@@ -22,6 +22,7 @@ on:
           - arm-a-runner-only
           - arm-c-dual-capture
           - arm-b-otel
+          - paired-a-c
       build_ebpf:
         description: "Rebuild eBPF artifact before running Arm C"
         required: true
@@ -59,6 +60,171 @@ jobs:
           if [ -d "$GITHUB_WORKSPACE" ]; then
             sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
           fi
+
+  paired-ac-overhead:
+    name: Paired Arm A/C overhead capture
+    if: ${{ inputs.arm == 'paired-a-c' }}
+    runs-on: [self-hosted, linux, assay-bpf-runner]
+    needs: prepare-delegated-runner
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Preflight delegated host
+        shell: bash
+        run: |
+          set -euo pipefail
+          for bin in cargo node npm python3 rustc tar; do
+            command -v "$bin" >/dev/null 2>&1 || {
+              echo "ERROR: required command not found on delegated runner: $bin" >&2
+              exit 1
+            }
+          done
+          node -e 'const major = Number(process.versions.node.split(".")[0]); if (major < 22) process.exit(1)' || {
+            echo "ERROR: delegated runner must provide Node.js 22 or newer" >&2
+            node --version >&2 || true
+            exit 1
+          }
+          if [ ! -f /sys/fs/cgroup/cgroup.controllers ]; then
+            echo "ERROR: delegated runner must expose cgroup v2 at /sys/fs/cgroup" >&2
+            exit 1
+          fi
+          {
+            echo "## Delegated runner preflight"
+            echo "- arm: paired-a-c"
+            echo "- kernel: $(uname -r)"
+            echo "- node: $(node --version)"
+            echo "- rustc: $(rustc --version)"
+            echo "- python3: $(python3 --version)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build assay CLI (runner feature)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p assay-cli --no-default-features --features runner
+
+      - name: Run overhead harness unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover \
+            -s docs/experiments/runner-vs-otel-overhead-2026-05 \
+            -p 'test_*.py'
+
+      - name: Build eBPF artifact
+        if: ${{ inputs.build_ebpf }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v docker >/dev/null 2>&1; then
+            cargo xtask build-image
+            cargo xtask build-ebpf --docker
+          else
+            cargo xtask build-ebpf
+          fi
+          test -f target/assay-ebpf.o
+
+      - name: Verify eBPF artifact present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f target/assay-ebpf.o ]; then
+            echo "ERROR: target/assay-ebpf.o is required. Run with build_ebpf=true." >&2
+            exit 1
+          fi
+
+      - name: Install Runner fixture dependencies
+        working-directory: runner-fixtures/openai-agents
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --ignore-scripts
+          node --check fixture-agent.js
+
+      - name: Build experiment workload
+        working-directory: docs/experiments/runner-vs-otel-2026-05/workload
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --ignore-scripts
+          npx tsc -p tsconfig.json
+          test -f dist/workload.js
+
+      - name: Run paired Arm A/C overhead harness
+        id: paired-ac-harness
+        shell: bash
+        env:
+          REPETITIONS: ${{ inputs.repetitions }}
+          TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
+          MEASURE_RSS: ${{ inputs.measure_rss }}
+        run: |
+          set -euo pipefail
+          OUT_DIR="$PWD/overhead-runs"
+          WORKFLOW_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          RSS_FLAG=()
+          if [ "$MEASURE_RSS" = "true" ]; then
+            RSS_FLAG=(--measure-rss)
+          fi
+          set +e
+          python3 docs/experiments/runner-vs-otel-overhead-2026-05/overhead_harness.py \
+            --arm paired-a-c \
+            --iterations "$REPETITIONS" \
+            --skip-build \
+            --clean \
+            --sudo \
+            --timeout-seconds "$TIMEOUT_SECONDS" \
+            --out-dir "$OUT_DIR" \
+            --workload-dir "$PWD/docs/experiments/runner-vs-otel-2026-05/workload" \
+            --assay-bin "$PWD/target/debug/assay" \
+            --ebpf-obj "$PWD/target/assay-ebpf.o" \
+            --runner-fixture-agent "$PWD/runner-fixtures/openai-agents/fixture-agent.js" \
+            --delegated-workflow-url "$WORKFLOW_URL" \
+            "${RSS_FLAG[@]}"
+          status=$?
+          set -e
+          echo "harness_status=$status" >> "$GITHUB_OUTPUT"
+
+          for arm in arm-a-runner-only arm-c-dual-capture; do
+            if [ -f "$OUT_DIR/$arm/summary.md" ]; then
+              cat "$OUT_DIR/$arm/summary.md" >> "$GITHUB_STEP_SUMMARY"
+              echo >> "$GITHUB_STEP_SUMMARY"
+            else
+              {
+                echo "## Runner-vs-OTel Overhead Summary"
+                echo
+                echo "No $arm summary was produced."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          {
+            echo
+            echo "- artifact: \`runner-otel-overhead-paired-ac-${GITHUB_RUN_ID}\`"
+            echo "- paired sequence: \`artifacts/paired-sequence.json\`"
+            echo "- harness exit: \`$status\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Require paired Arm A/C artifacts on harness success
+        if: ${{ always() && steps.paired-ac-harness.outputs.harness_status == '0' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f overhead-runs/arm-a-runner-only/summary.json
+          test -f overhead-runs/arm-c-dual-capture/summary.json
+          test -f overhead-runs/artifacts/paired-sequence.json
+
+      - name: Upload paired Arm A/C overhead artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: runner-otel-overhead-paired-ac-${{ github.run_id }}
+          path: overhead-runs/
+          if-no-files-found: warn
+          retention-days: 30
 
   arm-c-overhead:
     name: Arm C overhead capture

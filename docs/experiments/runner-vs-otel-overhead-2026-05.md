@@ -386,6 +386,73 @@ Slice 8 result:
   minus summed phase medians leaves `72.711 ms` outside the timed phase
   buckets.
 
+## Residual Diagnostics Follow-up
+
+Slice 9 is the next useful experiment if the wall-clock question still
+matters. It should measure Arm A and Arm C in one delegated workflow job
+with adjacent, counterbalanced pairs (`A/C`, then `C/A`) and keep a
+derived residual record for each sample:
+
+```text
+phase_residual_ms = wall_clock_ms - sum(recorded phase_timings_ms)
+```
+
+This is deliberately not a new benchmark claim. It asks whether the
+unexplained `72.711 ms` median residual from Slice 8 is stable when arm
+order and runner load drift are reduced, and whether the unexplained
+time is tied to a specific pair/order position. Negative residuals are
+allowed as diagnostics; they mean the timed phase sum exceeded the outer
+wall-clock sample, usually because of clock asymmetry, overlapping phase
+boundaries, or measurement noise. They are not publishable overhead
+quantities by themselves.
+
+Pre-read and rationale:
+
+- Distributed tracing overhead is known to vary by workload,
+  configuration, and deployment environment. Nõu et al. report
+  throughput and latency impacts for OpenTelemetry/Elastic APM across
+  microservice and serverless workloads, and identify trace
+  serialization/export as a major source of overhead:
+  <https://doi.org/10.1145/3680256.3721316>.
+- The OpenTelemetry benchmark guidance frames overhead as
+  target-platform specific and separates span/instrumentation cost,
+  throughput, CPU, memory, and report shape:
+  <https://opentelemetry.io/docs/specs/otel/performance-benchmark/>.
+- BPF/eBPF overhead measurement is itself hard to isolate. Red Hat's BPF
+  performance guide calls out "who traces the tracer?" as the core
+  problem and emphasizes measuring the right hook/attach path:
+  <https://developers.redhat.com/articles/2022/06/22/measuring-bpf-performance-tips-tricks-and-best-practices>.
+- Observability-overhead noise is a known phenomenon. Reichelt, Jung,
+  and van Hoorn compare MooBench across GitHub Actions and bare-metal
+  environments and show that shared/cloud execution noise affects what
+  changes are detectable:
+  <https://arxiv.org/abs/2411.05491>.
+
+Acceptance rules for Slice 9:
+
+- Dispatch `arm=paired-a-c` only on `assay-bpf-runner`, with
+  `repetitions=20`, `measure_rss=false`, and phase timing enabled by the
+  Runner harness path.
+- Treat each repetition as a pair, not as independent arm samples. The
+  harness order is counterbalanced adjacent pairs: odd pairs run Arm A
+  then Arm C; even pairs run Arm C then Arm A.
+- Publish no additive wall-clock decomposition unless the paired
+  residuals either shrink below the existing unexplained gap or point to
+  a repeatable order/phase source.
+- If the residual remains material and order-independent, close the
+  wall-clock decomposition as "not additively decomposable at this
+  measurement budget" rather than adding another broad rerun.
+
+Decision tree after dispatch:
+
+- **Residual shrinks materially under pairing:** treat Slice 8 as
+  inflated by inter-dispatch drift and update findings with the paired
+  caveat.
+- **Residual is order-dependent:** file a narrow warmup/cache/order slice
+  instead of attributing the gap to capture mode.
+- **Residual remains material and order-independent:** stop the
+  wall-clock decomposition arc at the current measurement budget.
+
 ## Non-Claims
 
 - Does not rank OpenTelemetry, OpenInference, or Runner as products.
@@ -408,6 +475,7 @@ Slice 8 result:
 | 6 | **Done**: same-host Arm B delegated workflow path via `arm=arm-b-otel`, dispatched in runs [26459699303](https://github.com/Rul1an/assay/actions/runs/26459699303) and [26461726436](https://github.com/Rul1an/assay/actions/runs/26461726436) | n=20 wall-clock and n=5 RSS on `assay-bpf-runner`; `host_class` matches Arm C |
 | 7 | **Done**: Arm A pure-L2 decomposition via `arm=arm-a-runner-only`, dispatched in runs [26463798358](https://github.com/Rul1an/assay/actions/runs/26463798358), [26464003194](https://github.com/Rul1an/assay/actions/runs/26464003194), and healthy repeat [26473448298](https://github.com/Rul1an/assay/actions/runs/26473448298) | RSS decomposition landed; wall-clock decomposition remains inconclusive because Arm A is still slower than Arm C at the median |
 | 8 | **Done**: Runner phase timing via hidden `--phase-timing-log` and harness `phase_timings_ms` aggregation, dispatched in runs [26476490968](https://github.com/Rul1an/assay/actions/runs/26476490968) and [26476824593](https://github.com/Rul1an/assay/actions/runs/26476824593) | phase data explains part, not all, of the Arm A / Arm C median gap; no additive wall-clock decomposition claim |
+| 9 | **Ready to dispatch**: paired Arm A/C residual diagnostics via workflow `arm=paired-a-c` | n=20 adjacent counterbalanced pairs on one delegated runner job; inspect `artifacts/paired-sequence.json` before changing findings |
 
 ## Publication Rule
 

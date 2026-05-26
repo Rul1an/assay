@@ -57,6 +57,10 @@ All notable changes to this project will be documented in this file.
   dispatches. The phase data explains part of the Arm A / Arm C median
   wall-clock gap, mostly around monitor attach, but still withholds an
   additive wall-clock decomposition claim.
+- Added Slice 9 paired Arm A/C residual diagnostics planning and
+  workflow support. The overhead workflow can now run `arm=paired-a-c`
+  as adjacent counterbalanced pairs and emit `paired-sequence.json` with
+  per-sample phase residuals for review.
 
 ## [3.12.0] - 2026-05-25
 

@@ -276,6 +276,17 @@ class OverheadHarnessTests(unittest.TestCase):
         }
         assert_matches_schema(self, payload, schema, root=schema)
 
+    def test_phase_residual_subtracts_recorded_phases(self) -> None:
+        sample = self.sample(
+            wall_clock_ms=20.0,
+            phase_timings_ms={
+                "preflight_ms": 1.0,
+                "child_runtime_ms": 4.0,
+                "archive_write_ms": 2.5,
+            },
+        )
+        self.assertEqual(overhead_harness.phase_residual_ms(sample), 12.5)
+
     def test_sample_schema_requires_extracted_size_key(self) -> None:
         schema = load_schema("overhead-sample-v0.schema.json")
         sample = self.sample()
@@ -705,6 +716,86 @@ class OverheadHarnessTests(unittest.TestCase):
             )
             self.assertIn(
                 "runner_vs_otel.arm_a_runner_only.phase_timings_ms.archive_write_ms.median",
+                bmf,
+            )
+
+    def test_paired_ac_runs_counterbalanced_adjacent_pairs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workload = root / "workload"
+            out_dir = root / "overhead"
+            fixture_agent = root / "fixture-agent.js"
+            write_stub_workload(workload)
+            fixture_agent.write_text("console.log('fake fixture')\n", encoding="utf-8")
+            fake_assay = write_fake_assay(root)
+            fake_ebpf = root / "assay-ebpf.o"
+            fake_ebpf.write_bytes(b"fake ebpf")
+
+            status = overhead_harness.main(
+                [
+                    "--arm",
+                    "paired-a-c",
+                    "--iterations",
+                    "2",
+                    "--skip-build",
+                    "--clean",
+                    "--timeout-seconds",
+                    "10",
+                    "--workload-dir",
+                    str(workload),
+                    "--out-dir",
+                    str(out_dir),
+                    "--assay-bin",
+                    str(fake_assay),
+                    "--ebpf-obj",
+                    str(fake_ebpf),
+                    "--runner-fixture-agent",
+                    str(fixture_agent),
+                ]
+            )
+            self.assertEqual(status, 0)
+
+            arm_a_summary = json.loads(
+                (out_dir / "arm-a-runner-only" / "summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            arm_c_summary = json.loads(
+                (out_dir / "arm-c-dual-capture" / "summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            sequence = json.loads(
+                (out_dir / "artifacts" / "paired-sequence.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            bmf = json.loads(
+                (out_dir / "artifacts" / "bmf.json").read_text(encoding="utf-8")
+            )
+
+            self.assertEqual(arm_a_summary["valid_samples"], 2)
+            self.assertEqual(arm_c_summary["valid_samples"], 2)
+            self.assertEqual(
+                sequence["schema"],
+                "assay.experiment.paired_sequence.v0",
+            )
+            self.assertEqual(
+                [entry["arm"] for entry in sequence["order"]],
+                [
+                    "arm-a-runner-only",
+                    "arm-c-dual-capture",
+                    "arm-c-dual-capture",
+                    "arm-a-runner-only",
+                ],
+            )
+            self.assertIsInstance(sequence["order"][0]["phase_residual_ms"], float)
+            self.assertIn(
+                "runner_vs_otel.arm_a_runner_only.wall_clock_ms.median",
+                bmf,
+            )
+            self.assertIn(
+                "runner_vs_otel.arm_c_dual_capture.wall_clock_ms.median",
                 bmf,
             )
 

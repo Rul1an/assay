@@ -247,7 +247,9 @@ publication language is now:
 
 Next engineering slice:
 
-> If this arc needs a sharper wall-clock explanation, either repeat the
-> phase-timing runs to characterize Arm A tail variance or decompose the
-> residual/outside-harness time. Do not publish an additive wall-clock
-> split from the current phase evidence.
+> If this arc needs a sharper wall-clock explanation, run the paired
+> Slice 9 residual diagnostic (`arm=paired-a-c`) before another broad
+> Arm A or Arm C rerun. It keeps Arm A and Arm C adjacent in one
+> delegated job, counterbalances order, and records per-sample
+> `phase_residual_ms`. Do not publish an additive wall-clock split from
+> the current phase evidence.

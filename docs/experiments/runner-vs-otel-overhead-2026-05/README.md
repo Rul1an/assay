@@ -4,7 +4,8 @@
 > dispatch pipeline, Slice 3 RSS collection, Slice 4 summary/BMF
 > rendering, Slice 5 findings, Slice 6 same-host Arm B dispatches, and
 > Slice 7 Arm A runner-only dispatches. Slice 8 phase timing diagnostics
-> have landed for Arm A/C. This directory contains the
+> have landed for Arm A/C, and Slice 9 paired A/C residual diagnostics
+> are ready to dispatch. This directory contains the
 > experiment-scoped measurement
 > harness and schema sidecars for the plan in
 > [`../runner-vs-otel-overhead-2026-05.md`](../runner-vs-otel-overhead-2026-05.md).
@@ -34,7 +35,10 @@ The harness writes:
   the harness runs with `--measure-rss`; and
 - `artifacts/phase-timings.json`, an experiment-scoped side artifact
   populated for Arm A / Arm C when `assay runner-spike` emits phase
-  timing diagnostics.
+  timing diagnostics; and
+- `artifacts/paired-sequence.json`, emitted only by `arm=paired-a-c`,
+  which carries `assay.experiment.paired_sequence.v0` and records
+  adjacent pair order and per-sample phase residuals.
 
 The experiment schemas are intentionally not Runner archive contracts.
 They are local measurement evidence for the overhead follow-up only.
@@ -78,6 +82,9 @@ The workflow runs on `assay-bpf-runner` and exposes an `arm` input:
   `assay runner-spike`, eBPF, and Runner health gates.
 - `arm-b-otel` runs `--arm arm-b-otel` on the same delegated host class
   without Runner capture.
+- `paired-a-c` runs Arm A and Arm C in one delegated job as adjacent,
+  counterbalanced pairs. Use this only for residual diagnostics after
+  broad Arm A/C phase timing has already landed.
 
 Arm A and Arm C fail if any sample is either non-zero exit or
 capture-unclean. Arm B fails if any sample exits non-zero. A direct arm
@@ -142,6 +149,14 @@ Phase timing is emitted as experiment-scoped diagnostics in
 `phase_timings_ms` on each sample and aggregated into `summary.json`.
 It is not a Runner archive contract and must not replace raw
 `wall_clock_ms`.
+
+For Slice 9, dispatch the same workflow with `arm=paired-a-c`,
+`repetitions=20`, `measure_rss=false`, and `build_ebpf=true`. The
+paired mode writes both Arm A and Arm C summaries plus
+`artifacts/paired-sequence.json`. That manifest records the actual
+`A/C`, then `C/A`, adjacent-pair order and the derived
+`phase_residual_ms` value for each sample. Negative residuals are
+diagnostic noise signals, not overhead claims.
 
 The local unit tests exercise the Arm A / Arm C paths with a fake `assay` binary
 that emits the expected archive shape. The first validation against real
