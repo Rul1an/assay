@@ -30,6 +30,8 @@ SUMMARY_SCHEMA = "assay.experiment.overhead_summary.v0"
 DEFAULT_ARM = "arm-b-otel"
 ARM_B = "arm-b-otel"
 ARM_C = "arm-c-dual-capture"
+RSS_TIME_PATH = Path("/usr/bin/time")
+RSS_SYSTEMS = {"darwin", "linux"}
 
 
 def repo_root() -> Path:
@@ -154,7 +156,7 @@ def extract_archive(archive: Path, destination: Path) -> None:
 
 
 def rss_time_tool_version() -> str | None:
-    time_path = Path("/usr/bin/time")
+    time_path = RSS_TIME_PATH
     if not time_path.exists():
         return None
     system = platform.system().lower()
@@ -166,12 +168,28 @@ def rss_time_tool_version() -> str | None:
 
 
 def rss_time_prefix() -> list[str]:
+    time_path = RSS_TIME_PATH
+    if not time_path.exists():
+        raise RuntimeError(f"{time_path} is required for --measure-rss")
     system = platform.system().lower()
     if system == "linux":
-        return ["/usr/bin/time", "-v"]
+        return [str(time_path), "-v"]
     if system == "darwin":
-        return ["/usr/bin/time", "-l"]
+        return [str(time_path), "-l"]
     raise RuntimeError(f"unsupported RSS measurement platform: {system}")
+
+
+def rss_time_preflight_error(
+    *,
+    system: str | None = None,
+    time_path: Path = RSS_TIME_PATH,
+) -> str | None:
+    host = (system or platform.system()).lower()
+    if host not in RSS_SYSTEMS:
+        return f"--measure-rss supports Linux and macOS only, got {host!r}"
+    if not time_path.exists():
+        return f"--measure-rss requires {time_path}"
+    return None
 
 
 def parse_peak_rss_bytes(stderr: str, *, system: str | None = None) -> int | None:
@@ -277,11 +295,17 @@ def one_sample(
         raise ValueError(f"unsupported arm: {arm}")
 
     run_command = rss_time_prefix() + command if measure_rss else command
+    env = None
+    if measure_rss:
+        env = os.environ.copy()
+        env["LC_ALL"] = "C"
+        env["LANG"] = "C"
     start = time.perf_counter()
     try:
         result = subprocess.run(
             run_command,
             cwd=workload_dir,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -474,6 +498,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.iterations < 1:
         parser.error("--iterations must be >= 1")
+    if args.measure_rss:
+        rss_error = rss_time_preflight_error()
+        if rss_error is not None:
+            parser.error(rss_error)
     if args.clean and args.out_dir.exists():
         shutil.rmtree(args.out_dir)
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import platform
+import subprocess
 import tempfile
 import tarfile
 import unittest
@@ -305,6 +306,71 @@ class OverheadHarnessTests(unittest.TestCase):
 
     def test_parse_peak_rss_returns_none_for_missing_tool_output(self) -> None:
         self.assertIsNone(overhead_harness.parse_peak_rss_bytes("", system="linux"))
+
+    def test_rss_preflight_rejects_missing_time_binary(self) -> None:
+        error = overhead_harness.rss_time_preflight_error(
+            system="linux",
+            time_path=Path("/definitely-not-installed/time"),
+        )
+        self.assertIn("--measure-rss requires", error or "")
+
+    def test_rss_preflight_rejects_unsupported_platform(self) -> None:
+        error = overhead_harness.rss_time_preflight_error(
+            system="plan9",
+            time_path=Path("/usr/bin/time"),
+        )
+        self.assertIn("supports Linux and macOS only", error or "")
+
+    def test_measure_rss_forces_stable_locale(self) -> None:
+        seen: dict[str, Any] = {}
+
+        def fake_run(
+            command: list[str],
+            **kwargs: Any,
+        ) -> subprocess.CompletedProcess[str]:
+            seen["command"] = command
+            seen["env"] = kwargs.get("env")
+            trace = command[command.index("--trace-out") + 1]
+            Path(trace).parent.mkdir(parents=True, exist_ok=True)
+            Path(trace).write_text('{"resourceSpans":[]}\n', encoding="utf-8")
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="",
+                stderr="123 maximum resident set size\n",
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workload = root / "workload"
+            write_stub_workload(workload)
+            original_run = overhead_harness.subprocess.run
+            original_prefix = overhead_harness.rss_time_prefix
+            original_parse = overhead_harness.parse_peak_rss_bytes
+            try:
+                overhead_harness.subprocess.run = fake_run  # type: ignore[assignment]
+                overhead_harness.rss_time_prefix = lambda: ["/usr/bin/time", "-l"]  # type: ignore[assignment]
+                overhead_harness.parse_peak_rss_bytes = (  # type: ignore[assignment]
+                    lambda stderr, system=None: 123
+                )
+                sample = overhead_harness.one_sample(
+                    arm_dir=root / "out",
+                    arm=overhead_harness.ARM_B,
+                    workload_dir=workload,
+                    iteration=1,
+                    commit="abcdef1",
+                    versions=self.sample()["tool_versions"],
+                    timeout_seconds=10,
+                    measure_rss=True,
+                )
+            finally:
+                overhead_harness.subprocess.run = original_run
+                overhead_harness.rss_time_prefix = original_prefix
+                overhead_harness.parse_peak_rss_bytes = original_parse
+
+        self.assertEqual(sample["peak_rss_bytes"], 123)
+        self.assertEqual(seen["env"]["LC_ALL"], "C")
+        self.assertEqual(seen["env"]["LANG"], "C")
 
     def test_harness_emits_twenty_valid_stub_samples(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
