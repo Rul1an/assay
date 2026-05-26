@@ -233,6 +233,10 @@ macOS time expose different output shapes. Parser tests should assert
 the exact formats accepted by the harness rather than assuming the host
 tooling is interchangeable.
 
+Linux RSS collection requires GNU `/usr/bin/time -v` (time 1.7 or
+newer). BusyBox or Alpine-style `time` output is not accepted by the v0
+parser and should fail the sample rather than produce a silent null.
+
 Preferred tools:
 
 | Need | Linux | macOS |
