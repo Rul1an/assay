@@ -145,6 +145,7 @@ jobs:
           test -f dist/workload.js
 
       - name: Run Arm C overhead harness
+        id: arm-c-harness
         shell: bash
         env:
           REPETITIONS: ${{ inputs.repetitions }}
@@ -158,6 +159,7 @@ jobs:
           if [ "$MEASURE_RSS" = "true" ]; then
             RSS_FLAG=(--measure-rss)
           fi
+          set +e
           python3 docs/experiments/runner-vs-otel-overhead-2026-05/overhead_harness.py \
             --arm arm-c-dual-capture \
             --iterations "$REPETITIONS" \
@@ -171,19 +173,41 @@ jobs:
             --ebpf-obj "$PWD/target/assay-ebpf.o" \
             --delegated-workflow-url "$WORKFLOW_URL" \
             "${RSS_FLAG[@]}"
+          status=$?
+          set -e
+          echo "harness_status=$status" >> "$GITHUB_OUTPUT"
 
-          cat "$OUT_DIR/arm-c-dual-capture/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$OUT_DIR/arm-c-dual-capture/summary.md" ]; then
+            cat "$OUT_DIR/arm-c-dual-capture/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Runner-vs-OTel Overhead Summary"
+              echo
+              echo "No Arm C summary was produced."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           {
             echo
             echo "- artifact: \`runner-otel-overhead-arm-c-${GITHUB_RUN_ID}\`"
+            echo "- harness exit: \`$status\`"
           } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Require Arm C artifacts on harness success
+        if: ${{ always() && steps.arm-c-harness.outputs.harness_status == '0' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d overhead-runs
+          find overhead-runs -type f -print -quit | grep -q .
 
       - name: Upload Arm C overhead artifacts
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: runner-otel-overhead-arm-c-${{ github.run_id }}
           path: overhead-runs/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
 
   arm-a-overhead:
@@ -271,6 +295,7 @@ jobs:
           node --check fixture-agent.js
 
       - name: Run Arm A overhead harness
+        id: arm-a-harness
         shell: bash
         env:
           REPETITIONS: ${{ inputs.repetitions }}
@@ -284,6 +309,7 @@ jobs:
           if [ "$MEASURE_RSS" = "true" ]; then
             RSS_FLAG=(--measure-rss)
           fi
+          set +e
           python3 docs/experiments/runner-vs-otel-overhead-2026-05/overhead_harness.py \
             --arm arm-a-runner-only \
             --iterations "$REPETITIONS" \
@@ -298,19 +324,41 @@ jobs:
             --runner-fixture-agent "$PWD/runner-fixtures/openai-agents/fixture-agent.js" \
             --delegated-workflow-url "$WORKFLOW_URL" \
             "${RSS_FLAG[@]}"
+          status=$?
+          set -e
+          echo "harness_status=$status" >> "$GITHUB_OUTPUT"
 
-          cat "$OUT_DIR/arm-a-runner-only/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$OUT_DIR/arm-a-runner-only/summary.md" ]; then
+            cat "$OUT_DIR/arm-a-runner-only/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Runner-vs-OTel Overhead Summary"
+              echo
+              echo "No Arm A summary was produced."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           {
             echo
             echo "- artifact: \`runner-otel-overhead-arm-a-${GITHUB_RUN_ID}\`"
+            echo "- harness exit: \`$status\`"
           } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Require Arm A artifacts on harness success
+        if: ${{ always() && steps.arm-a-harness.outputs.harness_status == '0' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d overhead-runs
+          find overhead-runs -type f -print -quit | grep -q .
 
       - name: Upload Arm A overhead artifacts
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: runner-otel-overhead-arm-a-${{ github.run_id }}
           path: overhead-runs/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
 
   arm-b-overhead:
@@ -366,6 +414,7 @@ jobs:
           test -f dist/workload.js
 
       - name: Run Arm B overhead harness
+        id: arm-b-harness
         shell: bash
         env:
           REPETITIONS: ${{ inputs.repetitions }}
@@ -379,6 +428,7 @@ jobs:
           if [ "$MEASURE_RSS" = "true" ]; then
             RSS_FLAG=(--measure-rss)
           fi
+          set +e
           python3 docs/experiments/runner-vs-otel-overhead-2026-05/overhead_harness.py \
             --arm arm-b-otel \
             --iterations "$REPETITIONS" \
@@ -389,17 +439,39 @@ jobs:
             --workload-dir "$PWD/docs/experiments/runner-vs-otel-2026-05/workload" \
             --delegated-workflow-url "$WORKFLOW_URL" \
             "${RSS_FLAG[@]}"
+          status=$?
+          set -e
+          echo "harness_status=$status" >> "$GITHUB_OUTPUT"
 
-          cat "$OUT_DIR/arm-b-otel/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$OUT_DIR/arm-b-otel/summary.md" ]; then
+            cat "$OUT_DIR/arm-b-otel/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Runner-vs-OTel Overhead Summary"
+              echo
+              echo "No Arm B summary was produced."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           {
             echo
             echo "- artifact: \`runner-otel-overhead-arm-b-${GITHUB_RUN_ID}\`"
+            echo "- harness exit: \`$status\`"
           } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Require Arm B artifacts on harness success
+        if: ${{ always() && steps.arm-b-harness.outputs.harness_status == '0' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d overhead-runs
+          find overhead-runs -type f -print -quit | grep -q .
 
       - name: Upload Arm B overhead artifacts
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: runner-otel-overhead-arm-b-${{ github.run_id }}
           path: overhead-runs/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30

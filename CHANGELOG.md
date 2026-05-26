@@ -42,6 +42,9 @@ All notable changes to this project will be documented in this file.
   The findings now record the same-host three-arm measurement set and
   classify wall-clock decomposition as inconclusive while showing that
   the observed RSS delta is dominated by Runner capture.
+- Tightened the Runner-vs-OTel overhead workflow diagnostics so failed
+  harness runs still upload partial measurement artifacts and planned
+  the next phase-timing slice for localizing Runner wall-clock overhead.
 
 ## [3.12.0] - 2026-05-25
 

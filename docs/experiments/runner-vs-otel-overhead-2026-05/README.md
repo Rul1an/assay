@@ -109,6 +109,19 @@ passed as
 5/5 valid samples and 0 discarded samples. Both emitted the same
 `linux-aarch64-6.8.0-117-generic` host class as Arm B and Arm C.
 
+Diagnostic repeat run
+[26472122983](https://github.com/Rul1an/assay/actions/runs/26472122983)
+failed because the harness discarded one Arm A sample. Failed harness
+runs now still upload partial `overhead-runs/` artifacts when available;
+those artifacts are diagnostic evidence and should not be promoted to
+findings unless the findings text explicitly explains why the sample was
+discarded.
+
+The next overhead slice is phase timing rather than another broad
+comparison. It should identify whether Runner wall-clock overhead is
+coming from cgroup setup, monitor attach, child spawn/runtime, event
+flush, archive writing, or health parsing.
+
 The local unit tests exercise the Arm A / Arm C paths with a fake `assay` binary
 that emits the expected archive shape. The first validation against real
 `assay runner-spike` output happens on the first delegated workflow
