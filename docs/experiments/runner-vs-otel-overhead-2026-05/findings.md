@@ -20,6 +20,7 @@
 | 8 repeat | [26473448298](https://github.com/Rul1an/assay/actions/runs/26473448298) | Arm A runner-only | 20 wall-clock repeat | 20 valid, 0 discarded, artifact-success gate active |
 | 8 phase A | [26476490968](https://github.com/Rul1an/assay/actions/runs/26476490968) | Arm A runner-only | 20 wall-clock + phase timing | 20 valid, 0 discarded, same host class |
 | 8 phase C | [26476824593](https://github.com/Rul1an/assay/actions/runs/26476824593) | Arm C dual capture | 20 wall-clock + phase timing | 20 valid, 0 discarded, same host class |
+| 9 paired A/C | [26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306) | Arm A + Arm C paired | 20 adjacent pairs | 20 valid per arm, 0 discarded, same job and host class |
 
 Generated artifacts from those runs were inspected as review artifacts
 only. They are intentionally not committed as benchmark evidence in this
@@ -36,6 +37,11 @@ The phase-timing runs are listed as diagnostics, not as replacement
 baselines. They validate the Slice 8 instrumentation and localize part
 of the Arm A / Arm C median gap, but Arm A again showed an unhealthy
 wall-clock tail in that dispatch.
+
+The paired Slice 9 run is also diagnostic. It keeps Arm A and Arm C
+adjacent in one delegated job to reduce inter-dispatch drift. It does
+not replace the same-host baselines below, and its unhealthy tails keep
+wall-clock publication caveats in force.
 
 ## Same-Host Baselines
 
@@ -181,6 +187,53 @@ explain why the runner-only Arm A path is slower than Arm C at the
 median. The wall-clock split remains unsuitable for a "Runner archive
 only + OTel trace export" additive claim.
 
+## Paired Residual Read
+
+Slice 9 dispatched `arm=paired-a-c` in
+[run 26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306).
+The harness ran 20 adjacent counterbalanced pairs in one delegated job:
+odd pairs used Arm A then Arm C, even pairs used Arm C then Arm A. Both
+arms produced 20 valid samples, 0 discarded samples, `ringbuf_drops=0`,
+`kernel_layer=complete`, and `cgroup_correlation=clean`.
+
+| Metric | Arm A runner-only | Arm C dual capture | Delta A-C |
+|---|---:|---:|---:|
+| Wall median | `1,806.007 ms` | `1,917.081 ms` | `-111.074 ms` |
+| Wall p95 | `3,500.225 ms` | `4,337.908 ms` | `-837.682 ms` |
+| Wall p99 | `3,911.765 ms` | `4,400.113 ms` | `-488.348 ms` |
+| Wall p99/median | `2.166` | `2.295` | both tails unhealthy |
+| Sum of phase medians | `1,443.657 ms` | `1,499.847 ms` | `-56.190 ms` |
+| Wall median minus summed phase medians | `362.349 ms` | `417.234 ms` | `-54.884 ms` |
+| Median per-sample `phase_residual_ms` | `368.808 ms` | `391.284 ms` | `-22.476 ms` |
+| Median paired wall delta | `n/a` | `n/a` | `-176.852 ms`; noisy pair spread |
+| Median paired residual delta | `n/a` | `n/a` | `-26.187 ms`; residuals close |
+
+Median phase breakdown from the paired run:
+
+| Phase | Arm A median | Arm C median | Delta A-C |
+|---|---:|---:|---:|
+| `preflight_ms` | `0.171 ms` | `0.157 ms` | `+0.014 ms` |
+| `cgroup_prepare_ms` | `1.941 ms` | `2.080 ms` | `-0.140 ms` |
+| `monitor_attach_ms` | `423.719 ms` | `428.631 ms` | `-4.912 ms` |
+| `child_spawn_ms` | `15.442 ms` | `16.860 ms` | `-1.418 ms` |
+| `child_runtime_ms` | `887.384 ms` | `939.790 ms` | `-52.406 ms` |
+| `event_flush_ms` | `112.041 ms` | `108.897 ms` | `+3.144 ms` |
+| `archive_write_ms` | `2.960 ms` | `3.432 ms` | `-0.471 ms` |
+
+This paired result changes the wall-clock read: the Slice 8 Arm A
+slower-than-Arm-C median gap does **not** reproduce when the arms run as
+adjacent counterbalanced pairs. In the paired run, Arm A is faster at
+the median and the per-sample residual medians differ by only
+`22.476 ms`. The result points to inter-dispatch drift and measurement
+variance as material contributors to the earlier wall-clock anomaly.
+
+The paired run does **not** justify a new additive wall-clock model:
+both paired tails are unhealthy (`p99/median > 2.0`), and the paired
+wall deltas have a wide spread. It does justify a stopping rule for this
+arc: wall-clock decomposition is not stable enough at n=20 on this
+runner to publish as an additive split. RSS remains the clean
+decomposition signal.
+
 ## What This Means
 
 - The delegated measurement harness is usable for all three arms: wall-clock
@@ -199,6 +252,10 @@ only + OTel trace export" additive claim.
 - Slice 8 phase timing localizes the largest measured internal phase
   delta to monitor attach, but the majority of the Arm A / Arm C median
   gap sits outside the current phase buckets.
+- Slice 9 paired diagnostics show that the Slice 8 Arm A-over-Arm C
+  median gap does not reproduce under adjacent pairing. Wall-clock
+  residuals are close enough, and tails noisy enough, that the wall-clock
+  decomposition should stop rather than spawning another broad rerun.
 - The RSS path works on the delegated Linux runner with GNU
   `/usr/bin/time -v`; samples record the RSS tool version and emit
   `peak_rss_bytes` into both `summary.json` and the BMF export.
@@ -217,8 +274,8 @@ only + OTel trace export" additive claim.
   well.
 - No additive wall-clock decomposition claim is made between "Runner
   archive only" and "Runner archive plus OTel trace". The phase-timing
-  runs explain only part of the Arm A / Arm C median gap and Arm A's
-  phase run had an unhealthy tail.
+  and paired residual runs show that the median gap is not stable under
+  pairing, and the paired run has unhealthy tails.
 - No Trust Card or Trust Basis claim is added. This remains an
   experiment-scoped measurement follow-up.
 - The generated artifacts remain review artifacts until a later decision
@@ -247,9 +304,9 @@ publication language is now:
 
 Next engineering slice:
 
-> If this arc needs a sharper wall-clock explanation, run the paired
-> Slice 9 residual diagnostic (`arm=paired-a-c`) before another broad
-> Arm A or Arm C rerun. It keeps Arm A and Arm C adjacent in one
-> delegated job, counterbalances order, and records per-sample
-> `phase_residual_ms`. Do not publish an additive wall-clock split from
-> the current phase evidence.
+> Do not add another broad Arm A/C wall-clock rerun for this arc. The
+> paired residual diagnostic has landed and shows that the median gap is
+> not stable enough for an additive wall-clock decomposition at the
+> current measurement budget. A future slice should only be opened if it
+> targets a narrower mechanism, such as warmup/order effects or a deeper
+> `child_runtime_ms` split.

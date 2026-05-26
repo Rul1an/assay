@@ -3,9 +3,9 @@
 > **Status:** Slice 1 local Arm B harness, Slice 2 delegated Arm C
 > dispatch pipeline, Slice 3 RSS collection, Slice 4 summary/BMF
 > rendering, Slice 5 findings, Slice 6 same-host Arm B dispatches, and
-> Slice 7 Arm A runner-only dispatches. Slice 8 phase timing diagnostics
-> have landed for Arm A/C, and Slice 9 paired A/C residual diagnostics
-> are ready to dispatch. This directory contains the
+> Slice 7 Arm A runner-only dispatches, Slice 8 phase timing diagnostics,
+> and Slice 9 paired A/C residual diagnostics have landed. This
+> directory contains the
 > experiment-scoped measurement
 > harness and schema sidecars for the plan in
 > [`../runner-vs-otel-overhead-2026-05.md`](../runner-vs-otel-overhead-2026-05.md).
@@ -158,10 +158,17 @@ paired mode writes both Arm A and Arm C summaries plus
 `phase_residual_ms` value for each sample. Negative residuals are
 diagnostic noise signals, not overhead claims.
 
-The local unit tests exercise the Arm A / Arm C paths with a fake `assay` binary
-that emits the expected archive shape. The first validation against real
-`assay runner-spike` output happens on the first delegated workflow
-dispatch.
+The first paired Arm A/C diagnostic passed as
+[GitHub Actions run 26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306):
+20 valid samples per arm, 0 discarded samples, and matching
+`linux-aarch64-6.8.0-117-generic` host class. It showed the Slice 8
+Arm A-over-Arm C wall-clock median gap does not reproduce under
+adjacent pairing, so wall-clock decomposition stays unpublished.
+
+The local unit tests exercise the Arm A / Arm C paths with a fake
+`assay` binary that emits the expected archive shape. Real
+`assay runner-spike` validation is provided by the delegated workflow
+dispatches listed above.
 
 Do not commit the uploaded artifacts until the findings slice decides
 which measurements should become evidence.
