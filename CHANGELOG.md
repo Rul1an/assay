@@ -45,6 +45,9 @@ All notable changes to this project will be documented in this file.
 - Tightened the Runner-vs-OTel overhead workflow diagnostics so failed
   harness runs still upload partial measurement artifacts and planned
   the next phase-timing slice for localizing Runner wall-clock overhead.
+- Refreshed the Runner-vs-OTel overhead findings with a healthy Arm A
+  wall-clock repeat, preserving the conclusion that RSS decomposes
+  cleanly while wall-clock does not yet support an additive split.
 
 ## [3.12.0] - 2026-05-25
 

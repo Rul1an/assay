@@ -56,8 +56,12 @@
 > failed because one sample was discarded. The temporary runner workspace
 > showed the same first-sample cgroup spawn failure pattern seen during
 > the original sanity attempt. The workflow now uploads partial artifacts
-> even when the harness exits non-zero, and the next measurement slice
-> should instrument Runner phase timing before another broad comparison.
+> even when the harness exits non-zero. A follow-up repeat
+> ([GitHub Actions run 26473448298](https://github.com/Rul1an/assay/actions/runs/26473448298))
+> passed with 20/20 valid samples and a healthy p99/median ratio, but
+> Arm A remained slower than Arm C at the median. The next measurement
+> slice should instrument Runner phase timing before another wall-clock
+> decomposition claim.
 
 ## Research Question
 
@@ -332,12 +336,11 @@ Acceptance rules for this slice:
   projections and must not replace the sample timing.
 - Upload partial artifacts when the harness fails, because discarded
   samples and cgroup errors are the evidence needed for diagnosis.
-- Add a one-sample warmup option only after phase data confirms the
-  first-sample cgroup spawn failure is a warmup artifact rather than a
-  correctness bug.
-- Do not publish a wall-clock additive split until Arm A produces a
-  complete n >= 20 run with healthy p99/median, or the phase data
-  explains the tail and failure mode well enough to scope the claim.
+- Add a one-sample warmup option only after phase data confirms whether
+  the first-sample cgroup spawn failure is a warmup artifact rather than
+  a correctness bug.
+- Do not publish a wall-clock additive split until phase data explains
+  why the healthy Arm A repeat remains slower than Arm C at the median.
 
 ## Non-Claims
 
@@ -359,8 +362,8 @@ Acceptance rules for this slice:
 | 4 | **Done**: summary renderer + BMF-compatible export | JSON schema-like tests over synthetic samples |
 | 5 | **Done**: initial findings update in [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md) | No deltas unless same-host arms exist |
 | 6 | **Done**: same-host Arm B delegated workflow path via `arm=arm-b-otel`, dispatched in runs [26459699303](https://github.com/Rul1an/assay/actions/runs/26459699303) and [26461726436](https://github.com/Rul1an/assay/actions/runs/26461726436) | n=20 wall-clock and n=5 RSS on `assay-bpf-runner`; `host_class` matches Arm C |
-| 7 | **Done**: Arm A pure-L2 decomposition via `arm=arm-a-runner-only`, dispatched in runs [26463798358](https://github.com/Rul1an/assay/actions/runs/26463798358) and [26464003194](https://github.com/Rul1an/assay/actions/runs/26464003194) | RSS decomposition landed; wall-clock decomposition remains inconclusive because Arm A tail was unhealthy |
-| 8 | **Planned**: Runner phase timing + partial-failure artifact capture | localize cgroup setup, monitor attach, child spawn/runtime, event flush, archive write, and health parsing before another wall-clock claim |
+| 7 | **Done**: Arm A pure-L2 decomposition via `arm=arm-a-runner-only`, dispatched in runs [26463798358](https://github.com/Rul1an/assay/actions/runs/26463798358), [26464003194](https://github.com/Rul1an/assay/actions/runs/26464003194), and healthy repeat [26473448298](https://github.com/Rul1an/assay/actions/runs/26473448298) | RSS decomposition landed; wall-clock decomposition remains inconclusive because Arm A is still slower than Arm C at the median |
+| 8 | **Planned**: Runner phase timing | localize cgroup setup, monitor attach, child spawn/runtime, event flush, archive write, and health parsing before another wall-clock claim |
 
 ## Publication Rule
 
