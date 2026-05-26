@@ -544,5 +544,4 @@ fn show_top_stable(entries: &BTreeMap<String, ProfileEntry>, total_runs: u32, n:
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[cfg(test)]
 mod tests;
