@@ -14,6 +14,7 @@ import json
 import math
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -95,6 +96,7 @@ def tool_versions(workload_dir: Path) -> dict[str, str | None]:
         "npm": clean(run_text(["npm", "--version"])),
         "hyperfine": clean(run_text(["hyperfine", "--version"])),
         "time": "python-time.perf_counter",
+        "rss_time": clean(rss_time_tool_version()),
         "workload_package": clean(
             run_text(["node", "-p", "require('./package.json').version"], workload_dir)
         ),
@@ -151,6 +153,38 @@ def extract_archive(archive: Path, destination: Path) -> None:
         tar.extractall(destination, filter="data")
 
 
+def rss_time_tool_version() -> str | None:
+    time_path = Path("/usr/bin/time")
+    if not time_path.exists():
+        return None
+    system = platform.system().lower()
+    if system == "linux":
+        return run_text([str(time_path), "--version"]) or "GNU time"
+    if system == "darwin":
+        return "/usr/bin/time -l"
+    return str(time_path)
+
+
+def rss_time_prefix() -> list[str]:
+    system = platform.system().lower()
+    if system == "linux":
+        return ["/usr/bin/time", "-v"]
+    if system == "darwin":
+        return ["/usr/bin/time", "-l"]
+    raise RuntimeError(f"unsupported RSS measurement platform: {system}")
+
+
+def parse_peak_rss_bytes(stderr: str, *, system: str | None = None) -> int | None:
+    host = (system or platform.system()).lower()
+    if host == "linux":
+        match = re.search(r"Maximum resident set size \(kbytes\):\s*(\d+)", stderr)
+        return int(match.group(1)) * 1024 if match else None
+    if host == "darwin":
+        match = re.search(r"^\s*(\d+)\s+maximum resident set size\s*$", stderr, re.M)
+        return int(match.group(1)) if match else None
+    return None
+
+
 def percentile(values: list[float], pct: float) -> float | None:
     if not values:
         return None
@@ -187,6 +221,7 @@ def one_sample(
     assay_bin: Path | None = None,
     ebpf_obj: Path | None = None,
     use_sudo: bool = False,
+    measure_rss: bool = False,
 ) -> dict[str, Any]:
     run_id = f"overhead_{arm.replace('-', '_')}_{iteration:03d}"
     run_dir = arm_dir / f"run_{iteration:03d}"
@@ -241,10 +276,11 @@ def one_sample(
     else:
         raise ValueError(f"unsupported arm: {arm}")
 
+    run_command = rss_time_prefix() + command if measure_rss else command
     start = time.perf_counter()
     try:
         result = subprocess.run(
-            command,
+            run_command,
             cwd=workload_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -260,6 +296,10 @@ def one_sample(
         stderr += f"\noverhead harness timeout after {timeout_seconds} seconds\n"
         exit_code = 124
     elapsed_ms = (time.perf_counter() - start) * 1000.0
+    peak_rss_bytes = parse_peak_rss_bytes(stderr) if measure_rss else None
+    if measure_rss and peak_rss_bytes is None and exit_code == 0:
+        stderr += "\noverhead harness failed to parse peak RSS from /usr/bin/time output\n"
+        exit_code = 125
     (run_dir / "stdout.log").write_text(stdout, encoding="utf-8")
     (run_dir / "stderr.log").write_text(stderr, encoding="utf-8")
     if use_sudo and run_dir.exists():
@@ -288,7 +328,7 @@ def one_sample(
         "started_at": started_at,
         "tool_versions": versions,
         "wall_clock_ms": elapsed_ms,
-        "peak_rss_bytes": None,
+        "peak_rss_bytes": peak_rss_bytes,
         "exit_code": exit_code,
         "health": health,
         "artifact_bytes": {
@@ -402,6 +442,8 @@ def bmf_export(summary: dict[str, Any]) -> dict[str, dict[str, float | int]]:
         f"{prefix}.artifact_bytes.trace_json_median": summary["artifact_bytes"][
             "trace_json_median"
         ],
+        f"{prefix}.peak_rss_bytes.median": summary["peak_rss_bytes"]["median"],
+        f"{prefix}.peak_rss_bytes.max": summary["peak_rss_bytes"]["max"],
     }
     return {key: {"value": value} for key, value in values.items() if value is not None}
 
@@ -427,6 +469,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--assay-bin", type=Path)
     parser.add_argument("--ebpf-obj", type=Path)
     parser.add_argument("--sudo", action="store_true")
+    parser.add_argument("--measure-rss", action="store_true")
     args = parser.parse_args(argv)
 
     if args.iterations < 1:
@@ -454,6 +497,7 @@ def main(argv: list[str] | None = None) -> int:
             assay_bin=args.assay_bin,
             ebpf_obj=args.ebpf_obj,
             use_sudo=args.sudo,
+            measure_rss=args.measure_rss,
         )
         for iteration in range(1, args.iterations + 1)
     ]
@@ -487,6 +531,17 @@ def main(argv: list[str] | None = None) -> int:
                 sample["artifact_bytes"]["archive_extracted"]
                 for sample in samples
                 if sample["artifact_bytes"]["archive_extracted"] is not None
+            ],
+        },
+    )
+    write_json(
+        artifacts_dir / "rss-sizes.json",
+        {
+            "arm": args.arm,
+            "peak_rss_bytes": [
+                sample["peak_rss_bytes"]
+                for sample in samples
+                if sample["peak_rss_bytes"] is not None
             ],
         },
     )

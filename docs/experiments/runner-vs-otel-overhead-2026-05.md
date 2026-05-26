@@ -10,10 +10,15 @@
 > [`runner-vs-otel-overhead-2026-05/`](runner-vs-otel-overhead-2026-05/).
 > Generated measurements are still not committed evidence.
 >
-> **Slice 2 status:** delegated Arm C workflow is available as
-> [`.github/workflows/runner-otel-overhead-experiment.yml`](../../.github/workflows/runner-otel-overhead-experiment.yml).
-> It uploads review artifacts and still does not commit benchmark
-> numbers.
+> **Slice 2 status:** delegated Arm C workflow passed on
+> [GitHub Actions run 26449999294](https://github.com/Rul1an/assay/actions/runs/26449999294):
+> 20/20 valid samples, 0 discarded samples, all Runner health gates
+> clean. The uploaded artifacts remain review artifacts and are not
+> committed benchmark numbers.
+>
+> **Slice 3 status:** RSS collection is wired through `--measure-rss`
+> and the `measure_rss` workflow input. The first delegated RSS dispatch
+> is still pending.
 
 ## Research Question
 
@@ -172,9 +177,9 @@ The BMF export is a derived artifact, for example:
 
 ```json
 {
-  "runner_vs_otel.arm_c.wall_clock_ms.median": { "value": 0 },
-  "runner_vs_otel.arm_c.wall_clock_ms.p99": { "value": 0 },
-  "runner_vs_otel.arm_c.peak_rss_bytes.max": { "value": 0 }
+  "runner_vs_otel.arm_c_dual_capture.wall_clock_ms.median": { "value": 0 },
+  "runner_vs_otel.arm_c_dual_capture.wall_clock_ms.p99": { "value": 0 },
+  "runner_vs_otel.arm_c_dual_capture.peak_rss_bytes.max": { "value": 0 }
 }
 ```
 
@@ -269,8 +274,8 @@ investigation before publication.
 |---|---|---|
 | 0 | This plan doc | Links from runner-vs-otel plan and README |
 | 1 | **Done**: local harness for Arm B wall-clock + size output, plus `overhead-sample-v0` and `overhead-summary-v0` schema sidecars | n=20 local dry run, no live API dependency, sidecar tests pass |
-| 2 | **Ready to dispatch**: delegated Arm C harness with health-gated samples via [`.github/workflows/runner-otel-overhead-experiment.yml`](../../.github/workflows/runner-otel-overhead-experiment.yml) | n=20 on `assay-bpf-runner`, all health gates clean |
-| 3 | RSS collection per arm | n=5 per arm, platform-specific parser tests, tool versions recorded per sample |
+| 2 | **Done**: delegated Arm C harness with health-gated samples via [`.github/workflows/runner-otel-overhead-experiment.yml`](../../.github/workflows/runner-otel-overhead-experiment.yml) | n=20 on `assay-bpf-runner`, all health gates clean |
+| 3 | **Ready to dispatch**: RSS collection per arm via `--measure-rss` / workflow `measure_rss=true` | n=5 per arm, platform-specific parser tests, tool versions recorded per sample |
 | 4 | Summary renderer + BMF-compatible export | JSON schema-like tests over synthetic samples |
 | 5 | Findings update | No deltas unless same-host arms exist |
 | 6 optional | Arm A pure-L2 decomposition | Only if Arm C overhead needs archive-only vs dual-capture separation |
