@@ -60,8 +60,8 @@
 > ([GitHub Actions run 26473448298](https://github.com/Rul1an/assay/actions/runs/26473448298))
 > passed with 20/20 valid samples and a healthy p99/median ratio, but
 > Arm A remained slower than Arm C at the median. The next measurement
-> slice should instrument Runner phase timing before another wall-clock
-> decomposition claim.
+> slice instruments Runner phase timing and should be dispatched before
+> another wall-clock decomposition claim.
 
 ## Research Question
 
@@ -146,6 +146,7 @@ runs/overhead-2026-05/
   artifacts/
     trace-sizes.json
     archive-sizes.json
+    phase-timings.json
     bmf.json
 ```
 
@@ -173,6 +174,15 @@ Each line in `samples.jsonl` should be a self-contained measurement:
     "kernel_layer": "complete",
     "ringbuf_drops": 0,
     "cgroup_correlation": "clean"
+  },
+  "phase_timings_ms": {
+    "preflight_ms": 0.1,
+    "cgroup_prepare_ms": 1.2,
+    "monitor_attach_ms": 3.4,
+    "child_spawn_ms": 5.6,
+    "child_runtime_ms": 789.0,
+    "event_flush_ms": 100.0,
+    "archive_write_ms": 12.3
   },
   "artifact_bytes": {
     "trace_json": 12345,
@@ -210,6 +220,13 @@ Each line in `samples.jsonl` should be a self-contained measurement:
     "trace_json_median": 0,
     "archive_targz_median": 0,
     "archive_extracted_median": 0
+  },
+  "phase_timings_ms": {
+    "child_runtime_ms": {
+      "median": 0,
+      "p95": 0,
+      "p99": 0
+    }
   }
 }
 ```
@@ -228,6 +245,12 @@ The BMF export is a derived artifact, for example:
   "runner_vs_otel.arm_c_dual_capture.peak_rss_bytes.max": { "value": 0 }
 }
 ```
+
+Phase timing metrics, when present, use the same derived BMF convention,
+for example
+`runner_vs_otel.arm_c_dual_capture.phase_timings_ms.child_runtime_ms.median`.
+They are diagnostics for this experiment and do not replace
+`wall_clock_ms`.
 
 The JSON shape is intentionally experiment-scoped. It is not a Runner
 archive contract. The `assay.experiment.*` namespace is reserved for
@@ -326,7 +349,7 @@ Required phase buckets:
 | `child_runtime_ms` | How long does the deterministic fixture itself run? | runner-spike child wait |
 | `event_flush_ms` | Does SDK/kernel event flush add tail latency? | runner-spike archive assembly |
 | `archive_write_ms` | Does tar/gzip or layer materialization dominate? | runner-spike archive assembly |
-| `health_parse_ms` | Does post-run health/correlation parsing add measurable cost? | overhead harness |
+| `health_parse_ms` | Does post-run health/correlation parsing add measurable cost? | overhead harness follow-up if extraction proves material |
 
 Acceptance rules for this slice:
 
@@ -340,7 +363,8 @@ Acceptance rules for this slice:
   the first-sample cgroup spawn failure is a warmup artifact rather than
   a correctness bug.
 - Do not publish a wall-clock additive split until phase data explains
-  why the healthy Arm A repeat remains slower than Arm C at the median.
+  why the healthy Arm A repeat remains slower than Arm C at the median,
+  or shows that the gap lives outside the instrumented Runner phases.
 
 ## Non-Claims
 
@@ -363,7 +387,7 @@ Acceptance rules for this slice:
 | 5 | **Done**: initial findings update in [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md) | No deltas unless same-host arms exist |
 | 6 | **Done**: same-host Arm B delegated workflow path via `arm=arm-b-otel`, dispatched in runs [26459699303](https://github.com/Rul1an/assay/actions/runs/26459699303) and [26461726436](https://github.com/Rul1an/assay/actions/runs/26461726436) | n=20 wall-clock and n=5 RSS on `assay-bpf-runner`; `host_class` matches Arm C |
 | 7 | **Done**: Arm A pure-L2 decomposition via `arm=arm-a-runner-only`, dispatched in runs [26463798358](https://github.com/Rul1an/assay/actions/runs/26463798358), [26464003194](https://github.com/Rul1an/assay/actions/runs/26464003194), and healthy repeat [26473448298](https://github.com/Rul1an/assay/actions/runs/26473448298) | RSS decomposition landed; wall-clock decomposition remains inconclusive because Arm A is still slower than Arm C at the median |
-| 8 | **Planned**: Runner phase timing | localize cgroup setup, monitor attach, child spawn/runtime, event flush, archive write, and health parsing before another wall-clock claim |
+| 8 | **Ready to dispatch**: Runner phase timing via hidden `--phase-timing-log` and harness `phase_timings_ms` aggregation | dispatch Arm A and Arm C wall-clock runs; localize cgroup setup, monitor attach, child spawn/runtime, event flush, and archive write before another wall-clock claim |
 
 ## Publication Rule
 

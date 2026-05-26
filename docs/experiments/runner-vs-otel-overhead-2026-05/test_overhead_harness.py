@@ -159,6 +159,9 @@ from pathlib import Path
 
 args = sys.argv[1:]
 output = Path(args[args.index("--output") + 1])
+phase_timing = None
+if "--phase-timing-log" in args:
+    phase_timing = Path(args[args.index("--phase-timing-log") + 1])
 trace = None
 if "--" in args:
     child = args[args.index("--") + 1:]
@@ -167,6 +170,25 @@ if "--" in args:
 if trace is not None:
     trace.parent.mkdir(parents=True, exist_ok=True)
     trace.write_text(json.dumps({"resourceSpans": []}) + "\\n", encoding="utf-8")
+if phase_timing is not None:
+    phase_timing.parent.mkdir(parents=True, exist_ok=True)
+    phase_timing.write_text(json.dumps({
+        "schema": "assay.experiment.runner_phase_timing.v0",
+        "run_id": "fake_run",
+        "agent_shim": "openai-agents",
+        "phases_ms": {
+            "preflight_ms": 1.0,
+            "cgroup_prepare_ms": 2.0,
+            "monitor_attach_ms": 3.0,
+            "child_spawn_ms": 4.0,
+            "child_runtime_ms": 5.0,
+            "event_flush_ms": 6.0,
+            "archive_write_ms": 7.0
+        },
+        "exit_code": 0,
+        "signal": None,
+        "error": None
+    }) + "\\n", encoding="utf-8")
 
 output.parent.mkdir(parents=True, exist_ok=True)
 with tempfile.TemporaryDirectory() as tmp:
@@ -212,6 +234,7 @@ class OverheadHarnessTests(unittest.TestCase):
             "peak_rss_bytes": None,
             "exit_code": 0,
             "health": None,
+            "phase_timings_ms": None,
             "artifact_bytes": {
                 "trace_json": 123,
                 "archive_targz": None,
@@ -224,6 +247,34 @@ class OverheadHarnessTests(unittest.TestCase):
     def test_sample_schema_accepts_arm_b_sample(self) -> None:
         schema = load_schema("overhead-sample-v0.schema.json")
         assert_matches_schema(self, self.sample(), schema, root=schema)
+
+    def test_sample_schema_accepts_phase_timings(self) -> None:
+        schema = load_schema("overhead-sample-v0.schema.json")
+        sample = self.sample(
+            phase_timings_ms={
+                "preflight_ms": 1.0,
+                "child_runtime_ms": 42.0,
+                "archive_write_ms": 7.0,
+            }
+        )
+        assert_matches_schema(self, sample, schema, root=schema)
+
+    def test_phase_timing_schema_accepts_side_log(self) -> None:
+        schema = load_schema("runner-phase-timing-v0.schema.json")
+        payload = {
+            "schema": "assay.experiment.runner_phase_timing.v0",
+            "run_id": "run_001",
+            "agent_shim": "openai-agents",
+            "phases_ms": {
+                "preflight_ms": 1.0,
+                "child_runtime_ms": 42.0,
+                "archive_write_ms": 7.0,
+            },
+            "exit_code": 0,
+            "signal": None,
+            "error": None,
+        }
+        assert_matches_schema(self, payload, schema, root=schema)
 
     def test_sample_schema_requires_extracted_size_key(self) -> None:
         schema = load_schema("overhead-sample-v0.schema.json")
@@ -264,19 +315,38 @@ class OverheadHarnessTests(unittest.TestCase):
 
     def test_bmf_export_is_metric_keyed_value_objects(self) -> None:
         summary = overhead_harness.summarize(
-            [self.sample(peak_rss_bytes=1234)],
+            [
+                self.sample(
+                    peak_rss_bytes=1234,
+                    phase_timings_ms={"child_runtime_ms": 42.0},
+                )
+            ],
             delegated_workflow_url=None,
         )
         bmf = overhead_harness.bmf_export(summary)
         self.assertIn("runner_vs_otel.arm_b_otel.wall_clock_ms.median", bmf)
         self.assertIn("runner_vs_otel.arm_b_otel.peak_rss_bytes.max", bmf)
+        self.assertIn(
+            "runner_vs_otel.arm_b_otel.phase_timings_ms.child_runtime_ms.median",
+            bmf,
+        )
         self.assertTrue(all(set(value) == {"value"} for value in bmf.values()))
 
     def test_summary_markdown_surfaces_core_review_fields(self) -> None:
         summary = overhead_harness.summarize(
             [
-                self.sample(iteration=1, wall_clock_ms=10.0, peak_rss_bytes=1000),
-                self.sample(iteration=2, wall_clock_ms=20.0, peak_rss_bytes=2000),
+                self.sample(
+                    iteration=1,
+                    wall_clock_ms=10.0,
+                    peak_rss_bytes=1000,
+                    phase_timings_ms={"child_runtime_ms": 10.0},
+                ),
+                self.sample(
+                    iteration=2,
+                    wall_clock_ms=20.0,
+                    peak_rss_bytes=2000,
+                    phase_timings_ms={"child_runtime_ms": 20.0},
+                ),
             ],
             delegated_workflow_url="https://github.com/Rul1an/assay/actions/runs/1",
         )
@@ -290,6 +360,8 @@ class OverheadHarnessTests(unittest.TestCase):
         self.assertIn("| Wall p99/median |", markdown)
         self.assertIn("(healthy)", markdown)
         self.assertIn("| Peak RSS max | `2,000 bytes` |", markdown)
+        self.assertIn("### Phase Timings", markdown)
+        self.assertIn("| `child_runtime_ms` | `15 ms` |", markdown)
         self.assertIn("runner-otel-overhead-arm-c-1", markdown)
         self.assertIn("Non-claim", markdown)
 
@@ -556,9 +628,14 @@ class OverheadHarnessTests(unittest.TestCase):
             self.assertEqual(sample["health"]["kernel_layer"], "complete")
             self.assertEqual(sample["health"]["ringbuf_drops"], 0)
             self.assertEqual(sample["health"]["cgroup_correlation"], "clean")
+            self.assertEqual(sample["phase_timings_ms"]["child_runtime_ms"], 5.0)
             self.assertGreater(sample["artifact_bytes"]["archive_targz"], 0)
             self.assertGreater(sample["artifact_bytes"]["archive_extracted"], 0)
             self.assertEqual(summary["valid_samples"], 1)
+            self.assertEqual(
+                summary["phase_timings_ms"]["child_runtime_ms"]["median"],
+                5.0,
+            )
             self.assertEqual(archive_sizes["arm"], "arm-c-dual-capture")
             self.assertEqual(len(archive_sizes["archive_targz_bytes"]), 1)
 
@@ -614,11 +691,20 @@ class OverheadHarnessTests(unittest.TestCase):
 
             self.assertEqual(sample["arm"], "arm-a-runner-only")
             self.assertEqual(sample["artifact_bytes"]["trace_json"], None)
+            self.assertEqual(sample["phase_timings_ms"]["archive_write_ms"], 7.0)
             self.assertGreater(sample["artifact_bytes"]["archive_targz"], 0)
             self.assertGreater(sample["artifact_bytes"]["archive_extracted"], 0)
             self.assertEqual(summary["valid_samples"], 1)
+            self.assertEqual(
+                summary["phase_timings_ms"]["archive_write_ms"]["median"],
+                7.0,
+            )
             self.assertIn(
                 "runner_vs_otel.arm_a_runner_only.wall_clock_ms.median",
+                bmf,
+            )
+            self.assertIn(
+                "runner_vs_otel.arm_a_runner_only.phase_timings_ms.archive_write_ms.median",
                 bmf,
             )
 
