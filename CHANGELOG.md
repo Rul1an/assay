@@ -31,6 +31,10 @@ All notable changes to this project will be documented in this file.
 - Added a delegated same-host Arm B path to the Runner-vs-OTel overhead
   workflow so `arm-b-otel` can be measured on `assay-bpf-runner` before
   any Arm B-vs-Arm C delta is published.
+- Updated the overhead findings after the same-host Arm B dispatches.
+  The findings now report the narrow `linux-aarch64-6.8.0-117-generic`
+  Arm B-vs-Arm C delta while preserving the non-co-temporal and
+  non-decomposition caveats.
 
 ## [3.12.0] - 2026-05-25
 
