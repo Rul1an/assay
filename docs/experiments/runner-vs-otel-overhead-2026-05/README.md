@@ -2,8 +2,9 @@
 
 > **Status:** Slice 1 local Arm B harness, Slice 2 delegated Arm C
 > dispatch pipeline, Slice 3 RSS collection, Slice 4 summary/BMF
-> rendering, Slice 5 findings, and Slice 6 same-host Arm B dispatches.
-> This directory contains the experiment-scoped measurement
+> rendering, Slice 5 findings, Slice 6 same-host Arm B dispatches, and
+> Slice 7 Arm A runner-only dispatch wiring. This directory contains the
+> experiment-scoped measurement
 > harness and schema sidecars for the plan in
 > [`../runner-vs-otel-overhead-2026-05.md`](../runner-vs-otel-overhead-2026-05.md).
 > It does not contain committed benchmark results.
@@ -27,7 +28,7 @@ The harness writes:
 - `artifacts/trace-sizes.json`, a trace-size side artifact for overhead
   bookkeeping; and
 - `artifacts/archive-sizes.json`, an archive-size side artifact that is
-  empty for Arm B and populated for Arm C; and
+  empty for Arm B and populated for Arm A / Arm C; and
 - `artifacts/rss-sizes.json`, a peak-RSS side artifact populated when
   the harness runs with `--measure-rss`.
 
@@ -36,7 +37,8 @@ They are local measurement evidence for the overhead follow-up only.
 
 BMF metric keys use the full arm slug so future arms stay
 unambiguous: `runner_vs_otel.arm_b_otel.*` for local Arm B and
-`runner_vs_otel.arm_c_dual_capture.*` for delegated Arm C.
+`runner_vs_otel.arm_c_dual_capture.*` for delegated Arm C. Arm A uses
+`runner_vs_otel.arm_a_runner_only.*`.
 
 ## Local Smoke
 
@@ -59,20 +61,23 @@ temporary output directory. Do not commit generated measurements until
 the findings slice decides what should become evidence. The default
 `runs/overhead-2026-05/` output path is ignored for this reason.
 
-## Delegated Arm B / Arm C
+## Delegated Arm A / Arm B / Arm C
 
 Arm B and Arm C are dispatched manually through
 [`runner-otel-overhead-experiment.yml`](../../../.github/workflows/runner-otel-overhead-experiment.yml).
 The workflow runs on `assay-bpf-runner` and exposes an `arm` input:
 
+- `arm-a-runner-only` runs `--arm arm-a-runner-only` with
+  `assay runner-spike`, eBPF, and the deterministic OpenAI Agents
+  fixture, but without OTel trace export.
 - `arm-c-dual-capture` runs `--arm arm-c-dual-capture` with
   `assay runner-spike`, eBPF, and Runner health gates.
 - `arm-b-otel` runs `--arm arm-b-otel` on the same delegated host class
   without Runner capture.
 
-Arm C fails if any sample is either non-zero exit or capture-unclean.
-Arm B fails if any sample exits non-zero. A direct Arm B-vs-Arm C delta
-is only valid when separately dispatched summaries emit matching
+Arm A and Arm C fail if any sample is either non-zero exit or
+capture-unclean. Arm B fails if any sample exits non-zero. A direct arm
+delta is only valid when separately dispatched summaries emit matching
 `host_class` values.
 
 For the Slice 3 RSS run, dispatch the same workflow with
@@ -90,7 +95,13 @@ passed as
 5/5 valid samples and 0 discarded samples. Both emitted the same
 `linux-aarch64-6.8.0-117-generic` host class as Arm C.
 
-The local unit tests exercise the Arm C path with a fake `assay` binary
+Arm A is the optional decomposition arm. Dispatch it only when you need
+to split the current Arm C delta into "Runner archive only" versus
+"Runner archive plus OTel trace": first `arm=arm-a-runner-only`,
+`repetitions=20`, `measure_rss=false`, then `repetitions=5`,
+`measure_rss=true`.
+
+The local unit tests exercise the Arm A / Arm C paths with a fake `assay` binary
 that emits the expected archive shape. The first validation against real
 `assay runner-spike` output happens on the first delegated workflow
 dispatch.

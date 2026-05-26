@@ -562,6 +562,66 @@ class OverheadHarnessTests(unittest.TestCase):
             self.assertEqual(archive_sizes["arm"], "arm-c-dual-capture")
             self.assertEqual(len(archive_sizes["archive_targz_bytes"]), 1)
 
+    def test_arm_a_sample_extracts_archive_without_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workload = root / "workload"
+            out_dir = root / "overhead"
+            fixture_agent = root / "fixture-agent.js"
+            write_stub_workload(workload)
+            fixture_agent.write_text("console.log('fake fixture')\n", encoding="utf-8")
+            fake_assay = write_fake_assay(root)
+            fake_ebpf = root / "assay-ebpf.o"
+            fake_ebpf.write_bytes(b"fake ebpf")
+
+            status = overhead_harness.main(
+                [
+                    "--arm",
+                    "arm-a-runner-only",
+                    "--iterations",
+                    "1",
+                    "--skip-build",
+                    "--clean",
+                    "--timeout-seconds",
+                    "10",
+                    "--workload-dir",
+                    str(workload),
+                    "--out-dir",
+                    str(out_dir),
+                    "--assay-bin",
+                    str(fake_assay),
+                    "--ebpf-obj",
+                    str(fake_ebpf),
+                    "--runner-fixture-agent",
+                    str(fixture_agent),
+                ]
+            )
+            self.assertEqual(status, 0)
+
+            sample = json.loads(
+                (out_dir / "arm-a-runner-only" / "samples.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()[0]
+            )
+            summary = json.loads(
+                (out_dir / "arm-a-runner-only" / "summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            bmf = json.loads(
+                (out_dir / "artifacts" / "bmf.json").read_text(encoding="utf-8")
+            )
+
+            self.assertEqual(sample["arm"], "arm-a-runner-only")
+            self.assertEqual(sample["artifact_bytes"]["trace_json"], None)
+            self.assertGreater(sample["artifact_bytes"]["archive_targz"], 0)
+            self.assertGreater(sample["artifact_bytes"]["archive_extracted"], 0)
+            self.assertEqual(summary["valid_samples"], 1)
+            self.assertIn(
+                "runner_vs_otel.arm_a_runner_only.wall_clock_ms.median",
+                bmf,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

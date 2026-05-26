@@ -28,6 +28,7 @@ EXPERIMENT = "runner-vs-otel-overhead-2026-05"
 SAMPLE_SCHEMA = "assay.experiment.overhead_sample.v0"
 SUMMARY_SCHEMA = "assay.experiment.overhead_summary.v0"
 DEFAULT_ARM = "arm-b-otel"
+ARM_A = "arm-a-runner-only"
 ARM_B = "arm-b-otel"
 ARM_C = "arm-c-dual-capture"
 RSS_TIME_PATH = Path("/usr/bin/time")
@@ -40,6 +41,10 @@ def repo_root() -> Path:
 
 def default_workload_dir() -> Path:
     return repo_root() / "docs/experiments/runner-vs-otel-2026-05/workload"
+
+
+def default_runner_fixture_agent() -> Path:
+    return repo_root() / "runner-fixtures/openai-agents/fixture-agent.js"
 
 
 def default_out_dir() -> Path:
@@ -240,6 +245,7 @@ def one_sample(
     ebpf_obj: Path | None = None,
     use_sudo: bool = False,
     measure_rss: bool = False,
+    runner_fixture_agent: Path | None = None,
 ) -> dict[str, Any]:
     run_id = f"overhead_{arm.replace('-', '_')}_{iteration:03d}"
     run_dir = arm_dir / f"run_{iteration:03d}"
@@ -261,9 +267,26 @@ def one_sample(
             "--trace-out",
             str(trace_path),
         ]
-    elif arm == ARM_C:
+    elif arm in {ARM_A, ARM_C}:
         if assay_bin is None or ebpf_obj is None:
-            raise ValueError("Arm C requires --assay-bin and --ebpf-obj")
+            raise ValueError(f"{arm} requires --assay-bin and --ebpf-obj")
+        if arm == ARM_A:
+            agent_command = [
+                "node",
+                str(runner_fixture_agent or default_runner_fixture_agent()),
+                str(work_dir),
+            ]
+        else:
+            agent_command = [
+                "node",
+                str(workload_dir / "dist/workload.js"),
+                "--run-id",
+                run_id,
+                "--work-dir",
+                str(work_dir),
+                "--trace-out",
+                str(trace_path),
+            ]
         command = [
             str(assay_bin),
             "runner-spike",
@@ -280,15 +303,7 @@ def one_sample(
             "--sdk-event-log",
             str(sdk_log),
             "--",
-            "node",
-            str(workload_dir / "dist/workload.js"),
-            "--run-id",
-            run_id,
-            "--work-dir",
-            str(work_dir),
-            "--trace-out",
-            str(trace_path),
-        ]
+        ] + agent_command
         if use_sudo:
             command = ["sudo", "-E", "env", f"PATH={os_environ_path()}"] + command
     else:
@@ -546,7 +561,7 @@ def write_json(path: Path, payload: Any) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--arm", choices=[ARM_B, ARM_C], default=ARM_B)
+    parser.add_argument("--arm", choices=[ARM_A, ARM_B, ARM_C], default=ARM_B)
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument("--out-dir", type=Path, default=default_out_dir())
     parser.add_argument("--workload-dir", type=Path, default=default_workload_dir())
@@ -556,6 +571,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     parser.add_argument("--assay-bin", type=Path)
     parser.add_argument("--ebpf-obj", type=Path)
+    parser.add_argument(
+        "--runner-fixture-agent",
+        type=Path,
+        default=default_runner_fixture_agent(),
+    )
     parser.add_argument("--sudo", action="store_true")
     parser.add_argument("--measure-rss", action="store_true")
     args = parser.parse_args(argv)
@@ -590,6 +610,7 @@ def main(argv: list[str] | None = None) -> int:
             ebpf_obj=args.ebpf_obj,
             use_sudo=args.sudo,
             measure_rss=args.measure_rss,
+            runner_fixture_agent=args.runner_fixture_agent,
         )
         for iteration in range(1, args.iterations + 1)
     ]

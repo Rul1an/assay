@@ -35,6 +35,9 @@ All notable changes to this project will be documented in this file.
   The findings now report the narrow `linux-aarch64-6.8.0-117-generic`
   Arm B-vs-Arm C delta while preserving the non-co-temporal and
   non-decomposition caveats.
+- Added optional Arm A runner-only overhead dispatch wiring so the
+  current Arm C delta can be decomposed into Runner archive-only cost
+  versus Runner archive plus OTel trace cost.
 
 ## [3.12.0] - 2026-05-25
 
