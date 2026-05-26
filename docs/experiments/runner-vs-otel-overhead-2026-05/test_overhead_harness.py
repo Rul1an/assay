@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import re
+import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -90,6 +90,8 @@ def assert_matches_schema(
         test.assertIn(payload, node["enum"], path)
     if "pattern" in node and isinstance(payload, str):
         test.assertRegex(payload, node["pattern"], path)
+    if "minLength" in node and isinstance(payload, str):
+        test.assertGreaterEqual(len(payload), node["minLength"], path)
     if node.get("format") == "date-time":
         value = payload.replace("Z", "+00:00")
         datetime.fromisoformat(value)
@@ -115,6 +117,32 @@ def assert_matches_schema(
                 )
 
 
+def write_stub_workload(root: Path) -> None:
+    (root / "dist").mkdir(parents=True)
+    (root / "package.json").write_text(
+        json.dumps({"name": "overhead-stub-workload", "version": "0.0.0"}),
+        encoding="utf-8",
+    )
+    (root / "dist" / "workload.js").write_text(
+        """
+const fs = require("fs");
+const path = require("path");
+const args = process.argv.slice(2);
+const get = (name) => {
+  const idx = args.indexOf(`--${name}`);
+  return idx >= 0 ? args[idx + 1] : undefined;
+};
+const traceOut = get("trace-out");
+const workDir = get("work-dir");
+fs.mkdirSync(path.dirname(traceOut), { recursive: true });
+fs.mkdirSync(workDir, { recursive: true });
+fs.writeFileSync(traceOut, JSON.stringify({ resourceSpans: [] }) + "\\n");
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 class OverheadHarnessTests(unittest.TestCase):
     def sample(self, **overrides: Any) -> dict[str, Any]:
         payload = {
@@ -129,8 +157,10 @@ class OverheadHarnessTests(unittest.TestCase):
             "tool_versions": {
                 "python": "3.12.0",
                 "node": "v22.16.0",
+                "npm": "10.0.0",
                 "hyperfine": None,
                 "time": "python-time.perf_counter",
+                "workload_package": "0.0.0",
             },
             "wall_clock_ms": 12.5,
             "peak_rss_bytes": None,
@@ -201,6 +231,65 @@ class OverheadHarnessTests(unittest.TestCase):
     def test_percentile_uses_nearest_rank(self) -> None:
         self.assertEqual(overhead_harness.percentile([1, 2, 3, 4, 5], 95), 5)
         self.assertEqual(overhead_harness.percentile([1, 2, 3, 4, 5], 50), 3)
+
+    def test_negative_returncode_is_schema_safe(self) -> None:
+        self.assertEqual(overhead_harness.normalized_exit_code(-15), 143)
+        self.assertEqual(overhead_harness.normalized_exit_code(2), 2)
+
+    def test_tool_versions_schema_rejects_typo_keys(self) -> None:
+        schema = load_schema("overhead-sample-v0.schema.json")
+        sample = self.sample()
+        sample["tool_versions"]["hyprfine"] = None
+        with self.assertRaises(AssertionError):
+            assert_matches_schema(self, sample, schema, root=schema)
+
+    def test_harness_emits_twenty_valid_stub_samples(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workload = root / "workload"
+            out_dir = root / "overhead"
+            write_stub_workload(workload)
+
+            status = overhead_harness.main(
+                [
+                    "--iterations",
+                    "20",
+                    "--skip-build",
+                    "--clean",
+                    "--timeout-seconds",
+                    "10",
+                    "--workload-dir",
+                    str(workload),
+                    "--out-dir",
+                    str(out_dir),
+                ]
+            )
+            self.assertEqual(status, 0)
+
+            samples = [
+                json.loads(line)
+                for line in (out_dir / "arm-b-otel" / "samples.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            summary = json.loads(
+                (out_dir / "arm-b-otel" / "summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            bmf = json.loads(
+                (out_dir / "artifacts" / "bmf.json").read_text(encoding="utf-8")
+            )
+
+            sample_schema = load_schema("overhead-sample-v0.schema.json")
+            summary_schema = load_schema("overhead-summary-v0.schema.json")
+            self.assertEqual(len(samples), 20)
+            for sample in samples:
+                assert_matches_schema(self, sample, sample_schema, root=sample_schema)
+            assert_matches_schema(self, summary, summary_schema, root=summary_schema)
+            self.assertEqual(summary["valid_samples"], 20)
+            self.assertEqual(summary["discarded_samples"], 0)
+            self.assertTrue(bmf)
 
 
 if __name__ == "__main__":

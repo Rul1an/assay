@@ -63,7 +63,10 @@ def run_text(command: list[str], cwd: Path | None = None) -> str | None:
 
 
 def assay_commit() -> str:
-    return run_text(["git", "rev-parse", "--short=8", "HEAD"], repo_root()) or "unknown"
+    commit = run_text(["git", "rev-parse", "--short=8", "HEAD"], repo_root())
+    if not commit:
+        raise RuntimeError("could not resolve git commit for overhead sample provenance")
+    return commit
 
 
 def host_class() -> str:
@@ -76,14 +79,19 @@ def host_class() -> str:
 
 
 def tool_versions(workload_dir: Path) -> dict[str, str | None]:
+    def clean(value: str | None) -> str | None:
+        if value in (None, "", "undefined"):
+            return None
+        return value
+
     return {
         "python": platform.python_version(),
-        "node": run_text(["node", "--version"]),
-        "npm": run_text(["npm", "--version"]),
-        "hyperfine": run_text(["hyperfine", "--version"]),
+        "node": clean(run_text(["node", "--version"])),
+        "npm": clean(run_text(["npm", "--version"])),
+        "hyperfine": clean(run_text(["hyperfine", "--version"])),
         "time": "python-time.perf_counter",
-        "workload_package": run_text(
-            ["node", "-p", "require('./package.json').version"], workload_dir
+        "workload_package": clean(
+            run_text(["node", "-p", "require('./package.json').version"], workload_dir)
         ),
     }
 
@@ -122,6 +130,12 @@ def median(values: list[float]) -> float | None:
     return (ordered[mid - 1] + ordered[mid]) / 2
 
 
+def normalized_exit_code(returncode: int) -> int:
+    if returncode < 0:
+        return 128 + abs(returncode)
+    return returncode
+
+
 def one_sample(
     *,
     arm_dir: Path,
@@ -129,6 +143,7 @@ def one_sample(
     iteration: int,
     commit: str,
     versions: dict[str, str | None],
+    timeout_seconds: float,
 ) -> dict[str, Any]:
     run_id = f"overhead_arm_b_{iteration:03d}"
     run_dir = arm_dir / f"run_{iteration:03d}"
@@ -148,16 +163,26 @@ def one_sample(
     ]
 
     start = time.perf_counter()
-    result = subprocess.run(
-        command,
-        cwd=workload_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            cwd=workload_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout_seconds,
+        )
+        stdout = result.stdout
+        stderr = result.stderr
+        exit_code = normalized_exit_code(result.returncode)
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout if isinstance(exc.stdout, str) else ""
+        stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+        stderr += f"\noverhead harness timeout after {timeout_seconds} seconds\n"
+        exit_code = 124
     elapsed_ms = (time.perf_counter() - start) * 1000.0
-    (run_dir / "stdout.log").write_text(result.stdout, encoding="utf-8")
-    (run_dir / "stderr.log").write_text(result.stderr, encoding="utf-8")
+    (run_dir / "stdout.log").write_text(stdout, encoding="utf-8")
+    (run_dir / "stderr.log").write_text(stderr, encoding="utf-8")
 
     return {
         "schema": SAMPLE_SCHEMA,
@@ -171,7 +196,7 @@ def one_sample(
         "tool_versions": versions,
         "wall_clock_ms": elapsed_ms,
         "peak_rss_bytes": None,
-        "exit_code": result.returncode,
+        "exit_code": exit_code,
         "health": None,
         "artifact_bytes": {
             "trace_json": file_size(trace_path),
@@ -276,6 +301,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--clean", action="store_true")
     parser.add_argument("--delegated-workflow-url")
+    parser.add_argument("--timeout-seconds", type=float, default=300.0)
     args = parser.parse_args(argv)
 
     if args.iterations < 1:
@@ -298,6 +324,7 @@ def main(argv: list[str] | None = None) -> int:
             iteration=iteration,
             commit=commit,
             versions=versions,
+            timeout_seconds=args.timeout_seconds,
         )
         for iteration in range(1, args.iterations + 1)
     ]

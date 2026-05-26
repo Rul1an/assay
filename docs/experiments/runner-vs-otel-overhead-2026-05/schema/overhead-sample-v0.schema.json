@@ -57,11 +57,46 @@
     },
     "tool_versions": {
       "type": "object",
-      "additionalProperties": {
-        "type": [
-          "string",
-          "null"
-        ]
+      "additionalProperties": false,
+      "required": [
+        "python",
+        "node",
+        "npm",
+        "hyperfine",
+        "time",
+        "workload_package"
+      ],
+      "properties": {
+        "python": {
+          "type": "string"
+        },
+        "node": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "npm": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hyperfine": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "time": {
+          "const": "python-time.perf_counter"
+        },
+        "workload_package": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "wall_clock_ms": {

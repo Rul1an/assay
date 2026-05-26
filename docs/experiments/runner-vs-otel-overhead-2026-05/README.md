@@ -14,7 +14,11 @@ The local harness writes:
 - `arm-b-otel/summary.json` using
   `assay.experiment.overhead_summary.v0`;
 - `artifacts/bmf.json`, a derived Bencher Metric Format export whose
-  metric keys map to `{ "value": ... }` objects.
+  metric keys map to `{ "value": ... }` objects;
+- `artifacts/trace-sizes.json`, a trace-size side artifact for overhead
+  bookkeeping; and
+- `artifacts/archive-sizes.json`, an archive-size side artifact that is
+  present but empty for Slice 1.
 
 The experiment schemas are intentionally not Runner archive contracts.
 They are local measurement evidence for the overhead follow-up only.
