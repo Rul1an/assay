@@ -145,6 +145,33 @@
       "if": {
         "properties": {
           "join_key": {
+            "const": "tool_call_id"
+          },
+          "unique_within_scope": {
+            "const": false
+          }
+        },
+        "required": [
+          "join_key",
+          "unique_within_scope"
+        ]
+      },
+      "then": {
+        "properties": {
+          "join_grade": {
+            "enum": [
+              "weak",
+              "diagnostic",
+              "failed"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "join_key": {
             "enum": [
               "session_id",
               "trace_span_id",
