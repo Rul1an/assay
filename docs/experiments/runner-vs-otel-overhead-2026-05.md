@@ -1,6 +1,6 @@
 # Runner vs OTel Overhead Measurement Plan (2026-05)
 
-> **Status:** measurement follow-up with Slices 1-8 complete. This
+> **Status:** measurement follow-up with Slices 1-9 complete. This
 > document turns the explicit overhead non-claim from
 > [`runner-vs-otel-2026-05`](runner-vs-otel-2026-05/) into a reproducible
 > measurement plan and findings trail. It does not commit generated
@@ -66,6 +66,14 @@
 > (Arm C) then passed with 20/20 valid samples each. They explain only
 > part of the median wall-clock gap, mostly around monitor attach, so the
 > findings still withhold an additive wall-clock decomposition claim.
+>
+> **Slice 9 status:** paired Arm A/C residual diagnostics passed on
+> [GitHub Actions run 26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306):
+> 20 adjacent counterbalanced pairs, 20/20 valid samples per arm, 0
+> discarded, same host class. The paired run shows the Slice 8 Arm A-over-Arm C
+> median gap does not reproduce under adjacent pairing; wall-clock
+> decomposition remains unpublished and should stop at this measurement
+> budget.
 
 ## Research Question
 
@@ -453,6 +461,22 @@ Decision tree after dispatch:
 - **Residual remains material and order-independent:** stop the
   wall-clock decomposition arc at the current measurement budget.
 
+Slice 9 result:
+
+- Paired Arm A/C residual diagnostics
+  ([run 26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306)):
+  20 adjacent counterbalanced pairs in one delegated job, 20/20 valid
+  samples per arm, 0 discarded, same host class.
+- The Slice 8 Arm A-over-Arm C median wall-clock gap did not reproduce
+  under pairing. Arm A was `111.074 ms` faster than Arm C at the median
+  in the paired run, while median per-sample residuals differed by only
+  `22.476 ms`.
+- Both paired tails were unhealthy (`p99/median=2.166` for Arm A and
+  `2.295` for Arm C), so the result does not publish a new additive
+  split. It closes the broad wall-clock decomposition loop as unstable
+  at n=20 on this delegated runner. RSS remains the clean decomposition
+  signal.
+
 ## Non-Claims
 
 - Does not rank OpenTelemetry, OpenInference, or Runner as products.
@@ -475,7 +499,7 @@ Decision tree after dispatch:
 | 6 | **Done**: same-host Arm B delegated workflow path via `arm=arm-b-otel`, dispatched in runs [26459699303](https://github.com/Rul1an/assay/actions/runs/26459699303) and [26461726436](https://github.com/Rul1an/assay/actions/runs/26461726436) | n=20 wall-clock and n=5 RSS on `assay-bpf-runner`; `host_class` matches Arm C |
 | 7 | **Done**: Arm A pure-L2 decomposition via `arm=arm-a-runner-only`, dispatched in runs [26463798358](https://github.com/Rul1an/assay/actions/runs/26463798358), [26464003194](https://github.com/Rul1an/assay/actions/runs/26464003194), and healthy repeat [26473448298](https://github.com/Rul1an/assay/actions/runs/26473448298) | RSS decomposition landed; wall-clock decomposition remains inconclusive because Arm A is still slower than Arm C at the median |
 | 8 | **Done**: Runner phase timing via hidden `--phase-timing-log` and harness `phase_timings_ms` aggregation, dispatched in runs [26476490968](https://github.com/Rul1an/assay/actions/runs/26476490968) and [26476824593](https://github.com/Rul1an/assay/actions/runs/26476824593) | phase data explains part, not all, of the Arm A / Arm C median gap; no additive wall-clock decomposition claim |
-| 9 | **Ready to dispatch**: paired Arm A/C residual diagnostics via workflow `arm=paired-a-c` | n=20 adjacent counterbalanced pairs on one delegated runner job; inspect `artifacts/paired-sequence.json` before changing findings |
+| 9 | **Done**: paired Arm A/C residual diagnostics via workflow `arm=paired-a-c`, dispatched in run [26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306) | residuals shrink/change sign under pairing; wall-clock decomposition remains unpublished and should stop at this measurement budget |
 
 ## Publication Rule
 

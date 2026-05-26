@@ -61,6 +61,11 @@ All notable changes to this project will be documented in this file.
   workflow support. The overhead workflow can now run `arm=paired-a-c`
   as adjacent counterbalanced pairs and emit `paired-sequence.json` with
   per-sample phase residuals for review.
+- Updated the overhead findings after the Slice 9 paired Arm A/C
+  dispatch. The paired run shows the earlier Arm A-over-Arm C median
+  wall-clock gap does not reproduce under adjacent pairing, so the
+  wall-clock decomposition remains unpublished and the RSS decomposition
+  remains the stable finding.
 
 ## [3.12.0] - 2026-05-25
 
