@@ -38,6 +38,10 @@ All notable changes to this project will be documented in this file.
 - Added optional Arm A runner-only overhead dispatch wiring so the
   current Arm C delta can be decomposed into Runner archive-only cost
   versus Runner archive plus OTel trace cost.
+- Updated the overhead findings after the Arm A runner-only dispatches.
+  The findings now record the same-host three-arm measurement set and
+  classify wall-clock decomposition as inconclusive while showing that
+  the observed RSS delta is dominated by Runner capture.
 
 ## [3.12.0] - 2026-05-25
 
