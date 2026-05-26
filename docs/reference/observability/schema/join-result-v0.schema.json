@@ -142,6 +142,7 @@
       }
     },
     {
+      "description": "Intentional inverse guard for readability: the strong-grade rule already requires unique_within_scope=true, and this rule keeps the non-unique tool_call_id case explicit at its own boundary.",
       "if": {
         "properties": {
           "join_key": {

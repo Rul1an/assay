@@ -19,7 +19,7 @@ string carries the contract boundary.
 ## Governance
 
 - A new top-level namespace should add a row here before it becomes
-  reviewable surface.
+  a reviewable surface.
 - Moving an artifact from `assay.experiment.*` into
   `assay.runner.*` or another reference namespace requires a reference
   page or ADR that states the new stability promise.
