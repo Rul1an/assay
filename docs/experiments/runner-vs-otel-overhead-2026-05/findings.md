@@ -18,6 +18,8 @@
 | 7 RSS | [26464003194](https://github.com/Rul1an/assay/actions/runs/26464003194) | Arm A runner-only | 5 RSS | 5 valid, 0 discarded, same host class |
 | 8 diagnostic | [26472122983](https://github.com/Rul1an/assay/actions/runs/26472122983) | Arm A runner-only | 20 wall-clock repeat | failed; one sample discarded, partial artifacts not uploaded by the old workflow |
 | 8 repeat | [26473448298](https://github.com/Rul1an/assay/actions/runs/26473448298) | Arm A runner-only | 20 wall-clock repeat | 20 valid, 0 discarded, artifact-success gate active |
+| 8 phase A | [26476490968](https://github.com/Rul1an/assay/actions/runs/26476490968) | Arm A runner-only | 20 wall-clock + phase timing | 20 valid, 0 discarded, same host class |
+| 8 phase C | [26476824593](https://github.com/Rul1an/assay/actions/runs/26476824593) | Arm C dual capture | 20 wall-clock + phase timing | 20 valid, 0 discarded, same host class |
 
 Generated artifacts from those runs were inspected as review artifacts
 only. They are intentionally not committed as benchmark evidence in this
@@ -29,6 +31,11 @@ passed with artifacts uploaded and the new artifact-success gate active.
 Together, the repeats show that the first-sample cgroup failure is not
 deterministic, while wall-clock decomposition still needs phase timing
 before it can support an additive claim.
+
+The phase-timing runs are listed as diagnostics, not as replacement
+baselines. They validate the Slice 8 instrumentation and localize part
+of the Arm A / Arm C median gap, but Arm A again showed an unhealthy
+wall-clock tail in that dispatch.
 
 ## Same-Host Baselines
 
@@ -134,6 +141,46 @@ The decomposition read is:
   path and dual-capture workload path need phase timing before the
   current data can be decomposed into additive cost buckets.
 
+## Phase-Timing Read
+
+Slice 8 added experiment-scoped phase diagnostics via
+`assay.experiment.runner_phase_timing.v0`. Both Arm A and Arm C phase
+runs used the same `linux-aarch64-6.8.0-117-generic` host class and
+produced 20 valid samples with 0 discarded samples.
+
+| Metric | Arm A runner-only | Arm C dual capture | Delta A-C |
+|---|---:|---:|---:|
+| Wall median | `1,894.545 ms` | `1,787.294 ms` | `+107.251 ms` |
+| Wall p95 | `2,542.600 ms` | `2,013.966 ms` | `+528.634 ms` |
+| Wall p99 | `6,855.941 ms` | `2,060.190 ms` | `+4,795.751 ms` |
+| Wall p99/median | `3.619` | `1.153` | Arm A tail unhealthy |
+| Sum of phase medians | `1,427.638 ms` | `1,393.098 ms` | `+34.540 ms` |
+| Wall median minus summed phase medians | `466.907 ms` | `394.197 ms` | `+72.711 ms` |
+
+Median phase breakdown:
+
+| Phase | Arm A median | Arm C median | Delta A-C |
+|---|---:|---:|---:|
+| `preflight_ms` | `0.196 ms` | `0.144 ms` | `+0.052 ms` |
+| `cgroup_prepare_ms` | `0.966 ms` | `1.085 ms` | `-0.119 ms` |
+| `monitor_attach_ms` | `446.885 ms` | `408.601 ms` | `+38.284 ms` |
+| `child_spawn_ms` | `18.020 ms` | `23.787 ms` | `-5.767 ms` |
+| `child_runtime_ms` | `850.928 ms` | `847.777 ms` | `+3.151 ms` |
+| `event_flush_ms` | `107.313 ms` | `109.086 ms` | `-1.773 ms` |
+| `archive_write_ms` | `3.330 ms` | `2.617 ms` | `+0.713 ms` |
+
+The summed phase medians explain about `34.540 ms` of the `107.251 ms`
+Arm A median wall-clock gap. The largest instrumented contributor is
+`monitor_attach_ms` (`+38.284 ms` for Arm A), but most of the median
+gap remains outside the current phase buckets as measured by wall median
+minus summed phase medians (`+72.711 ms` residual).
+
+That means Slice 8 supports a narrower conclusion than an additive
+wall-clock decomposition: the Runner-internal phases do **not** fully
+explain why the runner-only Arm A path is slower than Arm C at the
+median. The wall-clock split remains unsuitable for a "Runner archive
+only + OTel trace export" additive claim.
+
 ## What This Means
 
 - The delegated measurement harness is usable for all three arms: wall-clock
@@ -145,9 +192,13 @@ The decomposition read is:
 - The observed Arm A and Arm C RSS medians are effectively identical at
   this scale, so the RSS delta versus Arm B is attributable to Runner
   capture rather than trace JSON export.
-- Arm A's repeat wall-clock tail is healthy, but the runner-only median
-  remains higher than Arm C, so wall-clock decomposition remains a
-  caution, not a benchmark claim.
+- Arm A's repeat wall-clock tail was healthy, but the later phase-timing
+  run had an unhealthy tail and the runner-only median remained higher
+  than Arm C, so wall-clock decomposition remains a caution, not a
+  benchmark claim.
+- Slice 8 phase timing localizes the largest measured internal phase
+  delta to monitor attach, but the majority of the Arm A / Arm C median
+  gap sits outside the current phase buckets.
 - The RSS path works on the delegated Linux runner with GNU
   `/usr/bin/time -v`; samples record the RSS tool version and emit
   `peak_rss_bytes` into both `summary.json` and the BMF export.
@@ -165,9 +216,9 @@ The decomposition read is:
   host class at different times, and Arm A was dispatched separately as
   well.
 - No additive wall-clock decomposition claim is made between "Runner
-  archive only" and "Runner archive plus OTel trace". The healthy Arm A
-  repeat still does not compose with Arm C in a way that supports that
-  claim.
+  archive only" and "Runner archive plus OTel trace". The phase-timing
+  runs explain only part of the Arm A / Arm C median gap and Arm A's
+  phase run had an unhealthy tail.
 - No Trust Card or Trust Basis claim is added. This remains an
   experiment-scoped measurement follow-up.
 - The generated artifacts remain review artifacts until a later decision
@@ -183,18 +234,20 @@ The correct publication language is now:
 > workload. The result is not co-temporal and does not decompose Runner
 > archive-only cost.
 
-Arm A measurements have landed. The safe publication language is now:
+Arm A measurements and phase-timing diagnostics have landed. The safe
+publication language is now:
 
 > On the same delegated host class, Arm A runner-only and Arm C
 > dual-capture had effectively identical median RSS. The RSS
 > decomposition points to Runner capture as the memory-cost source.
-> Wall-clock decomposition remains inconclusive because the healthy Arm A
-> repeat is still slower than Arm C, so it should not be reported as an
-> additive split.
+> Wall-clock decomposition remains inconclusive: phase timing explains
+> part of the Arm A / Arm C median gap, mostly around monitor attach, but
+> the majority remains outside the current Runner phase buckets and Arm
+> A's phase run had an unhealthy tail.
 
 Next engineering slice:
 
-> Instrument Runner phase timing for cgroup setup, monitor attach, child
-> spawn/runtime, event flush, archive write, and health parsing. Failed
-> harness runs should upload partial artifacts so discarded samples can
-> be inspected from GitHub rather than from a temporary runner workspace.
+> If this arc needs a sharper wall-clock explanation, either repeat the
+> phase-timing runs to characterize Arm A tail variance or decompose the
+> residual/outside-harness time. Do not publish an additive wall-clock
+> split from the current phase evidence.

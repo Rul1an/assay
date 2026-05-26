@@ -1,6 +1,6 @@
 # Runner vs OTel Overhead Measurement Plan (2026-05)
 
-> **Status:** measurement follow-up with Slices 1-7 complete. This
+> **Status:** measurement follow-up with Slices 1-8 complete. This
 > document turns the explicit overhead non-claim from
 > [`runner-vs-otel-2026-05`](runner-vs-otel-2026-05/) into a reproducible
 > measurement plan and findings trail. It does not commit generated
@@ -51,7 +51,7 @@
 > only" versus "Runner archive plus OTel trace"; it is not a new product
 > benchmark.
 >
-> **Slice 8 status:** planned. A diagnostic repeat of Arm A wall-clock
+> **Slice 8 status:** phase timing dispatched. A diagnostic repeat of Arm A wall-clock
 > ([GitHub Actions run 26472122983](https://github.com/Rul1an/assay/actions/runs/26472122983))
 > failed because one sample was discarded. The temporary runner workspace
 > showed the same first-sample cgroup spawn failure pattern seen during
@@ -59,9 +59,13 @@
 > even when the harness exits non-zero. A follow-up repeat
 > ([GitHub Actions run 26473448298](https://github.com/Rul1an/assay/actions/runs/26473448298))
 > passed with 20/20 valid samples and a healthy p99/median ratio, but
-> Arm A remained slower than Arm C at the median. The next measurement
-> slice instruments Runner phase timing and should be dispatched before
-> another wall-clock decomposition claim.
+> Arm A remained slower than Arm C at the median. Phase-timing runs
+> [26476490968](https://github.com/Rul1an/assay/actions/runs/26476490968)
+> (Arm A) and
+> [26476824593](https://github.com/Rul1an/assay/actions/runs/26476824593)
+> (Arm C) then passed with 20/20 valid samples each. They explain only
+> part of the median wall-clock gap, mostly around monitor attach, so the
+> findings still withhold an additive wall-clock decomposition claim.
 
 ## Research Question
 
@@ -334,9 +338,9 @@ investigation before publication.
 
 ## Phase-Timing Follow-up
 
-The same-host results make RSS attribution clear enough, but wall-clock
-remains too coarse. The next slice should localize Runner overhead before
-claiming a wall-clock decomposition.
+The same-host results make RSS attribution clear enough. Slice 8 added
+phase timing because wall-clock remained too coarse for an additive
+decomposition claim.
 
 Required phase buckets:
 
@@ -366,6 +370,22 @@ Acceptance rules for this slice:
   why the healthy Arm A repeat remains slower than Arm C at the median,
   or shows that the gap lives outside the instrumented Runner phases.
 
+Slice 8 result:
+
+- Arm A phase timing
+  ([run 26476490968](https://github.com/Rul1an/assay/actions/runs/26476490968)):
+  20/20 valid, 0 discarded, same host class, but unhealthy tail
+  (`p99/median=3.619`).
+- Arm C phase timing
+  ([run 26476824593](https://github.com/Rul1an/assay/actions/runs/26476824593)):
+  20/20 valid, 0 discarded, same host class, healthy tail
+  (`p99/median=1.153`).
+- Summed phase medians explain `34.540 ms` of the `107.251 ms` Arm A
+  over Arm C median wall-clock gap. The largest instrumented phase delta
+  is `monitor_attach_ms` (`+38.284 ms` for Arm A), while the wall median
+  minus summed phase medians leaves `72.711 ms` outside the timed phase
+  buckets.
+
 ## Non-Claims
 
 - Does not rank OpenTelemetry, OpenInference, or Runner as products.
@@ -387,7 +407,7 @@ Acceptance rules for this slice:
 | 5 | **Done**: initial findings update in [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md) | No deltas unless same-host arms exist |
 | 6 | **Done**: same-host Arm B delegated workflow path via `arm=arm-b-otel`, dispatched in runs [26459699303](https://github.com/Rul1an/assay/actions/runs/26459699303) and [26461726436](https://github.com/Rul1an/assay/actions/runs/26461726436) | n=20 wall-clock and n=5 RSS on `assay-bpf-runner`; `host_class` matches Arm C |
 | 7 | **Done**: Arm A pure-L2 decomposition via `arm=arm-a-runner-only`, dispatched in runs [26463798358](https://github.com/Rul1an/assay/actions/runs/26463798358), [26464003194](https://github.com/Rul1an/assay/actions/runs/26464003194), and healthy repeat [26473448298](https://github.com/Rul1an/assay/actions/runs/26473448298) | RSS decomposition landed; wall-clock decomposition remains inconclusive because Arm A is still slower than Arm C at the median |
-| 8 | **Ready to dispatch**: Runner phase timing via hidden `--phase-timing-log` and harness `phase_timings_ms` aggregation | dispatch Arm A and Arm C wall-clock runs; localize cgroup setup, monitor attach, child spawn/runtime, event flush, and archive write before another wall-clock claim |
+| 8 | **Done**: Runner phase timing via hidden `--phase-timing-log` and harness `phase_timings_ms` aggregation, dispatched in runs [26476490968](https://github.com/Rul1an/assay/actions/runs/26476490968) and [26476824593](https://github.com/Rul1an/assay/actions/runs/26476824593) | phase data explains part, not all, of the Arm A / Arm C median gap; no additive wall-clock decomposition claim |
 
 ## Publication Rule
 

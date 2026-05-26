@@ -4,7 +4,7 @@
 > dispatch pipeline, Slice 3 RSS collection, Slice 4 summary/BMF
 > rendering, Slice 5 findings, Slice 6 same-host Arm B dispatches, and
 > Slice 7 Arm A runner-only dispatches. Slice 8 phase timing diagnostics
-> are wired for Arm A/C and ready to dispatch. This directory contains the
+> have landed for Arm A/C. This directory contains the
 > experiment-scoped measurement
 > harness and schema sidecars for the plan in
 > [`../runner-vs-otel-overhead-2026-05.md`](../runner-vs-otel-overhead-2026-05.md).
@@ -126,13 +126,17 @@ Follow-up repeat run
 passed with 20/20 valid samples, 0 discarded samples, and the same
 `linux-aarch64-6.8.0-117-generic` host class. Its p99/median ratio was
 healthy, but Arm A remained slower than Arm C at the median, so
-wall-clock decomposition still needs phase timing rather than another
-broad comparison.
+that run motivated phase timing rather than another broad comparison.
 
-The next overhead slice is phase timing rather than another broad
-comparison. It should identify whether Runner wall-clock overhead is
-coming from cgroup setup, monitor attach, child spawn/runtime, event
-flush, archive writing, or health parsing.
+Phase-timing runs
+[26476490968](https://github.com/Rul1an/assay/actions/runs/26476490968)
+(Arm A) and
+[26476824593](https://github.com/Rul1an/assay/actions/runs/26476824593)
+(Arm C) passed with 20/20 valid samples each. They show that the
+instrumented Runner phases explain part, but not all, of the Arm A /
+Arm C median wall-clock gap. The largest instrumented phase delta is
+`monitor_attach_ms`; the remaining residual keeps additive wall-clock
+decomposition withheld.
 
 Phase timing is emitted as experiment-scoped diagnostics in
 `phase_timings_ms` on each sample and aggregated into `summary.json`.
