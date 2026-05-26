@@ -9,12 +9,8 @@ git rev-parse --verify "$BASE_REF" >/dev/null
 
 ALLOW_PREFIXES=(
   "scripts/ci/adr025-closure-evaluate.sh"
-  "scripts/ci/adr025-i2-closure-evaluate.sh"
   "scripts/ci/test-adr025-closure-evaluate.sh"
-  "scripts/ci/test-adr025-i2-closure-evaluate.sh"
   "scripts/ci/fixtures/adr025-i2/"
-  "scripts/ci/fixtures/adr025-i2/manifest_full.json"
-  "scripts/ci/fixtures/adr025-i2/soak_report_minimal.json"
   "scripts/ci/review-adr025-i2-step2.sh"
   "schemas/closure_policy_v1.json"
 )

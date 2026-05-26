@@ -65,7 +65,7 @@ rg -n "schemas/soak_readiness_policy_v1\.json" .github/workflows/release.yml >/d
 }
 
 echo "[review] ensure fail-closed only in release path"
-if rg -n "adr025-soak-enforce\.sh" .github/workflows/*.yml | rg -v "^\.github/workflows/release\.yml:" >/dev/null; then
+if rg -n "adr025-soak-enforce\.sh" .github/workflows/*.yml | cut -d: -f1 | rg -v "^\.github/workflows/release\.yml$" >/dev/null; then
   echo "FAIL: enforcement script must only be wired in release workflow for Step4B"
   exit 1
 fi

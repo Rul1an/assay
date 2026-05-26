@@ -49,10 +49,12 @@ ALLOWLIST=(
   "docs/architecture/ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md"
   "docs/architecture/PLAN-ADR-032-MCP-POLICY-ENFORCEMENT-2026q2.md"
 
-  # step2 docs
-  "docs/contributing/SPLIT-CHECKLIST-wave28-approval-required-step2.md"
-  "docs/contributing/SPLIT-MOVE-MAP-wave28-approval-required-step2.md"
-  "docs/contributing/SPLIT-REVIEW-PACK-wave28-approval-required-step2.md"
+  # wave28 docs present on current branch
+  "docs/contributing/SPLIT-PLAN-wave28-approval-required.md"
+  "docs/contributing/SPLIT-CHECKLIST-wave28-approval-required-step1.md"
+  "docs/contributing/SPLIT-CHECKLIST-wave28-approval-required-step3.md"
+  "docs/contributing/SPLIT-REVIEW-PACK-wave28-approval-required-step1.md"
+  "docs/contributing/SPLIT-REVIEW-PACK-wave28-approval-required-step3.md"
 
   # gate
   "scripts/ci/review-wave28-approval-required-step2.sh"
