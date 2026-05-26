@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/experiments/runner-vs-otel-overhead-2026-05/schema/overhead-summary-v0.schema.json",
+  "title": "Runner vs OTel overhead summary v0",
+  "description": "Aggregated experiment-scoped overhead measurements. This is not a Runner archive contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "experiment",
+    "arm",
+    "host",
+    "host_class",
+    "kernel",
+    "assay_commit",
+    "delegated_workflow_url",
+    "valid_samples",
+    "discarded_samples",
+    "wall_clock_ms",
+    "peak_rss_bytes",
+    "artifact_bytes"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.experiment.overhead_summary.v0"
+    },
+    "experiment": {
+      "const": "runner-vs-otel-overhead-2026-05"
+    },
+    "arm": {
+      "enum": [
+        "arm-b-otel",
+        "arm-c-dual-capture",
+        "arm-a-runner-only"
+      ]
+    },
+    "host": {
+      "type": "string",
+      "minLength": 1
+    },
+    "host_class": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "kernel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "assay_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,64}$"
+    },
+    "delegated_workflow_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "valid_samples": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "discarded_samples": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "wall_clock_ms": {
+      "$ref": "#/$defs/wall_clock_stats"
+    },
+    "peak_rss_bytes": {
+      "$ref": "#/$defs/rss_stats"
+    },
+    "artifact_bytes": {
+      "$ref": "#/$defs/artifact_stats"
+    }
+  },
+  "$defs": {
+    "number_or_null": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "integer_or_null": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "wall_clock_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "median",
+        "p95",
+        "p99",
+        "p99_over_median"
+      ],
+      "properties": {
+        "median": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "p95": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "p99": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "p99_over_median": {
+          "$ref": "#/$defs/number_or_null"
+        }
+      }
+    },
+    "rss_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "median",
+        "max"
+      ],
+      "properties": {
+        "median": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "max": {
+          "$ref": "#/$defs/integer_or_null"
+        }
+      }
+    },
+    "artifact_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trace_json_median",
+        "archive_targz_median",
+        "archive_extracted_median"
+      ],
+      "properties": {
+        "trace_json_median": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "archive_targz_median": {
+          "$ref": "#/$defs/number_or_null"
+        },
+        "archive_extracted_median": {
+          "$ref": "#/$defs/number_or_null"
+        }
+      }
+    }
+  }
+}

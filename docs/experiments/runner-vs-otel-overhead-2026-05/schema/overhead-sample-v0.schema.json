@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/experiments/runner-vs-otel-overhead-2026-05/schema/overhead-sample-v0.schema.json",
+  "title": "Runner vs OTel overhead sample v0",
+  "description": "One experiment-scoped overhead measurement sample. This is not a Runner archive contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "experiment",
+    "arm",
+    "iteration",
+    "host",
+    "host_class",
+    "assay_commit",
+    "started_at",
+    "tool_versions",
+    "wall_clock_ms",
+    "peak_rss_bytes",
+    "exit_code",
+    "health",
+    "artifact_bytes"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.experiment.overhead_sample.v0"
+    },
+    "experiment": {
+      "const": "runner-vs-otel-overhead-2026-05"
+    },
+    "arm": {
+      "enum": [
+        "arm-b-otel",
+        "arm-c-dual-capture",
+        "arm-a-runner-only"
+      ]
+    },
+    "iteration": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "host": {
+      "type": "string",
+      "minLength": 1
+    },
+    "host_class": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "assay_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,64}$"
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tool_versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "python",
+        "node",
+        "npm",
+        "hyperfine",
+        "time",
+        "workload_package"
+      ],
+      "properties": {
+        "python": {
+          "type": "string"
+        },
+        "node": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "npm": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hyperfine": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "time": {
+          "const": "python-time.perf_counter"
+        },
+        "workload_package": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "wall_clock_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "peak_rss_bytes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "exit_code": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "health": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kernel_layer",
+            "ringbuf_drops",
+            "cgroup_correlation"
+          ],
+          "properties": {
+            "kernel_layer": {
+              "type": "string"
+            },
+            "ringbuf_drops": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cgroup_correlation": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "artifact_bytes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trace_json",
+        "archive_targz",
+        "archive_extracted"
+      ],
+      "properties": {
+        "trace_json": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "archive_targz": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "archive_extracted": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

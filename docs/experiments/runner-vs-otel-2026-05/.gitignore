@@ -2,4 +2,5 @@ workload/node_modules/
 workload/dist/
 workload/package-lock.json
 runs/run_*/
+runs/overhead-2026-05/
 !runs/v1-baseline/
