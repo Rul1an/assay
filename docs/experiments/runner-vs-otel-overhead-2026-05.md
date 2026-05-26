@@ -5,6 +5,10 @@
 > [`runner-vs-otel-2026-05`](runner-vs-otel-2026-05/) into a reproducible
 > measurement plan. It does not add live measurements, does not publish a
 > benchmark claim, and does not change Runner archive semantics.
+>
+> **Slice 1 status:** local Arm B harness and schema sidecars live under
+> [`runner-vs-otel-overhead-2026-05/`](runner-vs-otel-overhead-2026-05/).
+> Generated measurements are still not committed evidence.
 
 ## Research Question
 
@@ -259,7 +263,7 @@ investigation before publication.
 | Slice | Deliverable | Gate |
 |---|---|---|
 | 0 | This plan doc | Links from runner-vs-otel plan and README |
-| 1 | Local harness for Arm B wall-clock + size output, plus `overhead-sample-v0` and `overhead-summary-v0` schema sidecars | n=20 local dry run, no live API dependency, sidecar tests pass |
+| 1 | **Done**: local harness for Arm B wall-clock + size output, plus `overhead-sample-v0` and `overhead-summary-v0` schema sidecars | n=20 local dry run, no live API dependency, sidecar tests pass |
 | 2 | Delegated Arm C harness with health-gated samples | n=20 on `assay-bpf-runner`, all health gates clean |
 | 3 | RSS collection per arm | n=5 per arm, platform-specific parser tests, tool versions recorded per sample |
 | 4 | Summary renderer + BMF-compatible export | JSON schema-like tests over synthetic samples |

@@ -8,6 +8,11 @@ All notable changes to this project will be documented in this file.
   fixes the sample sizes, host-boundary rules, BMF-compatible output
   shape, and non-claims required before publishing wall-clock or RSS
   numbers.
+- Added the Slice 1 local Arm B overhead harness with
+  `assay.experiment.overhead_sample.v0` /
+  `assay.experiment.overhead_summary.v0` schema sidecars and tests. The
+  harness emits local measurement artifacts but does not commit or
+  publish benchmark numbers.
 
 ## [3.12.0] - 2026-05-25
 
