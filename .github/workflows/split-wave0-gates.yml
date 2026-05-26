@@ -35,6 +35,7 @@ jobs:
       assay_common_changed: ${{ steps.detect.outputs.assay_common_changed }}
       assay_policy_changed: ${{ steps.detect.outputs.assay_policy_changed }}
       assay_metrics_changed: ${{ steps.detect.outputs.assay_metrics_changed }}
+      unmatched_assay_crate_changed: ${{ steps.detect.outputs.unmatched_assay_crate_changed }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
@@ -91,6 +92,14 @@ jobs:
           assay_common_changed="$(flag_from_prefix 'crates/assay-common/')"
           assay_policy_changed="$(flag_from_prefix 'crates/assay-policy/')"
           assay_metrics_changed="$(flag_from_prefix 'crates/assay-metrics/')"
+          if [[ "${run_all}" == "true" || "${global_changed}" == "true" ]]; then
+            unmatched_assay_crate_changed=true
+          elif grep -Eq '^crates/assay-[^/]+/' "$changed_file" && \
+               ! grep -Eq '^crates/(assay-core|assay-cli|assay-registry|assay-evidence|assay-common|assay-policy|assay-metrics)/' "$changed_file"; then
+            unmatched_assay_crate_changed=true
+          else
+            unmatched_assay_crate_changed=false
+          fi
 
           if [[ "${assay_core_changed}" == "true" || "${assay_cli_changed}" == "true" || "${assay_registry_changed}" == "true" || "${assay_evidence_changed}" == "true" ]]; then
             hotspot_changed=true
@@ -98,7 +107,7 @@ jobs:
             hotspot_changed=false
           fi
 
-          if [[ "${global_changed}" == "true" || "${hotspot_changed}" == "true" || "${assay_common_changed}" == "true" || "${assay_policy_changed}" == "true" || "${assay_metrics_changed}" == "true" ]]; then
+          if [[ "${global_changed}" == "true" || "${hotspot_changed}" == "true" || "${assay_common_changed}" == "true" || "${assay_policy_changed}" == "true" || "${assay_metrics_changed}" == "true" || "${unmatched_assay_crate_changed}" == "true" ]]; then
             any_relevant=true
             semver_relevant=true
           else
@@ -120,6 +129,7 @@ jobs:
             echo "assay_common_changed=${assay_common_changed}"
             echo "assay_policy_changed=${assay_policy_changed}"
             echo "assay_metrics_changed=${assay_metrics_changed}"
+            echo "unmatched_assay_crate_changed=${unmatched_assay_crate_changed}"
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -137,6 +147,7 @@ jobs:
             echo "- hotspot_changed: ${hotspot_changed}"
             echo "- any_relevant: ${any_relevant}"
             echo "- semver_relevant: ${semver_relevant}"
+            echo "- unmatched_assay_crate_changed: ${unmatched_assay_crate_changed}"
             if [[ "${run_all}" == "false" || -n "${simulated}" ]]; then
               echo ""
               echo "### Changed files"
