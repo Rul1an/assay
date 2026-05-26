@@ -62,6 +62,8 @@ capture commit (`e3f6ef9d`) and
 commit used for the latest re-render (`2b8ab383`). That re-render keeps
 declared projection mappings explicit while summarizing unmatched raw
 values by count and sample.
+The comparator at and after that support commit emits v0.2 only;
+historical v0 reports are retained for reference, not regenerated.
 
 All six archives passed the workflow health gate before artifact upload:
 `ringbuf_drops == 0`, `kernel_layer == "complete"`, and

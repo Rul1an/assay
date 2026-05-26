@@ -63,6 +63,18 @@ the same report semantics but locks `projection.unmatched_summary` as a
 required `{a, b}` object with per-arm `side`, `count`, `samples`, and
 `sample_limit` fields.
 
+The literal dotted minor suffix (`v0.2`) is intentional for this
+experimental projection contract. Consumers that parse Runner schema
+strings should treat the suffix as semver-like (`major.minor`) rather
+than matching only `v(\d+)`. Other Runner archive artifacts still use
+bare `v0` schema strings until they need a minor compatibility
+tightening of their own.
+
+The current comparator emits v0.2 only. Historical v0 reports remain
+readable through the retained v0 schema and committed report files, but
+new re-renders from this comparator are not intended to reproduce v0
+wire output.
+
 Top-level fields:
 
 | Field | Type | Required | Semantics |
