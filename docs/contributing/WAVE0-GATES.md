@@ -14,7 +14,7 @@ Wave 0 gates are the pre-refactor guardrails for:
 ## Baseline SHA policy (semver checks)
 
 - Source of truth: workflow env `WAVE0_SEMVER_BASELINE_SHA`.
-- Current pinned baseline: `b56610681f623394c14ec587cb7e3ed1921a2583`.
+- Current pinned baseline: `9cc23b4c684be7cfd81f170c4f66d59903dd76eb`.
 - Reset cadence: update once at the start of a refactor sprint, not during a sprint.
 - Update rule: change SHA + mention the reset in PR description with reason.
 
