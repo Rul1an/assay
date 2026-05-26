@@ -64,6 +64,7 @@
         "npm",
         "hyperfine",
         "time",
+        "rss_time",
         "workload_package"
       ],
       "properties": {
@@ -90,6 +91,12 @@
         },
         "time": {
           "const": "python-time.perf_counter"
+        },
+        "rss_time": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "workload_package": {
           "type": [
