@@ -346,6 +346,28 @@ workload pre-creating the file the agent claims to read (that was
 the failure mode of the first Slice 3 dispatch; see commit `3dec3e1e`
 for the fix and the workflow run history for the contrast).
 
+### Kernel-event v0 rerun
+
+After the Runner kernel-event line schema was tightened, Slice 3 was
+rerun on Arm C under the same tampering scenario. The new evidence lives
+under
+[`runs/slice3-arm-c-kernel-event-v0/`](runs/slice3-arm-c-kernel-event-v0/)
+and preserves the original Slice 3 result:
+
+- `manifest_digest_binding=tamper-evident-match`
+- `tool_call_id_join=joined:tc_runner_policy_001`
+- `intent_effect_status=intent-effect-mismatch:<workdir>/agent-claimed-fixture.txt`
+- `kernel_layer=complete`, `ringbuf_drops=0`,
+  `cgroup_correlation=clean`
+
+The difference is that `layers/kernel.ndjson` now carries open metadata
+such as `access_mode`, `operation_flags`, `status`, and `return_value`.
+The redirected `tampering-target.txt` appears as a successful kernel
+read, while workload-created files and logs appear as writes with create
+and truncate/append flags. This upgrades the evidence from path presence
+alone to operation-aware measured effects, without changing the original
+trace/archive binding claim.
+
 ### What this enables next
 
 With reported intent and measured effect joined at the same
