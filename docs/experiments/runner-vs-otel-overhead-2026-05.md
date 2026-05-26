@@ -65,9 +65,11 @@ tree reliably.
    timings are not directly comparable unless they run on the same host.
 6. **Report distributions.** Median-only is insufficient; p95 and p99
    are required because capture systems can add tail latency.
-7. **BMF-compatible output.** Emit Bencher Metric Format style JSON so
-   results can live beside the existing Criterion/Bencher performance
-   pipeline instead of becoming a one-off table.
+7. **BMF export path.** Keep `samples.jsonl` and `summary.json` in the
+   experiment-scoped schemas below, then emit a separate Bencher Metric
+   Format export whose top-level metric keys map to `{ "value": ... }`
+   objects. The experiment schemas are not directly ingestible by
+   Bencher.
 
 ## Harness Shape
 
@@ -84,6 +86,7 @@ runs/overhead-2026-05/
   artifacts/
     trace-sizes.json
     archive-sizes.json
+    bmf.json
 ```
 
 Each line in `samples.jsonl` should be a self-contained measurement:
@@ -113,7 +116,8 @@ Each line in `samples.jsonl` should be a self-contained measurement:
   },
   "artifact_bytes": {
     "trace_json": 12345,
-    "archive_targz": 67890
+    "archive_targz": 67890,
+    "archive_extracted": 234567
   }
 }
 ```
@@ -125,6 +129,11 @@ Each line in `samples.jsonl` should be a self-contained measurement:
   "schema": "assay.experiment.overhead_summary.v0",
   "experiment": "runner-vs-otel-overhead-2026-05",
   "arm": "arm-c-dual-capture",
+  "host": "assay-bpf-runner",
+  "host_class": "assay-bpf-runner-linux-arm64-kernel-6.8",
+  "kernel": "6.8.0-117-generic",
+  "assay_commit": "ee343650",
+  "delegated_workflow_url": "https://github.com/Rul1an/assay/actions/runs/123456789",
   "valid_samples": 20,
   "discarded_samples": 0,
   "wall_clock_ms": {
@@ -136,7 +145,27 @@ Each line in `samples.jsonl` should be a self-contained measurement:
   "peak_rss_bytes": {
     "median": 0,
     "max": 0
+  },
+  "artifact_bytes": {
+    "trace_json_median": 0,
+    "archive_targz_median": 0,
+    "archive_extracted_median": 0
   }
+}
+```
+
+`archive_extracted` records the byte size of the extracted archive
+directory for the same sample. `archive-sizes.json` may duplicate these
+values for convenience, but the per-sample field is the source of truth
+for aggregation.
+
+The BMF export is a derived artifact, for example:
+
+```json
+{
+  "runner_vs_otel.arm_c.wall_clock_ms.median": { "value": 0 },
+  "runner_vs_otel.arm_c.wall_clock_ms.p99": { "value": 0 },
+  "runner_vs_otel.arm_c.peak_rss_bytes.max": { "value": 0 }
 }
 ```
 
