@@ -50,6 +50,14 @@
 > is only for decomposing the current Arm C delta into "Runner archive
 > only" versus "Runner archive plus OTel trace"; it is not a new product
 > benchmark.
+>
+> **Slice 8 status:** planned. A diagnostic repeat of Arm A wall-clock
+> ([GitHub Actions run 26472122983](https://github.com/Rul1an/assay/actions/runs/26472122983))
+> failed because one sample was discarded. The temporary runner workspace
+> showed the same first-sample cgroup spawn failure pattern seen during
+> the original sanity attempt. The workflow now uploads partial artifacts
+> even when the harness exits non-zero, and the next measurement slice
+> should instrument Runner phase timing before another broad comparison.
 
 ## Research Question
 
@@ -297,6 +305,40 @@ different threshold model. For v0, `p99/median < 1.5` is healthy,
 `1.5-2.0` is warning territory, and `> 2.0` is a fail signal requiring
 investigation before publication.
 
+## Phase-Timing Follow-up
+
+The same-host results make RSS attribution clear enough, but wall-clock
+remains too coarse. The next slice should localize Runner overhead before
+claiming a wall-clock decomposition.
+
+Required phase buckets:
+
+| Phase | Question | Expected source |
+|---|---|---|
+| `preflight_ms` | Is host/tooling preflight or per-run directory setup visible in the sample? | overhead harness |
+| `cgroup_prepare_ms` | Does cgroup domain-root resolution or session setup dominate? | runner-spike / `assay-runner-linux` |
+| `monitor_attach_ms` | Does eBPF/LSM/tracepoint attach dominate? | runner-spike + monitor adapter |
+| `child_spawn_ms` | Is process placement/spawn the failure or tail source? | runner-spike / cgroup placement |
+| `child_runtime_ms` | How long does the deterministic fixture itself run? | runner-spike child wait |
+| `event_flush_ms` | Does SDK/kernel event flush add tail latency? | runner-spike archive assembly |
+| `archive_write_ms` | Does tar/gzip or layer materialization dominate? | runner-spike archive assembly |
+| `health_parse_ms` | Does post-run health/correlation parsing add measurable cost? | overhead harness |
+
+Acceptance rules for this slice:
+
+- Emit phase timings as experiment-scoped diagnostics, not Runner archive
+  evidence, unless a later contract explicitly promotes them.
+- Keep raw end-to-end `wall_clock_ms`; phase timings are explanatory
+  projections and must not replace the sample timing.
+- Upload partial artifacts when the harness fails, because discarded
+  samples and cgroup errors are the evidence needed for diagnosis.
+- Add a one-sample warmup option only after phase data confirms the
+  first-sample cgroup spawn failure is a warmup artifact rather than a
+  correctness bug.
+- Do not publish a wall-clock additive split until Arm A produces a
+  complete n >= 20 run with healthy p99/median, or the phase data
+  explains the tail and failure mode well enough to scope the claim.
+
 ## Non-Claims
 
 - Does not rank OpenTelemetry, OpenInference, or Runner as products.
@@ -317,7 +359,8 @@ investigation before publication.
 | 4 | **Done**: summary renderer + BMF-compatible export | JSON schema-like tests over synthetic samples |
 | 5 | **Done**: initial findings update in [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md) | No deltas unless same-host arms exist |
 | 6 | **Done**: same-host Arm B delegated workflow path via `arm=arm-b-otel`, dispatched in runs [26459699303](https://github.com/Rul1an/assay/actions/runs/26459699303) and [26461726436](https://github.com/Rul1an/assay/actions/runs/26461726436) | n=20 wall-clock and n=5 RSS on `assay-bpf-runner`; `host_class` matches Arm C |
-| 7 | **Ready to dispatch**: Arm A pure-L2 decomposition via `arm=arm-a-runner-only` | separately dispatch n=20 wall-clock and n=5 RSS on `assay-bpf-runner`; compare only if `host_class` matches Arms B/C |
+| 7 | **Done**: Arm A pure-L2 decomposition via `arm=arm-a-runner-only`, dispatched in runs [26463798358](https://github.com/Rul1an/assay/actions/runs/26463798358) and [26464003194](https://github.com/Rul1an/assay/actions/runs/26464003194) | RSS decomposition landed; wall-clock decomposition remains inconclusive because Arm A tail was unhealthy |
+| 8 | **Planned**: Runner phase timing + partial-failure artifact capture | localize cgroup setup, monitor attach, child spawn/runtime, event flush, archive write, and health parsing before another wall-clock claim |
 
 ## Publication Rule
 

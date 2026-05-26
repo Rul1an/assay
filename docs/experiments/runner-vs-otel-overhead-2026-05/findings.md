@@ -16,10 +16,17 @@
 | 7 sanity | [26463582658](https://github.com/Rul1an/assay/actions/runs/26463582658) | Arm A runner-only | 2 wall-clock | 2 valid, 0 discarded, kernel layer complete |
 | 7 wall | [26463798358](https://github.com/Rul1an/assay/actions/runs/26463798358) | Arm A runner-only | 20 wall-clock | 20 valid, 0 discarded, same host class |
 | 7 RSS | [26464003194](https://github.com/Rul1an/assay/actions/runs/26464003194) | Arm A runner-only | 5 RSS | 5 valid, 0 discarded, same host class |
+| 8 diagnostic | [26472122983](https://github.com/Rul1an/assay/actions/runs/26472122983) | Arm A runner-only | 20 wall-clock repeat | failed; one sample discarded, partial artifacts not uploaded by the old workflow |
 
 Generated artifacts from those runs were inspected as review artifacts
 only. They are intentionally not committed as benchmark evidence in this
 slice.
+
+The failed diagnostic repeat is listed to explain the next work, not to
+replace the successful Slice 7 findings. It showed that repeating Arm A
+wall-clock without deeper instrumentation can still hit a discarded
+sample, so the correct next step is phase timing and failure-artifact
+capture rather than another broad n=20 rerun.
 
 ## Same-Host Baselines
 
@@ -181,3 +188,10 @@ Arm A measurements have landed. The safe publication language is now:
 > points to Runner capture as the memory-cost source; wall-clock
 > decomposition remains inconclusive and should not be reported as an
 > additive split.
+
+Next engineering slice:
+
+> Instrument Runner phase timing for cgroup setup, monitor attach, child
+> spawn/runtime, event flush, archive write, and health parsing. Failed
+> harness runs should upload partial artifacts so discarded samples can
+> be inspected from GitHub rather than from a temporary runner workspace.
