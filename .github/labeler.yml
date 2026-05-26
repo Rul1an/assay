@@ -1,0 +1,23 @@
+area:adapter:
+  - changed-files:
+      - any-glob-to-any-file: ['crates/assay-adapter-*/**']
+
+area:cli:
+  - changed-files:
+      - any-glob-to-any-file: ['crates/assay-cli/**']
+
+area:core:
+  - changed-files:
+      - any-glob-to-any-file: ['crates/assay-core/**']
+
+area:evidence:
+  - changed-files:
+      - any-glob-to-any-file: ['crates/assay-evidence/**']
+
+area:ci:
+  - changed-files:
+      - any-glob-to-any-file: ['.github/workflows/**', 'scripts/ci/**']
+
+area:docs:
+  - changed-files:
+      - any-glob-to-any-file: ['docs/**']
