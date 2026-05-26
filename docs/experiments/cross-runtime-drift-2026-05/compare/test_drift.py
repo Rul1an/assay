@@ -1654,6 +1654,18 @@ class RuntimeDriftSchemaSidecarTests(unittest.TestCase):
             "#/$defs/unmatched_summary",
         )
         self.assertEqual(
+            schema["$defs"]["projection"]["allOf"][0]["then"]["required"],
+            [
+                "claim_level",
+                "only_in_a",
+                "only_in_b",
+                "in_both",
+                "rules",
+                "mappings",
+                "unmatched_summary",
+            ],
+        )
+        self.assertEqual(
             schema["$defs"]["unmatched_summary"]["required"],
             ["a", "b"],
         )
@@ -1735,6 +1747,38 @@ class RuntimeDriftSchemaSidecarTests(unittest.TestCase):
             if row["dimension"] == "filesystem_paths_touched"
         )
         del path_row["projection"]["unmatched_summary"]["a"]["sample_limit"]
+        with self.assertRaises(AssertionError):
+            assert_matches_supported_schema_keywords(self, payload, schema)
+
+    def test_schema_sidecar_rejects_applied_projection_missing_claim_level(
+        self,
+    ) -> None:
+        schema_path = (
+            THIS_DIR.parents[2]
+            / "reference"
+            / "runner"
+            / "schema"
+            / "runtime-drift-v0.2.schema.json"
+        )
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        a = drift.parse_archive(ARM_A)
+        b = drift.parse_archive(ARM_B)
+        rows = drift.build_drift_report(
+            a,
+            b,
+            path_aliases=(
+                drift.PathAlias(
+                    "/tmp/work/fixture-input.txt",
+                    "workdir/input",
+                ),
+            ),
+        )
+        payload = drift.report_to_json(a, b, rows)
+        path_row = next(
+            row for row in payload["rows"]
+            if row["dimension"] == "filesystem_paths_touched"
+        )
+        del path_row["projection"]["claim_level"]
         with self.assertRaises(AssertionError):
             assert_matches_supported_schema_keywords(self, payload, schema)
 

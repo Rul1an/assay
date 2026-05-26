@@ -1,9 +1,10 @@
-# Assay-Runner Runtime Drift Projection v0 / v0.2 Contract
+# Assay-Runner Runtime Drift Projection v0.2 Contract
 
-> Internal projection contract slice. This page defines the first
-> `assay.runner.runtime_drift.v0` and `v0.2` report shapes used by the
-> cross-runtime drift experiment. It is not a Runner archive artifact,
-> not a policy verdict, and not a released product surface.
+> Internal projection contract slice. This page defines the current
+> `assay.runner.runtime_drift.v0.2` report shape used by the
+> cross-runtime drift experiment. It also links the retained historical
+> v0 schema for older committed reports. It is not a Runner archive
+> artifact, not a policy verdict, and not a released product surface.
 
 Runtime drift v0 answers one narrow question:
 

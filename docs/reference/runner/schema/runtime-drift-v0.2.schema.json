@@ -224,6 +224,28 @@
         "taxonomy_schema",
         "non_claims"
       ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "applied"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "claim_level",
+              "only_in_a",
+              "only_in_b",
+              "in_both",
+              "rules",
+              "mappings",
+              "unmatched_summary"
+            ]
+          }
+        }
+      ],
       "properties": {
         "schema": {
           "enum": [
