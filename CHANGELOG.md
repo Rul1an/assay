@@ -66,6 +66,11 @@ All notable changes to this project will be documented in this file.
   wall-clock gap does not reproduce under adjacent pairing, so the
   wall-clock decomposition remains unpublished and the RSS decomposition
   remains the stable finding.
+- Planned Slice 10 of the Runner-vs-OTel overhead follow-up as a
+  controlled event-rate / workload-intensity sweep. The next useful
+  question is how overhead scales with kernel-event rate, span/event
+  rate, concurrency, and payload size, not another broad Arm A/C
+  wall-clock rerun.
 
 ## [3.12.0] - 2026-05-25
 
