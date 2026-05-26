@@ -272,6 +272,39 @@ class OverheadHarnessTests(unittest.TestCase):
         self.assertIn("runner_vs_otel.arm_b_otel.peak_rss_bytes.max", bmf)
         self.assertTrue(all(set(value) == {"value"} for value in bmf.values()))
 
+    def test_summary_markdown_surfaces_core_review_fields(self) -> None:
+        summary = overhead_harness.summarize(
+            [
+                self.sample(iteration=1, wall_clock_ms=10.0, peak_rss_bytes=1000),
+                self.sample(iteration=2, wall_clock_ms=20.0, peak_rss_bytes=2000),
+            ],
+            delegated_workflow_url="https://github.com/Rul1an/assay/actions/runs/1",
+        )
+        markdown = overhead_harness.summary_markdown(
+            summary,
+            artifact_name="runner-otel-overhead-arm-c-1",
+        )
+
+        self.assertIn("## Runner-vs-OTel Overhead Summary", markdown)
+        self.assertIn("| Valid samples | `2` |", markdown)
+        self.assertIn("| Wall p99/median |", markdown)
+        self.assertIn("(healthy)", markdown)
+        self.assertIn("| Peak RSS max | `2,000 bytes` |", markdown)
+        self.assertIn("runner-otel-overhead-arm-c-1", markdown)
+        self.assertIn("Non-claim", markdown)
+
+    def test_summary_markdown_handles_zero_valid_samples(self) -> None:
+        summary = overhead_harness.summarize(
+            [self.sample(exit_code=1)],
+            delegated_workflow_url=None,
+        )
+        markdown = overhead_harness.summary_markdown(summary)
+
+        self.assertIn("| Valid samples | `0` |", markdown)
+        self.assertIn("| Wall median | `null` |", markdown)
+        self.assertIn("| Wall p99/median | `null` (unknown) |", markdown)
+        self.assertIn("| Peak RSS max | `null` |", markdown)
+
     def test_host_class_is_schema_safe(self) -> None:
         self.assertRegex(overhead_harness.host_class(), r"^[A-Za-z0-9_.-]+$")
 
@@ -409,6 +442,9 @@ class OverheadHarnessTests(unittest.TestCase):
             bmf = json.loads(
                 (out_dir / "artifacts" / "bmf.json").read_text(encoding="utf-8")
             )
+            summary_md = (out_dir / "arm-b-otel" / "summary.md").read_text(
+                encoding="utf-8"
+            )
 
             sample_schema = load_schema("overhead-sample-v0.schema.json")
             summary_schema = load_schema("overhead-summary-v0.schema.json")
@@ -419,6 +455,8 @@ class OverheadHarnessTests(unittest.TestCase):
             self.assertEqual(summary["valid_samples"], 20)
             self.assertEqual(summary["discarded_samples"], 0)
             self.assertTrue(bmf)
+            self.assertIn("Runner-vs-OTel Overhead Summary", summary_md)
+            self.assertIn("| Valid samples | `20` |", summary_md)
 
     @unittest.skipUnless(Path("/usr/bin/time").exists(), "/usr/bin/time not available")
     def test_harness_can_emit_rss_sample(self) -> None:

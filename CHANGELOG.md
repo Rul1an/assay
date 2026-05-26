@@ -22,6 +22,9 @@ All notable changes to this project will be documented in this file.
   harness can now wrap samples in `/usr/bin/time`, parse GNU time and
   macOS time peak-RSS output, emit `rss-sizes.json`, and include RSS
   metrics in the derived BMF export when present.
+- Added the Slice 4 overhead summary renderer. The harness now writes a
+  reviewer-friendly `summary.md` beside `summary.json`, and the
+  delegated workflow appends that Markdown to the GitHub step summary.
 
 ## [3.12.0] - 2026-05-25
 
