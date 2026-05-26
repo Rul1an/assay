@@ -40,8 +40,8 @@
 
 | Schema | Scope | Status | Sidecar |
 |---|---|---|---|
-| `assay.experiment.overhead_sample.v0` | One overhead measurement sample for runner-vs-OTel | experiment-scoped; Slice 1 sidecar active | [`overhead-sample-v0.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/overhead-sample-v0.schema.json) |
-| `assay.experiment.overhead_summary.v0` | Aggregated overhead summary for runner-vs-OTel | experiment-scoped; Slice 1 sidecar active | [`overhead-summary-v0.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/overhead-summary-v0.schema.json) |
+| `assay.experiment.overhead_sample.v0` | One overhead measurement sample for runner-vs-OTel | experiment-scoped; sidecar active; phase timing diagnostics included | [`overhead-sample-v0.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/overhead-sample-v0.schema.json) |
+| `assay.experiment.overhead_summary.v0` | Aggregated overhead summary for runner-vs-OTel | experiment-scoped; sidecar active; phase timing diagnostics included | [`overhead-summary-v0.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/overhead-summary-v0.schema.json) |
 
 The overhead schemas remain experiment-scoped. They are validated by the
 local harness tests against synthetic samples and summaries, but they are

@@ -19,6 +19,7 @@
     "peak_rss_bytes",
     "exit_code",
     "health",
+    "phase_timings_ms",
     "artifact_bytes"
   ],
   "properties": {
@@ -149,6 +150,16 @@
         }
       ]
     },
+    "phase_timings_ms": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/phase_timings"
+        }
+      ]
+    },
     "artifact_bytes": {
       "type": "object",
       "additionalProperties": false,
@@ -178,6 +189,39 @@
             "null"
           ],
           "minimum": 0
+        }
+      }
+    }
+  },
+  "$defs": {
+    "phase_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "phase_timings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preflight_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "cgroup_prepare_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "monitor_attach_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "child_spawn_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "child_runtime_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "event_flush_ms": {
+          "$ref": "#/$defs/phase_ms"
+        },
+        "archive_write_ms": {
+          "$ref": "#/$defs/phase_ms"
         }
       }
     }

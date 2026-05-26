@@ -3,7 +3,8 @@
 > **Status:** Slice 1 local Arm B harness, Slice 2 delegated Arm C
 > dispatch pipeline, Slice 3 RSS collection, Slice 4 summary/BMF
 > rendering, Slice 5 findings, Slice 6 same-host Arm B dispatches, and
-> Slice 7 Arm A runner-only dispatches. This directory contains the
+> Slice 7 Arm A runner-only dispatches. Slice 8 phase timing diagnostics
+> are wired for Arm A/C and ready to dispatch. This directory contains the
 > experiment-scoped measurement
 > harness and schema sidecars for the plan in
 > [`../runner-vs-otel-overhead-2026-05.md`](../runner-vs-otel-overhead-2026-05.md).
@@ -30,7 +31,10 @@ The harness writes:
 - `artifacts/archive-sizes.json`, an archive-size side artifact that is
   empty for Arm B and populated for Arm A / Arm C; and
 - `artifacts/rss-sizes.json`, a peak-RSS side artifact populated when
-  the harness runs with `--measure-rss`.
+  the harness runs with `--measure-rss`; and
+- `artifacts/phase-timings.json`, an experiment-scoped side artifact
+  populated for Arm A / Arm C when `assay runner-spike` emits phase
+  timing diagnostics.
 
 The experiment schemas are intentionally not Runner archive contracts.
 They are local measurement evidence for the overhead follow-up only.
@@ -129,6 +133,11 @@ The next overhead slice is phase timing rather than another broad
 comparison. It should identify whether Runner wall-clock overhead is
 coming from cgroup setup, monitor attach, child spawn/runtime, event
 flush, archive writing, or health parsing.
+
+Phase timing is emitted as experiment-scoped diagnostics in
+`phase_timings_ms` on each sample and aggregated into `summary.json`.
+It is not a Runner archive contract and must not replace raw
+`wall_clock_ms`.
 
 The local unit tests exercise the Arm A / Arm C paths with a fake `assay` binary
 that emits the expected archive shape. The first validation against real

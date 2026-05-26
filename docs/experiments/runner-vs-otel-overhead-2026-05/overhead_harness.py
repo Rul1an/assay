@@ -33,6 +33,15 @@ ARM_B = "arm-b-otel"
 ARM_C = "arm-c-dual-capture"
 RSS_TIME_PATH = Path("/usr/bin/time")
 RSS_SYSTEMS = {"darwin", "linux"}
+PHASE_TIMING_KEYS = [
+    "preflight_ms",
+    "cgroup_prepare_ms",
+    "monitor_attach_ms",
+    "child_spawn_ms",
+    "child_runtime_ms",
+    "event_flush_ms",
+    "archive_write_ms",
+]
 
 
 def repo_root() -> Path:
@@ -152,6 +161,20 @@ def load_archive_health(archive_contents: Path) -> dict[str, Any]:
     }
 
 
+def load_phase_timings(path: Path) -> dict[str, float] | None:
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    phases = payload.get("phases_ms")
+    if not isinstance(phases, dict):
+        return None
+    parsed: dict[str, float] = {}
+    for key, value in phases.items():
+        if key in PHASE_TIMING_KEYS and isinstance(value, (int, float)):
+            parsed[key] = float(value)
+    return parsed or None
+
+
 def extract_archive(archive: Path, destination: Path) -> None:
     if destination.exists():
         shutil.rmtree(destination)
@@ -254,6 +277,7 @@ def one_sample(
     archive_path = run_dir / "archive.tar.gz"
     archive_contents = run_dir / "archive-contents"
     sdk_log = run_dir / "sdk-events.ndjson"
+    phase_timing_path = run_dir / "phase-timing.json"
     run_dir.mkdir(parents=True, exist_ok=True)
     started_at = utc_now()
     if arm == ARM_B:
@@ -302,6 +326,8 @@ def one_sample(
             str(archive_path),
             "--sdk-event-log",
             str(sdk_log),
+            "--phase-timing-log",
+            str(phase_timing_path),
             "--",
         ] + agent_command
         if use_sudo:
@@ -370,6 +396,7 @@ def one_sample(
         "peak_rss_bytes": peak_rss_bytes,
         "exit_code": exit_code,
         "health": health,
+        "phase_timings_ms": load_phase_timings(phase_timing_path),
         "artifact_bytes": {
             "trace_json": file_size(trace_path),
             "archive_targz": archive_targz,
@@ -434,6 +461,7 @@ def summarize(
     ]
     wall_median = median(wall)
     wall_p99 = percentile(wall, 99)
+    phase_timings = summarize_phase_timings(valid)
     first = samples[0] if samples else {}
     return {
         "schema": SUMMARY_SCHEMA,
@@ -465,7 +493,28 @@ def summarize(
                 [float(value) for value in archive_extracted]
             ),
         },
+        "phase_timings_ms": phase_timings,
     }
+
+
+def summarize_phase_timings(
+    samples: list[dict[str, Any]],
+) -> dict[str, dict[str, float | None]] | None:
+    summary: dict[str, dict[str, float | None]] = {}
+    for key in PHASE_TIMING_KEYS:
+        values = [
+            float(sample["phase_timings_ms"][key])
+            for sample in samples
+            if isinstance(sample.get("phase_timings_ms"), dict)
+            and sample["phase_timings_ms"].get(key) is not None
+        ]
+        if values:
+            summary[key] = {
+                "median": median(values),
+                "p95": percentile(values, 95),
+                "p99": percentile(values, 99),
+            }
+    return summary or None
 
 
 def bmf_export(summary: dict[str, Any]) -> dict[str, dict[str, float | int]]:
@@ -484,6 +533,13 @@ def bmf_export(summary: dict[str, Any]) -> dict[str, dict[str, float | int]]:
         f"{prefix}.peak_rss_bytes.median": summary["peak_rss_bytes"]["median"],
         f"{prefix}.peak_rss_bytes.max": summary["peak_rss_bytes"]["max"],
     }
+    phase_timings = summary.get("phase_timings_ms")
+    if isinstance(phase_timings, dict):
+        for phase, stats in phase_timings.items():
+            if not isinstance(stats, dict):
+                continue
+            for stat in ("median", "p95", "p99"):
+                values[f"{prefix}.phase_timings_ms.{phase}.{stat}"] = stats.get(stat)
     return {key: {"value": value} for key, value in values.items() if value is not None}
 
 
@@ -515,6 +571,7 @@ def summary_markdown(summary: dict[str, Any], *, artifact_name: str | None = Non
     wall = summary["wall_clock_ms"]
     rss = summary["peak_rss_bytes"]
     artifacts = summary["artifact_bytes"]
+    phase_timings = summary.get("phase_timings_ms")
     tail_ratio = wall["p99_over_median"]
     lines = [
         "## Runner-vs-OTel Overhead Summary",
@@ -540,6 +597,25 @@ def summary_markdown(summary: dict[str, Any], *, artifact_name: str | None = Non
         lines.append(f"| Workflow | {summary['delegated_workflow_url']} |")
     if artifact_name:
         lines.append(f"| Artifact | `{artifact_name}` |")
+    if isinstance(phase_timings, dict) and phase_timings:
+        lines.extend(
+            [
+                "",
+                "### Phase Timings",
+                "",
+                "| Phase | Median | p95 | p99 |",
+                "|---|---:|---:|---:|",
+            ]
+        )
+        for phase in PHASE_TIMING_KEYS:
+            stats = phase_timings.get(phase)
+            if not isinstance(stats, dict):
+                continue
+            lines.append(
+                f"| `{phase}` | {_md_value(stats.get('median'), unit='ms')} | "
+                f"{_md_value(stats.get('p95'), unit='ms')} | "
+                f"{_md_value(stats.get('p99'), unit='ms')} |"
+            )
     lines.extend(
         [
             "",
@@ -656,6 +732,17 @@ def main(argv: list[str] | None = None) -> int:
                 sample["peak_rss_bytes"]
                 for sample in samples
                 if sample["peak_rss_bytes"] is not None
+            ],
+        },
+    )
+    write_json(
+        artifacts_dir / "phase-timings.json",
+        {
+            "arm": args.arm,
+            "phase_timings_ms": [
+                sample["phase_timings_ms"]
+                for sample in samples
+                if sample.get("phase_timings_ms") is not None
             ],
         },
     )
