@@ -85,9 +85,9 @@ All notable changes to this project will be documented in this file.
 
 ### Known follow-ups
 
-- Runtime drift `unmatched_summary` is emitted in a stable shape but the
-  current `runtime-drift-v0` schema only types it as an object. A future
-  v0.2 schema bump should lock the per-arm summary sub-shape.
+- Runtime drift `unmatched_summary` has been locked in
+  `assay.runner.runtime_drift.v0.2`; historical v0 reports remain
+  readable, and new re-renders should use the v0.2 schema.
 - Drift projections still avoid heuristic path/runtime noise classification.
   Unknown raw values remain raw until a declared projection rule or a future
   taxonomy rule classifies them.

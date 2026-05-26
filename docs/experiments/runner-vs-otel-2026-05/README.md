@@ -4,7 +4,9 @@
 > Arm B trace-only runs, Arm C delegated Linux/eBPF dual-capture runs,
 > SDK-layer ingestion, tool-level L1/L2 join, and the controlled
 > tool-call argument tampering scenario all have committed evidence
-> under [`runs/`](runs/). Publication drafts live under
+> under [`runs/`](runs/). The tampering scenario also has a
+> kernel-event-v0 rerun with operation-aware open metadata. Publication
+> drafts live under
 > [`publication/`](publication/) and remain gated on OpenInference
 > [#3162](https://github.com/Arize-ai/openinference/issues/3162)
 > triage.
@@ -22,7 +24,7 @@
 | `compare/tests/fixtures/` | Synthetic Runner archive directory tree and a matching OTLP trace JSON, used by the unit tests and by Arm B as a placeholder archive side. |
 | `workload/` | Node.js + TypeScript workload that wraps the existing deterministic OpenAI Agents fixture (`runner-fixtures/openai-agents/fixture-agent.js`) with OpenTelemetry tracing. Produces one OTLP/JSON trace per run and, in dual-capture mode, attaches the `assay.archive.manifest_digest` event. |
 | `run-arm-b.sh` | Local trace-only orchestrator (no eBPF required). |
-| `runs/` | Committed per-run evidence for Arm B, Arm C, Slice 2, and Slice 3. |
+| `runs/` | Committed per-run evidence for Arm B, Arm C, Slice 2, Slice 3, and the Slice 3 kernel-event-v0 rerun. |
 
 ## How to run each arm
 

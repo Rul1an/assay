@@ -1,9 +1,10 @@
-# Assay-Runner Runtime Drift Projection v0 Contract
+# Assay-Runner Runtime Drift Projection v0.2 Contract
 
-> Internal projection contract slice. This page defines the first
-> `assay.runner.runtime_drift.v0` report shape used by the
-> cross-runtime drift experiment. It is not a Runner archive artifact,
-> not a policy verdict, and not a released product surface.
+> Internal projection contract slice. This page defines the current
+> `assay.runner.runtime_drift.v0.2` report shape used by the
+> cross-runtime drift experiment. It also links the retained historical
+> v0 schema for older committed reports. It is not a Runner archive
+> artifact, not a policy verdict, and not a released product surface.
 
 Runtime drift v0 answers one narrow question:
 
@@ -49,18 +50,37 @@ from path shapes, package names, hostnames, or provider labels.
 Schema string:
 
 ```text
-assay.runner.runtime_drift.v0
+assay.runner.runtime_drift.v0.2
 ```
 
 Machine-readable schema:
 
-[`schema/runtime-drift-v0.schema.json`](schema/runtime-drift-v0.schema.json)
+[`schema/runtime-drift-v0.2.schema.json`](schema/runtime-drift-v0.2.schema.json)
+
+Historical v0 reports remain documented by
+[`schema/runtime-drift-v0.schema.json`](schema/runtime-drift-v0.schema.json).
+v0.2 is a compatible tightening of the projection sub-shape: it keeps
+the same report semantics but locks `projection.unmatched_summary` as a
+required `{a, b}` object with per-arm `side`, `count`, `samples`, and
+`sample_limit` fields.
+
+The literal dotted minor suffix (`v0.2`) is intentional for this
+experimental projection contract. Consumers that parse Runner schema
+strings should treat the suffix as semver-like (`major.minor`) rather
+than matching only `v(\d+)`. Other Runner archive artifacts still use
+bare `v0` schema strings until they need a minor compatibility
+tightening of their own.
+
+The current comparator emits v0.2 only. Historical v0 reports remain
+readable through the retained v0 schema and committed report files, but
+new re-renders from this comparator are not intended to reproduce v0
+wire output.
 
 Top-level fields:
 
 | Field | Type | Required | Semantics |
 |---|---|---:|---|
-| `schema` | string | yes | Must equal `assay.runner.runtime_drift.v0` |
+| `schema` | string | yes | Must equal `assay.runner.runtime_drift.v0.2` for new reports |
 | `archive_a` | object | yes | Compact reference to the first input archive |
 | `archive_b` | object | yes | Compact reference to the second input archive |
 | `taxonomy` | object | yes | Runtime/noise taxonomy vocabulary block |
@@ -175,12 +195,11 @@ Rows without an applicable projection carry the
 `status=not_applied` so downstream consumers do not confuse absence of
 projection with a parser failure.
 
-The v0 projection convention keeps `mappings` compact: it lists declared
+The v0.2 projection convention keeps `mappings` compact: it lists declared
 projected mappings, not every unmatched raw value. Unmatched raw values
 are summarized in `unmatched_summary` with per-arm counts and small
-samples. This is a v0-compatible clarification; the schema identifier
-remains `assay.runner.runtime_drift.v0`. The full raw values remain in
-each row's `only_in_a`, `only_in_b`, and `in_both` sets.
+samples. The full raw values remain in each row's `only_in_a`,
+`only_in_b`, and `in_both` sets.
 
 Operation-aware path values use the shape `op:/absolute/path` before
 projection, for example `read:/tmp/run/workdir/input.txt`. The

@@ -1,5 +1,5 @@
 {
-  "schema": "assay.runner.runtime_drift.v0",
+  "schema": "assay.runner.runtime_drift.v0.2",
   "archive_a": {
     "path": "docs/experiments/cross-runtime-drift-2026-05/runs/a0/run_arm_a-openai_20260525T113828Z_3/archive.tar.gz",
     "run_id": "run_arm_a-openai_20260525T113828Z_3",
@@ -103,8 +103,8 @@
     "assay_commit": "e3f6ef9d",
     "render_metadata": {
       "kind": "re_render",
-      "rendered_at": "2026-05-25T21:19:11Z",
-      "comparator_commit": "b1b4983f",
+      "rendered_at": "2026-05-26T08:58:26Z",
+      "comparator_commit": "2b8ab383",
       "source_run_url": "https://github.com/Rul1an/assay/actions/runs/26398427430",
       "raw_captures_unchanged": true
     },
