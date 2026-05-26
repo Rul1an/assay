@@ -283,5 +283,4 @@ fn markdown_body_before_non_goals(md: &str) -> &str {
 }
 
 #[cfg(test)]
-#[cfg(test)]
 mod tests;
