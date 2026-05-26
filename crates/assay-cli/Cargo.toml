@@ -82,7 +82,7 @@ ratatui = { workspace = true, optional = true }
 crossterm = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-landlock = "=0.4.4"
+landlock = "=0.4.5"
 
 
 
