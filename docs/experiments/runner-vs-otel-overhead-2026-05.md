@@ -1,6 +1,6 @@
 # Runner vs OTel Overhead Measurement Plan (2026-05)
 
-> **Status:** measurement follow-up with Slices 1-5 complete. This
+> **Status:** measurement follow-up with Slices 1-6 complete. This
 > document turns the explicit overhead non-claim from
 > [`runner-vs-otel-2026-05`](runner-vs-otel-2026-05/) into a reproducible
 > measurement plan and findings trail. It does not commit generated
@@ -28,14 +28,18 @@
 > reviewer-friendly `summary.md`, and derived BMF metrics. This is still
 > per-arm baseline reporting; findings must not present cross-host deltas.
 >
-> **Slice 5 status:** findings are summarized in
+> **Slice 5 status:** initial findings are summarized in
 > [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md).
-> The result is an Arm C host-class baseline, not a same-host overhead
-> delta.
+> The initial result was an Arm C host-class baseline.
 >
-> **Slice 6 status:** the delegated workflow can now dispatch same-host
-> Arm B (`arm-b-otel`) on `assay-bpf-runner`. The first same-host Arm B
-> measurement is still pending, so Arm B-vs-Arm C deltas remain withheld.
+> **Slice 6 status:** same-host Arm B passed on
+> [GitHub Actions run 26459699303](https://github.com/Rul1an/assay/actions/runs/26459699303)
+> for wall-clock (20/20 valid, 0 discarded) and
+> [GitHub Actions run 26461726436](https://github.com/Rul1an/assay/actions/runs/26461726436)
+> for RSS (5/5 valid, 0 discarded). Both emitted the same
+> `linux-aarch64-6.8.0-117-generic` host class as Arm C, so the findings
+> document now reports a narrow same-host delta for this deterministic
+> workload.
 
 ## Research Question
 
@@ -298,13 +302,15 @@ investigation before publication.
 | 2 | **Done**: delegated Arm C harness with health-gated samples via [`.github/workflows/runner-otel-overhead-experiment.yml`](../../.github/workflows/runner-otel-overhead-experiment.yml) | n=20 on `assay-bpf-runner`, all health gates clean |
 | 3 | **Done**: RSS collection per arm via `--measure-rss` / workflow `measure_rss=true` | n=5 on `assay-bpf-runner`, platform-specific parser tests, tool versions recorded per sample |
 | 4 | **Done**: summary renderer + BMF-compatible export | JSON schema-like tests over synthetic samples |
-| 5 | **Done**: findings update in [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md) | No deltas unless same-host arms exist |
-| 6 | **Ready to dispatch**: same-host Arm B delegated workflow path via `arm=arm-b-otel` | separately dispatch n=20 wall-clock and n=5 RSS on `assay-bpf-runner`; compare only if `host_class` matches Arm C |
+| 5 | **Done**: initial findings update in [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md) | No deltas unless same-host arms exist |
+| 6 | **Done**: same-host Arm B delegated workflow path via `arm=arm-b-otel`, dispatched in runs [26459699303](https://github.com/Rul1an/assay/actions/runs/26459699303) and [26461726436](https://github.com/Rul1an/assay/actions/runs/26461726436) | n=20 wall-clock and n=5 RSS on `assay-bpf-runner`; `host_class` matches Arm C |
 | 7 optional | Arm A pure-L2 decomposition | Only if Arm C overhead needs archive-only vs dual-capture separation |
 
 ## Publication Rule
 
-Publication may mention that a clean Arm C host-class baseline exists,
-but must not present Arm B-vs-Arm C overhead deltas until same-host Arm B
-measurements land. Do not add overhead numbers to the OpenInference
-discussion unless that distinction is explicit in the wording.
+Publication may mention the same-host Arm B-vs-Arm C delta only with the
+host-class and non-decomposition caveats from the findings document. Do
+not present it as a product benchmark, model/provider latency claim, or
+co-temporal variance result. Do not add overhead numbers to the
+OpenInference discussion unless that distinction is explicit in the
+wording.

@@ -124,7 +124,8 @@ The follow-up measurement contract is tracked in
 Current overhead findings are tracked in
 [`../runner-vs-otel-overhead-2026-05/findings.md`](../runner-vs-otel-overhead-2026-05/findings.md).
 Do not publish overhead claims from the `n=3` evidence slices, and do
-not publish Arm B-vs-Arm C deltas until same-host Arm B data exists.
+not publish Arm B-vs-Arm C deltas without the same-host, non-co-temporal,
+and non-decomposition caveats from that findings document.
 
 ## Comparator tests
 

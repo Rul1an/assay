@@ -1,15 +1,16 @@
 # Runner vs OTel Overhead Harness
 
 > **Status:** Slice 1 local Arm B harness, Slice 2 delegated Arm C
-> dispatch pipeline, Slice 3 RSS collection, and Slice 4 summary/BMF
-> rendering. This directory contains the experiment-scoped measurement
+> dispatch pipeline, Slice 3 RSS collection, Slice 4 summary/BMF
+> rendering, Slice 5 findings, and Slice 6 same-host Arm B dispatches.
+> This directory contains the experiment-scoped measurement
 > harness and schema sidecars for the plan in
 > [`../runner-vs-otel-overhead-2026-05.md`](../runner-vs-otel-overhead-2026-05.md).
 > It does not contain committed benchmark results.
 >
 > Current findings are in [`findings.md`](findings.md). They summarize
-> the delegated Arm C host-class baseline and intentionally withhold
-> cross-host deltas.
+> the delegated same-host Arm B-vs-Arm C delta and keep the caveats
+> attached.
 
 ## What This Emits
 
@@ -81,9 +82,13 @@ present on the delegated runner. The first delegated RSS run passed as
 [GitHub Actions run 26454010701](https://github.com/Rul1an/assay/actions/runs/26454010701):
 5/5 valid samples, 0 discarded samples, all health gates clean.
 
-For the first same-host Arm B run, dispatch separately with `arm=arm-b-otel`,
-`repetitions=20`, and `measure_rss=false`, then dispatch a second Arm B
-RSS run with `repetitions=5` and `measure_rss=true`.
+The first same-host Arm B wall-clock run passed as
+[GitHub Actions run 26459699303](https://github.com/Rul1an/assay/actions/runs/26459699303):
+20/20 valid samples and 0 discarded samples. The matching Arm B RSS run
+passed as
+[GitHub Actions run 26461726436](https://github.com/Rul1an/assay/actions/runs/26461726436):
+5/5 valid samples and 0 discarded samples. Both emitted the same
+`linux-aarch64-6.8.0-117-generic` host class as Arm C.
 
 The local unit tests exercise the Arm C path with a fake `assay` binary
 that emits the expected archive shape. The first validation against real
