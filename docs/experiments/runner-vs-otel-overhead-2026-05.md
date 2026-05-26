@@ -1,10 +1,11 @@
 # Runner vs OTel Overhead Measurement Plan (2026-05)
 
-> **Status:** plan-only follow-up. This document turns the explicit
-> overhead non-claim from
+> **Status:** measurement follow-up with Slices 1-5 complete. This
+> document turns the explicit overhead non-claim from
 > [`runner-vs-otel-2026-05`](runner-vs-otel-2026-05/) into a reproducible
-> measurement plan. It does not add live measurements, does not publish a
-> benchmark claim, and does not change Runner archive semantics.
+> measurement plan and findings trail. It does not commit generated
+> benchmark artifacts, does not publish cross-host deltas, and does not
+> change Runner archive semantics.
 >
 > **Slice 1 status:** local Arm B harness and schema sidecars live under
 > [`runner-vs-otel-overhead-2026-05/`](runner-vs-otel-overhead-2026-05/).
@@ -26,6 +27,11 @@
 > **Slice 4 status:** the harness emits schema-validated `summary.json`,
 > reviewer-friendly `summary.md`, and derived BMF metrics. This is still
 > per-arm baseline reporting; findings must not present cross-host deltas.
+>
+> **Slice 5 status:** findings are summarized in
+> [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md).
+> The result is an Arm C host-class baseline, not a same-host overhead
+> delta.
 
 ## Research Question
 
@@ -288,11 +294,12 @@ investigation before publication.
 | 2 | **Done**: delegated Arm C harness with health-gated samples via [`.github/workflows/runner-otel-overhead-experiment.yml`](../../.github/workflows/runner-otel-overhead-experiment.yml) | n=20 on `assay-bpf-runner`, all health gates clean |
 | 3 | **Done**: RSS collection per arm via `--measure-rss` / workflow `measure_rss=true` | n=5 on `assay-bpf-runner`, platform-specific parser tests, tool versions recorded per sample |
 | 4 | **Done**: summary renderer + BMF-compatible export | JSON schema-like tests over synthetic samples |
-| 5 | Findings update | No deltas unless same-host arms exist |
+| 5 | **Done**: findings update in [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md) | No deltas unless same-host arms exist |
 | 6 optional | Arm A pure-L2 decomposition | Only if Arm C overhead needs archive-only vs dual-capture separation |
 
 ## Publication Rule
 
-Do not add overhead numbers to the OpenInference discussion or blog until
-Slices 1-5 have landed and the findings document can distinguish
-same-host deltas from host-class baselines.
+Publication may mention that a clean Arm C host-class baseline exists,
+but must not present Arm B-vs-Arm C overhead deltas until same-host Arm B
+measurements land. Do not add overhead numbers to the OpenInference
+discussion unless that distinction is explicit in the wording.

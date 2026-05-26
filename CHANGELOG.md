@@ -25,6 +25,9 @@ All notable changes to this project will be documented in this file.
 - Added the Slice 4 overhead summary renderer. The harness now writes a
   reviewer-friendly `summary.md` beside `summary.json`, and the
   delegated workflow appends that Markdown to the GitHub step summary.
+- Added the Slice 5 overhead findings document. The findings summarize
+  the clean delegated Arm C host-class baseline and explicitly withhold
+  Arm B-vs-Arm C deltas until same-host Arm B measurements land.
 
 ## [3.12.0] - 2026-05-25
 
