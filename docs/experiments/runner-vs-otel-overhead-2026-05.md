@@ -95,8 +95,14 @@ Each line in `samples.jsonl` should be a self-contained measurement:
   "arm": "arm-c-dual-capture",
   "iteration": 1,
   "host": "assay-bpf-runner",
+  "host_class": "assay-bpf-runner-linux-arm64-kernel-6.8",
   "assay_commit": "ee343650",
   "started_at": "2026-05-26T00:00:00Z",
+  "tool_versions": {
+    "hyperfine": "1.19.0",
+    "time": "GNU time 1.9",
+    "node": "v22.16.0"
+  },
   "wall_clock_ms": 1234.5,
   "peak_rss_bytes": 123456789,
   "exit_code": 0,
@@ -135,7 +141,16 @@ Each line in `samples.jsonl` should be a self-contained measurement:
 ```
 
 The JSON shape is intentionally experiment-scoped. It is not a Runner
-archive contract.
+archive contract. The `assay.experiment.*` namespace is reserved for
+time-limited experiment evidence that may change between experiment
+slices. It must not be treated as a stable Runner archive namespace
+unless a later reference document explicitly promotes it.
+
+Slice 1 must add JSON Schema sidecars for these two shapes, for example
+`schema/overhead-sample-v0.schema.json` and
+`schema/overhead-summary-v0.schema.json`, plus sidecar tests that
+validate emitted synthetic samples. This prevents the harness output and
+the documented shape from drifting apart once code starts emitting data.
 
 ## Arm Definitions
 
@@ -147,7 +162,14 @@ archive contract.
 
 If Arm B is measured locally and Arm C is measured on the delegated
 runner, report them as separate host-class baselines. A direct delta
-requires Arm B to run on the delegated runner too.
+requires Arm B to run on the delegated runner too. `host_class` is the
+mechanical comparison key for this rule. It should be a stable label for
+the hardware/OS/kernel boundary, not a free-form display name.
+
+Arm A stays out of the v0 sequence unless Arm C overhead needs
+decomposition into "Runner archive only" versus "Runner archive plus
+OTel trace". If needed, add it as a follow-up Slice 6 with the same
+sample-count, health, and provenance gates.
 
 ## Tooling
 
@@ -161,6 +183,12 @@ Use existing Assay performance vocabulary where possible:
 The overhead harness may be a new script under the experiment directory
 instead of extending the general Assay perf scripts. That keeps agent
 observability overhead separate from store/SQLite performance.
+
+Every emitted sample must record the measurement tool versions used to
+produce it. This is required because `hyperfine` JSON, GNU time, and
+macOS time expose different output shapes. Parser tests should assert
+the exact formats accepted by the harness rather than assuming the host
+tooling is interchangeable.
 
 Preferred tools:
 
@@ -181,6 +209,13 @@ Preferred tools:
 | Distribution | Summary reports median, p95, p99, p99/median |
 | Non-claim | Report says whether arms ran on same host before presenting deltas |
 
+Tail-ratio interpretation should reuse
+[`docs/PERFORMANCE-ASSESSMENT.md`](../PERFORMANCE-ASSESSMENT.md) unless
+the findings document explicitly says overhead measurements use a
+different threshold model. For v0, `p99/median < 1.5` is healthy,
+`1.5-2.0` is warning territory, and `> 2.0` is a fail signal requiring
+investigation before publication.
+
 ## Non-Claims
 
 - Does not rank OpenTelemetry, OpenInference, or Runner as products.
@@ -195,11 +230,12 @@ Preferred tools:
 | Slice | Deliverable | Gate |
 |---|---|---|
 | 0 | This plan doc | Links from runner-vs-otel plan and README |
-| 1 | Local harness for Arm B wall-clock + size output | n=20 local dry run, no live API dependency |
+| 1 | Local harness for Arm B wall-clock + size output, plus `overhead-sample-v0` and `overhead-summary-v0` schema sidecars | n=20 local dry run, no live API dependency, sidecar tests pass |
 | 2 | Delegated Arm C harness with health-gated samples | n=20 on `assay-bpf-runner`, all health gates clean |
-| 3 | RSS collection per arm | n=5 per arm, platform-specific parser tests |
+| 3 | RSS collection per arm | n=5 per arm, platform-specific parser tests, tool versions recorded per sample |
 | 4 | Summary renderer + BMF-compatible export | JSON schema-like tests over synthetic samples |
 | 5 | Findings update | No deltas unless same-host arms exist |
+| 6 optional | Arm A pure-L2 decomposition | Only if Arm C overhead needs archive-only vs dual-capture separation |
 
 ## Publication Rule
 
