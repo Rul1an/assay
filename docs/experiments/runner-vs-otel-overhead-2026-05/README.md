@@ -3,15 +3,15 @@
 > **Status:** Slice 1 local Arm B harness, Slice 2 delegated Arm C
 > dispatch pipeline, Slice 3 RSS collection, Slice 4 summary/BMF
 > rendering, Slice 5 findings, Slice 6 same-host Arm B dispatches, and
-> Slice 7 Arm A runner-only dispatch wiring. This directory contains the
+> Slice 7 Arm A runner-only dispatches. This directory contains the
 > experiment-scoped measurement
 > harness and schema sidecars for the plan in
 > [`../runner-vs-otel-overhead-2026-05.md`](../runner-vs-otel-overhead-2026-05.md).
 > It does not contain committed benchmark results.
 >
 > Current findings are in [`findings.md`](findings.md). They summarize
-> the delegated same-host Arm B-vs-Arm C delta and keep the caveats
-> attached.
+> the delegated same-host Arm A / Arm B / Arm C measurement set and keep
+> the caveats attached.
 
 ## What This Emits
 
@@ -100,6 +100,14 @@ to split the current Arm C delta into "Runner archive only" versus
 "Runner archive plus OTel trace": first `arm=arm-a-runner-only`,
 `repetitions=20`, `measure_rss=false`, then `repetitions=5`,
 `measure_rss=true`.
+
+The first Arm A wall-clock run passed as
+[GitHub Actions run 26463798358](https://github.com/Rul1an/assay/actions/runs/26463798358):
+20/20 valid samples and 0 discarded samples. The matching Arm A RSS run
+passed as
+[GitHub Actions run 26464003194](https://github.com/Rul1an/assay/actions/runs/26464003194):
+5/5 valid samples and 0 discarded samples. Both emitted the same
+`linux-aarch64-6.8.0-117-generic` host class as Arm B and Arm C.
 
 The local unit tests exercise the Arm A / Arm C paths with a fake `assay` binary
 that emits the expected archive shape. The first validation against real

@@ -1,6 +1,6 @@
 # Runner vs OTel Overhead Measurement Plan (2026-05)
 
-> **Status:** measurement follow-up with Slices 1-6 complete. This
+> **Status:** measurement follow-up with Slices 1-7 complete. This
 > document turns the explicit overhead non-claim from
 > [`runner-vs-otel-2026-05`](runner-vs-otel-2026-05/) into a reproducible
 > measurement plan and findings trail. It does not commit generated
@@ -41,10 +41,15 @@
 > document now reports a narrow same-host delta for this deterministic
 > workload.
 >
-> **Slice 7 status:** the delegated workflow can now dispatch optional
-> Arm A (`arm-a-runner-only`) on `assay-bpf-runner`. Arm A is only for
-> decomposing the current Arm C delta into "Runner archive only" versus
-> "Runner archive plus OTel trace"; it is not a new product benchmark.
+> **Slice 7 status:** optional Arm A (`arm-a-runner-only`) passed on
+> [GitHub Actions run 26463798358](https://github.com/Rul1an/assay/actions/runs/26463798358)
+> for wall-clock (20/20 valid, 0 discarded) and
+> [GitHub Actions run 26464003194](https://github.com/Rul1an/assay/actions/runs/26464003194)
+> for RSS (5/5 valid, 0 discarded). Both emitted the same
+> `linux-aarch64-6.8.0-117-generic` host class as Arm B and Arm C. Arm A
+> is only for decomposing the current Arm C delta into "Runner archive
+> only" versus "Runner archive plus OTel trace"; it is not a new product
+> benchmark.
 
 ## Research Question
 
