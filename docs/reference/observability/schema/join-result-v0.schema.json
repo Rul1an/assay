@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/reference/observability/schema/join-result-v0.schema.json",
+  "title": "Assay observability join result v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "left_artifact_role",
+    "right_artifact_role",
+    "join_key",
+    "join_value",
+    "join_grade",
+    "scope",
+    "unique_within_scope",
+    "fallback_used",
+    "evidence_refs",
+    "notes"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.observability.join_result.v0"
+    },
+    "left_artifact_role": {
+      "$ref": "#/$defs/artifact_role"
+    },
+    "right_artifact_role": {
+      "$ref": "#/$defs/artifact_role"
+    },
+    "join_key": {
+      "type": "string",
+      "enum": [
+        "tool_call_id",
+        "run_id",
+        "session_id",
+        "trace_span_id",
+        "timestamp_or_order"
+      ]
+    },
+    "join_value": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "join_grade": {
+      "type": "string",
+      "enum": [
+        "strong",
+        "weak",
+        "diagnostic",
+        "failed"
+      ]
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "tool_call",
+        "run",
+        "session",
+        "trace_local",
+        "diagnostic"
+      ]
+    },
+    "unique_within_scope": {
+      "type": "boolean"
+    },
+    "fallback_used": {
+      "type": "boolean"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "artifact_role": {
+      "type": "string",
+      "enum": [
+        "otel_family_trace",
+        "measured_run_archive",
+        "joined_artifacts",
+        "external_receipt"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "join_key": {
+            "const": "tool_call_id"
+          },
+          "unique_within_scope": {
+            "const": true
+          },
+          "fallback_used": {
+            "const": false
+          }
+        },
+        "required": [
+          "join_key",
+          "unique_within_scope",
+          "fallback_used"
+        ]
+      },
+      "then": {
+        "properties": {
+          "scope": {
+            "const": "tool_call"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "join_key": {
+            "const": "run_id"
+          }
+        },
+        "required": [
+          "join_key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "scope": {
+            "const": "run"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "join_key": {
+            "enum": [
+              "session_id",
+              "trace_span_id",
+              "timestamp_or_order"
+            ]
+          }
+        },
+        "required": [
+          "join_key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "join_grade": {
+            "enum": [
+              "weak",
+              "diagnostic",
+              "failed"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "join_grade": {
+            "const": "strong"
+          }
+        },
+        "required": [
+          "join_grade"
+        ]
+      },
+      "then": {
+        "properties": {
+          "join_key": {
+            "enum": [
+              "tool_call_id",
+              "run_id"
+            ]
+          },
+          "scope": {
+            "enum": [
+              "tool_call",
+              "run"
+            ]
+          },
+          "unique_within_scope": {
+            "const": true
+          },
+          "fallback_used": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "join_grade": {
+            "const": "failed"
+          }
+        },
+        "required": [
+          "join_grade"
+        ]
+      },
+      "then": {
+        "properties": {
+          "join_value": {
+            "type": "null"
+          },
+          "fallback_used": {
+            "const": false
+          }
+        }
+      }
+    }
+  ]
+}
