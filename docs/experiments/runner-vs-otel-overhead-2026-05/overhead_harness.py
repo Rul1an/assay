@@ -27,10 +27,12 @@ from typing import Any
 EXPERIMENT = "runner-vs-otel-overhead-2026-05"
 SAMPLE_SCHEMA = "assay.experiment.overhead_sample.v0"
 SUMMARY_SCHEMA = "assay.experiment.overhead_summary.v0"
+PAIRED_SEQUENCE_SCHEMA = "assay.experiment.paired_sequence.v0"
 DEFAULT_ARM = "arm-b-otel"
 ARM_A = "arm-a-runner-only"
 ARM_B = "arm-b-otel"
 ARM_C = "arm-c-dual-capture"
+PAIRED_AC = "paired-a-c"
 RSS_TIME_PATH = Path("/usr/bin/time")
 RSS_SYSTEMS = {"darwin", "linux"}
 PHASE_TIMING_KEYS = [
@@ -173,6 +175,20 @@ def load_phase_timings(path: Path) -> dict[str, float] | None:
         if key in PHASE_TIMING_KEYS and isinstance(value, (int, float)):
             parsed[key] = float(value)
     return parsed or None
+
+
+def phase_residual_ms(sample: dict[str, Any]) -> float | None:
+    phases = sample.get("phase_timings_ms")
+    if not isinstance(phases, dict):
+        return None
+    values = [
+        float(phases[key])
+        for key in PHASE_TIMING_KEYS
+        if isinstance(phases.get(key), (int, float))
+    ]
+    if not values:
+        return None
+    return float(sample["wall_clock_ms"]) - sum(values)
 
 
 def extract_archive(archive: Path, destination: Path) -> None:
@@ -543,6 +559,153 @@ def bmf_export(summary: dict[str, Any]) -> dict[str, dict[str, float | int]]:
     return {key: {"value": value} for key, value in values.items() if value is not None}
 
 
+def write_run_outputs(
+    *,
+    out_dir: Path,
+    arm: str,
+    samples: list[dict[str, Any]],
+    summary: dict[str, Any],
+    artifact_suffix: str = "",
+) -> None:
+    arm_dir = out_dir / arm
+    artifacts_dir = out_dir / "artifacts"
+    samples_path = arm_dir / "samples.jsonl"
+    samples_path.write_text(
+        "".join(json.dumps(sample, sort_keys=True) + "\n" for sample in samples),
+        encoding="utf-8",
+    )
+    write_json(arm_dir / "summary.json", summary)
+    (arm_dir / "summary.md").write_text(summary_markdown(summary), encoding="utf-8")
+    write_json(
+        artifacts_dir / f"trace-sizes{artifact_suffix}.json",
+        {
+            "arm": arm,
+            "trace_json_bytes": [
+                sample["artifact_bytes"]["trace_json"] for sample in samples
+            ],
+        },
+    )
+    write_json(
+        artifacts_dir / f"archive-sizes{artifact_suffix}.json",
+        {
+            "arm": arm,
+            "archive_targz_bytes": [
+                sample["artifact_bytes"]["archive_targz"]
+                for sample in samples
+                if sample["artifact_bytes"]["archive_targz"] is not None
+            ],
+            "archive_extracted_bytes": [
+                sample["artifact_bytes"]["archive_extracted"]
+                for sample in samples
+                if sample["artifact_bytes"]["archive_extracted"] is not None
+            ],
+        },
+    )
+    write_json(
+        artifacts_dir / f"rss-sizes{artifact_suffix}.json",
+        {
+            "arm": arm,
+            "peak_rss_bytes": [
+                sample["peak_rss_bytes"]
+                for sample in samples
+                if sample["peak_rss_bytes"] is not None
+            ],
+        },
+    )
+    write_json(
+        artifacts_dir / f"phase-timings{artifact_suffix}.json",
+        {
+            "arm": arm,
+            "phase_timings_ms": [
+                sample["phase_timings_ms"]
+                for sample in samples
+                if sample.get("phase_timings_ms") is not None
+            ],
+        },
+    )
+
+
+def paired_ac_order(pair_index: int) -> list[str]:
+    return [ARM_A, ARM_C] if pair_index % 2 else [ARM_C, ARM_A]
+
+
+def run_paired_ac(args: argparse.Namespace) -> int:
+    ensure_workload_built(args.workload_dir, skip_build=args.skip_build)
+    artifacts_dir = args.out_dir / "artifacts"
+    for arm in (ARM_A, ARM_C):
+        (args.out_dir / arm).mkdir(parents=True, exist_ok=True)
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    commit = assay_commit()
+    versions = tool_versions(args.workload_dir)
+    samples_by_arm: dict[str, list[dict[str, Any]]] = {ARM_A: [], ARM_C: []}
+    order: list[dict[str, Any]] = []
+    for pair in range(1, args.iterations + 1):
+        for arm in paired_ac_order(pair):
+            sample = one_sample(
+                arm_dir=args.out_dir / arm,
+                arm=arm,
+                workload_dir=args.workload_dir,
+                iteration=pair,
+                commit=commit,
+                versions=versions,
+                timeout_seconds=args.timeout_seconds,
+                assay_bin=args.assay_bin,
+                ebpf_obj=args.ebpf_obj,
+                use_sudo=args.sudo,
+                measure_rss=args.measure_rss,
+                runner_fixture_agent=args.runner_fixture_agent,
+            )
+            samples_by_arm[arm].append(sample)
+            order.append(
+                {
+                    "pair": pair,
+                    "arm": arm,
+                    "iteration": pair,
+                    "started_at": sample["started_at"],
+                    "wall_clock_ms": sample["wall_clock_ms"],
+                    "phase_residual_ms": phase_residual_ms(sample),
+                    "exit_code": sample["exit_code"],
+                }
+            )
+
+    summaries = {
+        arm: summarize(samples, delegated_workflow_url=args.delegated_workflow_url)
+        for arm, samples in samples_by_arm.items()
+    }
+    bmf: dict[str, dict[str, float | int]] = {}
+    for arm, samples in samples_by_arm.items():
+        write_run_outputs(
+            out_dir=args.out_dir,
+            arm=arm,
+            samples=samples,
+            summary=summaries[arm],
+            artifact_suffix=f"-{arm}",
+        )
+        bmf.update(bmf_export(summaries[arm]))
+    write_json(artifacts_dir / "bmf.json", bmf)
+    write_json(
+        artifacts_dir / "paired-sequence.json",
+        {
+            "schema": PAIRED_SEQUENCE_SCHEMA,
+            "kind": PAIRED_AC,
+            "pairing": "counterbalanced-adjacent-pairs",
+            "arms": [ARM_A, ARM_C],
+            "pairs_per_arm": args.iterations,
+            "order": order,
+        },
+    )
+
+    print(f"wrote {args.out_dir / ARM_A / 'samples.jsonl'}")
+    print(f"wrote {args.out_dir / ARM_C / 'samples.jsonl'}")
+    print(f"wrote {artifacts_dir / 'paired-sequence.json'}")
+    print(f"wrote {artifacts_dir / 'bmf.json'}")
+    all_valid = all(
+        summary["valid_samples"] == args.iterations for summary in summaries.values()
+    )
+    return 0 if all_valid else 2
+
+
 def _md_value(value: Any, *, unit: str = "") -> str:
     if value is None:
         return "`null`"
@@ -637,7 +800,11 @@ def write_json(path: Path, payload: Any) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--arm", choices=[ARM_A, ARM_B, ARM_C], default=ARM_B)
+    parser.add_argument(
+        "--arm",
+        choices=[ARM_A, ARM_B, ARM_C, PAIRED_AC],
+        default=ARM_B,
+    )
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument("--out-dir", type=Path, default=default_out_dir())
     parser.add_argument("--workload-dir", type=Path, default=default_workload_dir())
@@ -664,6 +831,10 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(rss_error)
     if args.clean and args.out_dir.exists():
         shutil.rmtree(args.out_dir)
+    if args.arm == PAIRED_AC:
+        if args.assay_bin is None or args.ebpf_obj is None:
+            parser.error(f"--arm {PAIRED_AC} requires --assay-bin and --ebpf-obj")
+        return run_paired_ac(args)
 
     ensure_workload_built(args.workload_dir, skip_build=args.skip_build)
     arm_dir = args.out_dir / args.arm
@@ -693,59 +864,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = summarize(samples, delegated_workflow_url=args.delegated_workflow_url)
 
     samples_path = arm_dir / "samples.jsonl"
-    samples_path.write_text(
-        "".join(json.dumps(sample, sort_keys=True) + "\n" for sample in samples),
-        encoding="utf-8",
-    )
-    write_json(arm_dir / "summary.json", summary)
-    (arm_dir / "summary.md").write_text(summary_markdown(summary), encoding="utf-8")
-    write_json(
-        artifacts_dir / "trace-sizes.json",
-        {
-            "arm": args.arm,
-            "trace_json_bytes": [
-                sample["artifact_bytes"]["trace_json"] for sample in samples
-            ],
-        },
-    )
-    write_json(
-        artifacts_dir / "archive-sizes.json",
-        {
-            "arm": args.arm,
-            "archive_targz_bytes": [
-                sample["artifact_bytes"]["archive_targz"]
-                for sample in samples
-                if sample["artifact_bytes"]["archive_targz"] is not None
-            ],
-            "archive_extracted_bytes": [
-                sample["artifact_bytes"]["archive_extracted"]
-                for sample in samples
-                if sample["artifact_bytes"]["archive_extracted"] is not None
-            ],
-        },
-    )
-    write_json(
-        artifacts_dir / "rss-sizes.json",
-        {
-            "arm": args.arm,
-            "peak_rss_bytes": [
-                sample["peak_rss_bytes"]
-                for sample in samples
-                if sample["peak_rss_bytes"] is not None
-            ],
-        },
-    )
-    write_json(
-        artifacts_dir / "phase-timings.json",
-        {
-            "arm": args.arm,
-            "phase_timings_ms": [
-                sample["phase_timings_ms"]
-                for sample in samples
-                if sample.get("phase_timings_ms") is not None
-            ],
-        },
-    )
+    write_run_outputs(out_dir=args.out_dir, arm=args.arm, samples=samples, summary=summary)
     write_json(artifacts_dir / "bmf.json", bmf_export(summary))
 
     print(f"wrote {samples_path}")
