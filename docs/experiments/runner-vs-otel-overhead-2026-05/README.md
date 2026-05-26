@@ -117,6 +117,14 @@ those artifacts are diagnostic evidence and should not be promoted to
 findings unless the findings text explicitly explains why the sample was
 discarded.
 
+Follow-up repeat run
+[26473448298](https://github.com/Rul1an/assay/actions/runs/26473448298)
+passed with 20/20 valid samples, 0 discarded samples, and the same
+`linux-aarch64-6.8.0-117-generic` host class. Its p99/median ratio was
+healthy, but Arm A remained slower than Arm C at the median, so
+wall-clock decomposition still needs phase timing rather than another
+broad comparison.
+
 The next overhead slice is phase timing rather than another broad
 comparison. It should identify whether Runner wall-clock overhead is
 coming from cgroup setup, monitor attach, child spawn/runtime, event

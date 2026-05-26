@@ -17,16 +17,18 @@
 | 7 wall | [26463798358](https://github.com/Rul1an/assay/actions/runs/26463798358) | Arm A runner-only | 20 wall-clock | 20 valid, 0 discarded, same host class |
 | 7 RSS | [26464003194](https://github.com/Rul1an/assay/actions/runs/26464003194) | Arm A runner-only | 5 RSS | 5 valid, 0 discarded, same host class |
 | 8 diagnostic | [26472122983](https://github.com/Rul1an/assay/actions/runs/26472122983) | Arm A runner-only | 20 wall-clock repeat | failed; one sample discarded, partial artifacts not uploaded by the old workflow |
+| 8 repeat | [26473448298](https://github.com/Rul1an/assay/actions/runs/26473448298) | Arm A runner-only | 20 wall-clock repeat | 20 valid, 0 discarded, artifact-success gate active |
 
 Generated artifacts from those runs were inspected as review artifacts
 only. They are intentionally not committed as benchmark evidence in this
 slice.
 
-The failed diagnostic repeat is listed to explain the next work, not to
-replace the successful Slice 7 findings. It showed that repeating Arm A
-wall-clock without deeper instrumentation can still hit a discarded
-sample, so the correct next step is phase timing and failure-artifact
-capture rather than another broad n=20 rerun.
+The failed diagnostic repeat is listed to explain the workflow-DX fix,
+not to replace the successful Slice 7 findings. The follow-up repeat
+passed with artifacts uploaded and the new artifact-success gate active.
+Together, the repeats show that the first-sample cgroup failure is not
+deterministic, while wall-clock decomposition still needs phase timing
+before it can support an additive claim.
 
 ## Same-Host Baselines
 
@@ -38,10 +40,10 @@ they characterize a shared host class, not co-temporal variance.
 |---|---:|---|
 | Host class | `linux-aarch64-6.8.0-117-generic` | Delegated Linux runner machine/OS/kernel boundary |
 | Arm A wall-clock valid samples | `20/20` | Meets the n >= 20 gate |
-| Arm A wall median | `1,816.127 ms` | Runner archive-only baseline on this host class |
-| Arm A wall p95 | `2,220.031 ms` | One tail sample exceeded the healthy band |
-| Arm A wall p99 | `3,929.928 ms` | Nearest-rank p99 for n=20; first sample was the outlier |
-| Arm A wall p99/median | `2.164` | Above the v0 `> 2.0` fail band; wall-clock decomposition is inconclusive |
+| Arm A wall median | `1,859.521 ms` | Runner archive-only repeat baseline on this host class |
+| Arm A wall p95 | `2,143.676 ms` | Tail sample remained within the healthy band |
+| Arm A wall p99 | `2,459.097 ms` | Nearest-rank p99 for n=20 |
+| Arm A wall p99/median | `1.322` | Healthy per the v0 `< 1.5` tail-ratio band |
 | Arm A RSS valid samples | `5/5` | Meets the n >= 5 gate |
 | Arm A peak RSS median | `116,641,792 bytes` | Runner archive-only memory baseline |
 | Arm A peak RSS max | `116,645,888 bytes` | No large RSS outlier in the n=5 sample |
@@ -63,8 +65,8 @@ they characterize a shared host class, not co-temporal variance.
 | Arm C peak RSS max | `116,781,056 bytes` | No large RSS outlier in the n=5 sample |
 | Arm B trace JSON median | `3,204 bytes` | L1 trace footprint baseline |
 | Arm A trace JSON median | `null` | Expected: runner-only arm emits no OTel trace JSON |
-| Arm A archive `.tar.gz` median | `1,626 bytes` | L2 compressed archive footprint baseline without trace export |
-| Arm A archive extracted median | `5,638 bytes` | Review/storage footprint baseline without trace export |
+| Arm A archive `.tar.gz` median | `1,628 bytes` | L2 compressed archive footprint baseline without trace export |
+| Arm A archive extracted median | `5,639 bytes` | Review/storage footprint baseline without trace export |
 | Arm C trace JSON median | `3,220 bytes` | L1 trace plus Runner wrapper footprint |
 | Arm C archive `.tar.gz` median | `1,776 bytes` | L2 compressed archive footprint baseline |
 | Arm C archive extracted median | `8,186 bytes` | Review/storage footprint baseline |
@@ -109,15 +111,15 @@ model.
 
 | Metric | Arm B OTel-only | Arm A runner-only | Arm C dual capture |
 |---|---:|---:|---:|
-| Wall median | `879.961 ms` | `1,816.127 ms` | `1,737.838 ms` |
-| Wall p95 | `924.845 ms` | `2,220.031 ms` | `2,051.039 ms` |
-| Wall p99 | `964.023 ms` | `3,929.928 ms` | `2,070.354 ms` |
-| Wall p99/median | `1.096` | `2.164` | `1.191` |
+| Wall median | `879.961 ms` | `1,859.521 ms` | `1,737.838 ms` |
+| Wall p95 | `924.845 ms` | `2,143.676 ms` | `2,051.039 ms` |
+| Wall p99 | `964.023 ms` | `2,459.097 ms` | `2,070.354 ms` |
+| Wall p99/median | `1.096` | `1.322` | `1.191` |
 | Peak RSS median | `108,953,600 bytes` | `116,641,792 bytes` | `116,649,984 bytes` |
 | Peak RSS max | `110,493,696 bytes` | `116,645,888 bytes` | `116,781,056 bytes` |
 | Trace JSON median | `3,204 bytes` | `null` | `3,220 bytes` |
-| Archive `.tar.gz` median | `null` | `1,626 bytes` | `1,776 bytes` |
-| Archive extracted median | `null` | `5,638 bytes` | `8,186 bytes` |
+| Archive `.tar.gz` median | `null` | `1,628 bytes` | `1,776 bytes` |
+| Archive extracted median | `null` | `5,639 bytes` | `8,186 bytes` |
 
 The decomposition read is:
 
@@ -125,13 +127,12 @@ The decomposition read is:
   bytes at the median RSS level (`0.007%`). The observed same-host RSS
   increase over Arm B is therefore dominated by Runner capture rather
   than by adding the OTel trace wrapper around Runner capture.
-- **Wall-clock:** inconclusive as an additive decomposition. Arm A's
-  median is `78.289 ms` higher than Arm C, and Arm A's p99/median ratio
-  is `2.164` because the first wall-clock sample was a tail outlier.
-  This means the current wall-clock data should be read as "Runner
-  capture is the dominant overhead class, but the split between
-  runner-only and runner-plus-OTel is not stable enough to publish as an
-  additive cost."
+- **Wall-clock:** inconclusive as an additive decomposition. The healthy
+  Arm A repeat is still `121.683 ms` slower at the median than Arm C,
+  even though Arm A omits OTel trace export. That is not a meaningful
+  "OTel adds negative overhead" result; it means the runner-only fixture
+  path and dual-capture workload path need phase timing before the
+  current data can be decomposed into additive cost buckets.
 
 ## What This Means
 
@@ -144,8 +145,9 @@ The decomposition read is:
 - The observed Arm A and Arm C RSS medians are effectively identical at
   this scale, so the RSS delta versus Arm B is attributable to Runner
   capture rather than trace JSON export.
-- Arm A's wall-clock tail was not healthy, so the wall-clock
-  decomposition remains a caution, not a benchmark claim.
+- Arm A's repeat wall-clock tail is healthy, but the runner-only median
+  remains higher than Arm C, so wall-clock decomposition remains a
+  caution, not a benchmark claim.
 - The RSS path works on the delegated Linux runner with GNU
   `/usr/bin/time -v`; samples record the RSS tool version and emit
   `peak_rss_bytes` into both `summary.json` and the BMF export.
@@ -163,8 +165,9 @@ The decomposition read is:
   host class at different times, and Arm A was dispatched separately as
   well.
 - No additive wall-clock decomposition claim is made between "Runner
-  archive only" and "Runner archive plus OTel trace". The Arm A
-  wall-clock tail was not healthy enough for that claim.
+  archive only" and "Runner archive plus OTel trace". The healthy Arm A
+  repeat still does not compose with Arm C in a way that supports that
+  claim.
 - No Trust Card or Trust Basis claim is added. This remains an
   experiment-scoped measurement follow-up.
 - The generated artifacts remain review artifacts until a later decision
@@ -183,10 +186,10 @@ The correct publication language is now:
 Arm A measurements have landed. The safe publication language is now:
 
 > On the same delegated host class, Arm A runner-only and Arm C
-> dual-capture had effectively identical median RSS, while Arm A
-> wall-clock showed an unhealthy tail outlier. The RSS decomposition
-> points to Runner capture as the memory-cost source; wall-clock
-> decomposition remains inconclusive and should not be reported as an
+> dual-capture had effectively identical median RSS. The RSS
+> decomposition points to Runner capture as the memory-cost source.
+> Wall-clock decomposition remains inconclusive because the healthy Arm A
+> repeat is still slower than Arm C, so it should not be reported as an
 > additive split.
 
 Next engineering slice:
