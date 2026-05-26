@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import platform
+import subprocess
 import tempfile
 import tarfile
 import unittest
@@ -203,6 +205,7 @@ class OverheadHarnessTests(unittest.TestCase):
                 "npm": "10.0.0",
                 "hyperfine": None,
                 "time": "python-time.perf_counter",
+                "rss_time": "/usr/bin/time -l",
                 "workload_package": "0.0.0",
             },
             "wall_clock_ms": 12.5,
@@ -261,11 +264,12 @@ class OverheadHarnessTests(unittest.TestCase):
 
     def test_bmf_export_is_metric_keyed_value_objects(self) -> None:
         summary = overhead_harness.summarize(
-            [self.sample()],
+            [self.sample(peak_rss_bytes=1234)],
             delegated_workflow_url=None,
         )
         bmf = overhead_harness.bmf_export(summary)
         self.assertIn("runner_vs_otel.arm_b_otel.wall_clock_ms.median", bmf)
+        self.assertIn("runner_vs_otel.arm_b_otel.peak_rss_bytes.max", bmf)
         self.assertTrue(all(set(value) == {"value"} for value in bmf.values()))
 
     def test_host_class_is_schema_safe(self) -> None:
@@ -285,6 +289,88 @@ class OverheadHarnessTests(unittest.TestCase):
         sample["tool_versions"]["hyprfine"] = None
         with self.assertRaises(AssertionError):
             assert_matches_schema(self, sample, schema, root=schema)
+
+    def test_parse_gnu_time_peak_rss(self) -> None:
+        stderr = "Maximum resident set size (kbytes): 42\n"
+        self.assertEqual(
+            overhead_harness.parse_peak_rss_bytes(stderr, system="linux"),
+            42 * 1024,
+        )
+
+    def test_parse_darwin_time_peak_rss(self) -> None:
+        stderr = "123456 maximum resident set size\n"
+        self.assertEqual(
+            overhead_harness.parse_peak_rss_bytes(stderr, system="darwin"),
+            123456,
+        )
+
+    def test_parse_peak_rss_returns_none_for_missing_tool_output(self) -> None:
+        self.assertIsNone(overhead_harness.parse_peak_rss_bytes("", system="linux"))
+
+    def test_rss_preflight_rejects_missing_time_binary(self) -> None:
+        error = overhead_harness.rss_time_preflight_error(
+            system="linux",
+            time_path=Path("/definitely-not-installed/time"),
+        )
+        self.assertIn("--measure-rss requires", error or "")
+
+    def test_rss_preflight_rejects_unsupported_platform(self) -> None:
+        error = overhead_harness.rss_time_preflight_error(
+            system="plan9",
+            time_path=Path("/usr/bin/time"),
+        )
+        self.assertIn("supports Linux and macOS only", error or "")
+
+    def test_measure_rss_forces_stable_locale(self) -> None:
+        seen: dict[str, Any] = {}
+
+        def fake_run(
+            command: list[str],
+            **kwargs: Any,
+        ) -> subprocess.CompletedProcess[str]:
+            seen["command"] = command
+            seen["env"] = kwargs.get("env")
+            trace = command[command.index("--trace-out") + 1]
+            Path(trace).parent.mkdir(parents=True, exist_ok=True)
+            Path(trace).write_text('{"resourceSpans":[]}\n', encoding="utf-8")
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="",
+                stderr="123 maximum resident set size\n",
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workload = root / "workload"
+            write_stub_workload(workload)
+            original_run = overhead_harness.subprocess.run
+            original_prefix = overhead_harness.rss_time_prefix
+            original_parse = overhead_harness.parse_peak_rss_bytes
+            try:
+                overhead_harness.subprocess.run = fake_run  # type: ignore[assignment]
+                overhead_harness.rss_time_prefix = lambda: ["/usr/bin/time", "-l"]  # type: ignore[assignment]
+                overhead_harness.parse_peak_rss_bytes = (  # type: ignore[assignment]
+                    lambda stderr, system=None: 123
+                )
+                sample = overhead_harness.one_sample(
+                    arm_dir=root / "out",
+                    arm=overhead_harness.ARM_B,
+                    workload_dir=workload,
+                    iteration=1,
+                    commit="abcdef1",
+                    versions=self.sample()["tool_versions"],
+                    timeout_seconds=10,
+                    measure_rss=True,
+                )
+            finally:
+                overhead_harness.subprocess.run = original_run
+                overhead_harness.rss_time_prefix = original_prefix
+                overhead_harness.parse_peak_rss_bytes = original_parse
+
+        self.assertEqual(sample["peak_rss_bytes"], 123)
+        self.assertEqual(seen["env"]["LC_ALL"], "C")
+        self.assertEqual(seen["env"]["LANG"], "C")
 
     def test_harness_emits_twenty_valid_stub_samples(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -333,6 +419,53 @@ class OverheadHarnessTests(unittest.TestCase):
             self.assertEqual(summary["valid_samples"], 20)
             self.assertEqual(summary["discarded_samples"], 0)
             self.assertTrue(bmf)
+
+    @unittest.skipUnless(Path("/usr/bin/time").exists(), "/usr/bin/time not available")
+    def test_harness_can_emit_rss_sample(self) -> None:
+        if platform.system().lower() not in {"darwin", "linux"}:
+            self.skipTest("RSS parser only supports Darwin and Linux")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workload = root / "workload"
+            out_dir = root / "overhead"
+            write_stub_workload(workload)
+
+            status = overhead_harness.main(
+                [
+                    "--iterations",
+                    "1",
+                    "--skip-build",
+                    "--clean",
+                    "--measure-rss",
+                    "--timeout-seconds",
+                    "10",
+                    "--workload-dir",
+                    str(workload),
+                    "--out-dir",
+                    str(out_dir),
+                ]
+            )
+            self.assertEqual(status, 0)
+
+            sample = json.loads(
+                (out_dir / "arm-b-otel" / "samples.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()[0]
+            )
+            summary = json.loads(
+                (out_dir / "arm-b-otel" / "summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            rss_sizes = json.loads(
+                (out_dir / "artifacts" / "rss-sizes.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertIsInstance(sample["peak_rss_bytes"], int)
+            self.assertGreater(sample["peak_rss_bytes"], 0)
+            self.assertEqual(summary["peak_rss_bytes"]["max"], sample["peak_rss_bytes"])
+            self.assertEqual(rss_sizes["peak_rss_bytes"], [sample["peak_rss_bytes"]])
 
     def test_arm_c_sample_extracts_archive_health_and_sizes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

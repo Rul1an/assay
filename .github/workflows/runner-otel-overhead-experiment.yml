@@ -23,6 +23,11 @@ on:
         required: true
         default: "300"
         type: string
+      measure_rss:
+        description: "Wrap each sample in /usr/bin/time to collect peak RSS"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -134,10 +139,15 @@ jobs:
         env:
           REPETITIONS: ${{ inputs.repetitions }}
           TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
+          MEASURE_RSS: ${{ inputs.measure_rss }}
         run: |
           set -euo pipefail
           OUT_DIR="$PWD/overhead-runs"
           WORKFLOW_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          RSS_FLAG=()
+          if [ "$MEASURE_RSS" = "true" ]; then
+            RSS_FLAG=(--measure-rss)
+          fi
           python3 docs/experiments/runner-vs-otel-overhead-2026-05/overhead_harness.py \
             --arm arm-c-dual-capture \
             --iterations "$REPETITIONS" \
@@ -149,7 +159,8 @@ jobs:
             --workload-dir "$PWD/docs/experiments/runner-vs-otel-2026-05/workload" \
             --assay-bin "$PWD/target/debug/assay" \
             --ebpf-obj "$PWD/target/assay-ebpf.o" \
-            --delegated-workflow-url "$WORKFLOW_URL"
+            --delegated-workflow-url "$WORKFLOW_URL" \
+            "${RSS_FLAG[@]}"
 
           SUMMARY="$OUT_DIR/arm-c-dual-capture/summary.json"
           python3 - "$SUMMARY" "runner-otel-overhead-arm-c-${GITHUB_RUN_ID}" <<'PY' >> "$GITHUB_STEP_SUMMARY"
@@ -167,6 +178,8 @@ jobs:
           print(f"- wall p95 ms: {wall['p95']}")
           print(f"- wall p99 ms: {wall['p99']}")
           print(f"- wall p99/median: {wall['p99_over_median']}")
+          print(f"- peak RSS median bytes: {summary['peak_rss_bytes']['median']}")
+          print(f"- peak RSS max bytes: {summary['peak_rss_bytes']['max']}")
           print(f"- artifact: {artifact_name}")
           PY
 

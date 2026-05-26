@@ -18,6 +18,10 @@ All notable changes to this project will be documented in this file.
   artifacts for review but still does not commit benchmark numbers. BMF
   metric keys now use full arm slugs such as `arm_b_otel` and
   `arm_c_dual_capture` to keep future arms unambiguous.
+- Added Slice 3 RSS collection support to the overhead harness. The
+  harness can now wrap samples in `/usr/bin/time`, parse GNU time and
+  macOS time peak-RSS output, emit `rss-sizes.json`, and include RSS
+  metrics in the derived BMF export when present.
 
 ## [3.12.0] - 2026-05-25
 

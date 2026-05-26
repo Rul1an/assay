@@ -19,7 +19,9 @@ The harness writes:
 - `artifacts/trace-sizes.json`, a trace-size side artifact for overhead
   bookkeeping; and
 - `artifacts/archive-sizes.json`, an archive-size side artifact that is
-  empty for Arm B and populated for Arm C.
+  empty for Arm B and populated for Arm C; and
+- `artifacts/rss-sizes.json`, a peak-RSS side artifact populated when
+  the harness runs with `--measure-rss`.
 
 The experiment schemas are intentionally not Runner archive contracts.
 They are local measurement evidence for the overhead follow-up only.
@@ -40,6 +42,10 @@ python3 docs/experiments/runner-vs-otel-overhead-2026-05/overhead_harness.py \
   --out-dir "$(mktemp -d)/overhead"
 ```
 
+Add `--measure-rss` to collect peak RSS with `/usr/bin/time`. The
+harness currently parses GNU time (`-v`) on Linux and `/usr/bin/time -l`
+on macOS.
+
 For the Slice 1 acceptance dry run, use `--iterations 20` and a
 temporary output directory. Do not commit generated measurements until
 the findings slice decides what should become evidence. The default
@@ -52,6 +58,11 @@ Arm C is dispatched manually through
 The workflow runs on `assay-bpf-runner`, invokes the same harness with
 `--arm arm-c-dual-capture`, uploads `overhead-runs/`, and fails if any
 sample is either non-zero exit or capture-unclean.
+
+For the Slice 3 RSS run, dispatch the same workflow with
+`repetitions=5` and `measure_rss=true`. Keep `build_ebpf=true` unless a
+known-good `target/assay-ebpf.o` is already present on the delegated
+runner.
 
 The local unit tests exercise the Arm C path with a fake `assay` binary
 that emits the expected archive shape. The first validation against real
