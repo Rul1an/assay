@@ -192,8 +192,8 @@ jobs:
             # ASSAY_RUNNER_SDK_EVENT_SCHEMA in the workload child's
             # environment AND folds the resulting NDJSON into the
             # archive's layers/sdk.ndjson + observation_health.sdk_layer
-            # + capability_surface.mcp_tools. Without this flag the SDK
-            # layer comes out empty even when the child writes events.
+            # fields. Without this flag the SDK layer comes out empty
+            # even when the child writes events.
             # See Slice 2 of the runner-vs-otel experiment plan.
             sudo -E env \
               "PATH=$PATH" \
