@@ -70,8 +70,14 @@ archive bytes are deterministic across runs.
 ## Next Work
 
 The next useful measurement step is a same-host Arm B run on
-`assay-bpf-runner`. That would allow a narrow Arm B-vs-Arm C delta on the
-same host class. Until then, the correct publication language is:
+`assay-bpf-runner`. The delegated workflow now has an `arm=arm-b-otel`
+path for that purpose. To unblock a narrow Arm B-vs-Arm C delta, collect:
+
+- Arm B wall-clock: `repetitions=20`, `measure_rss=false`;
+- Arm B RSS: `repetitions=5`, `measure_rss=true`;
+- matching `host_class` values between the Arm B and Arm C summaries.
+
+Until then, the correct publication language is:
 
 > Arm C dual capture has a clean delegated host-class baseline. Direct
 > overhead deltas are still withheld because same-host Arm B data has not

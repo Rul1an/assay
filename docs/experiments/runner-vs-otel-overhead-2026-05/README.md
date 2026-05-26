@@ -58,20 +58,32 @@ temporary output directory. Do not commit generated measurements until
 the findings slice decides what should become evidence. The default
 `runs/overhead-2026-05/` output path is ignored for this reason.
 
-## Delegated Arm C
+## Delegated Arm B / Arm C
 
-Arm C is dispatched manually through
+Arm B and Arm C are dispatched manually through
 [`runner-otel-overhead-experiment.yml`](../../../.github/workflows/runner-otel-overhead-experiment.yml).
-The workflow runs on `assay-bpf-runner`, invokes the same harness with
-`--arm arm-c-dual-capture`, uploads `overhead-runs/`, and fails if any
-sample is either non-zero exit or capture-unclean.
+The workflow runs on `assay-bpf-runner` and exposes an `arm` input:
+
+- `arm-c-dual-capture` runs `--arm arm-c-dual-capture` with
+  `assay runner-spike`, eBPF, and Runner health gates.
+- `arm-b-otel` runs `--arm arm-b-otel` on the same delegated host class
+  without Runner capture.
+
+Arm C fails if any sample is either non-zero exit or capture-unclean.
+Arm B fails if any sample exits non-zero. A direct Arm B-vs-Arm C delta
+is only valid when separately dispatched summaries emit matching
+`host_class` values.
 
 For the Slice 3 RSS run, dispatch the same workflow with
-`repetitions=5` and `measure_rss=true`. Keep `build_ebpf=true` unless a
-known-good `target/assay-ebpf.o` is already present on the delegated
-runner. The first delegated RSS run passed as
+`arm=arm-c-dual-capture`, `repetitions=5`, and `measure_rss=true`. Keep
+`build_ebpf=true` unless a known-good `target/assay-ebpf.o` is already
+present on the delegated runner. The first delegated RSS run passed as
 [GitHub Actions run 26454010701](https://github.com/Rul1an/assay/actions/runs/26454010701):
 5/5 valid samples, 0 discarded samples, all health gates clean.
+
+For the first same-host Arm B run, dispatch separately with `arm=arm-b-otel`,
+`repetitions=20`, and `measure_rss=false`, then dispatch a second Arm B
+RSS run with `repetitions=5` and `measure_rss=true`.
 
 The local unit tests exercise the Arm C path with a fake `assay` binary
 that emits the expected archive shape. The first validation against real

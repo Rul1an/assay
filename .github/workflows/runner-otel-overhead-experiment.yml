@@ -9,10 +9,18 @@ on:
   workflow_dispatch:
     inputs:
       repetitions:
-        description: "Number of Arm C overhead samples to collect"
+        description: "Number of overhead samples to collect"
         required: true
         default: "20"
         type: string
+      arm:
+        description: "Measurement arm to run (dispatch once per arm)"
+        required: true
+        default: "arm-c-dual-capture"
+        type: choice
+        options:
+          - arm-c-dual-capture
+          - arm-b-otel
       build_ebpf:
         description: "Rebuild eBPF artifact before running Arm C"
         required: true
@@ -53,9 +61,10 @@ jobs:
 
   arm-c-overhead:
     name: Arm C overhead capture
+    if: ${{ inputs.arm == 'arm-c-dual-capture' }}
     runs-on: [self-hosted, linux, assay-bpf-runner]
     needs: prepare-delegated-runner
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -172,6 +181,97 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: runner-otel-overhead-arm-c-${{ github.run_id }}
+          path: overhead-runs/
+          if-no-files-found: error
+          retention-days: 30
+
+  arm-b-overhead:
+    name: Arm B overhead capture
+    if: ${{ inputs.arm == 'arm-b-otel' }}
+    runs-on: [self-hosted, linux, assay-bpf-runner]
+    needs: prepare-delegated-runner
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Preflight delegated host
+        shell: bash
+        run: |
+          set -euo pipefail
+          for bin in node npm python3 tar; do
+            command -v "$bin" >/dev/null 2>&1 || {
+              echo "ERROR: required command not found on delegated runner: $bin" >&2
+              exit 1
+            }
+          done
+          node -e 'const major = Number(process.versions.node.split(".")[0]); if (major < 22) process.exit(1)' || {
+            echo "ERROR: delegated runner must provide Node.js 22 or newer" >&2
+            node --version >&2 || true
+            exit 1
+          }
+          {
+            echo "## Delegated runner preflight"
+            echo "- arm: arm-b-otel"
+            echo "- kernel: $(uname -r)"
+            echo "- node: $(node --version)"
+            echo "- python3: $(python3 --version)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run overhead harness unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover \
+            -s docs/experiments/runner-vs-otel-overhead-2026-05 \
+            -p 'test_*.py'
+
+      - name: Build experiment workload
+        working-directory: docs/experiments/runner-vs-otel-2026-05/workload
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --ignore-scripts
+          npx tsc -p tsconfig.json
+          test -f dist/workload.js
+
+      - name: Run Arm B overhead harness
+        shell: bash
+        env:
+          REPETITIONS: ${{ inputs.repetitions }}
+          TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
+          MEASURE_RSS: ${{ inputs.measure_rss }}
+        run: |
+          set -euo pipefail
+          OUT_DIR="$PWD/overhead-runs"
+          WORKFLOW_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          RSS_FLAG=()
+          if [ "$MEASURE_RSS" = "true" ]; then
+            RSS_FLAG=(--measure-rss)
+          fi
+          python3 docs/experiments/runner-vs-otel-overhead-2026-05/overhead_harness.py \
+            --arm arm-b-otel \
+            --iterations "$REPETITIONS" \
+            --skip-build \
+            --clean \
+            --timeout-seconds "$TIMEOUT_SECONDS" \
+            --out-dir "$OUT_DIR" \
+            --workload-dir "$PWD/docs/experiments/runner-vs-otel-2026-05/workload" \
+            --delegated-workflow-url "$WORKFLOW_URL" \
+            "${RSS_FLAG[@]}"
+
+          cat "$OUT_DIR/arm-b-otel/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo
+            echo "- artifact: \`runner-otel-overhead-arm-b-${GITHUB_RUN_ID}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Arm B overhead artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: runner-otel-overhead-arm-b-${{ github.run_id }}
           path: overhead-runs/
           if-no-files-found: error
           retention-days: 30
