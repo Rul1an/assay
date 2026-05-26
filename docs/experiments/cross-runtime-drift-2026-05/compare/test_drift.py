@@ -1602,7 +1602,7 @@ class RuntimeDriftSchemaSidecarTests(unittest.TestCase):
             / "reference"
             / "runner"
             / "schema"
-            / "runtime-drift-v0.schema.json"
+            / "runtime-drift-v0.2.schema.json"
         )
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         self.assertEqual(
@@ -1648,6 +1648,24 @@ class RuntimeDriftSchemaSidecarTests(unittest.TestCase):
             schema["$defs"]["projection"]["properties"]["schema"]["enum"],
         )
         self.assertEqual(
+            schema["$defs"]["projection"]["properties"]["unmatched_summary"][
+                "$ref"
+            ],
+            "#/$defs/unmatched_summary",
+        )
+        self.assertEqual(
+            schema["$defs"]["unmatched_summary"]["required"],
+            ["a", "b"],
+        )
+        self.assertEqual(
+            schema["$defs"]["unmatched_arm_a"]["properties"]["side"]["const"],
+            "a",
+        )
+        self.assertEqual(
+            schema["$defs"]["unmatched_arm_b"]["properties"]["side"]["const"],
+            "b",
+        )
+        self.assertEqual(
             schema["required"],
             [
                 "schema",
@@ -1689,6 +1707,62 @@ class RuntimeDriftSchemaSidecarTests(unittest.TestCase):
         )
         payload = drift.report_to_json(a, b, rows)
         assert_matches_supported_schema_keywords(self, payload, schema)
+
+    def test_schema_sidecar_rejects_malformed_unmatched_summary(self) -> None:
+        schema_path = (
+            THIS_DIR.parents[2]
+            / "reference"
+            / "runner"
+            / "schema"
+            / "runtime-drift-v0.2.schema.json"
+        )
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        a = drift.parse_archive(ARM_A)
+        b = drift.parse_archive(ARM_B)
+        rows = drift.build_drift_report(
+            a,
+            b,
+            path_aliases=(
+                drift.PathAlias(
+                    "/tmp/work/fixture-input.txt",
+                    "workdir/input",
+                ),
+            ),
+        )
+        payload = drift.report_to_json(a, b, rows)
+        path_row = next(
+            row for row in payload["rows"]
+            if row["dimension"] == "filesystem_paths_touched"
+        )
+        del path_row["projection"]["unmatched_summary"]["a"]["sample_limit"]
+        with self.assertRaises(AssertionError):
+            assert_matches_supported_schema_keywords(self, payload, schema)
+
+    def test_unmatched_summary_samples_are_sorted(self) -> None:
+        summary = drift._projection_unmatched_summary(
+            "a",
+            [
+                drift.ProjectedValue(
+                    raw_value="/z",
+                    projected_value="/z",
+                    path_class=drift.PATH_CLASS_UNKNOWN,
+                    relation="unmatched",
+                    rule="no_declared_alias",
+                    confidence="unknown",
+                    claim_level=drift.CLAIM_RAW_OBSERVED,
+                ),
+                drift.ProjectedValue(
+                    raw_value="/a",
+                    projected_value="/a",
+                    path_class=drift.PATH_CLASS_UNKNOWN,
+                    relation="unmatched",
+                    rule="no_declared_alias",
+                    confidence="unknown",
+                    claim_level=drift.CLAIM_RAW_OBSERVED,
+                ),
+            ],
+        )
+        self.assertEqual(summary["samples"], ["/a", "/z"])
 
     def test_schema_helper_rejects_semantically_invalid_date_time(self) -> None:
         with self.assertRaises(AssertionError):

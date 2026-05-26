@@ -265,14 +265,14 @@ stable enough to freeze the first projection artifact shape.
 Implemented schema:
 
 ```text
-assay.runner.runtime_drift.v0
+assay.runner.runtime_drift.v0.2
 ```
 
 This is a projection artifact, not a primary evidence artifact. It reads
 Runner archives and emits a comparison report. The contract is documented
 in [`runtime-drift-v0.md`](runtime-drift-v0.md), with a machine-readable
 schema at
-[`schema/runtime-drift-v0.schema.json`](schema/runtime-drift-v0.schema.json).
+[`schema/runtime-drift-v0.2.schema.json`](schema/runtime-drift-v0.2.schema.json).
 
 Required design properties:
 
@@ -365,7 +365,7 @@ Projection reports MUST carry explicit non-claims. Initial codes:
 | 2 | Runtime/noise taxonomy constants and docs | Unknown-preserving tests |
 | 3 | Report provenance metadata block | Existing live run can be re-rendered with metadata |
 | 4 | Network projection helper | Exact endpoint, CIDR, and unknown fallback tests |
-| 5 | Freeze `assay.runner.runtime_drift.v0` projection schema | Synthetic fixture covers all claim levels + schema sidecar matches comparator output |
+| 5 | Freeze `assay.runner.runtime_drift.v0.2` projection schema | Synthetic fixture covers all claim levels + schema sidecar matches comparator output |
 | 6 | Kernel event metadata schema sidecar | Enriched open metadata line shape is machine-readable; no new syscall claims |
 
 ## Relationship To Existing Contracts

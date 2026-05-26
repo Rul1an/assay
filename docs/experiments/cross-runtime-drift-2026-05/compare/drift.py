@@ -2,7 +2,7 @@
 """Cross-runtime drift projection comparator.
 
 Reads two Runner measured-run archives (one per agent runtime) and
-emits an `assay.runner.runtime_drift.v0` projection artifact. The report
+emits an `assay.runner.runtime_drift.v0.2` projection artifact. The report
 preserves raw observed values and adds explicit projection views where
 the caller supplied path or network aliases.
 
@@ -64,7 +64,7 @@ PROJECTION_SAMPLE_LIMIT = 3
 
 CAPABILITY_SURFACE_SCHEMA = "assay.runner.capability_surface.v0"
 SDK_EVENT_SCHEMA = "assay.runner.sdk_event.v0"
-DRIFT_REPORT_SCHEMA = "assay.runner.runtime_drift.v0"
+DRIFT_REPORT_SCHEMA = "assay.runner.runtime_drift.v0.2"
 DRIFT_REPORT_PROVENANCE_SCHEMA = "assay.runner.drift_report_provenance.v0"
 
 MANIFEST_PATH = "manifest.json"
@@ -743,7 +743,7 @@ def _projection_unmatched_summary(
     return {
         "side": side,
         "count": len(raw_values),
-        "samples": raw_values[:PROJECTION_SAMPLE_LIMIT],
+        "samples": sorted(raw_values)[:PROJECTION_SAMPLE_LIMIT],
         "sample_limit": PROJECTION_SAMPLE_LIMIT,
     }
 

@@ -6,7 +6,7 @@
 > on `assay-bpf-runner`. Workload contract written, two runtime
 > implementations runnable locally with API keys, contract-checker
 > validates outputs (14 stdlib unit tests), `compare/drift.py`
-> produces `assay.runner.runtime_drift.v0` per-dimension projection
+> produces `assay.runner.runtime_drift.v0.2` per-dimension projection
 > reports (stdlib unit tests cover `drift.py` + `health_gate.py` +
 > `extract_fixture_paths.py`), and emits Runtime/Noise Taxonomy v0
 > metadata as vocabulary-only context. Live
@@ -176,7 +176,7 @@ committed archives are re-rendered after projection/schema changes.
   every classification label, fixture-path overrides, and CLI
   output (`--out-json`, `--out-md`).
 - Output schema locked in for comparator output:
-  `assay.runner.runtime_drift.v0`. The committed live
+  `assay.runner.runtime_drift.v0.2`. The committed live
   [`runs/drift/`](runs/drift/) baselines have been re-rendered from
   the original A0/B0 archives with that schema, including explicit
   path/network projection and provenance blocks.
