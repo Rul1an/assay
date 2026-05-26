@@ -148,7 +148,7 @@ def extract_archive(archive: Path, destination: Path) -> None:
         shutil.rmtree(destination)
     destination.mkdir(parents=True)
     with tarfile.open(archive, "r:gz") as tar:
-        tar.extractall(destination)
+        tar.extractall(destination, filter="data")
 
 
 def percentile(values: list[float], pct: float) -> float | None:

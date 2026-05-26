@@ -24,6 +24,10 @@ The harness writes:
 The experiment schemas are intentionally not Runner archive contracts.
 They are local measurement evidence for the overhead follow-up only.
 
+BMF metric keys use the full arm slug so future arms stay
+unambiguous: `runner_vs_otel.arm_b_otel.*` for local Arm B and
+`runner_vs_otel.arm_c_dual_capture.*` for delegated Arm C.
+
 ## Local Smoke
 
 From the repository root:
@@ -48,6 +52,11 @@ Arm C is dispatched manually through
 The workflow runs on `assay-bpf-runner`, invokes the same harness with
 `--arm arm-c-dual-capture`, uploads `overhead-runs/`, and fails if any
 sample is either non-zero exit or capture-unclean.
+
+The local unit tests exercise the Arm C path with a fake `assay` binary
+that emits the expected archive shape. The first validation against real
+`assay runner-spike` output happens on the first delegated workflow
+dispatch.
 
 Do not commit the uploaded artifacts until the findings slice decides
 which measurements should become evidence.

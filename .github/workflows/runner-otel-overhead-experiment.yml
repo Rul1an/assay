@@ -90,6 +90,14 @@ jobs:
           set -euo pipefail
           cargo build -p assay-cli --no-default-features --features runner
 
+      - name: Run overhead harness unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover \
+            -s docs/experiments/runner-vs-otel-overhead-2026-05 \
+            -p 'test_*.py'
+
       - name: Build eBPF artifact
         if: ${{ inputs.build_ebpf }}
         shell: bash
@@ -144,14 +152,23 @@ jobs:
             --delegated-workflow-url "$WORKFLOW_URL"
 
           SUMMARY="$OUT_DIR/arm-c-dual-capture/summary.json"
-          VALID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["valid_samples"])' "$SUMMARY")"
-          DISCARDED="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["discarded_samples"])' "$SUMMARY")"
-          {
-            echo "## Arm C overhead summary"
-            echo "- valid samples: $VALID"
-            echo "- discarded samples: $DISCARDED"
-            echo "- artifact: runner-otel-overhead-arm-c-${GITHUB_RUN_ID}"
-          } >> "$GITHUB_STEP_SUMMARY"
+          python3 - "$SUMMARY" "runner-otel-overhead-arm-c-${GITHUB_RUN_ID}" <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          import sys
+
+          summary_path, artifact_name = sys.argv[1], sys.argv[2]
+          with open(summary_path, encoding="utf-8") as fh:
+              summary = json.load(fh)
+          wall = summary["wall_clock_ms"]
+          print("## Arm C overhead summary")
+          print(f"- valid samples: {summary['valid_samples']}")
+          print(f"- discarded samples: {summary['discarded_samples']}")
+          print(f"- wall median ms: {wall['median']}")
+          print(f"- wall p95 ms: {wall['p95']}")
+          print(f"- wall p99 ms: {wall['p99']}")
+          print(f"- wall p99/median: {wall['p99_over_median']}")
+          print(f"- artifact: {artifact_name}")
+          PY
 
       - name: Upload Arm C overhead artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
