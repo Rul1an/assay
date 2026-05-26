@@ -475,8 +475,11 @@ def bmf_export(summary: dict[str, Any]) -> dict[str, dict[str, float | int]]:
 def _md_value(value: Any, *, unit: str = "") -> str:
     if value is None:
         return "`null`"
-    if isinstance(value, float):
-        rendered = f"{value:.3f}".rstrip("0").rstrip(".")
+    if isinstance(value, (float, int)):
+        if unit == "bytes" and float(value).is_integer():
+            rendered = f"{int(value):,}"
+        else:
+            rendered = f"{float(value):,.3f}".rstrip("0").rstrip(".")
     else:
         rendered = str(value)
     suffix = f" {unit}" if unit else ""

@@ -289,9 +289,21 @@ class OverheadHarnessTests(unittest.TestCase):
         self.assertIn("| Valid samples | `2` |", markdown)
         self.assertIn("| Wall p99/median |", markdown)
         self.assertIn("(healthy)", markdown)
-        self.assertIn("| Peak RSS max | `2000 bytes` |", markdown)
+        self.assertIn("| Peak RSS max | `2,000 bytes` |", markdown)
         self.assertIn("runner-otel-overhead-arm-c-1", markdown)
         self.assertIn("Non-claim", markdown)
+
+    def test_summary_markdown_handles_zero_valid_samples(self) -> None:
+        summary = overhead_harness.summarize(
+            [self.sample(exit_code=1)],
+            delegated_workflow_url=None,
+        )
+        markdown = overhead_harness.summary_markdown(summary)
+
+        self.assertIn("| Valid samples | `0` |", markdown)
+        self.assertIn("| Wall median | `null` |", markdown)
+        self.assertIn("| Wall p99/median | `null` (unknown) |", markdown)
+        self.assertIn("| Peak RSS max | `null` |", markdown)
 
     def test_host_class_is_schema_safe(self) -> None:
         self.assertRegex(overhead_harness.host_class(), r"^[A-Za-z0-9_.-]+$")
