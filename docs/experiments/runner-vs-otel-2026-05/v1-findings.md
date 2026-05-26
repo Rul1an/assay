@@ -407,7 +407,9 @@ Neither artifact is published yet.
 - **Overhead measurements at statistical power.** Wall-clock at
   `n >= 20`, RSS at `n >= 5`, archive/trace size at `n = 3`.
   v1/Slice 2/Slice 3 each ran `n = 3` purely for shape stability;
-  latency claims at `n = 3` are not yet defensible.
+  latency claims at `n = 3` are not yet defensible. The measurement
+  follow-up is scoped in
+  [`../runner-vs-otel-overhead-2026-05.md`](../runner-vs-otel-overhead-2026-05.md).
 - **L3 (Tetragon/Falco/Tracee) comparison.** Explicit follow-up in
   the plan doc.
 - **Kernel-event granularity beyond capability_surface.** The

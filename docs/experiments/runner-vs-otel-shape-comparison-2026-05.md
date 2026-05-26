@@ -467,6 +467,11 @@ measurements (`n>=20` wall clock, `n>=5` RSS) and the L3
 Tetragon/Falco/Tracee comparison remain explicit follow-ups rather than
 missing v1 checklist items.
 
+The overhead follow-up is scoped in
+[`runner-vs-otel-overhead-2026-05.md`](runner-vs-otel-overhead-2026-05.md).
+It is plan-only until a harness emits health-gated wall-clock/RSS samples
+and BMF-compatible summaries.
+
 ## References to Verify Before Publication
 
 - OpenTelemetry GenAI semantic conventions:
