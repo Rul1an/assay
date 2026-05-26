@@ -6,6 +6,10 @@
 > harness and schema sidecars for the plan in
 > [`../runner-vs-otel-overhead-2026-05.md`](../runner-vs-otel-overhead-2026-05.md).
 > It does not contain committed benchmark results.
+>
+> Current findings are in [`findings.md`](findings.md). They summarize
+> the delegated Arm C host-class baseline and intentionally withhold
+> cross-host deltas.
 
 ## What This Emits
 

@@ -121,7 +121,10 @@ existing Criterion / Bencher baseline.
 
 The follow-up measurement contract is tracked in
 [`../runner-vs-otel-overhead-2026-05.md`](../runner-vs-otel-overhead-2026-05.md).
-Do not publish overhead claims from the `n=3` evidence slices.
+Current overhead findings are tracked in
+[`../runner-vs-otel-overhead-2026-05/findings.md`](../runner-vs-otel-overhead-2026-05/findings.md).
+Do not publish overhead claims from the `n=3` evidence slices, and do
+not publish Arm B-vs-Arm C deltas until same-host Arm B data exists.
 
 ## Comparator tests
 
