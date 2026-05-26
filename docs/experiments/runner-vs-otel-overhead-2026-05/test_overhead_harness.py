@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import tempfile
+import tarfile
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -143,6 +144,48 @@ fs.writeFileSync(traceOut, JSON.stringify({ resourceSpans: [] }) + "\\n");
     )
 
 
+def write_fake_assay(root: Path) -> Path:
+    fake = root / "fake-assay.py"
+    fake.write_text(
+        """
+#!/usr/bin/env python3
+import json
+import sys
+import tarfile
+import tempfile
+from pathlib import Path
+
+args = sys.argv[1:]
+output = Path(args[args.index("--output") + 1])
+trace = None
+if "--" in args:
+    child = args[args.index("--") + 1:]
+    if "--trace-out" in child:
+        trace = Path(child[child.index("--trace-out") + 1])
+if trace is not None:
+    trace.parent.mkdir(parents=True, exist_ok=True)
+    trace.write_text(json.dumps({"resourceSpans": []}) + "\\n", encoding="utf-8")
+
+output.parent.mkdir(parents=True, exist_ok=True)
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    (root / "observation-health.json").write_text(
+        json.dumps({
+            "kernel_layer": "complete",
+            "ringbuf_drops": 0,
+            "cgroup_correlation": "clean"
+        }) + "\\n",
+        encoding="utf-8",
+    )
+    with tarfile.open(output, "w:gz") as tar:
+        tar.add(root / "observation-health.json", arcname="observation-health.json")
+""".lstrip(),
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    return fake
+
+
 class OverheadHarnessTests(unittest.TestCase):
     def sample(self, **overrides: Any) -> dict[str, Any]:
         payload = {
@@ -222,7 +265,7 @@ class OverheadHarnessTests(unittest.TestCase):
             delegated_workflow_url=None,
         )
         bmf = overhead_harness.bmf_export(summary)
-        self.assertIn("runner_vs_otel.arm_b.wall_clock_ms.median", bmf)
+        self.assertIn("runner_vs_otel.arm_b_otel.wall_clock_ms.median", bmf)
         self.assertTrue(all(set(value) == {"value"} for value in bmf.values()))
 
     def test_host_class_is_schema_safe(self) -> None:
@@ -290,6 +333,63 @@ class OverheadHarnessTests(unittest.TestCase):
             self.assertEqual(summary["valid_samples"], 20)
             self.assertEqual(summary["discarded_samples"], 0)
             self.assertTrue(bmf)
+
+    def test_arm_c_sample_extracts_archive_health_and_sizes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workload = root / "workload"
+            out_dir = root / "overhead"
+            write_stub_workload(workload)
+            fake_assay = write_fake_assay(root)
+            fake_ebpf = root / "assay-ebpf.o"
+            fake_ebpf.write_bytes(b"fake ebpf")
+
+            status = overhead_harness.main(
+                [
+                    "--arm",
+                    "arm-c-dual-capture",
+                    "--iterations",
+                    "1",
+                    "--skip-build",
+                    "--clean",
+                    "--timeout-seconds",
+                    "10",
+                    "--workload-dir",
+                    str(workload),
+                    "--out-dir",
+                    str(out_dir),
+                    "--assay-bin",
+                    str(fake_assay),
+                    "--ebpf-obj",
+                    str(fake_ebpf),
+                ]
+            )
+            self.assertEqual(status, 0)
+
+            sample = json.loads(
+                (out_dir / "arm-c-dual-capture" / "samples.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()[0]
+            )
+            summary = json.loads(
+                (out_dir / "arm-c-dual-capture" / "summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            archive_sizes = json.loads(
+                (out_dir / "artifacts" / "archive-sizes.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+            self.assertEqual(sample["health"]["kernel_layer"], "complete")
+            self.assertEqual(sample["health"]["ringbuf_drops"], 0)
+            self.assertEqual(sample["health"]["cgroup_correlation"], "clean")
+            self.assertGreater(sample["artifact_bytes"]["archive_targz"], 0)
+            self.assertGreater(sample["artifact_bytes"]["archive_extracted"], 0)
+            self.assertEqual(summary["valid_samples"], 1)
+            self.assertEqual(archive_sizes["arm"], "arm-c-dual-capture")
+            self.assertEqual(len(archive_sizes["archive_targz_bytes"]), 1)
 
 
 if __name__ == "__main__":
