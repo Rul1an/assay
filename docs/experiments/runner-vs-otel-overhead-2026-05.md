@@ -99,11 +99,12 @@
 > no health boundary at 100 kernel events, 100 span events, concurrency
 > 4, and 64 KiB span payloads.
 >
-> **Slice 12 status:** planned as a boundary-finding follow-up. It should
-> extend the sweep targets beyond the Slice 11 starter matrix before
-> dispatching any wider cells. The goal is to find the first health,
-> fidelity, trace-size, or phase-timing boundary; it is not another broad
-> Arm A/C wall-clock rerun.
+> **Slice 12 status:** harness-ready, not dispatched. The workflow and
+> harness now support extended `x500` / `x1000` sweep targets via
+> `assay.experiment.event_rate_sweep.v0.1`, optional warm-up samples, and
+> longer delegated job timeouts. The goal remains to find the first
+> health, fidelity, trace-size, or phase-timing boundary; it is not
+> another broad Arm A/C wall-clock rerun.
 
 ## Research Question
 
@@ -683,7 +684,7 @@ SOTA / best-practice rationale as of May 2026:
 
 Design implications:
 
-- Prefer a geometric stress ladder over many nearby levels. The first
+- Prefer a stepped widening ladder over many nearby levels. The first
   boundary is more useful than a dense table of healthy medians.
 - Keep paired/counterbalanced Arm A/C order. It reduces dispatch-window
   drift and preserves the Slice 9 lesson.
@@ -699,43 +700,67 @@ Design implications:
 
 Slice 12 harness/schema gate:
 
-- Add extended targets without changing the baseline behavior. Existing
+- **Done:** Add extended targets without changing the baseline behavior. Existing
   `baseline` / `low` / `medium` / `high` samples must remain readable.
-- If new named levels are added, introduce
+- **Done:** If new named levels are added, introduce
   `assay.experiment.event_rate_sweep.v0.1` rather than silently changing
   the meaning of `event_rate_sweep.v0`.
-- Record the numeric target values in every sample and summary, as Slice
+- **Done:** Record the numeric target values in every sample and summary, as Slice
   10 already does. Readers should not need to know what a label meant in
   a particular code revision.
-- Keep Arm A's span/event target at `baseline` / `0` even when Arm C is
+- **Done:** Keep Arm A's span/event target at `baseline` / `0` even when Arm C is
   stressing span events.
+- **Done:** Extend delegated workflow timeouts to 240 minutes for Slice
+  12-sized paired dispatches.
+- **Done:** Add `--warmup-iterations` / workflow `warmup_iterations`.
+  Warm-up samples are written to review artifacts but excluded from
+  `samples.jsonl`, `summary.json`, BMF metrics, and valid/discarded
+  counts.
+- **Done:** Pin warm-up failure policy. Warm-up samples do not abort the
+  harness when they fail; failures remain visible in the warm-up artifact
+  with their `exit_code`. Treat a dispatch where all warm-up samples fail
+  as inconclusive even if measured samples later pass.
 
 Predeclared widening cells:
 
 Use paired A/C dispatches, `measure_rss=false`, `build_ebpf=true`,
-`timeout_seconds=300`, and `repetitions=5`. Do not add Arm B, RSS, or
-provider/model work to this slice.
+`timeout_seconds=300`, `repetitions=5`, and `warmup_iterations=1`. Do
+not add Arm B, RSS, or provider/model work to this slice. RSS is not a
+Slice 12 finding; the Slice 7 RSS conclusion remains the current memory
+result.
 
 | Cell | Kernel target | Span target | Concurrency | Payload | Purpose |
 |---|---:|---:|---:|---|---|
-| k500 | 500 | 0 | 4 | small | First 5x kernel-event step above Slice 11 |
-| k1000 | 1000 | 0 | 4 | small | Kernel-event boundary probe |
-| s500 | 0 | 500 | 1 | small | First 5x span-event step above Slice 11 |
-| s1000 | 0 | 1000 | 1 | small | Trace-export boundary probe |
-| kc1000 | 1000 | 0 | 16 | small | Kernel pressure plus scheduling pressure |
-| corner-lite | 1000 | 1000 | 8 | large | Combined stress corner for health, trace size, and tail behavior |
+| k500 | `x500` / 500 | `baseline` / 0 | 4 | small | First 5x kernel-event step above Slice 11 |
+| k1000 | `x1000` / 1000 | `baseline` / 0 | 4 | small | Kernel-event boundary probe |
+| s500 | `baseline` / 0 | `x500` / 500 | 1 | small | First 5x span-event step above Slice 11 |
+| s1000 | `baseline` / 0 | `x1000` / 1000 | 1 | small | Trace-export boundary probe |
+| kc1000 | `x1000` / 1000 | `baseline` / 0 | 16 | small | Kernel pressure plus scheduling pressure |
+| corner-lite | `x1000` / 1000 | `x1000` / 1000 | 8 | large | Combined stress corner for health, trace size, and tail behavior |
 
 Slice 12 acceptance rules:
 
 - Every reported cell must state observed kernel worker files and Arm C
   span-event count against the declared numeric targets before timing is
   interpreted.
+- Warm-up failures do not abort the harness. They are recorded in
+  `warmup-samples*.jsonl` with the failing `exit_code` for review. If all
+  warm-up samples in a dispatch fail, treat the dispatch as inconclusive
+  regardless of measured-sample outcomes.
+- The n=5 widening pass is intentionally below OpenTelemetry's
+  repetitions guidance for published benchmark numbers. It may identify
+  candidate boundaries only; stable threshold claims require the n=20
+  follow-up described below.
 - A cell is a boundary if any of these happens: `ringbuf_drops > 0`,
   `kernel_layer != complete`, `cgroup_correlation != clean`, trace event
   counts are lower than target, archive/trace extraction fails, or
   p99/median enters the fail band.
 - If `corner-lite` fails but single-axis cells pass, report interaction
   pressure rather than dropping the corner.
+- If `kc1000` fails, do not claim whether the boundary is kernel-event
+  rate or concurrency without a follow-up single-axis cell.
+- If `corner-lite` passes at n=5, treat it as preliminary. Publish
+  "healthy through corner-lite" only after an n=20 confirmation.
 - If all widening cells stay healthy, stop the slice with a threshold
   statement: "no health boundary through 1000 kernel events, 1000 span
   events, concurrency 16 on this host class." Do not keep widening in the
@@ -743,6 +768,10 @@ Slice 12 acceptance rules:
 - If exactly one boundary appears, repeat the first failing cell and the
   nearest healthy predecessor at n=20 in a separate findings slice before
   making a stable threshold claim.
+- Close the overhead arc after Slice 12 if it either publishes a stable
+  boundary/healthy-through threshold, or shows the current capture stack
+  cannot characterize the boundary at this measurement budget. Do not
+  open Slice 13 merely to widen the same ladder again.
 
 ## Non-Claims
 
@@ -769,7 +798,7 @@ Slice 12 acceptance rules:
 | 9 | **Done**: paired Arm A/C residual diagnostics via workflow `arm=paired-a-c`, dispatched in run [26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306) | residuals shrink/change sign under pairing; wall-clock decomposition remains unpublished and should stop at this measurement budget |
 | 10 | **Smoke-verified**: controlled event-rate / workload-intensity sweep via workflow inputs and sample/summary metadata, with paired smoke runs [26508127380](https://github.com/Rul1an/assay/actions/runs/26508127380) and [26508355816](https://github.com/Rul1an/assay/actions/runs/26508355816) | no broad rerun; dispatch only a small matrix first, with kernel-event count, span/event count, concurrency, phase timing, residual, RSS, and health gates reported by level |
 | 11 | **Done**: predeclared Slice 11 starter matrix with five paired A/C cells: control, kernel-high, span-high, kernel-concurrent, and corner, dispatched in runs [26511405031](https://github.com/Rul1an/assay/actions/runs/26511405031), [26511787316](https://github.com/Rul1an/assay/actions/runs/26511787316), [26512146963](https://github.com/Rul1an/assay/actions/runs/26512146963), [26512515478](https://github.com/Rul1an/assay/actions/runs/26512515478), and [26512909068](https://github.com/Rul1an/assay/actions/runs/26512909068) | all cells 5/5 valid per arm with clean health gates; event counts matched targets; no health boundary reached at the starter matrix budget |
-| 12 | **Planned**: boundary-finding sweep with extended numeric targets above `high=100` | harness/schema gate first, then n=5 paired A/C cells; publish only boundary classes or repeat first boundary/predecessor at n=20 |
+| 12 | **Harness-ready**: boundary-finding sweep with extended `x500` / `x1000` targets, `event_rate_sweep.v0.1`, warm-up support, and 240-minute delegated timeouts | dispatch n=5 paired A/C cells with one warm-up pair; publish only boundary classes or repeat first boundary/predecessor at n=20 |
 
 ## Publication Rule
 

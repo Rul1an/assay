@@ -29,6 +29,7 @@ SAMPLE_SCHEMA = "assay.experiment.overhead_sample.v0"
 SUMMARY_SCHEMA = "assay.experiment.overhead_summary.v0"
 PAIRED_SEQUENCE_SCHEMA = "assay.experiment.paired_sequence.v0"
 EVENT_RATE_SWEEP_SCHEMA = "assay.experiment.event_rate_sweep.v0"
+EVENT_RATE_SWEEP_SCHEMA_V0_1 = "assay.experiment.event_rate_sweep.v0.1"
 DEFAULT_ARM = "arm-b-otel"
 ARM_A = "arm-a-runner-only"
 ARM_B = "arm-b-otel"
@@ -45,18 +46,22 @@ PHASE_TIMING_KEYS = [
     "event_flush_ms",
     "archive_write_ms",
 ]
-SWEEP_RATE_LEVELS = ("baseline", "low", "medium", "high")
+SWEEP_RATE_LEVELS = ("baseline", "low", "medium", "high", "x500", "x1000")
 SWEEP_KERNEL_EVENT_TARGETS = {
     "baseline": 0,
     "low": 1,
     "medium": 25,
     "high": 100,
+    "x500": 500,
+    "x1000": 1000,
 }
 SWEEP_SPAN_EVENT_TARGETS = {
     "baseline": 0,
     "low": 1,
     "medium": 25,
     "high": 100,
+    "x500": 500,
+    "x1000": 1000,
 }
 SWEEP_PAYLOAD_BYTES = {
     "small": 128,
@@ -208,8 +213,13 @@ def event_rate_sweep_config(args: argparse.Namespace) -> dict[str, Any] | None:
         and payload_size == "small"
     ):
         return None
+    schema = (
+        EVENT_RATE_SWEEP_SCHEMA_V0_1
+        if kernel_level in {"x500", "x1000"} or span_level in {"x500", "x1000"}
+        else EVENT_RATE_SWEEP_SCHEMA
+    )
     return {
-        "schema": EVENT_RATE_SWEEP_SCHEMA,
+        "schema": schema,
         "kernel_event_rate": kernel_level,
         "span_event_rate": span_level,
         "concurrency": concurrency,
@@ -368,10 +378,16 @@ def one_sample(
     measure_rss: bool = False,
     runner_fixture_agent: Path | None = None,
     event_rate_sweep: dict[str, Any] | None = None,
+    run_prefix: str = "run",
 ) -> dict[str, Any]:
     sample_event_rate_sweep = event_rate_sweep_for_arm(arm, event_rate_sweep)
-    run_id = f"overhead_{arm.replace('-', '_')}_{iteration:03d}"
-    run_dir = arm_dir / f"run_{iteration:03d}"
+    run_id_suffix = (
+        f"{iteration:03d}"
+        if run_prefix == "run"
+        else f"{run_prefix}_{iteration:03d}"
+    )
+    run_id = f"overhead_{arm.replace('-', '_')}_{run_id_suffix}"
+    run_dir = arm_dir / f"{run_prefix}_{iteration:03d}"
     work_dir = run_dir / "work"
     trace_path = run_dir / "trace.json"
     archive_path = run_dir / "archive.tar.gz"
@@ -656,14 +672,17 @@ def write_run_outputs(
     samples: list[dict[str, Any]],
     summary: dict[str, Any],
     artifact_suffix: str = "",
+    warmup_samples: list[dict[str, Any]] | None = None,
 ) -> None:
     arm_dir = out_dir / arm
     artifacts_dir = out_dir / "artifacts"
     samples_path = arm_dir / "samples.jsonl"
-    samples_path.write_text(
-        "".join(json.dumps(sample, sort_keys=True) + "\n" for sample in samples),
-        encoding="utf-8",
-    )
+    write_jsonl(samples_path, samples)
+    if warmup_samples:
+        write_jsonl(
+            artifacts_dir / f"warmup-samples{artifact_suffix}.jsonl",
+            warmup_samples,
+        )
     write_json(arm_dir / "summary.json", summary)
     (arm_dir / "summary.md").write_text(summary_markdown(summary), encoding="utf-8")
     write_json(
@@ -730,7 +749,27 @@ def run_paired_ac(args: argparse.Namespace) -> int:
     versions = tool_versions(args.workload_dir)
     event_rate_sweep = event_rate_sweep_config(args)
     samples_by_arm: dict[str, list[dict[str, Any]]] = {ARM_A: [], ARM_C: []}
+    warmups_by_arm: dict[str, list[dict[str, Any]]] = {ARM_A: [], ARM_C: []}
     order: list[dict[str, Any]] = []
+    for warmup in range(1, args.warmup_iterations + 1):
+        for arm in paired_ac_order(warmup):
+            sample = one_sample(
+                arm_dir=args.out_dir / arm,
+                arm=arm,
+                workload_dir=args.workload_dir,
+                iteration=warmup,
+                commit=commit,
+                versions=versions,
+                timeout_seconds=args.timeout_seconds,
+                assay_bin=args.assay_bin,
+                ebpf_obj=args.ebpf_obj,
+                use_sudo=args.sudo,
+                measure_rss=args.measure_rss,
+                runner_fixture_agent=args.runner_fixture_agent,
+                event_rate_sweep=event_rate_sweep,
+                run_prefix="warmup",
+            )
+            warmups_by_arm[arm].append(sample)
     for pair in range(1, args.iterations + 1):
         for arm in paired_ac_order(pair):
             sample = one_sample(
@@ -773,6 +812,7 @@ def run_paired_ac(args: argparse.Namespace) -> int:
             samples=samples,
             summary=summaries[arm],
             artifact_suffix=f"-{arm}",
+            warmup_samples=warmups_by_arm[arm],
         )
         bmf.update(bmf_export(summaries[arm]))
     write_json(artifacts_dir / "bmf.json", bmf)
@@ -783,6 +823,7 @@ def run_paired_ac(args: argparse.Namespace) -> int:
             "kind": PAIRED_AC,
             "pairing": "counterbalanced-adjacent-pairs",
             "arms": [ARM_A, ARM_C],
+            "warmup_pairs_per_arm": args.warmup_iterations,
             "pairs_per_arm": args.iterations,
             "order": order,
         },
@@ -790,6 +831,8 @@ def run_paired_ac(args: argparse.Namespace) -> int:
 
     print(f"wrote {args.out_dir / ARM_A / 'samples.jsonl'}")
     print(f"wrote {args.out_dir / ARM_C / 'samples.jsonl'}")
+    if args.warmup_iterations:
+        print(f"wrote warm-up samples for {args.warmup_iterations} pair(s)")
     print(f"wrote {artifacts_dir / 'paired-sequence.json'}")
     print(f"wrote {artifacts_dir / 'bmf.json'}")
     all_valid = all(
@@ -899,6 +942,14 @@ def write_json(path: Path, payload: Any) -> None:
     )
 
 
+def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -907,6 +958,12 @@ def main(argv: list[str] | None = None) -> int:
         default=ARM_B,
     )
     parser.add_argument("--iterations", type=int, default=20)
+    parser.add_argument(
+        "--warmup-iterations",
+        type=int,
+        default=0,
+        help="Run extra warm-up samples before measured samples; excluded from summaries",
+    )
     parser.add_argument("--out-dir", type=Path, default=default_out_dir())
     parser.add_argument("--workload-dir", type=Path, default=default_workload_dir())
     parser.add_argument("--skip-build", action="store_true")
@@ -942,6 +999,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.iterations < 1:
         parser.error("--iterations must be >= 1")
+    if args.warmup_iterations < 0:
+        parser.error("--warmup-iterations must be >= 0")
     if args.sweep_concurrency < 1:
         parser.error("--sweep-concurrency must be >= 1")
     if args.measure_rss:
@@ -964,6 +1023,25 @@ def main(argv: list[str] | None = None) -> int:
     commit = assay_commit()
     versions = tool_versions(args.workload_dir)
     event_rate_sweep = event_rate_sweep_config(args)
+    warmup_samples = [
+        one_sample(
+            arm_dir=arm_dir,
+            arm=args.arm,
+            workload_dir=args.workload_dir,
+            iteration=iteration,
+            commit=commit,
+            versions=versions,
+            timeout_seconds=args.timeout_seconds,
+            assay_bin=args.assay_bin,
+            ebpf_obj=args.ebpf_obj,
+            use_sudo=args.sudo,
+            measure_rss=args.measure_rss,
+            runner_fixture_agent=args.runner_fixture_agent,
+            event_rate_sweep=event_rate_sweep,
+            run_prefix="warmup",
+        )
+        for iteration in range(1, args.warmup_iterations + 1)
+    ]
     samples = [
         one_sample(
             arm_dir=arm_dir,
@@ -985,12 +1063,20 @@ def main(argv: list[str] | None = None) -> int:
     summary = summarize(samples, delegated_workflow_url=args.delegated_workflow_url)
 
     samples_path = arm_dir / "samples.jsonl"
-    write_run_outputs(out_dir=args.out_dir, arm=args.arm, samples=samples, summary=summary)
+    write_run_outputs(
+        out_dir=args.out_dir,
+        arm=args.arm,
+        samples=samples,
+        summary=summary,
+        warmup_samples=warmup_samples,
+    )
     write_json(artifacts_dir / "bmf.json", bmf_export(summary))
 
     print(f"wrote {samples_path}")
     print(f"wrote {arm_dir / 'summary.json'}")
     print(f"wrote {arm_dir / 'summary.md'}")
+    if args.warmup_iterations:
+        print(f"wrote warm-up samples for {args.warmup_iterations} run(s)")
     print(f"wrote {artifacts_dir / 'bmf.json'}")
     if summary["valid_samples"] != args.iterations:
         return 2

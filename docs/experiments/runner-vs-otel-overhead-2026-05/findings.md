@@ -373,9 +373,11 @@ Next engineering slice:
 > not stable enough for an additive wall-clock decomposition at the
 > current measurement budget. Slice 11 has now shown that the starter
 > event-rate matrix stays healthy and calibrates correctly. Slice 12 is
-> therefore predeclared as a boundary-finding sweep: extend the
-> sweep-target schema/harness beyond `high=100`, then run a small paired
-> A/C widening matrix. The intended finding is a health/fidelity boundary
+> therefore predeclared as a boundary-finding sweep. The harness now
+> supports extended `x500` / `x1000` targets through
+> `assay.experiment.event_rate_sweep.v0.1`, optional warm-up samples, and
+> longer delegated timeouts. The next step is to run the paired A/C
+> widening matrix. The intended finding is a health/fidelity boundary
 > statement, not another median wall-clock comparison.
 
 Slice 12 should only publish one of these outcomes:

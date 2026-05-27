@@ -291,6 +291,20 @@ class OverheadHarnessTests(unittest.TestCase):
         }
         assert_matches_schema(self, payload, schema, root=schema)
 
+    def test_event_rate_sweep_v01_schema_accepts_extended_targets(self) -> None:
+        schema = load_schema("event-rate-sweep-v0.1.schema.json")
+        payload = {
+            "schema": "assay.experiment.event_rate_sweep.v0.1",
+            "kernel_event_rate": "x1000",
+            "span_event_rate": "x500",
+            "concurrency": 8,
+            "payload_size": "large",
+            "target_kernel_events": 1000,
+            "target_span_events": 500,
+            "payload_bytes": 65536,
+        }
+        assert_matches_schema(self, payload, schema, root=schema)
+
     def test_event_rate_sweep_config_maps_levels_to_targets(self) -> None:
         args = type(
             "Args",
@@ -309,6 +323,25 @@ class OverheadHarnessTests(unittest.TestCase):
         self.assertEqual(config["target_span_events"], 25)
         self.assertEqual(config["payload_bytes"], 65536)
         self.assertEqual(config["concurrency"], 4)
+
+    def test_event_rate_sweep_config_maps_extended_targets_to_v01(self) -> None:
+        args = type(
+            "Args",
+            (),
+            {
+                "sweep_kernel_event_rate": "x1000",
+                "sweep_span_event_rate": "x500",
+                "sweep_concurrency": 8,
+                "sweep_payload_size": "large",
+            },
+        )()
+        config = overhead_harness.event_rate_sweep_config(args)
+
+        self.assertEqual(config["schema"], "assay.experiment.event_rate_sweep.v0.1")
+        self.assertEqual(config["target_kernel_events"], 1000)
+        self.assertEqual(config["target_span_events"], 500)
+        self.assertEqual(config["payload_bytes"], 65536)
+        self.assertEqual(config["concurrency"], 8)
 
     def test_baseline_event_rate_sweep_config_is_null(self) -> None:
         args = type(
@@ -377,6 +410,22 @@ class OverheadHarnessTests(unittest.TestCase):
                 "target_kernel_events": 1,
                 "target_span_events": 100,
                 "payload_bytes": 128,
+            }
+        )
+        assert_matches_schema(self, sample, schema, root=schema)
+
+    def test_sample_schema_accepts_event_rate_sweep_v01_metadata(self) -> None:
+        schema = load_schema("overhead-sample-v0.schema.json")
+        sample = self.sample(
+            event_rate_sweep={
+                "schema": "assay.experiment.event_rate_sweep.v0.1",
+                "kernel_event_rate": "x1000",
+                "span_event_rate": "x500",
+                "concurrency": 8,
+                "payload_size": "large",
+                "target_kernel_events": 1000,
+                "target_span_events": 500,
+                "payload_bytes": 65536,
             }
         )
         assert_matches_schema(self, sample, schema, root=schema)
@@ -674,6 +723,52 @@ class OverheadHarnessTests(unittest.TestCase):
             self.assertEqual(sample["event_rate_sweep"]["target_span_events"], 1)
             self.assertEqual(summary["event_rate_sweep"], sample["event_rate_sweep"])
 
+    def test_harness_records_warmup_samples_outside_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workload = root / "workload"
+            out_dir = root / "overhead"
+            write_stub_workload(workload)
+
+            status = overhead_harness.main(
+                [
+                    "--iterations",
+                    "1",
+                    "--warmup-iterations",
+                    "1",
+                    "--skip-build",
+                    "--clean",
+                    "--timeout-seconds",
+                    "10",
+                    "--workload-dir",
+                    str(workload),
+                    "--out-dir",
+                    str(out_dir),
+                ]
+            )
+            self.assertEqual(status, 0)
+
+            samples = (
+                (out_dir / "arm-b-otel" / "samples.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            )
+            warmups = (
+                (out_dir / "artifacts" / "warmup-samples.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            )
+            summary = json.loads(
+                (out_dir / "arm-b-otel" / "summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+            self.assertEqual(len(samples), 1)
+            self.assertEqual(len(warmups), 1)
+            self.assertEqual(summary["valid_samples"], 1)
+            self.assertEqual(summary["discarded_samples"], 0)
+
     @unittest.skipUnless(Path("/usr/bin/time").exists(), "/usr/bin/time not available")
     def test_harness_can_emit_rss_sample(self) -> None:
         if platform.system().lower() not in {"darwin", "linux"}:
@@ -870,6 +965,8 @@ class OverheadHarnessTests(unittest.TestCase):
                     "paired-a-c",
                     "--iterations",
                     "2",
+                    "--warmup-iterations",
+                    "1",
                     "--skip-build",
                     "--clean",
                     "--timeout-seconds",
@@ -906,9 +1003,22 @@ class OverheadHarnessTests(unittest.TestCase):
             bmf = json.loads(
                 (out_dir / "artifacts" / "bmf.json").read_text(encoding="utf-8")
             )
+            arm_a_warmups = (
+                (out_dir / "artifacts" / "warmup-samples-arm-a-runner-only.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            )
+            arm_c_warmups = (
+                (out_dir / "artifacts" / "warmup-samples-arm-c-dual-capture.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            )
 
             self.assertEqual(arm_a_summary["valid_samples"], 2)
             self.assertEqual(arm_c_summary["valid_samples"], 2)
+            self.assertEqual(sequence["warmup_pairs_per_arm"], 1)
+            self.assertEqual(len(arm_a_warmups), 1)
+            self.assertEqual(len(arm_c_warmups), 1)
             self.assertEqual(
                 sequence["schema"],
                 "assay.experiment.paired_sequence.v0",

@@ -234,14 +234,19 @@
       ],
       "properties": {
         "schema": {
-          "const": "assay.experiment.event_rate_sweep.v0"
+          "enum": [
+            "assay.experiment.event_rate_sweep.v0",
+            "assay.experiment.event_rate_sweep.v0.1"
+          ]
         },
         "kernel_event_rate": {
           "enum": [
             "baseline",
             "low",
             "medium",
-            "high"
+            "high",
+            "x500",
+            "x1000"
           ]
         },
         "span_event_rate": {
@@ -249,7 +254,9 @@
             "baseline",
             "low",
             "medium",
-            "high"
+            "high",
+            "x500",
+            "x1000"
           ]
         },
         "concurrency": {
