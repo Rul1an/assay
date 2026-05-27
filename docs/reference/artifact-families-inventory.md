@@ -37,7 +37,7 @@ accidentally present proposed artifacts as canonical product surfaces.
 | Overhead experiment sidecars | `experiment-scoped` | `assay.experiment.*` under `runner-vs-otel-overhead-2026-05/` | Samples, summaries, phase timings, paired sequences, and event-rate sweep cells. |
 | Cross-runtime drift outputs | `experiment-scoped` | `cross-runtime-drift-2026-05/` | Runtime capability-surface drift comparisons. |
 | Fidelity calibration | `experiment-scoped` | `assay.experiment.agent_observability_fidelity.calibration.v0` | Requested-vs-observed fidelity verdicts and per-layer count methods embedded by the overhead harness. |
-| Evidence pack | `proposed` | `assay.experiment.agent_observability_fidelity.evidence_pack.v0` | Portable bundle carrier for one run or scenario. |
+| Evidence pack | `experiment-scoped` | `assay.experiment.agent_observability_fidelity.evidence_pack.v0` | Prototype portable bundle carrier for one run or scenario, with manifest, summary, health, archive/trace references, and explicit redaction manifest. |
 | Binding evidence / join receipts | `proposed` | undecided | Working term for tool-call input/output/effect binding evidence. Not a product line yet. |
 | Semantic-gap finding | `proposed` | undecided | Experiment result family for reported-intent vs measured-effect divergence. |
 | Interop mapping | `proposed` | undecided | Mapping rows between OTel GenAI, OpenInference, Runner, and Assay claim vocabulary. |

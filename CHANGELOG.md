@@ -136,6 +136,13 @@ All notable changes to this project will be documented in this file.
   methods, per-layer agreement, and a compact `fidelity_verdict`.
   Fidelity calibration now moves from `proposed` to `experiment-scoped`
   in the artifact-families inventory.
+- Added the first agent-observability evidence-pack prototype. The
+  experiment-scoped `evidence_pack.py` generator emits a strict v0 pack
+  manifest, one-page Markdown summary, observation-health artifact,
+  optional trace JSON, Runner archive/reference copy, and explicit
+  redaction manifest without promoting evidence packs to a product API.
+  Evidence packs now move from `proposed` to `experiment-scoped` in the
+  artifact-families inventory.
 
 ## [3.12.0] - 2026-05-25
 

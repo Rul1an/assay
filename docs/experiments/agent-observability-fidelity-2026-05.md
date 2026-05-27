@@ -158,6 +158,13 @@ observed-count fields and summary-level calibration gates.
 **Goal:** turn one interesting or failing agent run into a compact,
 portable, reviewable bundle.
 
+> **Status:** prototype-ready in the agent-observability fidelity
+> package. The repo now includes
+> `docs/experiments/agent-observability-fidelity-2026-05/evidence_pack.py`
+> and strict v0 schemas for the pack manifest and redaction manifest.
+> The prototype is experiment-scoped and does not promote evidence packs
+> to a product API.
+
 This is the first tool-facing slice after calibration because every
 later experiment should be able to hand reviewers a bounded evidence
 pack instead of a pile of raw artifacts. The first prototype should
@@ -176,16 +183,39 @@ incident.
 | Nice-to-have v1 | Expanded manifest/provenance table |
 | Nice-to-have v1 | Derived measured-effects summary |
 
+### Prototype layout
+
+The v0 generator writes a directory with stable filenames:
+
+```text
+manifest.json
+summary.md
+redaction-manifest.json
+artifacts/<runner archive filename>
+artifacts/observation-health.json
+artifacts/trace.json          # only when a trace layer exists
+```
+
+The manifest uses
+`assay.experiment.agent_observability_fidelity.evidence_pack.v0`. The
+redaction manifest uses
+`assay.experiment.agent_observability_fidelity.redaction_manifest.v0`.
+`pack_id` is a deterministic digest over the carried input artifacts and
+redaction manifest; rendered summaries are listed as artifacts but do
+not create a circular pack-id dependency.
+
 ### Acceptance rules
 
-- The pack must never strengthen a claim beyond the underlying join and
-  calibration grades.
-- Redaction must be explicit: omitted content is named as omitted, not
-  silently removed.
-- The pack must be reproducible from input artifacts by a command, not
-  hand-curated.
-- The first pack should target one known scenario and produce stable
-  filenames, so later semantic-gap scenarios can reuse the same carrier.
+- **Done:** the pack never strengthens a claim beyond the underlying
+  join and calibration grades; v0 emits that as an explicit non-claim.
+- **Done:** redaction is explicit. Even no-redaction packs include
+  `redaction-manifest.json`.
+- **Done:** the pack is reproducible from input artifacts by command,
+  not hand-curated.
+- **Done:** the first prototype uses stable filenames so later
+  semantic-gap scenarios can reuse the same carrier.
+- **Not done:** promotion into a canonical Assay bundle or evidence
+  receipt family. That still requires a consumer and a promotion PR.
 
 ### Tool improvement
 
@@ -328,8 +358,8 @@ visible by the overhead and shape-comparison arcs.
 | Slice | Status | Purpose | Exit gate |
 |---:|---|---|---|
 | 0 | Done in this plan | Namespace governance for experiment artifacts | Naming, promotion, cross-arc field, calibration-method, and evidence-pack minimum rules are documented. |
-| 1 | Planned | Fidelity calibration fields and summary rendering | One overhead-style fixture proves clean, lossy, and not-applicable calibration states. |
-| 2 | Planned | Portable evidence-pack prototype | One controlled scenario emits the minimum pack: summary, archive/ref, trace/ref, health, and redaction manifest. |
+| 1 | Harness-ready | Fidelity calibration fields and summary rendering | One overhead-style fixture proves clean, lossy, and not-applicable calibration states. |
+| 2 | Prototype-ready | Portable evidence-pack prototype | `evidence_pack.py` emits the minimum pack: manifest, summary, archive/ref, optional trace/ref, health, and redaction manifest. |
 | 3 | Planned | Semantic-gap scenario plan | Baseline plus six predeclared scenarios, claim classes, and join requirements documented before dispatch. |
 | 4 | Planned | Semantic-gap harness | Fake fixtures plus one delegated sanity run prove joined intent/effect rows and evidence-pack output. |
 | 5 | Planned | Interop matrix plan | OTel/OpenInference/Runner coverage axes and non-claims pinned. |
