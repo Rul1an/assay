@@ -50,6 +50,28 @@ The receipt may include compact model identity fields plus bounded refs:
 The importer does not dereference refs, resolve network URLs, expand dataset
 components, or import full `modelCard` bodies.
 
+## Formulation Fixture
+
+`fixtures/model-handoff-formulation.cdx.json` extends the small model example
+with CycloneDX `formulation[]` workflow data. The formulation shows an
+illustrative model training, evaluation, and evidence-handoff workflow using
+CycloneDX workflow, task, step, metric-output, and evidence-output structures.
+
+For this importer, formulation remains source-BOM context. Assay still reduces
+only the selected `machine-learning-model` component plus bounded refs, and the
+receipt binds back to the exact CycloneDX artifact through
+`source_artifact_digest`. Formulation, metrics, task outputs, and evidence
+external references are not promoted into evaluation or decision receipts.
+
+Formulation parsing is intentionally out of scope for this importer. It may be
+considered later only for a separate formulation or evaluation receipt lane
+backed by a real downstream consumer request. Until then, formulation stays
+bound through the source BOM digest.
+
+The handoff task in this fixture uses an Assay command because this is the
+Assay-side consumer example. A generic CycloneDX example should keep the same
+structure but replace that command with a project-neutral evidence producer.
+
 ## Not Imported
 
 The v1 receipt excludes:
@@ -62,6 +84,7 @@ The v1 receipt excludes:
 - dataset component bodies
 - model metrics
 - ethical, fairness, and limitation sections
+- formulation workflows, tasks, steps, metrics, and handoff outputs
 
 Those fields are important in CycloneDX ML-BOMs. P43 simply keeps the Assay
 receipt unit small enough to review and portable enough to bundle.

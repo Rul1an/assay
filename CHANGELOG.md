@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added a CycloneDX ML-BOM formulation fixture that keeps training,
+  evaluation, and handoff workflow context in the source BOM while proving the
+  importer still emits only the bounded inventory receipt claim.
 - Added a plan-only Runner-vs-OTel overhead measurement follow-up that
   fixes the sample sizes, host-boundary rules, BMF-compatible output
   shape, and non-claims required before publishing wall-clock or RSS
