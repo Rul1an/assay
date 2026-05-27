@@ -372,8 +372,15 @@ Next engineering slice:
 > paired residual diagnostic has landed and shows that the median gap is
 > not stable enough for an additive wall-clock decomposition at the
 > current measurement budget. Slice 11 has now shown that the starter
-> event-rate matrix stays healthy and calibrates correctly. If the
-> overhead arc continues, the next slice should either widen the
-> event-rate ladder beyond `high=100` with a new predeclared matrix, or
-> close the sweep with the current threshold finding: no health boundary
-> was reached at the starter matrix budget.
+> event-rate matrix stays healthy and calibrates correctly. Slice 12 is
+> therefore predeclared as a boundary-finding sweep: extend the
+> sweep-target schema/harness beyond `high=100`, then run a small paired
+> A/C widening matrix. The intended finding is a health/fidelity boundary
+> statement, not another median wall-clock comparison.
+
+Slice 12 should only publish one of these outcomes:
+
+- healthy through the widened numeric targets on this host class;
+- first unhealthy boundary found, with the nearest healthy predecessor;
+- inconclusive because event-count calibration, Runner health, or tail
+  health failed before timing could be interpreted.

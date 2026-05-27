@@ -254,6 +254,15 @@ samples, clean Runner health gates, and matching host class. The current
 finding is a threshold statement: no health boundary was reached at the
 starter matrix budget.
 
+The next useful experiment is Slice 12 boundary-finding, not another
+single broad A/C wall-clock rerun. It should first extend the sweep
+schema/harness beyond the current `high=100` labels, then run a small
+paired A/C widening matrix over 500 and 1000 kernel/span-event targets,
+with concurrency and payload stress isolated. The output should be a
+boundary statement, such as "healthy through X" or "first unhealthy cell
+at Y", with event-count calibration and Runner health gates reported
+before timing is interpreted.
+
 Do not commit the uploaded artifacts until the findings slice decides
 which measurements should become evidence.
 
