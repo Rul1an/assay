@@ -716,6 +716,10 @@ Slice 12 harness/schema gate:
   Warm-up samples are written to review artifacts but excluded from
   `samples.jsonl`, `summary.json`, BMF metrics, and valid/discarded
   counts.
+- **Done:** Pin warm-up failure policy. Warm-up samples do not abort the
+  harness when they fail; failures remain visible in the warm-up artifact
+  with their `exit_code`. Treat a dispatch where all warm-up samples fail
+  as inconclusive even if measured samples later pass.
 
 Predeclared widening cells:
 
@@ -739,6 +743,10 @@ Slice 12 acceptance rules:
 - Every reported cell must state observed kernel worker files and Arm C
   span-event count against the declared numeric targets before timing is
   interpreted.
+- Warm-up failures do not abort the harness. They are recorded in
+  `warmup-samples*.jsonl` with the failing `exit_code` for review. If all
+  warm-up samples in a dispatch fail, treat the dispatch as inconclusive
+  regardless of measured-sample outcomes.
 - The n=5 widening pass is intentionally below OpenTelemetry's
   repetitions guidance for published benchmark numbers. It may identify
   candidate boundaries only; stable threshold claims require the n=20

@@ -99,7 +99,9 @@ All notable changes to this project will be documented in this file.
 - Added Slice 12 harness support for the boundary-finding sweep:
   `assay.experiment.event_rate_sweep.v0.1` extended `x500` / `x1000`
   targets, optional warm-up samples, and longer delegated workflow
-  timeouts. This does not dispatch the widening matrix or publish new
+  timeouts. The docs pin warm-up failures as review-artifact diagnostics
+  that do not abort the harness but make an all-warm-up-failed dispatch
+  inconclusive. This does not dispatch the widening matrix or publish new
   measurement claims.
 
 ## [3.12.0] - 2026-05-25

@@ -269,6 +269,10 @@ The Slice 12 dispatch should use paired A/C, `repetitions=5`,
 as "healthy through X" or "first unhealthy cell at Y", with event-count
 calibration and Runner health gates reported before timing is
 interpreted. RSS is intentionally not re-measured in this slice.
+Warm-up failures do not abort the harness; inspect
+`warmup-samples*.jsonl` for their `exit_code`. If every warm-up sample in
+a dispatch failed, treat that dispatch as inconclusive even when the
+measured samples pass.
 
 Do not commit the uploaded artifacts until the findings slice decides
 which measurements should become evidence.
