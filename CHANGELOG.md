@@ -80,6 +80,10 @@ All notable changes to this project will be documented in this file.
   sweep. Runs 26508127380 and 26508355816 verified paired Arm A/C sweep
   metadata, kernel-event pressure, Arm C span-event metadata, and clean
   health gates without promoting n=2 smoke runs into benchmark findings.
+- Planned the Slice 11 starter matrix for the event-rate sweep:
+  predeclared paired A/C control, kernel-high, span-high,
+  kernel-concurrent, and corner cells with n=5 per cell and explicit
+  event-count, health-gate, and non-publication rules.
 
 ## [3.12.0] - 2026-05-25
 
