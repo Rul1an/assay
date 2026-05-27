@@ -72,13 +72,13 @@ async function applySweepPressure(workDir) {
   const payload = 'x'.repeat(payloadBytes);
   const workers = Math.min(concurrency, kernelEvents);
   const sweepDir = path.join(workDir, 'event-rate-sweep');
-  fs.mkdirSync(sweepDir, { recursive: true });
+  await fs.promises.mkdir(sweepDir, { recursive: true });
   await Promise.all(
     Array.from({ length: workers }, async (_, worker) => {
       for (let index = worker; index < kernelEvents; index += workers) {
         const target = path.join(sweepDir, `worker-${worker}-${index}.txt`);
-        fs.writeFileSync(target, payload, 'utf8');
-        fs.readFileSync(target, 'utf8');
+        await fs.promises.writeFile(target, payload, 'utf8');
+        await fs.promises.readFile(target, 'utf8');
       }
     }),
   );

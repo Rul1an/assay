@@ -21,6 +21,7 @@
  */
 
 import { writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
+import { mkdir as mkdirAsync, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { Span, SpanStatusCode } from "@opentelemetry/api";
@@ -326,13 +327,13 @@ async function applySweepPressure(
 
   const workers = Math.min(config.sweepConcurrency, config.sweepKernelEvents);
   const sweepDir = join(config.workDir, "event-rate-sweep");
-  mkdirSync(sweepDir, { recursive: true });
+  await mkdirAsync(sweepDir, { recursive: true });
   await Promise.all(
     Array.from({ length: workers }, async (_, worker) => {
       for (let index = worker; index < config.sweepKernelEvents; index += workers) {
         const target = join(sweepDir, `worker-${worker}-${index}.txt`);
-        writeFileSync(target, payload, "utf8");
-        readFileSync(target, "utf8");
+        await writeFile(target, payload, "utf8");
+        await readFile(target, "utf8");
       }
     }),
   );
