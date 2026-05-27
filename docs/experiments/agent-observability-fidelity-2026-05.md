@@ -94,6 +94,12 @@ and does not rename historical overhead artifacts.
 **Goal:** make every measurement artifact self-report whether the
 declared signal reached the observed layer.
 
+> **Status:** harness-ready in the Runner-vs-OTel overhead package. The
+> overhead harness now embeds
+> `assay.experiment.agent_observability_fidelity.calibration.v0` in
+> non-baseline sweep samples and summaries. It does not promote the
+> calibration shape to a product API.
+
 This is the immediate next code slice because it turns the Slice 12
 lesson into a general guardrail. The overhead harness already records
 `span_event_limit_effective`, `span_event_limit_source`, and
@@ -105,7 +111,7 @@ observed-count fields and summary-level calibration gates.
 | Field | Meaning | Layer |
 |---|---|---|
 | `target_kernel_events` | Requested kernel worker-file pressure | workload config |
-| `observed_kernel_worker_files` | Unique `event-rate-sweep/worker-*` files observed in extracted archive contents | Runner archive |
+| `observed_kernel_worker_files` | Unique `event-rate-sweep/worker-*` paths observed in `layers/kernel.ndjson` | Runner archive |
 | `target_span_events` | Requested OTel span events | workload config |
 | `retained_span_events` | Span events retained in trace JSON | OTel trace |
 | `dropped_span_events_estimate` | `target_span_events - retained_span_events` when both are known | derived diagnostic |
@@ -127,9 +133,9 @@ observed-count fields and summary-level calibration gates.
 - Arm A remains asymmetric: OTel span fields are `not_applicable` rather
   than zero-throughput evidence.
 - Every observed count must name its method. Example methods:
-  `archive_contents_worker_files_count`,
-  `kernel_ndjson_path_match_count`, `otel_trace_json_events_count`, and
-  `fixture_side_log_count`.
+  `kernel_ndjson_path_match_count`,
+  `archive_contents_worker_files_count`, `otel_trace_json_events_count`,
+  and `fixture_side_log_count`.
 - The first schema should expose per-layer agreement, not only one
   summary boolean. A mixed cell can be `match` for kernel events and
   `clipped` for span events.
@@ -139,11 +145,13 @@ observed-count fields and summary-level calibration gates.
 
 ### Output
 
-- New experiment-scoped calibration sidecar under the overhead package,
-  or promotion into `assay.observability.*` if it applies beyond the
-  overhead harness.
-- Unit tests covering default OTel limit, raised limit, Arm A
-  not-applicable behavior, and kernel worker-file counting.
+- **Done:** new experiment-scoped calibration sidecar under the overhead
+  package.
+- **Done:** unit tests covering sample/summary schema validation, OTel
+  span-event counting, Arm A not-applicable behavior, span-limit
+  clipping, and kernel worker-file counting.
+- **Not done:** promotion into `assay.observability.*`. That still
+  requires a non-overhead consumer or a later evidence-pack renderer.
 
 ## Experiment 2 - Portable Incident Evidence Pack
 

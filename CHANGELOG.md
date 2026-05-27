@@ -128,6 +128,14 @@ All notable changes to this project will be documented in this file.
   roadmap now starts with experiment namespace-governance rules for
   naming, promotion, artifact-family inventory, calibration verdicts and
   methods, and evidence-pack minimums.
+- Added the first agent-observability fidelity guardrail to the
+  Runner-vs-OTel overhead harness. Non-baseline sweep samples and
+  summaries now embed
+  `assay.experiment.agent_observability_fidelity.calibration.v0` with
+  requested-vs-observed kernel/span counts, kernel-layer path matching
+  methods, per-layer agreement, and a compact `fidelity_verdict`.
+  Fidelity calibration now moves from `proposed` to `experiment-scoped`
+  in the artifact-families inventory.
 
 ## [3.12.0] - 2026-05-25
 

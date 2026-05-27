@@ -36,7 +36,7 @@ accidentally present proposed artifacts as canonical product surfaces.
 | Observability join rows | `reference` | [`observability/join-contract-v0.md`](observability/join-contract-v0.md) | Join-grade rows for trace/archive/receipt comparisons. |
 | Overhead experiment sidecars | `experiment-scoped` | `assay.experiment.*` under `runner-vs-otel-overhead-2026-05/` | Samples, summaries, phase timings, paired sequences, and event-rate sweep cells. |
 | Cross-runtime drift outputs | `experiment-scoped` | `cross-runtime-drift-2026-05/` | Runtime capability-surface drift comparisons. |
-| Fidelity calibration | `proposed` | `assay.experiment.agent_observability_fidelity.calibration.v0` | Requested-vs-observed fidelity verdicts and per-layer count methods. |
+| Fidelity calibration | `experiment-scoped` | `assay.experiment.agent_observability_fidelity.calibration.v0` | Requested-vs-observed fidelity verdicts and per-layer count methods embedded by the overhead harness. |
 | Evidence pack | `proposed` | `assay.experiment.agent_observability_fidelity.evidence_pack.v0` | Portable bundle carrier for one run or scenario. |
 | Binding evidence / join receipts | `proposed` | undecided | Working term for tool-call input/output/effect binding evidence. Not a product line yet. |
 | Semantic-gap finding | `proposed` | undecided | Experiment result family for reported-intent vs measured-effect divergence. |

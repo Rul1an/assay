@@ -30,6 +30,9 @@ SUMMARY_SCHEMA = "assay.experiment.overhead_summary.v0"
 PAIRED_SEQUENCE_SCHEMA = "assay.experiment.paired_sequence.v0"
 EVENT_RATE_SWEEP_SCHEMA = "assay.experiment.event_rate_sweep.v0"
 EVENT_RATE_SWEEP_SCHEMA_V0_1 = "assay.experiment.event_rate_sweep.v0.1"
+FIDELITY_CALIBRATION_SCHEMA = (
+    "assay.experiment.agent_observability_fidelity.calibration.v0"
+)
 OTEL_SPAN_EVENT_COUNT_LIMIT_ENV = "OTEL_SPAN_EVENT_COUNT_LIMIT"
 DEFAULT_OTEL_SPAN_EVENT_COUNT_LIMIT = 128
 DEFAULT_ARM = "arm-b-otel"
@@ -69,6 +72,19 @@ SWEEP_PAYLOAD_BYTES = {
     "small": 128,
     "medium": 4096,
     "large": 65536,
+}
+AGREEMENT_ORDER = {
+    "not_applicable": 0,
+    "match": 1,
+    "clipped": 2,
+    "drift": 3,
+    "failed": 4,
+}
+STATUS_ORDER = {
+    "not_applicable": 0,
+    "clean": 1,
+    "lossy": 2,
+    "inconclusive": 3,
 }
 
 
@@ -201,6 +217,195 @@ def load_phase_timings(path: Path) -> dict[str, float] | None:
         if key in PHASE_TIMING_KEYS and isinstance(value, (int, float)):
             parsed[key] = float(value)
     return parsed or None
+
+
+def iter_json_strings(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        strings: list[str] = []
+        for item in value:
+            strings.extend(iter_json_strings(item))
+        return strings
+    if isinstance(value, dict):
+        strings = []
+        for item in value.values():
+            strings.extend(iter_json_strings(item))
+        return strings
+    return []
+
+
+def count_kernel_worker_paths(archive_contents: Path) -> int | None:
+    kernel_path = archive_contents / "layers" / "kernel.ndjson"
+    if not kernel_path.exists():
+        return None
+    workers: set[str] = set()
+    pattern = re.compile(r"event-rate-sweep/worker-[^\"'\s]+\.txt")
+    for line in kernel_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            workers.update(pattern.findall(line))
+            continue
+        for value in iter_json_strings(payload):
+            workers.update(pattern.findall(value))
+    return len(workers)
+
+
+def iter_otel_spans(payload: Any) -> list[dict[str, Any]]:
+    spans: list[dict[str, Any]] = []
+    if not isinstance(payload, dict):
+        return spans
+    for resource_span in payload.get("resourceSpans", []):
+        if not isinstance(resource_span, dict):
+            continue
+        scope_spans = resource_span.get("scopeSpans")
+        if scope_spans is None:
+            scope_spans = resource_span.get("instrumentationLibrarySpans", [])
+        for scope_span in scope_spans:
+            if not isinstance(scope_span, dict):
+                continue
+            for span in scope_span.get("spans", []):
+                if isinstance(span, dict):
+                    spans.append(span)
+    return spans
+
+
+def count_otel_sweep_span_events(trace_path: Path) -> int | None:
+    if not trace_path.exists():
+        return None
+    try:
+        payload = json.loads(trace_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    count = 0
+    for span in iter_otel_spans(payload):
+        for event in span.get("events", []):
+            if isinstance(event, dict) and event.get("name") == "assay.sweep.span_event":
+                count += 1
+    return count
+
+
+def agreement_status(agreement: str) -> str:
+    if agreement == "match":
+        return "clean"
+    if agreement == "clipped":
+        return "lossy"
+    if agreement in {"drift", "failed"}:
+        return "inconclusive"
+    return "not_applicable"
+
+
+def worst_status(values: list[str]) -> str:
+    if not values:
+        return "not_applicable"
+    return max(values, key=lambda value: STATUS_ORDER[value])
+
+
+def worst_agreement(values: list[str]) -> str:
+    if not values:
+        return "not_applicable"
+    return max(values, key=lambda value: AGREEMENT_ORDER[value])
+
+
+def build_count_calibration(
+    *,
+    target: int,
+    observed: int | None,
+    method: str | None,
+    applicable: bool,
+    effective_limit: int | None = None,
+    effective_limit_source: str | None = None,
+) -> dict[str, Any]:
+    if not applicable:
+        agreement = "not_applicable"
+    elif observed is None:
+        agreement = "failed"
+    elif observed == target:
+        agreement = "match"
+    elif (
+        effective_limit is not None
+        and target > effective_limit
+        and observed == effective_limit
+    ):
+        agreement = "clipped"
+    else:
+        agreement = "drift"
+
+    payload: dict[str, Any] = {
+        "target": target,
+        "observed": observed,
+        "method": method,
+        "agreement": agreement,
+    }
+    if effective_limit is not None:
+        payload["effective_limit"] = effective_limit
+    if effective_limit_source is not None:
+        payload["effective_limit_source"] = effective_limit_source
+    if target is not None and observed is not None and target > observed:
+        payload["dropped_estimate"] = target - observed
+    return payload
+
+
+def fidelity_verdict(
+    *,
+    kernel_agreement: str,
+    span_agreement: str,
+) -> dict[str, str]:
+    runner_capture = agreement_status(kernel_agreement)
+    otel_capture = agreement_status(span_agreement)
+    return {
+        "runner_capture": runner_capture,
+        "otel_capture": otel_capture,
+        "overall": worst_status([runner_capture, otel_capture]),
+    }
+
+
+def build_fidelity_calibration(
+    *,
+    arm: str,
+    event_rate_sweep: dict[str, Any] | None,
+    archive_contents: Path,
+    trace_path: Path,
+) -> dict[str, Any] | None:
+    if event_rate_sweep is None:
+        return None
+
+    kernel_applicable = arm in {ARM_A, ARM_C} and (
+        event_rate_sweep["target_kernel_events"] > 0
+    )
+    kernel_events = build_count_calibration(
+        target=int(event_rate_sweep["target_kernel_events"]),
+        observed=count_kernel_worker_paths(archive_contents)
+        if kernel_applicable
+        else None,
+        method="kernel_ndjson_path_match_count" if kernel_applicable else None,
+        applicable=kernel_applicable,
+    )
+
+    span_applicable = arm in {ARM_B, ARM_C} and (
+        event_rate_sweep["target_span_events"] > 0
+    )
+    span_events = build_count_calibration(
+        target=int(event_rate_sweep["target_span_events"]),
+        observed=count_otel_sweep_span_events(trace_path) if span_applicable else None,
+        method="otel_trace_json_events_count" if span_applicable else None,
+        applicable=span_applicable,
+        effective_limit=event_rate_sweep.get("span_event_limit_effective"),
+        effective_limit_source=event_rate_sweep.get("span_event_limit_source"),
+    )
+    verdict = fidelity_verdict(
+        kernel_agreement=str(kernel_events["agreement"]),
+        span_agreement=str(span_events["agreement"]),
+    )
+    return {
+        "schema": FIDELITY_CALIBRATION_SCHEMA,
+        "kind": "sample",
+        "calibration_status": verdict["overall"],
+        "fidelity_verdict": verdict,
+        "kernel_events": kernel_events,
+        "span_events": span_events,
+    }
 
 
 def event_rate_sweep_config(args: argparse.Namespace) -> dict[str, Any] | None:
@@ -547,6 +752,12 @@ def one_sample(
         extract_archive(archive_path, archive_contents)
         health = load_archive_health(archive_contents)
         archive_extracted = directory_size(archive_contents)
+    fidelity_calibration = build_fidelity_calibration(
+        arm=arm,
+        event_rate_sweep=sample_event_rate_sweep,
+        archive_contents=archive_contents,
+        trace_path=trace_path,
+    )
 
     return {
         "schema": SAMPLE_SCHEMA,
@@ -564,6 +775,7 @@ def one_sample(
         "health": health,
         "phase_timings_ms": load_phase_timings(phase_timing_path),
         "event_rate_sweep": sample_event_rate_sweep,
+        "fidelity_calibration": fidelity_calibration,
         "artifact_bytes": {
             "trace_json": file_size(trace_path),
             "archive_targz": archive_targz,
@@ -629,6 +841,7 @@ def summarize(
     wall_median = median(wall)
     wall_p99 = percentile(wall, 99)
     phase_timings = summarize_phase_timings(valid)
+    fidelity_calibration = summarize_fidelity_calibrations(valid)
     first = samples[0] if samples else {}
     return {
         "schema": SUMMARY_SCHEMA,
@@ -662,6 +875,7 @@ def summarize(
         },
         "phase_timings_ms": phase_timings,
         "event_rate_sweep": first.get("event_rate_sweep"),
+        "fidelity_calibration": fidelity_calibration,
     }
 
 
@@ -683,6 +897,93 @@ def summarize_phase_timings(
                 "p99": percentile(values, 99),
             }
     return summary or None
+
+
+def summarize_count_calibration(
+    samples: list[dict[str, Any]],
+    key: str,
+) -> dict[str, Any] | None:
+    rows = [
+        sample["fidelity_calibration"][key]
+        for sample in samples
+        if isinstance(sample.get("fidelity_calibration"), dict)
+        and isinstance(sample["fidelity_calibration"].get(key), dict)
+    ]
+    if not rows:
+        return None
+    observed_values = [
+        int(row["observed"])
+        for row in rows
+        if isinstance(row.get("observed"), int)
+    ]
+    agreement_counts = {
+        agreement: sum(1 for row in rows if row.get("agreement") == agreement)
+        for agreement in AGREEMENT_ORDER
+        if any(row.get("agreement") == agreement for row in rows)
+    }
+    target_values = [
+        int(row["target"])
+        for row in rows
+        if isinstance(row.get("target"), int)
+    ]
+    summary: dict[str, Any] = {
+        "target": target_values[0] if target_values else None,
+        "observed_min": min(observed_values) if observed_values else None,
+        "observed_max": max(observed_values) if observed_values else None,
+        "method": rows[0].get("method"),
+        "agreement": worst_agreement(
+            [str(row.get("agreement", "not_applicable")) for row in rows]
+        ),
+        "agreement_counts": agreement_counts,
+    }
+    effective_limits = [
+        int(row["effective_limit"])
+        for row in rows
+        if isinstance(row.get("effective_limit"), int)
+    ]
+    if effective_limits:
+        summary["effective_limit"] = effective_limits[0]
+    effective_limit_source = next(
+        (
+            row.get("effective_limit_source")
+            for row in rows
+            if row.get("effective_limit_source") is not None
+        ),
+        None,
+    )
+    if effective_limit_source is not None:
+        summary["effective_limit_source"] = effective_limit_source
+    return summary
+
+
+def summarize_fidelity_calibrations(
+    samples: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    calibrations = [
+        sample["fidelity_calibration"]
+        for sample in samples
+        if isinstance(sample.get("fidelity_calibration"), dict)
+    ]
+    if not calibrations:
+        return None
+    kernel_events = summarize_count_calibration(samples, "kernel_events")
+    span_events = summarize_count_calibration(samples, "span_events")
+    kernel_agreement = (
+        str(kernel_events["agreement"]) if kernel_events else "not_applicable"
+    )
+    span_agreement = str(span_events["agreement"]) if span_events else "not_applicable"
+    verdict = fidelity_verdict(
+        kernel_agreement=kernel_agreement,
+        span_agreement=span_agreement,
+    )
+    return {
+        "schema": FIDELITY_CALIBRATION_SCHEMA,
+        "kind": "summary",
+        "calibration_status": verdict["overall"],
+        "fidelity_verdict": verdict,
+        "kernel_events": kernel_events,
+        "span_events": span_events,
+    }
 
 
 def bmf_export(summary: dict[str, Any]) -> dict[str, dict[str, float | int]]:
@@ -775,6 +1076,17 @@ def write_run_outputs(
                 sample["phase_timings_ms"]
                 for sample in samples
                 if sample.get("phase_timings_ms") is not None
+            ],
+        },
+    )
+    write_json(
+        artifacts_dir / f"fidelity-calibration{artifact_suffix}.json",
+        {
+            "arm": arm,
+            "fidelity_calibration": [
+                sample["fidelity_calibration"]
+                for sample in samples
+                if sample.get("fidelity_calibration") is not None
             ],
         },
     )
@@ -917,6 +1229,7 @@ def summary_markdown(summary: dict[str, Any], *, artifact_name: str | None = Non
     artifacts = summary["artifact_bytes"]
     phase_timings = summary.get("phase_timings_ms")
     event_rate_sweep = summary.get("event_rate_sweep")
+    fidelity_calibration = summary.get("fidelity_calibration")
     tail_ratio = wall["p99_over_median"]
     lines = [
         "## Runner-vs-OTel Overhead Summary",
@@ -959,6 +1272,36 @@ def summary_markdown(summary: dict[str, Any], *, artifact_name: str | None = Non
             lines.append(
                 "| OTel span event warning | "
                 f"`{event_rate_sweep['span_event_limit_warning']}` |"
+            )
+    if isinstance(fidelity_calibration, dict):
+        verdict = fidelity_calibration.get("fidelity_verdict", {})
+        lines.append(
+            "| Fidelity calibration | "
+            f"`{fidelity_calibration.get('calibration_status')}` |"
+        )
+        if isinstance(verdict, dict):
+            lines.append(
+                "| Fidelity verdict | "
+                f"`runner={verdict.get('runner_capture')}; "
+                f"otel={verdict.get('otel_capture')}; "
+                f"overall={verdict.get('overall')}` |"
+            )
+        for label, key in (
+            ("Kernel event calibration", "kernel_events"),
+            ("Span event calibration", "span_events"),
+        ):
+            row = fidelity_calibration.get(key)
+            if not isinstance(row, dict):
+                continue
+            observed = (
+                f"{row.get('observed_min')}..{row.get('observed_max')}"
+                if row.get("observed_min") != row.get("observed_max")
+                else str(row.get("observed_min"))
+            )
+            lines.append(
+                f"| {label} | "
+                f"`target={row.get('target')}; observed={observed}; "
+                f"agreement={row.get('agreement')}; method={row.get('method')}` |"
             )
     if isinstance(phase_timings, dict) and phase_timings:
         lines.extend(

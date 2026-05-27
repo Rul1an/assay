@@ -13,7 +13,8 @@ Assay experiments now emit several useful but local artifact families:
   event-rate sweep cells;
 - cross-runtime drift reports and fixtures;
 - observability join and claim-class reference rows;
-- planned fidelity-calibration and evidence-pack artifacts.
+- active fidelity-calibration sidecars and planned evidence-pack
+  artifacts.
 
 Without a naming and promotion rule, each new slice can create a locally
 reasonable schema that is hard to compare across arcs later. This doc
@@ -116,6 +117,8 @@ Recommended nested shape:
 ```json
 {
   "schema": "assay.experiment.agent_observability_fidelity.calibration.v0",
+  "kind": "sample",
+  "calibration_status": "lossy",
   "fidelity_verdict": {
     "runner_capture": "clean",
     "otel_capture": "clipped",
@@ -124,7 +127,7 @@ Recommended nested shape:
   "kernel_events": {
     "target": 1000,
     "observed": 1000,
-    "method": "archive_contents_worker_files_count",
+    "method": "kernel_ndjson_path_match_count",
     "agreement": "match"
   },
   "span_events": {
@@ -133,7 +136,7 @@ Recommended nested shape:
     "method": "otel_trace_json_events_count",
     "agreement": "clipped",
     "effective_limit": 128,
-    "effective_limit_source": "otel_sdk_default"
+    "effective_limit_source": "default"
   }
 }
 ```
@@ -142,6 +145,18 @@ Recommended nested shape:
 objects are the reproducibility layer. Keep both: a reviewer should see
 the verdict quickly, while an auditor can still see how every count was
 produced.
+
+### Vocabulary Alignment
+
+The calibration shape uses two vocabulary levels. Per-measurement
+`agreement` uses `match`, `clipped`, `drift`, `failed`, or
+`not_applicable`. The per-layer `fidelity_verdict` and top-level
+`calibration_status` use `clean`, `lossy`, `inconclusive`, or
+`not_applicable`. Agreement rolls up to status as follows:
+`match -> clean`, `clipped -> lossy`, `drift` or `failed ->
+inconclusive`, and `not_applicable -> not_applicable`. Layer statuses
+roll up to the overall status by worst case:
+`not_applicable < clean < lossy < inconclusive`.
 
 Allowed `agreement` values:
 

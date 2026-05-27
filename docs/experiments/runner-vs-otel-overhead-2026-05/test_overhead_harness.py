@@ -139,9 +139,21 @@ const get = (name) => {
 };
 const traceOut = get("trace-out");
 const workDir = get("work-dir");
+const sweepSpanEvents = Number.parseInt(get("sweep-span-events") ?? "0", 10);
 fs.mkdirSync(path.dirname(traceOut), { recursive: true });
 fs.mkdirSync(workDir, { recursive: true });
-fs.writeFileSync(traceOut, JSON.stringify({ resourceSpans: [] }) + "\\n");
+fs.writeFileSync(traceOut, JSON.stringify({
+  resourceSpans: [{
+    scopeSpans: [{
+      spans: [{
+        events: Array.from({ length: sweepSpanEvents }, (_, index) => ({
+          name: "assay.sweep.span_event",
+          attributes: [{ key: "assay.sweep.index", value: { intValue: String(index) } }]
+        }))
+      }]
+    }]
+  }]
+}) + "\\n");
 """.strip()
         + "\n",
         encoding="utf-8",
@@ -154,6 +166,7 @@ def write_fake_assay(root: Path) -> Path:
         """
 #!/usr/bin/env python3
 import json
+import os
 import sys
 import tarfile
 import tempfile
@@ -169,9 +182,29 @@ if "--" in args:
     child = args[args.index("--") + 1:]
     if "--trace-out" in child:
         trace = Path(child[child.index("--trace-out") + 1])
+    sweep_span_events = 0
+    if "--sweep-span-events" in child:
+        sweep_span_events = int(child[child.index("--sweep-span-events") + 1])
+    work_dir = None
+    if "--work-dir" in child:
+        work_dir = Path(child[child.index("--work-dir") + 1])
+else:
+    sweep_span_events = 0
+    work_dir = None
 if trace is not None:
     trace.parent.mkdir(parents=True, exist_ok=True)
-    trace.write_text(json.dumps({"resourceSpans": []}) + "\\n", encoding="utf-8")
+    trace.write_text(json.dumps({
+        "resourceSpans": [{
+            "scopeSpans": [{
+                "spans": [{
+                    "events": [
+                        {"name": "assay.sweep.span_event", "attributes": []}
+                        for _ in range(sweep_span_events)
+                    ]
+                }]
+            }]
+        }]
+    }) + "\\n", encoding="utf-8")
 if phase_timing is not None:
     phase_timing.parent.mkdir(parents=True, exist_ok=True)
     phase_timing.write_text(json.dumps({
@@ -203,8 +236,21 @@ with tempfile.TemporaryDirectory() as tmp:
         }) + "\\n",
         encoding="utf-8",
     )
+    kernel_events = int(os.environ.get("ASSAY_SWEEP_KERNEL_EVENTS", "0"))
+    if kernel_events > 0:
+        kernel = root / "layers" / "kernel.ndjson"
+        kernel.parent.mkdir(parents=True, exist_ok=True)
+        lines = []
+        for index in range(kernel_events):
+            lines.append(json.dumps({
+                "kind": "openat",
+                "path": f"/tmp/work/event-rate-sweep/worker-0-{index}.txt"
+            }))
+        kernel.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
     with tarfile.open(output, "w:gz") as tar:
-        tar.add(root / "observation-health.json", arcname="observation-health.json")
+        for child in root.rglob("*"):
+            if child.is_file():
+                tar.add(child, arcname=str(child.relative_to(root)))
 """.lstrip(),
         encoding="utf-8",
     )
@@ -238,6 +284,7 @@ class OverheadHarnessTests(unittest.TestCase):
             "health": None,
             "phase_timings_ms": None,
             "event_rate_sweep": None,
+            "fidelity_calibration": None,
             "artifact_bytes": {
                 "trace_json": 123,
                 "archive_targz": None,
@@ -327,6 +374,232 @@ class OverheadHarnessTests(unittest.TestCase):
             ),
         }
         assert_matches_schema(self, payload, schema, root=schema)
+
+    def test_fidelity_calibration_schema_accepts_sample_and_summary(self) -> None:
+        schema = load_schema("fidelity-calibration-v0.schema.json")
+        sample = {
+            "schema": overhead_harness.FIDELITY_CALIBRATION_SCHEMA,
+            "kind": "sample",
+            "calibration_status": "lossy",
+            "fidelity_verdict": {
+                "runner_capture": "clean",
+                "otel_capture": "lossy",
+                "overall": "lossy",
+            },
+            "kernel_events": {
+                "target": 1000,
+                "observed": 1000,
+                "method": "kernel_ndjson_path_match_count",
+                "agreement": "match",
+            },
+            "span_events": {
+                "target": 500,
+                "observed": 128,
+                "method": "otel_trace_json_events_count",
+                "agreement": "clipped",
+                "effective_limit": 128,
+                "effective_limit_source": "default",
+                "dropped_estimate": 372,
+            },
+        }
+        summary = {
+            "schema": overhead_harness.FIDELITY_CALIBRATION_SCHEMA,
+            "kind": "summary",
+            "calibration_status": "clean",
+            "fidelity_verdict": {
+                "runner_capture": "clean",
+                "otel_capture": "not_applicable",
+                "overall": "clean",
+            },
+            "kernel_events": {
+                "target": 1000,
+                "observed_min": 1000,
+                "observed_max": 1000,
+                "method": "kernel_ndjson_path_match_count",
+                "agreement": "match",
+                "agreement_counts": {"match": 5},
+            },
+            "span_events": {
+                "target": 0,
+                "observed_min": None,
+                "observed_max": None,
+                "method": None,
+                "agreement": "not_applicable",
+                "agreement_counts": {"not_applicable": 5},
+                "effective_limit": 128,
+                "effective_limit_source": "default",
+            },
+        }
+        assert_matches_schema(self, sample, schema, root=schema)
+        assert_matches_schema(self, summary, schema, root=schema)
+
+    def test_fidelity_count_helpers_count_kernel_paths_and_trace_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            kernel = root / "archive" / "layers" / "kernel.ndjson"
+            kernel.parent.mkdir(parents=True)
+            kernel.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "path": "/tmp/work/event-rate-sweep/worker-0-0.txt"
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "args": [
+                                    "/tmp/work/event-rate-sweep/worker-1-1.txt"
+                                ]
+                            }
+                        ),
+                        "raw event-rate-sweep/worker-1-1.txt duplicate",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            trace = root / "trace.json"
+            trace.write_text(
+                json.dumps(
+                    {
+                        "resourceSpans": [
+                            {
+                                "scopeSpans": [
+                                    {
+                                        "spans": [
+                                            {
+                                                "events": [
+                                                    {"name": "assay.sweep.span_event"},
+                                                    {"name": "other"},
+                                                    {"name": "assay.sweep.span_event"},
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                overhead_harness.count_kernel_worker_paths(root / "archive"),
+                2,
+            )
+            self.assertEqual(overhead_harness.count_otel_sweep_span_events(trace), 2)
+
+    def test_fidelity_trace_counter_accepts_legacy_instrumentation_library_spans(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = Path(tmp) / "trace.json"
+            trace.write_text(
+                json.dumps(
+                    {
+                        "resourceSpans": [
+                            {
+                                "instrumentationLibrarySpans": [
+                                    {
+                                        "spans": [
+                                            {
+                                                "events": [
+                                                    {"name": "assay.sweep.span_event"}
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(overhead_harness.count_otel_sweep_span_events(trace), 1)
+
+    def test_build_fidelity_calibration_marks_span_limit_clipping(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            trace = root / "trace.json"
+            trace.write_text(
+                json.dumps(
+                    {
+                        "resourceSpans": [
+                            {
+                                "scopeSpans": [
+                                    {
+                                        "spans": [
+                                            {
+                                                "events": [
+                                                    {"name": "assay.sweep.span_event"}
+                                                    for _ in range(128)
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            config = {
+                "target_kernel_events": 0,
+                "target_span_events": 500,
+                "span_event_limit_effective": 128,
+                "span_event_limit_source": "default",
+            }
+
+            calibration = overhead_harness.build_fidelity_calibration(
+                arm=overhead_harness.ARM_C,
+                event_rate_sweep=config,
+                archive_contents=root / "archive",
+                trace_path=trace,
+            )
+
+        self.assertEqual(calibration["span_events"]["observed"], 128)
+        self.assertEqual(calibration["span_events"]["agreement"], "clipped")
+        self.assertEqual(calibration["calibration_status"], "lossy")
+
+    def test_build_fidelity_calibration_marks_under_limit_loss_as_drift(self) -> None:
+        span = overhead_harness.build_count_calibration(
+            target=500,
+            observed=0,
+            method="otel_trace_json_events_count",
+            applicable=True,
+            effective_limit=128,
+            effective_limit_source="default",
+        )
+
+        self.assertEqual(span["agreement"], "drift")
+
+    def test_build_fidelity_calibration_marks_arm_a_span_not_applicable(self) -> None:
+        config = {
+            "target_kernel_events": 0,
+            "target_span_events": 0,
+            "span_event_limit_effective": 128,
+            "span_event_limit_source": "default",
+        }
+        calibration = overhead_harness.build_fidelity_calibration(
+            arm=overhead_harness.ARM_A,
+            event_rate_sweep=config,
+            archive_contents=Path("/does/not/exist"),
+            trace_path=Path("/does/not/exist"),
+        )
+
+        self.assertEqual(calibration["span_events"]["agreement"], "not_applicable")
+        self.assertEqual(
+            calibration["fidelity_verdict"]["otel_capture"],
+            "not_applicable",
+        )
 
     def test_event_rate_sweep_config_maps_levels_to_targets(self) -> None:
         args = type(
@@ -820,7 +1093,19 @@ class OverheadHarnessTests(unittest.TestCase):
                 "span_event_limit_warning",
                 sample["event_rate_sweep"],
             )
+            self.assertEqual(
+                sample["fidelity_calibration"]["span_events"]["agreement"],
+                "match",
+            )
+            self.assertEqual(
+                sample["fidelity_calibration"]["fidelity_verdict"]["overall"],
+                "clean",
+            )
             self.assertEqual(summary["event_rate_sweep"], sample["event_rate_sweep"])
+            self.assertEqual(
+                summary["fidelity_calibration"]["calibration_status"],
+                "clean",
+            )
 
     def test_harness_records_warmup_samples_outside_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
