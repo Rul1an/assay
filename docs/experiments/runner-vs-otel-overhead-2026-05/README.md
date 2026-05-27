@@ -281,6 +281,15 @@ interpret span-event timing above the limit unless
 `OTEL_SPAN_EVENT_COUNT_LIMIT` was raised and retained event counts were
 verified first.
 
+The harness now also embeds
+`assay.experiment.agent_observability_fidelity.calibration.v0` in
+non-baseline sweep samples and summaries. That calibration records the
+requested target, observed count, counting method, and agreement for
+Runner kernel worker paths in `layers/kernel.ndjson` and OTel span
+events in trace JSON. Summary Markdown surfaces the resulting
+`fidelity_verdict` so timing or throughput claims cannot be read before
+target-vs-observed fidelity is checked.
+
 That boundary-finding sweep has now been dispatched and summarized in
 [`findings.md`](findings.md):
 

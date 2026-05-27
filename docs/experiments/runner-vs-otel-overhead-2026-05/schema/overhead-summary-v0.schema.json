@@ -95,6 +95,16 @@
           "$ref": "#/$defs/event_rate_sweep"
         }
       ]
+    },
+    "fidelity_calibration": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/fidelity_calibration_summary"
+        }
+      ]
     }
   },
   "$defs": {
@@ -296,6 +306,185 @@
         "span_event_limit_warning": {
           "type": "string",
           "minLength": 1
+        }
+      }
+    },
+    "fidelity_verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runner_capture",
+        "otel_capture",
+        "overall"
+      ],
+      "properties": {
+        "runner_capture": {
+          "$ref": "#/$defs/calibration_status"
+        },
+        "otel_capture": {
+          "$ref": "#/$defs/calibration_status"
+        },
+        "overall": {
+          "$ref": "#/$defs/calibration_status"
+        }
+      }
+    },
+    "calibration_status": {
+      "enum": [
+        "clean",
+        "lossy",
+        "inconclusive",
+        "not_applicable"
+      ]
+    },
+    "calibration_agreement": {
+      "enum": [
+        "match",
+        "clipped",
+        "drift",
+        "failed",
+        "not_applicable"
+      ]
+    },
+    "calibration_method": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "archive_contents_worker_files_count",
+            "kernel_ndjson_path_match_count",
+            "otel_trace_json_events_count",
+            "fixture_side_log_count"
+          ]
+        }
+      ]
+    },
+    "agreement_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "match": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "clipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "drift": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_applicable": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "count_calibration_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "observed_min",
+        "observed_max",
+        "method",
+        "agreement",
+        "agreement_counts"
+      ],
+      "properties": {
+        "target": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "observed_min": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "observed_max": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "method": {
+          "$ref": "#/$defs/calibration_method"
+        },
+        "agreement": {
+          "$ref": "#/$defs/calibration_agreement"
+        },
+        "agreement_counts": {
+          "$ref": "#/$defs/agreement_counts"
+        },
+        "effective_limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "effective_limit_source": {
+          "enum": [
+            "default",
+            "env",
+            "invalid-env"
+          ]
+        }
+      }
+    },
+    "fidelity_calibration_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "kind",
+        "calibration_status",
+        "fidelity_verdict",
+        "kernel_events",
+        "span_events"
+      ],
+      "properties": {
+        "schema": {
+          "const": "assay.experiment.agent_observability_fidelity.calibration.v0"
+        },
+        "kind": {
+          "const": "summary"
+        },
+        "calibration_status": {
+          "$ref": "#/$defs/calibration_status"
+        },
+        "fidelity_verdict": {
+          "$ref": "#/$defs/fidelity_verdict"
+        },
+        "kernel_events": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/count_calibration_summary"
+            }
+          ]
+        },
+        "span_events": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/count_calibration_summary"
+            }
+          ]
         }
       }
     }

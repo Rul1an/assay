@@ -45,11 +45,13 @@
 | `assay.experiment.runner_phase_timing.v0` | Phase-timing side-log emitted by `assay runner-spike run --phase-timing-log` | experiment-scoped; sidecar active | [`runner-phase-timing-v0.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/runner-phase-timing-v0.schema.json) |
 | `assay.experiment.event_rate_sweep.v0` | Event-rate/workload-intensity cell metadata embedded in overhead samples and summaries | experiment-scoped; sidecar active; Slice 10 smoke-verified | [`event-rate-sweep-v0.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/event-rate-sweep-v0.schema.json) |
 | `assay.experiment.event_rate_sweep.v0.1` | Event-rate/workload-intensity cell metadata with Slice 12 extended targets | experiment-scoped; sidecar active; Slice 12 measured | [`event-rate-sweep-v0.1.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/event-rate-sweep-v0.1.schema.json) |
+| `assay.experiment.agent_observability_fidelity.calibration.v0` | Requested-vs-observed fidelity calibration embedded in overhead samples and summaries | experiment-scoped; sidecar active; fidelity guardrail harness-ready | [`fidelity-calibration-v0.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/fidelity-calibration-v0.schema.json) |
 
 The overhead schemas remain experiment-scoped. They are validated by the
 local harness tests against synthetic samples, summaries, phase
-side-logs, and event-rate sweep cells, but they are not Runner archive contracts and are not
-promoted to stable product surface.
+side-logs, event-rate sweep cells, and fidelity calibration sidecars,
+but they are not Runner archive contracts and are not promoted to stable
+product surface.
 
 ## Version Notes
 
