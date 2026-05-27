@@ -337,6 +337,38 @@ configuration, so the apparent wall-clock and trace-size behavior above
 trace records. It is evidence that the default OTel span limit preserves
 only 128 events.
 
+Mechanism verification:
+
+- The OpenTelemetry SDK environment-variable specification defines
+  `OTEL_SPAN_EVENT_COUNT_LIMIT` as the maximum span-event count, with
+  default `128`:
+  <https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#span-limits>.
+- The OpenTelemetry Trace SDK specification likewise defines
+  `EventCountLimit (Default=128)` under Span Limits:
+  <https://opentelemetry.io/docs/specs/otel/trace/sdk/#span-limits>.
+- The checked-in workload declares `@opentelemetry/sdk-trace-base@^2.0.0`
+  in
+  [`workload/package.json`](../runner-vs-otel-2026-05/workload/package.json),
+  and the v1 findings record that dependency as resolved to `2.7.x` at
+  install time. Its
+  [`BasicTracerProvider` setup](../runner-vs-otel-2026-05/workload/src/otel-setup.ts)
+  does not pass a custom `spanLimits` override, so default SDK limits
+  apply unless the environment overrides them.
+- The retained event indexes prove the cap is on span events, not on the
+  Runner archive or JSON writer. For `s500`, every Arm C measured trace
+  retained indexes `372..499`; for `s1000` and `corner-lite`, every Arm C
+  measured trace retained indexes `872..999`. That is the last 128
+  events, matching the OTel JS behavior of dropping the oldest event once
+  `eventCountLimit` is reached. This last-N pattern is consistent with
+  FIFO truncation under Span Limits, not with random sampling, first-N
+  truncation, or JSON serialization loss.
+- A local workload repro confirmed the mechanism: with
+  `OTEL_SPAN_EVENT_COUNT_LIMIT` unset, `--sweep-span-events 500`
+  retained 128 events (`372..499`); with
+  `OTEL_SPAN_EVENT_COUNT_LIMIT=1000`, the same workload retained all 500
+  events (`0..499`). With target 1000 and limit 1000, it retained all
+  1000 events (`0..999`).
+
 The `corner-lite` cell is therefore a mixed result: Runner kernel
 capture stayed healthy at 1000 worker files with large payloads and
 concurrency 8, but the OTel span side was already lossy at 128/1000
@@ -347,16 +379,24 @@ retained events carried 64 KiB payloads, but the cell cannot support a
 The Slice 12 boundary result is:
 
 - **Kernel side:** healthy through `x1000` kernel events and concurrency
-  16 on this host class, at `n=5` and without RSS collection.
+  16 on this host class, at `n=5` and without RSS collection. Artifact
+  inspection found exactly 500/500 unique worker files in `k500` and
+  1000/1000 in `k1000`, `kc1000`, and `corner-lite`, for both Arm A and
+  Arm C, counted from `event-rate-sweep/worker-*` entries in extracted
+  archive contents.
 - **Span side:** first widened span cell (`s500`) is a trace-fidelity
   boundary under the default OTel JS SDK limits: 128/500 events retained.
+  Arm A remains correctly asymmetric in these paired cells: it has no
+  OTel trace export and records span pressure as `baseline` / `0`.
 - **Corner side:** combined kernel + span stress is bounded by the same
   span-fidelity limit, not by Runner health.
 
 That closes the current event-rate arc for the default configuration.
 A future experiment can deliberately raise `OTEL_SPAN_EVENT_COUNT_LIMIT`
 and rerun the span cells, but that would be a new span-limit study, not
-a continuation of the default-config boundary sweep.
+a continuation of the default-config boundary sweep. That follow-up is
+tracked separately in
+[issue #1408](https://github.com/Rul1an/assay/issues/1408).
 
 ## What This Means
 
@@ -451,4 +491,6 @@ The only logical follow-up is a new, explicitly scoped span-limit study:
 configure the OTel SDK span-event limit above the requested target,
 verify retained event counts first, and then rerun only the span cells
 needed to answer whether trace export cost scales after the fidelity
-boundary is removed.
+boundary is removed. Track that as
+[issue #1408](https://github.com/Rul1an/assay/issues/1408), outside the
+closed default-config overhead arc.

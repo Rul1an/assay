@@ -108,6 +108,10 @@ All notable changes to this project will be documented in this file.
   through `x1000` / concurrency 16, while widened OTel span-event cells
   hit the default 128-event retention boundary at `s500`, so no timing
   slope is published beyond that span-fidelity limit.
+- Verified the Slice 12 span-fidelity mechanism against the
+  OpenTelemetry Span Limits default, retained event-index ranges, and a
+  local `OTEL_SPAN_EVENT_COUNT_LIMIT=1000` repro before treating the
+  128-event cap as an OTel SDK configuration boundary.
 
 ## [3.12.0] - 2026-05-25
 

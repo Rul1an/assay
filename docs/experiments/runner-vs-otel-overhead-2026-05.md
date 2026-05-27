@@ -799,12 +799,17 @@ Slice 12 result:
 - Arm C span-event fidelity failed at the first widened span cell:
   `s500` retained 128/500 `assay.sweep.span_event` entries per sample,
   and `s1000` / `corner-lite` retained 128/1000. This matches the
-  default OpenTelemetry JS SDK span-event count limit for the workload
-  configuration.
+  default OpenTelemetry Span Limits setting
+  `OTEL_SPAN_EVENT_COUNT_LIMIT=128` for the workload's
+  `@opentelemetry/sdk-trace-base@^2.0.0` configuration; the checked-in
+  v1 findings record that dependency as resolved to `2.7.x`, and local
+  repros retained all requested events after raising the limit to 1000.
 - Therefore the current arc closes with a split boundary statement:
   Runner kernel capture is healthy through the widened kernel cells, but
   default OTel span-event retention becomes the limiting fidelity
   boundary before span timing can be interpreted above 100 events.
+  A separate OTel span-limit characterization follow-up is tracked in
+  [issue #1408](https://github.com/Rul1an/assay/issues/1408).
 
 ## Non-Claims
 
@@ -831,7 +836,7 @@ Slice 12 result:
 | 9 | **Done**: paired Arm A/C residual diagnostics via workflow `arm=paired-a-c`, dispatched in run [26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306) | residuals shrink/change sign under pairing; wall-clock decomposition remains unpublished and should stop at this measurement budget |
 | 10 | **Smoke-verified**: controlled event-rate / workload-intensity sweep via workflow inputs and sample/summary metadata, with paired smoke runs [26508127380](https://github.com/Rul1an/assay/actions/runs/26508127380) and [26508355816](https://github.com/Rul1an/assay/actions/runs/26508355816) | no broad rerun; dispatch only a small matrix first, with kernel-event count, span/event count, concurrency, phase timing, residual, RSS, and health gates reported by level |
 | 11 | **Done**: predeclared Slice 11 starter matrix with five paired A/C cells: control, kernel-high, span-high, kernel-concurrent, and corner, dispatched in runs [26511405031](https://github.com/Rul1an/assay/actions/runs/26511405031), [26511787316](https://github.com/Rul1an/assay/actions/runs/26511787316), [26512146963](https://github.com/Rul1an/assay/actions/runs/26512146963), [26512515478](https://github.com/Rul1an/assay/actions/runs/26512515478), and [26512909068](https://github.com/Rul1an/assay/actions/runs/26512909068) | all cells 5/5 valid per arm with clean health gates; event counts matched targets; no health boundary reached at the starter matrix budget |
-| 12 | **Done**: boundary-finding sweep with extended `x500` / `x1000` targets, dispatched in runs [26517696032](https://github.com/Rul1an/assay/actions/runs/26517696032), [26518158603](https://github.com/Rul1an/assay/actions/runs/26518158603), [26518522754](https://github.com/Rul1an/assay/actions/runs/26518522754), [26518894002](https://github.com/Rul1an/assay/actions/runs/26518894002), [26519398461](https://github.com/Rul1an/assay/actions/runs/26519398461), and [26520226593](https://github.com/Rul1an/assay/actions/runs/26520226593) | kernel branch healthy through `x1000` / concurrency 16; span branch hits default OTel 128-event fidelity boundary at `s500`; no timing slope above that span boundary |
+| 12 | **Done**: boundary-finding sweep with extended `x500` / `x1000` targets, dispatched in runs [26517696032](https://github.com/Rul1an/assay/actions/runs/26517696032), [26518158603](https://github.com/Rul1an/assay/actions/runs/26518158603), [26518522754](https://github.com/Rul1an/assay/actions/runs/26518522754), [26518894002](https://github.com/Rul1an/assay/actions/runs/26518894002), [26519398461](https://github.com/Rul1an/assay/actions/runs/26519398461), and [26520226593](https://github.com/Rul1an/assay/actions/runs/26520226593) | kernel branch healthy through `x1000` / concurrency 16; span branch hits default OTel 128-event fidelity boundary at `s500`; no timing slope above that span boundary; [#1408](https://github.com/Rul1an/assay/issues/1408) tracks the optional separate span-limit follow-up |
 
 ## Publication Rule
 
