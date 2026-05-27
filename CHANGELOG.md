@@ -84,6 +84,11 @@ All notable changes to this project will be documented in this file.
   predeclared paired A/C control, kernel-high, span-high,
   kernel-concurrent, and corner cells with n=5 per cell and explicit
   event-count, health-gate, and non-publication rules.
+- Recorded Slice 11 event-rate starter-matrix findings. All five paired
+  A/C cells passed with 5/5 valid samples per arm, clean Runner health
+  gates, and calibrated kernel/span event targets; no health boundary was
+  reached at 100 kernel events, 100 span events, concurrency 4, and
+  64 KiB span payloads.
 
 ## [3.12.0] - 2026-05-25
 

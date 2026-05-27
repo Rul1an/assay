@@ -1,6 +1,6 @@
 # Runner vs OTel Overhead Findings (2026-05)
 
-> **Status:** same-host findings update. This document summarizes the
+> **Status:** event-rate starter-matrix findings update. This document summarizes the
 > overhead follow-up evidence collected so far. It does not commit the
 > generated measurement artifacts. Direct arm deltas are reported only
 > for the matching `linux-aarch64-6.8.0-117-generic` host class.
@@ -23,6 +23,11 @@
 | 9 paired A/C | [26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306) | Arm A + Arm C paired | 20 adjacent pairs | 20 valid per arm, 0 discarded, same job and host class |
 | 10 smoke kernel | [26508127380](https://github.com/Rul1an/assay/actions/runs/26508127380) | Arm A + Arm C paired | 2 adjacent pairs, `kernel=low`, `span=baseline`, `concurrency=1` | 2 valid per arm, 0 discarded, clean health gates |
 | 10 smoke span/concurrency | [26508355816](https://github.com/Rul1an/assay/actions/runs/26508355816) | Arm A + Arm C paired | 2 adjacent pairs, `kernel=medium`, `span=low`, `concurrency=2` | 2 valid per arm, 0 discarded, clean health gates |
+| 11 control | [26511405031](https://github.com/Rul1an/assay/actions/runs/26511405031) | Arm A + Arm C paired | 5 adjacent pairs, baseline sweep | 5 valid per arm, 0 discarded, clean health gates |
+| 11 kernel-high | [26511787316](https://github.com/Rul1an/assay/actions/runs/26511787316) | Arm A + Arm C paired | 5 adjacent pairs, `kernel=high`, `span=baseline`, `concurrency=1` | 5 valid per arm, 0 discarded, 100 kernel worker files per arm |
+| 11 span-high | [26512146963](https://github.com/Rul1an/assay/actions/runs/26512146963) | Arm A + Arm C paired | 5 adjacent pairs, `kernel=baseline`, `span=high`, `concurrency=1` | 5 valid per arm, 0 discarded, 100 Arm C span events per sample |
+| 11 kernel-concurrent | [26512515478](https://github.com/Rul1an/assay/actions/runs/26512515478) | Arm A + Arm C paired | 5 adjacent pairs, `kernel=high`, `span=baseline`, `concurrency=4` | 5 valid per arm, 0 discarded, 100 kernel worker files per arm |
+| 11 corner | [26512909068](https://github.com/Rul1an/assay/actions/runs/26512909068) | Arm A + Arm C paired | 5 adjacent pairs, `kernel=high`, `span=high`, `concurrency=4`, `payload=large` | 5 valid per arm, 0 discarded, 100 kernel worker files and 100 Arm C span events per sample |
 
 Generated artifacts from those runs were inspected as review artifacts
 only. They are intentionally not committed as benchmark evidence in this
@@ -52,6 +57,11 @@ emitted `assay.sweep.*` trace metadata when span/event pressure was
 requested, and Arm A correctly recorded `span_event_rate=baseline` with
 `target_span_events=0`. They are too small to support slope, threshold,
 or benchmark findings.
+
+The Slice 11 starter matrix is the first event-rate sweep findings
+slice. It is still small (`n=5` adjacent pairs per cell), so it reports
+health, calibration, and threshold signals only. It does not publish a
+product benchmark or a new additive wall-clock decomposition.
 
 ## Same-Host Baselines
 
@@ -244,6 +254,43 @@ arc: wall-clock decomposition is not stable enough at n=20 on this
 runner to publish as an additive split. RSS remains the clean
 decomposition signal.
 
+## Event-Rate Starter Matrix
+
+Slice 11 ran the predeclared five-cell paired A/C starter matrix. Every
+cell used `repetitions=5`, `measure_rss=false`, `build_ebpf=true`, and
+paired adjacent A/C order on the same `linux-aarch64-6.8.0-117-generic`
+host class. All cells passed the health gates: 5/5 valid samples per
+arm, 0 discarded samples, `ringbuf_drops=0`, `kernel_layer=complete`,
+and `cgroup_correlation=clean`.
+
+| Cell | Run | Arm A wall median | Arm C wall median | Arm C - Arm A | Tail band | Calibration |
+|---|---|---:|---:|---:|---|---|
+| control | [26511405031](https://github.com/Rul1an/assay/actions/runs/26511405031) | `1,859.312 ms` | `2,094.345 ms` | `+235.033 ms` | healthy (`1.260` / `1.056`) | no sweep metadata |
+| kernel-high | [26511787316](https://github.com/Rul1an/assay/actions/runs/26511787316) | `2,256.657 ms` | `2,364.349 ms` | `+107.692 ms` | healthy (`1.301` / `1.344`) | 100 kernel worker files per arm |
+| span-high | [26512146963](https://github.com/Rul1an/assay/actions/runs/26512146963) | `1,755.104 ms` | `1,720.886 ms` | `-34.218 ms` | healthy (`1.186` / `1.030`) | 100 Arm C span events per sample |
+| kernel-concurrent | [26512515478](https://github.com/Rul1an/assay/actions/runs/26512515478) | `1,972.446 ms` | `1,855.518 ms` | `-116.928 ms` | healthy but near warn for Arm C (`1.104` / `1.468`) | 100 kernel worker files per arm |
+| corner | [26512909068](https://github.com/Rul1an/assay/actions/runs/26512909068) | `1,815.705 ms` | `2,026.579 ms` | `+210.873 ms` | healthy (`1.140` / `1.166`) | 100 kernel worker files per arm; 100 Arm C span events per sample |
+
+The starter matrix is useful mainly because it **did not** find a
+failure boundary at these levels. Even the corner cell stayed clean: no
+ring-buffer drops, no degraded kernel layer, no cgroup-correlation
+failure, and a healthy tail ratio. The corner trace size grew to a
+median `6,636,746 bytes`, while the Arm C archive remained small
+(`3,905 bytes` compressed median, `93,987 bytes` extracted median).
+
+The wall-clock medians still should not be read as a product benchmark.
+At `n=5`, paired medians remain sensitive to run-window variance. The
+publishable Slice 11 result is narrower:
+
+- the sweep knobs calibrate correctly on real delegated infrastructure;
+- `high=100` kernel events produces the expected 100 worker files per
+  sample in both Arm A and Arm C;
+- `high=100` span events produces exactly 100 `assay.sweep.span_event`
+  entries per Arm C trace;
+- no starter cell hit the health or tail failure boundary;
+- larger OTel span payloads scale trace size clearly, but did not
+  destabilize Runner health at this matrix budget.
+
 ## What This Means
 
 - The delegated measurement harness is usable for all three arms: wall-clock
@@ -266,6 +313,9 @@ decomposition signal.
   median gap does not reproduce under adjacent pairing. Wall-clock
   residuals are close enough, and tails noisy enough, that the wall-clock
   decomposition should stop rather than spawning another broad rerun.
+- Slice 11 shifts the useful overhead question from "which arm is
+  faster?" to "where do health gates or artifact sizes start to scale?"
+  At the starter matrix levels, the health boundary was not reached.
 - The RSS path works on the delegated Linux runner with GNU
   `/usr/bin/time -v`; samples record the RSS tool version and emit
   `peak_rss_bytes` into both `summary.json` and the BMF export.
@@ -286,6 +336,10 @@ decomposition signal.
   archive only" and "Runner archive plus OTel trace". The phase-timing
   and paired residual runs show that the median gap is not stable under
   pairing, and the paired run has unhealthy tails.
+- Slice 11 does not prove that higher event rates are safe. It only says
+  that the starter matrix up to 100 kernel events, 100 span events,
+  concurrency 4, and 64 KiB span payloads stayed healthy on this host
+  class.
 - No Trust Card or Trust Basis claim is added. This remains an
   experiment-scoped measurement follow-up.
 - The generated artifacts remain review artifacts until a later decision
@@ -317,11 +371,9 @@ Next engineering slice:
 > Do not add another broad Arm A/C wall-clock rerun for this arc. The
 > paired residual diagnostic has landed and shows that the median gap is
 > not stable enough for an additive wall-clock decomposition at the
-> current measurement budget. Slice 10 smoke runs have now validated the
-> event-rate / workload-intensity knobs on main. If the overhead arc
-> continues, the next slice should run the predeclared Slice 11 starter
-> matrix: control, kernel-high, span-high, kernel-concurrent, and corner
-> cells with paired A/C order and `repetitions=5`. It should first
-> verify observed kernel and span/event counts against the declared
-> targets, then report slopes or thresholds rather than another single
-> wall-clock delta.
+> current measurement budget. Slice 11 has now shown that the starter
+> event-rate matrix stays healthy and calibrates correctly. If the
+> overhead arc continues, the next slice should either widen the
+> event-rate ladder beyond `high=100` with a new predeclared matrix, or
+> close the sweep with the current threshold finding: no health boundary
+> was reached at the starter matrix budget.

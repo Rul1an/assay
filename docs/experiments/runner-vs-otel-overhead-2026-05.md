@@ -86,6 +86,18 @@
 > samples per arm, 0 discarded samples, clean Runner health gates, and
 > matching host class. These are workflow and metadata smoke checks, not
 > published sweep measurements.
+>
+> **Slice 11 status:** starter matrix dispatched and summarized in
+> [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md).
+> Runs [26511405031](https://github.com/Rul1an/assay/actions/runs/26511405031),
+> [26511787316](https://github.com/Rul1an/assay/actions/runs/26511787316),
+> [26512146963](https://github.com/Rul1an/assay/actions/runs/26512146963),
+> [26512515478](https://github.com/Rul1an/assay/actions/runs/26512515478), and
+> [26512909068](https://github.com/Rul1an/assay/actions/runs/26512909068)
+> passed with 5/5 valid samples per arm, 0 discarded samples, clean
+> Runner health gates, and matching host class. The starter matrix found
+> no health boundary at 100 kernel events, 100 span events, concurrency
+> 4, and 64 KiB span payloads.
 
 ## Research Question
 
@@ -653,7 +665,7 @@ Slice 11 acceptance rules:
 | 8 | **Done**: Runner phase timing via hidden `--phase-timing-log` and harness `phase_timings_ms` aggregation, dispatched in runs [26476490968](https://github.com/Rul1an/assay/actions/runs/26476490968) and [26476824593](https://github.com/Rul1an/assay/actions/runs/26476824593) | phase data explains part, not all, of the Arm A / Arm C median gap; no additive wall-clock decomposition claim |
 | 9 | **Done**: paired Arm A/C residual diagnostics via workflow `arm=paired-a-c`, dispatched in run [26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306) | residuals shrink/change sign under pairing; wall-clock decomposition remains unpublished and should stop at this measurement budget |
 | 10 | **Smoke-verified**: controlled event-rate / workload-intensity sweep via workflow inputs and sample/summary metadata, with paired smoke runs [26508127380](https://github.com/Rul1an/assay/actions/runs/26508127380) and [26508355816](https://github.com/Rul1an/assay/actions/runs/26508355816) | no broad rerun; dispatch only a small matrix first, with kernel-event count, span/event count, concurrency, phase timing, residual, RSS, and health gates reported by level |
-| 11 | **Planned**: predeclared Slice 11 starter matrix with five paired A/C cells: control, kernel-high, span-high, kernel-concurrent, and corner | n=5 paired samples per cell; observed event counts match targets; publish only slopes/thresholds with health gates, never n=2 smoke medians |
+| 11 | **Done**: predeclared Slice 11 starter matrix with five paired A/C cells: control, kernel-high, span-high, kernel-concurrent, and corner, dispatched in runs [26511405031](https://github.com/Rul1an/assay/actions/runs/26511405031), [26511787316](https://github.com/Rul1an/assay/actions/runs/26511787316), [26512146963](https://github.com/Rul1an/assay/actions/runs/26512146963), [26512515478](https://github.com/Rul1an/assay/actions/runs/26512515478), and [26512909068](https://github.com/Rul1an/assay/actions/runs/26512909068) | all cells 5/5 valid per arm with clean health gates; event counts matched targets; no health boundary reached at the starter matrix budget |
 
 ## Publication Rule
 
