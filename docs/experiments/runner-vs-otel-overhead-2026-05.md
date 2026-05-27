@@ -1,7 +1,7 @@
 # Runner vs OTel Overhead Measurement Plan (2026-05)
 
-> **Status:** measurement follow-up with Slices 1-9 complete and Slice 10
-> smoke-verified. This
+> **Status:** measurement follow-up with Slices 1-11 complete and Slice 12
+> planned. This
 > document turns the explicit overhead non-claim from
 > [`runner-vs-otel-2026-05`](runner-vs-otel-2026-05/) into a reproducible
 > measurement plan and findings trail. It does not commit generated
@@ -98,6 +98,12 @@
 > Runner health gates, and matching host class. The starter matrix found
 > no health boundary at 100 kernel events, 100 span events, concurrency
 > 4, and 64 KiB span payloads.
+>
+> **Slice 12 status:** planned as a boundary-finding follow-up. It should
+> extend the sweep targets beyond the Slice 11 starter matrix before
+> dispatching any wider cells. The goal is to find the first health,
+> fidelity, trace-size, or phase-timing boundary; it is not another broad
+> Arm A/C wall-clock rerun.
 
 ## Research Question
 
@@ -641,6 +647,103 @@ Slice 11 acceptance rules:
 - Keep artifacts review-only until a findings PR decides which summary
   tables should become committed evidence.
 
+Slice 12 boundary-finding plan:
+
+The Slice 11 starter matrix proved that the sweep controls calibrate and
+that no health boundary appears at `high=100`. A useful follow-up must
+therefore widen the event-rate and payload ladder instead of rerunning the
+same broad A/C comparison.
+
+SOTA / best-practice rationale as of May 2026:
+
+- OpenTelemetry's benchmark spec treats overhead as event-throughput and
+  target-platform specific, recommends warm-up for runtimes with bootstrap
+  cost, and says measurements should be repeated at least ten times when
+  reporting full benchmark numbers:
+  <https://opentelemetry.io/docs/specs/otel/performance-benchmark/>.
+- Nõu et al. report that tracing overhead varies substantially by
+  workload and execution environment, with serialization/export work a
+  major source of overhead:
+  <https://doi.org/10.1145/3680256.3721316>.
+- Reichelt, Jung, and van Hoorn show that cloud/shared CI environments
+  can hide or distort observability-overhead deltas; paired adjacent
+  dispatches remain the right default for this runner:
+  <https://arxiv.org/abs/2411.05491>.
+- The ICPE 2026 tracing-agent benchmark preprint finds overhead scales
+  with the number of created records, while also warning that suspiciously
+  low slopes can indicate lost records rather than true efficiency:
+  <https://doi.org/10.1145/3777884.3797004>.
+- Recent eBPF library work emphasizes the performance/fidelity trade-off:
+  event size, workload intensity, ring-buffer transfer, and user-space
+  retrieval can trade lower apparent overhead for event loss:
+  <https://doi.org/10.1145/3748355.3748364>.
+- Red Hat's BPF measurement guidance keeps the meta-problem explicit:
+  measuring BPF overhead can itself perturb the workload:
+  <https://developers.redhat.com/articles/2022/06/22/measuring-bpf-performance-tips-tricks-and-best-practices>.
+
+Design implications:
+
+- Prefer a geometric stress ladder over many nearby levels. The first
+  boundary is more useful than a dense table of healthy medians.
+- Keep paired/counterbalanced Arm A/C order. It reduces dispatch-window
+  drift and preserves the Slice 9 lesson.
+- Treat fidelity as a first-class outcome. A low wall-clock slope is not
+  good news if kernel events, span events, trace records, or archive
+  health are missing.
+- Report boundary classes, not product rankings: "healthy through level
+  X", "first unhealthy cell at level Y", or "trace export becomes the
+  scaling surface above level Z."
+- Use n=5 for the widening pass, then repeat only the first boundary cell
+  and the nearest healthy predecessor at n=20 if publication needs a
+  stable threshold.
+
+Slice 12 harness/schema gate:
+
+- Add extended targets without changing the baseline behavior. Existing
+  `baseline` / `low` / `medium` / `high` samples must remain readable.
+- If new named levels are added, introduce
+  `assay.experiment.event_rate_sweep.v0.1` rather than silently changing
+  the meaning of `event_rate_sweep.v0`.
+- Record the numeric target values in every sample and summary, as Slice
+  10 already does. Readers should not need to know what a label meant in
+  a particular code revision.
+- Keep Arm A's span/event target at `baseline` / `0` even when Arm C is
+  stressing span events.
+
+Predeclared widening cells:
+
+Use paired A/C dispatches, `measure_rss=false`, `build_ebpf=true`,
+`timeout_seconds=300`, and `repetitions=5`. Do not add Arm B, RSS, or
+provider/model work to this slice.
+
+| Cell | Kernel target | Span target | Concurrency | Payload | Purpose |
+|---|---:|---:|---:|---|---|
+| k500 | 500 | 0 | 4 | small | First 5x kernel-event step above Slice 11 |
+| k1000 | 1000 | 0 | 4 | small | Kernel-event boundary probe |
+| s500 | 0 | 500 | 1 | small | First 5x span-event step above Slice 11 |
+| s1000 | 0 | 1000 | 1 | small | Trace-export boundary probe |
+| kc1000 | 1000 | 0 | 16 | small | Kernel pressure plus scheduling pressure |
+| corner-lite | 1000 | 1000 | 8 | large | Combined stress corner for health, trace size, and tail behavior |
+
+Slice 12 acceptance rules:
+
+- Every reported cell must state observed kernel worker files and Arm C
+  span-event count against the declared numeric targets before timing is
+  interpreted.
+- A cell is a boundary if any of these happens: `ringbuf_drops > 0`,
+  `kernel_layer != complete`, `cgroup_correlation != clean`, trace event
+  counts are lower than target, archive/trace extraction fails, or
+  p99/median enters the fail band.
+- If `corner-lite` fails but single-axis cells pass, report interaction
+  pressure rather than dropping the corner.
+- If all widening cells stay healthy, stop the slice with a threshold
+  statement: "no health boundary through 1000 kernel events, 1000 span
+  events, concurrency 16 on this host class." Do not keep widening in the
+  same PR.
+- If exactly one boundary appears, repeat the first failing cell and the
+  nearest healthy predecessor at n=20 in a separate findings slice before
+  making a stable threshold claim.
+
 ## Non-Claims
 
 - Does not rank OpenTelemetry, OpenInference, or Runner as products.
@@ -666,6 +769,7 @@ Slice 11 acceptance rules:
 | 9 | **Done**: paired Arm A/C residual diagnostics via workflow `arm=paired-a-c`, dispatched in run [26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306) | residuals shrink/change sign under pairing; wall-clock decomposition remains unpublished and should stop at this measurement budget |
 | 10 | **Smoke-verified**: controlled event-rate / workload-intensity sweep via workflow inputs and sample/summary metadata, with paired smoke runs [26508127380](https://github.com/Rul1an/assay/actions/runs/26508127380) and [26508355816](https://github.com/Rul1an/assay/actions/runs/26508355816) | no broad rerun; dispatch only a small matrix first, with kernel-event count, span/event count, concurrency, phase timing, residual, RSS, and health gates reported by level |
 | 11 | **Done**: predeclared Slice 11 starter matrix with five paired A/C cells: control, kernel-high, span-high, kernel-concurrent, and corner, dispatched in runs [26511405031](https://github.com/Rul1an/assay/actions/runs/26511405031), [26511787316](https://github.com/Rul1an/assay/actions/runs/26511787316), [26512146963](https://github.com/Rul1an/assay/actions/runs/26512146963), [26512515478](https://github.com/Rul1an/assay/actions/runs/26512515478), and [26512909068](https://github.com/Rul1an/assay/actions/runs/26512909068) | all cells 5/5 valid per arm with clean health gates; event counts matched targets; no health boundary reached at the starter matrix budget |
+| 12 | **Planned**: boundary-finding sweep with extended numeric targets above `high=100` | harness/schema gate first, then n=5 paired A/C cells; publish only boundary classes or repeat first boundary/predecessor at n=20 |
 
 ## Publication Rule
 

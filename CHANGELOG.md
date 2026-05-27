@@ -89,6 +89,10 @@ All notable changes to this project will be documented in this file.
   gates, and calibrated kernel/span event targets; no health boundary was
   reached at 100 kernel events, 100 span events, concurrency 4, and
   64 KiB span payloads.
+- Planned Slice 12 as a SOTA-informed boundary-finding sweep. The next
+  overhead step is to extend event-rate targets beyond `high=100`, then
+  run a small paired A/C widening matrix that reports health/fidelity
+  boundaries rather than another broad wall-clock decomposition.
 
 ## [3.12.0] - 2026-05-25
 
