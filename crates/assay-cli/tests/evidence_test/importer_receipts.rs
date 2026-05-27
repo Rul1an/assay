@@ -317,3 +317,80 @@ fn test_cyclonedx_mlbom_model_receipts_verify_and_feed_trust_basis_generation() 
         "CycloneDX ML-BOM model receipts should surface the bounded inventory receipt boundary claim"
     );
 }
+
+#[test]
+fn test_cyclonedx_mlbom_formulation_fixture_stays_inventory_only() {
+    let dir = tempdir().unwrap();
+    let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+        "../../examples/cyclonedx-mlbom-model-component-evidence/fixtures/model-handoff-formulation.cdx.json",
+    );
+    let bundle = dir
+        .path()
+        .join("cyclonedx-model-formulation-receipts.tar.gz");
+
+    assert!(
+        input.exists(),
+        "fixture should exist at {}",
+        input.display()
+    );
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("import")
+        .arg("cyclonedx-mlbom-model")
+        .arg("--input")
+        .arg(&input)
+        .arg("--bundle-out")
+        .arg(&bundle)
+        .arg("--source-artifact-ref")
+        .arg("model-handoff-formulation.cdx.json")
+        .arg("--bom-ref")
+        .arg("pkg:huggingface/example/support-ticket-classifier@1.0.0")
+        .arg("--run-id")
+        .arg("cyclonedx_formulation_boundary")
+        .arg("--import-time")
+        .arg("2026-04-28T12:00:00Z")
+        .assert()
+        .success();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("verify")
+        .arg(&bundle)
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("trust-basis")
+        .arg("generate")
+        .arg(&bundle)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let claims = json["claims"].as_array().unwrap();
+    assert_eq!(claim(claims, "bundle_verified")["level"], "verified");
+    assert_eq!(
+        claim(claims, "external_eval_receipt_boundary_visible")["level"],
+        "absent",
+        "CycloneDX formulation metrics are source-BOM context, not eval receipts"
+    );
+    assert_eq!(
+        claim(claims, "external_decision_receipt_boundary_visible")["level"],
+        "absent",
+        "CycloneDX formulation handoff outputs are not decision receipts"
+    );
+    assert_eq!(
+        claim(claims, "external_inventory_receipt_boundary_visible")["level"],
+        "verified",
+        "CycloneDX ML-BOM formulation fixture should remain an inventory receipt"
+    );
+}
