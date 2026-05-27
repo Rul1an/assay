@@ -281,6 +281,21 @@
         "payload_bytes": {
           "type": "integer",
           "minimum": 1
+        },
+        "span_event_limit_effective": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "span_event_limit_source": {
+          "enum": [
+            "default",
+            "env",
+            "invalid-env"
+          ]
+        },
+        "span_event_limit_warning": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }

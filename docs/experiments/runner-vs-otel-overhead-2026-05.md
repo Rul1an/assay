@@ -762,6 +762,10 @@ Slice 12 acceptance rules:
   `kernel_layer != complete`, `cgroup_correlation != clean`, trace event
   counts are lower than target, archive/trace extraction fails, or
   p99/median enters the fail band.
+- Any sample with `span_event_limit_warning` set may not be cited as
+  evidence of OTel span-event throughput above the effective limit.
+  Raise `OTEL_SPAN_EVENT_COUNT_LIMIT` and verify retained event counts
+  before interpreting timing above 128 span events.
 - If `corner-lite` fails but single-axis cells pass, report interaction
   pressure rather than dropping the corner.
 - If `kc1000` fails, do not claim whether the boundary is kernel-event
