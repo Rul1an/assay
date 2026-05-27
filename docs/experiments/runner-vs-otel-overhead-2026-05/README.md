@@ -240,6 +240,20 @@ kernel-high, span-high, kernel-concurrent, and corner. Its output should
 be slopes or thresholds with health gates, not another single broad
 wall-clock delta.
 
+That starter matrix has now been dispatched and summarized in
+[`findings.md`](findings.md):
+
+- control: [run 26511405031](https://github.com/Rul1an/assay/actions/runs/26511405031)
+- kernel-high: [run 26511787316](https://github.com/Rul1an/assay/actions/runs/26511787316)
+- span-high: [run 26512146963](https://github.com/Rul1an/assay/actions/runs/26512146963)
+- kernel-concurrent: [run 26512515478](https://github.com/Rul1an/assay/actions/runs/26512515478)
+- corner: [run 26512909068](https://github.com/Rul1an/assay/actions/runs/26512909068)
+
+All five cells passed with 5/5 valid samples per arm, 0 discarded
+samples, clean Runner health gates, and matching host class. The current
+finding is a threshold statement: no health boundary was reached at the
+starter matrix budget.
+
 Do not commit the uploaded artifacts until the findings slice decides
 which measurements should become evidence.
 
