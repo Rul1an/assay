@@ -28,6 +28,7 @@
     },
     "pack_id": {
       "type": "string",
+      "description": "Digest over the carried evidence inputs and redaction manifest: runner_archive, observation_health, optional trace_json, and redaction_manifest. The rendered summary_markdown artifact is listed for review but is not part of the pack_id digest to avoid a circular dependency.",
       "pattern": "^sha256:[0-9a-f]{64}$"
     },
     "scenario_id": {
