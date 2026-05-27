@@ -2,10 +2,10 @@
 
 > **Status:** Slice 1 local Arm B harness, Slice 2 delegated Arm C
 > dispatch pipeline, Slice 3 RSS collection, Slice 4 summary/BMF
-> rendering, Slice 5 findings, Slice 6 same-host Arm B dispatches, and
+> rendering, Slice 5 findings, Slice 6 same-host Arm B dispatches,
 > Slice 7 Arm A runner-only dispatches, Slice 8 phase timing diagnostics,
-> and Slice 9 paired A/C residual diagnostics have landed. Slice 10 is
-> smoke-verified as a controlled event-rate / workload-intensity sweep. This
+> Slice 9 paired A/C residual diagnostics, Slice 10 smoke validation,
+> Slice 11 starter matrix, and Slice 12 boundary-finding have landed. This
 > directory contains the
 > experiment-scoped measurement
 > harness and schema sidecars for the plan in
@@ -256,14 +256,14 @@ samples, clean Runner health gates, and matching host class. The current
 finding is a threshold statement: no health boundary was reached at the
 starter matrix budget.
 
-The next useful experiment is Slice 12 boundary-finding, not another
-single broad A/C wall-clock rerun. The harness is now ready for that
-slice: `x500` and `x1000` rate labels emit
+The next useful experiment was Slice 12 boundary-finding, not another
+single broad A/C wall-clock rerun. The harness supports that slice:
+`x500` and `x1000` rate labels emit
 `assay.experiment.event_rate_sweep.v0.1`, workflow dispatches can add
 warm-up samples with `warmup_iterations`, and delegated jobs have enough
 timeout budget for paired widening cells.
 
-The Slice 12 dispatch should use paired A/C, `repetitions=5`,
+The completed Slice 12 dispatches used paired A/C, `repetitions=5`,
 `warmup_iterations=1`, `measure_rss=false`, `build_ebpf=true`, and
 `timeout_seconds=300`. The output should be a boundary statement, such
 as "healthy through X" or "first unhealthy cell at Y", with event-count
@@ -273,6 +273,24 @@ Warm-up failures do not abort the harness; inspect
 `warmup-samples*.jsonl` for their `exit_code`. If every warm-up sample in
 a dispatch failed, treat that dispatch as inconclusive even when the
 measured samples pass.
+
+That boundary-finding sweep has now been dispatched and summarized in
+[`findings.md`](findings.md):
+
+- k500: [run 26517696032](https://github.com/Rul1an/assay/actions/runs/26517696032)
+- k1000: [run 26518158603](https://github.com/Rul1an/assay/actions/runs/26518158603)
+- s500: [run 26518522754](https://github.com/Rul1an/assay/actions/runs/26518522754)
+- s1000: [run 26518894002](https://github.com/Rul1an/assay/actions/runs/26518894002)
+- kc1000: [run 26519398461](https://github.com/Rul1an/assay/actions/runs/26519398461)
+- corner-lite: [run 26520226593](https://github.com/Rul1an/assay/actions/runs/26520226593)
+
+All six cells passed with 5/5 measured samples per arm, 0 discarded
+samples, successful warm-up samples, clean Runner health gates, and
+matching host class. Kernel-event calibration matched targets through
+1000 worker files per measured sample. The first widened span cell
+(`s500`) retained only 128/500 Arm C span events, and later span cells
+retained 128/1000. The current default-config boundary is therefore OTel
+span-event fidelity, not Runner health.
 
 Do not commit the uploaded artifacts until the findings slice decides
 which measurements should become evidence.

@@ -1,6 +1,6 @@
 # Runner vs OTel Overhead Findings (2026-05)
 
-> **Status:** event-rate starter-matrix findings update. This document summarizes the
+> **Status:** event-rate boundary-finding update. This document summarizes the
 > overhead follow-up evidence collected so far. It does not commit the
 > generated measurement artifacts. Direct arm deltas are reported only
 > for the matching `linux-aarch64-6.8.0-117-generic` host class.
@@ -28,6 +28,12 @@
 | 11 span-high | [26512146963](https://github.com/Rul1an/assay/actions/runs/26512146963) | Arm A + Arm C paired | 5 adjacent pairs, `kernel=baseline`, `span=high`, `concurrency=1` | 5 valid per arm, 0 discarded, 100 Arm C span events per sample |
 | 11 kernel-concurrent | [26512515478](https://github.com/Rul1an/assay/actions/runs/26512515478) | Arm A + Arm C paired | 5 adjacent pairs, `kernel=high`, `span=baseline`, `concurrency=4` | 5 valid per arm, 0 discarded, 100 kernel worker files per arm |
 | 11 corner | [26512909068](https://github.com/Rul1an/assay/actions/runs/26512909068) | Arm A + Arm C paired | 5 adjacent pairs, `kernel=high`, `span=high`, `concurrency=4`, `payload=large` | 5 valid per arm, 0 discarded, 100 kernel worker files and 100 Arm C span events per sample |
+| 12 k500 | [26517696032](https://github.com/Rul1an/assay/actions/runs/26517696032) | Arm A + Arm C paired | 5 adjacent pairs plus warm-up, `kernel=x500`, `span=baseline`, `concurrency=4` | 5 valid per arm, 0 discarded, 500 kernel worker files per arm |
+| 12 k1000 | [26518158603](https://github.com/Rul1an/assay/actions/runs/26518158603) | Arm A + Arm C paired | 5 adjacent pairs plus warm-up, `kernel=x1000`, `span=baseline`, `concurrency=4` | 5 valid per arm, 0 discarded, 1000 kernel worker files per arm |
+| 12 s500 | [26518522754](https://github.com/Rul1an/assay/actions/runs/26518522754) | Arm A + Arm C paired | 5 adjacent pairs plus warm-up, `kernel=baseline`, `span=x500`, `concurrency=1` | 5 valid per arm, 0 discarded, Arm C retained 128/500 span events |
+| 12 s1000 | [26518894002](https://github.com/Rul1an/assay/actions/runs/26518894002) | Arm A + Arm C paired | 5 adjacent pairs plus warm-up, `kernel=baseline`, `span=x1000`, `concurrency=1` | 5 valid per arm, 0 discarded, Arm C retained 128/1000 span events |
+| 12 kc1000 | [26519398461](https://github.com/Rul1an/assay/actions/runs/26519398461) | Arm A + Arm C paired | 5 adjacent pairs plus warm-up, `kernel=x1000`, `span=baseline`, `concurrency=16` | 5 valid per arm, 0 discarded, 1000 kernel worker files per arm |
+| 12 corner-lite | [26520226593](https://github.com/Rul1an/assay/actions/runs/26520226593) | Arm A + Arm C paired | 5 adjacent pairs plus warm-up, `kernel=x1000`, `span=x1000`, `concurrency=8`, `payload=large` | 5 valid per arm, 0 discarded, 1000 kernel worker files per arm; Arm C retained 128/1000 span events |
 
 Generated artifacts from those runs were inspected as review artifacts
 only. They are intentionally not committed as benchmark evidence in this
@@ -62,6 +68,13 @@ The Slice 11 starter matrix is the first event-rate sweep findings
 slice. It is still small (`n=5` adjacent pairs per cell), so it reports
 health, calibration, and threshold signals only. It does not publish a
 product benchmark or a new additive wall-clock decomposition.
+
+The Slice 12 boundary-finding sweep is the widened event-rate pass. It
+ran the predeclared cells sequentially because the workflow concurrency
+group keeps only one active delegated overhead run at a time. All six
+completed runs had 5/5 measured samples per arm, 0 discarded samples,
+clean Runner health gates, and successful warm-up samples. The finding
+is a fidelity/health boundary result, not a benchmark result.
 
 ## Same-Host Baselines
 
@@ -291,6 +304,60 @@ publishable Slice 11 result is narrower:
 - larger OTel span payloads scale trace size clearly, but did not
   destabilize Runner health at this matrix budget.
 
+## Event-Rate Boundary Sweep
+
+Slice 12 ran the predeclared widened A/C matrix with
+`repetitions=5`, `warmup_iterations=1`, `measure_rss=false`,
+`build_ebpf=true`, and `timeout_seconds=300`. Warm-up samples are
+review artifacts only; all measured cells below had 5 valid samples per
+arm and 0 discarded samples.
+
+| Cell | Run | Arm A wall median | Arm C wall median | Arm C - Arm A | Tail band | Fidelity read |
+|---|---|---:|---:|---:|---|---|
+| k500 | [26517696032](https://github.com/Rul1an/assay/actions/runs/26517696032) | `1,903.863 ms` | `2,177.001 ms` | `+273.138 ms` | Arm A warning (`1.724`), Arm C healthy (`1.098`) | 500/500 kernel worker files in both arms |
+| k1000 | [26518158603](https://github.com/Rul1an/assay/actions/runs/26518158603) | `2,407.982 ms` | `2,290.073 ms` | `-117.910 ms` | Arm A warning (`1.604`), Arm C healthy (`1.304`) | 1000/1000 kernel worker files in both arms |
+| s500 | [26518522754](https://github.com/Rul1an/assay/actions/runs/26518522754) | `1,761.804 ms` | `1,780.047 ms` | `+18.244 ms` | healthy (`1.157` / `1.192`) | Arm C retained 128/500 span events |
+| s1000 | [26518894002](https://github.com/Rul1an/assay/actions/runs/26518894002) | `1,777.862 ms` | `1,811.485 ms` | `+33.623 ms` | healthy (`1.040` / `1.026`) | Arm C retained 128/1000 span events |
+| kc1000 | [26519398461](https://github.com/Rul1an/assay/actions/runs/26519398461) | `2,101.253 ms` | `2,623.885 ms` | `+522.632 ms` | healthy (`1.314` / `1.057`) | 1000/1000 kernel worker files in both arms, concurrency 16 |
+| corner-lite | [26520226593](https://github.com/Rul1an/assay/actions/runs/26520226593) | `2,283.301 ms` | `2,787.537 ms` | `+504.236 ms` | healthy (`1.094` / `1.466`) | 1000/1000 kernel worker files; Arm C retained 128/1000 span events |
+
+The kernel-capture branch stayed healthy through the widened cells:
+`x1000` kernel worker files calibrated exactly for both arms, and the
+`kc1000` cell stayed clean even at concurrency 16. The two kernel-only
+cells put Arm A's tail ratio in the warning band, but no cell crossed
+the fail boundary (`p99/median > 2.0`), and no Runner health gate
+degraded.
+
+The span/event branch hit a fidelity boundary before timing can be
+interpreted. At both `x500` and `x1000`, the Arm C trace retained exactly
+128 `assay.sweep.span_event` entries per sample. That matches the
+OpenTelemetry JS SDK default span event count limit in this workload
+configuration, so the apparent wall-clock and trace-size behavior above
+100 span events is not evidence that the system handled 500 or 1000
+trace records. It is evidence that the default OTel span limit preserves
+only 128 events.
+
+The `corner-lite` cell is therefore a mixed result: Runner kernel
+capture stayed healthy at 1000 worker files with large payloads and
+concurrency 8, but the OTel span side was already lossy at 128/1000
+events. Its median Arm C trace grew to `8,494,070 bytes` because the
+retained events carried 64 KiB payloads, but the cell cannot support a
+"healthy through x1000 span events" claim.
+
+The Slice 12 boundary result is:
+
+- **Kernel side:** healthy through `x1000` kernel events and concurrency
+  16 on this host class, at `n=5` and without RSS collection.
+- **Span side:** first widened span cell (`s500`) is a trace-fidelity
+  boundary under the default OTel JS SDK limits: 128/500 events retained.
+- **Corner side:** combined kernel + span stress is bounded by the same
+  span-fidelity limit, not by Runner health.
+
+That closes the current event-rate arc for the default configuration.
+A future experiment can deliberately raise `OTEL_SPAN_EVENT_COUNT_LIMIT`
+and rerun the span cells, but that would be a new span-limit study, not
+a continuation of the default-config boundary sweep.
+
 ## What This Means
 
 - The delegated measurement harness is usable for all three arms: wall-clock
@@ -316,6 +383,10 @@ publishable Slice 11 result is narrower:
 - Slice 11 shifts the useful overhead question from "which arm is
   faster?" to "where do health gates or artifact sizes start to scale?"
   At the starter matrix levels, the health boundary was not reached.
+- Slice 12 extends that result: Runner kernel capture remained healthy
+  through 1000 worker files and concurrency 16, while widened OTel span
+  pressure hit the default SDK event-retention limit at the first
+  widened span cell.
 - The RSS path works on the delegated Linux runner with GNU
   `/usr/bin/time -v`; samples record the RSS tool version and emit
   `peak_rss_bytes` into both `summary.json` and the BMF export.
@@ -336,10 +407,10 @@ publishable Slice 11 result is narrower:
   archive only" and "Runner archive plus OTel trace". The phase-timing
   and paired residual runs show that the median gap is not stable under
   pairing, and the paired run has unhealthy tails.
-- Slice 11 does not prove that higher event rates are safe. It only says
-  that the starter matrix up to 100 kernel events, 100 span events,
-  concurrency 4, and 64 KiB span payloads stayed healthy on this host
-  class.
+- Slice 12 does not prove that 500 or 1000 OTel span events are safe or
+  cheap under the default workload configuration. The trace retained
+  only 128 span events at those targets, so timing above that point is
+  fidelity-limited.
 - No Trust Card or Trust Basis claim is added. This remains an
   experiment-scoped measurement follow-up.
 - The generated artifacts remain review artifacts until a later decision
@@ -371,18 +442,13 @@ Next engineering slice:
 > Do not add another broad Arm A/C wall-clock rerun for this arc. The
 > paired residual diagnostic has landed and shows that the median gap is
 > not stable enough for an additive wall-clock decomposition at the
-> current measurement budget. Slice 11 has now shown that the starter
-> event-rate matrix stays healthy and calibrates correctly. Slice 12 is
-> therefore predeclared as a boundary-finding sweep. The harness now
-> supports extended `x500` / `x1000` targets through
-> `assay.experiment.event_rate_sweep.v0.1`, optional warm-up samples, and
-> longer delegated timeouts. The next step is to run the paired A/C
-> widening matrix. The intended finding is a health/fidelity boundary
-> statement, not another median wall-clock comparison.
+> current measurement budget. Slice 12 has now produced the intended
+> boundary statement: kernel capture stayed healthy through the widened
+> kernel cells, and span widening hit the default OTel event-retention
+> boundary at the first widened span cell.
 
-Slice 12 should only publish one of these outcomes:
-
-- healthy through the widened numeric targets on this host class;
-- first unhealthy boundary found, with the nearest healthy predecessor;
-- inconclusive because event-count calibration, Runner health, or tail
-  health failed before timing could be interpreted.
+The only logical follow-up is a new, explicitly scoped span-limit study:
+configure the OTel SDK span-event limit above the requested target,
+verify retained event counts first, and then rerun only the span cells
+needed to answer whether trace export cost scales after the fidelity
+boundary is removed.
