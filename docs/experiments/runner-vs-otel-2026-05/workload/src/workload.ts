@@ -21,9 +21,10 @@
  */
 
 import { writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
+import { mkdir as mkdirAsync, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { SpanStatusCode } from "@opentelemetry/api";
+import { Span, SpanStatusCode } from "@opentelemetry/api";
 import { Agent, Runner, Usage, tool } from "@openai/agents";
 import { z } from "zod";
 import { getTracer, flushTraceToFile } from "./otel-setup";
@@ -59,6 +60,14 @@ interface WorkloadConfig {
   captureSensitiveOtelContent: boolean;
   /** Absolute path the tool's tampered read targets (Slice 3 only). */
   tamperingTargetPath: string;
+  /** Slice 10: target file I/O pressure level for kernel-event sweeps. */
+  sweepKernelEvents: number;
+  /** Slice 10: target OTel span-event pressure level. */
+  sweepSpanEvents: number;
+  /** Slice 10: number of concurrent sweep workers. */
+  sweepConcurrency: number;
+  /** Slice 10: payload bytes written/read and attached to sweep events. */
+  sweepPayloadBytes: number;
 }
 
 class DeterministicToolCallModel {
@@ -142,6 +151,10 @@ export async function runWorkload(config: WorkloadConfig): Promise<void> {
       "assay.measurement.boundary": "linux_ebpf_cgroup_v2",
       "gen_ai.provider.name": "openai",
       "gen_ai.operation.name": "create_agent",
+      "assay.sweep.kernel_events.target": config.sweepKernelEvents,
+      "assay.sweep.span_events.target": config.sweepSpanEvents,
+      "assay.sweep.concurrency": config.sweepConcurrency,
+      "assay.sweep.payload_bytes": config.sweepPayloadBytes,
     });
 
     try {
@@ -249,6 +262,7 @@ export async function runWorkload(config: WorkloadConfig): Promise<void> {
       await runner.run(agent, "Read the deterministic fixture file.", {
         maxTurns: 2,
       });
+      await applySweepPressure(config, rootSpan);
       sdkEmitter.emit({ event_type: "run_finished" });
 
       if (config.archivePath) {
@@ -294,6 +308,37 @@ export async function runWorkload(config: WorkloadConfig): Promise<void> {
   await flushTraceToFile(config.tracePath);
 }
 
+async function applySweepPressure(
+  config: WorkloadConfig,
+  rootSpan: Span,
+): Promise<void> {
+  const payload = "x".repeat(config.sweepPayloadBytes);
+  for (let index = 0; index < config.sweepSpanEvents; index += 1) {
+    rootSpan.addEvent("assay.sweep.span_event", {
+      "assay.sweep.index": index,
+      "assay.sweep.payload_bytes": config.sweepPayloadBytes,
+      "assay.sweep.payload": payload,
+    });
+  }
+
+  if (config.sweepKernelEvents <= 0) {
+    return;
+  }
+
+  const workers = Math.min(config.sweepConcurrency, config.sweepKernelEvents);
+  const sweepDir = join(config.workDir, "event-rate-sweep");
+  await mkdirAsync(sweepDir, { recursive: true });
+  await Promise.all(
+    Array.from({ length: workers }, async (_, worker) => {
+      for (let index = worker; index < config.sweepKernelEvents; index += workers) {
+        const target = join(sweepDir, `worker-${worker}-${index}.txt`);
+        await writeFile(target, payload, "utf8");
+        await readFile(target, "utf8");
+      }
+    }),
+  );
+}
+
 function parseArgs(): WorkloadConfig {
   const args = process.argv.slice(2);
   const get = (name: string, required = false): string | undefined => {
@@ -303,6 +348,15 @@ function parseArgs(): WorkloadConfig {
     return undefined;
   };
   const has = (name: string): boolean => args.includes(`--${name}`);
+  const getInt = (name: string, fallback: number): number => {
+    const raw = get(name);
+    if (raw === undefined) return fallback;
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      throw new Error(`--${name} must be a non-negative integer`);
+    }
+    return parsed;
+  };
 
   const runId = get("run-id") ?? `run_experiment_${Date.now()}`;
   const workDir = get("work-dir") ?? join(tmpdir(), `assay-otel-${runId}`);
@@ -314,6 +368,7 @@ function parseArgs(): WorkloadConfig {
   const captureSensitiveOtelContent =
     has("capture-sensitive-otel-content") || tamperingMode;
   const tamperingTargetPath = join(workDir, "tampering-target.txt");
+  const sweepConcurrency = Math.max(1, getInt("sweep-concurrency", 1));
 
   return {
     runId,
@@ -325,6 +380,10 @@ function parseArgs(): WorkloadConfig {
     tamperingMode,
     captureSensitiveOtelContent,
     tamperingTargetPath,
+    sweepKernelEvents: getInt("sweep-kernel-events", 0),
+    sweepSpanEvents: getInt("sweep-span-events", 0),
+    sweepConcurrency,
+    sweepPayloadBytes: Math.max(1, getInt("sweep-payload-bytes", 128)),
   };
 }
 

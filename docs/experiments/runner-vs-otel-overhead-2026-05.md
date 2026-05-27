@@ -76,11 +76,11 @@
 > decomposition remains unpublished and should stop at this measurement
 > budget.
 >
-> **Slice 10 status:** planned. The next experiment should not be another
-> broad Arm A/C wall-clock rerun. It should sweep controlled kernel-event
-> rate, span/event rate, and concurrency so the next question is "when
-> does overhead become visible, and which component scales with event
-> pressure?"
+> **Slice 10 status:** harness-ready. The overhead workflow now accepts
+> controlled kernel-event rate, span/event rate, concurrency, and payload
+> size inputs. The next question is "when does overhead become visible,
+> and which component scales with event pressure?" No sweep measurements
+> have been dispatched or published yet.
 
 ## Research Question
 
@@ -487,8 +487,8 @@ Slice 9 result:
 ## Event-Rate Sweep Follow-up
 
 Slice 10 is the next useful experiment if we want one more overhead
-slice. It should be a controlled event-rate and workload-intensity sweep,
-not another broad Arm A/C wall-clock repeat.
+slice. It is a controlled event-rate and workload-intensity sweep, not
+another broad Arm A/C wall-clock repeat.
 
 The question changes from:
 
@@ -537,6 +537,11 @@ Proposed arms:
 - **Arm B:** OTel/OpenInference-style tracing only.
 - **Arm C:** Runner archive capture plus OTel trace export.
 
+Arm A cannot apply OTel span/event pressure because it deliberately has
+no trace export. If a paired dispatch requests non-baseline span/event
+pressure, Arm A samples record `span_event_rate=baseline` and
+`target_span_events=0`; Arm C records and applies the requested target.
+
 Metrics:
 
 - `wall_clock_ms` as a secondary metric only;
@@ -551,8 +556,8 @@ Metrics:
 
 Acceptance rules for Slice 10:
 
-- Start with a plan-only PR or a harness-only PR. Do not commit sweep
-  measurements in the first slice.
+- Start with a harness-only PR. Do not commit sweep measurements in the
+  first slice.
 - Keep output experiment-scoped. If a new artifact is introduced, use an
   `assay.experiment.event_rate_sweep.v0` schema string and sidecar tests.
 - Use paired/counterbalanced order inside one delegated job whenever two
@@ -587,7 +592,7 @@ Acceptance rules for Slice 10:
 | 7 | **Done**: Arm A pure-L2 decomposition via `arm=arm-a-runner-only`, dispatched in runs [26463798358](https://github.com/Rul1an/assay/actions/runs/26463798358), [26464003194](https://github.com/Rul1an/assay/actions/runs/26464003194), and healthy repeat [26473448298](https://github.com/Rul1an/assay/actions/runs/26473448298) | RSS decomposition landed; wall-clock decomposition remains inconclusive because Arm A is still slower than Arm C at the median |
 | 8 | **Done**: Runner phase timing via hidden `--phase-timing-log` and harness `phase_timings_ms` aggregation, dispatched in runs [26476490968](https://github.com/Rul1an/assay/actions/runs/26476490968) and [26476824593](https://github.com/Rul1an/assay/actions/runs/26476824593) | phase data explains part, not all, of the Arm A / Arm C median gap; no additive wall-clock decomposition claim |
 | 9 | **Done**: paired Arm A/C residual diagnostics via workflow `arm=paired-a-c`, dispatched in run [26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306) | residuals shrink/change sign under pairing; wall-clock decomposition remains unpublished and should stop at this measurement budget |
-| 10 | **Planned**: controlled event-rate / workload-intensity sweep | no broad rerun; plan or harness first, with kernel-event count, span/event count, concurrency, phase timing, residual, RSS, and health gates reported by level |
+| 10 | **Harness-ready**: controlled event-rate / workload-intensity sweep via workflow inputs and sample/summary metadata | no broad rerun; dispatch only a small matrix first, with kernel-event count, span/event count, concurrency, phase timing, residual, RSS, and health gates reported by level |
 
 ## Publication Rule
 

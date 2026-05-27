@@ -235,6 +235,7 @@ class OverheadHarnessTests(unittest.TestCase):
             "exit_code": 0,
             "health": None,
             "phase_timings_ms": None,
+            "event_rate_sweep": None,
             "artifact_bytes": {
                 "trace_json": 123,
                 "archive_targz": None,
@@ -276,6 +277,76 @@ class OverheadHarnessTests(unittest.TestCase):
         }
         assert_matches_schema(self, payload, schema, root=schema)
 
+    def test_event_rate_sweep_schema_accepts_cell(self) -> None:
+        schema = load_schema("event-rate-sweep-v0.schema.json")
+        payload = {
+            "schema": "assay.experiment.event_rate_sweep.v0",
+            "kernel_event_rate": "medium",
+            "span_event_rate": "low",
+            "concurrency": 4,
+            "payload_size": "medium",
+            "target_kernel_events": 25,
+            "target_span_events": 1,
+            "payload_bytes": 4096,
+        }
+        assert_matches_schema(self, payload, schema, root=schema)
+
+    def test_event_rate_sweep_config_maps_levels_to_targets(self) -> None:
+        args = type(
+            "Args",
+            (),
+            {
+                "sweep_kernel_event_rate": "high",
+                "sweep_span_event_rate": "medium",
+                "sweep_concurrency": 4,
+                "sweep_payload_size": "large",
+            },
+        )()
+        config = overhead_harness.event_rate_sweep_config(args)
+
+        self.assertEqual(config["schema"], "assay.experiment.event_rate_sweep.v0")
+        self.assertEqual(config["target_kernel_events"], 100)
+        self.assertEqual(config["target_span_events"], 25)
+        self.assertEqual(config["payload_bytes"], 65536)
+        self.assertEqual(config["concurrency"], 4)
+
+    def test_baseline_event_rate_sweep_config_is_null(self) -> None:
+        args = type(
+            "Args",
+            (),
+            {
+                "sweep_kernel_event_rate": "baseline",
+                "sweep_span_event_rate": "baseline",
+                "sweep_concurrency": 1,
+                "sweep_payload_size": "small",
+            },
+        )()
+        self.assertIsNone(overhead_harness.event_rate_sweep_config(args))
+
+    def test_event_rate_sweep_for_arm_a_drops_span_target(self) -> None:
+        config = {
+            "schema": "assay.experiment.event_rate_sweep.v0",
+            "kernel_event_rate": "medium",
+            "span_event_rate": "high",
+            "concurrency": 2,
+            "payload_size": "small",
+            "target_kernel_events": 25,
+            "target_span_events": 100,
+            "payload_bytes": 128,
+        }
+        arm_a = overhead_harness.event_rate_sweep_for_arm(
+            overhead_harness.ARM_A,
+            config,
+        )
+
+        self.assertEqual(arm_a["span_event_rate"], "baseline")
+        self.assertEqual(arm_a["target_span_events"], 0)
+        self.assertEqual(arm_a["target_kernel_events"], 25)
+        self.assertEqual(
+            overhead_harness.event_rate_sweep_for_arm(overhead_harness.ARM_C, config),
+            config,
+        )
+
     def test_phase_residual_subtracts_recorded_phases(self) -> None:
         sample = self.sample(
             wall_clock_ms=20.0,
@@ -293,6 +364,22 @@ class OverheadHarnessTests(unittest.TestCase):
         del sample["artifact_bytes"]["archive_extracted"]
         with self.assertRaises(AssertionError):
             assert_matches_schema(self, sample, schema, root=schema)
+
+    def test_sample_schema_accepts_event_rate_sweep_metadata(self) -> None:
+        schema = load_schema("overhead-sample-v0.schema.json")
+        sample = self.sample(
+            event_rate_sweep={
+                "schema": "assay.experiment.event_rate_sweep.v0",
+                "kernel_event_rate": "low",
+                "span_event_rate": "high",
+                "concurrency": 2,
+                "payload_size": "small",
+                "target_kernel_events": 1,
+                "target_span_events": 100,
+                "payload_bytes": 128,
+            }
+        )
+        assert_matches_schema(self, sample, schema, root=schema)
 
     def test_summary_schema_accepts_summary(self) -> None:
         samples = [
@@ -540,6 +627,52 @@ class OverheadHarnessTests(unittest.TestCase):
             self.assertTrue(bmf)
             self.assertIn("Runner-vs-OTel Overhead Summary", summary_md)
             self.assertIn("| Valid samples | `20` |", summary_md)
+
+    def test_harness_emits_event_rate_sweep_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workload = root / "workload"
+            out_dir = root / "overhead"
+            write_stub_workload(workload)
+
+            status = overhead_harness.main(
+                [
+                    "--iterations",
+                    "1",
+                    "--skip-build",
+                    "--clean",
+                    "--timeout-seconds",
+                    "10",
+                    "--workload-dir",
+                    str(workload),
+                    "--out-dir",
+                    str(out_dir),
+                    "--sweep-kernel-event-rate",
+                    "medium",
+                    "--sweep-span-event-rate",
+                    "low",
+                    "--sweep-concurrency",
+                    "4",
+                    "--sweep-payload-size",
+                    "medium",
+                ]
+            )
+            self.assertEqual(status, 0)
+
+            sample = json.loads(
+                (out_dir / "arm-b-otel" / "samples.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()[0]
+            )
+            summary = json.loads(
+                (out_dir / "arm-b-otel" / "summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+            self.assertEqual(sample["event_rate_sweep"]["target_kernel_events"], 25)
+            self.assertEqual(sample["event_rate_sweep"]["target_span_events"], 1)
+            self.assertEqual(summary["event_rate_sweep"], sample["event_rate_sweep"])
 
     @unittest.skipUnless(Path("/usr/bin/time").exists(), "/usr/bin/time not available")
     def test_harness_can_emit_rss_sample(self) -> None:

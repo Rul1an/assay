@@ -160,6 +160,16 @@
         }
       ]
     },
+    "event_rate_sweep": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/event_rate_sweep"
+        }
+      ]
+    },
     "artifact_bytes": {
       "type": "object",
       "additionalProperties": false,
@@ -222,6 +232,64 @@
         },
         "archive_write_ms": {
           "$ref": "#/$defs/phase_ms"
+        }
+      }
+    },
+    "event_rate_sweep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "kernel_event_rate",
+        "span_event_rate",
+        "concurrency",
+        "payload_size",
+        "target_kernel_events",
+        "target_span_events",
+        "payload_bytes"
+      ],
+      "properties": {
+        "schema": {
+          "const": "assay.experiment.event_rate_sweep.v0"
+        },
+        "kernel_event_rate": {
+          "enum": [
+            "baseline",
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "span_event_rate": {
+          "enum": [
+            "baseline",
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "payload_size": {
+          "enum": [
+            "small",
+            "medium",
+            "large"
+          ]
+        },
+        "target_kernel_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target_span_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "payload_bytes": {
+          "type": "integer",
+          "minimum": 1
         }
       }
     }

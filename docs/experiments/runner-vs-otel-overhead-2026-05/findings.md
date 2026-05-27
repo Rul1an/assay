@@ -308,7 +308,7 @@ Next engineering slice:
 > paired residual diagnostic has landed and shows that the median gap is
 > not stable enough for an additive wall-clock decomposition at the
 > current measurement budget. If the overhead arc continues, the next
-> slice should be a controlled event-rate / workload-intensity sweep:
-> vary kernel-event rate, span/event rate, concurrency, and payload size,
-> then report slopes and thresholds rather than another single wall-clock
-> delta.
+> slice is the controlled event-rate / workload-intensity sweep now wired
+> into the overhead harness: vary kernel-event rate, span/event rate,
+> concurrency, and payload size, then report slopes and thresholds rather
+> than another single wall-clock delta.

@@ -38,6 +38,40 @@ on:
         required: true
         default: false
         type: boolean
+      sweep_kernel_event_rate:
+        description: "Slice 10 kernel-event pressure target"
+        required: true
+        default: "baseline"
+        type: choice
+        options:
+          - baseline
+          - low
+          - medium
+          - high
+      sweep_span_event_rate:
+        description: "Slice 10 OTel span/event pressure target"
+        required: true
+        default: "baseline"
+        type: choice
+        options:
+          - baseline
+          - low
+          - medium
+          - high
+      sweep_concurrency:
+        description: "Slice 10 concurrent sweep workers"
+        required: true
+        default: "1"
+        type: string
+      sweep_payload_size:
+        description: "Slice 10 per-event payload size"
+        required: true
+        default: "small"
+        type: choice
+        options:
+          - small
+          - medium
+          - large
 
 permissions:
   contents: read
@@ -161,6 +195,10 @@ jobs:
           REPETITIONS: ${{ inputs.repetitions }}
           TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
           MEASURE_RSS: ${{ inputs.measure_rss }}
+          SWEEP_KERNEL_EVENT_RATE: ${{ inputs.sweep_kernel_event_rate }}
+          SWEEP_SPAN_EVENT_RATE: ${{ inputs.sweep_span_event_rate }}
+          SWEEP_CONCURRENCY: ${{ inputs.sweep_concurrency }}
+          SWEEP_PAYLOAD_SIZE: ${{ inputs.sweep_payload_size }}
         run: |
           set -euo pipefail
           OUT_DIR="$PWD/overhead-runs"
@@ -169,6 +207,12 @@ jobs:
           if [ "$MEASURE_RSS" = "true" ]; then
             RSS_FLAG=(--measure-rss)
           fi
+          SWEEP_ARGS=(
+            --sweep-kernel-event-rate "$SWEEP_KERNEL_EVENT_RATE"
+            --sweep-span-event-rate "$SWEEP_SPAN_EVENT_RATE"
+            --sweep-concurrency "$SWEEP_CONCURRENCY"
+            --sweep-payload-size "$SWEEP_PAYLOAD_SIZE"
+          )
           set +e
           python3 docs/experiments/runner-vs-otel-overhead-2026-05/overhead_harness.py \
             --arm paired-a-c \
@@ -183,6 +227,7 @@ jobs:
             --ebpf-obj "$PWD/target/assay-ebpf.o" \
             --runner-fixture-agent "$PWD/runner-fixtures/openai-agents/fixture-agent.js" \
             --delegated-workflow-url "$WORKFLOW_URL" \
+            "${SWEEP_ARGS[@]}" \
             "${RSS_FLAG[@]}"
           status=$?
           set -e
@@ -317,6 +362,10 @@ jobs:
           REPETITIONS: ${{ inputs.repetitions }}
           TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
           MEASURE_RSS: ${{ inputs.measure_rss }}
+          SWEEP_KERNEL_EVENT_RATE: ${{ inputs.sweep_kernel_event_rate }}
+          SWEEP_SPAN_EVENT_RATE: ${{ inputs.sweep_span_event_rate }}
+          SWEEP_CONCURRENCY: ${{ inputs.sweep_concurrency }}
+          SWEEP_PAYLOAD_SIZE: ${{ inputs.sweep_payload_size }}
         run: |
           set -euo pipefail
           OUT_DIR="$PWD/overhead-runs"
@@ -325,6 +374,12 @@ jobs:
           if [ "$MEASURE_RSS" = "true" ]; then
             RSS_FLAG=(--measure-rss)
           fi
+          SWEEP_ARGS=(
+            --sweep-kernel-event-rate "$SWEEP_KERNEL_EVENT_RATE"
+            --sweep-span-event-rate "$SWEEP_SPAN_EVENT_RATE"
+            --sweep-concurrency "$SWEEP_CONCURRENCY"
+            --sweep-payload-size "$SWEEP_PAYLOAD_SIZE"
+          )
           set +e
           python3 docs/experiments/runner-vs-otel-overhead-2026-05/overhead_harness.py \
             --arm arm-c-dual-capture \
@@ -338,6 +393,7 @@ jobs:
             --assay-bin "$PWD/target/debug/assay" \
             --ebpf-obj "$PWD/target/assay-ebpf.o" \
             --delegated-workflow-url "$WORKFLOW_URL" \
+            "${SWEEP_ARGS[@]}" \
             "${RSS_FLAG[@]}"
           status=$?
           set -e
@@ -467,6 +523,10 @@ jobs:
           REPETITIONS: ${{ inputs.repetitions }}
           TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
           MEASURE_RSS: ${{ inputs.measure_rss }}
+          SWEEP_KERNEL_EVENT_RATE: ${{ inputs.sweep_kernel_event_rate }}
+          SWEEP_SPAN_EVENT_RATE: ${{ inputs.sweep_span_event_rate }}
+          SWEEP_CONCURRENCY: ${{ inputs.sweep_concurrency }}
+          SWEEP_PAYLOAD_SIZE: ${{ inputs.sweep_payload_size }}
         run: |
           set -euo pipefail
           OUT_DIR="$PWD/overhead-runs"
@@ -475,6 +535,12 @@ jobs:
           if [ "$MEASURE_RSS" = "true" ]; then
             RSS_FLAG=(--measure-rss)
           fi
+          SWEEP_ARGS=(
+            --sweep-kernel-event-rate "$SWEEP_KERNEL_EVENT_RATE"
+            --sweep-span-event-rate "$SWEEP_SPAN_EVENT_RATE"
+            --sweep-concurrency "$SWEEP_CONCURRENCY"
+            --sweep-payload-size "$SWEEP_PAYLOAD_SIZE"
+          )
           set +e
           python3 docs/experiments/runner-vs-otel-overhead-2026-05/overhead_harness.py \
             --arm arm-a-runner-only \
@@ -489,6 +555,7 @@ jobs:
             --ebpf-obj "$PWD/target/assay-ebpf.o" \
             --runner-fixture-agent "$PWD/runner-fixtures/openai-agents/fixture-agent.js" \
             --delegated-workflow-url "$WORKFLOW_URL" \
+            "${SWEEP_ARGS[@]}" \
             "${RSS_FLAG[@]}"
           status=$?
           set -e
@@ -586,6 +653,10 @@ jobs:
           REPETITIONS: ${{ inputs.repetitions }}
           TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
           MEASURE_RSS: ${{ inputs.measure_rss }}
+          SWEEP_KERNEL_EVENT_RATE: ${{ inputs.sweep_kernel_event_rate }}
+          SWEEP_SPAN_EVENT_RATE: ${{ inputs.sweep_span_event_rate }}
+          SWEEP_CONCURRENCY: ${{ inputs.sweep_concurrency }}
+          SWEEP_PAYLOAD_SIZE: ${{ inputs.sweep_payload_size }}
         run: |
           set -euo pipefail
           OUT_DIR="$PWD/overhead-runs"
@@ -594,6 +665,12 @@ jobs:
           if [ "$MEASURE_RSS" = "true" ]; then
             RSS_FLAG=(--measure-rss)
           fi
+          SWEEP_ARGS=(
+            --sweep-kernel-event-rate "$SWEEP_KERNEL_EVENT_RATE"
+            --sweep-span-event-rate "$SWEEP_SPAN_EVENT_RATE"
+            --sweep-concurrency "$SWEEP_CONCURRENCY"
+            --sweep-payload-size "$SWEEP_PAYLOAD_SIZE"
+          )
           set +e
           python3 docs/experiments/runner-vs-otel-overhead-2026-05/overhead_harness.py \
             --arm arm-b-otel \
@@ -604,6 +681,7 @@ jobs:
             --out-dir "$OUT_DIR" \
             --workload-dir "$PWD/docs/experiments/runner-vs-otel-2026-05/workload" \
             --delegated-workflow-url "$WORKFLOW_URL" \
+            "${SWEEP_ARGS[@]}" \
             "${RSS_FLAG[@]}"
           status=$?
           set -e
