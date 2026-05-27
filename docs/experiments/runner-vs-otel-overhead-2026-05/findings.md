@@ -21,6 +21,8 @@
 | 8 phase A | [26476490968](https://github.com/Rul1an/assay/actions/runs/26476490968) | Arm A runner-only | 20 wall-clock + phase timing | 20 valid, 0 discarded, same host class |
 | 8 phase C | [26476824593](https://github.com/Rul1an/assay/actions/runs/26476824593) | Arm C dual capture | 20 wall-clock + phase timing | 20 valid, 0 discarded, same host class |
 | 9 paired A/C | [26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306) | Arm A + Arm C paired | 20 adjacent pairs | 20 valid per arm, 0 discarded, same job and host class |
+| 10 smoke kernel | [26508127380](https://github.com/Rul1an/assay/actions/runs/26508127380) | Arm A + Arm C paired | 2 adjacent pairs, `kernel=low`, `span=baseline`, `concurrency=1` | 2 valid per arm, 0 discarded, clean health gates |
+| 10 smoke span/concurrency | [26508355816](https://github.com/Rul1an/assay/actions/runs/26508355816) | Arm A + Arm C paired | 2 adjacent pairs, `kernel=medium`, `span=low`, `concurrency=2` | 2 valid per arm, 0 discarded, clean health gates |
 
 Generated artifacts from those runs were inspected as review artifacts
 only. They are intentionally not committed as benchmark evidence in this
@@ -42,6 +44,14 @@ The paired Slice 9 run is also diagnostic. It keeps Arm A and Arm C
 adjacent in one delegated job to reduce inter-dispatch drift. It does
 not replace the same-host baselines below, and its unhealthy tails keep
 wall-clock publication caveats in force.
+
+The Slice 10 smoke runs are workflow and metadata validation only. They
+show that the event-rate sweep knobs reach the real delegated workload:
+both arms captured `event-rate-sweep/worker-*` kernel events, Arm C
+emitted `assay.sweep.*` trace metadata when span/event pressure was
+requested, and Arm A correctly recorded `span_event_rate=baseline` with
+`target_span_events=0`. They are too small to support slope, threshold,
+or benchmark findings.
 
 ## Same-Host Baselines
 
@@ -307,8 +317,9 @@ Next engineering slice:
 > Do not add another broad Arm A/C wall-clock rerun for this arc. The
 > paired residual diagnostic has landed and shows that the median gap is
 > not stable enough for an additive wall-clock decomposition at the
-> current measurement budget. If the overhead arc continues, the next
-> slice is the controlled event-rate / workload-intensity sweep now wired
-> into the overhead harness: vary kernel-event rate, span/event rate,
-> concurrency, and payload size, then report slopes and thresholds rather
-> than another single wall-clock delta.
+> current measurement budget. Slice 10 smoke runs have now validated the
+> event-rate / workload-intensity knobs on main. If the overhead arc
+> continues, the next slice should be a predeclared small matrix that
+> varies kernel-event rate, span/event rate, concurrency, and payload
+> size, then reports slopes and thresholds rather than another single
+> wall-clock delta.

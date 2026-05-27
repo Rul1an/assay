@@ -5,7 +5,7 @@
 > rendering, Slice 5 findings, Slice 6 same-host Arm B dispatches, and
 > Slice 7 Arm A runner-only dispatches, Slice 8 phase timing diagnostics,
 > and Slice 9 paired A/C residual diagnostics have landed. Slice 10 is
-> harness-ready as a controlled event-rate / workload-intensity sweep. This
+> smoke-verified as a controlled event-rate / workload-intensity sweep. This
 > directory contains the
 > experiment-scoped measurement
 > harness and schema sidecars for the plan in
@@ -186,6 +186,23 @@ The local unit tests exercise the Arm A / Arm C paths with a fake
 `assay` binary that emits the expected archive shape. Real
 `assay runner-spike` validation is provided by the delegated workflow
 dispatches listed above.
+
+Two post-merge Slice 10 smoke dispatches validated the real workflow
+path on main:
+
+- [Run 26508127380](https://github.com/Rul1an/assay/actions/runs/26508127380)
+  ran paired A/C with `kernel=low`, `span=baseline`, `concurrency=1`,
+  and `payload=small`: 2/2 valid samples per arm, 0 discarded, clean
+  health gates.
+- [Run 26508355816](https://github.com/Rul1an/assay/actions/runs/26508355816)
+  ran paired A/C with `kernel=medium`, `span=low`, `concurrency=2`,
+  and `payload=small`: 2/2 valid samples per arm, 0 discarded, clean
+  health gates. The artifacts showed `event-rate-sweep/worker-*`
+  kernel events for both arms and `assay.sweep.*` trace metadata for
+  Arm C.
+
+Those runs are smoke evidence only. They prove the knobs reach the real
+workload and fixture paths; they are not sweep findings.
 
 Do not commit the uploaded artifacts until the findings slice decides
 which measurements should become evidence.
