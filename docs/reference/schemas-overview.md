@@ -36,4 +36,6 @@ string carries the contract boundary.
 | Index | Role |
 |---|---|
 | [`runner/schemas-overview.md`](runner/schemas-overview.md) | Detailed Runner and Runner-adjacent schema list. |
+| [`artifact-families-inventory.md`](artifact-families-inventory.md) | Canonical, reference, experiment-scoped, and proposed artifact-family inventory. |
 | [`observability/README.md`](observability/README.md) | Observability reference contracts for claim classes and joins. |
+| [`experiments/namespace-governance.md`](experiments/namespace-governance.md) | Naming, promotion, and cross-arc field guidance for experiment-scoped schemas. |
