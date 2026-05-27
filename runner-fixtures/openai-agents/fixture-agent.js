@@ -34,6 +34,16 @@ function requiredEnv(name) {
   return value;
 }
 
+function optionalIntEnv(name, fallback) {
+  const value = process.env[name];
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative integer`);
+  }
+  return parsed;
+}
+
 function appendEvent(logPath, event) {
   fs.appendFileSync(logPath, `${JSON.stringify(event)}\n`, 'utf8');
 }
@@ -52,6 +62,26 @@ function makeEmitter({ logPath, runId, schema }) {
     });
     seq += 1;
   };
+}
+
+async function applySweepPressure(workDir) {
+  const kernelEvents = optionalIntEnv('ASSAY_SWEEP_KERNEL_EVENTS', 0);
+  if (kernelEvents <= 0) return;
+  const concurrency = Math.max(1, optionalIntEnv('ASSAY_SWEEP_CONCURRENCY', 1));
+  const payloadBytes = Math.max(1, optionalIntEnv('ASSAY_SWEEP_PAYLOAD_BYTES', 128));
+  const payload = 'x'.repeat(payloadBytes);
+  const workers = Math.min(concurrency, kernelEvents);
+  const sweepDir = path.join(workDir, 'event-rate-sweep');
+  fs.mkdirSync(sweepDir, { recursive: true });
+  await Promise.all(
+    Array.from({ length: workers }, async (_, worker) => {
+      for (let index = worker; index < kernelEvents; index += workers) {
+        const target = path.join(sweepDir, `worker-${worker}-${index}.txt`);
+        fs.writeFileSync(target, payload, 'utf8');
+        fs.readFileSync(target, 'utf8');
+      }
+    }),
+  );
 }
 
 class DeterministicToolCallModel {
@@ -148,6 +178,7 @@ async function main() {
 
   try {
     await runner.run(agent, 'Read the deterministic fixture file.', { maxTurns: 2 });
+    await applySweepPressure(workDir);
     emit({ event_type: 'run_finished' });
   } catch (error) {
     emit({ event_type: 'run_failed' });

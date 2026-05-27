@@ -5,7 +5,7 @@
 > rendering, Slice 5 findings, Slice 6 same-host Arm B dispatches, and
 > Slice 7 Arm A runner-only dispatches, Slice 8 phase timing diagnostics,
 > and Slice 9 paired A/C residual diagnostics have landed. Slice 10 is
-> planned as a controlled event-rate / workload-intensity sweep. This
+> harness-ready as a controlled event-rate / workload-intensity sweep. This
 > directory contains the
 > experiment-scoped measurement
 > harness and schema sidecars for the plan in
@@ -172,6 +172,15 @@ event count, span/event count, concurrency, and payload size. Its useful
 output is a set of slopes and thresholds, such as overhead per 1k kernel
 events or the event rate where ring-buffer retrieval becomes visible,
 not a product benchmark number.
+
+The delegated workflow exposes the Slice 10 knobs as
+`sweep_kernel_event_rate`, `sweep_span_event_rate`, `sweep_concurrency`,
+and `sweep_payload_size`. Baseline defaults preserve the pre-Slice-10
+behavior. Non-baseline runs embed `assay.experiment.event_rate_sweep.v0`
+metadata in each sample and summary so review artifacts remain
+self-describing. Arm A has no OTel trace export, so its sample metadata
+records any requested span/event pressure as `baseline` / `0` even when
+the paired Arm C sample applies the requested span/event target.
 
 The local unit tests exercise the Arm A / Arm C paths with a fake
 `assay` binary that emits the expected archive shape. Real

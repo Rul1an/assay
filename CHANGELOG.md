@@ -71,6 +71,11 @@ All notable changes to this project will be documented in this file.
   question is how overhead scales with kernel-event rate, span/event
   rate, concurrency, and payload size, not another broad Arm A/C
   wall-clock rerun.
+- Added Slice 10 harness/workflow support for that event-rate sweep. The
+  overhead workflow now accepts sweep inputs, the workload can generate
+  controlled kernel-event and OTel event pressure, and samples/summaries
+  embed `assay.experiment.event_rate_sweep.v0` metadata without
+  publishing new measurements.
 
 ## [3.12.0] - 2026-05-25
 
