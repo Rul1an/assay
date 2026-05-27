@@ -30,6 +30,8 @@ SUMMARY_SCHEMA = "assay.experiment.overhead_summary.v0"
 PAIRED_SEQUENCE_SCHEMA = "assay.experiment.paired_sequence.v0"
 EVENT_RATE_SWEEP_SCHEMA = "assay.experiment.event_rate_sweep.v0"
 EVENT_RATE_SWEEP_SCHEMA_V0_1 = "assay.experiment.event_rate_sweep.v0.1"
+OTEL_SPAN_EVENT_COUNT_LIMIT_ENV = "OTEL_SPAN_EVENT_COUNT_LIMIT"
+DEFAULT_OTEL_SPAN_EVENT_COUNT_LIMIT = 128
 DEFAULT_ARM = "arm-b-otel"
 ARM_A = "arm-a-runner-only"
 ARM_B = "arm-b-otel"
@@ -218,16 +220,59 @@ def event_rate_sweep_config(args: argparse.Namespace) -> dict[str, Any] | None:
         if kernel_level in {"x500", "x1000"} or span_level in {"x500", "x1000"}
         else EVENT_RATE_SWEEP_SCHEMA
     )
-    return {
+    target_span_events = SWEEP_SPAN_EVENT_TARGETS[span_level]
+    config = {
         "schema": schema,
         "kernel_event_rate": kernel_level,
         "span_event_rate": span_level,
         "concurrency": concurrency,
         "payload_size": payload_size,
         "target_kernel_events": SWEEP_KERNEL_EVENT_TARGETS[kernel_level],
-        "target_span_events": SWEEP_SPAN_EVENT_TARGETS[span_level],
+        "target_span_events": target_span_events,
         "payload_bytes": SWEEP_PAYLOAD_BYTES[payload_size],
     }
+    config.update(span_event_limit_metadata(target_span_events))
+    return config
+
+
+def span_event_limit_metadata(target_span_events: int) -> dict[str, Any]:
+    raw_limit = os.environ.get(OTEL_SPAN_EVENT_COUNT_LIMIT_ENV)
+    source = "default"
+    limit = DEFAULT_OTEL_SPAN_EVENT_COUNT_LIMIT
+    if raw_limit is not None:
+        try:
+            parsed = int(raw_limit)
+        except ValueError:
+            parsed = DEFAULT_OTEL_SPAN_EVENT_COUNT_LIMIT
+            source = "invalid-env"
+        else:
+            if parsed >= 0:
+                limit = parsed
+                source = "env"
+            else:
+                source = "invalid-env"
+    metadata: dict[str, Any] = {
+        "span_event_limit_effective": limit,
+        "span_event_limit_source": source,
+    }
+    if target_span_events > limit:
+        metadata["span_event_limit_warning"] = span_event_limit_warning(
+            target_span_events=target_span_events,
+            limit=limit,
+            source=source,
+        )
+    return metadata
+
+
+def span_event_limit_warning(
+    *, target_span_events: int, limit: int, source: str
+) -> str:
+    return (
+        f"target_span_events={target_span_events} exceeds effective OTel "
+        f"SpanLimits.EventCountLimit={limit} (source={source}); set "
+        f"{OTEL_SPAN_EVENT_COUNT_LIMIT_ENV} above the target to measure all "
+        "requested span events"
+    )
 
 
 def sweep_workload_args(event_rate_sweep: dict[str, Any] | None) -> list[str]:
@@ -256,6 +301,7 @@ def event_rate_sweep_for_arm(
     arm_sweep = dict(event_rate_sweep)
     arm_sweep["span_event_rate"] = "baseline"
     arm_sweep["target_span_events"] = 0
+    arm_sweep.pop("span_event_limit_warning", None)
     return arm_sweep
 
 
@@ -904,6 +950,16 @@ def summary_markdown(summary: dict[str, Any], *, artifact_name: str | None = Non
             f"concurrency={event_rate_sweep['concurrency']}; "
             f"payload={event_rate_sweep['payload_size']}` |"
         )
+        lines.append(
+            "| OTel span event limit | "
+            f"`{event_rate_sweep.get('span_event_limit_effective')}` "
+            f"({event_rate_sweep.get('span_event_limit_source', 'unknown')}) |"
+        )
+        if event_rate_sweep.get("span_event_limit_warning"):
+            lines.append(
+                "| OTel span event warning | "
+                f"`{event_rate_sweep['span_event_limit_warning']}` |"
+            )
     if isinstance(phase_timings, dict) and phase_timings:
         lines.extend(
             [

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import platform
 import subprocess
 import tempfile
 import tarfile
 import unittest
+from unittest import mock
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -305,6 +307,27 @@ class OverheadHarnessTests(unittest.TestCase):
         }
         assert_matches_schema(self, payload, schema, root=schema)
 
+    def test_event_rate_sweep_v01_schema_accepts_span_limit_warning(self) -> None:
+        schema = load_schema("event-rate-sweep-v0.1.schema.json")
+        payload = {
+            "schema": "assay.experiment.event_rate_sweep.v0.1",
+            "kernel_event_rate": "baseline",
+            "span_event_rate": "x500",
+            "concurrency": 1,
+            "payload_size": "small",
+            "target_kernel_events": 0,
+            "target_span_events": 500,
+            "payload_bytes": 128,
+            "span_event_limit_effective": 128,
+            "span_event_limit_source": "default",
+            "span_event_limit_warning": overhead_harness.span_event_limit_warning(
+                target_span_events=500,
+                limit=128,
+                source="default",
+            ),
+        }
+        assert_matches_schema(self, payload, schema, root=schema)
+
     def test_event_rate_sweep_config_maps_levels_to_targets(self) -> None:
         args = type(
             "Args",
@@ -342,6 +365,66 @@ class OverheadHarnessTests(unittest.TestCase):
         self.assertEqual(config["target_span_events"], 500)
         self.assertEqual(config["payload_bytes"], 65536)
         self.assertEqual(config["concurrency"], 8)
+        self.assertEqual(config["span_event_limit_effective"], 128)
+        self.assertEqual(config["span_event_limit_source"], "default")
+        self.assertEqual(
+            config["span_event_limit_warning"],
+            overhead_harness.span_event_limit_warning(
+                target_span_events=500,
+                limit=128,
+                source="default",
+            ),
+        )
+
+    def test_event_rate_sweep_config_uses_span_limit_env_override(self) -> None:
+        args = type(
+            "Args",
+            (),
+            {
+                "sweep_kernel_event_rate": "baseline",
+                "sweep_span_event_rate": "x1000",
+                "sweep_concurrency": 1,
+                "sweep_payload_size": "small",
+            },
+        )()
+        with mock.patch.dict(
+            os.environ,
+            {"OTEL_SPAN_EVENT_COUNT_LIMIT": "1000"},
+        ):
+            config = overhead_harness.event_rate_sweep_config(args)
+
+        self.assertEqual(config["span_event_limit_effective"], 1000)
+        self.assertEqual(config["span_event_limit_source"], "env")
+        self.assertNotIn("span_event_limit_warning", config)
+
+    def test_event_rate_sweep_config_warns_against_lower_env_override(self) -> None:
+        args = type(
+            "Args",
+            (),
+            {
+                "sweep_kernel_event_rate": "baseline",
+                "sweep_span_event_rate": "high",
+                "sweep_concurrency": 1,
+                "sweep_payload_size": "small",
+            },
+        )()
+        with mock.patch.dict(
+            os.environ,
+            {"OTEL_SPAN_EVENT_COUNT_LIMIT": "64"},
+        ):
+            config = overhead_harness.event_rate_sweep_config(args)
+
+        self.assertEqual(config["target_span_events"], 100)
+        self.assertEqual(config["span_event_limit_effective"], 64)
+        self.assertEqual(config["span_event_limit_source"], "env")
+        self.assertEqual(
+            config["span_event_limit_warning"],
+            overhead_harness.span_event_limit_warning(
+                target_span_events=100,
+                limit=64,
+                source="env",
+            ),
+        )
 
     def test_baseline_event_rate_sweep_config_is_null(self) -> None:
         args = type(
@@ -366,6 +449,8 @@ class OverheadHarnessTests(unittest.TestCase):
             "target_kernel_events": 25,
             "target_span_events": 100,
             "payload_bytes": 128,
+            "span_event_limit_effective": 128,
+            "span_event_limit_source": "default",
         }
         arm_a = overhead_harness.event_rate_sweep_for_arm(
             overhead_harness.ARM_A,
@@ -375,6 +460,8 @@ class OverheadHarnessTests(unittest.TestCase):
         self.assertEqual(arm_a["span_event_rate"], "baseline")
         self.assertEqual(arm_a["target_span_events"], 0)
         self.assertEqual(arm_a["target_kernel_events"], 25)
+        self.assertEqual(arm_a["span_event_limit_effective"], 128)
+        self.assertNotIn("span_event_limit_warning", arm_a)
         self.assertEqual(
             overhead_harness.event_rate_sweep_for_arm(overhead_harness.ARM_C, config),
             config,
@@ -721,6 +808,18 @@ class OverheadHarnessTests(unittest.TestCase):
 
             self.assertEqual(sample["event_rate_sweep"]["target_kernel_events"], 25)
             self.assertEqual(sample["event_rate_sweep"]["target_span_events"], 1)
+            self.assertEqual(
+                sample["event_rate_sweep"]["span_event_limit_effective"],
+                128,
+            )
+            self.assertEqual(
+                sample["event_rate_sweep"]["span_event_limit_source"],
+                "default",
+            )
+            self.assertNotIn(
+                "span_event_limit_warning",
+                sample["event_rate_sweep"],
+            )
             self.assertEqual(summary["event_rate_sweep"], sample["event_rate_sweep"])
 
     def test_harness_records_warmup_samples_outside_summary(self) -> None:

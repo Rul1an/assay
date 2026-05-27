@@ -274,6 +274,13 @@ Warm-up failures do not abort the harness; inspect
 a dispatch failed, treat that dispatch as inconclusive even when the
 measured samples pass.
 
+Samples and summaries now also record the effective OTel span-event
+limit for non-baseline sweep cells. If `target_span_events` exceeds that
+effective limit, the harness sets `span_event_limit_warning`; do not
+interpret span-event timing above the limit unless
+`OTEL_SPAN_EVENT_COUNT_LIMIT` was raised and retained event counts were
+verified first.
+
 That boundary-finding sweep has now been dispatched and summarized in
 [`findings.md`](findings.md):
 

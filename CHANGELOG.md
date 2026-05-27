@@ -112,6 +112,11 @@ All notable changes to this project will be documented in this file.
   OpenTelemetry Span Limits default, retained event-index ranges, and a
   local `OTEL_SPAN_EVENT_COUNT_LIMIT=1000` repro before treating the
   128-event cap as an OTel SDK configuration boundary.
+- Added a span-event limit guardrail to the overhead harness. Non-baseline
+  sweep samples and summaries now record the effective OTel span-event
+  limit and warn when `target_span_events` exceeds that limit, so future
+  dispatches cannot silently treat clipped span-event counts as throughput
+  evidence.
 
 ## [3.12.0] - 2026-05-25
 
