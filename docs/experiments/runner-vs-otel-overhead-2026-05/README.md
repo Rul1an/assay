@@ -178,7 +178,9 @@ The delegated workflow exposes the Slice 10 knobs as
 and `sweep_payload_size`. Baseline defaults preserve the pre-Slice-10
 behavior. Non-baseline runs embed `assay.experiment.event_rate_sweep.v0`
 metadata in each sample and summary so review artifacts remain
-self-describing. Arm A has no OTel trace export, so its sample metadata
+self-describing. Slice 12 extended `x500` / `x1000` targets use
+`assay.experiment.event_rate_sweep.v0.1` instead of changing the meaning
+of v0 labels. Arm A has no OTel trace export, so its sample metadata
 records any requested span/event pressure as `baseline` / `0` even when
 the paired Arm C sample applies the requested span/event target.
 
@@ -255,13 +257,18 @@ finding is a threshold statement: no health boundary was reached at the
 starter matrix budget.
 
 The next useful experiment is Slice 12 boundary-finding, not another
-single broad A/C wall-clock rerun. It should first extend the sweep
-schema/harness beyond the current `high=100` labels, then run a small
-paired A/C widening matrix over 500 and 1000 kernel/span-event targets,
-with concurrency and payload stress isolated. The output should be a
-boundary statement, such as "healthy through X" or "first unhealthy cell
-at Y", with event-count calibration and Runner health gates reported
-before timing is interpreted.
+single broad A/C wall-clock rerun. The harness is now ready for that
+slice: `x500` and `x1000` rate labels emit
+`assay.experiment.event_rate_sweep.v0.1`, workflow dispatches can add
+warm-up samples with `warmup_iterations`, and delegated jobs have enough
+timeout budget for paired widening cells.
+
+The Slice 12 dispatch should use paired A/C, `repetitions=5`,
+`warmup_iterations=1`, `measure_rss=false`, `build_ebpf=true`, and
+`timeout_seconds=300`. The output should be a boundary statement, such
+as "healthy through X" or "first unhealthy cell at Y", with event-count
+calibration and Runner health gates reported before timing is
+interpreted. RSS is intentionally not re-measured in this slice.
 
 Do not commit the uploaded artifacts until the findings slice decides
 which measurements should become evidence.

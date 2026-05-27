@@ -93,6 +93,11 @@ All notable changes to this project will be documented in this file.
   overhead step is to extend event-rate targets beyond `high=100`, then
   run a small paired A/C widening matrix that reports health/fidelity
   boundaries rather than another broad wall-clock decomposition.
+- Added Slice 12 harness support for the boundary-finding sweep:
+  `assay.experiment.event_rate_sweep.v0.1` extended `x500` / `x1000`
+  targets, optional warm-up samples, and longer delegated workflow
+  timeouts. This does not dispatch the widening matrix or publish new
+  measurement claims.
 
 ## [3.12.0] - 2026-05-25
 

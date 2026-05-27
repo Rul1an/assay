@@ -13,6 +13,11 @@ on:
         required: true
         default: "20"
         type: string
+      warmup_iterations:
+        description: "Warm-up samples to run before measured samples"
+        required: true
+        default: "0"
+        type: string
       arm:
         description: "Measurement arm to run (dispatch once per arm)"
         required: true
@@ -39,7 +44,7 @@ on:
         default: false
         type: boolean
       sweep_kernel_event_rate:
-        description: "Slice 10 kernel-event pressure target"
+        description: "Slice 10/12 kernel-event pressure target"
         required: true
         default: "baseline"
         type: choice
@@ -48,8 +53,10 @@ on:
           - low
           - medium
           - high
+          - x500
+          - x1000
       sweep_span_event_rate:
-        description: "Slice 10 OTel span/event pressure target"
+        description: "Slice 10/12 OTel span/event pressure target"
         required: true
         default: "baseline"
         type: choice
@@ -58,13 +65,15 @@ on:
           - low
           - medium
           - high
+          - x500
+          - x1000
       sweep_concurrency:
-        description: "Slice 10 concurrent sweep workers"
+        description: "Slice 10/12 concurrent sweep workers"
         required: true
         default: "1"
         type: string
       sweep_payload_size:
-        description: "Slice 10 per-event payload size"
+        description: "Slice 10/12 per-event payload size"
         required: true
         default: "small"
         type: choice
@@ -100,7 +109,7 @@ jobs:
     if: ${{ inputs.arm == 'paired-a-c' }}
     runs-on: [self-hosted, linux, assay-bpf-runner]
     needs: prepare-delegated-runner
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -193,6 +202,7 @@ jobs:
         shell: bash
         env:
           REPETITIONS: ${{ inputs.repetitions }}
+          WARMUP_ITERATIONS: ${{ inputs.warmup_iterations }}
           TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
           MEASURE_RSS: ${{ inputs.measure_rss }}
           SWEEP_KERNEL_EVENT_RATE: ${{ inputs.sweep_kernel_event_rate }}
@@ -217,6 +227,7 @@ jobs:
           python3 docs/experiments/runner-vs-otel-overhead-2026-05/overhead_harness.py \
             --arm paired-a-c \
             --iterations "$REPETITIONS" \
+            --warmup-iterations "$WARMUP_ITERATIONS" \
             --skip-build \
             --clean \
             --sudo \
@@ -276,7 +287,7 @@ jobs:
     if: ${{ inputs.arm == 'arm-c-dual-capture' }}
     runs-on: [self-hosted, linux, assay-bpf-runner]
     needs: prepare-delegated-runner
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -360,6 +371,7 @@ jobs:
         shell: bash
         env:
           REPETITIONS: ${{ inputs.repetitions }}
+          WARMUP_ITERATIONS: ${{ inputs.warmup_iterations }}
           TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
           MEASURE_RSS: ${{ inputs.measure_rss }}
           SWEEP_KERNEL_EVENT_RATE: ${{ inputs.sweep_kernel_event_rate }}
@@ -384,6 +396,7 @@ jobs:
           python3 docs/experiments/runner-vs-otel-overhead-2026-05/overhead_harness.py \
             --arm arm-c-dual-capture \
             --iterations "$REPETITIONS" \
+            --warmup-iterations "$WARMUP_ITERATIONS" \
             --skip-build \
             --clean \
             --sudo \
@@ -437,7 +450,7 @@ jobs:
     if: ${{ inputs.arm == 'arm-a-runner-only' }}
     runs-on: [self-hosted, linux, assay-bpf-runner]
     needs: prepare-delegated-runner
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -521,6 +534,7 @@ jobs:
         shell: bash
         env:
           REPETITIONS: ${{ inputs.repetitions }}
+          WARMUP_ITERATIONS: ${{ inputs.warmup_iterations }}
           TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
           MEASURE_RSS: ${{ inputs.measure_rss }}
           SWEEP_KERNEL_EVENT_RATE: ${{ inputs.sweep_kernel_event_rate }}
@@ -545,6 +559,7 @@ jobs:
           python3 docs/experiments/runner-vs-otel-overhead-2026-05/overhead_harness.py \
             --arm arm-a-runner-only \
             --iterations "$REPETITIONS" \
+            --warmup-iterations "$WARMUP_ITERATIONS" \
             --skip-build \
             --clean \
             --sudo \
@@ -599,7 +614,7 @@ jobs:
     if: ${{ inputs.arm == 'arm-b-otel' }}
     runs-on: [self-hosted, linux, assay-bpf-runner]
     needs: prepare-delegated-runner
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -651,6 +666,7 @@ jobs:
         shell: bash
         env:
           REPETITIONS: ${{ inputs.repetitions }}
+          WARMUP_ITERATIONS: ${{ inputs.warmup_iterations }}
           TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
           MEASURE_RSS: ${{ inputs.measure_rss }}
           SWEEP_KERNEL_EVENT_RATE: ${{ inputs.sweep_kernel_event_rate }}
@@ -675,6 +691,7 @@ jobs:
           python3 docs/experiments/runner-vs-otel-overhead-2026-05/overhead_harness.py \
             --arm arm-b-otel \
             --iterations "$REPETITIONS" \
+            --warmup-iterations "$WARMUP_ITERATIONS" \
             --skip-build \
             --clean \
             --timeout-seconds "$TIMEOUT_SECONDS" \
