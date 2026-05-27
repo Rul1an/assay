@@ -303,7 +303,7 @@
                   "name": "write handoff evidence",
                   "commands": [
                     {
-                      "executed": "assay evidence import cyclonedx-mlbom-model --input model.cdx.json --bom-ref pkg:huggingface/example/support-ticket-classifier@1.0.0"
+                      "executed": "assay evidence import cyclonedx-mlbom-model --input model-handoff-formulation.cdx.json --bom-ref pkg:huggingface/example/support-ticket-classifier@1.0.0"
                     }
                   ]
                 }
