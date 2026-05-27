@@ -44,7 +44,7 @@
 | `assay.experiment.overhead_summary.v0` | Aggregated overhead summary for runner-vs-OTel | experiment-scoped; sidecar active; phase timing diagnostics included | [`overhead-summary-v0.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/overhead-summary-v0.schema.json) |
 | `assay.experiment.runner_phase_timing.v0` | Phase-timing side-log emitted by `assay runner-spike run --phase-timing-log` | experiment-scoped; sidecar active | [`runner-phase-timing-v0.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/runner-phase-timing-v0.schema.json) |
 | `assay.experiment.event_rate_sweep.v0` | Event-rate/workload-intensity cell metadata embedded in overhead samples and summaries | experiment-scoped; sidecar active; Slice 10 smoke-verified | [`event-rate-sweep-v0.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/event-rate-sweep-v0.schema.json) |
-| `assay.experiment.event_rate_sweep.v0.1` | Event-rate/workload-intensity cell metadata with Slice 12 extended targets | experiment-scoped; sidecar active; Slice 12 harness-ready | [`event-rate-sweep-v0.1.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/event-rate-sweep-v0.1.schema.json) |
+| `assay.experiment.event_rate_sweep.v0.1` | Event-rate/workload-intensity cell metadata with Slice 12 extended targets | experiment-scoped; sidecar active; Slice 12 measured | [`event-rate-sweep-v0.1.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/event-rate-sweep-v0.1.schema.json) |
 
 The overhead schemas remain experiment-scoped. They are validated by the
 local harness tests against synthetic samples, summaries, phase

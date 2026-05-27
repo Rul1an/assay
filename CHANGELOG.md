@@ -103,6 +103,11 @@ All notable changes to this project will be documented in this file.
   that do not abort the harness but make an all-warm-up-failed dispatch
   inconclusive. This does not dispatch the widening matrix or publish new
   measurement claims.
+- Recorded Slice 12 boundary-finding results. The widened paired A/C
+  runs kept Runner health clean and kernel-event calibration exact
+  through `x1000` / concurrency 16, while widened OTel span-event cells
+  hit the default 128-event retention boundary at `s500`, so no timing
+  slope is published beyond that span-fidelity limit.
 
 ## [3.12.0] - 2026-05-25
 

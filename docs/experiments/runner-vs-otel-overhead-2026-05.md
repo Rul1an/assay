@@ -1,7 +1,6 @@
 # Runner vs OTel Overhead Measurement Plan (2026-05)
 
-> **Status:** measurement follow-up with Slices 1-11 complete and Slice 12
-> planned. This
+> **Status:** measurement follow-up with Slices 1-12 complete. This
 > document turns the explicit overhead non-claim from
 > [`runner-vs-otel-2026-05`](runner-vs-otel-2026-05/) into a reproducible
 > measurement plan and findings trail. It does not commit generated
@@ -99,12 +98,20 @@
 > no health boundary at 100 kernel events, 100 span events, concurrency
 > 4, and 64 KiB span payloads.
 >
-> **Slice 12 status:** harness-ready, not dispatched. The workflow and
-> harness now support extended `x500` / `x1000` sweep targets via
-> `assay.experiment.event_rate_sweep.v0.1`, optional warm-up samples, and
-> longer delegated job timeouts. The goal remains to find the first
-> health, fidelity, trace-size, or phase-timing boundary; it is not
-> another broad Arm A/C wall-clock rerun.
+> **Slice 12 status:** boundary-finding sweep dispatched and summarized
+> in
+> [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md).
+> Runs [26517696032](https://github.com/Rul1an/assay/actions/runs/26517696032),
+> [26518158603](https://github.com/Rul1an/assay/actions/runs/26518158603),
+> [26518522754](https://github.com/Rul1an/assay/actions/runs/26518522754),
+> [26518894002](https://github.com/Rul1an/assay/actions/runs/26518894002),
+> [26519398461](https://github.com/Rul1an/assay/actions/runs/26519398461), and
+> [26520226593](https://github.com/Rul1an/assay/actions/runs/26520226593)
+> passed with 5/5 measured samples per arm, 0 discarded samples, clean
+> Runner health gates, and successful warm-up samples. The kernel branch
+> stayed healthy through `x1000` and concurrency 16; the span branch hit
+> the default OTel event-retention fidelity boundary at `s500`
+> (128/500 retained events).
 
 ## Research Question
 
@@ -773,6 +780,32 @@ Slice 12 acceptance rules:
   cannot characterize the boundary at this measurement budget. Do not
   open Slice 13 merely to widen the same ladder again.
 
+Slice 12 result:
+
+- Runs
+  [26517696032](https://github.com/Rul1an/assay/actions/runs/26517696032),
+  [26518158603](https://github.com/Rul1an/assay/actions/runs/26518158603),
+  [26518522754](https://github.com/Rul1an/assay/actions/runs/26518522754),
+  [26518894002](https://github.com/Rul1an/assay/actions/runs/26518894002),
+  [26519398461](https://github.com/Rul1an/assay/actions/runs/26519398461), and
+  [26520226593](https://github.com/Rul1an/assay/actions/runs/26520226593)
+  completed the six predeclared cells.
+- Every cell had 5/5 measured samples per arm, 0 discarded samples,
+  successful warm-up samples, clean Runner health gates, and matching
+  host class.
+- Kernel-event calibration matched the declared targets exactly through
+  `x1000`: 500/500 or 1000/1000 unique `event-rate-sweep/worker-*`
+  files per measured sample in both arms.
+- Arm C span-event fidelity failed at the first widened span cell:
+  `s500` retained 128/500 `assay.sweep.span_event` entries per sample,
+  and `s1000` / `corner-lite` retained 128/1000. This matches the
+  default OpenTelemetry JS SDK span-event count limit for the workload
+  configuration.
+- Therefore the current arc closes with a split boundary statement:
+  Runner kernel capture is healthy through the widened kernel cells, but
+  default OTel span-event retention becomes the limiting fidelity
+  boundary before span timing can be interpreted above 100 events.
+
 ## Non-Claims
 
 - Does not rank OpenTelemetry, OpenInference, or Runner as products.
@@ -798,7 +831,7 @@ Slice 12 acceptance rules:
 | 9 | **Done**: paired Arm A/C residual diagnostics via workflow `arm=paired-a-c`, dispatched in run [26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306) | residuals shrink/change sign under pairing; wall-clock decomposition remains unpublished and should stop at this measurement budget |
 | 10 | **Smoke-verified**: controlled event-rate / workload-intensity sweep via workflow inputs and sample/summary metadata, with paired smoke runs [26508127380](https://github.com/Rul1an/assay/actions/runs/26508127380) and [26508355816](https://github.com/Rul1an/assay/actions/runs/26508355816) | no broad rerun; dispatch only a small matrix first, with kernel-event count, span/event count, concurrency, phase timing, residual, RSS, and health gates reported by level |
 | 11 | **Done**: predeclared Slice 11 starter matrix with five paired A/C cells: control, kernel-high, span-high, kernel-concurrent, and corner, dispatched in runs [26511405031](https://github.com/Rul1an/assay/actions/runs/26511405031), [26511787316](https://github.com/Rul1an/assay/actions/runs/26511787316), [26512146963](https://github.com/Rul1an/assay/actions/runs/26512146963), [26512515478](https://github.com/Rul1an/assay/actions/runs/26512515478), and [26512909068](https://github.com/Rul1an/assay/actions/runs/26512909068) | all cells 5/5 valid per arm with clean health gates; event counts matched targets; no health boundary reached at the starter matrix budget |
-| 12 | **Harness-ready**: boundary-finding sweep with extended `x500` / `x1000` targets, `event_rate_sweep.v0.1`, warm-up support, and 240-minute delegated timeouts | dispatch n=5 paired A/C cells with one warm-up pair; publish only boundary classes or repeat first boundary/predecessor at n=20 |
+| 12 | **Done**: boundary-finding sweep with extended `x500` / `x1000` targets, dispatched in runs [26517696032](https://github.com/Rul1an/assay/actions/runs/26517696032), [26518158603](https://github.com/Rul1an/assay/actions/runs/26518158603), [26518522754](https://github.com/Rul1an/assay/actions/runs/26518522754), [26518894002](https://github.com/Rul1an/assay/actions/runs/26518894002), [26519398461](https://github.com/Rul1an/assay/actions/runs/26519398461), and [26520226593](https://github.com/Rul1an/assay/actions/runs/26520226593) | kernel branch healthy through `x1000` / concurrency 16; span branch hits default OTel 128-event fidelity boundary at `s500`; no timing slope above that span boundary |
 
 ## Publication Rule
 
