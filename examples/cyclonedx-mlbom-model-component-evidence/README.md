@@ -68,6 +68,10 @@ considered later only for a separate formulation or evaluation receipt lane
 backed by a real downstream consumer request. Until then, formulation stays
 bound through the source BOM digest.
 
+The handoff task in this fixture uses an Assay command because this is the
+Assay-side consumer example. A generic CycloneDX example should keep the same
+structure but replace that command with a project-neutral evidence producer.
+
 ## Not Imported
 
 The v1 receipt excludes:
