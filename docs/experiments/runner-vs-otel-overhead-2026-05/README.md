@@ -12,9 +12,9 @@
 > [`../runner-vs-otel-overhead-2026-05.md`](../runner-vs-otel-overhead-2026-05.md).
 > It does not contain committed benchmark results.
 >
-> Current findings are in [`findings.md`](findings.md). They summarize
-> the delegated same-host Arm A / Arm B / Arm C measurement set and keep
-> the caveats attached.
+> The citation-oriented summary is in
+> [`findings-summary.md`](findings-summary.md). The full evidence trail
+> remains in [`findings.md`](findings.md).
 
 ## What This Emits
 
