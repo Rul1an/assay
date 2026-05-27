@@ -307,6 +307,8 @@ Next engineering slice:
 > Do not add another broad Arm A/C wall-clock rerun for this arc. The
 > paired residual diagnostic has landed and shows that the median gap is
 > not stable enough for an additive wall-clock decomposition at the
-> current measurement budget. A future slice should only be opened if it
-> targets a narrower mechanism, such as warmup/order effects or a deeper
-> `child_runtime_ms` split.
+> current measurement budget. If the overhead arc continues, the next
+> slice should be a controlled event-rate / workload-intensity sweep:
+> vary kernel-event rate, span/event rate, concurrency, and payload size,
+> then report slopes and thresholds rather than another single wall-clock
+> delta.

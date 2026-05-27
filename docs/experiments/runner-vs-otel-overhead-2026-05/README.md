@@ -4,7 +4,8 @@
 > dispatch pipeline, Slice 3 RSS collection, Slice 4 summary/BMF
 > rendering, Slice 5 findings, Slice 6 same-host Arm B dispatches, and
 > Slice 7 Arm A runner-only dispatches, Slice 8 phase timing diagnostics,
-> and Slice 9 paired A/C residual diagnostics have landed. This
+> and Slice 9 paired A/C residual diagnostics have landed. Slice 10 is
+> planned as a controlled event-rate / workload-intensity sweep. This
 > directory contains the
 > experiment-scoped measurement
 > harness and schema sidecars for the plan in
@@ -164,6 +165,13 @@ The first paired Arm A/C diagnostic passed as
 `linux-aarch64-6.8.0-117-generic` host class. It showed the Slice 8
 Arm A-over-Arm C wall-clock median gap does not reproduce under
 adjacent pairing, so wall-clock decomposition stays unpublished.
+
+Slice 10 should not be another broad Arm A/C rerun. The planned next
+step is an event-rate / workload-intensity sweep that varies kernel
+event count, span/event count, concurrency, and payload size. Its useful
+output is a set of slopes and thresholds, such as overhead per 1k kernel
+events or the event rate where ring-buffer retrieval becomes visible,
+not a product benchmark number.
 
 The local unit tests exercise the Arm A / Arm C paths with a fake
 `assay` binary that emits the expected archive shape. Real

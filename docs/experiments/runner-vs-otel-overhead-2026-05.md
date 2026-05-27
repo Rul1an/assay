@@ -1,6 +1,7 @@
 # Runner vs OTel Overhead Measurement Plan (2026-05)
 
-> **Status:** measurement follow-up with Slices 1-9 complete. This
+> **Status:** measurement follow-up with Slices 1-9 complete and Slice 10
+> planned. This
 > document turns the explicit overhead non-claim from
 > [`runner-vs-otel-2026-05`](runner-vs-otel-2026-05/) into a reproducible
 > measurement plan and findings trail. It does not commit generated
@@ -74,6 +75,12 @@
 > median gap does not reproduce under adjacent pairing; wall-clock
 > decomposition remains unpublished and should stop at this measurement
 > budget.
+>
+> **Slice 10 status:** planned. The next experiment should not be another
+> broad Arm A/C wall-clock rerun. It should sweep controlled kernel-event
+> rate, span/event rate, and concurrency so the next question is "when
+> does overhead become visible, and which component scales with event
+> pressure?"
 
 ## Research Question
 
@@ -477,6 +484,86 @@ Slice 9 result:
   at n=20 on this delegated runner. RSS remains the clean decomposition
   signal.
 
+## Event-Rate Sweep Follow-up
+
+Slice 10 is the next useful experiment if we want one more overhead
+slice. It should be a controlled event-rate and workload-intensity sweep,
+not another broad Arm A/C wall-clock repeat.
+
+The question changes from:
+
+```text
+Is Arm A faster or slower than Arm C?
+```
+
+to:
+
+```text
+At what kernel-event rate, span/event rate, and concurrency level does
+Runner or OTel overhead become measurable, and which component scales?
+```
+
+Rationale from the literature:
+
+- OpenTelemetry's benchmark guidance frames overhead as target-platform
+  and event-throughput specific, not as a universal constant:
+  <https://opentelemetry.io/docs/specs/otel/performance-benchmark/>.
+- Nõu et al. show distributed-tracing overhead varies by workload,
+  endpoint, framework, and deployment shape:
+  <https://doi.org/10.1145/3680256.3721316>.
+- Reichelt, Jung, and van Hoorn show that shared/cloud runner noise can
+  hide or distort observability-overhead deltas:
+  <https://arxiv.org/abs/2411.05491>.
+- Red Hat's BPF performance guide warns that measuring tracing overhead
+  can itself perturb the thing being measured:
+  <https://developers.redhat.com/articles/2022/06/22/measuring-bpf-performance-tips-tricks-and-best-practices>.
+- Recent eBPF component-analysis work decomposes tracing overhead by
+  event-generation and user-space retrieval stages, and reports that the
+  overhead is workload- and event-rate dependent:
+  <https://doi.org/10.1145/3805687.3806254>.
+
+Proposed independent variables:
+
+| Axis | Levels | Purpose |
+|---|---|---|
+| Kernel-event rate | low / medium / high | Does eBPF capture cost scale with syscall/event pressure? |
+| Span/event rate | low / medium / high | Does trace export cost scale separately from kernel capture? |
+| Concurrency | 1 / 4 / 16 workers | Does overhead remain sequential or become scheduling/noise dominated? |
+| Payload size | small / medium / large | Separates event count from bytes moved and archive/trace size. |
+
+Proposed arms:
+
+- **Arm A:** Runner archive capture only.
+- **Arm B:** OTel/OpenInference-style tracing only.
+- **Arm C:** Runner archive capture plus OTel trace export.
+
+Metrics:
+
+- `wall_clock_ms` as a secondary metric only;
+- `peak_rss_bytes`;
+- `phase_timings_ms` and `phase_residual_ms`;
+- kernel event count per sample;
+- span/event count per sample;
+- ring-buffer drops and Runner health gates;
+- trace JSON size, archive compressed size, archive extracted size;
+- optional CPU-time or hardware/software counter data if it can be
+  collected without perturbing the workload more than the signal.
+
+Acceptance rules for Slice 10:
+
+- Start with a plan-only PR or a harness-only PR. Do not commit sweep
+  measurements in the first slice.
+- Keep output experiment-scoped. If a new artifact is introduced, use an
+  `assay.experiment.event_rate_sweep.v0` schema string and sidecar tests.
+- Use paired/counterbalanced order inside one delegated job whenever two
+  arms are compared.
+- Publish no product benchmark. Report slopes and thresholds, such as
+  "overhead per 1k kernel events" or "ring-buffer retrieval becomes
+  visible above this event rate," only with host class and workload
+  caveats.
+- Stop if tails fail the existing p99/median health band; do not rescue
+  the result by picking only favorable levels.
+
 ## Non-Claims
 
 - Does not rank OpenTelemetry, OpenInference, or Runner as products.
@@ -500,6 +587,7 @@ Slice 9 result:
 | 7 | **Done**: Arm A pure-L2 decomposition via `arm=arm-a-runner-only`, dispatched in runs [26463798358](https://github.com/Rul1an/assay/actions/runs/26463798358), [26464003194](https://github.com/Rul1an/assay/actions/runs/26464003194), and healthy repeat [26473448298](https://github.com/Rul1an/assay/actions/runs/26473448298) | RSS decomposition landed; wall-clock decomposition remains inconclusive because Arm A is still slower than Arm C at the median |
 | 8 | **Done**: Runner phase timing via hidden `--phase-timing-log` and harness `phase_timings_ms` aggregation, dispatched in runs [26476490968](https://github.com/Rul1an/assay/actions/runs/26476490968) and [26476824593](https://github.com/Rul1an/assay/actions/runs/26476824593) | phase data explains part, not all, of the Arm A / Arm C median gap; no additive wall-clock decomposition claim |
 | 9 | **Done**: paired Arm A/C residual diagnostics via workflow `arm=paired-a-c`, dispatched in run [26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306) | residuals shrink/change sign under pairing; wall-clock decomposition remains unpublished and should stop at this measurement budget |
+| 10 | **Planned**: controlled event-rate / workload-intensity sweep | no broad rerun; plan or harness first, with kernel-event count, span/event count, concurrency, phase timing, residual, RSS, and health gates reported by level |
 
 ## Publication Rule
 
