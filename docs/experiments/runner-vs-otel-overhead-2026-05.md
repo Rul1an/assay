@@ -801,8 +801,9 @@ Slice 12 result:
   and `s1000` / `corner-lite` retained 128/1000. This matches the
   default OpenTelemetry Span Limits setting
   `OTEL_SPAN_EVENT_COUNT_LIMIT=128` for the workload's
-  `@opentelemetry/sdk-trace-base` `2.7.1` configuration; local repros
-  retained all requested events after raising the limit to 1000.
+  `@opentelemetry/sdk-trace-base@^2.0.0` configuration; the checked-in
+  v1 findings record that dependency as resolved to `2.7.x`, and local
+  repros retained all requested events after raising the limit to 1000.
 - Therefore the current arc closes with a split boundary statement:
   Runner kernel capture is healthy through the widened kernel cells, but
   default OTel span-event retention becomes the limiting fidelity

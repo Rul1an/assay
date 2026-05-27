@@ -346,11 +346,14 @@ Mechanism verification:
 - The OpenTelemetry Trace SDK specification likewise defines
   `EventCountLimit (Default=128)` under Span Limits:
   <https://opentelemetry.io/docs/specs/otel/trace/sdk/#span-limits>.
-- The workload uses `@opentelemetry/sdk-trace-base` `2.7.1` from
-  `docs/experiments/runner-vs-otel-2026-05/workload/package-lock.json`.
-  Its `BasicTracerProvider` setup does not pass a custom `spanLimits`
-  override, so default SDK limits apply unless the environment overrides
-  them.
+- The checked-in workload declares `@opentelemetry/sdk-trace-base@^2.0.0`
+  in
+  [`workload/package.json`](../runner-vs-otel-2026-05/workload/package.json),
+  and the v1 findings record that dependency as resolved to `2.7.x` at
+  install time. Its
+  [`BasicTracerProvider` setup](../runner-vs-otel-2026-05/workload/src/otel-setup.ts)
+  does not pass a custom `spanLimits` override, so default SDK limits
+  apply unless the environment overrides them.
 - The retained event indexes prove the cap is on span events, not on the
   Runner archive or JSON writer. For `s500`, every Arm C measured trace
   retained indexes `372..499`; for `s1000` and `corner-lite`, every Arm C
