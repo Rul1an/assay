@@ -1,7 +1,7 @@
 # Runner vs OTel Overhead Measurement Plan (2026-05)
 
 > **Status:** measurement follow-up with Slices 1-9 complete and Slice 10
-> planned. This
+> smoke-verified. This
 > document turns the explicit overhead non-claim from
 > [`runner-vs-otel-2026-05`](runner-vs-otel-2026-05/) into a reproducible
 > measurement plan and findings trail. It does not commit generated
@@ -76,11 +76,16 @@
 > decomposition remains unpublished and should stop at this measurement
 > budget.
 >
-> **Slice 10 status:** harness-ready. The overhead workflow now accepts
+> **Slice 10 status:** smoke-verified. The overhead workflow accepts
 > controlled kernel-event rate, span/event rate, concurrency, and payload
-> size inputs. The next question is "when does overhead become visible,
-> and which component scales with event pressure?" No sweep measurements
-> have been dispatched or published yet.
+> size inputs. Two small paired A/C smoke dispatches passed on main:
+> [26508127380](https://github.com/Rul1an/assay/actions/runs/26508127380)
+> (`kernel=low`, `span=baseline`, `concurrency=1`) and
+> [26508355816](https://github.com/Rul1an/assay/actions/runs/26508355816)
+> (`kernel=medium`, `span=low`, `concurrency=2`). Both had 2/2 valid
+> samples per arm, 0 discarded samples, clean Runner health gates, and
+> matching host class. These are workflow and metadata smoke checks, not
+> published sweep measurements.
 
 ## Research Question
 
@@ -569,6 +574,24 @@ Acceptance rules for Slice 10:
 - Stop if tails fail the existing p99/median health band; do not rescue
   the result by picking only favorable levels.
 
+Smoke status:
+
+- Run
+  [26508127380](https://github.com/Rul1an/assay/actions/runs/26508127380)
+  verified the post-merge paired A/C path with `kernel=low`,
+  `span=baseline`, `concurrency=1`, and `payload=small`.
+- Run
+  [26508355816](https://github.com/Rul1an/assay/actions/runs/26508355816)
+  verified the non-baseline span/event metadata and `concurrency=2`
+  kernel-pressure path with `kernel=medium`, `span=low`,
+  `concurrency=2`, and `payload=small`.
+- The second smoke produced `assay.sweep.*` trace attributes and
+  `assay.sweep.span_event` events in Arm C, while Arm A correctly
+  recorded `span_event_rate=baseline` and `target_span_events=0`.
+- Both smoke runs remain review artifacts only. The first real findings
+  slice should still use a predeclared small matrix and report slopes or
+  thresholds, not these n=2 smoke medians.
+
 ## Non-Claims
 
 - Does not rank OpenTelemetry, OpenInference, or Runner as products.
@@ -592,7 +615,7 @@ Acceptance rules for Slice 10:
 | 7 | **Done**: Arm A pure-L2 decomposition via `arm=arm-a-runner-only`, dispatched in runs [26463798358](https://github.com/Rul1an/assay/actions/runs/26463798358), [26464003194](https://github.com/Rul1an/assay/actions/runs/26464003194), and healthy repeat [26473448298](https://github.com/Rul1an/assay/actions/runs/26473448298) | RSS decomposition landed; wall-clock decomposition remains inconclusive because Arm A is still slower than Arm C at the median |
 | 8 | **Done**: Runner phase timing via hidden `--phase-timing-log` and harness `phase_timings_ms` aggregation, dispatched in runs [26476490968](https://github.com/Rul1an/assay/actions/runs/26476490968) and [26476824593](https://github.com/Rul1an/assay/actions/runs/26476824593) | phase data explains part, not all, of the Arm A / Arm C median gap; no additive wall-clock decomposition claim |
 | 9 | **Done**: paired Arm A/C residual diagnostics via workflow `arm=paired-a-c`, dispatched in run [26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306) | residuals shrink/change sign under pairing; wall-clock decomposition remains unpublished and should stop at this measurement budget |
-| 10 | **Harness-ready**: controlled event-rate / workload-intensity sweep via workflow inputs and sample/summary metadata | no broad rerun; dispatch only a small matrix first, with kernel-event count, span/event count, concurrency, phase timing, residual, RSS, and health gates reported by level |
+| 10 | **Smoke-verified**: controlled event-rate / workload-intensity sweep via workflow inputs and sample/summary metadata, with paired smoke runs [26508127380](https://github.com/Rul1an/assay/actions/runs/26508127380) and [26508355816](https://github.com/Rul1an/assay/actions/runs/26508355816) | no broad rerun; dispatch only a small matrix first, with kernel-event count, span/event count, concurrency, phase timing, residual, RSS, and health gates reported by level |
 
 ## Publication Rule
 

@@ -76,6 +76,10 @@ All notable changes to this project will be documented in this file.
   controlled kernel-event and OTel event pressure, and samples/summaries
   embed `assay.experiment.event_rate_sweep.v0` metadata without
   publishing new measurements.
+- Recorded the post-merge Slice 10 smoke dispatches for the event-rate
+  sweep. Runs 26508127380 and 26508355816 verified paired Arm A/C sweep
+  metadata, kernel-event pressure, Arm C span-event metadata, and clean
+  health gates without promoting n=2 smoke runs into benchmark findings.
 
 ## [3.12.0] - 2026-05-25
 
