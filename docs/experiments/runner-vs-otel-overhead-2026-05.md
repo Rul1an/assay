@@ -7,6 +7,11 @@
 > benchmark artifacts, does not publish cross-host deltas, and does not
 > change Runner archive semantics.
 >
+> **Findings summary:** the citation-oriented result is in
+> [`runner-vs-otel-overhead-2026-05/findings-summary.md`](runner-vs-otel-overhead-2026-05/findings-summary.md).
+> The full evidence trail remains in
+> [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md).
+>
 > **Slice 1 status:** local Arm B harness and schema sidecars live under
 > [`runner-vs-otel-overhead-2026-05/`](runner-vs-otel-overhead-2026-05/).
 > Generated measurements are still not committed evidence.

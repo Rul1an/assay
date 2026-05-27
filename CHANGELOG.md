@@ -117,6 +117,10 @@ All notable changes to this project will be documented in this file.
   limit and warn when `target_span_events` exceeds that limit, so future
   dispatches cannot silently treat clipped span-event counts as throughput
   evidence.
+- Added a citation-oriented Runner-vs-OTel overhead findings summary that
+  separates the three closed arc results: non-additive wall-clock behavior,
+  stable RSS decomposition, and the Runner-kernel / OTel-span fidelity
+  boundary.
 
 ## [3.12.0] - 2026-05-25
 
