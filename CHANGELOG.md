@@ -121,6 +121,13 @@ All notable changes to this project will be documented in this file.
   separates the three closed arc results: non-additive wall-clock behavior,
   stable RSS decomposition, and the Runner-kernel / OTel-span fidelity
   boundary.
+- Added a SOTA-informed agent-observability fidelity roadmap that turns
+  the completed overhead and trace/archive experiments into prioritized
+  follow-up slices for calibration guardrails, portable evidence packs,
+  semantic-gap scenarios, and OTel/OpenInference interoperability. The
+  roadmap now starts with experiment namespace-governance rules for
+  naming, promotion, artifact-family inventory, calibration verdicts and
+  methods, and evidence-pack minimums.
 
 ## [3.12.0] - 2026-05-25
 

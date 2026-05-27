@@ -20,3 +20,17 @@ These contracts are intentionally separate from Runner archive schemas.
 Runner artifacts remain the primary measured-run evidence. The
 observability contracts describe comparison and interpretation output
 above those artifacts.
+
+The next planned experiment line for this layer is
+[`agent-observability-fidelity-2026-05`](../../experiments/agent-observability-fidelity-2026-05.md).
+It turns the completed overhead findings into a prioritized roadmap for
+calibration guardrails, semantic-gap scenarios, portable evidence packs,
+and OTel/OpenInference/Runner interoperability checks.
+
+Experiment-scoped schema naming and promotion rules for that roadmap are
+tracked in
+[`../experiments/namespace-governance.md`](../experiments/namespace-governance.md).
+Artifact-family status is tracked in
+[`../artifact-families-inventory.md`](../artifact-families-inventory.md),
+so proposed surfaces such as fidelity calibration, evidence packs, and
+binding evidence do not get mistaken for canonical product artifacts.
