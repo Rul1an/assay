@@ -34,3 +34,9 @@ Artifact-family status is tracked in
 [`../artifact-families-inventory.md`](../artifact-families-inventory.md),
 so proposed surfaces such as fidelity calibration, evidence packs, and
 binding evidence do not get mistaken for canonical product artifacts.
+
+The first experiment-scoped evidence-pack prototype is tracked in
+[`../../experiments/agent-observability-fidelity-2026-05.md`](../../experiments/agent-observability-fidelity-2026-05.md).
+It renders a portable manifest, one-page summary, observation-health
+record, optional trace, Runner archive/reference, and explicit redaction
+manifest without promoting that carrier to a product API.

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assay.dev/schemas/experiments/agent-observability-fidelity/redaction-manifest-v0.schema.json",
+  "title": "Agent Observability Redaction Manifest v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "created_at",
+    "policy",
+    "redaction_applied",
+    "omitted_content",
+    "notes"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.experiment.agent_observability_fidelity.redaction_manifest.v0"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "policy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "redaction_applied": {
+      "type": "boolean"
+    },
+    "omitted_content": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

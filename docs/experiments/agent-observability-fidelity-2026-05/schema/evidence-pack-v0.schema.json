@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assay.dev/schemas/experiments/agent-observability-fidelity/evidence-pack-v0.schema.json",
+  "title": "Agent Observability Evidence Pack v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "experiment",
+    "pack_id",
+    "scenario_id",
+    "created_at",
+    "claim_class",
+    "claim_summary",
+    "observation_health_status",
+    "observation_health",
+    "artifacts",
+    "redaction",
+    "reproduction",
+    "non_claims"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.experiment.agent_observability_fidelity.evidence_pack.v0"
+    },
+    "experiment": {
+      "const": "agent-observability-fidelity-2026-05"
+    },
+    "pack_id": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "scenario_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "claim_class": {
+      "enum": [
+        "diagnostic",
+        "fidelity_boundary",
+        "semantic_gap",
+        "positive_join"
+      ]
+    },
+    "claim_summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observation_health_status": {
+      "enum": [
+        "clean",
+        "inconclusive"
+      ]
+    },
+    "observation_health": {
+      "$ref": "#/$defs/observation_health"
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "$ref": "#/$defs/artifact"
+      }
+    },
+    "redaction": {
+      "$ref": "#/$defs/redaction_manifest"
+    },
+    "reproduction": {
+      "$ref": "#/$defs/reproduction"
+    },
+    "non_claims": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "path",
+        "required",
+        "bytes",
+        "sha256",
+        "redaction_state"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "runner_archive",
+            "trace_json",
+            "observation_health",
+            "redaction_manifest",
+            "summary_markdown"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "redaction_state": {
+          "enum": [
+            "unredacted",
+            "manifest",
+            "rendered"
+          ]
+        }
+      }
+    },
+    "observation_health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kernel_layer",
+        "ringbuf_drops",
+        "cgroup_correlation"
+      ],
+      "properties": {
+        "kernel_layer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ringbuf_drops": {
+          "type": "integer",
+          "minimum": -1
+        },
+        "cgroup_correlation": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "redaction_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "created_at",
+        "policy",
+        "redaction_applied",
+        "omitted_content",
+        "notes"
+      ],
+      "properties": {
+        "schema": {
+          "const": "assay.experiment.agent_observability_fidelity.redaction_manifest.v0"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "policy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "redaction_applied": {
+          "type": "boolean"
+        },
+        "omitted_content": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "reproduction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "inputs"
+      ],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "runner_archive",
+            "trace_json",
+            "observation_health"
+          ],
+          "properties": {
+            "runner_archive": {
+              "type": "string",
+              "minLength": 1
+            },
+            "trace_json": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "observation_health": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

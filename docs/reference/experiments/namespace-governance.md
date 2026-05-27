@@ -196,6 +196,17 @@ The pack must not strengthen a claim beyond the underlying calibration
 and join grades. It is a carrier for evidence, not a new source of
 truth.
 
+The v0 prototype lives under
+`docs/experiments/agent-observability-fidelity-2026-05/` and uses:
+
+| Schema | Role |
+|---|---|
+| `assay.experiment.agent_observability_fidelity.evidence_pack.v0` | Pack manifest with scenario, claim class, carried artifacts, health, reproduction, and non-claims. |
+| `assay.experiment.agent_observability_fidelity.redaction_manifest.v0` | Required redaction record, even when no redaction was applied. |
+
+Keep this prototype in `assay.experiment.*` until a real CLI or
+artifact-exchange consumer needs a stable product surface.
+
 ## Artifact Family Inventory
 
 Before adding a new artifact family, check
