@@ -799,12 +799,16 @@ Slice 12 result:
 - Arm C span-event fidelity failed at the first widened span cell:
   `s500` retained 128/500 `assay.sweep.span_event` entries per sample,
   and `s1000` / `corner-lite` retained 128/1000. This matches the
-  default OpenTelemetry JS SDK span-event count limit for the workload
-  configuration.
+  default OpenTelemetry Span Limits setting
+  `OTEL_SPAN_EVENT_COUNT_LIMIT=128` for the workload's
+  `@opentelemetry/sdk-trace-base` `2.7.1` configuration; local repros
+  retained all requested events after raising the limit to 1000.
 - Therefore the current arc closes with a split boundary statement:
   Runner kernel capture is healthy through the widened kernel cells, but
   default OTel span-event retention becomes the limiting fidelity
   boundary before span timing can be interpreted above 100 events.
+  A separate OTel span-limit characterization follow-up is tracked in
+  [issue #1408](https://github.com/Rul1an/assay/issues/1408).
 
 ## Non-Claims
 
