@@ -592,6 +592,43 @@ Smoke status:
   slice should still use a predeclared small matrix and report slopes or
   thresholds, not these n=2 smoke medians.
 
+Slice 11 starter matrix:
+
+The first real sweep should stay small enough to inspect manually and
+large enough to separate "knob works" from "signal exists." Use paired
+A/C dispatches, `measure_rss=false`, `build_ebpf=true`,
+`timeout_seconds=300`, and `repetitions=5` for each cell. Do not add
+Arm B or RSS until these cells pass health gates.
+
+| Cell | Kernel-event rate | Span/event rate | Concurrency | Payload | Purpose |
+|---|---|---|---:|---|---|
+| control | `baseline` | `baseline` | `1` | `small` | Same workflow shape with no sweep pressure |
+| kernel-high | `high` | `baseline` | `1` | `small` | Is eBPF/kernel-event pressure visible by itself? |
+| span-high | `baseline` | `high` | `1` | `small` | Is OTel span-event pressure visible by itself? |
+| kernel-concurrent | `high` | `baseline` | `4` | `small` | Does kernel pressure change under modest concurrency? |
+| corner | `high` | `high` | `4` | `large` | First combined stress corner for drops, trace growth, and archive growth |
+
+The smoke dispatches verify environment and CLI propagation only. They
+do not verify rate calibration, payload-size behavior, or high
+concurrency. The Slice 11 analysis must therefore check observed kernel
+event paths and Arm C trace event counts against the declared targets in
+each cell before interpreting timing.
+
+Slice 11 acceptance rules:
+
+- Publish no slope or threshold unless every reported cell has 5/5 valid
+  samples per arm, 0 discarded samples, `ringbuf_drops=0`,
+  `kernel_layer=complete`, and `cgroup_correlation=clean`.
+- Treat the `corner` cell as a threshold probe. If it produces drops,
+  trace truncation, or unhealthy tails, report the failure boundary
+  instead of dropping the cell.
+- If all starter cells are healthy but show no measurable signal, do not
+  keep broad-rerunning. Either widen the event-rate levels in a new
+  predeclared slice or close the sweep as "no visible signal at the
+  starter matrix budget."
+- Keep artifacts review-only until a findings PR decides which summary
+  tables should become committed evidence.
+
 ## Non-Claims
 
 - Does not rank OpenTelemetry, OpenInference, or Runner as products.
@@ -616,6 +653,7 @@ Smoke status:
 | 8 | **Done**: Runner phase timing via hidden `--phase-timing-log` and harness `phase_timings_ms` aggregation, dispatched in runs [26476490968](https://github.com/Rul1an/assay/actions/runs/26476490968) and [26476824593](https://github.com/Rul1an/assay/actions/runs/26476824593) | phase data explains part, not all, of the Arm A / Arm C median gap; no additive wall-clock decomposition claim |
 | 9 | **Done**: paired Arm A/C residual diagnostics via workflow `arm=paired-a-c`, dispatched in run [26479319306](https://github.com/Rul1an/assay/actions/runs/26479319306) | residuals shrink/change sign under pairing; wall-clock decomposition remains unpublished and should stop at this measurement budget |
 | 10 | **Smoke-verified**: controlled event-rate / workload-intensity sweep via workflow inputs and sample/summary metadata, with paired smoke runs [26508127380](https://github.com/Rul1an/assay/actions/runs/26508127380) and [26508355816](https://github.com/Rul1an/assay/actions/runs/26508355816) | no broad rerun; dispatch only a small matrix first, with kernel-event count, span/event count, concurrency, phase timing, residual, RSS, and health gates reported by level |
+| 11 | **Planned**: predeclared Slice 10 starter matrix with five paired A/C cells: control, kernel-high, span-high, kernel-concurrent, and corner | n=5 paired samples per cell; observed event counts match targets; publish only slopes/thresholds with health gates, never n=2 smoke medians |
 
 ## Publication Rule
 

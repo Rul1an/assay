@@ -204,6 +204,42 @@ path on main:
 Those runs are smoke evidence only. They prove the knobs reach the real
 workload and fixture paths; they are not sweep findings.
 
+To reproduce the smoke inspection, download the run artifact and inspect
+the sample metadata plus captured kernel and trace artifacts:
+
+```bash
+gh run download 26508355816 --dir /tmp/assay-slice10-smoke
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+root = Path('/tmp/assay-slice10-smoke/runner-otel-overhead-paired-ac-26508355816')
+for arm in ['arm-a-runner-only', 'arm-c-dual-capture']:
+    summary = json.loads((root / arm / 'summary.json').read_text())
+    print(arm, summary['valid_samples'], summary['discarded_samples'])
+    print(summary['event_rate_sweep'])
+    mentions = 0
+    for kernel in (root / arm).glob('run_*/archive-contents/layers/kernel.ndjson'):
+        mentions += kernel.read_text(errors='replace').count('event-rate-sweep/worker-')
+    print('kernel sweep mentions', mentions)
+
+trace = (root / 'arm-c-dual-capture' / 'run_001' / 'trace.json').read_text()
+print('Arm C sweep attrs', 'assay.sweep.span_events.target' in trace)
+print('Arm C span events', trace.count('assay.sweep.span_event'))
+PY
+```
+
+The smoke runs do not verify rate calibration, payload sizes other than
+`small`, concurrency above `2`, or `medium`/`high` span-event behavior.
+The first real matrix slice should check observed event counts against
+declared targets before interpreting timing.
+
+The predeclared Slice 11 starter matrix is five paired A/C cells with
+`repetitions=5`, `measure_rss=false`, and `build_ebpf=true`: control,
+kernel-high, span-high, kernel-concurrent, and corner. Its output should
+be slopes or thresholds with health gates, not another single broad
+wall-clock delta.
+
 Do not commit the uploaded artifacts until the findings slice decides
 which measurements should become evidence.
 

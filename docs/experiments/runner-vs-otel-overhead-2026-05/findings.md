@@ -319,7 +319,9 @@ Next engineering slice:
 > not stable enough for an additive wall-clock decomposition at the
 > current measurement budget. Slice 10 smoke runs have now validated the
 > event-rate / workload-intensity knobs on main. If the overhead arc
-> continues, the next slice should be a predeclared small matrix that
-> varies kernel-event rate, span/event rate, concurrency, and payload
-> size, then reports slopes and thresholds rather than another single
+> continues, the next slice should run the predeclared Slice 11 starter
+> matrix: control, kernel-high, span-high, kernel-concurrent, and corner
+> cells with paired A/C order and `repetitions=5`. It should first
+> verify observed kernel and span/event counts against the declared
+> targets, then report slopes or thresholds rather than another single
 > wall-clock delta.
