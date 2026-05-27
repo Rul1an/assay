@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://assay.dev/schemas/experiments/agent-observability-fidelity/evidence-pack-v0.schema.json",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/experiments/agent-observability-fidelity-2026-05/schema/evidence-pack-v0.schema.json",
   "title": "Agent Observability Evidence Pack v0",
   "type": "object",
   "additionalProperties": false,
