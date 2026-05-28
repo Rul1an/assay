@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +97,14 @@ class SemanticGapHarnessTests(unittest.TestCase):
             cells = load_json(out / "claim-class-cells.json")
 
             self.assertEqual(
+                trace["schema"],
+                semantic_gap_harness.SYNTHETIC_TRACE_SCHEMA,
+            )
+            self.assertEqual(
+                archive["schema"],
+                semantic_gap_harness.SYNTHETIC_RUNNER_ARCHIVE_SCHEMA,
+            )
+            self.assertEqual(
                 trace["tool_calls"][0]["tool_call_id"],
                 archive["effects"][0]["tool_call_id"],
             )
@@ -166,6 +176,64 @@ class SemanticGapHarnessTests(unittest.TestCase):
             then_properties["evidence_pack_claim_class"]["const"], "diagnostic"
         )
         self.assertNotIn("trace_calibration_status", then_properties)
+
+    def test_inconclusive_verdict_validates_only_as_diagnostic(self) -> None:
+        schema = load_schema(ROOT / "schema" / "semantic-gap-verdict-v0.schema.json")
+        payload = {
+            "schema": semantic_gap_harness.SEMANTIC_GAP_VERDICT_SCHEMA,
+            "scenario_id": "matched_safe_read",
+            "role": "baseline",
+            "verdict": "inconclusive",
+            "evidence_pack_claim_class": "diagnostic",
+            "runner_health_status": "inconclusive",
+            "trace_calibration_status": "lossy",
+            "join_key": "tool_call_id",
+            "join_grade": "failed",
+            "fallback_used": False,
+            "reason": "Lossy calibration prevents a semantic claim.",
+            "non_claims": ["does_not_publish_delegated_gap_finding"],
+        }
+
+        assert_matches_schema(self, payload, schema, root=schema)
+        payload["evidence_pack_claim_class"] = "positive_join"
+        with self.assertRaises(AssertionError):
+            assert_matches_schema(self, payload, schema, root=schema)
+
+    def test_mvp_scenarios_match_verdict_schema_enum(self) -> None:
+        schema = load_schema(ROOT / "schema" / "semantic-gap-verdict-v0.schema.json")
+
+        self.assertEqual(
+            sorted(schema["properties"]["scenario_id"]["enum"]),
+            sorted(semantic_gap_harness.MVP_SCENARIOS),
+        )
+        self.assertEqual(
+            sorted(semantic_gap_harness.scenario_definitions()),
+            sorted(semantic_gap_harness.MVP_SCENARIOS),
+        )
+
+    def test_cli_generates_selected_scenario(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "semantic-gap-runs"
+            stdout = io.StringIO()
+
+            with redirect_stdout(stdout):
+                exit_code = semantic_gap_harness.main(
+                    [
+                        "--out-dir",
+                        str(out),
+                        "--scenario",
+                        "matched_safe_read",
+                        "--created-at",
+                        "2026-05-28T08:00:00Z",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("matched_safe_read", stdout.getvalue())
+            self.assertTrue(
+                (out / "matched_safe_read" / "scenario-verdict.json").exists()
+            )
+            self.assertFalse((out / "hidden_write").exists())
 
     def test_existing_nonempty_output_directory_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
