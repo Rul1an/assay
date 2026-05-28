@@ -7,7 +7,7 @@
 > not open the optional OTel span-limit study tracked in
 > [issue #1408](https://github.com/Rul1an/assay/issues/1408).
 >
-> **Last updated:** 2026-05-27
+> **Last updated:** 2026-05-28
 
 ## Executive Decision
 
@@ -227,6 +227,12 @@ Assay feature: "give me the portable evidence for this agent run."
 **Goal:** prove exactly where trace-reported intent, SDK events, policy
 events, and measured system effects diverge.
 
+> **Status:** scenario-plan-ready. The baseline, scenario matrix, join
+> requirements, claim-class rules, evidence-pack expectations, and
+> Slice 4 exit gate are predeclared in
+> [`agent-observability-fidelity-2026-05/semantic-gap-scenario-plan.md`](agent-observability-fidelity-2026-05/semantic-gap-scenario-plan.md).
+> This does not add a harness or dispatch measurements.
+
 This is the most strategically valuable new experiment. It extends the
 existing runner-vs-OTel shape comparison and cross-runtime drift work
 from "can we join layers?" to "what can the joined layers honestly
@@ -247,28 +253,36 @@ join path under real Runner capture before gap findings are published.
 
 ### Scenarios
 
-| Scenario | Reported trace intent | Measured effect | Expected claim |
-|---|---|---|---|
-| Matched safe read | tool call reports reading `safe.txt` | kernel observes read of `safe.txt` | strong positive join |
-| Argument/path rewrite | tool call reports `safe.txt` | kernel observes normalized alternate path | semantic mismatch at same tool call |
-| Hidden write | tool call reports read-only action | kernel observes create/write in workdir | L1 underreports side effect |
-| Retry/self-correction | trace records final successful action | kernel/archive records failed prior attempts | trace summary loses temporal evidence |
-| Runtime side effect | no tool-level trace event | archive records runtime loader/config/probe path | runtime-induced surface |
-| Weak join fallback | missing `tool_call_id`, only order/timestamp | effects are plausible but not strongly joinable | diagnostic-only claim |
+| Scenario | Role | Reported trace intent | Measured effect | Expected claim |
+|---|---|---|---|---|
+| Matched safe read | baseline | tool call reports reading `safe.txt` | kernel observes read of `safe.txt` | strong positive join |
+| Argument/path rewrite | gap | tool call reports `safe.txt` | kernel observes normalized alternate path | semantic mismatch at same tool call |
+| Hidden write | gap | tool call reports read-only action | kernel observes create/write in workdir | reported intent under-describes measured side effect |
+| Retry/self-correction | gap | trace records final successful action | kernel/archive records failed prior attempts | trace summary loses temporal evidence |
+| Runtime side effect | gap | no tool-level trace event | archive records runtime loader/config/probe path | runtime-induced surface |
+| Weak join fallback | fallback | missing `tool_call_id`, only order/timestamp | effects are plausible but not strongly joinable | diagnostic-only claim |
+
+The detailed plan pins scenario ids, join requirements, claim rules, and
+the minimum harness exit gate. The first harness should prove the
+baseline, `hidden_write`, and `weak_join_fallback` before broadening to
+all six scenarios.
 
 ### Acceptance rules
 
-- Every row must emit an `assay.observability.join_result.v0` entry or a
-  newer successor.
-- Strong findings require unique `tool_call_id` or an explicitly
-  equivalent key.
-- Timestamp/order joins remain diagnostic and may not support semantic
-  equality claims.
-- The output must classify each scenario by claim class: reported
-  intent, measured effect, joined evidence, or inconclusive.
-- A measured effect mismatch is evidence of divergence. It is not by
-  itself evidence of malicious behavior, policy failure, or root-cause
-  attribution.
+- **Done for Slice 3:** every planned row must emit an
+  `assay.observability.join_result.v0` entry or a newer successor.
+- **Done for Slice 3:** strong findings require unique `tool_call_id`
+  or an explicitly equivalent key.
+- **Done for Slice 3:** timestamp/order joins remain diagnostic and may
+  not support semantic equality claims.
+- **Done for Slice 3:** the output must classify each scenario by claim
+  class: reported intent, measured effect, joined evidence, or
+  inconclusive.
+- **Done for Slice 3:** a measured effect mismatch is evidence of
+  divergence. It is not by itself evidence of malicious behavior, policy
+  failure, or root-cause attribution.
+- **Not done:** harness, synthetic fixtures, delegated sanity run, or
+  committed measurement artifacts.
 
 ### Tool improvement
 
@@ -360,7 +374,7 @@ visible by the overhead and shape-comparison arcs.
 | 0 | Done in this plan | Namespace governance for experiment artifacts | Naming, promotion, cross-arc field, calibration-method, and evidence-pack minimum rules are documented. |
 | 1 | Harness-ready | Fidelity calibration fields and summary rendering | One overhead-style fixture proves clean, lossy, and not-applicable calibration states. |
 | 2 | Prototype-ready | Portable evidence-pack prototype | `evidence_pack.py` emits the minimum pack: manifest, summary, archive/ref, optional trace/ref, health, and redaction manifest. |
-| 3 | Planned | Semantic-gap scenario plan | Baseline plus six predeclared scenarios, claim classes, and join requirements documented before dispatch. |
+| 3 | Scenario-plan-ready | Semantic-gap scenario plan | Baseline plus six predeclared scenarios, claim classes, join requirements, evidence-pack expectations, and Slice 4 minimum harness gate documented before dispatch. |
 | 4 | Planned | Semantic-gap harness | Fake fixtures plus one delegated sanity run prove joined intent/effect rows and evidence-pack output. |
 | 5 | Planned | Interop matrix plan | OTel/OpenInference/Runner coverage axes and non-claims pinned. |
 | 6 | Optional | OTel span-limit study | Only after an external trigger; otherwise remains issue-only. |
@@ -379,6 +393,11 @@ Not every follow-up needs full experiment-arc discipline:
 Use the heavier slice discipline when the result will be interpreted as
 evidence. Use feature iteration when the task is improving how evidence
 is carried or rendered.
+
+Status labels may differ by slice type. `Scenario-plan-ready` means the
+scenario matrix, baseline, claim rules, and next harness gate are pinned
+before implementation. It does not mean the harness exists or that any
+measurement has run.
 
 ## What Not To Do Yet
 

@@ -143,6 +143,12 @@ All notable changes to this project will be documented in this file.
   redaction manifest without promoting evidence packs to a product API.
   Evidence packs now move from `proposed` to `experiment-scoped` in the
   artifact-families inventory.
+- Planned the first semantic-gap scenario matrix for the
+  agent-observability fidelity roadmap. The plan predeclares a
+  deterministic safe-read baseline, five divergence/fallback scenarios,
+  join-grade requirements, claim-class rules, evidence-pack output
+  expectations, and the minimum Slice 4 harness exit gate without adding
+  a harness or dispatching measurements.
 
 ## [3.12.0] - 2026-05-25
 

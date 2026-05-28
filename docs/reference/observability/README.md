@@ -40,3 +40,9 @@ The first experiment-scoped evidence-pack prototype is tracked in
 It renders a portable manifest, one-page summary, observation-health
 record, optional trace, Runner archive/reference, and explicit redaction
 manifest without promoting that carrier to a product API.
+
+The first semantic-gap scenario plan is tracked in
+[`../../experiments/agent-observability-fidelity-2026-05/semantic-gap-scenario-plan.md`](../../experiments/agent-observability-fidelity-2026-05/semantic-gap-scenario-plan.md).
+It predeclares how the join and claim-class contracts should be used
+when trace-reported tool intent and measured system effects agree,
+diverge, or only correlate weakly.
