@@ -256,16 +256,17 @@ join path under real Runner capture before gap findings are published.
 | Scenario | Role | Reported trace intent | Measured effect | Expected claim |
 |---|---|---|---|---|
 | Matched safe read | baseline | tool call reports reading `safe.txt` | kernel observes read of `safe.txt` | strong positive join |
-| Argument/path rewrite | gap | tool call reports `safe.txt` | kernel observes normalized alternate path | semantic mismatch at same tool call |
+| Argument/path rewrite | gap | tool call reports `safe-link.txt` | kernel observes symlink target `safe.txt` or both paths inside the workdir | semantic mismatch at same tool call |
 | Hidden write | gap | tool call reports read-only action | kernel observes create/write in workdir | reported intent under-describes measured side effect |
 | Retry/self-correction | gap | trace records final successful action | kernel/archive records failed prior attempts | trace summary loses temporal evidence |
 | Runtime side effect | gap | no tool-level trace event | archive records runtime loader/config/probe path | runtime-induced surface |
 | Weak join fallback | fallback | missing `tool_call_id`, only order/timestamp | effects are plausible but not strongly joinable | diagnostic-only claim |
 
-The detailed plan pins scenario ids, join requirements, claim rules, and
-the minimum harness exit gate. The first harness should prove the
-baseline, `hidden_write`, and `weak_join_fallback` before broadening to
-all six scenarios.
+The detailed plan pins scenario ids, join requirements, claim rules,
+the canonical `path_rewrite` symlink fixture, runtime-side-effect join
+policy, and the minimum harness exit gate. The first harness should
+prove the baseline, `hidden_write`, and `weak_join_fallback` with
+synthetic fixtures before broadening to all six scenarios.
 
 ### Acceptance rules
 
@@ -286,9 +287,11 @@ all six scenarios.
 
 ### Tool improvement
 
-This experiment should drive product work on input-binding receipts and
-per-tool evidence rows. If the tool cannot clearly say "same tool call,
-different effect," the observability story is not strong enough yet.
+This experiment may drive product work on binding evidence or per-tool
+input/output/effect carriers, still tracked as `proposed` in the
+artifact-families inventory. If the tool cannot clearly say "same tool
+call, different effect," the observability story is not strong enough
+yet.
 
 ## Experiment 4 - OTel / OpenInference / Runner Interop Matrix
 
