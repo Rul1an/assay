@@ -51,6 +51,7 @@
 | `assay.experiment.agent_observability_fidelity.semantic_gap_verdict.v0` | Bounded verdict for all six Slice 4 semantic-gap synthetic scenarios | experiment-scoped; synthetic matrix-ready; not a delegated finding | [`semantic-gap-verdict-v0.schema.json`](../../experiments/agent-observability-fidelity-2026-05/schema/semantic-gap-verdict-v0.schema.json) |
 | `assay.experiment.agent_observability_fidelity.synthetic_trace.v0` | Synthetic trace fixture used by the local semantic-gap harness | experiment-scoped; schema-string only; not delegated evidence | none |
 | `assay.experiment.agent_observability_fidelity.synthetic_runner_archive.v0` | Synthetic Runner-archive fixture used by the local semantic-gap harness | experiment-scoped; schema-string only; not a Runner archive contract | none |
+| `assay.experiment.agent_observability_fidelity.interop_coverage_cell.v0` | Planned OTel GenAI / OpenInference / Runner coverage and claim-strength matrix row | experiment-scoped; matrix-plan-ready; sidecar deferred to Slice 6 | planned |
 
 These experiment schemas remain experiment-scoped. They are validated by
 local harness tests against synthetic samples, summaries, phase

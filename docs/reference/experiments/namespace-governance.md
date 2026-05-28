@@ -233,6 +233,30 @@ These fixture payloads are intentionally schema-string-only in v0. They
 are not delegated capture artifacts, not Runner archive contracts, and
 not a new `assay.synthetic.*` namespace.
 
+## Interop Mapping Rows
+
+The Slice 5 interop plan reserves one experiment-scoped row family for
+coverage and claim-strength mappings between OTel GenAI, OpenInference,
+Runner measured effects, and Assay observability vocabulary:
+
+| Schema | Role |
+|---|---|
+| `assay.experiment.agent_observability_fidelity.interop_coverage_cell.v0` | Planned Slice 6 row for vocabulary coverage, claim strength, join key, evidence layer, source snapshot, and bounded mapping notes. |
+
+The schema sidecar is intentionally deferred to the Slice 6 harness PR.
+The plan-only slice may name the schema string and row fields, but it
+must not promote interop mappings to `assay.observability.*`.
+
+Interop rows must stay coverage-focused:
+
+- use `assay.observability.claim_class_cell.v0` vocabulary for
+  `claim_strength` and `claim_basis`;
+- use `assay.observability.join_result.v0` vocabulary for join keys;
+- record source snapshots for OTel GenAI and OpenInference because
+  both vocabularies are moving;
+- treat absent or partial mappings as valid findings, not product
+  rankings.
+
 ## Artifact Family Inventory
 
 Before adding a new artifact family, check

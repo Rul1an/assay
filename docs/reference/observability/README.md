@@ -49,5 +49,12 @@ diverge, or only correlate weakly.
 
 The first semantic-gap MVP harness is tracked in
 [`../../experiments/agent-observability-fidelity-2026-05/semantic_gap_harness.py`](../../experiments/agent-observability-fidelity-2026-05/semantic_gap_harness.py).
-It generates synthetic exit-gate scenarios and evidence packs without
-promoting those outputs to delegated findings or product APIs.
+It generates the full synthetic semantic-gap matrix and evidence packs
+without promoting those outputs to delegated findings or product APIs.
+
+The first interop matrix plan is tracked in
+[`../../experiments/agent-observability-fidelity-2026-05/interop-matrix-plan.md`](../../experiments/agent-observability-fidelity-2026-05/interop-matrix-plan.md).
+It predeclares how OTel GenAI, OpenInference, Runner measured effects,
+and Assay claim vocabulary should be mapped as coverage and
+claim-strength rows without ranking products or defining a runtime
+translator.

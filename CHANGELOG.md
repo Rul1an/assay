@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Planned Slice 5 of the agent-observability fidelity roadmap as an
+  OTel GenAI / OpenInference / Runner interop matrix. The plan pins
+  coverage axes, upstream snapshot rules, five starter cells, the
+  future `interop_coverage_cell.v0` row shape, and non-claims so the
+  matrix remains a coverage and claim-strength map rather than a
+  product ranking or runtime translator. Interop mapping now moves from
+  `proposed` to `experiment-scoped` in the artifact-families inventory
+  without creating a release-facing product API.
 - Clarified the semantic-gap scenario plan so the `path_rewrite`
   table allows both target-only and link-plus-target archive shapes, and
   so `ambiguous_proximity` is documented only as a freeform diagnostic
