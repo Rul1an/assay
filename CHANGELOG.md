@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Removed the legacy `assay-runner-spike` compatibility wrapper crate
+  from the workspace and release pipeline. The runner substrate publish
+  contract now includes only `assay-runner-schema`,
+  `assay-runner-core`, and `assay-runner-linux`; release/public-crate
+  policy scripts and runner boundary docs were updated accordingly.
 - Added a post-arc claim-boundary positioning note for agent
   observability work. The note records Assay's post-overhead and
   post-fidelity position as a claim-boundary and evidence-fidelity layer,

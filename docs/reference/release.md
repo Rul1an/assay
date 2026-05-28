@@ -26,7 +26,6 @@ This document outlines the canonical checklist for releasing new versions of Ass
   - `assay-runner-schema`
   - `assay-runner-linux`
   - `assay-runner-core`
-  - `assay-runner-spike`
   - `assay-sim`
   - `assay-cli`
 - [ ] **Non-crates.io workspace members**: Confirm these remain `publish = false` unless a dedicated distribution freeze changes the contract:

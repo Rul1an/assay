@@ -15,7 +15,6 @@ members = [
   "crates/assay-runner-schema",
   "crates/assay-runner-core",
   "crates/assay-runner-linux",
-  "crates/assay-runner-spike",
 ]
 default-members = [
   "crates/assay-core",
@@ -86,7 +85,6 @@ assay-registry = { path = "crates/assay-registry", version = "3.12.0" }
 assay-runner-schema = { path = "crates/assay-runner-schema", version = "3.12.0" }
 assay-runner-core = { path = "crates/assay-runner-core", version = "3.12.0" }
 assay-runner-linux = { path = "crates/assay-runner-linux", version = "3.12.0" }
-assay-runner-spike = { path = "crates/assay-runner-spike", version = "3.12.0" }
 
 # Common dependencies
 anyhow = "1"
