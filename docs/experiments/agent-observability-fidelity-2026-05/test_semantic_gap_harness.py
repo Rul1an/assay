@@ -1,4 +1,4 @@
-"""Tests for the semantic-gap synthetic MVP harness."""
+"""Tests for the semantic-gap synthetic harness."""
 
 from __future__ import annotations
 
@@ -40,21 +40,28 @@ class SemanticGapHarnessTests(unittest.TestCase):
         out = root / "semantic-gap-runs"
         semantic_gap_harness.generate_harness(
             out_dir=out,
-            scenarios=list(semantic_gap_harness.MVP_SCENARIOS),
+            scenarios=list(semantic_gap_harness.SYNTHETIC_SCENARIOS),
             created_at="2026-05-28T08:00:00Z",
             redaction_policy="none",
         )
         return out
 
-    def test_mvp_harness_emits_three_scenarios_with_evidence_packs(self) -> None:
+    def test_synthetic_harness_emits_all_scenarios_with_evidence_packs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = self.generate(Path(tmp))
 
             self.assertEqual(
                 sorted(path.name for path in out.iterdir()),
-                ["hidden_write", "matched_safe_read", "weak_join_fallback"],
+                [
+                    "hidden_write",
+                    "matched_safe_read",
+                    "path_rewrite",
+                    "retry_self_correction",
+                    "runtime_side_effect",
+                    "weak_join_fallback",
+                ],
             )
-            for scenario_id in semantic_gap_harness.MVP_SCENARIOS:
+            for scenario_id in semantic_gap_harness.SYNTHETIC_SCENARIOS:
                 scenario_dir = out / scenario_id
                 for name in (
                     "trace.json",
@@ -87,6 +94,24 @@ class SemanticGapHarnessTests(unittest.TestCase):
             self.assertEqual(verdict["verdict"], "positive_join")
             self.assertEqual(manifest["claim_class"], "positive_join")
 
+    def test_path_rewrite_records_symlink_projection_gap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.generate(Path(tmp)) / "path_rewrite"
+            trace = load_json(out / "trace.json")
+            archive = load_json(out / "runner-archive.json")
+            verdict = load_json(out / "scenario-verdict.json")
+            cells = load_json(out / "claim-class-cells.json")
+
+            self.assertEqual(
+                trace["tool_calls"][0]["reported_path"], "safe-link.txt"
+            )
+            self.assertEqual(archive["effects"][0]["path"], "safe.txt")
+            self.assertEqual(
+                archive["effects"][0]["resolved_from"], "safe-link.txt"
+            )
+            self.assertEqual(verdict["verdict"], "semantic_gap")
+            self.assertIn("does_not_claim_unsafe_behavior", cells[2]["non_claims"])
+
     def test_hidden_write_is_semantic_gap_with_same_tool_call_join(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = self.generate(Path(tmp)) / "hidden_write"
@@ -117,6 +142,51 @@ class SemanticGapHarnessTests(unittest.TestCase):
                 "does_not_claim_malicious_behavior", cells[2]["non_claims"]
             )
 
+    def test_retry_self_correction_preserves_prior_attempts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.generate(Path(tmp)) / "retry_self_correction"
+            trace = load_json(out / "trace.json")
+            archive = load_json(out / "runner-archive.json")
+            join = load_json(out / "join-result.json")
+            verdict = load_json(out / "scenario-verdict.json")
+
+            self.assertEqual(trace["tool_calls"][0]["reported_status"], "success")
+            self.assertEqual(len(archive["effects"]), 3)
+            self.assertEqual(
+                [effect["effect"] for effect in archive["effects"]],
+                ["failed_open", "failed_open", "read"],
+            )
+            self.assertEqual(
+                trace["tool_calls"][0]["tool_call_id"],
+                archive["effects"][0]["tool_call_id"],
+            )
+            self.assertEqual(join["join_grade"], "strong")
+            self.assertEqual(verdict["verdict"], "semantic_gap")
+
+    def test_runtime_side_effect_is_run_scope_diagnostic_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.generate(Path(tmp)) / "runtime_side_effect"
+            trace = load_json(out / "trace.json")
+            archive = load_json(out / "runner-archive.json")
+            join = load_json(out / "join-result.json")
+            verdict = load_json(out / "scenario-verdict.json")
+            cells = load_json(out / "claim-class-cells.json")
+            manifest = load_json(out / "evidence-pack/manifest.json")
+
+            self.assertEqual(trace["tool_calls"], [])
+            self.assertTrue(
+                archive["effects"][0]["emitted_before_first_tool_call"]
+            )
+            self.assertEqual(join["join_key"], "run_id")
+            self.assertEqual(join["scope"], "run")
+            self.assertEqual(join["join_grade"], "diagnostic")
+            self.assertIn("trace.json#/tool_calls", join["evidence_refs"])
+            self.assertEqual(verdict["verdict"], "diagnostic_only")
+            self.assertEqual(manifest["claim_class"], "diagnostic")
+            self.assertEqual(cells[0]["artifact_role"], "none")
+            self.assertEqual(cells[0]["claim_strength"], "absent")
+            self.assertEqual(cells[0]["evidence_refs"], [])
+
     def test_weak_join_fallback_stays_diagnostic_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = self.generate(Path(tmp)) / "weak_join_fallback"
@@ -144,7 +214,7 @@ class SemanticGapHarnessTests(unittest.TestCase):
                 ROOT / "schema" / "semantic-gap-verdict-v0.schema.json"
             )
 
-            for scenario_id in semantic_gap_harness.MVP_SCENARIOS:
+            for scenario_id in semantic_gap_harness.SYNTHETIC_SCENARIOS:
                 scenario_dir = out / scenario_id
                 join = load_json(scenario_dir / "join-result.json")
                 verdict = load_json(scenario_dir / "scenario-verdict.json")
@@ -199,16 +269,20 @@ class SemanticGapHarnessTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             assert_matches_schema(self, payload, schema, root=schema)
 
-    def test_mvp_scenarios_match_verdict_schema_enum(self) -> None:
+    def test_synthetic_scenarios_match_verdict_schema_enum(self) -> None:
         schema = load_schema(ROOT / "schema" / "semantic-gap-verdict-v0.schema.json")
 
         self.assertEqual(
             sorted(schema["properties"]["scenario_id"]["enum"]),
-            sorted(semantic_gap_harness.MVP_SCENARIOS),
+            sorted(semantic_gap_harness.SYNTHETIC_SCENARIOS),
         )
         self.assertEqual(
             sorted(semantic_gap_harness.scenario_definitions()),
-            sorted(semantic_gap_harness.MVP_SCENARIOS),
+            sorted(semantic_gap_harness.SYNTHETIC_SCENARIOS),
+        )
+        self.assertLessEqual(
+            set(semantic_gap_harness.MVP_SCENARIOS),
+            set(semantic_gap_harness.SYNTHETIC_SCENARIOS),
         )
 
     def test_cli_generates_selected_scenario(self) -> None:

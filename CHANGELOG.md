@@ -170,6 +170,11 @@ All notable changes to this project will be documented in this file.
   `assay.experiment.agent_observability_fidelity.*`, adding schema
   conditional coverage for `inconclusive` verdicts, and pinning the
   scenario-id enum/CLI generation paths in tests.
+- Expanded the semantic-gap synthetic harness to all six predeclared
+  scenario-plan rows: `matched_safe_read`, `path_rewrite`,
+  `hidden_write`, `retry_self_correction`, `runtime_side_effect`, and
+  `weak_join_fallback`. The harness still does not dispatch delegated
+  runs or publish semantic-gap findings.
 
 ## [3.12.0] - 2026-05-25
 

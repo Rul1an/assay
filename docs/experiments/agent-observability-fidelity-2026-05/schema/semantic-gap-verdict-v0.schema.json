@@ -26,7 +26,10 @@
       "type": "string",
       "enum": [
         "matched_safe_read",
+        "path_rewrite",
         "hidden_write",
+        "retry_self_correction",
+        "runtime_side_effect",
         "weak_join_fallback"
       ]
     },
