@@ -10,6 +10,12 @@ All notable changes to this project will be documented in this file.
   for timing, throughput, and absence claims without opening a new
   experiment arc, defining a schema, or promoting experiment-scoped
   calibration artifacts to product APIs.
+- Added a research note for MCP tool evidence binding. The note asks
+  what bounded evidence is needed to connect the model-visible MCP tool
+  context, a tool call, and a measured runtime effect. It does not
+  attempt tool-poisoning detection, create a receipt family, define a
+  schema, rank MCP implementations, open a new experiment arc, or publish
+  outreach targets.
 - Removed the legacy `assay-runner-spike` compatibility wrapper crate
   from the workspace and release pipeline. The runner substrate publish
   contract now includes only `assay-runner-schema`,

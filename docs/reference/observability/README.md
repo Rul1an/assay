@@ -48,6 +48,12 @@ extracts the closed arcs' requested-vs-observed calibration lesson into
 a public reference category: measure retained signal before interpreting
 timing, throughput, or absence claims.
 
+The MCP tool evidence binding research note is
+[`../../experiments/mcp-tool-evidence-binding-2026-05.md`](../../experiments/mcp-tool-evidence-binding-2026-05.md).
+It asks what bounded evidence is needed to connect a model-visible MCP
+tool context, a tool call, and a measured runtime effect without
+claiming to detect poisoned tools or creating a new receipt family.
+
 Experiment-scoped schema naming and promotion rules for that roadmap are
 tracked in
 [`../experiments/namespace-governance.md`](../experiments/namespace-governance.md).
