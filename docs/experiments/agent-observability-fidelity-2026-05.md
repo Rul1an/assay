@@ -324,12 +324,14 @@ yet.
 **Goal:** compare semantic coverage across OTel GenAI, OpenInference,
 and Runner measured effects without treating them as interchangeable.
 
-> **Status:** matrix-plan-ready. The coverage axes, upstream snapshot,
+> **Status:** harness-ready. The coverage axes, upstream snapshot,
 > starter matrix, row shape, acceptance rules, and Slice 6 harness exit
-> gate are predeclared in
+> gate were predeclared in
 > [`agent-observability-fidelity-2026-05/interop-matrix-plan.md`](agent-observability-fidelity-2026-05/interop-matrix-plan.md).
-> This is plan-only: no harness code, no schema sidecar, no delegated
-> runs, and no product-surface promotion.
+> Slice 6 now adds the synthetic
+> [`interop_harness.py`](agent-observability-fidelity-2026-05/interop_harness.py)
+> and `interop_coverage_cell.v0` schema sidecar. It still publishes no
+> delegated runs and promotes no product surface.
 
 The interop matrix is now unblocked by calibration, evidence packs, and
 the full synthetic semantic-gap matrix. It should remain a coverage and
@@ -351,11 +353,12 @@ apply.
 
 ### Starter matrix
 
-Slice 6 should implement five synthetic starter cells:
+Slice 6 implements five synthetic starter cells:
 `single_tool_joined_all`, `hidden_write_joined_all`,
 `retry_temporal_partial`, `runtime_surface_archive_only`, and
-`retrieval_then_tool_openinference`. The first four can reuse Slice 4
-synthetic fixtures; the fifth may add one synthetic retrieval/tool mix.
+`retrieval_then_tool_openinference`. The first four reuse Slice 4
+synthetic scenario shapes; the fifth adds one synthetic retrieval/tool
+mix.
 
 ### Acceptance rules
 
@@ -366,9 +369,9 @@ synthetic fixtures; the fifth may add one synthetic retrieval/tool mix.
   version anchor: package version, semconv tag, or Assay commit.
 - Missing fields are findings, not test failures, when the vocabulary
   legitimately does not model the behavior.
-- Slice 6 may add
+- Slice 6 adds
   `assay.experiment.agent_observability_fidelity.interop_coverage_cell.v0`
-  only after this plan is accepted.
+  as an experiment-scoped sidecar only.
 
 ### Tool improvement
 
@@ -434,7 +437,8 @@ visible by the overhead and shape-comparison arcs.
 | 3 | Scenario-plan-ready | Semantic-gap scenario plan | Baseline plus six predeclared scenarios, claim classes, join requirements, evidence-pack expectations, and Slice 4 minimum harness gate documented before dispatch. |
 | 4 | Synthetic matrix-ready | Semantic-gap harness | Synthetic fixtures prove all six predeclared scenarios with joined intent/effect rows, bounded verdicts, and evidence-pack output; delegated sanity run remains not done. |
 | 5 | Matrix-plan-ready | Interop matrix plan | OTel/OpenInference/Runner coverage axes, starter cells, row shape, source snapshots, and non-claims pinned before harness work. |
-| 6 | Optional | OTel span-limit study | Only after an external trigger; otherwise remains issue-only. |
+| 6 | Harness-ready | Interop matrix harness | Five synthetic starter cells emit strict `interop_coverage_cell.v0` rows, join-result refs, claim-class refs, source snapshots, partial/absent rows, and stable output directories without delegated publication. |
+| 7 | Optional | OTel span-limit study | Only after an external trigger; otherwise remains issue-only. |
 
 ## Experiment vs Feature Boundary
 
@@ -459,7 +463,9 @@ exercise the minimum gate without publishing delegated measurements.
 implemented locally, while delegated publication gates remain open.
 `Matrix-plan-ready` means coverage axes, starter cells, source snapshot
 rules, row-shape expectations, and the next harness gate are pinned
-before implementation.
+before implementation. `Harness-ready` means a synthetic harness emits
+schema-validated rows for the predeclared starter cells, while delegated
+publication gates remain open.
 
 ## What Not To Do Yet
 

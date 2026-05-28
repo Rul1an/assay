@@ -1,0 +1,392 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/experiments/agent-observability-fidelity-2026-05/schema/interop-coverage-cell-v0.schema.json",
+  "title": "Assay agent-observability interop coverage cell v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "cell_id",
+    "scenario_id",
+    "observation_profile",
+    "source_snapshot",
+    "agent_shape",
+    "join_key",
+    "evidence_layer",
+    "coverage_status",
+    "claim_strength",
+    "claim_basis",
+    "mapping",
+    "mapping_basis",
+    "mapping_notes",
+    "non_claims",
+    "claim_class_cell_ref",
+    "join_result_ref"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.experiment.agent_observability_fidelity.interop_coverage_cell.v0"
+    },
+    "cell_id": {
+      "type": "string",
+      "enum": [
+        "single_tool_joined_all",
+        "hidden_write_joined_all",
+        "retry_temporal_partial",
+        "runtime_surface_archive_only",
+        "retrieval_then_tool_openinference"
+      ]
+    },
+    "scenario_id": {
+      "type": "string",
+      "enum": [
+        "matched_safe_read",
+        "hidden_write",
+        "retry_self_correction",
+        "runtime_side_effect",
+        "retrieval_then_tool"
+      ]
+    },
+    "observation_profile": {
+      "type": "string",
+      "enum": [
+        "otel_genai_default",
+        "otel_genai_latest_experimental",
+        "openinference",
+        "runner_measured_effects"
+      ]
+    },
+    "source_snapshot": {
+      "$ref": "#/$defs/source_snapshot"
+    },
+    "agent_shape": {
+      "type": "string",
+      "enum": [
+        "single_tool_call",
+        "retry_self_correction",
+        "runtime_side_effect",
+        "retrieval_then_tool"
+      ]
+    },
+    "join_key": {
+      "type": "string",
+      "enum": [
+        "tool_call_id",
+        "run_id",
+        "trace_span_id",
+        "timestamp_or_order"
+      ]
+    },
+    "evidence_layer": {
+      "type": "string",
+      "enum": [
+        "trace_only",
+        "archive_only",
+        "joined"
+      ]
+    },
+    "coverage_status": {
+      "type": "string",
+      "enum": [
+        "full",
+        "partial",
+        "absent",
+        "not_applicable"
+      ]
+    },
+    "claim_strength": {
+      "type": "string",
+      "enum": [
+        "strong",
+        "partial",
+        "weak",
+        "absent"
+      ]
+    },
+    "claim_basis": {
+      "type": "string",
+      "enum": [
+        "reported",
+        "measured",
+        "derived",
+        "inferred"
+      ]
+    },
+    "mapping": {
+      "$ref": "#/$defs/mapping"
+    },
+    "mapping_basis": {
+      "type": "string",
+      "enum": [
+        "explicit_upstream_doc",
+        "synthetic_fixture",
+        "derived_join_rule",
+        "not_expressible"
+      ]
+    },
+    "mapping_notes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "non_claims": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[a-z][a-z0-9_]*$"
+      }
+    },
+    "claim_class_cell_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "join_result_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "otel_operation_name": {
+      "type": "string",
+      "enum": [
+        "execute_tool",
+        "retrieval"
+      ]
+    },
+    "otel_semconv_opt_in": {
+      "type": "string",
+      "enum": [
+        "none",
+        "gen_ai_latest_experimental"
+      ]
+    },
+    "openinference_span_kind": {
+      "type": "string",
+      "enum": [
+        "TOOL",
+        "RETRIEVER"
+      ]
+    },
+    "runner_effect_kind": {
+      "type": "string",
+      "enum": [
+        "filesystem_read",
+        "filesystem_write",
+        "runtime_probe"
+      ]
+    }
+  },
+  "$defs": {
+    "source_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_name",
+        "url",
+        "retrieval_date",
+        "version_anchor"
+      ],
+      "properties": {
+        "source_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "retrieval_date": {
+          "type": "string",
+          "pattern": "^20[0-9]{2}-[0-9]{2}-[0-9]{2}$"
+        },
+        "version_anchor": {
+          "$ref": "#/$defs/version_anchor"
+        }
+      }
+    },
+    "version_anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "value"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "package_version",
+            "semconv_tag",
+            "assay_commit"
+          ]
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "otel_field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "otel_value": {
+          "type": "string",
+          "minLength": 1
+        },
+        "openinference_field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "openinference_value": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runner_field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runner_value": {
+          "type": "string",
+          "minLength": 1
+        },
+        "assay_claim_type": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_]*$"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "coverage_status": {
+            "const": "absent"
+          }
+        },
+        "required": [
+          "coverage_status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "claim_strength": {
+            "const": "absent"
+          },
+          "mapping_basis": {
+            "const": "not_expressible"
+          },
+          "join_result_ref": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence_layer": {
+            "const": "joined"
+          }
+        },
+        "required": [
+          "evidence_layer"
+        ]
+      },
+      "then": {
+        "properties": {
+          "join_result_ref": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "observation_profile": {
+            "const": "otel_genai_latest_experimental"
+          }
+        },
+        "required": [
+          "observation_profile"
+        ]
+      },
+      "then": {
+        "required": [
+          "otel_semconv_opt_in"
+        ],
+        "properties": {
+          "otel_semconv_opt_in": {
+            "const": "gen_ai_latest_experimental"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "observation_profile": {
+            "const": "openinference"
+          },
+          "coverage_status": {
+            "enum": [
+              "full",
+              "partial"
+            ]
+          }
+        },
+        "required": [
+          "observation_profile",
+          "coverage_status"
+        ]
+      },
+      "then": {
+        "required": [
+          "openinference_span_kind"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "observation_profile": {
+            "const": "runner_measured_effects"
+          },
+          "coverage_status": {
+            "enum": [
+              "full",
+              "partial"
+            ]
+          }
+        },
+        "required": [
+          "observation_profile",
+          "coverage_status"
+        ]
+      },
+      "then": {
+        "required": [
+          "runner_effect_kind"
+        ],
+        "properties": {
+          "claim_basis": {
+            "const": "measured"
+          }
+        }
+      }
+    }
+  ]
+}
