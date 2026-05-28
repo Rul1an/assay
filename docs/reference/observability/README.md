@@ -90,6 +90,13 @@ It validates the `matched_safe_read` path under real Runner capture
 without publishing delegated gap findings or promoting experiment
 artifacts to product APIs.
 
+The delegated semantic-gap expansion plan is tracked in
+[`../../experiments/agent-observability-fidelity-2026-05/delegated-semantic-gap-expansion-plan.md`](../../experiments/agent-observability-fidelity-2026-05/delegated-semantic-gap-expansion-plan.md).
+It selects `hidden_write` as the first post-baseline delegated gap
+candidate and pins the same-head baseline, clean-health, strong-join,
+workdir-boundary, and non-claim gates required before any delegated gap
+row can be cited as measured evidence.
+
 The first interop matrix plan is tracked in
 [`../../experiments/agent-observability-fidelity-2026-05/interop-matrix-plan.md`](../../experiments/agent-observability-fidelity-2026-05/interop-matrix-plan.md).
 It predeclares how OTel GenAI, OpenInference, Runner measured effects,
