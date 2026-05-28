@@ -30,7 +30,11 @@ Priority order:
    measured system effect diverge at the same tool call.
 4. **Interop matrix** - compare OTel GenAI, OpenInference, and Runner
    evidence boundaries without pretending they measure the same thing.
-5. **Optional OTel span-limit characterization** - only when an external
+5. **Delegated semantic-gap baseline** - prove the positive join path
+   under real Runner capture before any gap finding is published.
+6. **Fidelity arc findings summary** - close the arc with bounded,
+   citation-ready statements after the delegated baseline gate.
+7. **Optional OTel span-limit characterization** - only when an external
    consumer needs behavior above the default 128 span-event limit.
 
 ## Why This Direction
@@ -379,7 +383,90 @@ This should produce a map from external semantic conventions to Assay's
 internal claim vocabulary. It informs importers, receipt families, and
 docs around what Assay can honestly consume.
 
-## Experiment 5 - Optional OTel Span-Limit Characterization
+## Experiment 5 - Delegated Semantic-Gap Baseline
+
+**Goal:** prove the semantic-gap positive baseline under real Runner
+capture before publishing any delegated gap finding.
+
+> **Status:** delegated-baseline-plan-ready. The delegated baseline
+> source, artifact expectations, join invariants, acceptance rules, and
+> follow-up dispatch/conversion gate are predeclared in
+> [`agent-observability-fidelity-2026-05/delegated-baseline-plan.md`](agent-observability-fidelity-2026-05/delegated-baseline-plan.md).
+> This does not dispatch the delegated run and does not publish
+> semantic-gap findings.
+
+The full synthetic semantic-gap matrix is useful, but it is still local
+ground truth. Before any semantic-gap result is described as delegated
+measurement evidence, the positive baseline must show that the same
+tool-call id can join reported tool intent, SDK events, policy evidence,
+and measured filesystem effects under real `assay runner-spike` capture.
+
+### Baseline dispatch shape
+
+Slice 7 plans a single delegated baseline source:
+
+```text
+.github/workflows/runner-spike-delegated.yml
+inputs.gates = openai-agents-kernel-policy
+inputs.build_ebpf = true
+```
+
+The existing delegated gate already runs the deterministic OpenAI Agents
+fixture with stable `tool_call_id=tc_runner_policy_001`, SDK events,
+policy evidence, kernel capture, and a retained proof pack. The first
+baseline should use that gate directly rather than creating a new runner
+lane.
+
+### Acceptance rules
+
+- Treat the delegated baseline as a publication gate, not a gap finding.
+- Require a passed `openai-agents-kernel-policy` delegated proof pack.
+- Require clean Runner health before interpreting any join.
+- Require a strong `tool_call_id` join for `tc_runner_policy_001`.
+- Require the measured effect to stay inside the delegated fixture
+  workdir and match the reported `read_file` baseline.
+- If any required artifact is missing, classify the baseline as
+  inconclusive and stop before delegated gap scenarios.
+- The follow-up dispatch pass must first decide whether the existing
+  evidence-pack prototype can carry proof-pack references as-is or
+  whether a small converter is needed. If a converter is needed, it must
+  reuse the evidence-pack, join-result, and claim-class vocabularies
+  rather than adding a new artifact family.
+
+## Experiment 6 - Fidelity Arc Findings Summary
+
+**Goal:** close the agent-observability fidelity arc with a stable
+summary after the delegated baseline gate has either passed or been
+classified as inconclusive.
+
+This should mirror the overhead arc's `findings-summary.md` discipline:
+one citation-friendly document, with slice history kept in the longer
+roadmap and plan files.
+
+### Expected statements
+
+- **Calibration discipline:** requested-vs-observed signal counts are a
+  mechanical guardrail, not a reviewer memory exercise.
+- **Portable evidence:** evidence packs and proof-pack references carry
+  bounded claims without strengthening the underlying artifacts.
+- **Semantic gap:** six synthetic scenario shapes exercise positive
+  join, same-tool-call divergence, fallback diagnostics, and runtime
+  surface boundaries.
+- **Interop:** five starter cells map OTel GenAI, OpenInference, and
+  Runner observation profiles as coverage/claim-strength rows, not
+  product rankings.
+- **Delegated baseline:** the positive join path is either verified by
+  a real Runner capture or explicitly inconclusive.
+
+### Non-claims
+
+- The summary should not publish delegated gap-scenario findings unless
+  those scenarios have their own delegated gates.
+- The summary should not promote experiment-scoped schemas to product
+  APIs.
+- The summary should not recommend one trace vocabulary over another.
+
+## Experiment 7 - Optional OTel Span-Limit Characterization
 
 **Goal:** characterize span-event throughput/fidelity only after raising
 the OTel SDK limit above the requested target.
@@ -438,7 +525,9 @@ visible by the overhead and shape-comparison arcs.
 | 4 | Synthetic matrix-ready | Semantic-gap harness | Synthetic fixtures prove all six predeclared scenarios with joined intent/effect rows, bounded verdicts, and evidence-pack output; delegated sanity run remains not done. |
 | 5 | Matrix-plan-ready | Interop matrix plan | OTel/OpenInference/Runner coverage axes, starter cells, row shape, source snapshots, and non-claims pinned before harness work. |
 | 6 | Harness-ready | Interop matrix harness | Five synthetic starter cells emit strict `interop_coverage_cell.v0` rows, join-result refs, claim-class refs, source snapshots, partial/absent rows, and stable output directories without delegated publication. |
-| 7 | Optional | OTel span-limit study | Only after an external trigger; otherwise remains issue-only. |
+| 7 | Delegated-baseline-plan-ready | Delegated semantic-gap baseline | Existing `openai-agents-kernel-policy` delegated gate, artifact expectations, health/join invariants, and follow-up dispatch/conversion gate are pinned before any delegated semantic-gap finding. |
+| 8 | Planned | Fidelity arc findings summary | After the delegated baseline gate, write a citation-friendly summary of calibration, evidence-pack, semantic-gap, interop, and delegated-baseline outcomes without promoting product APIs. |
+| 9 | Optional | OTel span-limit study | Only after an external trigger; otherwise remains issue-only. |
 
 ## Experiment vs Feature Boundary
 
@@ -465,17 +554,25 @@ implemented locally, while delegated publication gates remain open.
 rules, row-shape expectations, and the next harness gate are pinned
 before implementation. `Harness-ready` means a synthetic harness emits
 schema-validated rows for the predeclared starter cells, while delegated
-publication gates remain open.
+publication gates remain open. `Delegated-baseline-plan-ready` means the
+one delegated positive baseline source, artifacts, invariants, and
+non-claims are pinned before dispatch. `Delegated-baseline-smoke-verified`
+means the delegated positive baseline ran, produced the required proof
+pack or references, and satisfied the predeclared health and join
+invariants without promoting delegated gap scenarios.
 
 ## What Not To Do Yet
 
-- Do not turn the Interop Matrix into product ranking. Calibration,
-  evidence packs, and the synthetic semantic-gap matrix now unblock it,
-  but it should remain a coverage and claim-strength map.
+- Do not dispatch delegated gap scenarios before the delegated
+  `matched_safe_read` baseline is clean. If the baseline is
+  inconclusive, keep gap scenarios blocked until the failure is
+  understood and a follow-up baseline re-establishes the gate.
+- Do not turn the Interop Matrix into product ranking. It is now
+  harness-ready, but it remains a coverage and claim-strength map.
 - Do not turn the required product-development list into one epic. Each
   item belongs to a different dependency chain.
 - Do not open a new paper arc yet. The argument is strong, but the
-  portable evidence format should exist before publication work starts.
+  delegated baseline and findings-summary closure should land first.
 - Do not start #1408 unless an external trigger appears.
 
 ## Closure Criterion

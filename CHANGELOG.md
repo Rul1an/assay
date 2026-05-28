@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Planned Slice 7 of the agent-observability fidelity roadmap as a
+  delegated semantic-gap baseline. The plan pins the existing
+  `openai-agents-kernel-policy` delegated Runner gate, required
+  proof-pack artifacts, clean-health and strong `tool_call_id` join
+  invariants, and non-claims before any semantic-gap finding is promoted
+  beyond synthetic harness behavior. The roadmap now reserves the next
+  closure step for a fidelity-arc findings summary and keeps the OTel
+  span-limit study trigger-only.
 - Added the Slice 6 synthetic interop harness for the
   agent-observability fidelity roadmap. The harness emits five
   OTel GenAI / OpenInference / Runner starter cells with strict

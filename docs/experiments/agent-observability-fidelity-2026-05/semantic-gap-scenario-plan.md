@@ -4,8 +4,9 @@
 > matrix-ready for the agent-observability fidelity roadmap. This
 > document predeclared the baseline, scenarios, join requirements,
 > claim classes, and evidence pack expectations before harness work; the
-> synthetic harness now implements all six predeclared scenarios
-> without delegated runs.
+> synthetic harness now implements all six predeclared scenarios. The
+> delegated positive-baseline gate is planned separately in
+> [`delegated-baseline-plan.md`](delegated-baseline-plan.md).
 >
 > **Last updated:** 2026-05-28
 
@@ -60,7 +61,8 @@ This baseline is not optional. Every gap scenario is interpreted against
 the same fixture contract and the same join path. Synthetic fixtures are
 acceptable for unit tests, but at least one delegated sanity run must
 prove this baseline under real Runner capture before any gap finding is
-published.
+published. Slice 7 pins that delegated sanity run in
+[`delegated-baseline-plan.md`](delegated-baseline-plan.md).
 
 ## Scenario Matrix
 
@@ -227,3 +229,8 @@ A delegated `matched_safe_read` sanity run is required before any
 semantic-gap finding is published. Delegated runs for the gap and
 fallback scenarios are required only when their findings are promoted
 from harness behavior to measured results.
+
+Slice 7 predeclares the delegated baseline source, proof-pack artifacts,
+health/join invariants, and dispatch/conversion exit gate in
+[`delegated-baseline-plan.md`](delegated-baseline-plan.md). It still
+does not dispatch delegated measurements.

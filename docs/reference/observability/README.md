@@ -52,6 +52,12 @@ The first semantic-gap MVP harness is tracked in
 It generates the full synthetic semantic-gap matrix and evidence packs
 without promoting those outputs to delegated findings or product APIs.
 
+The delegated semantic-gap baseline plan is tracked in
+[`../../experiments/agent-observability-fidelity-2026-05/delegated-baseline-plan.md`](../../experiments/agent-observability-fidelity-2026-05/delegated-baseline-plan.md).
+It pins the real Runner capture gate, proof-pack artifacts, health
+requirements, and strong-join invariants required before any
+semantic-gap finding is promoted beyond synthetic harness behavior.
+
 The first interop matrix plan is tracked in
 [`../../experiments/agent-observability-fidelity-2026-05/interop-matrix-plan.md`](../../experiments/agent-observability-fidelity-2026-05/interop-matrix-plan.md).
 It predeclares how OTel GenAI, OpenInference, Runner measured effects,
