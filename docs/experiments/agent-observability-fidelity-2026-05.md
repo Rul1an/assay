@@ -339,7 +339,7 @@ claim-strength map, not a translator and not a ranking.
 
 | Axis | Values |
 |---|---|
-| Vocabulary profile | OTel GenAI current default, OTel latest experimental opt-in, OpenInference, Runner measured effects |
+| Observation profile | OTel GenAI current default, OTel latest experimental opt-in, OpenInference, Runner measured effects |
 | Agent shape | single tool call, retry/self-correction, runtime side effect, retrieval-then-tool, handoff/multi-agent |
 | Join key | `tool_call_id`, `run_id`, `trace_span_id`, `timestamp_or_order` |
 | Evidence layer | trace-only, archive-only, joined |
@@ -362,6 +362,8 @@ synthetic fixtures; the fifth may add one synthetic retrieval/tool mix.
 - The matrix reports coverage and claim strength, not product ranking.
 - OTel GenAI convention version or opt-in value must be recorded.
 - OpenInference package/version must be recorded.
+- Every row must include a source URL, retrieval date, and at least one
+  version anchor: package version, semconv tag, or Assay commit.
 - Missing fields are findings, not test failures, when the vocabulary
   legitimately does not model the behavior.
 - Slice 6 may add

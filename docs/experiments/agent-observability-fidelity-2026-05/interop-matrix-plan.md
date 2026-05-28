@@ -52,7 +52,7 @@ are moving targets.
 | [OpenInference semantic conventions](https://arize-ai.github.io/openinference/spec/semantic_conventions.html) | `openinference.span.kind` is required for OpenInference spans, with span kinds including `LLM`, `EMBEDDING`, `CHAIN`, `RETRIEVER`, `RERANKER`, `TOOL`, `AGENT`, `GUARDRAIL`, `EVALUATOR`, and `PROMPT`. |
 | [openinference-semantic-conventions 0.1.1](https://docs.rs/crate/openinference-semantic-conventions/latest) | The Rust package exposes OpenInference attribute constants and notes dual support for OpenInference-style attributes and OTel GenAI aliases. |
 
-Slice 6 must record the exact package/spec snapshot it uses in every
+Slice 6 must record the exact package/spec/commit snapshot it uses in every
 interop output. If OTel or OpenInference upstream docs move before
 implementation, the harness PR should update the snapshot section before
 emitting rows.
@@ -65,7 +65,7 @@ starter matrix becomes too large before the mappings are even useful.
 
 | Axis | Values | Notes |
 |---|---|---|
-| Vocabulary profile | `otel_genai_default`, `otel_genai_latest_experimental`, `openinference`, `runner_measured_effects` | `otel_genai_default` means the default convention emitted by the fixture. `otel_genai_latest_experimental` means the fixture records the opt-in config value. Runner is included as a measured evidence boundary, not a trace vocabulary. |
+| Observation profile | `otel_genai_default`, `otel_genai_latest_experimental`, `openinference`, `runner_measured_effects` | The first three values are trace vocabularies. Runner is included as a measured-effects boundary, not as a trace vocabulary. |
 | Agent shape | `single_tool_call`, `retry_self_correction`, `runtime_side_effect`, `retrieval_then_tool`, `handoff_multi_agent` | The first three reuse Slice 4 synthetic scenarios. Retrieval and handoff are planned starter extensions for interop because they exercise OpenInference span kinds and OTel workflow/agent spans. |
 | Join key | `tool_call_id`, `run_id`, `trace_span_id`, `timestamp_or_order` | Values reuse `assay.observability.join_result.v0`; the matrix must not introduce a new join hierarchy. |
 | Evidence layer | `trace_only`, `archive_only`, `joined` | Values describe where the claim is supported. `joined` requires a join-result row; `archive_only` can state measured effects without semantic intent. |
@@ -121,8 +121,8 @@ Planned fields:
 | `schema` | const | `assay.experiment.agent_observability_fidelity.interop_coverage_cell.v0` |
 | `cell_id` | lowercase id | Stable matrix cell id. |
 | `scenario_id` | string | Existing semantic-gap scenario id or planned interop fixture id. |
-| `vocabulary_profile` | enum | `otel_genai_default`, `otel_genai_latest_experimental`, `openinference`, `runner_measured_effects`. |
-| `source_snapshot` | object | URL, retrieved date, package/spec version when known. |
+| `observation_profile` | enum | `otel_genai_default`, `otel_genai_latest_experimental`, `openinference`, `runner_measured_effects`. |
+| `source_snapshot` | object | URL, retrieval date, and at least one of package version, semantic-convention tag, or Assay commit. |
 | `agent_shape` | enum | One matrix agent shape. |
 | `join_key` | enum | Reuse `join_result.v0` join-key vocabulary. |
 | `evidence_layer` | enum | `trace_only`, `archive_only`, or `joined`. |
@@ -137,6 +137,12 @@ Planned fields:
 `coverage_status=absent` is a valid result. It means a vocabulary or
 layer cannot express the claim in that cell. It is not a test failure
 and not a product criticism.
+
+Example: an OTel GenAI row that tries to express Runner's measured
+`filesystem_read` effect should use `coverage_status=absent`,
+`mapping_basis=not_expressible`, and a note explaining that no OTel
+trace field carries the measured filesystem effect itself. That is a
+valid coverage result, not a test failure.
 
 ## Mapping Ownership
 
@@ -158,8 +164,9 @@ claim.
 ## Acceptance Rules
 
 - The matrix reports coverage and claim strength, not product ranking.
-- Every row must record the vocabulary snapshot: upstream URL, retrieval
-  date, and package/spec version when available.
+- Every row must record a source snapshot: upstream URL, retrieval
+  date, and at least one version anchor (`package_version`,
+  `semconv_tag`, or `assay_commit`).
 - Every row must reuse `claim_class_cell.v0` vocabulary for
   `claim_strength` and `claim_basis`.
 - Every joined row must reference a `join_result.v0` row or state why no
