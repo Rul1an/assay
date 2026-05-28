@@ -847,7 +847,6 @@ flowchart TB
         assay_runner_core["assay-runner-core"]
         assay_runner_linux["assay-runner-linux"]
         assay_runner_schema["assay-runner-schema"]
-        assay_runner_spike["assay-runner-spike"]
         assay_sim["assay-sim"]
         assay_xtask["assay-xtask"]
     end
@@ -884,8 +883,6 @@ flowchart TB
     assay_runner_core --> assay_common
     assay_runner_core --> assay_monitor
     assay_runner_core --> assay_runner_schema
-    assay_runner_spike --> assay_runner_core
-    assay_runner_spike --> assay_runner_schema
     assay_sim --> assay_adapter_api
     assay_sim --> assay_core
     assay_sim --> assay_evidence
