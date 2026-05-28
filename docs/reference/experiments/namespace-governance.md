@@ -207,6 +207,19 @@ The v0 prototype lives under
 Keep this prototype in `assay.experiment.*` until a real CLI or
 artifact-exchange consumer needs a stable product surface.
 
+## Semantic-Gap Verdicts
+
+The Slice 4 MVP harness adds one narrow experiment-scoped verdict shape:
+
+| Schema | Role |
+|---|---|
+| `assay.experiment.agent_observability_fidelity.semantic_gap_verdict.v0` | Bounded verdict for the three synthetic MVP scenarios: `positive_join`, `semantic_gap`, `diagnostic_only`, or `inconclusive`. |
+
+This verdict summarizes existing join and claim-class rows. It does not
+replace `assay.observability.join_result.v0`, does not promote semantic
+gap findings to a product API, and does not support delegated findings
+until the delegated baseline gate is run.
+
 ## Artifact Family Inventory
 
 Before adding a new artifact family, check

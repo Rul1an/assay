@@ -39,7 +39,7 @@ accidentally present proposed artifacts as canonical product surfaces.
 | Fidelity calibration | `experiment-scoped` | `assay.experiment.agent_observability_fidelity.calibration.v0` | Requested-vs-observed fidelity verdicts and per-layer count methods embedded by the overhead harness. |
 | Evidence pack | `experiment-scoped` | `assay.experiment.agent_observability_fidelity.evidence_pack.v0` | Prototype portable bundle carrier for one run or scenario, with manifest, summary, health, archive/trace references, and explicit redaction manifest. |
 | Binding evidence / join receipts | `proposed` | undecided | Working term for tool-call input/output/effect binding evidence. Not a product line yet. |
-| Semantic-gap finding | `proposed` | planned under [`semantic-gap-scenario-plan.md`](../experiments/agent-observability-fidelity-2026-05/semantic-gap-scenario-plan.md) | Experiment result family for reported-intent vs measured-effect divergence. Plan-ready only; no schema or harness yet. |
+| Semantic-gap finding | `experiment-scoped` | `assay.experiment.agent_observability_fidelity.semantic_gap_verdict.v0` under [`semantic-gap-scenario-plan.md`](../experiments/agent-observability-fidelity-2026-05/semantic-gap-scenario-plan.md) | Synthetic MVP harness verdicts for reported-intent vs measured-effect divergence. Not a delegated finding or product API. |
 | Interop mapping | `proposed` | undecided | Mapping rows between OTel GenAI, OpenInference, Runner, and Assay claim vocabulary. |
 
 ## Promotion Rule

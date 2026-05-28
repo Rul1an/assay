@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/experiments/agent-observability-fidelity-2026-05/schema/semantic-gap-verdict-v0.schema.json",
+  "title": "Assay agent-observability semantic-gap verdict v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "scenario_id",
+    "role",
+    "verdict",
+    "evidence_pack_claim_class",
+    "runner_health_status",
+    "trace_calibration_status",
+    "join_key",
+    "join_grade",
+    "fallback_used",
+    "reason",
+    "non_claims"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.experiment.agent_observability_fidelity.semantic_gap_verdict.v0"
+    },
+    "scenario_id": {
+      "type": "string",
+      "enum": [
+        "matched_safe_read",
+        "hidden_write",
+        "weak_join_fallback"
+      ]
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "baseline",
+        "gap",
+        "fallback"
+      ]
+    },
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "positive_join",
+        "semantic_gap",
+        "diagnostic_only",
+        "inconclusive"
+      ]
+    },
+    "evidence_pack_claim_class": {
+      "type": "string",
+      "enum": [
+        "diagnostic",
+        "fidelity_boundary",
+        "semantic_gap",
+        "positive_join"
+      ]
+    },
+    "runner_health_status": {
+      "type": "string",
+      "enum": [
+        "clean",
+        "inconclusive"
+      ]
+    },
+    "trace_calibration_status": {
+      "type": "string",
+      "enum": [
+        "clean",
+        "lossy",
+        "inconclusive",
+        "not_applicable"
+      ]
+    },
+    "join_key": {
+      "type": "string",
+      "enum": [
+        "tool_call_id",
+        "run_id",
+        "session_id",
+        "trace_span_id",
+        "timestamp_or_order"
+      ]
+    },
+    "join_grade": {
+      "type": "string",
+      "enum": [
+        "strong",
+        "weak",
+        "diagnostic",
+        "failed"
+      ]
+    },
+    "fallback_used": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "non_claims": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[a-z][a-z0-9_]*$"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "positive_join"
+          }
+        },
+        "required": [
+          "verdict"
+        ]
+      },
+      "then": {
+        "properties": {
+          "evidence_pack_claim_class": {
+            "const": "positive_join"
+          },
+          "join_grade": {
+            "const": "strong"
+          },
+          "fallback_used": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "semantic_gap"
+          }
+        },
+        "required": [
+          "verdict"
+        ]
+      },
+      "then": {
+        "properties": {
+          "evidence_pack_claim_class": {
+            "const": "semantic_gap"
+          },
+          "join_grade": {
+            "const": "strong"
+          },
+          "fallback_used": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "diagnostic_only"
+          }
+        },
+        "required": [
+          "verdict"
+        ]
+      },
+      "then": {
+        "properties": {
+          "evidence_pack_claim_class": {
+            "const": "diagnostic"
+          },
+          "join_grade": {
+            "enum": [
+              "weak",
+              "diagnostic",
+              "failed"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "inconclusive"
+          }
+        },
+        "required": [
+          "verdict"
+        ]
+      },
+      "then": {
+        "properties": {
+          "evidence_pack_claim_class": {
+            "const": "diagnostic"
+          }
+        }
+      }
+    }
+  ]
+}
