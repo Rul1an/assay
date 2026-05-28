@@ -13,6 +13,7 @@ governance.
 
 | Contract | Role |
 |---|---|
+| [`claim-boundary-positioning.md`](claim-boundary-positioning.md) | Post-arc positioning and adjacent whitespace map for claim-boundary and evidence-fidelity work. |
 | [`claim-classes-v0.md`](claim-classes-v0.md) | Vocabulary for saying what a trace, archive, or joined artifact can honestly claim. |
 | [`join-contract-v0.md`](join-contract-v0.md) | Vocabulary for joining trace, SDK, policy, and measured-run evidence without silently upgrading weak keys. |
 
@@ -32,6 +33,14 @@ The citation-oriented result of that arc is
 It summarizes the calibration, evidence-pack, semantic-gap, interop, and
 delegated-baseline findings without promoting experiment-scoped schemas
 to product APIs.
+
+The post-arc positioning note is
+[`claim-boundary-positioning.md`](claim-boundary-positioning.md). It
+turns the closed overhead and fidelity findings into a next-arc
+selection rule and lifecycle-conform outreach map: MCP tool-evidence
+comments, an AgentSight citation update, a fidelity-SLO research note,
+and trigger-only watches for identity, real trace interop, and causal
+graph work.
 
 Experiment-scoped schema naming and promotion rules for that roadmap are
 tracked in
