@@ -18,6 +18,12 @@ updates, or add the final proof comment. A maintainer owns those steps.
 This page does not make the delegated workflow automatic. The delegated lane
 remains `workflow_dispatch` only.
 
+If GitHub's PR metadata API is temporarily unavailable, the lane-check helper
+may classify changed files from the local git diff plus `GITHUB_EVENT_PATH`
+payload. Comment evidence is optional on that degradation path: the PR body
+remains the primary evidence carrier, and runner-impacting PRs still fail unless
+matching delegated proof can be read from the body or available comments.
+
 ## Runner-Impacting Dependency Surfaces
 
 Treat these dependency changes as runner-impacting:

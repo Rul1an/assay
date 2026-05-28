@@ -11,7 +11,9 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -24,6 +26,10 @@ CONTRACT_DOC = "docs/reference/runner/ci-lanes.md"
 DEPENDABOT_FLOW_DOC = "docs/reference/runner/dependabot-lane-flow.md"
 DELEGATED_WORKFLOW_NAME = "Runner Spike Delegated"
 COMMENT_MARKER = "<!-- assay-runner-lane-check -->"
+# 404 is retryable here because GitHub can briefly return it for freshly
+# created PR metadata endpoints such as /pulls/{number}/files.
+RETRYABLE_HTTP_CODES = {404, 502, 503, 504}
+HTTP_RETRY_ATTEMPTS = 3
 
 
 class Gate(IntEnum):
@@ -78,7 +84,7 @@ class GitHubApi:
             data = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(url, data=data, headers=headers, method=method)
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urlopen_with_retry(request) as response:
             body = response.read().decode("utf-8")
             return json.loads(body) if body else {}
 
@@ -95,13 +101,35 @@ class GitHubApi:
                     "Authorization": f"Bearer {self.token}",
                 },
             )
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urlopen_with_retry(request) as response:
                 page = json.loads(response.read().decode("utf-8"))
                 if not isinstance(page, list):
                     raise TypeError(f"Expected list response from {url}")
                 results.extend(page)
                 url = next_link(response.headers.get("Link", ""))
         return results
+
+
+def urlopen_with_retry(request: urllib.request.Request):
+    last_error: BaseException | None = None
+    attempts = HTTP_RETRY_ATTEMPTS if request.get_method() == "GET" else 1
+    for attempt in range(attempts):
+        try:
+            return urllib.request.urlopen(request, timeout=30)
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            # HTTPError is file-like and may hold a connection; close it before
+            # retrying or re-raising so repeated transient failures do not leak.
+            exc.close()
+            if exc.code not in RETRYABLE_HTTP_CODES or attempt == attempts - 1:
+                raise
+        except (urllib.error.URLError, TimeoutError) as exc:
+            last_error = exc
+            if attempt == attempts - 1:
+                raise
+        time.sleep(1 + attempt)
+    assert last_error is not None
+    raise last_error
 
 
 def next_link(header: str) -> str | None:
@@ -243,20 +271,101 @@ def accepted_gates(expected: Gate) -> set[str]:
 
 
 def load_pr(api: GitHubApi, number: int) -> PullRequest:
-    pr = api.request("GET", f"/pulls/{number}")
-    files = api.paginated(f"/pulls/{number}/files")
+    try:
+        pr = api.request("GET", f"/pulls/{number}")
+        files = api.paginated(f"/pulls/{number}/files")
+        return PullRequest(
+            number=number,
+            title=str(pr.get("title") or ""),
+            body=str(pr.get("body") or ""),
+            author_login=str((pr.get("user") or {}).get("login") or ""),
+            head_sha=str(pr["head"]["sha"]),
+            files=tuple(str(item["filename"]) for item in files),
+        )
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+        fallback = load_pr_from_event_and_git(number)
+        if fallback is not None:
+            print(
+                f"warning: could not read GitHub PR metadata; "
+                f"classifying changed files from local git diff fallback: {exc}",
+                file=sys.stderr,
+            )
+            return fallback
+        raise
+
+
+def load_pr_from_event_and_git(number: int) -> PullRequest | None:
+    event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+    if not event_path:
+        return None
+    try:
+        with open(event_path, encoding="utf-8") as handle:
+            event = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    raw_pr = event.get("pull_request")
+    if not isinstance(raw_pr, dict) or int(raw_pr.get("number") or 0) != number:
+        return None
+
+    base_sha = str((raw_pr.get("base") or {}).get("sha") or "")
+    head_sha = str((raw_pr.get("head") or {}).get("sha") or "")
+    if not base_sha or not head_sha:
+        return None
+
+    try:
+        fetch_ref_for_diff(number, head_sha)
+        files_output = subprocess.check_output(
+            ["git", "diff", "--name-only", f"{base_sha}...{head_sha}"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
     return PullRequest(
         number=number,
-        title=str(pr.get("title") or ""),
-        body=str(pr.get("body") or ""),
-        author_login=str((pr.get("user") or {}).get("login") or ""),
-        head_sha=str(pr["head"]["sha"]),
-        files=tuple(str(item["filename"]) for item in files),
+        title=str(raw_pr.get("title") or ""),
+        body=str(raw_pr.get("body") or ""),
+        author_login=str((raw_pr.get("user") or {}).get("login") or ""),
+        head_sha=head_sha,
+        files=tuple(line for line in files_output.splitlines() if line),
+    )
+
+
+def fetch_ref_for_diff(number: int, head_sha: str) -> None:
+    try:
+        subprocess.run(
+            ["git", "cat-file", "-e", f"{head_sha}^{{commit}}"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return
+    except (OSError, subprocess.CalledProcessError):
+        pass
+
+    subprocess.run(
+        ["git", "fetch", "--depth=1", "origin", f"pull/{number}/head"],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
 
 def load_issue_comments(api: GitHubApi, number: int) -> list[dict[str, object]]:
     return [dict(item) for item in api.paginated(f"/issues/{number}/comments")]
+
+
+def safe_load_issue_comments(api: GitHubApi, number: int) -> list[dict[str, object]]:
+    try:
+        return load_issue_comments(api, number)
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+        print(
+            f"warning: could not read PR comments; PR body evidence will still be checked: {exc}",
+            file=sys.stderr,
+        )
+        return []
 
 
 def combined_evidence_text(pr: PullRequest, comments: Iterable[dict[str, object]]) -> str:
@@ -414,8 +523,8 @@ def post_or_update_comment(
 
 def run_check(api: GitHubApi, pr_number: int, *, comment: bool) -> int:
     pr = load_pr(api, pr_number)
-    comments = load_issue_comments(api, pr.number)
     classification = classify_files(pr.files)
+    comments = safe_load_issue_comments(api, pr.number)
     text = combined_evidence_text(pr, comments)
 
     print(f"Assay-Runner lane check for PR #{pr.number}")
@@ -484,6 +593,7 @@ def maybe_comment(
 def self_test() -> None:
     cases = [
         (["docs/reference/runner/ci-lanes.md"], Gate.NONE),
+        (["docs/reference/observability/claim-boundary-positioning.md"], Gate.NONE),
         (["tests/fixtures/runner-spike/kernel-only-agent.sh"], Gate.KERNEL_ONLY),
         (["tests/fixtures/runner-spike/mcp-policy-agent.sh"], Gate.KERNEL_POLICY),
         (["runner-fixtures/openai-agents/package-lock.json"], Gate.OPENAI_AGENTS_KERNEL_POLICY),
