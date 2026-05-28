@@ -46,12 +46,15 @@
 | `assay.experiment.event_rate_sweep.v0` | Event-rate/workload-intensity cell metadata embedded in overhead samples and summaries | experiment-scoped; sidecar active; Slice 10 smoke-verified | [`event-rate-sweep-v0.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/event-rate-sweep-v0.schema.json) |
 | `assay.experiment.event_rate_sweep.v0.1` | Event-rate/workload-intensity cell metadata with Slice 12 extended targets | experiment-scoped; sidecar active; Slice 12 measured | [`event-rate-sweep-v0.1.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/event-rate-sweep-v0.1.schema.json) |
 | `assay.experiment.agent_observability_fidelity.calibration.v0` | Requested-vs-observed fidelity calibration embedded in overhead samples and summaries | experiment-scoped; sidecar active; fidelity guardrail harness-ready | [`fidelity-calibration-v0.schema.json`](../../experiments/runner-vs-otel-overhead-2026-05/schema/fidelity-calibration-v0.schema.json) |
+| `assay.experiment.agent_observability_fidelity.evidence_pack.v0` | Portable synthetic evidence-pack manifest for one agent-observability scenario | experiment-scoped; prototype-ready; not a product API | [`evidence-pack-v0.schema.json`](../../experiments/agent-observability-fidelity-2026-05/schema/evidence-pack-v0.schema.json) |
+| `assay.experiment.agent_observability_fidelity.redaction_manifest.v0` | Explicit redaction record carried by every agent-observability evidence pack | experiment-scoped; prototype-ready | [`redaction-manifest-v0.schema.json`](../../experiments/agent-observability-fidelity-2026-05/schema/redaction-manifest-v0.schema.json) |
+| `assay.experiment.agent_observability_fidelity.semantic_gap_verdict.v0` | Bounded verdict for Slice 4 MVP semantic-gap synthetic scenarios | experiment-scoped; MVP harness-ready; not a delegated finding | [`semantic-gap-verdict-v0.schema.json`](../../experiments/agent-observability-fidelity-2026-05/schema/semantic-gap-verdict-v0.schema.json) |
 
-The overhead schemas remain experiment-scoped. They are validated by the
+These experiment schemas remain experiment-scoped. They are validated by
 local harness tests against synthetic samples, summaries, phase
-side-logs, event-rate sweep cells, and fidelity calibration sidecars,
-but they are not Runner archive contracts and are not promoted to stable
-product surface.
+side-logs, event-rate sweep cells, fidelity calibration sidecars, and
+agent-observability evidence packs/verdicts, but they are not Runner
+archive contracts and are not promoted to stable product surface.
 
 ## Version Notes
 

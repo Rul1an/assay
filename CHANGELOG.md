@@ -159,6 +159,12 @@ All notable changes to this project will be documented in this file.
   unless a strong key exists, and Slice 4's MVP gate can be synthetic
   while delegated capture remains required before publishing measured
   findings.
+- Added the Slice 4 semantic-gap MVP harness. The synthetic harness
+  emits `matched_safe_read`, `hidden_write`, and `weak_join_fallback`
+  scenario directories with trace/archive fixtures, join-result rows,
+  claim-class cells, bounded semantic-gap verdicts, and evidence packs
+  without dispatching delegated runs or publishing semantic-gap
+  findings.
 
 ## [3.12.0] - 2026-05-25
 

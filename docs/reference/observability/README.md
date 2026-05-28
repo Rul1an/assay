@@ -46,3 +46,8 @@ The first semantic-gap scenario plan is tracked in
 It predeclares how the join and claim-class contracts should be used
 when trace-reported tool intent and measured system effects agree,
 diverge, or only correlate weakly.
+
+The first semantic-gap MVP harness is tracked in
+[`../../experiments/agent-observability-fidelity-2026-05/semantic_gap_harness.py`](../../experiments/agent-observability-fidelity-2026-05/semantic_gap_harness.py).
+It generates synthetic exit-gate scenarios and evidence packs without
+promoting those outputs to delegated findings or product APIs.

@@ -1,10 +1,11 @@
 # Semantic Gap Scenario Plan
 
-> **Status:** plan-only Slice 3 for the
-> agent-observability fidelity roadmap. This document predeclares the
-> baseline, scenarios, join requirements, claim classes, and evidence
-> pack expectations before any semantic-gap harness or delegated run is
-> added.
+> **Status:** scenario-plan-ready plus Slice 4 MVP synthetic
+> harness-ready for the agent-observability fidelity roadmap. This
+> document predeclared the baseline, scenarios, join requirements,
+> claim classes, and evidence pack expectations before harness work; the
+> MVP harness now implements the three minimum exit-gate scenarios
+> without delegated runs.
 >
 > **Last updated:** 2026-05-28
 
@@ -36,6 +37,10 @@ The first harness PR should reuse
 `assay.observability.claim_class_cell.v0`, and
 `assay.experiment.agent_observability_fidelity.evidence_pack.v0` unless
 the implementation proves a version bump is required.
+
+The Slice 4 MVP harness lives in [`semantic_gap_harness.py`](semantic_gap_harness.py).
+It emits the three minimum synthetic scenarios from the exit gate:
+`matched_safe_read`, `hidden_write`, and `weak_join_fallback`.
 
 ## Baseline
 
@@ -117,6 +122,12 @@ Minimum required rows per scenario:
 | Evidence pack | One experiment-scoped evidence pack carrying the trace/archive or references, observation health, redaction manifest, and one-page summary. |
 | Scenario verdict | A bounded verdict: `positive_join`, `semantic_gap`, `diagnostic_only`, or `inconclusive`. |
 
+The MVP harness emits scenario verdicts with
+`assay.experiment.agent_observability_fidelity.semantic_gap_verdict.v0`.
+That schema is experiment-scoped and covers the three synthetic
+exit-gate scenarios only; delegated findings or additional scenario
+types require a deliberate schema review before publication.
+
 The evidence pack's `scenario_id` field must equal the scenario id from
 this plan, for example `matched_safe_read`, `hidden_write`, or
 `weak_join_fallback`. The Slice 4 harness can use the existing
@@ -180,7 +191,7 @@ The first findings document should report claim strength and basis using
 
 ## Non-Claims
 
-- This plan does not add a harness or dispatch delegated runs.
+- The MVP harness does not dispatch delegated runs.
 - This plan does not rank OTel, OpenInference, Runner, or Assay.
 - This plan does not claim semantic gaps are malicious.
 - This plan does not promote evidence packs, join results, or claim
@@ -189,8 +200,8 @@ The first findings document should report claim strength and basis using
 
 ## Exit Gate For Slice 4
 
-Slice 4 may start when this document is merged and the harness PR can
-show, using synthetic fixtures first, that:
+Slice 4's MVP synthetic harness is ready when it can show, using
+synthetic fixtures first, that:
 
 1. `matched_safe_read` emits a strong `tool_call_id` join and a
    `positive_join` evidence pack.
