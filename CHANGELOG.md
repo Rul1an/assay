@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added a post-arc claim-boundary positioning note for agent
+  observability work. The note records Assay's post-overhead and
+  post-fidelity position as a claim-boundary and evidence-fidelity layer,
+  not an observability replacement. It maps lifecycle-conform next steps
+  as upstream comments, citation updates, research notes, and
+  trigger-only watches rather than opening new experiment arcs or
+  promoting experiment-scoped artifacts.
 - Added an experiment arc lifecycle guide that captures the shared
   plan-to-harness-to-findings-summary pattern proven by the overhead and
   agent-observability fidelity arcs. The guide documents delegated gate
