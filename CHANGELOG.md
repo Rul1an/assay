@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Smoke-verified Slice 7 of the agent-observability fidelity roadmap
+  with a delegated `matched_safe_read` baseline. GitHub Actions run
+  `26571739019` passed the existing `openai-agents-kernel-policy`
+  delegated Runner gate, uploaded proof pack
+  `assay-runner-delegated-proof-pack-26571739019`, and records clean
+  Runner health, a strong `tool_call_id=tc_runner_policy_001` join, and
+  a `positive_join` scenario verdict without publishing delegated gap
+  scenarios or promoting experiment artifacts to product APIs. The slice
+  also hardens Linux cgroup root selection so Assay skips systemd
+  `.service` units as session roots, matching the existing `.scope`
+  handling.
 - Planned Slice 7 of the agent-observability fidelity roadmap as a
   delegated semantic-gap baseline. The plan pins the existing
   `openai-agents-kernel-policy` delegated Runner gate, required
