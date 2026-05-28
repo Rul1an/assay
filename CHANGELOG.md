@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added the Slice 6 synthetic interop harness for the
+  agent-observability fidelity roadmap. The harness emits five
+  OTel GenAI / OpenInference / Runner starter cells with strict
+  `assay.experiment.agent_observability_fidelity.interop_coverage_cell.v0`
+  rows, source snapshots, join-result references, claim-class
+  references, and partial/absent coverage rows without delegated
+  measurements, product ranking, runtime translation, or product API
+  promotion.
 - Planned Slice 5 of the agent-observability fidelity roadmap as an
   OTel GenAI / OpenInference / Runner interop matrix. The plan pins
   coverage axes, upstream snapshot rules, five starter cells, the

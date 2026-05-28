@@ -58,3 +58,9 @@ It predeclares how OTel GenAI, OpenInference, Runner measured effects,
 and Assay claim vocabulary should be mapped as coverage and
 claim-strength rows without ranking products or defining a runtime
 translator.
+
+The first synthetic interop harness is tracked in
+[`../../experiments/agent-observability-fidelity-2026-05/interop_harness.py`](../../experiments/agent-observability-fidelity-2026-05/interop_harness.py).
+It emits the five Slice 6 starter cells with `interop_coverage_cell.v0`
+rows, join-result references, claim-class references, and source
+snapshots without publishing delegated interop measurements.

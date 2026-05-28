@@ -241,11 +241,11 @@ Runner measured effects, and Assay observability vocabulary:
 
 | Schema | Role |
 |---|---|
-| `assay.experiment.agent_observability_fidelity.interop_coverage_cell.v0` | Planned Slice 6 row for vocabulary coverage, claim strength, join key, evidence layer, source snapshot, and bounded mapping notes. |
+| `assay.experiment.agent_observability_fidelity.interop_coverage_cell.v0` | Slice 6 row for observation-profile coverage, claim strength, join key, evidence layer, source snapshot, and bounded mapping notes. |
 
-The schema sidecar is intentionally deferred to the Slice 6 harness PR.
-The plan-only slice may name the schema string and row fields, but it
-must not promote interop mappings to `assay.observability.*`.
+The schema sidecar is active in the Slice 6 harness PR. The schema stays
+experiment-scoped and must not promote interop mappings to
+`assay.observability.*`.
 
 Interop rows must stay coverage-focused:
 
@@ -256,6 +256,12 @@ Interop rows must stay coverage-focused:
   both vocabularies are moving;
 - treat absent or partial mappings as valid findings, not product
   rankings.
+
+Evidence packs are not required for every matrix cell. Single-run
+scenario outputs should use evidence packs when the claim depends on a
+portable trace/archive bundle; multi-row synthetic matrix cells may use a
+stable directory layout when the claim is coverage-shape behavior rather
+than delegated run evidence.
 
 ## Artifact Family Inventory
 
