@@ -26,7 +26,7 @@ will be interpreted as evidence.
 | 0. Governance | Decide naming, artifact-family status, and promotion boundaries before adding new outputs. | New artifacts have an `assay.experiment.<arc>.<artifact>.v<N>` shape or a documented reason not to. |
 | 1. Plan | State the narrow question, prerequisites, acceptance rules, non-claims, and stop conditions. | Review can tell what would count as success, boundary, or inconclusive before code exists. |
 | 2. Harness | Implement the smallest local or synthetic harness that exercises the planned claim classes. | Outputs validate against experiment-scoped schemas and policy rules are enforced by tests or schema conditionals. |
-| 3. Carrier | Add a reviewable carrier only if raw artifacts are too scattered to inspect safely. | Evidence packs or stable directories carry artifacts without strengthening the underlying claim. |
+| 3. Carrier | Add a reviewable carrier when artifacts need to be portable, redacted, or shaped for downstream consumption. | Evidence packs or stable directories carry artifacts without strengthening the underlying claim. |
 | 4. Delegated Gate | Run real infrastructure only when a finding needs delegated evidence, not just local fixture behavior. | Health, calibration, join, and artifact retention requirements pass or the result is explicitly inconclusive. |
 | 5. Findings Summary | Close with a stable citation point separate from slice history. | One `findings-summary.md` states findings, non-claims, and reproduction pointers. |
 | 6. Tail Items | Keep optional follow-ups trigger-only. | Optional issues remain open but do not keep the arc itself open. |
@@ -35,6 +35,11 @@ Not every arc needs every stage. A docs-only feasibility arc may stop at
 the plan. A feature-like carrier may iterate without delegated gates. A
 measurement arc that publishes real findings should usually reach a
 findings summary.
+
+An arc may also iterate through multiple plan-to-harness cycles before
+it reaches a delegated gate or findings summary. The plan stage is a
+review boundary, not a requirement to predict every later slice in one
+document.
 
 ## Plan Rules
 
@@ -145,6 +150,8 @@ Common non-triggers:
 - many commits landed;
 - a findings summary is useful;
 - a synthetic harness is complete;
+- two synthetic harnesses consume the same already-stable
+  `assay.observability.*` reference schema;
 - a PR reviewer liked the shape.
 
 Common triggers:
