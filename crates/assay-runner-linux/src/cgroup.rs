@@ -68,7 +68,7 @@ impl CgroupManager {
         loop {
             let cgroup_type = fs::read_to_string(path.join("cgroup.type"))
                 .with_context(|| format!("Failed to read cgroup type for {}", path.display()))?;
-            if cgroup_type.trim() == "domain" && !Self::is_systemd_scope(&path) {
+            if cgroup_type.trim() == "domain" && !Self::is_systemd_leaf_unit(&path) {
                 return Ok(path);
             }
 
@@ -86,10 +86,10 @@ impl CgroupManager {
         }
     }
 
-    fn is_systemd_scope(path: &Path) -> bool {
+    fn is_systemd_leaf_unit(path: &Path) -> bool {
         path.file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name.ends_with(".scope"))
+            .is_some_and(|name| name.ends_with(".scope") || name.ends_with(".service"))
     }
 
     /// Creates a new ephemeral cgroup.
@@ -306,6 +306,24 @@ mod tests {
             .expect("write system slice cgroup type");
         fs::write(service.join("cgroup.type"), "domain threaded\n")
             .expect("write service cgroup type");
+
+        let resolved =
+            CgroupManager::nearest_domain_root(&root, service).expect("resolve domain root");
+
+        assert_eq!(resolved, system_slice);
+        fs::remove_dir_all(root).expect("remove temp cgroup tree");
+    }
+
+    #[test]
+    fn nearest_domain_root_ascends_from_systemd_service_unit() {
+        let root = temp_cgroup_tree("service-unit");
+        let system_slice = root.join("system.slice");
+        let service = system_slice.join("actions.runner.example.service");
+        fs::create_dir_all(&service).expect("create fake service cgroup");
+        fs::write(root.join("cgroup.type"), "domain\n").expect("write root cgroup type");
+        fs::write(system_slice.join("cgroup.type"), "domain\n")
+            .expect("write system slice cgroup type");
+        fs::write(service.join("cgroup.type"), "domain\n").expect("write service cgroup type");
 
         let resolved =
             CgroupManager::nearest_domain_root(&root, service).expect("resolve domain root");
