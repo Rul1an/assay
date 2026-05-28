@@ -69,6 +69,9 @@ test_policy.yaml
 regex_debug.rs
 target-ebpf/
 demo/output/tmp_video/
+demo/output/*.mp4
+demo/output/*.gif
+demo/output/*.aiff
 
 # Local maturin build artifacts (platform-specific)
 assay-python-sdk/python/assay/_native*.so
