@@ -85,8 +85,9 @@ published.
   tests whether Assay can separate tool effects from runtime/framework
   effects. Runtime events emitted before the first tool-call event are
   run-scope only by definition. Runtime events near a tool call by
-  timestamp/order alone must be flagged as `ambiguous_proximity`, not
-  upgraded to a strong tool-call join.
+  timestamp/order alone must use the existing `timestamp_or_order` join
+  key with `diagnostic` grade and may add `ambiguous_proximity` only as
+  a freeform note. They must not be upgraded to a strong tool-call join.
 - `weak_join_fallback` exists to prove the negative case: plausible
   timing is useful for investigation but must not become a strong claim.
 
@@ -118,9 +119,13 @@ Minimum required rows per scenario:
 The evidence pack's `scenario_id` field must equal the scenario id from
 this plan, for example `matched_safe_read`, `hidden_write`, or
 `weak_join_fallback`. The Slice 4 harness can use the existing
-`evidence_pack.py create --out-dir
-semantic-gap-runs/<scenario-id>/evidence-pack` command; no evidence-pack
-CLI change is required for the planned directory layout.
+evidence-pack command; no evidence-pack CLI change is required for the
+planned directory layout.
+
+```bash
+python3 docs/experiments/agent-observability-fidelity-2026-05/evidence_pack.py create \
+  --out-dir semantic-gap-runs/<scenario-id>/evidence-pack
+```
 
 Evidence-pack `claim_class` should map verdicts conservatively:
 

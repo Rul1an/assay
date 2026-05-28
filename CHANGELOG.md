@@ -151,9 +151,10 @@ All notable changes to this project will be documented in this file.
   a harness or dispatching measurements.
 - Clarified the semantic-gap pre-harness contract before implementation:
   the `path_rewrite` fixture uses a symlink-resolution pattern, runtime
-  side effects remain run-scope or ambiguous-proximity unless a strong
-  key exists, and Slice 4's MVP gate can be synthetic while delegated
-  capture remains required before publishing measured findings.
+  side effects remain run-scope or `timestamp_or_order` diagnostic joins
+  unless a strong key exists, and Slice 4's MVP gate can be synthetic
+  while delegated capture remains required before publishing measured
+  findings.
 
 ## [3.12.0] - 2026-05-25
 

@@ -256,7 +256,7 @@ join path under real Runner capture before gap findings are published.
 | Scenario | Role | Reported trace intent | Measured effect | Expected claim |
 |---|---|---|---|---|
 | Matched safe read | baseline | tool call reports reading `safe.txt` | kernel observes read of `safe.txt` | strong positive join |
-| Argument/path rewrite | gap | tool call reports `safe.txt` | kernel observes normalized alternate path | semantic mismatch at same tool call |
+| Argument/path rewrite | gap | tool call reports `safe-link.txt` | kernel observes symlink target `safe.txt` or both paths inside the workdir | semantic mismatch at same tool call |
 | Hidden write | gap | tool call reports read-only action | kernel observes create/write in workdir | reported intent under-describes measured side effect |
 | Retry/self-correction | gap | trace records final successful action | kernel/archive records failed prior attempts | trace summary loses temporal evidence |
 | Runtime side effect | gap | no tool-level trace event | archive records runtime loader/config/probe path | runtime-induced surface |
