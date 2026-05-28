@@ -16,6 +16,7 @@ governance.
 | [`claim-boundary-positioning.md`](claim-boundary-positioning.md) | Post-arc positioning and public selection discipline for claim-boundary and evidence-fidelity work. |
 | [`claim-classes-v0.md`](claim-classes-v0.md) | Vocabulary for saying what a trace, archive, or joined artifact can honestly claim. |
 | [`join-contract-v0.md`](join-contract-v0.md) | Vocabulary for joining trace, SDK, policy, and measured-run evidence without silently upgrading weak keys. |
+| [`observability-fidelity-calibration.md`](observability-fidelity-calibration.md) | Reference note for reading requested-vs-observed signal retention before timing, throughput, or absence claims. |
 
 These contracts are intentionally separate from Runner archive schemas.
 Runner artifacts remain the primary measured-run evidence. The
@@ -40,6 +41,12 @@ turns the closed overhead and fidelity findings into a public
 positioning statement and next-arc selection rule. It intentionally does
 not publish outreach targets, comment drafts, adjacent-whitespace
 shortlists, competitive analysis, or private sequencing notes.
+
+The observability fidelity calibration note is
+[`observability-fidelity-calibration.md`](observability-fidelity-calibration.md). It
+extracts the closed arcs' requested-vs-observed calibration lesson into
+a public reference category: measure retained signal before interpreting
+timing, throughput, or absence claims.
 
 Experiment-scoped schema naming and promotion rules for that roadmap are
 tracked in

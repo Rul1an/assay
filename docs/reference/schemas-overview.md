@@ -39,5 +39,6 @@ string carries the contract boundary.
 | [`artifact-families-inventory.md`](artifact-families-inventory.md) | Canonical, reference, experiment-scoped, and proposed artifact-family inventory. |
 | [`observability/README.md`](observability/README.md) | Observability reference contracts for claim classes and joins. |
 | [`observability/claim-boundary-positioning.md`](observability/claim-boundary-positioning.md) | Post-arc positioning and public next-arc selection discipline for claim-boundary and evidence-fidelity work. |
+| [`observability/observability-fidelity-calibration.md`](observability/observability-fidelity-calibration.md) | Reference note for requested-vs-observed signal retention before timing, throughput, or absence claims. |
 | [`experiments/namespace-governance.md`](experiments/namespace-governance.md) | Naming, promotion, and cross-arc field guidance for experiment-scoped schemas. |
 | [`experiments/arc-lifecycle-guide.md`](experiments/arc-lifecycle-guide.md) | Plan, harness, delegated-gate, and findings-summary lifecycle guidance for experiment arcs. |

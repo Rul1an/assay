@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added an observability fidelity calibration reference note that generalizes
+  the closed overhead and fidelity arcs' requested-vs-observed
+  calibration lesson. The note frames retained signal as a prerequisite
+  for timing, throughput, and absence claims without opening a new
+  experiment arc, defining a schema, or promoting experiment-scoped
+  calibration artifacts to product APIs.
 - Removed the legacy `assay-runner-spike` compatibility wrapper crate
   from the workspace and release pipeline. The runner substrate publish
   contract now includes only `assay-runner-schema`,
