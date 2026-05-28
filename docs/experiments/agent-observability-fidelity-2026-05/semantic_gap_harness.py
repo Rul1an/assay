@@ -16,6 +16,12 @@ CLAIM_CLASS_CELL_SCHEMA = "assay.observability.claim_class_cell.v0"
 SEMANTIC_GAP_VERDICT_SCHEMA = (
     "assay.experiment.agent_observability_fidelity.semantic_gap_verdict.v0"
 )
+SYNTHETIC_TRACE_SCHEMA = (
+    "assay.experiment.agent_observability_fidelity.synthetic_trace.v0"
+)
+SYNTHETIC_RUNNER_ARCHIVE_SCHEMA = (
+    "assay.experiment.agent_observability_fidelity.synthetic_runner_archive.v0"
+)
 
 MVP_SCENARIOS = ("matched_safe_read", "hidden_write", "weak_join_fallback")
 
@@ -198,7 +204,7 @@ def scenario_definitions() -> dict[str, Scenario]:
 
 def trace_payload(scenario: Scenario) -> dict[str, Any]:
     return {
-        "schema": "assay.synthetic.semantic_gap_trace.v0",
+        "schema": SYNTHETIC_TRACE_SCHEMA,
         "scenario_id": scenario.scenario_id,
         "run_id": f"synthetic_{scenario.scenario_id}",
         "tool_calls": [scenario.trace_tool_call],
@@ -208,7 +214,7 @@ def trace_payload(scenario: Scenario) -> dict[str, Any]:
 
 def runner_archive_payload(scenario: Scenario) -> dict[str, Any]:
     return {
-        "schema": "assay.synthetic.semantic_gap_runner_archive.v0",
+        "schema": SYNTHETIC_RUNNER_ARCHIVE_SCHEMA,
         "scenario_id": scenario.scenario_id,
         "run_id": f"synthetic_{scenario.scenario_id}",
         "effects": [scenario.measured_effect],

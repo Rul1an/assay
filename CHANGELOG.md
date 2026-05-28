@@ -165,6 +165,11 @@ All notable changes to this project will be documented in this file.
   claim-class cells, bounded semantic-gap verdicts, and evidence packs
   without dispatching delegated runs or publishing semantic-gap
   findings.
+- Tightened the semantic-gap MVP harness after review by keeping
+  synthetic fixture schema strings under
+  `assay.experiment.agent_observability_fidelity.*`, adding schema
+  conditional coverage for `inconclusive` verdicts, and pinning the
+  scenario-id enum/CLI generation paths in tests.
 
 ## [3.12.0] - 2026-05-25
 

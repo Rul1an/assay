@@ -220,6 +220,18 @@ replace `assay.observability.join_result.v0`, does not promote semantic
 gap findings to a product API, and does not support delegated findings
 until the delegated baseline gate is run.
 
+Synthetic fixture payloads emitted by this harness also stay under the
+same experiment namespace:
+
+| Schema | Role |
+|---|---|
+| `assay.experiment.agent_observability_fidelity.synthetic_trace.v0` | Synthetic trace fixture used by the local MVP harness. |
+| `assay.experiment.agent_observability_fidelity.synthetic_runner_archive.v0` | Synthetic Runner-archive fixture used by the local MVP harness. |
+
+These fixture payloads are intentionally schema-string-only in v0. They
+are not delegated capture artifacts, not Runner archive contracts, and
+not a new `assay.synthetic.*` namespace.
+
 ## Artifact Family Inventory
 
 Before adding a new artifact family, check

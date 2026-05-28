@@ -49,6 +49,8 @@
 | `assay.experiment.agent_observability_fidelity.evidence_pack.v0` | Portable synthetic evidence-pack manifest for one agent-observability scenario | experiment-scoped; prototype-ready; not a product API | [`evidence-pack-v0.schema.json`](../../experiments/agent-observability-fidelity-2026-05/schema/evidence-pack-v0.schema.json) |
 | `assay.experiment.agent_observability_fidelity.redaction_manifest.v0` | Explicit redaction record carried by every agent-observability evidence pack | experiment-scoped; prototype-ready | [`redaction-manifest-v0.schema.json`](../../experiments/agent-observability-fidelity-2026-05/schema/redaction-manifest-v0.schema.json) |
 | `assay.experiment.agent_observability_fidelity.semantic_gap_verdict.v0` | Bounded verdict for Slice 4 MVP semantic-gap synthetic scenarios | experiment-scoped; MVP harness-ready; not a delegated finding | [`semantic-gap-verdict-v0.schema.json`](../../experiments/agent-observability-fidelity-2026-05/schema/semantic-gap-verdict-v0.schema.json) |
+| `assay.experiment.agent_observability_fidelity.synthetic_trace.v0` | Synthetic trace fixture used by the local semantic-gap MVP harness | experiment-scoped; schema-string only; not delegated evidence | none |
+| `assay.experiment.agent_observability_fidelity.synthetic_runner_archive.v0` | Synthetic Runner-archive fixture used by the local semantic-gap MVP harness | experiment-scoped; schema-string only; not a Runner archive contract | none |
 
 These experiment schemas remain experiment-scoped. They are validated by
 local harness tests against synthetic samples, summaries, phase

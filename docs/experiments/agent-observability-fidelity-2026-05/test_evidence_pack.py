@@ -34,6 +34,59 @@ def resolve_ref(schema: dict[str, Any], ref: str) -> dict[str, Any]:
     return target
 
 
+def condition_matches(
+    payload: Any,
+    node: dict[str, Any],
+    *,
+    root: dict[str, Any],
+) -> bool:
+    if "$ref" in node:
+        return condition_matches(payload, resolve_ref(root, node["$ref"]), root=root)
+
+    if "const" in node and payload != node["const"]:
+        return False
+    if "enum" in node and payload not in node["enum"]:
+        return False
+
+    expected_type = node.get("type")
+    if expected_type is not None:
+        types = expected_type if isinstance(expected_type, list) else [expected_type]
+        type_ok = False
+        for typ in types:
+            if typ == "object":
+                type_ok = isinstance(payload, dict)
+            elif typ == "array":
+                type_ok = isinstance(payload, list)
+            elif typ == "string":
+                type_ok = isinstance(payload, str)
+            elif typ == "integer":
+                type_ok = isinstance(payload, int) and not isinstance(payload, bool)
+            elif typ == "boolean":
+                type_ok = isinstance(payload, bool)
+            elif typ == "null":
+                type_ok = payload is None
+            else:
+                raise AssertionError(f"unsupported type {typ!r}")
+            if type_ok:
+                break
+        if not type_ok:
+            return False
+
+    if isinstance(payload, dict):
+        for key in node.get("required", []):
+            if key not in payload:
+                return False
+        for key, child in node.get("properties", {}).items():
+            if key in payload and not condition_matches(
+                payload[key],
+                child,
+                root=root,
+            ):
+                return False
+
+    return True
+
+
 def assert_matches_schema(
     test: unittest.TestCase,
     payload: Any,
@@ -107,6 +160,25 @@ def assert_matches_schema(
                 assert_matches_schema(
                     test, value, properties[key], root=root, path=f"{path}.{key}"
                 )
+
+    for index, child in enumerate(node.get("allOf", [])):
+        if "if" in child and "then" in child:
+            if condition_matches(payload, child["if"], root=root):
+                assert_matches_schema(
+                    test,
+                    payload,
+                    child["then"],
+                    root=root,
+                    path=f"{path}.allOf[{index}].then",
+                )
+        else:
+            assert_matches_schema(
+                test,
+                payload,
+                child,
+                root=root,
+                path=f"{path}.allOf[{index}]",
+            )
 
 
 def write_inputs(root: Path, *, ringbuf_drops: int = 0) -> tuple[Path, Path, Path]:
