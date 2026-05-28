@@ -38,6 +38,6 @@ string carries the contract boundary.
 | [`runner/schemas-overview.md`](runner/schemas-overview.md) | Detailed Runner and Runner-adjacent schema list. |
 | [`artifact-families-inventory.md`](artifact-families-inventory.md) | Canonical, reference, experiment-scoped, and proposed artifact-family inventory. |
 | [`observability/README.md`](observability/README.md) | Observability reference contracts for claim classes and joins. |
-| [`observability/claim-boundary-positioning.md`](observability/claim-boundary-positioning.md) | Post-arc positioning and next-arc selection guidance for claim-boundary and evidence-fidelity work. |
+| [`observability/claim-boundary-positioning.md`](observability/claim-boundary-positioning.md) | Post-arc positioning and public next-arc selection discipline for claim-boundary and evidence-fidelity work. |
 | [`experiments/namespace-governance.md`](experiments/namespace-governance.md) | Naming, promotion, and cross-arc field guidance for experiment-scoped schemas. |
 | [`experiments/arc-lifecycle-guide.md`](experiments/arc-lifecycle-guide.md) | Plan, harness, delegated-gate, and findings-summary lifecycle guidance for experiment arcs. |

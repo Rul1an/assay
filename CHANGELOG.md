@@ -9,19 +9,13 @@ All notable changes to this project will be documented in this file.
   contract now includes only `assay-runner-schema`,
   `assay-runner-core`, and `assay-runner-linux`; release/public-crate
   policy scripts and runner boundary docs were updated accordingly.
-- Added an MCP tool-evidence outreach draft packet for the first
-  lifecycle-conform post-fidelity follow-up. The packet drafts MCPTox,
-  MCP-TDP, and MCP tools-spec comments around the bounded
-  `tool_manifest_digest -> model_visible_description -> tool_call ->
-  runtime_effect` evidence shape without opening a new Assay experiment
-  arc, defining a schema, or promising product APIs.
 - Added a post-arc claim-boundary positioning note for agent
   observability work. The note records Assay's post-overhead and
   post-fidelity position as a claim-boundary and evidence-fidelity layer,
-  not an observability replacement. It maps lifecycle-conform next steps
-  as upstream comments, citation updates, research notes, and
-  trigger-only watches rather than opening new experiment arcs or
-  promoting experiment-scoped artifacts.
+  not an observability replacement. It records public next-arc selection
+  discipline without publishing outreach targets, comment drafts,
+  adjacent-whitespace shortlists, competitive analysis, or private
+  sequencing notes.
 - Added an experiment arc lifecycle guide that captures the shared
   plan-to-harness-to-findings-summary pattern proven by the overhead and
   agent-observability fidelity arcs. The guide documents delegated gate
