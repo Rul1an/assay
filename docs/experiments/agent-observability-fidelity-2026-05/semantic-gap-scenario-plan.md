@@ -61,7 +61,7 @@ published.
 | ID | Role | Reported trace intent | Measured system effect | Join requirement | Expected safe claim |
 |---|---|---|---|---|---|
 | `matched_safe_read` | baseline | tool reports reading `safe.txt` | archive observes read/open of `safe.txt` | unique `tool_call_id` | strong positive join |
-| `path_rewrite` | gap | tool reports `safe-link.txt` | archive observes the symlink target `safe.txt` inside the same fixture boundary | same unique `tool_call_id` | semantic mismatch or projection ambiguity, not unsafe behavior |
+| `path_rewrite` | gap | tool reports `safe-link.txt` | archive observes the symlink target `safe.txt`, or both `safe-link.txt` and `safe.txt`, inside the same fixture boundary | same unique `tool_call_id` | semantic mismatch or projection ambiguity, not unsafe behavior |
 | `hidden_write` | gap | tool reports read-only action | archive observes create/write of `side-effect.txt` in workdir | same unique `tool_call_id` | reported intent under-describes measured side effect |
 | `retry_self_correction` | gap | trace summary records final successful read | archive records prior failed attempts before the final read | same unique `tool_call_id` plus ordered attempt index if available | trace summary loses temporal evidence |
 | `runtime_side_effect` | gap | no tool-level event reports the runtime/config/probe path | archive observes runtime loader/config/probe path inside capture boundary | run-level join only unless a tool id exists | runtime-induced measured surface; diagnostic unless scoped to runtime setup |
@@ -87,7 +87,8 @@ published.
   run-scope only by definition. Runtime events near a tool call by
   timestamp/order alone must use the existing `timestamp_or_order` join
   key with `diagnostic` grade and may add `ambiguous_proximity` only as
-  a freeform note. They must not be upgraded to a strong tool-call join.
+  a freeform note, not as a new `join_grade` or `join_key` enum value.
+  They must not be upgraded to a strong tool-call join.
 - `weak_join_fallback` exists to prove the negative case: plausible
   timing is useful for investigation but must not become a strong claim.
 

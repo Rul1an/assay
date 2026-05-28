@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Clarified the semantic-gap scenario plan so the `path_rewrite`
+  table allows both target-only and link-plus-target archive shapes, and
+  so `ambiguous_proximity` is documented only as a freeform diagnostic
+  note rather than a join-result enum value.
 - Added a CycloneDX ML-BOM formulation fixture that keeps training,
   evaluation, and handoff workflow context in the source BOM while proving the
   importer still emits only the bounded inventory receipt claim.
