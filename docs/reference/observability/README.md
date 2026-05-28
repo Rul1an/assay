@@ -57,6 +57,11 @@ The delegated semantic-gap baseline plan is tracked in
 It pins the real Runner capture gate, proof-pack artifacts, health
 requirements, and strong-join invariants required before any
 semantic-gap finding is promoted beyond synthetic harness behavior.
+The first delegated positive baseline smoke is recorded in
+[`../../experiments/agent-observability-fidelity-2026-05/runs/slice7-delegated-baseline/summary.md`](../../experiments/agent-observability-fidelity-2026-05/runs/slice7-delegated-baseline/summary.md).
+It validates the `matched_safe_read` path under real Runner capture
+without publishing delegated gap findings or promoting experiment
+artifacts to product APIs.
 
 The first interop matrix plan is tracked in
 [`../../experiments/agent-observability-fidelity-2026-05/interop-matrix-plan.md`](../../experiments/agent-observability-fidelity-2026-05/interop-matrix-plan.md).

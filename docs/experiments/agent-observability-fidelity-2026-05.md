@@ -388,12 +388,14 @@ docs around what Assay can honestly consume.
 **Goal:** prove the semantic-gap positive baseline under real Runner
 capture before publishing any delegated gap finding.
 
-> **Status:** delegated-baseline-plan-ready. The delegated baseline
+> **Status:** delegated-baseline-smoke-verified. The delegated baseline
 > source, artifact expectations, join invariants, acceptance rules, and
-> follow-up dispatch/conversion gate are predeclared in
+> follow-up dispatch/conversion gate were predeclared in
 > [`agent-observability-fidelity-2026-05/delegated-baseline-plan.md`](agent-observability-fidelity-2026-05/delegated-baseline-plan.md).
-> This does not dispatch the delegated run and does not publish
-> semantic-gap findings.
+> The successful smoke record is in
+> [`agent-observability-fidelity-2026-05/runs/slice7-delegated-baseline/summary.md`](agent-observability-fidelity-2026-05/runs/slice7-delegated-baseline/summary.md).
+> This publishes only the positive baseline gate, not delegated gap
+> findings.
 
 The full synthetic semantic-gap matrix is useful, but it is still local
 ground truth. Before any semantic-gap result is described as delegated
@@ -416,6 +418,35 @@ fixture with stable `tool_call_id=tc_runner_policy_001`, SDK events,
 policy evidence, kernel capture, and a retained proof pack. The first
 baseline should use that gate directly rather than creating a new runner
 lane.
+
+### Smoke outcome
+
+The Slice 7 follow-up dispatched
+[`runner-spike-delegated.yml`](../../.github/workflows/runner-spike-delegated.yml)
+on branch `codex/agent-fidelity-delegated-baseline-smoke` with
+`gates=openai-agents-kernel-policy` and `build_ebpf=true`. Run
+[`26570812096`](https://github.com/Rul1an/assay/actions/runs/26570812096)
+passed all three deterministic OpenAI Agents kernel+policy runs and
+uploaded proof pack
+`assay-runner-delegated-proof-pack-26570812096` (artifact
+`7264384541`, retained until 2026-08-26).
+
+The smoke record validates:
+
+- clean Runner health: `kernel_layer=complete`, `ringbuf_drops=0`,
+  `cgroup_correlation=clean`;
+- one SDK started/completed `read_file` pair for
+  `tc_runner_policy_001`;
+- one policy `allow` decision for the same `tool_call_id`;
+- two workdir-bounded kernel read/open effects;
+- a clean correlation report with one binding and zero ambiguities;
+- a strong `tool_call_id` join and `positive_join` scenario verdict.
+
+The first delegated attempts found a runner-side cgroup nesting bug:
+systemd `.service` units can be unsafe Assay session roots when their
+cgroup type is or becomes threaded. Slice 7 includes the fix to skip
+`.service` units just like `.scope` units and ascend to the nearest
+non-leaf domain cgroup before creating session cgroups.
 
 ### Acceptance rules
 
@@ -525,7 +556,7 @@ visible by the overhead and shape-comparison arcs.
 | 4 | Synthetic matrix-ready | Semantic-gap harness | Synthetic fixtures prove all six predeclared scenarios with joined intent/effect rows, bounded verdicts, and evidence-pack output; delegated sanity run remains not done. |
 | 5 | Matrix-plan-ready | Interop matrix plan | OTel/OpenInference/Runner coverage axes, starter cells, row shape, source snapshots, and non-claims pinned before harness work. |
 | 6 | Harness-ready | Interop matrix harness | Five synthetic starter cells emit strict `interop_coverage_cell.v0` rows, join-result refs, claim-class refs, source snapshots, partial/absent rows, and stable output directories without delegated publication. |
-| 7 | Delegated-baseline-plan-ready | Delegated semantic-gap baseline | Existing `openai-agents-kernel-policy` delegated gate, artifact expectations, health/join invariants, and follow-up dispatch/conversion gate are pinned before any delegated semantic-gap finding. |
+| 7 | Delegated-baseline-smoke-verified | Delegated semantic-gap baseline | Run `26570812096` passed the `openai-agents-kernel-policy` delegated gate, uploaded proof pack `assay-runner-delegated-proof-pack-26570812096`, and validated clean health plus strong `tool_call_id` positive baseline join without promoting delegated gap scenarios. |
 | 8 | Planned | Fidelity arc findings summary | After the delegated baseline gate, write a citation-friendly summary of calibration, evidence-pack, semantic-gap, interop, and delegated-baseline outcomes without promoting product APIs. |
 | 9 | Optional | OTel span-limit study | Only after an external trigger; otherwise remains issue-only. |
 
@@ -563,10 +594,10 @@ invariants without promoting delegated gap scenarios.
 
 ## What Not To Do Yet
 
-- Do not dispatch delegated gap scenarios before the delegated
-  `matched_safe_read` baseline is clean. If the baseline is
-  inconclusive, keep gap scenarios blocked until the failure is
-  understood and a follow-up baseline re-establishes the gate.
+- Do not dispatch delegated gap scenarios as part of this baseline
+  smoke. The delegated `matched_safe_read` gate is clean; any delegated
+  gap scenario still needs its own dispatch plan, non-claims, and review
+  gate before it is cited as measured evidence.
 - Do not turn the Interop Matrix into product ranking. It is now
   harness-ready, but it remains a coverage and claim-strength map.
 - Do not turn the required product-development list into one epic. Each

@@ -1,11 +1,13 @@
 # Delegated Semantic-Gap Baseline Plan
 
-> **Status:** delegated-baseline-plan-ready for Slice 7 of the
-> agent-observability fidelity roadmap. This document pins the one
+> **Status:** delegated-baseline-smoke-verified for Slice 7 of the
+> agent-observability fidelity roadmap. This document pinned the one
 > delegated `matched_safe_read` sanity run required before any
 > semantic-gap finding is promoted beyond synthetic harness behavior.
-> It does not dispatch the run, does not publish gap findings, and does
-> not open the optional OTel span-limit study.
+> The successful smoke record is in
+> [`runs/slice7-delegated-baseline/summary.md`](runs/slice7-delegated-baseline/summary.md).
+> It does not publish gap findings and does not open the optional OTel
+> span-limit study.
 >
 > **Last updated:** 2026-05-28
 
@@ -72,6 +74,25 @@ The first delegated baseline is deliberately one scenario:
 candidate, but it should not be added to this slice. It can only be
 promoted after the positive baseline is clean or after an inconclusive
 baseline has been understood and fixed.
+
+## Smoke Outcome
+
+The follow-up dispatched
+[`runner-spike-delegated.yml`](../../../.github/workflows/runner-spike-delegated.yml)
+on branch `codex/agent-fidelity-delegated-baseline-smoke` with
+`gates=openai-agents-kernel-policy` and `build_ebpf=true`. Run
+[`26570812096`](https://github.com/Rul1an/assay/actions/runs/26570812096)
+passed all three deterministic OpenAI Agents kernel+policy runs and
+uploaded proof pack
+`assay-runner-delegated-proof-pack-26570812096` (artifact
+`7264384541`, retained until 2026-08-26).
+
+The review record
+[`runs/slice7-delegated-baseline/summary.md`](runs/slice7-delegated-baseline/summary.md)
+points to the proof-pack reference, a strong `tool_call_id` join result,
+claim-class cells, a `positive_join` scenario verdict, and a redaction
+manifest. No tarball payload is committed to git; the proof pack remains
+the retained GitHub Actions artifact.
 
 ## Required Output
 

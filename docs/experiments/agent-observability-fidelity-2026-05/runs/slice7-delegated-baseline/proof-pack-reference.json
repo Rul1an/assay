@@ -1,0 +1,72 @@
+{
+  "kind": "delegated_baseline_reference",
+  "scenario_id": "matched_safe_read",
+  "status": "delegated-baseline-smoke-verified",
+  "created_at": "2026-05-28T11:13:52Z",
+  "workflow": {
+    "name": "Runner Spike Delegated",
+    "run_id": "26570812096",
+    "run_url": "https://github.com/Rul1an/assay/actions/runs/26570812096",
+    "ref": "refs/heads/codex/agent-fidelity-delegated-baseline-smoke",
+    "head_sha": "32952e2cbc79b41a5951cff5408a82528bde8ad9",
+    "inputs": {
+      "gates": "openai-agents-kernel-policy",
+      "build_ebpf": "true"
+    }
+  },
+  "proof_pack": {
+    "artifact_id": "7264384541",
+    "artifact_name": "assay-runner-delegated-proof-pack-26570812096",
+    "artifact_url": "https://github.com/Rul1an/assay/actions/runs/26570812096/artifacts/7264384541",
+    "expires_at": "2026-08-26T11:03:39Z",
+    "manifest_path": "manifest.json",
+    "gate": "openai-agents-kernel-policy",
+    "gate_status": "passed",
+    "archive_count": 3,
+    "pass_lines": [
+      "PASS: runner-spike OpenAI Agents kernel+policy acceptance",
+      "PASS: runner-spike OpenAI Agents kernel+policy acceptance",
+      "PASS: runner-spike OpenAI Agents kernel+policy acceptance",
+      "PASS: runner-spike OpenAI Agents kernel+policy three-run determinism"
+    ]
+  },
+  "runner_archive_evidence": {
+    "run_id": "run_openai_agents_kernel_policy_determinism",
+    "tool_call_id": "tc_runner_policy_001",
+    "tool": "read_file",
+    "sdk_name": "@openai/agents",
+    "sdk_version": "0.11.4",
+    "policy_decision": "allow",
+    "kernel_event_count": 2,
+    "workdir_prefix": "/tmp/assay-runner-proof-26570812096/gates/openai-agents-kernel-policy/work/",
+    "measured_paths": [
+      "/tmp/assay-runner-proof-26570812096/gates/openai-agents-kernel-policy/work/openai-agents-input.txt",
+      "/tmp/assay-runner-proof-26570812096/gates/openai-agents-kernel-policy/work/policy-input.txt"
+    ]
+  },
+  "health": {
+    "kernel_layer": "complete",
+    "ringbuf_drops": 0,
+    "policy_layer": "present",
+    "sdk_layer": "self_reported",
+    "cgroup_correlation": "clean",
+    "correlation_status": "clean",
+    "ambiguities": 0
+  },
+  "determinism": {
+    "capability_surface_sha256": "sha256:cf12108d2f62ae0702acde703150c68e5109d7bf2042e8e5f74a5f1359f78877",
+    "correlation_report_sha256": "sha256:028c901829e03fc44490eb14a1d5119be135fbed2b9a3704d2586764f1c8812e",
+    "observation_health_sha256": "sha256:dbb934767e3ddadbed9ef911fd2dc9e68e37eb9ff3c347de776797d5f53e622c",
+    "archive_sha256": [
+      "sha256:0537d3b8825b5c3d6a81ed9821e848e1b5974450a949730c9fc43aacb652fd95",
+      "sha256:c238a3b9456673c54bc61efa47ef0f8cd4e8cff953cf48dc0743a1cfa45ba804",
+      "sha256:5064484482c69f9fa4ad3ab5ea51f850f153e026070c725c3ec0b5398d07248f"
+    ]
+  },
+  "non_claims": [
+    "does_not_publish_delegated_gap_finding",
+    "does_not_dispatch_delegated_gap_scenarios",
+    "does_not_promote_experiment_schema_to_product_api",
+    "does_not_rank_runner_otel_openinference_or_openai_agents"
+  ]
+}
