@@ -16,6 +16,7 @@ governance.
 | [`claim-boundary-positioning.md`](claim-boundary-positioning.md) | Post-arc positioning and adjacent whitespace map for claim-boundary and evidence-fidelity work. |
 | [`claim-classes-v0.md`](claim-classes-v0.md) | Vocabulary for saying what a trace, archive, or joined artifact can honestly claim. |
 | [`join-contract-v0.md`](join-contract-v0.md) | Vocabulary for joining trace, SDK, policy, and measured-run evidence without silently upgrading weak keys. |
+| [`mcp-tool-evidence-comment-drafts.md`](mcp-tool-evidence-comment-drafts.md) | Outreach draft packet for MCP tool-poisoning evidence comments using the shared claim-bound evidence shape. |
 
 These contracts are intentionally separate from Runner archive schemas.
 Runner artifacts remain the primary measured-run evidence. The
@@ -41,6 +42,13 @@ selection rule and lifecycle-conform outreach map: MCP tool-evidence
 comments, an AgentSight citation update, a fidelity-SLO research note,
 and trigger-only watches for identity, real trace interop, and causal
 graph work.
+
+The first outreach packet is
+[`mcp-tool-evidence-comment-drafts.md`](mcp-tool-evidence-comment-drafts.md).
+It drafts MCPTox, MCP-TDP, and MCP tools-spec comments around the shared
+`tool_manifest_digest -> model_visible_description -> tool_call ->
+runtime_effect` evidence shape without opening a new Assay arc or
+promising product APIs.
 
 Experiment-scoped schema naming and promotion rules for that roadmap are
 tracked in

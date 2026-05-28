@@ -243,7 +243,9 @@ Defer arcs that:
 The near-term program is outreach and positioning, not new experiments:
 
 1. **MCP comment trilogy.** One bounded-evidence comment each for
-   MCPTox, MCP-TDP, and the MCP tools specification or discussion.
+   MCPTox, MCP-TDP, and the MCP tools specification or discussion. The
+   draft packet is
+   [`mcp-tool-evidence-comment-drafts.md`](mcp-tool-evidence-comment-drafts.md).
 2. **AgentSight citation update.** Use AgentSight as an external
    formulation of the semantic gap already closed by the fidelity arc.
 3. **Fidelity-SLO research note.** Reframe Slice 12 as "observability
