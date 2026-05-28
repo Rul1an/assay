@@ -4,6 +4,8 @@
 > document does not define a product API. It keeps experiment-scoped
 > schemas, cross-arc fields, and promotion decisions consistent before
 > the agent-observability fidelity roadmap adds more artifacts.
+> For the broader plan-to-harness-to-summary lifecycle, see
+> [`arc-lifecycle-guide.md`](arc-lifecycle-guide.md).
 
 ## Problem
 

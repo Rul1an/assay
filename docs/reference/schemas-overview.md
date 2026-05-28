@@ -39,3 +39,4 @@ string carries the contract boundary.
 | [`artifact-families-inventory.md`](artifact-families-inventory.md) | Canonical, reference, experiment-scoped, and proposed artifact-family inventory. |
 | [`observability/README.md`](observability/README.md) | Observability reference contracts for claim classes and joins. |
 | [`experiments/namespace-governance.md`](experiments/namespace-governance.md) | Naming, promotion, and cross-arc field guidance for experiment-scoped schemas. |
+| [`experiments/arc-lifecycle-guide.md`](experiments/arc-lifecycle-guide.md) | Plan, harness, delegated-gate, and findings-summary lifecycle guidance for experiment arcs. |
