@@ -425,11 +425,11 @@ The Slice 7 follow-up dispatched
 [`runner-spike-delegated.yml`](../../.github/workflows/runner-spike-delegated.yml)
 on branch `codex/agent-fidelity-delegated-baseline-smoke` with
 `gates=openai-agents-kernel-policy` and `build_ebpf=true`. Run
-[`26570812096`](https://github.com/Rul1an/assay/actions/runs/26570812096)
+[`26571739019`](https://github.com/Rul1an/assay/actions/runs/26571739019)
 passed all three deterministic OpenAI Agents kernel+policy runs and
 uploaded proof pack
-`assay-runner-delegated-proof-pack-26570812096` (artifact
-`7264384541`, retained until 2026-08-26).
+`assay-runner-delegated-proof-pack-26571739019` (artifact
+`7264883391`, retained until 2026-08-26).
 
 The smoke record validates:
 
@@ -556,7 +556,7 @@ visible by the overhead and shape-comparison arcs.
 | 4 | Synthetic matrix-ready | Semantic-gap harness | Synthetic fixtures prove all six predeclared scenarios with joined intent/effect rows, bounded verdicts, and evidence-pack output; delegated sanity run remains not done. |
 | 5 | Matrix-plan-ready | Interop matrix plan | OTel/OpenInference/Runner coverage axes, starter cells, row shape, source snapshots, and non-claims pinned before harness work. |
 | 6 | Harness-ready | Interop matrix harness | Five synthetic starter cells emit strict `interop_coverage_cell.v0` rows, join-result refs, claim-class refs, source snapshots, partial/absent rows, and stable output directories without delegated publication. |
-| 7 | Delegated-baseline-smoke-verified | Delegated semantic-gap baseline | Run `26570812096` passed the `openai-agents-kernel-policy` delegated gate, uploaded proof pack `assay-runner-delegated-proof-pack-26570812096`, and validated clean health plus strong `tool_call_id` positive baseline join without promoting delegated gap scenarios. |
+| 7 | Delegated-baseline-smoke-verified | Delegated semantic-gap baseline | Run `26571739019` passed the `openai-agents-kernel-policy` delegated gate, uploaded proof pack `assay-runner-delegated-proof-pack-26571739019`, and validated clean health plus strong `tool_call_id` positive baseline join without promoting delegated gap scenarios. |
 | 8 | Planned | Fidelity arc findings summary | After the delegated baseline gate, write a citation-friendly summary of calibration, evidence-pack, semantic-gap, interop, and delegated-baseline outcomes without promoting product APIs. |
 | 9 | Optional | OTel span-limit study | Only after an external trigger; otherwise remains issue-only. |
 

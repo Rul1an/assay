@@ -81,11 +81,11 @@ The follow-up dispatched
 [`runner-spike-delegated.yml`](../../../.github/workflows/runner-spike-delegated.yml)
 on branch `codex/agent-fidelity-delegated-baseline-smoke` with
 `gates=openai-agents-kernel-policy` and `build_ebpf=true`. Run
-[`26570812096`](https://github.com/Rul1an/assay/actions/runs/26570812096)
+[`26571739019`](https://github.com/Rul1an/assay/actions/runs/26571739019)
 passed all three deterministic OpenAI Agents kernel+policy runs and
 uploaded proof pack
-`assay-runner-delegated-proof-pack-26570812096` (artifact
-`7264384541`, retained until 2026-08-26).
+`assay-runner-delegated-proof-pack-26571739019` (artifact
+`7264883391`, retained until 2026-08-26).
 
 The review record
 [`runs/slice7-delegated-baseline/summary.md`](runs/slice7-delegated-baseline/summary.md)

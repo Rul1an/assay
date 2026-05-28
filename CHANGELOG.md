@@ -6,9 +6,9 @@ All notable changes to this project will be documented in this file.
 
 - Smoke-verified Slice 7 of the agent-observability fidelity roadmap
   with a delegated `matched_safe_read` baseline. GitHub Actions run
-  `26570812096` passed the existing `openai-agents-kernel-policy`
+  `26571739019` passed the existing `openai-agents-kernel-policy`
   delegated Runner gate, uploaded proof pack
-  `assay-runner-delegated-proof-pack-26570812096`, and records clean
+  `assay-runner-delegated-proof-pack-26571739019`, and records clean
   Runner health, a strong `tool_call_id=tc_runner_policy_001` join, and
   a `positive_join` scenario verdict without publishing delegated gap
   scenarios or promoting experiment artifacts to product APIs. The slice

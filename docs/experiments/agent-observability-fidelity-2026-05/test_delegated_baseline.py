@@ -30,14 +30,14 @@ class DelegatedBaselineSmokeTests(unittest.TestCase):
 
         self.assertEqual(reference["scenario_id"], "matched_safe_read")
         self.assertEqual(reference["status"], "delegated-baseline-smoke-verified")
-        self.assertEqual(reference["workflow"]["run_id"], "26570812096")
+        self.assertEqual(reference["workflow"]["run_id"], "26571739019")
         self.assertEqual(
             reference["workflow"]["run_url"],
-            "https://github.com/Rul1an/assay/actions/runs/26570812096",
+            "https://github.com/Rul1an/assay/actions/runs/26571739019",
         )
         self.assertEqual(
             reference["workflow"]["head_sha"],
-            "32952e2cbc79b41a5951cff5408a82528bde8ad9",
+            "c3384c425673fe09b0368f82765c72dda86ac200",
         )
         self.assertEqual(
             reference["workflow"]["inputs"],

@@ -9,7 +9,7 @@
   "join_key": "tool_call_id",
   "join_grade": "strong",
   "fallback_used": false,
-  "reason": "Delegated openai-agents-kernel-policy proof pack 26570812096 passed all three deterministic matched_safe_read runs with clean Runner health, one stable read_file tool_call_id, policy allow evidence, and workdir-bounded kernel read/open effects.",
+  "reason": "Delegated openai-agents-kernel-policy proof pack 26571739019 passed all three deterministic matched_safe_read runs with clean Runner health, one stable read_file tool_call_id, policy allow evidence, and workdir-bounded kernel read/open effects.",
   "non_claims": [
     "does_not_publish_delegated_gap_finding",
     "does_not_dispatch_delegated_gap_scenarios",

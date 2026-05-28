@@ -1,10 +1,10 @@
 {
   "schema": "assay.experiment.agent_observability_fidelity.redaction_manifest.v0",
-  "created_at": "2026-05-28T11:13:52Z",
+  "created_at": "2026-05-28T11:40:04Z",
   "policy": "none",
   "redaction_applied": false,
   "omitted_content": [
-    "proof-pack tarballs are retained in GitHub Actions artifact 7264384541 rather than committed to git"
+    "proof-pack tarballs are retained in GitHub Actions artifact 7264883391 rather than committed to git"
   ],
   "notes": [
     "No redaction was applied to the committed review rows.",

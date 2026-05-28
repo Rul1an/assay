@@ -2,23 +2,23 @@
   "kind": "delegated_baseline_reference",
   "scenario_id": "matched_safe_read",
   "status": "delegated-baseline-smoke-verified",
-  "created_at": "2026-05-28T11:13:52Z",
+  "created_at": "2026-05-28T11:40:04Z",
   "workflow": {
     "name": "Runner Spike Delegated",
-    "run_id": "26570812096",
-    "run_url": "https://github.com/Rul1an/assay/actions/runs/26570812096",
+    "run_id": "26571739019",
+    "run_url": "https://github.com/Rul1an/assay/actions/runs/26571739019",
     "ref": "refs/heads/codex/agent-fidelity-delegated-baseline-smoke",
-    "head_sha": "32952e2cbc79b41a5951cff5408a82528bde8ad9",
+    "head_sha": "c3384c425673fe09b0368f82765c72dda86ac200",
     "inputs": {
       "gates": "openai-agents-kernel-policy",
       "build_ebpf": "true"
     }
   },
   "proof_pack": {
-    "artifact_id": "7264384541",
-    "artifact_name": "assay-runner-delegated-proof-pack-26570812096",
-    "artifact_url": "https://github.com/Rul1an/assay/actions/runs/26570812096/artifacts/7264384541",
-    "expires_at": "2026-08-26T11:03:39Z",
+    "artifact_id": "7264883391",
+    "artifact_name": "assay-runner-delegated-proof-pack-26571739019",
+    "artifact_url": "https://github.com/Rul1an/assay/actions/runs/26571739019/artifacts/7264883391",
+    "expires_at": "2026-08-26T11:24:39Z",
     "manifest_path": "manifest.json",
     "gate": "openai-agents-kernel-policy",
     "gate_status": "passed",
@@ -38,10 +38,10 @@
     "sdk_version": "0.11.4",
     "policy_decision": "allow",
     "kernel_event_count": 2,
-    "workdir_prefix": "/tmp/assay-runner-proof-26570812096/gates/openai-agents-kernel-policy/work/",
+    "workdir_prefix": "/tmp/assay-runner-proof-26571739019/gates/openai-agents-kernel-policy/work/",
     "measured_paths": [
-      "/tmp/assay-runner-proof-26570812096/gates/openai-agents-kernel-policy/work/openai-agents-input.txt",
-      "/tmp/assay-runner-proof-26570812096/gates/openai-agents-kernel-policy/work/policy-input.txt"
+      "/tmp/assay-runner-proof-26571739019/gates/openai-agents-kernel-policy/work/openai-agents-input.txt",
+      "/tmp/assay-runner-proof-26571739019/gates/openai-agents-kernel-policy/work/policy-input.txt"
     ]
   },
   "health": {
@@ -54,13 +54,13 @@
     "ambiguities": 0
   },
   "determinism": {
-    "capability_surface_sha256": "sha256:cf12108d2f62ae0702acde703150c68e5109d7bf2042e8e5f74a5f1359f78877",
+    "capability_surface_sha256": "sha256:ca04dc8821ed46192be5316b31f3c08238aad0e5c68b1c02108d228c4a475f19",
     "correlation_report_sha256": "sha256:028c901829e03fc44490eb14a1d5119be135fbed2b9a3704d2586764f1c8812e",
     "observation_health_sha256": "sha256:dbb934767e3ddadbed9ef911fd2dc9e68e37eb9ff3c347de776797d5f53e622c",
     "archive_sha256": [
-      "sha256:0537d3b8825b5c3d6a81ed9821e848e1b5974450a949730c9fc43aacb652fd95",
-      "sha256:c238a3b9456673c54bc61efa47ef0f8cd4e8cff953cf48dc0743a1cfa45ba804",
-      "sha256:5064484482c69f9fa4ad3ab5ea51f850f153e026070c725c3ec0b5398d07248f"
+      "sha256:db5aafdb9af15ef1bb8f754d81222cc0206b4e22701e45152421f1c0476a3c57",
+      "sha256:a508f4170c7170c91b66a631bc2f809c9d283f710a12bcc71ea7b7ead768c69c",
+      "sha256:073f15e0bbdf078843f313c2e31e92cdec0ab89a5588f264cfdcef2e6dd95e61"
     ]
   },
   "non_claims": [

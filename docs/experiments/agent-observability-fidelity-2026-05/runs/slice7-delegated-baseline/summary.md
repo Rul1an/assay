@@ -2,10 +2,10 @@
 
 > **Status:** delegated-baseline-smoke-verified.
 > **Scenario:** `matched_safe_read`.
-> **Run:** [`26570812096`](https://github.com/Rul1an/assay/actions/runs/26570812096).
-> **Proof pack:** `assay-runner-delegated-proof-pack-26570812096`
-> (artifact `7264384541`, retained until 2026-08-26).
-> **Assay commit:** `32952e2cbc79b41a5951cff5408a82528bde8ad9`.
+> **Run:** [`26571739019`](https://github.com/Rul1an/assay/actions/runs/26571739019).
+> **Proof pack:** `assay-runner-delegated-proof-pack-26571739019`
+> (artifact `7264883391`, retained until 2026-08-26).
+> **Assay commit:** `c3384c425673fe09b0368f82765c72dda86ac200`.
 
 ## Outcome
 
