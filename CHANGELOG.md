@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added an experiment arc lifecycle guide that captures the shared
+  plan-to-harness-to-findings-summary pattern proven by the overhead and
+  agent-observability fidelity arcs. The guide documents delegated gate
+  discipline, the separate research-evidence versus engineering
+  compliance proof tracks, closure rules, and promotion non-triggers
+  without opening a new arc or promoting experiment-scoped schemas.
 - Closed the agent-observability fidelity arc with a citation-oriented
   findings summary. The summary bounds five claims: calibration as a
   mechanical guardrail, evidence packs as non-strengthening carriers,
