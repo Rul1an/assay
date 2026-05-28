@@ -5,6 +5,10 @@
 > contract, or modify the boundary-map ownership table. Its purpose
 > is to settle the design questions that block Slice 6B (the
 > implementation slice that resolves extraction blocker #4).
+>
+> Historical status: this note pre-dates the post-Slice-6B cleanup that
+> removed `assay-runner-spike` from the workspace. References to the
+> wrapper crate below are retained as design-history context.
 
 Slice 6 of the
 [Assay-Runner extraction roadmap](extraction-roadmap.md) asks one

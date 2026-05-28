@@ -477,14 +477,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "assay-runner-spike"
-version = "3.12.0"
-dependencies = [
- "assay-runner-core",
- "assay-runner-schema",
-]
-
-[[package]]
 name = "assay-sim"
 version = "3.12.0"
 dependencies = [

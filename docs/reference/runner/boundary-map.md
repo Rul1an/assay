@@ -90,8 +90,7 @@ The current spike surfaces remain in `Rul1an/assay`:
 | `crates/assay-runner-core/src/policy.rs` | policy log normalization and binding into the archive | runner candidate mechanics using Assay policy semantics; hosted by the core crate since Slice 2 |
 | `crates/assay-runner-core/src/sdk.rs` | SDK ndjson parsing and SDK/policy mismatch marking | runner candidate mechanics; consumes `SdkLayerEvent`/`SDK_EVENT_SCHEMA` from the schema crate; hosted by the core crate since Slice 2 |
 | `crates/assay-runner-core/src/archive.rs` | runner archive assembly and writing | runner candidate mechanics; consumes manifest types from the schema crate; hosted by the core crate since Slice 2 |
-| `crates/assay-runner-spike/` | publish-disabled legacy alias crate (Phase 2D Slice 6B) | retained as a navigational alias only; no production code in the workspace depends on this crate since Slice 6B redirected `assay-cli` to consume `assay-runner-schema` and `assay-runner-core` directly. The crate's `pub use` re-exports continue to exist for readers of pre-Slice-6B history; a future PR may delete the crate entirely (deletion is a one-way door, and the cost of leaving an unused crate is minimal). `scripts/ci/assay_runner_lane_check.py --self-test` enforces that no in-workspace consumer re-introduces a dependency on this crate |
-| `crates/assay-runner-spike/src/lib.rs` | `pub use` re-exports of every name previously hosted by this crate | only file in the crate; no production code outside the crate imports anything from it as of Slice 6B |
+| `crates/assay-runner-spike/` | removed legacy alias crate (post-Slice 6B cleanup) | removed after proving no in-workspace consumers. Historical extraction docs may still reference the alias wrapper as pre-removal context |
 | `crates/assay-runner-linux/` | publish-disabled Linux platform adapter crate (Phase 2D Slice 3) | **runner Linux placement primitives only**; currently hosts cgroup v2 placement (`CgroupManager`, `SessionCgroup`). Phase 2D Slice 4 confirmed this boundary: the eBPF monitor adapter and the kernel programs stay in their existing Assay-owned crates (see below); macOS/Windows adapters are out of scope until separate platform spikes open under `platform-and-extraction-readiness.md` |
 | `crates/assay-runner-linux/src/cgroup.rs` | cgroup v2 placement primitives | hosted by the Linux platform crate since Slice 3 (previously at `crates/assay-cli/src/cgroup.rs`) |
 | `crates/assay-cli/src/cgroup.rs` | removed in Phase 2D Slice 3 | the placement primitives moved to `assay-runner-linux`; `crates/assay-cli/src/cli/commands/runner_spike.rs` now imports `CgroupManager`/`SessionCgroup` from `assay_runner_linux` |
@@ -190,11 +189,11 @@ Extraction is blocked if any of these are true:
   CI lane contract
 - fixture stability requires undocumented local knowledge
 - `tool_call_id` fallback semantics are being decided implicitly
-- `assay-runner-spike` still owns schema definitions that both Assay and a
+- runner schema definitions are still coupled to Assay internals in ways a
   future runner repository would need to import
 - runner orchestration still depends on `assay-cli`-local cgroup helpers
   without a stable API boundary
-- `cargo build -p assay-runner-spike` requires more Assay internals than a
+- runner crate build boundaries require more Assay internals than a
   deliberate shared schema/monitor contract allows
 - macOS or Windows support is being treated as a port rather than a separate
   platform spike

@@ -58,9 +58,9 @@ Binary- or operational-facing crates such as `assay-cli`, `assay-monitor`,
 Wave 0 library semver allowlist unless a future gate slice adds stable library
 API coverage for them.
 
-The four Assay-Runner substrate crates — `assay-runner-schema`,
-`assay-runner-core`, `assay-runner-linux`, and `assay-runner-spike` — are
-also published as of `v3.11.3`, but their package descriptions explicitly
+The Assay-Runner substrate crates — `assay-runner-schema`,
+`assay-runner-core`, and `assay-runner-linux` — are also published as of
+`v3.11.3`, but their package descriptions explicitly
 frame them as internal/experimental substrate (no standalone product
 guarantee, intentionally undocumented for third-party use, semver tracks
 the Assay workspace). They are intentionally **not** in the Wave 0 library

@@ -163,7 +163,6 @@ def classify_file(path: str) -> tuple[Gate, str | None]:
         return Gate.NONE, None
 
     all_prefixes = (
-        "crates/assay-runner-spike/",
         "crates/assay-runner-schema/",
         "crates/assay-runner-core/",
         "crates/assay-runner-linux/",

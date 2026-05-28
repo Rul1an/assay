@@ -9,7 +9,7 @@ echo "📦 Starting Idempotent Publisher..."
 # line. assay-adapter-api has historical crates.io versions, but no current
 # release-line publishing until ADR-026 gets a dedicated distribution freeze.
 #
-# As of v3.11.2 the four Assay-Runner crates publish too. They are marked as
+# As of v3.11.2 the Assay-Runner crates publish too. They are marked as
 # internal/experimental substrate in their package descriptions; they exist on
 # crates.io so that `assay-cli` (which depends on them when the `runner`
 # feature is enabled, the default) can resolve them at publish time. Their
@@ -27,7 +27,6 @@ CRATES=(
   "assay-runner-schema"
   "assay-runner-linux"
   "assay-runner-core"
-  "assay-runner-spike"
   "assay-sim"
   "assay-cli"
 )
