@@ -209,11 +209,12 @@ artifact-exchange consumer needs a stable product surface.
 
 ## Semantic-Gap Verdicts
 
-The Slice 4 MVP harness adds one narrow experiment-scoped verdict shape:
+The Slice 4 synthetic harness adds one narrow experiment-scoped verdict
+shape:
 
 | Schema | Role |
 |---|---|
-| `assay.experiment.agent_observability_fidelity.semantic_gap_verdict.v0` | Bounded verdict for the three synthetic MVP scenarios: `positive_join`, `semantic_gap`, `diagnostic_only`, or `inconclusive`. |
+| `assay.experiment.agent_observability_fidelity.semantic_gap_verdict.v0` | Bounded verdict for the six synthetic scenario-plan rows: `positive_join`, `semantic_gap`, `diagnostic_only`, or `inconclusive`. |
 
 This verdict summarizes existing join and claim-class rows. It does not
 replace `assay.observability.join_result.v0`, does not promote semantic
@@ -225,8 +226,8 @@ same experiment namespace:
 
 | Schema | Role |
 |---|---|
-| `assay.experiment.agent_observability_fidelity.synthetic_trace.v0` | Synthetic trace fixture used by the local MVP harness. |
-| `assay.experiment.agent_observability_fidelity.synthetic_runner_archive.v0` | Synthetic Runner-archive fixture used by the local MVP harness. |
+| `assay.experiment.agent_observability_fidelity.synthetic_trace.v0` | Synthetic trace fixture used by the local semantic-gap harness. |
+| `assay.experiment.agent_observability_fidelity.synthetic_runner_archive.v0` | Synthetic Runner-archive fixture used by the local semantic-gap harness. |
 
 These fixture payloads are intentionally schema-string-only in v0. They
 are not delegated capture artifacts, not Runner archive contracts, and

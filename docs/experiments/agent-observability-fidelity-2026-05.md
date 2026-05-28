@@ -228,12 +228,12 @@ Assay feature: "give me the portable evidence for this agent run."
 **Goal:** prove exactly where trace-reported intent, SDK events, policy
 events, and measured system effects diverge.
 
-> **Status:** MVP synthetic harness-ready. The baseline, scenario
+> **Status:** full synthetic matrix-ready. The baseline, scenario
 > matrix, join requirements, claim-class rules, evidence-pack
 > expectations, and Slice 4 exit gate are predeclared in
 > [`agent-observability-fidelity-2026-05/semantic-gap-scenario-plan.md`](agent-observability-fidelity-2026-05/semantic-gap-scenario-plan.md).
 > [`agent-observability-fidelity-2026-05/semantic_gap_harness.py`](agent-observability-fidelity-2026-05/semantic_gap_harness.py)
-> now generates the three MVP synthetic scenarios and evidence packs.
+> now generates all six synthetic scenarios and evidence packs.
 > This does not dispatch delegated measurements.
 
 This is the most strategically valuable new experiment. It extends the
@@ -267,25 +267,27 @@ join path under real Runner capture before gap findings are published.
 
 The detailed plan pins scenario ids, join requirements, claim rules,
 the canonical `path_rewrite` symlink fixture, runtime-side-effect join
-policy, and the minimum harness exit gate. The MVP harness proves the
-baseline, `hidden_write`, and `weak_join_fallback` with synthetic
-fixtures before broadening to all six scenarios.
+policy, and the minimum harness exit gate. The synthetic harness first
+proved the baseline, `hidden_write`, and `weak_join_fallback`, then
+expanded to all six predeclared scenarios without publishing delegated
+measurements.
 
-### MVP harness
+### Synthetic harness
 
-The Slice 4 MVP harness emits one directory per synthetic scenario:
+The Slice 4 synthetic harness emits one directory per synthetic
+scenario:
 
 ```bash
 python3 docs/experiments/agent-observability-fidelity-2026-05/semantic_gap_harness.py \
   --out-dir semantic-gap-runs
 ```
 
-Each MVP scenario directory contains `trace.json`,
+Each scenario directory contains `trace.json`,
 `runner-archive.json`, `observation-health.json`, `join-result.json`,
 `claim-class-cells.json`, `scenario-verdict.json`, `summary.md`, and an
 `evidence-pack/` directory. The verdict file uses
 `assay.experiment.agent_observability_fidelity.semantic_gap_verdict.v0`.
-The MVP harness is synthetic-only; delegated baseline capture is still
+The harness is synthetic-only; delegated baseline capture is still
 required before any semantic-gap finding is published.
 
 ### Acceptance rules
@@ -302,10 +304,12 @@ required before any semantic-gap finding is published.
 - **Done for Slice 3:** a measured effect mismatch is evidence of
   divergence. It is not by itself evidence of malicious behavior, policy
   failure, or root-cause attribution.
-- **Done for Slice 4 MVP:** synthetic fixtures and evidence-pack output
-  for `matched_safe_read`, `hidden_write`, and `weak_join_fallback`.
-- **Not done:** delegated sanity run, all six scenario implementations,
-  or committed measurement artifacts.
+- **Done for Slice 4 MVP subset:** synthetic fixtures and evidence-pack
+  output for `matched_safe_read`, `hidden_write`, and
+  `weak_join_fallback`.
+- **Done for Slice 4 matrix:** synthetic fixtures and evidence-pack
+  output for all six predeclared semantic-gap scenarios.
+- **Not done:** delegated sanity run or committed measurement artifacts.
 
 ### Tool improvement
 
@@ -400,7 +404,7 @@ visible by the overhead and shape-comparison arcs.
 | 1 | Harness-ready | Fidelity calibration fields and summary rendering | One overhead-style fixture proves clean, lossy, and not-applicable calibration states. |
 | 2 | Prototype-ready | Portable evidence-pack prototype | `evidence_pack.py` emits the minimum pack: manifest, summary, archive/ref, optional trace/ref, health, and redaction manifest. |
 | 3 | Scenario-plan-ready | Semantic-gap scenario plan | Baseline plus six predeclared scenarios, claim classes, join requirements, evidence-pack expectations, and Slice 4 minimum harness gate documented before dispatch. |
-| 4 | MVP harness-ready | Semantic-gap harness | Synthetic fixtures prove the three exit-gate cases with joined intent/effect rows, bounded verdicts, and evidence-pack output; delegated sanity run remains not done. |
+| 4 | Synthetic matrix-ready | Semantic-gap harness | Synthetic fixtures prove all six predeclared scenarios with joined intent/effect rows, bounded verdicts, and evidence-pack output; delegated sanity run remains not done. |
 | 5 | Planned | Interop matrix plan | OTel/OpenInference/Runner coverage axes and non-claims pinned. |
 | 6 | Optional | OTel span-limit study | Only after an external trigger; otherwise remains issue-only. |
 
@@ -423,12 +427,14 @@ Status labels may differ by slice type. `Scenario-plan-ready` means the
 scenario matrix, baseline, claim rules, and next harness gate are pinned
 before implementation. `MVP harness-ready` means synthetic fixtures
 exercise the minimum gate without publishing delegated measurements.
+`Synthetic matrix-ready` means every predeclared synthetic scenario is
+implemented locally, while delegated publication gates remain open.
 
 ## What Not To Do Yet
 
-- Do not start with the Interop Matrix. Without working calibration and
-  evidence-pack output, a matrix is mostly a promise rather than
-  inspectable evidence.
+- Do not turn the Interop Matrix into product ranking. Calibration,
+  evidence packs, and the synthetic semantic-gap matrix now unblock it,
+  but it should remain a coverage and claim-strength map.
 - Do not turn the required product-development list into one epic. Each
   item belongs to a different dependency chain.
 - Do not open a new paper arc yet. The argument is strong, but the

@@ -141,6 +141,8 @@ def assert_matches_schema(
     if isinstance(payload, list):
         if "minItems" in node:
             test.assertGreaterEqual(len(payload), node["minItems"], path)
+        if "maxItems" in node:
+            test.assertLessEqual(len(payload), node["maxItems"], path)
         item_node = node.get("items")
         if item_node is not None:
             for index, item in enumerate(payload):

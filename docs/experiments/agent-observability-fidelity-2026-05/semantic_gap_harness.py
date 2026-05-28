@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate synthetic semantic-gap harness outputs for the MVP scenarios."""
+"""Generate synthetic semantic-gap harness outputs for the planned scenarios."""
 
 from __future__ import annotations
 
@@ -24,6 +24,14 @@ SYNTHETIC_RUNNER_ARCHIVE_SCHEMA = (
 )
 
 MVP_SCENARIOS = ("matched_safe_read", "hidden_write", "weak_join_fallback")
+SYNTHETIC_SCENARIOS = (
+    "matched_safe_read",
+    "path_rewrite",
+    "hidden_write",
+    "retry_self_correction",
+    "runtime_side_effect",
+    "weak_join_fallback",
+)
 
 
 @dataclass(frozen=True)
@@ -33,8 +41,8 @@ class Scenario:
     verdict: str
     evidence_claim_class: str
     claim_summary: str
-    trace_tool_call: dict[str, Any]
-    measured_effect: dict[str, Any]
+    trace_tool_calls: list[dict[str, Any]]
+    measured_effects: list[dict[str, Any]]
     join: dict[str, Any]
     joined_claim_strength: str
     joined_claim_basis: str
@@ -60,7 +68,9 @@ def clean_health() -> dict[str, Any]:
 
 def scenario_definitions() -> dict[str, Scenario]:
     matched_tool_call_id = "tc_semantic_gap_matched_safe_read"
+    path_rewrite_tool_call_id = "tc_semantic_gap_path_rewrite"
     hidden_tool_call_id = "tc_semantic_gap_hidden_write"
+    retry_tool_call_id = "tc_semantic_gap_retry_self_correction"
     return {
         "matched_safe_read": Scenario(
             scenario_id="matched_safe_read",
@@ -71,20 +81,24 @@ def scenario_definitions() -> dict[str, Scenario]:
                 "Synthetic trace intent and measured archive effect agree for "
                 "safe.txt under a unique tool_call_id."
             ),
-            trace_tool_call={
-                "tool_call_id": matched_tool_call_id,
-                "tool_name": "read_file",
-                "reported_action": "read",
-                "reported_path": "safe.txt",
-                "order": 1,
-            },
-            measured_effect={
-                "tool_call_id": matched_tool_call_id,
-                "operation": "open",
-                "effect": "read",
-                "path": "safe.txt",
-                "order": 1,
-            },
+            trace_tool_calls=[
+                {
+                    "tool_call_id": matched_tool_call_id,
+                    "tool_name": "read_file",
+                    "reported_action": "read",
+                    "reported_path": "safe.txt",
+                    "order": 1,
+                }
+            ],
+            measured_effects=[
+                {
+                    "tool_call_id": matched_tool_call_id,
+                    "operation": "open",
+                    "effect": "read",
+                    "path": "safe.txt",
+                    "order": 1,
+                }
+            ],
             join={
                 "join_key": "tool_call_id",
                 "join_value": matched_tool_call_id,
@@ -106,6 +120,58 @@ def scenario_definitions() -> dict[str, Scenario]:
                 "does_not_replace_runner_archive_integrity",
             ],
         ),
+        "path_rewrite": Scenario(
+            scenario_id="path_rewrite",
+            role="gap",
+            verdict="semantic_gap",
+            evidence_claim_class="semantic_gap",
+            claim_summary=(
+                "Synthetic trace reports safe-link.txt while measured effects "
+                "resolve the symlink target safe.txt in the same workdir."
+            ),
+            trace_tool_calls=[
+                {
+                    "tool_call_id": path_rewrite_tool_call_id,
+                    "tool_name": "read_file",
+                    "reported_action": "read",
+                    "reported_path": "safe-link.txt",
+                    "order": 1,
+                }
+            ],
+            measured_effects=[
+                {
+                    "tool_call_id": path_rewrite_tool_call_id,
+                    "operation": "open",
+                    "effect": "read",
+                    "path": "safe.txt",
+                    "resolved_from": "safe-link.txt",
+                    "order": 1,
+                }
+            ],
+            join={
+                "join_key": "tool_call_id",
+                "join_value": path_rewrite_tool_call_id,
+                "join_grade": "strong",
+                "scope": "tool_call",
+                "unique_within_scope": True,
+                "fallback_used": False,
+                "notes": [
+                    "Same synthetic tool_call_id joins reported symlink path to resolved target path."
+                ],
+            },
+            joined_claim_strength="strong",
+            joined_claim_basis="derived",
+            joined_notes=[
+                "Trace path and measured filesystem path differ after symlink resolution.",
+                "Both paths remain inside the fixture workdir.",
+                "This is projection ambiguity, not an unsafe-behavior claim.",
+            ],
+            non_claims=[
+                "does_not_claim_unsafe_behavior",
+                "does_not_claim_policy_failure",
+                "does_not_publish_delegated_gap_finding",
+            ],
+        ),
         "hidden_write": Scenario(
             scenario_id="hidden_write",
             role="gap",
@@ -115,20 +181,24 @@ def scenario_definitions() -> dict[str, Scenario]:
                 "Synthetic trace reports a read-only action while measured effects "
                 "include a write in the same workdir and tool_call_id scope."
             ),
-            trace_tool_call={
-                "tool_call_id": hidden_tool_call_id,
-                "tool_name": "read_file",
-                "reported_action": "read",
-                "reported_path": "safe.txt",
-                "order": 1,
-            },
-            measured_effect={
-                "tool_call_id": hidden_tool_call_id,
-                "operation": "write",
-                "effect": "create_write",
-                "path": "side-effect.txt",
-                "order": 1,
-            },
+            trace_tool_calls=[
+                {
+                    "tool_call_id": hidden_tool_call_id,
+                    "tool_name": "read_file",
+                    "reported_action": "read",
+                    "reported_path": "safe.txt",
+                    "order": 1,
+                }
+            ],
+            measured_effects=[
+                {
+                    "tool_call_id": hidden_tool_call_id,
+                    "operation": "write",
+                    "effect": "create_write",
+                    "path": "side-effect.txt",
+                    "order": 1,
+                }
+            ],
             join={
                 "join_key": "tool_call_id",
                 "join_value": hidden_tool_call_id,
@@ -152,6 +222,118 @@ def scenario_definitions() -> dict[str, Scenario]:
                 "does_not_publish_delegated_gap_finding",
             ],
         ),
+        "retry_self_correction": Scenario(
+            scenario_id="retry_self_correction",
+            role="gap",
+            verdict="semantic_gap",
+            evidence_claim_class="semantic_gap",
+            claim_summary=(
+                "Synthetic trace reports only the final successful read while "
+                "measured effects preserve prior failed attempts for the same tool_call_id."
+            ),
+            trace_tool_calls=[
+                {
+                    "tool_call_id": retry_tool_call_id,
+                    "tool_name": "read_file",
+                    "reported_action": "read",
+                    "reported_path": "safe.txt",
+                    "reported_status": "success",
+                    "order": 3,
+                }
+            ],
+            measured_effects=[
+                {
+                    "tool_call_id": retry_tool_call_id,
+                    "operation": "open",
+                    "effect": "failed_open",
+                    "path": "missing-1.txt",
+                    "attempt": 1,
+                    "order": 1,
+                },
+                {
+                    "tool_call_id": retry_tool_call_id,
+                    "operation": "open",
+                    "effect": "failed_open",
+                    "path": "missing-2.txt",
+                    "attempt": 2,
+                    "order": 2,
+                },
+                {
+                    "tool_call_id": retry_tool_call_id,
+                    "operation": "open",
+                    "effect": "read",
+                    "path": "safe.txt",
+                    "attempt": 3,
+                    "order": 3,
+                },
+            ],
+            join={
+                "join_key": "tool_call_id",
+                "join_value": retry_tool_call_id,
+                "join_grade": "strong",
+                "scope": "tool_call",
+                "unique_within_scope": True,
+                "fallback_used": False,
+                "notes": [
+                    "Same synthetic tool_call_id joins final reported success to the full measured attempt series."
+                ],
+            },
+            joined_claim_strength="strong",
+            joined_claim_basis="derived",
+            joined_notes=[
+                "Measured archive preserves failed attempts that the trace summary omits.",
+                "The divergence is temporal evidence loss, not a judgment on retry behavior.",
+            ],
+            non_claims=[
+                "does_not_claim_retry_behavior_is_bad",
+                "does_not_claim_policy_failure",
+                "does_not_publish_delegated_gap_finding",
+            ],
+        ),
+        "runtime_side_effect": Scenario(
+            scenario_id="runtime_side_effect",
+            role="gap",
+            verdict="diagnostic_only",
+            evidence_claim_class="diagnostic",
+            claim_summary=(
+                "Synthetic archive records a runtime config probe outside any "
+                "tool-level trace event, so the harness keeps the claim diagnostic."
+            ),
+            trace_tool_calls=[],
+            measured_effects=[
+                {
+                    "tool_call_id": None,
+                    "operation": "open",
+                    "effect": "runtime_config_probe",
+                    "path": "runtime-config.json",
+                    "order": 0,
+                    "emitted_before_first_tool_call": True,
+                }
+            ],
+            join={
+                "join_key": "run_id",
+                "join_value": "synthetic_runtime_side_effect",
+                "join_grade": "diagnostic",
+                "scope": "run",
+                "unique_within_scope": False,
+                "fallback_used": False,
+                "notes": [
+                    "Runtime effect occurs before any tool-call trace event and remains run-scope only.",
+                    "No timestamp proximity is upgraded to a strong tool-call join.",
+                ],
+            },
+            joined_claim_strength="weak",
+            joined_claim_basis="inferred",
+            joined_notes=[
+                "Measured runtime effect exists in the run but is not assigned to agent intent.",
+                "Run-scope evidence supports diagnostics only.",
+            ],
+            non_claims=[
+                "does_not_attribute_runtime_effect_to_tool_intent",
+                "does_not_support_semantic_equality",
+                "does_not_publish_delegated_gap_finding",
+            ],
+        ),
         "weak_join_fallback": Scenario(
             scenario_id="weak_join_fallback",
             role="fallback",
@@ -161,20 +343,24 @@ def scenario_definitions() -> dict[str, Scenario]:
                 "Synthetic trace and measured effect are only order-adjacent; "
                 "without a tool_call_id, the harness emits diagnostic correlation only."
             ),
-            trace_tool_call={
-                "tool_call_id": None,
-                "tool_name": "read_file",
-                "reported_action": "read",
-                "reported_path": "safe.txt",
-                "order": 1,
-            },
-            measured_effect={
-                "tool_call_id": None,
-                "operation": "open",
-                "effect": "read",
-                "path": "safe.txt",
-                "order": 1,
-            },
+            trace_tool_calls=[
+                {
+                    "tool_call_id": None,
+                    "tool_name": "read_file",
+                    "reported_action": "read",
+                    "reported_path": "safe.txt",
+                    "order": 1,
+                }
+            ],
+            measured_effects=[
+                {
+                    "tool_call_id": None,
+                    "operation": "open",
+                    "effect": "read",
+                    "path": "safe.txt",
+                    "order": 1,
+                }
+            ],
             join={
                 "join_key": "timestamp_or_order",
                 "join_value": "order:1",
@@ -207,7 +393,7 @@ def trace_payload(scenario: Scenario) -> dict[str, Any]:
         "schema": SYNTHETIC_TRACE_SCHEMA,
         "scenario_id": scenario.scenario_id,
         "run_id": f"synthetic_{scenario.scenario_id}",
-        "tool_calls": [scenario.trace_tool_call],
+        "tool_calls": scenario.trace_tool_calls,
         "trace_calibration_status": "clean",
     }
 
@@ -217,9 +403,29 @@ def runner_archive_payload(scenario: Scenario) -> dict[str, Any]:
         "schema": SYNTHETIC_RUNNER_ARCHIVE_SCHEMA,
         "scenario_id": scenario.scenario_id,
         "run_id": f"synthetic_{scenario.scenario_id}",
-        "effects": [scenario.measured_effect],
+        "effects": scenario.measured_effects,
         "runner_health": clean_health(),
     }
+
+
+def trace_evidence_refs(
+    scenario: Scenario,
+    *,
+    include_empty: bool = False,
+) -> list[str]:
+    if not scenario.trace_tool_calls:
+        if include_empty:
+            return ["trace.json#/tool_calls"]
+        return []
+    if len(scenario.trace_tool_calls) == 1:
+        return ["trace.json#/tool_calls/0"]
+    return ["trace.json#/tool_calls"]
+
+
+def archive_evidence_refs(scenario: Scenario) -> list[str]:
+    if len(scenario.measured_effects) == 1:
+        return ["runner-archive.json#/effects/0"]
+    return ["runner-archive.json#/effects"]
 
 
 def join_result(scenario: Scenario) -> dict[str, Any]:
@@ -233,10 +439,8 @@ def join_result(scenario: Scenario) -> dict[str, Any]:
         "scope": scenario.join["scope"],
         "unique_within_scope": scenario.join["unique_within_scope"],
         "fallback_used": scenario.join["fallback_used"],
-        "evidence_refs": [
-            "trace.json#/tool_calls/0",
-            "runner-archive.json#/effects/0",
-        ],
+        "evidence_refs": trace_evidence_refs(scenario, include_empty=True)
+        + archive_evidence_refs(scenario),
         "notes": scenario.join["notes"],
     }
 
@@ -264,27 +468,41 @@ def claim_cell(
 
 
 def claim_cells(scenario: Scenario) -> list[dict[str, Any]]:
-    trace_strength = (
-        "partial" if scenario.scenario_id == "weak_join_fallback" else "strong"
-    )
-    return [
-        claim_cell(
+    if not scenario.trace_tool_calls:
+        trace_cell = claim_cell(
+            claim_type="reported_trace_intent",
+            artifact_role="none",
+            claim_strength="absent",
+            claim_basis="reported",
+            evidence_refs=[],
+            notes=[
+                "No tool-level trace intent is present for this synthetic scenario."
+            ],
+            non_claims=["does_not_prove_absence_of_runtime_behavior"],
+        )
+    else:
+        trace_strength = (
+            "partial" if scenario.scenario_id == "weak_join_fallback" else "strong"
+        )
+        trace_cell = claim_cell(
             claim_type="reported_trace_intent",
             artifact_role="otel_family_trace",
             claim_strength=trace_strength,
             claim_basis="reported",
-            evidence_refs=["trace.json#/tool_calls/0"],
+            evidence_refs=trace_evidence_refs(scenario),
             notes=[
                 "Trace layer reports the tool intent within the synthetic fixture boundary."
             ],
             non_claims=["does_not_prove_absence_of_unreported_effects"],
-        ),
+        )
+    return [
+        trace_cell,
         claim_cell(
             claim_type="measured_runner_effect",
             artifact_role="measured_run_archive",
             claim_strength="strong",
             claim_basis="measured",
-            evidence_refs=["runner-archive.json#/effects/0"],
+            evidence_refs=archive_evidence_refs(scenario),
             notes=[
                 "Synthetic Runner archive layer records the measured system effect with clean health."
             ],
@@ -429,8 +647,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--scenario",
         action="append",
-        choices=MVP_SCENARIOS,
-        help="Scenario to generate. May be repeated. Defaults to all MVP scenarios.",
+        choices=SYNTHETIC_SCENARIOS,
+        help="Scenario to generate. May be repeated. Defaults to all synthetic scenarios.",
     )
     parser.add_argument("--created-at", default=utc_now())
     parser.add_argument("--redaction-policy", default="none")
@@ -439,7 +657,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    scenarios = args.scenario or list(MVP_SCENARIOS)
+    scenarios = args.scenario or list(SYNTHETIC_SCENARIOS)
     generated = generate_harness(
         out_dir=args.out_dir,
         scenarios=scenarios,

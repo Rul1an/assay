@@ -1,10 +1,10 @@
 # Semantic Gap Scenario Plan
 
-> **Status:** scenario-plan-ready plus Slice 4 MVP synthetic
-> harness-ready for the agent-observability fidelity roadmap. This
+> **Status:** scenario-plan-ready plus Slice 4 full synthetic
+> matrix-ready for the agent-observability fidelity roadmap. This
 > document predeclared the baseline, scenarios, join requirements,
 > claim classes, and evidence pack expectations before harness work; the
-> MVP harness now implements the three minimum exit-gate scenarios
+> synthetic harness now implements all six predeclared scenarios
 > without delegated runs.
 >
 > **Last updated:** 2026-05-28
@@ -32,15 +32,16 @@ pack prototype as prerequisites.
 | Join contract | Reference-ready: [`join-result-v0.schema.json`](../../reference/observability/schema/join-result-v0.schema.json) exists | Strong findings require an explicit join key and grade, not timestamp proximity. |
 | Claim classes | Reference-ready: [`claim-class-cell-v0.schema.json`](../../reference/observability/schema/claim-class-cell-v0.schema.json) exists | Reported intent, measured effects, derived joins, and inferred diagnostics must stay separate. |
 
-The first harness PR should reuse
+The harness reuses
 `assay.observability.join_result.v0`,
 `assay.observability.claim_class_cell.v0`, and
 `assay.experiment.agent_observability_fidelity.evidence_pack.v0` unless
 the implementation proves a version bump is required.
 
-The Slice 4 MVP harness lives in [`semantic_gap_harness.py`](semantic_gap_harness.py).
-It emits the three minimum synthetic scenarios from the exit gate:
-`matched_safe_read`, `hidden_write`, and `weak_join_fallback`.
+The Slice 4 synthetic harness lives in [`semantic_gap_harness.py`](semantic_gap_harness.py).
+It emits all six predeclared synthetic scenarios. The original minimum
+exit gate remains the subset `matched_safe_read`, `hidden_write`, and
+`weak_join_fallback`.
 
 ## Baseline
 
@@ -74,7 +75,7 @@ published.
 
 ### Scenario Notes
 
-- `path_rewrite` uses one canonical rewrite pattern for Slice 4: the
+- `path_rewrite` uses one canonical rewrite pattern: the
   fixture creates `safe-link.txt -> safe.txt`, the trace reports
   `safe-link.txt`, and the measured archive is expected to observe the
   resolved target `safe.txt` or both paths depending on kernel event
@@ -122,14 +123,15 @@ Minimum required rows per scenario:
 | Evidence pack | One experiment-scoped evidence pack carrying the trace/archive or references, observation health, redaction manifest, and one-page summary. |
 | Scenario verdict | A bounded verdict: `positive_join`, `semantic_gap`, `diagnostic_only`, or `inconclusive`. |
 
-The MVP harness emits scenario verdicts with
+The synthetic harness emits scenario verdicts with
 `assay.experiment.agent_observability_fidelity.semantic_gap_verdict.v0`.
-That schema is experiment-scoped and covers the three synthetic
-exit-gate scenarios only; delegated findings or additional scenario
-types require a deliberate schema review before publication.
+That schema is experiment-scoped and covers the six synthetic
+scenario-plan rows; delegated findings or additional scenario types
+require a deliberate schema review before publication.
 
 The evidence pack's `scenario_id` field must equal the scenario id from
-this plan, for example `matched_safe_read`, `hidden_write`, or
+this plan, for example `matched_safe_read`, `path_rewrite`,
+`hidden_write`, `retry_self_correction`, `runtime_side_effect`, or
 `weak_join_fallback`. The Slice 4 harness can use the existing
 evidence-pack command; no evidence-pack CLI change is required for the
 planned directory layout.
@@ -176,7 +178,8 @@ The first findings document should report claim strength and basis using
 
 ## Acceptance Rules
 
-- Do not dispatch or publish measurements from this plan-only slice.
+- Do not dispatch or publish delegated measurements from the synthetic
+  harness.
 - Every scenario must have a role: `baseline`, `gap`, or `fallback`.
 - Strong semantic-gap findings require a unique same-scenario
   `tool_call_id`; timestamp/order fallback remains diagnostic.
@@ -191,7 +194,7 @@ The first findings document should report claim strength and basis using
 
 ## Non-Claims
 
-- The MVP harness does not dispatch delegated runs.
+- The synthetic harness does not dispatch delegated runs.
 - This plan does not rank OTel, OpenInference, Runner, or Assay.
 - This plan does not claim semantic gaps are malicious.
 - This plan does not promote evidence packs, join results, or claim
@@ -209,13 +212,18 @@ synthetic fixtures first, that:
 3. `weak_join_fallback` emits only a diagnostic join and cannot be
    rendered as semantic equality.
 
-Those three cases are the minimum useful harness. The remaining
-scenarios can be added after the shape is proven, but the harness should
-not publish delegated findings until all predeclared scenarios have
-either run or been explicitly scoped out.
+Those three cases are the minimum useful harness. The current synthetic
+matrix also implements the remaining scenarios after proving that
+shape. The harness should not publish delegated findings until all
+predeclared scenarios have either run under the delegated gate or been
+explicitly scoped out.
 
 The three MVP cases may all be synthetic-fixture-only at harness gate
-time. A delegated `matched_safe_read` sanity run is required before any
-semantic-gap finding is published. Delegated runs for `hidden_write` and
-`weak_join_fallback` are required only when their findings are promoted
+time. The current harness also implements the remaining predeclared
+synthetic rows: `path_rewrite`, `retry_self_correction`, and
+`runtime_side_effect`.
+
+A delegated `matched_safe_read` sanity run is required before any
+semantic-gap finding is published. Delegated runs for the gap and
+fallback scenarios are required only when their findings are promoted
 from harness behavior to measured results.
