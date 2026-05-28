@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Closed the agent-observability fidelity arc with a citation-oriented
+  findings summary. The summary bounds five claims: calibration as a
+  mechanical guardrail, evidence packs as non-strengthening carriers,
+  the six-scenario synthetic semantic-gap matrix, the five-cell interop
+  coverage matrix, and the delegated `matched_safe_read` positive
+  baseline smoke. It does not publish delegated gap findings, rank trace
+  vocabularies or products, or promote experiment-scoped schemas to
+  product APIs.
 - Smoke-verified Slice 7 of the agent-observability fidelity roadmap
   with a delegated `matched_safe_read` baseline. GitHub Actions run
   `26571739019` passed the existing `openai-agents-kernel-policy`

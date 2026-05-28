@@ -21,11 +21,17 @@ Runner artifacts remain the primary measured-run evidence. The
 observability contracts describe comparison and interpretation output
 above those artifacts.
 
-The next planned experiment line for this layer is
+The agent-observability fidelity arc for this layer is
 [`agent-observability-fidelity-2026-05`](../../experiments/agent-observability-fidelity-2026-05.md).
-It turns the completed overhead findings into a prioritized roadmap for
-calibration guardrails, semantic-gap scenarios, portable evidence packs,
-and OTel/OpenInference/Runner interoperability checks.
+It turns the completed overhead findings into calibration guardrails,
+semantic-gap scenarios, portable evidence packs, and
+OTel/OpenInference/Runner interoperability checks.
+
+The citation-oriented result of that arc is
+[`findings-summary.md`](../../experiments/agent-observability-fidelity-2026-05/findings-summary.md).
+It summarizes the calibration, evidence-pack, semantic-gap, interop, and
+delegated-baseline findings without promoting experiment-scoped schemas
+to product APIs.
 
 Experiment-scoped schema naming and promotion rules for that roadmap are
 tracked in
