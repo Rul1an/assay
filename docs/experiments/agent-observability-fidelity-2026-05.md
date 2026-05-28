@@ -1,11 +1,13 @@
 # Agent Observability Fidelity Roadmap (2026-05)
 
 > **Status:** roadmap plus implemented local harness slices after the
-> completed Runner-vs-OTel overhead arc. This document ranks the next
-> useful experiments for improving Assay's agent-observability surface
-> and links the implemented local guardrail/prototype harnesses. It does
-> not dispatch new runs, does not commit measurement artifacts, and does
-> not open the optional OTel span-limit study tracked in
+> completed Runner-vs-OTel overhead arc. The citation-oriented closure
+> point is
+> [`agent-observability-fidelity-2026-05/findings-summary.md`](agent-observability-fidelity-2026-05/findings-summary.md).
+> This document keeps the longer slice history and links the implemented
+> local guardrail/prototype harnesses. It does not dispatch new runs,
+> does not commit measurement artifacts, and does not open the optional
+> OTel span-limit study tracked in
 > [issue #1408](https://github.com/Rul1an/assay/issues/1408).
 >
 > **Last updated:** 2026-05-28
@@ -388,14 +390,16 @@ docs around what Assay can honestly consume.
 **Goal:** prove the semantic-gap positive baseline under real Runner
 capture before publishing any delegated gap finding.
 
-> **Status:** delegated-baseline-smoke-verified. The delegated baseline
+> **Status:** done. The delegated baseline
 > source, artifact expectations, join invariants, acceptance rules, and
 > follow-up dispatch/conversion gate were predeclared in
 > [`agent-observability-fidelity-2026-05/delegated-baseline-plan.md`](agent-observability-fidelity-2026-05/delegated-baseline-plan.md).
 > The successful smoke record is in
 > [`agent-observability-fidelity-2026-05/runs/slice7-delegated-baseline/summary.md`](agent-observability-fidelity-2026-05/runs/slice7-delegated-baseline/summary.md).
-> This publishes only the positive baseline gate, not delegated gap
-> findings.
+> The citation-oriented closure summary is in
+> [`agent-observability-fidelity-2026-05/findings-summary.md`](agent-observability-fidelity-2026-05/findings-summary.md).
+> This slice is done for the positive baseline only; delegated gap
+> scenarios remain not dispatched and are not findings.
 
 The full synthetic semantic-gap matrix is useful, but it is still local
 ground truth. Before any semantic-gap result is described as delegated
@@ -470,32 +474,35 @@ non-leaf domain cgroup before creating session cgroups.
 summary after the delegated baseline gate has either passed or been
 classified as inconclusive.
 
-This should mirror the overhead arc's `findings-summary.md` discipline:
-one citation-friendly document, with slice history kept in the longer
+> **Status:** done. The citation-oriented result is in
+> [`agent-observability-fidelity-2026-05/findings-summary.md`](agent-observability-fidelity-2026-05/findings-summary.md).
+
+This mirrors the overhead arc's `findings-summary.md` discipline: one
+citation-friendly document, with slice history kept in the longer
 roadmap and plan files.
 
-### Expected statements
+### Statements
 
-- **Calibration discipline:** requested-vs-observed signal counts are a
+- **Done:** requested-vs-observed signal counts are a
   mechanical guardrail, not a reviewer memory exercise.
-- **Portable evidence:** evidence packs and proof-pack references carry
+- **Done:** evidence packs and proof-pack references carry
   bounded claims without strengthening the underlying artifacts.
-- **Semantic gap:** six synthetic scenario shapes exercise positive
+- **Done:** six synthetic scenario shapes exercise positive
   join, same-tool-call divergence, fallback diagnostics, and runtime
   surface boundaries.
-- **Interop:** five starter cells map OTel GenAI, OpenInference, and
+- **Done:** five starter cells map OTel GenAI, OpenInference, and
   Runner observation profiles as coverage/claim-strength rows, not
   product rankings.
-- **Delegated baseline:** the positive join path is either verified by
-  a real Runner capture or explicitly inconclusive.
+- **Done:** the positive join path is verified by a real Runner capture
+  before delegated gap findings are published.
 
 ### Non-claims
 
-- The summary should not publish delegated gap-scenario findings unless
+- The summary does not publish delegated gap-scenario findings unless
   those scenarios have their own delegated gates.
-- The summary should not promote experiment-scoped schemas to product
+- The summary does not promote experiment-scoped schemas to product
   APIs.
-- The summary should not recommend one trace vocabulary over another.
+- The summary does not recommend one trace vocabulary over another.
 
 ## Experiment 7 - Optional OTel Span-Limit Characterization
 
@@ -547,6 +554,10 @@ visible by the overhead and shape-comparison arcs.
 
 ## Recommended Slice Order
 
+Arc status: closed at Slice 8 with
+[`agent-observability-fidelity-2026-05/findings-summary.md`](agent-observability-fidelity-2026-05/findings-summary.md).
+Slice 9 remains optional and trigger-only.
+
 | Slice | Status | Purpose | Exit gate |
 |---:|---|---|---|
 | 0 | Done in this plan | Namespace governance for experiment artifacts | Naming, promotion, cross-arc field, calibration-method, and evidence-pack minimum rules are documented. |
@@ -557,7 +568,7 @@ visible by the overhead and shape-comparison arcs.
 | 5 | Matrix-plan-ready | Interop matrix plan | OTel/OpenInference/Runner coverage axes, starter cells, row shape, source snapshots, and non-claims pinned before harness work. |
 | 6 | Harness-ready | Interop matrix harness | Five synthetic starter cells emit strict `interop_coverage_cell.v0` rows, join-result refs, claim-class refs, source snapshots, partial/absent rows, and stable output directories without delegated publication. |
 | 7 | Delegated-baseline-smoke-verified | Delegated semantic-gap baseline | Run `26571739019` passed the `openai-agents-kernel-policy` delegated gate, uploaded proof pack `assay-runner-delegated-proof-pack-26571739019`, and validated clean health plus strong `tool_call_id` positive baseline join without promoting delegated gap scenarios. |
-| 8 | Planned | Fidelity arc findings summary | After the delegated baseline gate, write a citation-friendly summary of calibration, evidence-pack, semantic-gap, interop, and delegated-baseline outcomes without promoting product APIs. |
+| 8 | Done | Fidelity arc findings summary | Citation-friendly summary closes the arc across calibration, evidence-pack, semantic-gap, interop, and delegated-baseline outcomes without promoting product APIs or publishing delegated gap findings. |
 | 9 | Optional | OTel span-limit study | Only after an external trigger; otherwise remains issue-only. |
 
 ## Experiment vs Feature Boundary
@@ -602,8 +613,9 @@ invariants without promoting delegated gap scenarios.
   harness-ready, but it remains a coverage and claim-strength map.
 - Do not turn the required product-development list into one epic. Each
   item belongs to a different dependency chain.
-- Do not open a new paper arc yet. The argument is strong, but the
-  delegated baseline and findings-summary closure should land first.
+- Do not open a new paper arc without a concrete consumer. The
+  fidelity-arc summary now gives the argument a stable cite point; a
+  paper arc still needs its own question and acceptance rules.
 - Do not start #1408 unless an external trigger appears.
 
 ## Closure Criterion
