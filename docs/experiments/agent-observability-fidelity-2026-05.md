@@ -262,10 +262,11 @@ join path under real Runner capture before gap findings are published.
 | Runtime side effect | gap | no tool-level trace event | archive records runtime loader/config/probe path | runtime-induced surface |
 | Weak join fallback | fallback | missing `tool_call_id`, only order/timestamp | effects are plausible but not strongly joinable | diagnostic-only claim |
 
-The detailed plan pins scenario ids, join requirements, claim rules, and
-the minimum harness exit gate. The first harness should prove the
-baseline, `hidden_write`, and `weak_join_fallback` before broadening to
-all six scenarios.
+The detailed plan pins scenario ids, join requirements, claim rules,
+the canonical `path_rewrite` symlink fixture, runtime-side-effect join
+policy, and the minimum harness exit gate. The first harness should
+prove the baseline, `hidden_write`, and `weak_join_fallback` with
+synthetic fixtures before broadening to all six scenarios.
 
 ### Acceptance rules
 
@@ -286,9 +287,11 @@ all six scenarios.
 
 ### Tool improvement
 
-This experiment should drive product work on input-binding receipts and
-per-tool evidence rows. If the tool cannot clearly say "same tool call,
-different effect," the observability story is not strong enough yet.
+This experiment may drive product work on binding evidence or per-tool
+input/output/effect carriers, still tracked as `proposed` in the
+artifact-families inventory. If the tool cannot clearly say "same tool
+call, different effect," the observability story is not strong enough
+yet.
 
 ## Experiment 4 - OTel / OpenInference / Runner Interop Matrix
 

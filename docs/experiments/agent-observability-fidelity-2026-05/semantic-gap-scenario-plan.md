@@ -28,8 +28,8 @@ pack prototype as prerequisites.
 |---|---|---|
 | Fidelity calibration | Done for the overhead harness | A trace/archive comparison cannot interpret missing retained signal as efficient or safe behavior. |
 | Evidence pack carrier | Prototype-ready | Every scenario should be reviewable as a small pack rather than a loose artifact pile. |
-| Join contract | Reference-ready | Strong findings require an explicit join key and grade, not timestamp proximity. |
-| Claim classes | Reference-ready | Reported intent, measured effects, derived joins, and inferred diagnostics must stay separate. |
+| Join contract | Reference-ready: [`join-result-v0.schema.json`](../../reference/observability/schema/join-result-v0.schema.json) exists | Strong findings require an explicit join key and grade, not timestamp proximity. |
+| Claim classes | Reference-ready: [`claim-class-cell-v0.schema.json`](../../reference/observability/schema/claim-class-cell-v0.schema.json) exists | Reported intent, measured effects, derived joins, and inferred diagnostics must stay separate. |
 
 The first harness PR should reuse
 `assay.observability.join_result.v0`,
@@ -61,7 +61,7 @@ published.
 | ID | Role | Reported trace intent | Measured system effect | Join requirement | Expected safe claim |
 |---|---|---|---|---|---|
 | `matched_safe_read` | baseline | tool reports reading `safe.txt` | archive observes read/open of `safe.txt` | unique `tool_call_id` | strong positive join |
-| `path_rewrite` | gap | tool reports `safe.txt` | archive observes normalized alternate path that resolves inside the same fixture boundary | same unique `tool_call_id` | semantic mismatch or projection ambiguity, not unsafe behavior |
+| `path_rewrite` | gap | tool reports `safe-link.txt` | archive observes the symlink target `safe.txt` inside the same fixture boundary | same unique `tool_call_id` | semantic mismatch or projection ambiguity, not unsafe behavior |
 | `hidden_write` | gap | tool reports read-only action | archive observes create/write of `side-effect.txt` in workdir | same unique `tool_call_id` | reported intent under-describes measured side effect |
 | `retry_self_correction` | gap | trace summary records final successful read | archive records prior failed attempts before the final read | same unique `tool_call_id` plus ordered attempt index if available | trace summary loses temporal evidence |
 | `runtime_side_effect` | gap | no tool-level event reports the runtime/config/probe path | archive observes runtime loader/config/probe path inside capture boundary | run-level join only unless a tool id exists | runtime-induced measured surface; diagnostic unless scoped to runtime setup |
@@ -69,10 +69,12 @@ published.
 
 ### Scenario Notes
 
-- `path_rewrite` should distinguish benign projection mismatch from
-  dangerous target drift. A normalized path inside the fixture boundary
-  is still a gap between reported and measured representation, not
-  automatically a policy failure.
+- `path_rewrite` uses one canonical rewrite pattern for Slice 4: the
+  fixture creates `safe-link.txt -> safe.txt`, the trace reports
+  `safe-link.txt`, and the measured archive is expected to observe the
+  resolved target `safe.txt` or both paths depending on kernel event
+  shape. Both paths must remain inside the scenario workdir. This is a
+  representation/projection gap, not automatically a policy failure.
 - `hidden_write` is the sharpest same-tool-call divergence. It needs a
   clean Runner health gate and a unique tool-call join before it can
   support a strong joined-evidence claim.
@@ -81,7 +83,10 @@ published.
   loss, not whether retry behavior is good or bad.
 - `runtime_side_effect` is intentionally not framed as agent intent. It
   tests whether Assay can separate tool effects from runtime/framework
-  effects.
+  effects. Runtime events emitted before the first tool-call event are
+  run-scope only by definition. Runtime events near a tool call by
+  timestamp/order alone must be flagged as `ambiguous_proximity`, not
+  upgraded to a strong tool-call join.
 - `weak_join_fallback` exists to prove the negative case: plausible
   timing is useful for investigation but must not become a strong claim.
 
@@ -110,6 +115,13 @@ Minimum required rows per scenario:
 | Evidence pack | One experiment-scoped evidence pack carrying the trace/archive or references, observation health, redaction manifest, and one-page summary. |
 | Scenario verdict | A bounded verdict: `positive_join`, `semantic_gap`, `diagnostic_only`, or `inconclusive`. |
 
+The evidence pack's `scenario_id` field must equal the scenario id from
+this plan, for example `matched_safe_read`, `hidden_write`, or
+`weak_join_fallback`. The Slice 4 harness can use the existing
+`evidence_pack.py create --out-dir
+semantic-gap-runs/<scenario-id>/evidence-pack` command; no evidence-pack
+CLI change is required for the planned directory layout.
+
 Evidence-pack `claim_class` should map verdicts conservatively:
 
 | Scenario verdict | Evidence-pack `claim_class` |
@@ -129,6 +141,11 @@ Evidence-pack `claim_class` should map verdicts conservatively:
 | Timestamp/order fallback only | diagnostic-only |
 | Runner health not clean | inconclusive for measured-effect claims |
 | Trace calibration lossy or inconclusive | no claim that absent trace fields prove absence of intent |
+
+If fidelity calibration for a scenario is `lossy` or `inconclusive`,
+the scenario verdict becomes `inconclusive` regardless of the
+intent/effect comparison. That sample may still be cited as calibration
+evidence, but not as a semantic-gap finding.
 
 The first findings document should report claim strength and basis using
 `assay.observability.claim_class_cell.v0` vocabulary:
@@ -179,3 +196,9 @@ Those three cases are the minimum useful harness. The remaining
 scenarios can be added after the shape is proven, but the harness should
 not publish delegated findings until all predeclared scenarios have
 either run or been explicitly scoped out.
+
+The three MVP cases may all be synthetic-fixture-only at harness gate
+time. A delegated `matched_safe_read` sanity run is required before any
+semantic-gap finding is published. Delegated runs for `hidden_write` and
+`weak_join_fallback` are required only when their findings are promoted
+from harness behavior to measured results.
