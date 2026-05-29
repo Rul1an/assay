@@ -77,6 +77,15 @@ MCP_FILE_SERVER="$CONTROL_ROOT/mcp_file_server.py"
 SDK_TOOL_CALL_ID="tc_runner_policy_001"
 EXPECTED_SDK_SOURCE="${ASSAY_RUNNER_ACCEPTANCE_EXPECT_SDK_SOURCE:-openai-agents-fixture}"
 EXPECTED_SDK_VERSION="${ASSAY_RUNNER_ACCEPTANCE_EXPECT_SDK_VERSION:-0.11.4}"
+OPENAI_AGENTS_SCENARIO="${ASSAY_RUNNER_OPENAI_AGENTS_SCENARIO:-matched_safe_read}"
+case "$OPENAI_AGENTS_SCENARIO" in
+  matched_safe_read|hidden_write)
+    ;;
+  *)
+    echo "ERROR: unsupported ASSAY_RUNNER_OPENAI_AGENTS_SCENARIO: $OPENAI_AGENTS_SCENARIO" >&2
+    exit 64
+    ;;
+esac
 
 export ASSAY_BIN
 export ASSAY_FIXTURE_ROOT="$ROOT"
@@ -92,6 +101,7 @@ export ASSAY_RUNNER_POLICY_AGENT="$POLICY_AGENT"
 export ASSAY_RUNNER_POLICY_DECISION_LOG="$DECISION_LOG"
 export ASSAY_RUNNER_RUN_ID="$RUN_ID"
 export ASSAY_RUNNER_SDK_TOOL_CALL_ID="$SDK_TOOL_CALL_ID"
+export ASSAY_RUNNER_OPENAI_AGENTS_SCENARIO="$OPENAI_AGENTS_SCENARIO"
 
 cp "$ROOT/runner-fixtures/openai-agents/sdk-policy-agent.sh" "$AGENT_SCRIPT"
 cp "$ROOT/runner-fixtures/openai-agents/fixture-agent.js" "$OPENAI_FIXTURE_AGENT"
@@ -116,7 +126,7 @@ printf '%s\n' "assay runner policy fixture input" > "$WORK_DIR/policy-input.txt"
 mkdir -p "$EXTRACT_DIR"
 tar -xzf "$BUNDLE" -C "$EXTRACT_DIR"
 
-python3 - "$EXTRACT_DIR" "$WORK_DIR" "$RUN_ID" "$SDK_TOOL_CALL_ID" "$EXPECTED_SDK_SOURCE" "$EXPECTED_SDK_VERSION" "$DECISION_LOG" <<'PY'
+python3 - "$EXTRACT_DIR" "$WORK_DIR" "$RUN_ID" "$SDK_TOOL_CALL_ID" "$EXPECTED_SDK_SOURCE" "$EXPECTED_SDK_VERSION" "$DECISION_LOG" "$OPENAI_AGENTS_SCENARIO" <<'PY'
 import hashlib
 import json
 import sys
@@ -130,6 +140,7 @@ sdk_tool_call_id = sys.argv[4]
 expected_sdk_source = sys.argv[5]
 expected_sdk_version = sys.argv[6]
 decision_log = Path(sys.argv[7])
+scenario = sys.argv[8]
 policy_tool_call_id = "tc_runner_policy_001"
 
 
@@ -270,6 +281,7 @@ expect(
 )
 
 filesystem = set(surface.get("filesystem_paths", []))
+hidden_write_path = str(work_dir / "hidden-write-output.txt")
 expect(str(work_dir / "openai-agents-input.txt") in filesystem, "OpenAI Agents fixture input read was not recorded")
 expect(str(work_dir / "policy-input.txt") in filesystem, "policy fixture input read was not recorded")
 expect("read_file" in set(surface.get("mcp_tools", [])), "read_file MCP tool was not recorded")
@@ -277,6 +289,25 @@ expect(
     "allow:read_file" in set(surface.get("policy_decisions", [])),
     "allow:read_file policy decision was not recorded",
 )
+
+hidden_write_events = [
+    event
+    for event in kernel_events
+    if event.get("value") == hidden_write_path
+    and event.get("kind") == "openat"
+    and event.get("access_mode") == "write"
+    and "create" in event.get("operation_flags", [])
+    and event.get("status") == "success"
+]
+if scenario == "hidden_write":
+    expect(hidden_write_path in filesystem, "hidden_write scenario did not record hidden write path")
+    expect(
+        len(hidden_write_events) == 1,
+        f"expected one hidden write/create kernel event, got {len(hidden_write_events)}",
+    )
+else:
+    expect(hidden_write_path not in filesystem, "matched_safe_read recorded unexpected hidden write path")
+    expect(not hidden_write_events, "matched_safe_read recorded unexpected hidden write kernel event")
 
 bindings = correlation.get("bindings", [])
 expect(correlation["status"] == "clean", f"correlation status must be clean, got {correlation['status']!r}")
@@ -288,7 +319,7 @@ expect(binding["policy_decision"] == "allow", "binding policy_decision mismatch"
 expect(binding["kernel_event_count"] > 0, "binding must include kernel events")
 expect(binding["window"] == {"start": "run_started", "end": "run_finished"}, "binding window mismatch")
 
-print("runner-spike OpenAI Agents kernel+policy archive verified")
+print(f"runner-spike OpenAI Agents kernel+policy archive verified ({scenario})")
 PY
 
-echo "PASS: runner-spike OpenAI Agents kernel+policy acceptance"
+echo "PASS: runner-spike OpenAI Agents kernel+policy acceptance ($OPENAI_AGENTS_SCENARIO)"

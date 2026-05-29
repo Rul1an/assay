@@ -235,6 +235,8 @@ jobs:
                 "$PWD/scripts/ci/runner-spike-kernel-policy-three-run-determinism.sh"
               run_gate "openai-agents-kernel-policy" "OpenAI Agents kernel+policy+SDK three-run determinism" \
                 "$PWD/scripts/ci/runner-spike-openai-agents-kernel-policy-three-run-determinism.sh"
+              run_gate "openai-agents-hidden-write" "OpenAI Agents hidden_write semantic-gap determinism" \
+                "$PWD/scripts/ci/runner-spike-openai-agents-kernel-policy-hidden-write-three-run-determinism.sh"
               # Gemini Python google-genai second-runtime gate. Runs under
               # the existing `all` umbrella per #1307 non-goal: do not
               # introduce a new narrower delegated gate name. If a narrower

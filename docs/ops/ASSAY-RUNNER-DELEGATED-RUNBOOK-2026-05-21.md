@@ -22,7 +22,7 @@ The delegated workflow runs the Linux/eBPF gates that hosted CI cannot prove:
 | `kernel-only` | `scripts/ci/runner-spike-kernel-only-three-run-determinism.sh` | kernel observation, cgroup correlation, bundle verification, three-run determinism |
 | `kernel-policy` | `scripts/ci/runner-spike-kernel-policy-three-run-determinism.sh` | kernel plus policy correlation, bundle verification, three-run determinism |
 | `openai-agents-kernel-policy` | `scripts/ci/runner-spike-openai-agents-kernel-policy-three-run-determinism.sh` | kernel plus policy plus real `@openai/agents` SDK runtime correlation, bundle verification, three-run determinism |
-| `all` | all of the above, sequentially | full Phase 1 delegated proof |
+| `all` | all of the above, plus `scripts/ci/runner-spike-openai-agents-kernel-policy-hidden-write-three-run-determinism.sh` | full delegated proof, including the post-closure hidden-write semantic-gap expansion gate |
 
 Each three-run script executes its single-run acceptance three times and then
 compares the deterministic artifacts. Kernel raw event ordering is not used as

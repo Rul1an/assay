@@ -23,7 +23,12 @@ from typing import Any
 SCHEMA = "assay.runner.delegated_proof_pack.v0"
 KIND = "delegated_runner_proof_pack"
 GATE_SELECTIONS = {
-    "all": ("kernel-only", "kernel-policy", "openai-agents-kernel-policy"),
+    "all": (
+        "kernel-only",
+        "kernel-policy",
+        "openai-agents-kernel-policy",
+        "openai-agents-hidden-write",
+    ),
     "kernel-only": ("kernel-only",),
     "kernel-policy": ("kernel-policy",),
     "openai-agents-kernel-policy": ("openai-agents-kernel-policy",),
@@ -261,6 +266,7 @@ def self_test() -> None:
             "kernel-only": "passed",
             "kernel-policy": "missing",
             "openai-agents-kernel-policy": "missing",
+            "openai-agents-hidden-write": "missing",
         }:
             raise ProofPackError(f"self-test gate status mismatch: {statuses}")
         if not manifest["gates"][0]["archives"]:
