@@ -4,6 +4,7 @@ use assay_core::replay::{
     ReplayManifest,
 };
 use assert_cmd::Command;
+use predicates::prelude::*;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;

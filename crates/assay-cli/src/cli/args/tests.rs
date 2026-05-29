@@ -7,6 +7,22 @@ fn cli_debug_assert() {
     Cli::command().debug_assert();
 }
 
+#[test]
+fn visible_top_level_commands_have_descriptions() {
+    let missing: Vec<_> = Cli::command()
+        .get_subcommands()
+        .filter(|cmd| !cmd.is_hide_set())
+        .filter(|cmd| cmd.get_about().is_none())
+        .map(|cmd| cmd.get_name().to_string())
+        .collect();
+
+    assert!(
+        missing.is_empty(),
+        "visible top-level commands without descriptions: {}",
+        missing.join(", ")
+    );
+}
+
 #[cfg(feature = "sim")]
 #[test]
 fn sim_soak_parses_with_defaults() {

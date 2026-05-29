@@ -43,28 +43,46 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Run an evaluation suite and write run artifacts
     Run(RunArgs),
+    /// Run the CI gate and emit CI report artifacts
     Ci(CiArgs),
+    /// Create starter Assay config and trace fixtures
     Init(InitArgs),
+    /// Manage quarantined or flaky tests
     Quarantine(QuarantineArgs),
+    /// Inspect or transform trace inputs
     Trace(TraceArgs),
+    /// Calibrate thresholds from previous run artifacts
     Calibrate(CalibrateArgs),
+    /// Record or compare score baselines
     Baseline(BaselineArgs),
+    /// Validate config and trace files without a full run
     Validate(ValidateArgs),
+    /// Diagnose local setup, config, and trace health
     Doctor(DoctorArgs),
     /// Watch config/policy/trace files and rerun on changes
     Watch(WatchArgs),
+    /// Import external artifacts into Assay-compatible data
     Import(ImportArgs),
+    /// Migrate older config or policy formats
     Migrate(MigrateArgs),
+    /// Report policy and trace coverage
     Coverage(CoverageArgs),
+    /// Explain a test result or trace decision
     Explain(super::commands::explain::ExplainArgs),
+    /// Generate and run the local demo project
     Demo(DemoArgs),
+    /// Generate CI workflow scaffolding
     InitCi(InitCiArgs),
+    /// Apply supported automatic fixes
     Fix(FixArgs),
     /// Experimental: MCP Process Wrapper
     #[command(hide = true)]
     Mcp(McpArgs),
+    /// Print Assay version information
     Version,
+    /// Validate, format, and migrate policies
     Policy(PolicyArgs),
     /// Discover MCP servers on this machine (v1.8)
     Discover(DiscoverArgs),

@@ -162,6 +162,13 @@ pub(crate) async fn execute_pipeline(
         eprintln!("WARN: {}", msg);
     }
 
+    if cfg.model == "trace" && input.trace_file.is_none() {
+        eprintln!("config error: model: trace requires --trace-file <PATH>");
+        return Err(PipelineError::invalid_args(
+            "config uses model: trace, so --trace-file <PATH> is required",
+        ));
+    }
+
     let store = match assay_core::storage::Store::open(&input.db) {
         Ok(s) => s,
         Err(e) => {
