@@ -79,6 +79,12 @@ The first semantic-gap MVP harness is tracked in
 It generates the full synthetic semantic-gap matrix and evidence packs
 without promoting those outputs to delegated findings or product APIs.
 
+The first post-closure delegated gap sidecar is
+[`delegated-hidden-write-finding.md`](../../experiments/agent-observability-fidelity-2026-05/delegated-hidden-write-finding.md).
+It records one smoke-verified `hidden_write` row after the delegated
+positive baseline, while keeping the closed arc findings summary closed
+and leaving other semantic-gap scenarios synthetic-only.
+
 The delegated semantic-gap baseline plan is tracked in
 [`../../experiments/agent-observability-fidelity-2026-05/delegated-baseline-plan.md`](../../experiments/agent-observability-fidelity-2026-05/delegated-baseline-plan.md).
 It pins the real Runner capture gate, proof-pack artifacts, health

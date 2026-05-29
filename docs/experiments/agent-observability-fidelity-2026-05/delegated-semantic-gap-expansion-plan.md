@@ -2,9 +2,16 @@
 
 > **Status:** delegated-gap-expansion-plan-ready. This note predeclares
 > the smallest post-closure delegated gap expansion after the successful
-> `matched_safe_read` smoke. It does not dispatch a delegated run, add a
-> new schema, promote experiment artifacts, or publish delegated
-> semantic-gap findings.
+> `matched_safe_read` smoke. The plan itself did not dispatch a
+> delegated run, add a new schema, promote experiment artifacts, or
+> publish delegated semantic-gap findings.
+>
+> **Follow-up record:** implemented as one bounded sidecar in
+> [`runs/delegated-hidden-write/summary.md`](runs/delegated-hidden-write/summary.md)
+> and
+> [`delegated-hidden-write-finding.md`](delegated-hidden-write-finding.md).
+> The arc-level [`findings-summary.md`](findings-summary.md) remains
+> closed.
 >
 > **Last updated:** 2026-05-29
 
