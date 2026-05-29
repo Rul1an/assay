@@ -4,13 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Added a post-closure delegated semantic-gap expansion plan for the
-  agent-observability fidelity arc. The plan selects `hidden_write` as
-  the first delegated gap candidate after the smoke-verified
-  `matched_safe_read` baseline, pins same-head baseline revalidation,
-  clean-health, strong `tool_call_id` join, workdir-boundary, and
-  non-claim gates, and does not dispatch a run, publish delegated gap
-  findings, define schemas, or promote experiment artifacts.
+- Added a post-closure delegated semantic-gap expansion plan for
+  `hidden_write` after the smoke-verified `matched_safe_read` baseline.
+  The plan pins the technical review gate without dispatching a run,
+  publishing a gap finding, defining schemas, or promoting artifacts.
+- Clarified the experiment arc lifecycle rules for post-closure
+  follow-up plans: they must keep findings summaries closed, land any
+  new finding as a sidecar, and avoid hidden arc reopening.
 - Added an observability fidelity calibration reference note that generalizes
   the closed overhead and fidelity arcs' requested-vs-observed
   calibration lesson. The note frames retained signal as a prerequisite

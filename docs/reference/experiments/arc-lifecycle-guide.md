@@ -177,8 +177,33 @@ Good stop outcomes:
 - **Carrier/prototype complete:** feature-like carrier has enough shape
   for the next consumer to test.
 
-Follow-up questions should become trigger-only issues or a new arc with
-their own plan, not hidden extensions of the closed arc.
+Follow-up questions should usually become trigger-only issues or a new
+arc with their own plan, not hidden extensions of the closed arc. A
+closed arc may host a post-closure follow-up only when the follow-up
+keeps the original findings summary closed and satisfies the rules
+below.
+
+## Post-Closure Follow-Up Rules
+
+A post-closure follow-up is allowed when a closed arc already contains
+the substrate needed for one narrow technical gate and a separate new
+arc would hide more context than it clarifies.
+
+Before adding one, pin:
+
+- why the follow-up belongs to the closed arc's evidence substrate;
+- the single candidate, scenario, or gate being extended;
+- where any successful new finding will live as a sidecar, not as an
+  append to the closed `findings-summary.md`;
+- the health, calibration, join, or artifact-retention rules that can
+  stop the follow-up as inconclusive;
+- the non-claims that prevent the follow-up from reopening the whole
+  arc.
+
+Post-closure follow-ups should appear as explicitly labeled follow-up
+rows or sidecar plans, not as new numbered slices inside the closed
+arc. They must not promote schemas, broaden the closed findings
+summary, or imply that all remaining tail items are now active.
 
 ## Non-Claims
 
