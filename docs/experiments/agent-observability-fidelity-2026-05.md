@@ -512,12 +512,19 @@ roadmap and plan files.
 **Goal:** predeclare the first delegated gap scenario after the positive
 baseline without reopening the whole fidelity arc.
 
-> **Status:** plan-ready. The post-closure expansion gate is in
+> **Status:** smoke-verified. The post-closure expansion gate was
+> predeclared in
 > [`agent-observability-fidelity-2026-05/delegated-semantic-gap-expansion-plan.md`](agent-observability-fidelity-2026-05/delegated-semantic-gap-expansion-plan.md).
-> It selects `hidden_write` as the first delegated gap candidate and
-> keeps the follow-up bounded to one same-tool-call gap row. It does not
-> dispatch a delegated run, publish a gap finding, add a schema, or
-> promote experiment artifacts.
+> It selected `hidden_write` as the first delegated gap candidate and
+> kept the follow-up bounded to one same-tool-call gap row. Run
+> [`26620643517`](https://github.com/Rul1an/assay/actions/runs/26620643517)
+> passed the `openai-agents-hidden-write` gate and same-head
+> `openai-agents-kernel-policy` baseline. The sidecar record is in
+> [`agent-observability-fidelity-2026-05/runs/delegated-hidden-write/summary.md`](agent-observability-fidelity-2026-05/runs/delegated-hidden-write/summary.md)
+> and the sidecar finding is
+> [`agent-observability-fidelity-2026-05/delegated-hidden-write-finding.md`](agent-observability-fidelity-2026-05/delegated-hidden-write-finding.md).
+> It does not add a schema, promote experiment artifacts, publish other
+> delegated gap scenarios, or reopen the closed findings summary.
 
 The positive `matched_safe_read` baseline is already
 smoke-verified. That makes a narrow delegated gap expansion technically
@@ -594,7 +601,7 @@ visible by the overhead and shape-comparison arcs.
 
 Arc status: closed at Slice 8 with
 [`agent-observability-fidelity-2026-05/findings-summary.md`](agent-observability-fidelity-2026-05/findings-summary.md).
-Post-closure Follow-up A is plan-ready for a narrow delegated
+Post-closure Follow-up A is smoke-verified for a narrow delegated
 `hidden_write` expansion. Slice 9 remains optional and trigger-only.
 
 | Slice | Status | Purpose | Exit gate |
@@ -608,7 +615,7 @@ Post-closure Follow-up A is plan-ready for a narrow delegated
 | 6 | Harness-ready | Interop matrix harness | Five synthetic starter cells emit strict `interop_coverage_cell.v0` rows, join-result refs, claim-class refs, source snapshots, partial/absent rows, and stable output directories without delegated publication. |
 | 7 | Delegated-baseline-smoke-verified | Delegated semantic-gap baseline | Run `26571739019` passed the `openai-agents-kernel-policy` delegated gate, uploaded proof pack `assay-runner-delegated-proof-pack-26571739019`, and validated clean health plus strong `tool_call_id` positive baseline join without promoting delegated gap scenarios. |
 | 8 | Done | Fidelity arc findings summary | Citation-friendly summary closes the arc across calibration, evidence-pack, semantic-gap, interop, and delegated-baseline outcomes without promoting product APIs or publishing delegated gap findings. |
-| Follow-up A | Delegated-gap-expansion-plan-ready | Delegated semantic-gap expansion | `hidden_write` is selected as the first delegated gap candidate with same-head positive-baseline revalidation, clean-health, strong-join, workdir-boundary, and non-claim gates pinned before dispatch. |
+| Follow-up A | Delegated-gap-smoke-verified | Delegated semantic-gap expansion | Run `26620643517` passed the `openai-agents-hidden-write` delegated gate and same-head positive baseline, producing a bounded `semantic_gap` sidecar row for `hidden_write` without reopening the arc findings summary. |
 | 9 | Optional | OTel span-limit study | Only after an external trigger; otherwise remains issue-only. |
 
 ## Experiment vs Feature Boundary
@@ -645,14 +652,17 @@ invariants without promoting delegated gap scenarios.
 `Delegated-gap-expansion-plan-ready` means one delegated gap candidate,
 same-head baseline revalidation rules, health gates, join invariants,
 review artifacts, and non-claims are pinned before any delegated gap
-dispatch.
+dispatch. `Delegated-gap-smoke-verified` means that one predeclared
+delegated gap candidate ran, produced the required proof pack or
+references, satisfied the predeclared health and join invariants, and
+landed as a sidecar finding without reopening the closed arc summary.
 
 ## What Not To Do Yet
 
-- Do not dispatch delegated gap scenarios as part of this baseline
-  smoke. The delegated `matched_safe_read` gate is clean; any delegated
-  gap scenario still needs its own accepted dispatch follow-up,
-  non-claims, and review gate before it is cited as measured evidence.
+- Do not dispatch additional delegated gap scenarios just because
+  `hidden_write` is smoke-verified. Each additional delegated scenario
+  still needs its own accepted dispatch follow-up, non-claims, and
+  review gate before it is cited as measured evidence.
 - Do not turn the Interop Matrix into product ranking. It is now
   harness-ready, but it remains a coverage and claim-strength map.
 - Do not turn the required product-development list into one epic. Each

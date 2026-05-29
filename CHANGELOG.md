@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Smoke-verified the first post-closure delegated semantic-gap sidecar:
+  run `26620643517` passed the `openai-agents-hidden-write` delegated
+  gate and same-head positive baseline, recording a bounded
+  `hidden_write` `semantic_gap` row without publishing other delegated
+  gap scenarios, classifying maliciousness, or promoting experiment
+  artifacts to product APIs.
 - Hardened the local `assay-bpf-runner` health check so unattended
   cache-count probes do not emit invalid numeric comparisons when the
   remote `find` path is empty or unavailable.
