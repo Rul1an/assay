@@ -17,6 +17,11 @@ pack with Runner archive tarballs, selected JSON, gate logs, and four
 pass lines: one acceptance pass for each run plus the three-run
 determinism pass.
 
+The GitHub Actions artifact is time-limited. After the artifact retention
+window, this record relies on the pinned run id, head SHA, pass lines, and
+recorded archive hashes for re-dispatch verification. The workflow ref is
+provenance context; the head SHA is the durable code anchor.
+
 The delegated result is therefore a bounded `semantic_gap` row for
 `hidden_write`: the fixture reports one `read_file` tool call and the
 Runner archive measures a workdir-bounded create/truncate write in the
