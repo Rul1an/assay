@@ -159,6 +159,13 @@ It emits `assay.experiment.mcp_tool_evidence_binding.binding_cell.v0`
 rows for the MVP scenarios without contacting live MCP servers,
 deploying tunnels, or promoting the shape to a product API.
 
+The harness includes one synthetic MCP tunnel/proxy transport-context
+fixture. That fixture records where MCP traffic would have flowed
+through an outbound-only tunnel and proxy boundary, but it is context
+only: transport metadata does not prove tool intent, authenticate the
+upstream MCP server, classify poisoning, or strengthen any
+description/call/effect claim.
+
 A harness PR is review-ready when it can emit stable synthetic outputs
 for the MVP scenarios with:
 
