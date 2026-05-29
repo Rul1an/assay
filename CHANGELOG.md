@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Hardened the local `assay-bpf-runner` health check so unattended
+  cache-count probes do not emit invalid numeric comparisons when the
+  remote `find` path is empty or unavailable.
 - Added an opt-in delegated `hidden_write` semantic-gap expansion gate under
   the `Runner Spike Delegated` workflow's `gates=all` path. The existing
   `openai-agents-kernel-policy` baseline gate remains unchanged; the new

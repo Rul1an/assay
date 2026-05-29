@@ -147,7 +147,7 @@ STALE_JOB_HOURS="${STALE_JOB_HOURS:-4}"
 cancel_stale_jobs() {
     local gh="${GH_CMD:-gh}"
     local cutoff_time
-    cutoff_time=$(date -u -v-${STALE_JOB_HOURS}H '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
+    cutoff_time=$(date -u -v-"${STALE_JOB_HOURS}"H '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
                   date -u -d "${STALE_JOB_HOURS} hours ago" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "")
 
     if [[ -z "$cutoff_time" ]]; then
@@ -239,7 +239,7 @@ prioritize_pr_runs() {
 
         # Cancel push runs (they'll be superseded by next push anyway)
         $gh run list --repo "$REPO" --status queued --event push --limit 10 --json databaseId 2>/dev/null | \
-            jq -r '.[].databaseId' | while read run_id; do
+            jq -r '.[].databaseId' | while read -r run_id; do
             log_info "Cancelling push run $run_id (PR priority)..."
             $gh run cancel "$run_id" --repo "$REPO" 2>/dev/null || true
             sleep 1
@@ -439,10 +439,17 @@ clean_actions_cache() {
     log_info "Cleaning actions cache (entries older than ${ACTIONS_CACHE_MAX_AGE_DAYS} days)..."
 
     local cleaned_count
-    cleaned_count=$(multipass exec "$VM_NAME" -- sudo find "$ACTIONS_CACHE_DIR" -type d -mtime +${ACTIONS_CACHE_MAX_AGE_DAYS} -mindepth 2 -maxdepth 2 2>/dev/null | wc -l || echo "0")
+    if ! cleaned_count=$(
+        multipass exec "$VM_NAME" -- bash -lc \
+            "sudo find '$ACTIONS_CACHE_DIR' -type d -mtime +${ACTIONS_CACHE_MAX_AGE_DAYS} -mindepth 2 -maxdepth 2 -print 2>/dev/null || true" \
+            | wc -l \
+            | tr -d '[:space:]'
+    ); then
+        cleaned_count=0
+    fi
 
     if [[ "$cleaned_count" -gt 0 ]]; then
-        multipass exec "$VM_NAME" -- sudo find "$ACTIONS_CACHE_DIR" -type d -mtime +${ACTIONS_CACHE_MAX_AGE_DAYS} -mindepth 2 -maxdepth 2 -exec rm -rf {} \; 2>/dev/null || true
+        multipass exec "$VM_NAME" -- sudo find "$ACTIONS_CACHE_DIR" -type d -mtime +"${ACTIONS_CACHE_MAX_AGE_DAYS}" -mindepth 2 -maxdepth 2 -exec rm -rf {} \; 2>/dev/null || true
         log_ok "Cleaned $cleaned_count stale cache entries"
     else
         log_info "No stale cache entries found"
@@ -709,7 +716,7 @@ show_status() {
 
     # Check for stale jobs
     local cutoff_time stale_count
-    cutoff_time=$(date -u -v-${STALE_JOB_HOURS}H '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
+    cutoff_time=$(date -u -v-"${STALE_JOB_HOURS}"H '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
                   date -u -d "${STALE_JOB_HOURS} hours ago" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "")
     if [[ -n "$cutoff_time" ]]; then
         stale_count=$($gh run list --repo "$REPO" --status queued --limit 50 --json createdAt 2>/dev/null | \
@@ -728,7 +735,14 @@ show_status() {
     echo "=== Actions Cache ==="
     local cache_size cache_entries
     cache_size=$(timeout 10 multipass exec "$VM_NAME" -- du -sh "$ACTIONS_CACHE_DIR" 2>/dev/null | cut -f1 || echo "?")
-    cache_entries=$(timeout 10 multipass exec "$VM_NAME" -- find "$ACTIONS_CACHE_DIR" -maxdepth 2 -type d 2>/dev/null | wc -l || echo "?")
+    if ! cache_entries=$(
+        timeout 10 multipass exec "$VM_NAME" -- bash -lc \
+            "find '$ACTIONS_CACHE_DIR' -maxdepth 2 -type d -print 2>/dev/null || true" \
+            | wc -l \
+            | tr -d '[:space:]'
+    ); then
+        cache_entries="?"
+    fi
     echo "Cache Size: $cache_size"
     echo "Cache Entries: $cache_entries"
 
