@@ -1,0 +1,6 @@
+{
+  "arguments_digest": "sha256:d1a022e88fed4ac804978a70abccbb2c0cedc8bf6473b336c01060c9bf68eea7",
+  "kind": "synthetic_mcp_tool_call",
+  "tool_call_id": "mcp_call_001",
+  "tool_name": "read_file"
+}
