@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Surfaced the synthetic MCP tool evidence-binding quickstart from the
+  observability reference, the research note, and the root README
+  research section. Discoverability only: no new schema, no top-level
+  example, no poisoning-detection or product-API claim.
 - Added a boundary-first quickstart for the synthetic MCP tool
   evidence-binding harness. It demonstrates bounded
   `description -> call -> effect -> claim` reading without promoting the
