@@ -158,6 +158,10 @@ The synthetic harness lives in
 It emits `assay.experiment.mcp_tool_evidence_binding.binding_cell.v0`
 rows for the MVP scenarios without contacting live MCP servers,
 deploying tunnels, or promoting the shape to a product API.
+A runnable quickstart is now available at
+[`mcp-tool-evidence-binding-harness-2026-05/QUICKSTART.md`](mcp-tool-evidence-binding-harness-2026-05/QUICKSTART.md):
+it walks the out-of-boundary and co-visible-context scenarios as golden
+examples with their non-claims.
 
 The harness includes one synthetic MCP tunnel/proxy transport-context
 fixture. That fixture records where MCP traffic would have flowed

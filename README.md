@@ -322,6 +322,10 @@ No release commitment. No timeline. No external demand has been measured.
 - [OWASP MCP Top 10 Mapping](docs/security/OWASP-MCP-TOP10-MAPPING.md) — how Assay relates to each risk category (coverage is **not** a scalar guarantee).
 - Third-party survey: popular MCP servers often show weak defaults — Assay adds policy + evidence; see discussion in the mapping doc.
 - [Security experiments](docs/architecture/SYNTHESIS-TRUST-CHAIN-TRIFECTA-2026q2.md) — attack vectors and harness notes (methodology matters more than headline counts).
+- [MCP tool evidence-binding quickstart](docs/experiments/mcp-tool-evidence-binding-harness-2026-05/QUICKSTART.md) —
+  synthetic description→call→effect binding with bounded claims.
+  Experiment-scoped; **not** a poisoning detector, and distinct from
+  the supported [MCP policy quickstart](examples/mcp-quickstart/) above.
 
 ## Contributing
 

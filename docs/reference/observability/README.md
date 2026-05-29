@@ -53,6 +53,11 @@ The MCP tool evidence binding research note is
 It asks what bounded evidence is needed to connect a model-visible MCP
 tool context, a tool call, and a measured runtime effect without
 claiming to detect poisoned tools or creating a new receipt family.
+A runnable, synthetic quickstart for that note lives in
+[`../../experiments/mcp-tool-evidence-binding-harness-2026-05/QUICKSTART.md`](../../experiments/mcp-tool-evidence-binding-harness-2026-05/QUICKSTART.md).
+It demonstrates bounded description→call→effect reading with non-claims
+as first-class output. It is experiment-scoped and is not a poisoning
+detector.
 
 Experiment-scoped schema naming and promotion rules for that roadmap are
 tracked in
