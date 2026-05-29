@@ -85,6 +85,45 @@ fn contract_run_json_always_written_arg_conflict() {
 }
 
 #[test]
+fn contract_model_trace_requires_trace_file() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"version: 1
+suite: trace-requires-input
+model: trace
+tests:
+  - id: t1
+    input: { prompt: "hello" }
+    expected: { type: must_contain, must_contain: ["hello"] }
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("assay").unwrap();
+    cmd.current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "model: trace requires --trace-file <PATH>",
+        ));
+
+    let v = read_run_json(dir.path());
+    assert_schema(&v);
+    assert_eq!(v["exit_code"], 2);
+    assert_eq!(v["reason_code"], "E_INVALID_ARGS");
+    assert!(v["resolution"]["message"]
+        .as_str()
+        .expect("resolution.message must be a string")
+        .contains("--trace-file <PATH> is required"));
+    assert_run_json_seeds_early_exit(&v);
+}
+
+#[test]
 fn contract_reason_code_trace_not_found_v2() {
     let dir = tempdir().unwrap();
     // Valid config schema with ID
