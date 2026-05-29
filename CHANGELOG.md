@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Clarified that the MCP tool evidence-binding harness's synthetic
+  tunnel/proxy transport fixture is context-only metadata and does not
+  prove tool intent, upstream MCP authentication, poisoning, or stronger
+  description/call/effect claims.
 - Added a synthetic MCP tool evidence-binding harness that emits
   experiment-scoped `binding_cell.v0` rows for description/call/effect
   scenarios, including plural visible tool-description sets and one
