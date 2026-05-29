@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added a synthetic MCP tool evidence-binding harness that emits
+  experiment-scoped `binding_cell.v0` rows for description/call/effect
+  scenarios, including plural visible tool-description sets and one
+  tunnel-context fixture. The harness does not contact live MCP servers,
+  detect poisoned tools, classify maliciousness, rank MCP
+  implementations, or promote a receipt family.
 - Smoke-verified the first post-closure delegated semantic-gap sidecar:
   run `26620643517` passed the `openai-agents-hidden-write` delegated
   gate and same-head positive baseline, recording a bounded

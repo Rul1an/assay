@@ -151,10 +151,16 @@ chain is reviewed.
    plan.
 8. No schema, receipt family, or product API is promoted by this note.
 
-## Possible Future Harness Gate
+## Harness Gate
 
-A follow-up harness PR is review-ready when it can emit stable synthetic
-outputs for the MVP scenarios with:
+The synthetic harness lives in
+[`mcp-tool-evidence-binding-harness-2026-05/README.md`](mcp-tool-evidence-binding-harness-2026-05/README.md).
+It emits `assay.experiment.mcp_tool_evidence_binding.binding_cell.v0`
+rows for the MVP scenarios without contacting live MCP servers,
+deploying tunnels, or promoting the shape to a product API.
+
+A harness PR is review-ready when it can emit stable synthetic outputs
+for the MVP scenarios with:
 
 - one captured or fixture-backed model-visible description set per
   scenario;
