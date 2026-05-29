@@ -205,6 +205,9 @@ def classify_file(path: str) -> tuple[Gate, str | None]:
     if path.startswith("scripts/ci/runner-spike-"):
         return Gate.ALL, f"{path}: shared runner-spike script requires gates=all"
 
+    if path == "scripts/ci/assay_runner_delegated_proof_pack.py":
+        return Gate.ALL, f"{path}: delegated proof-pack collector requires gates=all"
+
     if path == "tests/fixtures/runner-spike/kernel-only-agent.sh":
         return Gate.KERNEL_ONLY, f"{path}: kernel-only fixture requires gates=kernel-only"
 
@@ -607,6 +610,11 @@ def self_test() -> None:
         (["runner-fixtures/gemini-google-genai/fixture.py"], Gate.ALL),
         (["runner-fixtures/gemini-google-genai/sdk-policy-agent.sh"], Gate.ALL),
         (["scripts/ci/runner-spike-gemini-google-genai-acceptance.sh"], Gate.ALL),
+        (
+            ["scripts/ci/runner-spike-openai-agents-kernel-policy-hidden-write-three-run-determinism.sh"],
+            Gate.OPENAI_AGENTS_KERNEL_POLICY,
+        ),
+        (["scripts/ci/assay_runner_delegated_proof_pack.py"], Gate.ALL),
         # Read-only contract validators under scripts/ci/ do not exercise
         # the kernel, eBPF, or runner runtime path. They project over
         # normalized evidence files only. The cross-runtime-diff v0

@@ -50,7 +50,7 @@ changed layer:
 | Policy capture or policy-to-kernel coherence | `kernel-policy` |
 | OpenAI Agents SDK fixture, SDK event schema, SDK version assertion, or `tool_call_id` binding | `openai-agents-kernel-policy` |
 | Gemini Python `google-genai` fixture, SDK event schema, SDK version assertion, cassette content, or `tool_call_id` binding | `all` (no narrower Gemini-specific gate exists in v0; a narrower gate is a separate coordinated decision per #1307) |
-| `crates/assay-monitor/**`, `crates/assay-ebpf/**`, `crates/assay-xtask/**`, eBPF build/attach path, cgroup placement, telemetry filter, cross-layer archive, artifact schema, correlation report, workflow/security model, runner scripts, BPF/runtime dependency bump, or final release/acceptance proof | `all` |
+| Delegated hidden-write semantic-gap expansion, proof-pack collector changes, `crates/assay-monitor/**`, `crates/assay-ebpf/**`, `crates/assay-xtask/**`, eBPF build/attach path, cgroup placement, telemetry filter, cross-layer archive, artifact schema, correlation report, workflow/security model, runner scripts, BPF/runtime dependency bump, or final release/acceptance proof | `all` |
 
 If a change touches multiple surfaces, run the highest required gate. If the
 right gate is ambiguous, default to `all`.

@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added an opt-in delegated `hidden_write` semantic-gap expansion gate under
+  the `Runner Spike Delegated` workflow's `gates=all` path. The existing
+  `openai-agents-kernel-policy` baseline gate remains unchanged; the new
+  wrapper reuses the OpenAI Agents fixture with an explicit scenario selector
+  and asserts a workdir-bounded write/create effect without upgrading it to
+  maliciousness, policy-failure, or root-cause evidence.
 - Added a post-closure delegated semantic-gap expansion plan for
   `hidden_write` after the smoke-verified `matched_safe_read` baseline.
   The plan pins the technical review gate without dispatching a run,
