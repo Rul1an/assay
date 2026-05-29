@@ -25,6 +25,12 @@ The first delegated gap candidate is `hidden_write` because it keeps
 the same single-call, strong-join shape as the positive baseline while
 changing only the measured effect side.
 
+This plan follows the post-closure follow-up rules in the
+[`arc-lifecycle-guide`](../../reference/experiments/arc-lifecycle-guide.md#post-closure-follow-up-rules):
+the arc-level findings summary stays closed, any successful delegated
+gap result lands as a sidecar, and the follow-up remains bounded to one
+predeclared technical gate.
+
 ## Prerequisites
 
 | Prerequisite | Status | Why it matters |
@@ -107,6 +113,12 @@ retention is time-limited, the summary must record enough run id,
 artifact name, commit SHA, and digest metadata for re-dispatch
 verification.
 
+A successful delegated gap result should land as a sidecar finding, for
+example `delegated-hidden-write-finding.md`, next to the review
+directory. The existing arc-level
+[`findings-summary.md`](findings-summary.md) remains closed and should
+not be appended merely because one delegated gap row passes.
+
 ## Acceptance Rules
 
 - Dispatch no delegated gap scenario until this plan, or a successor
@@ -132,19 +144,18 @@ verification.
   `scenario_id=hidden_write`, `verdict=semantic_gap`, and
   `evidence_pack_claim_class=semantic_gap`.
 - If any required artifact is missing or health is not clean, classify
-  the result as `inconclusive` and stop. Do not reinterpret the failure
-  as a semantic gap.
+  the result as `inconclusive` with
+  `evidence_pack_claim_class=diagnostic` and stop. Do not reinterpret
+  the failure as a semantic gap.
 - Do not use timestamp/order proximity to upgrade the claim if
   `tool_call_id` binding is absent or ambiguous.
 
 ## Later Candidates
 
-| Scenario | When to attempt | Extra risk |
-|---|---|---|
-| `path_rewrite` | After `hidden_write` proves one delegated gap can preserve a strong join | Path projection must distinguish symlink link path, resolved target, and workdir containment without claiming policy failure. |
-| `retry_self_correction` | After the delegated review carrier handles multiple measured effects for one call | The evidence model must preserve attempt order without treating retry behavior as bad. |
-| `runtime_side_effect` | Only after run-scope rows are reviewed separately | The measured effect is not tool intent and must remain diagnostic. |
-| `weak_join_fallback` | Only if a consumer needs delegated weak-join behavior | The expected outcome is diagnostic-only; it should not become a semantic-gap publication row. |
+Other synthetic gap scenarios remain in scope of the synthetic matrix.
+Each delegated expansion beyond `hidden_write` requires its own
+predeclared gate, review output, stop conditions, and non-claims before
+dispatch.
 
 ## Stop Conditions
 
