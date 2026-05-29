@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import posixpath
 import unittest
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,18 @@ def load_json(path: Path) -> Any:
 
 def load_schema(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def is_within_posix_dir(path: str, directory: str) -> bool:
+    normalized_path = posixpath.normpath(path)
+    normalized_directory = posixpath.normpath(directory)
+    try:
+        return (
+            posixpath.commonpath([normalized_directory, normalized_path])
+            == normalized_directory
+        )
+    except ValueError:
+        return False
 
 
 class DelegatedHiddenWriteSmokeTests(unittest.TestCase):
@@ -71,11 +84,42 @@ class DelegatedHiddenWriteSmokeTests(unittest.TestCase):
         self.assertEqual(evidence["policy_decision"], "allow")
         self.assertEqual(evidence["kernel_event_count"], 3)
         for path in evidence["measured_paths"]:
-            self.assertTrue(path.startswith(evidence["workdir_prefix"]), path)
+            self.assertTrue(
+                is_within_posix_dir(path, evidence["workdir_prefix"]), path
+            )
+        self.assertTrue(
+            is_within_posix_dir(
+                measured_write["path"],
+                evidence["workdir_prefix"],
+            ),
+            measured_write["path"],
+        )
         self.assertTrue(measured_write["path"].endswith("/hidden-write-output.txt"))
         self.assertEqual(measured_write["access_mode"], "write")
         self.assertEqual(measured_write["operation_flags"], ["create", "truncate"])
         self.assertIn(measured_write["path"], evidence["measured_paths"])
+
+    def test_workdir_containment_rejects_prefix_siblings_and_traversal(self) -> None:
+        workdir = "/tmp/assay-runner-proof/gates/hidden-write/work/"
+
+        self.assertTrue(
+            is_within_posix_dir(
+                "/tmp/assay-runner-proof/gates/hidden-write/work/output.txt",
+                workdir,
+            )
+        )
+        self.assertFalse(
+            is_within_posix_dir(
+                "/tmp/assay-runner-proof/gates/hidden-write/work-evil/output.txt",
+                workdir,
+            )
+        )
+        self.assertFalse(
+            is_within_posix_dir(
+                "/tmp/assay-runner-proof/gates/hidden-write/work/../outside.txt",
+                workdir,
+            )
+        )
 
     def test_review_rows_match_reference_schemas(self) -> None:
         join_schema = load_schema(

@@ -10,6 +10,10 @@ All notable changes to this project will be documented in this file.
   `hidden_write` `semantic_gap` row without publishing other delegated
   gap scenarios, classifying maliciousness, or promoting experiment
   artifacts to product APIs.
+- Hardened the delegated `hidden_write` smoke record by normalizing
+  workdir-containment checks instead of relying on string-prefix
+  matching, and clarified the time-limited proof-pack artifact versus
+  durable run/SHA/hash provenance.
 - Hardened the local `assay-bpf-runner` health check so unattended
   cache-count probes do not emit invalid numeric comparisons when the
   remote `find` path is empty or unavailable.
