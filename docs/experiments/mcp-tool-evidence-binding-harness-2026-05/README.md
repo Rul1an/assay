@@ -44,6 +44,9 @@ runtime effect was measured.
 
 ## Output Layout
 
+For a runnable boundary-first walkthrough, see
+[`QUICKSTART.md`](QUICKSTART.md).
+
 Run:
 
 ```bash

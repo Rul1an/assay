@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added a boundary-first quickstart for the synthetic MCP tool
+  evidence-binding harness. It demonstrates bounded
+  `description -> call -> effect -> claim` reading without promoting the
+  schema, contacting live MCP servers, or claiming poisoning detection.
 - Added checked-in starter outputs for the synthetic MCP tool
   evidence-binding harness and a regression test that regenerates them
   to catch harness/output drift.
