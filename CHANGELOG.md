@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added checked-in starter outputs for the synthetic MCP tool
+  evidence-binding harness and a regression test that regenerates them
+  to catch harness/output drift.
 - Clarified that the MCP tool evidence-binding harness's synthetic
   tunnel/proxy transport fixture is context-only metadata and does not
   prove tool intent, upstream MCP authentication, poisoning, or stronger

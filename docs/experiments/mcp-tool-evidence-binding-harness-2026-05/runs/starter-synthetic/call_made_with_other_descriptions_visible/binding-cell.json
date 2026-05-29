@@ -1,0 +1,62 @@
+{
+  "assay_commit": "synthetic-starter-output",
+  "call_observed": true,
+  "called_tool_description_digest": "sha256:933d4192f09bc1cb704f00d711c0462c1761fe82504024a424dcffcdd9ef9556",
+  "called_tool_manifest_digest": "sha256:bbe1e428ff1f2a9ae3f493fbb1664c77308de9f8be464bc4506284b19fd3bcee",
+  "called_tool_name": "read_file",
+  "claim_outcome": "call_isolated_in_visible_context",
+  "co_visible_tool_names": [
+    "read_file",
+    "write_file"
+  ],
+  "context_descriptor_set_digest": "sha256:cd7e6646a2432fb05476d810f4112ca498f5ff433d0416c72698a91051cffc76",
+  "context_descriptor_set_ref": "context-descriptor-set.json",
+  "created_at": "2026-05-29T00:00:00Z",
+  "description_matches_manifest": true,
+  "effect_capture_status": "observed",
+  "effect_within_declared_boundary": true,
+  "join_grade": "strong",
+  "join_key": "tool_call_id",
+  "mapping_notes": [
+    "The called tool is bound while preserving the complete co-visible tool description set.",
+    "The row records co-visibility without claiming causation between other visible descriptions and the call."
+  ],
+  "measured_effect_kind": "filesystem_read",
+  "measured_effect_ref": "measured-effect.json",
+  "model_visible_tool_description_refs": [
+    {
+      "declared_boundary": [
+        "filesystem_read:/workspace/allowed/*"
+      ],
+      "digest": "sha256:933d4192f09bc1cb704f00d711c0462c1761fe82504024a424dcffcdd9ef9556",
+      "ref": "context-descriptor-set.json#/tools/0",
+      "source_surface": "synthetic_mcp_tools_list",
+      "tool_name": "read_file"
+    },
+    {
+      "declared_boundary": [
+        "filesystem_write:/workspace/out/*"
+      ],
+      "digest": "sha256:6d1a29b3d081c1575ed6d624edf6a53344cd76d696250a22ad2c50a426fd92fa",
+      "ref": "context-descriptor-set.json#/tools/1",
+      "source_surface": "synthetic_mcp_tools_list",
+      "tool_name": "write_file"
+    }
+  ],
+  "non_claims": [
+    "does_not_detect_tool_poisoning",
+    "does_not_classify_malicious_intent",
+    "does_not_rank_mcp_clients_servers_or_providers",
+    "does_not_define_mcp_spec_changes",
+    "does_not_promote_experiment_schema_to_product_api",
+    "does_not_claim_co_visible_description_caused_call"
+  ],
+  "required_links_complete": true,
+  "role": "context_boundary",
+  "scenario_id": "call_made_with_other_descriptions_visible",
+  "schema": "assay.experiment.mcp_tool_evidence_binding.binding_cell.v0",
+  "tool_call_id": "mcp_call_001",
+  "tool_call_ref": "tool-call.json",
+  "transport_context": null,
+  "transport_profile": "local_synthetic"
+}

@@ -60,6 +60,11 @@ Each scenario directory contains:
 - `transport-context.json` only for the synthetic tunnel fixture;
 - `summary.md`.
 
+The checked-in starter outputs are indexed from
+[`runs/README.md`](runs/README.md). The harness tests regenerate the
+`runs/starter-synthetic/` directory and fail if the committed outputs
+drift from the generator.
+
 ## Non-Claims
 
 - This harness does not detect tool poisoning.

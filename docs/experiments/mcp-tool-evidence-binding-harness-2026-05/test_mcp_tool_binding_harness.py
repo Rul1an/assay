@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parent
 HARNESS_PATH = ROOT / "mcp_tool_binding_harness.py"
 FIDELITY_ROOT = ROOT.parent / "agent-observability-fidelity-2026-05"
 SCHEMA_PATH = ROOT / "schema" / "mcp-tool-binding-cell-v0.schema.json"
+STABLE_RUNS = ROOT / "runs" / "starter-synthetic"
 
 schema_spec = importlib.util.spec_from_file_location(
     "fidelity_test_evidence_pack",
@@ -219,6 +220,35 @@ class McpToolBindingHarnessTests(unittest.TestCase):
                     out_dir=out,
                     scenarios=["benign_tool_call_bound"],
                     assay_commit="test",
+                )
+
+    def test_checked_in_starter_outputs_match_harness(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            generated = Path(tmp) / "starter-synthetic"
+            mcp_tool_binding_harness.generate_harness(
+                out_dir=generated,
+                scenarios=list(mcp_tool_binding_harness.STARTER_SCENARIOS),
+                assay_commit="synthetic-starter-output",
+                created_at="2026-05-29T00:00:00Z",
+            )
+
+            checked_in_files = sorted(
+                path.relative_to(STABLE_RUNS)
+                for path in STABLE_RUNS.rglob("*")
+                if path.is_file()
+            )
+            generated_files = sorted(
+                path.relative_to(generated)
+                for path in generated.rglob("*")
+                if path.is_file()
+            )
+
+            self.assertEqual(generated_files, checked_in_files)
+            for relative_path in checked_in_files:
+                self.assertEqual(
+                    (generated / relative_path).read_text(encoding="utf-8"),
+                    (STABLE_RUNS / relative_path).read_text(encoding="utf-8"),
+                    f"stable output drifted: {relative_path}",
                 )
 
 
