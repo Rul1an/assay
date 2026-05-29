@@ -36,7 +36,10 @@ Priority order:
    under real Runner capture before any gap finding is published.
 6. **Fidelity arc findings summary** - close the arc with bounded,
    citation-ready statements after the delegated baseline gate.
-7. **Optional OTel span-limit characterization** - only when an external
+7. **Delegated semantic-gap expansion** - only after the positive
+   baseline, predeclare the first delegated gap candidate and review
+   gate before any measured gap row is cited.
+8. **Optional OTel span-limit characterization** - only when an external
    consumer needs behavior above the default 128 span-event limit.
 
 ## Why This Direction
@@ -504,7 +507,42 @@ roadmap and plan files.
   APIs.
 - The summary does not recommend one trace vocabulary over another.
 
-## Experiment 7 - Optional OTel Span-Limit Characterization
+## Post-Closure Follow-Up A - Delegated Semantic-Gap Expansion
+
+**Goal:** predeclare the first delegated gap scenario after the positive
+baseline without reopening the whole fidelity arc.
+
+> **Status:** plan-ready. The post-closure expansion gate is in
+> [`agent-observability-fidelity-2026-05/delegated-semantic-gap-expansion-plan.md`](agent-observability-fidelity-2026-05/delegated-semantic-gap-expansion-plan.md).
+> It selects `hidden_write` as the first delegated gap candidate and
+> keeps the follow-up bounded to one same-tool-call gap row. It does not
+> dispatch a delegated run, publish a gap finding, add a schema, or
+> promote experiment artifacts.
+
+The positive `matched_safe_read` baseline is already
+smoke-verified. That makes a narrow delegated gap expansion technically
+possible, but it does not make every synthetic gap scenario publishable.
+The first useful follow-up is `hidden_write`: one reported read-like
+tool call, one measured workdir-bounded write effect, one strong
+`tool_call_id` join, and explicit non-claims around maliciousness,
+policy failure, and root cause.
+
+### Acceptance rules
+
+- Keep the first delegated gap expansion to `hidden_write` only.
+- If fixture code, acceptance scripts, cgroup handling, SDK
+  normalization, policy normalization, or kernel extraction changes,
+  rerun the positive baseline on the same head SHA before citing the
+  gap row.
+- Require clean Runner health and a unique strong `tool_call_id` join.
+- Require the measured write/create effect to remain inside the
+  delegated fixture workdir.
+- Classify missing artifacts, unclean health, or ambiguous joins as
+  `inconclusive`, not as semantic gaps.
+- Preserve the existing semantic-gap verdict, join-result, claim-class,
+  evidence-pack, and redaction vocabularies.
+
+## Experiment 8 - Optional OTel Span-Limit Characterization
 
 **Goal:** characterize span-event throughput/fidelity only after raising
 the OTel SDK limit above the requested target.
@@ -556,7 +594,8 @@ visible by the overhead and shape-comparison arcs.
 
 Arc status: closed at Slice 8 with
 [`agent-observability-fidelity-2026-05/findings-summary.md`](agent-observability-fidelity-2026-05/findings-summary.md).
-Slice 9 remains optional and trigger-only.
+Post-closure Follow-up A is plan-ready for a narrow delegated
+`hidden_write` expansion. Slice 9 remains optional and trigger-only.
 
 | Slice | Status | Purpose | Exit gate |
 |---:|---|---|---|
@@ -569,6 +608,7 @@ Slice 9 remains optional and trigger-only.
 | 6 | Harness-ready | Interop matrix harness | Five synthetic starter cells emit strict `interop_coverage_cell.v0` rows, join-result refs, claim-class refs, source snapshots, partial/absent rows, and stable output directories without delegated publication. |
 | 7 | Delegated-baseline-smoke-verified | Delegated semantic-gap baseline | Run `26571739019` passed the `openai-agents-kernel-policy` delegated gate, uploaded proof pack `assay-runner-delegated-proof-pack-26571739019`, and validated clean health plus strong `tool_call_id` positive baseline join without promoting delegated gap scenarios. |
 | 8 | Done | Fidelity arc findings summary | Citation-friendly summary closes the arc across calibration, evidence-pack, semantic-gap, interop, and delegated-baseline outcomes without promoting product APIs or publishing delegated gap findings. |
+| Follow-up A | Delegated-gap-expansion-plan-ready | Delegated semantic-gap expansion | `hidden_write` is selected as the first delegated gap candidate with same-head positive-baseline revalidation, clean-health, strong-join, workdir-boundary, and non-claim gates pinned before dispatch. |
 | 9 | Optional | OTel span-limit study | Only after an external trigger; otherwise remains issue-only. |
 
 ## Experiment vs Feature Boundary
@@ -602,13 +642,17 @@ non-claims are pinned before dispatch. `Delegated-baseline-smoke-verified`
 means the delegated positive baseline ran, produced the required proof
 pack or references, and satisfied the predeclared health and join
 invariants without promoting delegated gap scenarios.
+`Delegated-gap-expansion-plan-ready` means one delegated gap candidate,
+same-head baseline revalidation rules, health gates, join invariants,
+review artifacts, and non-claims are pinned before any delegated gap
+dispatch.
 
 ## What Not To Do Yet
 
 - Do not dispatch delegated gap scenarios as part of this baseline
   smoke. The delegated `matched_safe_read` gate is clean; any delegated
-  gap scenario still needs its own dispatch plan, non-claims, and review
-  gate before it is cited as measured evidence.
+  gap scenario still needs its own accepted dispatch follow-up,
+  non-claims, and review gate before it is cited as measured evidence.
 - Do not turn the Interop Matrix into product ranking. It is now
   harness-ready, but it remains a coverage and claim-strength map.
 - Do not turn the required product-development list into one epic. Each
