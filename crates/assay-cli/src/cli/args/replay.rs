@@ -5,6 +5,10 @@ use super::ValidateOutputFormat;
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct ValidateArgs {
+    /// Path to config (same as --config)
+    #[arg(value_name = "CONFIG", conflicts_with = "config")]
+    pub config_path: Option<std::path::PathBuf>,
+
     #[arg(long, default_value = "assay.yaml")]
     pub config: std::path::PathBuf,
 
@@ -26,6 +30,12 @@ pub struct ValidateArgs {
     /// Fail if deprecated v1 policy format is detected
     #[arg(long)]
     pub deny_deprecations: bool,
+}
+
+impl ValidateArgs {
+    pub fn resolved_config(&self) -> &std::path::PathBuf {
+        self.config_path.as_ref().unwrap_or(&self.config)
+    }
 }
 
 #[derive(Parser, Clone)]
