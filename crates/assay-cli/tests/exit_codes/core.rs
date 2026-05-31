@@ -304,3 +304,73 @@ tests:
     let run = read_run_json(dir.path());
     assert_eq!(run["reason_code"], "E_CFG_PARSE");
 }
+
+#[test]
+fn contract_run_format_json_emits_report_to_stdout() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        "suite: test\nmodel: dummy\ntests:\n  - id: pass\n    input: hello",
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    // stdout carries a valid, parseable JSON report (the CI piping contract).
+    let stdout = String::from_utf8(out.stdout).expect("stdout utf8");
+    let report: Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON for --format json");
+    assert!(report.get("run_id").is_some(), "report missing run_id");
+    assert!(report.get("suite").is_some(), "report missing suite");
+    assert!(
+        report.get("results").and_then(|r| r.as_array()).is_some(),
+        "report missing results array"
+    );
+
+    // The run.json artifact is still written and schema-valid regardless of format.
+    let run = read_run_json(dir.path());
+    assert_schema(&run);
+    assert_eq!(run["exit_code"], 0);
+}
+
+#[test]
+fn contract_run_default_text_keeps_stdout_clean() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        "suite: test\nmodel: dummy\ntests:\n  - id: pass\n    input: hello",
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    // Default text format leaves stdout empty (human report goes to stderr),
+    // so `--format json` is the only thing that writes machine output to stdout.
+    assert!(
+        out.stdout.is_empty(),
+        "default text run must not write to stdout, got: {:?}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
