@@ -12,8 +12,10 @@ pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1");
     }
 
+    let config_path = args.resolved_config();
+
     // 1. Load Config
-    let cfg = match load_config(&args.config, legacy_mode, true) {
+    let cfg = match load_config(config_path, legacy_mode, true) {
         Ok(c) => c,
         Err(e) => {
             let diag = Diagnostic::new(
@@ -22,7 +24,7 @@ pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             )
             .with_source("config")
             .with_context(json!({
-                "file": args.config,
+                "file": config_path,
             }));
 
             let report = ValidateReport {
@@ -35,7 +37,7 @@ pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         }
     };
 
-    let resolver = PathResolver::new(&args.config);
+    let resolver = PathResolver::new(config_path);
 
     // 2. Prepare Options
     let opts = ValidateOptions {
@@ -140,6 +142,7 @@ fn build_validate_json(
     args: &ValidateArgs,
     exit_code: i32,
 ) -> serde_json::Value {
+    let config_path = args.resolved_config();
     let mut diags: Vec<&Diagnostic> = report.diagnostics.iter().collect();
 
     // Deterministic sort: severity_rank > code > message > file
@@ -166,7 +169,7 @@ fn build_validate_json(
 
     let mut args_list: Vec<String> = vec![
         "--config".into(),
-        args.config.display().to_string(),
+        config_path.display().to_string(),
         "--format".into(),
         match args.format {
             ValidateOutputFormat::Text => "text",
@@ -193,12 +196,12 @@ fn build_validate_json(
     }
 
     // Agentic Contract Integration
-    let inferred_policy = infer_policy_path(&args.config);
+    let inferred_policy = infer_policy_path(config_path);
     let (suggested_actions, suggested_patches) = build_suggestions(
         &report.diagnostics,
         &AgenticCtx {
             policy_path: inferred_policy,
-            config_path: Some(args.config.clone()),
+            config_path: Some(config_path.clone()),
         },
     );
 
@@ -215,7 +218,7 @@ fn build_validate_json(
         "command": {
             "name": "validate",
             "args": args_list,
-            "config_file": args.config.display().to_string(),
+            "config_file": config_path.display().to_string(),
             "trace_file": args.trace_file.as_ref().map(|p| p.display().to_string()),
             "baseline_file": args.baseline.as_ref().map(|p| p.display().to_string())
         },

@@ -7,7 +7,7 @@ Validate agent traces against your policy. The standard CI gate.
 ## Synopsis
 
 ```bash
-assay validate [OPTIONS]
+assay validate [OPTIONS] [CONFIG]
 ```
 
 ## Description
@@ -21,7 +21,8 @@ Unlike `assay run`, which can perform active replay and LLM-as-a-Judge evaluatio
 ### Input
 | Option | Description |
 |--------|-------------|
-| `--config <FILE>` | Path to config. Default: `assay.yaml`. |
+| `[CONFIG]` | Optional positional config path. |
+| `--config <FILE>` | Path to config. Default: `assay.yaml`. Mutually exclusive with `[CONFIG]`. |
 | `--trace-file <FILE>` | Trace file to validate (JSONL). |
 | `--baseline <FILE>` | Compare against a baseline trace. |
 
@@ -67,4 +68,11 @@ Use `--format sarif` to integrate directly with GitHub Code Scanning.
 
 ```bash
 assay validate --trace-file traces.jsonl --format sarif --output results.sarif
+```
+
+Equivalent config path forms:
+
+```bash
+assay validate eval.yaml --trace-file traces.jsonl
+assay validate --config eval.yaml --trace-file traces.jsonl
 ```

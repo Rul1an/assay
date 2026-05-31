@@ -1,5 +1,6 @@
 use assay_core::config::load_config;
 use assert_cmd::Command;
+use predicates::prelude::*;
 use std::fs;
 use tempfile::tempdir;
 
@@ -41,6 +42,42 @@ fn test_init_hello_trace_contract() {
         .arg("traces/hello.jsonl")
         .assert()
         .success();
+}
+
+#[test]
+fn test_validate_accepts_positional_config_path() {
+    let temp = tempdir().expect("temp dir");
+
+    #[allow(deprecated)]
+    let mut init = Command::cargo_bin("assay").expect("assay binary");
+    init.current_dir(temp.path())
+        .arg("init")
+        .arg("--hello-trace")
+        .assert()
+        .success();
+
+    #[allow(deprecated)]
+    let mut validate = Command::cargo_bin("assay").expect("assay binary");
+    validate
+        .current_dir(temp.path())
+        .arg("validate")
+        .arg("eval.yaml")
+        .arg("--trace-file")
+        .arg("traces/hello.jsonl")
+        .assert()
+        .success();
+
+    #[allow(deprecated)]
+    let mut conflict = Command::cargo_bin("assay").expect("assay binary");
+    conflict
+        .current_dir(temp.path())
+        .arg("validate")
+        .arg("eval.yaml")
+        .arg("--config")
+        .arg("eval.yaml")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
 }
 
 #[test]
