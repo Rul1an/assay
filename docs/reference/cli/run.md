@@ -17,6 +17,7 @@ assay run [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `--config <PATH>` | Config file (default: `eval.yaml`) |
+| `--format <text\|json>` | Output format. `text` (default) prints a human report to stderr; `json` prints a machine-readable report to stdout. The `run.json`/`summary.json` artifacts are always written regardless. |
 | `--db <PATH>` | SQLite DB path (default: `.eval/eval.db`) |
 | `--trace-file <PATH>` | Trace file source for replay/validation |
 | `--strict` | Treat blocking results as failing exit status |

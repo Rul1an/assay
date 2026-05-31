@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use super::JudgeArgs;
+use super::{JudgeArgs, OutputFormat};
 
 #[derive(Parser, Clone)]
 pub struct RunArgs {
@@ -84,6 +84,12 @@ pub struct RunArgs {
     /// Disable signature verification (UNSAFE); recorded in summary.json as verify_enabled: false
     #[arg(long)]
     pub no_verify: bool,
+
+    /// Output format for results: text (human report on stderr) or json
+    /// (machine-readable report on stdout). The run.json/summary.json
+    /// artifacts are always written regardless of this flag.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub format: OutputFormat,
 }
 
 impl Default for RunArgs {
@@ -110,6 +116,7 @@ impl Default for RunArgs {
             deny_deprecations: false,
             exit_codes: crate::exit_codes::ExitCodeVersion::default(),
             no_verify: false,
+            format: OutputFormat::Text,
         }
     }
 }
