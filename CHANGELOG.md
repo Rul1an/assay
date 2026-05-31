@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added `assay run --format <text|json>`. `text` (default) keeps the
+  existing human-readable summary on stderr; `json` prints a
+  machine-readable results report to stdout so `assay run --format json >
+  results.json` composes with CI pipelines. The `run.json`/`summary.json`
+  artifacts and the exit-code contract are unchanged. This mirrors the
+  existing `assay validate --format` interface for consistency.
+
 - Surfaced the synthetic MCP tool evidence-binding quickstart from the
   observability reference, the research note, and the root README
   research section. Discoverability only: no new schema, no top-level
