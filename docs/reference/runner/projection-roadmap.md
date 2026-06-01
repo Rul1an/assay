@@ -365,7 +365,7 @@ Projection reports MUST carry explicit non-claims. Initial codes:
 
 | Slice | Deliverable | Gate |
 |---|---|---|
-| 1 | Path projection helper over existing cross-runtime drift fixtures | Unit tests with raw/projected dual view |
+| 1 | Path projection helper over declared filesystem path rules | Implemented in `assay-runner-core` with unit tests for raw/projected dual view |
 | 2 | Runtime/noise taxonomy constants and docs | Unknown-preserving tests |
 | 3 | Report provenance metadata block | Existing live run can be re-rendered with metadata |
 | 4 | Network projection helper | Exact endpoint, CIDR, and unknown fallback tests |
