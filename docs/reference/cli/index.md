@@ -29,7 +29,7 @@ assay --version
 | Command | Description |
 |---------|-------------|
 | [`assay run`](run.md) | Run tests against traces |
-| [`assay generate`](generate.md) | Generate policy scaffolding from trace/profile input |
+| [`assay policy`](policy.md) | Author, validate, format, and migrate policies |
 | [`assay explain`](explain.md) | Explain why trace steps were allowed/blocked |
 | [`assay bundle`](bundle.md) | Create/verify replay bundles |
 | [`assay replay`](replay.md) | Replay from a replay bundle |
@@ -82,10 +82,10 @@ assay ci --config eval.yaml --trace-file traces/golden.jsonl --sarif sarif.json 
 
 ```bash
 # Generate policy from trace
-assay generate --input traces/session.jsonl --output policy.yaml
+assay policy generate --input traces/session.jsonl --output policy.yaml
 
 # Preview changes against existing policy file
-assay generate --input traces/session.jsonl --output policy.yaml --diff --dry-run
+assay policy generate --input traces/session.jsonl --output policy.yaml --diff --dry-run
 ```
 
 ### Replay Bundles
@@ -217,13 +217,13 @@ See [Configuration](../config/index.md) for full reference.
 
     [:octicons-arrow-right-24: Full reference](explain.md)
 
--   :material-source-branch:{ .lg .middle } __assay generate__
+-   :material-source-branch:{ .lg .middle } __assay policy__
 
     ---
 
-    Generate policy scaffolding from traces/profiles and preview diffs.
+    Author, validate, format, and migrate policies.
 
-    [:octicons-arrow-right-24: Full reference](generate.md)
+    [:octicons-arrow-right-24: Full reference](policy.md)
 
 -   :material-import:{ .lg .middle } __assay import__
 

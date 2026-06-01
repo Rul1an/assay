@@ -92,8 +92,10 @@ pub enum Command {
     /// Runtime eBPF Monitor (Linux only)
     Monitor(super::commands::monitor::MonitorArgs),
     /// Learning Mode: Generate policy from trace or profile
+    #[command(hide = true)]
     Generate(super::commands::generate::GenerateArgs),
     /// Learning Mode: Capture and Generate in one flow
+    #[command(hide = true)]
     Record(super::commands::record::RecordArgs),
     /// Internal Assay-Runner Phase 1 spike command
     #[cfg(feature = "runner")]

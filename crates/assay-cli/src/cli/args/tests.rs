@@ -101,6 +101,53 @@ fn mcp_group_accepts_canonical_paths_and_legacy_shims_are_hidden() {
     assert!(matches!(legacy_tool.cmd, Command::Tool(_)));
 }
 
+#[test]
+fn policy_group_accepts_authoring_paths_and_legacy_shims_are_hidden() {
+    let visible: Vec<_> = Cli::command()
+        .get_subcommands()
+        .filter(|cmd| !cmd.is_hide_set())
+        .map(|cmd| cmd.get_name().to_string())
+        .collect();
+
+    assert!(visible.contains(&"policy".to_string()));
+    assert!(!visible.contains(&"generate".to_string()));
+    assert!(!visible.contains(&"record".to_string()));
+
+    let generate = Cli::try_parse_from([
+        "assay",
+        "policy",
+        "generate",
+        "--input",
+        "trace.jsonl",
+        "--dry-run",
+    ])
+    .expect("canonical policy generate command should parse");
+    assert!(matches!(
+        generate.cmd,
+        Command::Policy(PolicyArgs {
+            cmd: PolicyCommand::Generate(_)
+        })
+    ));
+
+    let record = Cli::try_parse_from(["assay", "policy", "record", "--", "echo", "hello"])
+        .expect("canonical policy record command should parse");
+    assert!(matches!(
+        record.cmd,
+        Command::Policy(PolicyArgs {
+            cmd: PolicyCommand::Record(_)
+        })
+    ));
+
+    let legacy_generate =
+        Cli::try_parse_from(["assay", "generate", "--input", "trace.jsonl", "--dry-run"])
+            .expect("legacy generate shim should parse");
+    assert!(matches!(legacy_generate.cmd, Command::Generate(_)));
+
+    let legacy_record = Cli::try_parse_from(["assay", "record", "--", "echo", "hello"])
+        .expect("legacy record shim should parse");
+    assert!(matches!(legacy_record.cmd, Command::Record(_)));
+}
+
 #[cfg(feature = "sim")]
 #[test]
 fn sim_soak_parses_with_defaults() {
