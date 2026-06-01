@@ -79,6 +79,10 @@ Path projection is the highest-leverage next step. Current drift reports
 show too much absolute run-directory noise. The fix is not to remove raw
 paths; it is to add a logical path layer above them.
 
+> The smallest buildable first slice of this phase — declared-rule
+> projection only, no heuristics, no network — is scoped in
+> [`path-projection-slice1-plan.md`](path-projection-slice1-plan.md).
+
 ### Shape
 
 ```json
