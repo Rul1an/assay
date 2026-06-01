@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.13.0] - 2026-06-01
+
+> `v3.13.0` closes the post-`v3.12.0` CLI UX pass and ships the first
+> selective command-grouping pilot. It keeps the core evaluation loop flat,
+> adds machine-readable `run` output, improves trace/validate ergonomics,
+> canonicalizes Trust Card spelling, and groups MCP runtime commands under
+> `assay mcp` while preserving hidden compatibility shims for the previous
+> flat paths.
+
 - Grouped MCP runtime commands under the visible `assay mcp` command
   family. The canonical forms are now `assay mcp discover`, `assay mcp
   kill`, and `assay mcp tool ...`; the previous flat `assay discover`,
