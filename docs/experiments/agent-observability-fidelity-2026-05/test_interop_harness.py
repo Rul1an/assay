@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import io
 import json
@@ -117,7 +118,14 @@ class InteropHarnessTests(unittest.TestCase):
                 for cell_id in interop_harness.STARTER_CELLS
                 for row in self.rows_for(out, cell_id)
             ]
+            summary = (out / "single_tool_joined_all" / "summary.md").read_text(
+                encoding="utf-8"
+            )
 
+            self.assertIn(
+                "| Observation profile | Coverage | Joinability | Claim strength | Mapping basis |",
+                summary,
+            )
             self.assertIn("strong_join", {row["joinability"] for row in rows})
             self.assertIn("diagnostic_join", {row["joinability"] for row in rows})
             self.assertIn("not_joinable", {row["joinability"] for row in rows})
@@ -128,6 +136,36 @@ class InteropHarnessTests(unittest.TestCase):
                 if row["joinability"] == "not_joinable":
                     self.assertEqual(row["coverage_status"], "absent")
                     self.assertIsNone(row["join_result_ref"])
+
+    def test_joinability_rejects_malformed_join_result_refs(self) -> None:
+        row = interop_harness.InteropRow(
+            cell_id="single_tool_joined_all",
+            scenario_id="matched_safe_read",
+            observation_profile="otel_genai_default",
+            agent_shape="single_tool_call",
+            join_key="tool_call_id",
+            evidence_layer="joined",
+            coverage_status="full",
+            claim_strength="strong",
+            claim_basis="reported",
+            mapping={"assay_claim_type": "reported_tool_intent"},
+            mapping_basis="explicit_upstream_doc",
+            mapping_notes=["test row"],
+            non_claims=["does_not_claim_semantic_equivalence"],
+            join_result_ref="join-results.json#/bad",
+        )
+        join_results = [{"join_grade": "strong"}]
+
+        with self.assertRaisesRegex(ValueError, "expected join-results.json#/<int>"):
+            interop_harness.row_joinability(row, join_results)
+
+        negative = dataclasses.replace(row, join_result_ref="join-results.json#/-1")
+        with self.assertRaisesRegex(ValueError, "index out of range"):
+            interop_harness.row_joinability(negative, join_results)
+
+        out_of_range = dataclasses.replace(row, join_result_ref="join-results.json#/1")
+        with self.assertRaisesRegex(ValueError, "index out of range"):
+            interop_harness.row_joinability(out_of_range, join_results)
 
     def test_latest_otel_row_records_exact_opt_in(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

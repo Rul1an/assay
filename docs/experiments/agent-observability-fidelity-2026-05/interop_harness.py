@@ -65,7 +65,15 @@ def referenced_join_result(
     prefix = "join-results.json#/"
     if not row.join_result_ref.startswith(prefix):
         raise ValueError(f"unsupported join_result_ref: {row.join_result_ref}")
-    index = int(row.join_result_ref[len(prefix) :])
+    raw_index = row.join_result_ref[len(prefix) :]
+    try:
+        index = int(raw_index)
+    except ValueError as exc:
+        raise ValueError(
+            f"unsupported join_result_ref (expected {prefix}<int>): {row.join_result_ref}"
+        ) from exc
+    if index < 0 or index >= len(join_results):
+        raise ValueError(f"join_result_ref index out of range: {row.join_result_ref}")
     return join_results[index]
 
 
