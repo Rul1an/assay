@@ -39,6 +39,10 @@ fn attestation_json() -> &'static str {
 }
 
 fn decision_json(digest: &str) -> String {
+    decision_json_with_value(digest, "allow")
+}
+
+fn decision_json_with_value(digest: &str, decision: &str) -> String {
     format!(
         r#"{{
   "version": 1,
@@ -48,7 +52,7 @@ fn decision_json(digest: &str) -> String {
     "attestationNonce": "nonce-1"
   }},
   "decisionDerived": {{
-    "decision": "allow",
+    "decision": "{decision}",
     "policyId": "policy:test",
     "decidedAt": "2026-06-01T00:00:01Z"
   }},
@@ -158,4 +162,70 @@ fn verify_mcp_records_fails_on_substituted_backlink() {
             "decision_attestation_digest_match",
         ))
         .stdout(predicate::str::contains("fail mismatch"));
+}
+
+#[test]
+fn verify_mcp_records_accepts_decision_only_pairing() {
+    let dir = tempdir().unwrap();
+    let attestation = dir.path().join("attestation.json");
+    let decision = dir.path().join("decision.json");
+    fs::write(&attestation, attestation_json()).unwrap();
+    fs::write(&decision, decision_json(ATTESTATION_DIGEST)).unwrap();
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence",
+            "verify-mcp-records",
+            "--attestation",
+            attestation.to_str().unwrap(),
+            "--decision",
+            decision.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let report: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["outcome"], Value::Null);
+    assert!(report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|check| { check["id"] == "outcome_absent" && check["ok"] == true }));
+}
+
+#[test]
+fn verify_mcp_records_fails_on_unknown_decision_enum() {
+    let dir = tempdir().unwrap();
+    let attestation = dir.path().join("attestation.json");
+    let decision = dir.path().join("decision.json");
+    fs::write(&attestation, attestation_json()).unwrap();
+    fs::write(
+        &decision,
+        decision_json_with_value(ATTESTATION_DIGEST, "defer"),
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence",
+            "verify-mcp-records",
+            "--attestation",
+            attestation.to_str().unwrap(),
+            "--decision",
+            decision.to_str().unwrap(),
+        ])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("decision_enum"))
+        .stdout(predicate::str::contains(
+            "defer is not one of allow, block, escalate",
+        ));
 }
