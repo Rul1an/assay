@@ -119,7 +119,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "assay-adapter-a2a"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -133,7 +133,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-acp"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-api"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "assay-evidence",
  "hex",
@@ -159,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-ucp"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "assay-cli"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -228,7 +228,7 @@ dependencies = [
 
 [[package]]
 name = "assay-common"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "aya",
  "chrono",
@@ -240,7 +240,7 @@ dependencies = [
 
 [[package]]
 name = "assay-core"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "anyhow",
  "assay-adapter-api",
@@ -289,7 +289,7 @@ dependencies = [
 
 [[package]]
 name = "assay-ebpf"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "assay-common",
  "aya-ebpf",
@@ -298,7 +298,7 @@ dependencies = [
 
 [[package]]
 name = "assay-evidence"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "anyhow",
  "assert_fs",
@@ -331,7 +331,7 @@ dependencies = [
 
 [[package]]
 name = "assay-it"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "assay-core",
  "pyo3",
@@ -343,7 +343,7 @@ dependencies = [
 
 [[package]]
 name = "assay-mcp-server"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -371,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "assay-metrics"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "assay-monitor"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -403,7 +403,7 @@ dependencies = [
 
 [[package]]
 name = "assay-policy"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "anyhow",
  "ipnet",
@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "assay-registry"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -443,7 +443,7 @@ dependencies = [
 
 [[package]]
 name = "assay-runner-core"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "assay-common",
  "assay-monitor",
@@ -460,7 +460,7 @@ dependencies = [
 
 [[package]]
 name = "assay-runner-linux"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -469,7 +469,7 @@ dependencies = [
 
 [[package]]
 name = "assay-runner-schema"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -478,7 +478,7 @@ dependencies = [
 
 [[package]]
 name = "assay-sim"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "anyhow",
  "assay-adapter-api",
@@ -499,7 +499,7 @@ dependencies = [
 
 [[package]]
 name = "assay-xtask"
-version = "3.13.0"
+version = "3.14.0"
 dependencies = [
  "anyhow",
  "clap",
