@@ -7,6 +7,9 @@
 > buildable first slice. It does not change the Runner archive v0
 > contracts, add a public CLI surface, infer heuristic classes, touch
 > network projection, or promote projection output to primary evidence.
+> The `assay.runner.path_projection.v0` and taxonomy schema strings used
+> by the helper are internal projection labels at this stage, not a
+> stable emitted artifact contract.
 
 ## Why a slice, not a new plan
 
@@ -74,7 +77,10 @@ The raw `filesystem_paths` set is unchanged. Projected rows are additive.
    by workflow or artifact metadata; an undeclared prefix stays raw.
 5. Unmatched raw paths are summarized by count and samples; `unknown` is
    not a failure.
-6. Projection is idempotent: projecting a projected report is a no-op.
+6. Projection is deterministic for this helper API: the same raw path
+   set plus the same declared rules yields the same additive projection.
+   The helper does not accept projection reports as input, so
+   re-projecting projected output is out of scope for Slice 1.
 7. Projection emits no policy verdict. `path_class` is reviewer
    vocabulary, not an allow/deny or safety judgment.
 8. A report can show "raw paths differ, projected paths match" without
@@ -98,10 +104,10 @@ The raw `filesystem_paths` set is unchanged. Projected rows are additive.
   `confidence=declared` for the workload-contract and declared-workdir
   cases.
 - Raw `filesystem_paths` round-trip unchanged.
-- Idempotence and `unknown`-preservation are covered by tests.
+- Determinism and `unknown`-preservation are covered by tests.
 - A fixture shows "raw differs / projected matches" with the
   non-equivalence non-claim attached.
 
 Slice 1 is implemented as a pure Rust helper in `assay-runner-core`.
-It does not yet wire projection into a CLI, archive schema, or stable
-runtime-drift report emitter.
+It does not yet wire projection into a CLI, archive schema, stable
+runtime-drift report emitter, or public schema artifact.
