@@ -68,12 +68,14 @@ CI: [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-securi
 No hosted backend. No API keys for core flows. Deterministic: same input, same decision.
 
 > **CLI release note:** `main` currently includes a small CLI UX close-out for
-> the next release line: `assay run --format json` emits machine-readable run
+> the `v3.13.0` release line: `assay run --format json` emits machine-readable run
 > results to stdout, `model: trace` now errors clearly when `--trace-file` is
 > missing, `assay validate eval.yaml` works beside `--config eval.yaml`, and
-> `assay trust-card` is the canonical Trust Card command spelling. These are
-> merged on `main`; see [CHANGELOG.md](CHANGELOG.md) for release status before
-> assuming crates.io availability.
+> `assay trust-card` is the canonical Trust Card command spelling. MCP runtime
+> commands are grouped under `assay mcp`, with hidden compatibility shims for
+> the previous flat `assay discover`, `assay kill`, and `assay tool ...` paths.
+> These are merged on `main`; see [CHANGELOG.md](CHANGELOG.md) for release
+> status before assuming crates.io availability.
 
 <details>
 <summary>Evidence levels and non-goals</summary>

@@ -167,14 +167,16 @@ Historical close-out note:
 
 To reduce "surface area tax" and improve adoption, CLI commands are positioned in two tiers:
 
-Post-`v3.12.0` CLI UX close-out is merged on `main`: top-level command help is
+The `v3.13.0` CLI UX close-out is merged on `main`: top-level command help is
 covered by regression tests, trace replay reports missing `--trace-file` as an
 argument error, `assay run --format json` provides stdout machine output,
 `assay validate` accepts a positional config path, and `assay trust-card` is the
 canonical Trust Card command spelling with `trustcard` retained as a deprecated
-compatibility alias. This is a discoverability and scripting pass only; it does
-not change scoring, artifact schemas, Trust Basis semantics, or the command
-grouping RFC migration plan.
+compatibility alias. The first command-grouping pilot is also merged: MCP
+runtime commands now live under `assay mcp`, with hidden compatibility shims for
+the previous flat `assay discover`, `assay kill`, and `assay tool ...` paths.
+This is a discoverability and scripting pass only; it does not change scoring,
+artifact schemas, Trust Basis semantics, or MCP policy behavior.
 
 ### Happy Path (Core Workflow)
 ```bash
@@ -187,7 +189,7 @@ assay evidence explore # Interactive TUI viewer
 ```
 
 ### Power Tools (Advanced/Experimental)
-All other commands (`quarantine`, `fix`, `demo`, `sim`, `discover`, `kill`, `mcp`, etc.) are documented separately as advanced tooling.
+All other commands (`quarantine`, `fix`, `demo`, `sim`, `mcp`, etc.) are documented separately as advanced tooling.
 
 ---
 
