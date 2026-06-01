@@ -1,14 +1,15 @@
 # Assay Roadmap 2026
 
 > **Status sync (2026-06-01, post-`v3.13.0`):** the latest public release is
-> **`v3.13.0`**. The workspace version on `main` is **`3.13.0`**. Post-release
+> tagged **`v3.13.0`**; the Cargo workspace/package version on `main` is
+> **`3.13.0`**. Post-release
 > `main` currently also contains the new `assay evidence verify-mcp-records`
 > command, its edge-test follow-up, and Tier 2a CLI grouping for
 > `assay policy generate` / `assay policy record`; those are merged repository
 > truth, not a separate crates.io release yet.
 > The current execution posture is: keep remaining CLI grouping trigger-gated,
 > keep Assay-Runner repository extraction gated, treat Assay-Harness `v3.13.0`
-> compatibility as verified by its release-binary proof rail
+> compatibility as verified by its release-binary compatibility CI check
 > ([run 26756652781](https://github.com/Rul1an/Assay-Harness/actions/runs/26756652781)),
 > and use the capability-diff / `assay-action` preview decision as the next
 > product-roadmap checkpoint.
@@ -194,7 +195,7 @@ artifact schemas, Trust Basis semantics, or MCP policy behavior.
 After `v3.13.0`, `main` also contains the Tier 2a policy-authoring grouping:
 `assay policy generate` and `assay policy record` are canonical, while the
 previous top-level `assay generate` and `assay record` paths remain hidden
-compatibility shims with stderr deprecation warnings. The rest of the CLI
+compatibility shims with `stderr` deprecation warnings. The rest of the CLI
 grouping RFC remains deliberately trigger-gated: `trust` and `replay` should
 move only with a concrete docs/user-maintenance reason, not just to reduce the
 top-level command count.
