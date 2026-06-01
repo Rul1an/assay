@@ -205,6 +205,7 @@ nav:
     - assay trust-basis: reference/cli/trust-basis.md
     - assay trust-card: reference/cli/trust-card.md
     - assay mcp-server: reference/cli/mcp-server.md
+    - CLI command grouping RFC: reference/cli/command-grouping-rfc.md
 
   - Metrics Reference:
     - metrics/index.md
