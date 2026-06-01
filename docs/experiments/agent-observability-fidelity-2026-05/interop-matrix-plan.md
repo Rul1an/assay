@@ -175,6 +175,9 @@ Rows that reference a claim-supporting `join_result.v0` row may use
 order context should use `diagnostic_join`; rows where the claim cannot
 be joined should use `not_joinable`; rows where a join is not relevant
 to the row's local claim may use `not_applicable`.
+It is a derived stored field: producers must compute it from the row's
+coverage, mapping basis, join key, and referenced `join_result.v0`
+grade rather than accepting user-supplied values.
 
 ## Acceptance Rules
 

@@ -79,6 +79,7 @@
       ]
     },
     "joinability": {
+      "description": "Derived row-level summary of join support. Producers compute this from coverage_status, mapping_basis, join_key, and any referenced join_result.v0 row; it is not an independent join contract.",
       "type": "string",
       "enum": [
         "strong_join",
