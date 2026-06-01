@@ -27,6 +27,7 @@ Phase 2B capability-diff planning slice.
 - [Runner cross-runtime diff Phase 2C decisions (A1+B3+C1)](cross-runtime-diff-decisions.md)
 - [Runner cross-runtime diff v0 contract](cross-runtime-diff-v0.md)
 - [Runner projection roadmap](projection-roadmap.md)
+- [Runner path projection Slice 1 plan (declared-rule only)](path-projection-slice1-plan.md)
 - [Runner schema overview](schemas-overview.md)
 - [Runner runtime drift projection v0/v0.2 contract](runtime-drift-v0.md)
 - [Runner cross-runtime diff v0 clean-output JSON Schema](schema/cross-runtime-diff-v0-clean.schema.json)
