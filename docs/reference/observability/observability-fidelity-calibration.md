@@ -44,6 +44,14 @@ This is a reference shape, not a new schema. The experiment-scoped
 implementation that proved the pattern is
 `assay.experiment.agent_observability_fidelity.calibration.v0`.
 
+For the separate Runner per-run measurement-health gate, see
+[`../runner/fidelity-verdict-v0.md`](../runner/fidelity-verdict-v0.md).
+That contract derives `clean`, `clipped`, `correlation_partial`,
+`failed`, or `not_applicable` from one `observation_health.v0` record.
+It is not this calibration `agreement` vocabulary: calibration compares
+requested versus observed signals, while Runner fidelity gates what
+claim types may be interpreted from a run's measurement health.
+
 ## Agreement Semantics
 
 The central vocabulary is the agreement field:

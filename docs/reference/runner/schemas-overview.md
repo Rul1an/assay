@@ -34,6 +34,7 @@
 | `assay.runner.network_projection.v0` | Additive network projection block embedded in runtime-drift reports | embedded projection vocabulary | described in [`runtime-drift-v0.md`](runtime-drift-v0.md) |
 | `assay.runner.runtime_noise_taxonomy.v0` | Shared vocabulary for runtime/provider/task/noise classes | vocabulary-only | described in [`runtime-drift-v0.md`](runtime-drift-v0.md) |
 | `assay.runner.drift_report_provenance.v0` | Render and capture provenance embedded in runtime-drift reports | embedded report metadata | described in [`runtime-drift-v0.md`](runtime-drift-v0.md) |
+| `assay.runner.fidelity_verdict.v0` | Derived claim gate from one `observation_health.v0` record | internal helper contract; no archive member or sidecar yet | described in [`fidelity-verdict-v0.md`](fidelity-verdict-v0.md) |
 | `assay.runner.cross_runtime_diff.v0.clean` | Earlier clean-output cross-runtime diff shape | reference schema | [`cross-runtime-diff-v0-clean.schema.json`](schema/cross-runtime-diff-v0-clean.schema.json) |
 
 ## Experiment Schemas
