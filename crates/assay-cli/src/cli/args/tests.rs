@@ -23,6 +23,31 @@ fn visible_top_level_commands_have_descriptions() {
     );
 }
 
+#[test]
+fn trust_card_command_accepts_canonical_and_legacy_names() {
+    let canonical = Cli::try_parse_from([
+        "assay",
+        "trust-card",
+        "generate",
+        "bundle.tar.gz",
+        "--out-dir",
+        "trustcard",
+    ])
+    .expect("canonical trust-card command should parse");
+    assert!(matches!(canonical.cmd, Command::TrustCard(_)));
+
+    let legacy = Cli::try_parse_from([
+        "assay",
+        "trustcard",
+        "generate",
+        "bundle.tar.gz",
+        "--out-dir",
+        "trustcard",
+    ])
+    .expect("legacy trustcard alias should parse");
+    assert!(matches!(legacy.cmd, Command::TrustCard(_)));
+}
+
 #[cfg(feature = "sim")]
 #[test]
 fn sim_soak_parses_with_defaults() {

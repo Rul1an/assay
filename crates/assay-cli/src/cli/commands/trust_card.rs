@@ -10,9 +10,17 @@ use assay_evidence::{
 use std::fs::File;
 
 pub fn run(args: TrustCardArgs) -> Result<i32> {
+    if invoked_via_legacy_trustcard() {
+        eprintln!("warning: `assay trustcard` is deprecated; use `assay trust-card` instead");
+    }
+
     match args.cmd {
         TrustCardSub::Generate(args) => cmd_generate(args),
     }
+}
+
+fn invoked_via_legacy_trustcard() -> bool {
+    std::env::args().nth(1).as_deref() == Some("trustcard")
 }
 
 fn cmd_generate(args: TrustCardGenerateArgs) -> Result<i32> {

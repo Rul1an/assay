@@ -155,7 +155,7 @@ The current claim-visible receipt families are Promptfoo assertion-component res
 <summary>Trust Card details</summary>
 
 ```bash
-assay trustcard generate demo/fixtures/bundle.tar.gz --out-dir ./trust-out
+assay trust-card generate demo/fixtures/bundle.tar.gz --out-dir ./trust-out
 # -> trust-out/trustcard.json , trust-out/trustcard.md , trust-out/trustcard.html
 ```
 
