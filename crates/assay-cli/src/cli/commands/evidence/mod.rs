@@ -5,6 +5,7 @@ pub mod list;
 pub mod livekit_tool_action;
 pub mod mapping;
 pub mod mastra_score_event;
+pub mod mcp_execution_records;
 pub mod openfeature_details;
 pub mod promptfoo_jsonl;
 pub mod pull;
@@ -26,6 +27,9 @@ pub enum EvidenceCmd {
     Export(EvidenceExportArgs),
     /// Verify a bundle's integrity and provenance
     Verify(EvidenceVerifyArgs),
+    /// Verify SEP-2787/server execution-record fixture pairing
+    #[command(name = "verify-mcp-records")]
+    VerifyMcpRecords(mcp_execution_records::McpExecutionRecordArgs),
     /// Inspect a bundle's contents (verify + show table)
     Show(EvidenceShowArgs),
     /// Import external evidence into an Assay evidence bundle
@@ -118,6 +122,7 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
     match args.cmd {
         EvidenceCmd::Export(a) => cmd_export(a),
         EvidenceCmd::Verify(a) => cmd_verify(a),
+        EvidenceCmd::VerifyMcpRecords(a) => mcp_execution_records::cmd_verify_mcp_records(a),
         EvidenceCmd::Show(a) => cmd_show(a),
         EvidenceCmd::Import(a) => cmd_import(a),
         EvidenceCmd::Schema(a) => schema::cmd_schema(a),

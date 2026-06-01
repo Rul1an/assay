@@ -17,3 +17,5 @@ mod deterministic_and_guardrails;
 mod flow_and_eval_receipts;
 #[path = "evidence_test/importer_receipts.rs"]
 mod importer_receipts;
+#[path = "evidence_test/mcp_execution_records.rs"]
+mod mcp_execution_records;

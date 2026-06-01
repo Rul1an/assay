@@ -65,6 +65,33 @@ Schema names can be the registry name, known alias, source path, or JSON Schema
 
 ---
 
+## MCP Execution Record Pairing
+
+Verify that SEP-2787 attestation and server execution-record fixtures pair up
+from the consumer side:
+
+```bash
+assay evidence verify-mcp-records \
+  --attestation sep2787-attestation.json \
+  --decision server-decision-record.json \
+  --outcome server-outcome-record.json \
+  --format json
+```
+
+This command emits an `assay.mcp.execution-record-pairing.report.v0` report. It
+computes the SEP-2787 JCS digest, checks the decision and optional outcome
+`backLink` fields, and verifies the narrow decision/outcome enum surface.
+
+The command is deliberately not an MCP proxy, issuer, policy engine, or runtime
+truth oracle. It does not verify signatures, establish issuer key trust, prove
+policy correctness, prove side effects, or disclose payload/result bodies. It is
+for downstream verifier fixtures and reviewer-visible pairing diagnostics.
+
+If `--outcome` is omitted, Assay reports a valid decision-only pairing check.
+Pairing or enum mismatches produce a report and exit `2`.
+
+---
+
 ## CycloneDX ML-BOM Model Import
 
 Import one selected CycloneDX ML-BOM `machine-learning-model` component into a
