@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.14.0] - 2026-06-01
+
+- Added `assay evidence verify-mcp-records`, a downstream consumer verifier
+  for SEP-2787 attestation and server execution-record fixture pairing. The
+  command computes the SEP-2787 JCS digest, checks decision/outcome `backLink`
+  fields, and emits an `assay.mcp.execution-record-pairing.report.v0` report.
+  It does not verify signatures, establish issuer key trust, proxy MCP, prove
+  policy correctness, prove side effects, or claim runtime truth.
+
 - Grouped policy authoring under `assay policy generate` and
   `assay policy record`. The previous top-level `assay generate` and
   `assay record` commands remain available as hidden compatibility shims with
