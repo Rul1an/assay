@@ -17,6 +17,7 @@
 
 mod archive_manifest;
 mod correlation;
+mod fidelity;
 mod health;
 mod sdk_event;
 mod surface;
@@ -29,6 +30,12 @@ pub use archive_manifest::{
 pub use correlation::{
     BindingWindow, CorrelationBinding, CorrelationReport, CorrelationReportError,
     CorrelationStatus, CORRELATION_REPORT_SCHEMA,
+};
+pub use fidelity::{
+    ClaimGateDecision, RunnerClaimGate, RunnerFidelityReason, RunnerFidelityVerdict,
+    RunnerFidelityVerdictReport, PROJECTION_CLAIM_LEVEL_INCONCLUSIVE,
+    PROJECTION_CLAIM_LEVEL_PROJECTED_EQUIVALENT, PROJECTION_CLAIM_LEVEL_RAW_OBSERVED,
+    RUNNER_FIDELITY_VERDICT_SCHEMA,
 };
 pub use health::{
     CgroupCorrelationStatus, KernelLayerStatus, ObservationHealth, ObservationHealthError,
