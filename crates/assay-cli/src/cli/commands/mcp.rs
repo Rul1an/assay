@@ -16,6 +16,9 @@ pub async fn run(args: McpArgs) -> anyhow::Result<i32> {
             super::config_path::run(config_args);
             Ok(0)
         }
+        McpSub::Discover(discover_args) => super::discover::run(discover_args).await,
+        McpSub::Kill(kill_args) => super::kill::run(kill_args).await,
+        McpSub::Tool(tool_args) => Ok(super::tool::cmd_tool(tool_args.cmd)),
     }
 }
 

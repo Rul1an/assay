@@ -174,8 +174,8 @@ The GitHub Action lives in this monorepo under `assay-action/` and is referenced
 - **`mcp.rs`**: `assay mcp` command
 - **`monitor.rs`**: `assay monitor` command
 - **`sandbox.rs`**: `assay sandbox` command
-- **`discover.rs`**: `assay discover` command
-- **`kill.rs`**: `assay kill` command
+- **`discover.rs`**: `assay mcp discover` command
+- **`kill.rs`**: `assay mcp kill` command
 - **`quarantine.rs`**: `assay quarantine` command
 - **`calibrate.rs`**: `assay calibrate` command
 - **`profile.rs`**: `assay profile` command
@@ -187,10 +187,10 @@ The GitHub Action lives in this monorepo under `assay-action/` and is referenced
   - **`evidence/push.rs`**: `assay evidence push` - Upload to BYOS storage
   - **`evidence/pull.rs`**: `assay evidence pull` - Download from BYOS storage
   - **`evidence/list.rs`**: `assay evidence list` - List bundles in storage
-- **`tool/mod.rs`**: `assay tool` command with subcommands:
-  - **`tool/keygen.rs`**: `assay tool keygen` - Generate ed25519 keypair
-  - **`tool/sign.rs`**: `assay tool sign` - Sign tool definition
-  - **`tool/verify.rs`**: `assay tool verify` - Verify signature
+- **`tool/mod.rs`**: `assay mcp tool` command with subcommands:
+  - **`tool/keygen.rs`**: `assay mcp tool keygen` - Generate ed25519 keypair
+  - **`tool/sign.rs`**: `assay mcp tool sign` - Sign tool definition
+  - **`tool/verify.rs`**: `assay mcp tool verify` - Verify signature
 - **`demo.rs`**: `assay demo` command
 - **`fix.rs`**: `assay fix` command (agentic policy fixing)
 - **`sim.rs`**: `assay sim` command

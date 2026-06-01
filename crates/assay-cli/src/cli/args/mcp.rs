@@ -1,18 +1,26 @@
+use super::ToolArgs;
+use crate::cli::commands::kill::KillArgs;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-#[derive(Parser, Clone, Debug)]
+#[derive(Parser, Debug)]
 pub struct McpArgs {
     #[command(subcommand)]
     pub cmd: McpSub,
 }
 
-#[derive(Subcommand, Clone, Debug)]
+#[derive(Subcommand, Debug)]
 pub enum McpSub {
     /// Wrap an MCP server process
     Wrap(McpWrapArgs),
     /// Detect config path and generate setup
     ConfigPath(ConfigPathArgs),
+    /// Discover MCP servers on this machine
+    Discover(DiscoverArgs),
+    /// Kill or terminate MCP server processes
+    Kill(KillArgs),
+    /// Sign and verify MCP tool definitions
+    Tool(ToolArgs),
 }
 
 #[derive(Parser, Clone, Debug)]

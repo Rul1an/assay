@@ -186,12 +186,12 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 
 **New in v2.10**: `--decision-log`, `--event-source`, `--audit-log` flags for mandate runtime enforcement.
 
-#### `assay discover`
+#### `assay mcp discover`
 **Purpose**: Discover MCP servers on machine
 **Entry**: `crates/assay-cli/src/cli/commands/discover.rs::run()`
 **Flow**: Scan for MCP processes → list servers
 
-#### `assay kill`
+#### `assay mcp kill`
 **Purpose**: Kill/terminate MCP servers
 **Entry**: `crates/assay-cli/src/cli/commands/kill.rs::run()`
 **Flow**: Find MCP processes → terminate
@@ -242,7 +242,7 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 - `pull --bundle-id <ID> --store <URI>`: Download from storage
 - `list --store <URI>`: List bundles
 
-#### `assay tool`
+#### `assay mcp tool`
 **Purpose**: Tool signing and verification
 **Entry**: `crates/assay-cli/src/cli/commands/tool/mod.rs::cmd_tool()`
 **Flow**: Generate keys, sign/verify tool definitions

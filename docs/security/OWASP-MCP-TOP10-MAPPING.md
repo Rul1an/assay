@@ -12,7 +12,7 @@ How Assay addresses the [OWASP MCP Top 10](https://owasp.org/www-project-mcp-top
 | Intent Flow Subversion | MCP06 | Strong | Sequence policies detect tool-call ordering violations. [Memory poisoning experiment](../architecture/RESULTS-EXPERIMENT-MEMORY-POISON-2026q2.md) tested delayed payload reactivation. |
 | Insufficient Authentication & Authorization | MCP07 | Strong | `approval_required` enforcement, mandate system with revocation, auth context validation. |
 | **Lack of Audit and Telemetry** | **MCP08** | **Complete** | **Evidence bundles, decision logs, replay, diff, lint, SARIF output.** This is Assay's primary value proposition. |
-| Shadow MCP Servers | MCP09 | Partial | `assay discover` lists MCP servers on the machine. Policy enforcement only applies to wrapped servers. |
+| Shadow MCP Servers | MCP09 | Partial | `assay mcp discover` lists MCP servers on the machine. Policy enforcement only applies to wrapped servers. |
 | Context Injection & Over-Sharing | MCP10 | Strong | `redact_args` enforcement strips sensitive fields. Context envelope hardening validates completeness. [Protocol evidence experiment](../architecture/RESULTS-EXPERIMENT-PROTOCOL-EVIDENCE-INTERPRETATION-2026q2.md) tested consumer-side interpretation. |
 
 ## Summary

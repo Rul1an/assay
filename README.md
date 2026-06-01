@@ -112,7 +112,9 @@ Assay does **not** ship a primary aggregate trust score or a `safe/unsafe` badge
               └─► 📊 Trust Basis → Trust Card → SARIF / CI
 ```
 
-> **CLI:** The `mcp` command group is **hidden** from top-level `assay --help` while the surface stabilizes; it is supported. Use `assay mcp --help`, `assay mcp wrap …`, or follow the [MCP Quickstart](examples/mcp-quickstart/).
+> **CLI:** MCP runtime commands live under `assay mcp`. Use `assay mcp --help`,
+> `assay mcp wrap …`, `assay mcp discover`, `assay mcp kill`, or follow the
+> [MCP Quickstart](examples/mcp-quickstart/).
 
 > **Wedge, not category.** “MCP firewall” describes the control plane; **trust compilation** describes the outcome: reviewable claims backed by evidence. See [ADR-033](docs/architecture/ADR-033-OTel-Trust-Compiler-Positioning.md) and [RFC-005](docs/architecture/RFC-005-trust-compiler-mvp-2026q2.md).
 
@@ -285,7 +287,7 @@ PRs that violate policy get blocked; SARIF can surface in the Security tab.
 | **Deterministic** | Same input, same decision — not probabilistic. |
 | **Portable artifacts** | Bundles, Trust Basis, Trust Card, SARIF — for CI, review, audit. |
 | **Bounded claims** | Explicit about what is **verified** vs **visible** vs **absent** — no score-first UX. |
-| **MCP-native wedge** | `assay mcp wrap` is the fast path (the `mcp` group is hidden from `assay --help`; use `assay mcp --help`). Adapters extend the same engine. |
+| **MCP-native wedge** | `assay mcp wrap` is the fast path; `assay mcp discover`, `assay mcp kill`, and `assay mcp tool` keep the runtime surface grouped. Adapters extend the same engine. |
 | **Offline-first** | No backend required for core enforcement and bundle verification. |
 
 <details>

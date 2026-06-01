@@ -334,13 +334,13 @@ impl RekorCache {
 
 ```bash
 # Require Rekor transparency proof for verification (enterprise advanced signing)
-assay tool verify tool.json --rekor-required
+assay mcp tool verify tool.json --rekor-required
 
 # Verify evidence bundle with Rekor check
 assay evidence verify bundle.tar.gz --rekor-required
 
 # Skip Rekor check (offline mode)
-assay tool verify tool.json --offline
+assay mcp tool verify tool.json --offline
 assay evidence verify bundle.tar.gz --offline
 ```
 

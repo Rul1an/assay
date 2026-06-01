@@ -103,7 +103,7 @@ fn test_discovery_respects_policy_fail_on_unmanaged() {
         .env("APPDATA", &appdata)
         // Make XDG lookups deterministic too
         .env("XDG_CONFIG_HOME", &xdg_config_home)
-        .args(["discover", "--policy", policy_path.to_str().unwrap()])
+        .args(["mcp", "discover", "--policy", policy_path.to_str().unwrap()])
         .output()
         .unwrap();
 

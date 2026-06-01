@@ -209,13 +209,13 @@ assay evidence diff baseline.tar.gz current.tar.gz
 
 ```bash
 # Generate keypair
-assay tool keygen --out keys/
+assay mcp tool keygen --out keys/
 
 # Sign tool definition
-assay tool sign tool.yaml --key keys/private.pem --out tool-signed.yaml
+assay mcp tool sign tool.yaml --key keys/private.pem --out tool-signed.yaml
 
 # Verify signature
-assay tool verify tool-signed.yaml --trust-policy trust.yaml
+assay mcp tool verify tool-signed.yaml --trust-policy trust.yaml
 ```
 
 ## Common Patterns

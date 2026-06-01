@@ -1,6 +1,6 @@
 # CLI Command Grouping RFC
 
-Status: draft proposal
+Status: accepted direction; Tier 1 MCP pilot implemented
 
 Owner: CLI / Product
 
@@ -13,11 +13,11 @@ usable, and the high-frequency commands should stay flat. The useful next step
 is selective noun-verb grouping for families that already behave like resource
 groups:
 
-- `mcp` first
+- `mcp` first (implemented as the Tier 1 pilot)
 - `trust` second only after one more usage/docs check
 - `policy` and `evidence` only if user feedback or maintenance work justifies it
 
-The migration contract should copy the proven `trustcard` to `trust-card`
+The migration contract copies the proven `trustcard` to `trust-card`
 pattern from #1454: new canonical spelling, old spelling kept as a hidden
 compatibility path, a stderr deprecation warning, tests for both paths, and no
 artifact/output-shape changes.
@@ -72,7 +72,7 @@ related actions remain flat.
 | Policy authoring | `policy`, `generate`, `record`, `coverage`, `explain`, `fix`, `migrate`, `calibrate` | Mixed |
 | Trust artifacts | `trust-basis`, `trust-card`, `baseline` | Flat |
 | Evidence and replay | `evidence`, `bundle`, `replay`, `import` | Mixed |
-| MCP runtime | `mcp`, `discover`, `kill`, `tool` | Mixed |
+| MCP runtime | `mcp` with hidden legacy shims for `discover`, `kill`, `tool` | Grouped |
 | Runtime/security | `monitor`, `sandbox`, `quarantine`, `sim` | Mixed |
 | Trace/profile data | `trace`, `profile` | Flat |
 | Meta | `doctor`, `version` | Flat |
@@ -119,6 +119,11 @@ Migration rule:
   hidden compatibility shims.
 - Emit a stderr deprecation warning when a legacy flat path is used.
 - Do not change policy enforcement, output files, exit codes, or JSON shapes.
+
+Status:
+
+- Implemented for `discover`, `kill`, and `tool` as the first grouping pilot.
+- `assay mcp wrap` and `assay mcp config-path` remain in the same family.
 
 ### Tier 1: Consider Trust After MCP
 
@@ -245,10 +250,9 @@ That difference is why this RFC recommends starting with one family at a time.
 
 ## Suggested Sequence
 
-1. Land this RFC as docs-only.
-2. Wait for a concrete reason to touch MCP command code, or schedule a small
-   MCP-only grouping PR.
-3. If MCP grouping lands cleanly, consider a trust grouping PR.
+1. Land this RFC as docs-only. Done.
+2. Land the small MCP-only grouping pilot. Done.
+3. If MCP grouping lands cleanly in a release, consider a trust grouping PR.
 4. Defer policy/evidence grouping until there is user feedback or nearby
    maintenance work.
 5. Do not group core commands.

@@ -1,4 +1,4 @@
-//! `assay tool sign` - Sign a tool definition.
+//! `assay mcp tool sign` - Sign a tool definition.
 
 use anyhow::{Context, Result};
 use clap::Args;

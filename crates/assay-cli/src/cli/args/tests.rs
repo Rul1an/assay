@@ -48,6 +48,59 @@ fn trust_card_command_accepts_canonical_and_legacy_names() {
     assert!(matches!(legacy.cmd, Command::TrustCard(_)));
 }
 
+#[test]
+fn mcp_group_accepts_canonical_paths_and_legacy_shims_are_hidden() {
+    let visible: Vec<_> = Cli::command()
+        .get_subcommands()
+        .filter(|cmd| !cmd.is_hide_set())
+        .map(|cmd| cmd.get_name().to_string())
+        .collect();
+
+    assert!(visible.contains(&"mcp".to_string()));
+    assert!(!visible.contains(&"discover".to_string()));
+    assert!(!visible.contains(&"kill".to_string()));
+    assert!(!visible.contains(&"tool".to_string()));
+
+    let discover = Cli::try_parse_from(["assay", "mcp", "discover", "--format", "json"])
+        .expect("canonical mcp discover command should parse");
+    assert!(matches!(
+        discover.cmd,
+        Command::Mcp(McpArgs {
+            cmd: McpSub::Discover(_)
+        })
+    ));
+
+    let kill = Cli::try_parse_from(["assay", "mcp", "kill", "proc-123"])
+        .expect("canonical mcp kill command should parse");
+    assert!(matches!(
+        kill.cmd,
+        Command::Mcp(McpArgs {
+            cmd: McpSub::Kill(_)
+        })
+    ));
+
+    let tool = Cli::try_parse_from(["assay", "mcp", "tool", "keygen", "--out", "keys"])
+        .expect("canonical mcp tool command should parse");
+    assert!(matches!(
+        tool.cmd,
+        Command::Mcp(McpArgs {
+            cmd: McpSub::Tool(_)
+        })
+    ));
+
+    let legacy_discover = Cli::try_parse_from(["assay", "discover", "--format", "json"])
+        .expect("legacy discover shim should parse");
+    assert!(matches!(legacy_discover.cmd, Command::Discover(_)));
+
+    let legacy_kill =
+        Cli::try_parse_from(["assay", "kill", "proc-123"]).expect("legacy kill shim should parse");
+    assert!(matches!(legacy_kill.cmd, Command::Kill(_)));
+
+    let legacy_tool = Cli::try_parse_from(["assay", "tool", "keygen", "--out", "keys"])
+        .expect("legacy tool shim should parse");
+    assert!(matches!(legacy_tool.cmd, Command::Tool(_)));
+}
+
 #[cfg(feature = "sim")]
 #[test]
 fn sim_soak_parses_with_defaults() {

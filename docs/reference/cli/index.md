@@ -3,7 +3,7 @@
 Complete documentation for all Assay commands.
 
 Planning note: see [CLI Command Grouping RFC](command-grouping-rfc.md) for the
-draft noun-verb grouping direction and migration contract.
+selective noun-verb grouping direction and migration contract.
 
 ---
 
@@ -41,8 +41,8 @@ assay --version
 | [`assay doctor`](doctor.md) | Diagnose setup and optionally auto-fix known issues |
 | [`assay watch`](watch.md) | Re-run on config/policy/trace changes |
 | [`assay monitor`](../../guides/runtime-monitor.md) | **Runtime Security** (Linux Kernel Enforcement) |
-| [`assay mcp wrap`](mcp-server.md) | Wrap an MCP process with policy enforcement |
-| [CLI Command Grouping RFC](command-grouping-rfc.md) | Draft command grouping direction and compatibility contract |
+| [`assay mcp`](mcp-server.md) | MCP runtime commands: wrap, discover, kill, config-path, and tool signing |
+| [CLI Command Grouping RFC](command-grouping-rfc.md) | Selective command grouping direction and compatibility contract |
 
 ---
 
@@ -124,7 +124,7 @@ assay validate eval.yaml --trace-file traces/golden.jsonl
 assay validate --config eval.yaml --trace-file traces/golden.jsonl
 ```
 
-### Start MCP Wrapper
+### MCP Runtime
 
 ```bash
 # Enforcing mode
@@ -132,6 +132,12 @@ assay mcp wrap --policy assay.yaml -- <real-mcp-command> [args...]
 
 # Dry-run mode
 assay mcp wrap --policy assay.yaml --dry-run -- <real-mcp-command> [args...]
+
+# Discover local MCP servers
+assay mcp discover --format json
+
+# Sign or verify MCP tool definitions
+assay mcp tool sign tool.json --key private.pem --out signed.json
 ```
 
 ### Diagnose and Watch

@@ -1,4 +1,4 @@
-//! `assay tool keygen` - Generate ed25519 keypair for signing.
+//! `assay mcp tool keygen` - Generate ed25519 keypair for signing.
 
 use anyhow::{Context, Result};
 use clap::Args;

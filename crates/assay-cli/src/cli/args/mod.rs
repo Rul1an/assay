@@ -77,16 +77,17 @@ pub enum Command {
     InitCi(InitCiArgs),
     /// Apply supported automatic fixes
     Fix(FixArgs),
-    /// Experimental: MCP Process Wrapper
-    #[command(hide = true)]
+    /// MCP runtime, discovery, kill-switch, and tool signing commands
     Mcp(McpArgs),
     /// Print Assay version information
     Version,
     /// Validate, format, and migrate policies
     Policy(PolicyArgs),
     /// Discover MCP servers on this machine (v1.8)
+    #[command(hide = true)]
     Discover(DiscoverArgs),
     /// Kill/Terminate MCP servers (v1.8)
+    #[command(hide = true)]
     Kill(super::commands::kill::KillArgs),
     /// Runtime eBPF Monitor (Linux only)
     Monitor(super::commands::monitor::MonitorArgs),
@@ -114,6 +115,7 @@ pub enum Command {
     /// Interactive installer and environment setup (Phase 2)
     Setup(SetupArgs),
     /// Tool signing and verification
+    #[command(hide = true)]
     Tool(ToolArgs),
     /// Generate canonical trust-basis artifacts from verified evidence bundles
     #[command(name = "trust-basis")]

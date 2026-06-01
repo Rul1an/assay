@@ -1,6 +1,10 @@
 use super::super::args::*;
 use crate::exit_codes::EXIT_SUCCESS;
 
+fn warn_legacy_mcp_path(old: &str, new: &str) {
+    eprintln!("warning: `assay {old}` is deprecated; use `assay mcp {new}` instead");
+}
+
 pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
     match cli.cmd {
         Command::Init(args) => super::init::run(args).await,
@@ -31,8 +35,14 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Demo(args) => super::demo::cmd_demo(args).await,
         Command::InitCi(args) => super::init_ci::cmd_init_ci(args),
         Command::Mcp(args) => super::mcp::run(args).await,
-        Command::Discover(args) => super::discover::run(args).await,
-        Command::Kill(args) => super::kill::run(args).await,
+        Command::Discover(args) => {
+            warn_legacy_mcp_path("discover", "discover");
+            super::discover::run(args).await
+        }
+        Command::Kill(args) => {
+            warn_legacy_mcp_path("kill", "kill");
+            super::kill::run(args).await
+        }
         Command::Monitor(args) => super::monitor::run(args).await,
         Command::Policy(args) => super::policy::run(args).await,
         Command::Generate(args) => super::generate::run(args),
@@ -47,7 +57,10 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         #[cfg(feature = "sim")]
         Command::Sim(args) => super::sim::run(args),
         Command::Setup(args) => super::setup::run(args).await,
-        Command::Tool(args) => Ok(super::tool::cmd_tool(args.cmd)),
+        Command::Tool(args) => {
+            warn_legacy_mcp_path("tool", "tool");
+            Ok(super::tool::cmd_tool(args.cmd))
+        }
         Command::TrustBasis(args) => super::trust_basis::run(args),
         Command::TrustCard(args) => super::trust_card::run(args),
         Command::Version => {

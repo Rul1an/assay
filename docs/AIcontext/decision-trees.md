@@ -185,7 +185,7 @@ flowchart TD
 | Export evidence | `assay evidence export` | `--profile`, `--out` |
 | Verify evidence | `assay evidence verify` | `<bundle.tar.gz>` |
 | Lint evidence | `assay evidence lint` | `--format sarif` |
-| Sign tool | `assay tool sign` | `--key`, `--out` |
+| Sign tool | `assay mcp tool sign` | `--key`, `--out` |
 
 ## Decision Table: Output Format Selection
 
