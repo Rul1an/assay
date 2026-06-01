@@ -87,6 +87,7 @@ class InteropHarnessTests(unittest.TestCase):
                 self.assertEqual(row["coverage_status"], "full")
                 self.assertEqual(row["claim_strength"], "strong")
                 self.assertEqual(row["evidence_layer"], "joined")
+                self.assertEqual(row["joinability"], "strong_join")
                 self.assertEqual(row["join_result_ref"], "join-results.json#/0")
 
     def test_partial_and_absent_rows_are_first_class_outputs(self) -> None:
@@ -104,8 +105,29 @@ class InteropHarnessTests(unittest.TestCase):
             self.assertTrue(absent)
             for row in absent:
                 self.assertEqual(row["claim_strength"], "absent")
+                self.assertEqual(row["joinability"], "not_joinable")
                 self.assertEqual(row["mapping_basis"], "not_expressible")
                 self.assertIsNone(row["join_result_ref"])
+
+    def test_joinability_summarizes_row_level_join_support(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self.generate(Path(tmp))
+            rows = [
+                row
+                for cell_id in interop_harness.STARTER_CELLS
+                for row in self.rows_for(out, cell_id)
+            ]
+
+            self.assertIn("strong_join", {row["joinability"] for row in rows})
+            self.assertIn("diagnostic_join", {row["joinability"] for row in rows})
+            self.assertIn("not_joinable", {row["joinability"] for row in rows})
+            for row in rows:
+                if row["joinability"] == "strong_join":
+                    self.assertEqual(row["evidence_layer"], "joined")
+                    self.assertRegex(row["join_result_ref"], r"^join-results.json#/")
+                if row["joinability"] == "not_joinable":
+                    self.assertEqual(row["coverage_status"], "absent")
+                    self.assertIsNone(row["join_result_ref"])
 
     def test_latest_otel_row_records_exact_opt_in(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -242,6 +264,15 @@ class InteropHarnessTests(unittest.TestCase):
                 "otel_genai_default",
                 "otel_genai_latest_experimental",
                 "runner_measured_effects",
+            ],
+        )
+        self.assertEqual(
+            sorted(schema["properties"]["joinability"]["enum"]),
+            [
+                "diagnostic_join",
+                "not_applicable",
+                "not_joinable",
+                "strong_join",
             ],
         )
 

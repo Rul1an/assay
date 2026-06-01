@@ -127,6 +127,7 @@ Planned fields:
 | `source_snapshot` | object | URL, retrieval date, and at least one of package version, semantic-convention tag, or Assay commit. |
 | `agent_shape` | enum | One matrix agent shape. |
 | `join_key` | enum | Reuse `join_result.v0` join-key vocabulary. |
+| `joinability` | enum | Row-level readability summary: `strong_join`, `diagnostic_join`, `not_joinable`, or `not_applicable`. This is derived from the row and any referenced `join_result.v0`; it does not replace the join contract. |
 | `evidence_layer` | enum | `trace_only`, `archive_only`, or `joined`. |
 | `coverage_status` | enum | `full`, `partial`, `absent`, or `not_applicable`. |
 | `claim_strength` | enum | Reuse `claim_class_cell.v0`: `strong`, `partial`, `weak`, or `absent`. |
@@ -168,6 +169,13 @@ emit `mapping_basis=derived_join_rule` and keep `claim_strength` no
 stronger than `partial` unless the source artifacts directly support the
 claim.
 
+`joinability` is a compact reviewer aid, not a second join hierarchy.
+Rows that reference a claim-supporting `join_result.v0` row may use
+`strong_join`; rows that only have run-level, trace-local, timestamp, or
+order context should use `diagnostic_join`; rows where the claim cannot
+be joined should use `not_joinable`; rows where a join is not relevant
+to the row's local claim may use `not_applicable`.
+
 ## Acceptance Rules
 
 - The matrix reports coverage and claim strength, not product ranking.
@@ -178,6 +186,8 @@ claim.
   `claim_strength` and `claim_basis`.
 - Every joined row must reference a `join_result.v0` row or state why no
   join exists.
+- Every row must carry `joinability` as a summary of row-level join
+  support without promoting weak or diagnostic joins to claim support.
 - Missing cells are valid findings when the vocabulary legitimately does
   not model the behavior.
 - `otel_genai_latest_experimental` rows must record the exact
@@ -197,6 +207,8 @@ claim.
 - This plan does not claim semantic equivalence between vocabularies.
 - This plan does not publish delegated interop measurements.
 - This plan does not promote interop mappings to a product API.
+- This plan does not replace `assay.observability.join_result.v0` with
+  row-level `joinability`.
 - This plan does not require all three vocabularies to be active in
   production.
 - This plan does not define a runtime translator between vocabularies.
