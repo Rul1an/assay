@@ -1,7 +1,8 @@
 # Runner Path Projection — Slice 1 Plan (declared-rule only)
 
-> **Status:** slice-scoping plan, not a shipped contract. This narrows
-> the path-projection work already described in
+> **Status:** core helper implemented in `assay-runner-core`; not a
+> shipped CLI or report contract. This narrows the path-projection work
+> already described in
 > [`projection-roadmap.md`](projection-roadmap.md) into the smallest
 > buildable first slice. It does not change the Runner archive v0
 > contracts, add a public CLI surface, infer heuristic classes, touch
@@ -100,3 +101,7 @@ The raw `filesystem_paths` set is unchanged. Projected rows are additive.
 - Idempotence and `unknown`-preservation are covered by tests.
 - A fixture shows "raw differs / projected matches" with the
   non-equivalence non-claim attached.
+
+Slice 1 is implemented as a pure Rust helper in `assay-runner-core`.
+It does not yet wire projection into a CLI, archive schema, or stable
+runtime-drift report emitter.

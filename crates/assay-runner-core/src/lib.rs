@@ -15,12 +15,17 @@
 
 mod archive;
 mod kernel;
+mod path_projection;
 mod policy;
 mod run;
 mod sdk;
 
 pub use archive::{RunnerSpikeArchive, RunnerSpikeArchiveError};
 pub use kernel::{KernelLayerBuilder, KernelLayerCapture, KernelLayerError, KERNEL_EVENT_SCHEMA};
+pub use path_projection::{
+    project_filesystem_paths, DeclaredPathProjectionRules, DeclaredPathRule, PathProjection,
+    PathProjectionMapping, UnmatchedPathSummary, PATH_PROJECTION_SCHEMA,
+};
 pub use policy::{PolicyLayerCapture, PolicyLayerError, PolicyLayerEvent, POLICY_EVENT_SCHEMA};
 pub use run::{RunExecutionError, RunOutcome, RunSpec, RunSpecError, RUN_EVENT_SCHEMA};
 pub use sdk::{SdkLayerCapture, SdkLayerError};
