@@ -152,7 +152,7 @@ Where `spki_bytes` is the DER-encoded SubjectPublicKeyInfo.
 
 ```bash
 # Using assay CLI
-assay tool keygen --out ~/.assay/keys/
+assay mcp tool keygen --out ~/.assay/keys/
 
 # Output:
 #   ~/.assay/keys/private_key.pem (PKCS#8, mode 0600)

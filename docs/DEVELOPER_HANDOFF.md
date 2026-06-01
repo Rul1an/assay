@@ -267,9 +267,9 @@ Supported backends: AWS S3, Backblaze B2, Wasabi, Cloudflare R2, MinIO, Azure Bl
 MCP tool definition signing with `x-assay-sig` field:
 
 ```bash
-assay tool keygen --out ~/.assay/keys/    # Generate PKCS#8/SPKI keypair
-assay tool sign tool.json --key priv.pem --out signed.json
-assay tool verify signed.json --pubkey pub.pem  # Exit: 0=ok, 2=unsigned, 3=untrusted, 4=invalid
+assay mcp tool keygen --out ~/.assay/keys/    # Generate PKCS#8/SPKI keypair
+assay mcp tool sign tool.json --key priv.pem --out signed.json
+assay mcp tool verify signed.json --pubkey pub.pem  # Exit: 0=ok, 2=unsigned, 3=untrusted, 4=invalid
 ```
 
 **Key files:**

@@ -4,7 +4,24 @@ This page documents the current MCP runtime entry points in Assay.
 
 ---
 
-## 1) `assay mcp wrap` (CLI)
+## 1) `assay mcp` (CLI)
+
+`assay mcp` is the canonical command family for MCP runtime work:
+
+- `assay mcp wrap`
+- `assay mcp discover`
+- `assay mcp kill`
+- `assay mcp config-path`
+- `assay mcp tool keygen|sign|verify`
+
+The previous flat `assay discover`, `assay kill`, and `assay tool ...`
+spellings remain available as hidden compatibility shims and print a
+deprecation warning to stderr. Their stdout, exit codes, artifacts, and output
+formats remain unchanged.
+
+---
+
+## 2) `assay mcp wrap` (CLI)
 
 Wrap a real MCP process and enforce policy decisions inline.
 
@@ -39,7 +56,7 @@ assay mcp wrap --policy assay.yaml --dry-run -- <real-mcp-command> [args...]
 
 ---
 
-## 2) `assay-mcp-server` (separate binary)
+## 3) `assay-mcp-server` (separate binary)
 
 Run the MCP server binary directly.
 

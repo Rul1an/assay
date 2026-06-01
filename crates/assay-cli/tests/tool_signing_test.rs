@@ -1,4 +1,4 @@
-//! Integration tests for `assay tool` signing commands.
+//! Integration tests for `assay mcp tool` signing commands.
 
 use std::process::Command;
 use tempfile::TempDir;
@@ -13,10 +13,10 @@ fn test_keygen_creates_keypair() {
     let out_dir = tmp.path();
 
     let output = assay_cmd()
-        .args(["tool", "keygen", "--out"])
+        .args(["mcp", "tool", "keygen", "--out"])
         .arg(out_dir)
         .output()
-        .expect("failed to run assay tool keygen");
+        .expect("failed to run assay mcp tool keygen");
 
     assert!(output.status.success(), "keygen should succeed");
 
@@ -45,7 +45,7 @@ fn test_keygen_refuses_overwrite_without_force() {
 
     // First keygen
     let output = assay_cmd()
-        .args(["tool", "keygen", "--out"])
+        .args(["mcp", "tool", "keygen", "--out"])
         .arg(out_dir)
         .output()
         .expect("failed to run first keygen");
@@ -53,7 +53,7 @@ fn test_keygen_refuses_overwrite_without_force() {
 
     // Second keygen without --force should fail
     let output = assay_cmd()
-        .args(["tool", "keygen", "--out"])
+        .args(["mcp", "tool", "keygen", "--out"])
         .arg(out_dir)
         .output()
         .expect("failed to run second keygen");
@@ -61,7 +61,7 @@ fn test_keygen_refuses_overwrite_without_force() {
 
     // With --force should succeed
     let output = assay_cmd()
-        .args(["tool", "keygen", "--out"])
+        .args(["mcp", "tool", "keygen", "--out"])
         .arg(out_dir)
         .args(["--force"])
         .output()
@@ -77,7 +77,7 @@ fn test_sign_verify_roundtrip() {
 
     // Generate keypair
     let output = assay_cmd()
-        .args(["tool", "keygen", "--out"])
+        .args(["mcp", "tool", "keygen", "--out"])
         .arg(&key_dir)
         .output()
         .expect("keygen failed");
@@ -92,7 +92,7 @@ fn test_sign_verify_roundtrip() {
     // Sign
     let signed_path = tmp.path().join("signed.json");
     let output = assay_cmd()
-        .args(["tool", "sign"])
+        .args(["mcp", "tool", "sign"])
         .arg(&tool_path)
         .args(["--key"])
         .arg(key_dir.join("private_key.pem"))
@@ -110,7 +110,7 @@ fn test_sign_verify_roundtrip() {
 
     // Verify
     let output = assay_cmd()
-        .args(["tool", "verify"])
+        .args(["mcp", "tool", "verify"])
         .arg(&signed_path)
         .args(["--pubkey"])
         .arg(key_dir.join("public_key.pem"))
@@ -131,7 +131,7 @@ fn test_verify_unsigned_exits_0() {
 
     // Generate keypair
     assay_cmd()
-        .args(["tool", "keygen", "--out"])
+        .args(["mcp", "tool", "keygen", "--out"])
         .arg(&key_dir)
         .output()
         .expect("keygen failed");
@@ -142,7 +142,7 @@ fn test_verify_unsigned_exits_0() {
 
     // Verify unsigned (no policy requiring signature) -> exit 0
     let output = assay_cmd()
-        .args(["tool", "verify"])
+        .args(["mcp", "tool", "verify"])
         .arg(&tool_path)
         .args(["--pubkey"])
         .arg(key_dir.join("public_key.pem"))
@@ -165,12 +165,12 @@ fn test_verify_wrong_key_exits_4() {
     std::fs::create_dir_all(&key2_dir).unwrap();
 
     assay_cmd()
-        .args(["tool", "keygen", "--out"])
+        .args(["mcp", "tool", "keygen", "--out"])
         .arg(&key1_dir)
         .output()
         .unwrap();
     assay_cmd()
-        .args(["tool", "keygen", "--out"])
+        .args(["mcp", "tool", "keygen", "--out"])
         .arg(&key2_dir)
         .output()
         .unwrap();
@@ -181,7 +181,7 @@ fn test_verify_wrong_key_exits_4() {
 
     let signed_path = tmp.path().join("signed.json");
     assay_cmd()
-        .args(["tool", "sign"])
+        .args(["mcp", "tool", "sign"])
         .arg(&tool_path)
         .args(["--key"])
         .arg(key1_dir.join("private_key.pem"))
@@ -192,7 +192,7 @@ fn test_verify_wrong_key_exits_4() {
 
     // Verify with key2 -> should fail with exit code 4
     let output = assay_cmd()
-        .args(["tool", "verify"])
+        .args(["mcp", "tool", "verify"])
         .arg(&signed_path)
         .args(["--pubkey"])
         .arg(key2_dir.join("public_key.pem"))
@@ -211,7 +211,7 @@ fn test_verify_tampered_exits_4() {
 
     // Generate keypair
     assay_cmd()
-        .args(["tool", "keygen", "--out"])
+        .args(["mcp", "tool", "keygen", "--out"])
         .arg(&key_dir)
         .output()
         .unwrap();
@@ -222,7 +222,7 @@ fn test_verify_tampered_exits_4() {
 
     let signed_path = tmp.path().join("signed.json");
     assay_cmd()
-        .args(["tool", "sign"])
+        .args(["mcp", "tool", "sign"])
         .arg(&tool_path)
         .args(["--key"])
         .arg(key_dir.join("private_key.pem"))
@@ -238,7 +238,7 @@ fn test_verify_tampered_exits_4() {
 
     // Verify -> should fail with exit code 4
     let output = assay_cmd()
-        .args(["tool", "verify"])
+        .args(["mcp", "tool", "verify"])
         .arg(&signed_path)
         .args(["--pubkey"])
         .arg(key_dir.join("public_key.pem"))
@@ -259,7 +259,7 @@ fn test_sign_requires_output() {
     std::fs::create_dir_all(&key_dir).unwrap();
 
     assay_cmd()
-        .args(["tool", "keygen", "--out"])
+        .args(["mcp", "tool", "keygen", "--out"])
         .arg(&key_dir)
         .output()
         .unwrap();
@@ -269,7 +269,7 @@ fn test_sign_requires_output() {
 
     // Sign without --out or --in-place should fail
     let output = assay_cmd()
-        .args(["tool", "sign"])
+        .args(["mcp", "tool", "sign"])
         .arg(&tool_path)
         .args(["--key"])
         .arg(key_dir.join("private_key.pem"))

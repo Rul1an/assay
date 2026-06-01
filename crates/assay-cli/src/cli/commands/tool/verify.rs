@@ -1,4 +1,4 @@
-//! `assay tool verify` - Verify a signed tool definition.
+//! `assay mcp tool verify` - Verify a signed tool definition.
 
 use anyhow::{Context, Result};
 use clap::Args;

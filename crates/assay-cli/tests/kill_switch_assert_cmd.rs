@@ -21,9 +21,9 @@ fn kill_by_proc_id_works() {
     // On Unix we can send signal 0, but std doesn't expose that easily.
     // relying on `kill` command to succeed is the test.
 
-    // Kill it using assay kill
+    // Kill it using assay mcp kill
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay"));
-    cmd.args(["kill", &format!("proc-{}", pid)]);
+    cmd.args(["mcp", "kill", &format!("proc-{}", pid)]);
 
     // We expect success
     cmd.assert().success();

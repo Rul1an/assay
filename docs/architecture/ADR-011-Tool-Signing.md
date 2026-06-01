@@ -5,7 +5,7 @@
 Proposed (January 2026; boundary sync February 2026)
 
 Open-core boundary note (current `main`):
-- Open-core delivered: local-key signing and verification via `x-assay-sig` (`assay tool sign --key`, `assay tool verify`).
+- Open-core delivered: local-key signing and verification via `x-assay-sig` (`assay mcp tool sign --key`, `assay mcp tool verify`).
 - Enterprise pending: Sigstore keyless + transparency-log verification (Fulcio/Rekor).
 
 ## Context
@@ -87,19 +87,19 @@ We will implement **Sigstore-based keyless signing** as an enterprise extension 
 
 ```bash
 # Keyless signing (enterprise advanced signing)
-assay tool sign --keyless tool-definition.json
+assay mcp tool sign --keyless tool-definition.json
 
 # Local-key signing (open-core)
-assay tool sign --key private.pem tool-definition.json
+assay mcp tool sign --key private.pem tool-definition.json
 
 # Verify a signed tool
-assay tool verify tool-definition.json
+assay mcp tool verify tool-definition.json
 
 # Verify with explicit trust requirements
-assay tool verify tool-definition.json --require-producer-trust policy.yaml
+assay mcp tool verify tool-definition.json --require-producer-trust policy.yaml
 
 # Verify and require Rekor transparency proof (enterprise advanced signing)
-assay tool verify tool-definition.json --rekor-required
+assay mcp tool verify tool-definition.json --rekor-required
 ```
 
 ### Evidence Verification with Producer Trust
@@ -378,13 +378,13 @@ This enables interoperability with other MCP security tools.
 ## Implementation Plan
 
 ### Phase 1: Enterprise Signing CLI (Week 1)
-- [ ] `assay tool sign --keyless` command
+- [ ] `assay mcp tool sign --keyless` command
 - [ ] Fulcio integration for certificate issuance
 - [ ] Rekor integration for transparency logging
 - [ ] `x-assay-sig` serialization
 
 ### Phase 2: Verification (Week 2)
-- [ ] `assay tool verify` command
+- [ ] `assay mcp tool verify` command
 - [ ] Policy-based trust anchors
 - [ ] Integration with existing `ToolIdentity`
 - [ ] Warning mode for gradual rollout

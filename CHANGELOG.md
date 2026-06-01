@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Grouped MCP runtime commands under the visible `assay mcp` command
+  family. The canonical forms are now `assay mcp discover`, `assay mcp
+  kill`, and `assay mcp tool ...`; the previous flat `assay discover`,
+  `assay kill`, and `assay tool ...` paths remain available as hidden
+  compatibility shims with stderr deprecation warnings. Output shapes,
+  exit codes, artifacts, and MCP policy behavior are unchanged.
+
 - Added `assay run --format <text|json>`. `text` (default) keeps the
   existing human-readable summary on stderr; `json` prints a
   machine-readable results report to stdout so `assay run --format json >
