@@ -167,12 +167,12 @@ Historical close-out note:
 
 To reduce "surface area tax" and improve adoption, CLI commands are positioned in two tiers:
 
-The `v3.13.0` CLI UX close-out is merged on `main`: top-level command help is
-covered by regression tests, trace replay reports missing `--trace-file` as an
-argument error, `assay run --format json` provides stdout machine output,
-`assay validate` accepts a positional config path, and `assay trust-card` is the
+The `v3.13.0` CLI UX close-out is released: top-level command help is covered
+by regression tests, trace replay reports missing `--trace-file` as an argument
+error, `assay run --format json` provides stdout machine output, `assay
+validate` accepts a positional config path, and `assay trust-card` is the
 canonical Trust Card command spelling with `trustcard` retained as a deprecated
-compatibility alias. The first command-grouping pilot is also merged: MCP
+compatibility alias. The first command-grouping pilot is also released: MCP
 runtime commands now live under `assay mcp`, with hidden compatibility shims for
 the previous flat `assay discover`, `assay kill`, and `assay tool ...` paths.
 This is a discoverability and scripting pass only; it does not change scoring,
