@@ -7,6 +7,7 @@ use assay_evidence::{
     generate_trust_basis, trust_basis_to_trust_card, trust_card_to_canonical_json_bytes,
     trust_card_to_html, trust_card_to_markdown, TrustBasisOptions, VerifyLimits,
 };
+use std::ffi::OsStr;
 use std::fs::File;
 
 pub fn run(args: TrustCardArgs) -> Result<i32> {
@@ -20,7 +21,7 @@ pub fn run(args: TrustCardArgs) -> Result<i32> {
 }
 
 fn invoked_via_legacy_trustcard() -> bool {
-    std::env::args().nth(1).as_deref() == Some("trustcard")
+    std::env::args_os().nth(1).as_deref() == Some(OsStr::new("trustcard"))
 }
 
 fn cmd_generate(args: TrustCardGenerateArgs) -> Result<i32> {
