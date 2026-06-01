@@ -40,7 +40,7 @@ fn trustcard_generate_writes_json_and_md_matching_trust_basis_claims() {
 
     let out = Command::cargo_bin("assay")
         .unwrap()
-        .arg("trustcard")
+        .arg("trust-card")
         .arg("generate")
         .arg(&bundle)
         .arg("--out-dir")
@@ -152,6 +152,46 @@ fn trustcard_generate_writes_json_and_md_matching_trust_basis_claims() {
 }
 
 #[test]
+fn trustcard_legacy_alias_still_works_with_deprecation_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    let bundle = dir.path().join("bundle-legacy.tar.gz");
+    let out_dir = dir.path().join("out-legacy");
+    write_bundle(
+        &bundle,
+        vec![make_event(
+            "assay.tool.decision",
+            "run_legacy_tc",
+            0,
+            json!({
+                "tool": "tool.commit",
+                "decision": "allow"
+            }),
+        )],
+    );
+
+    let out = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("trustcard")
+        .arg("generate")
+        .arg(&bundle)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("`assay trustcard` is deprecated; use `assay trust-card` instead"),
+        "missing legacy alias warning: {stderr}"
+    );
+    assert!(out_dir.join("trustcard.json").exists());
+}
+
+#[test]
 fn trustcard_generate_pack_flag_matches_trust_basis_pack_classification() {
     let dir = tempfile::tempdir().unwrap();
     let bundle = dir.path().join("bundle-pack.tar.gz");
@@ -172,7 +212,7 @@ fn trustcard_generate_pack_flag_matches_trust_basis_pack_classification() {
 
     let out = Command::cargo_bin("assay")
         .unwrap()
-        .arg("trustcard")
+        .arg("trust-card")
         .arg("generate")
         .arg(&bundle)
         .arg("--out-dir")

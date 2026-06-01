@@ -96,7 +96,7 @@ assay evidence verify bundle.tar.gz
 
 ```bash
 assay trust-basis generate bundle.tar.gz --out trust-basis.json
-assay trustcard generate bundle.tar.gz --out-dir trustcard
+assay trust-card generate bundle.tar.gz --out-dir trustcard
 ```
 
 `trustcard.json` is the canonical Trust Card artifact. `trustcard.md` and

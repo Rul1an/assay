@@ -11,6 +11,11 @@ All notable changes to this project will be documented in this file.
   artifacts and the exit-code contract are unchanged. This mirrors the
   existing `assay validate --format` interface for consistency.
 
+- Renamed the Trust Card command surface to `assay trust-card` for
+  consistency with other hyphenated multi-word commands. The previous
+  `assay trustcard` spelling remains available as a deprecated
+  compatibility alias.
+
 - Surfaced the synthetic MCP tool evidence-binding quickstart from the
   observability reference, the research note, and the root README
   research section. Discoverability only: no new schema, no top-level

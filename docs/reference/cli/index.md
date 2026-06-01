@@ -32,7 +32,7 @@ assay --version
 | [`assay replay`](replay.md) | Replay from a replay bundle |
 | [`assay evidence`](evidence.md) | Manage evidence bundles, external evidence imports, and receipt schemas |
 | [`assay trust-basis`](trust-basis.md) | Generate, compare, and assert canonical Trust Basis artifacts |
-| [`assay trustcard`](trustcard.md) | Generate Trust Card JSON, Markdown, and static HTML projections |
+| [`assay trust-card`](trust-card.md) | Generate Trust Card JSON, Markdown, and static HTML projections |
 | [`assay import`](import.md) | Import sessions from MCP Inspector, etc. |
 | [`assay migrate`](migrate.md) | Upgrade config from v0 to v1 |
 | [`assay doctor`](doctor.md) | Diagnose setup and optionally auto-fix known issues |
@@ -266,13 +266,13 @@ See [Configuration](../config/index.md) for full reference.
 
     [:octicons-arrow-right-24: Full reference](trust-basis.md)
 
--   :material-card-account-details-outline:{ .lg .middle } __assay trustcard__
+-   :material-card-account-details-outline:{ .lg .middle } __assay trust-card__
 
     ---
 
     Generate Trust Card JSON, Markdown, and static HTML projections.
 
-    [:octicons-arrow-right-24: Full reference](trustcard.md)
+    [:octicons-arrow-right-24: Full reference](trust-card.md)
 
 -   :material-server:{ .lg .middle } __assay mcp wrap__
 

@@ -55,7 +55,7 @@ High-level sequence (see [RFC-005](https://github.com/Rul1an/assay/blob/main/doc
 | Wave | What shipped (intent) |
 |------|------------------------|
 | **T1a** | Canonical **Trust Basis** compiler output from verified bundles (`assay trust-basis generate`). |
-| **T1b** | **Trust Card** — `trustcard.json` + `trustcard.md` + static `trustcard.html` from the same basis (`assay trustcard generate`). |
+| **T1b** | **Trust Card** — `trustcard.json` + `trustcard.md` + static `trustcard.html` from the same basis (`assay trust-card generate`). |
 | **G3** | Bounded **authorization context** on supported MCP decision evidence (`auth_scheme`, `auth_issuer`, `principal`) — visibility, not auth-validation. Trust Card schema bumped; **seven** trust claims — consumers key by **`id`**, not fixed row count. |
 | **P2** | Protocol-oriented claim packs (next). |
 
@@ -73,7 +73,7 @@ Ask questions about sequencing and boundaries here; keep feature requests in Iss
 
 1. Produce or use a **verified** evidence bundle (`.tar.gz`).
 2. `assay trust-basis generate bundle.tar.gz` → `trust-basis.json` (deterministic claim rows).
-3. `assay trustcard generate bundle.tar.gz --out-dir ./out` → `out/trustcard.json`, `out/trustcard.md`, `out/trustcard.html`.
+3. `assay trust-card generate bundle.tar.gz --out-dir ./out` → `out/trustcard.json`, `out/trustcard.md`, `out/trustcard.html`.
 
 **What to look for:**
 

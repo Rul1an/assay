@@ -1,4 +1,4 @@
-# assay trustcard
+# assay trust-card
 
 Generate Trust Card artifacts from a verified evidence bundle.
 
@@ -7,7 +7,7 @@ Generate Trust Card artifacts from a verified evidence bundle.
 ## Synopsis
 
 ```bash
-assay trustcard <COMMAND> [OPTIONS]
+assay trust-card <COMMAND> [OPTIONS]
 ```
 
 ---
@@ -17,7 +17,7 @@ assay trustcard <COMMAND> [OPTIONS]
 Generate `trustcard.json`, `trustcard.md`, and `trustcard.html`:
 
 ```bash
-assay trustcard generate evidence.tar.gz --out-dir trustcard
+assay trust-card generate evidence.tar.gz --out-dir trustcard
 ```
 
 The Trust Card is a one-way projection of Trust Basis claim rows plus frozen
@@ -33,6 +33,9 @@ Policy. It does not require JavaScript, remote assets, a hosted backend, or
 network access. It includes accessible table structure, responsive overflow,
 dark-mode, forced-colors, and print styling, but it does not add claim
 semantics, scores, badges, or a second classifier.
+
+`assay trustcard` remains available as a deprecated compatibility alias for
+existing scripts. New usage should prefer `assay trust-card`.
 
 ---
 
