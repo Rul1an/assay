@@ -4,7 +4,7 @@ Status: accepted direction; Tier 1 MCP pilot implemented
 
 Owner: CLI / Product
 
-Last updated: 2026-06-01
+Last updated: 2026-06-01 (Tier 2 revised)
 
 ## Summary
 
@@ -15,7 +15,15 @@ groups:
 
 - `mcp` first (implemented as the Tier 1 pilot)
 - `trust` second only after one more usage/docs check
-- `policy` and `evidence` only if user feedback or maintenance work justifies it
+- a narrowed `policy` grouping (`generate`/`record`, not the full set first
+  drafted) and a corrected `replay` grouping (not `evidence`) only if user
+  feedback or nearby maintenance work justifies it
+
+Tier 2 was revised after checking the real command tree: the earlier
+`policy generate/coverage/explain/fix` and `evidence bundle/replay/import`
+sketches hit name collisions (`policy migrate`, `evidence import`) and a
+miscategorization (replay bundles are not evidence bundles). See the Tier 2
+sections for the corrected, smaller scope.
 
 The migration contract copies the proven `trustcard` to `trust-card`
 pattern from #1454: new canonical spelling, old spelling kept as a hidden
@@ -165,53 +173,90 @@ Open question:
   `trust`. It is related to scoring baselines, not necessarily Trust Basis/Card
   artifacts.
 
-### Tier 2: Consider Policy Authoring
+### Tier 2: Consider Policy Authoring (narrowed)
 
-Possible target shape:
+> **Revision note:** an earlier draft of this section proposed
+> `policy generate / coverage / explain / fix`. Checking the real command
+> tree narrowed that set: `policy` already exposes `validate`, `migrate`, and
+> `fmt`, and several proposed verbs either collide or do not belong under
+> `policy`. The viable Tier 2a surface is smaller than first drafted.
+
+Viable target shape:
 
 ```text
-assay policy generate
-assay policy coverage
-assay policy explain
-assay policy fix
+assay policy generate   # was: generate  ("Learning Mode: Generate policy from trace")
+assay policy record     # was: record    ("Learning Mode: Capture and Generate in one flow")
 ```
+
+Optional, weaker fit:
+
+```text
+assay policy coverage   # was: coverage  (reports both policy and trace coverage)
+```
+
+Do **not** move these under `policy`:
+
+- `migrate` — collides with the existing `policy migrate` ("v1.x constraints
+  to v2.0 schemas"). The top-level `migrate` also handles config formats, so
+  this is a semantics-merge decision, not a grouping shim. Leave both as-is
+  until someone deliberately unifies the two migrate behaviors.
+- `explain` — explains a test result or trace decision, not policy. It does
+  not belong under `policy`. Leave flat (or revisit under a different noun).
+- `fix` — "apply supported automatic fixes" is broader than policy and may
+  touch config or trace fixes. Leave flat until its scope is bounded.
+- `calibrate` — calibrates scoring thresholds, not policy.
 
 Why not first:
 
-- `generate`, `coverage`, `explain`, and `fix` may be more familiar as flat
-  commands.
-- Moving top-level commands into a subcommand usually needs shim commands, not
-  just clap aliases.
-- This creates broader docs and example churn.
-- This should only start if the old top-level verbs can be actively supported,
-  warned, and tested for at least two minor releases.
+- Moving top-level commands into a subcommand needs shim commands, not just
+  clap aliases.
+- This creates docs and example churn.
+- The old top-level verbs must be actively supported, warned, and tested for
+  at least two minor releases.
 
 Trigger to start:
 
+- A future policy-authoring refactor that already touches `generate`/`record`.
 - User confusion around policy authoring.
-- A future policy-command refactor.
-- A concrete need to make agent help traversal cleaner.
 
-### Tier 2: Consider Evidence and Replay
+### Tier 2: Group Replay (corrected — not under Evidence)
 
-Possible target shape:
+> **Revision note:** an earlier draft proposed folding `bundle`, `replay`, and
+> `import` under `evidence`. Checking the real command tree showed this is
+> wrong on two counts, so the target noun changed from `evidence` to `replay`.
+
+Why the earlier `evidence` plan does not work:
+
+- `evidence` already exposes `import` (`evidence import` for CycloneDX,
+  OpenFeature, Mastra, and Pydantic evidence). The top-level `import`
+  ("external artifacts into Assay-compatible data") is a **different** command,
+  so `import` cannot move under `evidence` without a name collision. Leave
+  top-level `import` flat. Whether the two imports should be unified is a
+  separate semantics question, not a grouping move.
+- `bundle` and `replay` operate on **replay bundles** ("Create replay bundle
+  from run artifacts"), not **evidence bundles**. Folding them under `evidence`
+  would conflate two distinct bundle concepts.
+
+Corrected target shape — a dedicated `replay` noun:
 
 ```text
-assay evidence bundle
-assay evidence replay
-assay evidence import
+assay replay bundle create   # was: bundle create
+assay replay bundle verify   # was: bundle verify
+assay replay run             # was: replay  (run a recorded replay bundle)
 ```
 
-Why not first:
+Extra care vs the MCP grouping:
 
-- `evidence` and `bundle` already have established subcommand surfaces.
-- `replay` and `import` may appear in scripts.
-- The benefit is real but less urgent than MCP/trust grouping.
+- This promotes the existing top-level `replay` **command** into a `replay`
+  **noun**. `assay replay <bundle>` must keep working as a shim that maps to
+  `assay replay run <bundle>`. That command-to-noun promotion is slightly more
+  involved than the MCP case (where `discover`/`kill`/`tool` were already
+  distinct commands) and deserves its own parse and behavior tests.
 
 Trigger to start:
 
-- A future evidence importer or replay UX pass.
-- Repeated confusion between bundles, receipts, replay, and imports.
+- A future replay or bundle UX pass that already touches this code.
+- Repeated confusion between replay bundles and evidence bundles.
 
 ## Migration Contract
 
@@ -253,9 +298,16 @@ That difference is why this RFC recommends starting with one family at a time.
 1. Land this RFC as docs-only. Done.
 2. Land the small MCP-only grouping pilot. Done.
 3. If MCP grouping lands cleanly in a release, consider a trust grouping PR.
-4. Defer policy/evidence grouping until there is user feedback or nearby
-   maintenance work.
+4. Defer the narrowed Tier 2 work until there is user feedback or nearby
+   maintenance work:
+   - Tier 2a: `policy generate` / `policy record` (only `generate`/`record`,
+     plus optional `coverage`). Do not move `migrate`/`explain`/`fix`/
+     `calibrate`.
+   - Tier 2b: a `replay` noun (`replay bundle`, `replay run`). Not `evidence`.
+     Leave top-level `import` flat (collides with `evidence import`).
 5. Do not group core commands.
+6. Treat each Tier 2 family as its own PR; the collisions found while drafting
+   Tier 2 are exactly why a bundled restructure is unsafe.
 
 ## Review Checklist For Future Grouping PRs
 
