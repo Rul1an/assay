@@ -71,6 +71,9 @@ assay run --config eval.yaml --strict
 # Specific trace file
 assay run --config eval.yaml --trace-file traces/golden.jsonl
 
+# Machine-readable run report on stdout
+assay run --config eval.yaml --trace-file traces/golden.jsonl --format json > results.json
+
 # CI reports
 assay ci --config eval.yaml --trace-file traces/golden.jsonl --sarif sarif.json --junit junit.xml
 ```
@@ -109,6 +112,16 @@ assay migrate --config old-eval.yaml
 
 # Preview changes without writing
 assay migrate --config old-eval.yaml --dry-run
+```
+
+### Validate Config And Trace
+
+```bash
+# Positional config path
+assay validate eval.yaml --trace-file traces/golden.jsonl
+
+# Equivalent explicit config flag
+assay validate --config eval.yaml --trace-file traces/golden.jsonl
 ```
 
 ### Start MCP Wrapper

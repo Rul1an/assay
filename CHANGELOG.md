@@ -11,6 +11,14 @@ All notable changes to this project will be documented in this file.
   artifacts and the exit-code contract are unchanged. This mirrors the
   existing `assay validate --format` interface for consistency.
 
+- Tightened trace-replay UX: `model: trace` now fails early with
+  `E_INVALID_ARGS` when `--trace-file` is missing instead of falling
+  through to misleading test failures.
+
+- Added the natural positional config form for validation:
+  `assay validate eval.yaml --trace-file traces.jsonl`. The existing
+  `--config eval.yaml` form remains supported.
+
 - Renamed the Trust Card command surface to `assay trust-card` for
   consistency with other hyphenated multi-word commands. The previous
   `assay trustcard` spelling remains available as a deprecated

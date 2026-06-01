@@ -167,6 +167,15 @@ Historical close-out note:
 
 To reduce "surface area tax" and improve adoption, CLI commands are positioned in two tiers:
 
+Post-`v3.12.0` CLI UX close-out is merged on `main`: top-level command help is
+covered by regression tests, trace replay reports missing `--trace-file` as an
+argument error, `assay run --format json` provides stdout machine output,
+`assay validate` accepts a positional config path, and `assay trust-card` is the
+canonical Trust Card command spelling with `trustcard` retained as a deprecated
+compatibility alias. This is a discoverability and scripting pass only; it does
+not change scoring, artifact schemas, Trust Basis semantics, or the command
+grouping RFC migration plan.
+
 ### Happy Path (Core Workflow)
 ```bash
 assay run              # Execute with policy enforcement
