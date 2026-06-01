@@ -238,12 +238,13 @@ not a new `assay.synthetic.*` namespace.
 ## Interop Mapping Rows
 
 The Slice 5 interop plan reserves one experiment-scoped row family for
-coverage and claim-strength mappings between OTel GenAI, OpenInference,
-Runner measured effects, and Assay observability vocabulary:
+coverage, joinability, and claim-strength mappings between OTel GenAI,
+OpenInference, Runner measured effects, and Assay observability
+vocabulary:
 
 | Schema | Role |
 |---|---|
-| `assay.experiment.agent_observability_fidelity.interop_coverage_cell.v0` | Slice 6 row for observation-profile coverage, claim strength, join key, evidence layer, source snapshot, and bounded mapping notes. |
+| `assay.experiment.agent_observability_fidelity.interop_coverage_cell.v0` | Slice 6 row for observation-profile coverage, row-level joinability, claim strength, join key, evidence layer, source snapshot, and bounded mapping notes. |
 
 The schema sidecar is active in the Slice 6 harness PR. The schema stays
 experiment-scoped and must not promote interop mappings to
@@ -254,6 +255,8 @@ Interop rows must stay coverage-focused:
 - use `assay.observability.claim_class_cell.v0` vocabulary for
   `claim_strength` and `claim_basis`;
 - use `assay.observability.join_result.v0` vocabulary for join keys;
+- keep `joinability` as a row-level summary and not a replacement for
+  `assay.observability.join_result.v0`;
 - record source snapshots for OTel GenAI and OpenInference because
   both vocabularies are moving;
 - treat absent or partial mappings as valid findings, not product

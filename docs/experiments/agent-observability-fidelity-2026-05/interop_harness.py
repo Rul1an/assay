@@ -57,6 +57,44 @@ class InteropRow:
     runner_effect_kind: str | None = None
 
 
+def referenced_join_result(
+    row: InteropRow, join_results: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    if row.join_result_ref is None:
+        return None
+    prefix = "join-results.json#/"
+    if not row.join_result_ref.startswith(prefix):
+        raise ValueError(f"unsupported join_result_ref: {row.join_result_ref}")
+    raw_index = row.join_result_ref[len(prefix) :]
+    try:
+        index = int(raw_index)
+    except ValueError as exc:
+        raise ValueError(
+            f"unsupported join_result_ref (expected {prefix}<int>): {row.join_result_ref}"
+        ) from exc
+    if index < 0 or index >= len(join_results):
+        raise ValueError(f"join_result_ref index out of range: {row.join_result_ref}")
+    return join_results[index]
+
+
+def row_joinability(row: InteropRow, join_results: list[dict[str, Any]]) -> str:
+    if row.coverage_status == "absent" or row.mapping_basis == "not_expressible":
+        return "not_joinable"
+    join = referenced_join_result(row, join_results)
+    if join is not None:
+        join_grade = join["join_grade"]
+        if join_grade == "strong":
+            return "strong_join"
+        if join_grade in {"weak", "diagnostic"}:
+            return "diagnostic_join"
+        if join_grade == "failed":
+            return "not_joinable"
+        raise ValueError(f"unsupported join_grade: {join_grade}")
+    if row.join_key in {"run_id", "trace_span_id", "timestamp_or_order"}:
+        return "diagnostic_join"
+    return "not_applicable"
+
+
 def write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -121,6 +159,7 @@ def row_payload(
     index: int,
     assay_commit: str,
     retrieval_date: str,
+    join_results: list[dict[str, Any]],
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema": INTEROP_COVERAGE_CELL_SCHEMA,
@@ -134,6 +173,7 @@ def row_payload(
         ),
         "agent_shape": row.agent_shape,
         "join_key": row.join_key,
+        "joinability": row_joinability(row, join_results),
         "evidence_layer": row.evidence_layer,
         "coverage_status": row.coverage_status,
         "claim_strength": row.claim_strength,
@@ -575,13 +615,14 @@ def render_summary(*, cell_id: str, rows: list[dict[str, Any]]) -> str:
     lines = [
         f"# Interop Coverage Cell: {cell_id}",
         "",
-        "| Observation profile | Coverage | Claim strength | Mapping basis |",
-        "|---|---|---|---|",
+        "| Observation profile | Coverage | Joinability | Claim strength | Mapping basis |",
+        "|---|---|---|---|---|",
     ]
     for row in rows:
         lines.append(
             f"| `{row['observation_profile']}` | `{row['coverage_status']}` | "
-            f"`{row['claim_strength']}` | `{row['mapping_basis']}` |"
+            f"`{row['joinability']}` | `{row['claim_strength']}` | "
+            f"`{row['mapping_basis']}` |"
         )
     lines.extend(
         [
@@ -617,6 +658,7 @@ def generate_cell(
             index=index,
             assay_commit=assay_commit,
             retrieval_date=retrieval_date,
+            join_results=definition["join_results"],
         )
         for index, row in enumerate(definition["rows"])
     ]

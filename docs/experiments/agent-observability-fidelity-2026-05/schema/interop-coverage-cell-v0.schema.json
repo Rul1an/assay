@@ -12,6 +12,7 @@
     "source_snapshot",
     "agent_shape",
     "join_key",
+    "joinability",
     "evidence_layer",
     "coverage_status",
     "claim_strength",
@@ -75,6 +76,16 @@
         "run_id",
         "trace_span_id",
         "timestamp_or_order"
+      ]
+    },
+    "joinability": {
+      "description": "Derived row-level summary of join support. Producers compute this from coverage_status, mapping_basis, join_key, and any referenced join_result.v0 row; it is not an independent join contract.",
+      "type": "string",
+      "enum": [
+        "strong_join",
+        "diagnostic_join",
+        "not_joinable",
+        "not_applicable"
       ]
     },
     "evidence_layer": {
@@ -286,6 +297,9 @@
           },
           "mapping_basis": {
             "const": "not_expressible"
+          },
+          "joinability": {
+            "const": "not_joinable"
           },
           "join_result_ref": {
             "type": "null"
