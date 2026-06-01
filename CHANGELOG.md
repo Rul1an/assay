@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Grouped policy authoring under `assay policy generate` and
+  `assay policy record`. The previous top-level `assay generate` and
+  `assay record` commands remain available as hidden compatibility shims with
+  stderr deprecation warnings; output shapes, exit codes, and generated policy
+  behavior are unchanged.
+
 ## [3.13.0] - 2026-06-01
 
 > `v3.13.0` closes the post-`v3.12.0` CLI UX pass and ships the first

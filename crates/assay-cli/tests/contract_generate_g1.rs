@@ -37,7 +37,7 @@ fn normalize_text(raw: &str, tmp_root: &Path) -> String {
 
 fn run_generate(args: &[&str]) -> std::process::Output {
     let mut cmd = Command::cargo_bin("assay").expect("assay binary");
-    cmd.arg("generate");
+    cmd.arg("policy").arg("generate");
     for arg in args {
         cmd.arg(arg);
     }
@@ -99,7 +99,8 @@ fn generate_contract_read_events_all_invalid_is_hard_error() {
     write_file(&input, "not-json\n{\n#comment\n");
 
     let mut cmd = Command::cargo_bin("assay").expect("assay binary");
-    cmd.arg("generate")
+    cmd.arg("policy")
+        .arg("generate")
         .arg("--input")
         .arg(&input)
         .arg("--dry-run")
@@ -137,6 +138,7 @@ entries:
 
     let mut none_cmd = Command::cargo_bin("assay").expect("assay binary");
     none_cmd
+        .arg("policy")
         .arg("generate")
         .arg("--dry-run")
         .assert()
@@ -148,6 +150,7 @@ entries:
 
     let mut both_cmd = Command::cargo_bin("assay").expect("assay binary");
     both_cmd
+        .arg("policy")
         .arg("generate")
         .arg("--input")
         .arg(&input)

@@ -1,10 +1,10 @@
 # CLI Command Grouping RFC
 
-Status: accepted direction; Tier 1 MCP pilot implemented
+Status: accepted direction; Tier 1 MCP pilot and Tier 2a policy authoring implemented
 
 Owner: CLI / Product
 
-Last updated: 2026-06-01 (Tier 2 revised)
+Last updated: 2026-06-01 (Tier 2a policy authoring implemented)
 
 ## Summary
 
@@ -16,8 +16,9 @@ groups:
 - `mcp` first (implemented as the Tier 1 pilot)
 - `trust` second only after one more usage/docs check
 - a narrowed `policy` grouping (`generate`/`record`, not the full set first
-  drafted) and a corrected `replay` grouping (not `evidence`) only if user
-  feedback or nearby maintenance work justifies it
+  drafted), now implemented as Tier 2a
+- a corrected `replay` grouping (not `evidence`) only if user feedback or
+  nearby maintenance work justifies it
 
 Tier 2 was revised after checking the real command tree: the earlier
 `policy generate/coverage/explain/fix` and `evidence bundle/replay/import`
@@ -188,6 +189,9 @@ assay policy generate   # was: generate  ("Learning Mode: Generate policy from t
 assay policy record     # was: record    ("Learning Mode: Capture and Generate in one flow")
 ```
 
+Status: implemented. The old top-level `assay generate` and `assay record`
+paths remain hidden compatibility shims with stderr deprecation warnings.
+
 Optional, weaker fit:
 
 ```text
@@ -298,15 +302,14 @@ That difference is why this RFC recommends starting with one family at a time.
 1. Land this RFC as docs-only. Done.
 2. Land the small MCP-only grouping pilot. Done.
 3. If MCP grouping lands cleanly in a release, consider a trust grouping PR.
-4. Defer the narrowed Tier 2 work until there is user feedback or nearby
-   maintenance work:
-   - Tier 2a: `policy generate` / `policy record` (only `generate`/`record`,
-     plus optional `coverage`). Do not move `migrate`/`explain`/`fix`/
-     `calibrate`.
-   - Tier 2b: a `replay` noun (`replay bundle`, `replay run`). Not `evidence`.
-     Leave top-level `import` flat (collides with `evidence import`).
-5. Do not group core commands.
-6. Treat each Tier 2 family as its own PR; the collisions found while drafting
+4. Tier 2a `policy generate` / `policy record` is implemented. Keep
+   `coverage` flat for now, and do not move `migrate`/`explain`/`fix`/
+   `calibrate`.
+5. Defer Tier 2b until there is user feedback or nearby replay maintenance:
+   a `replay` noun (`replay bundle`, `replay run`). Not `evidence`. Leave
+   top-level `import` flat (collides with `evidence import`).
+6. Do not group core commands.
+7. Treat each Tier 2 family as its own PR; the collisions found while drafting
    Tier 2 are exactly why a bundled restructure is unsafe.
 
 ## Review Checklist For Future Grouping PRs

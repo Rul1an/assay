@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
 
+use crate::cli::commands::{generate::GenerateArgs, record::RecordArgs};
+
 #[derive(Args, Clone, Debug)]
 pub struct PolicyArgs {
     #[command(subcommand)]
@@ -12,6 +14,12 @@ pub struct PolicyArgs {
 
 #[derive(Subcommand, Clone, Debug)]
 pub enum PolicyCommand {
+    /// Generate policy from trace or profile input
+    Generate(GenerateArgs),
+
+    /// Capture runtime behavior and generate a policy
+    Record(RecordArgs),
+
     /// Validate policy syntax and (v2) JSON Schemas
     Validate(PolicyValidateArgs),
 

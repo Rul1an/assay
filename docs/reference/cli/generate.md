@@ -1,20 +1,24 @@
-# assay generate
+# assay policy generate
 
 Generate policy scaffolding from trace or profile inputs.
+
+The legacy top-level form `assay generate` remains available as a hidden
+compatibility shim and prints a deprecation warning. New usage should prefer
+`assay policy generate`.
 
 ---
 
 ## Synopsis
 
 ```bash
-assay generate [OPTIONS]
+assay policy generate [OPTIONS]
 ```
 
 ---
 
 ## Description
 
-`assay generate` supports two modes:
+`assay policy generate` supports two modes:
 
 - single-run mode from `--input` trace events
 - profile mode from `--profile` stability data
@@ -50,19 +54,19 @@ For parity hardening, the key reviewer-facing surface is `--diff`: it previews h
 ### Trace input
 
 ```bash
-assay generate --input traces/session.jsonl --output policy.yaml
+assay policy generate --input traces/session.jsonl --output policy.yaml
 ```
 
 ### Diff preview (no write)
 
 ```bash
-assay generate --input traces/session.jsonl --output policy.yaml --diff --dry-run
+assay policy generate --input traces/session.jsonl --output policy.yaml --diff --dry-run
 ```
 
 ### Profile input
 
 ```bash
-assay generate --profile .assay/profile.json --min-stability 0.8 --new-is-risky
+assay policy generate --profile .assay/profile.json --min-stability 0.8 --new-is-risky
 ```
 
 ---

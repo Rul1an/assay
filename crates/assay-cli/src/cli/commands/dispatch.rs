@@ -5,6 +5,10 @@ fn warn_legacy_mcp_path(old: &str, new: &str) {
     eprintln!("warning: `assay {old}` is deprecated; use `assay mcp {new}` instead");
 }
 
+fn warn_legacy_policy_path(old: &str, new: &str) {
+    eprintln!("warning: `assay {old}` is deprecated; use `assay policy {new}` instead");
+}
+
 pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
     match cli.cmd {
         Command::Init(args) => super::init::run(args).await,
@@ -45,8 +49,14 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         }
         Command::Monitor(args) => super::monitor::run(args).await,
         Command::Policy(args) => super::policy::run(args).await,
-        Command::Generate(args) => super::generate::run(args),
-        Command::Record(args) => super::record::run(args).await,
+        Command::Generate(args) => {
+            warn_legacy_policy_path("generate", "generate");
+            super::generate::run(args)
+        }
+        Command::Record(args) => {
+            warn_legacy_policy_path("record", "record");
+            super::record::run(args).await
+        }
         #[cfg(feature = "runner")]
         Command::RunnerSpike(args) => super::runner_spike::run(args).await,
         Command::Profile(args) => super::profile::run(args),

@@ -1,4 +1,4 @@
-//! Golden tests for assay generate (Phase 3)
+//! Golden tests for assay policy generate (Phase 3)
 
 #![allow(deprecated)] // cargo_bin is deprecated but still works
 
@@ -21,9 +21,10 @@ fn run_golden(name: &str, use_heuristics: bool) {
     let input_path = dir.join("input.jsonl");
     let expected_path = dir.join("expected.yaml");
 
-    // We run the binary "assay" with the "generate" subcommand
+    // We run the binary "assay" with the canonical "policy generate" subcommand.
     let mut cmd = Command::cargo_bin("assay").unwrap();
-    cmd.arg("generate")
+    cmd.arg("policy")
+        .arg("generate")
         .arg("--input")
         .arg(&input_path)
         .arg("--name")

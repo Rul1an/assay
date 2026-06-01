@@ -15,18 +15,25 @@ fn docs_reference_includes_generate_and_explain_contract_flags() {
     let index = fs::read_to_string(root.join("docs/reference/cli/index.md")).expect("read index");
     let explain =
         fs::read_to_string(root.join("docs/reference/cli/explain.md")).expect("read explain doc");
+    let policy =
+        fs::read_to_string(root.join("docs/reference/cli/policy.md")).expect("read policy doc");
     let generate =
         fs::read_to_string(root.join("docs/reference/cli/generate.md")).expect("read generate doc");
 
     assert!(
-        index.contains("[`assay generate`](generate.md)"),
-        "CLI index must link to assay generate"
+        index.contains("[`assay policy`](policy.md)"),
+        "CLI index must link to assay policy"
     );
     assert!(
         index.contains("[`assay explain`](explain.md)"),
         "CLI index must link to assay explain"
     );
 
+    assert!(
+        policy.contains("[`assay policy generate`](generate.md)")
+            && policy.contains("`assay policy record`"),
+        "policy docs must include policy authoring commands"
+    );
     assert!(
         explain.contains("--compliance-pack"),
         "explain docs must include compliance-pack option"
@@ -42,6 +49,7 @@ fn cli_help_exposes_generate_diff_and_explain_compliance_pack() {
     #[allow(deprecated)]
     let mut generate_help = Command::cargo_bin("assay").expect("assay binary");
     let generate_output = generate_help
+        .arg("policy")
         .arg("generate")
         .arg("--help")
         .assert()
