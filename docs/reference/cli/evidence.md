@@ -67,8 +67,8 @@ Schema names can be the registry name, known alias, source path, or JSON Schema
 
 ## MCP Execution Record Pairing
 
-Verify that SEP-2787 attestation and server execution-record fixtures pair up
-from the consumer side:
+Verify that request binding material and server execution-record fixtures pair
+up from the consumer side:
 
 ```bash
 assay evidence verify-mcp-records \
@@ -78,15 +78,35 @@ assay evidence verify-mcp-records \
   --format json
 ```
 
+For deployments without SEP-2787 attestation, supply the observed
+`tools/call` params plus `_meta` request envelope instead:
+
+```bash
+assay evidence verify-mcp-records \
+  --request-envelope tools-call-envelope.json \
+  --decision server-decision-record.json \
+  --outcome server-outcome-record.json \
+  --format json
+```
+
+`--attestation` and `--request-envelope` are mutually exclusive. Exactly one is
+required.
+
 This command emits an `assay.mcp.execution-record-pairing.report.v0` report. It
-computes the SEP-2787 JCS digest, checks the decision and optional outcome
+computes the binding digest, checks the decision and optional outcome
 `backLink` fields, verifies the outcome's `decisionDigest` commitment to the
-signed decision record, and verifies the narrow decision/outcome enum surface.
+full signed decision record, and verifies the narrow decision/outcome enum
+surface. In SEP-2787 mode the binding digest is the attestation JCS digest and
+the nonce comes from `issuerAsserted.nonce`. In request-envelope mode the
+binding digest is the JCS digest of the supplied envelope, while the nonce is
+only checked for decision/outcome record consistency.
 
 The command is deliberately not an MCP proxy, issuer, policy engine, or runtime
 truth oracle. It does not verify signatures, establish issuer key trust, prove
 policy correctness, prove side effects, or disclose payload/result bodies. It is
 for downstream verifier fixtures and reviewer-visible pairing diagnostics.
+Request-envelope fallback does not prove the server observed that envelope
+honestly, or that the server-chosen nonce was unique or fresh for the call.
 
 If `--outcome` is omitted, Assay reports a valid decision-only pairing check.
 Pairing or enum mismatches produce a report and exit `2`.

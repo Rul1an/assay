@@ -115,24 +115,30 @@ add a binding block that names the mode:
 {
   "schema": "assay.mcp.execution-record-pairing.report.v0",
   "binding": {
-    "kind": "request_envelope_fallback",
+    "mode": "request_envelope",
     "digest": "sha256:...",
-    "nonce": "server-chosen-nonce-001"
+    "digest_source": "request_envelope_jcs",
+    "nonce": "server-chosen-nonce-001",
+    "nonce_source": "record_backlink_consistency"
   }
 }
 ```
 
-For the SEP-2787 path, `binding.kind` should be
-`sep2787_attestation`. The existing `attestation` report field can stay
-for compatibility when an attestation input is supplied. The `binding`
-block is additive; existing v0 consumers that ignore unknown fields
-should still be able to parse the report.
+For the SEP-2787 path, `binding.mode` should be
+`sep2787_attestation`, with `digest_source` set to
+`sep2787_attestation_jcs` and `nonce_source` set to
+`issuerAsserted.nonce`. The existing `attestation` report field can stay
+for compatibility when an attestation input is supplied, and should be
+`null` in request-envelope mode. The `binding` block is additive;
+existing v0 consumers that ignore unknown fields should still be able to
+parse the report.
 
 Fallback-specific check ids should say what was verified:
 
 | Check id | Meaning |
 |---|---|
 | `decision_request_envelope_digest_match` | Decision backLink digest matches the request-envelope digest |
+| `decision_request_envelope_nonce_present` | Decision backLink carries the server-chosen nonce used for fallback pairing |
 | `outcome_request_envelope_digest_match` | Outcome backLink digest matches the request-envelope digest |
 | `decision_outcome_backlink_match` | Decision and outcome describe the same call instance through digest + nonce |
 | `outcome_decision_digest_match` | Outcome commits to this full signed decision record |
@@ -195,7 +201,7 @@ Review-ready when:
 
 - `verify-mcp-records` accepts exactly one of `--attestation` or
   `--request-envelope`
-- both modes produce an explicit `binding.kind`
+- both modes produce an explicit `binding.mode`
 - SEP-2787-backed behavior is unchanged
 - fallback digest and nonce checks are covered by CLI tests
 - Check B remains shared across both modes
