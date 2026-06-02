@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::{Args, ValueEnum};
+use clap::{ArgGroup, Args, ValueEnum};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -7,10 +7,19 @@ use std::fs;
 use std::path::PathBuf;
 
 #[derive(Debug, Args, Clone)]
+#[command(group(
+    ArgGroup::new("binding_input")
+        .required(true)
+        .args(["attestation", "request_envelope"])
+))]
 pub struct McpExecutionRecordArgs {
     /// SEP-2787 attestation JSON fixture
     #[arg(long)]
-    pub attestation: PathBuf,
+    pub attestation: Option<PathBuf>,
+
+    /// Observed tools/call request envelope JSON fixture for no-attestation fallback
+    #[arg(long)]
+    pub request_envelope: Option<PathBuf>,
 
     /// Server-side decision record JSON fixture
     #[arg(long)]
@@ -37,7 +46,8 @@ struct PairingReport {
     ok: bool,
     canonicalization: &'static str,
     verification_scope: VerificationScope,
-    attestation: AttestationReport,
+    binding: BindingReport,
+    attestation: Option<AttestationReport>,
     decision: DecisionReport,
     outcome: Option<OutcomeReport>,
     checks: Vec<CheckReport>,
@@ -54,6 +64,15 @@ struct VerificationScope {
 struct AttestationReport {
     digest: String,
     nonce: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BindingReport {
+    mode: &'static str,
+    digest: String,
+    digest_source: &'static str,
+    nonce: Option<String>,
+    nonce_source: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -87,11 +106,17 @@ struct CheckReport {
 }
 
 pub fn cmd_verify_mcp_records(args: McpExecutionRecordArgs) -> Result<i32> {
-    let attestation = read_json(&args.attestation)?;
+    let binding_input = match (&args.attestation, &args.request_envelope) {
+        (Some(attestation), None) => BindingInput::Attestation(read_json(attestation)?),
+        (None, Some(request_envelope)) => {
+            BindingInput::RequestEnvelope(read_json(request_envelope)?)
+        }
+        _ => anyhow::bail!("exactly one of --attestation or --request-envelope is required"),
+    };
     let decision = read_json(&args.decision)?;
     let outcome = args.outcome.as_ref().map(read_json).transpose()?;
 
-    let report = build_report(&attestation, &decision, outcome.as_ref())?;
+    let report = build_report(&binding_input, &decision, outcome.as_ref())?;
     match args.format {
         McpExecutionRecordFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -108,30 +133,31 @@ fn read_json(path: &PathBuf) -> Result<Value> {
     serde_json::from_str(&body).with_context(|| format!("failed to parse {}", path.display()))
 }
 
+enum BindingInput {
+    Attestation(Value),
+    RequestEnvelope(Value),
+}
+
+struct BindingExpectation {
+    mode: &'static str,
+    digest: String,
+    digest_source: &'static str,
+    nonce: Option<String>,
+    nonce_source: &'static str,
+}
+
 fn build_report(
-    attestation: &Value,
+    binding_input: &BindingInput,
     decision: &Value,
     outcome: Option<&Value>,
 ) -> Result<PairingReport> {
-    let attestation_digest = jcs_digest(attestation).context("failed to digest attestation")?;
     let decision_digest = jcs_digest(decision).context("failed to digest decision")?;
-    let attestation_nonce = string_at(attestation, &["issuerAsserted", "nonce"]);
     let decision_backlink = backlink_report(decision)?;
     let outcome_backlink = outcome.map(backlink_report).transpose()?;
+    let expectation = binding_expectation(binding_input, &decision_backlink)?;
 
     let mut checks = Vec::new();
-    checks.push(check_eq(
-        "decision_attestation_digest_match",
-        decision_backlink.attestation_digest.as_deref(),
-        Some(attestation_digest.as_str()),
-        "decision backLink.attestationDigest matches SEP-2787 JCS digest",
-    ));
-    checks.push(check_eq(
-        "decision_attestation_nonce_match",
-        decision_backlink.attestation_nonce.as_deref(),
-        attestation_nonce.as_deref(),
-        "decision backLink.attestationNonce matches issuerAsserted.nonce",
-    ));
+    push_decision_binding_checks(&mut checks, &decision_backlink, &expectation);
     checks.push(check_enum(
         "decision_enum",
         decision_value(decision).as_deref(),
@@ -139,24 +165,14 @@ fn build_report(
     ));
 
     if let Some(outcome_backlink) = &outcome_backlink {
-        checks.push(check_eq(
-            "outcome_attestation_digest_match",
-            outcome_backlink.attestation_digest.as_deref(),
-            Some(attestation_digest.as_str()),
-            "outcome backLink.attestationDigest matches SEP-2787 JCS digest",
-        ));
-        checks.push(check_eq(
-            "outcome_attestation_nonce_match",
-            outcome_backlink.attestation_nonce.as_deref(),
-            attestation_nonce.as_deref(),
-            "outcome backLink.attestationNonce matches issuerAsserted.nonce",
-        ));
+        push_outcome_binding_checks(&mut checks, outcome_backlink, &expectation);
         checks.push(check_eq(
             "decision_outcome_backlink_match",
             backlink_pair_key(outcome_backlink).as_deref(),
             backlink_pair_key(&decision_backlink).as_deref(),
             "decision and outcome describe the same call instance",
         ));
+        // SEP-2828 Check B digests the full signed decision record.
         checks.push(check_eq(
             "outcome_decision_digest_match",
             outcome.and_then(outcome_decision_digest).as_deref(),
@@ -202,21 +218,138 @@ fn build_report(
             role: "independent-consumer",
             note: "Assay verifies fixture pairing and digest commitments only; it does not emit records or act as a proxy.",
         },
-        attestation: AttestationReport {
-            digest: attestation_digest,
-            nonce: attestation_nonce,
+        binding: BindingReport {
+            mode: expectation.mode,
+            digest: expectation.digest.clone(),
+            digest_source: expectation.digest_source,
+            nonce: expectation.nonce.clone(),
+            nonce_source: expectation.nonce_source,
         },
+        attestation: attestation_report(binding_input, &expectation),
         decision: decision_report,
         outcome: outcome_report,
         checks,
-        claims_not_made: vec![
-            "signature_verification",
-            "issuer_key_trust",
-            "policy_correctness",
-            "runtime_side_effect_truth",
-            "payload_or_result_disclosure",
-        ],
+        claims_not_made: claims_not_made(&expectation),
     })
+}
+
+fn claims_not_made(expectation: &BindingExpectation) -> Vec<&'static str> {
+    let mut claims = vec![
+        "signature_verification",
+        "issuer_key_trust",
+        "policy_correctness",
+        "runtime_side_effect_truth",
+        "payload_or_result_disclosure",
+    ];
+    if expectation.mode == "request_envelope" {
+        claims.push("fallback_server_observation_truth");
+        claims.push("fallback_nonce_freshness_or_uniqueness");
+    }
+    claims
+}
+
+fn binding_expectation(
+    binding_input: &BindingInput,
+    decision_backlink: &BackLinkReport,
+) -> Result<BindingExpectation> {
+    match binding_input {
+        BindingInput::Attestation(attestation) => Ok(BindingExpectation {
+            mode: "sep2787_attestation",
+            digest: jcs_digest(attestation).context("failed to digest attestation")?,
+            digest_source: "sep2787_attestation_jcs",
+            nonce: string_at(attestation, &["issuerAsserted", "nonce"]),
+            nonce_source: "issuerAsserted.nonce",
+        }),
+        BindingInput::RequestEnvelope(request_envelope) => Ok(BindingExpectation {
+            mode: "request_envelope",
+            digest: jcs_digest(request_envelope).context("failed to digest request envelope")?,
+            digest_source: "request_envelope_jcs",
+            nonce: decision_backlink.attestation_nonce.clone(),
+            nonce_source: "record_backlink_consistency",
+        }),
+    }
+}
+
+fn attestation_report(
+    binding_input: &BindingInput,
+    expectation: &BindingExpectation,
+) -> Option<AttestationReport> {
+    match binding_input {
+        BindingInput::Attestation(_) => Some(AttestationReport {
+            digest: expectation.digest.clone(),
+            nonce: expectation.nonce.clone(),
+        }),
+        BindingInput::RequestEnvelope(_) => None,
+    }
+}
+
+fn push_decision_binding_checks(
+    checks: &mut Vec<CheckReport>,
+    decision_backlink: &BackLinkReport,
+    expectation: &BindingExpectation,
+) {
+    match expectation.mode {
+        "sep2787_attestation" => {
+            checks.push(check_eq(
+                "decision_attestation_digest_match",
+                decision_backlink.attestation_digest.as_deref(),
+                Some(expectation.digest.as_str()),
+                "decision backLink.attestationDigest matches SEP-2787 JCS digest",
+            ));
+            checks.push(check_eq(
+                "decision_attestation_nonce_match",
+                decision_backlink.attestation_nonce.as_deref(),
+                expectation.nonce.as_deref(),
+                "decision backLink.attestationNonce matches issuerAsserted.nonce",
+            ));
+        }
+        "request_envelope" => {
+            checks.push(check_eq(
+                "decision_request_envelope_digest_match",
+                decision_backlink.attestation_digest.as_deref(),
+                Some(expectation.digest.as_str()),
+                "decision backLink.attestationDigest matches request-envelope JCS digest",
+            ));
+            checks.push(check_present(
+                "decision_request_envelope_nonce_present",
+                decision_backlink.attestation_nonce.as_deref(),
+                "decision backLink.attestationNonce is present for fallback binding",
+            ));
+        }
+        _ => unreachable!("unknown binding mode"),
+    }
+}
+
+fn push_outcome_binding_checks(
+    checks: &mut Vec<CheckReport>,
+    outcome_backlink: &BackLinkReport,
+    expectation: &BindingExpectation,
+) {
+    match expectation.mode {
+        "sep2787_attestation" => {
+            checks.push(check_eq(
+                "outcome_attestation_digest_match",
+                outcome_backlink.attestation_digest.as_deref(),
+                Some(expectation.digest.as_str()),
+                "outcome backLink.attestationDigest matches SEP-2787 JCS digest",
+            ));
+            checks.push(check_eq(
+                "outcome_attestation_nonce_match",
+                outcome_backlink.attestation_nonce.as_deref(),
+                expectation.nonce.as_deref(),
+                "outcome backLink.attestationNonce matches issuerAsserted.nonce",
+            ));
+        }
+        "request_envelope" => {
+            checks.push(check_eq(
+                "outcome_request_envelope_digest_match",
+                outcome_backlink.attestation_digest.as_deref(),
+                Some(expectation.digest.as_str()),
+                "outcome backLink.attestationDigest matches request-envelope JCS digest",
+            ));
+        }
+        _ => unreachable!("unknown binding mode"),
+    }
 }
 
 fn jcs_digest(value: &Value) -> Result<String> {
@@ -305,15 +438,28 @@ fn check_enum(id: &'static str, value: Option<&str>, allowed: &[&str]) -> CheckR
     }
 }
 
+fn check_present(id: &'static str, value: Option<&str>, description: &str) -> CheckReport {
+    CheckReport {
+        id,
+        ok: value.is_some(),
+        detail: if value.is_some() {
+            description.to_string()
+        } else {
+            "missing value".to_string()
+        },
+    }
+}
+
 fn print_table_report(report: &PairingReport) {
     println!("MCP Execution Record Pairing Report");
     println!("===================================");
     println!("OK:               {}", if report.ok { "yes" } else { "no" });
     println!("Role:             {}", report.verification_scope.role);
-    println!("Attestation:      {}", report.attestation.digest);
+    println!("Binding:          {}", report.binding.mode);
+    println!("Binding digest:   {}", report.binding.digest);
     println!(
-        "Nonce:            {}",
-        report.attestation.nonce.as_deref().unwrap_or("-")
+        "Binding nonce:    {}",
+        report.binding.nonce.as_deref().unwrap_or("-")
     );
     println!(
         "Decision:         {}",
