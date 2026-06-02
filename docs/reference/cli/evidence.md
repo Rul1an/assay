@@ -80,7 +80,8 @@ assay evidence verify-mcp-records \
 
 This command emits an `assay.mcp.execution-record-pairing.report.v0` report. It
 computes the SEP-2787 JCS digest, checks the decision and optional outcome
-`backLink` fields, and verifies the narrow decision/outcome enum surface.
+`backLink` fields, verifies the outcome's `decisionDigest` commitment to the
+signed decision record, and verifies the narrow decision/outcome enum surface.
 
 The command is deliberately not an MCP proxy, issuer, policy engine, or runtime
 truth oracle. It does not verify signatures, establish issuer key trust, prove

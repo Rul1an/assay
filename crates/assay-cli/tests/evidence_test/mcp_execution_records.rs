@@ -1,6 +1,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::fs;
 use tempfile::tempdir;
 
@@ -69,7 +70,7 @@ fn decision_json_with_value(digest: &str, decision: &str) -> String {
     )
 }
 
-fn outcome_json(digest: &str) -> String {
+fn outcome_json(digest: &str, decision_digest: &str) -> String {
     format!(
         r#"{{
   "version": 1,
@@ -80,7 +81,8 @@ fn outcome_json(digest: &str) -> String {
   }},
   "outcomeDerived": {{
     "status": "executed",
-    "completedAt": "2026-06-01T00:00:02Z"
+    "completedAt": "2026-06-01T00:00:02Z",
+    "decisionDigest": "{decision_digest}"
   }},
   "receiptAsserted": {{
     "iss": "server",
@@ -95,15 +97,23 @@ fn outcome_json(digest: &str) -> String {
     )
 }
 
+fn jcs_digest_json(body: &str) -> String {
+    let value: Value = serde_json::from_str(body).unwrap();
+    let canonical = assay_core::mcp::jcs::to_vec(&value).unwrap();
+    format!("sha256:{}", hex::encode(Sha256::digest(&canonical)))
+}
+
 #[test]
 fn verify_mcp_records_reports_pairing_as_independent_consumer() {
     let dir = tempdir().unwrap();
     let attestation = dir.path().join("attestation.json");
     let decision = dir.path().join("decision.json");
     let outcome = dir.path().join("outcome.json");
+    let decision_body = decision_json(ATTESTATION_DIGEST);
+    let decision_digest = jcs_digest_json(&decision_body);
     fs::write(&attestation, attestation_json()).unwrap();
-    fs::write(&decision, decision_json(ATTESTATION_DIGEST)).unwrap();
-    fs::write(&outcome, outcome_json(ATTESTATION_DIGEST)).unwrap();
+    fs::write(&decision, decision_body).unwrap();
+    fs::write(&outcome, outcome_json(ATTESTATION_DIGEST, &decision_digest)).unwrap();
 
     let output = Command::cargo_bin("assay")
         .unwrap()
@@ -131,11 +141,44 @@ fn verify_mcp_records_reports_pairing_as_independent_consumer() {
     assert_eq!(report["attestation"]["digest"], ATTESTATION_DIGEST);
     assert_eq!(report["decision"]["decision"], "allow");
     assert_eq!(report["outcome"]["status"], "executed");
+    assert_eq!(report["outcome"]["decision_digest"], decision_digest);
     assert!(report["claims_not_made"]
         .as_array()
         .unwrap()
         .iter()
         .any(|claim| claim == "signature_verification"));
+}
+
+#[test]
+fn verify_mcp_records_fails_when_outcome_binds_different_decision() {
+    let dir = tempdir().unwrap();
+    let attestation = dir.path().join("attestation.json");
+    let decision = dir.path().join("decision.json");
+    let outcome = dir.path().join("outcome.json");
+    fs::write(&attestation, attestation_json()).unwrap();
+    fs::write(&decision, decision_json(ATTESTATION_DIGEST)).unwrap();
+    fs::write(
+        &outcome,
+        outcome_json(ATTESTATION_DIGEST, "sha256:0000000000000000"),
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence",
+            "verify-mcp-records",
+            "--attestation",
+            attestation.to_str().unwrap(),
+            "--decision",
+            decision.to_str().unwrap(),
+            "--outcome",
+            outcome.to_str().unwrap(),
+        ])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("outcome_decision_digest_match"))
+        .stdout(predicate::str::contains("fail mismatch"));
 }
 
 #[test]

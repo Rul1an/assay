@@ -68,6 +68,7 @@ struct DecisionReport {
 struct OutcomeReport {
     status: Option<String>,
     completed_at: Option<String>,
+    decision_digest: Option<String>,
     backlink: BackLinkReport,
     signature_present: bool,
 }
@@ -113,6 +114,7 @@ fn build_report(
     outcome: Option<&Value>,
 ) -> Result<PairingReport> {
     let attestation_digest = jcs_digest(attestation).context("failed to digest attestation")?;
+    let decision_digest = jcs_digest(decision).context("failed to digest decision")?;
     let attestation_nonce = string_at(attestation, &["issuerAsserted", "nonce"]);
     let decision_backlink = backlink_report(decision)?;
     let outcome_backlink = outcome.map(backlink_report).transpose()?;
@@ -151,9 +153,15 @@ fn build_report(
         ));
         checks.push(check_eq(
             "decision_outcome_backlink_match",
-            outcome_backlink.attestation_digest.as_deref(),
-            decision_backlink.attestation_digest.as_deref(),
+            backlink_pair_key(outcome_backlink).as_deref(),
+            backlink_pair_key(&decision_backlink).as_deref(),
             "decision and outcome describe the same call instance",
+        ));
+        checks.push(check_eq(
+            "outcome_decision_digest_match",
+            outcome.and_then(outcome_decision_digest).as_deref(),
+            Some(decision_digest.as_str()),
+            "outcomeDerived.decisionDigest matches the signed decision record digest",
         ));
         checks.push(check_enum(
             "outcome_status_enum",
@@ -178,6 +186,7 @@ fn build_report(
         (Some(outcome), Some(backlink)) => Some(OutcomeReport {
             status: outcome_status(outcome),
             completed_at: string_at(outcome, &["outcomeDerived", "completedAt"]),
+            decision_digest: outcome_decision_digest(outcome),
             backlink,
             signature_present: outcome.get("signature").and_then(Value::as_str).is_some(),
         }),
@@ -237,6 +246,19 @@ fn decision_value(record: &Value) -> Option<String> {
 fn outcome_status(record: &Value) -> Option<String> {
     string_at(record, &["outcomeDerived", "status"])
         .or_else(|| string_at(record, &["outcome_derived", "status"]))
+}
+
+fn outcome_decision_digest(record: &Value) -> Option<String> {
+    string_at(record, &["outcomeDerived", "decisionDigest"])
+        .or_else(|| string_at(record, &["outcome_derived", "decision_digest"]))
+}
+
+fn backlink_pair_key(backlink: &BackLinkReport) -> Option<String> {
+    Some(format!(
+        "attestationDigest={};attestationNonce={}",
+        backlink.attestation_digest.as_deref()?,
+        backlink.attestation_nonce.as_deref()?
+    ))
 }
 
 fn string_at(value: &Value, path: &[&str]) -> Option<String> {
