@@ -1213,7 +1213,9 @@ def build_drift_report(
         fixture_paths,
         is_network_dimension=True,
     )
-    if _network_endpoint_churn_is_diagnostic_only(a, b, only_a, only_b):
+    if a_net and b_net and _network_endpoint_churn_is_diagnostic_only(
+        a, b, only_a, only_b
+    ):
         cls = CLASSIFICATION_INCONCLUSIVE
         detail = _diagnostic_only_network_endpoint_detail(a, b, detail)
     rows.append(

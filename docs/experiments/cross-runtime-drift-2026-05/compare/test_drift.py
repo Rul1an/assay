@@ -1124,6 +1124,56 @@ class DriftReportInconclusiveTests(unittest.TestCase):
         )
         self.assertIn("arm-b", row.detail)
 
+    def test_diagnostic_only_one_sided_endpoint_absence_keeps_absence_detail(
+        self,
+    ) -> None:
+        a = drift.ArchiveObservation(
+            path="a",
+            run_id="a",
+            runtime_label="openai-agents",
+            manifest_digest="sha256:aa",
+            capability_surface={
+                "filesystem_paths": [],
+                "network_endpoints": ["api.openai.com:443"],
+                "process_execs": [],
+                "mcp_tools": [],
+                "policy_decisions": [],
+            },
+            sdk_events=[],
+            sdk_event_count=0,
+            sdk_tools=[],
+            sdk_tool_call_ids=[],
+            sdk_tool_order=[],
+            observation_health={
+                "network_endpoint_claim_scope": "diagnostic_only"
+            },
+        )
+        b = drift.ArchiveObservation(
+            path="b",
+            run_id="b",
+            runtime_label="gemini-genai",
+            manifest_digest="sha256:bb",
+            capability_surface={
+                "filesystem_paths": [],
+                "network_endpoints": [],
+                "process_execs": [],
+                "mcp_tools": [],
+                "policy_decisions": [],
+            },
+            sdk_events=[],
+            sdk_event_count=0,
+            sdk_tools=[],
+            sdk_tool_call_ids=[],
+            sdk_tool_order=[],
+        )
+
+        rows = drift.build_drift_report(a, b)
+        row = next(r for r in rows if r.dimension == "network_endpoints")
+
+        self.assertEqual(row.classification, drift.CLASSIFICATION_INCONCLUSIVE)
+        self.assertIn("dimension absent in arm-b", row.detail)
+        self.assertNotIn("raw endpoint churn", row.detail)
+
 
 class DriftReportFixturePathOverrideTests(unittest.TestCase):
     """An extra fixture path that only one arm touched (e.g. cache file)
