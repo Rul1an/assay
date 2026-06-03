@@ -1,0 +1,63 @@
+{
+  "schema": "assay.mcp.tunnel_observed.v0",
+  "artifact_id": "mcp-tunnel-observed-raw-auth-leak",
+  "observed_at": "2026-06-03T16:00:02Z",
+  "provider_context": {
+    "provider": "example",
+    "surface": "mcp_tunnel",
+    "component": "sample-tunnel-client",
+    "component_version": "0.0.0"
+  },
+  "tunnel": {
+    "tunnel_ref": "tunnel_redacted",
+    "tunnel_ref_kind": "provider_id",
+    "direction": "outbound_client_poll",
+    "transport": "https_long_poll"
+  },
+  "request_instance": {
+    "request_id": "req-001",
+    "request_envelope_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "request_envelope_canonicalization": "jcs:mcp_request_envelope.v1",
+    "nonce": "n-001"
+  },
+  "route": {
+    "channel": "main",
+    "method": "tools/call",
+    "path": "/mcp"
+  },
+  "upstream": {
+    "target_ref": "local-stdio",
+    "target_kind": "stdio",
+    "target_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "mcp": {
+    "method": "tools/call",
+    "tool_name": "deploy_service"
+  },
+  "auth_context": {
+    "authorization_header_visible": true,
+    "authorization_header_stored": true,
+    "authorization_header_raw": "Bearer should-not-ship",
+    "authorization_header_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "mcp_oauth_metadata_visible": true,
+    "client_mtls_configured": false
+  },
+  "visibility": {
+    "request_payload_mode": "digest_only",
+    "response_payload_mode": "not_observed",
+    "tool_result_visible": false,
+    "policy_decision_visible": false,
+    "raw_payload_retained": false
+  },
+  "non_claims": [
+    "agent_identity_not_verified_by_tunnel_observation",
+    "authorization_not_proven_by_tunnel_observation",
+    "policy_outcome_not_inferred_from_transport",
+    "tool_result_truth_not_proven",
+    "application_outcome_not_proven",
+    "upstream_server_trust_not_proven",
+    "token_freshness_not_proven",
+    "observed_facts_trust_depends_on_observation_point_integrity",
+    "route_facts_may_be_asserted_not_mediation_proven"
+  ]
+}
