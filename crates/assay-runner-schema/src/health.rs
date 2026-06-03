@@ -34,6 +34,27 @@ pub enum CgroupCorrelationStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkProtocolCoverageStatus {
+    #[default]
+    Unknown,
+    Absent,
+    ConnectOnly,
+    DatagramPeerObserved,
+    ConnectAndDatagramPeerObserved,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkEndpointClaimScope {
+    #[default]
+    Unknown,
+    NotApplicable,
+    DiagnosticOnly,
+    PeerSet,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObservationHealth {
     pub schema: String,
@@ -44,6 +65,10 @@ pub struct ObservationHealth {
     pub policy_layer: PolicyLayerStatus,
     pub sdk_layer: SdkLayerStatus,
     pub cgroup_correlation: CgroupCorrelationStatus,
+    #[serde(default)]
+    pub network_protocol_coverage: NetworkProtocolCoverageStatus,
+    #[serde(default)]
+    pub network_endpoint_claim_scope: NetworkEndpointClaimScope,
     pub notes: Vec<String>,
 }
 
@@ -72,6 +97,8 @@ impl ObservationHealth {
             policy_layer: PolicyLayerStatus::Absent,
             sdk_layer: SdkLayerStatus::Absent,
             cgroup_correlation: CgroupCorrelationStatus::Partial,
+            network_protocol_coverage: NetworkProtocolCoverageStatus::Absent,
+            network_endpoint_claim_scope: NetworkEndpointClaimScope::NotApplicable,
             notes: Vec::new(),
         }
         .normalized()
@@ -136,6 +163,10 @@ impl ObservationHealth {
         if self.platform != "linux" {
             self.kernel_layer = KernelLayerStatus::Absent;
         }
+        if self.platform != "linux" || self.kernel_layer == KernelLayerStatus::Absent {
+            self.network_protocol_coverage = NetworkProtocolCoverageStatus::Absent;
+            self.network_endpoint_claim_scope = NetworkEndpointClaimScope::NotApplicable;
+        }
         // The SDK layer is intentionally not derived from the declared shim.
         // A shim can crash before emitting events, which legitimately leaves
         // sdk_layer=absent even when the requested shim was not "none".
@@ -152,6 +183,10 @@ mod tests {
 
         assert_eq!(health.kernel_layer, KernelLayerStatus::PartialRingbufDrops);
         assert_eq!(health.ringbuf_drops, 2);
+        assert_eq!(
+            health.network_protocol_coverage,
+            NetworkProtocolCoverageStatus::Absent
+        );
     }
 
     #[test]
@@ -160,6 +195,10 @@ mod tests {
 
         assert_eq!(health.kernel_layer, KernelLayerStatus::Absent);
         assert_eq!(health.cgroup_correlation, CgroupCorrelationStatus::Partial);
+        assert_eq!(
+            health.network_endpoint_claim_scope,
+            NetworkEndpointClaimScope::NotApplicable
+        );
     }
 
     #[test]
@@ -167,6 +206,10 @@ mod tests {
         let health = ObservationHealth::new("run_001", "macos");
 
         assert_eq!(health.kernel_layer, KernelLayerStatus::Absent);
+        assert_eq!(
+            health.network_protocol_coverage,
+            NetworkProtocolCoverageStatus::Absent
+        );
     }
 
     #[test]

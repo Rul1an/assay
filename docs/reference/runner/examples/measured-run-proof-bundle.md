@@ -88,8 +88,10 @@ Canonical golden, from
   "policy_layer": "present",
   "sdk_layer": "self_reported",
   "cgroup_correlation": "clean",
+  "network_protocol_coverage": "connect_only",
+  "network_endpoint_claim_scope": "diagnostic_only",
   "notes": [
-    "s2_kernel_capture: monitor_events=4 ringbuf_drops=0",
+    "s2_kernel_capture: monitor_events=4 ringbuf_drops=0 network_protocol_coverage=connect_only network_endpoint_claim_scope=diagnostic_only",
     "s4_policy_capture: policy_events=1",
     "s5_sdk_capture: sdk_events=3 sdk_tool_calls=1"
   ]
@@ -102,6 +104,12 @@ How to read this:
   not lose any events the eBPF ring buffer handed us. If it had, this
   would say `degraded` and the count would be non-zero, and the rest of
   the bundle would have to be interpreted in that light.
+- `network_protocol_coverage: connect_only` is the honesty boundary for
+  the current Runner network surface: clean capture does not imply
+  protocol-complete QUIC peer attribution.
+- `network_endpoint_claim_scope: diagnostic_only` means any
+  `network_endpoints` values are coarse/diagnostic evidence, not an
+  exact datagram peer set.
 - `policy_layer: present` means MCP policy decisions were captured.
 - `sdk_layer: self_reported` is the honest framing: SDK events come from
   the SDK itself, so we record them but never call them

@@ -16,6 +16,8 @@ signals:
 - `policy_layer`
 - `sdk_layer`
 - `cgroup_correlation`
+- `network_protocol_coverage`
+- `network_endpoint_claim_scope`
 
 Those fields are the source of truth. The fidelity verdict is a small
 derived read-model that answers one narrower question:
@@ -94,6 +96,11 @@ Observed positive events can remain useful under `clipped`; missing
 events cannot prove absence. This is why `clipped` degrades positive
 measured claims but blocks bounded negative claims.
 
+`clean` is capture-health clean, not protocol-universal. A record may be
+`clean` while still declaring `network_protocol_coverage = connect_only`
+and `network_endpoint_claim_scope = diagnostic_only`. Downstream code
+must not stretch that into an exact QUIC/datagram peer-set claim.
+
 ## Composition With Projection `claim_level`
 
 Projection helpers such as path projection carry `claim_level` values
@@ -171,6 +178,11 @@ The v0 helper derives the verdict only from one
 5. `kernel_layer = complete`, `ringbuf_drops = 0`, and
    `cgroup_correlation = clean` produces `clean`.
 
+The helper intentionally does not upgrade or reinterpret
+`network_protocol_coverage` or `network_endpoint_claim_scope`. Those
+fields remain an explicit honesty boundary on top of the capture-health
+verdict.
+
 If more than one degradation is present, the helper preserves specific
 reasons and applies the stricter gate where needed. For example,
 partial cgroup correlation blocks per-binding claims even when the
@@ -185,6 +197,8 @@ top-level verdict is driven by clipping.
 - The verdict does not provide probabilistic confidence.
 - The verdict does not validate reported traces, spans, tool calls, or
   SDK events as true.
+- The verdict does not convert connect-only network capture into an exact
+  datagram/QUIC peer-binding claim.
 
 ## Wiring Boundary
 

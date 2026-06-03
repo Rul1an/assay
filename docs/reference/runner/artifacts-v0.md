@@ -179,6 +179,8 @@ Fields:
 | `policy_layer` | enum | yes | `present` or `absent` |
 | `sdk_layer` | enum | yes | `present`, `self_reported`, or `absent` |
 | `cgroup_correlation` | enum | yes | `clean`, `partial`, or `failed` |
+| `network_protocol_coverage` | enum | yes | Network protocol coverage scope for this run's kernel evidence |
+| `network_endpoint_claim_scope` | enum | yes | Claim boundary for interpreting `network_endpoints` |
 | `notes` | array[string] | yes | Stable code-prefixed capture notes used by delegated determinism |
 
 `sdk_layer=self_reported` is the accepted v0 value for the OpenAI Agents SDK
@@ -200,6 +202,16 @@ Validation rules:
 - non-`linux` platforms require `kernel_layer=absent`.
 - `cgroup_correlation=failed` is not valid for a passing Phase 1 run.
 
+Interpretation rules:
+
+- `kernel_layer=complete` means capture health was clean for the attached hooks;
+  it does not, by itself, prove protocol-complete network coverage.
+- `network_protocol_coverage=connect_only` means the current Runner observed
+  `connect()`-level network evidence only.
+- `network_endpoint_claim_scope=diagnostic_only` means `network_endpoints`
+  are useful for coarse/diagnostic review, not for exact peer-set claims on
+  datagram protocols such as QUIC.
+
 Passing Linux/eBPF example:
 
 ```json
@@ -212,8 +224,10 @@ Passing Linux/eBPF example:
   "policy_layer": "present",
   "sdk_layer": "self_reported",
   "cgroup_correlation": "clean",
+  "network_protocol_coverage": "connect_only",
+  "network_endpoint_claim_scope": "diagnostic_only",
   "notes": [
-    "s2_kernel_capture: monitor_events=4 ringbuf_drops=0",
+    "s2_kernel_capture: monitor_events=4 ringbuf_drops=0 network_protocol_coverage=connect_only network_endpoint_claim_scope=diagnostic_only",
     "s4_policy_capture: policy_events=1",
     "s5_sdk_capture: sdk_events=3 sdk_tool_calls=1"
   ]
@@ -235,7 +249,7 @@ Fields:
 | `schema` | string | yes | Must equal `assay.runner.capability_surface.v0` |
 | `run_id` | string | yes | Non-empty run identifier shared by all archive artifacts |
 | `filesystem_paths` | array[string] | yes | Stable sorted set of observed filesystem evidence values |
-| `network_endpoints` | array[string] | yes | Stable sorted set of observed network endpoints |
+| `network_endpoints` | array[string] | yes | Stable sorted set of observed network endpoint values under the coverage and claim-scope limits declared in `observation_health` |
 | `process_execs` | array[string] | yes | Stable sorted set of observed process execution values |
 | `mcp_tools` | array[string] | yes | Stable sorted set of observed MCP/tool names |
 | `policy_decisions` | array[string] | yes | Stable sorted set of policy decision summaries |
@@ -245,6 +259,11 @@ projections. During Phase 2A consolidation this field was renamed from the
 earlier internal `filesystem_prefixes` label because the old name implied a
 projection the artifact never provided. Prefix projection remains a later
 capability-diff transformation, not part of this artifact contract.
+
+For current Linux kernel capture, `network_endpoints` is populated from
+`EVENT_CONNECT` / `EVENT_CONNECT_BLOCKED` sockaddr values. For datagram
+protocols, especially QUIC, this is a connect-attempt surface, not a proven
+actual peer-set surface.
 
 Example:
 

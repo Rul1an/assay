@@ -274,6 +274,8 @@ mod tests {
             .with_sdk_layer(SdkLayerStatus::SelfReported)
             .with_cgroup_correlation(CgroupCorrelationStatus::Clean);
         health.kernel_layer = KernelLayerStatus::Complete;
+        health.network_protocol_coverage = crate::NetworkProtocolCoverageStatus::ConnectOnly;
+        health.network_endpoint_claim_scope = crate::NetworkEndpointClaimScope::DiagnosticOnly;
         health
     }
 
