@@ -169,6 +169,12 @@ Map a tiny Microsoft Agent Framework exported trace artifact into Assay-shaped e
 Map a tiny `mcp-agent` token-summary artifact into Assay-shaped external evidence.
 **Focus**: bounded runtime-accounting seam, upstream cost estimate only, no imported billing or workflow truth.
 
+### [MCP Tunnel Observed-Facts Evidence](./mcp-tunnel-observed-evidence)
+Map a tiny provider-neutral MCP tunnel observation artifact into Assay-shaped
+external evidence.
+**Focus**: tunnel-observed route/upstream facts plus request-envelope binding
+only, no imported tunnel trust, auth correctness, policy outcome, or tool truth.
+
 ### [Pydantic Evals Reduced Case-Result Evidence](./pydantic-ai-eval-report-evidence)
 Map one reduced artifact derived from `pydantic_evals` `EvaluationReport.cases[]` into Assay-shaped external evidence or importer-only Pydantic case-result receipts.
 **Focus**: code-first case-result seam, no raw `ReportCase`, report summary, task input/output, tracing truth, or Trust Basis claim.
