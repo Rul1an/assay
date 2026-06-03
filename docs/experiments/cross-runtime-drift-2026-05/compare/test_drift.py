@@ -621,6 +621,85 @@ class DriftReportClassificationTests(unittest.TestCase):
         )
         self.assertEqual(row.classification, drift.CLASSIFICATION_PROVIDER)
 
+    def test_diagnostic_only_network_endpoint_churn_is_inconclusive(self) -> None:
+        a = drift.ArchiveObservation(
+            path="a",
+            run_id="a",
+            runtime_label="openai-agents",
+            manifest_digest="sha256:aa",
+            capability_surface={
+                "filesystem_paths": [],
+                "network_endpoints": ["198.41.192.107:7844"],
+                "process_execs": [],
+                "mcp_tools": [],
+                "policy_decisions": [],
+            },
+            sdk_events=[],
+            sdk_event_count=0,
+            sdk_tools=[],
+            sdk_tool_call_ids=[],
+            sdk_tool_order=[],
+            observation_health={
+                "network_endpoint_claim_scope": "diagnostic_only"
+            },
+        )
+        b = drift.ArchiveObservation(
+            path="b",
+            run_id="b",
+            runtime_label="openai-agents",
+            manifest_digest="sha256:bb",
+            capability_surface={
+                "filesystem_paths": [],
+                "network_endpoints": ["198.41.200.43:7844"],
+                "process_execs": [],
+                "mcp_tools": [],
+                "policy_decisions": [],
+            },
+            sdk_events=[],
+            sdk_event_count=0,
+            sdk_tools=[],
+            sdk_tool_call_ids=[],
+            sdk_tool_order=[],
+            observation_health={
+                "network_endpoint_claim_scope": "diagnostic_only"
+            },
+        )
+
+        rows = drift.build_drift_report(a, b)
+        row = self._by_dim(rows)["network_endpoints"]
+
+        self.assertEqual(row.classification, drift.CLASSIFICATION_INCONCLUSIVE)
+        self.assertIn("diagnostic-only", row.detail)
+        self.assertIn("not classified as a hard regression", row.detail)
+
+    def test_diagnostic_only_network_endpoint_overlap_remains_task(self) -> None:
+        a = drift.ArchiveObservation(
+            path="a",
+            run_id="a",
+            runtime_label="openai-agents",
+            manifest_digest="sha256:aa",
+            capability_surface={
+                "filesystem_paths": [],
+                "network_endpoints": ["198.41.192.107:7844"],
+                "process_execs": [],
+                "mcp_tools": [],
+                "policy_decisions": [],
+            },
+            sdk_events=[],
+            sdk_event_count=0,
+            sdk_tools=[],
+            sdk_tool_call_ids=[],
+            sdk_tool_order=[],
+            observation_health={
+                "network_endpoint_claim_scope": "diagnostic_only"
+            },
+        )
+
+        rows = drift.build_drift_report(a, a)
+        row = self._by_dim(rows)["network_endpoints"]
+
+        self.assertEqual(row.classification, drift.CLASSIFICATION_TASK)
+
     def test_kernel_file_operations_task_induced(self) -> None:
         rows = drift.build_drift_report(
             self.a, self.b, fixture_paths=self.fixture_paths
