@@ -1,7 +1,7 @@
 use crate::{run::is_safe_run_id, RunnerSpikeArchive};
 use assay_common::{
     MonitorEvent, EVENT_CONNECT, EVENT_CONNECT_BLOCKED, EVENT_EXEC, EVENT_FILE_BLOCKED,
-    EVENT_INODE_RESOLVED, EVENT_OPENAT,
+    EVENT_INODE_RESOLVED, EVENT_OPENAT, EVENT_SENDMSG, EVENT_SENDTO,
 };
 use assay_monitor::MonitorStatsSnapshot;
 use assay_runner_schema::{
@@ -76,6 +76,10 @@ struct TracepointHookBreakdown {
     openat2_dropped: u64,
     connect_emitted: u64,
     connect_dropped: u64,
+    sendto_emitted: u64,
+    sendto_dropped: u64,
+    sendmsg_emitted: u64,
+    sendmsg_dropped: u64,
 }
 
 #[derive(Debug, Error)]
@@ -143,7 +147,10 @@ impl KernelLayerBuilder {
             ("openat", Some(path)) | ("file_blocked", Some(path)) => {
                 self.capability_surface.add_filesystem_path(path);
             }
-            ("connect", Some(endpoint)) | ("connect_blocked", Some(endpoint)) => {
+            ("connect", Some(endpoint))
+            | ("connect_blocked", Some(endpoint))
+            | ("sendto", Some(endpoint))
+            | ("sendmsg", Some(endpoint)) => {
                 self.capability_surface.add_network_endpoint(endpoint);
             }
             ("exec", Some(path)) => {
@@ -218,6 +225,7 @@ impl KernelLayerCapture {
             filtered_loader_events,
             filtered_loader_top,
         } = self;
+        let network_protocol_coverage = network_protocol_coverage_for(tracepoint_hook_breakdown);
 
         if archive.run_id != run_id {
             return Err(KernelLayerError::RunIdMismatch {
@@ -240,8 +248,7 @@ impl KernelLayerCapture {
                 archive.observation_health.network_endpoint_claim_scope =
                     NetworkEndpointClaimScope::NotApplicable;
             } else {
-                archive.observation_health.network_protocol_coverage =
-                    NetworkProtocolCoverageStatus::ConnectOnly;
+                archive.observation_health.network_protocol_coverage = network_protocol_coverage;
                 archive.observation_health.network_endpoint_claim_scope =
                     NetworkEndpointClaimScope::DiagnosticOnly;
             }
@@ -269,6 +276,7 @@ impl KernelLayerCapture {
                 filtered_loader_events,
                 filtered_loader_top,
                 cgroup_correlation,
+                network_protocol_coverage,
             }));
         Ok(())
     }
@@ -291,6 +299,8 @@ fn decode_monitor_event(event: &MonitorEvent) -> DecodedKernelEvent {
     match event.event_type {
         EVENT_OPENAT => decoded_open_event(event),
         EVENT_CONNECT => decoded_plain_event("connect", decode_sockaddr_endpoint(&event.data)),
+        EVENT_SENDTO => decoded_plain_event("sendto", decode_sockaddr_endpoint(&event.data)),
+        EVENT_SENDMSG => decoded_plain_event("sendmsg", decode_sockaddr_endpoint(&event.data)),
         EVENT_EXEC => decoded_plain_event("exec", decode_c_string(&event.data)),
         EVENT_FILE_BLOCKED => decoded_plain_event("file_blocked", decode_c_string(&event.data)),
         EVENT_CONNECT_BLOCKED => {
@@ -513,6 +523,38 @@ fn tracepoint_hook_breakdown(
                 .connect_ringbuf_dropped
                 .saturating_sub(before.connect_ringbuf_dropped),
         ),
+        sendto_emitted: u64::from(
+            after
+                .sendto_events_emitted
+                .saturating_sub(before.sendto_events_emitted),
+        ),
+        sendto_dropped: u64::from(
+            after
+                .sendto_ringbuf_dropped
+                .saturating_sub(before.sendto_ringbuf_dropped),
+        ),
+        sendmsg_emitted: u64::from(
+            after
+                .sendmsg_events_emitted
+                .saturating_sub(before.sendmsg_events_emitted),
+        ),
+        sendmsg_dropped: u64::from(
+            after
+                .sendmsg_ringbuf_dropped
+                .saturating_sub(before.sendmsg_ringbuf_dropped),
+        ),
+    }
+}
+
+fn network_protocol_coverage_for(
+    tracepoints: TracepointHookBreakdown,
+) -> NetworkProtocolCoverageStatus {
+    let has_connect = tracepoints.connect_emitted > 0;
+    let has_datagram_peer = tracepoints.sendto_emitted > 0 || tracepoints.sendmsg_emitted > 0;
+    match (has_connect, has_datagram_peer) {
+        (true, true) => NetworkProtocolCoverageStatus::ConnectAndDatagramPeerObserved,
+        (false, true) => NetworkProtocolCoverageStatus::DatagramPeerObserved,
+        _ => NetworkProtocolCoverageStatus::ConnectOnly,
     }
 }
 
@@ -557,6 +599,7 @@ struct KernelCaptureNote {
     filtered_loader_events: u64,
     filtered_loader_top: Vec<(String, u64)>,
     cgroup_correlation: CgroupCorrelationStatus,
+    network_protocol_coverage: NetworkProtocolCoverageStatus,
 }
 
 fn kernel_capture_note(input: KernelCaptureNote) -> String {
@@ -569,12 +612,14 @@ fn kernel_capture_note(input: KernelCaptureNote) -> String {
         filtered_loader_events,
         filtered_loader_top,
         cgroup_correlation,
+        network_protocol_coverage,
     } = input;
+    let network_protocol_coverage = network_protocol_coverage_label(network_protocol_coverage);
 
     match cgroup_correlation {
         CgroupCorrelationStatus::Clean if ringbuf_drops == 0 => {
             format!(
-                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage=connect_only network_endpoint_claim_scope=diagnostic_only"
+                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage={network_protocol_coverage} network_endpoint_claim_scope=diagnostic_only"
             )
         }
         CgroupCorrelationStatus::Clean => {
@@ -584,7 +629,7 @@ fn kernel_capture_note(input: KernelCaptureNote) -> String {
                 .collect::<Vec<_>>()
                 .join(",");
             format!(
-                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage=connect_only network_endpoint_claim_scope=diagnostic_only drop_breakdown=tracepoint:{} lsm:{} socket:{} emitted=tracepoint:{} lsm:{} socket:{} tracepoint_hooks=openat:{}/{} openat2:{}/{} connect:{}/{} filtered_loader_events={filtered_loader_events} filtered_loader_top=[{filtered_top}]",
+                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage={network_protocol_coverage} network_endpoint_claim_scope=diagnostic_only drop_breakdown=tracepoint:{} lsm:{} socket:{} emitted=tracepoint:{} lsm:{} socket:{} tracepoint_hooks=openat:{}/{} openat2:{}/{} connect:{}/{} sendto:{}/{} sendmsg:{}/{} filtered_loader_events={filtered_loader_events} filtered_loader_top=[{filtered_top}]",
                 drop_breakdown.tracepoint,
                 drop_breakdown.lsm,
                 drop_breakdown.socket,
@@ -597,11 +642,27 @@ fn kernel_capture_note(input: KernelCaptureNote) -> String {
                 tracepoint_hook_breakdown.openat2_dropped,
                 tracepoint_hook_breakdown.connect_emitted,
                 tracepoint_hook_breakdown.connect_dropped,
+                tracepoint_hook_breakdown.sendto_emitted,
+                tracepoint_hook_breakdown.sendto_dropped,
+                tracepoint_hook_breakdown.sendmsg_emitted,
+                tracepoint_hook_breakdown.sendmsg_dropped,
             )
         }
         CgroupCorrelationStatus::Partial | CgroupCorrelationStatus::Failed => format!(
             "s2_kernel_capture: monitor_events={event_count} cgroup_correlation={cgroup_correlation:?} kernel_layer downgraded to absent"
         ),
+    }
+}
+
+fn network_protocol_coverage_label(status: NetworkProtocolCoverageStatus) -> &'static str {
+    match status {
+        NetworkProtocolCoverageStatus::Unknown => "unknown",
+        NetworkProtocolCoverageStatus::Absent => "absent",
+        NetworkProtocolCoverageStatus::ConnectOnly => "connect_only",
+        NetworkProtocolCoverageStatus::DatagramPeerObserved => "datagram_peer_observed",
+        NetworkProtocolCoverageStatus::ConnectAndDatagramPeerObserved => {
+            "connect_and_datagram_peer_observed"
+        }
     }
 }
 
@@ -842,6 +903,121 @@ mod tests {
             .capability_surface
             .network_endpoints
             .contains("10.0.0.5:443"));
+    }
+
+    #[test]
+    fn sendto_event_records_datagram_network_capability() {
+        let mut sockaddr = [0_u8; 16];
+        sockaddr[0..2].copy_from_slice(&2_u16.to_ne_bytes());
+        sockaddr[2..4].copy_from_slice(&7844_u16.to_be_bytes());
+        sockaddr[4..8].copy_from_slice(&[198, 41, 192, 107]);
+        let mut builder = KernelLayerBuilder::new("run_001").unwrap();
+
+        builder
+            .push_monitor_event(&event(EVENT_SENDTO, &sockaddr))
+            .unwrap();
+        let capture = builder.finish(
+            &MonitorStatsSnapshot::default(),
+            &MonitorStatsSnapshot::default(),
+        );
+        let record: KernelLayerEvent =
+            serde_json::from_slice(&capture.kernel_layer_ndjson).unwrap();
+
+        assert_eq!(record.kind, "sendto");
+        assert_eq!(record.value.as_deref(), Some("198.41.192.107:7844"));
+        assert!(capture
+            .capability_surface
+            .network_endpoints
+            .contains("198.41.192.107:7844"));
+    }
+
+    #[test]
+    fn sendmsg_event_records_datagram_network_capability() {
+        let mut sockaddr = [0_u8; 16];
+        sockaddr[0..2].copy_from_slice(&2_u16.to_ne_bytes());
+        sockaddr[2..4].copy_from_slice(&7844_u16.to_be_bytes());
+        sockaddr[4..8].copy_from_slice(&[198, 41, 200, 43]);
+        let mut builder = KernelLayerBuilder::new("run_001").unwrap();
+
+        builder
+            .push_monitor_event(&event(EVENT_SENDMSG, &sockaddr))
+            .unwrap();
+        let capture = builder.finish(
+            &MonitorStatsSnapshot::default(),
+            &MonitorStatsSnapshot::default(),
+        );
+        let record: KernelLayerEvent =
+            serde_json::from_slice(&capture.kernel_layer_ndjson).unwrap();
+
+        assert_eq!(record.kind, "sendmsg");
+        assert_eq!(record.value.as_deref(), Some("198.41.200.43:7844"));
+        assert!(capture
+            .capability_surface
+            .network_endpoints
+            .contains("198.41.200.43:7844"));
+    }
+
+    #[test]
+    fn datagram_peer_stats_upgrade_network_protocol_coverage() {
+        let before = MonitorStatsSnapshot::default();
+        let after = MonitorStatsSnapshot {
+            connect_events_emitted: 1,
+            sendmsg_events_emitted: 1,
+            ..Default::default()
+        };
+        let mut builder = KernelLayerBuilder::new("run_001").unwrap();
+        builder
+            .push_monitor_event(&event(EVENT_OPENAT, b"/tmp/known\0"))
+            .unwrap();
+        let capture = builder.finish(&before, &after);
+        let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+
+        capture
+            .apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)
+            .unwrap();
+
+        assert_eq!(
+            archive.observation_health.network_protocol_coverage,
+            NetworkProtocolCoverageStatus::ConnectAndDatagramPeerObserved
+        );
+        assert_eq!(
+            archive.observation_health.network_endpoint_claim_scope,
+            NetworkEndpointClaimScope::DiagnosticOnly
+        );
+        assert!(archive.observation_health.notes.iter().any(|note| {
+            note.contains("network_protocol_coverage=connect_and_datagram_peer_observed")
+        }));
+    }
+
+    #[test]
+    fn datagram_only_stats_mark_datagram_peer_observed() {
+        let before = MonitorStatsSnapshot::default();
+        let after = MonitorStatsSnapshot {
+            sendto_events_emitted: 1,
+            ..Default::default()
+        };
+        let capture = KernelLayerBuilder::new("run_001")
+            .unwrap()
+            .finish(&before, &after);
+        let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+
+        capture
+            .apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)
+            .unwrap();
+
+        assert_eq!(
+            archive.observation_health.network_protocol_coverage,
+            NetworkProtocolCoverageStatus::DatagramPeerObserved
+        );
+        assert_eq!(
+            archive.observation_health.network_endpoint_claim_scope,
+            NetworkEndpointClaimScope::DiagnosticOnly
+        );
+        assert!(archive
+            .observation_health
+            .notes
+            .iter()
+            .any(|note| note.contains("network_protocol_coverage=datagram_peer_observed")));
     }
 
     #[test]

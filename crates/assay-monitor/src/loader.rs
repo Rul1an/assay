@@ -6,6 +6,8 @@ use assay_common::{
     MONITOR_STAT_LSM_EVENTS_EMITTED, MONITOR_STAT_LSM_RINGBUF_DROPPED,
     MONITOR_STAT_OPENAT2_EVENTS_EMITTED, MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
     MONITOR_STAT_OPENAT_EVENTS_EMITTED, MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
+    MONITOR_STAT_SENDMSG_EVENTS_EMITTED, MONITOR_STAT_SENDMSG_RINGBUF_DROPPED,
+    MONITOR_STAT_SENDTO_EVENTS_EMITTED, MONITOR_STAT_SENDTO_RINGBUF_DROPPED,
     MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
     SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR, SOCKET_STAT_BLOCKED_PORT, SOCKET_STAT_CHECKS,
     SOCKET_STAT_EVENTS_EMITTED, SOCKET_STAT_RINGBUF_DROPPED,
@@ -210,6 +212,24 @@ impl LinuxMonitor {
                 println!("DEBUG: Attached Tracepoint sys_enter_connect");
             }
         }
+        if let Some(prog) = bpf.program_mut("assay_monitor_sendto") {
+            if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
+                tp.load()?;
+                let link_id = tp.attach("syscalls", "sys_enter_sendto")?;
+                let link = tp.take_link(link_id)?;
+                self.links.push(MonitorLink::TracePoint(link));
+                println!("DEBUG: Attached Tracepoint sys_enter_sendto");
+            }
+        }
+        if let Some(prog) = bpf.program_mut("assay_monitor_sendmsg") {
+            if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
+                tp.load()?;
+                let link_id = tp.attach("syscalls", "sys_enter_sendmsg")?;
+                let link = tp.take_link(link_id)?;
+                self.links.push(MonitorLink::TracePoint(link));
+                println!("DEBUG: Attached Tracepoint sys_enter_sendmsg");
+            }
+        }
         if let Some(prog) = bpf.program_mut("assay_monitor_fork") {
             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
                 tp.load()?;
@@ -375,6 +395,18 @@ impl LinuxMonitor {
             .unwrap_or(0);
         stats.connect_ringbuf_dropped = array
             .get(&MONITOR_STAT_CONNECT_RINGBUF_DROPPED, 0)
+            .unwrap_or(0);
+        stats.sendto_events_emitted = array
+            .get(&MONITOR_STAT_SENDTO_EVENTS_EMITTED, 0)
+            .unwrap_or(0);
+        stats.sendto_ringbuf_dropped = array
+            .get(&MONITOR_STAT_SENDTO_RINGBUF_DROPPED, 0)
+            .unwrap_or(0);
+        stats.sendmsg_events_emitted = array
+            .get(&MONITOR_STAT_SENDMSG_EVENTS_EMITTED, 0)
+            .unwrap_or(0);
+        stats.sendmsg_ringbuf_dropped = array
+            .get(&MONITOR_STAT_SENDMSG_RINGBUF_DROPPED, 0)
             .unwrap_or(0);
 
         let map = bpf.map("SOCKET_STATS").ok_or(MonitorError::MapNotFound {

@@ -15,11 +15,14 @@ pub mod socket_lsm;
 pub mod vmlinux;
 
 use assay_common::{
-    MonitorEvent, EVENT_CONNECT, EVENT_OPENAT, KEY_DEDUP_OPEN_PATHS, KEY_MONITOR_ALL,
-    MONITOR_STATS_LEN, MONITOR_STAT_CONNECT_EVENTS_EMITTED, MONITOR_STAT_CONNECT_RINGBUF_DROPPED,
-    MONITOR_STAT_OPENAT2_EVENTS_EMITTED, MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
-    MONITOR_STAT_OPENAT_EVENTS_EMITTED, MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
-    MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
+    MonitorEvent, EVENT_CONNECT, EVENT_OPENAT, EVENT_SENDMSG, EVENT_SENDTO, KEY_DEDUP_OPEN_PATHS,
+    KEY_MONITOR_ALL, MONITOR_STATS_LEN, MONITOR_STAT_CONNECT_EVENTS_EMITTED,
+    MONITOR_STAT_CONNECT_RINGBUF_DROPPED, MONITOR_STAT_OPENAT2_EVENTS_EMITTED,
+    MONITOR_STAT_OPENAT2_RINGBUF_DROPPED, MONITOR_STAT_OPENAT_EVENTS_EMITTED,
+    MONITOR_STAT_OPENAT_RINGBUF_DROPPED, MONITOR_STAT_SENDMSG_EVENTS_EMITTED,
+    MONITOR_STAT_SENDMSG_RINGBUF_DROPPED, MONITOR_STAT_SENDTO_EVENTS_EMITTED,
+    MONITOR_STAT_SENDTO_RINGBUF_DROPPED, MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED,
+    MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
 };
 use aya_ebpf::{
     helpers::{
@@ -111,6 +114,8 @@ const KEY_OFFSET_OPENAT_FLAGS: u32 = 5;
 const KEY_OFFSET_OPENAT_MODE: u32 = 6;
 const KEY_OFFSET_OPENAT2_HOW: u32 = 7;
 const KEY_OFFSET_SYSCALL_EXIT_RET: u32 = 8;
+const KEY_OFFSET_SENDTO_SOCKADDR: u32 = 11;
+const KEY_OFFSET_SENDMSG_MSGHDR: u32 = 12;
 const DEFAULT_OFFSET: u32 = 24;
 
 const KEY_MAX_ANCESTOR_DEPTH: u32 = 10;
@@ -172,6 +177,14 @@ fn is_monitored() -> bool {
 }
 
 const DATA_LEN: usize = 512;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct UserMsghdrHead {
+    msg_name: u64,
+    msg_namelen: u32,
+    _pad: u32,
+}
 
 #[inline(always)]
 unsafe fn write_event_header(ev: *mut MonitorEvent, pid: u32, event_type: u32) {
@@ -464,6 +477,86 @@ fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
         .unwrap_or(DEFAULT_OFFSET as usize);
 
     let sockaddr_ptr: u64 = unsafe { ctx.read_at(sockaddr_offset).map_err(|_| 1u32)? };
+    emit_sockaddr_event(
+        sockaddr_ptr,
+        EVENT_CONNECT,
+        MONITOR_STAT_CONNECT_EVENTS_EMITTED,
+        MONITOR_STAT_CONNECT_RINGBUF_DROPPED,
+    )
+}
+
+#[tracepoint]
+pub fn assay_monitor_sendto(ctx: TracePointContext) -> u32 {
+    match try_sendto(ctx) {
+        Ok(v) => v,
+        Err(v) => v,
+    }
+}
+
+fn try_sendto(ctx: TracePointContext) -> Result<u32, u32> {
+    if !is_monitored() {
+        return Ok(0);
+    }
+
+    let sockaddr_offset = unsafe { CONFIG.get(&KEY_OFFSET_SENDTO_SOCKADDR) }
+        .map(|v| *v as usize)
+        .unwrap_or(48);
+    let sockaddr_ptr: u64 = unsafe { ctx.read_at(sockaddr_offset).map_err(|_| 1u32)? };
+    emit_sockaddr_event(
+        sockaddr_ptr,
+        EVENT_SENDTO,
+        MONITOR_STAT_SENDTO_EVENTS_EMITTED,
+        MONITOR_STAT_SENDTO_RINGBUF_DROPPED,
+    )
+}
+
+#[tracepoint]
+pub fn assay_monitor_sendmsg(ctx: TracePointContext) -> u32 {
+    match try_sendmsg(ctx) {
+        Ok(v) => v,
+        Err(v) => v,
+    }
+}
+
+fn try_sendmsg(ctx: TracePointContext) -> Result<u32, u32> {
+    if !is_monitored() {
+        return Ok(0);
+    }
+
+    let msghdr_offset = unsafe { CONFIG.get(&KEY_OFFSET_SENDMSG_MSGHDR) }
+        .map(|v| *v as usize)
+        .unwrap_or(DEFAULT_OFFSET as usize);
+    let msghdr_ptr: u64 = unsafe { ctx.read_at(msghdr_offset).map_err(|_| 1u32)? };
+    if msghdr_ptr == 0 {
+        return Ok(0);
+    }
+
+    let msghdr = unsafe {
+        aya_ebpf::helpers::bpf_probe_read_user(msghdr_ptr as *const UserMsghdrHead)
+            .map_err(|_| 1u32)?
+    };
+    if msghdr.msg_name == 0 || msghdr.msg_namelen == 0 {
+        return Ok(0);
+    }
+
+    emit_sockaddr_event(
+        msghdr.msg_name,
+        EVENT_SENDMSG,
+        MONITOR_STAT_SENDMSG_EVENTS_EMITTED,
+        MONITOR_STAT_SENDMSG_RINGBUF_DROPPED,
+    )
+}
+
+#[inline(always)]
+fn emit_sockaddr_event(
+    sockaddr_ptr: u64,
+    event_type: u32,
+    emitted_stat: u32,
+    dropped_stat: u32,
+) -> Result<u32, u32> {
+    if sockaddr_ptr == 0 {
+        return Ok(0);
+    }
 
     // We can't easily read indefinite structs, so we read a fixed chunk (e.g. 128 bytes)
     // to cover sockaddr_in / sockaddr_in6.
@@ -484,7 +577,7 @@ fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
     if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
         let ev = entry.as_mut_ptr() as *mut MonitorEvent;
         unsafe {
-            write_event_header(ev, current_tgid(), EVENT_CONNECT);
+            write_event_header(ev, current_tgid(), event_type);
 
             // Copy pre-read stack buffer into ringbuf payload
             let data_ptr = (*ev).data.as_mut_ptr();
@@ -497,10 +590,10 @@ fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
         }
         entry.submit(0);
         inc_stat(MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED);
-        inc_stat(MONITOR_STAT_CONNECT_EVENTS_EMITTED);
+        inc_stat(emitted_stat);
     } else {
         inc_stat(MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED);
-        inc_stat(MONITOR_STAT_CONNECT_RINGBUF_DROPPED);
+        inc_stat(dropped_stat);
     }
 
     Ok(0)
