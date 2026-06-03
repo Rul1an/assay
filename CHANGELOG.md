@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.15.0] - 2026-06-03
+
+- Added Runner network-fidelity claim-scope fields so measured-run archives can
+  distinguish capture health from protocol coverage. `network_protocol_coverage`
+  now records whether evidence is connect-only, datagram-peer-only, or both, and
+  `network_endpoint_claim_scope` keeps raw network endpoints diagnostic-only
+  when Assay cannot make an exact peer-set claim.
+
+- Added Runner datagram peer telemetry for Linux captures by attaching
+  `sys_enter_sendto` and `sys_enter_sendmsg` tracepoints alongside the existing
+  `connect()` hook. Assay now records observed datagram destination sockaddr
+  evidence when the kernel exposes it, while still avoiding request-level,
+  `cf_ray`, or authoritative exact-QUIC-peer binding claims.
+
+- Added Runner fidelity helpers for low-level archive consumers, including the
+  fidelity verdict helper and declared path-projection helper used by measured
+  run proof bundles and runner documentation.
+
+- Improved MCP execution-record verification by adding outcome decision-digest
+  verification and a request-envelope fallback binding path for supported MCP
+  execution-record pairing fixtures.
+
+- Updated the cross-runtime drift experiment comparator so raw
+  `network_endpoints` churn is classified as inconclusive when either archive
+  declares diagnostic-only network endpoint scope. This prevents experiment
+  tooling from turning deliberately weak Runner transport evidence into a hard
+  provider/runtime drift claim.
+
+- Added interop joinability summaries for the agent-observability fidelity
+  experiment docs, keeping those artifacts experiment-scoped and non-product
+  API.
+
 ## [3.14.0] - 2026-06-01
 
 - Added `assay evidence verify-mcp-records`, a downstream consumer verifier
