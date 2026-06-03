@@ -10,6 +10,8 @@ It is intentionally small:
 - map the good artifact into an Assay-shaped placeholder envelope
 - reject raw authorization material and strong joins with mismatched request
   canonicalization
+- keep optional inspector event references to bounded `kind` / `digest` /
+  optional opaque `ref` objects
 - keep tunnel presence, policy decisions, agent identity, and tool outcome
   truth out of Assay truth
 
@@ -102,6 +104,7 @@ It does not:
 - verify OAuth, bearer-token, or mTLS correctness
 - verify server execution records, policy decisions, or tool outcomes
 - treat route, channel, upstream, request id, or timestamp as a strong join key
+- accept raw inspector event payloads under `inspector_event_refs`
 
 The checked-in sample is unsigned. Its trust level is therefore the trust level
 of the emitter and observation point. A future attestation envelope could

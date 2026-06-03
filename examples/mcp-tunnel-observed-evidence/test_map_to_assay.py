@@ -146,6 +146,64 @@ class McpTunnelObservedMapperTest(unittest.TestCase):
                 import_time="2026-06-03T18:10:00Z",
             )
 
+    def test_rejects_string_boolean_values(self):
+        mapper = _load_mapper()
+        artifact = _valid_artifact()
+        artifact["visibility"]["tool_result_visible"] = "false"
+
+        with self.assertRaisesRegex(ValueError, "must be a JSON boolean"):
+            mapper.map_record(
+                artifact,
+                assay_run_id="import-mcp-tunnel-string-bool",
+                import_time="2026-06-03T18:15:00Z",
+            )
+
+    def test_rejects_payload_like_inspector_event_refs(self):
+        mapper = _load_mapper()
+        artifact = _valid_artifact()
+        artifact["inspector_event_refs"] = [
+            {
+                "kind": "mcp.inspector_event",
+                "digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+                "raw_payload": {"method": "tools/call", "params": {"secret": "not here"}},
+            }
+        ]
+
+        with self.assertRaisesRegex(ValueError, "unsupported keys"):
+            mapper.map_record(
+                artifact,
+                assay_run_id="import-mcp-tunnel-bad-inspector-ref",
+                import_time="2026-06-03T18:20:00Z",
+            )
+
+    def test_accepts_bounded_inspector_event_refs(self):
+        mapper = _load_mapper()
+        artifact = _valid_artifact()
+        artifact["inspector_event_refs"] = [
+            {
+                "kind": "mcp.inspector_event",
+                "digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+                "ref": "inspector-event-001",
+            }
+        ]
+
+        event = mapper.map_record(
+            artifact,
+            assay_run_id="import-mcp-tunnel-inspector-ref",
+            import_time="2026-06-03T18:25:00Z",
+        )
+
+        self.assertEqual(
+            event["data"]["observed"]["inspector_event_refs"],
+            [
+                {
+                    "kind": "mcp.inspector_event",
+                    "digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+                    "ref": "inspector-event-001",
+                }
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

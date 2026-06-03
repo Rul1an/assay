@@ -198,6 +198,12 @@ def _validate_string_enum(value: Any, line_label: str, field_name: str, allowed:
     return normalized
 
 
+def _validate_json_bool(value: Any, line_label: str, field_name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{line_label}: {field_name} must be a JSON boolean")
+    return value
+
+
 def _validate_provider_context(value: Any) -> dict[str, Any]:
     context = _validate_object(value, "artifact", "provider_context")
     allowed = {"provider", "surface", "component", "component_version"}
@@ -327,10 +333,22 @@ def _validate_auth_context(value: Any) -> dict[str, Any]:
         raise ValueError("auth_context: raw authorization headers must not be stored in this sample")
 
     normalized = {
-        "authorization_header_visible": bool(auth.get("authorization_header_visible", False)),
+        "authorization_header_visible": _validate_json_bool(
+            auth.get("authorization_header_visible", False),
+            "auth_context",
+            "authorization_header_visible",
+        ),
         "authorization_header_stored": False,
-        "mcp_oauth_metadata_visible": bool(auth.get("mcp_oauth_metadata_visible", False)),
-        "client_mtls_configured": bool(auth.get("client_mtls_configured", False)),
+        "mcp_oauth_metadata_visible": _validate_json_bool(
+            auth.get("mcp_oauth_metadata_visible", False),
+            "auth_context",
+            "mcp_oauth_metadata_visible",
+        ),
+        "client_mtls_configured": _validate_json_bool(
+            auth.get("client_mtls_configured", False),
+            "auth_context",
+            "client_mtls_configured",
+        ),
     }
     if "authorization_header_digest" in auth:
         normalized["authorization_header_digest"] = _validate_sha256(
@@ -367,13 +385,40 @@ def _validate_visibility(value: Any) -> dict[str, Any]:
             "response_payload_mode",
             ALLOWED_PAYLOAD_MODES,
         ),
-        "tool_result_visible": bool(visibility["tool_result_visible"]),
-        "policy_decision_visible": bool(visibility["policy_decision_visible"]),
-        "raw_payload_retained": bool(visibility["raw_payload_retained"]),
+        "tool_result_visible": _validate_json_bool(
+            visibility["tool_result_visible"], "visibility", "tool_result_visible"
+        ),
+        "policy_decision_visible": _validate_json_bool(
+            visibility["policy_decision_visible"], "visibility", "policy_decision_visible"
+        ),
+        "raw_payload_retained": _validate_json_bool(
+            visibility["raw_payload_retained"], "visibility", "raw_payload_retained"
+        ),
     }
     if normalized["raw_payload_retained"]:
         raise ValueError("visibility: raw_payload_retained must be false in this sample")
     return normalized
+
+
+def _validate_inspector_event_refs(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ValueError("inspector_event_refs: must be a list")
+    normalized_refs: list[dict[str, Any]] = []
+    for index, ref in enumerate(value):
+        label = f"inspector_event_refs[{index}]"
+        ref_obj = _validate_object(ref, "artifact", label)
+        allowed = {"kind", "digest", "ref"}
+        unknown = set(ref_obj) - allowed
+        if unknown:
+            raise ValueError(f"{label}: unsupported keys: {', '.join(sorted(unknown))}")
+        normalized = {
+            "kind": _validate_non_empty_string(ref_obj.get("kind"), label, "kind"),
+            "digest": _validate_sha256(ref_obj.get("digest"), label, "digest"),
+        }
+        if "ref" in ref_obj:
+            normalized["ref"] = _validate_non_empty_string(ref_obj["ref"], label, "ref")
+        normalized_refs.append(normalized)
+    return normalized_refs
 
 
 def _validate_evidence_refs(value: Any, request_instance: dict[str, Any]) -> list[dict[str, Any]]:
@@ -470,9 +515,7 @@ def _normalized_record(record: dict[str, Any]) -> dict[str, Any]:
     if "control_plane" in record:
         normalized["control_plane"] = _validate_object(record["control_plane"], "artifact", "control_plane")
     if "inspector_event_refs" in record:
-        if not isinstance(record["inspector_event_refs"], list):
-            raise ValueError("inspector_event_refs: must be a list")
-        normalized["inspector_event_refs"] = record["inspector_event_refs"]
+        normalized["inspector_event_refs"] = _validate_inspector_event_refs(record["inspector_event_refs"])
     if "evidence_refs" in record:
         normalized["evidence_refs"] = _validate_evidence_refs(record["evidence_refs"], request_instance)
     if "notes" in record:
