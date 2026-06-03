@@ -113,6 +113,33 @@ Pairing or enum mismatches produce a report and exit `2`.
 
 ---
 
+## MCP Tunnel Observed-Facts Check
+
+Validate one bounded MCP tunnel observed-facts fixture and classify its join
+evidence from the consumer side:
+
+```bash
+assay evidence verify-mcp-tunnel-observed \
+  --artifact examples/mcp-tunnel-observed-evidence/fixtures/valid.tunnel.json \
+  --format json
+```
+
+This command emits an `assay.mcp.tunnel-observed.report.v0` report. It checks
+the provider-neutral `assay.mcp.tunnel_observed.v0` fixture shape, enforces the
+no-raw-payload and no-raw-authorization boundaries, and reports whether
+`evidence_refs` form a strong `same_request_instance` join or only diagnostic
+correlation.
+
+A strong join requires the referenced evidence to bind the same
+`request_envelope_digest` and `request_envelope_canonicalization` as the tunnel
+artifact. Route, upstream, request id, timestamp, or provider request id alone
+remain diagnostic correlation. The command deliberately does not prove tunnel
+mediation, agent identity, authorization success, policy correctness, tool
+result truth, application outcome truth, or issuer/key trust. Boundary
+violations produce a JSON/table report and exit `2`.
+
+---
+
 ## CycloneDX ML-BOM Model Import
 
 Import one selected CycloneDX ML-BOM `machine-learning-model` component into a

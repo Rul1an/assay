@@ -60,6 +60,21 @@ python3 examples/mcp-tunnel-observed-evidence/map_to_assay.py \
   --overwrite
 ```
 
+## Verify the observed-facts fixture
+
+```bash
+assay evidence verify-mcp-tunnel-observed \
+  --artifact examples/mcp-tunnel-observed-evidence/fixtures/valid.tunnel.json \
+  --format json
+```
+
+This checker is the reference fixture path for the sample. It validates the
+bounded `assay.mcp.tunnel_observed.v0` shape, keeps raw payload/auth material
+out, and classifies `evidence_refs` as either strong `same_request_instance`
+joins or diagnostic correlation. Strong joins require a shared
+`request_envelope_digest` and `request_envelope_canonicalization`; route,
+upstream, request id, timestamp, or provider request id alone stay diagnostic.
+
 ## Map the substituted-upstream artifact
 
 ```bash
@@ -114,4 +129,5 @@ strengthen that, but this first sample keeps the consumer boundary explicit.
 
 ```bash
 python3 -m unittest examples/mcp-tunnel-observed-evidence/test_map_to_assay.py
+cargo test -p assay-cli --test evidence_test mcp_tunnel_observed
 ```
