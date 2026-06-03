@@ -300,10 +300,15 @@ bytes. The v0 projection should include only:
 - method;
 - id when present;
 - params digest or params absent marker;
-- `_meta` digest or `_meta` absent marker;
-- tunnel-visible route labels required for replay.
+- `_meta` digest or `_meta` absent marker.
 
-Raw params should be excluded by default.
+Raw params should be excluded by default. Tunnel-only route, channel, and
+upstream labels should also stay outside `request_envelope_digest`; capture
+them separately under `route` and `upstream`. That keeps the digest
+request-specific enough to join with server-side execution or policy records
+that never observed the tunnel route. If replay needs route context, reference
+the route fields separately rather than folding them into the request envelope
+digest.
 
 #### `route`
 
