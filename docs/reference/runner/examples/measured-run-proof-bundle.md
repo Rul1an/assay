@@ -107,6 +107,10 @@ How to read this:
 - `network_protocol_coverage: connect_only` is the honesty boundary for
   the current Runner network surface: clean capture does not imply
   protocol-complete QUIC peer attribution.
+- Runs that emit `sendto` or `sendmsg` peer events can report
+  `datagram_peer_observed` or `connect_and_datagram_peer_observed` instead.
+  That strengthens the transport observation but does not, by itself, create
+  a request-level or exact peer-set claim.
 - `network_endpoint_claim_scope: diagnostic_only` means any
   `network_endpoints` values are coarse/diagnostic evidence, not an
   exact datagram peer set.

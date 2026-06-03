@@ -100,6 +100,11 @@ measured claims but blocks bounded negative claims.
 `clean` while still declaring `network_protocol_coverage = connect_only`
 and `network_endpoint_claim_scope = diagnostic_only`. Downstream code
 must not stretch that into an exact QUIC/datagram peer-set claim.
+When Runner observes `sendto` or `sendmsg` destination sockaddr events it
+may upgrade `network_protocol_coverage` to `datagram_peer_observed` or
+`connect_and_datagram_peer_observed`; that is a stronger transport signal,
+but still not a request-level or exact peer-set binding while
+`network_endpoint_claim_scope = diagnostic_only`.
 
 ## Composition With Projection `claim_level`
 

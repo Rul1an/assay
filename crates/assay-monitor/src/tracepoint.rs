@@ -21,6 +21,8 @@ impl TracepointResolver {
         // Key 6: openat mode
         // Key 7: openat2 how
         // Key 8: syscall exit return value
+        // Key 11: sendto sockaddr
+        // Key 12: sendmsg msghdr
 
         let openat_fn = Self::find_offset("syscalls", "sys_enter_openat", "filename").unwrap_or(24);
         map.insert(0, openat_fn);
@@ -53,6 +55,17 @@ impl TracepointResolver {
 
         let exit_ret = Self::find_offset("syscalls", "sys_exit_openat", "ret").unwrap_or(16);
         map.insert(8, exit_ret);
+
+        let sendto_sa = Self::find_offset("syscalls", "sys_enter_sendto", "addr")
+            .or_else(|_| Self::find_offset("syscalls", "sys_enter_sendto", "dest_addr"))
+            .or_else(|_| Self::find_offset("syscalls", "sys_enter_sendto", "uservaddr"))
+            .unwrap_or(48);
+        map.insert(11, sendto_sa);
+
+        let sendmsg_msg = Self::find_offset("syscalls", "sys_enter_sendmsg", "msg")
+            .or_else(|_| Self::find_offset("syscalls", "sys_enter_sendmsg", "msg_ptr"))
+            .unwrap_or(24);
+        map.insert(12, sendmsg_msg);
 
         map
     }

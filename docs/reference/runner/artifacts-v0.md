@@ -208,9 +208,18 @@ Interpretation rules:
   it does not, by itself, prove protocol-complete network coverage.
 - `network_protocol_coverage=connect_only` means the current Runner observed
   `connect()`-level network evidence only.
+- `network_protocol_coverage=datagram_peer_observed` means Runner observed
+  datagram peer evidence from `sendto` or `sendmsg`, without a matching
+  `connect()` event in the same capture window.
+- `network_protocol_coverage=connect_and_datagram_peer_observed` means Runner
+  observed both `connect()` and datagram peer evidence in the same capture
+  window.
 - `network_endpoint_claim_scope=diagnostic_only` means `network_endpoints`
   are useful for coarse/diagnostic review, not for exact peer-set claims on
   datagram protocols such as QUIC.
+- Datagram peer evidence is stronger than `connect_only` for QUIC-style
+  capture, but v0 still keeps `network_endpoint_claim_scope=diagnostic_only`
+  unless a future layer can make a bounded exact peer-set claim.
 
 Passing Linux/eBPF example:
 
