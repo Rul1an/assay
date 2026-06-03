@@ -92,6 +92,8 @@ CLASSIFICATION_PROVIDER = "provider-induced"
 CLASSIFICATION_RUNTIME = "runtime-induced"
 CLASSIFICATION_INCONCLUSIVE = "inconclusive"
 
+NETWORK_ENDPOINT_CLAIM_SCOPE_DIAGNOSTIC_ONLY = "diagnostic_only"
+
 PATH_PROJECTION_SCHEMA = "assay.runner.path_projection.v0"
 NETWORK_PROJECTION_SCHEMA = "assay.runner.network_projection.v0"
 PROJECTION_NOT_APPLIED_SCHEMA = "assay.runner.projection_not_applied.v0"
@@ -1077,6 +1079,46 @@ def _diff_lists(
     )
 
 
+def _network_endpoint_claim_scope(observation: ArchiveObservation) -> str | None:
+    value = observation.observation_health.get("network_endpoint_claim_scope")
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _diagnostic_only_network_endpoint_detail(
+    a: ArchiveObservation,
+    b: ArchiveObservation,
+    previous_detail: str,
+) -> str:
+    scopes = {
+        "arm-a": _network_endpoint_claim_scope(a) or "unspecified",
+        "arm-b": _network_endpoint_claim_scope(b) or "unspecified",
+    }
+    return (
+        "network_endpoints claim scope is diagnostic-only "
+        f"(arm-a={scopes['arm-a']}, arm-b={scopes['arm-b']}); "
+        "raw endpoint churn is not classified as a hard regression. "
+        f"Raw comparison detail: {previous_detail}"
+    )
+
+
+def _network_endpoint_churn_is_diagnostic_only(
+    a: ArchiveObservation,
+    b: ArchiveObservation,
+    only_a: list[str],
+    only_b: list[str],
+) -> bool:
+    if not only_a and not only_b:
+        return False
+    return (
+        _network_endpoint_claim_scope(a)
+        == NETWORK_ENDPOINT_CLAIM_SCOPE_DIAGNOSTIC_ONLY
+        or _network_endpoint_claim_scope(b)
+        == NETWORK_ENDPOINT_CLAIM_SCOPE_DIAGNOSTIC_ONLY
+    )
+
+
 def build_drift_report(
     a: ArchiveObservation,
     b: ArchiveObservation,
@@ -1171,6 +1213,11 @@ def build_drift_report(
         fixture_paths,
         is_network_dimension=True,
     )
+    if a_net and b_net and _network_endpoint_churn_is_diagnostic_only(
+        a, b, only_a, only_b
+    ):
+        cls = CLASSIFICATION_INCONCLUSIVE
+        detail = _diagnostic_only_network_endpoint_detail(a, b, detail)
     rows.append(
         DriftRow(
             dimension="network_endpoints",
