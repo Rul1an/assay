@@ -19,3 +19,5 @@ mod flow_and_eval_receipts;
 mod importer_receipts;
 #[path = "evidence_test/mcp_execution_records.rs"]
 mod mcp_execution_records;
+#[path = "evidence_test/mcp_tunnel_observed.rs"]
+mod mcp_tunnel_observed;
