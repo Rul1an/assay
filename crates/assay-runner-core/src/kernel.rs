@@ -4,7 +4,10 @@ use assay_common::{
     EVENT_INODE_RESOLVED, EVENT_OPENAT,
 };
 use assay_monitor::MonitorStatsSnapshot;
-use assay_runner_schema::{CapabilitySurface, CgroupCorrelationStatus, KernelLayerStatus};
+use assay_runner_schema::{
+    CapabilitySurface, CgroupCorrelationStatus, KernelLayerStatus, NetworkEndpointClaimScope,
+    NetworkProtocolCoverageStatus,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -231,10 +234,25 @@ impl KernelLayerCapture {
             archive.observation_health.kernel_layer =
                 kernel_layer_for(ringbuf_drops, cgroup_correlation);
             archive.observation_health.cgroup_correlation = cgroup_correlation;
+            if archive.observation_health.kernel_layer == KernelLayerStatus::Absent {
+                archive.observation_health.network_protocol_coverage =
+                    NetworkProtocolCoverageStatus::Absent;
+                archive.observation_health.network_endpoint_claim_scope =
+                    NetworkEndpointClaimScope::NotApplicable;
+            } else {
+                archive.observation_health.network_protocol_coverage =
+                    NetworkProtocolCoverageStatus::ConnectOnly;
+                archive.observation_health.network_endpoint_claim_scope =
+                    NetworkEndpointClaimScope::DiagnosticOnly;
+            }
         } else {
             archive.observation_health.ringbuf_drops = 0;
             archive.observation_health.kernel_layer = KernelLayerStatus::Absent;
             archive.observation_health.cgroup_correlation = CgroupCorrelationStatus::Partial;
+            archive.observation_health.network_protocol_coverage =
+                NetworkProtocolCoverageStatus::Absent;
+            archive.observation_health.network_endpoint_claim_scope =
+                NetworkEndpointClaimScope::NotApplicable;
         }
         archive.observation_health.notes.retain(|note| {
             !note.starts_with("contract_only_mode:") && !note.starts_with("s2_kernel_capture:")
@@ -555,7 +573,9 @@ fn kernel_capture_note(input: KernelCaptureNote) -> String {
 
     match cgroup_correlation {
         CgroupCorrelationStatus::Clean if ringbuf_drops == 0 => {
-            format!("s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops}")
+            format!(
+                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage=connect_only network_endpoint_claim_scope=diagnostic_only"
+            )
         }
         CgroupCorrelationStatus::Clean => {
             let filtered_top = filtered_loader_top
@@ -564,7 +584,7 @@ fn kernel_capture_note(input: KernelCaptureNote) -> String {
                 .collect::<Vec<_>>()
                 .join(",");
             format!(
-                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} drop_breakdown=tracepoint:{} lsm:{} socket:{} emitted=tracepoint:{} lsm:{} socket:{} tracepoint_hooks=openat:{}/{} openat2:{}/{} connect:{}/{} filtered_loader_events={filtered_loader_events} filtered_loader_top=[{filtered_top}]",
+                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage=connect_only network_endpoint_claim_scope=diagnostic_only drop_breakdown=tracepoint:{} lsm:{} socket:{} emitted=tracepoint:{} lsm:{} socket:{} tracepoint_hooks=openat:{}/{} openat2:{}/{} connect:{}/{} filtered_loader_events={filtered_loader_events} filtered_loader_top=[{filtered_top}]",
                 drop_breakdown.tracepoint,
                 drop_breakdown.lsm,
                 drop_breakdown.socket,
@@ -848,6 +868,14 @@ mod tests {
             KernelLayerStatus::PartialRingbufDrops
         );
         assert_eq!(archive.observation_health.ringbuf_drops, 4);
+        assert_eq!(
+            archive.observation_health.network_protocol_coverage,
+            NetworkProtocolCoverageStatus::ConnectOnly
+        );
+        assert_eq!(
+            archive.observation_health.network_endpoint_claim_scope,
+            NetworkEndpointClaimScope::DiagnosticOnly
+        );
         archive.observation_health.validate().unwrap();
     }
 
@@ -875,11 +903,19 @@ mod tests {
             archive.observation_health.cgroup_correlation,
             CgroupCorrelationStatus::Clean
         );
+        assert_eq!(
+            archive.observation_health.network_protocol_coverage,
+            NetworkProtocolCoverageStatus::ConnectOnly
+        );
+        assert_eq!(
+            archive.observation_health.network_endpoint_claim_scope,
+            NetworkEndpointClaimScope::DiagnosticOnly
+        );
         assert!(archive
             .observation_health
             .notes
             .iter()
-            .any(|note| note.starts_with("s2_kernel_capture:")));
+            .any(|note| note.contains("network_protocol_coverage=connect_only")));
     }
 
     #[test]
@@ -903,6 +939,14 @@ mod tests {
             CgroupCorrelationStatus::Partial
         );
         assert_eq!(archive.observation_health.ringbuf_drops, 0);
+        assert_eq!(
+            archive.observation_health.network_protocol_coverage,
+            NetworkProtocolCoverageStatus::Absent
+        );
+        assert_eq!(
+            archive.observation_health.network_endpoint_claim_scope,
+            NetworkEndpointClaimScope::NotApplicable
+        );
         assert!(archive
             .observation_health
             .notes
@@ -987,6 +1031,14 @@ mod tests {
             CgroupCorrelationStatus::Partial
         );
         assert_eq!(archive.observation_health.ringbuf_drops, 0);
+        assert_eq!(
+            archive.observation_health.network_protocol_coverage,
+            NetworkProtocolCoverageStatus::Absent
+        );
+        assert_eq!(
+            archive.observation_health.network_endpoint_claim_scope,
+            NetworkEndpointClaimScope::NotApplicable
+        );
         archive.observation_health.validate().unwrap();
     }
 }
