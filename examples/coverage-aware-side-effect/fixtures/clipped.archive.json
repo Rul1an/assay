@@ -1,0 +1,24 @@
+{
+  "observation_health": {
+    "schema": "assay.runner.observation_health.v0",
+    "run_id": "run_coverage_aware_clipped",
+    "platform": "linux",
+    "kernel_layer": "partial_ringbuf_drops",
+    "ringbuf_drops": 4,
+    "policy_layer": "absent",
+    "sdk_layer": "absent",
+    "cgroup_correlation": "clean",
+    "network_protocol_coverage": "connect_only",
+    "network_endpoint_claim_scope": "diagnostic_only",
+    "notes": ["coverage_aware_sample_clipped"]
+  },
+  "capability_surface": {
+    "schema": "assay.runner.capability_surface.v0",
+    "run_id": "run_coverage_aware_clipped",
+    "filesystem_paths": ["/etc/hostname"],
+    "network_endpoints": ["198.41.200.33:7844"],
+    "process_execs": [],
+    "mcp_tools": [],
+    "policy_decisions": []
+  }
+}

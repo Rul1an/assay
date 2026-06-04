@@ -95,7 +95,7 @@ M1 also treats `completeness` as load-bearing, not decorative. Exhaustive
 and bounded-negative claims are allowed only when `completeness = full`
 and the descriptor declares no blind spots. A descriptor with
 `completeness = open_syscall_only`, `connect_only`, or `exec_only` still
-degrades or blocks those claim kinds even if its blindspot text is
+degrades or blocks those claim kinds even if its blind spot text is
 accidentally empty.
 
 This composes with `fidelity_verdict.v0`. Fidelity gates capture health
