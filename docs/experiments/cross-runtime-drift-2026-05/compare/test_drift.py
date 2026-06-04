@@ -2304,6 +2304,40 @@ class FidelityAndEnforcementTest(unittest.TestCase):
             report = json.loads((Path(tmp) / "drift.json").read_text(encoding="utf-8"))
             self.assertNotIn("coverage_annotation", report)
 
+    def test_invalid_health_is_failed(self):
+        # non-Linux must have kernel_layer=absent; complete -> invalid -> failed
+        bad_platform = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "x",
+            "platform": "darwin", "kernel_layer": "complete",
+            "ringbuf_drops": 0, "cgroup_correlation": "clean",
+        }
+        self.assertEqual(drift.fidelity_verdict(bad_platform), "failed")
+        # ringbuf_drops>0 requires partial_ringbuf_drops
+        bad_drops = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "y",
+            "platform": "linux", "kernel_layer": "complete",
+            "ringbuf_drops": 3, "cgroup_correlation": "clean",
+        }
+        self.assertEqual(drift.fidelity_verdict(bad_drops), "failed")
+        # out-of-enum cgroup_correlation -> failed
+        bad_enum = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "z",
+            "platform": "linux", "kernel_layer": "complete",
+            "ringbuf_drops": 0, "cgroup_correlation": "weird",
+        }
+        self.assertEqual(drift.fidelity_verdict(bad_enum), "failed")
+
+    def test_cli_empty_dimension_is_usage_error(self):
+        rc = drift.main(
+            [
+                "--archive-a", str(ARM_A),
+                "--archive-b", str(ARM_B),
+                "--out-json", "/dev/null",
+                "--assert-claim", "positive:",
+            ]
+        )
+        self.assertEqual(rc, 2)
+
 
 
 if __name__ == "__main__":

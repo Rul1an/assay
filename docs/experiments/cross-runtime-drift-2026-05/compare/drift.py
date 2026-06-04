@@ -1593,19 +1593,35 @@ def fidelity_verdict(health: Any) -> str:
         cgroup correlation.
       - "clipped": measurement exists but is degraded (drops / partial kernel /
         partial correlation).
-    A non-dict / empty record is treated as "not_applicable".
+    A non-dict / empty record is treated as "not_applicable". An
+    out-of-contract record (bad enum, or a violated cross-field invariant such
+    as non-Linux without kernel_layer=absent, or ringbuf_drops>0 without
+    kernel_layer=partial_ringbuf_drops) is "failed" per fidelity_verdict.v0,
+    so an invalid record can never be misread as clean/clipped/not_applicable.
     """
     if not isinstance(health, dict) or not health:
         return "not_applicable"
-    if health.get("platform") != "linux" or health.get("kernel_layer") == "absent":
-        return "not_applicable"
-    if health.get("cgroup_correlation") == "failed":
+    platform = health.get("platform")
+    kernel = health.get("kernel_layer")
+    correlation = health.get("cgroup_correlation")
+    drops = health.get("ringbuf_drops")
+    # Invalid records -> failed (checked before any other verdict).
+    if kernel not in ("complete", "partial_ringbuf_drops", "absent"):
         return "failed"
-    if (
-        health.get("kernel_layer") == "complete"
-        and health.get("ringbuf_drops") == 0
-        and health.get("cgroup_correlation") == "clean"
-    ):
+    if correlation not in ("clean", "partial", "failed"):
+        return "failed"
+    if isinstance(drops, bool) or not isinstance(drops, int) or drops < 0:
+        return "failed"
+    if platform != "linux" and kernel != "absent":
+        return "failed"  # non-Linux must have kernel_layer=absent
+    if drops > 0 and kernel != "partial_ringbuf_drops":
+        return "failed"  # drops require partial_ringbuf_drops
+    if correlation == "failed":
+        return "failed"
+    # Valid records.
+    if platform != "linux" or kernel == "absent":
+        return "not_applicable"
+    if kernel == "complete" and drops == 0 and correlation == "clean":
         return "clean"
     return "clipped"
 
@@ -2273,10 +2289,13 @@ def main(argv: list[str] | None = None) -> int:
 
     annotation: dict[str, Any] | None = None
     if args.coverage_annotation_out or args.assert_claim:
+        # parse_archive leaves observation_health as {} when the archive has no
+        # observation-health.json. Treat that as "no health supplied" (-> the
+        # conservative partial fallback) rather than a not_applicable arm.
         annotation = coverage_annotation_for_report(
             payload,
-            health_a=a.observation_health,
-            health_b=b.observation_health,
+            health_a=a.observation_health or None,
+            health_b=b.observation_health or None,
         )
 
     if args.coverage_annotation_out and annotation is not None:
@@ -2329,6 +2348,13 @@ def main(argv: list[str] | None = None) -> int:
             claim_type, _, dimension = raw.partition(":")
             claim_type = claim_type.strip()
             dimension = dimension.strip()
+            if not dimension:
+                print(
+                    f"--assert-claim must be TYPE:DIMENSION with a non-empty "
+                    f"dimension, got {raw!r}",
+                    file=sys.stderr,
+                )
+                return 2
             if claim_type not in ASSERTABLE_CLAIM_TYPES:
                 print(
                     f"--assert-claim TYPE must be one of {ASSERTABLE_CLAIM_TYPES}; "
