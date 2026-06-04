@@ -27,6 +27,7 @@
         "does_not_prove_intent",
         "strong_only_within_cgroup_scope"
       ],
+      "notes": [],
       "schema": "assay.observability.claim_class_cell.v0"
     },
     {
@@ -59,6 +60,7 @@
         "does_not_prove_intent",
         "strong_only_within_cgroup_scope"
       ],
+      "notes": [],
       "schema": "assay.observability.claim_class_cell.v0"
     },
     {

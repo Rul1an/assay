@@ -109,6 +109,7 @@ def build_report(archive: dict[str, Any]) -> dict[str, Any]:
                 "claim_strength": "strong" if capture_clean else "partial",
                 "claim_basis": "measured",
                 "evidence_refs": ["capability-surface.json", "observation-health.json"],
+                "notes": [],
                 "non_claims": [
                     "does_not_prove_intent",
                     "strong_only_within_cgroup_scope",
@@ -137,7 +138,7 @@ def build_report(archive: dict[str, Any]) -> dict[str, Any]:
             )
 
         # Bounded negative: "X did not happen". Blocked unless coverage is
-        # complete with no blind spots, or capture was not clean.
+        # complete with no blind spots AND capture was clean.
         if not _supports_complete_claims(descriptor) or not capture_clean:
             reason = (
                 f"{dimension} absence claim requires completeness=full with no blind "
