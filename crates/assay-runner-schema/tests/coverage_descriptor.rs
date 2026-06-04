@@ -204,3 +204,22 @@ fn missing_descriptor_still_blocks_effect_variant() {
     assert_eq!(decision.decision, ClaimGateDecision::Blocked);
     assert_eq!(decision.rule, "coverage_descriptor_required_for_claim");
 }
+
+#[test]
+fn unobserved_class_with_empty_observes_uses_placeholder() {
+    let descriptor = CoverageDescriptor {
+        schema: "assay.runner.coverage_descriptor.v0".to_string(),
+        dimension: EffectDimension::Filesystem,
+        method: "synthetic".to_string(),
+        observes: Vec::new(),
+        known_blind_spots: Vec::new(),
+        completeness: CoverageCompleteness::OpenSyscallOnly,
+    };
+    let decision = CoverageDescriptor::claim_decision_for_effect(
+        Some(&descriptor),
+        CoverageClaimKind::PositiveExistence,
+        "path opens",
+    );
+    assert_eq!(decision.decision, ClaimGateDecision::Degraded);
+    assert!(decision.reason.contains("observes: none declared"));
+}

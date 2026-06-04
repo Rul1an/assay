@@ -213,7 +213,7 @@ impl CoverageDescriptor {
                 "{} does not list the claimed effect class \"{}\" in observes: {}",
                 dimension_label(descriptor.dimension),
                 effect_class.trim(),
-                descriptor.observes.join("; ")
+                observes_summary(descriptor)
             ),
         }
     }
@@ -260,5 +260,13 @@ fn blind_spot_summary(descriptor: &CoverageDescriptor) -> String {
         "none declared".to_string()
     } else {
         descriptor.known_blind_spots.join("; ")
+    }
+}
+
+fn observes_summary(descriptor: &CoverageDescriptor) -> String {
+    if descriptor.observes.is_empty() {
+        "none declared".to_string()
+    } else {
+        descriptor.observes.join("; ")
     }
 }
