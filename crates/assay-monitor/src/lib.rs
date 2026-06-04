@@ -30,6 +30,8 @@ pub struct MonitorStatsSnapshot {
     pub sendto_ringbuf_dropped: u32,
     pub sendmsg_events_emitted: u32,
     pub sendmsg_ringbuf_dropped: u32,
+    pub sendto_no_peer: u32,
+    pub sendmsg_no_peer: u32,
     pub socket_checks: u64,
     pub socket_blocked_cidr: u64,
     pub socket_blocked_port: u64,
