@@ -1,0 +1,78 @@
+{
+  "dimensions": {
+    "filesystem_paths_touched": {
+      "bounded_negative_blocked": 2,
+      "exhaustive_equality": {
+        "absent": 0,
+        "missing": 1,
+        "partial": 1,
+        "weak": 1
+      },
+      "fleet_positive_floor": "absent",
+      "measured_positive": {
+        "absent": 1,
+        "missing": 0,
+        "partial": 1,
+        "strong": 1,
+        "weak": 0
+      },
+      "runs_observed": 3
+    },
+    "kernel_file_operations": {
+      "bounded_negative_blocked": 0,
+      "exhaustive_equality": {
+        "absent": 0,
+        "missing": 3,
+        "partial": 0,
+        "weak": 0
+      },
+      "fleet_positive_floor": "missing",
+      "measured_positive": {
+        "absent": 0,
+        "missing": 3,
+        "partial": 0,
+        "strong": 0,
+        "weak": 0
+      },
+      "runs_observed": 0
+    },
+    "network_endpoints": {
+      "bounded_negative_blocked": 2,
+      "exhaustive_equality": {
+        "absent": 0,
+        "missing": 3,
+        "partial": 0,
+        "weak": 0
+      },
+      "fleet_positive_floor": "absent",
+      "measured_positive": {
+        "absent": 1,
+        "missing": 0,
+        "partial": 2,
+        "strong": 0,
+        "weak": 0
+      },
+      "runs_observed": 3
+    },
+    "process_execs": {
+      "bounded_negative_blocked": 0,
+      "exhaustive_equality": {
+        "absent": 0,
+        "missing": 3,
+        "partial": 0,
+        "weak": 0
+      },
+      "fleet_positive_floor": "missing",
+      "measured_positive": {
+        "absent": 0,
+        "missing": 3,
+        "partial": 0,
+        "strong": 0,
+        "weak": 0
+      },
+      "runs_observed": 0
+    }
+  },
+  "run_count": 3,
+  "schema": "assay.coverage_fleet_summary.v0"
+}
