@@ -13,7 +13,11 @@ sample. That sample gates claims for one measured run; this one gates the
 
 It is intentionally small and derived-report only:
 
-- reads one frozen `runtime_drift.v0.2` report fixture
+- reads one frozen `runtime_drift.v0.2` report fixture. The checked-in
+  `fixtures/drift_report.json` is a minimized subset for the sample: it carries
+  only the `schema` and `rows` the annotator reads, and intentionally omits
+  v0.2-required fields (`taxonomy`, `provenance`, `summary`, and several per-row
+  fields), so it is not a schema-valid v0.2 report on its own
 - emits an `assay.coverage_aware_drift.annotation.v0` placeholder annotation
 - does not change the comparator, the runtime-drift schema, Runner archives,
   or Trust Basis

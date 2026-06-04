@@ -1,7 +1,7 @@
 {
   "schema": "assay.runner.runtime_drift.v0.2",
-  "archive_a": {"path": "runs/arm-a", "manifest_digest": "sha256:aaaa"},
-  "archive_b": {"path": "runs/arm-b", "manifest_digest": "sha256:bbbb"},
+  "archive_a": {"path": "runs/arm-a", "manifest_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+  "archive_b": {"path": "runs/arm-b", "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"},
   "rows": [
     {
       "dimension": "filesystem_paths_touched",
