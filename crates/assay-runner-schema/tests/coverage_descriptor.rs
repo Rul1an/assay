@@ -129,3 +129,78 @@ fn network_connect_only_is_positive_but_not_an_exhaustive_peer_set() {
     assert_eq!(exhaustive.decision, ClaimGateDecision::Degraded);
     assert!(exhaustive.reason.contains("QUIC"));
 }
+
+#[test]
+fn observes_effect_class_matches_case_insensitive_substring() {
+    let descriptor = CoverageDescriptor::filesystem_open_syscall_only();
+    assert!(descriptor.observes_effect_class("path opens"));
+    assert!(descriptor.observes_effect_class("PATH OPENS"));
+    assert!(!descriptor.observes_effect_class("network connect"));
+    assert!(!descriptor.observes_effect_class("   "));
+}
+
+#[test]
+fn positive_claim_for_observed_class_is_allowed() {
+    let descriptor = CoverageDescriptor::network_connect_only();
+    let decision = CoverageDescriptor::claim_decision_for_effect(
+        Some(&descriptor),
+        CoverageClaimKind::PositiveExistence,
+        "connect-time peer endpoints",
+    );
+    assert_eq!(decision.decision, ClaimGateDecision::Allowed);
+    assert_eq!(
+        decision.rule,
+        "coverage_descriptor_allows_observed_positive_claim"
+    );
+}
+
+#[test]
+fn positive_claim_for_unobserved_class_is_degraded() {
+    let descriptor = CoverageDescriptor::network_connect_only();
+    // connect-only capture does not observe post-connect datagram peers
+    let decision = CoverageDescriptor::claim_decision_for_effect(
+        Some(&descriptor),
+        CoverageClaimKind::PositiveExistence,
+        "datagram peer after connect",
+    );
+    assert_eq!(decision.decision, ClaimGateDecision::Degraded);
+    assert_eq!(
+        decision.rule,
+        "coverage_descriptor_positive_class_not_observed"
+    );
+    assert!(decision.reason.contains("datagram peer after connect"));
+}
+
+#[test]
+fn effect_class_variant_leaves_exhaustive_and_bounded_unchanged() {
+    let descriptor = CoverageDescriptor::filesystem_open_syscall_only();
+    // class argument is irrelevant for non-positive claim kinds
+    let exhaustive = CoverageDescriptor::claim_decision_for_effect(
+        Some(&descriptor),
+        CoverageClaimKind::ExhaustiveSet,
+        "anything",
+    );
+    assert_eq!(exhaustive.decision, ClaimGateDecision::Degraded);
+    assert_eq!(
+        exhaustive.rule,
+        "coverage_descriptor_degrades_exhaustive_claim"
+    );
+
+    let bounded = CoverageDescriptor::claim_decision_for_effect(
+        Some(&descriptor),
+        CoverageClaimKind::BoundedNegative,
+        "anything",
+    );
+    assert_eq!(bounded.decision, ClaimGateDecision::Blocked);
+}
+
+#[test]
+fn missing_descriptor_still_blocks_effect_variant() {
+    let decision = CoverageDescriptor::claim_decision_for_effect(
+        None,
+        CoverageClaimKind::PositiveExistence,
+        "path opens",
+    );
+    assert_eq!(decision.decision, ClaimGateDecision::Blocked);
+    assert_eq!(decision.rule, "coverage_descriptor_required_for_claim");
+}

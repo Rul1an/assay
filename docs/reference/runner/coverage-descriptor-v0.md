@@ -81,15 +81,27 @@ The descriptor gate evaluates the requested claim kind:
 | `exhaustive_set` | "These are all paths or peers." | Degraded when any blind spots are declared. |
 | `bounded_negative` | "No unexpected egress happened." | Blocked when any blind spots are declared. |
 
-M1 is intentionally conservative. The helper does not yet inspect whether
-a particular claimed effect class appears in `observes`, and it does not
-filter blind spots by per-claim relevance. Callers are responsible for
-selecting the descriptor that matches the effect dimension and effect
-class they are interpreting. If a descriptor declares any blind spot, M1
-treats that blind spot as relevant for exhaustive and bounded-negative
-claims. A later descriptor-aware consumer slice can add finer
-effect-class matching and relevance filtering without weakening this
-initial gate.
+The base gate (`claim_decision_for`) is intentionally conservative: it does
+not inspect whether a particular claimed effect class appears in `observes`,
+so callers that use it remain responsible for selecting a descriptor whose
+`observes` covers the effect class they are interpreting.
+
+An additive, effect-class-aware variant `claim_decision_for_effect(descriptor,
+claim_kind, effect_class)` layers that check on top. For `positive_existence`
+it first applies the same presence/schema/claim-kind gate and then, when the
+base gate would allow the positive claim, additionally confirms the
+`effect_class` is one the descriptor observes (a conservative case-insensitive
+containment match against `observes`, also exposed as
+`observes_effect_class`). A positive claim for a class outside `observes` is
+downgraded to `degraded` (`coverage_descriptor_positive_class_not_observed`)
+rather than blanket-allowed. `exhaustive_set` and `bounded_negative` are
+unaffected, because they already gate on completeness and blind spots, which
+are class-independent; the base `claim_decision_for` is left unchanged for
+callers that scope the effect class themselves.
+
+Relevance filtering of individual blind spots per claim remains a later step:
+if a descriptor declares any blind spot, both variants still treat it as
+relevant for exhaustive and bounded-negative claims.
 
 M1 also treats `completeness` as load-bearing, not decorative. Exhaustive
 and bounded-negative claims are allowed only when `completeness = full`
