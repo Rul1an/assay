@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.16.0] - 2026-06-04
+
+- Added `assay evidence verify-mcp-tunnel-observed`, a bounded consumer-side
+  checker for MCP tunnel observed-facts fixtures. The command validates the
+  `assay.mcp.tunnel_observed.v0` shape, enforces no-raw-payload and
+  no-raw-authorization boundaries, and classifies whether evidence references
+  support a strong `same_request_instance` join or only diagnostic correlation.
+  It does not prove tunnel mediation, authorization success, policy
+  correctness, tool result truth, application outcome truth, or issuer/key
+  trust.
+
+- Added Runner coverage descriptor helpers and examples for coverage-aware
+  side-effect interpretation. The new `assay.runner.coverage_descriptor.v0`
+  helper gates positive, exhaustive, and bounded-negative effect claims by
+  effect dimension and documented blind spots, so observed positives can remain
+  useful while absence and exact-set claims stay blocked or degraded when the
+  capture method cannot support them.
+
+- Added coverage-aware drift annotation and enforcement support to the
+  cross-runtime drift experiment comparator. The comparator can now emit a
+  sidecar claim annotation, derive measured-positive strength from per-arm
+  observation health, and use `--assert-claim TYPE:DIMENSION` to fail when a
+  requested claim is not permitted by the coverage/fidelity gates. The drift
+  report schema remains unchanged.
+
+- Added datagram-aware network coverage descriptors for Runner archives that
+  report `datagram_peer_observed` or `connect_and_datagram_peer_observed`.
+  Coverage-aware samples now derive the network descriptor from
+  `observation_health.network_protocol_coverage` instead of assuming
+  `connect_only`. Datagram peer evidence strengthens positive network
+  observations, but exact peer-set and bounded-negative network claims remain
+  degraded or blocked while blind spots are declared.
+
+- Updated dependency and CI hygiene patches, including CodeQL, `serial_test`,
+  `uuid`, and `assert_fs` patch bumps.
+
 ## [3.15.0] - 2026-06-03
 
 - Added Runner network-fidelity claim-scope fields so measured-run archives can

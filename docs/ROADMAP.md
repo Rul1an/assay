@@ -1,12 +1,12 @@
 # Assay Roadmap 2026
 
-> **Status sync (2026-06-03, `v3.15.0` release prep):** the `v3.15.0`
-> release line carries the post-`v3.14.0` Runner fidelity batch: honest
-> network protocol coverage / endpoint claim-scope fields, datagram peer
-> telemetry for `sendto`/`sendmsg`, the fidelity verdict and declared
-> path-projection helpers, the MCP request-envelope fallback binding slice, and
-> the cross-runtime comparator's diagnostic-only endpoint-churn handling. The
-> Cargo workspace/package version in this release-prep branch is **`3.15.0`**.
+> **Status sync (2026-06-04, `v3.16.0` release prep):** the `v3.16.0`
+> release line carries the post-`v3.15.0` coverage-aware interpretation batch:
+> the MCP tunnel observed-facts checker, the Runner coverage descriptor helper,
+> coverage-aware side-effect and drift annotation examples, drift comparator
+> claim enforcement, and datagram-aware descriptor mapping for Runner archives
+> that report `sendto`/`sendmsg` peer observations. The Cargo workspace/package
+> version in this release-prep branch is **`3.16.0`**.
 > The current execution posture is: keep remaining CLI grouping trigger-gated,
 > keep Assay-Runner repository extraction gated, treat Assay-Harness `v3.13.0`
 > compatibility as verified by its release-binary compatibility CI check
@@ -202,14 +202,21 @@ grouping RFC remains deliberately trigger-gated: `trust` and `replay` should
 move only with a concrete docs/user-maintenance reason, not just to reduce the
 top-level command count.
 
-The `v3.15.0` release-prep line closes the Runner QUIC fidelity follow-up on
-`main`: Runner archives can now state protocol coverage and diagnostic-only
-network endpoint scope separately from capture health, Linux captures can record
-observed datagram destination sockaddr evidence from `sendto`/`sendmsg`, and the
+The `v3.15.0` release line closed the Runner QUIC fidelity follow-up on `main`:
+Runner archives can state protocol coverage and diagnostic-only network endpoint
+scope separately from capture health, Linux captures can record observed
+datagram destination sockaddr evidence from `sendto`/`sendmsg`, and the
 cross-runtime experiment comparator treats diagnostic-only endpoint churn as
-inconclusive instead of hard provider/runtime drift. This strengthens transport
-evidence beyond connect-only capture, but it still does not claim request-level
-binding, `cf_ray` capture, or authoritative exact QUIC peer identity.
+inconclusive instead of hard provider/runtime drift.
+
+The `v3.16.0` release-prep line layers coverage-aware interpretation on top of
+that substrate: consumers can classify effect claims through coverage
+descriptors, drift annotations can be emitted and enforced as sidecars, and
+datagram-aware network descriptors are selected from
+`observation_health.network_protocol_coverage`. This strengthens positive
+network observations beyond connect-only capture, but it still does not claim
+request-level binding, `cf_ray` capture, or authoritative exact QUIC peer
+identity.
 
 ### Happy Path (Core Workflow)
 ```bash
