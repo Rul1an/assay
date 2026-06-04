@@ -91,7 +91,7 @@ def _capture_is_clean(health: dict[str, Any]) -> bool:
     return (
         health.get("platform") == "linux"
         and health.get("kernel_layer") == "complete"
-        and int(health.get("ringbuf_drops", 1)) == 0
+        and health.get("ringbuf_drops") == 0
         and health.get("cgroup_correlation") == "clean"
     )
 
@@ -119,6 +119,29 @@ def _positive_verdict(health: dict[str, Any]) -> str:
 
 OBS_HEALTH_SCHEMA = "assay.runner.observation_health.v0"
 CAP_SURFACE_SCHEMA = "assay.runner.capability_surface.v0"
+# Canonical observation_health.v0 enums (see docs/reference/runner/artifacts-v0.md).
+KERNEL_LAYERS = {"complete", "partial_ringbuf_drops", "absent"}
+CGROUP_CORRELATIONS = {"clean", "partial", "failed"}
+
+
+def _validate_health(health: dict[str, Any]) -> None:
+    """Enforce the observation_health.v0 enum/type invariants before deriving.
+
+    A sample that mirrors fidelity_verdict.v0 must reject out-of-contract health
+    rather than interpret it. This is not a full schema validator; it checks the
+    fields the gate actually reads.
+    """
+    if health.get("schema") != OBS_HEALTH_SCHEMA:
+        raise ValueError(f"observation_health schema must be {OBS_HEALTH_SCHEMA}")
+    if health.get("kernel_layer") not in KERNEL_LAYERS:
+        raise ValueError(f"kernel_layer must be one of {sorted(KERNEL_LAYERS)}")
+    if health.get("cgroup_correlation") not in CGROUP_CORRELATIONS:
+        raise ValueError(
+            f"cgroup_correlation must be one of {sorted(CGROUP_CORRELATIONS)}"
+        )
+    drops = health.get("ringbuf_drops")
+    if isinstance(drops, bool) or not isinstance(drops, int) or drops < 0:
+        raise ValueError("ringbuf_drops must be a non-negative integer")
 
 
 def build_report(archive: dict[str, Any]) -> dict[str, Any]:
@@ -132,10 +155,7 @@ def build_report(archive: dict[str, Any]) -> dict[str, Any]:
     # Validate both records before interpreting them. fidelity_verdict.v0 blocks
     # measured claims on an invalid health record, so a sample that derives
     # claims must refuse malformed or mismatched inputs rather than emit cells.
-    if health.get("schema") != OBS_HEALTH_SCHEMA:
-        raise ValueError(
-            f"observation_health schema must be {OBS_HEALTH_SCHEMA}"
-        )
+    _validate_health(health)
     if surface.get("schema") != CAP_SURFACE_SCHEMA:
         raise ValueError(
             f"capability_surface schema must be {CAP_SURFACE_SCHEMA}"

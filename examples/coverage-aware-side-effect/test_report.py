@@ -84,10 +84,10 @@ class CoverageAwareReportTest(unittest.TestCase):
             "observation_health": {
                 "schema": "assay.runner.observation_health.v0",
                 "run_id": "run_blocked",
-                "platform": "darwin",
-                "kernel_layer": "absent",
+                "platform": "linux",
+                "kernel_layer": "complete",
                 "ringbuf_drops": 0,
-                "cgroup_correlation": "not_applicable",
+                "cgroup_correlation": "failed",
             },
             "capability_surface": {
                 "schema": "assay.runner.capability_surface.v0",
