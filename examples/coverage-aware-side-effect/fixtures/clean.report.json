@@ -1,0 +1,87 @@
+{
+  "blocked_claims": [
+    {
+      "claim_type": "bounded_negative_claim",
+      "decision": "blocked",
+      "reason": "filesystem absence claim requires completeness=full with no blind spots and clean capture; completeness is open_syscall_only; blind spots: io_uring file operations may bypass syscall tracepoints; mmap-backed writes are not path-open observations; capture_clean=true",
+      "requested_claim": "no_unexpected_filesystem_effect"
+    },
+    {
+      "claim_type": "bounded_negative_claim",
+      "decision": "blocked",
+      "reason": "network absence claim requires completeness=full with no blind spots and clean capture; completeness is connect_only; blind spots: QUIC/datagram peer changes after connect are not an exhaustive peer set; io_uring network operations may bypass syscall tracepoints; capture_clean=true",
+      "requested_claim": "no_unexpected_network_effect"
+    }
+  ],
+  "claim_cells": [
+    {
+      "artifact_role": "measured_run_archive",
+      "claim_basis": "measured",
+      "claim_strength": "strong",
+      "claim_type": "measured_filesystem_effect",
+      "evidence_refs": [
+        "capability-surface.json",
+        "observation-health.json"
+      ],
+      "non_claims": [
+        "does_not_prove_tool_intent",
+        "strong_only_within_cgroup_scope"
+      ],
+      "notes": [],
+      "schema": "assay.observability.claim_class_cell.v0"
+    },
+    {
+      "artifact_role": "measured_run_archive",
+      "claim_basis": "derived",
+      "claim_strength": "weak",
+      "claim_type": "exhaustive_filesystem_set",
+      "evidence_refs": [
+        "capability-surface.json",
+        "observation-health.json"
+      ],
+      "non_claims": [
+        "does_not_prove_complete_filesystem_set"
+      ],
+      "notes": [
+        "derived by coverage_descriptor.v0 + fidelity_verdict.v0: exhaustive filesystem set requires completeness=full with no blind spots; completeness is open_syscall_only; blind spots: io_uring file operations may bypass syscall tracepoints; mmap-backed writes are not path-open observations"
+      ],
+      "schema": "assay.observability.claim_class_cell.v0"
+    },
+    {
+      "artifact_role": "measured_run_archive",
+      "claim_basis": "measured",
+      "claim_strength": "strong",
+      "claim_type": "measured_network_effect",
+      "evidence_refs": [
+        "capability-surface.json",
+        "observation-health.json"
+      ],
+      "non_claims": [
+        "does_not_prove_tool_intent",
+        "strong_only_within_cgroup_scope"
+      ],
+      "notes": [],
+      "schema": "assay.observability.claim_class_cell.v0"
+    },
+    {
+      "artifact_role": "measured_run_archive",
+      "claim_basis": "derived",
+      "claim_strength": "weak",
+      "claim_type": "exhaustive_network_set",
+      "evidence_refs": [
+        "capability-surface.json",
+        "observation-health.json"
+      ],
+      "non_claims": [
+        "does_not_prove_complete_network_set"
+      ],
+      "notes": [
+        "derived by coverage_descriptor.v0 + fidelity_verdict.v0: exhaustive network set requires completeness=full with no blind spots; completeness is connect_only; blind spots: QUIC/datagram peer changes after connect are not an exhaustive peer set; io_uring network operations may bypass syscall tracepoints"
+      ],
+      "schema": "assay.observability.claim_class_cell.v0"
+    }
+  ],
+  "observation_health_ref": "observation-health.json",
+  "run_id": "run_coverage_aware_clean",
+  "schema": "assay.coverage_aware_side_effect.report.v0"
+}

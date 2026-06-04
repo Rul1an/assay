@@ -175,6 +175,14 @@ external evidence.
 **Focus**: tunnel-observed route/upstream facts plus request-envelope binding
 only, no imported tunnel trust, auth correctness, policy outcome, or tool truth.
 
+### [Coverage-Aware Side-Effect Report](./coverage-aware-side-effect)
+Turn a Runner archive's `observation_health` and `capability_surface` into
+per-dimension claim cells plus blocked claims, reusing the shipped
+`coverage_descriptor.v0` claim-kind gate.
+**Focus**: positive existence is strong measured, exhaustive set is weak under
+declared blind spots, and bounded-negative (absence) claims are blocked unless
+coverage is complete and capture is clean. Derived report only, no schema change.
+
 ### [Pydantic Evals Reduced Case-Result Evidence](./pydantic-ai-eval-report-evidence)
 Map one reduced artifact derived from `pydantic_evals` `EvaluationReport.cases[]` into Assay-shaped external evidence or importer-only Pydantic case-result receipts.
 **Focus**: code-first case-result seam, no raw `ReportCase`, report summary, task input/output, tracing truth, or Trust Basis claim.
