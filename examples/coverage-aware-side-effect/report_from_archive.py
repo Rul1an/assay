@@ -96,6 +96,27 @@ def _capture_is_clean(health: dict[str, Any]) -> bool:
     )
 
 
+def _positive_verdict(health: dict[str, Any]) -> str:
+    """Strength a measured positive claim may carry, mirroring fidelity_verdict.v0.
+
+    - blocked -> "absent": there is no measured kernel-effect surface to support
+      the claim (non-Linux/not_applicable, kernel layer absent, or correlation
+      failed). An absent cell carries no evidence_refs.
+    - clean -> "strong".
+    - otherwise -> "partial": measurement exists but is degraded (e.g. drops or
+      partial kernel capture).
+    """
+    if (
+        health.get("platform") != "linux"
+        or health.get("kernel_layer") == "absent"
+        or health.get("cgroup_correlation") == "failed"
+    ):
+        return "absent"
+    if _capture_is_clean(health):
+        return "strong"
+    return "partial"
+
+
 def build_report(archive: dict[str, Any]) -> dict[str, Any]:
     health = archive.get("observation_health")
     surface = archive.get("capability_surface")
@@ -115,23 +136,43 @@ def build_report(archive: dict[str, Any]) -> dict[str, Any]:
             continue
 
         # Positive existence: an observed effect happened. Capture health gates
-        # strength (clipped capture downgrades positive measured claims), but the
-        # descriptor's blind spots do not weaken a positive observation.
-        claim_cells.append(
-            {
-                "schema": CLAIM_CELL_SCHEMA,
-                "claim_type": POSITIVE_CLAIM_TYPE[dimension],
-                "artifact_role": "measured_run_archive",
-                "claim_strength": "strong" if capture_clean else "partial",
-                "claim_basis": "measured",
-                "evidence_refs": ["capability-surface.json", "observation-health.json"],
-                "notes": [],
-                "non_claims": [
-                    "does_not_prove_tool_intent",
-                    "strong_only_within_cgroup_scope",
-                ],
-            }
-        )
+        # strength: clean -> strong, degraded -> partial, and a blocked verdict
+        # (no measured kernel surface) -> absent rather than overstated partial.
+        # The descriptor's blind spots do not weaken a positive observation.
+        positive = _positive_verdict(health)
+        if positive == "absent":
+            claim_cells.append(
+                {
+                    "schema": CLAIM_CELL_SCHEMA,
+                    "claim_type": POSITIVE_CLAIM_TYPE[dimension],
+                    "artifact_role": "none",
+                    "claim_strength": "absent",
+                    "claim_basis": "measured",
+                    "evidence_refs": [],
+                    "notes": [
+                        "measured positive blocked by fidelity verdict: no measured "
+                        "kernel-effect surface (non-Linux, kernel layer absent, or "
+                        "cgroup correlation failed)"
+                    ],
+                    "non_claims": ["does_not_prove_tool_intent"],
+                }
+            )
+        else:
+            claim_cells.append(
+                {
+                    "schema": CLAIM_CELL_SCHEMA,
+                    "claim_type": POSITIVE_CLAIM_TYPE[dimension],
+                    "artifact_role": "measured_run_archive",
+                    "claim_strength": positive,
+                    "claim_basis": "measured",
+                    "evidence_refs": ["capability-surface.json", "observation-health.json"],
+                    "notes": [],
+                    "non_claims": [
+                        "does_not_prove_tool_intent",
+                        "strong_only_within_cgroup_scope",
+                    ],
+                }
+            )
 
         # Exhaustive set: "these are all the X". Allowed (strong) only when the
         # descriptor supports complete claims; otherwise degraded to weak with

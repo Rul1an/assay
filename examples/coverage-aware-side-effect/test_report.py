@@ -77,6 +77,29 @@ class CoverageAwareReportTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.m.build_report({"capability_surface": {"filesystem_paths": []}})
 
+    def test_blocked_fidelity_makes_positive_absent(self):
+        # Non-Linux (or kernel absent / correlation failed) blocks measured
+        # positives: the cell is absent with empty evidence_refs, not partial.
+        archive = {
+            "observation_health": {
+                "schema": "assay.runner.observation_health.v0",
+                "run_id": "run_blocked",
+                "platform": "darwin",
+                "kernel_layer": "absent",
+                "ringbuf_drops": 0,
+                "cgroup_correlation": "not_applicable",
+            },
+            "capability_surface": {"filesystem_paths": ["read:/etc/hosts"]},
+        }
+        report = self.m.build_report(archive)
+        fs = next(
+            c for c in report["claim_cells"]
+            if c["claim_type"] == "measured_filesystem_effect"
+        )
+        self.assertEqual(fs["claim_strength"], "absent")
+        self.assertEqual(fs["artifact_role"], "none")
+        self.assertEqual(fs["evidence_refs"], [])
+
     def test_clean_report_matches_frozen_fixture(self):
         # Golden test: the generator output must equal the frozen expected
         # report, so the fixture and generator cannot drift apart silently.

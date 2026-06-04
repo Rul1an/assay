@@ -17,9 +17,13 @@ It is intentionally small and derived-report only:
 For each observed effect dimension, the report distinguishes claim kinds:
 
 - positive existence (this open / connect / exec happened) is `strong measured`
-  when capture is clean; capture health, not blind spots, gates its strength
-- exhaustive set (these are all the X) is `weak measured` while the dimension's
-  coverage declares blind spots
+  when capture is clean, `partial` when capture is degraded, and `absent` (with
+  no evidence refs) when the fidelity verdict blocks measured claims entirely
+  (non-Linux, kernel layer absent, or correlation failed); capture health, not
+  blind spots, gates its strength
+- exhaustive set (these are all the X) is `weak derived` while the dimension's
+  coverage declares blind spots: the exhaustive reading is computed by the gate,
+  so its basis is `derived`, and the cell note names the rule
 - bounded negative (X did not happen) is blocked unless coverage is complete
   with no blind spots and capture was clean
 
