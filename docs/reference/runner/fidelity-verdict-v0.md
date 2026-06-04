@@ -135,6 +135,31 @@ claim to a specific run/cgroup/tool identity, it must also consult
 This keeps `claim_gate` as a guardrail over existing claim levels instead
 of introducing a second independent claim hierarchy.
 
+## Composition With Coverage Descriptors
+
+`fidelity_verdict.v0` gates capture health. `coverage_descriptor.v0`
+gates the per-dimension visibility ceiling. Consumers must apply both
+when interpreting measured side effects.
+
+Example:
+
+- A clean health record may allow `bounded_negative_claims` at the
+  fidelity layer.
+- A filesystem descriptor with `completeness = open_syscall_only` still
+  blocks a bounded-negative file-activity claim because io_uring or
+  mmap-backed writes can hide effects from the capture method.
+
+So the combined decision is the stricter of:
+
+```text
+fidelity claim gate
+coverage descriptor claim-kind decision
+```
+
+This keeps positive observed effects useful while preventing a clean
+capture-health verdict from becoming a universal absence or completeness
+claim.
+
 ## Derived Shape
 
 Example clean verdict:

@@ -8,6 +8,8 @@
 //! - `assay.runner.capability_surface.v0`
 //! - `assay.runner.correlation_report.v0`
 //! - `assay.runner.sdk_event.v0`
+//! - `assay.runner.coverage_descriptor.v0` (internal helper contract; not an
+//!   archive member yet)
 //! - `assay.runner.archive_manifest.v0` (manifest semantics only; archive
 //!   assembly mechanics live in `assay-runner-core` since Phase 2D Slice 2)
 //!
@@ -17,6 +19,7 @@
 
 mod archive_manifest;
 mod correlation;
+mod coverage;
 mod fidelity;
 mod health;
 mod sdk_event;
@@ -30,6 +33,10 @@ pub use archive_manifest::{
 pub use correlation::{
     BindingWindow, CorrelationBinding, CorrelationReport, CorrelationReportError,
     CorrelationStatus, CORRELATION_REPORT_SCHEMA,
+};
+pub use coverage::{
+    CoverageClaimDecision, CoverageClaimKind, CoverageCompleteness, CoverageDescriptor,
+    EffectDimension, COVERAGE_DESCRIPTOR_SCHEMA,
 };
 pub use fidelity::{
     ClaimGateDecision, RunnerClaimGate, RunnerFidelityReason, RunnerFidelityVerdict,
