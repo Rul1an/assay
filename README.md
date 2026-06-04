@@ -33,8 +33,11 @@ Start with the path that matches what you already have:
 | CycloneDX ML-BOM model component | You want CI evidence for the model inventory/provenance boundary that existed | Inventory receipt, verified bundle, Trust Basis diff | [CycloneDX ML-BOM](docs/use-cases/cyclonedx-mlbom-model-to-inventory-receipt.md) |
 | MCP tool calls | You are ready to put a policy file around tool execution | Allow/deny audit trail and evidence for observed tool behavior | [MCP Quick Start](examples/mcp-quickstart/) |
 | A GitHub PR gate | You want CI to block regressions from checked artifacts | Trust Basis diff, gate status, SARIF/JUnit-ready output | [CI Guide](docs/guides/github-action.md) |
+| A Runner archive or coverage annotation from an observed run | You want to know what the observed evidence can and cannot support before trusting a side-effect claim | Coverage descriptors, claim-class cells (strength x basis), and a claimed-vs-observed check | [Coverage-honesty walkthrough](examples/coverage-honesty-walkthrough/) |
 
 The core workflow is intentionally small: import or record a bounded outcome, bundle and verify it, compile `trust-basis.json`, then gate the Trust Basis diff. Assay does not make the upstream tool the source of truth; it makes the evidence boundary inspectable.
+
+For observed runtime evidence specifically, the same boundary discipline runs end to end: a coverage descriptor declares what the capture can and cannot support, claim-class cells record each claim as `claim_strength` x `claim_basis`, and a gate refuses to let a claim exceed what was observed. See the [coverage-honesty walkthrough](examples/coverage-honesty-walkthrough/) and the [claim-class semantics](docs/reference/observability/claim-semantics-overview.md).
 
 ```text
 Trust Basis Gate
