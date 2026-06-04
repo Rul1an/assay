@@ -2152,6 +2152,14 @@ class CoverageAnnotationTest(unittest.TestCase):
         for cell in self.annotation["claim_cells"]:
             self.assertEqual(required - set(cell), set(), cell["claim_type"])
 
+    def test_rejects_non_v02_report(self) -> None:
+        with self.assertRaises(ValueError):
+            drift.coverage_annotation_for_report({"schema": "assay.runner.runtime_drift.v0", "rows": []})
+
+    def test_rejects_non_list_rows(self) -> None:
+        with self.assertRaises(ValueError):
+            drift.coverage_annotation_for_report({"schema": "assay.runner.runtime_drift.v0.2", "rows": {}})
+
 
 if __name__ == "__main__":
     unittest.main()

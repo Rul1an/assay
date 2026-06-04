@@ -1574,17 +1574,26 @@ def _coverage_supports_complete(descriptor: dict[str, Any]) -> bool:
 def coverage_annotation_for_report(report: dict[str, Any]) -> dict[str, Any]:
     """Derive a coverage annotation from a runtime_drift.v0.2 report.
 
-    Additive companion to the drift report: it attaches per-dimension claim
-    cells that apply the shipped coverage_descriptor.v0 ceiling so a full-overlap
-    (task-induced) row is not read as exhaustive-equality or bounded-negative.
-    Mirrors examples/coverage-aware-drift-annotation/; the canonical gate is the
-    Rust helper in crates/assay-runner-schema/src/coverage.rs.
+    Separate companion document to the drift report (it is emitted as its own
+    sidecar, never injected into the runtime_drift.v0.2 payload, which is
+    additionalProperties:false). It carries per-dimension claim cells that apply
+    the shipped coverage_descriptor.v0 ceiling so a full-overlap (task-induced)
+    row is not read as exhaustive-equality or bounded-negative. Mirrors
+    examples/coverage-aware-drift-annotation/; the canonical gate is the Rust
+    helper in crates/assay-runner-schema/src/coverage.rs.
     """
+    if report.get("schema") != DRIFT_REPORT_SCHEMA:
+        raise ValueError(
+            f"expected {DRIFT_REPORT_SCHEMA} report; got {report.get('schema')!r}"
+        )
+    rows = report.get("rows")
+    if not isinstance(rows, list):
+        raise ValueError("report: rows must be a list")
     claim_cells: list[dict[str, Any]] = []
     blocked_claims: list[dict[str, Any]] = []
     classification_caveats: list[dict[str, Any]] = []
 
-    for row in report.get("rows", []):
+    for row in rows:
         dimension = row.get("dimension")
         mapping = COVERAGE_DIMENSION_MAP.get(dimension)
         if mapping is None:
@@ -2030,12 +2039,13 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--with-coverage-annotation",
-        action="store_true",
+        "--coverage-annotation-out",
+        type=Path,
         help=(
-            "Attach an additive assay.coverage_aware_drift.annotation.v0 block "
-            "(per-dimension claim cells applying the shipped coverage ceiling). "
-            "Off by default; default report output is unchanged."
+            "Write a separate assay.coverage_aware_drift.annotation.v0 sidecar "
+            "document to this path (per-dimension claim cells applying the shipped "
+            "coverage ceiling). The drift report itself is never modified, so it "
+            "stays valid against the additionalProperties:false v0.2 schema."
         ),
     )
     parser.add_argument("--workflow-url", help="GitHub Actions run URL, if any.")
@@ -2114,8 +2124,21 @@ def main(argv: list[str] | None = None) -> int:
         ebpf_object_digest=args.ebpf_object_digest or None,
     )
     payload = report_to_json(a, b, rows, provenance)
-    if args.with_coverage_annotation:
-        payload["coverage_annotation"] = coverage_annotation_for_report(payload)
+
+    if args.coverage_annotation_out:
+        annotation = coverage_annotation_for_report(payload)
+        try:
+            args.coverage_annotation_out.parent.mkdir(parents=True, exist_ok=True)
+            args.coverage_annotation_out.write_text(
+                json.dumps(annotation, indent=2, sort_keys=False) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            print(
+                f"failed to write --coverage-annotation-out: {exc}",
+                file=sys.stderr,
+            )
+            return 2
 
     if args.out_json:
         try:
