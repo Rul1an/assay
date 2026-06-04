@@ -24,7 +24,7 @@
         "observation-health.json"
       ],
       "non_claims": [
-        "does_not_prove_intent",
+        "does_not_prove_tool_intent",
         "strong_only_within_cgroup_scope"
       ],
       "notes": [],
@@ -57,7 +57,7 @@
         "observation-health.json"
       ],
       "non_claims": [
-        "does_not_prove_intent",
+        "does_not_prove_tool_intent",
         "strong_only_within_cgroup_scope"
       ],
       "notes": [],

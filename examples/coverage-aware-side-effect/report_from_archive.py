@@ -59,6 +59,15 @@ SURFACE_FIELD = {
     "process": "process_execs",
 }
 
+# Canonical positive-effect claim_type per dimension, matching the documented
+# vocabulary in docs/reference/observability/claim-classes-v0.md. Note the
+# process dimension uses `process_execution_effect`, not `measured_process_*`.
+POSITIVE_CLAIM_TYPE = {
+    "filesystem": "measured_filesystem_effect",
+    "network": "measured_network_effect",
+    "process": "process_execution_effect",
+}
+
 
 def _blind_spot_summary(descriptor: dict[str, Any]) -> str:
     spots = descriptor.get("known_blind_spots") or []
@@ -73,8 +82,12 @@ def _supports_complete_claims(descriptor: dict[str, Any]) -> bool:
 
 
 def _capture_is_clean(health: dict[str, Any]) -> bool:
+    # Non-Linux records have no measured kernel-effect surface; the canonical
+    # fidelity verdict treats them as not_applicable, never clean, so they must
+    # not upgrade measured claims to strong.
     return (
-        health.get("kernel_layer") == "complete"
+        health.get("platform") == "linux"
+        and health.get("kernel_layer") == "complete"
         and int(health.get("ringbuf_drops", 1)) == 0
         and health.get("cgroup_correlation") == "clean"
     )
@@ -104,14 +117,14 @@ def build_report(archive: dict[str, Any]) -> dict[str, Any]:
         claim_cells.append(
             {
                 "schema": CLAIM_CELL_SCHEMA,
-                "claim_type": f"measured_{dimension}_effect",
+                "claim_type": POSITIVE_CLAIM_TYPE[dimension],
                 "artifact_role": "measured_run_archive",
                 "claim_strength": "strong" if capture_clean else "partial",
                 "claim_basis": "measured",
                 "evidence_refs": ["capability-surface.json", "observation-health.json"],
                 "notes": [],
                 "non_claims": [
-                    "does_not_prove_intent",
+                    "does_not_prove_tool_intent",
                     "strong_only_within_cgroup_scope",
                 ],
             }
@@ -165,14 +178,14 @@ def build_report(archive: dict[str, Any]) -> dict[str, Any]:
             claim_cells.append(
                 {
                     "schema": CLAIM_CELL_SCHEMA,
-                    "claim_type": f"bounded_negative_{dimension}_effect",
+                    "claim_type": "bounded_negative_claim",
                     "artifact_role": "measured_run_archive",
                     "claim_strength": "strong",
                     "claim_basis": "measured",
                     "evidence_refs": ["capability-surface.json", "observation-health.json"],
                     "notes": [
-                        f"completeness is full with no declared blind spots and "
-                        f"capture is clean: bounded-negative {dimension} claim allowed"
+                        f"{dimension}: completeness is full with no declared blind "
+                        f"spots and capture is clean: bounded-negative claim allowed"
                     ],
                     "non_claims": ["strong_only_within_cgroup_scope"],
                 }
