@@ -117,9 +117,29 @@ def build_report(archive: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
-        # Exhaustive set: "these are all the X". Allowed only when the descriptor
-        # supports complete claims; otherwise degraded to weak with the reason.
-        if not _supports_complete_claims(descriptor):
+        # Exhaustive set: "these are all the X". Allowed (strong) only when the
+        # descriptor supports complete claims; otherwise degraded to weak with
+        # the reason. This mirrors coverage_descriptor.v0, where exhaustive set
+        # is allowed when completeness=full with no blind spots. Under the seed
+        # descriptors the supported branch is never taken; it is kept so the
+        # example represents the full gate, not only its degraded path.
+        if _supports_complete_claims(descriptor):
+            claim_cells.append(
+                {
+                    "schema": CLAIM_CELL_SCHEMA,
+                    "claim_type": f"exhaustive_{dimension}_set",
+                    "artifact_role": "measured_run_archive",
+                    "claim_strength": "strong" if capture_clean else "partial",
+                    "claim_basis": "measured",
+                    "evidence_refs": ["capability-surface.json", "observation-health.json"],
+                    "notes": [
+                        f"completeness is full with no declared blind spots: "
+                        f"exhaustive {dimension} set allowed"
+                    ],
+                    "non_claims": ["strong_only_within_cgroup_scope"],
+                }
+            )
+        else:
             claim_cells.append(
                 {
                     "schema": CLAIM_CELL_SCHEMA,
@@ -137,9 +157,27 @@ def build_report(archive: dict[str, Any]) -> dict[str, Any]:
                 }
             )
 
-        # Bounded negative: "X did not happen". Blocked unless coverage is
-        # complete with no blind spots AND capture was clean.
-        if not _supports_complete_claims(descriptor) or not capture_clean:
+        # Bounded negative: "X did not happen". Allowed only when coverage is
+        # complete with no blind spots AND capture was clean; otherwise blocked.
+        # As with the exhaustive set, the seed descriptors never satisfy the
+        # allowed branch; it is kept so the gate's allowed outcome is represented.
+        if _supports_complete_claims(descriptor) and capture_clean:
+            claim_cells.append(
+                {
+                    "schema": CLAIM_CELL_SCHEMA,
+                    "claim_type": f"bounded_negative_{dimension}_effect",
+                    "artifact_role": "measured_run_archive",
+                    "claim_strength": "strong",
+                    "claim_basis": "measured",
+                    "evidence_refs": ["capability-surface.json", "observation-health.json"],
+                    "notes": [
+                        f"completeness is full with no declared blind spots and "
+                        f"capture is clean: bounded-negative {dimension} claim allowed"
+                    ],
+                    "non_claims": ["strong_only_within_cgroup_scope"],
+                }
+            )
+        else:
             reason = (
                 f"{dimension} absence claim requires completeness=full with no blind "
                 f"spots and clean capture; completeness is {descriptor['completeness']}; "

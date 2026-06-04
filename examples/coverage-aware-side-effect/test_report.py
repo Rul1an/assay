@@ -77,6 +77,13 @@ class CoverageAwareReportTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.m.build_report({"capability_surface": {"filesystem_paths": []}})
 
+    def test_clean_report_matches_frozen_fixture(self):
+        # Golden test: the generator output must equal the frozen expected
+        # report, so the fixture and generator cannot drift apart silently.
+        report = self.m.build_report(_archive("clean.archive.json"))
+        expected = json.loads((FIXTURES / "clean.report.json").read_text(encoding="utf-8"))
+        self.assertEqual(report, expected)
+
 
 if __name__ == "__main__":
     unittest.main()
