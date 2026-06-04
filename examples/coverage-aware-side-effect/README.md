@@ -18,9 +18,10 @@ For each observed effect dimension, the report distinguishes claim kinds:
 
 - positive existence (this open / connect / exec happened) is `strong measured`
   when capture is clean, `partial` when capture is degraded, and `absent` (with
-  no evidence refs) when the fidelity verdict blocks measured claims entirely
-  (non-Linux, kernel layer absent, or correlation failed); capture health, not
-  blind spots, gates its strength
+  no evidence refs) on the not_applicable path, where there is no measured
+  kernel surface (non-Linux, or kernel layer absent); capture health, not blind
+  spots, gates its strength. Out-of-contract health (for example
+  `cgroup_correlation=failed`) is rejected outright rather than interpreted
 - exhaustive set (these are all the X) is `weak derived` while the dimension's
   coverage declares blind spots: the exhaustive reading is computed by the gate,
   so its basis is `derived`, and the cell note names the rule

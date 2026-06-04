@@ -77,17 +77,18 @@ class CoverageAwareReportTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.m.build_report({"capability_surface": {"filesystem_paths": []}})
 
-    def test_blocked_fidelity_makes_positive_absent(self):
-        # Non-Linux (or kernel absent / correlation failed) blocks measured
-        # positives: the cell is absent with empty evidence_refs, not partial.
+    def test_not_applicable_makes_positive_absent(self):
+        # A valid not_applicable record (non-Linux, kernel_layer=absent) has no
+        # measured kernel surface: the positive cell is absent with empty
+        # evidence_refs, not an overstated partial.
         archive = {
             "observation_health": {
                 "schema": "assay.runner.observation_health.v0",
                 "run_id": "run_blocked",
-                "platform": "linux",
-                "kernel_layer": "complete",
+                "platform": "darwin",
+                "kernel_layer": "absent",
                 "ringbuf_drops": 0,
-                "cgroup_correlation": "failed",
+                "cgroup_correlation": "clean",
             },
             "capability_surface": {
                 "schema": "assay.runner.capability_surface.v0",
@@ -103,6 +104,27 @@ class CoverageAwareReportTest(unittest.TestCase):
         self.assertEqual(fs["claim_strength"], "absent")
         self.assertEqual(fs["artifact_role"], "none")
         self.assertEqual(fs["evidence_refs"], [])
+
+    def test_failed_cgroup_correlation_is_rejected(self):
+        # cgroup_correlation=failed is a non-passing observation_health record;
+        # the sample rejects it rather than interpreting it.
+        archive = {
+            "observation_health": {
+                "schema": "assay.runner.observation_health.v0",
+                "run_id": "run_failed",
+                "platform": "linux",
+                "kernel_layer": "complete",
+                "ringbuf_drops": 0,
+                "cgroup_correlation": "failed",
+            },
+            "capability_surface": {
+                "schema": "assay.runner.capability_surface.v0",
+                "run_id": "run_failed",
+                "filesystem_paths": ["/etc/hosts"],
+            },
+        }
+        with self.assertRaises(ValueError):
+            self.m.build_report(archive)
 
     def test_mismatched_run_id_is_rejected(self):
         archive = {

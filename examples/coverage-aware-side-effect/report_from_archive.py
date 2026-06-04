@@ -99,18 +99,18 @@ def _capture_is_clean(health: dict[str, Any]) -> bool:
 def _positive_verdict(health: dict[str, Any]) -> str:
     """Strength a measured positive claim may carry, mirroring fidelity_verdict.v0.
 
-    - blocked -> "absent": there is no measured kernel-effect surface to support
-      the claim (non-Linux/not_applicable, kernel layer absent, or correlation
-      failed). An absent cell carries no evidence_refs.
+    Assumes the record already passed `_validate_health` (so it is a valid,
+    passing observation_health record: no `cgroup_correlation=failed`, cross-field
+    invariants satisfied).
+
+    - not_applicable -> "absent": there is no measured kernel-effect surface to
+      support the claim (non-Linux, or kernel layer absent). An absent cell
+      carries no evidence_refs.
     - clean -> "strong".
     - otherwise -> "partial": measurement exists but is degraded (e.g. drops or
       partial kernel capture).
     """
-    if (
-        health.get("platform") != "linux"
-        or health.get("kernel_layer") == "absent"
-        or health.get("cgroup_correlation") == "failed"
-    ):
+    if health.get("platform") != "linux" or health.get("kernel_layer") == "absent":
         return "absent"
     if _capture_is_clean(health):
         return "strong"
@@ -121,27 +121,50 @@ OBS_HEALTH_SCHEMA = "assay.runner.observation_health.v0"
 CAP_SURFACE_SCHEMA = "assay.runner.capability_surface.v0"
 # Canonical observation_health.v0 enums (see docs/reference/runner/artifacts-v0.md).
 KERNEL_LAYERS = {"complete", "partial_ringbuf_drops", "absent"}
-CGROUP_CORRELATIONS = {"clean", "partial", "failed"}
+# A passing record carries clean or partial correlation. `failed` is a valid
+# enum token in the schema but marks a non-passing record, which
+# ObservationHealth::validate() and fidelity_verdict.v0 (verdict=failed) reject;
+# this sample rejects it rather than interpreting it.
+PASSING_CGROUP_CORRELATIONS = {"clean", "partial"}
 
 
 def _validate_health(health: dict[str, Any]) -> None:
-    """Enforce the observation_health.v0 enum/type invariants before deriving.
+    """Enforce the passing observation_health.v0 invariants before deriving.
 
-    A sample that mirrors fidelity_verdict.v0 must reject out-of-contract health
-    rather than interpret it. This is not a full schema validator; it checks the
-    fields the gate actually reads.
+    Mirrors the contract rules ObservationHealth::validate() enforces so the
+    sample refuses out-of-contract health rather than interpreting it. This is
+    not a byte-for-byte schema validator; it checks the fields the gate reads
+    plus the cross-field invariants documented in artifacts-v0.md.
     """
     if health.get("schema") != OBS_HEALTH_SCHEMA:
         raise ValueError(f"observation_health schema must be {OBS_HEALTH_SCHEMA}")
-    if health.get("kernel_layer") not in KERNEL_LAYERS:
+    run_id = health.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        raise ValueError("observation_health.run_id must be a non-empty string")
+    platform = health.get("platform")
+    if not isinstance(platform, str) or not platform:
+        raise ValueError("observation_health.platform must be a non-empty string")
+    kernel_layer = health.get("kernel_layer")
+    if kernel_layer not in KERNEL_LAYERS:
         raise ValueError(f"kernel_layer must be one of {sorted(KERNEL_LAYERS)}")
-    if health.get("cgroup_correlation") not in CGROUP_CORRELATIONS:
+    correlation = health.get("cgroup_correlation")
+    if correlation not in PASSING_CGROUP_CORRELATIONS:
+        # `failed` reaches here as a non-passing record; reject like the contract.
         raise ValueError(
-            f"cgroup_correlation must be one of {sorted(CGROUP_CORRELATIONS)}"
+            "cgroup_correlation must be one of "
+            f"{sorted(PASSING_CGROUP_CORRELATIONS)} for a passing record "
+            "(cgroup_correlation=failed is an invalid observation_health record)"
         )
     drops = health.get("ringbuf_drops")
     if isinstance(drops, bool) or not isinstance(drops, int) or drops < 0:
         raise ValueError("ringbuf_drops must be a non-negative integer")
+    # Cross-field invariants (artifacts-v0.md).
+    if drops > 0 and kernel_layer != "partial_ringbuf_drops":
+        raise ValueError(
+            "ringbuf_drops > 0 requires kernel_layer=partial_ringbuf_drops"
+        )
+    if platform != "linux" and kernel_layer != "absent":
+        raise ValueError("non-linux platforms require kernel_layer=absent")
 
 
 def build_report(archive: dict[str, Any]) -> dict[str, Any]:
