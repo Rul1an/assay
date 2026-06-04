@@ -8,6 +8,38 @@ Ready-to-use examples to get started with Assay.
 Wrap an MCP server with policy enforcement in under 2 minutes.
 See ALLOW/DENY decisions for every tool call.
 
+## Coverage honesty
+
+How Assay keeps a coverage claim no stronger than the observation behind it —
+capture, then a completeness ceiling, then claim cells, then enforcement and
+aggregation. Every stage degrades rather than inflates when evidence is missing.
+Start with the walkthrough; it links the runnable pieces in order.
+
+### [Coverage Honesty Walkthrough](./coverage-honesty-walkthrough)
+The whole chain in one place: capture → coverage descriptor → annotation →
+enforcement → aggregation, plus the synthetic attestation-shape demonstrator.
+A reading guide that points at each runnable example below.
+
+### [Coverage-Aware Side-Effect Report](./coverage-aware-side-effect)
+Single-archive sample that reads a runner archive and reports observed effects
+with the coverage descriptor that bounds them.
+
+### [Coverage-Aware Drift Annotation](./coverage-aware-drift-annotation)
+Turn a cross-runtime drift report into honest claim cells (strength × basis),
+capped by the coverage descriptor.
+
+### [Coverage-Claims Gate](./coverage-claims-gate)
+A dependency-free consumer that mechanically permits or blocks asserted coverage
+claims against an annotation — enforcement, not just documentation.
+
+### [Coverage Fleet Summary](./coverage-fleet-summary)
+Fold many annotations into one fleet-level honesty summary, including the fleet
+floor: the strongest positive claim supportable across *every* run.
+
+### [Attested-Claim Composition Shape](./attested-shape-demo)
+A clearly-labelled synthetic demonstrator of how a verifiable, subject-bound
+claim would compose — degrading unless verified. No real attestation mechanism.
+
 ## Inventory examples
 
 ### [CycloneDX ML-BOM Model Component Evidence](./cyclonedx-mlbom-model-component-evidence)
