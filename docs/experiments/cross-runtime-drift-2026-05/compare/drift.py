@@ -1581,7 +1581,159 @@ def _coverage_supports_complete(descriptor: dict[str, Any]) -> bool:
     )
 
 
-def coverage_annotation_for_report(report: dict[str, Any]) -> dict[str, Any]:
+def fidelity_verdict(health: Any) -> str:
+    """Derive a fidelity verdict from one observation_health record.
+
+    Mirrors the runner fidelity_verdict.v0 buckets that matter for measured
+    positive strength:
+      - "not_applicable": no measured kernel-effect surface (non-Linux, or
+        kernel_layer absent).
+      - "failed": cgroup_correlation failed -> invalid for measured claims.
+      - "clean": Linux, kernel_layer complete, zero ring-buffer drops, clean
+        cgroup correlation.
+      - "correlation_partial": valid measurement but cgroup_correlation=partial
+        (kept distinct from clipped per fidelity_verdict.v0, since downstream
+        readers may gate per-binding claims differently).
+      - "clipped": measurement exists but is otherwise degraded (drops / partial
+        kernel capture).
+    A non-dict / empty record is "failed": a record that is present but invalid.
+    "not_applicable" is reserved for *valid* records that simply have no measured
+    kernel surface (non-Linux / kernel_layer=absent). The "no record supplied"
+    case is handled by the caller (None -> conservative fallback), not here. An
+    out-of-contract record (bad enum, or a violated cross-field invariant such
+    as non-Linux without kernel_layer=absent, or ringbuf_drops>0 without
+    kernel_layer=partial_ringbuf_drops) is also "failed", so an invalid record
+    can never be misread as clean/clipped/not_applicable.
+    """
+    if not isinstance(health, dict) or not health:
+        return "failed"
+    # Out-of-contract records -> failed (checked before any other verdict).
+    if health.get("schema") != "assay.runner.observation_health.v0":
+        return "failed"
+    run_id = health.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return "failed"
+    platform = health.get("platform")
+    kernel = health.get("kernel_layer")
+    correlation = health.get("cgroup_correlation")
+    drops = health.get("ringbuf_drops")
+    if kernel not in ("complete", "partial_ringbuf_drops", "absent"):
+        return "failed"
+    if correlation not in ("clean", "partial", "failed"):
+        return "failed"
+    if isinstance(drops, bool) or not isinstance(drops, int) or drops < 0:
+        return "failed"
+    if not isinstance(platform, str) or not platform:
+        return "failed"  # platform is a required field
+    if platform != "linux" and kernel != "absent":
+        return "failed"  # non-Linux must have kernel_layer=absent
+    if drops > 0 and kernel != "partial_ringbuf_drops":
+        return "failed"  # drops require partial_ringbuf_drops
+    if correlation == "failed":
+        return "failed"
+    # Valid records.
+    if platform != "linux" or kernel == "absent":
+        return "not_applicable"
+    if kernel == "complete" and drops == 0 and correlation == "clean":
+        return "clean"
+    # Clipping (ring-buffer drops / partial kernel capture) takes precedence over
+    # correlation_partial, matching fidelity_verdict.v0 ordering.
+    if drops > 0 or kernel == "partial_ringbuf_drops":
+        return "clipped"
+    if correlation == "partial":
+        return "correlation_partial"
+    return "clipped"
+
+
+def _combined_positive_strength(
+    health_a: Any, health_b: Any
+) -> tuple[str, str]:
+    """Cross-arm strength for a measured positive drift claim, with a reason.
+
+    Evidence-first: any *supplied* arm that classifies as not_applicable/failed
+    blocks the cross-arm positive (-> absent), even if the other arm's health is
+    missing, because there is positive evidence of no valid measured surface.
+    If no supplied arm is absent-class: both arms clean -> strong; a missing arm
+    -> conservative partial; otherwise (degraded but valid) -> partial.
+    Returns (strength, reason).
+    """
+    va = fidelity_verdict(health_a) if health_a is not None else None
+    vb = fidelity_verdict(health_b) if health_b is not None else None
+    present = [v for v in (va, vb) if v is not None]
+
+    if any(v in ("not_applicable", "failed") for v in present):
+        return "absent", (
+            f"measured positive blocked: arm fidelity a={va}, b={vb}; at least "
+            "one supplied arm has no valid measured kernel surface"
+        )
+    if health_a is None or health_b is None:
+        return "partial", (
+            f"per-arm observation health not supplied for at least one arm "
+            f"(a={va}, b={vb}); positive strength capped at partial"
+        )
+    if va == "clean" and vb == "clean":
+        return "strong", "both arms clean (fidelity_verdict=clean)"
+    return "partial", f"degraded capture: arm fidelity a={va}, b={vb}"
+
+
+ASSERTABLE_CLAIM_TYPES = ("positive", "exhaustive", "bounded_negative")
+
+
+def evaluate_asserted_claim(
+    annotation: dict[str, Any], claim_type: str, dimension: str
+) -> tuple[bool, str]:
+    """Return (permitted, detail) for one asserted claim against an annotation.
+
+    Enforcement contract:
+      - positive:DIM permitted iff a measured_{DIM}_drift cell exists with
+        strength strong or partial (absent / missing -> not permitted).
+      - exhaustive:DIM permitted iff exhaustive_{DIM}_equality is allowed
+        (strength partial); a degraded weak cell or a missing cell is not.
+      - bounded_negative:DIM permitted iff it is NOT in blocked_claims.
+    """
+    cells = {c.get("claim_type"): c for c in annotation.get("claim_cells", [])}
+    if claim_type == "positive":
+        cell = cells.get(f"measured_{dimension}_drift")
+        if cell is None:
+            return False, f"no measured_{dimension}_drift cell (nothing observed)"
+        strength = cell.get("claim_strength")
+        if strength in ("strong", "partial"):
+            return True, f"measured positive is {strength}"
+        return False, f"measured positive is {strength}"
+    if claim_type == "exhaustive":
+        cell = cells.get(f"exhaustive_{dimension}_equality")
+        if cell is None:
+            return False, f"no exhaustive_{dimension}_equality cell"
+        strength = cell.get("claim_strength")
+        if strength == "partial":
+            return True, "exhaustive equality allowed (partial)"
+        return False, f"exhaustive equality is {strength} (degraded by coverage)"
+    if claim_type == "bounded_negative":
+        mapping = COVERAGE_DIMENSION_MAP.get(dimension)
+        if mapping is None or mapping[0] is None:
+            # Reported (effect None) or unknown dimensions never produce a
+            # measured bounded-negative; the assertion is not evaluable here, so
+            # it is not permitted rather than vacuously true.
+            return (
+                False,
+                f"bounded-negative not evaluable for non-measured dimension "
+                f"{dimension!r}",
+            )
+        blocked = {
+            b.get("requested_claim") for b in annotation.get("blocked_claims", [])
+        }
+        if f"no_{dimension}_effect_beyond_observed" in blocked:
+            return False, "bounded-negative blocked by coverage descriptor"
+        return True, "bounded-negative not blocked"
+    return False, f"unknown claim type {claim_type!r}"
+
+
+def coverage_annotation_for_report(
+    report: dict[str, Any],
+    *,
+    health_a: Any = None,
+    health_b: Any = None,
+) -> dict[str, Any]:
     """Derive a coverage annotation from a runtime_drift.v0.2 report.
 
     Separate companion document to the drift report (it is emitted as its own
@@ -1591,6 +1743,13 @@ def coverage_annotation_for_report(report: dict[str, Any]) -> dict[str, Any]:
     row is not read as exhaustive-equality or bounded-negative. Mirrors
     examples/coverage-aware-drift-annotation/; the canonical gate is the Rust
     helper in crates/assay-runner-schema/src/coverage.rs.
+
+    When `health_a` / `health_b` (the two source archives' observation_health
+    records) are supplied, a measured positive drift claim is raised to `strong`
+    only when both arms are clean, degraded to `partial` when capture is
+    degraded, and downgraded to `absent` when either arm has no valid measured
+    surface (fidelity_verdict not_applicable/failed). Without them it stays the
+    conservative `partial`. The drift report contract is never changed by this.
     """
     if report.get("schema") != DRIFT_REPORT_SCHEMA:
         raise ValueError(
@@ -1602,6 +1761,9 @@ def coverage_annotation_for_report(report: dict[str, Any]) -> dict[str, Any]:
     claim_cells: list[dict[str, Any]] = []
     blocked_claims: list[dict[str, Any]] = []
     classification_caveats: list[dict[str, Any]] = []
+    # Cross-arm fidelity drives measured positive strength (dimension-independent).
+    pos_strength, pos_reason = _combined_positive_strength(health_a, health_b)
+    pos_derived = health_a is not None and health_b is not None
 
     for row in rows:
         dimension = row.get("dimension")
@@ -1637,25 +1799,41 @@ def coverage_annotation_for_report(report: dict[str, Any]) -> dict[str, Any]:
 
         descriptor = COVERAGE_SEED_DESCRIPTORS[effect]
         if observed:
-            claim_cells.append(
-                {
-                    "schema": COVERAGE_CLAIM_CELL_SCHEMA,
-                    "claim_type": f"measured_{dimension}_drift",
-                    "artifact_role": "joined_artifacts",
-                    "claim_strength": "partial",
-                    "claim_basis": "measured",
-                    "evidence_refs": ["runtime-drift-report.json"],
-                    "notes": [
-                        "positive strength capped at partial: the drift report "
-                        "does not surface per-arm observation health; consult "
-                        "fidelity_verdict.v0 against the source archives to raise it"
-                    ],
-                    "non_claims": [
-                        "does_not_prove_tool_intent",
-                        "does_not_prove_complete_set",
-                    ],
-                }
-            )
+            if pos_strength == "absent":
+                # No valid measured surface on at least one arm: the cross-arm
+                # positive cannot be supported. Absent cells carry no evidence.
+                claim_cells.append(
+                    {
+                        "schema": COVERAGE_CLAIM_CELL_SCHEMA,
+                        "claim_type": f"measured_{dimension}_drift",
+                        "artifact_role": "none",
+                        "claim_strength": "absent",
+                        "claim_basis": "measured",
+                        "evidence_refs": [],
+                        "notes": [pos_reason],
+                        "non_claims": ["does_not_prove_tool_intent"],
+                    }
+                )
+            else:
+                claim_cells.append(
+                    {
+                        "schema": COVERAGE_CLAIM_CELL_SCHEMA,
+                        "claim_type": f"measured_{dimension}_drift",
+                        "artifact_role": "joined_artifacts",
+                        "claim_strength": pos_strength,
+                        "claim_basis": "measured",
+                        "evidence_refs": ["runtime-drift-report.json"],
+                        "notes": [
+                            f"positive strength derived from {COVERAGE_GATE_RULE}: {pos_reason}"
+                            if pos_derived
+                            else pos_reason
+                        ],
+                        "non_claims": [
+                            "does_not_prove_tool_intent",
+                            "does_not_prove_complete_set",
+                        ],
+                    }
+                )
             if _coverage_supports_complete(descriptor):
                 # Gate allows the exhaustive set; still capped at partial here
                 # because the drift report carries no per-arm capture health.
@@ -2058,6 +2236,19 @@ def main(argv: list[str] | None = None) -> int:
             "stays valid against the additionalProperties:false v0.2 schema."
         ),
     )
+    parser.add_argument(
+        "--assert-claim",
+        action="append",
+        default=[],
+        metavar="TYPE:DIMENSION",
+        help=(
+            "Enforcement: assert a coverage claim and fail (exit 1) if the "
+            "coverage gate does not permit it. TYPE is positive, exhaustive, or "
+            "bounded_negative; DIMENSION is a drift dimension (e.g. "
+            "network_endpoints). Repeatable. Makes the honesty layer "
+            "enforceable rather than only documentable."
+        ),
+    )
     parser.add_argument("--workflow-url", help="GitHub Actions run URL, if any.")
     parser.add_argument("--runner-label", help="Runner label or host class.")
     parser.add_argument("--kernel-os", help="Kernel OS for the capture host.")
@@ -2135,8 +2326,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     payload = report_to_json(a, b, rows, provenance)
 
-    if args.coverage_annotation_out:
-        annotation = coverage_annotation_for_report(payload)
+    annotation: dict[str, Any] | None = None
+    if args.coverage_annotation_out or args.assert_claim:
+        # parse_archive leaves observation_health as {} when the archive has no
+        # observation-health.json. Treat that as "no health supplied" (-> the
+        # conservative partial fallback) rather than a not_applicable arm.
+        annotation = coverage_annotation_for_report(
+            payload,
+            health_a=a.observation_health or None,
+            health_b=b.observation_health or None,
+        )
+
+    if args.coverage_annotation_out and annotation is not None:
         try:
             args.coverage_annotation_out.parent.mkdir(parents=True, exist_ok=True)
             args.coverage_annotation_out.write_text(
@@ -2172,6 +2373,48 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as exc:
             print(f"failed to write --out-md: {exc}", file=sys.stderr)
             return 2
+
+    if args.assert_claim and annotation is not None:
+        violations: list[str] = []
+        for spec in args.assert_claim:
+            raw = str(spec)
+            if ":" not in raw:
+                print(
+                    f"--assert-claim must be TYPE:DIMENSION, got {raw!r}",
+                    file=sys.stderr,
+                )
+                return 2
+            claim_type, _, dimension = raw.partition(":")
+            claim_type = claim_type.strip()
+            dimension = dimension.strip()
+            if not dimension:
+                print(
+                    f"--assert-claim must be TYPE:DIMENSION with a non-empty "
+                    f"dimension, got {raw!r}",
+                    file=sys.stderr,
+                )
+                return 2
+            if claim_type not in ASSERTABLE_CLAIM_TYPES:
+                print(
+                    f"--assert-claim TYPE must be one of {ASSERTABLE_CLAIM_TYPES}; "
+                    f"got {claim_type!r}",
+                    file=sys.stderr,
+                )
+                return 2
+            permitted, detail = evaluate_asserted_claim(
+                annotation, claim_type, dimension
+            )
+            verdict = "PERMIT" if permitted else "BLOCK"
+            print(f"assert-claim {raw}: {verdict} ({detail})", file=sys.stderr)
+            if not permitted:
+                violations.append(raw)
+        if violations:
+            print(
+                "coverage enforcement failed: "
+                + ", ".join(violations),
+                file=sys.stderr,
+            )
+            return 1
 
     return 0
 

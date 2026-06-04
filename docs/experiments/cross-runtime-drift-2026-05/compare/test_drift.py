@@ -2160,6 +2160,263 @@ class CoverageAnnotationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             drift.coverage_annotation_for_report({"schema": "assay.runner.runtime_drift.v0.2", "rows": {}})
 
+class FidelityAndEnforcementTest(unittest.TestCase):
+    """F3: per-arm fidelity drives positive strength; --assert-claim enforces."""
+
+    CLEAN = {
+        "schema": "assay.runner.observation_health.v0",
+        "run_id": "a",
+        "platform": "linux",
+        "kernel_layer": "complete",
+        "ringbuf_drops": 0,
+        "cgroup_correlation": "clean",
+    }
+    CLIPPED = {
+        "schema": "assay.runner.observation_health.v0",
+        "run_id": "b",
+        "platform": "linux",
+        "kernel_layer": "partial_ringbuf_drops",
+        "ringbuf_drops": 4,
+        "cgroup_correlation": "clean",
+    }
+    NOT_APPLICABLE = {
+        "schema": "assay.runner.observation_health.v0",
+        "run_id": "c",
+        "platform": "darwin",
+        "kernel_layer": "absent",
+        "ringbuf_drops": 0,
+        "cgroup_correlation": "clean",
+    }
+    FAILED = {
+        "schema": "assay.runner.observation_health.v0",
+        "run_id": "d",
+        "platform": "linux",
+        "kernel_layer": "complete",
+        "ringbuf_drops": 0,
+        "cgroup_correlation": "failed",
+    }
+    REPORT = {
+        "schema": "assay.runner.runtime_drift.v0.2",
+        "rows": [
+            {
+                "dimension": "network_endpoints",
+                "classification": "task-induced",
+                "only_in_a": [],
+                "only_in_b": [],
+                "in_both": ["api.example.com:443"],
+            }
+        ],
+    }
+
+    def _net_cell(self, ann):
+        for c in ann["claim_cells"]:
+            if c["claim_type"] == "measured_network_endpoints_drift":
+                return c
+        return None
+
+    def test_fidelity_verdict_mapping(self):
+        self.assertEqual(drift.fidelity_verdict(self.CLEAN), "clean")
+        self.assertEqual(drift.fidelity_verdict(self.CLIPPED), "clipped")
+        self.assertEqual(drift.fidelity_verdict(self.NOT_APPLICABLE), "not_applicable")
+        self.assertEqual(drift.fidelity_verdict(self.FAILED), "failed")
+        # empty/invalid record is a present-but-invalid record -> failed
+        self.assertEqual(drift.fidelity_verdict({}), "failed")
+
+    def test_both_clean_makes_positive_strong(self):
+        ann = drift.coverage_annotation_for_report(
+            self.REPORT, health_a=self.CLEAN, health_b=self.CLEAN
+        )
+        self.assertEqual(self._net_cell(ann)["claim_strength"], "strong")
+
+    def test_clipped_arm_makes_positive_partial(self):
+        ann = drift.coverage_annotation_for_report(
+            self.REPORT, health_a=self.CLEAN, health_b=self.CLIPPED
+        )
+        self.assertEqual(self._net_cell(ann)["claim_strength"], "partial")
+
+    def test_not_applicable_arm_makes_positive_absent(self):
+        ann = drift.coverage_annotation_for_report(
+            self.REPORT, health_a=self.CLEAN, health_b=self.NOT_APPLICABLE
+        )
+        cell = self._net_cell(ann)
+        self.assertEqual(cell["claim_strength"], "absent")
+        self.assertEqual(cell["artifact_role"], "none")
+        self.assertEqual(cell["evidence_refs"], [])
+
+    def test_failed_arm_makes_positive_absent(self):
+        ann = drift.coverage_annotation_for_report(
+            self.REPORT, health_a=self.FAILED, health_b=self.CLEAN
+        )
+        self.assertEqual(self._net_cell(ann)["claim_strength"], "absent")
+
+    def test_no_health_falls_back_to_partial(self):
+        ann = drift.coverage_annotation_for_report(self.REPORT)
+        self.assertEqual(self._net_cell(ann)["claim_strength"], "partial")
+
+    def test_evaluate_asserted_claim_outcomes(self):
+        ann = drift.coverage_annotation_for_report(
+            self.REPORT, health_a=self.CLEAN, health_b=self.CLEAN
+        )
+        ok, _ = drift.evaluate_asserted_claim(ann, "positive", "network_endpoints")
+        self.assertTrue(ok)
+        ok, _ = drift.evaluate_asserted_claim(ann, "bounded_negative", "network_endpoints")
+        self.assertFalse(ok)
+        ok, _ = drift.evaluate_asserted_claim(ann, "exhaustive", "network_endpoints")
+        self.assertFalse(ok)  # degraded to weak under seed blind spots
+
+    def test_cli_assert_bounded_negative_fails(self):
+        rc = drift.main(
+            [
+                "--archive-a", str(ARM_A),
+                "--archive-b", str(ARM_B),
+                "--out-json", "/dev/null",
+                "--assert-claim", "bounded_negative:network_endpoints",
+            ]
+        )
+        self.assertEqual(rc, 1)
+
+    def test_cli_malformed_assert_claim_is_usage_error(self):
+        rc = drift.main(
+            [
+                "--archive-a", str(ARM_A),
+                "--archive-b", str(ARM_B),
+                "--out-json", "/dev/null",
+                "--assert-claim", "bogus",
+            ]
+        )
+        self.assertEqual(rc, 2)
+
+    def test_cli_coverage_annotation_sidecar_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "ann.json"
+            rc = drift.main(
+                [
+                    "--archive-a", str(ARM_A),
+                    "--archive-b", str(ARM_B),
+                    "--out-json", str(Path(tmp) / "drift.json"),
+                    "--coverage-annotation-out", str(out),
+                ]
+            )
+            self.assertEqual(rc, 0)
+            self.assertTrue(out.is_file())
+            doc = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(doc["schema"], "assay.coverage_aware_drift.annotation.v0")
+            # the drift report itself must NOT carry the annotation key
+            report = json.loads((Path(tmp) / "drift.json").read_text(encoding="utf-8"))
+            self.assertNotIn("coverage_annotation", report)
+
+    def test_invalid_health_is_failed(self):
+        # non-Linux must have kernel_layer=absent; complete -> invalid -> failed
+        bad_platform = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "x",
+            "platform": "darwin", "kernel_layer": "complete",
+            "ringbuf_drops": 0, "cgroup_correlation": "clean",
+        }
+        self.assertEqual(drift.fidelity_verdict(bad_platform), "failed")
+        # ringbuf_drops>0 requires partial_ringbuf_drops
+        bad_drops = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "y",
+            "platform": "linux", "kernel_layer": "complete",
+            "ringbuf_drops": 3, "cgroup_correlation": "clean",
+        }
+        self.assertEqual(drift.fidelity_verdict(bad_drops), "failed")
+        # out-of-enum cgroup_correlation -> failed
+        bad_enum = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "z",
+            "platform": "linux", "kernel_layer": "complete",
+            "ringbuf_drops": 0, "cgroup_correlation": "weird",
+        }
+        self.assertEqual(drift.fidelity_verdict(bad_enum), "failed")
+
+    def test_cli_empty_dimension_is_usage_error(self):
+        rc = drift.main(
+            [
+                "--archive-a", str(ARM_A),
+                "--archive-b", str(ARM_B),
+                "--out-json", "/dev/null",
+                "--assert-claim", "positive:",
+            ]
+        )
+        self.assertEqual(rc, 2)
+
+    def test_missing_schema_or_runid_is_failed(self):
+        no_schema = {"run_id": "x", "platform": "linux", "kernel_layer": "complete",
+                     "ringbuf_drops": 0, "cgroup_correlation": "clean"}
+        self.assertEqual(drift.fidelity_verdict(no_schema), "failed")
+        empty_runid = {"schema": "assay.runner.observation_health.v0", "run_id": "",
+                       "platform": "linux", "kernel_layer": "complete",
+                       "ringbuf_drops": 0, "cgroup_correlation": "clean"}
+        self.assertEqual(drift.fidelity_verdict(empty_runid), "failed")
+
+    def test_bounded_negative_not_evaluable_for_reported_dimension(self):
+        ann = drift.coverage_annotation_for_report(
+            self.REPORT, health_a=self.CLEAN, health_b=self.CLEAN
+        )
+        ok, _ = drift.evaluate_asserted_claim(ann, "bounded_negative", "sdk_tool_events")
+        self.assertFalse(ok)
+        ok, _ = drift.evaluate_asserted_claim(ann, "bounded_negative", "no_such_dim")
+        self.assertFalse(ok)
+
+    def test_correlation_partial_distinct_and_degrades_to_partial(self):
+        corr_partial = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "p",
+            "platform": "linux", "kernel_layer": "complete",
+            "ringbuf_drops": 0, "cgroup_correlation": "partial",
+        }
+        self.assertEqual(drift.fidelity_verdict(corr_partial), "correlation_partial")
+        ann = drift.coverage_annotation_for_report(
+            self.REPORT, health_a=self.CLEAN, health_b=corr_partial
+        )
+        self.assertEqual(self._net_cell(ann)["claim_strength"], "partial")
+
+    def test_missing_platform_is_failed(self):
+        no_platform = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "q",
+            "kernel_layer": "absent", "ringbuf_drops": 0,
+            "cgroup_correlation": "clean",
+        }
+        self.assertEqual(drift.fidelity_verdict(no_platform), "failed")
+
+    def test_clipping_takes_precedence_over_correlation_partial(self):
+        # both clipped (drops>0 / partial kernel) AND correlation=partial -> clipped
+        both = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "r",
+            "platform": "linux", "kernel_layer": "partial_ringbuf_drops",
+            "ringbuf_drops": 5, "cgroup_correlation": "partial",
+        }
+        self.assertEqual(drift.fidelity_verdict(both), "clipped")
+        # partial kernel, zero drops, partial correlation -> still clipped (partial kernel)
+        partial_kernel = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "s",
+            "platform": "linux", "kernel_layer": "partial_ringbuf_drops",
+            "ringbuf_drops": 0, "cgroup_correlation": "partial",
+        }
+        self.assertEqual(drift.fidelity_verdict(partial_kernel), "clipped")
+        # complete kernel, zero drops, partial correlation -> correlation_partial
+        only_corr = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "t",
+            "platform": "linux", "kernel_layer": "complete",
+            "ringbuf_drops": 0, "cgroup_correlation": "partial",
+        }
+        self.assertEqual(drift.fidelity_verdict(only_corr), "correlation_partial")
+
+    def test_one_arm_missing_health_paths(self):
+        # both missing -> conservative partial
+        ann = drift.coverage_annotation_for_report(self.REPORT)
+        self.assertEqual(self._net_cell(ann)["claim_strength"], "partial")
+        # one arm clean, other missing -> partial (cannot be strong; not absent)
+        ann = drift.coverage_annotation_for_report(self.REPORT, health_a=self.CLEAN)
+        self.assertEqual(self._net_cell(ann)["claim_strength"], "partial")
+        # one arm not_applicable, other missing -> absent (evidence of no surface)
+        ann = drift.coverage_annotation_for_report(
+            self.REPORT, health_b=self.NOT_APPLICABLE
+        )
+        self.assertEqual(self._net_cell(ann)["claim_strength"], "absent")
+        # one arm failed, other missing -> absent
+        ann = drift.coverage_annotation_for_report(self.REPORT, health_a=self.FAILED)
+        self.assertEqual(self._net_cell(ann)["claim_strength"], "absent")
+
+
 
 if __name__ == "__main__":
     unittest.main()
