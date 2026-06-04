@@ -648,14 +648,14 @@ fn kernel_capture_note(input: KernelCaptureNote) -> String {
         String::new()
     };
 
-    // Datagram sends to a non-IP family (e.g. AF_UNIX). Surfaced only when
-    // non-zero, for the same byte-identical-archive invariant. These are not IP
-    // peers and never raise the network coverage descriptor.
-    let datagram_non_ip = tracepoint_hook_breakdown.sendto_non_ip_family
+    // sendto/sendmsg to a non-IP family (e.g. AF_UNIX). Surfaced only when
+    // non-zero, for the same byte-identical-archive invariant. Socket type is not
+    // classified; these are not IP peers and never raise the coverage descriptor.
+    let send_non_ip = tracepoint_hook_breakdown.sendto_non_ip_family
         + tracepoint_hook_breakdown.sendmsg_non_ip_family;
-    let non_ip_suffix = if datagram_non_ip > 0 {
+    let non_ip_suffix = if send_non_ip > 0 {
         format!(
-            " datagram_non_ip_family=sendto:{} sendmsg:{}",
+            " send_non_ip_family=sendto:{} sendmsg:{}",
             tracepoint_hook_breakdown.sendto_non_ip_family,
             tracepoint_hook_breakdown.sendmsg_non_ip_family
         )
@@ -1138,7 +1138,7 @@ mod tests {
     }
 
     #[test]
-    fn datagram_non_ip_family_count_surfaces_in_note() {
+    fn send_non_ip_family_count_surfaces_in_note() {
         let before = MonitorStatsSnapshot::default();
         let after = MonitorStatsSnapshot {
             sendto_non_ip_family: 4,
@@ -1157,12 +1157,12 @@ mod tests {
             .observation_health
             .notes
             .iter()
-            .any(|note| note.contains("datagram_non_ip_family=sendto:4 sendmsg:2")));
+            .any(|note| note.contains("send_non_ip_family=sendto:4 sendmsg:2")));
     }
 
     #[test]
     fn non_ip_family_sends_do_not_upgrade_network_protocol_coverage() {
-        // A datagram send to AF_UNIX is not an IP peer and must not claim one.
+        // A non-IP send (e.g. AF_UNIX) is not an IP peer and must not claim one.
         let before = MonitorStatsSnapshot::default();
         let after = MonitorStatsSnapshot {
             sendto_non_ip_family: 9,
@@ -1201,7 +1201,7 @@ mod tests {
             .observation_health
             .notes
             .iter()
-            .all(|note| !note.contains("datagram_non_ip_family")));
+            .all(|note| !note.contains("send_non_ip_family")));
     }
 
     #[test]

@@ -45,10 +45,11 @@ pub const MONITOR_STAT_SENDMSG_RINGBUF_DROPPED: u32 = 13;
 // Counted so these sends are visible rather than silently dropped.
 pub const MONITOR_STAT_SENDTO_NO_PEER: u32 = 14;
 pub const MONITOR_STAT_SENDMSG_NO_PEER: u32 = 15;
-// Datagram sends to a non-IP socket family (e.g. AF_UNIX) — observed but skipped
-// because only IPv4/IPv6 peers are normalized into endpoint evidence. Counted so
-// the `datagram_peer_observed` label stays honest: it reflects IP peers only, and
-// these sends are neither IP peers nor silently lost.
+// sendto/sendmsg to a non-IP socket family (e.g. AF_UNIX) — observed but skipped
+// because only IPv4/IPv6 peers are normalized into endpoint evidence. Socket type
+// is not classified. Counted so the `datagram_peer_observed` label stays honest:
+// it reflects IP peers only, and these sends are neither IP peers nor silently
+// lost.
 pub const MONITOR_STAT_SENDTO_NON_IP_FAMILY: u32 = 16;
 pub const MONITOR_STAT_SENDMSG_NON_IP_FAMILY: u32 = 17;
 
