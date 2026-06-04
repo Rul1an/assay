@@ -29,6 +29,7 @@ Phase 2B capability-diff planning slice.
 - [Runner projection roadmap](projection-roadmap.md)
 - [Runner path projection Slice 1 plan (declared-rule only)](path-projection-slice1-plan.md)
 - [Runner fidelity verdict v0](fidelity-verdict-v0.md)
+- [Runner coverage descriptor v0](coverage-descriptor-v0.md)
 - [Runner schema overview](schemas-overview.md)
 - [Runner runtime drift projection v0/v0.2 contract](runtime-drift-v0.md)
 - [Runner cross-runtime diff v0 clean-output JSON Schema](schema/cross-runtime-diff-v0-clean.schema.json)
