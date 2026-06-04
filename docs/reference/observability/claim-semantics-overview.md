@@ -69,9 +69,13 @@ ceiling. The descriptor gate evaluates the requested claim kind:
 
 | Claim kind | Descriptor rule |
 |---|---|
-| `positive_existence` | Allowed for an observed effect class when a descriptor is present. Strength then comes from gate one. |
+| `positive_existence` | Allowed when a descriptor is present; strength then comes from gate one. The shipped helper keys this on descriptor presence and does not yet validate that the claimed class appears in `observes` — the caller is responsible for selecting a descriptor whose `observes` covers the effect class. |
 | `exhaustive_set` | Degraded to `weak` whenever the descriptor declares any blind spot or `completeness` is not `full`. |
 | `bounded_negative` | Blocked whenever the descriptor declares any blind spot or `completeness` is not `full`. |
+
+A missing or schema-mismatched descriptor is not the same as a present
+one: the helper blocks coverage-aware claims outright when no valid
+descriptor is supplied, rather than treating absence as permission.
 
 The seed descriptors describe today's capture ceiling: filesystem capture
 is `open_syscall_only` (io_uring and mmap-backed writes are blind spots),
