@@ -80,6 +80,8 @@ struct TracepointHookBreakdown {
     sendto_dropped: u64,
     sendmsg_emitted: u64,
     sendmsg_dropped: u64,
+    sendto_no_peer: u64,
+    sendmsg_no_peer: u64,
 }
 
 #[derive(Debug, Error)]
@@ -543,6 +545,8 @@ fn tracepoint_hook_breakdown(
                 .sendmsg_ringbuf_dropped
                 .saturating_sub(before.sendmsg_ringbuf_dropped),
         ),
+        sendto_no_peer: u64::from(after.sendto_no_peer.saturating_sub(before.sendto_no_peer)),
+        sendmsg_no_peer: u64::from(after.sendmsg_no_peer.saturating_sub(before.sendmsg_no_peer)),
     }
 }
 
@@ -616,10 +620,26 @@ fn kernel_capture_note(input: KernelCaptureNote) -> String {
     } = input;
     let network_protocol_coverage = network_protocol_coverage_label(network_protocol_coverage);
 
+    // Surfaced only when a sendto/sendmsg with no recoverable peer address was
+    // actually observed, so runs that never hit this path produce a
+    // byte-identical note (the load-bearing invariant for existing archives).
+    // Socket type is not classified here, so this counts any address-less send
+    // (including connected stream sends), not datagram-specifically.
+    let send_no_peer =
+        tracepoint_hook_breakdown.sendto_no_peer + tracepoint_hook_breakdown.sendmsg_no_peer;
+    let no_peer_suffix = if send_no_peer > 0 {
+        format!(
+            " send_no_recoverable_peer=sendto:{} sendmsg:{}",
+            tracepoint_hook_breakdown.sendto_no_peer, tracepoint_hook_breakdown.sendmsg_no_peer
+        )
+    } else {
+        String::new()
+    };
+
     match cgroup_correlation {
         CgroupCorrelationStatus::Clean if ringbuf_drops == 0 => {
             format!(
-                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage={network_protocol_coverage} network_endpoint_claim_scope=diagnostic_only"
+                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage={network_protocol_coverage} network_endpoint_claim_scope=diagnostic_only{no_peer_suffix}"
             )
         }
         CgroupCorrelationStatus::Clean => {
@@ -629,7 +649,7 @@ fn kernel_capture_note(input: KernelCaptureNote) -> String {
                 .collect::<Vec<_>>()
                 .join(",");
             format!(
-                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage={network_protocol_coverage} network_endpoint_claim_scope=diagnostic_only drop_breakdown=tracepoint:{} lsm:{} socket:{} emitted=tracepoint:{} lsm:{} socket:{} tracepoint_hooks=openat:{}/{} openat2:{}/{} connect:{}/{} sendto:{}/{} sendmsg:{}/{} filtered_loader_events={filtered_loader_events} filtered_loader_top=[{filtered_top}]",
+                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage={network_protocol_coverage} network_endpoint_claim_scope=diagnostic_only drop_breakdown=tracepoint:{} lsm:{} socket:{} emitted=tracepoint:{} lsm:{} socket:{} tracepoint_hooks=openat:{}/{} openat2:{}/{} connect:{}/{} sendto:{}/{} sendmsg:{}/{} filtered_loader_events={filtered_loader_events} filtered_loader_top=[{filtered_top}]{no_peer_suffix}",
                 drop_breakdown.tracepoint,
                 drop_breakdown.lsm,
                 drop_breakdown.socket,
@@ -1018,6 +1038,76 @@ mod tests {
             .notes
             .iter()
             .any(|note| note.contains("network_protocol_coverage=datagram_peer_observed")));
+    }
+
+    #[test]
+    fn send_no_recoverable_peer_count_surfaces_in_note() {
+        let before = MonitorStatsSnapshot::default();
+        let after = MonitorStatsSnapshot {
+            sendto_no_peer: 2,
+            sendmsg_no_peer: 1,
+            ..Default::default()
+        };
+        let capture = KernelLayerBuilder::new("run_001")
+            .unwrap()
+            .finish(&before, &after);
+        let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+        capture
+            .apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)
+            .unwrap();
+
+        assert!(archive
+            .observation_health
+            .notes
+            .iter()
+            .any(|note| note.contains("send_no_recoverable_peer=sendto:2 sendmsg:1")));
+    }
+
+    #[test]
+    fn no_recoverable_peer_sends_do_not_upgrade_network_protocol_coverage() {
+        // Address-less sends must NOT claim a datagram peer was observed — the
+        // peer is unrecoverable and the socket type is unknown. Coverage stays.
+        let before = MonitorStatsSnapshot::default();
+        let after = MonitorStatsSnapshot {
+            sendto_no_peer: 5,
+            ..Default::default()
+        };
+        let capture = KernelLayerBuilder::new("run_001")
+            .unwrap()
+            .finish(&before, &after);
+        let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+        capture
+            .apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)
+            .unwrap();
+
+        assert_ne!(
+            archive.observation_health.network_protocol_coverage,
+            NetworkProtocolCoverageStatus::DatagramPeerObserved
+        );
+        assert_ne!(
+            archive.observation_health.network_protocol_coverage,
+            NetworkProtocolCoverageStatus::ConnectAndDatagramPeerObserved
+        );
+    }
+
+    #[test]
+    fn zero_no_peer_count_leaves_note_byte_identical() {
+        // The invariant: a run with no address-less sends must not gain the
+        // suffix, so existing clean archives read identically.
+        let snap = MonitorStatsSnapshot::default();
+        let capture = KernelLayerBuilder::new("run_001")
+            .unwrap()
+            .finish(&snap, &snap);
+        let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+        capture
+            .apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)
+            .unwrap();
+
+        assert!(archive
+            .observation_health
+            .notes
+            .iter()
+            .all(|note| !note.contains("send_no_recoverable_peer")));
     }
 
     #[test]

@@ -24,7 +24,7 @@ pub const EVENT_CONNECT_BLOCKED: u32 = 20;
 
 pub const DATA_LEN: usize = 512;
 
-pub const MONITOR_STATS_LEN: u32 = 14;
+pub const MONITOR_STATS_LEN: u32 = 16;
 pub const MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED: u32 = 0;
 pub const MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED: u32 = 1;
 pub const MONITOR_STAT_LSM_EVENTS_EMITTED: u32 = 2;
@@ -39,6 +39,12 @@ pub const MONITOR_STAT_SENDTO_EVENTS_EMITTED: u32 = 10;
 pub const MONITOR_STAT_SENDTO_RINGBUF_DROPPED: u32 = 11;
 pub const MONITOR_STAT_SENDMSG_EVENTS_EMITTED: u32 = 12;
 pub const MONITOR_STAT_SENDMSG_RINGBUF_DROPPED: u32 = 13;
+// sendto/sendmsg observed with no recoverable peer address (a sendto with a null
+// sockaddr, or a sendmsg with no msg_name). Socket type is not classified here,
+// so this includes address-less connected sends regardless of stream/datagram.
+// Counted so these sends are visible rather than silently dropped.
+pub const MONITOR_STAT_SENDTO_NO_PEER: u32 = 14;
+pub const MONITOR_STAT_SENDMSG_NO_PEER: u32 = 15;
 
 pub const SOCKET_STATS_LEN: u32 = 8;
 pub const SOCKET_STAT_CHECKS: u32 = 0;

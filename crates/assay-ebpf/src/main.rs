@@ -20,7 +20,8 @@ use assay_common::{
     MONITOR_STAT_CONNECT_RINGBUF_DROPPED, MONITOR_STAT_OPENAT2_EVENTS_EMITTED,
     MONITOR_STAT_OPENAT2_RINGBUF_DROPPED, MONITOR_STAT_OPENAT_EVENTS_EMITTED,
     MONITOR_STAT_OPENAT_RINGBUF_DROPPED, MONITOR_STAT_SENDMSG_EVENTS_EMITTED,
-    MONITOR_STAT_SENDMSG_RINGBUF_DROPPED, MONITOR_STAT_SENDTO_EVENTS_EMITTED,
+    MONITOR_STAT_SENDMSG_NO_PEER, MONITOR_STAT_SENDMSG_RINGBUF_DROPPED,
+    MONITOR_STAT_SENDTO_EVENTS_EMITTED, MONITOR_STAT_SENDTO_NO_PEER,
     MONITOR_STAT_SENDTO_RINGBUF_DROPPED, MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED,
     MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
 };
@@ -502,6 +503,13 @@ fn try_sendto(ctx: TracePointContext) -> Result<u32, u32> {
         .map(|v| *v as usize)
         .unwrap_or(48);
     let sockaddr_ptr: u64 = unsafe { ctx.read_at(sockaddr_offset).map_err(|_| 1u32)? };
+    if sockaddr_ptr == 0 {
+        // Address-less send (e.g. a connected socket): no destination sockaddr in
+        // this call, so the peer is not recoverable here. Socket type is not
+        // classified. Count it instead of dropping silently.
+        inc_stat(MONITOR_STAT_SENDTO_NO_PEER);
+        return Ok(0);
+    }
     emit_sockaddr_event(
         sockaddr_ptr,
         EVENT_SENDTO,
@@ -536,6 +544,10 @@ fn try_sendmsg(ctx: TracePointContext) -> Result<u32, u32> {
             .map_err(|_| 1u32)?
     };
     if msghdr.msg_name == 0 || msghdr.msg_namelen == 0 {
+        // Address-less send (e.g. a connected socket): the message carries no
+        // destination address, so the peer is not recoverable here. Socket type
+        // is not classified. Count it instead of dropping.
+        inc_stat(MONITOR_STAT_SENDMSG_NO_PEER);
         return Ok(0);
     }
 
