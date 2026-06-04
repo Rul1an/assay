@@ -1,5 +1,6 @@
 use assay_runner_schema::{
-    ClaimGateDecision, CoverageClaimKind, CoverageCompleteness, CoverageDescriptor, EffectDimension,
+    ClaimGateDecision, CoverageClaimKind, CoverageCompleteness, CoverageDescriptor,
+    EffectDimension, NetworkProtocolCoverageStatus,
 };
 use serde_json::json;
 
@@ -128,6 +129,104 @@ fn network_connect_only_is_positive_but_not_an_exhaustive_peer_set() {
     let exhaustive = descriptor.claim_decision(CoverageClaimKind::ExhaustiveSet);
     assert_eq!(exhaustive.decision, ClaimGateDecision::Degraded);
     assert!(exhaustive.reason.contains("QUIC"));
+}
+
+#[test]
+fn network_datagram_descriptor_serializes_sendto_sendmsg_surface() {
+    let descriptor = CoverageDescriptor::network_datagram_peer_observed();
+
+    assert_eq!(descriptor.dimension, EffectDimension::Network);
+    assert_eq!(
+        descriptor.completeness,
+        CoverageCompleteness::DatagramPeerObserved
+    );
+    assert!(descriptor.observes_effect_class("datagram peer endpoints"));
+    assert!(descriptor
+        .known_blind_spots
+        .iter()
+        .any(|blindspot| blindspot.contains("io_uring")));
+
+    let value = serde_json::to_value(&descriptor).expect("descriptor serializes");
+    assert_eq!(
+        value,
+        json!({
+            "schema": "assay.runner.coverage_descriptor.v0",
+            "dimension": "network",
+            "method": "sendto/sendmsg tracepoints",
+            "observes": ["datagram peer endpoints from explicit sockaddr arguments"],
+            "known_blind_spots": [
+                "connected datagram sends without an explicit sockaddr require connect evidence to recover the peer",
+                "io_uring network operations may bypass syscall tracepoints"
+            ],
+            "completeness": "datagram_peer_observed"
+        })
+    );
+}
+
+#[test]
+fn network_descriptor_tracks_observation_health_protocol_coverage() {
+    let connect = CoverageDescriptor::network_for_protocol_coverage(
+        NetworkProtocolCoverageStatus::ConnectOnly,
+    )
+    .expect("connect-only descriptor");
+    assert_eq!(connect.completeness, CoverageCompleteness::ConnectOnly);
+
+    let datagram = CoverageDescriptor::network_for_protocol_coverage(
+        NetworkProtocolCoverageStatus::DatagramPeerObserved,
+    )
+    .expect("datagram descriptor");
+    assert_eq!(
+        datagram.completeness,
+        CoverageCompleteness::DatagramPeerObserved
+    );
+    assert!(datagram.observes_effect_class("datagram peer endpoints"));
+
+    let combined = CoverageDescriptor::network_for_protocol_coverage(
+        NetworkProtocolCoverageStatus::ConnectAndDatagramPeerObserved,
+    )
+    .expect("combined descriptor");
+    assert_eq!(
+        combined.completeness,
+        CoverageCompleteness::ConnectAndDatagramPeerObserved
+    );
+    assert!(combined.observes_effect_class("connect-time peer endpoints"));
+    assert!(combined.observes_effect_class("datagram peer endpoints"));
+
+    assert!(CoverageDescriptor::network_for_protocol_coverage(
+        NetworkProtocolCoverageStatus::Absent
+    )
+    .is_none());
+    assert!(CoverageDescriptor::network_for_protocol_coverage(
+        NetworkProtocolCoverageStatus::Unknown
+    )
+    .is_none());
+}
+
+#[test]
+fn datagram_network_descriptor_allows_observed_datagram_positive_only() {
+    let descriptor = CoverageDescriptor::network_datagram_peer_observed();
+
+    let positive = CoverageDescriptor::claim_decision_for_effect(
+        Some(&descriptor),
+        CoverageClaimKind::PositiveExistence,
+        "datagram peer endpoints",
+    );
+    assert_eq!(positive.decision, ClaimGateDecision::Allowed);
+
+    let connect_positive = CoverageDescriptor::claim_decision_for_effect(
+        Some(&descriptor),
+        CoverageClaimKind::PositiveExistence,
+        "connect-time peer endpoints",
+    );
+    assert_eq!(connect_positive.decision, ClaimGateDecision::Degraded);
+
+    let bounded_negative = CoverageDescriptor::claim_decision_for_effect(
+        Some(&descriptor),
+        CoverageClaimKind::BoundedNegative,
+        "datagram peer endpoints",
+    );
+    assert_eq!(bounded_negative.decision, ClaimGateDecision::Blocked);
+    assert!(bounded_negative.reason.contains("datagram_peer_observed"));
 }
 
 #[test]

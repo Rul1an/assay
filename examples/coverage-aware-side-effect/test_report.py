@@ -166,6 +166,30 @@ class CoverageAwareReportTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.m.build_report(archive)
 
+    def test_datagram_network_coverage_updates_descriptor_ceiling(self):
+        archive = _archive("clean.archive.json")
+        archive["observation_health"][
+            "network_protocol_coverage"
+        ] = "connect_and_datagram_peer_observed"
+        report = self.m.build_report(archive)
+        exhaustive = next(
+            c
+            for c in report["claim_cells"]
+            if c["claim_type"] == "exhaustive_network_set"
+        )
+        self.assertTrue(
+            any(
+                "connect_and_datagram_peer_observed" in note
+                for note in exhaustive["notes"]
+            )
+        )
+        blocked = next(
+            b
+            for b in report["blocked_claims"]
+            if b["requested_claim"] == "no_unexpected_network_effect"
+        )
+        self.assertIn("connect_and_datagram_peer_observed", blocked["reason"])
+
     def test_clean_report_matches_frozen_fixture(self):
         # Golden test: the generator output must equal the frozen expected
         # report, so the fixture and generator cannot drift apart silently.
