@@ -1,0 +1,13 @@
+{
+  "_demo": "SYNTHETIC DEMONSTRATOR — verifies but binds to a different subject",
+  "envelope_type": "synthetic-demo",
+  "subject_digest": "sha256:00000000000000000000000000000000000000000000000000000000000000ff",
+  "statement": {
+    "predicate": "synthetic-coverage-attestation",
+    "note": "illustrative only; subject digest deliberately does not match the cell"
+  },
+  "verification": {
+    "status": "verified",
+    "note": "decided by this flag, not by any real verification"
+  }
+}

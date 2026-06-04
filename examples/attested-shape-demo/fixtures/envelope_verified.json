@@ -1,0 +1,13 @@
+{
+  "_demo": "SYNTHETIC DEMONSTRATOR — fabricated envelope, no cryptography performed",
+  "envelope_type": "synthetic-demo",
+  "subject_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+  "statement": {
+    "predicate": "synthetic-coverage-attestation",
+    "note": "illustrative only; binds a fabricated subject digest to a fabricated statement"
+  },
+  "verification": {
+    "status": "verified",
+    "note": "decided by this flag, not by any real verification"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "_demo": "SYNTHETIC DEMONSTRATOR — fabricated data, not a real attestation",
+  "schema": "assay.observability.claim_class_cell.v0",
+  "claim_type": "measured_filesystem_paths_touched_drift",
+  "artifact_role": "joined_artifacts",
+  "claim_strength": "strong",
+  "claim_basis": "attested",
+  "subject_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+  "evidence_refs": ["synthetic-attestation-envelope.json"],
+  "notes": ["synthetic cell exploring the shape of an attested-basis claim"],
+  "non_claims": ["not_a_real_attestation", "demonstrator_only"]
+}
