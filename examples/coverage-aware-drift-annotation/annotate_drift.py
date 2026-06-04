@@ -63,7 +63,7 @@ SEED_DESCRIPTORS: dict[str, dict[str, Any]] = {
 # Map each runtime-drift dimension to an effect dimension + claim basis.
 # Measured dimensions get the coverage ceiling; reported dimensions do not,
 # because SDK/trace events are reported, not measured kernel effects.
-DIMENSION_MAP: dict[str, dict[str, str]] = {
+DIMENSION_MAP: dict[str, dict[str, str | None]] = {
     "filesystem_paths_touched": {"effect": "filesystem", "basis": "measured"},
     "kernel_file_operations": {"effect": "filesystem", "basis": "measured"},
     "network_endpoints": {"effect": "network", "basis": "measured"},
@@ -140,6 +140,10 @@ def annotate(report: dict[str, Any]) -> dict[str, Any]:
             continue
 
         effect = mapping["effect"]
+        if effect is None:
+            # Reported dimensions return above; measured ones always map to an
+            # effect. Guard explicitly so the SEED_DESCRIPTORS lookup is safe.
+            continue
         descriptor = SEED_DESCRIPTORS[effect]
 
         if observed:

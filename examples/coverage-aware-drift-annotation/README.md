@@ -34,7 +34,9 @@ dimension the annotation therefore distinguishes:
   cannot back from the report alone. Consult `fidelity_verdict.v0` against the
   source archives to raise it.
 - exhaustive equality (this is the complete shared effect set) is `weak
-  measured` while the dimension declares blind spots.
+  derived` while the dimension declares blind spots: the exhaustive reading is
+  computed by applying the gate, so its basis is `derived`, not `measured`, and
+  the cell note names the rule.
 - bounded negative (no effect beyond the observed surface) is blocked, even for
   an empty or inconclusive row. A zero-observation row is exactly where someone
   is tempted to claim "no effects happened"; the annotation refuses it.
