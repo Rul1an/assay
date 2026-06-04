@@ -39,10 +39,10 @@ pub const MONITOR_STAT_SENDTO_EVENTS_EMITTED: u32 = 10;
 pub const MONITOR_STAT_SENDTO_RINGBUF_DROPPED: u32 = 11;
 pub const MONITOR_STAT_SENDMSG_EVENTS_EMITTED: u32 = 12;
 pub const MONITOR_STAT_SENDMSG_RINGBUF_DROPPED: u32 = 13;
-// Datagram sends observed but with no recoverable peer address (e.g. a sendto
-// with a null sockaddr, or a sendmsg with no msg_name) — the connected-datagram
-// blind spot the network coverage descriptor already declares. Counted so the
-// blind spot is visibly exercised rather than silently dropped.
+// sendto/sendmsg observed with no recoverable peer address (a sendto with a null
+// sockaddr, or a sendmsg with no msg_name). Socket type is not classified here,
+// so this includes address-less connected sends regardless of stream/datagram.
+// Counted so these sends are visible rather than silently dropped.
 pub const MONITOR_STAT_SENDTO_NO_PEER: u32 = 14;
 pub const MONITOR_STAT_SENDMSG_NO_PEER: u32 = 15;
 // Datagram sends to a non-IP socket family (e.g. AF_UNIX) — observed but skipped

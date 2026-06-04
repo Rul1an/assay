@@ -506,8 +506,9 @@ fn try_sendto(ctx: TracePointContext) -> Result<u32, u32> {
         .unwrap_or(48);
     let sockaddr_ptr: u64 = unsafe { ctx.read_at(sockaddr_offset).map_err(|_| 1u32)? };
     if sockaddr_ptr == 0 {
-        // Connected-datagram send: no destination sockaddr in this call, so the
-        // peer is not recoverable here. Count it instead of dropping silently.
+        // Address-less send (e.g. a connected socket): no destination sockaddr in
+        // this call, so the peer is not recoverable here. Socket type is not
+        // classified. Count it instead of dropping silently.
         inc_stat(MONITOR_STAT_SENDTO_NO_PEER);
         return Ok(0);
     }
@@ -546,8 +547,9 @@ fn try_sendmsg(ctx: TracePointContext) -> Result<u32, u32> {
             .map_err(|_| 1u32)?
     };
     if msghdr.msg_name == 0 || msghdr.msg_namelen == 0 {
-        // Connected-datagram send: the message carries no destination address,
-        // so the peer is not recoverable here. Count it instead of dropping.
+        // Address-less send (e.g. a connected socket): the message carries no
+        // destination address, so the peer is not recoverable here. Socket type
+        // is not classified. Count it instead of dropping.
         inc_stat(MONITOR_STAT_SENDMSG_NO_PEER);
         return Ok(0);
     }
