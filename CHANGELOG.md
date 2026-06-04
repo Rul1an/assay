@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Documentation: grouped the coverage-honesty examples under a single
+  "Coverage honesty" section in the examples index, with the end-to-end
+  walkthrough as the entry point, so the capture → coverage descriptor →
+  annotation → enforcement → aggregation chain is discoverable in one place.
+  Also added Runner reference docs for the address-less and non-IP
+  `sendto`/`sendmsg` send counters. Documentation only; no schema, archive,
+  CLI output, or other contract change.
+
 ## [3.16.0] - 2026-06-04
 
 - Added `assay evidence verify-mcp-tunnel-observed`, a bounded consumer-side
