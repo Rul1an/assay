@@ -1601,11 +1601,16 @@ def fidelity_verdict(health: Any) -> str:
     """
     if not isinstance(health, dict) or not health:
         return "not_applicable"
+    # Out-of-contract records -> failed (checked before any other verdict).
+    if health.get("schema") != "assay.runner.observation_health.v0":
+        return "failed"
+    run_id = health.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return "failed"
     platform = health.get("platform")
     kernel = health.get("kernel_layer")
     correlation = health.get("cgroup_correlation")
     drops = health.get("ringbuf_drops")
-    # Invalid records -> failed (checked before any other verdict).
     if kernel not in ("complete", "partial_ringbuf_drops", "absent"):
         return "failed"
     if correlation not in ("clean", "partial", "failed"):
@@ -1685,6 +1690,16 @@ def evaluate_asserted_claim(
             return True, "exhaustive equality allowed (partial)"
         return False, f"exhaustive equality is {strength} (degraded by coverage)"
     if claim_type == "bounded_negative":
+        mapping = COVERAGE_DIMENSION_MAP.get(dimension)
+        if mapping is None or mapping[0] is None:
+            # Reported (effect None) or unknown dimensions never produce a
+            # measured bounded-negative; the assertion is not evaluable here, so
+            # it is not permitted rather than vacuously true.
+            return (
+                False,
+                f"bounded-negative not evaluable for non-measured dimension "
+                f"{dimension!r}",
+            )
         blocked = {
             b.get("requested_claim") for b in annotation.get("blocked_claims", [])
         }

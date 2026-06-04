@@ -2338,6 +2338,24 @@ class FidelityAndEnforcementTest(unittest.TestCase):
         )
         self.assertEqual(rc, 2)
 
+    def test_missing_schema_or_runid_is_failed(self):
+        no_schema = {"run_id": "x", "platform": "linux", "kernel_layer": "complete",
+                     "ringbuf_drops": 0, "cgroup_correlation": "clean"}
+        self.assertEqual(drift.fidelity_verdict(no_schema), "failed")
+        empty_runid = {"schema": "assay.runner.observation_health.v0", "run_id": "",
+                       "platform": "linux", "kernel_layer": "complete",
+                       "ringbuf_drops": 0, "cgroup_correlation": "clean"}
+        self.assertEqual(drift.fidelity_verdict(empty_runid), "failed")
+
+    def test_bounded_negative_not_evaluable_for_reported_dimension(self):
+        ann = drift.coverage_annotation_for_report(
+            self.REPORT, health_a=self.CLEAN, health_b=self.CLEAN
+        )
+        ok, _ = drift.evaluate_asserted_claim(ann, "bounded_negative", "sdk_tool_events")
+        self.assertFalse(ok)
+        ok, _ = drift.evaluate_asserted_claim(ann, "bounded_negative", "no_such_dim")
+        self.assertFalse(ok)
+
 
 
 if __name__ == "__main__":
