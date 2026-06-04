@@ -101,6 +101,16 @@ python3 "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/drift.p
   --path-alias /tmp/work/fixture-output.txt=workdir/output \
   --out-md /tmp/drift.md
 
+# Optional: write a separate coverage-annotation sidecar document. The drift
+# report itself is never modified (it stays valid against the
+# additionalProperties:false runtime_drift.v0.2 schema). The sidecar is an
+# assay.coverage_aware_drift.annotation.v0 document carrying per-dimension claim
+# cells that apply the shipped coverage_descriptor.v0 ceiling, so a full-overlap
+# (task-induced) row is not read as exhaustive-equality or as a bounded-negative
+# effect claim. The canonical gate is crates/assay-runner-schema/src/coverage.rs;
+# see also examples/coverage-aware-drift-annotation/.
+#   ... --coverage-annotation-out /tmp/drift.coverage-annotation.json
+
 # Tests (no API keys required):
 python3 -m unittest discover \
   -s "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare" \

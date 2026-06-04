@@ -99,6 +99,51 @@ NETWORK_PROJECTION_SCHEMA = "assay.runner.network_projection.v0"
 PROJECTION_NOT_APPLIED_SCHEMA = "assay.runner.projection_not_applied.v0"
 RUNTIME_NOISE_TAXONOMY_SCHEMA = "assay.runner.runtime_noise_taxonomy.v0"
 
+# Optional, opt-in coverage annotation (additive; default output is unchanged).
+# Mirrors the shipped gate in crates/assay-runner-schema/src/coverage.rs so a
+# full-overlap (task-induced) row is not read as exhaustive-equality or as a
+# bounded-negative effect claim. See examples/coverage-aware-drift-annotation/.
+COVERAGE_ANNOTATION_SCHEMA = "assay.coverage_aware_drift.annotation.v0"
+COVERAGE_CLAIM_CELL_SCHEMA = "assay.observability.claim_class_cell.v0"
+COVERAGE_GATE_RULE = "coverage_descriptor.v0 + fidelity_verdict.v0"
+# Minimal coverage-descriptor fragments per effect dimension: only the two
+# fields the annotation gate reads (completeness + known_blind_spots), mirroring
+# the ceiling logic in crates/assay-runner-schema/src/coverage.rs. This is NOT
+# the full CoverageDescriptor shape (which also carries schema, dimension,
+# method, and observes) — just the fragment needed to gate exhaustive/negative.
+COVERAGE_SEED_DESCRIPTORS: dict[str, dict[str, Any]] = {
+    "filesystem": {
+        "completeness": "open_syscall_only",
+        "known_blind_spots": [
+            "io_uring file operations may bypass syscall tracepoints",
+            "mmap-backed writes are not path-open observations",
+        ],
+    },
+    "network": {
+        "completeness": "connect_only",
+        "known_blind_spots": [
+            "QUIC/datagram peer changes after connect are not an exhaustive peer set",
+            "io_uring network operations may bypass syscall tracepoints",
+        ],
+    },
+    "process": {
+        "completeness": "exec_only",
+        "known_blind_spots": [
+            "fork/clone gaps can make process-tree exhaustiveness kernel-dependent",
+        ],
+    },
+}
+# drift dimension -> (effect dimension or None for reported, claim basis)
+COVERAGE_DIMENSION_MAP: dict[str, tuple[str | None, str]] = {
+    "filesystem_paths_touched": ("filesystem", "measured"),
+    "kernel_file_operations": ("filesystem", "measured"),
+    "network_endpoints": ("network", "measured"),
+    "process_execs": ("process", "measured"),
+    "sdk_tool_events": (None, "reported"),
+    "tool_invocation_order": (None, "reported"),
+    "mcp_tool_surface": (None, "reported"),
+}
+
 CLAIM_RAW_OBSERVED = "raw_observed"
 CLAIM_PROJECTED_EQUIVALENT = "projected_equivalent"
 CLAIM_INCONCLUSIVE = "inconclusive"
@@ -1516,6 +1561,179 @@ def _provenance_payload(
     }
 
 
+def _coverage_blind_spot_summary(descriptor: dict[str, Any]) -> str:
+    spots = descriptor.get("known_blind_spots") or []
+    return "; ".join(spots) if spots else "none declared"
+
+
+def _coverage_supports_complete(descriptor: dict[str, Any]) -> bool:
+    # Mirrors coverage.rs supports_complete_claims: completeness == full AND an
+    # explicitly empty blind-spot list. A missing/None known_blind_spots is
+    # treated conservatively as unknown -> does NOT support complete claims, so
+    # a descriptor cannot accidentally unlock complete claims by omitting the
+    # field. The seed descriptors never satisfy this; the branch is kept so the
+    # annotation tracks the gate if a descriptor ever becomes full.
+    spots = descriptor.get("known_blind_spots")
+    return (
+        descriptor.get("completeness") == "full"
+        and isinstance(spots, list)
+        and not spots
+    )
+
+
+def coverage_annotation_for_report(report: dict[str, Any]) -> dict[str, Any]:
+    """Derive a coverage annotation from a runtime_drift.v0.2 report.
+
+    Separate companion document to the drift report (it is emitted as its own
+    sidecar, never injected into the runtime_drift.v0.2 payload, which is
+    additionalProperties:false). It carries per-dimension claim cells that apply
+    the shipped coverage_descriptor.v0 ceiling so a full-overlap (task-induced)
+    row is not read as exhaustive-equality or bounded-negative. Mirrors
+    examples/coverage-aware-drift-annotation/; the canonical gate is the Rust
+    helper in crates/assay-runner-schema/src/coverage.rs.
+    """
+    if report.get("schema") != DRIFT_REPORT_SCHEMA:
+        raise ValueError(
+            f"expected {DRIFT_REPORT_SCHEMA} report; got {report.get('schema')!r}"
+        )
+    rows = report.get("rows")
+    if not isinstance(rows, list):
+        raise ValueError("report: rows must be a list")
+    claim_cells: list[dict[str, Any]] = []
+    blocked_claims: list[dict[str, Any]] = []
+    classification_caveats: list[dict[str, Any]] = []
+
+    for row in rows:
+        dimension = row.get("dimension")
+        mapping = COVERAGE_DIMENSION_MAP.get(dimension)
+        if mapping is None:
+            continue
+        effect, basis = mapping
+        observed = bool(
+            row.get("only_in_a") or row.get("only_in_b") or row.get("in_both")
+        )
+
+        if basis == "reported":
+            if observed:
+                claim_cells.append(
+                    {
+                        "schema": COVERAGE_CLAIM_CELL_SCHEMA,
+                        "claim_type": f"reported_{dimension}",
+                        "artifact_role": "joined_artifacts",
+                        "claim_strength": "partial",
+                        "claim_basis": "reported",
+                        "evidence_refs": ["runtime-drift-report.json"],
+                        "notes": [
+                            "SDK/trace-reported drift surface; not a measured "
+                            "kernel effect, so no coverage ceiling is applied"
+                        ],
+                        "non_claims": [
+                            "does_not_prove_measured_effect",
+                            "does_not_prove_complete_set",
+                        ],
+                    }
+                )
+            continue
+
+        descriptor = COVERAGE_SEED_DESCRIPTORS[effect]
+        if observed:
+            claim_cells.append(
+                {
+                    "schema": COVERAGE_CLAIM_CELL_SCHEMA,
+                    "claim_type": f"measured_{dimension}_drift",
+                    "artifact_role": "joined_artifacts",
+                    "claim_strength": "partial",
+                    "claim_basis": "measured",
+                    "evidence_refs": ["runtime-drift-report.json"],
+                    "notes": [
+                        "positive strength capped at partial: the drift report "
+                        "does not surface per-arm observation health; consult "
+                        "fidelity_verdict.v0 against the source archives to raise it"
+                    ],
+                    "non_claims": [
+                        "does_not_prove_tool_intent",
+                        "does_not_prove_complete_set",
+                    ],
+                }
+            )
+            if _coverage_supports_complete(descriptor):
+                # Gate allows the exhaustive set; still capped at partial here
+                # because the drift report carries no per-arm capture health.
+                claim_cells.append(
+                    {
+                        "schema": COVERAGE_CLAIM_CELL_SCHEMA,
+                        "claim_type": f"exhaustive_{dimension}_equality",
+                        "artifact_role": "joined_artifacts",
+                        "claim_strength": "partial",
+                        "claim_basis": "derived",
+                        "evidence_refs": ["runtime-drift-report.json"],
+                        "notes": [
+                            f"derived by {COVERAGE_GATE_RULE}: completeness is full "
+                            f"with no declared blind spots, so exhaustive {effect} "
+                            f"equality is allowed; capped at partial because the "
+                            f"drift report does not surface per-arm health"
+                        ],
+                        "non_claims": ["strong_only_within_cgroup_scope"],
+                    }
+                )
+            else:
+                claim_cells.append(
+                    {
+                        "schema": COVERAGE_CLAIM_CELL_SCHEMA,
+                        "claim_type": f"exhaustive_{dimension}_equality",
+                        "artifact_role": "joined_artifacts",
+                        "claim_strength": "weak",
+                        "claim_basis": "derived",
+                        "evidence_refs": ["runtime-drift-report.json"],
+                        "notes": [
+                            f"derived by {COVERAGE_GATE_RULE}: exhaustive {effect} "
+                            f"equality requires completeness=full with no blind spots; "
+                            f"completeness is {descriptor['completeness']}; blind "
+                            f"spots: {_coverage_blind_spot_summary(descriptor)}"
+                        ],
+                        "non_claims": [f"does_not_prove_complete_{effect}_set"],
+                    }
+                )
+
+        # Bounded negative is always blocked here: the drift report carries no
+        # per-arm capture health, and the seed descriptors declare blind spots.
+        blocked_claims.append(
+            {
+                "claim_type": "bounded_negative_claim",
+                "requested_claim": f"no_{dimension}_effect_beyond_observed",
+                "decision": "blocked",
+                "reason": (
+                    f"{effect} absence-beyond-observed claim requires "
+                    f"completeness=full with no blind spots and confirmed clean "
+                    f"capture; completeness is {descriptor['completeness']}; blind "
+                    f"spots: {_coverage_blind_spot_summary(descriptor)}; the drift "
+                    f"report does not surface per-arm observation health"
+                ),
+            }
+        )
+
+        if row.get("classification") == "task-induced":
+            classification_caveats.append(
+                {
+                    "dimension": dimension,
+                    "classification": "task-induced",
+                    "caveat": (
+                        "full overlap of the observed surface; this is not proof "
+                        f"the {effect} effect sets are exhaustively equal, because "
+                        f"{effect} coverage is {descriptor['completeness']}"
+                    ),
+                }
+            )
+
+    return {
+        "schema": COVERAGE_ANNOTATION_SCHEMA,
+        "source_report_schema": report.get("schema"),
+        "claim_cells": claim_cells,
+        "blocked_claims": blocked_claims,
+        "classification_caveats": classification_caveats,
+    }
+
+
 def report_to_json(
     a: ArchiveObservation,
     b: ArchiveObservation,
@@ -1830,6 +2048,16 @@ def main(argv: list[str] | None = None) -> int:
             "or omit for unknown/null."
         ),
     )
+    parser.add_argument(
+        "--coverage-annotation-out",
+        type=Path,
+        help=(
+            "Write a separate assay.coverage_aware_drift.annotation.v0 sidecar "
+            "document to this path (per-dimension claim cells applying the shipped "
+            "coverage ceiling). The drift report itself is never modified, so it "
+            "stays valid against the additionalProperties:false v0.2 schema."
+        ),
+    )
     parser.add_argument("--workflow-url", help="GitHub Actions run URL, if any.")
     parser.add_argument("--runner-label", help="Runner label or host class.")
     parser.add_argument("--kernel-os", help="Kernel OS for the capture host.")
@@ -1906,6 +2134,21 @@ def main(argv: list[str] | None = None) -> int:
         ebpf_object_digest=args.ebpf_object_digest or None,
     )
     payload = report_to_json(a, b, rows, provenance)
+
+    if args.coverage_annotation_out:
+        annotation = coverage_annotation_for_report(payload)
+        try:
+            args.coverage_annotation_out.parent.mkdir(parents=True, exist_ok=True)
+            args.coverage_annotation_out.write_text(
+                json.dumps(annotation, indent=2, sort_keys=False) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            print(
+                f"failed to write --coverage-annotation-out: {exc}",
+                file=sys.stderr,
+            )
+            return 2
 
     if args.out_json:
         try:
