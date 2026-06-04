@@ -211,6 +211,10 @@ Map a tiny A2A task lifecycle export into Assay-shaped external evidence.
 Map a tiny UCP checkout/order lifecycle export into Assay-shaped external evidence.
 **Focus**: checkout/order-state observation only, no imported payment, settlement, or merchant truth.
 
+### [Coverage-Aware Drift Annotation](./coverage-aware-drift-annotation)
+Attach per-dimension claim cells to a `runtime_drift.v0.2` report so a full-overlap drift row is not read as exhaustive-equality or bounded-negative.
+**Focus**: comparator-output coverage ceiling, blocked absence claims, no comparator or schema change.
+
 ## 2. [Negation Safety](./negation-safety)
 Ensure model adheres to critical safety instructions (e.g. "Do NOT").
 **Metrics**: `regex`.

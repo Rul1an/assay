@@ -1,0 +1,116 @@
+{
+  "blocked_claims": [
+    {
+      "claim_type": "bounded_negative_claim",
+      "decision": "blocked",
+      "reason": "filesystem absence-beyond-observed claim requires completeness=full with no blind spots and confirmed clean capture; completeness is open_syscall_only; blind spots: io_uring file operations may bypass syscall tracepoints; mmap-backed writes are not path-open observations; the drift report does not surface per-arm observation health",
+      "requested_claim": "no_filesystem_paths_touched_effect_beyond_observed"
+    },
+    {
+      "claim_type": "bounded_negative_claim",
+      "decision": "blocked",
+      "reason": "network absence-beyond-observed claim requires completeness=full with no blind spots and confirmed clean capture; completeness is connect_only; blind spots: QUIC/datagram peer changes after connect are not an exhaustive peer set; io_uring network operations may bypass syscall tracepoints; the drift report does not surface per-arm observation health",
+      "requested_claim": "no_network_endpoints_effect_beyond_observed"
+    },
+    {
+      "claim_type": "bounded_negative_claim",
+      "decision": "blocked",
+      "reason": "process absence-beyond-observed claim requires completeness=full with no blind spots and confirmed clean capture; completeness is exec_only; blind spots: fork/clone gaps can make process-tree exhaustiveness kernel-dependent; the drift report does not surface per-arm observation health",
+      "requested_claim": "no_process_execs_effect_beyond_observed"
+    }
+  ],
+  "claim_cells": [
+    {
+      "artifact_role": "joined_artifacts",
+      "claim_basis": "measured",
+      "claim_strength": "partial",
+      "claim_type": "measured_filesystem_paths_touched_drift",
+      "evidence_refs": [
+        "runtime-drift-report.json"
+      ],
+      "non_claims": [
+        "does_not_prove_tool_intent",
+        "does_not_prove_complete_set"
+      ],
+      "notes": [
+        "positive strength capped at partial: the drift report does not surface per-arm observation health; consult fidelity_verdict.v0 against the source archives to raise this to strong"
+      ],
+      "schema": "assay.observability.claim_class_cell.v0"
+    },
+    {
+      "artifact_role": "joined_artifacts",
+      "claim_basis": "derived",
+      "claim_strength": "weak",
+      "claim_type": "exhaustive_filesystem_paths_touched_equality",
+      "evidence_refs": [
+        "runtime-drift-report.json"
+      ],
+      "non_claims": [
+        "does_not_prove_complete_filesystem_set"
+      ],
+      "notes": [
+        "derived by coverage_descriptor.v0 + fidelity_verdict.v0: exhaustive filesystem equality requires completeness=full with no blind spots; completeness is open_syscall_only; blind spots: io_uring file operations may bypass syscall tracepoints; mmap-backed writes are not path-open observations"
+      ],
+      "schema": "assay.observability.claim_class_cell.v0"
+    },
+    {
+      "artifact_role": "joined_artifacts",
+      "claim_basis": "measured",
+      "claim_strength": "partial",
+      "claim_type": "measured_network_endpoints_drift",
+      "evidence_refs": [
+        "runtime-drift-report.json"
+      ],
+      "non_claims": [
+        "does_not_prove_tool_intent",
+        "does_not_prove_complete_set"
+      ],
+      "notes": [
+        "positive strength capped at partial: the drift report does not surface per-arm observation health; consult fidelity_verdict.v0 against the source archives to raise this to strong"
+      ],
+      "schema": "assay.observability.claim_class_cell.v0"
+    },
+    {
+      "artifact_role": "joined_artifacts",
+      "claim_basis": "derived",
+      "claim_strength": "weak",
+      "claim_type": "exhaustive_network_endpoints_equality",
+      "evidence_refs": [
+        "runtime-drift-report.json"
+      ],
+      "non_claims": [
+        "does_not_prove_complete_network_set"
+      ],
+      "notes": [
+        "derived by coverage_descriptor.v0 + fidelity_verdict.v0: exhaustive network equality requires completeness=full with no blind spots; completeness is connect_only; blind spots: QUIC/datagram peer changes after connect are not an exhaustive peer set; io_uring network operations may bypass syscall tracepoints"
+      ],
+      "schema": "assay.observability.claim_class_cell.v0"
+    },
+    {
+      "artifact_role": "joined_artifacts",
+      "claim_basis": "reported",
+      "claim_strength": "partial",
+      "claim_type": "reported_sdk_tool_events",
+      "evidence_refs": [
+        "runtime-drift-report.json"
+      ],
+      "non_claims": [
+        "does_not_prove_measured_effect",
+        "does_not_prove_complete_set"
+      ],
+      "notes": [
+        "SDK/trace-reported drift surface; not a measured kernel effect, so no coverage ceiling is applied"
+      ],
+      "schema": "assay.observability.claim_class_cell.v0"
+    }
+  ],
+  "classification_caveats": [
+    {
+      "caveat": "full overlap of the observed surface; this is not proof the network effect sets are exhaustively equal, because network coverage is connect_only",
+      "classification": "task-induced",
+      "dimension": "network_endpoints"
+    }
+  ],
+  "schema": "assay.coverage_aware_drift.annotation.v0",
+  "source_report_schema": "assay.runner.runtime_drift.v0.2"
+}
