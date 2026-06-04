@@ -1,0 +1,13 @@
+{
+  "_demo": "SYNTHETIC DEMONSTRATOR — envelope present but not verified",
+  "envelope_type": "synthetic-demo",
+  "subject_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+  "statement": {
+    "predicate": "synthetic-coverage-attestation",
+    "note": "illustrative only"
+  },
+  "verification": {
+    "status": "unverified",
+    "note": "decided by this flag, not by any real verification"
+  }
+}
