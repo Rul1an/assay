@@ -6,8 +6,9 @@ Reads many coverage annotation sidecars
 drift comparator's --coverage-annotation-out) and folds them into one
 fleet-level honesty summary: for each measured dimension, how many runs report
 each positive strength, how many allow an exhaustive claim, and how many block
-the bounded-negative claim — plus the fleet "floor" (the weakest strength seen
-across the set).
+the bounded-negative claim — plus the fleet "floor" (the weakest positive level
+across every run, where a run with no positive cell counts as `missing` and
+pulls the floor down — so the floor is what is supportable *everywhere*).
 
 The point of the showcase: the same per-run honesty classification scales to a
 whole set of runs using only local inputs and with no contract change — it is
@@ -37,14 +38,18 @@ MEASURED_DIMENSIONS = (
     "process_execs",
 )
 
-# Positive strength ordering, weakest first — used to compute the fleet floor.
-_STRENGTH_ORDER = ("absent", "weak", "partial", "strong")
+# Positive strength ordering, weakest first. `missing` (a run with no positive
+# cell at all) is the weakest level of all: if even one run cannot support a
+# positive claim, the fleet cannot support it *everywhere*, so the floor is
+# `missing`. This ordering is what makes the floor an honest "supportable
+# across every run" answer rather than "supportable across the observed runs".
+_FLOOR_ORDER = ("missing", "absent", "weak", "partial", "strong")
 
 
 def _weaker(a: str, b: str) -> str:
-    """Return the weaker of two strengths by _STRENGTH_ORDER (unknowns are weakest)."""
-    ia = _STRENGTH_ORDER.index(a) if a in _STRENGTH_ORDER else -1
-    ib = _STRENGTH_ORDER.index(b) if b in _STRENGTH_ORDER else -1
+    """Return the weaker of two levels by _FLOOR_ORDER (unknowns are weakest)."""
+    ia = _FLOOR_ORDER.index(a) if a in _FLOOR_ORDER else -1
+    ib = _FLOOR_ORDER.index(b) if b in _FLOOR_ORDER else -1
     return a if ia <= ib else b
 
 
@@ -54,7 +59,9 @@ def _empty_dimension() -> dict[str, Any]:
         "exhaustive_equality": {"partial": 0, "weak": 0, "absent": 0, "missing": 0},
         "bounded_negative_blocked": 0,
         "runs_observed": 0,
-        "fleet_positive_floor": "missing",
+        # None until the first run is folded in; resolved to "missing" at the end
+        # for a dimension with no runs at all.
+        "fleet_positive_floor": None,
     }
 
 
@@ -79,19 +86,20 @@ def fold(annotations: list[dict[str, Any]]) -> dict[str, Any]:
         for dim in MEASURED_DIMENSIONS:
             entry = dims[dim]
             pos = cells.get(f"measured_{dim}_drift")
-            if pos is None:
-                entry["measured_positive"]["missing"] += 1
+            strength = pos.get("claim_strength", "missing") if pos is not None else "missing"
+            if strength in entry["measured_positive"] and strength != "missing":
+                entry["measured_positive"][strength] += 1
+                entry["runs_observed"] += 1
+                run_level = strength
             else:
-                strength = pos.get("claim_strength", "missing")
-                if strength in entry["measured_positive"] and strength != "missing":
-                    entry["measured_positive"][strength] += 1
-                    entry["runs_observed"] += 1
-                    cur = entry["fleet_positive_floor"]
-                    entry["fleet_positive_floor"] = (
-                        strength if cur == "missing" else _weaker(cur, strength)
-                    )
-                else:
-                    entry["measured_positive"]["missing"] += 1
+                # No positive cell, or an unrecognised strength: this run does not
+                # support a positive claim for the dimension.
+                entry["measured_positive"]["missing"] += 1
+                run_level = "missing"
+            # Fold every run into the floor — including the missing ones, so a
+            # single unsupported run pulls the everywhere-floor down to "missing".
+            cur = entry["fleet_positive_floor"]
+            entry["fleet_positive_floor"] = run_level if cur is None else _weaker(cur, run_level)
 
             exh = cells.get(f"exhaustive_{dim}_equality")
             if exh is None:
@@ -106,9 +114,9 @@ def fold(annotations: list[dict[str, Any]]) -> dict[str, Any]:
             if f"no_{dim}_effect_beyond_observed" in blocked:
                 entry["bounded_negative_blocked"] += 1
 
-    # A dimension never observed across the fleet has no floor.
+    # A dimension with no runs at all (empty fleet) resolves to "missing".
     for entry in dims.values():
-        if entry["runs_observed"] == 0:
+        if entry["fleet_positive_floor"] is None:
             entry["fleet_positive_floor"] = "missing"
 
     return {

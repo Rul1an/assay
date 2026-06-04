@@ -1,0 +1,18 @@
+{
+  "schema": "assay.coverage_aware_drift.annotation.v0",
+  "source_report_schema": "assay.runner.runtime_drift.v0.2",
+  "claim_cells": [
+    {
+      "schema": "assay.observability.claim_class_cell.v0",
+      "claim_type": "measured_network_endpoints_drift",
+      "artifact_role": "joined_artifacts",
+      "claim_strength": "partial",
+      "claim_basis": "measured",
+      "evidence_refs": ["runtime-drift-report.json"],
+      "notes": ["network observed at partial; this run has no filesystem positive cell"],
+      "non_claims": ["does_not_prove_tool_intent"]
+    }
+  ],
+  "blocked_claims": [],
+  "classification_caveats": []
+}

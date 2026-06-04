@@ -30,6 +30,15 @@ def _all_runs() -> list:
     ]
 
 
+def _mixed_runs() -> list:
+    mixed = os.path.join(FIXTURES, "mixed")
+    return [
+        _load(os.path.join(mixed, name))
+        for name in sorted(os.listdir(mixed))
+        if name.endswith(".json")
+    ]
+
+
 class WeakerTests(unittest.TestCase):
     def test_orders_strengths(self) -> None:
         self.assertEqual(ac._weaker("strong", "absent"), "absent")
@@ -74,6 +83,54 @@ class FoldTests(unittest.TestCase):
         self.assertEqual(exh["weak"], 1)
         self.assertEqual(exh["partial"], 1)
         self.assertEqual(exh["missing"], 1)
+
+    def test_mixed_observed_and_missing_lowers_floor_to_missing(self) -> None:
+        # Regression for the "floor must answer supportable *everywhere*" contract:
+        # one run observes filesystem at partial, the other has no filesystem
+        # positive cell at all. The floor must drop to "missing" -- a fleet cannot
+        # claim a positive everywhere if one run cannot support it at all.
+        summary = ac.fold(_mixed_runs())
+        fs = summary["dimensions"]["filesystem_paths_touched"]
+        self.assertEqual(fs["fleet_positive_floor"], "missing")
+        self.assertEqual(fs["runs_observed"], 1)
+        self.assertEqual(fs["measured_positive"]["partial"], 1)
+        self.assertEqual(fs["measured_positive"]["missing"], 1)
+        # Network is observed at partial in both runs, so its floor stays partial.
+        net = summary["dimensions"]["network_endpoints"]
+        self.assertEqual(net["fleet_positive_floor"], "partial")
+        self.assertEqual(net["runs_observed"], 2)
+
+    def test_single_absent_run_lowers_floor_below_observed(self) -> None:
+        # A single absent run pulls the floor to absent even if others are strong.
+        summary = ac.fold(
+            [
+                {
+                    "schema": ac.ANNOTATION_SCHEMA,
+                    "claim_cells": [
+                        {
+                            "claim_type": "measured_process_execs_drift",
+                            "claim_strength": "strong",
+                        }
+                    ],
+                    "blocked_claims": [],
+                },
+                {
+                    "schema": ac.ANNOTATION_SCHEMA,
+                    "claim_cells": [
+                        {
+                            "claim_type": "measured_process_execs_drift",
+                            "claim_strength": "absent",
+                        }
+                    ],
+                    "blocked_claims": [],
+                },
+            ]
+        )
+        pe = summary["dimensions"]["process_execs"]
+        self.assertEqual(pe["fleet_positive_floor"], "absent")
+        # Both runs carry a positive cell (strong + absent), so both are observed;
+        # the floor is the weaker of the two.
+        self.assertEqual(pe["runs_observed"], 2)
 
     def test_empty_fleet(self) -> None:
         summary = ac.fold([])

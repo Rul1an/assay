@@ -15,7 +15,10 @@ and the **fleet floor** — the weakest positive strength seen across the set.
 The fleet floor answers the operational question directly: "across these runs,
 the strongest positive claim I can make *everywhere* is no better than this." If
 one run in the set degraded to `absent`, the floor is `absent`, even if every
-other run was `strong`.
+other run was `strong`. And if even one run has no positive cell at all for the
+dimension, the floor is `missing` — a fleet cannot claim a positive everywhere
+when one run cannot support it at all. The floor is computed over *every* run,
+not only the observed ones.
 
 It is an example only — it changes no Runner or contract surface. It consumes
 only the public annotation sidecar shape.
@@ -45,8 +48,10 @@ For each of the measured dimensions (`filesystem_paths_touched`,
   claim for this dimension.
 - `runs_observed` — runs that carried any measured positive cell for the
   dimension.
-- `fleet_positive_floor` — the weakest positive strength observed, or `missing`
-  if the dimension was never observed across the fleet.
+- `fleet_positive_floor` — the weakest positive level across **every** run
+  (weakest first: `missing`, `absent`, `weak`, `partial`, `strong`). A run with
+  no positive cell counts as `missing` and pulls the floor to `missing`; the
+  floor is also `missing` for a dimension with no runs at all.
 
 ## Fixtures
 
