@@ -46,6 +46,21 @@ SEED_DESCRIPTORS: dict[str, dict[str, Any]] = {
         ],
         "completeness": "connect_only",
     },
+    "network_datagram_peer_observed": {
+        "method": "sendto/sendmsg tracepoints",
+        "known_blind_spots": [
+            "connected datagram sends without an explicit sockaddr require connect evidence to recover the peer",
+            "io_uring network operations may bypass syscall tracepoints",
+        ],
+        "completeness": "datagram_peer_observed",
+    },
+    "network_connect_and_datagram_peer_observed": {
+        "method": "connect/sendto/sendmsg tracepoints",
+        "known_blind_spots": [
+            "io_uring network operations may bypass syscall tracepoints",
+        ],
+        "completeness": "connect_and_datagram_peer_observed",
+    },
     "process": {
         "method": "exec tracepoint",
         "known_blind_spots": [
@@ -82,6 +97,21 @@ def _supports_complete_claims(descriptor: dict[str, Any]) -> bool:
     return descriptor.get("completeness") == "full" and not descriptor.get(
         "known_blind_spots"
     )
+
+
+def _network_descriptor_for_health(health: dict[str, Any]) -> dict[str, Any]:
+    status = health.get("network_protocol_coverage")
+    if status == "datagram_peer_observed":
+        return SEED_DESCRIPTORS["network_datagram_peer_observed"]
+    if status == "connect_and_datagram_peer_observed":
+        return SEED_DESCRIPTORS["network_connect_and_datagram_peer_observed"]
+    return SEED_DESCRIPTORS["network"]
+
+
+def _descriptor_for_dimension(dimension: str, health: dict[str, Any]) -> dict[str, Any]:
+    if dimension == "network":
+        return _network_descriptor_for_health(health)
+    return SEED_DESCRIPTORS[dimension]
 
 
 def _capture_is_clean(health: dict[str, Any]) -> bool:
@@ -197,7 +227,8 @@ def build_report(archive: dict[str, Any]) -> dict[str, Any]:
     claim_cells: list[dict[str, Any]] = []
     blocked_claims: list[dict[str, Any]] = []
 
-    for dimension, descriptor in SEED_DESCRIPTORS.items():
+    for dimension in SURFACE_FIELD:
+        descriptor = _descriptor_for_dimension(dimension, health)
         observed = surface.get(SURFACE_FIELD[dimension])
         if observed is None:
             continue

@@ -69,7 +69,7 @@ ceiling. The descriptor gate evaluates the requested claim kind:
 
 | Claim kind | Descriptor rule |
 |---|---|
-| `positive_existence` | Allowed when a descriptor is present; strength then comes from gate one. The shipped helper keys this on descriptor presence and does not yet validate that the claimed class appears in `observes` — the caller is responsible for selecting a descriptor whose `observes` covers the effect class. |
+| `positive_existence` | Allowed when a descriptor is present and, for callers using `claim_decision_for_effect`, the claimed class appears in `observes`; strength then comes from gate one. |
 | `exhaustive_set` | Degraded to `weak` whenever the descriptor declares any blind spot or `completeness` is not `full`. |
 | `bounded_negative` | Blocked whenever the descriptor declares any blind spot or `completeness` is not `full`. |
 
@@ -77,13 +77,15 @@ A missing or schema-mismatched descriptor is not the same as a present
 one: the helper blocks coverage-aware claims outright when no valid
 descriptor is supplied, rather than treating absence as permission.
 
-The seed descriptors describe today's capture ceiling: filesystem capture
-is `open_syscall_only` (io_uring and mmap-backed writes are blind spots),
-network capture is `connect_only` (QUIC/datagram and io_uring are blind
-spots), process capture is `exec_only` (fork/clone gaps). None of them
-support complete claims yet, so every exhaustive set degrades and every
-bounded-negative claim blocks under the current seeds. That is the point:
-the gate must not silently upgrade a claim the method cannot back.
+The seed descriptors describe today's capture ceilings: filesystem capture
+is `open_syscall_only` (io_uring and mmap-backed writes are blind spots);
+network capture can be `connect_only`, `datagram_peer_observed`, or
+`connect_and_datagram_peer_observed` depending on whether the run observed
+`connect`, `sendto`, and/or `sendmsg` peers; process capture is `exec_only`
+(fork/clone gaps). None of the seed descriptors support complete claims yet,
+so every exhaustive set degrades and every bounded-negative claim blocks under
+the current seeds. That is the point: the gate must not silently upgrade a
+claim the method cannot back.
 
 ## Composition order
 
@@ -128,7 +130,8 @@ endpoint it emits:
   not `measured`.
 - `measured_network_effect` — `strong` / `measured`.
 - `exhaustive_network_set` — `weak` / `derived`, naming the gating rule
-  and the `connect_only` ceiling.
+  and the run's network coverage ceiling (`connect_only`,
+  `datagram_peer_observed`, or `connect_and_datagram_peer_observed`).
 - `no_unexpected_filesystem_effect` and `no_unexpected_network_effect` —
   **blocked**, recorded in `blocked_claims` rather than emitted as cells.
 

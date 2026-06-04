@@ -126,6 +126,19 @@ COVERAGE_SEED_DESCRIPTORS: dict[str, dict[str, Any]] = {
             "io_uring network operations may bypass syscall tracepoints",
         ],
     },
+    "network_datagram_peer_observed": {
+        "completeness": "datagram_peer_observed",
+        "known_blind_spots": [
+            "connected datagram sends without an explicit sockaddr require connect evidence to recover the peer",
+            "io_uring network operations may bypass syscall tracepoints",
+        ],
+    },
+    "network_connect_and_datagram_peer_observed": {
+        "completeness": "connect_and_datagram_peer_observed",
+        "known_blind_spots": [
+            "io_uring network operations may bypass syscall tracepoints",
+        ],
+    },
     "process": {
         "completeness": "exec_only",
         "known_blind_spots": [
@@ -1581,6 +1594,52 @@ def _coverage_supports_complete(descriptor: dict[str, Any]) -> bool:
     )
 
 
+def _network_descriptor_for_protocol_coverage(status: Any) -> dict[str, Any] | None:
+    if status == "connect_only":
+        return COVERAGE_SEED_DESCRIPTORS["network"]
+    if status == "datagram_peer_observed":
+        return COVERAGE_SEED_DESCRIPTORS["network_datagram_peer_observed"]
+    if status == "connect_and_datagram_peer_observed":
+        return COVERAGE_SEED_DESCRIPTORS["network_connect_and_datagram_peer_observed"]
+    return None
+
+
+def _coverage_descriptor_for_effect(
+    effect: str,
+    *,
+    health_a: Any = None,
+    health_b: Any = None,
+) -> dict[str, Any]:
+    if effect != "network":
+        return COVERAGE_SEED_DESCRIPTORS[effect]
+    if health_a is None and health_b is None:
+        return COVERAGE_SEED_DESCRIPTORS["network"]
+
+    statuses = []
+    descriptors = []
+    for health in (health_a, health_b):
+        if isinstance(health, dict):
+            status = health.get("network_protocol_coverage")
+        else:
+            status = None
+        statuses.append(status)
+        descriptors.append(_network_descriptor_for_protocol_coverage(status))
+
+    # Cross-runtime annotations use the common ceiling across both arms. If one
+    # arm is weaker or unknown, keep the connect-only descriptor rather than
+    # allowing the stronger arm to speak for the pair.
+    if any(descriptor is None for descriptor in descriptors):
+        return COVERAGE_SEED_DESCRIPTORS["network"]
+    if any(status != "connect_and_datagram_peer_observed" for status in statuses):
+        if all(
+            status in ("datagram_peer_observed", "connect_and_datagram_peer_observed")
+            for status in statuses
+        ):
+            return COVERAGE_SEED_DESCRIPTORS["network_datagram_peer_observed"]
+        return COVERAGE_SEED_DESCRIPTORS["network"]
+    return COVERAGE_SEED_DESCRIPTORS["network_connect_and_datagram_peer_observed"]
+
+
 def fidelity_verdict(health: Any) -> str:
     """Derive a fidelity verdict from one observation_health record.
 
@@ -1797,7 +1856,9 @@ def coverage_annotation_for_report(
                 )
             continue
 
-        descriptor = COVERAGE_SEED_DESCRIPTORS[effect]
+        descriptor = _coverage_descriptor_for_effect(
+            effect, health_a=health_a, health_b=health_b
+        )
         if observed:
             if pos_strength == "absent":
                 # No valid measured surface on at least one arm: the cross-arm
@@ -1873,8 +1934,15 @@ def coverage_annotation_for_report(
                     }
                 )
 
-        # Bounded negative is always blocked here: the drift report carries no
-        # per-arm capture health, and the seed descriptors declare blind spots.
+        health_reason = (
+            "per-arm observation health supplied; coverage completeness still "
+            "blocks this bounded-negative claim"
+            if health_a is not None and health_b is not None
+            else "the drift report does not surface per-arm observation health"
+        )
+        # Bounded negative is always blocked here: the seed descriptors declare
+        # blind spots, so no current network/filesystem/process descriptor can
+        # prove absence-beyond-observed.
         blocked_claims.append(
             {
                 "claim_type": "bounded_negative_claim",
@@ -1884,8 +1952,8 @@ def coverage_annotation_for_report(
                     f"{effect} absence-beyond-observed claim requires "
                     f"completeness=full with no blind spots and confirmed clean "
                     f"capture; completeness is {descriptor['completeness']}; blind "
-                    f"spots: {_coverage_blind_spot_summary(descriptor)}; the drift "
-                    f"report does not surface per-arm observation health"
+                    f"spots: {_coverage_blind_spot_summary(descriptor)}; "
+                    f"{health_reason}"
                 ),
             }
         )

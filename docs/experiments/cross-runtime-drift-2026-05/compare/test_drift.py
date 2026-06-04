@@ -2214,6 +2214,17 @@ class FidelityAndEnforcementTest(unittest.TestCase):
                 return c
         return None
 
+    def _net_exhaustive_cell(self, ann):
+        for c in ann["claim_cells"]:
+            if c["claim_type"] == "exhaustive_network_endpoints_equality":
+                return c
+        return None
+
+    def _network_health(self, status: str) -> dict:
+        health = dict(self.CLEAN)
+        health["network_protocol_coverage"] = status
+        return health
+
     def test_fidelity_verdict_mapping(self):
         self.assertEqual(drift.fidelity_verdict(self.CLEAN), "clean")
         self.assertEqual(drift.fidelity_verdict(self.CLIPPED), "clipped")
@@ -2415,6 +2426,38 @@ class FidelityAndEnforcementTest(unittest.TestCase):
         # one arm failed, other missing -> absent
         ann = drift.coverage_annotation_for_report(self.REPORT, health_a=self.FAILED)
         self.assertEqual(self._net_cell(ann)["claim_strength"], "absent")
+
+    def test_network_descriptor_uses_common_datagram_coverage_when_both_arms_observe_it(self):
+        ann = drift.coverage_annotation_for_report(
+            self.REPORT,
+            health_a=self._network_health("connect_and_datagram_peer_observed"),
+            health_b=self._network_health("connect_and_datagram_peer_observed"),
+        )
+        exhaustive = self._net_exhaustive_cell(ann)
+        self.assertIn("connect_and_datagram_peer_observed", exhaustive["notes"][0])
+        caveat = ann["classification_caveats"][0]["caveat"]
+        self.assertIn("connect_and_datagram_peer_observed", caveat)
+
+    def test_network_descriptor_downgrades_to_datagram_when_one_arm_lacks_connect(self):
+        ann = drift.coverage_annotation_for_report(
+            self.REPORT,
+            health_a=self._network_health("datagram_peer_observed"),
+            health_b=self._network_health("connect_and_datagram_peer_observed"),
+        )
+        exhaustive = self._net_exhaustive_cell(ann)
+        self.assertIn("datagram_peer_observed", exhaustive["notes"][0])
+        self.assertNotIn("connect_and_datagram_peer_observed", exhaustive["notes"][0])
+
+    def test_network_descriptor_keeps_connect_only_when_one_arm_is_connect_only(self):
+        ann = drift.coverage_annotation_for_report(
+            self.REPORT,
+            health_a=self._network_health("connect_only"),
+            health_b=self._network_health("connect_and_datagram_peer_observed"),
+        )
+        exhaustive = self._net_exhaustive_cell(ann)
+        self.assertIn("connect_only", exhaustive["notes"][0])
+        blocked = ann["blocked_claims"][0]["reason"]
+        self.assertIn("coverage completeness still blocks", blocked)
 
 
 

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::ClaimGateDecision;
+use crate::{ClaimGateDecision, NetworkProtocolCoverageStatus};
 
 pub const COVERAGE_DESCRIPTOR_SCHEMA: &str = "assay.runner.coverage_descriptor.v0";
 
@@ -18,6 +18,8 @@ pub enum CoverageCompleteness {
     Full,
     OpenSyscallOnly,
     ConnectOnly,
+    DatagramPeerObserved,
+    ConnectAndDatagramPeerObserved,
     ExecOnly,
 }
 
@@ -75,6 +77,52 @@ impl CoverageDescriptor {
                 "io_uring network operations may bypass syscall tracepoints".to_string(),
             ],
             completeness: CoverageCompleteness::ConnectOnly,
+        }
+    }
+
+    #[must_use]
+    pub fn network_datagram_peer_observed() -> Self {
+        Self {
+            schema: COVERAGE_DESCRIPTOR_SCHEMA.to_string(),
+            dimension: EffectDimension::Network,
+            method: "sendto/sendmsg tracepoints".to_string(),
+            observes: vec!["datagram peer endpoints from explicit sockaddr arguments".to_string()],
+            known_blind_spots: vec![
+                "connected datagram sends without an explicit sockaddr require connect evidence to recover the peer".to_string(),
+                "io_uring network operations may bypass syscall tracepoints".to_string(),
+            ],
+            completeness: CoverageCompleteness::DatagramPeerObserved,
+        }
+    }
+
+    #[must_use]
+    pub fn network_connect_and_datagram_peer_observed() -> Self {
+        Self {
+            schema: COVERAGE_DESCRIPTOR_SCHEMA.to_string(),
+            dimension: EffectDimension::Network,
+            method: "connect/sendto/sendmsg tracepoints".to_string(),
+            observes: vec![
+                "connect-time peer endpoints".to_string(),
+                "datagram peer endpoints from explicit sockaddr arguments".to_string(),
+            ],
+            known_blind_spots: vec![
+                "io_uring network operations may bypass syscall tracepoints".to_string()
+            ],
+            completeness: CoverageCompleteness::ConnectAndDatagramPeerObserved,
+        }
+    }
+
+    #[must_use]
+    pub fn network_for_protocol_coverage(coverage: NetworkProtocolCoverageStatus) -> Option<Self> {
+        match coverage {
+            NetworkProtocolCoverageStatus::ConnectOnly => Some(Self::network_connect_only()),
+            NetworkProtocolCoverageStatus::DatagramPeerObserved => {
+                Some(Self::network_datagram_peer_observed())
+            }
+            NetworkProtocolCoverageStatus::ConnectAndDatagramPeerObserved => {
+                Some(Self::network_connect_and_datagram_peer_observed())
+            }
+            NetworkProtocolCoverageStatus::Unknown | NetworkProtocolCoverageStatus::Absent => None,
         }
     }
 
@@ -251,6 +299,10 @@ fn completeness_label(completeness: CoverageCompleteness) -> &'static str {
         CoverageCompleteness::Full => "full",
         CoverageCompleteness::OpenSyscallOnly => "open_syscall_only",
         CoverageCompleteness::ConnectOnly => "connect_only",
+        CoverageCompleteness::DatagramPeerObserved => "datagram_peer_observed",
+        CoverageCompleteness::ConnectAndDatagramPeerObserved => {
+            "connect_and_datagram_peer_observed"
+        }
         CoverageCompleteness::ExecOnly => "exec_only",
     }
 }

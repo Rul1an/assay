@@ -65,11 +65,19 @@ must consult it before interpreting absence or exhaustiveness.
 |---|---|---|---|
 | filesystem | `filesystem_open_syscall_only()` | `open_syscall_only` | io_uring file operations; mmap-backed writes |
 | network | `network_connect_only()` | `connect_only` | QUIC/datagram peer changes after connect; io_uring network operations |
+| network | `network_datagram_peer_observed()` | `datagram_peer_observed` | connected datagram sends without explicit sockaddr; io_uring network operations |
+| network | `network_connect_and_datagram_peer_observed()` | `connect_and_datagram_peer_observed` | io_uring network operations |
 | process | `process_exec_only()` | `exec_only` | fork/clone gaps that affect process-tree exhaustiveness |
 
 The seed descriptors intentionally describe the current capture ceiling.
 Future capture improvements can narrow or remove blind spots by changing
 descriptor data; until then, the gate must not silently upgrade claims.
+`network_for_protocol_coverage(status)` maps
+`observation_health.network_protocol_coverage` into the matching network
+descriptor when the run reported `connect_only`, `datagram_peer_observed`,
+or `connect_and_datagram_peer_observed`. `unknown` and `absent` return no
+descriptor, so coverage-aware network claims remain blocked rather than
+silently assuming a method.
 
 ## Claim Kinds
 
@@ -142,20 +150,24 @@ Initial rules:
 - The descriptor does not prove runtime safety.
 - The descriptor does not close the blind spot it names.
 - The descriptor does not replace `observation_health.v0`.
-- The descriptor does not convert `connect_only` network capture into an
-  exact peer set.
+- The descriptor does not convert `connect_only` or datagram-aware network
+  capture into an exact peer set.
 - The descriptor does not make self-reported SDK or trace evidence
   measured.
 
-## Wiring Boundary
+## Wiring Status
 
-This slice adds only the contract and helper. It intentionally does not:
+The Rust helper remains an internal contract in `assay-runner-schema`.
+Experiment surfaces may mirror it for sidecar annotations and enforcement, but
+the Runner archive contract is unchanged. This helper still does not:
 
 - add a Runner archive member;
 - add CLI output;
-- add comparator wiring;
+- add a stable report schema;
 - add Trust Basis claims;
-- add capture enhancements for io_uring, QUIC/datagram, or fork/clone.
+- add capture enhancements for io_uring or fork/clone.
 
-Report and comparator wiring should wait for the next descriptor-aware
-consumer slice.
+Any consumer that mirrors the gate should preserve the same ceiling: datagram
+peer observations can strengthen positive network evidence, but they do not
+permit exact peer-set or bounded-negative network claims while blind spots
+remain declared.

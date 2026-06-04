@@ -206,7 +206,7 @@ Interpretation rules:
 
 - `kernel_layer=complete` means capture health was clean for the attached hooks;
   it does not, by itself, prove protocol-complete network coverage.
-- `network_protocol_coverage=connect_only` means the current Runner observed
+- `network_protocol_coverage=connect_only` means Runner observed
   `connect()`-level network evidence only.
 - `network_protocol_coverage=datagram_peer_observed` means Runner observed
   datagram peer evidence from `sendto` or `sendmsg`, without a matching
