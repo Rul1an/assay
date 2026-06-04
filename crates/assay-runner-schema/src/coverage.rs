@@ -147,7 +147,7 @@ impl CoverageDescriptor {
                     "{} completeness is {}; blind spots: {}",
                     dimension_label(descriptor.dimension),
                     completeness_label(descriptor.completeness),
-                    descriptor.known_blind_spots.join("; ")
+                    blind_spot_summary(descriptor)
                 ),
             },
             CoverageClaimKind::BoundedNegative if descriptor.supports_complete_claims() => {
@@ -169,6 +169,68 @@ impl CoverageDescriptor {
                 ),
             },
         }
+    }
+
+    /// Effect-class-aware variant of [`Self::claim_decision_for`].
+    ///
+    /// This refines only `PositiveExistence`: it first applies the same
+    /// descriptor-presence, schema, and claim-kind gate, and then, when that
+    /// gate would allow the positive claim, additionally checks that the
+    /// caller's `effect_class` is one this descriptor actually observes. A
+    /// positive claim for a class outside `observes` is downgraded to
+    /// `Degraded` rather than blanket-allowed, so callers cannot read a
+    /// present descriptor as permission for an effect class it never captured.
+    ///
+    /// `ExhaustiveSet` and `BoundedNegative` are unaffected: they already gate
+    /// on completeness and blind spots, which are class-independent. The
+    /// existing [`Self::claim_decision_for`] is left unchanged for callers that
+    /// scope the effect class themselves.
+    #[must_use]
+    pub fn claim_decision_for_effect(
+        descriptor: Option<&Self>,
+        claim_kind: CoverageClaimKind,
+        effect_class: &str,
+    ) -> CoverageClaimDecision {
+        let base = Self::claim_decision_for(descriptor, claim_kind);
+        if claim_kind != CoverageClaimKind::PositiveExistence {
+            return base;
+        }
+        // Only refine a positive claim the base gate already allowed; missing
+        // descriptor / schema mismatch are already blocked by `base`.
+        let Some(descriptor) = descriptor else {
+            return base;
+        };
+        if base.decision != ClaimGateDecision::Allowed {
+            return base;
+        }
+        if descriptor.observes_effect_class(effect_class) {
+            return base;
+        }
+        CoverageClaimDecision {
+            decision: ClaimGateDecision::Degraded,
+            rule: "coverage_descriptor_positive_class_not_observed".to_string(),
+            reason: format!(
+                "{} does not list the claimed effect class \"{}\" in observes: {}",
+                dimension_label(descriptor.dimension),
+                effect_class.trim(),
+                observes_summary(descriptor)
+            ),
+        }
+    }
+
+    /// Conservative containment check: does any `observes` entry mention this
+    /// effect class? `observes` carries free-text capture descriptions, so the
+    /// match is a case-insensitive substring rather than an enum equality. An
+    /// empty class never matches.
+    #[must_use]
+    pub fn observes_effect_class(&self, effect_class: &str) -> bool {
+        let needle = effect_class.trim().to_ascii_lowercase();
+        if needle.is_empty() {
+            return false;
+        }
+        self.observes
+            .iter()
+            .any(|observed| observed.to_ascii_lowercase().contains(&needle))
     }
 
     fn supports_complete_claims(&self) -> bool {
@@ -198,5 +260,13 @@ fn blind_spot_summary(descriptor: &CoverageDescriptor) -> String {
         "none declared".to_string()
     } else {
         descriptor.known_blind_spots.join("; ")
+    }
+}
+
+fn observes_summary(descriptor: &CoverageDescriptor) -> String {
+    if descriptor.observes.is_empty() {
+        "none declared".to_string()
+    } else {
+        descriptor.observes.join("; ")
     }
 }
