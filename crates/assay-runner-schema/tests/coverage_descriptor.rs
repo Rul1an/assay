@@ -78,6 +78,41 @@ fn missing_descriptor_blocks_all_claim_kinds() {
 }
 
 #[test]
+fn malformed_descriptor_schema_blocks_claim_decisions() {
+    let mut descriptor = CoverageDescriptor::filesystem_open_syscall_only();
+    descriptor.schema = "assay.runner.coverage_descriptor.v_next".to_string();
+
+    let decision = CoverageDescriptor::claim_decision_for(
+        Some(&descriptor),
+        CoverageClaimKind::PositiveExistence,
+    );
+
+    assert_eq!(decision.decision, ClaimGateDecision::Blocked);
+    assert_eq!(decision.rule, "coverage_descriptor_schema_mismatch");
+}
+
+#[test]
+fn non_full_completeness_blocks_absence_even_without_blindspot_text() {
+    let mut descriptor = CoverageDescriptor::filesystem_open_syscall_only();
+    descriptor.known_blind_spots.clear();
+
+    let exhaustive = descriptor.claim_decision(CoverageClaimKind::ExhaustiveSet);
+    assert_eq!(exhaustive.decision, ClaimGateDecision::Degraded);
+    assert_eq!(
+        exhaustive.rule,
+        "coverage_descriptor_degrades_exhaustive_claim"
+    );
+
+    let bounded_negative = descriptor.claim_decision(CoverageClaimKind::BoundedNegative);
+    assert_eq!(bounded_negative.decision, ClaimGateDecision::Blocked);
+    assert_eq!(
+        bounded_negative.rule,
+        "coverage_descriptor_blocks_absence_claim"
+    );
+    assert!(bounded_negative.reason.contains("open_syscall_only"));
+}
+
+#[test]
 fn network_connect_only_is_positive_but_not_an_exhaustive_peer_set() {
     let descriptor = CoverageDescriptor::network_connect_only();
 

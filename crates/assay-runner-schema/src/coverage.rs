@@ -111,6 +111,17 @@ impl CoverageDescriptor {
             };
         };
 
+        if descriptor.schema != COVERAGE_DESCRIPTOR_SCHEMA {
+            return CoverageClaimDecision {
+                decision: ClaimGateDecision::Blocked,
+                rule: "coverage_descriptor_schema_mismatch".to_string(),
+                reason: format!(
+                    "coverage descriptor schema must be {}, found {}",
+                    COVERAGE_DESCRIPTOR_SCHEMA, descriptor.schema
+                ),
+            };
+        }
+
         match claim_kind {
             CoverageClaimKind::PositiveExistence => CoverageClaimDecision {
                 decision: ClaimGateDecision::Allowed,
@@ -121,11 +132,12 @@ impl CoverageDescriptor {
                     dimension_label(descriptor.dimension)
                 ),
             },
-            CoverageClaimKind::ExhaustiveSet if descriptor.known_blind_spots.is_empty() => {
+            CoverageClaimKind::ExhaustiveSet if descriptor.supports_complete_claims() => {
                 CoverageClaimDecision {
                     decision: ClaimGateDecision::Allowed,
                     rule: "coverage_descriptor_allows_exhaustive_claim".to_string(),
-                    reason: "descriptor declares no blind spots for this dimension".to_string(),
+                    reason: "descriptor completeness is full and declares no blind spots"
+                        .to_string(),
                 }
             }
             CoverageClaimKind::ExhaustiveSet => CoverageClaimDecision {
@@ -138,23 +150,29 @@ impl CoverageDescriptor {
                     descriptor.known_blind_spots.join("; ")
                 ),
             },
-            CoverageClaimKind::BoundedNegative if descriptor.known_blind_spots.is_empty() => {
+            CoverageClaimKind::BoundedNegative if descriptor.supports_complete_claims() => {
                 CoverageClaimDecision {
                     decision: ClaimGateDecision::Allowed,
                     rule: "coverage_descriptor_allows_absence_claim".to_string(),
-                    reason: "descriptor declares no blind spots for this dimension".to_string(),
+                    reason: "descriptor completeness is full and declares no blind spots"
+                        .to_string(),
                 }
             }
             CoverageClaimKind::BoundedNegative => CoverageClaimDecision {
                 decision: ClaimGateDecision::Blocked,
                 rule: "coverage_descriptor_blocks_absence_claim".to_string(),
                 reason: format!(
-                    "{} blind spots can hide the requested absence: {}",
+                    "{} completeness is {}; blind spots can hide the requested absence: {}",
                     dimension_label(descriptor.dimension),
-                    descriptor.known_blind_spots.join("; ")
+                    completeness_label(descriptor.completeness),
+                    blind_spot_summary(descriptor)
                 ),
             },
         }
+    }
+
+    fn supports_complete_claims(&self) -> bool {
+        self.completeness == CoverageCompleteness::Full && self.known_blind_spots.is_empty()
     }
 }
 
@@ -172,5 +190,13 @@ fn completeness_label(completeness: CoverageCompleteness) -> &'static str {
         CoverageCompleteness::OpenSyscallOnly => "open_syscall_only",
         CoverageCompleteness::ConnectOnly => "connect_only",
         CoverageCompleteness::ExecOnly => "exec_only",
+    }
+}
+
+fn blind_spot_summary(descriptor: &CoverageDescriptor) -> String {
+    if descriptor.known_blind_spots.is_empty() {
+        "none declared".to_string()
+    } else {
+        descriptor.known_blind_spots.join("; ")
     }
 }

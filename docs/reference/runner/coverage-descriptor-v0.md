@@ -91,6 +91,13 @@ claims. A later descriptor-aware consumer slice can add finer
 effect-class matching and relevance filtering without weakening this
 initial gate.
 
+M1 also treats `completeness` as load-bearing, not decorative. Exhaustive
+and bounded-negative claims are allowed only when `completeness = full`
+and the descriptor declares no blind spots. A descriptor with
+`completeness = open_syscall_only`, `connect_only`, or `exec_only` still
+degrades or blocks those claim kinds even if its blindspot text is
+accidentally empty.
+
 This composes with `fidelity_verdict.v0`. Fidelity gates capture health
 such as drops and cgroup correlation. Coverage descriptors gate the
 dimension-specific ceiling even when fidelity is otherwise `clean`.
@@ -110,12 +117,13 @@ The helper emits a small `CoverageClaimDecision`:
 Initial rules:
 
 - Missing descriptor blocks coverage-aware side-effect claims.
+- Schema mismatch blocks coverage-aware side-effect claims.
 - Positive existence is `allowed` for a present descriptor, scoped by the
   caller to an effect class that descriptor observes.
-- Exhaustive set is `allowed` only when the descriptor has no known blind
-  spots; otherwise it is `degraded`.
-- Bounded negative is `allowed` only when the descriptor has no known
-  blind spots; otherwise it is `blocked`.
+- Exhaustive set is `allowed` only when `completeness = full` and the
+  descriptor has no known blind spots; otherwise it is `degraded`.
+- Bounded negative is `allowed` only when `completeness = full` and the
+  descriptor has no known blind spots; otherwise it is `blocked`.
 
 ## Non-Claims
 
