@@ -2052,10 +2052,6 @@ class KernelEventSchemaSidecarTests(unittest.TestCase):
             )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CoverageAnnotationTest(unittest.TestCase):
     """Additive coverage annotation derived from a drift report."""
 
@@ -2155,3 +2151,7 @@ class CoverageAnnotationTest(unittest.TestCase):
         }
         for cell in self.annotation["claim_cells"]:
             self.assertEqual(required - set(cell), set(), cell["claim_type"])
+
+
+if __name__ == "__main__":
+    unittest.main()

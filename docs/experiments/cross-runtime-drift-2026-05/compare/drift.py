@@ -1562,6 +1562,15 @@ def _coverage_blind_spot_summary(descriptor: dict[str, Any]) -> str:
     return "; ".join(spots) if spots else "none declared"
 
 
+def _coverage_supports_complete(descriptor: dict[str, Any]) -> bool:
+    # Mirrors coverage.rs supports_complete_claims: completeness == full AND no
+    # blind spots. The seed descriptors never satisfy this; the branch is kept
+    # so the annotation tracks the gate if a descriptor ever becomes full.
+    return descriptor.get("completeness") == "full" and not descriptor.get(
+        "known_blind_spots"
+    )
+
+
 def coverage_annotation_for_report(report: dict[str, Any]) -> dict[str, Any]:
     """Derive a coverage annotation from a runtime_drift.v0.2 report.
 
@@ -1628,23 +1637,44 @@ def coverage_annotation_for_report(report: dict[str, Any]) -> dict[str, Any]:
                     ],
                 }
             )
-            claim_cells.append(
-                {
-                    "schema": COVERAGE_CLAIM_CELL_SCHEMA,
-                    "claim_type": f"exhaustive_{dimension}_equality",
-                    "artifact_role": "joined_artifacts",
-                    "claim_strength": "weak",
-                    "claim_basis": "derived",
-                    "evidence_refs": ["runtime-drift-report.json"],
-                    "notes": [
-                        f"derived by {COVERAGE_GATE_RULE}: exhaustive {effect} "
-                        f"equality requires completeness=full with no blind spots; "
-                        f"completeness is {descriptor['completeness']}; blind "
-                        f"spots: {_coverage_blind_spot_summary(descriptor)}"
-                    ],
-                    "non_claims": [f"does_not_prove_complete_{effect}_set"],
-                }
-            )
+            if _coverage_supports_complete(descriptor):
+                # Gate allows the exhaustive set; still capped at partial here
+                # because the drift report carries no per-arm capture health.
+                claim_cells.append(
+                    {
+                        "schema": COVERAGE_CLAIM_CELL_SCHEMA,
+                        "claim_type": f"exhaustive_{dimension}_equality",
+                        "artifact_role": "joined_artifacts",
+                        "claim_strength": "partial",
+                        "claim_basis": "derived",
+                        "evidence_refs": ["runtime-drift-report.json"],
+                        "notes": [
+                            f"derived by {COVERAGE_GATE_RULE}: completeness is full "
+                            f"with no declared blind spots, so exhaustive {effect} "
+                            f"equality is allowed; capped at partial because the "
+                            f"drift report does not surface per-arm health"
+                        ],
+                        "non_claims": ["strong_only_within_cgroup_scope"],
+                    }
+                )
+            else:
+                claim_cells.append(
+                    {
+                        "schema": COVERAGE_CLAIM_CELL_SCHEMA,
+                        "claim_type": f"exhaustive_{dimension}_equality",
+                        "artifact_role": "joined_artifacts",
+                        "claim_strength": "weak",
+                        "claim_basis": "derived",
+                        "evidence_refs": ["runtime-drift-report.json"],
+                        "notes": [
+                            f"derived by {COVERAGE_GATE_RULE}: exhaustive {effect} "
+                            f"equality requires completeness=full with no blind spots; "
+                            f"completeness is {descriptor['completeness']}; blind "
+                            f"spots: {_coverage_blind_spot_summary(descriptor)}"
+                        ],
+                        "non_claims": [f"does_not_prove_complete_{effect}_set"],
+                    }
+                )
 
         # Bounded negative is always blocked here: the drift report carries no
         # per-arm capture health, and the seed descriptors declare blind spots.
