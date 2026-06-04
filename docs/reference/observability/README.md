@@ -15,6 +15,7 @@ governance.
 |---|---|
 | [`claim-boundary-positioning.md`](claim-boundary-positioning.md) | Post-arc positioning and public selection discipline for claim-boundary and evidence-fidelity work. |
 | [`claim-classes-v0.md`](claim-classes-v0.md) | Vocabulary for saying what a trace, archive, or joined artifact can honestly claim. |
+| [`claim-semantics-overview.md`](claim-semantics-overview.md) | How the claim-class cell, the Runner fidelity verdict, and the coverage descriptor compose into one per-dimension claim-cell decision. |
 | [`join-contract-v0.md`](join-contract-v0.md) | Vocabulary for joining trace, SDK, policy, and measured-run evidence without silently upgrading weak keys. |
 | [`observability-fidelity-calibration.md`](observability-fidelity-calibration.md) | Reference note for reading requested-vs-observed signal retention before timing, throughput, or absence claims. |
 
