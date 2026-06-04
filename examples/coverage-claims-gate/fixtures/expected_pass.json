@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "claim": "positive:filesystem_paths_touched",
+      "detail": "measured positive is partial",
+      "permitted": true
+    }
+  ]
+}

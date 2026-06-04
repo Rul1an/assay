@@ -1,0 +1,6 @@
+[
+  "positive:filesystem_paths_touched",
+  "positive:network_endpoints",
+  "exhaustive:filesystem_paths_touched",
+  "bounded_negative:filesystem_paths_touched"
+]
