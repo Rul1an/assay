@@ -1596,14 +1596,17 @@ def fidelity_verdict(health: Any) -> str:
         readers may gate per-binding claims differently).
       - "clipped": measurement exists but is otherwise degraded (drops / partial
         kernel capture).
-    A non-dict / empty record is treated as "not_applicable". An
+    A non-dict / empty record is "failed": a record that is present but invalid.
+    "not_applicable" is reserved for *valid* records that simply have no measured
+    kernel surface (non-Linux / kernel_layer=absent). The "no record supplied"
+    case is handled by the caller (None -> conservative fallback), not here. An
     out-of-contract record (bad enum, or a violated cross-field invariant such
     as non-Linux without kernel_layer=absent, or ringbuf_drops>0 without
-    kernel_layer=partial_ringbuf_drops) is "failed" per fidelity_verdict.v0,
-    so an invalid record can never be misread as clean/clipped/not_applicable.
+    kernel_layer=partial_ringbuf_drops) is also "failed", so an invalid record
+    can never be misread as clean/clipped/not_applicable.
     """
     if not isinstance(health, dict) or not health:
-        return "not_applicable"
+        return "failed"
     # Out-of-contract records -> failed (checked before any other verdict).
     if health.get("schema") != "assay.runner.observation_health.v0":
         return "failed"
@@ -1647,21 +1650,26 @@ def _combined_positive_strength(
 ) -> tuple[str, str]:
     """Cross-arm strength for a measured positive drift claim, with a reason.
 
-    Both arms clean -> strong. Any arm not_applicable/failed -> absent (no
-    measured surface to back the cross-arm positive). Otherwise -> partial.
-    Returns (strength, reason). When either health record is missing, falls back
-    to the conservative "partial" used before per-arm health was wired in.
+    Evidence-first: any *supplied* arm that classifies as not_applicable/failed
+    blocks the cross-arm positive (-> absent), even if the other arm's health is
+    missing, because there is positive evidence of no valid measured surface.
+    If no supplied arm is absent-class: both arms clean -> strong; a missing arm
+    -> conservative partial; otherwise (degraded but valid) -> partial.
+    Returns (strength, reason).
     """
-    if health_a is None or health_b is None:
-        return "partial", (
-            "per-arm observation health not supplied; positive strength capped "
-            "at partial"
-        )
-    va, vb = fidelity_verdict(health_a), fidelity_verdict(health_b)
-    if va in ("not_applicable", "failed") or vb in ("not_applicable", "failed"):
+    va = fidelity_verdict(health_a) if health_a is not None else None
+    vb = fidelity_verdict(health_b) if health_b is not None else None
+    present = [v for v in (va, vb) if v is not None]
+
+    if any(v in ("not_applicable", "failed") for v in present):
         return "absent", (
             f"measured positive blocked: arm fidelity a={va}, b={vb}; at least "
-            "one arm has no valid measured kernel surface"
+            "one supplied arm has no valid measured kernel surface"
+        )
+    if health_a is None or health_b is None:
+        return "partial", (
+            f"per-arm observation health not supplied for at least one arm "
+            f"(a={va}, b={vb}); positive strength capped at partial"
         )
     if va == "clean" and vb == "clean":
         return "strong", "both arms clean (fidelity_verdict=clean)"

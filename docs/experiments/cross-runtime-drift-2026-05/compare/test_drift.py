@@ -2219,7 +2219,8 @@ class FidelityAndEnforcementTest(unittest.TestCase):
         self.assertEqual(drift.fidelity_verdict(self.CLIPPED), "clipped")
         self.assertEqual(drift.fidelity_verdict(self.NOT_APPLICABLE), "not_applicable")
         self.assertEqual(drift.fidelity_verdict(self.FAILED), "failed")
-        self.assertEqual(drift.fidelity_verdict({}), "not_applicable")
+        # empty/invalid record is a present-but-invalid record -> failed
+        self.assertEqual(drift.fidelity_verdict({}), "failed")
 
     def test_both_clean_makes_positive_strong(self):
         ann = drift.coverage_annotation_for_report(
@@ -2398,6 +2399,22 @@ class FidelityAndEnforcementTest(unittest.TestCase):
             "ringbuf_drops": 0, "cgroup_correlation": "partial",
         }
         self.assertEqual(drift.fidelity_verdict(only_corr), "correlation_partial")
+
+    def test_one_arm_missing_health_paths(self):
+        # both missing -> conservative partial
+        ann = drift.coverage_annotation_for_report(self.REPORT)
+        self.assertEqual(self._net_cell(ann)["claim_strength"], "partial")
+        # one arm clean, other missing -> partial (cannot be strong; not absent)
+        ann = drift.coverage_annotation_for_report(self.REPORT, health_a=self.CLEAN)
+        self.assertEqual(self._net_cell(ann)["claim_strength"], "partial")
+        # one arm not_applicable, other missing -> absent (evidence of no surface)
+        ann = drift.coverage_annotation_for_report(
+            self.REPORT, health_b=self.NOT_APPLICABLE
+        )
+        self.assertEqual(self._net_cell(ann)["claim_strength"], "absent")
+        # one arm failed, other missing -> absent
+        ann = drift.coverage_annotation_for_report(self.REPORT, health_a=self.FAILED)
+        self.assertEqual(self._net_cell(ann)["claim_strength"], "absent")
 
 
 
