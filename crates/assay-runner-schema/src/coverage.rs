@@ -125,8 +125,7 @@ impl CoverageDescriptor {
                 CoverageClaimDecision {
                     decision: ClaimGateDecision::Allowed,
                     rule: "coverage_descriptor_allows_exhaustive_claim".to_string(),
-                    reason: "descriptor declares no relevant blind spots for this dimension"
-                        .to_string(),
+                    reason: "descriptor declares no blind spots for this dimension".to_string(),
                 }
             }
             CoverageClaimKind::ExhaustiveSet => CoverageClaimDecision {
@@ -143,8 +142,7 @@ impl CoverageDescriptor {
                 CoverageClaimDecision {
                     decision: ClaimGateDecision::Allowed,
                     rule: "coverage_descriptor_allows_absence_claim".to_string(),
-                    reason: "descriptor declares no relevant blind spots for this dimension"
-                        .to_string(),
+                    reason: "descriptor declares no blind spots for this dimension".to_string(),
                 }
             }
             CoverageClaimKind::BoundedNegative => CoverageClaimDecision {

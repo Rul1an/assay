@@ -62,7 +62,7 @@ fn partial_filesystem_coverage_allows_positive_but_blocks_absence() {
 }
 
 #[test]
-fn missing_descriptor_blocks_exhaustive_and_bounded_negative_claims() {
+fn missing_descriptor_blocks_all_claim_kinds() {
     assert_eq!(
         CoverageDescriptor::claim_decision_for(None, CoverageClaimKind::PositiveExistence).decision,
         ClaimGateDecision::Blocked

@@ -77,9 +77,19 @@ The descriptor gate evaluates the requested claim kind:
 
 | Claim kind | Example | Descriptor rule |
 |---|---|---|
-| `positive_existence` | "This path open happened." | Allowed when the method observes that positive event class. |
-| `exhaustive_set` | "These are all paths or peers." | Degraded when relevant blind spots are present. |
-| `bounded_negative` | "No unexpected egress happened." | Blocked when relevant blind spots are present. |
+| `positive_existence` | "This path open happened." | Allowed for the caller-scoped effect class when a descriptor is present. |
+| `exhaustive_set` | "These are all paths or peers." | Degraded when any blind spots are declared. |
+| `bounded_negative` | "No unexpected egress happened." | Blocked when any blind spots are declared. |
+
+M1 is intentionally conservative. The helper does not yet inspect whether
+a particular claimed effect class appears in `observes`, and it does not
+filter blind spots by per-claim relevance. Callers are responsible for
+selecting the descriptor that matches the effect dimension and effect
+class they are interpreting. If a descriptor declares any blind spot, M1
+treats that blind spot as relevant for exhaustive and bounded-negative
+claims. A later descriptor-aware consumer slice can add finer
+effect-class matching and relevance filtering without weakening this
+initial gate.
 
 This composes with `fidelity_verdict.v0`. Fidelity gates capture health
 such as drops and cgroup correlation. Coverage descriptors gate the
@@ -100,7 +110,8 @@ The helper emits a small `CoverageClaimDecision`:
 Initial rules:
 
 - Missing descriptor blocks coverage-aware side-effect claims.
-- Positive existence is `allowed` for a present descriptor.
+- Positive existence is `allowed` for a present descriptor, scoped by the
+  caller to an effect class that descriptor observes.
 - Exhaustive set is `allowed` only when the descriptor has no known blind
   spots; otherwise it is `degraded`.
 - Bounded negative is `allowed` only when the descriptor has no known
