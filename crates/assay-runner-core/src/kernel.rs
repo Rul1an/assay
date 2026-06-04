@@ -620,14 +620,16 @@ fn kernel_capture_note(input: KernelCaptureNote) -> String {
     } = input;
     let network_protocol_coverage = network_protocol_coverage_label(network_protocol_coverage);
 
-    // Surfaced only when a datagram send with no recoverable peer was actually
-    // observed, so runs that never hit the connected-datagram blind spot produce
-    // a byte-identical note (the load-bearing invariant for existing archives).
-    let datagram_no_peer =
+    // Surfaced only when a sendto/sendmsg with no recoverable peer address was
+    // actually observed, so runs that never hit this path produce a
+    // byte-identical note (the load-bearing invariant for existing archives).
+    // Socket type is not classified here, so this counts any address-less send
+    // (including connected stream sends), not datagram-specifically.
+    let send_no_peer =
         tracepoint_hook_breakdown.sendto_no_peer + tracepoint_hook_breakdown.sendmsg_no_peer;
-    let no_peer_suffix = if datagram_no_peer > 0 {
+    let no_peer_suffix = if send_no_peer > 0 {
         format!(
-            " datagram_no_recoverable_peer=sendto:{} sendmsg:{}",
+            " send_no_recoverable_peer=sendto:{} sendmsg:{}",
             tracepoint_hook_breakdown.sendto_no_peer, tracepoint_hook_breakdown.sendmsg_no_peer
         )
     } else {
@@ -1039,7 +1041,7 @@ mod tests {
     }
 
     #[test]
-    fn datagram_no_recoverable_peer_count_surfaces_in_note() {
+    fn send_no_recoverable_peer_count_surfaces_in_note() {
         let before = MonitorStatsSnapshot::default();
         let after = MonitorStatsSnapshot {
             sendto_no_peer: 2,
@@ -1058,13 +1060,13 @@ mod tests {
             .observation_health
             .notes
             .iter()
-            .any(|note| note.contains("datagram_no_recoverable_peer=sendto:2 sendmsg:1")));
+            .any(|note| note.contains("send_no_recoverable_peer=sendto:2 sendmsg:1")));
     }
 
     #[test]
     fn no_recoverable_peer_sends_do_not_upgrade_network_protocol_coverage() {
-        // Unrecoverable-peer datagram sends must NOT claim a datagram peer was
-        // observed — that is precisely the blind spot. Coverage stays as-is.
+        // Address-less sends must NOT claim a datagram peer was observed — the
+        // peer is unrecoverable and the socket type is unknown. Coverage stays.
         let before = MonitorStatsSnapshot::default();
         let after = MonitorStatsSnapshot {
             sendto_no_peer: 5,
@@ -1090,8 +1092,8 @@ mod tests {
 
     #[test]
     fn zero_no_peer_count_leaves_note_byte_identical() {
-        // The invariant: a run with no unrecoverable-peer datagram sends must not
-        // gain the suffix, so existing clean archives read identically.
+        // The invariant: a run with no address-less sends must not gain the
+        // suffix, so existing clean archives read identically.
         let snap = MonitorStatsSnapshot::default();
         let capture = KernelLayerBuilder::new("run_001")
             .unwrap()
@@ -1105,7 +1107,7 @@ mod tests {
             .observation_health
             .notes
             .iter()
-            .all(|note| !note.contains("datagram_no_recoverable_peer")));
+            .all(|note| !note.contains("send_no_recoverable_peer")));
     }
 
     #[test]
