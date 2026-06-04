@@ -2054,3 +2054,104 @@ class KernelEventSchemaSidecarTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CoverageAnnotationTest(unittest.TestCase):
+    """Additive coverage annotation derived from a drift report."""
+
+    REPORT = {
+        "schema": "assay.runner.runtime_drift.v0.2",
+        "rows": [
+            {
+                "dimension": "filesystem_paths_touched",
+                "classification": "runtime-induced",
+                "only_in_a": ["read:/tmp/a"],
+                "only_in_b": [],
+                "in_both": ["read:/etc/hosts"],
+            },
+            {
+                "dimension": "network_endpoints",
+                "classification": "task-induced",
+                "only_in_a": [],
+                "only_in_b": [],
+                "in_both": ["api.example.com:443"],
+            },
+            {
+                "dimension": "process_execs",
+                "classification": "inconclusive",
+                "only_in_a": [],
+                "only_in_b": [],
+                "in_both": [],
+            },
+            {
+                "dimension": "sdk_tool_events",
+                "classification": "task-induced",
+                "only_in_a": [],
+                "only_in_b": [],
+                "in_both": ["search"],
+            },
+        ],
+    }
+
+    def setUp(self) -> None:
+        self.annotation = drift.coverage_annotation_for_report(self.REPORT)
+
+    def _cells(self) -> dict:
+        return {c["claim_type"]: c for c in self.annotation["claim_cells"]}
+
+    def test_schema_and_source(self) -> None:
+        self.assertEqual(
+            self.annotation["schema"], "assay.coverage_aware_drift.annotation.v0"
+        )
+        self.assertEqual(
+            self.annotation["source_report_schema"],
+            "assay.runner.runtime_drift.v0.2",
+        )
+
+    def test_positive_is_partial_measured_exhaustive_weak_derived(self) -> None:
+        cells = self._cells()
+        fs = cells["measured_filesystem_paths_touched_drift"]
+        self.assertEqual(fs["claim_strength"], "partial")
+        self.assertEqual(fs["claim_basis"], "measured")
+        net_ex = cells["exhaustive_network_endpoints_equality"]
+        self.assertEqual(net_ex["claim_strength"], "weak")
+        self.assertEqual(net_ex["claim_basis"], "derived")
+
+    def test_bounded_negative_blocked_for_all_measured_dims(self) -> None:
+        blocked = {b["requested_claim"] for b in self.annotation["blocked_claims"]}
+        self.assertIn("no_filesystem_paths_touched_effect_beyond_observed", blocked)
+        self.assertIn("no_network_endpoints_effect_beyond_observed", blocked)
+        self.assertIn("no_process_execs_effect_beyond_observed", blocked)
+
+    def test_empty_dimension_has_no_positive_or_exhaustive_cell(self) -> None:
+        cells = self._cells()
+        self.assertNotIn("measured_process_execs_drift", cells)
+        self.assertNotIn("exhaustive_process_execs_equality", cells)
+
+    def test_reported_dim_is_reported_basis_no_gate(self) -> None:
+        cells = self._cells()
+        self.assertEqual(cells["reported_sdk_tool_events"]["claim_basis"], "reported")
+        self.assertFalse(
+            any(
+                "sdk_tool_events" in b["requested_claim"]
+                for b in self.annotation["blocked_claims"]
+            )
+        )
+
+    def test_task_induced_caveat_recorded(self) -> None:
+        dims = {c["dimension"] for c in self.annotation["classification_caveats"]}
+        self.assertIn("network_endpoints", dims)
+
+    def test_all_cells_have_required_fields(self) -> None:
+        required = {
+            "schema",
+            "claim_type",
+            "artifact_role",
+            "claim_strength",
+            "claim_basis",
+            "evidence_refs",
+            "notes",
+            "non_claims",
+        }
+        for cell in self.annotation["claim_cells"]:
+            self.assertEqual(required - set(cell), set(), cell["claim_type"])
