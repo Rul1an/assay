@@ -198,7 +198,16 @@ def build_report(archive: dict[str, Any]) -> dict[str, Any]:
     blocked_claims: list[dict[str, Any]] = []
 
     for dimension, descriptor in SEED_DESCRIPTORS.items():
-        observed = surface.get(SURFACE_FIELD[dimension]) or []
+        observed = surface.get(SURFACE_FIELD[dimension])
+        if observed is None:
+            continue
+        if not isinstance(observed, list) or any(
+            not isinstance(value, str) or not value for value in observed
+        ):
+            raise ValueError(
+                f"capability_surface.{SURFACE_FIELD[dimension]} must be a list of "
+                "non-empty strings"
+            )
         if not observed:
             continue
 
@@ -217,9 +226,9 @@ def build_report(archive: dict[str, Any]) -> dict[str, Any]:
                     "claim_basis": "measured",
                     "evidence_refs": [],
                     "notes": [
-                        "measured positive blocked by fidelity verdict: no measured "
-                        "kernel-effect surface (non-Linux, kernel layer absent, or "
-                        "cgroup correlation failed)"
+                        "measured positive blocked on the not_applicable path: no "
+                        "measured kernel-effect surface (non-Linux, or kernel layer "
+                        "absent)"
                     ],
                     "non_claims": ["does_not_prove_tool_intent"],
                 }

@@ -145,6 +145,27 @@ class CoverageAwareReportTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.m.build_report(archive)
 
+    def test_malformed_surface_field_is_rejected(self):
+        # A non-list (or empty-string-containing) capability_surface field is
+        # refused rather than interpreted as observed effects.
+        archive = {
+            "observation_health": {
+                "schema": "assay.runner.observation_health.v0",
+                "run_id": "run_bad_surface",
+                "platform": "linux",
+                "kernel_layer": "complete",
+                "ringbuf_drops": 0,
+                "cgroup_correlation": "clean",
+            },
+            "capability_surface": {
+                "schema": "assay.runner.capability_surface.v0",
+                "run_id": "run_bad_surface",
+                "filesystem_paths": "/etc/hosts",
+            },
+        }
+        with self.assertRaises(ValueError):
+            self.m.build_report(archive)
+
     def test_clean_report_matches_frozen_fixture(self):
         # Golden test: the generator output must equal the frozen expected
         # report, so the fixture and generator cannot drift apart silently.
