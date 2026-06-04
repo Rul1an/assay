@@ -1,0 +1,35 @@
+{
+  "schema": "assay.runner.runtime_drift.v0.2",
+  "archive_a": {"path": "runs/arm-a", "manifest_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+  "archive_b": {"path": "runs/arm-b", "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"},
+  "rows": [
+    {
+      "dimension": "filesystem_paths_touched",
+      "classification": "runtime-induced",
+      "only_in_a": ["read:/tmp/run-a/input.txt", "read:/tmp/run-a/cache"],
+      "only_in_b": ["read:/tmp/run-b/input.txt"],
+      "in_both": ["read:/etc/hosts"]
+    },
+    {
+      "dimension": "network_endpoints",
+      "classification": "task-induced",
+      "only_in_a": [],
+      "only_in_b": [],
+      "in_both": ["api.example.com:443"]
+    },
+    {
+      "dimension": "process_execs",
+      "classification": "inconclusive",
+      "only_in_a": [],
+      "only_in_b": [],
+      "in_both": []
+    },
+    {
+      "dimension": "sdk_tool_events",
+      "classification": "task-induced",
+      "only_in_a": [],
+      "only_in_b": [],
+      "in_both": ["search", "fetch"]
+    }
+  ]
+}
