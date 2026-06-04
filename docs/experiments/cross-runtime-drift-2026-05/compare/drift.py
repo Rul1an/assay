@@ -106,7 +106,11 @@ RUNTIME_NOISE_TAXONOMY_SCHEMA = "assay.runner.runtime_noise_taxonomy.v0"
 COVERAGE_ANNOTATION_SCHEMA = "assay.coverage_aware_drift.annotation.v0"
 COVERAGE_CLAIM_CELL_SCHEMA = "assay.observability.claim_class_cell.v0"
 COVERAGE_GATE_RULE = "coverage_descriptor.v0 + fidelity_verdict.v0"
-# Seed coverage descriptors per effect dimension, mirroring coverage.rs.
+# Minimal coverage-descriptor fragments per effect dimension: only the two
+# fields the annotation gate reads (completeness + known_blind_spots), mirroring
+# the ceiling logic in crates/assay-runner-schema/src/coverage.rs. This is NOT
+# the full CoverageDescriptor shape (which also carries schema, dimension,
+# method, and observes) — just the fragment needed to gate exhaustive/negative.
 COVERAGE_SEED_DESCRIPTORS: dict[str, dict[str, Any]] = {
     "filesystem": {
         "completeness": "open_syscall_only",
@@ -1563,11 +1567,17 @@ def _coverage_blind_spot_summary(descriptor: dict[str, Any]) -> str:
 
 
 def _coverage_supports_complete(descriptor: dict[str, Any]) -> bool:
-    # Mirrors coverage.rs supports_complete_claims: completeness == full AND no
-    # blind spots. The seed descriptors never satisfy this; the branch is kept
-    # so the annotation tracks the gate if a descriptor ever becomes full.
-    return descriptor.get("completeness") == "full" and not descriptor.get(
-        "known_blind_spots"
+    # Mirrors coverage.rs supports_complete_claims: completeness == full AND an
+    # explicitly empty blind-spot list. A missing/None known_blind_spots is
+    # treated conservatively as unknown -> does NOT support complete claims, so
+    # a descriptor cannot accidentally unlock complete claims by omitting the
+    # field. The seed descriptors never satisfy this; the branch is kept so the
+    # annotation tracks the gate if a descriptor ever becomes full.
+    spots = descriptor.get("known_blind_spots")
+    return (
+        descriptor.get("completeness") == "full"
+        and isinstance(spots, list)
+        and not spots
     )
 
 
