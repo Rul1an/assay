@@ -89,7 +89,11 @@ class CoverageAwareReportTest(unittest.TestCase):
                 "ringbuf_drops": 0,
                 "cgroup_correlation": "not_applicable",
             },
-            "capability_surface": {"filesystem_paths": ["read:/etc/hosts"]},
+            "capability_surface": {
+                "schema": "assay.runner.capability_surface.v0",
+                "run_id": "run_blocked",
+                "filesystem_paths": ["/etc/hosts"],
+            },
         }
         report = self.m.build_report(archive)
         fs = next(
@@ -99,6 +103,25 @@ class CoverageAwareReportTest(unittest.TestCase):
         self.assertEqual(fs["claim_strength"], "absent")
         self.assertEqual(fs["artifact_role"], "none")
         self.assertEqual(fs["evidence_refs"], [])
+
+    def test_mismatched_run_id_is_rejected(self):
+        archive = {
+            "observation_health": {
+                "schema": "assay.runner.observation_health.v0",
+                "run_id": "run_a",
+                "platform": "linux",
+                "kernel_layer": "complete",
+                "ringbuf_drops": 0,
+                "cgroup_correlation": "clean",
+            },
+            "capability_surface": {
+                "schema": "assay.runner.capability_surface.v0",
+                "run_id": "run_b",
+                "filesystem_paths": ["/etc/hosts"],
+            },
+        }
+        with self.assertRaises(ValueError):
+            self.m.build_report(archive)
 
     def test_clean_report_matches_frozen_fixture(self):
         # Golden test: the generator output must equal the frozen expected

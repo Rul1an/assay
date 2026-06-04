@@ -117,6 +117,10 @@ def _positive_verdict(health: dict[str, Any]) -> str:
     return "partial"
 
 
+OBS_HEALTH_SCHEMA = "assay.runner.observation_health.v0"
+CAP_SURFACE_SCHEMA = "assay.runner.capability_surface.v0"
+
+
 def build_report(archive: dict[str, Any]) -> dict[str, Any]:
     health = archive.get("observation_health")
     surface = archive.get("capability_surface")
@@ -125,7 +129,27 @@ def build_report(archive: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(surface, dict):
         raise ValueError("archive: capability_surface object is required")
 
-    run_id = health.get("run_id") or surface.get("run_id") or "unknown"
+    # Validate both records before interpreting them. fidelity_verdict.v0 blocks
+    # measured claims on an invalid health record, so a sample that derives
+    # claims must refuse malformed or mismatched inputs rather than emit cells.
+    if health.get("schema") != OBS_HEALTH_SCHEMA:
+        raise ValueError(
+            f"observation_health schema must be {OBS_HEALTH_SCHEMA}"
+        )
+    if surface.get("schema") != CAP_SURFACE_SCHEMA:
+        raise ValueError(
+            f"capability_surface schema must be {CAP_SURFACE_SCHEMA}"
+        )
+    health_run = health.get("run_id")
+    surface_run = surface.get("run_id")
+    if not health_run or not surface_run:
+        raise ValueError("both records must carry a run_id")
+    if health_run != surface_run:
+        raise ValueError(
+            f"run_id mismatch: health={health_run!r} surface={surface_run!r}"
+        )
+
+    run_id = health_run
     capture_clean = _capture_is_clean(health)
     claim_cells: list[dict[str, Any]] = []
     blocked_claims: list[dict[str, Any]] = []
