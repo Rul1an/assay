@@ -110,6 +110,20 @@ python3 "$REPO_ROOT/docs/experiments/cross-runtime-drift-2026-05/compare/drift.p
 # effect claim. The canonical gate is crates/assay-runner-schema/src/coverage.rs;
 # see also examples/coverage-aware-drift-annotation/.
 #   ... --coverage-annotation-out /tmp/drift.coverage-annotation.json
+#
+# Positive measured drift strength is derived from per-arm observation_health
+# (already parsed from both archives): strong only when BOTH arms are clean,
+# partial when capture is degraded, absent when either arm has no valid measured
+# surface (fidelity_verdict not_applicable/failed). The drift report contract is
+# not changed.
+#
+# Enforcement: --assert-claim TYPE:DIMENSION makes the honesty layer
+# afdwingbaar. The comparator exits 1 if the coverage gate does not permit an
+# asserted claim (e.g. a bounded-negative or a blind-spot-degraded exhaustive
+# claim), and 0 when all asserted claims are permitted. TYPE is positive,
+# exhaustive, or bounded_negative.
+#   ... --assert-claim bounded_negative:network_endpoints   # exits 1 (blocked)
+#   ... --assert-claim positive:filesystem_paths_touched    # exits 0 if observed+clean
 
 # Tests (no API keys required):
 python3 -m unittest discover \
