@@ -41,8 +41,8 @@ gates below decide where on those axes a given effect dimension lands.
 ## Gate one: capture health (fidelity verdict)
 
 The first gate is run-wide and dimension-independent. It reads one
-`assay.runner.observation_health.v0` record and produces a
-`fidelity_verdict.v0`:
+`assay.runner.observation_health.v0` record and derives an
+`assay.runner.fidelity_verdict.v0` from it:
 
 - `clean` — kernel capture present, no ring-buffer drops, cgroup
   correlation clean. Measured positive and bounded-negative claims may be
@@ -62,8 +62,8 @@ method cannot see io_uring.
 
 ## Gate two: per-dimension coverage (coverage descriptor)
 
-The second gate is dimension-specific. For each effect dimension a
-`coverage_descriptor.v0` names the capture method, the positive effect
+The second gate is dimension-specific. For each effect dimension an
+`assay.runner.coverage_descriptor.v0` names the capture method, the positive effect
 classes it observes, its `known_blind_spots`, and a `completeness`
 ceiling. The descriptor gate evaluates the requested claim kind:
 
