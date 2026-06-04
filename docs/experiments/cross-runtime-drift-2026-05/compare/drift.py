@@ -1633,6 +1633,10 @@ def fidelity_verdict(health: Any) -> str:
         return "not_applicable"
     if kernel == "complete" and drops == 0 and correlation == "clean":
         return "clean"
+    # Clipping (ring-buffer drops / partial kernel capture) takes precedence over
+    # correlation_partial, matching fidelity_verdict.v0 ordering.
+    if drops > 0 or kernel == "partial_ringbuf_drops":
+        return "clipped"
     if correlation == "partial":
         return "correlation_partial"
     return "clipped"

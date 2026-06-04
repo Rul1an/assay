@@ -2376,6 +2376,29 @@ class FidelityAndEnforcementTest(unittest.TestCase):
         }
         self.assertEqual(drift.fidelity_verdict(no_platform), "failed")
 
+    def test_clipping_takes_precedence_over_correlation_partial(self):
+        # both clipped (drops>0 / partial kernel) AND correlation=partial -> clipped
+        both = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "r",
+            "platform": "linux", "kernel_layer": "partial_ringbuf_drops",
+            "ringbuf_drops": 5, "cgroup_correlation": "partial",
+        }
+        self.assertEqual(drift.fidelity_verdict(both), "clipped")
+        # partial kernel, zero drops, partial correlation -> still clipped (partial kernel)
+        partial_kernel = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "s",
+            "platform": "linux", "kernel_layer": "partial_ringbuf_drops",
+            "ringbuf_drops": 0, "cgroup_correlation": "partial",
+        }
+        self.assertEqual(drift.fidelity_verdict(partial_kernel), "clipped")
+        # complete kernel, zero drops, partial correlation -> correlation_partial
+        only_corr = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "t",
+            "platform": "linux", "kernel_layer": "complete",
+            "ringbuf_drops": 0, "cgroup_correlation": "partial",
+        }
+        self.assertEqual(drift.fidelity_verdict(only_corr), "correlation_partial")
+
 
 
 if __name__ == "__main__":
