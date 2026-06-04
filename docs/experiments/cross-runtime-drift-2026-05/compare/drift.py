@@ -1755,6 +1755,7 @@ def coverage_annotation_for_report(
     classification_caveats: list[dict[str, Any]] = []
     # Cross-arm fidelity drives measured positive strength (dimension-independent).
     pos_strength, pos_reason = _combined_positive_strength(health_a, health_b)
+    pos_derived = health_a is not None and health_b is not None
 
     for row in rows:
         dimension = row.get("dimension")
@@ -1814,7 +1815,11 @@ def coverage_annotation_for_report(
                         "claim_strength": pos_strength,
                         "claim_basis": "measured",
                         "evidence_refs": ["runtime-drift-report.json"],
-                        "notes": [f"positive strength derived from {COVERAGE_GATE_RULE}: {pos_reason}"],
+                        "notes": [
+                            f"positive strength derived from {COVERAGE_GATE_RULE}: {pos_reason}"
+                            if pos_derived
+                            else pos_reason
+                        ],
                         "non_claims": [
                             "does_not_prove_tool_intent",
                             "does_not_prove_complete_set",
@@ -2233,7 +2238,7 @@ def main(argv: list[str] | None = None) -> int:
             "coverage gate does not permit it. TYPE is positive, exhaustive, or "
             "bounded_negative; DIMENSION is a drift dimension (e.g. "
             "network_endpoints). Repeatable. Makes the honesty layer "
-            "afdwingbaar rather than only documentable."
+            "enforceable rather than only documentable."
         ),
     )
     parser.add_argument("--workflow-url", help="GitHub Actions run URL, if any.")
