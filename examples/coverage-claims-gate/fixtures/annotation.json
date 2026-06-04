@@ -1,0 +1,69 @@
+{
+  "schema": "assay.coverage_aware_drift.annotation.v0",
+  "source_report_schema": "assay.runner.runtime_drift.v0.2",
+  "claim_cells": [
+    {
+      "schema": "assay.observability.claim_class_cell.v0",
+      "claim_type": "measured_filesystem_paths_touched_drift",
+      "artifact_role": "joined_artifacts",
+      "claim_strength": "partial",
+      "claim_basis": "measured",
+      "evidence_refs": ["runtime-drift-report.json"],
+      "notes": [
+        "positive strength derived from coverage_descriptor.v0 gate: one arm reported clipped capture health"
+      ],
+      "non_claims": [
+        "does_not_prove_tool_intent",
+        "does_not_prove_complete_set"
+      ]
+    },
+    {
+      "schema": "assay.observability.claim_class_cell.v0",
+      "claim_type": "exhaustive_filesystem_paths_touched_equality",
+      "artifact_role": "joined_artifacts",
+      "claim_strength": "weak",
+      "claim_basis": "derived",
+      "evidence_refs": ["runtime-drift-report.json"],
+      "notes": [
+        "derived by coverage_descriptor.v0 gate: exhaustive filesystem equality requires completeness=full with no blind spots; completeness is open_syscall_only; blind spots: rename, unlink"
+      ],
+      "non_claims": ["does_not_prove_complete_filesystem_set"]
+    },
+    {
+      "schema": "assay.observability.claim_class_cell.v0",
+      "claim_type": "measured_network_endpoints_drift",
+      "artifact_role": "none",
+      "claim_strength": "absent",
+      "claim_basis": "measured",
+      "evidence_refs": [],
+      "notes": [
+        "one arm reported a failed fidelity verdict; the cross-arm positive cannot be supported"
+      ],
+      "non_claims": ["does_not_prove_tool_intent"]
+    },
+    {
+      "schema": "assay.observability.claim_class_cell.v0",
+      "claim_type": "reported_tool_calls",
+      "artifact_role": "joined_artifacts",
+      "claim_strength": "partial",
+      "claim_basis": "reported",
+      "evidence_refs": ["runtime-drift-report.json"],
+      "notes": [
+        "SDK/trace-reported drift surface; not a measured kernel effect, so no coverage ceiling is applied"
+      ],
+      "non_claims": [
+        "does_not_prove_measured_effect",
+        "does_not_prove_complete_set"
+      ]
+    }
+  ],
+  "blocked_claims": [
+    {
+      "claim_type": "bounded_negative_claim",
+      "requested_claim": "no_filesystem_paths_touched_effect_beyond_observed",
+      "decision": "blocked",
+      "reason": "filesystem absence-beyond-observed claim requires completeness=full with no blind spots and confirmed clean capture; completeness is open_syscall_only; blind spots: rename, unlink; the drift report does not surface per-arm observation health"
+    }
+  ],
+  "classification_caveats": []
+}

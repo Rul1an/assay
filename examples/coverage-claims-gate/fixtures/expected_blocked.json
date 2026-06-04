@@ -1,0 +1,25 @@
+{
+  "passed": false,
+  "results": [
+    {
+      "claim": "positive:filesystem_paths_touched",
+      "detail": "measured positive is partial",
+      "permitted": true
+    },
+    {
+      "claim": "positive:network_endpoints",
+      "detail": "measured positive is absent",
+      "permitted": false
+    },
+    {
+      "claim": "exhaustive:filesystem_paths_touched",
+      "detail": "exhaustive equality is weak (degraded by coverage)",
+      "permitted": false
+    },
+    {
+      "claim": "bounded_negative:filesystem_paths_touched",
+      "detail": "bounded-negative blocked by coverage descriptor",
+      "permitted": false
+    }
+  ]
+}
