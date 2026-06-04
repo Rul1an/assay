@@ -32,7 +32,7 @@
     },
     {
       "artifact_role": "measured_run_archive",
-      "claim_basis": "measured",
+      "claim_basis": "derived",
       "claim_strength": "weak",
       "claim_type": "exhaustive_filesystem_set",
       "evidence_refs": [
@@ -43,7 +43,7 @@
         "does_not_prove_complete_filesystem_set"
       ],
       "notes": [
-        "exhaustive filesystem set requires completeness=full with no blind spots; completeness is open_syscall_only; blind spots: io_uring file operations may bypass syscall tracepoints; mmap-backed writes are not path-open observations"
+        "derived by coverage_descriptor.v0 + fidelity_verdict.v0: exhaustive filesystem set requires completeness=full with no blind spots; completeness is open_syscall_only; blind spots: io_uring file operations may bypass syscall tracepoints; mmap-backed writes are not path-open observations"
       ],
       "schema": "assay.observability.claim_class_cell.v0"
     },
@@ -65,7 +65,7 @@
     },
     {
       "artifact_role": "measured_run_archive",
-      "claim_basis": "measured",
+      "claim_basis": "derived",
       "claim_strength": "weak",
       "claim_type": "exhaustive_network_set",
       "evidence_refs": [
@@ -76,7 +76,7 @@
         "does_not_prove_complete_network_set"
       ],
       "notes": [
-        "exhaustive network set requires completeness=full with no blind spots; completeness is connect_only; blind spots: QUIC/datagram peer changes after connect are not an exhaustive peer set; io_uring network operations may bypass syscall tracepoints"
+        "derived by coverage_descriptor.v0 + fidelity_verdict.v0: exhaustive network set requires completeness=full with no blind spots; completeness is connect_only; blind spots: QUIC/datagram peer changes after connect are not an exhaustive peer set; io_uring network operations may bypass syscall tracepoints"
       ],
       "schema": "assay.observability.claim_class_cell.v0"
     }

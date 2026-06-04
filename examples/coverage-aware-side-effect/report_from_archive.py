@@ -22,6 +22,9 @@ from typing import Any
 
 REPORT_SCHEMA = "assay.coverage_aware_side_effect.report.v0"
 CLAIM_CELL_SCHEMA = "assay.observability.claim_class_cell.v0"
+# The gating rule named by every derived claim cell, per claim-classes-v0
+# ("Derived must name the rule").
+GATE_RULE = "coverage_descriptor.v0 + fidelity_verdict.v0"
 
 # Seed coverage descriptors per effect dimension, mirroring the shipped
 # coverage.rs seed constructors. Each names the capture method and its
@@ -143,11 +146,12 @@ def build_report(archive: dict[str, Any]) -> dict[str, Any]:
                     "claim_type": f"exhaustive_{dimension}_set",
                     "artifact_role": "measured_run_archive",
                     "claim_strength": "strong" if capture_clean else "partial",
-                    "claim_basis": "measured",
+                    "claim_basis": "derived",
                     "evidence_refs": ["capability-surface.json", "observation-health.json"],
                     "notes": [
-                        f"completeness is full with no declared blind spots: "
-                        f"exhaustive {dimension} set allowed"
+                        f"derived by {GATE_RULE}: completeness is full with no "
+                        f"declared blind spots, so the exhaustive {dimension} set "
+                        f"is allowed"
                     ],
                     "non_claims": ["strong_only_within_cgroup_scope"],
                 }
@@ -159,12 +163,13 @@ def build_report(archive: dict[str, Any]) -> dict[str, Any]:
                     "claim_type": f"exhaustive_{dimension}_set",
                     "artifact_role": "measured_run_archive",
                     "claim_strength": "weak",
-                    "claim_basis": "measured",
+                    "claim_basis": "derived",
                     "evidence_refs": ["capability-surface.json", "observation-health.json"],
                     "notes": [
-                        f"exhaustive {dimension} set requires completeness=full with no "
-                        f"blind spots; completeness is {descriptor['completeness']}; "
-                        f"blind spots: {_blind_spot_summary(descriptor)}"
+                        f"derived by {GATE_RULE}: exhaustive {dimension} set requires "
+                        f"completeness=full with no blind spots; completeness is "
+                        f"{descriptor['completeness']}; blind spots: "
+                        f"{_blind_spot_summary(descriptor)}"
                     ],
                     "non_claims": [f"does_not_prove_complete_{dimension}_set"],
                 }
@@ -181,11 +186,12 @@ def build_report(archive: dict[str, Any]) -> dict[str, Any]:
                     "claim_type": "bounded_negative_claim",
                     "artifact_role": "measured_run_archive",
                     "claim_strength": "strong",
-                    "claim_basis": "measured",
+                    "claim_basis": "derived",
                     "evidence_refs": ["capability-surface.json", "observation-health.json"],
                     "notes": [
-                        f"{dimension}: completeness is full with no declared blind "
-                        f"spots and capture is clean: bounded-negative claim allowed"
+                        f"{dimension}: derived by {GATE_RULE}: completeness is full "
+                        f"with no declared blind spots and capture is clean, so the "
+                        f"bounded-negative claim is allowed"
                     ],
                     "non_claims": ["strong_only_within_cgroup_scope"],
                 }
