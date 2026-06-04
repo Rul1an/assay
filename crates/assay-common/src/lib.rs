@@ -24,7 +24,7 @@ pub const EVENT_CONNECT_BLOCKED: u32 = 20;
 
 pub const DATA_LEN: usize = 512;
 
-pub const MONITOR_STATS_LEN: u32 = 16;
+pub const MONITOR_STATS_LEN: u32 = 18;
 pub const MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED: u32 = 0;
 pub const MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED: u32 = 1;
 pub const MONITOR_STAT_LSM_EVENTS_EMITTED: u32 = 2;
@@ -45,6 +45,12 @@ pub const MONITOR_STAT_SENDMSG_RINGBUF_DROPPED: u32 = 13;
 // blind spot is visibly exercised rather than silently dropped.
 pub const MONITOR_STAT_SENDTO_NO_PEER: u32 = 14;
 pub const MONITOR_STAT_SENDMSG_NO_PEER: u32 = 15;
+// Datagram sends to a non-IP socket family (e.g. AF_UNIX) — observed but skipped
+// because only IPv4/IPv6 peers are normalized into endpoint evidence. Counted so
+// the `datagram_peer_observed` label stays honest: it reflects IP peers only, and
+// these sends are neither IP peers nor silently lost.
+pub const MONITOR_STAT_SENDTO_NON_IP_FAMILY: u32 = 16;
+pub const MONITOR_STAT_SENDMSG_NON_IP_FAMILY: u32 = 17;
 
 pub const SOCKET_STATS_LEN: u32 = 8;
 pub const SOCKET_STAT_CHECKS: u32 = 0;

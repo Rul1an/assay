@@ -82,6 +82,8 @@ struct TracepointHookBreakdown {
     sendmsg_dropped: u64,
     sendto_no_peer: u64,
     sendmsg_no_peer: u64,
+    sendto_non_ip_family: u64,
+    sendmsg_non_ip_family: u64,
 }
 
 #[derive(Debug, Error)]
@@ -547,6 +549,16 @@ fn tracepoint_hook_breakdown(
         ),
         sendto_no_peer: u64::from(after.sendto_no_peer.saturating_sub(before.sendto_no_peer)),
         sendmsg_no_peer: u64::from(after.sendmsg_no_peer.saturating_sub(before.sendmsg_no_peer)),
+        sendto_non_ip_family: u64::from(
+            after
+                .sendto_non_ip_family
+                .saturating_sub(before.sendto_non_ip_family),
+        ),
+        sendmsg_non_ip_family: u64::from(
+            after
+                .sendmsg_non_ip_family
+                .saturating_sub(before.sendmsg_non_ip_family),
+        ),
     }
 }
 
@@ -634,10 +646,25 @@ fn kernel_capture_note(input: KernelCaptureNote) -> String {
         String::new()
     };
 
+    // Datagram sends to a non-IP family (e.g. AF_UNIX). Surfaced only when
+    // non-zero, for the same byte-identical-archive invariant. These are not IP
+    // peers and never raise the network coverage descriptor.
+    let datagram_non_ip = tracepoint_hook_breakdown.sendto_non_ip_family
+        + tracepoint_hook_breakdown.sendmsg_non_ip_family;
+    let non_ip_suffix = if datagram_non_ip > 0 {
+        format!(
+            " datagram_non_ip_family=sendto:{} sendmsg:{}",
+            tracepoint_hook_breakdown.sendto_non_ip_family,
+            tracepoint_hook_breakdown.sendmsg_non_ip_family
+        )
+    } else {
+        String::new()
+    };
+
     match cgroup_correlation {
         CgroupCorrelationStatus::Clean if ringbuf_drops == 0 => {
             format!(
-                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage={network_protocol_coverage} network_endpoint_claim_scope=diagnostic_only{no_peer_suffix}"
+                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage={network_protocol_coverage} network_endpoint_claim_scope=diagnostic_only{no_peer_suffix}{non_ip_suffix}"
             )
         }
         CgroupCorrelationStatus::Clean => {
@@ -647,7 +674,7 @@ fn kernel_capture_note(input: KernelCaptureNote) -> String {
                 .collect::<Vec<_>>()
                 .join(",");
             format!(
-                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage={network_protocol_coverage} network_endpoint_claim_scope=diagnostic_only drop_breakdown=tracepoint:{} lsm:{} socket:{} emitted=tracepoint:{} lsm:{} socket:{} tracepoint_hooks=openat:{}/{} openat2:{}/{} connect:{}/{} sendto:{}/{} sendmsg:{}/{} filtered_loader_events={filtered_loader_events} filtered_loader_top=[{filtered_top}]{no_peer_suffix}",
+                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage={network_protocol_coverage} network_endpoint_claim_scope=diagnostic_only drop_breakdown=tracepoint:{} lsm:{} socket:{} emitted=tracepoint:{} lsm:{} socket:{} tracepoint_hooks=openat:{}/{} openat2:{}/{} connect:{}/{} sendto:{}/{} sendmsg:{}/{} filtered_loader_events={filtered_loader_events} filtered_loader_top=[{filtered_top}]{no_peer_suffix}{non_ip_suffix}",
                 drop_breakdown.tracepoint,
                 drop_breakdown.lsm,
                 drop_breakdown.socket,
@@ -1106,6 +1133,73 @@ mod tests {
             .notes
             .iter()
             .all(|note| !note.contains("datagram_no_recoverable_peer")));
+    }
+
+    #[test]
+    fn datagram_non_ip_family_count_surfaces_in_note() {
+        let before = MonitorStatsSnapshot::default();
+        let after = MonitorStatsSnapshot {
+            sendto_non_ip_family: 4,
+            sendmsg_non_ip_family: 2,
+            ..Default::default()
+        };
+        let capture = KernelLayerBuilder::new("run_001")
+            .unwrap()
+            .finish(&before, &after);
+        let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+        capture
+            .apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)
+            .unwrap();
+
+        assert!(archive
+            .observation_health
+            .notes
+            .iter()
+            .any(|note| note.contains("datagram_non_ip_family=sendto:4 sendmsg:2")));
+    }
+
+    #[test]
+    fn non_ip_family_sends_do_not_upgrade_network_protocol_coverage() {
+        // A datagram send to AF_UNIX is not an IP peer and must not claim one.
+        let before = MonitorStatsSnapshot::default();
+        let after = MonitorStatsSnapshot {
+            sendto_non_ip_family: 9,
+            ..Default::default()
+        };
+        let capture = KernelLayerBuilder::new("run_001")
+            .unwrap()
+            .finish(&before, &after);
+        let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+        capture
+            .apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)
+            .unwrap();
+
+        assert_ne!(
+            archive.observation_health.network_protocol_coverage,
+            NetworkProtocolCoverageStatus::DatagramPeerObserved
+        );
+        assert_ne!(
+            archive.observation_health.network_protocol_coverage,
+            NetworkProtocolCoverageStatus::ConnectAndDatagramPeerObserved
+        );
+    }
+
+    #[test]
+    fn zero_non_ip_family_count_leaves_note_byte_identical() {
+        let snap = MonitorStatsSnapshot::default();
+        let capture = KernelLayerBuilder::new("run_001")
+            .unwrap()
+            .finish(&snap, &snap);
+        let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+        capture
+            .apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)
+            .unwrap();
+
+        assert!(archive
+            .observation_health
+            .notes
+            .iter()
+            .all(|note| !note.contains("datagram_non_ip_family")));
     }
 
     #[test]

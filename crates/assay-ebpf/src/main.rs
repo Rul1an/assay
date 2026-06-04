@@ -20,10 +20,11 @@ use assay_common::{
     MONITOR_STAT_CONNECT_RINGBUF_DROPPED, MONITOR_STAT_OPENAT2_EVENTS_EMITTED,
     MONITOR_STAT_OPENAT2_RINGBUF_DROPPED, MONITOR_STAT_OPENAT_EVENTS_EMITTED,
     MONITOR_STAT_OPENAT_RINGBUF_DROPPED, MONITOR_STAT_SENDMSG_EVENTS_EMITTED,
+    MONITOR_STAT_SENDMSG_EVENTS_EMITTED, MONITOR_STAT_SENDMSG_NON_IP_FAMILY,
     MONITOR_STAT_SENDMSG_NO_PEER, MONITOR_STAT_SENDMSG_RINGBUF_DROPPED,
-    MONITOR_STAT_SENDTO_EVENTS_EMITTED, MONITOR_STAT_SENDTO_NO_PEER,
-    MONITOR_STAT_SENDTO_RINGBUF_DROPPED, MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED,
-    MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
+    MONITOR_STAT_SENDTO_EVENTS_EMITTED, MONITOR_STAT_SENDTO_NON_IP_FAMILY,
+    MONITOR_STAT_SENDTO_NO_PEER, MONITOR_STAT_SENDTO_RINGBUF_DROPPED,
+    MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
 };
 use aya_ebpf::{
     helpers::{
@@ -483,6 +484,7 @@ fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
         EVENT_CONNECT,
         MONITOR_STAT_CONNECT_EVENTS_EMITTED,
         MONITOR_STAT_CONNECT_RINGBUF_DROPPED,
+        NON_IP_FAMILY_STAT_DISABLED,
     )
 }
 
@@ -514,6 +516,7 @@ fn try_sendto(ctx: TracePointContext) -> Result<u32, u32> {
         EVENT_SENDTO,
         MONITOR_STAT_SENDTO_EVENTS_EMITTED,
         MONITOR_STAT_SENDTO_RINGBUF_DROPPED,
+        MONITOR_STAT_SENDTO_NON_IP_FAMILY,
     )
 }
 
@@ -554,8 +557,13 @@ fn try_sendmsg(ctx: TracePointContext) -> Result<u32, u32> {
         EVENT_SENDMSG,
         MONITOR_STAT_SENDMSG_EVENTS_EMITTED,
         MONITOR_STAT_SENDMSG_RINGBUF_DROPPED,
+        MONITOR_STAT_SENDMSG_NON_IP_FAMILY,
     )
 }
+
+/// Sentinel for `emit_sockaddr_event`'s `non_ip_family_stat`: do not count a
+/// non-IP family skip (used by the connect path, where this is plain plumbing).
+const NON_IP_FAMILY_STAT_DISABLED: u32 = u32::MAX;
 
 #[inline(always)]
 fn emit_sockaddr_event(
@@ -563,6 +571,7 @@ fn emit_sockaddr_event(
     event_type: u32,
     emitted_stat: u32,
     dropped_stat: u32,
+    non_ip_family_stat: u32,
 ) -> Result<u32, u32> {
     if sockaddr_ptr == 0 {
         return Ok(0);
@@ -578,9 +587,14 @@ fn emit_sockaddr_event(
 
     // Runner-spike only normalizes IPv4/IPv6 endpoints into attribution
     // evidence. AF_UNIX and other connect telemetry is runtime plumbing, so
-    // skip it before reserving tracepoint ring buffer space.
+    // skip it before reserving tracepoint ring buffer space. For datagram sends
+    // we count the skip (non_ip_family_stat) so the datagram peer label stays
+    // honest; the connect path passes the disabled sentinel.
     let family = u16::from_ne_bytes([raw_sockaddr[0], raw_sockaddr[1]]);
     if family != 2 && family != 10 {
+        if non_ip_family_stat != NON_IP_FAMILY_STAT_DISABLED {
+            inc_stat(non_ip_family_stat);
+        }
         return Ok(0);
     }
 
