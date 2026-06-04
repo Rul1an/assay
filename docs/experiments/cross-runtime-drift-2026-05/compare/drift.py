@@ -1591,8 +1591,11 @@ def fidelity_verdict(health: Any) -> str:
       - "failed": cgroup_correlation failed -> invalid for measured claims.
       - "clean": Linux, kernel_layer complete, zero ring-buffer drops, clean
         cgroup correlation.
-      - "clipped": measurement exists but is degraded (drops / partial kernel /
-        partial correlation).
+      - "correlation_partial": valid measurement but cgroup_correlation=partial
+        (kept distinct from clipped per fidelity_verdict.v0, since downstream
+        readers may gate per-binding claims differently).
+      - "clipped": measurement exists but is otherwise degraded (drops / partial
+        kernel capture).
     A non-dict / empty record is treated as "not_applicable". An
     out-of-contract record (bad enum, or a violated cross-field invariant such
     as non-Linux without kernel_layer=absent, or ringbuf_drops>0 without
@@ -1617,6 +1620,8 @@ def fidelity_verdict(health: Any) -> str:
         return "failed"
     if isinstance(drops, bool) or not isinstance(drops, int) or drops < 0:
         return "failed"
+    if not isinstance(platform, str) or not platform:
+        return "failed"  # platform is a required field
     if platform != "linux" and kernel != "absent":
         return "failed"  # non-Linux must have kernel_layer=absent
     if drops > 0 and kernel != "partial_ringbuf_drops":
@@ -1628,6 +1633,8 @@ def fidelity_verdict(health: Any) -> str:
         return "not_applicable"
     if kernel == "complete" and drops == 0 and correlation == "clean":
         return "clean"
+    if correlation == "partial":
+        return "correlation_partial"
     return "clipped"
 
 

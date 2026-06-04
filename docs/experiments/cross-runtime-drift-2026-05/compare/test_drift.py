@@ -2356,6 +2356,26 @@ class FidelityAndEnforcementTest(unittest.TestCase):
         ok, _ = drift.evaluate_asserted_claim(ann, "bounded_negative", "no_such_dim")
         self.assertFalse(ok)
 
+    def test_correlation_partial_distinct_and_degrades_to_partial(self):
+        corr_partial = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "p",
+            "platform": "linux", "kernel_layer": "complete",
+            "ringbuf_drops": 0, "cgroup_correlation": "partial",
+        }
+        self.assertEqual(drift.fidelity_verdict(corr_partial), "correlation_partial")
+        ann = drift.coverage_annotation_for_report(
+            self.REPORT, health_a=self.CLEAN, health_b=corr_partial
+        )
+        self.assertEqual(self._net_cell(ann)["claim_strength"], "partial")
+
+    def test_missing_platform_is_failed(self):
+        no_platform = {
+            "schema": "assay.runner.observation_health.v0", "run_id": "q",
+            "kernel_layer": "absent", "ringbuf_drops": 0,
+            "cgroup_correlation": "clean",
+        }
+        self.assertEqual(drift.fidelity_verdict(no_platform), "failed")
+
 
 
 if __name__ == "__main__":
