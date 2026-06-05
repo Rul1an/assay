@@ -206,7 +206,7 @@ pub struct CompilationStats {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Compile a policy into enforcement tiers
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 #[must_use]
 pub fn compile(policy: &Policy) -> CompiledPolicy {
     let mut tier1 = Tier1Rules::default();

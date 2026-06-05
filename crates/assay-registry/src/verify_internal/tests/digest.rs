@@ -39,7 +39,7 @@ fn test_compute_digest_key_ordering() {
 }
 
 #[test]
-#[allow(deprecated)]
+#[expect(deprecated)]
 fn test_compute_digest_raw_differs() {
     // Raw digest differs from canonical
     let content = "name: eu-ai-act-baseline\nversion: \"1.0.0\"\nkind: compliance";
@@ -58,7 +58,7 @@ fn test_compute_digest_raw_differs() {
 }
 
 #[test]
-#[allow(deprecated)]
+#[expect(deprecated)]
 fn test_compute_digest_raw_matches_bytes_helper() {
     // Use clearly non-canonical, malformed YAML-like text to avoid ambiguity:
     // this contract freezes raw byte hashing parity only.

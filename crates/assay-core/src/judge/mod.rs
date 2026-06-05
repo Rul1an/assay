@@ -45,7 +45,7 @@ impl JudgeService {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn evaluate(
         &self,
         test_id: &str,

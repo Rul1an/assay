@@ -206,7 +206,7 @@ fn test_sarif_output_with_pack_metadata() {
     let result =
         lint_bundle_with_options(Cursor::new(&bundle), VerifyLimits::default(), options).unwrap();
 
-    #[allow(deprecated)]
+    #[expect(deprecated)]
     let sarif_options = SarifOptions {
         pack_meta: result.pack_meta.clone(),
         bundle_path: Some("test_sarif.tar.gz".to_string()),

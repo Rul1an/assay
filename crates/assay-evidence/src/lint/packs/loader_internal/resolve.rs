@@ -147,7 +147,7 @@ pub(crate) fn suggest_similar_pack_impl(reference: &str) -> String {
 }
 
 /// Simple Levenshtein distance for fuzzy matching.
-#[allow(clippy::needless_range_loop)]
+#[expect(clippy::needless_range_loop)]
 pub(crate) fn levenshtein_distance_impl(a: &str, b: &str) -> usize {
     let a_chars: Vec<char> = a.chars().collect();
     let b_chars: Vec<char> = b.chars().collect();

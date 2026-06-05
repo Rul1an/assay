@@ -240,7 +240,7 @@ impl EvidenceEvent {
 // -- Strongly Typed Payload Helpers --
 
 /// Typed payload variants (for convenience, not enforced by contract)
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "payload")]
 pub enum Payload {

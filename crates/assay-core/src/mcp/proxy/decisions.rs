@@ -72,7 +72,7 @@ pub(super) fn map_policy_code(code: &str) -> String {
 }
 
 /// Emit a decision event (I1: always emit).
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub(super) fn emit_decision(
     emitter: &Arc<dyn DecisionEmitter>,
     source: &str,
