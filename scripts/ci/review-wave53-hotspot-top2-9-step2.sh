@@ -22,7 +22,7 @@ worktree_changed="$(
 )"
 changed="$(printf '%s\n%s\n' "$base_changed" "$worktree_changed" | sed '/^$/d' | sort -u)"
 
-allowed_pattern='^(docs/contributing/SPLIT-PLAN-wave53-hotspot-top2-9\.md|docs/contributing/SPLIT-CHECKLIST-wave53-hotspot-top2-9-step2\.md|docs/contributing/SPLIT-MOVE-MAP-wave53-hotspot-top2-9-step2\.md|docs/contributing/SPLIT-REVIEW-PACK-wave53-hotspot-top2-9-step2\.md|scripts/ci/review-wave53-hotspot-top2-9-step2\.sh|crates/assay-core/src/report/summary\.rs|crates/assay-core/src/report/summary/types\.rs|crates/assay-core/src/report/summary/metrics\.rs|crates/assay-core/src/report/summary/writer\.rs|crates/assay-cli/src/cli/commands/bundle\.rs|crates/assay-cli/src/cli/commands/bundle/implementation\.rs|crates/assay-cli/src/cli/commands/bundle/verify\.rs|crates/assay-cli/src/cli/commands/bundle/paths\.rs|crates/assay-cli/src/cli/commands/bundle/coverage\.rs|crates/assay-registry/src/lockfile\.rs|crates/assay-registry/src/lockfile_next/types\.rs)$'
+allowed_pattern='^(docs/contributing/SPLIT-PLAN-wave53-hotspot-top2-9\.md|docs/contributing/SPLIT-CHECKLIST-wave53-hotspot-top2-9-step2\.md|docs/contributing/SPLIT-MOVE-MAP-wave53-hotspot-top2-9-step2\.md|docs/contributing/SPLIT-REVIEW-PACK-wave53-hotspot-top2-9-step1\.md|docs/contributing/SPLIT-REVIEW-PACK-wave53-hotspot-top2-9-step2\.md|scripts/ci/review-wave53-hotspot-top2-9-step1\.sh|scripts/ci/review-wave53-hotspot-top2-9-step2\.sh|crates/assay-core/src/report/summary\.rs|crates/assay-core/src/report/summary/types\.rs|crates/assay-core/src/report/summary/metrics\.rs|crates/assay-core/src/report/summary/writer\.rs|crates/assay-cli/src/cli/commands/bundle\.rs|crates/assay-cli/src/cli/commands/bundle/implementation\.rs|crates/assay-cli/src/cli/commands/bundle/verify\.rs|crates/assay-cli/src/cli/commands/bundle/paths\.rs|crates/assay-cli/src/cli/commands/bundle/coverage\.rs|crates/assay-registry/src/lockfile\.rs|crates/assay-registry/src/lockfile_next/types\.rs)$'
 unexpected="$(printf '%s\n' "$changed" | rg -v "$allowed_pattern" || true)"
 if [[ -n "$unexpected" ]]; then
   echo "FAIL: Wave53 Step2 changed files outside the allowlist:"
@@ -126,6 +126,8 @@ cargo check -p assay-core
 cargo test -q -p assay-core --lib report::summary
 cargo check -p assay-cli
 cargo test -q -p assay-cli -- bundle
+git diff --check "$base_ref"...HEAD
 git diff --check
+git diff --cached --check
 
 echo "PASS: Wave53 Step2 high-readiness split gate"
