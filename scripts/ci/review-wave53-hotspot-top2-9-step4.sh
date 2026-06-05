@@ -132,6 +132,8 @@ cargo check -p assay-runner-core
 cargo test -q -p assay-runner-core
 cargo clippy -p assay-runner-core --all-targets -- -D warnings
 cargo check -p assay-ebpf
+git diff --check "$base_ref"...HEAD
 git diff --check
+git diff --cached --check
 
 echo "PASS: Wave53 Step4 runner/eBPF split gate"
