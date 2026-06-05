@@ -1,0 +1,11 @@
+pub(super) const EVENT_TYPE: &str = "assay.receipt.pydantic.case_result.v1";
+pub(super) const EVENT_SOURCE: &str = "urn:assay:external:pydantic-evals:case-result";
+pub(super) const RECEIPT_SCHEMA: &str = "assay.receipt.pydantic.case_result.v1";
+pub(super) const SOURCE_SYSTEM: &str = "pydantic_evals";
+pub(super) const SOURCE_SURFACE: &str = "evaluation_report.cases.case_result";
+pub(super) const REDUCER_VERSION: &str = "assay-pydantic-case-result@0.1.0";
+pub(super) const INPUT_SCHEMA: &str = "pydantic-evals.report-case-result.export.v1";
+pub(super) const DEFAULT_RUN_ID: &str = "import-pydantic-case-result";
+pub(super) const MAX_BOUNDARY_STRING_CHARS: usize = 160;
+pub(super) const MAX_REASON_CHARS: usize = 240;
+pub(super) const MAX_RESULTS: usize = 32;
