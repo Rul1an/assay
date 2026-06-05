@@ -96,6 +96,7 @@ done
 require_marker '^pub use args::\{RunnerSpikeArgs, RunnerSpikeCommand, RunnerSpikeRunArgs\};$' "crates/assay-cli/src/cli/commands/runner_spike.rs" "runner_spike facade must re-export Clap types"
 require_marker 'implementation::run\(args\)\.await' "crates/assay-cli/src/cli/commands/runner_spike.rs" "runner_spike facade must delegate to implementation::run"
 forbid_marker '^async fn cmd_run\b|^fn cmd_run_contract_only\b|^fn build_spec\b|^fn write_u32_decimal\b' "crates/assay-cli/src/cli/commands/runner_spike.rs" "runner_spike facade must not own moved function bodies"
+require_marker 'spec: &assay_runner_core::RunSpec' "crates/assay-cli/src/cli/commands/runner_spike/cgroup.rs" "runner_spike cgroup helpers must use a fully qualified RunSpec outside inner Linux-only scopes"
 
 for module in fixes implementation parse_error patching; do
   require_marker "^mod ${module};$" "crates/assay-cli/src/cli/commands/doctor.rs" "doctor facade must declare ${module} module"

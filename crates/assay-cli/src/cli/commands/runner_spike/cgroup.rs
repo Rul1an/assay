@@ -14,7 +14,7 @@ pub(super) async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> any
     use std::time::{Duration, Instant};
 
     use assay_monitor::Monitor;
-    use assay_runner_core::{KernelLayerBuilder, RunSpec};
+    use assay_runner_core::KernelLayerBuilder;
     use assay_runner_linux::CgroupManager;
     use assay_runner_schema::CgroupCorrelationStatus;
     use tokio_stream::StreamExt;
@@ -291,7 +291,10 @@ fn spawn_child_in_cgroup(
 }
 
 #[cfg(target_os = "linux")]
-fn apply_kernel_capture_child_env(command: &mut tokio::process::Command, spec: &RunSpec) {
+fn apply_kernel_capture_child_env(
+    command: &mut tokio::process::Command,
+    spec: &assay_runner_core::RunSpec,
+) {
     // `cargo run` injects dynamic-loader search paths into the parent process.
     // If inherited by the fixture, every shell/tool startup emits thousands of
     // loader/locale openat events that are not runner-spike attribution
