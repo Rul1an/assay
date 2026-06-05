@@ -32,8 +32,8 @@ BASE_REF=origin/main bash scripts/ci/review-wave53-hotspot-top2-9-step1.sh
 ```
 
 The default local mode is intentionally tolerant of unrelated dirty Rust files because this branch
-already contains work outside Wave53. Explicit `BASE_REF` mode keeps the stricter full
-`cargo fmt --check` path for clean review branches.
+already contains work outside Wave53. Explicit `BASE_REF` mode keeps strict Step1 diff scope checks;
+the script runs full `cargo fmt --check` only when the local Rust worktree is clean.
 
 ## Reviewer Focus
 
