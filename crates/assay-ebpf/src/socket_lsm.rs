@@ -69,10 +69,16 @@ pub fn connect4_hook(ctx: SockAddrContext) -> i32 {
 fn try_connect4(ctx: &SockAddrContext) -> Result<bool, i64> {
     inc_stat(SOCKET_STAT_CHECKS);
 
+    // SAFETY: `bpf_get_current_cgroup_id` returns a scalar cgroup id from the
+    // verifier-provided helper; the result is not dereferenced.
     let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
+    // SAFETY: `ctx.as_ptr()` is provided by the cgroup sockaddr hook and points
+    // to a `bpf_sock_addr` for the duration of this hook invocation.
     let sock_addr = unsafe { &*(ctx.as_ptr() as *const bpf_sock_addr) };
     let dst_port = u16::from_be(sock_addr.user_port as u16);
 
+    // SAFETY: DENY_PORTS is an eBPF map owned by this program. The destination
+    // port key is a scalar copied from the hook context.
     if let Some(&rule_id) = unsafe { DENY_PORTS.get(&dst_port) } {
         emit_socket_event(
             EVENT_CONNECT_BLOCKED,
@@ -88,6 +94,8 @@ fn try_connect4(ctx: &SockAddrContext) -> Result<bool, i64> {
         return Ok(false);
     }
 
+    // SAFETY: ALLOW_PORTS is an eBPF map owned by this program. A missing key
+    // means no explicit allow rule matched this destination port.
     if unsafe { ALLOW_PORTS.get(&dst_port).is_some() } {
         inc_stat(SOCKET_STAT_ALLOWED);
         return Ok(true);
@@ -170,19 +178,28 @@ pub fn connect6_hook(ctx: SockAddrContext) -> i32 {
 fn try_connect6(ctx: &SockAddrContext) -> Result<bool, i64> {
     inc_stat(SOCKET_STAT_CHECKS);
 
+    // SAFETY: `bpf_get_current_cgroup_id` returns a scalar cgroup id from the
+    // verifier-provided helper; the result is not dereferenced.
     let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
+    // SAFETY: `ctx.as_ptr()` is provided by the cgroup sockaddr hook and points
+    // to a `bpf_sock_addr` for the duration of this hook invocation.
     let sock_addr = unsafe { &*(ctx.as_ptr() as *const bpf_sock_addr) };
     let dst_port = u16::from_be(sock_addr.user_port as u16);
     let dst_addr = sock_addr.user_ip6;
 
+    // SAFETY: DENY_PORTS is an eBPF map owned by this program. The destination
+    // port key is a scalar copied from the hook context.
     if let Some(&rule_id) = unsafe { DENY_PORTS.get(&dst_port) } {
+        // SAFETY: `[u32; 4]` and `[u8; 16]` have the same size, and every byte
+        // pattern is valid for `u8`; the bytes are copied into the event payload.
+        let dst_addr_bytes = unsafe { core::mem::transmute::<[u32; 4], [u8; 16]>(dst_addr) };
         emit_socket_event(
             EVENT_CONNECT_BLOCKED,
             cgroup_id,
             10, // IPv6
             dst_port,
             0,
-            &unsafe { core::mem::transmute::<[u32; 4], [u8; 16]>(dst_addr) },
+            &dst_addr_bytes,
             rule_id,
             0,
         );
@@ -190,11 +207,15 @@ fn try_connect6(ctx: &SockAddrContext) -> Result<bool, i64> {
         return Ok(false);
     }
 
+    // SAFETY: ALLOW_PORTS is an eBPF map owned by this program. A missing key
+    // means no explicit allow rule matched this destination port.
     if unsafe { ALLOW_PORTS.get(&dst_port).is_some() } {
         inc_stat(SOCKET_STAT_ALLOWED);
         return Ok(true);
     }
 
+    // SAFETY: `[u32; 4]` and `[u8; 16]` have the same size, and every byte
+    // pattern is valid for `u8`; the bytes are used immediately as an LPM key.
     let ip6_bytes = unsafe { core::mem::transmute::<[u32; 4], [u8; 16]>(dst_addr) };
     let key = Key::new(128, ip6_bytes);
     if let Some(&action) = CIDR_RULES_V6.get(&key) {
@@ -221,6 +242,8 @@ fn try_connect6(ctx: &SockAddrContext) -> Result<bool, i64> {
 #[inline(always)]
 fn inc_stat(index: u32) {
     if let Some(val) = SOCKET_STATS.get_ptr_mut(index) {
+        // SAFETY: `val` points to a mutable counter returned by the eBPF stats
+        // array; the verifier checks map bounds for the supplied index.
         unsafe { *val += 1 };
     }
 }
@@ -237,9 +260,13 @@ fn emit_socket_event(
     action: u32,
 ) {
     if let Some(mut event) = SOCKET_EVENTS.reserve::<SocketEvent>(0) {
+        // SAFETY: `event.as_mut_ptr()` points to a reserved `SocketEvent`
+        // ring-buffer entry initialized below before submit.
         let ev = unsafe { &mut *event.as_mut_ptr() };
         ev.event_type = event_type;
         ev.pid = (bpf_get_current_pid_tgid() >> 32) as u32;
+        // SAFETY: `bpf_ktime_get_ns` returns a scalar timestamp from the
+        // verifier-provided helper; the result is not dereferenced.
         ev.timestamp_ns = unsafe { bpf_ktime_get_ns() };
         ev.cgroup_id = cgroup_id;
         ev.family = family;
@@ -248,9 +275,7 @@ fn emit_socket_event(
         ev.rule_id = rule_id;
         ev.action = action;
 
-        for i in 0..16 {
-            ev.addr_v6[i] = addr_v6[i];
-        }
+        ev.addr_v6.copy_from_slice(addr_v6);
         event.submit(0);
         inc_stat(SOCKET_STAT_EVENTS_EMITTED);
     } else {

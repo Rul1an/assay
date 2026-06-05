@@ -281,6 +281,9 @@ fn spawn_child_in_cgroup(
     command.args(&spec.command[1..]);
     apply_kernel_capture_child_env(&mut command, spec);
 
+    // SAFETY: `pre_exec` runs after fork and before exec. The closure only
+    // writes the child pid to the precomputed cgroup.procs path using libc
+    // open/write/close helpers below and does not touch shared Rust state.
     unsafe {
         command.pre_exec(move || write_self_to_cgroup(&procs_path));
     }
@@ -350,10 +353,13 @@ async fn drain_kernel_events(
 fn write_self_to_cgroup(procs_path: &std::ffi::CStr) -> std::io::Result<()> {
     let fd = retry_open_write_only(procs_path)?;
 
+    // SAFETY: `getpid` is async-signal-safe and returns the current child pid in
+    // the pre-exec path; the scalar result is only formatted into a stack buffer.
     let pid = unsafe { libc::getpid() } as u32;
     let mut buf = [0_u8; 32];
     let len = write_u32_decimal(pid, &mut buf);
     let write_result = retry_write_all(fd, &buf[..len]);
+    // SAFETY: `fd` was returned by `open` and is no longer used after this close.
     let close_result = unsafe { libc::close(fd) };
 
     match (write_result.err(), close_result) {
@@ -366,6 +372,8 @@ fn write_self_to_cgroup(procs_path: &std::ffi::CStr) -> std::io::Result<()> {
 #[cfg(target_os = "linux")]
 fn retry_open_write_only(path: &std::ffi::CStr) -> std::io::Result<i32> {
     loop {
+        // SAFETY: `path` is a NUL-terminated cgroup.procs path prepared before
+        // `pre_exec`; the returned fd is checked before use and retried on EINTR.
         let fd = unsafe { libc::open(path.as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC) };
         if fd >= 0 {
             return Ok(fd);
@@ -380,6 +388,8 @@ fn retry_open_write_only(path: &std::ffi::CStr) -> std::io::Result<i32> {
 #[cfg(target_os = "linux")]
 fn retry_write_all(fd: i32, mut bytes: &[u8]) -> std::io::Result<()> {
     while !bytes.is_empty() {
+        // SAFETY: `fd` is an open cgroup.procs descriptor and `bytes` points to
+        // the stack-formatted pid slice for the duration of the write call.
         let written = unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) };
         if written < 0 {
             let error = std::io::Error::last_os_error();

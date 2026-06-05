@@ -16,6 +16,7 @@ pub mod socket_lsm;
 #[allow(non_camel_case_types)]
 #[allow(non_upper_case_globals)]
 #[allow(clippy::all)]
+#[allow(clippy::undocumented_unsafe_blocks, unsafe_op_in_unsafe_fn)]
 pub mod vmlinux;
 
 use assay_common::{
@@ -47,6 +48,8 @@ fn current_tgid() -> u32 {
 #[inline(always)]
 pub(crate) fn inc_stat(index: u32) {
     if let Some(val) = STATS.get_ptr_mut(index) {
+        // SAFETY: `val` points to a mutable entry returned by the eBPF stats
+        // array for this program; the verifier checks map bounds for the index.
         unsafe { *val += 1 };
     }
 }
@@ -129,6 +132,8 @@ const MAX_ANCESTOR_DEPTH_HARD: usize = 16;
 
 #[inline(always)]
 fn max_ancestor_depth() -> usize {
+    // SAFETY: CONFIG is an eBPF map owned by this program. Missing keys are
+    // handled by the fallback default and the value is clamped below.
     let v = unsafe { CONFIG.get(&KEY_MAX_ANCESTOR_DEPTH) }
         .copied()
         .unwrap_or(8);
@@ -143,6 +148,8 @@ fn max_ancestor_depth() -> usize {
 #[inline(always)]
 fn is_monitored() -> bool {
     // 0. Global Monitor-All Override
+    // SAFETY: CONFIG is an eBPF map owned by this program. Missing keys are
+    // handled by the default disabled monitor-all setting.
     if unsafe { CONFIG.get(&KEY_MONITOR_ALL) }
         .copied()
         .unwrap_or(0)
@@ -152,12 +159,18 @@ fn is_monitored() -> bool {
     }
 
     // 1. Check PID (Legacy/Override)
+    // SAFETY: MONITORED_PIDS is an eBPF map owned by this program. The scalar
+    // current TGID key is local and a missing key simply means not monitored.
     if unsafe { MONITORED_PIDS.get(&current_tgid()) }.is_some() {
         return true;
     }
 
     // 2. Check current cgroup
+    // SAFETY: `bpf_get_current_cgroup_id` returns a scalar cgroup id from the
+    // verifier-provided helper; the result is not dereferenced.
     let current_id = unsafe { bpf_get_current_cgroup_id() };
+    // SAFETY: MONITORED_CGROUPS is an eBPF map owned by this program. A missing
+    // current cgroup key simply means this task is outside the monitored set.
     if unsafe { MONITORED_CGROUPS.get(&current_id) }.is_some() {
         return true;
     }
@@ -169,11 +182,15 @@ fn is_monitored() -> bool {
             break;
         }
 
+        // SAFETY: The helper returns a scalar ancestor cgroup id for the
+        // current task. The result is only compared and used as a map key.
         let ancestor_id = unsafe { bpf_get_current_ancestor_cgroup_id(i as i32) };
         if ancestor_id == 0 {
             break;
         } // Root or error
 
+        // SAFETY: MONITORED_CGROUPS is an eBPF map owned by this program. A
+        // missing ancestor key simply means this task is outside the monitored set.
         if unsafe { MONITORED_CGROUPS.get(&ancestor_id) }.is_some() {
             return true;
         }
@@ -186,14 +203,18 @@ const DATA_LEN: usize = 512;
 
 #[inline(always)]
 unsafe fn write_event_header(ev: *mut MonitorEvent, pid: u32, event_type: u32) {
-    (*ev).pid = pid;
-    (*ev).event_type = event_type;
-    (*ev).flags = 0;
-    (*ev).mode = 0;
-    (*ev).resolve = 0;
-    (*ev).return_value = 0;
-    // Zero payload in-place
-    core::ptr::write_bytes((*ev).data.as_mut_ptr(), 0, (*ev).data.len());
+    // SAFETY: Callers pass a non-null pointer to a reserved `MonitorEvent`
+    // ring-buffer entry. This initializes the fixed header and zeros the
+    // payload before the caller submits the event.
+    unsafe {
+        (*ev).pid = pid;
+        (*ev).event_type = event_type;
+        (*ev).flags = 0;
+        (*ev).mode = 0;
+        (*ev).resolve = 0;
+        (*ev).return_value = 0;
+        core::ptr::write_bytes((*ev).data.as_mut_ptr(), 0, (*ev).data.len());
+    }
 }
 
 #[tracepoint]
@@ -263,6 +284,8 @@ pub fn assay_monitor_sendmsg(ctx: TracePointContext) -> u32 {
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
+    // SAFETY: eBPF programs in this crate use abort-style panic semantics and
+    // cannot recover in-kernel. Reaching this handler is treated as unreachable.
     unsafe { core::hint::unreachable_unchecked() }
 }
 

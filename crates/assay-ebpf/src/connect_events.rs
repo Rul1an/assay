@@ -14,10 +14,14 @@ pub(super) fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
     }
 
     // Dynamic offset resolution
+    // SAFETY: CONFIG is an eBPF map owned by this program. Missing keys fall
+    // back to the tracepoint ABI default below.
     let sockaddr_offset = unsafe { CONFIG.get(&KEY_OFFSET_SOCKADDR) }
         .map(|v| *v as usize)
         .unwrap_or(DEFAULT_OFFSET as usize);
 
+    // SAFETY: The offset comes from configured tracepoint ABI state; failed
+    // reads are converted into the existing error path.
     let sockaddr_ptr: u64 = unsafe { ctx.read_at(sockaddr_offset).map_err(|_| 1u32)? };
     emit_sockaddr_event(
         sockaddr_ptr,
@@ -33,9 +37,13 @@ pub(super) fn try_sendto(ctx: TracePointContext) -> Result<u32, u32> {
         return Ok(0);
     }
 
+    // SAFETY: CONFIG is an eBPF map owned by this program. Missing keys fall
+    // back to the tracepoint ABI default below.
     let sockaddr_offset = unsafe { CONFIG.get(&KEY_OFFSET_SENDTO_SOCKADDR) }
         .map(|v| *v as usize)
         .unwrap_or(48);
+    // SAFETY: The offset comes from configured tracepoint ABI state; failed
+    // reads are converted into the existing error path.
     let sockaddr_ptr: u64 = unsafe { ctx.read_at(sockaddr_offset).map_err(|_| 1u32)? };
     if sockaddr_ptr == 0 {
         // Address-less send (e.g. a connected socket): no destination sockaddr in
@@ -58,14 +66,20 @@ pub(super) fn try_sendmsg(ctx: TracePointContext) -> Result<u32, u32> {
         return Ok(0);
     }
 
+    // SAFETY: CONFIG is an eBPF map owned by this program. Missing keys fall
+    // back to the tracepoint ABI default below.
     let msghdr_offset = unsafe { CONFIG.get(&KEY_OFFSET_SENDMSG_MSGHDR) }
         .map(|v| *v as usize)
         .unwrap_or(DEFAULT_OFFSET as usize);
+    // SAFETY: The offset comes from configured tracepoint ABI state; failed
+    // reads are converted into the existing error path.
     let msghdr_ptr: u64 = unsafe { ctx.read_at(msghdr_offset).map_err(|_| 1u32)? };
     if msghdr_ptr == 0 {
         return Ok(0);
     }
 
+    // SAFETY: `msghdr_ptr` is the user pointer carried by the tracepoint. Probe
+    // read failures are converted into the existing error path.
     let msghdr = unsafe {
         aya_ebpf::helpers::bpf_probe_read_user(msghdr_ptr as *const UserMsghdrHead)
             .map_err(|_| 1u32)?
@@ -106,6 +120,8 @@ fn emit_sockaddr_event(
     // We can't easily read indefinite structs, so we read a fixed chunk (e.g. 128 bytes)
     // to cover sockaddr_in / sockaddr_in6.
     let mut raw_sockaddr = [0u8; 128];
+    // SAFETY: `sockaddr_ptr` is a user sockaddr pointer from the syscall
+    // tracepoint. Failed probe reads leave the zeroed stack buffer in place.
     unsafe {
         let _ = aya_ebpf::helpers::bpf_probe_read_user(sockaddr_ptr as *const [u8; 128])
             .map(|x| raw_sockaddr = x);
@@ -125,7 +141,9 @@ fn emit_sockaddr_event(
     }
 
     if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
-        let ev = entry.as_mut_ptr() as *mut MonitorEvent;
+        let ev = entry.as_mut_ptr();
+        // SAFETY: `ev` points to a reserved `MonitorEvent` ring-buffer entry.
+        // Header and copied sockaddr payload are initialized before submit.
         unsafe {
             write_event_header(ev, current_tgid(), event_type);
 

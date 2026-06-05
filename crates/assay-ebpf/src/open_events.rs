@@ -2,19 +2,29 @@ use super::{path_filter, *};
 
 pub(super) fn try_openat2(ctx: TracePointContext) -> Result<u32, u32> {
     if let Some(hits) = TP_HIT.get_ptr_mut(0) {
+        // SAFETY: `hits` points to a mutable counter returned by the eBPF map;
+        // the verifier checks the map access for the constant key.
         unsafe { *hits += 1 };
     }
 
+    // SAFETY: CONFIG is an eBPF map owned by this program. Missing keys fall
+    // back to the tracepoint ABI default below.
     let how_offset = unsafe { CONFIG.get(&KEY_OFFSET_OPENAT2_HOW) }
         .map(|v| *v as usize)
         .unwrap_or(32);
+    // SAFETY: The offset comes from configured tracepoint ABI state; failed
+    // reads are converted into the existing error path.
     let how_ptr: u64 = unsafe { ctx.read_at(how_offset).map_err(|_| 1u32)? };
     let mut flags = 0u64;
     let mut mode = 0u64;
     let mut resolve = 0u64;
     if how_ptr != 0 {
         if let Ok(how) =
-            unsafe { aya_ebpf::helpers::bpf_probe_read_user(how_ptr as *const vmlinux::open_how) }
+            // SAFETY: `how_ptr` is the user pointer carried by the tracepoint. Probe
+            // read failures are ignored and leave the default openat2 metadata.
+            unsafe {
+                aya_ebpf::helpers::bpf_probe_read_user(how_ptr as *const vmlinux::open_how)
+            }
         {
             flags = how.flags;
             mode = how.mode;
@@ -27,16 +37,26 @@ pub(super) fn try_openat2(ctx: TracePointContext) -> Result<u32, u32> {
 
 pub(super) fn try_openat(ctx: TracePointContext) -> Result<u32, u32> {
     if let Some(hits) = TP_HIT.get_ptr_mut(0) {
+        // SAFETY: `hits` points to a mutable counter returned by the eBPF map;
+        // the verifier checks the map access for the constant key.
         unsafe { *hits += 1 };
     }
 
+    // SAFETY: CONFIG is an eBPF map owned by this program. Missing keys fall
+    // back to the tracepoint ABI default below.
     let flags_offset = unsafe { CONFIG.get(&KEY_OFFSET_OPENAT_FLAGS) }
         .map(|v| *v as usize)
         .unwrap_or(32);
+    // SAFETY: CONFIG is an eBPF map owned by this program. Missing keys fall
+    // back to the tracepoint ABI default below.
     let mode_offset = unsafe { CONFIG.get(&KEY_OFFSET_OPENAT_MODE) }
         .map(|v| *v as usize)
         .unwrap_or(40);
+    // SAFETY: The offset comes from configured tracepoint ABI state; failed
+    // reads use the existing safe default.
     let flags: i32 = unsafe { ctx.read_at(flags_offset).unwrap_or(0) };
+    // SAFETY: The offset comes from configured tracepoint ABI state; failed
+    // reads use the existing safe default.
     let mode: u64 = unsafe { ctx.read_at::<u64>(mode_offset).unwrap_or(0) };
 
     store_open_pending(ctx, KEY_OFFSET_FILENAME, flags as u64, mode, 0)
@@ -54,10 +74,14 @@ fn store_open_pending(
         return Ok(0);
     }
 
+    // SAFETY: CONFIG is an eBPF map owned by this program. Missing keys fall
+    // back to the tracepoint ABI default below.
     let filename_offset = unsafe { CONFIG.get(&offset_key) }
         .map(|v| *v as usize)
         .unwrap_or(DEFAULT_OFFSET as usize);
 
+    // SAFETY: The offset comes from configured tracepoint ABI state; failed
+    // reads are converted into the existing error path.
     let filename_ptr: u64 = unsafe { ctx.read_at(filename_offset).map_err(|_| 1u32)? };
     if filename_ptr == 0 {
         return Ok(0);
@@ -67,12 +91,16 @@ fn store_open_pending(
         Some(pending) => pending,
         None => return Ok(0),
     };
+    // SAFETY: `pending` points to this CPU's scratch `PendingOpen` slot returned
+    // by the PerCpuArray; all fields are initialized before the slot is used.
     unsafe {
         core::ptr::write_bytes((*pending).data.as_mut_ptr(), 0, DATA_LEN);
         (*pending).flags = flags;
         (*pending).mode = mode;
         (*pending).resolve = resolve;
     }
+    // SAFETY: `filename_ptr` is the user pointer carried by the tracepoint. The
+    // destination is the initialized scratch buffer and read errors are handled.
     let read_result = unsafe {
         aya_ebpf::helpers::bpf_probe_read_user_str_bytes(
             filename_ptr as *const u8,
@@ -82,6 +110,8 @@ fn store_open_pending(
     if read_result.is_err() {
         return Ok(0);
     }
+    // SAFETY: `pending` remains the valid scratch slot returned above. The data
+    // field was zeroed before the user string probe read.
     let path = unsafe { &(*pending).data };
     if path_filter::is_loader_telemetry_open_path(path) {
         return Ok(0);
@@ -91,6 +121,8 @@ fn store_open_pending(
     }
 
     let key = bpf_get_current_pid_tgid();
+    // SAFETY: PENDING_OPEN is an eBPF map owned by this program. `pending` is
+    // copied into the map value before the scratch slot can be reused.
     let _ = unsafe { PENDING_OPEN.insert(&key, &*pending, 0) };
 
     Ok(0)
@@ -103,19 +135,27 @@ pub(super) fn try_open_exit(
     dropped_stat: u32,
 ) -> Result<u32, u32> {
     let key = bpf_get_current_pid_tgid();
+    // SAFETY: PENDING_OPEN is an eBPF map owned by this program. A missing key
+    // means the entry probe did not record a path for this pid/tgid.
     let pending = match unsafe { PENDING_OPEN.get(&key) } {
         Some(pending) => pending,
         None => return Ok(0),
     };
     let _ = PENDING_OPEN.remove(&key);
 
+    // SAFETY: CONFIG is an eBPF map owned by this program. Missing keys fall
+    // back to the syscall-exit tracepoint ABI default below.
     let ret_offset = unsafe { CONFIG.get(&KEY_OFFSET_SYSCALL_EXIT_RET) }
         .map(|v| *v as usize)
         .unwrap_or(16);
+    // SAFETY: The offset comes from configured tracepoint ABI state; failed
+    // reads use the existing safe default return value.
     let ret: i64 = unsafe { ctx.read_at(ret_offset).unwrap_or(0) };
 
     if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
-        let ev = entry.as_mut_ptr() as *mut MonitorEvent;
+        let ev = entry.as_mut_ptr();
+        // SAFETY: `ev` points to a reserved `MonitorEvent` ring-buffer entry.
+        // Header and payload fields are initialized before submit.
         unsafe {
             write_event_header(ev, current_tgid(), EVENT_OPENAT);
             (*ev).flags = pending.flags;
@@ -141,6 +181,8 @@ pub(super) fn try_open_exit(
 
 #[inline(always)]
 fn should_dedup_open_path(path: &[u8; DATA_LEN], flags: u64) -> bool {
+    // SAFETY: CONFIG is an eBPF map owned by this program. Missing keys disable
+    // deduplication through the existing fallback default.
     let dedup = unsafe { CONFIG.get(&KEY_DEDUP_OPEN_PATHS) }
         .copied()
         .unwrap_or(0)
@@ -150,6 +192,8 @@ fn should_dedup_open_path(path: &[u8; DATA_LEN], flags: u64) -> bool {
     }
 
     let key = hash_open_path(path, flags);
+    // SAFETY: OPEN_PATH_SEEN is an eBPF map owned by this program. A missing key
+    // means the path hash has not been emitted yet.
     if unsafe { OPEN_PATH_SEEN.get(&key) }.is_some() {
         return true;
     }

@@ -9,7 +9,7 @@ use assay_common::{
 use aya_ebpf::{
     helpers::{bpf_get_current_cgroup_id, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
     macros::{lsm, map},
-    maps::{Array, HashMap, RingBuf},
+    maps::HashMap,
     programs::LsmContext,
 };
 use aya_log_ebpf::info;
@@ -47,6 +47,8 @@ fn emit_event(
 ) {
     if let Some(mut entry) = LSM_EVENTS.reserve::<[u8; 520]>(0) {
         let buf = entry.as_mut_ptr() as *mut u8;
+        // SAFETY: `buf` points to a reserved LSM event ring-buffer entry. The
+        // fixed header and bounded payload bytes are initialized before submit.
         unsafe {
             // Write PID
             let pid = (bpf_get_current_pid_tgid() >> 32) as u32;
@@ -86,30 +88,42 @@ fn emit_event(
 pub fn file_open_lsm(ctx: LsmContext) -> i32 {
     match try_file_open_lsm(ctx) {
         Ok(ret) => ret,
-        Err(ret) => ret as i32,
+        Err(ret) => ret,
     }
 }
 
 fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
     // 0. Mark Hit (Absolute proof kernel reached here)
     if let Some(hits) = LSM_HIT.get_ptr_mut(0) {
+        // SAFETY: `hits` points to a mutable counter returned by the eBPF map;
+        // the verifier checks the map access for the constant key.
         unsafe { *hits += 1 };
     }
 
+    // SAFETY: `bpf_get_current_cgroup_id` returns a scalar cgroup id from the
+    // verifier-provided helper; the result is not dereferenced.
     let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
 
     // Validates that we have a file pointer (arg 0)
+    // SAFETY: The LSM hook supplies argument 0 as a kernel `file` pointer. The
+    // pointer is checked for null before any typed field access.
     let file_ptr: *const c_void = unsafe { ctx.arg(0) };
     if file_ptr.is_null() {
         return Ok(0);
     }
 
+    // SAFETY: CONFIG is an eBPF map owned by this program. Missing keys use the
+    // existing monitor-all disabled default.
     let monitor_val = unsafe { CONFIG.get(&KEY_MONITOR_ALL).copied().unwrap_or(0) };
     let monitor_all = monitor_val != 0;
 
     // Optimization: avoid heavy logic if not monitored
+    // SAFETY: MONITORED_CGROUPS is an eBPF map owned by this program. A missing
+    // cgroup key means this task is outside the monitored set.
     if !monitor_all && unsafe { MONITORED_CGROUPS.get(&cgroup_id).is_none() } {
         if let Some(x) = LSM_BYPASS.get_ptr_mut(0) {
+            // SAFETY: `x` points to a mutable bypass counter returned by the
+            // eBPF map for the constant key.
             unsafe { *x += 1 };
         }
         return Ok(0);
@@ -120,6 +134,8 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
     // The "CO-RE" magic happens because we are casting to pointers of `vmlinux::file`/`inode`
     // which are generated with BTF relocations enabled.
     let f = file_ptr as *const file;
+    // SAFETY: `f` is the non-null kernel file pointer from the LSM hook. Probe
+    // read failures return a null inode pointer and are handled below.
     let inode_ptr: *mut inode = unsafe {
         bpf_probe_read_kernel(&((*f).f_inode) as *const *mut inode).unwrap_or(core::ptr::null_mut())
     };
@@ -130,12 +146,18 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
     }
 
     // Read i_ino
+    // SAFETY: `inode_ptr` was probe-read from the file and checked for null.
+    // Failed reads use the existing zero sentinel.
     let i_ino = unsafe { bpf_probe_read_kernel(&((*inode_ptr).i_ino) as *const u64).unwrap_or(0) };
 
     // Read i_generation (SOTA)
+    // SAFETY: `inode_ptr` was probe-read from the file and checked for null.
+    // Failed reads use the existing zero generation sentinel.
     let i_gen =
         unsafe { bpf_probe_read_kernel(&((*inode_ptr).i_generation) as *const u32).unwrap_or(0) };
 
+    // SAFETY: `inode_ptr` was probe-read from the file and checked for null.
+    // Failed reads return a null super_block pointer and are handled below.
     let sb_ptr: *mut super_block = unsafe {
         bpf_probe_read_kernel(&((*inode_ptr).i_sb) as *const *mut super_block)
             .unwrap_or(core::ptr::null_mut())
@@ -143,6 +165,8 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
 
     let mut s_dev = 0u32;
     if !sb_ptr.is_null() {
+        // SAFETY: `sb_ptr` was probe-read from the inode and checked for null.
+        // Failed reads use the existing zero device sentinel.
         s_dev = unsafe { bpf_probe_read_kernel(&((*sb_ptr).s_dev) as *const u32).unwrap_or(0) };
     }
 
@@ -156,7 +180,11 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
             dev: s_dev,
             gen: i_gen,
         };
+        // SAFETY: DENY_INO is an eBPF map owned by this program. The key is
+        // fully initialized from probe-read inode fields.
         if let Some(rule_id) = unsafe { DENY_INO.get(&key_exact) } {
+            // SAFETY: `bpf_printk!` emits scalar diagnostic values only; no
+            // pointer arguments are passed to the helper.
             unsafe {
                 aya_ebpf::helpers::bpf_printk!(
                     b"LSM: BLOCKED %llu:%llu (Exact Gen %u) rule=%u\0",
@@ -168,10 +196,14 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
             }
 
             if let Some(denies) = LSM_DENY.get_ptr_mut(0) {
+                // SAFETY: `denies` points to a mutable deny counter returned by
+                // the eBPF map for the constant key.
                 unsafe { *denies += 1 };
             }
 
             let mut alert_data = [0u8; 64];
+            // SAFETY: `alert_data` is a 64-byte stack buffer and the fixed
+            // offsets/lengths below fit within it.
             unsafe {
                 core::ptr::copy_nonoverlapping(
                     (s_dev as u64).to_ne_bytes().as_ptr(),
@@ -205,7 +237,11 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
         gen: 0,
     };
 
+    // SAFETY: DENY_INO is an eBPF map owned by this program. The fallback key is
+    // fully initialized from probe-read inode fields.
     if let Some(rule_id) = unsafe { DENY_INO.get(&key_fallback) } {
+        // SAFETY: `bpf_printk!` emits scalar diagnostic values only; no pointer
+        // arguments are passed to the helper.
         unsafe {
             aya_ebpf::helpers::bpf_printk!(
                 b"LSM: BLOCKED %llu:%llu (Fallback Gen) rule=%u\0",
@@ -216,10 +252,14 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
         }
 
         if let Some(denies) = LSM_DENY.get_ptr_mut(0) {
+            // SAFETY: `denies` points to a mutable deny counter returned by the
+            // eBPF map for the constant key.
             unsafe { *denies += 1 };
         }
 
         let mut alert_data = [0u8; 64];
+        // SAFETY: `alert_data` is a 64-byte stack buffer and the fixed
+        // offsets/lengths below fit within it.
         unsafe {
             core::ptr::copy_nonoverlapping(
                 (s_dev as u64).to_ne_bytes().as_ptr(),
@@ -246,6 +286,8 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
     // Event 112: Inode Resolved (Telemetry). It is enabled by default for the
     // monitor CLI, but runner-spike disables it because it is not attribution
     // evidence and can flood the LSM ring buffer on tiny fixtures.
+    // SAFETY: CONFIG is an eBPF map owned by this program. Missing keys use the
+    // existing default that emits inode-resolved telemetry.
     let emit_inode_resolved = unsafe { CONFIG.get(&KEY_EMIT_INODE_RESOLVED) }
         .copied()
         .unwrap_or(1)
