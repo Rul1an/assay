@@ -149,11 +149,7 @@ Step2 high-readiness split:
 ```text
 crates/assay-registry/src/lockfile.rs
 crates/assay-registry/src/lockfile_next/
-  mod.rs
-  model.rs
-  source.rs
-  signature.rs
-  verify.rs
+  types.rs
 
 crates/assay-core/src/report/summary.rs
 crates/assay-core/src/report/summary/
@@ -163,7 +159,7 @@ crates/assay-core/src/report/summary/
 
 crates/assay-cli/src/cli/commands/bundle.rs
 crates/assay-cli/src/cli/commands/bundle/
-  create.rs
+  implementation.rs
   verify.rs
   paths.rs
   coverage.rs
