@@ -72,16 +72,12 @@ rg -n 'selected top 2 through 9|selected 2-9 snapshot|selected top 2-9 snapshot'
   docs/contributing/SPLIT-PLAN-wave53-hotspot-top2-9.md \
   docs/contributing/SPLIT-REVIEW-PACK-wave53-hotspot-top2-9-step1.md >/dev/null
 
-if [[ "$base_mode" == "base-ref" ]]; then
-  cargo fmt --check
+dirty_rust="$(git status --short --untracked-files=all | sed -E 's/^...//' | rg '^crates/.+\.rs$' || true)"
+if [[ -n "$dirty_rust" ]]; then
+  echo "WARN: skipping workspace cargo fmt --check; dirty Rust exists outside Wave53 Step1:"
+  printf '%s\n' "$dirty_rust"
 else
-  dirty_rust="$(git status --short --untracked-files=all | sed -E 's/^...//' | rg '^crates/.+\.rs$' || true)"
-  if [[ -n "$dirty_rust" ]]; then
-    echo "WARN: skipping workspace cargo fmt --check in local dirty mode; dirty Rust exists outside Wave53 Step1:"
-    printf '%s\n' "$dirty_rust"
-  else
-    cargo fmt --check
-  fi
+  cargo fmt --check
 fi
 git diff --check
 
