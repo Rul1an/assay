@@ -171,6 +171,7 @@ Step3 CLI medium-readiness split:
 crates/assay-cli/src/cli/commands/runner_spike.rs
 crates/assay-cli/src/cli/commands/runner_spike/
   args.rs
+  implementation.rs
   spec.rs
   phases.rs
   cgroup.rs
@@ -179,10 +180,10 @@ crates/assay-cli/src/cli/commands/runner_spike/
 
 crates/assay-cli/src/cli/commands/doctor.rs
 crates/assay-cli/src/cli/commands/doctor/
+  implementation.rs
   fixes.rs
   patching.rs
   parse_error.rs
-  preview.rs
 ```
 
 Step4 runner/eBPF split:
