@@ -189,6 +189,11 @@ impl SessionCgroup {
             }
 
             #[cfg(target_os = "linux")]
+            // SAFETY: pidfd_open and pidfd_send_signal are raw libc syscalls.
+            // `pid` is validated above, the returned fd is checked before use,
+            // and the only pointer passed to the kernel is a null siginfo
+            // pointer. Failures fall back to classic kill; nothing is
+            // dereferenced through a Rust reference.
             unsafe {
                 // syscall(SYS_pidfd_open, pid, 0)
                 let fd = libc::syscall(libc::SYS_pidfd_open, pid, 0) as i32;

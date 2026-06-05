@@ -4,6 +4,8 @@
 // remains `unsafe_code = "deny"`; this crate is the platform adapter where
 // such syscalls are intentional and unavoidable.
 #![allow(unsafe_code)]
+#![warn(unsafe_op_in_unsafe_fn)]
+#![warn(clippy::undocumented_unsafe_blocks)]
 
 //! Linux-only platform adapter for the Assay-Runner candidate.
 //!
