@@ -122,6 +122,8 @@ cargo check -p assay-core
 cargo test -q -p assay-core --test policy_engine_test
 cargo test -q -p assay-core --lib policy
 cargo clippy -p assay-core --all-targets -- -D warnings
+git diff --check "$base_ref"...HEAD
 git diff --check
+git diff --cached --check
 
 echo "PASS: Wave53 Step5 policy facade closure gate"
