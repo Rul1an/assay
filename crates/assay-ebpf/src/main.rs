@@ -5,7 +5,11 @@
 #[link_section = "license"]
 pub static _LICENSE: [u8; 4] = *b"GPL\0";
 
+mod connect_events;
+mod fork_events;
 pub mod lsm;
+mod open_events;
+mod path_filter;
 pub mod socket_lsm;
 #[allow(dead_code)]
 #[allow(non_snake_case)]
@@ -180,14 +184,6 @@ fn is_monitored() -> bool {
 
 const DATA_LEN: usize = 512;
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct UserMsghdrHead {
-    msg_name: u64,
-    msg_namelen: u32,
-    _pad: u32,
-}
-
 #[inline(always)]
 unsafe fn write_event_header(ev: *mut MonitorEvent, pid: u32, event_type: u32) {
     (*ev).pid = pid;
@@ -202,7 +198,7 @@ unsafe fn write_event_header(ev: *mut MonitorEvent, pid: u32, event_type: u32) {
 
 #[tracepoint]
 pub fn assay_monitor_openat(ctx: TracePointContext) -> u32 {
-    match try_openat(ctx) {
+    match open_events::try_openat(ctx) {
         Ok(v) => v,
         Err(v) => v,
     }
@@ -211,7 +207,7 @@ pub fn assay_monitor_openat(ctx: TracePointContext) -> u32 {
 /// SOTA Coverage: Also monitor openat2 (modern Linux)
 #[tracepoint]
 pub fn assay_monitor_openat2(ctx: TracePointContext) -> u32 {
-    match try_openat2(ctx) {
+    match open_events::try_openat2(ctx) {
         Ok(v) => v,
         Err(v) => v,
     }
@@ -219,7 +215,7 @@ pub fn assay_monitor_openat2(ctx: TracePointContext) -> u32 {
 
 #[tracepoint]
 pub fn assay_monitor_openat_exit(ctx: TracePointContext) -> u32 {
-    match try_open_exit(
+    match open_events::try_open_exit(
         ctx,
         MONITOR_STAT_OPENAT_EVENTS_EMITTED,
         MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
@@ -231,7 +227,7 @@ pub fn assay_monitor_openat_exit(ctx: TracePointContext) -> u32 {
 
 #[tracepoint]
 pub fn assay_monitor_openat2_exit(ctx: TracePointContext) -> u32 {
-    match try_open_exit(
+    match open_events::try_open_exit(
         ctx,
         MONITOR_STAT_OPENAT2_EVENTS_EMITTED,
         MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
@@ -241,388 +237,28 @@ pub fn assay_monitor_openat2_exit(ctx: TracePointContext) -> u32 {
     }
 }
 
-fn try_openat2(ctx: TracePointContext) -> Result<u32, u32> {
-    if let Some(hits) = TP_HIT.get_ptr_mut(0) {
-        unsafe { *hits += 1 };
-    }
-
-    let how_offset = unsafe { CONFIG.get(&KEY_OFFSET_OPENAT2_HOW) }
-        .map(|v| *v as usize)
-        .unwrap_or(32);
-    let how_ptr: u64 = unsafe { ctx.read_at(how_offset).map_err(|_| 1u32)? };
-    let mut flags = 0u64;
-    let mut mode = 0u64;
-    let mut resolve = 0u64;
-    if how_ptr != 0 {
-        if let Ok(how) =
-            unsafe { aya_ebpf::helpers::bpf_probe_read_user(how_ptr as *const vmlinux::open_how) }
-        {
-            flags = how.flags;
-            mode = how.mode;
-            resolve = how.resolve;
-        }
-    }
-
-    store_open_pending(ctx, KEY_OFFSET_FILENAME_OPENAT2, flags, mode, resolve)
-}
-
-fn try_openat(ctx: TracePointContext) -> Result<u32, u32> {
-    if let Some(hits) = TP_HIT.get_ptr_mut(0) {
-        unsafe { *hits += 1 };
-    }
-
-    let flags_offset = unsafe { CONFIG.get(&KEY_OFFSET_OPENAT_FLAGS) }
-        .map(|v| *v as usize)
-        .unwrap_or(32);
-    let mode_offset = unsafe { CONFIG.get(&KEY_OFFSET_OPENAT_MODE) }
-        .map(|v| *v as usize)
-        .unwrap_or(40);
-    let flags: i32 = unsafe { ctx.read_at(flags_offset).unwrap_or(0) };
-    let mode: u64 = unsafe { ctx.read_at::<u64>(mode_offset).unwrap_or(0) };
-
-    store_open_pending(ctx, KEY_OFFSET_FILENAME, flags as u64, mode, 0)
-}
-
-#[inline(always)]
-fn store_open_pending(
-    ctx: TracePointContext,
-    offset_key: u32,
-    flags: u64,
-    mode: u64,
-    resolve: u64,
-) -> Result<u32, u32> {
-    if !is_monitored() {
-        return Ok(0);
-    }
-
-    let filename_offset = unsafe { CONFIG.get(&offset_key) }
-        .map(|v| *v as usize)
-        .unwrap_or(DEFAULT_OFFSET as usize);
-
-    let filename_ptr: u64 = unsafe { ctx.read_at(filename_offset).map_err(|_| 1u32)? };
-    if filename_ptr == 0 {
-        return Ok(0);
-    }
-
-    let pending = match OPEN_SCRATCH.get_ptr_mut(0) {
-        Some(pending) => pending,
-        None => return Ok(0),
-    };
-    unsafe {
-        core::ptr::write_bytes((*pending).data.as_mut_ptr(), 0, DATA_LEN);
-        (*pending).flags = flags;
-        (*pending).mode = mode;
-        (*pending).resolve = resolve;
-    }
-    let read_result = unsafe {
-        aya_ebpf::helpers::bpf_probe_read_user_str_bytes(
-            filename_ptr as *const u8,
-            &mut (*pending).data,
-        )
-    };
-    if read_result.is_err() {
-        return Ok(0);
-    }
-    let path = unsafe { &(*pending).data };
-    if is_loader_telemetry_open_path(path) {
-        return Ok(0);
-    }
-    if should_dedup_open_path(path, flags) {
-        return Ok(0);
-    }
-
-    let key = bpf_get_current_pid_tgid();
-    let _ = unsafe { PENDING_OPEN.insert(&key, &*pending, 0) };
-
-    Ok(0)
-}
-
-#[inline(always)]
-fn try_open_exit(ctx: TracePointContext, emitted_stat: u32, dropped_stat: u32) -> Result<u32, u32> {
-    let key = bpf_get_current_pid_tgid();
-    let pending = match unsafe { PENDING_OPEN.get(&key) } {
-        Some(pending) => pending,
-        None => return Ok(0),
-    };
-    let _ = PENDING_OPEN.remove(&key);
-
-    let ret_offset = unsafe { CONFIG.get(&KEY_OFFSET_SYSCALL_EXIT_RET) }
-        .map(|v| *v as usize)
-        .unwrap_or(16);
-    let ret: i64 = unsafe { ctx.read_at(ret_offset).unwrap_or(0) };
-
-    if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
-        let ev = entry.as_mut_ptr() as *mut MonitorEvent;
-        unsafe {
-            write_event_header(ev, current_tgid(), EVENT_OPENAT);
-            (*ev).flags = pending.flags;
-            (*ev).mode = pending.mode;
-            (*ev).resolve = pending.resolve;
-            (*ev).return_value = ret;
-            core::ptr::copy_nonoverlapping(
-                pending.data.as_ptr(),
-                (*ev).data.as_mut_ptr(),
-                DATA_LEN,
-            );
-        }
-        entry.submit(0);
-        inc_stat(MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED);
-        inc_stat(emitted_stat);
-    } else {
-        inc_stat(MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED);
-        inc_stat(dropped_stat);
-    }
-
-    Ok(0)
-}
-
-#[inline(always)]
-fn should_dedup_open_path(path: &[u8; DATA_LEN], flags: u64) -> bool {
-    let dedup = unsafe { CONFIG.get(&KEY_DEDUP_OPEN_PATHS) }
-        .copied()
-        .unwrap_or(0)
-        != 0;
-    if !dedup {
-        return false;
-    }
-
-    let key = hash_open_path(path, flags);
-    if unsafe { OPEN_PATH_SEEN.get(&key) }.is_some() {
-        return true;
-    }
-    let seen = 1u8;
-    let _ = OPEN_PATH_SEEN.insert(&key, &seen, 0);
-    false
-}
-
-#[inline(always)]
-fn hash_open_path(path: &[u8; DATA_LEN], flags: u64) -> u64 {
-    let mut hash = 0xcbf29ce484222325u64;
-    hash ^= flags;
-    hash = hash.wrapping_mul(0x100000001b3u64);
-    for index in 0..DATA_LEN {
-        let byte = path[index];
-        if byte == 0 {
-            break;
-        }
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3u64);
-    }
-    hash
-}
-
-#[inline(always)]
-fn is_loader_telemetry_open_path(path: &[u8; DATA_LEN]) -> bool {
-    // Dynamic linker and libc config probes flooded delegated runs without
-    // carrying runner-spike attribution evidence.
-    bytes_start_with(path, b"/etc/ld.so.cache\0")
-        || bytes_start_with(path, b"/etc/localtime\0")
-        || bytes_start_with(path, b"/etc/ssl/openssl.cnf\0")
-        // Python runtime bootstrap files are control-plane noise from the MCP
-        // fixture process, not agent file access.
-        || bytes_start_with(path, b"/usr/pyvenv.cfg\0")
-        // System library and locale lookups dominated the openat stream and
-        // varied with loader state across otherwise identical fixtures.
-        || bytes_start_with(path, b"/lib/")
-        || bytes_start_with(path, b"/lib32/")
-        || bytes_start_with(path, b"/lib64/")
-        || bytes_start_with(path, b"/usr/bin/pyvenv.cfg\0")
-        || bytes_start_with(path, b"/usr/bin/python3._pth\0")
-        || bytes_start_with(path, b"/usr/bin/python3.12._pth\0")
-        || bytes_start_with(path, b"/usr/bin/pybuilddir.txt\0")
-        // The OpenAI Agents fixture's vendored dependency tree is SDK runtime
-        // plumbing; SDK evidence is recorded from the normalized SDK layer.
-        || bytes_start_with(
-            path,
-            b"/opt/actions-runner/_work/assay/assay/runner-fixtures/openai-agents/node_modules",
-        )
-        || bytes_start_with(path, b"/usr/local/lib/")
-        || bytes_start_with(path, b"/usr/local/share/locale/")
-        || bytes_start_with(path, b"/usr/lib/")
-        || bytes_start_with(path, b"/usr/share/locale/")
-        // Kernel and device introspection paths are monitor/runtime plumbing,
-        // not filesystem capability evidence for the fixture.
-        || bytes_start_with(path, b"/proc/")
-        || bytes_start_with(path, b"/sys/")
-        || bytes_start_with(path, b"/dev/")
-}
-
-#[inline(always)]
-fn bytes_start_with(path: &[u8; DATA_LEN], prefix: &[u8]) -> bool {
-    for index in 0..DATA_LEN {
-        if index >= prefix.len() {
-            return true;
-        }
-        if path[index] != prefix[index] {
-            return false;
-        }
-    }
-    false
-}
-
 #[tracepoint]
 pub fn assay_monitor_connect(ctx: TracePointContext) -> u32 {
-    match try_connect(ctx) {
+    match connect_events::try_connect(ctx) {
         Ok(v) => v,
         Err(v) => v,
     }
-}
-
-fn try_connect(ctx: TracePointContext) -> Result<u32, u32> {
-    if !is_monitored() {
-        return Ok(0);
-    }
-
-    // Dynamic offset resolution
-    let sockaddr_offset = unsafe { CONFIG.get(&KEY_OFFSET_SOCKADDR) }
-        .map(|v| *v as usize)
-        .unwrap_or(DEFAULT_OFFSET as usize);
-
-    let sockaddr_ptr: u64 = unsafe { ctx.read_at(sockaddr_offset).map_err(|_| 1u32)? };
-    emit_sockaddr_event(
-        sockaddr_ptr,
-        EVENT_CONNECT,
-        MONITOR_STAT_CONNECT_EVENTS_EMITTED,
-        MONITOR_STAT_CONNECT_RINGBUF_DROPPED,
-        NON_IP_FAMILY_STAT_DISABLED,
-    )
 }
 
 #[tracepoint]
 pub fn assay_monitor_sendto(ctx: TracePointContext) -> u32 {
-    match try_sendto(ctx) {
+    match connect_events::try_sendto(ctx) {
         Ok(v) => v,
         Err(v) => v,
     }
-}
-
-fn try_sendto(ctx: TracePointContext) -> Result<u32, u32> {
-    if !is_monitored() {
-        return Ok(0);
-    }
-
-    let sockaddr_offset = unsafe { CONFIG.get(&KEY_OFFSET_SENDTO_SOCKADDR) }
-        .map(|v| *v as usize)
-        .unwrap_or(48);
-    let sockaddr_ptr: u64 = unsafe { ctx.read_at(sockaddr_offset).map_err(|_| 1u32)? };
-    if sockaddr_ptr == 0 {
-        // Address-less send (e.g. a connected socket): no destination sockaddr in
-        // this call, so the peer is not recoverable here. Socket type is not
-        // classified. Count it instead of dropping silently.
-        inc_stat(MONITOR_STAT_SENDTO_NO_PEER);
-        return Ok(0);
-    }
-    emit_sockaddr_event(
-        sockaddr_ptr,
-        EVENT_SENDTO,
-        MONITOR_STAT_SENDTO_EVENTS_EMITTED,
-        MONITOR_STAT_SENDTO_RINGBUF_DROPPED,
-        MONITOR_STAT_SENDTO_NON_IP_FAMILY,
-    )
 }
 
 #[tracepoint]
 pub fn assay_monitor_sendmsg(ctx: TracePointContext) -> u32 {
-    match try_sendmsg(ctx) {
+    match connect_events::try_sendmsg(ctx) {
         Ok(v) => v,
         Err(v) => v,
     }
-}
-
-fn try_sendmsg(ctx: TracePointContext) -> Result<u32, u32> {
-    if !is_monitored() {
-        return Ok(0);
-    }
-
-    let msghdr_offset = unsafe { CONFIG.get(&KEY_OFFSET_SENDMSG_MSGHDR) }
-        .map(|v| *v as usize)
-        .unwrap_or(DEFAULT_OFFSET as usize);
-    let msghdr_ptr: u64 = unsafe { ctx.read_at(msghdr_offset).map_err(|_| 1u32)? };
-    if msghdr_ptr == 0 {
-        return Ok(0);
-    }
-
-    let msghdr = unsafe {
-        aya_ebpf::helpers::bpf_probe_read_user(msghdr_ptr as *const UserMsghdrHead)
-            .map_err(|_| 1u32)?
-    };
-    if msghdr.msg_name == 0 || msghdr.msg_namelen == 0 {
-        // Address-less send (e.g. a connected socket): the message carries no
-        // destination address, so the peer is not recoverable here. Socket type
-        // is not classified. Count it instead of dropping.
-        inc_stat(MONITOR_STAT_SENDMSG_NO_PEER);
-        return Ok(0);
-    }
-
-    emit_sockaddr_event(
-        msghdr.msg_name,
-        EVENT_SENDMSG,
-        MONITOR_STAT_SENDMSG_EVENTS_EMITTED,
-        MONITOR_STAT_SENDMSG_RINGBUF_DROPPED,
-        MONITOR_STAT_SENDMSG_NON_IP_FAMILY,
-    )
-}
-
-/// Sentinel for `emit_sockaddr_event`'s `non_ip_family_stat`: do not count a
-/// non-IP family skip (used by the connect path, where this is plain plumbing).
-const NON_IP_FAMILY_STAT_DISABLED: u32 = u32::MAX;
-
-#[inline(always)]
-fn emit_sockaddr_event(
-    sockaddr_ptr: u64,
-    event_type: u32,
-    emitted_stat: u32,
-    dropped_stat: u32,
-    non_ip_family_stat: u32,
-) -> Result<u32, u32> {
-    if sockaddr_ptr == 0 {
-        return Ok(0);
-    }
-
-    // We can't easily read indefinite structs, so we read a fixed chunk (e.g. 128 bytes)
-    // to cover sockaddr_in / sockaddr_in6.
-    let mut raw_sockaddr = [0u8; 128];
-    unsafe {
-        let _ = aya_ebpf::helpers::bpf_probe_read_user(sockaddr_ptr as *const [u8; 128])
-            .map(|x| raw_sockaddr = x);
-    }
-
-    // Runner-spike only normalizes IPv4/IPv6 endpoints into attribution
-    // evidence. AF_UNIX and other family telemetry is runtime plumbing, so skip
-    // it before reserving tracepoint ring buffer space. For sendto/sendmsg we
-    // count the skip (non_ip_family_stat) so the datagram peer label stays
-    // honest; the connect path passes the disabled sentinel.
-    let family = u16::from_ne_bytes([raw_sockaddr[0], raw_sockaddr[1]]);
-    if family != 2 && family != 10 {
-        if non_ip_family_stat != NON_IP_FAMILY_STAT_DISABLED {
-            inc_stat(non_ip_family_stat);
-        }
-        return Ok(0);
-    }
-
-    if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
-        let ev = entry.as_mut_ptr() as *mut MonitorEvent;
-        unsafe {
-            write_event_header(ev, current_tgid(), event_type);
-
-            // Copy pre-read stack buffer into ringbuf payload
-            let data_ptr = (*ev).data.as_mut_ptr();
-            let n = if raw_sockaddr.len() < DATA_LEN {
-                raw_sockaddr.len()
-            } else {
-                DATA_LEN
-            };
-            core::ptr::copy_nonoverlapping(raw_sockaddr.as_ptr(), data_ptr, n);
-        }
-        entry.submit(0);
-        inc_stat(MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED);
-        inc_stat(emitted_stat);
-    } else {
-        inc_stat(MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED);
-        inc_stat(dropped_stat);
-    }
-
-    Ok(0)
 }
 
 #[panic_handler]
@@ -632,47 +268,8 @@ fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
 
 #[tracepoint]
 pub fn assay_monitor_fork(ctx: TracePointContext) -> u32 {
-    match try_fork(ctx) {
+    match fork_events::try_fork(ctx) {
         Ok(v) => v,
         Err(v) => v,
     }
-}
-
-fn try_fork(ctx: TracePointContext) -> Result<u32, u32> {
-    // Only trace if parent is monitored.
-    // NOTE: Cgroup inheritance means child is AUTOMATICALLY in the cgroup.
-    // So if parent is in cgroup, child is too.
-    // We check `is_monitored()` which checks current (parent) cgroup.
-    if !is_monitored() {
-        return Ok(0);
-    }
-
-    let parent_offset = unsafe { CONFIG.get(&KEY_OFFSET_FORK_PARENT) }
-        .map(|v| *v as usize)
-        .unwrap_or(24); // Common default for parent_pid
-
-    let child_offset = unsafe { CONFIG.get(&KEY_OFFSET_FORK_CHILD) }
-        .map(|v| *v as usize)
-        .unwrap_or(44); // Common default for child_pid
-
-    let parent_pid: u32 = unsafe { ctx.read_at(parent_offset).map_err(|_| 1u32)? };
-    let child_pid: u32 = unsafe { ctx.read_at(child_offset).map_err(|_| 1u32)? };
-
-    if let Some(mut entry) = EVENTS.reserve::<MonitorEvent>(0) {
-        let ev = entry.as_mut_ptr() as *mut MonitorEvent;
-        unsafe {
-            use assay_common::EVENT_FORK;
-            write_event_header(ev, parent_pid, EVENT_FORK);
-
-            // Payload: child_pid (4 bytes)
-            let data_ptr = (*ev).data.as_mut_ptr();
-            core::ptr::write(data_ptr as *mut u32, child_pid);
-        }
-        entry.submit(0);
-        inc_stat(MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED);
-    } else {
-        inc_stat(MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED);
-    }
-
-    Ok(0)
 }
