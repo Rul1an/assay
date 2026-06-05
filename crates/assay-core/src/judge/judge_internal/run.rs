@@ -2,7 +2,7 @@ use crate::judge::{reliability, JudgeService};
 use crate::model::TestInput;
 use serde_json::json;
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub(crate) async fn evaluate_impl(
     svc: &JudgeService,
     test_id: &str,

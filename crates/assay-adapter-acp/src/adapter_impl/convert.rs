@@ -166,7 +166,7 @@ fn default_time() -> DateTime<Utc> {
         .expect("default timestamp must be valid")
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn build_payload(
     adapter_id: &str,
     adapter_version: &str,

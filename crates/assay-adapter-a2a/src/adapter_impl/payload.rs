@@ -2,7 +2,7 @@ use serde_json::{Map, Value};
 
 use super::{discovery::discovery_object, handoff::handoff_object, PROTOCOL_NAME};
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub(super) fn build_payload(
     adapter_id: &str,
     adapter_version: &str,

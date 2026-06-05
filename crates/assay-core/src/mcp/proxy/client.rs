@@ -16,7 +16,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub(super) fn run_client_to_server(
     mut child_stdin: ChildStdin,
     stdout: Arc<Mutex<io::Stdout>>,
