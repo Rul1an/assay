@@ -195,6 +195,7 @@ crates/assay-runner-core/src/kernel/
   stats.rs
   health.rs
   notes.rs
+  tests.rs
 
 crates/assay-ebpf/src/main.rs
 crates/assay-ebpf/src/
