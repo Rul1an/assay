@@ -219,6 +219,14 @@ crates/assay-core/src/mcp/policy/
 Existing directories such as `engine_next/*` remain in place. Step5 is about thinning
 `mcp/policy/mod.rs`, not redesigning the policy engine.
 
+Step5 closure snapshot:
+
+- `policy/mod.rs` remains the public facade and keeps `McpPolicy` inherent methods.
+- `policy/types.rs` owns policy data types and runtime feature re-exports.
+- `policy/deserialize.rs` owns legacy constraints compatibility.
+- `policy/matcher.rs` owns policy-local tool-pattern matching.
+- `policy/contracts.rs` owns typed decision contracts and moved contract tests.
+
 For files that already exist as `foo.rs`, the split modules live under `foo/*.rs` and are declared
 from the facade with `mod child;`. Do not add a sibling `foo/mod.rs`, because that would conflict
 with the existing facade module.
