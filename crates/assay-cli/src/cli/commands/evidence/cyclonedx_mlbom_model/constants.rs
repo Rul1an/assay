@@ -1,0 +1,9 @@
+pub(super) const EVENT_TYPE: &str = "assay.receipt.cyclonedx.mlbom_model_component.v1";
+pub(super) const EVENT_SOURCE: &str = "urn:assay:external:cyclonedx:mlbom-model-component";
+pub(super) const RECEIPT_SCHEMA: &str = "assay.receipt.cyclonedx.mlbom-model-component.v1";
+pub(super) const SOURCE_SYSTEM: &str = "cyclonedx";
+pub(super) const SOURCE_SURFACE: &str = "bom.components[type=machine-learning-model]";
+pub(super) const REDUCER_VERSION: &str = "assay-cyclonedx-mlbom-model-component@0.1.0";
+pub(super) const DEFAULT_RUN_ID: &str = "import-cyclonedx-mlbom-model";
+pub(super) const MAX_BOUNDARY_STRING_CHARS: usize = 240;
+pub(super) const MAX_REF_COUNT: usize = 32;

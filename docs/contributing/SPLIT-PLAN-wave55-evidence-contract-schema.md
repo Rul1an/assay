@@ -7,6 +7,7 @@ targets:
 
 - `crates/assay-cli/src/cli/commands/evidence/schema.rs`
 - `crates/assay-cli/src/cli/commands/evidence/pydantic_case_result.rs`
+- `crates/assay-cli/src/cli/commands/evidence/cyclonedx_mlbom_model.rs`
 
 These files own serialized CLI contracts: schema listing/validation and external importer receipt
 reduction. The wave preserves behavior and output shape while making each contract easier to review.
@@ -33,6 +34,21 @@ Split `pydantic_case_result.rs` behind its existing public importer facade:
 - move bounded validation helpers to `pydantic_case_result/validate.rs`
 - move existing importer unit tests to `pydantic_case_result/tests.rs`
 
+## Step 3 Target
+
+Split `cyclonedx_mlbom_model.rs` behind its existing public importer facade:
+
+- keep `CycloneDxMlBomModelArgs` and `cmd_cyclonedx_mlbom_model` in
+  `cyclonedx_mlbom_model.rs`
+- move event/schema constants to `cyclonedx_mlbom_model/constants.rs`
+- move `EvidenceEvent` construction to `cyclonedx_mlbom_model/events.rs`
+- move CycloneDX component selection and receipt payload reduction to
+  `cyclonedx_mlbom_model/reduce.rs`
+- move import-time, default artifact reference, JSON input, and digest helpers to
+  `cyclonedx_mlbom_model/source.rs`
+- move bounded reviewer-safe string validation helpers to `cyclonedx_mlbom_model/validate.rs`
+- move existing importer unit tests to `cyclonedx_mlbom_model/tests.rs`
+
 ## Non-Goals
 
 - No schema ID, alias, path, family, status, or Trust Basis claim changes.
@@ -41,6 +57,7 @@ Split `pydantic_case_result.rs` behind its existing public importer facade:
 - No docs/reference content changes.
 - No `.github/workflows/**` edits.
 - No CycloneDX or Mastra importer moves in Step 2.
+- No Mastra importer moves in Step 3.
 
 ## Review Rule
 
