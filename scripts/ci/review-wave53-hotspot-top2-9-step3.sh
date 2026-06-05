@@ -125,6 +125,8 @@ cargo check -p assay-cli
 cargo test -q -p assay-cli -- runner_spike
 cargo test -q -p assay-cli -- doctor
 cargo clippy -p assay-cli --all-targets -- -D warnings
+git diff --check "$base_ref"...HEAD
 git diff --check
+git diff --cached --check
 
 echo "PASS: Wave53 Step3 CLI command split gate"
