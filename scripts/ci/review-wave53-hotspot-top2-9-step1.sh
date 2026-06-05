@@ -79,6 +79,10 @@ if [[ -n "$dirty_rust" ]]; then
 else
   cargo fmt --check
 fi
-git diff --check
+if [[ "$base_mode" == "base-ref" ]]; then
+  git diff --check "$base_ref"...HEAD
+else
+  git diff --check
+fi
 
 echo "PASS: Wave53 Step1 freeze gate"

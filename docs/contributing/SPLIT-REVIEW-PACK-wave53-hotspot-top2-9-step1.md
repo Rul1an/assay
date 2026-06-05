@@ -11,6 +11,7 @@ only.
 - `docs/contributing/SPLIT-CHECKLIST-wave53-hotspot-top2-9-step1.md`
 - `docs/contributing/SPLIT-MOVE-MAP-wave53-hotspot-top2-9-step1.md`
 - `docs/contributing/SPLIT-REVIEW-PACK-wave53-hotspot-top2-9-step1.md`
+- `docs/superpowers/plans/2026-06-05-assay-wave53-hotspot-top2-9-refactor.md`
 - `scripts/ci/review-wave53-hotspot-top2-9-step1.sh`
 
 ## Baseline Note
