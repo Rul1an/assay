@@ -117,7 +117,7 @@ fn key_to_spki_der(key: &VerifyingKey) -> Result<Vec<u8>> {
 /// ```text
 /// PAE(type, payload) = "DSSEv1" SP LEN(type) SP type SP LEN(payload) SP payload
 /// ```
-fn build_pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
+pub(crate) fn build_pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
     let type_len = payload_type.len().to_string();
     let payload_len = payload.len().to_string();
 
