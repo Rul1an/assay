@@ -47,9 +47,9 @@ runcmd:
   - ln -sf /opt/rust/bin/cargo /usr/local/bin/cargo
   - ln -sf /opt/rust/bin/rustc /usr/local/bin/rustc
   - ln -sf /opt/rust/bin/rustup /usr/local/bin/rustup
-  - /opt/rust/bin/rustup toolchain install nightly
-  - /opt/rust/bin/rustup component add rust-src --toolchain nightly
-  - /opt/rust/bin/cargo install bpf-linker --locked
+  - /opt/rust/bin/rustup toolchain install nightly-2026-01-01 --profile minimal
+  - /opt/rust/bin/rustup component add rust-src --toolchain nightly-2026-01-01
+  - /opt/rust/bin/rustup run nightly-2026-01-01 cargo install bpf-linker --version 0.10.3 --locked --force
   - ln -sf /opt/rust/bin/bpf-linker /usr/local/bin/bpf-linker
 
   # 4. Prepare Runner User

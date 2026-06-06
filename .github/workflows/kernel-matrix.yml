@@ -224,39 +224,32 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             llvm-dev libclang-dev build-essential libbpf-dev pkg-config
 
-      - name: Install Rust Toolchain (nightly)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # nightly
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
-      - name: Install rust-src for eBPF (explicit for ARM)
+      - name: Install pinned eBPF toolchain
         run: |
-          rustup component add rust-src --toolchain nightly
-          # Verify rust-src is installed
-          ls -la "$(rustup run nightly rustc --print sysroot)/lib/rustlib/src/rust/library/Cargo.lock" || {
-            echo "ERROR: rust-src not found after install"
-            rustup show
-            exit 1
-          }
+          scripts/ci/install-ebpf-toolchain.sh
 
       - name: Swatinem/rust-cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           cache-on-failure: true
 
-      - name: Install bpf-linker (nightly)
+      - name: Verify bpf-linker
         run: |
           set -euo pipefail
-          cargo +nightly install bpf-linker --locked
           command -v bpf-linker
 
       - name: Build eBPF (Release)
         run: |
           set -euo pipefail
-          cargo +nightly xtask build-ebpf --release
+          cargo xtask build-ebpf --release
 
       - name: Build CLI (Release)
         run: |
           set -euo pipefail
-          cargo +nightly build --release --package assay-cli --bin assay
+          cargo build --release --package assay-cli --bin assay
 
       - name: Prepare Artifacts
         run: |

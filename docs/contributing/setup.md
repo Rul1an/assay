@@ -10,9 +10,9 @@
 Assay's delegated runner path uses native `bpf-linker` builds so cold Docker image builds stay out of the proof hot path.
 
 ```bash
-rustup toolchain install nightly
-rustup component add rust-src --toolchain nightly
-cargo install bpf-linker --locked
+rustup toolchain install nightly-2026-01-01 --profile minimal
+rustup component add rust-src --toolchain nightly-2026-01-01
+rustup run nightly-2026-01-01 cargo install bpf-linker --version 0.10.3 --locked
 ```
 
 ## 3. Build & Verify

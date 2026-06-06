@@ -4,6 +4,9 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::process::Command;
 
+const DEFAULT_EBPF_RUST_TOOLCHAIN: &str = "nightly-2026-01-01";
+const DEFAULT_BPF_LINKER_VERSION: &str = "0.10.3";
+
 #[derive(Parser)]
 struct Opts {
     #[clap(subcommand)]
@@ -81,6 +84,31 @@ fn has_cmd(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn ebpf_rust_toolchain() -> String {
+    std::env::var("ASSAY_EBPF_RUST_TOOLCHAIN")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_EBPF_RUST_TOOLCHAIN.to_string())
+}
+
+fn bpf_linker_version() -> String {
+    std::env::var("ASSAY_BPF_LINKER_VERSION")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_BPF_LINKER_VERSION.to_string())
+}
+
+fn has_pinned_bpf_linker() -> bool {
+    let expected = format!("bpf-linker {}", bpf_linker_version());
+    Command::new("bpf-linker")
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|stdout| stdout.contains(&expected))
+        .unwrap_or(false)
+}
+
 fn docker_allowed(opts: &BuildEbpfOpts) -> bool {
     // explicit override flags win
     if opts.no_docker {
@@ -102,23 +130,26 @@ fn build_ebpf(opts: BuildEbpfOpts) -> anyhow::Result<()> {
 
 fn build_ebpf_local(root: &PathBuf, opts: &BuildEbpfOpts) -> anyhow::Result<()> {
     // Auto-fallback only when allowed and docker exists
-    if !has_cmd("bpf-linker") {
+    if !has_pinned_bpf_linker() {
         if docker_allowed(opts) && has_cmd("docker") {
-            eprintln!("bpf-linker not found; falling back to docker build...");
+            eprintln!("pinned bpf-linker not found; falling back to docker build...");
             return build_ebpf_docker(root.as_path(), opts);
         }
 
         anyhow::bail!(
-            "bpf-linker not found.\n\
-             Install it with: cargo install bpf-linker --locked\n\
-             Or rerun with --docker (or omit --no-docker to allow fallback)."
+            "pinned bpf-linker not found.\n\
+             Install it with: cargo install bpf-linker --version {} --locked\n\
+             Or rerun with --docker (or omit --no-docker to allow fallback).",
+            bpf_linker_version()
         );
     }
 
     let target_flag = format!("--target={}", opts.target);
+    let toolchain = ebpf_rust_toolchain();
+    let toolchain_arg = format!("+{toolchain}");
 
     let mut args = vec![
-        "+nightly",
+        toolchain_arg.as_str(),
         "build",
         "--package",
         "assay-ebpf",
@@ -248,15 +279,23 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
     // Ensure cargo is in PATH (standard rust image location)
     script.push_str("export PATH=\"/usr/local/cargo/bin:$PATH\"; ");
 
+    let toolchain = ebpf_rust_toolchain();
+    let bpf_linker_version = bpf_linker_version();
+
     // Setup dependencies (using cache) - SKIP if using builder image
     if !opts.docker_image.contains("assay-ebpf-builder") {
-        // We need nightly for -Z build-std, so install it first
-        script.push_str("rustup toolchain install nightly; ");
-        script.push_str(
-            "rustup component add rust-src --toolchain nightly >/dev/null 2>&1 || true; ",
+        // We need a pinned nightly for -Z build-std, so install it first.
+        let _ = write!(
+            script,
+            "rustup toolchain install {toolchain} --profile minimal; "
         );
-        script.push_str(
-            "if ! command -v bpf-linker > /dev/null; then echo 'Installing bpf-linker...'; ",
+        let _ = write!(
+            script,
+            "rustup component add rust-src --toolchain {toolchain} >/dev/null 2>&1 || true; "
+        );
+        let _ = write!(
+            script,
+            "if ! command -v bpf-linker > /dev/null || ! bpf-linker --version | grep -Fq 'bpf-linker {bpf_linker_version}'; then echo 'Installing bpf-linker...'; "
         );
 
         // Install dependencies for bpf-linker
@@ -264,11 +303,17 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
             "apt-get update && apt-get install -y llvm-dev libclang-dev build-essential git; ",
         );
 
-        script.push_str("cargo install bpf-linker --locked; fi; ");
+        let _ = write!(
+            script,
+            "rustup run {toolchain} cargo install bpf-linker --version {bpf_linker_version} --locked; fi; "
+        );
     }
 
     // Always ensure bpf-linker exists in-container (builder should already have it)
-    script.push_str("if ! command -v bpf-linker >/dev/null 2>&1; then ");
+    let _ = write!(
+        script,
+        "if ! command -v bpf-linker >/dev/null 2>&1 || ! bpf-linker --version | grep -Fq 'bpf-linker {bpf_linker_version}'; then "
+    );
     if opts.docker_image.contains("assay-ebpf-builder") {
         script.push_str("echo 'ERROR: bpf-linker missing in builder image'; exit 1; ");
     } else {
@@ -276,13 +321,16 @@ fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Re
         script.push_str(
             "apt-get update && apt-get install -y llvm-dev libclang-dev build-essential git; ",
         );
-        script.push_str("cargo install bpf-linker --locked; ");
+        let _ = write!(
+            script,
+            "rustup run {toolchain} cargo install bpf-linker --version {bpf_linker_version} --locked; "
+        );
     }
     script.push_str("fi; ");
 
     script.push_str(r#"export RUSTFLAGS="${RUSTFLAGS:-} -C linker=bpf-linker"; "#);
 
-    script.push_str("cargo +nightly build --package assay-ebpf ");
+    let _ = write!(script, "cargo +{toolchain} build --package assay-ebpf ");
     script.push_str(&format!("--target {} ", opts.target));
     script.push_str("--release "); // Force release build for eBPF (LLVM strictness)
     script.push_str("-Z build-std=core ");
