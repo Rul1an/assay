@@ -29,7 +29,7 @@ It answers four questions:
 | Wave65 | Registry lockfile | `#1530` | Closed-loop | moved inline lockfile tests behind existing `lockfile_next/tests.rs`; kept lockfile facade/API behavior stable |
 | Wave66 | Registry auth | `#1531` | Closed-loop | moved inline auth/OIDC tests behind existing `auth_next/tests.rs`; kept `TokenProvider`/`OidcProvider` facade/API behavior stable |
 | Wave67 | Registry canonicalize tests | `#1533` | Closed-loop | split canonicalize behavior-freeze tests into `golden`, `rejections`, `values`, and `duplicates` modules |
-| Wave68 | Metrics args_valid | `#1535` | In review | split args_valid metric into facade + `args_valid_next/{matcher,policy,evaluator,tests}.rs`; kept `ArgsValidMetric` public surface stable |
+| Wave68 | Metrics args_valid | `#1535` | Closed-loop | split args_valid metric into facade + `args_valid_next/{matcher,policy,evaluator,tests}.rs`; kept `ArgsValidMetric` public surface stable |
 | Housekeeping | Refactor artifacts | `#1527` | Closed-loop | removed historical per-wave `SPLIT-*` docs and `review-wave*.sh` scripts after the durable generic gate landed |
 | Housekeeping | Stale review scripts | `#1529` | Closed-loop | removed non-wave review scripts that still referenced deleted `SPLIT-*` docs |
 
