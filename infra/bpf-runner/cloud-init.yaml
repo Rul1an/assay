@@ -15,8 +15,12 @@ packages:
   - linux-tools-generic
   - linux-headers-generic
   - llvm
+  - llvm-dev
   - clang
   - libclang-dev
+  - pkg-config
+  - libssl-dev
+  - libsqlite3-dev
   - jq
   - docker.io
 
@@ -39,12 +43,21 @@ runcmd:
   - export CARGO_HOME=/opt/rust
   - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
   - chmod -R 777 /opt/rust
-  - ln -s /opt/rust/bin/cargo /usr/local/bin/cargo
-  - ln -s /opt/rust/bin/rustc /usr/local/bin/rustc
+  - printf 'export RUSTUP_HOME=/opt/rust\nexport CARGO_HOME=/opt/rust\nexport PATH=/opt/rust/bin:$PATH\n' > /etc/profile.d/rust.sh
+  - ln -sf /opt/rust/bin/cargo /usr/local/bin/cargo
+  - ln -sf /opt/rust/bin/rustc /usr/local/bin/rustc
+  - ln -sf /opt/rust/bin/rustup /usr/local/bin/rustup
+  - /opt/rust/bin/rustup toolchain install nightly
+  - /opt/rust/bin/rustup component add rust-src --toolchain nightly
+  - /opt/rust/bin/cargo install bpf-linker --locked
+  - ln -sf /opt/rust/bin/bpf-linker /usr/local/bin/bpf-linker
 
   # 4. Prepare Runner User
   - useradd -m -s /bin/bash github-runner
   - usermod -aG docker github-runner
+  - ln -sfn /opt/rust /home/github-runner/.cargo
+  - ln -sfn /opt/rust /home/github-runner/.rustup
+  - chown -h github-runner:github-runner /home/github-runner/.cargo /home/github-runner/.rustup
   - echo "github-runner ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/github-runner
 
   # 5. NOTE: runner registration requires secrets (GITHUB_TOKEN)
