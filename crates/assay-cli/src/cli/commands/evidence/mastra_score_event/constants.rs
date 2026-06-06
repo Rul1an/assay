@@ -1,0 +1,10 @@
+pub(super) const EVENT_TYPE: &str = "assay.receipt.mastra.score_event.v1";
+pub(super) const EVENT_SOURCE: &str = "urn:assay:external:mastra:score-event";
+pub(super) const RECEIPT_SCHEMA: &str = "assay.receipt.mastra.score_event.v1";
+pub(super) const SOURCE_SYSTEM: &str = "mastra";
+pub(super) const SOURCE_SURFACE: &str = "observability.score_event";
+pub(super) const REDUCER_VERSION: &str = "assay-mastra-score-event@0.1.0";
+pub(super) const INPUT_SCHEMA: &str = "mastra.score-event.export.v1";
+pub(super) const DEFAULT_RUN_ID: &str = "import-mastra-score-event";
+pub(super) const MAX_BOUNDARY_STRING_CHARS: usize = 160;
+pub(super) const MAX_REASON_CHARS: usize = 240;
