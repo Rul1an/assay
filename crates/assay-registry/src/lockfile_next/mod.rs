@@ -10,8 +10,10 @@ pub(crate) mod errors;
 pub(crate) mod format;
 pub(crate) mod io;
 pub(crate) mod parse;
-pub(crate) mod tests;
 pub(crate) mod types;
+
+#[cfg(test)]
+mod tests;
 
 use tracing::{debug, warn};
 
