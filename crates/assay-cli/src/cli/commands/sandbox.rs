@@ -9,6 +9,7 @@ mod bundle;
 mod child;
 mod degradation;
 mod env;
+mod otel;
 mod profile;
 mod tmp;
 
@@ -266,6 +267,7 @@ mod tests {
             profile_format: "yaml".into(),
             profile_report: None,
             bundle: None,
+            otel_jsonl: None,
             verbose: false,
             quiet: true,
         }

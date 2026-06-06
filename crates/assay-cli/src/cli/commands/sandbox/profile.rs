@@ -56,6 +56,16 @@ pub(super) fn maybe_profile_finish(
         }
     }
 
+    // Optionally emit the observed tool effects as OTel GenAI execute_tool spans
+    // (semconv JSONL) carrying the claim-class outcome. `--otel-jsonl` requires
+    // `--profile`, enforced by clap.
+    if let Some(otel_path) = args.otel_jsonl.as_ref() {
+        super::otel::emit_tool_spans(&report, &run_id, otel_path)?;
+        if !args.quiet {
+            eprintln!("OTel tool spans: {}", otel_path.display());
+        }
+    }
+
     let report_path = args.profile_report.clone().unwrap_or_else(|| {
         let mut p = out_path.clone();
         if let Some(fname) = p.file_name() {
