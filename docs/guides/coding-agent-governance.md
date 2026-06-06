@@ -68,11 +68,25 @@ agent:
 Most useful in CI and cloud-autonomous runs, where an independent audit trail beats
 an interactive permission prompt.
 
-## Consuming the record
+## Canonical evidence bundle
 
-Today the sandbox emits the evidence-profile artifact described above. Promoting that
-into the canonical evidence bundle consumed by `assay evidence lint` / `diff`, and a
-matching Assay-Harness recipe, gate, and report, is tracked as the next slice (see
-ADR-035 and ADR-034). Until then, consume `run.profile.evidence.yaml` directly.
+Add `--bundle <path>` (alongside `--profile`) to also emit a canonical evidence
+bundle (`.tar.gz`, manifest + events) of the observed effects, consumable by
+`assay evidence lint` / `diff`:
+
+```bash
+assay sandbox \
+  --profile run.profile.yaml \
+  --bundle run.bundle.tar.gz \
+  -- <your coding-agent command> [args...]
+
+assay evidence lint run.bundle.tar.gz
+```
+
+The bundle carries one CloudEvents-style event per observed filesystem operation,
+executed program, and containment degradation, plus a summary event, under the
+deterministic profile run id (event timestamps reflect emission time). A matching
+Assay-Harness recipe, gate, and report over this bundle is tracked next (see ADR-035
+and ADR-034).
 
 See also: [Editor MCP recipe](editor-mcp-recipe.md), [ADR-035](../architecture/ADR-035-sandbox-the-agent-evidence.md).

@@ -196,6 +196,11 @@ pub struct SandboxArgs {
     #[arg(long)]
     pub profile_report: Option<PathBuf>,
 
+    /// Emit observed effects as a canonical evidence bundle (.tar.gz) at this path.
+    /// Requires --profile (the bundle is built from the profiled observations).
+    #[arg(long, requires = "profile")]
+    pub bundle: Option<PathBuf>,
+
     /// Show detailed sandbox setup
     #[arg(long, short)]
     pub verbose: bool,
