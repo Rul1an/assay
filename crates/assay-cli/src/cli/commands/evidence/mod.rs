@@ -1,3 +1,4 @@
+pub mod attest;
 pub mod cyclonedx_mlbom_model;
 pub mod diff;
 pub mod lint;
@@ -44,6 +45,8 @@ pub enum EvidenceCmd {
     Lint(lint::LintArgs),
     /// Diff two bundles and report changes
     Diff(diff::DiffArgs),
+    /// Sign a bundle's manifest as an in-toto/DSSE attestation
+    Attest(attest::AttestArgs),
     /// Upload a bundle to remote storage (BYOS)
     Push(push::PushArgs),
     /// Download a bundle from remote storage (BYOS)
@@ -135,6 +138,7 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
         EvidenceCmd::Schema(a) => schema::cmd_schema(a),
         EvidenceCmd::Lint(a) => lint::cmd_lint(a),
         EvidenceCmd::Diff(a) => diff::cmd_diff(a),
+        EvidenceCmd::Attest(a) => attest::cmd_attest(a),
         EvidenceCmd::Push(a) => push::cmd_push(a).await,
         EvidenceCmd::Pull(a) => pull::cmd_pull(a).await,
         EvidenceCmd::List(a) => list::cmd_list(a).await,
