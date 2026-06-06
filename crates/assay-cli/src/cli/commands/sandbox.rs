@@ -5,6 +5,7 @@ use crate::metrics;
 
 use crate::profile::{events::ProfileEvent, ProfileCollector};
 
+mod bundle;
 mod child;
 mod degradation;
 mod env;
@@ -264,6 +265,7 @@ mod tests {
             profile: None,
             profile_format: "yaml".into(),
             profile_report: None,
+            bundle: None,
             verbose: false,
             quiet: true,
         }

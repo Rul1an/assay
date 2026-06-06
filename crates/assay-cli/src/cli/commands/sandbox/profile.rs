@@ -46,6 +46,16 @@ pub(super) fn maybe_profile_finish(
     let evidence_profile = report.to_evidence_profile(&evidence_profile_name, &run_id);
     crate::cli::commands::profile_types::save_profile(&evidence_profile, &evidence_profile_path)?;
 
+    // Optionally emit the observed effects as a canonical evidence bundle
+    // (consumable by `assay evidence lint` / `diff`). `--bundle` requires
+    // `--profile`, enforced by clap, so the report exists here.
+    if let Some(bundle_path) = args.bundle.as_ref() {
+        super::bundle::emit_bundle(&report, &args.command, &run_id, bundle_path)?;
+        if !args.quiet {
+            eprintln!("Evidence Bundle: {}", bundle_path.display());
+        }
+    }
+
     let report_path = args.profile_report.clone().unwrap_or_else(|| {
         let mut p = out_path.clone();
         if let Some(fname) = p.file_name() {
