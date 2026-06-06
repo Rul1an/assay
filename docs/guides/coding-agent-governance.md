@@ -25,7 +25,8 @@ This produces three artifacts:
   containment degradations), with a deterministic run id of the form
   `sandbox_<sha256-prefix>`. Re-running the same command over the same behavior
   yields the same run id.
-- `run.profile.report.md` — a human-readable summary.
+- `run.report.md` — a human-readable summary (the path passed to `--profile-report`;
+  if that flag is omitted it defaults to `run.profile.yaml.report.md`).
 
 Use `--profile-format json` for JSON instead of YAML.
 
