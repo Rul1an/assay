@@ -201,6 +201,11 @@ pub struct SandboxArgs {
     #[arg(long, requires = "profile")]
     pub bundle: Option<PathBuf>,
 
+    /// Emit observed tool effects as OTel GenAI execute_tool spans (semconv JSONL)
+    /// at this path, each carrying the claim-class outcome. Requires --profile.
+    #[arg(long = "otel-jsonl", requires = "profile")]
+    pub otel_jsonl: Option<PathBuf>,
+
     /// Show detailed sandbox setup
     #[arg(long, short)]
     pub verbose: bool,
