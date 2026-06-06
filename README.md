@@ -104,6 +104,8 @@ Assay does **not** ship a primary aggregate trust score or a `safe/unsafe` badge
 | **Trust Basis** | Canonical `trust-basis.json` — bounded claim classification from verified bundles. |
 | **Trust Card** | `trustcard.json` / `trustcard.md` / `trustcard.html` — same claims, review-friendly artifacts. |
 | **SARIF / CI** | GitHub Action, Security tab integration, policy gates on PRs. |
+| **Coding-agent governance** | Run a coding agent under `assay sandbox`; emit its observed effects as an evidence bundle (`--bundle`) or OTel `execute_tool` spans (`--otel-jsonl`). |
+| **Attestation** | Export a bundle as an in-toto / DSSE statement (v0), anchor-pluggable. |
 
 > **Repository truth:** release notes and [CHANGELOG.md](CHANGELOG.md) remain the authority for what is actually public. `main` may carry release-prep commits before a tag is cut; crates.io publication is separate from repository merge state.
 
@@ -119,7 +121,7 @@ Assay does **not** ship a primary aggregate trust score or a `safe/unsafe` badge
 > `assay mcp wrap …`, `assay mcp discover`, `assay mcp kill`, or follow the
 > [MCP Quickstart](examples/mcp-quickstart/).
 
-> **Wedge, not category.** “MCP firewall” describes the control plane; **trust compilation** describes the outcome: reviewable claims backed by evidence. See [ADR-033](docs/architecture/ADR-033-OTel-Trust-Compiler-Positioning.md) and [RFC-005](docs/architecture/RFC-005-trust-compiler-mvp-2026q2.md).
+> **A boundary, not a category.** “MCP firewall” describes the control plane; **trust compilation** describes the outcome: reviewable claims backed by evidence. See [ADR-033](docs/architecture/ADR-033-OTel-Trust-Compiler-Positioning.md) and [RFC-005](docs/architecture/RFC-005-trust-compiler-mvp-2026q2.md).
 
 ## See It Work
 
@@ -205,7 +207,7 @@ It generates JSON like:
 }
 ```
 
-The same wrapped command works in other MCP clients — see [MCP Quick Start](docs/mcp/quickstart.md).
+The same wrapped command works in other MCP clients (Claude Code, Codex) — see the [editor MCP recipe](docs/guides/editor-mcp-recipe.md) and [MCP Quick Start](docs/mcp/quickstart.md).
 
 ## Policy Is Simple
 
@@ -247,7 +249,7 @@ assay trace ingest-otel \
   --out-trace traces/otel.v2.jsonl
 ```
 
-See [OpenTelemetry & Langfuse](docs/guides/otel-langfuse.md).
+Assay can also emit observed tool effects as OTel GenAI `execute_tool` spans carrying the claim-class outcome (`assay sandbox --otel-jsonl`), so declared and observed sit in one trace. See [OpenTelemetry & Langfuse](docs/guides/otel-langfuse.md).
 
 ### Protocol adapters
 
@@ -311,6 +313,8 @@ These are tool-decision timings, not end-to-end model latency. (See [Research & 
 - [OpenFeature EvaluationDetails to CI Review Artifact](docs/use-cases/openfeature-evaluationdetails-to-ci-review-artifact.md) — runtime decision receipt path
 - [CycloneDX ML-BOM Model to Inventory Receipt](docs/use-cases/cyclonedx-mlbom-model-to-inventory-receipt.md) — model inventory/provenance receipt path
 - [MCP Quickstart](examples/mcp-quickstart/) — filesystem server walkthrough
+- [Coding-agent governance](docs/guides/coding-agent-governance.md) — run an agent under the sandbox, get a verifiable record
+- [Editor MCP recipe](docs/guides/editor-mcp-recipe.md) — policy-enforcing MCP in Claude Code, Cursor, Codex
 - [Policy Files](docs/reference/config/policies.md) — YAML schema for `assay mcp wrap`
 - [OpenTelemetry & Langfuse](docs/guides/otel-langfuse.md) — traces → replay and evidence
 - [CI Guide](docs/guides/github-action.md) — GitHub Action
