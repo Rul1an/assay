@@ -1,12 +1,11 @@
 # Assay Roadmap 2026
 
-> **Status sync (2026-06-04, `v3.16.0` release prep):** the `v3.16.0`
-> release line carries the post-`v3.15.0` coverage-aware interpretation batch:
-> the MCP tunnel observed-facts checker, the Runner coverage descriptor helper,
-> coverage-aware side-effect and drift annotation examples, drift comparator
-> claim enforcement, and datagram-aware descriptor mapping for Runner archives
-> that report `sendto`/`sendmsg` peer observations. The Cargo workspace/package
-> version in this release-prep branch is **`3.16.0`**.
+> **Status sync (2026-06-06, `v3.17.0` release prep):** the `v3.17.0`
+> release line carries the post-`v3.16.0` sandbox-evidence bundle projection,
+> Runner/eBPF build and unsafe-invariant hardening, refactor-gate cleanup, and
+> facade splits that keep public module surfaces stable while reducing
+> high-traffic implementation hotspots. The Cargo workspace/package version in
+> this release-prep branch is **`3.17.0`**.
 > The current execution posture is: keep remaining CLI grouping trigger-gated,
 > keep Assay-Runner repository extraction gated, treat Assay-Harness `v3.13.0`
 > compatibility as verified by its release-binary compatibility CI check
@@ -209,7 +208,7 @@ datagram destination sockaddr evidence from `sendto`/`sendmsg`, and the
 cross-runtime experiment comparator treats diagnostic-only endpoint churn as
 inconclusive instead of hard provider/runtime drift.
 
-The `v3.16.0` release-prep line layers coverage-aware interpretation on top of
+The `v3.16.0` release line layers coverage-aware interpretation on top of
 that substrate: consumers can classify effect claims through coverage
 descriptors, drift annotations can be emitted and enforced as sidecars, and
 datagram-aware network descriptors are selected from
@@ -217,6 +216,14 @@ datagram-aware network descriptors are selected from
 network observations beyond connect-only capture, but it still does not claim
 request-level binding, `cf_ray` capture, or authoritative exact QUIC peer
 identity.
+
+The `v3.17.0` release-prep line adds a canonical sandbox-observation evidence
+bundle projection, records the Assay/Runner/Harness contract seam and related
+interop decisions, hardens the Runner/eBPF build and unsafe-invariant posture,
+and closes the split-refactor housekeeping loop with a durable generic gate.
+Those changes are bounded to evidence projection, implementation structure,
+release/CI robustness, and technical contracts; they do not add a scalar trust
+score, hosted dashboard, policy-quality claim, or application-outcome claim.
 
 ### Happy Path (Core Workflow)
 ```bash
