@@ -25,7 +25,8 @@ It answers four questions:
 | Wave17 | Replay bundle | `#666`, `#668` | Closed-loop | replay bundle split into bounded replay/bundle modules |
 | Wave18 | Mandate types | `#670`, `#672`, `#674`, `#675` | Closed-loop | mandate types split into facade, core, serde, schema, tests |
 | Wave19 | Coverage command | Step1 landed, `#679`, `#680` | Closed-loop | coverage command split into facade, generate, legacy, IO, supporting modules |
-| Wave64 | Assay sim | pending PR | In progress | consumer downgrade split into facade + `consumer_downgrade_next/*`; first user of generic `review-split-wave.sh` |
+| Wave64 | Assay sim | `#1526` | Closed-loop | consumer downgrade split into facade + `consumer_downgrade_next/*`; first user of generic `review-split-wave.sh` |
+| Housekeeping | Refactor artifacts | pending PR | In progress | removes historical per-wave `SPLIT-*` docs and `review-wave*.sh` scripts after the durable generic gate landed |
 
 ## What changed
 The refactor program reduced large single-file hotspots in these areas:
