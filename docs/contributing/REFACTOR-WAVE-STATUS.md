@@ -27,7 +27,7 @@ It answers four questions:
 | Wave19 | Coverage command | Step1 landed, `#679`, `#680` | Closed-loop | coverage command split into facade, generate, legacy, IO, supporting modules |
 | Wave64 | Assay sim | `#1526` | Closed-loop | consumer downgrade split into facade + `consumer_downgrade_next/*`; first user of generic `review-split-wave.sh` |
 | Housekeeping | Refactor artifacts | `#1527` | Closed-loop | removed historical per-wave `SPLIT-*` docs and `review-wave*.sh` scripts after the durable generic gate landed |
-| Housekeeping | Stale review scripts | `#1529` | In progress | remove non-wave review scripts that still referenced deleted `SPLIT-*` docs |
+| Housekeeping | Stale review scripts | `#1529` | Closed-loop | removed non-wave review scripts that still referenced deleted `SPLIT-*` docs |
 
 ## What changed
 The refactor program reduced large single-file hotspots in these areas:
