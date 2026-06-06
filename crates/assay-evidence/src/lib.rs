@@ -1,3 +1,4 @@
+pub mod attestation;
 pub mod bundle;
 pub mod crypto;
 pub mod diff;
