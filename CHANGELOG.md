@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.19.0] - 2026-06-06
+
+### Added
+
+- `assay evidence attest` — sign an evidence bundle's manifest as an in-toto v1
+  Statement, emitted as a DSSE envelope (Ed25519 over the JCS-canonicalized
+  statement), using a PKCS#8 PEM key from `assay mcp tool keygen`. Builds on the
+  ADR-039 attestation library (shipped library-only in 3.18.0). The anchor
+  (transparency log / timestamp) stays external; an attestation binds who-said-it
+  and the bundle content and does not upgrade observed support. Predicate type is
+  a non-committal `v0`.
+
 ## [3.18.0] - 2026-06-06
 
 - Added OTel GenAI `execute_tool` emission helpers in `assay-core` and
