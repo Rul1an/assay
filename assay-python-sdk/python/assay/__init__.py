@@ -1,8 +1,16 @@
+from .claim_support import claim_support_scorer, score_claim_support
 from .client import AssayClient
 from .coverage import Coverage
 from .explain import Explainer
 
-__all__ = ["AssayClient", "Coverage", "Explainer", "validate"]
+__all__ = [
+    "AssayClient",
+    "Coverage",
+    "Explainer",
+    "claim_support_scorer",
+    "score_claim_support",
+    "validate",
+]
 
 def validate(policy_path: str, traces: list) -> dict:
     """
