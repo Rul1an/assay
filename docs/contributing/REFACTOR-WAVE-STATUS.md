@@ -26,7 +26,7 @@ It answers four questions:
 | Wave18 | Mandate types | `#670`, `#672`, `#674`, `#675` | Closed-loop | mandate types split into facade, core, serde, schema, tests |
 | Wave19 | Coverage command | Step1 landed, `#679`, `#680` | Closed-loop | coverage command split into facade, generate, legacy, IO, supporting modules |
 | Wave64 | Assay sim | `#1526` | Closed-loop | consumer downgrade split into facade + `consumer_downgrade_next/*`; first user of generic `review-split-wave.sh` |
-| Wave65 | Registry lockfile | pending PR | In progress | move inline lockfile tests behind existing `lockfile_next/tests.rs`; keep lockfile facade/API behavior stable |
+| Wave65 | Registry lockfile | `#1530` | Closed-loop | moved inline lockfile tests behind existing `lockfile_next/tests.rs`; kept lockfile facade/API behavior stable |
 | Housekeeping | Refactor artifacts | `#1527` | Closed-loop | removed historical per-wave `SPLIT-*` docs and `review-wave*.sh` scripts after the durable generic gate landed |
 | Housekeeping | Stale review scripts | `#1529` | Closed-loop | removed non-wave review scripts that still referenced deleted `SPLIT-*` docs |
 
