@@ -581,6 +581,6 @@ cargo test -p assay-evidence -- --nocapture verify_bundle
 # Check what would be published
 cargo publish -p assay-evidence --dry-run
 
-# Build eBPF (Linux/Docker only)
-cargo xtask build-ebpf --docker
+# Build eBPF (native bpf-linker path)
+cargo xtask build-ebpf --release --no-docker
 ```

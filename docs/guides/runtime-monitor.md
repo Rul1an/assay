@@ -44,15 +44,19 @@ Uses Cgroup `connect4` and `connect6` hooks to enforce:
 ## 3. Developer Workflow
 
 ### Environment Setup
-eBPF development requires a specific toolchain (LLVM, nightly Rust, bpf-linker). Assay automates this via Docker:
+eBPF development requires a specific toolchain (LLVM, nightly Rust, bpf-linker). The delegated runner path uses native `bpf-linker` builds so cold Docker image builds stay out of the proof hot path:
 
 ```bash
-# 1. Build the builder image (one-time)
-cargo xtask build-image
+# 1. Install the native eBPF toolchain
+rustup toolchain install nightly
+rustup component add rust-src --toolchain nightly
+cargo install bpf-linker --locked
 
 # 2. Compile eBPF bytecode
-cargo xtask build-ebpf --docker
+cargo xtask build-ebpf --release --no-docker
 ```
+
+Docker remains available as a fallback for machines that cannot host the native toolchain: `cargo xtask build-image && cargo xtask build-ebpf --docker`.
 
 ### Verification
 Local verification is best done via **Lima VM** on macOS or directly on **Linux**:
