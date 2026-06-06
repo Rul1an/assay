@@ -4,6 +4,37 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.18.0] - 2026-06-06
+
+- Added OTel GenAI `execute_tool` emission helpers in `assay-core` and
+  `assay sandbox --otel-jsonl`. The emitted records carry bounded
+  claim-class outcome fields for sandbox observations and keep OTel as an
+  export/interchange surface, not the authoritative evidence or policy truth
+  layer.
+
+- Added in-toto/DSSE attestation support over evidence bundle manifests in
+  `assay-evidence`. The attestation helper signs the bundle manifest digest and
+  records the envelope material needed by downstream verifiers without
+  promoting issuer trust, application outcome truth, or bundle-content
+  correctness beyond the signed manifest boundary.
+
+- Added the `assay-it` Python claim-support scorer for Inspect-oriented
+  consumers. The helper aggregates observed claim support into bounded
+  categories that downstream harnesses can consume, while leaving policy
+  enforcement, signer trust, and application correctness decisions outside the
+  scorer.
+
+- Updated coding-agent governance docs and README discoverability for the
+  sandbox evidence bundle, OTel JSONL export, bundle attestation, and Inspect
+  claim-support scorer. These notes describe the technical contract seam and
+  artifact flow for downstream consumers; they do not add a broader runtime
+  safety, sandbox correctness, or governance-status claim.
+
+- Fixed the release workflow's cross-target binary build setup by installing
+  each matrix Rust target explicitly before building. This keeps the release
+  artifact path aligned across the CLI, MCP server, wheels, proof kit, and the
+  existing crates.io publish order.
+
 ## [3.17.0] - 2026-06-06
 
 - Added `assay sandbox --bundle-out`, which emits sandbox observations as a

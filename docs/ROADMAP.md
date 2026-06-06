@@ -1,11 +1,11 @@
 # Assay Roadmap 2026
 
-> **Status sync (2026-06-06, `v3.17.0` release prep):** the `v3.17.0`
-> release line carries the post-`v3.16.0` sandbox-evidence bundle projection,
-> Runner/eBPF build and unsafe-invariant hardening, refactor-gate cleanup, and
-> facade splits that keep public module surfaces stable while reducing
-> high-traffic implementation hotspots. The Cargo workspace/package version in
-> this release-prep branch is **`3.17.0`**.
+> **Status sync (2026-06-06, `v3.18.0` release prep):** the `v3.18.0`
+> release line carries the post-`v3.17.0` interop surfaces for coding-agent
+> governance docs, OTel `execute_tool` JSONL export, in-toto/DSSE evidence
+> bundle manifest attestation, and the `assay-it` Python claim-support scorer
+> for Inspect-oriented consumers. The Cargo workspace/package version in this
+> release-prep branch is **`3.18.0`**.
 > The current execution posture is: keep remaining CLI grouping trigger-gated,
 > keep Assay-Runner repository extraction gated, treat Assay-Harness `v3.13.0`
 > compatibility as verified by its release-binary compatibility CI check
