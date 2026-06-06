@@ -13,4 +13,6 @@ pub(crate) mod keys;
 pub(crate) mod policy;
 pub(crate) mod put;
 pub(crate) mod read;
+
+#[cfg(test)]
 pub(crate) mod tests;
