@@ -103,10 +103,21 @@ pub fn verify_envelope(
     envelope: &DsseEnvelope,
     trusted_key: &VerifyingKey,
 ) -> Result<InTotoStatement> {
+    // Reject any DSSE payload type other than in-toto BEFORE verifying, so a key
+    // that signed the same bytes under a different payload type cannot be accepted
+    // as an in-toto attestation (payload-type confusion). The PAE binds the type,
+    // so we must verify under the type we require, not the one the envelope claims.
+    if envelope.payload_type != IN_TOTO_PAYLOAD_TYPE {
+        anyhow::bail!(
+            "unexpected DSSE payloadType: expected {}, got {}",
+            IN_TOTO_PAYLOAD_TYPE,
+            envelope.payload_type
+        );
+    }
     let canonical = BASE64
         .decode(&envelope.payload)
         .context("decode dsse payload")?;
-    let pae = build_pae(&envelope.payload_type, &canonical);
+    let pae = build_pae(IN_TOTO_PAYLOAD_TYPE, &canonical);
     let dsse_sig = envelope
         .signatures
         .first()
@@ -120,7 +131,17 @@ pub fn verify_envelope(
     trusted_key
         .verify(&pae, &signature)
         .context("dsse signature verification failed")?;
-    serde_json::from_slice(&canonical).context("parse in-toto statement")
+    let statement: InTotoStatement =
+        serde_json::from_slice(&canonical).context("parse in-toto statement")?;
+    // Defense in depth: the verified payload must be a v1 in-toto Statement.
+    if statement.type_ != STATEMENT_TYPE {
+        anyhow::bail!(
+            "unexpected in-toto statement _type: expected {}, got {}",
+            STATEMENT_TYPE,
+            statement.type_
+        );
+    }
+    Ok(statement)
 }
 
 #[cfg(test)]
@@ -162,5 +183,19 @@ mod tests {
         // A different key must fail verification.
         let other = SigningKey::from_bytes(&[9u8; 32]);
         assert!(verify_envelope(&envelope, &other.verifying_key()).is_err());
+    }
+
+    #[test]
+    fn verify_rejects_non_in_toto_payload_type() {
+        let key = SigningKey::from_bytes(&[7u8; 32]);
+        let statement = sample_statement();
+        let mut envelope = sign_statement(&statement, &key).expect("sign");
+
+        // Re-label the envelope as a different DSSE payload type. Even with a
+        // genuine signature over the same bytes, an in-toto verifier must reject it.
+        envelope.payload_type = "application/json".to_string();
+        let err = verify_envelope(&envelope, &key.verifying_key())
+            .expect_err("must reject non-in-toto payload type");
+        assert!(err.to_string().contains("payloadType"));
     }
 }
