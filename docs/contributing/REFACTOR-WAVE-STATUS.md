@@ -31,6 +31,7 @@ It answers four questions:
 | Wave67 | Registry canonicalize tests | `#1533` | Closed-loop | split canonicalize behavior-freeze tests into `golden`, `rejections`, `values`, and `duplicates` modules |
 | Wave68 | Metrics args_valid | `#1535` | Closed-loop | split args_valid metric into facade + `args_valid_next/{matcher,policy,evaluator,tests}.rs`; kept `ArgsValidMetric` public surface stable |
 | Wave69 | Policy tiers | `#1538` | Closed-loop | split policy tier compiler into facade + `tiers_next/{types,compiler,classifier,maps,tests}.rs`; kept `assay_policy::tiers::*` public surface stable |
+| Wave70 | Evidence mandate core types | pending | In review | split mandate core data model into facade + `core_next/*`; added serde contract guard for `MandateContent` JSON shape |
 | Housekeeping | Refactor artifacts | `#1527` | Closed-loop | removed historical per-wave `SPLIT-*` docs and `review-wave*.sh` scripts after the durable generic gate landed |
 | Housekeeping | Stale review scripts | `#1529` | Closed-loop | removed non-wave review scripts that still referenced deleted `SPLIT-*` docs |
 
