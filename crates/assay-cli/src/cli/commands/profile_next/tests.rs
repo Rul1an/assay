@@ -1,4 +1,7 @@
+use super::aggregate::{aggregate_run, merge_run};
 use super::*;
+use crate::cli::commands::profile_types::{Profile, ProfileEntry};
+
 #[test]
 fn aggregate_dedup() {
     let events = vec![
