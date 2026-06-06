@@ -25,6 +25,7 @@ It answers four questions:
 | Wave17 | Replay bundle | `#666`, `#668` | Closed-loop | replay bundle split into bounded replay/bundle modules |
 | Wave18 | Mandate types | `#670`, `#672`, `#674`, `#675` | Closed-loop | mandate types split into facade, core, serde, schema, tests |
 | Wave19 | Coverage command | Step1 landed, `#679`, `#680` | Closed-loop | coverage command split into facade, generate, legacy, IO, supporting modules |
+| Wave64 | Assay sim | pending PR | In progress | consumer downgrade split into facade + `consumer_downgrade_next/*`; first user of generic `review-split-wave.sh` |
 
 ## What changed
 The refactor program reduced large single-file hotspots in these areas:
@@ -88,8 +89,6 @@ A wave is only done when all of the following are true:
 ## Notes
 This document stays intentionally short.
 
-Detailed wave context remains in each wave's:
-- split plan
-- checklist
-- review pack
-- reviewer gate
+Detailed wave context should live in PR bodies and durable status docs. Do not add
+new per-wave `SPLIT-*` files or per-wave `review-wave*.sh` scripts for routine
+mechanical splits; use `scripts/ci/review-split-wave.sh` instead.
