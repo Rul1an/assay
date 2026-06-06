@@ -465,9 +465,7 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential libssl-dev pkg-config llvm-dev libclang-dev clang libsqlite3-dev
 
-          if ! command -v bpf-linker >/dev/null 2>&1; then
-            cargo install bpf-linker --locked
-          fi
+          scripts/ci/install-ebpf-toolchain.sh
 
       - name: Verify LSM blocking (CI Mode - Ubuntu soft skip)
         shell: bash
@@ -631,9 +629,7 @@ jobs:
             build-essential libssl-dev pkg-config llvm-dev libclang-dev clang libsqlite3-dev
 
           sudo chown -R "$(whoami)":"$(id -gn)" ~/.cargo || true
-          if ! command -v bpf-linker >/dev/null 2>&1; then
-            cargo install bpf-linker --locked
-          fi
+          scripts/ci/install-ebpf-toolchain.sh
 
       - name: Ensure Docker context excludes target
         shell: bash

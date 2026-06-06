@@ -123,10 +123,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rustup toolchain install nightly --profile minimal --component rust-src
-          if ! command -v bpf-linker >/dev/null 2>&1; then
-            cargo install bpf-linker --locked
-          fi
+          scripts/ci/install-ebpf-toolchain.sh
           cargo xtask build-ebpf --release --no-docker
           test -f target/assay-ebpf.o
 
@@ -283,10 +280,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rustup toolchain install nightly --profile minimal --component rust-src
-          if ! command -v bpf-linker >/dev/null 2>&1; then
-            cargo install bpf-linker --locked
-          fi
+          scripts/ci/install-ebpf-toolchain.sh
           cargo xtask build-ebpf --release --no-docker
           test -f target/assay-ebpf.o
 

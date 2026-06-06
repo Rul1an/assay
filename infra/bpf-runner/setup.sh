@@ -71,13 +71,14 @@ export RUSTUP_HOME=/opt/rust
 export CARGO_HOME=/opt/rust
 export PATH=/opt/rust/bin:$PATH
 EOF
+# shellcheck disable=SC1091
 source /etc/profile.d/rust.sh
-rustup toolchain install nightly
-rustup component add rust-src --toolchain nightly
-if ! command -v bpf-linker &> /dev/null; then
-    cargo install bpf-linker --locked
+rustup toolchain install nightly-2026-01-01 --profile minimal
+rustup component add rust-src --toolchain nightly-2026-01-01
+if ! command -v bpf-linker &> /dev/null || ! bpf-linker --version | grep -Fq "bpf-linker 0.10.3"; then
+    rustup run nightly-2026-01-01 cargo install bpf-linker --version 0.10.3 --locked --force
 else
-    echo "   -> bpf-linker already installed."
+    echo "   -> bpf-linker 0.10.3 already installed."
 fi
 ln -sf /opt/rust/bin/cargo /usr/local/bin/cargo
 ln -sf /opt/rust/bin/rustc /usr/local/bin/rustc
