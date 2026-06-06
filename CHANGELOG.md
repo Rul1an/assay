@@ -4,6 +4,40 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.17.0] - 2026-06-06
+
+- Added `assay sandbox --bundle-out`, which emits sandbox observations as a
+  canonical evidence bundle. The bundle projection records observed filesystem,
+  environment, process, and sandbox-degradation facts without promoting them to
+  policy approval, signer trust, application outcome truth, or a broader
+  runtime-safety claim.
+
+- Hardened Runner/eBPF release and CI behavior by documenting unsafe invariants
+  in eBPF and runner Linux code, adding targeted unsafe lint posture, pinning
+  the eBPF toolchain, and making native eBPF builds use the release-optimized
+  path expected by the kernel verifier. These changes keep the runner proof
+  path bounded and do not change the public evidence archive schema.
+
+- Split high-traffic implementation hotspots behind stable facades, including
+  CLI importers and command modules, registry trust/cache/resolver internals,
+  runner path projection, policy tier compilation, metrics argument validation,
+  simulation attack matrices, and mandate core data types. Public module
+  surfaces are preserved through re-exports; the release adds contract and
+  serialization guards where the moved code carries evidence or policy
+  semantics.
+
+- Added and refined technical governance docs for the Assay/Runner/Harness
+  contract seam, sandbox-evidence capture, editor MCP wrapping, OTLP export for
+  observations, evidence-bundle attestation, Inspect claim-support scoring, and
+  the eBPF policy-substrate decision boundary. These are repository contracts
+  and implementation guidance, not separate product claims.
+
+- Replaced historical per-wave refactor artifacts with the durable generic
+  split-wave gate and removed stale split review scripts. Routine refactor
+  waves now keep move maps and review notes in PR bodies plus the rolling
+  refactor status page instead of adding per-wave `SPLIT-*` docs or
+  `review-wave*.sh` scripts.
+
 - Documentation: grouped the coverage-honesty examples under a single
   "Coverage honesty" section in the examples index, with the end-to-end
   walkthrough as the entry point, so the capture → coverage descriptor →
