@@ -8,3 +8,6 @@ pub(super) mod diagnostics;
 pub(super) mod headers;
 #[cfg(feature = "oidc")]
 pub(super) mod oidc;
+
+#[cfg(test)]
+mod tests;
