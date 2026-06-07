@@ -56,6 +56,7 @@ vm_assay_version() {
     return 0
   fi
 
+  # shellcheck disable=SC2016 # awk expansion must happen inside the VM shell.
   multipass exec "$VM_NAME" -- sudo -u github-runner bash -lc \
     'assay --version 2>/dev/null | awk "{print \$2}"' 2>/dev/null || true
 }

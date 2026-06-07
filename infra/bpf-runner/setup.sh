@@ -11,7 +11,7 @@
 #
 # FEATURES:
 # - Kernel Hardening: Enables BPF LSM via boot parameters.
-# - Dependency Management: Rust (via rustup), Docker, LLVM/Clang.
+# - Dependency Management: Rust (via rustup), native bpf-linker, Docker, LLVM/Clang.
 # - Runner Security: Runs as non-root 'github-runner' user, standard Docker group.
 # ==============================================================================
 
@@ -23,7 +23,8 @@ apt-get update
 apt-get install -y \
     curl git build-essential \
     linux-tools-common linux-tools-generic linux-headers-generic \
-    llvm clang libclang-dev \
+    llvm llvm-dev clang libclang-dev \
+    pkg-config libssl-dev libsqlite3-dev \
     jq
 
 # 2. Configure Kernel for BPF LSM
@@ -55,7 +56,7 @@ else
 fi
 
 # 4. Install Rust Toolchain (System-wide for Runner)
-echo "🦀 [4/5] Installing Rust Toolchain..."
+echo "🦀 [4/5] Installing Rust Toolchain and native eBPF linker..."
 export RUSTUP_HOME=/opt/rust
 export CARGO_HOME=/opt/rust
 if [ ! -d "/opt/rust" ]; then
@@ -64,9 +65,25 @@ if [ ! -d "/opt/rust" ]; then
 else
     echo "   -> Rust already installed in /opt/rust."
 fi
-# Add to global path
-echo 'export PATH=/opt/rust/bin:$PATH' > /etc/profile.d/rust.sh
+# Add to global path and keep rustup proxies pointed at the system toolchain.
+cat > /etc/profile.d/rust.sh <<'EOF'
+export RUSTUP_HOME=/opt/rust
+export CARGO_HOME=/opt/rust
+export PATH=/opt/rust/bin:$PATH
+EOF
+# shellcheck disable=SC1091
 source /etc/profile.d/rust.sh
+rustup toolchain install nightly-2026-01-01 --profile minimal
+rustup component add rust-src --toolchain nightly-2026-01-01
+if ! command -v bpf-linker &> /dev/null || ! bpf-linker --version | grep -Fq "bpf-linker 0.10.3"; then
+    rustup run nightly-2026-01-01 cargo install bpf-linker --version 0.10.3 --locked --force
+else
+    echo "   -> bpf-linker 0.10.3 already installed."
+fi
+ln -sf /opt/rust/bin/cargo /usr/local/bin/cargo
+ln -sf /opt/rust/bin/rustc /usr/local/bin/rustc
+ln -sf /opt/rust/bin/rustup /usr/local/bin/rustup
+ln -sf /opt/rust/bin/bpf-linker /usr/local/bin/bpf-linker
 
 # 5. Connect GitHub Runner
 echo "🏃 [5/5] Configuring GitHub Action Runner..."
@@ -80,6 +97,13 @@ if ! id "$RUNNER_USER" &>/dev/null; then
     # but verify_lsm_docker.sh needs host privileges for BPF)
     echo "$RUNNER_USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/github-runner
 fi
+for rust_home in .cargo .rustup; do
+    rust_home_path="/home/$RUNNER_USER/$rust_home"
+    if [ ! -e "$rust_home_path" ]; then
+        ln -s /opt/rust "$rust_home_path"
+        chown -h "$RUNNER_USER":"$RUNNER_USER" "$rust_home_path"
+    fi
+done
 
 mkdir -p "$RUNNER_DIR"
 chown "$RUNNER_USER":"$RUNNER_USER" "$RUNNER_DIR"

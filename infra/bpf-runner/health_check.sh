@@ -130,6 +130,7 @@ latest_assay_tag() {
 }
 
 runner_user_assay_version() {
+    # shellcheck disable=SC2016 # awk expansion must happen inside the VM shell.
     multipass exec "$VM_NAME" -- sudo -u "$RUNNER_USER" bash -lc \
         'command -v assay >/dev/null 2>&1 && assay --version | awk "{print \$2}"' 2>/dev/null || true
 }

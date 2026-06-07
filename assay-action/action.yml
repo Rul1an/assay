@@ -1,6 +1,13 @@
-# Assay GitHub Action v2.1
-# Verify, lint, and diff evidence bundles from AI agent runs.
-# v2.1 adds: Compliance packs, BYOS push with OIDC, artifact attestation, coverage badges.
+# Assay GitHub Action v3.0.0
+# Verify, lint, and diff evidence bundles from AI agent runs, plus coding-agent
+# sandbox governance and in-toto/DSSE bundle attestation.
+#
+# v3.0.0 is a new major. It carries the v2.1 "AI Agent Security" feature set
+# (compliance packs, BYOS push, artifact attestation, coverage badges) and adds
+# `sandbox-command` (run a coding agent under `assay sandbox` and verify the
+# resulting evidence bundle) and `attest-key` (`assay evidence attest`,
+# in-toto/DSSE). It does NOT carry the legacy marketplace v2 "Evidence Artifacts"
+# `mode`/`run` inputs; pin `@v2` if you depend on those.
 #
 # Spec: https://github.com/Rul1an/assay/blob/main/docs/architecture/SPEC-GitHub-Action-v2.1.md
 # ADR:  https://github.com/Rul1an/assay/blob/main/docs/architecture/ADR-018-GitHub-Action-v2.1.md
@@ -141,6 +148,20 @@ inputs:
       Only used when badge_gist is set.
     required: false
     default: ''
+  sandbox-command:
+    description: |
+      Optional. A command to run under `assay sandbox` (Landlock) so the action
+      records the coding agent's observed effects as an evidence bundle and
+      verifies/lints it. Requires a Linux runner. Empty disables the step.
+    required: false
+    default: ''
+  attest-key:
+    description: |
+      Optional. Ed25519 private key (PKCS#8 PEM) used to sign the evidence
+      bundle's manifest as an in-toto/DSSE attestation via `assay evidence
+      attest`. Pass via a secret. Empty disables the step.
+    required: false
+    default: ''
 
 outputs:
   verified:
@@ -202,6 +223,9 @@ outputs:
   coverage_percent:
     description: 'Evidence coverage percentage (tools with policy / total tools)'
     value: ${{ steps.coverage.outputs.coverage_percent }}
+  attestation_envelope:
+    description: 'Local path to the in-toto/DSSE attestation envelope (if attest-key set)'
+    value: ${{ steps.assay-attest.outputs.envelope_path }}
 
 runs:
   using: 'composite'
@@ -394,6 +418,27 @@ runs:
     # E2: Evidence Processing - Discovery, verify, lint
     # (Placeholder - will be implemented in Epic 2)
     # =========================================================================
+
+    - name: Coding-agent sandbox governance
+      id: sandbox-governance
+      if: inputs.sandbox-command != ''
+      shell: bash
+      env:
+        SANDBOX_COMMAND: ${{ inputs.sandbox-command }}
+        RUNNER_TEMP: ${{ runner.temp }}
+      run: |
+        set -euo pipefail
+        TMP="${RUNNER_TEMP:-/tmp}"
+        BUNDLE="$TMP/assay-coding-agent.tar.gz"
+        echo "Running coding agent under assay sandbox (observe + record)"
+        assay sandbox \
+          --profile "$TMP/assay-coding-agent.profile.yaml" \
+          --bundle "$BUNDLE" \
+          --dry-run \
+          -- bash -lc "$SANDBOX_COMMAND"
+        echo "coding_agent_bundle=$BUNDLE" >> "$GITHUB_OUTPUT"
+        echo "Linting the coding-agent evidence bundle"
+        assay evidence lint "$BUNDLE"
 
     - name: Discover evidence bundles
       id: discover
@@ -1194,6 +1239,36 @@ runs:
     # =========================================================================
     # v2.1: P4 - Coverage Badge
     # =========================================================================
+
+    - name: In-toto attestation
+      id: assay-attest
+      if: inputs.attest-key != ''
+      shell: bash
+      env:
+        ATTEST_KEY: ${{ inputs.attest-key }}
+        RUNNER_TEMP: ${{ runner.temp }}
+        CODING_AGENT_BUNDLE: ${{ steps.sandbox-governance.outputs.coding_agent_bundle }}
+        BUNDLES_PATTERN: ${{ inputs.bundles }}
+      run: |
+        set -euo pipefail
+        TMP="${RUNNER_TEMP:-/tmp}"
+        KEY="$TMP/assay-attest-key.pem"
+        printf '%s\n' "$ATTEST_KEY" > "$KEY"
+        chmod 600 "$KEY"
+        BUNDLE="${CODING_AGENT_BUNDLE:-}"
+        if [ -z "$BUNDLE" ] && [ -n "${BUNDLES_PATTERN:-}" ]; then
+          BUNDLE="$(ls -1 $BUNDLES_PATTERN 2>/dev/null | head -n1 || true)"
+        fi
+        if [ -z "$BUNDLE" ] || [ ! -f "$BUNDLE" ]; then
+          echo "::warning::attest-key set but no bundle found to attest; skipping"
+          rm -f "$KEY"
+          exit 0
+        fi
+        OUT="$TMP/assay-attestation.json"
+        assay evidence attest --bundle "$BUNDLE" --key "$KEY" --out "$OUT"
+        rm -f "$KEY"
+        echo "envelope_path=$OUT" >> "$GITHUB_OUTPUT"
+        echo "Wrote in-toto/DSSE attestation: $OUT"
 
     - name: Update coverage badge
       if: |
