@@ -11,7 +11,7 @@
 #
 # FEATURES:
 # - Kernel Hardening: Enables BPF LSM via boot parameters.
-# - Dependency Management: Rust (via rustup), native bpf-linker, Docker, LLVM/Clang.
+# - Dependency Management: Rust (via rustup), Docker, LLVM/Clang.
 # - Runner Security: Runs as non-root 'github-runner' user, standard Docker group.
 # ==============================================================================
 
@@ -23,8 +23,7 @@ apt-get update
 apt-get install -y \
     curl git build-essential \
     linux-tools-common linux-tools-generic linux-headers-generic \
-    llvm llvm-dev clang libclang-dev \
-    pkg-config libssl-dev libsqlite3-dev \
+    llvm clang libclang-dev \
     jq
 
 # 2. Configure Kernel for BPF LSM
@@ -56,7 +55,7 @@ else
 fi
 
 # 4. Install Rust Toolchain (System-wide for Runner)
-echo "🦀 [4/5] Installing Rust Toolchain and native eBPF linker..."
+echo "🦀 [4/5] Installing Rust Toolchain..."
 export RUSTUP_HOME=/opt/rust
 export CARGO_HOME=/opt/rust
 if [ ! -d "/opt/rust" ]; then
@@ -65,25 +64,9 @@ if [ ! -d "/opt/rust" ]; then
 else
     echo "   -> Rust already installed in /opt/rust."
 fi
-# Add to global path and keep rustup proxies pointed at the system toolchain.
-cat > /etc/profile.d/rust.sh <<'EOF'
-export RUSTUP_HOME=/opt/rust
-export CARGO_HOME=/opt/rust
-export PATH=/opt/rust/bin:$PATH
-EOF
-# shellcheck disable=SC1091
+# Add to global path
+echo 'export PATH=/opt/rust/bin:$PATH' > /etc/profile.d/rust.sh
 source /etc/profile.d/rust.sh
-rustup toolchain install nightly-2026-01-01 --profile minimal
-rustup component add rust-src --toolchain nightly-2026-01-01
-if ! command -v bpf-linker &> /dev/null || ! bpf-linker --version | grep -Fq "bpf-linker 0.10.3"; then
-    rustup run nightly-2026-01-01 cargo install bpf-linker --version 0.10.3 --locked --force
-else
-    echo "   -> bpf-linker 0.10.3 already installed."
-fi
-ln -sf /opt/rust/bin/cargo /usr/local/bin/cargo
-ln -sf /opt/rust/bin/rustc /usr/local/bin/rustc
-ln -sf /opt/rust/bin/rustup /usr/local/bin/rustup
-ln -sf /opt/rust/bin/bpf-linker /usr/local/bin/bpf-linker
 
 # 5. Connect GitHub Runner
 echo "🏃 [5/5] Configuring GitHub Action Runner..."
@@ -97,13 +80,6 @@ if ! id "$RUNNER_USER" &>/dev/null; then
     # but verify_lsm_docker.sh needs host privileges for BPF)
     echo "$RUNNER_USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/github-runner
 fi
-for rust_home in .cargo .rustup; do
-    rust_home_path="/home/$RUNNER_USER/$rust_home"
-    if [ ! -e "$rust_home_path" ]; then
-        ln -s /opt/rust "$rust_home_path"
-        chown -h "$RUNNER_USER":"$RUNNER_USER" "$rust_home_path"
-    fi
-done
 
 mkdir -p "$RUNNER_DIR"
 chown "$RUNNER_USER":"$RUNNER_USER" "$RUNNER_DIR"
@@ -117,6 +93,14 @@ if ! (crontab -l 2>/dev/null | grep -q "free_disk.sh"); then
     (crontab -l 2>/dev/null; echo "0 * * * * $RUNNER_DIR/scripts/free_disk.sh >> /var/log/assay-free_disk.log 2>&1") | crontab -
     echo "   -> Installed hourly cron: $RUNNER_DIR/scripts/free_disk.sh"
 fi
+
+# 5b. Install Assay latest-release updater (keeps global PATH binary current)
+install -m 0755 "$SCRIPT_DIR/update_assay_latest.sh" /usr/local/sbin/update-assay-latest
+install -m 0644 "$SCRIPT_DIR/assay-update.service" /etc/systemd/system/assay-update.service
+install -m 0644 "$SCRIPT_DIR/assay-update.timer" /etc/systemd/system/assay-update.timer
+systemctl daemon-reload
+systemctl enable --now assay-update.timer
+/usr/local/sbin/update-assay-latest
 
 if [ ! -f "$RUNNER_DIR/.runner" ]; then
     echo "   -> Downloading Runner Agent..."

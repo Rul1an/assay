@@ -1,13 +1,6 @@
-# Assay GitHub Action v3.0.0
-# Verify, lint, and diff evidence bundles from AI agent runs, plus coding-agent
-# sandbox governance and in-toto/DSSE bundle attestation.
-#
-# v3.0.0 is a new major. It carries the v2.1 "AI Agent Security" feature set
-# (compliance packs, BYOS push, artifact attestation, coverage badges) and adds
-# `sandbox-command` (run a coding agent under `assay sandbox` and verify the
-# resulting evidence bundle) and `attest-key` (`assay evidence attest`,
-# in-toto/DSSE). It does NOT carry the legacy marketplace v2 "Evidence Artifacts"
-# `mode`/`run` inputs; pin `@v2` if you depend on those.
+# Assay GitHub Action v2.1
+# Verify, lint, and diff evidence bundles from AI agent runs.
+# v2.1 adds: Compliance packs, BYOS push with OIDC, artifact attestation, coverage badges.
 #
 # Spec: https://github.com/Rul1an/assay/blob/main/docs/architecture/SPEC-GitHub-Action-v2.1.md
 # ADR:  https://github.com/Rul1an/assay/blob/main/docs/architecture/ADR-018-GitHub-Action-v2.1.md
@@ -148,20 +141,6 @@ inputs:
       Only used when badge_gist is set.
     required: false
     default: ''
-  sandbox-command:
-    description: |
-      Optional. A command to run under `assay sandbox` (Landlock) so the action
-      records the coding agent's observed effects as an evidence bundle and
-      verifies/lints it. Requires a Linux runner. Empty disables the step.
-    required: false
-    default: ''
-  attest-key:
-    description: |
-      Optional. Ed25519 private key (PKCS#8 PEM) used to sign the evidence
-      bundle's manifest as an in-toto/DSSE attestation via `assay evidence
-      attest`. Pass via a secret. Empty disables the step.
-    required: false
-    default: ''
 
 outputs:
   verified:
@@ -223,9 +202,6 @@ outputs:
   coverage_percent:
     description: 'Evidence coverage percentage (tools with policy / total tools)'
     value: ${{ steps.coverage.outputs.coverage_percent }}
-  attestation_envelope:
-    description: 'Local path to the in-toto/DSSE attestation envelope (if attest-key set)'
-    value: ${{ steps.assay-attest.outputs.envelope_path }}
 
 runs:
   using: 'composite'
@@ -234,15 +210,47 @@ runs:
     # E1: Foundation - Platform detection, caching, binary installation
     # =========================================================================
 
-    - name: Check if Assay already in PATH
+    - name: Resolve requested Assay version
       id: check-existing
       shell: bash
+      env:
+        ASSAY_VERSION_INPUT: ${{ inputs.version }}
       run: |
-        if command -v assay &> /dev/null; then
-          echo "Assay already installed: $(assay --version)"
-          echo "skip_install=true" >> $GITHUB_OUTPUT
-        else
+        set -euo pipefail
+
+        VERSION="$ASSAY_VERSION_INPUT"
+        REPO="Rul1an/assay"
+
+        if [ "$VERSION" = "latest" ]; then
+          VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
+          if [ -z "$VERSION" ]; then
+            echo "::error::Failed to fetch latest Assay version"
+            exit 1
+          fi
+        fi
+
+        case "$VERSION" in
+          v*) ;;
+          *) VERSION="v${VERSION}" ;;
+        esac
+
+        echo "resolved_version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "resolved_version_plain=${VERSION#v}" >> "$GITHUB_OUTPUT"
+
+        if ! command -v assay &> /dev/null; then
           echo "skip_install=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        INSTALLED_VERSION="$(assay --version 2>/dev/null | awk '{print $2}' || true)"
+        echo "installed_version=$INSTALLED_VERSION" >> "$GITHUB_OUTPUT"
+        echo "Assay already installed: ${INSTALLED_VERSION:-unknown}"
+
+        if [ "$INSTALLED_VERSION" = "${VERSION#v}" ]; then
+          echo "skip_install=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "::notice::Installed Assay ${INSTALLED_VERSION:-unknown} does not match requested ${VERSION}; reinstalling"
+          echo "skip_install=false" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Detect platform
@@ -281,13 +289,13 @@ runs:
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
         path: ~/.assay/bin
-        key: assay-${{ inputs.version }}-${{ steps.platform.outputs.target }}
+        key: assay-${{ steps.check-existing.outputs.resolved_version }}-${{ steps.platform.outputs.target }}
 
     - name: Install Assay CLI
       if: steps.check-existing.outputs.skip_install != 'true' && steps.cache.outputs.cache-hit != 'true'
       shell: bash
       env:
-        ASSAY_VERSION: ${{ inputs.version }}
+        ASSAY_VERSION: ${{ steps.check-existing.outputs.resolved_version }}
         ASSAY_TARGET: ${{ steps.platform.outputs.target }}
       run: |
         set -euo pipefail
@@ -296,15 +304,6 @@ runs:
         VERSION="$ASSAY_VERSION"
         TARGET="$ASSAY_TARGET"
         REPO="Rul1an/assay"
-
-        # Resolve 'latest' to actual version
-        if [ "$VERSION" = "latest" ]; then
-          VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
-          if [ -z "$VERSION" ]; then
-            echo "::error::Failed to fetch latest version"
-            exit 1
-          fi
-        fi
 
         DOWNLOAD_URL="https://github.com/$REPO/releases/download/${VERSION}/assay-${VERSION}-${TARGET}.tar.gz"
         CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
@@ -373,16 +372,21 @@ runs:
       id: verify-install
       if: steps.check-existing.outputs.skip_install != 'true'
       shell: bash
+      env:
+        EXPECTED_VERSION: ${{ steps.check-existing.outputs.resolved_version_plain }}
       run: | # zizmor: ignore[github-env] v2 compatibility exports a literal install dir for later caller steps
         # v2 compatibility: later caller steps may invoke `assay` directly.
         # Keep exporting this literal install directory until a major-version contract change.
         printf '%s\n' "$HOME/.assay/bin" >> "$GITHUB_PATH"
         export PATH="$HOME/.assay/bin:$PATH"
 
-        if ! ~/.assay/bin/assay --version; then
+        INSTALLED_VERSION="$(~/.assay/bin/assay --version | awk '{print $2}')"
+        if [ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]; then
+          echo "::error::Assay installation verification failed: expected ${EXPECTED_VERSION}, got ${INSTALLED_VERSION:-unknown}"
           echo "::error::Assay installation verification failed"
           exit 1
         fi
+        ~/.assay/bin/assay --version
 
         echo "installed=true" >> $GITHUB_OUTPUT
 
@@ -390,27 +394,6 @@ runs:
     # E2: Evidence Processing - Discovery, verify, lint
     # (Placeholder - will be implemented in Epic 2)
     # =========================================================================
-
-    - name: Coding-agent sandbox governance
-      id: sandbox-governance
-      if: inputs.sandbox-command != ''
-      shell: bash
-      env:
-        SANDBOX_COMMAND: ${{ inputs.sandbox-command }}
-        RUNNER_TEMP: ${{ runner.temp }}
-      run: |
-        set -euo pipefail
-        TMP="${RUNNER_TEMP:-/tmp}"
-        BUNDLE="$TMP/assay-coding-agent.tar.gz"
-        echo "Running coding agent under assay sandbox (observe + record)"
-        assay sandbox \
-          --profile "$TMP/assay-coding-agent.profile.yaml" \
-          --bundle "$BUNDLE" \
-          --dry-run \
-          -- bash -lc "$SANDBOX_COMMAND"
-        echo "coding_agent_bundle=$BUNDLE" >> "$GITHUB_OUTPUT"
-        echo "Linting the coding-agent evidence bundle"
-        assay evidence lint "$BUNDLE"
 
     - name: Discover evidence bundles
       id: discover
@@ -1211,36 +1194,6 @@ runs:
     # =========================================================================
     # v2.1: P4 - Coverage Badge
     # =========================================================================
-
-    - name: In-toto attestation
-      id: assay-attest
-      if: inputs.attest-key != ''
-      shell: bash
-      env:
-        ATTEST_KEY: ${{ inputs.attest-key }}
-        RUNNER_TEMP: ${{ runner.temp }}
-        CODING_AGENT_BUNDLE: ${{ steps.sandbox-governance.outputs.coding_agent_bundle }}
-        BUNDLES_PATTERN: ${{ inputs.bundles }}
-      run: |
-        set -euo pipefail
-        TMP="${RUNNER_TEMP:-/tmp}"
-        KEY="$TMP/assay-attest-key.pem"
-        printf '%s\n' "$ATTEST_KEY" > "$KEY"
-        chmod 600 "$KEY"
-        BUNDLE="${CODING_AGENT_BUNDLE:-}"
-        if [ -z "$BUNDLE" ] && [ -n "${BUNDLES_PATTERN:-}" ]; then
-          BUNDLE="$(ls -1 $BUNDLES_PATTERN 2>/dev/null | head -n1 || true)"
-        fi
-        if [ -z "$BUNDLE" ] || [ ! -f "$BUNDLE" ]; then
-          echo "::warning::attest-key set but no bundle found to attest; skipping"
-          rm -f "$KEY"
-          exit 0
-        fi
-        OUT="$TMP/assay-attestation.json"
-        assay evidence attest --bundle "$BUNDLE" --key "$KEY" --out "$OUT"
-        rm -f "$KEY"
-        echo "envelope_path=$OUT" >> "$GITHUB_OUTPUT"
-        echo "Wrote in-toto/DSSE attestation: $OUT"
 
     - name: Update coverage badge
       if: |
