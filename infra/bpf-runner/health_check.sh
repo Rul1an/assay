@@ -33,6 +33,7 @@ GH_TOKEN_FILE="${GH_TOKEN_FILE:-${GITHUB_TOKEN_FILE:-}}"
 LOG_FILE="${LOG_FILE:-/tmp/runner-health-check.log}"
 MAX_LOG_SIZE=1048576  # 1MB
 RUNNER_FATAL_PATTERNS="${RUNNER_FATAL_PATTERNS:-registration has been deleted from the server|Failed to create a session|token expired|Authentication failed}"
+ASSAY_UPDATE_SCRIPT="${ASSAY_UPDATE_SCRIPT:-/usr/local/sbin/update-assay-latest}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -121,6 +122,51 @@ check_vm_running() {
         fi
         return 1
     fi
+    return 0
+}
+
+latest_assay_tag() {
+    curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | jq -r '.tag_name // empty' 2>/dev/null || true
+}
+
+runner_user_assay_version() {
+    # shellcheck disable=SC2016 # awk expansion must happen inside the VM shell.
+    multipass exec "$VM_NAME" -- sudo -u "$RUNNER_USER" bash -lc \
+        'command -v assay >/dev/null 2>&1 && assay --version | awk "{print \$2}"' 2>/dev/null || true
+}
+
+ensure_assay_cli_current() {
+    local latest_tag latest_version current_version update_output
+    latest_tag=$(latest_assay_tag)
+
+    if [[ -z "$latest_tag" || "$latest_tag" == "null" ]]; then
+        log_error "Could not determine latest Assay release for $REPO"
+        return 1
+    fi
+    latest_version="${latest_tag#v}"
+
+    log_info "Checking Assay CLI freshness on VM (latest: $latest_tag)..."
+
+    update_output=$(multipass exec "$VM_NAME" -- bash -lc "
+        set -euo pipefail
+        if [ ! -x '$ASSAY_UPDATE_SCRIPT' ]; then
+            echo 'missing updater: $ASSAY_UPDATE_SCRIPT' >&2
+            exit 42
+        fi
+        sudo '$ASSAY_UPDATE_SCRIPT'
+    " 2>&1) || {
+        log_error "Assay CLI updater failed: $update_output"
+        return 1
+    }
+    log_info "$update_output"
+
+    current_version=$(runner_user_assay_version)
+    if [[ "$current_version" != "$latest_version" ]]; then
+        log_error "Assay CLI drift detected: runner user sees '${current_version:-missing}', expected '$latest_version'"
+        return 1
+    fi
+
+    log_ok "Assay CLI current for runner user: $current_version"
     return 0
 }
 
@@ -593,6 +639,7 @@ health_check() {
     # Pre-flight checks
     check_gh_auth || return 1
     check_vm_running || return 1
+    ensure_assay_cli_current || return 1
 
     # Get current status
     local status
@@ -704,6 +751,19 @@ show_status() {
         echo "Runner Log Health: fatal registration/session error detected"
     else
         echo "Runner Log Health: no fatal registration/session error detected"
+    fi
+
+    echo ""
+    echo "=== Assay CLI ==="
+    local latest_tag current_version
+    latest_tag=$(latest_assay_tag)
+    current_version=$(runner_user_assay_version)
+    echo "Latest Release: ${latest_tag:-unknown}"
+    echo "Runner PATH Version: ${current_version:-missing}"
+    if [[ -n "$latest_tag" && "$current_version" == "${latest_tag#v}" ]]; then
+        echo "Assay CLI Health: current"
+    else
+        echo "Assay CLI Health: stale or unknown (run /usr/local/sbin/update-assay-latest on the VM)"
     fi
 
     echo ""

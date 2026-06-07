@@ -78,7 +78,18 @@ multipass exec "$VM_NAME" -- sudo chmod +x /opt/actions-runner/scripts/free_disk
 multipass exec "$VM_NAME" -- bash -c '(crontab -l 2>/dev/null | grep -q free_disk.sh) || (crontab -l 2>/dev/null; echo "0 * * * * /opt/actions-runner/scripts/free_disk.sh >> /var/log/assay-free_disk.log 2>&1") | crontab -'
 echo "   -> Hourly free_disk cron installed."
 
-# 5. Final Instructions
+# 5. Install Assay release updater (keeps PATH binary current for action smoke tests)
+echo "📋 Installing Assay latest-release updater on VM..."
+multipass exec "$VM_NAME" -- sudo tee /usr/local/sbin/update-assay-latest < infra/bpf-runner/update_assay_latest.sh >/dev/null
+multipass exec "$VM_NAME" -- sudo chmod +x /usr/local/sbin/update-assay-latest
+multipass exec "$VM_NAME" -- sudo tee /etc/systemd/system/assay-update.service < infra/bpf-runner/assay-update.service >/dev/null
+multipass exec "$VM_NAME" -- sudo tee /etc/systemd/system/assay-update.timer < infra/bpf-runner/assay-update.timer >/dev/null
+multipass exec "$VM_NAME" -- sudo systemctl daemon-reload
+multipass exec "$VM_NAME" -- sudo systemctl enable --now assay-update.timer
+multipass exec "$VM_NAME" -- sudo /usr/local/sbin/update-assay-latest
+echo "   -> Assay updater installed and timer enabled."
+
+# 6. Final Instructions
 IP=$(multipass info "$VM_NAME" | grep IPv4 | awk '{print $2}')
 echo ""
 echo "========================================================================"
