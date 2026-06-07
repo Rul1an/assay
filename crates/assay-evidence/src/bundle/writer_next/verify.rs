@@ -444,6 +444,33 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
         .into());
     }
 
+    // Defense in depth: drain the remaining gzip stream so the decoder validates its CRC32/ISIZE
+    // trailer. The tar reader stops after the expected entries and would otherwise never read the
+    // trailer, so a mutation in the compressed stream that lands in a manifest field not covered by
+    // a specific check (e.g. producer metadata) could slip through. Draining forces the CRC check.
+    let mut tail = archive.into_inner();
+    let mut drain = [0u8; 8192];
+    loop {
+        match tail.read(&mut drain) {
+            Ok(0) => break,
+            Ok(_) => continue,
+            Err(e) => {
+                let mut ve = VerifyError::from(e);
+                if ve.message.contains("LimitDecodeBytes") {
+                    ve.code = ErrorCode::LimitDecodeBytes;
+                    ve.class = ErrorClass::Limits;
+                } else if ve.message.contains("LimitBundleBytes") {
+                    ve.code = ErrorCode::LimitBundleBytes;
+                    ve.class = ErrorClass::Limits;
+                } else {
+                    ve.code = ErrorCode::IntegrityGzip;
+                    ve.class = ErrorClass::Integrity;
+                }
+                return Err(ve.with_context("Gzip trailer").into());
+            }
+        }
+    }
+
     Ok(VerifyResult {
         manifest: manifest.unwrap(),
         event_count: actual_event_count,
