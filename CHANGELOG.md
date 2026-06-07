@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.19.1] - 2026-06-07
+
+### Fixed
+
+- Validate gzip trailer CRC/ISIZE during evidence bundle verification so
+  truncated or corrupted gzip payloads fail before content validation. (#1559)
+- Keep runner Assay binaries fresh against the latest release, preserve the
+  GitHub Action v3.0 sandbox and attestation contract, and add a release-line
+  version gate covering workspace, Harness, and VM surfaces. (#1558)
+
 ## [3.19.0] - 2026-06-06
 
 ### Added
