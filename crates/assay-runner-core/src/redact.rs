@@ -308,7 +308,7 @@ pub fn rule_specs() -> &'static [(&'static str, &'static str)] {
         ("github-token", r"\bgh[pousr]_[A-Za-z0-9]{36,}\b"),
         ("openai-key", r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b"),
         ("slack-token", r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
-        ("google-api-key", r"\bAIza[0-9A-Za-z_-]{35}"),
+        ("google-api-key", r"\bAIza[0-9A-Za-z_-]{35}\b"),
         ("stripe-key", r"\b[sp]k_(?:live|test)_[0-9A-Za-z]{16,}\b"),
         ("private-key-pem", r"-----BEGIN (?:[A-Z ]*)PRIVATE KEY-----"),
         (
