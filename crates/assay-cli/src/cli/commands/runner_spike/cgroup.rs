@@ -248,6 +248,8 @@ pub(super) async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> any
     spec.append_run_finished(&mut archive, 1, &status, clock.elapsed())?;
     record_phase(&mut phases, "event_flush_ms", event_flush_start);
 
+    // Redact secret-shaped values and run the fail-closed sweep before writing (and hashing).
+    super::redaction::finalize_redaction(&args, &mut archive)?;
     let archive_write_start = Instant::now();
     let mut file = File::create(&output)?;
     archive.write(&mut file)?;

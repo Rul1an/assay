@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Runner evidence redaction at capture (ADR-034, Phase 1). The runner-spike run now redacts
+  secret-shaped values (provider tokens, PEM keys, JWTs, bearer tokens, `key=value` credentials, and
+  flag values such as `--token X`) out of argv and the capability surface before the bundle is
+  serialized, hashed, or signed, replacing each with a value-free `<redacted:RULE:H8>` placeholder
+  keyed by an installation-local key. `observation_health` gains an additive, value-free `redaction`
+  block (mode, counts by rule and field, `key_scope`, `key_id`). A fail-closed assertion sweep aborts
+  bundle creation if a secret-shaped value survives. Redaction is on by default; it can be disabled
+  only with the deliberately named `--unsafe-disable-redaction` (recorded as `disabled_unsafe`). The
+  redaction key resolves from `ASSAY_REDACTION_KEY_FILE`, else a generated host-local key file, else
+  `--redaction-key ephemeral`. Note: default-on redaction changes the recorded bytes of bundles that
+  contained secret-shaped values; clean bundles are byte-identical and all existing bundles remain
+  valid. This is a runner behavior change and should ship with a minor version bump.
+
 ## [3.19.1] - 2026-06-07
 
 ### Fixed

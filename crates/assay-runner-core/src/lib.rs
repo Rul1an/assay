@@ -17,6 +17,8 @@ mod archive;
 mod kernel;
 mod path_projection;
 mod policy;
+mod redact;
+mod redaction_key;
 mod run;
 mod sdk;
 
@@ -27,5 +29,7 @@ pub use path_projection::{
     PathProjectionMapping, UnmatchedPathSummary, PATH_PROJECTION_SCHEMA,
 };
 pub use policy::{PolicyLayerCapture, PolicyLayerError, PolicyLayerEvent, POLICY_EVENT_SCHEMA};
+pub use redact::{RedactMode, RedactionTally, Redactor};
+pub use redaction_key::{KeyScope, RedactionKey, ENV_KEY_FILE, KEY_FILE_PREFIX};
 pub use run::{RunExecutionError, RunOutcome, RunSpec, RunSpecError, RUN_EVENT_SCHEMA};
 pub use sdk::{SdkLayerCapture, SdkLayerError};

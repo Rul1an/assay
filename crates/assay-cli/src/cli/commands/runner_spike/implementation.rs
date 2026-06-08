@@ -26,6 +26,8 @@ fn cmd_run_contract_only(args: RunnerSpikeRunArgs) -> anyhow::Result<i32> {
 
     let mut outcome = spec.run_contract_only()?;
     apply_policy_then_sdk_logs_if_requested(&spec, &args, &mut outcome.archive)?;
+    // Redact secret-shaped values and run the fail-closed sweep before writing (and hashing).
+    super::redaction::finalize_redaction(&args, &mut outcome.archive)?;
     let mut file = File::create(&output)?;
     outcome.archive.write(&mut file)?;
     let exit_status = exit_status_label(outcome.exit_code, outcome.signal);
