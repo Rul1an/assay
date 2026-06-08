@@ -6,6 +6,7 @@ mod exit_status;
 mod implementation;
 mod logs;
 mod phases;
+mod redaction;
 mod spec;
 
 #[allow(unused_imports)]

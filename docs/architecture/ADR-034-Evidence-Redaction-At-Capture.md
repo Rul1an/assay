@@ -140,12 +140,31 @@ decided choice (see Decisions). Properties:
 - We do NOT record `matched_len` in the runner evidence (unlike the Plimsoll detector, which sees the
   value at review time): length leaks bits about the secret. The runner records rule + count only.
 
-Key management (the one new operational surface this introduces): `installation_secret` is a
-locally-held value, resolved from config or an env var, generated once per install if absent and
-persisted alongside the runner config. It is a redaction salt, not an encryption key: losing it only
-means future redaction tokens stop correlating with older bundles; it never exposes a past secret. It
-must never itself be written into any evidence field (add it to the env keys-only / never-recorded
-set).
+Key management (resolved in review). The salt is a runner-local key file, generated once, with an env
+override for CI/ephemeral runners. It is a redaction salt, not an encryption key: losing it only means
+future redaction tokens stop correlating with older bundles, it never exposes a past secret.
+
+Resolution order:
+
+1. Explicit env override `ASSAY_REDACTION_KEY_FILE=/path/to/key` (for CI / mounted secrets).
+2. Default host-local key file: `/var/lib/assay/redaction.key` (Linux), with a user-mode fallback
+   under the platform data dir (e.g. `$XDG_DATA_HOME/assay/redaction.key`) when the system path is not
+   writable. Generated once if absent.
+3. Ephemeral, only with explicit `--redaction-key ephemeral`: an in-memory random key, never persisted.
+   This warns on stderr and sets `redaction.key_scope = "ephemeral"` so a reviewer knows tokens from
+   this bundle do not correlate with any other run.
+
+Key file format: 32 random bytes, base64url-encoded, with a version tag:
+`assay-redaction-key-v1:<base64url>`. File permissions `0600`, owned by the runner user. The key is
+never written into the bundle and never logged.
+
+Forbidden key sources (each defeats the purpose): `run_id` (loses cross-run correlation), repository
+name (guessable), commit SHA (public), a hardcoded default (globally correlatable / brute-forceable),
+or any key stored inside the repo (leak risk).
+
+The bundle records only a non-reversible `key_id` (a digest of the key, e.g. `hmac-sha256:8f3a91c2`),
+so two bundles can be told to share a redaction domain without the key ever appearing. See the
+`observation_health.redaction` block below.
 
 ### 3. Field-by-field treatment
 
@@ -198,9 +217,15 @@ frozen):
   "mode": "shape_and_flag",
   "redacted_count": 3,
   "by_rule": { "github-token": 2, "credential-assignment": 1 },
-  "by_field": { "command": 2, "filesystem_paths": 1 }
+  "by_field": { "command": 2, "filesystem_paths": 1 },
+  "key_scope": "host_local",
+  "key_id": "hmac-sha256:8f3a91c2"
 }
 ```
+
+`key_scope` is `host_local` (default file or env-provided file) or `ephemeral`. `key_id` is a digest of
+the key, never the key, used only to tell whether two bundles share a redaction domain (so a reviewer
+can reason about whether `<redacted:...:H8>` tokens are comparable across two bundles).
 
 This makes the evidence state plainly that redaction occurred and of what class, with no value echoed.
 The Plimsoll consumer can then soften `PLIMSOLL-POSSIBLE-SECRET` from "a secret is sitting in your
@@ -215,6 +240,8 @@ observed. `policy_layer` / `kernel_layer` / `network_protocol_coverage` keep the
 - `--redact <shape_and_flag|shape_only>`; default `shape_and_flag`. There is no `off` value on this
   flag, deliberately.
 - `--redact-allowlist <file>`: regexes for known-safe values to suppress false positives.
+- Key sourcing (see "Key management" above): `ASSAY_REDACTION_KEY_FILE` env override, else the default
+  host-local key file (generated once), else `--redaction-key ephemeral` for an in-memory throwaway key.
 - The ONLY way to disable redaction is a separate, deliberately alarming flag:
   `--unsafe-disable-redaction`. Choosing a scary name over a neutral `--redact off` is intentional:
   users override defaults, and the flag name itself must say "this is dangerous". When set, the runner
@@ -296,9 +323,9 @@ scanned length per value; avoid allocation when there is no hit (`Cow::Borrowed`
 5. **Rule-set home: a `secret-rules.v1.json` contract fixture in both repos.** No generated runtime
    shared source (too much machinery). Same approach as the claim-class fixtures.
 
-### Residual operational detail to confirm during Phase 1
-
-The installation-secret salt is the one new surface this introduces. Phase 1 must decide where it is
-stored and how it is generated/rotated (proposal: generated once per install, persisted with runner
-config, resolvable via config or env, never written into evidence). This is an implementation detail,
-not a blocker for the design.
+6. **Salt sourcing: a runner-local key file, generated once, env override for CI.** Resolution order
+   `ASSAY_REDACTION_KEY_FILE` env, then the default host-local key file (generated once, `0600`), then
+   `--redaction-key ephemeral` for throwaway runs. Key format `assay-redaction-key-v1:<base64url>` over
+   32 random bytes; never in the bundle, never logged. The bundle records only a non-reversible
+   `key_id` plus `key_scope` (`host_local` | `ephemeral`). Forbidden sources: `run_id`, repo name,
+   commit SHA, a hardcoded default, or any in-repo key. (See "Key management".)

@@ -1,7 +1,24 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const OBSERVATION_HEALTH_SCHEMA: &str = "assay.runner.observation_health.v0";
+
+/// Capture-side secret redaction summary (ADR-034). Value-free: it states that redaction happened,
+/// of which rule class and in which field, plus the redaction-domain key id, never the matched value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Redaction {
+    /// `shape_and_flag` | `shape_only` | `disabled_unsafe`.
+    pub mode: String,
+    pub redacted_count: u64,
+    pub by_rule: BTreeMap<String, u64>,
+    pub by_field: BTreeMap<String, u64>,
+    /// `host_local` | `ephemeral`.
+    pub key_scope: String,
+    /// Non-reversible digest of the redaction key (`hmac-sha256:<hex>`); never the key itself.
+    pub key_id: String,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -69,6 +86,8 @@ pub struct ObservationHealth {
     pub network_protocol_coverage: NetworkProtocolCoverageStatus,
     #[serde(default)]
     pub network_endpoint_claim_scope: NetworkEndpointClaimScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redaction: Option<Redaction>,
     pub notes: Vec<String>,
 }
 
@@ -99,6 +118,7 @@ impl ObservationHealth {
             cgroup_correlation: CgroupCorrelationStatus::Partial,
             network_protocol_coverage: NetworkProtocolCoverageStatus::Absent,
             network_endpoint_claim_scope: NetworkEndpointClaimScope::NotApplicable,
+            redaction: None,
             notes: Vec::new(),
         }
         .normalized()
