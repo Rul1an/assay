@@ -142,6 +142,32 @@ impl Redactor {
         self.shape_pass(field, input, tally)
     }
 
+    /// Redact the userinfo credential pair in a URL (`scheme://user:pass@host` ->
+    /// `scheme://<redacted:url-userinfo:H8>@host`), preserving the scheme and host. Only fires when
+    /// the userinfo contains a `:` (a `user:pass` pair): a token-as-username is already caught by the
+    /// shape pass, while a bare username is not a credential. This is a runner-side capture-hygiene
+    /// transform, not a shared detection rule (the password is not shape-matchable), so it is not in
+    /// `secret-rules.v1.json`. Idempotent: an already-redacted placeholder is left untouched.
+    pub fn redact_url_userinfo<'a>(
+        &self,
+        field: &str,
+        input: &'a str,
+        tally: &mut RedactionTally,
+    ) -> Cow<'a, str> {
+        if !self.mode.is_active() {
+            return Cow::Borrowed(input);
+        }
+        url_userinfo_re().replace_all(input, |caps: &regex::Captures<'_>| {
+            let scheme = &caps["scheme"];
+            let userinfo = &caps["userinfo"];
+            if userinfo.starts_with("<redacted:") || self.is_allowlisted(userinfo) {
+                return caps[0].to_string();
+            }
+            tally.record(field, "url-userinfo");
+            format!("{scheme}{}@", self.placeholder("url-userinfo", userinfo))
+        })
+    }
+
     /// Redact an argv vector: flag-aware (a value following a known credential flag is redacted
     /// regardless of shape, in `ShapeAndFlag` mode) plus a shape pass on every token. `argv[0]` is
     /// treated as a binary path (shape pass only, never as a flag value).
@@ -291,6 +317,18 @@ fn placeholder_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(r"<redacted:[a-z-]+:[0-9a-f]{8}>").expect("placeholder pattern must compile")
+    })
+}
+
+/// Matches `scheme://userinfo@` where the userinfo contains a `user:pass` pair. Captures the scheme
+/// and the userinfo so the replacement can keep the scheme and host while redacting only the
+/// credential pair.
+fn url_userinfo_re() -> &'static Regex {
+    use std::sync::OnceLock;
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)(?P<userinfo>[^/?#@\s]*:[^/?#@\s]*)@")
+            .expect("url userinfo pattern must compile")
     })
 }
 
@@ -550,6 +588,48 @@ mod tests {
         // host/path are preserved; only the credential params (key=value) are replaced.
         assert!(out.starts_with("https://api.example.com/cb?"));
         assert!(out.contains("<redacted:sensitive-query-param:"));
+    }
+
+    #[test]
+    fn url_userinfo_redacted_preserving_host() {
+        let r = redactor(RedactMode::ShapeAndFlag);
+        let mut t = RedactionTally::default();
+        let pw = format!("s3cr3t{}", "pass");
+        let url = format!("https://svcuser:{pw}@db.internal.example.com:5432/app");
+        let out = r.redact_url_userinfo("network_endpoints", &url, &mut t);
+        assert!(out.starts_with("https://<redacted:url-userinfo:"));
+        assert!(out.ends_with("@db.internal.example.com:5432/app"));
+        assert!(!out.contains(&pw));
+        assert!(!out.contains("svcuser"));
+        assert_eq!(t.by_rule.get("url-userinfo"), Some(&1));
+    }
+
+    #[test]
+    fn url_userinfo_leaves_bare_username_and_hostport() {
+        let r = redactor(RedactMode::ShapeAndFlag);
+        let mut t = RedactionTally::default();
+        // bare username (no password pair) and a plain host:port are not credential pairs
+        assert_eq!(
+            r.redact_url_userinfo("f", "https://justuser@host.com/x", &mut t),
+            "https://justuser@host.com/x"
+        );
+        assert_eq!(
+            r.redact_url_userinfo("f", "10.0.0.1:53", &mut t),
+            "10.0.0.1:53"
+        );
+        assert!(t.is_empty());
+    }
+
+    #[test]
+    fn url_userinfo_is_idempotent() {
+        let r = redactor(RedactMode::ShapeAndFlag);
+        let mut t = RedactionTally::default();
+        let url = "https://u:pw1234@host.com/p";
+        let once = r.redact_url_userinfo("f", url, &mut t).into_owned();
+        let mut t2 = RedactionTally::default();
+        let twice = r.redact_url_userinfo("f", &once, &mut t2);
+        assert_eq!(twice, once);
+        assert!(t2.is_empty());
     }
 
     #[test]
