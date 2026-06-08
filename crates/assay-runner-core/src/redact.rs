@@ -298,16 +298,17 @@ fn is_cred_flag(flag: &str) -> bool {
     CRED_FLAGS.iter().any(|f| f.eq_ignore_ascii_case(flag))
 }
 
-/// The curated rule set. Shared vocabulary with the Plimsoll detector (`secret-rules.v1`).
-fn build_rules() -> Vec<Rule> {
-    // (name, pattern). Order matters only for which placeholder wins on overlap; provider tokens
-    // first, the broad credential-assignment rule last.
-    let specs: &[(&str, &str)] = &[
+/// Canonical curated rule set: `(name, pattern)`, shared vocabulary with the Plimsoll detector. This
+/// is the single source of truth behind the `secret-rules.v1.json` contract fixture; a parity test
+/// asserts the two stay in lockstep. Order matters only for which placeholder wins on overlap:
+/// provider tokens first, then URL/structural credential shapes, then the broad assignment rule last.
+pub fn rule_specs() -> &'static [(&'static str, &'static str)] {
+    &[
         ("aws-access-key-id", r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
         ("github-token", r"\bgh[pousr]_[A-Za-z0-9]{36,}\b"),
         ("openai-key", r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b"),
         ("slack-token", r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
-        ("google-api-key", r"\bAIza[0-9A-Za-z_-]{35}\b"),
+        ("google-api-key", r"\bAIza[0-9A-Za-z_-]{35}"),
         ("stripe-key", r"\b[sp]k_(?:live|test)_[0-9A-Za-z]{16,}\b"),
         ("private-key-pem", r"-----BEGIN (?:[A-Z ]*)PRIVATE KEY-----"),
         (
@@ -315,12 +316,22 @@ fn build_rules() -> Vec<Rule> {
             r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b",
         ),
         ("bearer-token", r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{20,}=*"),
+        // URL/query credential params that the assignment rule misses because the credential word is
+        // glued to another token by an underscore (e.g. `access_token`) or is not a keyword (`sig`).
+        (
+            "sensitive-query-param",
+            r#"(?i)\b(?:access[_-]?token|refresh[_-]?token|sig|signature)=[^&\s#"']{6,}"#,
+        ),
         (
             "credential-assignment",
             r#"(?i)\b(?:api[_-]?key|secret|token|password|passwd|access[_-]?key|client[_-]?secret)\b\s*[=:]\s*[^\s'"]{6,}"#,
         ),
-    ];
-    specs
+    ]
+}
+
+/// The compiled curated rule set.
+fn build_rules() -> Vec<Rule> {
+    rule_specs()
         .iter()
         .map(|(name, pat)| Rule {
             name,
@@ -523,6 +534,22 @@ mod tests {
         let _ = r.redact_value("process_execs", &assignment, &mut t);
         assert_eq!(t.by_rule.get("aws-access-key-id"), Some(&1));
         assert_eq!(t.by_rule.get("credential-assignment"), Some(&1));
+    }
+
+    #[test]
+    fn sensitive_query_param_catches_assignment_gaps() {
+        // access_token / sig / signature are glued or non-keyword, so the credential-assignment rule
+        // misses them; the sensitive-query-param rule covers the URL/query case.
+        let r = redactor(RedactMode::ShapeAndFlag);
+        let mut t = RedactionTally::default();
+        let url = "https://api.example.com/cb?access_token=abcdef123456&sig=deadbeefcafe";
+        let out = r.redact_value("network_endpoints", url, &mut t);
+        assert!(!out.contains("abcdef123456"));
+        assert!(!out.contains("deadbeefcafe"));
+        assert_eq!(t.by_rule.get("sensitive-query-param"), Some(&2));
+        // host/path are preserved; only the credential params (key=value) are replaced.
+        assert!(out.starts_with("https://api.example.com/cb?"));
+        assert!(out.contains("<redacted:sensitive-query-param:"));
     }
 
     #[test]
