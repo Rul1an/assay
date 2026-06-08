@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Secret-rule contract fixture (ADR-034, Phase 2). The runner Redactor's curated rules are now
+  published as `secret-rules.v1.json` (the canonical name->pattern table), with a parity test
+  asserting the built-in rules match it exactly; the same fixture is shared with the Plimsoll detector
+  so the Rust and Python implementations cannot drift. Adds a `sensitive-query-param` rule covering
+  URL/query credentials the assignment rule misses (`access_token=`, `sig=`, `signature=`).
+
 - Runner evidence redaction at capture (ADR-034, Phase 1). The runner-spike run now redacts
   secret-shaped values (provider tokens, PEM keys, JWTs, bearer tokens, `key=value` credentials, and
   flag values such as `--token X`) out of argv and the capability surface before the bundle is
