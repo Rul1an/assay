@@ -1,5 +1,6 @@
 use assay_runner_schema::{
-    CgroupCorrelationStatus, KernelLayerStatus, NetworkProtocolCoverageStatus,
+    CgroupCorrelationStatus, KernelLayerStatus, NetworkEndpointClaimScope,
+    NetworkProtocolCoverageStatus,
 };
 
 use super::stats::TracepointHookBreakdown;
@@ -9,10 +10,31 @@ pub(super) fn network_protocol_coverage_for(
 ) -> NetworkProtocolCoverageStatus {
     let has_connect = tracepoints.connect_emitted > 0;
     let has_datagram_peer = tracepoints.sendto_emitted > 0 || tracepoints.sendmsg_emitted > 0;
+    let has_network_hook_drop = tracepoints.connect_dropped > 0
+        || tracepoints.sendto_dropped > 0
+        || tracepoints.sendmsg_dropped > 0;
+    if !has_connect && !has_datagram_peer && has_network_hook_drop {
+        return NetworkProtocolCoverageStatus::Unknown;
+    }
     match (has_connect, has_datagram_peer) {
         (true, true) => NetworkProtocolCoverageStatus::ConnectAndDatagramPeerObserved,
+        (true, false) => NetworkProtocolCoverageStatus::ConnectOnly,
         (false, true) => NetworkProtocolCoverageStatus::DatagramPeerObserved,
-        _ => NetworkProtocolCoverageStatus::ConnectOnly,
+        (false, false) => NetworkProtocolCoverageStatus::Absent,
+    }
+}
+
+pub(super) fn network_endpoint_claim_scope_for(
+    network_protocol_coverage: NetworkProtocolCoverageStatus,
+) -> NetworkEndpointClaimScope {
+    match network_protocol_coverage {
+        NetworkProtocolCoverageStatus::Unknown => NetworkEndpointClaimScope::Unknown,
+        NetworkProtocolCoverageStatus::Absent => NetworkEndpointClaimScope::NotApplicable,
+        NetworkProtocolCoverageStatus::ConnectOnly
+        | NetworkProtocolCoverageStatus::DatagramPeerObserved
+        | NetworkProtocolCoverageStatus::ConnectAndDatagramPeerObserved => {
+            NetworkEndpointClaimScope::DiagnosticOnly
+        }
     }
 }
 

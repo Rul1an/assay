@@ -514,11 +514,11 @@ fn ringbuf_drop_delta_marks_partial_health_when_applied() {
     assert_eq!(archive.observation_health.ringbuf_drops, 4);
     assert_eq!(
         archive.observation_health.network_protocol_coverage,
-        NetworkProtocolCoverageStatus::ConnectOnly
+        NetworkProtocolCoverageStatus::Unknown
     );
     assert_eq!(
         archive.observation_health.network_endpoint_claim_scope,
-        NetworkEndpointClaimScope::DiagnosticOnly
+        NetworkEndpointClaimScope::Unknown
     );
     archive.observation_health.validate().unwrap();
 }
@@ -549,17 +549,54 @@ fn clean_capture_can_mark_kernel_complete() {
     );
     assert_eq!(
         archive.observation_health.network_protocol_coverage,
-        NetworkProtocolCoverageStatus::ConnectOnly
+        NetworkProtocolCoverageStatus::Absent
     );
     assert_eq!(
         archive.observation_health.network_endpoint_claim_scope,
-        NetworkEndpointClaimScope::DiagnosticOnly
+        NetworkEndpointClaimScope::NotApplicable
     );
     assert!(archive
         .observation_health
         .notes
         .iter()
-        .any(|note| note.contains("network_protocol_coverage=connect_only")));
+        .any(|note| note.contains("network_protocol_coverage=absent")
+            && note.contains("network_endpoint_claim_scope=not_applicable")));
+}
+
+#[test]
+fn network_hook_drop_without_network_emit_marks_unknown_coverage() {
+    let before = MonitorStatsSnapshot::default();
+    let after = MonitorStatsSnapshot {
+        connect_ringbuf_dropped: 1,
+        ..Default::default()
+    };
+    let capture = KernelLayerBuilder::new("run_001")
+        .unwrap()
+        .finish(&before, &after);
+    let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+
+    capture
+        .apply_to_archive(&mut archive, CgroupCorrelationStatus::Clean)
+        .unwrap();
+
+    assert_eq!(
+        archive.observation_health.kernel_layer,
+        KernelLayerStatus::Complete
+    );
+    assert_eq!(
+        archive.observation_health.network_protocol_coverage,
+        NetworkProtocolCoverageStatus::Unknown
+    );
+    assert_eq!(
+        archive.observation_health.network_endpoint_claim_scope,
+        NetworkEndpointClaimScope::Unknown
+    );
+    assert!(archive
+        .observation_health
+        .notes
+        .iter()
+        .any(|note| note.contains("network_protocol_coverage=unknown")
+            && note.contains("network_endpoint_claim_scope=unknown")));
 }
 
 #[test]

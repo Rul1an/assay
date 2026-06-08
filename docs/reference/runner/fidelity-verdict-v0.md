@@ -97,14 +97,18 @@ events cannot prove absence. This is why `clipped` degrades positive
 measured claims but blocks bounded negative claims.
 
 `clean` is capture-health clean, not protocol-universal. A record may be
-`clean` while still declaring `network_protocol_coverage = connect_only`
-and `network_endpoint_claim_scope = diagnostic_only`. Downstream code
-must not stretch that into an exact QUIC/datagram peer-set claim.
-When Runner observes `sendto` or `sendmsg` destination sockaddr events it
-may upgrade `network_protocol_coverage` to `datagram_peer_observed` or
+`clean` while still declaring `network_protocol_coverage = absent` and
+`network_endpoint_claim_scope = not_applicable` when no network protocol
+events were observed. A record with observed connect activity may instead
+declare `network_protocol_coverage = connect_only` and
+`network_endpoint_claim_scope = diagnostic_only`; downstream code must not
+stretch that into an exact QUIC/datagram peer-set claim. When Runner observes
+`sendto` or `sendmsg` destination sockaddr events it may upgrade
+`network_protocol_coverage` to `datagram_peer_observed` or
 `connect_and_datagram_peer_observed`; that is a stronger transport signal,
 but still not a request-level or exact peer-set binding while
-`network_endpoint_claim_scope = diagnostic_only`.
+`network_endpoint_claim_scope = diagnostic_only`. If network events may have
+been dropped before any network event was emitted, coverage is `unknown`.
 
 ## Composition With Projection `claim_level`
 
