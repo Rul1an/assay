@@ -62,6 +62,34 @@ fn no_raw_planted_secret_in_serialized_archive() {
 }
 
 #[test]
+fn url_userinfo_in_endpoint_is_redacted_preserving_host() {
+    let pw = format!("s3cr3t{}", "pass");
+    let mut archive = RunnerSpikeArchive::empty("run_url", "linux");
+    archive
+        .capability_surface
+        .add_network_endpoint(format!("postgres://svc:{pw}@db.internal:5432/app"));
+
+    let r = redactor();
+    let tally = archive.redact_in_place(&r);
+    assert!(tally.total >= 1);
+    let eps: Vec<String> = archive
+        .capability_surface
+        .network_endpoints
+        .iter()
+        .cloned()
+        .collect();
+    let joined = eps.join(" ");
+    assert!(!joined.contains(&pw), "raw password leaked: {joined}");
+    assert!(
+        joined.contains("@db.internal:5432/app"),
+        "host should be preserved: {joined}"
+    );
+    archive
+        .assert_no_unredacted(&r)
+        .expect("no unredacted secret after redaction");
+}
+
+#[test]
 fn fail_closed_sweep_catches_a_missed_funnel() {
     let tok = gh_token();
     let mut archive = RunnerSpikeArchive::empty("run_leak", "linux");

@@ -299,15 +299,21 @@ scanned length per value; avoid allocation when there is no hit (`Cow::Borrowed`
 
 ## Rollout plan
 
-1. Phase 1: `Redactor`, shape pass on argv and capability-surface fields, the `observation_health.
-   redaction` block, the fail-closed assertion sweep before hashing, env keys-only invariant test,
-   `--unsafe-disable-redaction` escape hatch, default-on, and the installation-secret salt plumbing.
-   Minor version bump.
-2. Phase 2: flag-aware argv value redaction (catches non-shaped secrets like short passwords).
-3. Phase 3: URL userinfo and sensitive query-param redaction for `network_endpoints`.
-4. Phase 4: shared `secret-rules.v1.json` fixture and parity tests in both repos; Plimsoll consumes
-   `observation_health.redaction` to downgrade `PLIMSOLL-POSSIBLE-SECRET` to a "redacted at capture"
-   informational note when the runner already handled it.
+1. Phase 1 (DONE, #1563): `Redactor`, shape pass on argv and capability-surface fields, the
+   `observation_health.redaction` block, the fail-closed assertion sweep before hashing, env
+   keys-only invariant test, `--unsafe-disable-redaction` escape hatch, default-on, and the
+   installation-secret salt plumbing. Flag-aware argv value redaction (the original Phase 2 item) was
+   folded in here.
+2. Phase 2 (DONE, #1564 + plimsoll #13): shared `secret-rules.v1.json` fixture and parity tests in
+   both repos; the `sensitive-query-param` rule (covers `access_token=`/`sig=`/`signature=` query
+   credentials the assignment rule misses); Plimsoll consumes `observation_health.redaction` to turn
+   `PLIMSOLL-POSSIBLE-SECRET` into a "redacted at capture" receipt when the runner already handled it.
+3. Phase 3 (DONE): URL userinfo redaction for `network_endpoints` (`scheme://user:pass@host`),
+   preserving the host. Limited to the `user:pass` pair because a token-as-username is already caught
+   by the shape pass and a bare username is not a credential.
+4. Later refinement (deferred): broader URL structural handling if a real need appears (e.g.
+   non-`:`-delimited userinfo schemes); the shape + query-param rules already cover recognized
+   credentials in URLs, so this is not currently necessary.
 
 ## Decisions (resolved in review, June 2026)
 

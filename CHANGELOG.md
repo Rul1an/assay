@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- URL userinfo redaction (ADR-034, Phase 3). A network endpoint that is a URL carrying a
+  `user:pass@` credential pair now has its userinfo redacted at capture (`scheme://user:pass@host` ->
+  `scheme://<redacted:url-userinfo:H8>@host`), preserving the scheme and host. It fires only when the
+  userinfo contains a `:` pair (a token-as-username is already caught by the shape pass), is
+  idempotent, and is a runner-side capture-hygiene transform rather than a shared detection rule.
+
 - Secret-rule contract fixture (ADR-034, Phase 2). The runner Redactor's curated rules are now
   published as `secret-rules.v1.json` (the canonical name->pattern table), with a parity test
   asserting the built-in rules match it exactly; the same fixture is shared with the Plimsoll detector

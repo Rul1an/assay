@@ -167,7 +167,7 @@ impl RunnerSpikeArchive {
             redactor,
             &mut tally,
         );
-        redact_set(
+        redact_endpoint_set(
             &mut self.capability_surface.network_endpoints,
             "network_endpoints",
             redactor,
@@ -222,6 +222,27 @@ fn redact_set(
     let redacted: BTreeSet<String> = set
         .iter()
         .map(|v| redactor.redact_value(field, v, tally).into_owned())
+        .collect();
+    *set = redacted;
+}
+
+/// A network endpoint can be a URL carrying a `user:pass@` credential pair whose password is not
+/// shape-matchable, so it first gets the structural userinfo transform (which preserves scheme +
+/// host) and then the normal shape pass.
+fn redact_endpoint_set(
+    set: &mut BTreeSet<String>,
+    field: &str,
+    redactor: &Redactor,
+    tally: &mut RedactionTally,
+) {
+    let redacted: BTreeSet<String> = set
+        .iter()
+        .map(|v| {
+            let after_userinfo = redactor.redact_url_userinfo(field, v, tally);
+            redactor
+                .redact_value(field, &after_userinfo, tally)
+                .into_owned()
+        })
         .collect();
     *set = redacted;
 }
