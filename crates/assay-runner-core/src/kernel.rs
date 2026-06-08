@@ -17,7 +17,10 @@ mod stats;
 mod tests;
 
 use decode::{decode_monitor_event, is_loader_telemetry_path};
-use health::{health_ringbuf_drops, kernel_layer_for, network_protocol_coverage_for};
+use health::{
+    health_ringbuf_drops, kernel_layer_for, network_endpoint_claim_scope_for,
+    network_protocol_coverage_for,
+};
 use notes::{kernel_capture_note, KernelCaptureNote};
 use stats::{
     ringbuf_drop_breakdown, ringbuf_drop_delta, ringbuf_emitted_breakdown,
@@ -209,7 +212,8 @@ impl KernelLayerCapture {
             filtered_loader_events,
             filtered_loader_top,
         } = self;
-        let network_protocol_coverage = network_protocol_coverage_for(tracepoint_hook_breakdown);
+        let mut network_protocol_coverage =
+            network_protocol_coverage_for(tracepoint_hook_breakdown);
 
         if archive.run_id != run_id {
             return Err(KernelLayerError::RunIdMismatch {
@@ -232,9 +236,14 @@ impl KernelLayerCapture {
                 archive.observation_health.network_endpoint_claim_scope =
                     NetworkEndpointClaimScope::NotApplicable;
             } else {
+                if archive.observation_health.kernel_layer == KernelLayerStatus::PartialRingbufDrops
+                    && network_protocol_coverage == NetworkProtocolCoverageStatus::Absent
+                {
+                    network_protocol_coverage = NetworkProtocolCoverageStatus::Unknown;
+                }
                 archive.observation_health.network_protocol_coverage = network_protocol_coverage;
                 archive.observation_health.network_endpoint_claim_scope =
-                    NetworkEndpointClaimScope::DiagnosticOnly;
+                    network_endpoint_claim_scope_for(network_protocol_coverage);
             }
         } else {
             archive.observation_health.ringbuf_drops = 0;
@@ -261,6 +270,9 @@ impl KernelLayerCapture {
                 filtered_loader_top,
                 cgroup_correlation,
                 network_protocol_coverage,
+                network_endpoint_claim_scope: archive
+                    .observation_health
+                    .network_endpoint_claim_scope,
             }));
         Ok(())
     }

@@ -1,4 +1,6 @@
-use assay_runner_schema::{CgroupCorrelationStatus, NetworkProtocolCoverageStatus};
+use assay_runner_schema::{
+    CgroupCorrelationStatus, NetworkEndpointClaimScope, NetworkProtocolCoverageStatus,
+};
 
 use super::stats::{RingbufDropBreakdown, RingbufEmittedBreakdown, TracepointHookBreakdown};
 
@@ -12,6 +14,7 @@ pub(super) struct KernelCaptureNote {
     pub(super) filtered_loader_top: Vec<(String, u64)>,
     pub(super) cgroup_correlation: CgroupCorrelationStatus,
     pub(super) network_protocol_coverage: NetworkProtocolCoverageStatus,
+    pub(super) network_endpoint_claim_scope: NetworkEndpointClaimScope,
 }
 
 pub(super) fn kernel_capture_note(input: KernelCaptureNote) -> String {
@@ -25,8 +28,11 @@ pub(super) fn kernel_capture_note(input: KernelCaptureNote) -> String {
         filtered_loader_top,
         cgroup_correlation,
         network_protocol_coverage,
+        network_endpoint_claim_scope,
     } = input;
     let network_protocol_coverage = network_protocol_coverage_label(network_protocol_coverage);
+    let network_endpoint_claim_scope =
+        network_endpoint_claim_scope_label(network_endpoint_claim_scope);
 
     // Surfaced only when a sendto/sendmsg with no recoverable peer address was
     // actually observed, so runs that never hit this path produce a
@@ -62,7 +68,7 @@ pub(super) fn kernel_capture_note(input: KernelCaptureNote) -> String {
     match cgroup_correlation {
         CgroupCorrelationStatus::Clean if ringbuf_drops == 0 => {
             format!(
-                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage={network_protocol_coverage} network_endpoint_claim_scope=diagnostic_only{no_peer_suffix}{non_ip_suffix}"
+                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage={network_protocol_coverage} network_endpoint_claim_scope={network_endpoint_claim_scope}{no_peer_suffix}{non_ip_suffix}"
             )
         }
         CgroupCorrelationStatus::Clean => {
@@ -72,7 +78,7 @@ pub(super) fn kernel_capture_note(input: KernelCaptureNote) -> String {
                 .collect::<Vec<_>>()
                 .join(",");
             format!(
-                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage={network_protocol_coverage} network_endpoint_claim_scope=diagnostic_only drop_breakdown=tracepoint:{} lsm:{} socket:{} emitted=tracepoint:{} lsm:{} socket:{} tracepoint_hooks=openat:{}/{} openat2:{}/{} connect:{}/{} sendto:{}/{} sendmsg:{}/{} filtered_loader_events={filtered_loader_events} filtered_loader_top=[{filtered_top}]{no_peer_suffix}{non_ip_suffix}",
+                "s2_kernel_capture: monitor_events={event_count} ringbuf_drops={ringbuf_drops} network_protocol_coverage={network_protocol_coverage} network_endpoint_claim_scope={network_endpoint_claim_scope} drop_breakdown=tracepoint:{} lsm:{} socket:{} emitted=tracepoint:{} lsm:{} socket:{} tracepoint_hooks=openat:{}/{} openat2:{}/{} connect:{}/{} sendto:{}/{} sendmsg:{}/{} filtered_loader_events={filtered_loader_events} filtered_loader_top=[{filtered_top}]{no_peer_suffix}{non_ip_suffix}",
                 drop_breakdown.tracepoint,
                 drop_breakdown.lsm,
                 drop_breakdown.socket,
@@ -94,6 +100,15 @@ pub(super) fn kernel_capture_note(input: KernelCaptureNote) -> String {
         CgroupCorrelationStatus::Partial | CgroupCorrelationStatus::Failed => format!(
             "s2_kernel_capture: monitor_events={event_count} cgroup_correlation={cgroup_correlation:?} kernel_layer downgraded to absent"
         ),
+    }
+}
+
+fn network_endpoint_claim_scope_label(status: NetworkEndpointClaimScope) -> &'static str {
+    match status {
+        NetworkEndpointClaimScope::Unknown => "unknown",
+        NetworkEndpointClaimScope::NotApplicable => "not_applicable",
+        NetworkEndpointClaimScope::DiagnosticOnly => "diagnostic_only",
+        NetworkEndpointClaimScope::PeerSet => "peer_set",
     }
 }
 

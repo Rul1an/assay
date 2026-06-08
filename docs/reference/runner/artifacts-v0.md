@@ -206,6 +206,11 @@ Interpretation rules:
 
 - `kernel_layer=complete` means capture health was clean for the attached hooks;
   it does not, by itself, prove protocol-complete network coverage.
+- `network_protocol_coverage=absent` means Runner observed no network protocol
+  events in the capture window. It is not a positive network coverage claim.
+- `network_protocol_coverage=unknown` means network protocol coverage cannot be
+  interpreted, for example because relevant network hook events may have been
+  dropped.
 - `network_protocol_coverage=connect_only` means Runner observed
   `connect()`-level network evidence only.
 - `network_protocol_coverage=datagram_peer_observed` means Runner observed
@@ -217,6 +222,10 @@ Interpretation rules:
 - `network_endpoint_claim_scope=diagnostic_only` means `network_endpoints`
   are useful for coarse/diagnostic review, not for exact peer-set claims on
   datagram protocols such as QUIC.
+- `network_endpoint_claim_scope=not_applicable` means no network endpoint claim
+  is available for this run.
+- `network_endpoint_claim_scope=unknown` means no bounded endpoint claim should
+  be inferred because network coverage is not interpretable.
 - Datagram peer evidence is stronger than `connect_only` for QUIC-style
   capture, but v0 still keeps `network_endpoint_claim_scope=diagnostic_only`
   unless a future layer can make a bounded exact peer-set claim.
