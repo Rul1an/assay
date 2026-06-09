@@ -1,0 +1,24 @@
+{
+  "capability_surface": {
+    "schema": "assay.runner.capability_surface.v0",
+    "filesystem_paths": ["/workspace/app"],
+    "network_endpoints": ["203.0.113.10:443"],
+    "process_execs": [],
+    "mcp_tools": ["read_file"],
+    "policy_decisions": ["allow:read_file", "deny:write_file"]
+  },
+  "observation_health": {
+    "schema": "assay.runner.observation_health.v0",
+    "kernel_layer": "complete",
+    "network_protocol_coverage": "connect_only",
+    "policy_layer": "present"
+  },
+  "enforcement_health": {
+    "schema": "assay.enforcement_health.v0",
+    "network_enforcement": "active",
+    "attach_confirmed": true,
+    "blocked_count": 1,
+    "allowed_count": 2,
+    "scope": "ipv4_tcp_connect"
+  }
+}

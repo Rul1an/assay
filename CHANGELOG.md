@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- OTel GenAI + OpenInference projection (`otel::projection`, schema `assay.otel_projection.v0`): a
+  read-only, one-directional, lossy view of assay runtime evidence (capability surface, observation
+  health, enforcement health) as OpenTelemetry GenAI attributes plus an OpenInference `span.kind`, so
+  an OTel/OpenInference backend can read assay evidence without learning assay's vocabulary. assay
+  artifacts stay the source of truth; the output carries `lossy: true` and `source_of_truth` so the
+  view cannot be mistaken for the record. Honesty invariants pinned by tests: every standard field that
+  could be over-read carries a paired `assay.*` qualifier; enforcement is its OWN guardrail-style span
+  (`assay.claim_class=enforcement`), never attributes hung next to an observed tool span, and absent
+  when no `enforcement_health` is supplied (absence makes no claim); observed sets the standard
+  vocabulary cannot express (egress endpoints, paths) stay under `assay.*`. Pinned to OTel GenAI semconv
+  `1.37.0-development` (the agent/tool-span surface where `execute_tool` lives, distinct from the
+  LLM-client-span surface the module pins at 1.28.0; both Development upstream) and OpenInference
+  `pinned`, so a bump is explicit. Ships a
+  contract doc (`docs/reference/otel-projection.md`) and a committed golden fixture (input plus expected
+  projection) so an external reader sees the contract concretely. Projection function and fixtures only;
+  no exporter and no CLI wiring (those are a later slice).
+
 ### Changed
 
 - `policy_engine::PolicyState`: compile a policy's per-tool JSON Schema validators ONCE and reuse them
