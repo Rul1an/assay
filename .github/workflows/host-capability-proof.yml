@@ -1,0 +1,78 @@
+# Host-capability proof producer.
+#
+# Contract: docs/reference/runner/host-capability-proof.md. Dispatched manually on a PR
+# head SHA (dispatching requires write access, so who-may-produce-proof is GitHub's own
+# permission model). Builds assay-cli from the dispatched ref on the self-hosted host,
+# runs `assay doctor --format json`, and uploads the output plus provenance as the
+# `host-capability-proof` artifact that the check workflow validates via the Actions API.
+#
+# This workflow makes no enforcement claim: the artifact proves the diagnostics were
+# produced on this host for this SHA, nothing more.
+#
+# OPERATIONAL RULE: this job builds and executes the dispatched ref on the self-hosted
+# host (cargo build runs build scripts and proc macros). Do NOT dispatch it on untrusted
+# fork code; review and mirror external contributions into a trusted branch first. This
+# is trusted-maintainer-operated infrastructure, not a safe arbitrary-fork runner.
+name: host-capability-proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  proof:
+    name: Produce host-capability proof
+    runs-on: [self-hosted, linux, assay-bpf-runner]
+    timeout-minutes: 30
+    steps:
+      - name: Reset workspace ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Mirror the prepare-delegated-runner pattern from runner-spike-delegated.yml so
+          # cargo/action cache state from a previous run does not block this job.
+          if [ -d "$GITHUB_WORKSPACE" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build assay CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p assay-cli
+
+      - name: Run doctor and collect provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof-out
+          ./target/debug/assay doctor --format json > proof-out/doctor.json
+          python3 - "$GITHUB_SHA" <<'EOF'
+          import json, platform, sys
+          meta = {
+              "head_sha": sys.argv[1],
+              "host": "assay-bpf-runner",
+              "command": "assay doctor --format json",
+              "uname": " ".join(platform.uname()),
+          }
+          with open("proof-out/proof_meta.json", "w", encoding="utf-8") as f:
+              json.dump(meta, f, indent=2)
+          EOF
+          echo "doctor landlock block:"
+          python3 -c "import json; print(json.dumps(json.load(open('proof-out/doctor.json'))['landlock'], indent=2))"
+
+      - name: Upload proof artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
+        with:
+          name: host-capability-proof
+          path: proof-out/
+          if-no-files-found: error
+          retention-days: 90

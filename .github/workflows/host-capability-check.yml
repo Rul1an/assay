@@ -1,0 +1,38 @@
+# Host-capability proof gate.
+#
+# Contract: docs/reference/runner/host-capability-proof.md. Runs on every PR (no path
+# filter: a required check that does not run blocks merges as "pending", so the checker
+# itself decides and passes immediately when no diagnostics paths changed, the same
+# pattern as the runner lane check). Read-only permissions by design: it posts no
+# comment, so fork PRs need nothing beyond the default read-only GITHUB_TOKEN, and no
+# pull_request_target is involved.
+name: Host Capability Check
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+jobs:
+  check:
+    name: host-capability-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Checker self-test
+        shell: bash
+        run: python3 scripts/ci/assay_host_capability_check.py --self-test
+
+      - name: Validate host-capability proof
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/ci/assay_host_capability_check.py --pr "${{ github.event.pull_request.number }}"
