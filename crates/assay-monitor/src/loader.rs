@@ -347,15 +347,24 @@ impl LinuxMonitor {
         cgroup_file: &std::fs::File,
     ) -> Result<(), MonitorError> {
         let mut bpf = self.bpf.lock().unwrap();
-        if let Some(prog) = bpf.program_mut("connect4_hook") {
-            if let Ok(csa) = TryInto::<&mut CgroupSockAddr>::try_into(&mut *prog) {
-                csa.load()?;
-                let link_id = csa.attach(cgroup_file, CgroupAttachMode::Single)?;
-                let link = csa.take_link(link_id)?;
-                self.links.push(MonitorLink::CgroupSockAddr(link));
-                println!("DEBUG: Attached cgroup connect4 egress enforcement");
-            }
-        }
+        // Fail-closed: a missing program or a load/attach failure is a hard error, never a silent
+        // degrade. The caller (monitor) must refuse to run enforcement it could not actually install.
+        let prog = bpf.program_mut("connect4_hook").ok_or_else(|| {
+            MonitorError::EnforcementUnavailable(
+                "connect4_hook program not present in eBPF object".to_string(),
+            )
+        })?;
+        let csa: &mut CgroupSockAddr = TryInto::<&mut CgroupSockAddr>::try_into(&mut *prog)
+            .map_err(|e| {
+                MonitorError::EnforcementUnavailable(format!(
+                    "connect4_hook is not a CgroupSockAddr program: {e}"
+                ))
+            })?;
+        csa.load()?;
+        let link_id = csa.attach(cgroup_file, CgroupAttachMode::Single)?;
+        let link = csa.take_link(link_id)?;
+        self.links.push(MonitorLink::CgroupSockAddr(link));
+        println!("DEBUG: Attached cgroup connect4 egress enforcement");
         Ok(())
     }
 

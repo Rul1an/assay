@@ -6,14 +6,23 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Network egress enforcement (IPv4/TCP). `assay monitor --policy <file>` now attaches the compiled
-  `connect4` cgroup program so a policy's network deny rules actually block outbound connects, not just
-  observe them. When the policy carries `net_connect` deny rules (a destination port or CIDR), the
-  `connect4_hook` program is attached at the cgroup v2 root and the `DENY_PORTS` / `CIDR_RULES_V4` maps
-  decide which connects are refused (EPERM); an empty rule set is a no-op. Scope is deliberately narrow:
-  IPv4/TCP `connect` only (no IPv6/UDP/QUIC), and the connect tracepoint observation path is unchanged,
-  so `observation_health` reporting is unaffected by enforcement being active. Previously the cgroup
-  attach was a stub, so the compiled rules were never enforced at runtime.
+- Network egress enforcement (IPv4 TCP connect only). `assay monitor --policy <file>` now attaches the
+  compiled `connect4` cgroup program so a policy's network deny rules actually block outbound connects,
+  not just observe them. When the policy carries `net_connect` deny rules (a destination port or CIDR),
+  `connect4_hook` is attached at the cgroup v2 root and the `DENY_PORTS` / `CIDR_RULES_V4` maps decide
+  which connects are refused (EPERM); an empty rule set is a no-op. Previously the cgroup attach was a
+  stub, so the compiled rules were never enforced at runtime.
+  - **Fail-closed.** When enforcement is requested (the policy has network deny rules) but the attach
+    cannot be installed (no cgroup v2 root, no kernel support, attach error), `assay monitor` aborts
+    with exit code 4 (would-block) instead of degrading to audit-only. A caller asking for egress
+    enforcement never gets a clean run that did not actually enforce.
+  - **Bounded scope, explicit non-coverage.** This covers IPv4 TCP `connect()` egress only. It does NOT
+    cover IPv6, UDP/QUIC, DNS resolution, already-open sockets, raw sockets, or proxy/tunnel identity.
+    Policy semantics stay simple (a destination ip/port is allowed or denied); there is no
+    provider classification or DNS-name truth here. The connect tracepoint observation path is unchanged,
+    so `observation_health` reporting is unaffected by enforcement being active, and this change does not
+    add a network-enforcement status to `observation_health` — consumers must not infer enforcement from
+    observation coverage.
 
 - URL userinfo redaction (ADR-034, Phase 3). A network endpoint that is a URL carrying a
   `user:pass@` credential pair now has its userinfo redacted at capture (`scheme://user:pass@host` ->
