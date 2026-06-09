@@ -34,6 +34,22 @@ pub enum LandlockAbiProbeStatus {
     Error,
 }
 
+/// How the Landlock-net CONNECT_TCP ruleset usability smoke resolved. One step beyond
+/// `LandlockAbiProbeStatus`: it does not just read the ABI, it actually builds a TCP-connect
+/// ruleset and applies it (`landlock_restrict_self`) in a throwaway child. This is
+/// host-eligibility/diagnostics only and does NOT implement or claim enforcement.
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LandlockNetProbeStatus {
+    /// Ruleset created, a port rule added, `no_new_privs` set, and `restrict_self` succeeded
+    /// in the child: the host supports the CONNECT_TCP syscall path needed for future enforcement.
+    Usable,
+    /// ABI < 4 (no `LANDLOCK_ACCESS_NET_CONNECT_TCP`) or non-Linux: the smoke is not applicable.
+    Unsupported,
+    /// Ruleset build, `no_new_privs`, or `restrict_self` failed (errno carried separately).
+    Failed,
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub struct LandlockStatus {
     /// Landlock present in `/sys/kernel/security/lsm`. Unchanged meaning; kept as an extra observation
@@ -55,6 +71,12 @@ pub struct LandlockStatus {
     /// Whether `PR_SET_NO_NEW_PRIVS` could be set in a throwaway child (prerequisite for unprivileged
     /// `landlock_restrict_self`). Measured in a forked child, never set on the diagnostics process.
     pub no_new_privs_settable: bool,
+    /// Result of the CONNECT_TCP ruleset usability smoke: whether the host can create and apply a
+    /// TCP-connect Landlock ruleset (`restrict_self`) in a throwaway child. Host-eligibility only;
+    /// proves nothing about whether any connection is actually blocked.
+    pub net_connect_ruleset_probe: LandlockNetProbeStatus,
+    /// The errno when `net_connect_ruleset_probe` is `failed`; `None` on `usable`/`unsupported`.
+    pub net_connect_ruleset_errno: Option<i32>,
 }
 
 #[derive(Debug, Serialize, Clone)]

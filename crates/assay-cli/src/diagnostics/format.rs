@@ -12,8 +12,10 @@ pub fn format_text(report: &DiagnosticReport) -> String {
     s.push_str("\nSecurity Modules:\n");
     if let Some(abi) = report.landlock.abi_version {
         s.push_str(&format!(
-            "  Landlock:   ✓ ABI v{abi} (FS); net_connect_tcp={}, no_new_privs_settable={}\n",
-            report.landlock.net_connect_tcp_supported, report.landlock.no_new_privs_settable,
+            "  Landlock:   ✓ ABI v{abi} (FS); net_connect_tcp={}, no_new_privs_settable={}, ruleset_probe={:?}\n",
+            report.landlock.net_connect_tcp_supported,
+            report.landlock.no_new_privs_settable,
+            report.landlock.net_connect_ruleset_probe,
         ));
     } else {
         s.push_str(&format!(

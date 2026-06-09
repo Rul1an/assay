@@ -1,4 +1,5 @@
 pub mod format;
+mod landlock_net_smoke;
 pub mod probes;
 pub mod report;
 

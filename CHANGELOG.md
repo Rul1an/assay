@@ -20,6 +20,13 @@ All notable changes to this project will be documented in this file.
   `net_enforce`, `abi_version`) are unchanged. This is preflight / host-eligibility only — it reports
   whether a host can support a future Landlock TCP-connect proof path; it does **not** implement or
   claim enforcement of TCP connects.
+- Landlock-net CONNECT_TCP usability smoke on the diagnostics report: `net_connect_ruleset_probe`
+  (`usable` / `unsupported` / `failed`) and `net_connect_ruleset_errno`. The smoke builds a
+  CONNECT_TCP ruleset with a port rule (landlock crate, hard-requirement compatibility so the right is
+  never silently best-effort-dropped) and applies it via `landlock_restrict_self` in a throwaway
+  forked child that runs only async-signal-safe calls, so the diagnostics process itself is never
+  restricted. This proves the host supports the CONNECT_TCP syscall path needed for a future
+  enforcement proof; it does **not** implement or claim enforcement, and blocks no connection.
 
 ### Changed
 
