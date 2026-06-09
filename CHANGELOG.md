@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `assay evidence verify-mcp-supersession`: independent-consumer evaluation of decision-record
+  supersession for SEP-2828-style execution records. Given decision records that share a call binding
+  (`backLink`), the latest `decidedAt` wins; an equal-`decidedAt` tie with no explicit ordering field
+  (`decisionDerived.sequence`) is reported as `ambiguous` / non-conformant (exit `2`) rather than
+  resolved from file order, arrival order, or the record nonce, because a nonce is unique per record,
+  not an ordering field, and an arbitrary-but-deterministic winner can mask a producer that emitted two
+  records that should never have tied. An explicit `sequence` resolves a tie deterministically.
+  Consumer side only: no signature, issuer-trust, freshness, or runtime-truth claims.
 - `assay evidence verify-mcp-records --fallback-projection named`: a no-attestation fallback binding
   computed over a named projection (the `tools/call` `params` plus the `_meta.authorization_binding`
   block) instead of the whole request envelope, so transport- or observation-local `_meta` fields a
