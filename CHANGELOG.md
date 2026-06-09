@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Host-capability proof gate (CI): changes under `crates/assay-cli/src/diagnostics/` now require a
+  validated `workflow_dispatch` run of the `host-capability-proof` workflow on the PR head SHA
+  (event, SHA, conclusion, and workflow validated via the Actions API; doctor JSON read from the
+  run artifact). The checker validates presence and JSON type of the Landlock capability fields,
+  never their values. Contract: `docs/reference/runner/host-capability-proof.md`.
+
 ### Fixed
 - `assay monitor` no longer exits 0 when a requested `--enforcement-health` artifact cannot be
   written. A consumer reads a missing artifact as "not requested" (absent), so an active run whose
