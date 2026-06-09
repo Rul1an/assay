@@ -64,6 +64,10 @@ fn single_decision_resolves() {
     let report: Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(report["ok"], true);
     assert_eq!(report["groups"][0]["verdict"], "resolved");
+    assert_eq!(
+        report["groups"][0]["reason_code"],
+        "supersession_resolved_single"
+    );
 }
 
 #[test]
@@ -79,6 +83,10 @@ fn distinct_decided_at_latest_wins() {
     let report: Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(report["ok"], true);
     assert_eq!(report["groups"][0]["verdict"], "resolved");
+    assert_eq!(
+        report["groups"][0]["reason_code"],
+        "supersession_resolved_latest_decided_at"
+    );
     assert_eq!(report["groups"][0]["effective_decision"], "allow");
     assert_eq!(
         report["groups"][0]["effective_decided_at"],
@@ -95,8 +103,9 @@ fn equal_decided_at_without_ordering_is_ambiguous() {
         decision("sha256:aa", "n1", "2026-06-09T10:00:00Z", "allow", None),
     ])
     .code(2)
-    .stdout(predicate::str::contains("ambiguous"))
-    .stdout(predicate::str::contains("no explicit ordering field"));
+    .stdout(predicate::str::contains(
+        "supersession_ambiguous_missing_sequence",
+    ));
 }
 
 #[test]
@@ -118,6 +127,10 @@ fn equal_decided_at_with_sequence_resolves() {
     let report: Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(report["ok"], true);
     assert_eq!(report["groups"][0]["verdict"], "resolved");
+    assert_eq!(
+        report["groups"][0]["reason_code"],
+        "supersession_resolved_sequence"
+    );
     assert_eq!(report["groups"][0]["effective_decision"], "allow");
 }
 
@@ -134,8 +147,9 @@ fn equal_decided_at_and_equal_sequence_is_ambiguous() {
         decision("sha256:aa", "n1", "2026-06-09T10:00:00Z", "allow", Some(5)),
     ])
     .code(2)
-    .stdout(predicate::str::contains("ambiguous"))
-    .stdout(predicate::str::contains("equal sequence"));
+    .stdout(predicate::str::contains(
+        "supersession_ambiguous_duplicate_sequence",
+    ));
 }
 
 #[test]
