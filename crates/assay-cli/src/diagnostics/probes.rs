@@ -105,6 +105,8 @@ fn probe_landlock(lsms: &[String]) -> LandlockStatus {
     let net_connect_tcp_supported = net_connect_tcp_supported(abi_version);
     let net_bind_tcp_supported = net_bind_tcp_supported(abi_version);
     let no_new_privs_settable = probe_no_new_privs_settable();
+    let (net_connect_ruleset_probe, net_connect_ruleset_errno) =
+        super::landlock_net_smoke::probe_net_connect_ruleset(abi_version);
 
     LandlockStatus {
         available,
@@ -121,6 +123,8 @@ fn probe_landlock(lsms: &[String]) -> LandlockStatus {
         net_connect_tcp_supported,
         net_bind_tcp_supported,
         no_new_privs_settable,
+        net_connect_ruleset_probe,
+        net_connect_ruleset_errno,
     }
 }
 
@@ -315,6 +319,8 @@ mod landlock_probe_tests {
             "net_connect_tcp_supported",
             "net_bind_tcp_supported",
             "no_new_privs_settable",
+            "net_connect_ruleset_probe",
+            "net_connect_ruleset_errno",
         ] {
             assert!(v.get(k).is_some(), "missing new field {k}");
         }
