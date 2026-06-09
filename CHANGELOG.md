@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Landlock TCP-connect egress enforcement for `assay sandbox` (`--enforce-net`, requires
+  `--enforce`): builds a combined FS+NET Landlock ruleset that allows only the explicit TCP
+  ports in `net.allow` and denies all other TCP connects, applied via `restrict_self` in the
+  enforcing child. A non-expressible network policy fails closed before spawn. With
+  `--enforcement-health <path>` it writes the `assay.enforcement_health.v1` artifact (`active`
+  when the ruleset is applied, `failed` with a machine-readable reason otherwise); a requested
+  artifact that cannot be written is a command failure. FS-only sandboxing is unchanged.
 - `assay doctor --format json` now carries a top-level `schema` id (`assay.doctor_report.v0`), making
   the report self-describing so a future field-shape change is an explicit version bump rather than
   silent drift. Additive; existing fields unchanged.

@@ -258,6 +258,8 @@ mod tests {
             enforce: true,
             dry_run: false,
             fail_closed: false,
+            enforce_net: false,
+            enforcement_health: None,
             env_strict: false,
             env_strip_exec: false,
             env_allow: None,

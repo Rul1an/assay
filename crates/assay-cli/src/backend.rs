@@ -92,14 +92,16 @@ impl LandlockEnforcer {
     }
 }
 
-/// Prepare Landlock ruleset. allocations/IO allowed here.
+/// Prepare Landlock ruleset. allocations/IO allowed here. `net_allow_ports` of `Some` builds a
+/// combined FS+NET (TCP-connect allowlist) ruleset; `None` is FS-only (unchanged behaviour).
 pub fn prepare_landlock(
     policy: &crate::policy::Policy,
     scoped_tmp: &std::path::Path,
+    net_allow_ports: Option<&[u16]>,
 ) -> anyhow::Result<LandlockEnforcer> {
     #[cfg(target_os = "linux")]
     {
-        let ruleset = landlock_impl::create_ruleset(policy, scoped_tmp)?;
+        let ruleset = landlock_impl::create_ruleset(policy, scoped_tmp, net_allow_ports)?;
         Ok(LandlockEnforcer {
             ruleset: Some(ruleset),
         })
@@ -108,6 +110,7 @@ pub fn prepare_landlock(
     {
         let _ = policy;
         let _ = scoped_tmp;
+        let _ = net_allow_ports;
         Ok(LandlockEnforcer {})
     }
 }
@@ -118,8 +121,8 @@ pub fn prepare_landlock(
 #[cfg(target_os = "linux")]
 mod landlock_impl {
     use landlock::{
-        Access, AccessFs, BitFlags, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreated,
-        RulesetCreatedAttr, RulesetStatus, ABI,
+        Access, AccessFs, AccessNet, BitFlags, CompatLevel, Compatible, NetPort, PathBeneath,
+        PathFd, Ruleset, RulesetAttr, RulesetCreated, RulesetCreatedAttr, RulesetStatus, ABI,
     };
     use std::path::Path;
 
@@ -200,10 +203,15 @@ mod landlock_impl {
         }
     }
 
-    /// Create Landlock ruleset from policy.
+    /// Create Landlock ruleset from policy. When `net_allow_ports` is `Some`, a combined FS+NET
+    /// ruleset is built in ONE ruleset: `LANDLOCK_ACCESS_NET_CONNECT_TCP` is handled as a hard
+    /// requirement (no best-effort downgrade for an enforcement claim) and a `NetPort` allow rule is
+    /// added for each port. An empty port list is a valid deny-all-TCP-connect. When `None`, the
+    /// ruleset is FS-only and unchanged.
     pub(super) fn create_ruleset(
         policy: &crate::policy::Policy,
         scoped_tmp: &Path,
+        net_allow_ports: Option<&[u16]>,
     ) -> anyhow::Result<RulesetCreated> {
         let (_, abi_level) = probe_abi();
         let abi = match abi_level {
@@ -218,9 +226,23 @@ mod landlock_impl {
         // FS rules (ABI V1-V3)
         ruleset = ruleset.handle_access(AccessFs::from_all(abi))?;
 
-        // TODO(landlock-net): NET rules (ABI V4) when abi_level >= 4
+        // NET rules (ABI V4): handle CONNECT_TCP as a hard requirement so an unsupported host fails
+        // rather than silently enforcing nothing. Allowlist-only: once handled, TCP connects are
+        // denied unless a NetPort rule below grants the destination port.
+        if net_allow_ports.is_some() {
+            ruleset = ruleset
+                .set_compatibility(CompatLevel::HardRequirement)
+                .handle_access(AccessNet::ConnectTcp)?
+                .set_compatibility(CompatLevel::BestEffort);
+        }
 
         let mut ruleset = ruleset.create()?;
+
+        if let Some(ports) = net_allow_ports {
+            for &port in ports {
+                ruleset = ruleset.add_rule(NetPort::new(port, AccessNet::ConnectTcp))?;
+            }
+        }
 
         // 1. Allow CWD (RX only by default, safe containment)
         if let Ok(cwd) = std::env::current_dir() {

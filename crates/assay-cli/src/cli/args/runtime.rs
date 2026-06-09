@@ -164,6 +164,17 @@ pub struct SandboxArgs {
     #[arg(long)]
     pub fail_closed: bool,
 
+    /// Enforce the network policy as a Landlock TCP-connect port allowlist (ABI >= 4). Allowlist-only:
+    /// `net.allow` must be explicit TCP ports; any IP/CIDR, host, non-TCP protocol, range, deny rule,
+    /// or port 0 fails closed. Requires --enforce.
+    #[arg(long = "enforce-net", requires = "enforce")]
+    pub enforce_net: bool,
+
+    /// Write the `assay.enforcement_health.v1` artifact (Landlock TCP-connect domain) to this path.
+    /// A requested artifact that cannot be written is a command failure, never a silent absence.
+    #[arg(long = "enforcement-health")]
+    pub enforcement_health: Option<PathBuf>,
+
     /// Strict env mode: only safe base vars + explicit allows
     #[arg(long = "env-strict")]
     pub env_strict: bool,
