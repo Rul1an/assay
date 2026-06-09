@@ -1,0 +1,62 @@
+name: Monitor attach smoke
+
+# Attach-health gate for `assay monitor` on the delegated eBPF host. Proves ONE thing only: that
+# `assay monitor` can load and attach its observation probes on this kernel. No policy, no egress, no
+# enforcement. This exists because a green `runner-spike` delegated lane is NOT evidence that
+# `assay monitor` can attach — they attach different program sets (see #1570). Manual dispatch so it
+# does not block unrelated PRs; run it to verify attach-health after touching monitor/eBPF code.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_ebpf:
+        description: "Build target/assay-ebpf.o from source before the smoke run"
+        required: false
+        default: "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monitor-attach-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: [self-hosted, linux, assay-bpf-runner]
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build assay-cli
+        run: cargo build -p assay-cli --release
+
+      - name: Build eBPF object
+        if: ${{ github.event.inputs.build_ebpf != 'false' }}
+        run: cargo xtask build-ebpf
+
+      - name: Smoke - assay monitor must attach its observation probes
+        run: |
+          set -euo pipefail
+          OBJ="target/assay-ebpf.o"
+          test -f "$OBJ"
+          OUT="$RUNNER_TEMP/monitor-smoke.log"
+          # Attach-only run: no --policy, so no enforcement path is exercised. We only assert that the
+          # observation probes load and attach on this kernel. Pipe through tee (no redirect under sudo)
+          # and read the monitor's own exit code from PIPESTATUS.
+          set +e
+          sudo -E timeout 30 ./target/release/assay monitor --monitor-all --ebpf "$OBJ" \
+            --duration 3s --print 2>&1 | tee "$OUT"
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "---- assay monitor exit code: $code ----"
+          if grep -q "Failed to attach probes" "$OUT"; then
+            echo "SMOKE FAIL: assay monitor could not attach its observation probes on this host (see #1570)."
+            exit 1
+          fi
+          if ! grep -q "Assay Monitor running" "$OUT"; then
+            echo "SMOKE FAIL: assay monitor did not reach the running state (attach health unproven)."
+            exit 1
+          fi
+          echo "SMOKE PASS: assay monitor attached its observation probes."
