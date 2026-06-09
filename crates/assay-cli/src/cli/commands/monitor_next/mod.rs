@@ -329,6 +329,32 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                 e
             );
         }
+
+        // Egress enforcement (IPv4/TCP): attach the connect4 cgroup program so the compiled network
+        // deny rules actually block. Only attach when there is something to enforce; the maps gate
+        // which connects are denied. Observation (the connect tracepoint) is unchanged either way.
+        let has_net_deny = !compiled.tier1.network_deny_ports.is_empty()
+            || !compiled.tier1.network_deny_cidrs.is_empty();
+        if has_net_deny {
+            match std::fs::File::open("/sys/fs/cgroup") {
+                Ok(cgroup_file) => match monitor.attach_network_cgroup(&cgroup_file) {
+                    Ok(()) => {
+                        if !args.quiet {
+                            emit_err!(
+                                "  • Egress enforcement (connect4) attached at /sys/fs/cgroup ({} port + {} cidr deny rules)",
+                                compiled.tier1.network_deny_ports.len(),
+                                compiled.tier1.network_deny_cidrs.len()
+                            );
+                        }
+                    }
+                    Err(e) => emit_err!("Warning: Failed to attach egress enforcement: {}", e),
+                },
+                Err(e) => emit_err!(
+                    "Warning: cannot open cgroup v2 root for egress enforcement: {}",
+                    e
+                ),
+            }
+        }
     }
 
     let mut stream = monitor.listen().map_err(|e| anyhow::anyhow!(e))?;

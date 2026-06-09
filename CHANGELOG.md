@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Network egress enforcement (IPv4/TCP). `assay monitor --policy <file>` now attaches the compiled
+  `connect4` cgroup program so a policy's network deny rules actually block outbound connects, not just
+  observe them. When the policy carries `net_connect` deny rules (a destination port or CIDR), the
+  `connect4_hook` program is attached at the cgroup v2 root and the `DENY_PORTS` / `CIDR_RULES_V4` maps
+  decide which connects are refused (EPERM); an empty rule set is a no-op. Scope is deliberately narrow:
+  IPv4/TCP `connect` only (no IPv6/UDP/QUIC), and the connect tracepoint observation path is unchanged,
+  so `observation_health` reporting is unaffected by enforcement being active. Previously the cgroup
+  attach was a stub, so the compiled rules were never enforced at runtime.
+
 - URL userinfo redaction (ADR-034, Phase 3). A network endpoint that is a URL carrying a
   `user:pass@` credential pair now has its userinfo redacted at capture (`scheme://user:pass@host` ->
   `scheme://<redacted:url-userinfo:H8>@host`), preserving the scheme and host. It fires only when the

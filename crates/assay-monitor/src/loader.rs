@@ -6,10 +6,6 @@ use assay_common::{
     MONITOR_STAT_LSM_EVENTS_EMITTED, MONITOR_STAT_LSM_RINGBUF_DROPPED,
     MONITOR_STAT_OPENAT2_EVENTS_EMITTED, MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
     MONITOR_STAT_OPENAT_EVENTS_EMITTED, MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
-    MONITOR_STAT_SENDMSG_EVENTS_EMITTED, MONITOR_STAT_SENDMSG_NON_IP_FAMILY,
-    MONITOR_STAT_SENDMSG_NO_PEER, MONITOR_STAT_SENDMSG_RINGBUF_DROPPED,
-    MONITOR_STAT_SENDTO_EVENTS_EMITTED, MONITOR_STAT_SENDTO_NON_IP_FAMILY,
-    MONITOR_STAT_SENDTO_NO_PEER, MONITOR_STAT_SENDTO_RINGBUF_DROPPED,
     MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
     SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR, SOCKET_STAT_BLOCKED_PORT, SOCKET_STAT_CHECKS,
     SOCKET_STAT_EVENTS_EMITTED, SOCKET_STAT_RINGBUF_DROPPED,
@@ -18,7 +14,7 @@ use assay_policy::tiers::CompiledPolicy;
 use aya::maps::lpm_trie::Key;
 use aya::{
     maps::{Array as AyaArray, HashMap as AyaHashMap, LpmTrie, RingBuf},
-    programs::{Lsm, TracePoint},
+    programs::{CgroupAttachMode, CgroupSockAddr, Lsm, TracePoint},
     Btf, Ebpf,
 };
 use std::sync::{Arc, Mutex};
@@ -39,6 +35,8 @@ enum MonitorLink {
     Lsm(#[allow(dead_code)] aya::programs::lsm::LsmLink),
     #[allow(dead_code)]
     KProbe(#[allow(dead_code)] aya::programs::kprobe::KProbeLink),
+    #[allow(dead_code)]
+    CgroupSockAddr(#[allow(dead_code)] aya::programs::cgroup_sock_addr::CgroupSockAddrLink),
 }
 
 #[cfg(target_os = "linux")]
@@ -214,24 +212,6 @@ impl LinuxMonitor {
                 println!("DEBUG: Attached Tracepoint sys_enter_connect");
             }
         }
-        if let Some(prog) = bpf.program_mut("assay_monitor_sendto") {
-            if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
-                tp.load()?;
-                let link_id = tp.attach("syscalls", "sys_enter_sendto")?;
-                let link = tp.take_link(link_id)?;
-                self.links.push(MonitorLink::TracePoint(link));
-                println!("DEBUG: Attached Tracepoint sys_enter_sendto");
-            }
-        }
-        if let Some(prog) = bpf.program_mut("assay_monitor_sendmsg") {
-            if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
-                tp.load()?;
-                let link_id = tp.attach("syscalls", "sys_enter_sendmsg")?;
-                let link = tp.take_link(link_id)?;
-                self.links.push(MonitorLink::TracePoint(link));
-                println!("DEBUG: Attached Tracepoint sys_enter_sendmsg");
-            }
-        }
         if let Some(prog) = bpf.program_mut("assay_monitor_fork") {
             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
                 tp.load()?;
@@ -356,11 +336,26 @@ impl LinuxMonitor {
         Ok(())
     }
 
+    /// Attach the connect4 cgroup_sock_addr enforcement program to the given cgroup v2 directory.
+    ///
+    /// IPv4/TCP egress only. The `DENY_PORTS` / `CIDR_RULES_V4` maps (populated by `set_tier1_rules`)
+    /// decide which connects are blocked; with an empty rule set every connect falls through to allow,
+    /// so attaching is safe even at the cgroup root. The connect tracepoint observation path is
+    /// untouched, so observation-health reporting is unaffected by enforcement being active.
     pub fn attach_network_cgroup(
         &mut self,
-        _cgroup_file: &std::fs::File,
+        cgroup_file: &std::fs::File,
     ) -> Result<(), MonitorError> {
-        // Stub for compatibility
+        let mut bpf = self.bpf.lock().unwrap();
+        if let Some(prog) = bpf.program_mut("connect4_hook") {
+            if let Ok(csa) = TryInto::<&mut CgroupSockAddr>::try_into(&mut *prog) {
+                csa.load()?;
+                let link_id = csa.attach(cgroup_file, CgroupAttachMode::Single)?;
+                let link = csa.take_link(link_id)?;
+                self.links.push(MonitorLink::CgroupSockAddr(link));
+                println!("DEBUG: Attached cgroup connect4 egress enforcement");
+            }
+        }
         Ok(())
     }
 
@@ -397,26 +392,6 @@ impl LinuxMonitor {
             .unwrap_or(0);
         stats.connect_ringbuf_dropped = array
             .get(&MONITOR_STAT_CONNECT_RINGBUF_DROPPED, 0)
-            .unwrap_or(0);
-        stats.sendto_events_emitted = array
-            .get(&MONITOR_STAT_SENDTO_EVENTS_EMITTED, 0)
-            .unwrap_or(0);
-        stats.sendto_ringbuf_dropped = array
-            .get(&MONITOR_STAT_SENDTO_RINGBUF_DROPPED, 0)
-            .unwrap_or(0);
-        stats.sendmsg_events_emitted = array
-            .get(&MONITOR_STAT_SENDMSG_EVENTS_EMITTED, 0)
-            .unwrap_or(0);
-        stats.sendmsg_ringbuf_dropped = array
-            .get(&MONITOR_STAT_SENDMSG_RINGBUF_DROPPED, 0)
-            .unwrap_or(0);
-        stats.sendto_no_peer = array.get(&MONITOR_STAT_SENDTO_NO_PEER, 0).unwrap_or(0);
-        stats.sendmsg_no_peer = array.get(&MONITOR_STAT_SENDMSG_NO_PEER, 0).unwrap_or(0);
-        stats.sendto_non_ip_family = array
-            .get(&MONITOR_STAT_SENDTO_NON_IP_FAMILY, 0)
-            .unwrap_or(0);
-        stats.sendmsg_non_ip_family = array
-            .get(&MONITOR_STAT_SENDMSG_NON_IP_FAMILY, 0)
             .unwrap_or(0);
 
         let map = bpf.map("SOCKET_STATS").ok_or(MonitorError::MapNotFound {
