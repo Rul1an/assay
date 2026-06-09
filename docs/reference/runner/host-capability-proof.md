@@ -68,6 +68,12 @@ The run builds `assay-cli` from the dispatched ref and uploads an artifact conta
 Starting a `workflow_dispatch` run requires write access to the repository, so who-may-produce-proof
 is enforced by GitHub's own permission model, not by comment-author filtering.
 
+Operational rule: the proof run builds and executes the dispatched ref on the self-hosted host, and
+`cargo build` runs build scripts and proc macros. Do not dispatch `host-capability-proof` on
+untrusted fork code. For external contributions, review the change and mirror it into a trusted
+branch before producing proof on the self-hosted runner. This proof route is trusted-maintainer-
+operated infrastructure, not a safe arbitrary-fork runner.
+
 ## Check workflow (`host-capability-check.yml`)
 
 ```yaml
@@ -100,11 +106,16 @@ A JSON block after the marker is welcome as reviewer convenience, but it is neve
 truth. The checker validates the workflow run through the Actions API:
 
 ```text
-event       == workflow_dispatch
-head_sha    == PR head SHA (exact match against the run's immutable metadata)
-conclusion  == success
-workflow    == host-capability-proof
+event          == workflow_dispatch
+head_sha       == PR head SHA (exact match against the run's immutable metadata)
+conclusion     == success
+workflow name  == host-capability-proof
+workflow path  == .github/workflows/host-capability-proof.yml
 ```
+
+Producer identity is validated by workflow path, not only display name: names are human-facing
+and can duplicate or drift, the path is the proof-chain component. The marker may still say
+`host-capability-proof` for the human reader.
 
 and reads the doctor JSON from the run's artifact. A pasted JSON block without a validating
 workflow-run URL fails the gate: a trusted account posting a JSON block proves authorship of a

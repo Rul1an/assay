@@ -8,6 +8,11 @@
 #
 # This workflow makes no enforcement claim: the artifact proves the diagnostics were
 # produced on this host for this SHA, nothing more.
+#
+# OPERATIONAL RULE: this job builds and executes the dispatched ref on the self-hosted
+# host (cargo build runs build scripts and proc macros). Do NOT dispatch it on untrusted
+# fork code; review and mirror external contributions into a trusted branch first. This
+# is trusted-maintainer-operated infrastructure, not a safe arbitrary-fork runner.
 name: host-capability-proof
 
 on:

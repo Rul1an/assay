@@ -35,6 +35,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 PROOF_WORKFLOW_NAME = "host-capability-proof"
+# Producer identity is validated by workflow PATH, not only display name: names are
+# human-facing and can duplicate or drift; the path is the proof-chain component.
+PROOF_WORKFLOW_PATH = ".github/workflows/host-capability-proof.yml"
 ARTIFACT_NAME = "host-capability-proof"
 DOCTOR_JSON_NAME = "doctor.json"
 META_JSON_NAME = "proof_meta.json"
@@ -268,11 +271,14 @@ def run_ids_from_text(repo: str, text: str) -> list[str]:
 def run_diagnostic(run: dict[str, object], run_id: str, head_sha: str) -> tuple[str, str] | None:
     """None when the run is a valid proof run; otherwise (reason, detail)."""
     name = str(run.get("name") or "")
+    path = str(run.get("path") or "")
     event = str(run.get("event") or "")
     conclusion = str(run.get("conclusion") or "")
     run_head = str(run.get("head_sha") or "")
     if name != PROOF_WORKFLOW_NAME:
         return ("run_wrong_workflow", f"run {run_id}: workflow is {name!r}, expected {PROOF_WORKFLOW_NAME!r}")
+    if path != PROOF_WORKFLOW_PATH:
+        return ("run_wrong_workflow", f"run {run_id}: workflow path is {path!r}, expected {PROOF_WORKFLOW_PATH!r}")
     if event != "workflow_dispatch":
         return ("run_not_dispatch", f"run {run_id}: event is {event!r}, expected 'workflow_dispatch'")
     if run_head != head_sha:
@@ -428,12 +434,23 @@ def self_test() -> int:
         if result.reason != expected_reason:
             failures.append(f"fields: {label}: got {result.reason}, expected {expected_reason}")
 
+    valid_run = {
+        "name": PROOF_WORKFLOW_NAME,
+        "path": PROOF_WORKFLOW_PATH,
+        "event": "workflow_dispatch",
+        "conclusion": "success",
+        "head_sha": "a" * 40,
+    }
     run_cases = [
-        ({"name": "other", "event": "workflow_dispatch", "conclusion": "success", "head_sha": "a" * 40}, "run_wrong_workflow"),
-        ({"name": PROOF_WORKFLOW_NAME, "event": "push", "conclusion": "success", "head_sha": "a" * 40}, "run_not_dispatch"),
-        ({"name": PROOF_WORKFLOW_NAME, "event": "workflow_dispatch", "conclusion": "success", "head_sha": "b" * 40}, "head_sha_mismatch"),
-        ({"name": PROOF_WORKFLOW_NAME, "event": "workflow_dispatch", "conclusion": "failure", "head_sha": "a" * 40}, "run_not_success"),
-        ({"name": PROOF_WORKFLOW_NAME, "event": "workflow_dispatch", "conclusion": "success", "head_sha": "a" * 40}, None),
+        ({**valid_run, "name": "other"}, "run_wrong_workflow"),
+        # Identity is the path, not only the display name: a different workflow file that
+        # happens to carry the same name must not validate.
+        ({**valid_run, "path": ".github/workflows/other.yml"}, "run_wrong_workflow"),
+        ({**valid_run, "path": ""}, "run_wrong_workflow"),
+        ({**valid_run, "event": "push"}, "run_not_dispatch"),
+        ({**valid_run, "head_sha": "b" * 40}, "head_sha_mismatch"),
+        ({**valid_run, "conclusion": "failure"}, "run_not_success"),
+        (valid_run, None),
     ]
     for run, expected in run_cases:
         got = run_diagnostic(run, "1", "a" * 40)
