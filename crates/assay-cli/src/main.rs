@@ -5,6 +5,7 @@ pub mod backend;
 pub mod caps;
 mod cli;
 pub mod diagnostics;
+pub mod enforcement_health_v1;
 mod env_filter;
 pub mod exit_codes;
 pub mod fs;

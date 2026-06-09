@@ -1,0 +1,27 @@
+{
+  "schema": "assay.enforcement_health.v1",
+  "status": "active",
+  "mechanism": "landlock",
+  "scope": "tcp_connect_landlock_port",
+  "policy_semantics": "allowlist",
+  "landlock": {
+    "abi": 4,
+    "handled_access_net": [
+      "connect_tcp"
+    ],
+    "allowed_connect_tcp_ports": [
+      443
+    ],
+    "no_new_privs_confirmed": true,
+    "restrict_self_confirmed": true
+  },
+  "probe": null,
+  "non_claims": [
+    "no ip or cidr enforcement",
+    "no hostname enforcement",
+    "no destination identity enforcement",
+    "no udp or quic enforcement",
+    "no http or tls route policy",
+    "not a replacement for cgroup/connect4 endpoint enforcement"
+  ]
+}

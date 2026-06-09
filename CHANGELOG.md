@@ -8,6 +8,12 @@ All notable changes to this project will be documented in this file.
 - `assay doctor --format json` now carries a top-level `schema` id (`assay.doctor_report.v0`), making
   the report self-describing so a future field-shape change is an explicit version bump rather than
   silent drift. Additive; existing fields unchanged.
+- `assay.enforcement_health.v1` carrier (types + committed fixtures only, no producer yet) for the
+  Landlock TCP-connect port-allowlist enforcement domain. An explicit version bump from
+  `assay.enforcement_health.v0` (left untouched; consumers read both additively): `status` is
+  `active`/`failed` only (no `not_applicable`, no `absent` — presence means requested), `probe` is
+  always present and `null` when no real-block probe ran, and `failure.reason_code` is a
+  machine-readable enum. Fixtures: `crates/assay-cli/tests/fixtures/enforcement_health/v1/`.
 - Host-capability proof gate (CI): changes under `crates/assay-cli/src/diagnostics/` now require a
   validated `workflow_dispatch` run of the `host-capability-proof` workflow on the PR head SHA
   (event, SHA, conclusion, and workflow validated via the Actions API; doctor JSON read from the

@@ -1,0 +1,26 @@
+{
+  "schema": "assay.enforcement_health.v1",
+  "status": "failed",
+  "mechanism": "landlock",
+  "scope": "tcp_connect_landlock_port",
+  "policy_semantics": "allowlist",
+  "failure": {
+    "reason_code": "landlock_abi_too_old",
+    "detail": "Landlock ABI 4 is required for TCP connect port allowlists"
+  },
+  "landlock": {
+    "abi": 3,
+    "net_connect_tcp_supported": false,
+    "no_new_privs_confirmed": false,
+    "restrict_self_confirmed": false
+  },
+  "probe": null,
+  "non_claims": [
+    "no ip or cidr enforcement",
+    "no hostname enforcement",
+    "no destination identity enforcement",
+    "no udp or quic enforcement",
+    "no http or tls route policy",
+    "not a replacement for cgroup/connect4 endpoint enforcement"
+  ]
+}
