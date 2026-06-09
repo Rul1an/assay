@@ -14,6 +14,11 @@ All notable changes to this project will be documented in this file.
   `active`/`failed` only (no `not_applicable`, no `absent` — presence means requested), `probe` is
   always present and `null` when no real-block probe ran, and `failure.reason_code` is a
   machine-readable enum. Fixtures: `crates/assay-cli/tests/fixtures/enforcement_health/v1/`.
+- Landlock TCP-connect port-allowlist compile target (`assay_policy::tiers::compile_landlock_net`,
+  types + tests only, no sandbox applies it yet). Compiles an explicit TCP-connect port allowlist
+  and fails closed on every Landlock-inexpressible shape the policy can represent: IP/CIDR rules,
+  negative/deny rules, host/wildcard destinations, and port 0, each with a machine-readable reason.
+  The eBPF tier compiler is unchanged.
 - Host-capability proof gate (CI): changes under `crates/assay-cli/src/diagnostics/` now require a
   validated `workflow_dispatch` run of the `host-capability-proof` workflow on the PR head SHA
   (event, SHA, conclusion, and workflow validated via the Actions API; doctor JSON read from the

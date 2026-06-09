@@ -7,6 +7,7 @@
 mod tiers_next;
 
 pub use tiers_next::{
-    compile, CidrRule, CompilationStats, CompiledPolicy, DestRule, FilePolicy, GlobRule, InodeRule,
+    compile, compile_landlock_net, CidrRule, CompilationStats, CompiledPolicy, DestRule,
+    FilePolicy, GlobRule, InodeRule, LandlockNetTarget, LandlockRejectReason, LandlockRejection,
     NetworkPolicy, PathRule, Policy, PortRule, ProcessPolicy, Tier1Rules, Tier2Rules,
 };
