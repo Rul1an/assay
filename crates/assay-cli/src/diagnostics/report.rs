@@ -1,8 +1,16 @@
 use serde::Serialize;
 use std::path::PathBuf;
 
+/// Schema id for the `assay doctor --format json` report. Makes the artifact self-describing so a
+/// future field-shape change is an explicit version bump rather than silent drift (the same
+/// append-only discipline as the other assay carriers). The host-capability proof gate consumes
+/// this report, so a stable id lets a consumer pin the shape it reconstructs.
+pub const DOCTOR_REPORT_SCHEMA: &str = "assay.doctor_report.v0";
+
 #[derive(Debug, Serialize, Clone)]
 pub struct DiagnosticReport {
+    /// Schema id (`assay.doctor_report.v0`); always first so the JSON stays self-describing.
+    pub schema: &'static str,
     pub assay_version: String,
     pub platform: String,
     pub kernel: Option<String>,

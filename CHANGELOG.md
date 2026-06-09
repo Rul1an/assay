@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `assay doctor --format json` now carries a top-level `schema` id (`assay.doctor_report.v0`), making
+  the report self-describing so a future field-shape change is an explicit version bump rather than
+  silent drift. Additive; existing fields unchanged.
 - Host-capability proof gate (CI): changes under `crates/assay-cli/src/diagnostics/` now require a
   validated `workflow_dispatch` run of the `host-capability-proof` workflow on the PR head SHA
   (event, SHA, conclusion, and workflow validated via the Actions API; doctor JSON read from the
