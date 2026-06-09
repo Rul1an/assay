@@ -332,6 +332,15 @@ impl LinuxMonitor {
             }
         }
 
+        // Port deny rules -> DENY_PORTS map read by the connect4 hook. Without this, a port-based
+        // egress deny rule compiles but never reaches the kernel, so the hook runs but never blocks.
+        if let Some(map) = bpf.map_mut("DENY_PORTS") {
+            let mut hm: AyaHashMap<_, u16, u32> = AyaHashMap::try_from(map)?;
+            for (port, rule_id) in compiled.tier1.port_deny_entries() {
+                hm.insert(port, rule_id, 0)?;
+            }
+        }
+
         println!("✅ Policy applied: tier1 inode rules loaded");
         Ok(())
     }
