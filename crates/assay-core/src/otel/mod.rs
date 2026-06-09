@@ -2,6 +2,7 @@ use crate::model::TestResultRow;
 
 pub mod genai;
 pub mod metrics;
+pub mod projection;
 pub mod redaction;
 pub mod semconv;
 
