@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `assay evidence verify-mcp-records --fallback-projection named`: a no-attestation fallback binding
+  computed over a named projection (the `tools/call` `params` plus the `_meta.authorization_binding`
+  block) instead of the whole request envelope, so transport- or observation-local `_meta` fields a
+  gateway/provider can legitimately add or strip do not change the binding digest. Allowlist (only the
+  named fields are in the preimage) and fail-closed (a missing binding block is non-conformant, never a
+  silent fall-back to hashing the whole envelope). The report carries a self-describing
+  `binding.projection = "assay.fallback_projection.v0"`, so the rule is versioned and a change is an
+  explicit bump; it tracks the in-progress SEP-2828 fallback-binding discussion. Default stays
+  `whole-envelope`, so existing behavior is unchanged. Docs:
+  `docs/reference/cli/mcp-execution-record-fallback-plan.md`.
 - `assay project-otel` CLI: a read-only wrapper around the `otel::projection` library that emits
   `assay.otel_projection.v0` from files. `--capability-surface` is required; `--observation-health`
   and `--enforcement-health` are optional (following the library signature); `--out` writes to a file
