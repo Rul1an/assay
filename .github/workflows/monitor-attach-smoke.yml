@@ -41,6 +41,13 @@ jobs:
         run: |
           scripts/ci/install-ebpf-toolchain.sh
           cargo xtask build-ebpf --release --no-docker
+          # Build provenance, so the canonical eBPF build path is self-documenting in the run log and
+          # nobody has to reconstruct in three months why this path is the right one (see #1570).
+          {
+            echo "ebpf_build_mode=release"
+            echo "ebpf_build_path=xtask --release --no-docker"
+            echo "toolchain_install=present"
+          } | tee "$RUNNER_TEMP/ebpf-build-provenance.txt"
 
       - name: Smoke - assay monitor must attach its observation probes
         run: |
