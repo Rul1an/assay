@@ -136,4 +136,37 @@ mod tests {
         assert_eq!(back.network_enforcement, NetworkEnforcement::Failed);
         assert!(!back.attach_confirmed);
     }
+
+    // write_to failure modes use a directory-as-path and a missing parent: both are portable and
+    // deterministic, unlike permission bits which differ per OS/CI. A requested artifact that cannot
+    // be written must surface as an error so the caller can refuse exit 0 (a missing file would
+    // otherwise be read as "not requested").
+    #[test]
+    fn write_to_fails_when_path_is_a_directory() {
+        let h = EnforcementHealth::active(SCOPE_IPV4_TCP_CONNECT, 1, 1);
+        assert!(h.write_to(&std::env::temp_dir()).is_err());
+    }
+
+    #[test]
+    fn write_to_fails_when_parent_dir_is_missing() {
+        let h = EnforcementHealth::active(SCOPE_IPV4_TCP_CONNECT, 1, 1);
+        let path = std::env::temp_dir()
+            .join(format!("assay-eh-missing-{}", std::process::id()))
+            .join("nested")
+            .join("enforcement_health.json");
+        assert!(h.write_to(&path).is_err());
+    }
+
+    #[test]
+    fn write_to_succeeds_and_round_trips_from_disk() {
+        let h = EnforcementHealth::active(SCOPE_IPV4_TCP_CONNECT, 2, 3);
+        let path = std::env::temp_dir().join(format!("assay-eh-{}.json", std::process::id()));
+        h.write_to(&path).unwrap();
+        let back: EnforcementHealth =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(back.network_enforcement, NetworkEnforcement::Active);
+        assert_eq!(back.blocked_count, 2);
+        assert_eq!(back.allowed_count, 3);
+    }
 }
