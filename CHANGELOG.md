@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Diagnostics now read the Landlock ABI from the canonical `landlock_create_ruleset(NULL, 0,
+  LANDLOCK_CREATE_RULESET_VERSION)` syscall instead of `/sys/kernel/security/landlock/abi_version`,
+  which does not exist on mainline kernels and produced a false-negative `net_enforce` on real hosts
+  (e.g. Ubuntu 24.04, kernel 6.8, Landlock ABI 4). The probe distinguishes `Supported` (ABI returned),
+  `Disabled` (`EOPNOTSUPP`, built in but boot-disabled), and `Unsupported` (`ENOSYS`); the LSM-list
+  membership is kept only as an extra observation, not as the ABI/net source of truth.
+
+### Added
+- Landlock-net preflight fields on the diagnostics report: `abi_probe_status` (`ok` / `unsupported` /
+  `disabled` / `error`), `abi_probe_errno`, `abi_version_source`, `net_connect_tcp_supported` /
+  `net_bind_tcp_supported` (ABI ≥ 4), and `no_new_privs_settable` (measured in a throwaway forked
+  child, never set on the diagnostics process). Existing fields (`available`, `fs_enforce`,
+  `net_enforce`, `abi_version`) are unchanged. This is preflight / host-eligibility only — it reports
+  whether a host can support a future Landlock TCP-connect proof path; it does **not** implement or
+  claim enforcement of TCP connects.
+
 ### Changed
 
 - MCP execution-record verifiers: pin semantics with stable, machine-readable reason codes before the

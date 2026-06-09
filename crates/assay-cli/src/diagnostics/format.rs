@@ -10,13 +10,16 @@ pub fn format_text(report: &DiagnosticReport) -> String {
     }
 
     s.push_str("\nSecurity Modules:\n");
-    if report.landlock.available {
+    if let Some(abi) = report.landlock.abi_version {
         s.push_str(&format!(
-            "  Landlock:   ✓ ABI v{} (FS)\n",
-            report.landlock.abi_version.unwrap_or(0)
+            "  Landlock:   ✓ ABI v{abi} (FS); net_connect_tcp={}, no_new_privs_settable={}\n",
+            report.landlock.net_connect_tcp_supported, report.landlock.no_new_privs_settable,
         ));
     } else {
-        s.push_str("  Landlock:   ✗ unavailable\n");
+        s.push_str(&format!(
+            "  Landlock:   ✗ {:?} (no usable ABI)\n",
+            report.landlock.abi_probe_status
+        ));
     }
 
     if report.bpf_lsm.available {
