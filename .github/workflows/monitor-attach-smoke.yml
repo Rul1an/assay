@@ -34,7 +34,13 @@ jobs:
 
       - name: Build eBPF object
         if: ${{ github.event.inputs.build_ebpf != 'false' }}
-        run: cargo xtask build-ebpf
+        # Build the eBPF object exactly like the delegated runner-spike gate: install the eBPF
+        # toolchain and build in release with --no-docker. A debug-mode build produces programs the
+        # verifier rejects (empty / "last insn is not an exit or jmp"), which is what made an earlier
+        # smoke run mislook like an assay monitor attach bug.
+        run: |
+          scripts/ci/install-ebpf-toolchain.sh
+          cargo xtask build-ebpf --release --no-docker
 
       - name: Smoke - assay monitor must attach its observation probes
         run: |
