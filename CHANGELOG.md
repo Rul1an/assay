@@ -6,6 +6,20 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Enforcement health artifact (`assay.enforcement_health.v0`). `assay monitor --enforcement-health
+  <path>` writes an explicit enforcement-truth artifact, deliberately SEPARATE from
+  `observation_health`: observation_health answers "how complete was observation?", this answers "was
+  enforcement active, and did it block?". The two are orthogonal (a run can have complete observation
+  and absent enforcement, or vice versa), so they are not conflated into one blob. Fields:
+  `network_enforcement` (`active` / `absent` / `failed` / `not_applicable`), `attach_confirmed`,
+  `blocked_count`, `allowed_count`, `scope` (`ipv4_tcp_connect`). It is a written artifact, never parsed
+  from stdout. Crucially, on the fail-closed abort path (egress enforcement requested but the connect4
+  attach could not be installed) it writes `failed` BEFORE exiting, so a requested-but-failed
+  enforcement is never mistaken for an un-requested one (`absent`). v0 is intentionally small; rule IDs,
+  policy refs, timestamps, provenance, and enforcement receipts are follow-ups. The schema is
+  producer-agnostic so future enforcement paths emit the same shape; a second enforcement domain becomes
+  an explicit `v1`, never a silent reinterpretation of `v0`.
+
 - Network egress enforcement (IPv4 TCP connect only). `assay monitor --policy <file>` now attaches the
   compiled `connect4` cgroup program so a policy's network deny rules actually block outbound connects,
   not just observe them. When the policy carries `net_connect` deny rules (a destination port or CIDR),
