@@ -58,6 +58,7 @@ pub fn probe_system() -> DiagnosticReport {
     }
 
     DiagnosticReport {
+        schema: DOCTOR_REPORT_SCHEMA,
         assay_version: env!("CARGO_PKG_VERSION").to_string(),
         platform,
         kernel,
@@ -324,5 +325,16 @@ mod landlock_probe_tests {
         ] {
             assert!(v.get(k).is_some(), "missing new field {k}");
         }
+    }
+
+    #[test]
+    fn report_is_self_describing_with_schema_id() {
+        let report = probe_system();
+        let v = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            v.get("schema").and_then(|s| s.as_str()),
+            Some(DOCTOR_REPORT_SCHEMA),
+            "doctor report must carry its schema id so the shape is an explicit version, not silent drift"
+        );
     }
 }
