@@ -63,13 +63,12 @@ impl Metric for ArgsValidMetric {
                         .map(|(k, v)| (k.clone(), v.clone()))
                         .collect(),
                 );
+                // Compile each tool schema once and reuse it across every tool call, instead of
+                // recompiling per call via evaluate_tool_args.
+                let state = assay_core::policy_engine::PolicyState::compile(&policy_val);
 
                 for call in tool_calls {
-                    let verdict = assay_core::policy_engine::evaluate_tool_args(
-                        &policy_val,
-                        &call.tool_name,
-                        &call.args,
-                    );
+                    let verdict = state.evaluate(&call.tool_name, &call.args);
 
                     if verdict.status == assay_core::policy_engine::VerdictStatus::Blocked {
                         // Legacy compat: schema-only mode ignores missing tools.
@@ -99,6 +98,8 @@ impl Metric for ArgsValidMetric {
                         .map(|(k, v)| (k.clone(), v.clone()))
                         .collect(),
                 );
+                // Compile each tool schema once and reuse it across every tool call.
+                let state = assay_core::policy_engine::PolicyState::compile(&policy_val);
 
                 for call in tool_calls {
                     if policy
@@ -139,11 +140,7 @@ impl Metric for ArgsValidMetric {
                         continue;
                     }
 
-                    let verdict = assay_core::policy_engine::evaluate_tool_args(
-                        &policy_val,
-                        &call.tool_name,
-                        &call.args,
-                    );
+                    let verdict = state.evaluate(&call.tool_name, &call.args);
                     if verdict.status == assay_core::policy_engine::VerdictStatus::Blocked {
                         if verdict.reason_code == "E_ARG_SCHEMA" {
                             if let Some(violations) =
