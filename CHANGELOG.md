@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.20.0] - 2026-06-09
+
 ### Added
 
 - Enforcement health artifact (`assay.enforcement_health.v0`). `assay monitor --enforcement-health
