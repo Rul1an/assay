@@ -19,6 +19,10 @@ pub(crate) mod errors;
 pub(crate) mod events;
 #[cfg(target_os = "linux")]
 pub(crate) mod normalize;
+// Cross-platform carrier; its only emitter (run_linux) is Linux-gated, so on other targets the
+// constructors are unused outside the unit tests.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) mod enforcement_health;
 pub(crate) mod output;
 #[cfg(target_os = "linux")]
 pub(crate) mod rules;
@@ -152,6 +156,10 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     }
 
     let rules = rules::compile_active_rules(runtime_config.as_ref());
+
+    // Enforcement truth for the enforcement_health.v0 artifact: did egress enforcement actually attach?
+    use enforcement_health::{EnforcementHealth, SCOPE_IPV4_TCP_CONNECT};
+    let mut enforcement_active = false;
 
     if let Some(cfg) = &runtime_config {
         let mut t1_policy = assay_policy::tiers::Policy::default();
@@ -349,6 +357,12 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                         "FATAL: egress enforcement requested but cannot open cgroup v2 root /sys/fs/cgroup: {} (fail-closed, not running audit-only)",
                         e
                     );
+                    // Honesty: a requested-but-failed enforcement must record `failed`, never look
+                    // like `absent` (not requested), so write the artifact BEFORE the fail-closed exit.
+                    write_enforcement_health(
+                        &args,
+                        EnforcementHealth::failed(SCOPE_IPV4_TCP_CONNECT),
+                    );
                     return Ok(crate::exit_codes::EXIT_WOULD_BLOCK);
                 }
             };
@@ -357,8 +371,10 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                     "FATAL: egress enforcement requested but connect4 attach failed: {} (fail-closed, not running audit-only)",
                     e
                 );
+                write_enforcement_health(&args, EnforcementHealth::failed(SCOPE_IPV4_TCP_CONNECT));
                 return Ok(crate::exit_codes::EXIT_WOULD_BLOCK);
             }
+            enforcement_active = true;
             if !args.quiet {
                 emit_err!(
                     "  • Egress enforcement ACTIVE (IPv4/TCP connect, connect4) at /sys/fs/cgroup: {} port + {} cidr deny rules. NOT covered: IPv6, UDP/QUIC, DNS resolution, already-open sockets, raw sockets, proxy/tunnel identity.",
@@ -403,6 +419,9 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
+    // Enforcement block/allow counts for the enforcement_health artifact (from the kernel stats).
+    let mut blocked_count = 0u64;
+    let mut allowed_count = 0u64;
     match monitor.snapshot_stats() {
         Ok(stats) => {
             emit_err!("Monitor summary:");
@@ -425,6 +444,8 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                 stats.socket_events_emitted,
                 stats.socket_ringbuf_dropped
             );
+            blocked_count = stats.socket_blocked_port + stats.socket_blocked_cidr;
+            allowed_count = stats.socket_allowed;
             if stats.has_ringbuf_pressure() {
                 emit_err!(
                     "  ⚠️  Ring buffer pressure detected: {} dropped event(s)",
@@ -435,5 +456,39 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         Err(e) => emit_err!("Warning: Failed to read monitor stats: {}", e),
     }
 
+    // enforcement_health.v0 artifact (explicit, never parsed from stdout). active when enforcement
+    // attached; absent when it was not requested. The `failed` case is written on the fail-closed abort
+    // path above, before exit, so requested-but-failed never reads as not-requested.
+    if args.enforcement_health.is_some() {
+        let health = if enforcement_active {
+            EnforcementHealth::active(SCOPE_IPV4_TCP_CONNECT, blocked_count, allowed_count)
+        } else {
+            EnforcementHealth::absent(SCOPE_IPV4_TCP_CONNECT)
+        };
+        write_enforcement_health(&args, health);
+    }
+
     Ok(exit_codes::OK)
+}
+
+/// Write the enforcement_health.v0 artifact to `--enforcement-health <path>` if set. No-op otherwise.
+#[cfg(target_os = "linux")]
+fn write_enforcement_health(
+    args: &super::MonitorArgs,
+    health: enforcement_health::EnforcementHealth,
+) {
+    if let Some(path) = args.enforcement_health.as_ref() {
+        match health.write_to(path) {
+            Ok(()) => output::err(format!(
+                "  • enforcement_health.v0 written: {} ({:?})",
+                path.display(),
+                health.network_enforcement
+            )),
+            Err(e) => output::err(format!(
+                "Warning: failed to write enforcement_health artifact to {}: {}",
+                path.display(),
+                e
+            )),
+        }
+    }
 }

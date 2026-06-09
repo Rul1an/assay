@@ -58,6 +58,11 @@ pub struct MonitorArgs {
     /// Monitor ALL cgroups (bypass filtering, useful for debugging)
     #[arg(long)]
     pub monitor_all: bool,
+
+    /// Write an `assay.enforcement_health.v0` artifact (enforcement truth: active/failed/absent +
+    /// block counts) to this path. Explicit artifact, not parsed from stdout.
+    #[arg(long)]
+    pub enforcement_health: Option<PathBuf>,
 }
 
 pub async fn run(args: MonitorArgs) -> anyhow::Result<i32> {
