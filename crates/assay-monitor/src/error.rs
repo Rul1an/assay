@@ -45,4 +45,7 @@ pub enum MonitorError {
 
     #[error("ringbuf error: {0}")]
     RingBuf(String),
+
+    #[error("network enforcement unavailable: {0}")]
+    EnforcementUnavailable(String),
 }

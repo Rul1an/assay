@@ -329,6 +329,44 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                 e
             );
         }
+
+        // Egress enforcement (IPv4/TCP connect only): attach the connect4 cgroup program so the
+        // compiled network deny rules actually block. Only attach when the policy requests it (has
+        // network deny rules); the maps gate which connects are refused. Observation (the connect
+        // tracepoint) is unchanged either way.
+        //
+        // FAIL-CLOSED: when enforcement is requested but cannot be installed (no cgroup v2 root, no
+        // kernel support for cgroup/connect4, attach error), refuse to run rather than silently
+        // continuing in audit-only mode. A consumer asking for egress enforcement must not get a clean
+        // run that did not actually enforce.
+        let has_net_deny = !compiled.tier1.network_deny_ports.is_empty()
+            || !compiled.tier1.network_deny_cidrs.is_empty();
+        if has_net_deny {
+            let cgroup_file = match std::fs::File::open("/sys/fs/cgroup") {
+                Ok(f) => f,
+                Err(e) => {
+                    emit_err!(
+                        "FATAL: egress enforcement requested but cannot open cgroup v2 root /sys/fs/cgroup: {} (fail-closed, not running audit-only)",
+                        e
+                    );
+                    return Ok(crate::exit_codes::EXIT_WOULD_BLOCK);
+                }
+            };
+            if let Err(e) = monitor.attach_network_cgroup(&cgroup_file) {
+                emit_err!(
+                    "FATAL: egress enforcement requested but connect4 attach failed: {} (fail-closed, not running audit-only)",
+                    e
+                );
+                return Ok(crate::exit_codes::EXIT_WOULD_BLOCK);
+            }
+            if !args.quiet {
+                emit_err!(
+                    "  • Egress enforcement ACTIVE (IPv4/TCP connect, connect4) at /sys/fs/cgroup: {} port + {} cidr deny rules. NOT covered: IPv6, UDP/QUIC, DNS resolution, already-open sockets, raw sockets, proxy/tunnel identity.",
+                    compiled.tier1.network_deny_ports.len(),
+                    compiled.tier1.network_deny_cidrs.len()
+                );
+            }
+        }
     }
 
     let mut stream = monitor.listen().map_err(|e| anyhow::anyhow!(e))?;
