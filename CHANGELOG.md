@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- MCP execution-record verifiers: pin semantics with stable, machine-readable reason codes before the
+  new verifiers are used as a contract (no new capability, no mode change, no schema bump).
+  `verify-mcp-supersession` now exposes a stable `groups[].reason_code`
+  (`supersession_resolved_*` / `supersession_ambiguous_*`) instead of only prose; the named fallback
+  in `verify-mcp-records` distinguishes `fallback_projection_missing_authorization_binding` from
+  `fallback_projection_invalid_meta` (both fail-closed). Tests now pin that the projection id is part
+  of the digest preimage (changing it breaks the back-link) and that the whole `authorization_binding`
+  object is bound (no allowlist inside the block). `--fallback-projection whole-envelope` is documented
+  as the legacy compatibility mode and `named` as the named projection mode (default unchanged). The
+  supersession report documents that `sequence` is asserted canonical-content ordering, not an
+  independently verified ordering (Assay verifies no signatures). Docs:
+  `docs/reference/cli/mcp-execution-record-fallback-plan.md`.
+
 ### Added
 
 - `assay evidence verify-mcp-supersession`: independent-consumer evaluation of decision-record

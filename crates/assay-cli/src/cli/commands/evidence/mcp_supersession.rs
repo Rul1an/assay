@@ -59,6 +59,8 @@ struct GroupReport {
     backlink_key: String,
     count: usize,
     verdict: &'static str,
+    /// Stable, machine-readable reason; CI consumers key on this, not on `detail` prose.
+    reason_code: &'static str,
     effective_decided_at: Option<String>,
     effective_decision: Option<String>,
     detail: String,
@@ -97,6 +99,10 @@ pub fn cmd_verify_mcp_supersession(args: McpSupersessionArgs) -> Result<i32> {
             "signature_verification",
             "issuer_key_trust",
             "decided_at_clock_truth",
+            // `sequence` is read from the canonical decisionDerived content; Assay verifies no
+            // signatures, so a sequence-resolved ordering is asserted-content, not independently
+            // verified ordering.
+            "sequence_ordering_is_asserted_content_not_verified",
             "policy_correctness",
             "runtime_side_effect_truth",
         ],
@@ -116,6 +122,7 @@ fn evaluate_group(key: String, records: &[&Value]) -> GroupReport {
             backlink_key: key,
             count,
             verdict: "resolved",
+            reason_code: "supersession_resolved_single",
             effective_decided_at: decided_at(records[0]),
             effective_decision: decision_value(records[0]),
             detail: "single decision for this call binding".to_string(),
@@ -128,6 +135,7 @@ fn evaluate_group(key: String, records: &[&Value]) -> GroupReport {
         return ambiguous(
             key,
             count,
+            "supersession_ambiguous_missing_decided_at",
             "a decision record is missing decidedAt; cannot order",
         );
     }
@@ -143,6 +151,7 @@ fn evaluate_group(key: String, records: &[&Value]) -> GroupReport {
             backlink_key: key,
             count,
             verdict: "resolved",
+            reason_code: "supersession_resolved_latest_decided_at",
             effective_decided_at: Some(max_time),
             effective_decision: decision_value(leaders[0]),
             detail: "latest decidedAt is unique".to_string(),
@@ -162,14 +171,18 @@ fn evaluate_group(key: String, records: &[&Value]) -> GroupReport {
                 backlink_key: key,
                 count,
                 verdict: "resolved",
+                reason_code: "supersession_resolved_sequence",
                 effective_decided_at: Some(max_time),
                 effective_decision: decision_value(seq_leaders[0]),
-                detail: format!("equal decidedAt resolved by explicit sequence {max_seq}"),
+                detail: format!(
+                    "equal decidedAt resolved by explicit (asserted) sequence {max_seq}"
+                ),
             };
         }
         return ambiguous(
             key,
             count,
+            "supersession_ambiguous_duplicate_sequence",
             "equal decidedAt and equal sequence; no deterministic winner",
         );
     }
@@ -177,15 +190,17 @@ fn evaluate_group(key: String, records: &[&Value]) -> GroupReport {
     ambiguous(
         key,
         count,
+        "supersession_ambiguous_missing_sequence",
         "equal decidedAt and no explicit ordering field; a nonce is not an ordering field",
     )
 }
 
-fn ambiguous(key: String, count: usize, detail: &str) -> GroupReport {
+fn ambiguous(key: String, count: usize, reason_code: &'static str, detail: &str) -> GroupReport {
     GroupReport {
         backlink_key: key,
         count,
         verdict: "ambiguous",
+        reason_code,
         effective_decided_at: None,
         effective_decision: None,
         detail: detail.to_string(),
@@ -242,8 +257,8 @@ fn print_table(report: &SupersessionReport) {
     println!();
     for group in &report.groups {
         println!(
-            "{:<10} count={} {}",
-            group.verdict, group.count, group.backlink_key
+            "{:<10} {:<44} count={} {}",
+            group.verdict, group.reason_code, group.count, group.backlink_key
         );
         println!("           {}", group.detail);
     }

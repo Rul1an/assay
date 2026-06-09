@@ -250,3 +250,30 @@ Everything else under `_meta` is excluded by construction. The rules, in code an
 - Matching the named projection digest does not prove the server observed the envelope honestly, nor
   that the omitted `_meta` was irrelevant to anything other than the binding.
 - `whole-envelope` mode remains for interop with current external fixtures that bind the full envelope.
+
+## Reason Codes and Semantics (hardening)
+
+Stable, machine-readable reason codes (CI consumers key on these, not on prose `detail`):
+
+- fallback (named mode, in `verify-mcp-records` check ids): `fallback_projection_binding_present`,
+  `fallback_projection_missing_authorization_binding`, `fallback_projection_invalid_meta`; a digest
+  mismatch surfaces through the existing `decision_request_envelope_digest_match` check.
+- supersession (`verify-mcp-supersession` `groups[].reason_code`):
+  `supersession_resolved_single`, `supersession_resolved_latest_decided_at`,
+  `supersession_resolved_sequence`, `supersession_ambiguous_missing_sequence`,
+  `supersession_ambiguous_duplicate_sequence`, `supersession_ambiguous_missing_decided_at`.
+
+Pinned semantics:
+
+- **Projection id is bound.** The named projection digest is `sha256(jcs({projection, params, binding}))`,
+  so the projection id is part of the preimage; changing it changes the digest. A rename or rule change
+  is an explicit version bump.
+- **Bind-all inside the binding block.** Extra non-binding `_meta` fields are excluded from the digest,
+  but the `authorization_binding` object is included as a whole — there is no allowlist *inside* the
+  binding block, so any field within it is bound. (A closed schema for `authorization_binding` is a
+  possible later policy step, not part of this hardening.)
+- **`whole-envelope` is legacy compatibility.** `named` is the mode used for the `_meta`
+  authorization-binding allowlist behavior. The default is unchanged here.
+- **Asserted sequence ordering.** `sequence` is read from the canonical `decisionDerived` content.
+  Assay verifies no signatures or issuer trust for these records, so a sequence-resolved ordering is
+  asserted-content ordering, not an independently verified ordering (stated in `claims_not_made`).
