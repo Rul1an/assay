@@ -17,12 +17,44 @@ pub struct DiagnosticReport {
     pub suggestions: Vec<String>,
 }
 
+/// How the Landlock ABI probe resolved. The authoritative query is the
+/// `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` syscall (per the kernel docs),
+/// NOT the `/sys/kernel/security/landlock/abi_version` path, which does not exist on mainline kernels
+/// and produced a false-negative `net_enforce` on real hosts.
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LandlockAbiProbeStatus {
+    /// Syscall returned an ABI version (>= 1): Landlock is built in and enabled.
+    Ok,
+    /// Syscall returned `ENOSYS`: the kernel has no Landlock support.
+    Unsupported,
+    /// Syscall returned `EOPNOTSUPP`: Landlock is built in but disabled at boot.
+    Disabled,
+    /// Any other errno (or a non-Linux platform): could not be determined.
+    Error,
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub struct LandlockStatus {
+    /// Landlock present in `/sys/kernel/security/lsm`. Unchanged meaning; kept as an extra observation
+    /// only — it is NOT the source of truth for ABI or net support (the syscall is).
     pub available: bool,
     pub fs_enforce: bool,
+    /// Back-compat alias for `net_connect_tcp_supported` (kept so existing readers do not break).
     pub net_enforce: bool,
     pub abi_version: Option<u32>,
+    /// How `abi_version` was obtained: `landlock_create_ruleset_version` (syscall) or `none`.
+    pub abi_version_source: &'static str,
+    pub abi_probe_status: LandlockAbiProbeStatus,
+    /// The errno from the ABI probe when it did not return a version; `None` on success.
+    pub abi_probe_errno: Option<i32>,
+    /// ABI >= 4 (`LANDLOCK_ACCESS_NET_CONNECT_TCP`). Required for the future Landlock TCP-connect path.
+    pub net_connect_tcp_supported: bool,
+    /// ABI >= 4 (`LANDLOCK_ACCESS_NET_BIND_TCP`).
+    pub net_bind_tcp_supported: bool,
+    /// Whether `PR_SET_NO_NEW_PRIVS` could be set in a throwaway child (prerequisite for unprivileged
+    /// `landlock_restrict_self`). Measured in a forked child, never set on the diagnostics process.
+    pub no_new_privs_settable: bool,
 }
 
 #[derive(Debug, Serialize, Clone)]

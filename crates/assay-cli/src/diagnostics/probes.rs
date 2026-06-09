@@ -95,26 +95,124 @@ fn probe_lsms() -> Vec<String> {
 }
 
 fn probe_landlock(lsms: &[String]) -> LandlockStatus {
+    // LSM-list membership is an extra observation only. The source of truth for ABI and net support
+    // is the landlock_create_ruleset(NULL, 0, VERSION) syscall: the sysfs path the old probe read
+    // (/sys/kernel/security/landlock/abi_version) does not exist on mainline kernels and produced a
+    // false-negative net_enforce on real hosts (e.g. Ubuntu 24.04, kernel 6.8, ABI 4).
     let available = lsms.contains(&"landlock".to_string());
 
-    // Read actual ABI version from sysfs (PR5.5 enhancement)
-    let abi_version = if available {
-        std::fs::read_to_string("/sys/kernel/security/landlock/abi_version")
-            .ok()
-            .and_then(|s| s.trim().parse::<u32>().ok())
-    } else {
-        None
-    };
-
-    // Net enforcement requires ABI >= 4
-    let net_enforce = abi_version.map(|v| v >= 4).unwrap_or(false);
+    let (abi_probe_status, abi_version, abi_probe_errno) = query_landlock_abi();
+    let net_connect_tcp_supported = net_connect_tcp_supported(abi_version);
+    let net_bind_tcp_supported = net_bind_tcp_supported(abi_version);
+    let no_new_privs_settable = probe_no_new_privs_settable();
 
     LandlockStatus {
         available,
         fs_enforce: available,
-        net_enforce,
+        net_enforce: net_connect_tcp_supported,
         abi_version,
+        abi_version_source: if abi_version.is_some() {
+            "landlock_create_ruleset_version"
+        } else {
+            "none"
+        },
+        abi_probe_status,
+        abi_probe_errno,
+        net_connect_tcp_supported,
+        net_bind_tcp_supported,
+        no_new_privs_settable,
     }
+}
+
+/// Classify the raw return of `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)`.
+/// Pure logic, unit-tested cross-platform; the actual syscall is Linux-only (below), so on non-Linux
+/// builds this is only reachable from tests.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn classify_abi(ret: i64, errno: i32) -> (LandlockAbiProbeStatus, Option<u32>, Option<i32>) {
+    if ret >= 1 {
+        (LandlockAbiProbeStatus::Ok, Some(ret as u32), None)
+    } else if errno == libc::ENOSYS {
+        (LandlockAbiProbeStatus::Unsupported, None, Some(errno))
+    } else if errno == libc::EOPNOTSUPP {
+        (LandlockAbiProbeStatus::Disabled, None, Some(errno))
+    } else {
+        (LandlockAbiProbeStatus::Error, None, Some(errno))
+    }
+}
+
+/// `LANDLOCK_ACCESS_NET_CONNECT_TCP` is available from ABI 4 (the future Plan 2A connect path).
+fn net_connect_tcp_supported(abi: Option<u32>) -> bool {
+    abi.is_some_and(|v| v >= 4)
+}
+
+/// `LANDLOCK_ACCESS_NET_BIND_TCP` is also available from ABI 4.
+fn net_bind_tcp_supported(abi: Option<u32>) -> bool {
+    abi.is_some_and(|v| v >= 4)
+}
+
+// The ABI query and the no_new_privs probe are raw syscalls. assay-cli already opts into unsafe
+// (`#![allow(unsafe_code)]` in main.rs) for its sandbox path, and backend.rs's enforce() already runs
+// raw prctl + landlock_restrict_self in pre_exec, so this is consistent with the crate's existing
+// policy rather than a new unsafe surface. The landlock crate gives an ABI number (see
+// backend.rs::detect_backend / caps.abi_version) but caps probing at V4 and does not expose the
+// ENOSYS-vs-EOPNOTSUPP distinction, so the canonical VERSION syscall is used directly here.
+#[cfg(target_os = "linux")]
+fn query_landlock_abi() -> (LandlockAbiProbeStatus, Option<u32>, Option<i32>) {
+    // landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION) returns the ABI version.
+    const LANDLOCK_CREATE_RULESET_VERSION: libc::c_long = 1;
+    // SAFETY: a pure version query — NULL attr, 0 size, VERSION flag. Reads no memory, restricts
+    // nothing, has no side effects on this process.
+    let ret = unsafe {
+        libc::syscall(
+            libc::SYS_landlock_create_ruleset,
+            std::ptr::null::<libc::c_void>(),
+            0usize,
+            LANDLOCK_CREATE_RULESET_VERSION,
+        )
+    };
+    let errno = if ret < 0 {
+        std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+    } else {
+        0
+    };
+    classify_abi(ret as i64, errno)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn query_landlock_abi() -> (LandlockAbiProbeStatus, Option<u32>, Option<i32>) {
+    // No Landlock off Linux.
+    (LandlockAbiProbeStatus::Unsupported, None, None)
+}
+
+/// Whether `PR_SET_NO_NEW_PRIVS` can be set, measured in a throwaway forked child so the diagnostics
+/// process itself is never permanently put into no-new-privs. Only async-signal-safe calls (prctl,
+/// _exit) run between fork and exit.
+#[cfg(target_os = "linux")]
+fn probe_no_new_privs_settable() -> bool {
+    const PR_SET_NO_NEW_PRIVS: libc::c_int = 38;
+    const PR_GET_NO_NEW_PRIVS: libc::c_int = 39;
+    // SAFETY: child runs only prctl + _exit (async-signal-safe); parent only waitpid.
+    unsafe {
+        let pid = libc::fork();
+        if pid == 0 {
+            let set = libc::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+            let get = libc::prctl(PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0);
+            libc::_exit(if set == 0 && get == 1 { 0 } else { 1 });
+        } else if pid > 0 {
+            let mut status: libc::c_int = 0;
+            if libc::waitpid(pid, &mut status, 0) < 0 {
+                return false;
+            }
+            libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0
+        } else {
+            false
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn probe_no_new_privs_settable() -> bool {
+    false
 }
 
 fn probe_bpf_lsm(lsms: &[String]) -> BpfLsmStatus {
@@ -133,5 +231,92 @@ fn probe_helper() -> HelperStatus {
         version: None,
         socket_exists: socket.exists(),
         socket,
+    }
+}
+
+#[cfg(test)]
+mod landlock_probe_tests {
+    use super::*;
+
+    #[test]
+    fn abi_ok_returns_version_and_no_errno() {
+        assert_eq!(
+            classify_abi(4, 0),
+            (LandlockAbiProbeStatus::Ok, Some(4), None)
+        );
+        assert_eq!(
+            classify_abi(1, 0),
+            (LandlockAbiProbeStatus::Ok, Some(1), None)
+        );
+    }
+
+    #[test]
+    fn abi_enosys_is_unsupported() {
+        assert_eq!(
+            classify_abi(-1, libc::ENOSYS),
+            (
+                LandlockAbiProbeStatus::Unsupported,
+                None,
+                Some(libc::ENOSYS)
+            )
+        );
+    }
+
+    #[test]
+    fn abi_eopnotsupp_is_disabled() {
+        assert_eq!(
+            classify_abi(-1, libc::EOPNOTSUPP),
+            (
+                LandlockAbiProbeStatus::Disabled,
+                None,
+                Some(libc::EOPNOTSUPP)
+            )
+        );
+    }
+
+    #[test]
+    fn abi_other_errno_is_error_with_errno() {
+        assert_eq!(
+            classify_abi(-1, libc::EPERM),
+            (LandlockAbiProbeStatus::Error, None, Some(libc::EPERM))
+        );
+    }
+
+    #[test]
+    fn net_caps_require_abi_4() {
+        assert!(!net_connect_tcp_supported(None));
+        assert!(!net_connect_tcp_supported(Some(3)));
+        assert!(net_connect_tcp_supported(Some(4)));
+        assert!(net_connect_tcp_supported(Some(5)));
+        assert!(!net_bind_tcp_supported(Some(3)));
+        assert!(net_bind_tcp_supported(Some(4)));
+    }
+
+    #[test]
+    fn no_new_privs_probe_returns_without_panic() {
+        // We cannot assert the value cross-platform (true on Linux, false elsewhere), only that the
+        // forked-child probe returns a bool and never panics.
+        let _: bool = probe_no_new_privs_settable();
+    }
+
+    #[test]
+    fn report_is_additive_and_keeps_old_fields() {
+        let status = probe_landlock(&[]);
+        let v = serde_json::to_value(&status).unwrap();
+        // Old fields still present.
+        for k in ["available", "fs_enforce", "net_enforce", "abi_version"] {
+            assert!(v.get(k).is_some(), "missing pre-existing field {k}");
+        }
+        // New preflight fields present.
+        for k in [
+            "abi_version_source",
+            "abi_probe_status",
+            "abi_probe_errno",
+            "net_connect_tcp_supported",
+            "net_bind_tcp_supported",
+            "no_new_privs_settable",
+        ] {
+            assert!(v.get(k).is_some(), "missing new field {k}");
+        }
     }
 }
