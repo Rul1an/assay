@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- `policy_engine::PolicyState`: compile a policy's per-tool JSON Schema validators ONCE and reuse them
+  across calls, instead of recompiling per call. The `args_valid` metric evaluator now compiles once
+  per evaluation and reuses the validators across every tool call in the response (previously each call
+  recompiled the matched tool's schema). `evaluate_tool_args` stays as the one-shot convenience and is
+  unchanged; the MCP proxy already compiled at policy load. Verdicts are identical (parity-tested);
+  this is a hot-loop performance change, not a behaviour change.
+
 ## [3.20.0] - 2026-06-09
 
 ### Added

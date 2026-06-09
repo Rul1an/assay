@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 #[serde(rename_all = "snake_case")]
@@ -93,6 +94,66 @@ pub fn evaluate_schema(compiled: &jsonschema::Validator, tool_args: &Value) -> V
         details: serde_json::json!({
             "violations": violations
         }),
+    }
+}
+
+/// A policy whose per-tool JSON Schema validators are compiled ONCE, so a caller evaluating many tool
+/// calls against the same policy does not recompile per call (`jsonschema::validator_for` is the
+/// expensive step). `evaluate_tool_args` stays the one-shot convenience that compiles on the fly; this
+/// is the compile-once path for hot loops, matching how the MCP proxy compiles all schemas at policy
+/// load. Verdicts are identical to `evaluate_tool_args` for the same policy and call.
+pub struct PolicyState {
+    validators: HashMap<String, Result<jsonschema::Validator, String>>,
+    tool_names: Vec<String>,
+}
+
+impl PolicyState {
+    /// Compile every tool schema in the policy once. A tool whose schema fails to compile is recorded
+    /// as an error and only surfaces (as `E_SCHEMA_COMPILE`) if that tool is later evaluated, matching
+    /// the one-shot `evaluate_tool_args` behavior of only compiling the requested tool's schema.
+    pub fn compile(policy: &Value) -> Self {
+        let mut validators = HashMap::new();
+        let mut tool_names = Vec::new();
+        if let Some(obj) = policy.as_object() {
+            for (tool, schema_val) in obj {
+                tool_names.push(tool.clone());
+                validators.insert(
+                    tool.clone(),
+                    jsonschema::validator_for(schema_val).map_err(|e| e.to_string()),
+                );
+            }
+        }
+        Self {
+            validators,
+            tool_names,
+        }
+    }
+
+    /// Evaluate one tool call against the pre-compiled validators.
+    pub fn evaluate(&self, tool_name: &str, tool_args: &Value) -> Verdict {
+        match self.validators.get(tool_name) {
+            None => {
+                let mut message = format!("Tool '{}' not defined in policy", tool_name);
+                if let Some(match_) =
+                    crate::errors::similarity::closest_prompt(tool_name, self.tool_names.iter())
+                {
+                    message.push_str(&format!(". Did you mean '{}'?", match_.prompt));
+                }
+                Verdict {
+                    status: VerdictStatus::Blocked,
+                    reason_code: "E_POLICY_MISSING_TOOL".to_string(),
+                    details: serde_json::json!({ "message": message }),
+                }
+            }
+            Some(Err(e)) => Verdict {
+                status: VerdictStatus::Blocked,
+                reason_code: "E_SCHEMA_COMPILE".to_string(),
+                details: serde_json::json!({
+                    "message": format!("Invalid schema for tool '{}': {}", tool_name, e)
+                }),
+            },
+            Some(Ok(compiled)) => evaluate_schema(compiled, tool_args),
+        }
     }
 }
 
