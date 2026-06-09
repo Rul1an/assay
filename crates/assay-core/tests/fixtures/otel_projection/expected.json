@@ -1,7 +1,7 @@
 {
   "schema": "assay.otel_projection.v0",
   "semconv": {
-    "otel_genai": "1.28.0-development",
+    "otel_genai": "1.37.0-development",
     "openinference": "pinned"
   },
   "spans": [
@@ -69,6 +69,6 @@
     "gen_ai.* and openinference.* fields are a projection, not the source of truth.",
     "Observed is not enforced: capability-surface tools carry assay.claim_class=observed, and enforcement is a separate span read only from assay.enforcement_health.v0.",
     "Absence of an enforcement span means no enforcement_health was supplied, not that enforcement was absent.",
-    "Pinned to OTel GenAI semconv 1.28.0-development and OpenInference pinned; a version bump is explicit."
+    "Pinned to OTel GenAI semconv 1.37.0-development and OpenInference pinned; a version bump is explicit."
   ]
 }

@@ -28,9 +28,11 @@ use serde_json::{Map, Value};
 /// Schema id of this projection artifact.
 pub const PROJECTION_SCHEMA: &str = "assay.otel_projection.v0";
 
-/// Pinned OTel GenAI semconv target, flagged Development to match upstream status. Matches the
-/// version the rest of the `otel` module pins (`semconv::V1_28_0`). A bump is an explicit change.
-pub const OTEL_GENAI_SEMCONV: &str = "1.28.0-development";
+/// Pinned OTel GenAI semconv target, flagged Development to match upstream status. This projection
+/// targets the GenAI *agent/tool* span surface (`execute_tool`, `gen_ai.tool.*`), which is newer than
+/// the LLM-*client* span surface the rest of the `otel` module pins at 1.28.0 (`semconv::V1_28_0`):
+/// `execute_tool` did not exist in 1.28.0. Both surfaces are Development upstream. A bump is explicit.
+pub const OTEL_GENAI_SEMCONV: &str = "1.37.0-development";
 
 /// OpenInference is pinned (its span-kind set is stable enough to target by name).
 pub const OPENINFERENCE_SEMCONV: &str = "pinned";
