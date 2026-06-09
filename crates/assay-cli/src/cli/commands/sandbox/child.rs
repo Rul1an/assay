@@ -57,9 +57,47 @@ pub(super) async fn run_child(
     cmd.env("TMP", tmp_dir);
     cmd.env("TEMP", tmp_dir);
 
+    // Landlock-net enforcement plan. `Some(ports)` builds a combined FS+NET ruleset; a rejected
+    // policy fails closed BEFORE spawn with a `failed` enforcement_health.v1 artifact.
+    #[cfg(target_os = "linux")]
+    let net_allow_ports: Option<Vec<u16>> = if actual_enforcement && args.enforce_net {
+        let abi = crate::backend::detect_backend().1.abi_version;
+        match crate::landlock_net::plan_landlock_net_ports(&policy.net) {
+            Ok(ports) => Some(ports),
+            Err(rejects) => {
+                let reason = net_reject_to_reason_code(&rejects);
+                let detail = rejects
+                    .iter()
+                    .map(|r| format!("{}: {}", r.reason.as_str(), r.entry))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                let health = crate::enforcement_health_v1::EnforcementHealthV1::landlock_failed(
+                    abi,
+                    reason,
+                    detail,
+                    abi >= 4,
+                    false,
+                );
+                write_enforcement_health_v1(args, &health)?;
+                if !args.quiet {
+                    eprintln!(
+                        "ERROR: network policy is not Landlock-net enforceable (fail-closed)"
+                    );
+                }
+                return Ok(exit_codes::WOULD_BLOCK);
+            }
+        }
+    } else {
+        None
+    };
+
     #[cfg(target_os = "linux")]
     let enforcer_opt = if actual_enforcement {
-        Some(crate::backend::prepare_landlock(policy, tmp_dir)?)
+        Some(crate::backend::prepare_landlock(
+            policy,
+            tmp_dir,
+            net_allow_ports.as_deref(),
+        )?)
     } else {
         None
     };
@@ -76,9 +114,36 @@ pub(super) async fn run_child(
         }
     }
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| anyhow::anyhow!("failed to spawn child: {}", e))?;
+    // The child→parent ack is std's pre_exec error channel: if `enforce()` (no_new_privs +
+    // restrict_self) returns an error in the child, the closure fails and `spawn()` returns that
+    // error, so we never record `restrict_self_confirmed` on an unenforced child.
+    let spawn_result = cmd.spawn();
+
+    #[cfg(target_os = "linux")]
+    if actual_enforcement && args.enforce_net {
+        let abi = crate::backend::detect_backend().1.abi_version;
+        match &spawn_result {
+            Ok(_) => {
+                let ports = net_allow_ports.clone().unwrap_or_default();
+                let health = crate::enforcement_health_v1::EnforcementHealthV1::landlock_active(
+                    abi, ports, None,
+                );
+                write_enforcement_health_v1(args, &health)?;
+            }
+            Err(_) => {
+                let health = crate::enforcement_health_v1::EnforcementHealthV1::landlock_failed(
+                    abi,
+                    crate::enforcement_health_v1::ReasonCode::RestrictSelfFailed,
+                    "landlock restrict_self failed in the enforcing child",
+                    abi >= 4,
+                    true,
+                );
+                write_enforcement_health_v1(args, &health)?;
+            }
+        }
+    }
+
+    let mut child = spawn_result.map_err(|e| anyhow::anyhow!("failed to spawn child: {}", e))?;
 
     let status_res = if let Some(sec) = args.timeout {
         match tokio::time::timeout(Duration::from_secs(sec), child.wait()).await {
@@ -147,6 +212,35 @@ pub(super) async fn run_child(
             Ok(exit_codes::INTERNAL_ERROR)
         }
     }
+}
+
+/// Write the `assay.enforcement_health.v1` artifact when `--enforcement-health` is set. Fail-closed:
+/// a requested artifact that cannot be written is an error so the caller does not exit successfully
+/// in a state where the evidence is absent on disk (the same rule v0 enforces).
+#[cfg(target_os = "linux")]
+fn write_enforcement_health_v1(
+    args: &SandboxArgs,
+    health: &crate::enforcement_health_v1::EnforcementHealthV1,
+) -> anyhow::Result<()> {
+    use anyhow::Context;
+    if let Some(path) = args.enforcement_health.as_ref() {
+        health.write_to(path).with_context(|| {
+            format!(
+                "failed to write enforcement_health.v1 to {}",
+                path.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+/// All policy-not-expressible rejections collapse to a single reason code; the specific entries and
+/// their per-entry reasons travel in the artifact's `detail` string.
+#[cfg(target_os = "linux")]
+fn net_reject_to_reason_code(
+    _rejects: &[crate::landlock_net::NetReject],
+) -> crate::enforcement_health_v1::ReasonCode {
+    crate::enforcement_health_v1::ReasonCode::PolicyNotExpressible
 }
 
 fn resolve_command_path(cmd_name: &str) -> std::path::PathBuf {

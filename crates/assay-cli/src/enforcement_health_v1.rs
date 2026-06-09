@@ -72,6 +72,9 @@ pub enum ReasonCode {
     RestrictSelfFailed,
     /// The ruleset could not be built (handle-access or add-rule failed).
     RulesetBuildFailed,
+    /// The network policy is not expressible as a Landlock TCP-connect allowlist (IP/CIDR, host,
+    /// non-TCP protocol, port range, deny rule, or port 0). The specific entries are in `detail`.
+    PolicyNotExpressible,
 }
 
 /// The Landlock-specific evidence block. Fields that do not apply to a given status are omitted
@@ -133,7 +136,80 @@ pub struct EnforcementHealthV1 {
     pub non_claims: Vec<String>,
 }
 
+/// The standing non-claims for the Landlock TCP-connect port-allowlist domain.
+fn landlock_non_claims() -> Vec<String> {
+    [
+        "no ip or cidr enforcement",
+        "no hostname enforcement",
+        "no destination identity enforcement",
+        "no udp or quic enforcement",
+        "no http or tls route policy",
+        "not a replacement for cgroup/connect4 endpoint enforcement",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
 impl EnforcementHealthV1 {
+    /// Active Landlock TCP-connect enforcement: the ruleset was applied (`no_new_privs` set and
+    /// `restrict_self` confirmed). `probe` is `Some` only when a real-block probe was actually run;
+    /// `None` records "ruleset applied, no real-block claim".
+    #[must_use]
+    pub fn landlock_active(abi: u32, allowed_ports: Vec<u16>, probe: Option<Probe>) -> Self {
+        Self {
+            schema: SCHEMA_V1.to_string(),
+            status: Status::Active,
+            mechanism: Mechanism::Landlock,
+            scope: SCOPE_TCP_CONNECT_LANDLOCK_PORT.to_string(),
+            policy_semantics: PolicySemantics::Allowlist,
+            failure: None,
+            landlock: LandlockBlock {
+                abi,
+                net_connect_tcp_supported: None,
+                handled_access_net: Some(vec!["connect_tcp".to_string()]),
+                allowed_connect_tcp_ports: Some(allowed_ports),
+                no_new_privs_confirmed: true,
+                restrict_self_confirmed: true,
+            },
+            probe,
+            non_claims: landlock_non_claims(),
+        }
+    }
+
+    /// Failed Landlock TCP-connect enforcement: requested but not installed. Carries the
+    /// machine-readable reason and the partial-capability truth.
+    #[must_use]
+    pub fn landlock_failed(
+        abi: u32,
+        reason_code: ReasonCode,
+        detail: impl Into<String>,
+        net_connect_tcp_supported: bool,
+        no_new_privs_confirmed: bool,
+    ) -> Self {
+        Self {
+            schema: SCHEMA_V1.to_string(),
+            status: Status::Failed,
+            mechanism: Mechanism::Landlock,
+            scope: SCOPE_TCP_CONNECT_LANDLOCK_PORT.to_string(),
+            policy_semantics: PolicySemantics::Allowlist,
+            failure: Some(Failure {
+                reason_code,
+                detail: detail.into(),
+            }),
+            landlock: LandlockBlock {
+                abi,
+                net_connect_tcp_supported: Some(net_connect_tcp_supported),
+                handled_access_net: None,
+                allowed_connect_tcp_ports: None,
+                no_new_privs_confirmed,
+                restrict_self_confirmed: false,
+            },
+            probe: None,
+            non_claims: landlock_non_claims(),
+        }
+    }
+
     pub fn write_to(&self, path: &std::path::Path) -> std::io::Result<()> {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
