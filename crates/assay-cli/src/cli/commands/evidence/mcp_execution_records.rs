@@ -29,9 +29,32 @@ pub struct McpExecutionRecordArgs {
     #[arg(long)]
     pub outcome: Option<PathBuf>,
 
+    /// For the no-attestation fallback, how the request-envelope binding digest is computed.
+    /// `whole-envelope` (default) digests the full JCS envelope; `named` digests only a named
+    /// projection (the `tools/call` params plus a named `_meta` binding block), so transport-local
+    /// or observation-local `_meta` fields a gateway/provider can legitimately add or strip do not
+    /// change the digest. Named mode is allowlist + fail-closed: if the binding block is absent the
+    /// fallback case is non-conformant rather than silently hashing the whole envelope. Ignored for
+    /// the SEP-2787 attestation path.
+    #[arg(long, value_enum, default_value_t = FallbackProjection::WholeEnvelope)]
+    pub fallback_projection: FallbackProjection,
+
     /// Output format
     #[arg(long, value_enum, default_value_t = McpExecutionRecordFormat::Table)]
     pub format: McpExecutionRecordFormat,
+}
+
+/// Self-describing id of the named fallback projection. A rename or rule change is an explicit
+/// version bump (it tracks the in-progress SEP-2828 fallback-binding discussion), never a silent
+/// reinterpretation. The binding block is read at `_meta.authorization_binding`.
+const FALLBACK_PROJECTION_V0: &str = "assay.fallback_projection.v0";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum FallbackProjection {
+    /// Digest the full JCS-canonical request envelope (matches the shipped SEP-2828 fallback text).
+    WholeEnvelope,
+    /// Digest only the named projection: `tools/call` params plus the `_meta` binding block.
+    Named,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -71,6 +94,8 @@ struct BindingReport {
     mode: &'static str,
     digest: String,
     digest_source: &'static str,
+    /// Self-describing projection id for the named fallback; `None` for whole-envelope / attestation.
+    projection: Option<&'static str>,
     nonce: Option<String>,
     nonce_source: &'static str,
 }
@@ -116,7 +141,12 @@ pub fn cmd_verify_mcp_records(args: McpExecutionRecordArgs) -> Result<i32> {
     let decision = read_json(&args.decision)?;
     let outcome = args.outcome.as_ref().map(read_json).transpose()?;
 
-    let report = build_report(&binding_input, &decision, outcome.as_ref())?;
+    let report = build_report(
+        &binding_input,
+        &decision,
+        outcome.as_ref(),
+        args.fallback_projection,
+    )?;
     match args.format {
         McpExecutionRecordFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -142,6 +172,10 @@ struct BindingExpectation {
     mode: &'static str,
     digest: String,
     digest_source: &'static str,
+    projection: Option<&'static str>,
+    /// `Some(false)` when named projection was requested but the binding block was absent
+    /// (fail-closed); `None` when not applicable (whole-envelope / attestation).
+    binding_block_present: Option<bool>,
     nonce: Option<String>,
     nonce_source: &'static str,
 }
@@ -150,13 +184,32 @@ fn build_report(
     binding_input: &BindingInput,
     decision: &Value,
     outcome: Option<&Value>,
+    fallback_projection: FallbackProjection,
 ) -> Result<PairingReport> {
     let decision_digest = jcs_digest(decision).context("failed to digest decision")?;
     let decision_backlink = backlink_report(decision)?;
     let outcome_backlink = outcome.map(backlink_report).transpose()?;
-    let expectation = binding_expectation(binding_input, &decision_backlink)?;
+    let expectation = binding_expectation(binding_input, &decision_backlink, fallback_projection)?;
 
     let mut checks = Vec::new();
+    // Fail-closed: named projection requested but the binding block was absent is non-conformant,
+    // never a silent fall-back to hashing the whole envelope.
+    if expectation.binding_block_present == Some(false) {
+        checks.push(CheckReport {
+            id: "fallback_binding_block_present",
+            ok: false,
+            detail:
+                "named fallback projection requested but _meta.authorization_binding is absent; \
+                     failing closed instead of hashing the whole envelope"
+                    .to_string(),
+        });
+    } else if expectation.binding_block_present == Some(true) {
+        checks.push(CheckReport {
+            id: "fallback_binding_block_present",
+            ok: true,
+            detail: "named fallback projection binding block present".to_string(),
+        });
+    }
     push_decision_binding_checks(&mut checks, &decision_backlink, &expectation);
     checks.push(check_enum(
         "decision_enum",
@@ -222,6 +275,7 @@ fn build_report(
             mode: expectation.mode,
             digest: expectation.digest.clone(),
             digest_source: expectation.digest_source,
+            projection: expectation.projection,
             nonce: expectation.nonce.clone(),
             nonce_source: expectation.nonce_source,
         },
@@ -251,22 +305,62 @@ fn claims_not_made(expectation: &BindingExpectation) -> Vec<&'static str> {
 fn binding_expectation(
     binding_input: &BindingInput,
     decision_backlink: &BackLinkReport,
+    fallback_projection: FallbackProjection,
 ) -> Result<BindingExpectation> {
     match binding_input {
         BindingInput::Attestation(attestation) => Ok(BindingExpectation {
             mode: "sep2787_attestation",
             digest: jcs_digest(attestation).context("failed to digest attestation")?,
             digest_source: "sep2787_attestation_jcs",
+            projection: None,
+            binding_block_present: None,
             nonce: string_at(attestation, &["issuerAsserted", "nonce"]),
             nonce_source: "issuerAsserted.nonce",
         }),
-        BindingInput::RequestEnvelope(request_envelope) => Ok(BindingExpectation {
-            mode: "request_envelope",
-            digest: jcs_digest(request_envelope).context("failed to digest request envelope")?,
-            digest_source: "request_envelope_jcs",
-            nonce: decision_backlink.attestation_nonce.clone(),
-            nonce_source: "record_backlink_consistency",
-        }),
+        BindingInput::RequestEnvelope(request_envelope) => match fallback_projection {
+            FallbackProjection::WholeEnvelope => Ok(BindingExpectation {
+                mode: "request_envelope",
+                digest: jcs_digest(request_envelope)
+                    .context("failed to digest request envelope")?,
+                digest_source: "request_envelope_jcs",
+                projection: None,
+                binding_block_present: None,
+                nonce: decision_backlink.attestation_nonce.clone(),
+                nonce_source: "record_backlink_consistency",
+            }),
+            FallbackProjection::Named => {
+                // Allowlist: the preimage is exactly the named params plus the named binding block,
+                // everything else under _meta is excluded by construction. Fail-closed when the
+                // binding block is absent — never fall back to hashing the whole envelope.
+                let binding_block = request_envelope
+                    .get("_meta")
+                    .and_then(|m| m.get("authorization_binding"));
+                let (digest, present) = match binding_block {
+                    Some(binding) => {
+                        let projected = serde_json::json!({
+                            "projection": FALLBACK_PROJECTION_V0,
+                            "params": request_envelope.get("params").unwrap_or(&Value::Null),
+                            "binding": binding,
+                        });
+                        (
+                            jcs_digest(&projected)
+                                .context("failed to digest named fallback projection")?,
+                            true,
+                        )
+                    }
+                    None => ("sha256:unresolved-binding-block".to_string(), false),
+                };
+                Ok(BindingExpectation {
+                    mode: "request_envelope",
+                    digest,
+                    digest_source: "request_envelope_named_projection_jcs",
+                    projection: Some(FALLBACK_PROJECTION_V0),
+                    binding_block_present: Some(present),
+                    nonce: decision_backlink.attestation_nonce.clone(),
+                    nonce_source: "record_backlink_consistency",
+                })
+            }
+        },
     }
 }
 

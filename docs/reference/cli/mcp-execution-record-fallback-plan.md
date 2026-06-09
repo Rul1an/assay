@@ -208,3 +208,45 @@ Review-ready when:
 - docs state the request-envelope shape and the fallback non-claims
 - no supersession, signature verification, or issuer-trust behavior is
   introduced in this slice
+
+## Named Projection Follow-up (shipped)
+
+The slice above hashes the whole request envelope. A follow-up adds an opt-in named projection so
+transport-local or observation-local `_meta` fields a gateway or provider can legitimately add or
+strip do not change the binding digest.
+
+```bash
+assay evidence verify-mcp-records \
+  --request-envelope tools-call-envelope.json \
+  --decision server-decision-record.json \
+  --fallback-projection named \
+  --format json
+```
+
+In `--fallback-projection named` (default stays `whole-envelope`, so existing behavior is unchanged),
+the binding digest is computed over an **allowlist** projection, not the whole envelope:
+
+```text
+sha256( jcs( { "projection": "assay.fallback_projection.v0",
+               "params":     <tools/call params>,
+               "binding":    <_meta.authorization_binding> } ) )
+```
+
+Everything else under `_meta` is excluded by construction. The rules, in code and pinned by tests:
+
+- **Allowlist, not denylist.** Only the named `params` and the named binding block are in the
+  preimage; unrelated `_meta` (progress tokens, trace context, other SEP blocks) is excluded, so two
+  views that differ only in non-binding `_meta` produce the same digest.
+- **Fail-closed.** If `_meta.authorization_binding` is absent, the fallback case is non-conformant
+  (`fallback_binding_block_present` fails, exit `2`) rather than silently hashing the whole envelope.
+- **Self-describing version.** The report carries `binding.projection = "assay.fallback_projection.v0"`.
+  This tracks the in-progress SEP-2828 fallback-binding discussion; a rename or rule change is an
+  explicit version bump, never a silent reinterpretation.
+
+### Non-claims (named projection)
+
+- The named field set (`params` + `_meta.authorization_binding`) is a proposed shape tracking the
+  upstream discussion, not a finalized SEP contract; it is versioned so it can change explicitly.
+- Matching the named projection digest does not prove the server observed the envelope honestly, nor
+  that the omitted `_meta` was irrelevant to anything other than the binding.
+- `whole-envelope` mode remains for interop with current external fixtures that bind the full envelope.
