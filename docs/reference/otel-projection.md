@@ -66,7 +66,29 @@ The projection carries its own `non_claims`, and they are the point of doing it 
 - absence of an enforcement span is not a claim that enforcement was absent;
 - the version is pinned and a bump is explicit.
 
+## CLI
+
+`assay project-otel` emits `assay.otel_projection.v0`, a lossy, read-only projection of assay evidence
+into selected OTel GenAI / OpenInference-shaped fields. It reads files, parses JSON, calls the library
+projector, and writes JSON — it is transport only, with no projection logic of its own.
+
+```bash
+assay project-otel \
+  --capability-surface capability-surface.json \
+  --observation-health observation-health.json \
+  --enforcement-health enforcement-health.json
+# or write to a file (stdout stays empty on success):
+assay project-otel --capability-surface capability-surface.json --out projection.json
+```
+
+Only `--capability-surface` is required; `--observation-health` and `--enforcement-health` are
+optional and follow the library signature (an absent enforcement-health makes no enforcement claim).
+On a read or parse error the command writes a message to stderr and exits non-zero (`2`) with an empty
+stdout, and never echoes raw artifact content. It is not a telemetry pipeline: it produces a
+projection JSON document, it does not export OTLP, open a network connection, or emit runtime proof.
+
 ## Scope
 
-This is the projection function and its fixtures. There is no OTLP exporter and no CLI subcommand yet;
-those are later slices, kept separate so the contract and its fixtures stand on their own first.
+This is the projection function, its fixtures, and the read-only `assay project-otel` CLI wrapper.
+There is no OTLP exporter and no live telemetry path yet; those are later slices, kept separate so the
+contract and its fixtures stand on their own first.

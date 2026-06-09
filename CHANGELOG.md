@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `assay project-otel` CLI: a read-only wrapper around the `otel::projection` library that emits
+  `assay.otel_projection.v0` from files. `--capability-surface` is required; `--observation-health`
+  and `--enforcement-health` are optional (following the library signature); `--out` writes to a file
+  and leaves stdout empty. The CLI is transport only — it reads files, parses JSON, calls
+  `assay_core::otel::projection::project`, and writes JSON; all projection semantics stay in the
+  library. On a read/parse error it writes to stderr and exits `2` with empty stdout, without echoing
+  raw artifact content. Not a telemetry pipeline: no OTLP export, no network, no runtime-proof claim.
+  Docs: `docs/reference/otel-projection.md`.
 - OTel GenAI + OpenInference projection (`otel::projection`, schema `assay.otel_projection.v0`): a
   read-only, one-directional, lossy view of assay runtime evidence (capability surface, observation
   health, enforcement health) as OpenTelemetry GenAI attributes plus an OpenInference `span.kind`, so

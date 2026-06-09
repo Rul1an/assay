@@ -32,6 +32,7 @@ pub mod profile;
 #[cfg(test)]
 mod profile_simulation_test;
 pub mod profile_types;
+pub mod project_otel;
 pub(crate) mod quarantine;
 pub mod record;
 pub(crate) mod reporting;
