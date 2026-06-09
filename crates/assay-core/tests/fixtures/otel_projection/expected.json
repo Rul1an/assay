@@ -1,0 +1,74 @@
+{
+  "schema": "assay.otel_projection.v0",
+  "semconv": {
+    "otel_genai": "1.28.0-development",
+    "openinference": "pinned"
+  },
+  "spans": [
+    {
+      "name": "execute_tool read_file",
+      "kind": "INTERNAL",
+      "attributes": {
+        "gen_ai.operation.name": "execute_tool",
+        "gen_ai.tool.name": "read_file",
+        "openinference.span.kind": "TOOL",
+        "tool.name": "read_file",
+        "assay.claim_class": "observed"
+      }
+    },
+    {
+      "name": "guardrail read_file",
+      "kind": "INTERNAL",
+      "attributes": {
+        "openinference.span.kind": "GUARDRAIL",
+        "assay.decision": "allow",
+        "assay.tool": "read_file",
+        "assay.claim_class": "observed"
+      }
+    },
+    {
+      "name": "guardrail write_file",
+      "kind": "INTERNAL",
+      "attributes": {
+        "openinference.span.kind": "GUARDRAIL",
+        "assay.decision": "deny",
+        "assay.tool": "write_file",
+        "assay.claim_class": "observed"
+      }
+    },
+    {
+      "name": "enforcement ipv4_tcp_connect",
+      "kind": "INTERNAL",
+      "attributes": {
+        "openinference.span.kind": "GUARDRAIL",
+        "assay.claim_class": "enforcement",
+        "assay.enforcement.network": "active",
+        "assay.enforcement.attach_confirmed": true,
+        "assay.enforcement.scope": "ipv4_tcp_connect",
+        "assay.enforcement.blocked_count": 1,
+        "assay.enforcement.allowed_count": 2
+      }
+    }
+  ],
+  "resource_attributes": {
+    "service.name": "assay",
+    "assay.capability.network_endpoints": [
+      "203.0.113.10:443"
+    ],
+    "assay.capability.filesystem_paths": [
+      "/workspace/app"
+    ],
+    "assay.observation.kernel_layer": "complete",
+    "assay.observation.network_protocol_coverage": "connect_only",
+    "assay.observation.policy_layer": "present"
+  },
+  "lossy": true,
+  "source_of_truth": "assay artifacts",
+  "non_claims": [
+    "This projection is a one-directional, lossy view; the assay artifacts remain authoritative.",
+    "gen_ai.* and openinference.* fields are a projection, not the source of truth.",
+    "Observed is not enforced: capability-surface tools carry assay.claim_class=observed, and enforcement is a separate span read only from assay.enforcement_health.v0.",
+    "Absence of an enforcement span means no enforcement_health was supplied, not that enforcement was absent.",
+    "Pinned to OTel GenAI semconv 1.28.0-development and OpenInference pinned; a version bump is explicit."
+  ]
+}

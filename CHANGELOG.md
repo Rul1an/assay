@@ -10,13 +10,16 @@ All notable changes to this project will be documented in this file.
   read-only, one-directional, lossy view of assay runtime evidence (capability surface, observation
   health, enforcement health) as OpenTelemetry GenAI attributes plus an OpenInference `span.kind`, so
   an OTel/OpenInference backend can read assay evidence without learning assay's vocabulary. assay
-  artifacts stay the source of truth; the standard fields are a projection, never the authority. Three
-  honesty invariants are pinned by tests: every standard field that could be over-read carries a paired
-  `assay.*` qualifier; enforcement is its own attribute set and is never folded into an (observed) tool
-  span, and is absent when no `enforcement_health` is supplied (absence makes no claim); observed sets
-  the standard vocabulary cannot express (egress endpoints, paths) stay under `assay.*`. Pinned to GenAI
-  semantic conventions 1.28.0, so a version bump is an explicit change, never a silent reinterpretation.
-  Projection function and fixtures only; no exporter and no CLI wiring (those are a later slice).
+  artifacts stay the source of truth; the output carries `lossy: true` and `source_of_truth` so the
+  view cannot be mistaken for the record. Honesty invariants pinned by tests: every standard field that
+  could be over-read carries a paired `assay.*` qualifier; enforcement is its OWN guardrail-style span
+  (`assay.claim_class=enforcement`), never attributes hung next to an observed tool span, and absent
+  when no `enforcement_health` is supplied (absence makes no claim); observed sets the standard
+  vocabulary cannot express (egress endpoints, paths) stay under `assay.*`. Pinned to OTel GenAI semconv
+  `1.28.0-development` (flagged Development) and OpenInference `pinned`, so a bump is explicit. Ships a
+  contract doc (`docs/reference/otel-projection.md`) and a committed golden fixture (input plus expected
+  projection) so an external reader sees the contract concretely. Projection function and fixtures only;
+  no exporter and no CLI wiring (those are a later slice).
 
 ### Changed
 
