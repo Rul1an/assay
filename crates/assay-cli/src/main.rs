@@ -10,6 +10,7 @@ mod env_filter;
 pub mod exit_codes;
 pub mod fs;
 pub mod landlock_check;
+pub mod landlock_net;
 pub mod metrics;
 pub mod packs;
 pub mod policy;
