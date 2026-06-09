@@ -359,7 +359,8 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                     );
                     // Honesty: a requested-but-failed enforcement must record `failed`, never look
                     // like `absent` (not requested), so write the artifact BEFORE the fail-closed exit.
-                    write_enforcement_health(
+                    // A write failure here is already covered by the non-zero exit below.
+                    let _ = write_enforcement_health(
                         &args,
                         EnforcementHealth::failed(SCOPE_IPV4_TCP_CONNECT),
                     );
@@ -371,7 +372,10 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                     "FATAL: egress enforcement requested but connect4 attach failed: {} (fail-closed, not running audit-only)",
                     e
                 );
-                write_enforcement_health(&args, EnforcementHealth::failed(SCOPE_IPV4_TCP_CONNECT));
+                let _ = write_enforcement_health(
+                    &args,
+                    EnforcementHealth::failed(SCOPE_IPV4_TCP_CONNECT),
+                );
                 return Ok(crate::exit_codes::EXIT_WOULD_BLOCK);
             }
             enforcement_active = true;
@@ -465,30 +469,48 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         } else {
             EnforcementHealth::absent(SCOPE_IPV4_TCP_CONNECT)
         };
-        write_enforcement_health(&args, health);
+        if !write_enforcement_health(&args, health) {
+            // A requested artifact that cannot be written must not exit 0: a consumer reads a
+            // missing file as "not requested" (absent), which would misreport an active run.
+            // Enforcement itself worked, so this is an infra error, not a would-block.
+            emit_err!(
+                "FATAL: enforcement_health artifact was requested but could not be written; refusing exit 0 so a missing artifact is never read as not-requested"
+            );
+            return Ok(exit_codes::EXIT_INFRA_ERROR);
+        }
     }
 
     Ok(exit_codes::OK)
 }
 
 /// Write the enforcement_health.v0 artifact to `--enforcement-health <path>` if set. No-op otherwise.
+/// Returns `false` only when the artifact was requested but could not be written; on the fail-closed
+/// abort paths the caller already exits non-zero, on the success path the caller must not exit 0.
 #[cfg(target_os = "linux")]
 fn write_enforcement_health(
     args: &super::MonitorArgs,
     health: enforcement_health::EnforcementHealth,
-) {
+) -> bool {
     if let Some(path) = args.enforcement_health.as_ref() {
         match health.write_to(path) {
-            Ok(()) => output::err(format!(
-                "  • enforcement_health.v0 written: {} ({:?})",
-                path.display(),
-                health.network_enforcement
-            )),
-            Err(e) => output::err(format!(
-                "Warning: failed to write enforcement_health artifact to {}: {}",
-                path.display(),
-                e
-            )),
+            Ok(()) => {
+                output::err(format!(
+                    "  • enforcement_health.v0 written: {} ({:?})",
+                    path.display(),
+                    health.network_enforcement
+                ));
+                true
+            }
+            Err(e) => {
+                output::err(format!(
+                    "ERROR: failed to write enforcement_health artifact to {}: {}",
+                    path.display(),
+                    e
+                ));
+                false
+            }
         }
+    } else {
+        true
     }
 }

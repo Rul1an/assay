@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- `assay monitor` no longer exits 0 when a requested `--enforcement-health` artifact cannot be
+  written. A consumer reads a missing artifact as "not requested" (absent), so an active run whose
+  artifact write failed would have been misread as making no enforcement claim; the command now exits
+  with an infra error instead. The fail-closed abort paths (attach failure) already exit non-zero and
+  are unchanged.
 - Diagnostics now read the Landlock ABI from the canonical `landlock_create_ruleset(NULL, 0,
   LANDLOCK_CREATE_RULESET_VERSION)` syscall instead of `/sys/kernel/security/landlock/abi_version`,
   which does not exist on mainline kernels and produced a false-negative `net_enforce` on real hosts
