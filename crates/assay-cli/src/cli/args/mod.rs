@@ -8,6 +8,7 @@ pub mod evidence;
 pub mod import;
 pub mod mcp;
 pub mod policy;
+pub mod project_otel;
 pub mod replay;
 pub mod run;
 pub mod runtime;
@@ -23,6 +24,7 @@ pub use evidence::*;
 pub use import::*;
 pub use mcp::*;
 pub use policy::*;
+pub use project_otel::*;
 pub use replay::*;
 pub use run::*;
 pub use runtime::*;
@@ -69,6 +71,8 @@ pub enum Command {
     Migrate(MigrateArgs),
     /// Report policy and trace coverage
     Coverage(CoverageArgs),
+    /// Project assay evidence into the OTel GenAI + OpenInference view (`assay.otel_projection.v0`)
+    ProjectOtel(ProjectOtelArgs),
     /// Explain a test result or trace decision
     Explain(super::commands::explain::ExplainArgs),
     /// Generate and run the local demo project

@@ -35,6 +35,7 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         },
         Command::Migrate(args) => super::migrate::cmd_migrate(args),
         Command::Coverage(args) => super::coverage::cmd_coverage(args).await,
+        Command::ProjectOtel(args) => super::project_otel::run(args),
         Command::Explain(args) => super::explain::run(args).await,
         Command::Demo(args) => super::demo::cmd_demo(args).await,
         Command::InitCi(args) => super::init_ci::cmd_init_ci(args),
