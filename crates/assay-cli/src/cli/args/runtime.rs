@@ -170,6 +170,13 @@ pub struct SandboxArgs {
     #[arg(long = "enforce-net", requires = "enforce")]
     pub enforce_net: bool,
 
+    /// With --enforce-net, run a self-probe before the workload: from inside the enforcing ruleset,
+    /// attempt one connect to an ephemeral denied port. Only a real block (EACCES + the harness
+    /// listener never reached) writes the `probe` block into enforcement_health.v1. A probe that does
+    /// not prove a block does not fail the run; it is reported, never silently dropped.
+    #[arg(long = "probe-enforcement", requires = "enforce_net")]
+    pub probe_enforcement: bool,
+
     /// Write the `assay.enforcement_health.v1` artifact (Landlock TCP-connect domain) to this path.
     /// A requested artifact that cannot be written is a command failure, never a silent absence.
     #[arg(long = "enforcement-health")]

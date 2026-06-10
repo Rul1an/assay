@@ -125,8 +125,16 @@ pub(super) async fn run_child(
         match &spawn_result {
             Ok(_) => {
                 let ports = net_allow_ports.clone().unwrap_or_default();
+                // Optional self-probe: only a proven real block (EACCES + listener-not-reached)
+                // writes the probe; a non-proving probe is reported, never silently dropped, and
+                // never fails the run (restrict_self on the workload child was confirmed).
+                let probe = if args.probe_enforcement {
+                    run_enforcement_self_probe(&ports, args.quiet)
+                } else {
+                    None
+                };
                 let health = crate::enforcement_health_v1::EnforcementHealthV1::landlock_active(
-                    abi, ports, None,
+                    abi, ports, probe,
                 );
                 write_enforcement_health_v1(args, &health)?;
             }
@@ -241,6 +249,96 @@ fn net_reject_to_reason_code(
     _rejects: &[crate::landlock_net::NetReject],
 ) -> crate::enforcement_health_v1::ReasonCode {
     crate::enforcement_health_v1::ReasonCode::PolicyNotExpressible
+}
+
+/// Run the enforcement self-probe. Returns `Some(probe)` ONLY when a real block is proven: the
+/// denied connect failed with EACCES AND the harness listener was never reached. Any other outcome
+/// (connect succeeded, weak errno, listener reached, or the probe could not run) returns `None` and
+/// is reported to stderr, never silently dropped, and never fails the run.
+#[cfg(target_os = "linux")]
+fn run_enforcement_self_probe(
+    allowed_ports: &[u16],
+    quiet: bool,
+) -> Option<crate::enforcement_health_v1::Probe> {
+    use crate::backend::SelfProbeOutcome;
+
+    let listener = match bind_denied_listener(allowed_ports) {
+        Some(l) => l,
+        None => {
+            if !quiet {
+                eprintln!("WARN: probe-enforcement: could not bind a denied probe port; no probe");
+            }
+            return None;
+        }
+    };
+    let deny_port = listener.local_addr().ok().map(|a| a.port()).unwrap_or(0);
+
+    let outcome = match crate::backend::self_probe_denied_connect(allowed_ports, deny_port) {
+        Ok(o) => o,
+        Err(e) => {
+            if !quiet {
+                eprintln!("WARN: probe-enforcement: self-probe could not run: {e}");
+            }
+            return None;
+        }
+    };
+
+    // Independent ground truth: did any connection actually reach the listener?
+    let _ = listener.set_nonblocking(true);
+    let listener_reached = listener.accept().is_ok();
+
+    if outcome == SelfProbeOutcome::BlockedEacces && !listener_reached {
+        return Some(crate::enforcement_health_v1::Probe {
+            kind: "real_block".to_string(),
+            transport: "ipv4".to_string(),
+            blocked_action: "tcp_connect".to_string(),
+            blocked_port: deny_port,
+            blocked_errno: "EACCES".to_string(),
+            listener_reached: false,
+        });
+    }
+    if !quiet {
+        eprintln!(
+            "WARN: probe-enforcement: self-probe did not prove a block ({}); the enforcement \
+             ruleset was still applied",
+            describe_probe_nonblock(outcome, listener_reached)
+        );
+    }
+    None
+}
+
+/// Bind an ephemeral loopback listener on a port that is NOT in the allowlist (so a connect to it is
+/// expected to be denied). Retries a few times in the unlikely event the kernel hands back an
+/// allowlisted ephemeral port.
+#[cfg(target_os = "linux")]
+fn bind_denied_listener(allowed_ports: &[u16]) -> Option<std::net::TcpListener> {
+    for _ in 0..8 {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).ok()?;
+        let port = listener.local_addr().ok()?.port();
+        if !allowed_ports.contains(&port) {
+            return Some(listener);
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn describe_probe_nonblock(
+    outcome: crate::backend::SelfProbeOutcome,
+    listener_reached: bool,
+) -> String {
+    use crate::backend::SelfProbeOutcome;
+    if listener_reached {
+        return "the denied connect reached the listener".to_string();
+    }
+    match outcome {
+        SelfProbeOutcome::Connected => "the denied connect succeeded".to_string(),
+        SelfProbeOutcome::OtherErrno(e) => {
+            format!("the denied connect failed with errno {e}, not EACCES")
+        }
+        SelfProbeOutcome::ProbeInfraError(r) => format!("the probe could not run: {r}"),
+        SelfProbeOutcome::BlockedEacces => "blocked, but the listener was reached".to_string(),
+    }
 }
 
 fn resolve_command_path(cmd_name: &str) -> std::path::PathBuf {

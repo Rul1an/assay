@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay sandbox --probe-enforcement` (with `--enforce-net`): runs a self-probe before the
+  workload that, from inside the enforcing ruleset, attempts one connect to an ephemeral denied
+  port. Only a proven real block (EACCES and the harness listener never reached) writes the
+  `probe` block into `enforcement_health.v1` (`active` + probe). A probe that does not prove a
+  block is reported and never silently dropped, and never fails the run. Weak signals (timeout,
+  ECONNREFUSED, ENETUNREACH) never count as a block.
+
 ## [3.21.0] - 2026-06-10
 
 ### Added
