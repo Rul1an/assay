@@ -25,6 +25,17 @@ use serde_json::{json, Value};
 
 pub const SCHEMA: &str = "assay.mcp_manifest_observed.v0";
 pub const CANONICALIZATION: &str = "assay.mcp_manifest_projection.v0";
+/// P60d-v2: domain for per-field digests. OPTIONAL attribution metadata — field_digests never enter
+/// the tool_digest or manifest_digest preimages, so adding them moves no existing digest.
+pub const FIELD_PROJECTION: &str = "assay.mcp_tool_field.v0";
+/// The four mutable per-tool fields P60d-v2 attributes. A name change is a remove+add, not a field
+/// change, so name is not among them.
+const FIELD_NAMES: [&str; 4] = [
+    "description",
+    "input_schema",
+    "output_schema",
+    "annotations",
+];
 
 /// Completeness of the observed `tools/list`. Never guessed: `complete` is only legitimate when the
 /// full pagination chain (until no `nextCursor`) was observed.
@@ -82,8 +93,21 @@ fn tool_digest(projection: &Value) -> String {
     digest_of(projection)
 }
 
+/// P60d-v2: a per-field digest (optional attribution metadata). Domain-separated with the projection
+/// id AND the field name inside the hashed preimage, so a null `description` and a null `annotations`
+/// can never collide. `value` is the canonical field value the per-tool projection already carries
+/// (or null), so each field_digest is over the same bytes that feed `tool_digest`.
+fn field_digest(field: &str, value: &Value) -> String {
+    digest_of(&json!({
+        "projection": FIELD_PROJECTION,
+        "field": field,
+        "value": value,
+    }))
+}
+
 /// `manifest_digest` over the manifest projection, with the projection id INSIDE the hashed preimage
-/// and entries sorted by `(name, tool_digest)` — order-independent, shape-pinned.
+/// and entries sorted by `(name, tool_digest)` — order-independent, shape-pinned. NOTE: the preimage
+/// is `{name, tool_digest}` only; P60d-v2 `field_digests` are deliberately NOT included here.
 fn manifest_digest(name_digests: &[(String, String)]) -> String {
     let mut entries: Vec<(String, String)> = name_digests.to_vec();
     entries.sort();
@@ -118,12 +142,23 @@ fn tool_digest_entry(tool: &Value) -> (String, String, Value) {
     // annotations can never decide it.
     let category = classify(&raw, &Value::Null).category;
     let privileged = category.is_some();
+    // P60d-v2: per-field digests over the SAME canonical field values that feed tool_digest, so they
+    // are consistent with tool_digest while remaining outside its (and the manifest's) preimage.
+    let mut field_digests = serde_json::Map::new();
+    for field in FIELD_NAMES {
+        field_digests.insert(
+            field.to_string(),
+            Value::String(field_digest(field, &projection[field])),
+        );
+    }
+    let field_digests = Value::Object(field_digests);
     let entry = json!({
         "name": sanitize(&raw),
         "tool_digest": digest.clone(),
         "privileged": privileged,
         "privilege_classification": if privileged { "classified" } else { "unclassified" },
         "action_class": category.map(Value::from).unwrap_or(Value::Null),
+        "field_digests": field_digests,
     });
     (raw, digest, entry)
 }
@@ -376,5 +411,95 @@ mod tests {
         assert_eq!(rec["schema"], json!(SCHEMA));
         assert_eq!(rec["observed"]["canonicalization"], json!(CANONICALIZATION));
         assert!(!rec["non_claims"].as_array().unwrap().is_empty());
+    }
+
+    // ---- P60d-v2: optional field_digests (additive) ----
+
+    #[test]
+    fn field_digests_carry_all_four_fields_and_recompute() {
+        // The producer emits a field_digest for each of the four mutable fields, each recomputing from
+        // the same canonical value the per-tool projection carries.
+        let tool = json!({
+            "name": "github.add_deploy_key",
+            "description": "Add a deploy key",
+            "inputSchema": {"type": "object", "required": ["owner", "repo"]}
+        });
+        let rec = build_observed(
+            "github",
+            std::slice::from_ref(&tool),
+            Completeness::Complete,
+        );
+        let fd = &rec["observed"]["tool_digests"][0]["field_digests"];
+        let proj = tool_projection(&tool);
+        for field in FIELD_NAMES {
+            assert_eq!(
+                fd[field].as_str().unwrap(),
+                field_digest(field, &proj[field]),
+                "{field} digest must recompute from the projected value"
+            );
+        }
+        assert_eq!(fd.as_object().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn adding_field_digests_does_not_move_tool_or_manifest_digest() {
+        // The load-bearing invariant: field_digests are outside both preimages. Reuse the committed
+        // P60a anchor — the producer (now emitting field_digests) must still reproduce it byte-for-byte.
+        let ex = p60a_fixture();
+        let rec = build_observed("github", &p60a_raw_tools(), Completeness::Complete);
+        assert_eq!(
+            rec["observed"]["manifest_digest"].as_str().unwrap(),
+            ex["manifest"]["expected_manifest_digest"].as_str().unwrap(),
+            "manifest_digest must be unchanged after adding field_digests"
+        );
+        let deploy = rec["observed"]["tool_digests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["name"] == json!("github.add_deploy_key"))
+            .unwrap();
+        assert_eq!(
+            deploy["tool_digest"].as_str().unwrap(),
+            ex["per_tool"]["expected_tool_digest"].as_str().unwrap(),
+            "tool_digest must be unchanged after adding field_digests"
+        );
+    }
+
+    #[test]
+    fn null_and_missing_fields_canonicalize_deterministically() {
+        // A tool with no description/output_schema/annotations: those fields project to null and their
+        // field_digests are stable and equal across two independent builds.
+        let bare = json!({"name": "x", "inputSchema": {"type": "object"}});
+        let r1 = build_observed("s", std::slice::from_ref(&bare), Completeness::Complete);
+        let r2 = build_observed("s", std::slice::from_ref(&bare), Completeness::Complete);
+        let f1 = &r1["observed"]["tool_digests"][0]["field_digests"];
+        let f2 = &r2["observed"]["tool_digests"][0]["field_digests"];
+        assert_eq!(f1, f2, "null-field digests must be deterministic");
+        // A null description and a null annotations must NOT collide (domain separation).
+        assert_ne!(f1["description"], f1["annotations"]);
+        assert_eq!(
+            f1["description"].as_str().unwrap(),
+            field_digest("description", &Value::Null)
+        );
+    }
+
+    #[test]
+    fn field_digests_expose_no_raw_field_values() {
+        // field_digests are sha256 hex; a hostile/secret-looking description must not appear verbatim.
+        let tool = json!({
+            "name": "t",
+            "description": "SECRET-MARKER-9f3a do not leak",
+            "inputSchema": {"type": "object", "properties": {"token": {"const": "RAW-SCHEMA-MARKER"}}}
+        });
+        let rec = build_observed("s", &[tool], Completeness::Complete);
+        let text = serde_json::to_string(&rec["observed"]["tool_digests"]).unwrap();
+        assert!(
+            !text.contains("SECRET-MARKER-9f3a"),
+            "raw description must not appear"
+        );
+        assert!(
+            !text.contains("RAW-SCHEMA-MARKER"),
+            "raw schema value must not appear"
+        );
     }
 }

@@ -12,14 +12,26 @@
       "tool_digest": "sha256:2318d9fd63878b81e992300635172e75053e086db757e31b7ebc917a7c721697",
       "privileged": false,
       "privilege_classification": "unclassified",
-      "action_class": null
+      "action_class": null,
+      "field_digests": {
+        "description": "sha256:44c1a1350496d95897e53865330ee56cbf07b02ee54450c191d7d72b2d7005ea",
+        "input_schema": "sha256:e0522e896196457208cca527b92ed8155a72673ccb7723ade56ef69f57230290",
+        "output_schema": "sha256:6969128f97f2ae0b5576343b492d312e1ab80eedf990f4bba8366c4622e808b5",
+        "annotations": "sha256:9d456a3d9cbf04f45cec915bcf7e8f02c034bf81abc077151b74bf5b06c4234b"
+      }
     },
     {
       "name": "github.add_deploy_key",
       "tool_digest": "sha256:03c7e1d546c3440fb100938dcaa7578ac34ae81f28e5762e7f8a3197e272a9f6",
       "privileged": true,
       "privilege_classification": "classified",
-      "action_class": "github_deploy_key"
+      "action_class": "github_deploy_key",
+      "field_digests": {
+        "description": "sha256:7e326787191c47250d1541c8dd2e5c8e9e8c5345ef3da8b66694e32788a29d99",
+        "input_schema": "sha256:52e5c928edb4433b517b5410a20c6a8a2ed87ff90b7931c000ba2a43fca3644c",
+        "output_schema": "sha256:6969128f97f2ae0b5576343b492d312e1ab80eedf990f4bba8366c4622e808b5",
+        "annotations": "sha256:9d456a3d9cbf04f45cec915bcf7e8f02c034bf81abc077151b74bf5b06c4234b"
+      }
     }
   ]
 }

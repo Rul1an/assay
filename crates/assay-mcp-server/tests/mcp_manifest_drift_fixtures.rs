@@ -30,6 +30,34 @@ fn tool_digest(tool: &Value) -> String {
     digest_of(tool)
 }
 
+/// P60d-v2 per-field digest: projection id + field name inside the hashed preimage.
+fn field_digest(field: &str, value: &Value) -> String {
+    digest_of(&json!({"projection": "assay.mcp_tool_field.v0", "field": field, "value": value}))
+}
+
+#[test]
+fn field_digests_anchor_recomputes_from_committed_bytes() {
+    // The committed per-field anchor recomputes via the same JCS the producer uses (cross-impl), and
+    // it is independent of tool_digest/manifest_digest (which the other tests pin unchanged).
+    let ex = fx("canonicalization_example.json");
+    let proj = &ex["per_tool"]["projection"];
+    let expected = &ex["per_tool"]["expected_field_digests"];
+    for field in [
+        "description",
+        "input_schema",
+        "output_schema",
+        "annotations",
+    ] {
+        assert_eq!(
+            field_digest(field, &proj[field]),
+            expected[field].as_str().unwrap(),
+            "{field} field_digest must recompute from the committed projection"
+        );
+    }
+    // Domain separation: a null output_schema and a null annotations must not collide.
+    assert_ne!(expected["output_schema"], expected["annotations"]);
+}
+
 /// Build the manifest projection with the projection id INSIDE the hashed preimage, sorted by name
 /// then tool_digest, and hash it. This is the value the v0 Plimsoll gate compares against baseline.
 fn manifest_digest(tools: &[Value]) -> String {
