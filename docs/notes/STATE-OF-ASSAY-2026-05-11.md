@@ -9,8 +9,8 @@ Snapshot of where Assay sits after the spring 2026 hardening sweep. Intended as
 internal reference and as cross-repo handoff context (especially for
 Assay-Harness, which is now the next governance focus).
 
-The previous snapshot is
-[`STATE-OF-ASSAY-2026-03-15.md`](../STATE-OF-ASSAY-2026-03-15.md).
+The previous snapshot (`STATE-OF-ASSAY-2026-03-15`) is kept in the project's local working notes
+rather than the published docs.
 
 ## Headline
 

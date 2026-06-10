@@ -32,7 +32,7 @@
 
 Assay is evolving from an evidence recorder into a **CI-native evidence compiler and protocol-governance layer for agent systems**. The product thesis is no longer "help teams inspect traces better"; it is "compile agent runtime truth into canonical evidence, protocol-aware policy checks, and verifiable security claims with explicit evidence levels." Assay turns traces, protocol events, and bundle artifacts into canonical evidence, signal-aware packs, SARIF findings, offline-verifiable bundles, and trust artifacts such as a signed Trust Card.
 
-This keeps Assay out of the wrong competitive lane. Promptfoo, Langfuse, LangSmith, and vendor eval platforms already own large parts of evals, dashboards, and red-team loops. Assay's moat is different: **claim provenance, bounded security semantics, and portable proof-bearing outputs**.
+This keeps Assay out of the wrong competitive lane. Promptfoo, Langfuse, LangSmith, and vendor eval platforms already own large parts of evals, dashboards, and red-team loops. Assay's focus is different: **claim provenance, bounded security semantics, and portable proof-bearing outputs**.
 
 **Standards Alignment:**
 - **CloudEvents v1.0** envelope — lingua franca for event routers and SIEM pipelines
@@ -74,7 +74,7 @@ See [ADR-033](architecture/ADR-033-OTel-Trust-Compiler-Positioning.md) for the p
 
 ### North Star Guardrails
 
-- **Claim-first, not dashboard-first**: a prettier trace UI is not the product wedge. The wedge is evidence-classified trust claims.
+- **Claim-first, not dashboard-first**: a prettier trace UI is not the point. The point is evidence-classified trust claims.
 - **Canonical evidence first**: OTel is an ingest bridge, not the sole semantic authority.
 - **Canonical evidence wins operationally**: new ingest paths may enrich or map into canonical evidence, but they must not semantically override claim classification directly from raw upstream formats.
 - **Trust Card, not trust score**: the primary artifact must show what is `verified`, `self_reported`, `inferred`, or `absent`, not collapse into `trusted/untrusted`.
@@ -93,18 +93,18 @@ This direction should continue only if all three answers stay "yes":
 2. **Repo capability fit**
    Assay already ships the substrate this direction needs: canonical evidence, offline verification, signal-aware packs, proof-bearing bundles, OTel ingest, delegation context, and containment degradation signals.
 
-3. **Wedge fit vs alternatives**
+3. **Fit vs alternatives**
    A Trust Card and trust-compiler story differentiate Assay better than another pack wave, another engine feature, or a broader dashboard surface. Those alternatives are easier to explain, but they are also where the category is more crowded and Assay is less structurally unique.
 
 If any of these answers turns into "no", the default action is to stop a broader product-positioning wave:
 
 - if **external demand fit** is weak, do not broaden packaging or positioning
 - if **repo capability fit** is weak, close the missing signal/engine seam first
-- if **wedge fit** is weak, do not start a new product lane until the differentiator is sharper
+- if **fit** is weak, do not start a new direction until the distinction is sharper
 
 ### Primary Risks
 
-- **Abstract product story**: "trust compiler" is less immediately legible than "eval" or "observability." The Trust Card is the required wedge that makes the compiler story tangible.
+- **Abstract product story**: "trust compiler" is less immediately legible than "eval" or "observability." The Trust Card is what makes the compiler story tangible.
 - **Category confusion**: if Assay is marketed as a tracing platform, dashboard, firewall, or generic eval suite, it loses the category it is best positioned to own.
 - **Standards churn**: OTel GenAI and agent semantic conventions are still evolving. Assay must keep its canonical evidence layer stable and treat OTel as ingest, not truth.
 
@@ -124,13 +124,13 @@ The agentic commerce/interop space is fragmenting (Jan 2026):
 | **A2A** (Agent2Agent) | Google | Agent discovery/capabilities/tasks |
 | **x402** | Community | Internet-native (crypto) agent payments |
 
-**Assay's moat:** Protocol-agnostic evidence + governance layer.
+**Assay's focus:** Protocol-agnostic evidence + governance layer.
 
 > "Regardless of protocol: verifiable evidence, policy enforcement, trust verification, SIEM/OTel-ready."
 
 All these protocols converge on "tool calls + state transitions" — exactly what Assay captures as trace-linked evidence.
 
-**2026 runtime-governance positioning:** Recent fragmented-IPI experiments on `main` sharpen this moat. Assay's value is not "better regex"; it is deterministic governance on the tool bus plus canonical evidence for what the agent runtime actually exposed. Wrap-only lexical enforcement is useful but brittle against multi-step leakage and tool-hopping. Sequence/state policies stay robust because they govern behavioral routes across sink labels and payload variants. The bounded claim remains important: these experiments demonstrate sink-call exfiltration control with audit-grade evidence and low decision overhead, not a universal solution to semantic hijacking or raw network egress.
+**2026 runtime-governance positioning:** Recent fragmented-IPI experiments on `main` sharpen this focus. Assay's value is not "better regex"; it is deterministic governance on the tool bus plus canonical evidence for what the agent runtime actually exposed. Wrap-only lexical enforcement is useful but brittle against multi-step leakage and tool-hopping. Sequence/state policies stay robust because they govern behavioral routes across sink labels and payload variants. The bounded claim remains important: these experiments demonstrate sink-call exfiltration control with audit-grade evidence and low decision overhead, not a universal solution to semantic hijacking or raw network egress.
 
 ### Why This Matters
 
@@ -311,7 +311,7 @@ For detailed historical delivery records, see the relevant ADRs and companion do
 
 ## Q3 2026: Trust Compiler Productization
 
-**Objective:** Productize Assay as an OTel-native trust compiler and make protocol-aware claims portable before expanding dashboards or broader enterprise surfaces.
+**Objective:** Productize Assay as an OTel-native trust compiler and make protocol-aware claims portable before expanding dashboards or broader deployment surfaces.
 
 ### Trust Compiler Core (Highest Priority)
 
@@ -363,7 +363,7 @@ Lightweight adapters that map protocol-specific events to Assay's `EvidenceEvent
 - [x] **A2A adapter**: Agent capabilities, task delegation, artifacts
 
 Status on `main`:
-- `assay-adapter-api`, `assay-adapter-acp`, `assay-adapter-a2a`, and `assay-adapter-ucp` are merged in open core.
+- `assay-adapter-api`, `assay-adapter-acp`, `assay-adapter-a2a`, and `assay-adapter-ucp` are merged in the open-source engine.
 - ADR-026 stabilization through E4 is merged on `main` (metadata identity, lossiness preservation, host attachment policy, canonical digests, parser hardening).
 - UCP now follows the same A/B/C rollout discipline as ACP and A2A: Step1 freeze, Step2 MVP + fixtures, Step3 closure docs.
 
@@ -410,7 +410,7 @@ If yes, implement per [ADR-009](./architecture/ADR-009-WORM-Storage.md) and [ADR
 
 ## Q4 2026: Platform Features
 
-**Objective:** Advanced capabilities for enterprise adoption.
+**Objective:** Advanced capabilities for larger deployments.
 
 ### A. Governance Dashboard (If Managed Store Exists)
 - [ ] **Policy Drift**: Trend lines, anomaly detection
@@ -512,47 +512,3 @@ The core execution and policy engine is stable and production-ready.
 - [x] MCP Discovery: Auto-discovery of MCP servers
 - [x] MCP Management: Kill/terminate MCP servers
 - [x] Experimental: MCP process wrapper (hidden command)
-
----
-
-## Open Core Philosophy
-
-Assay follows the **open core model** (Semgrep pattern): engine + baseline packs are open source, managed workflows + pro packs are enterprise.
-
-See [ADR-016: Pack Taxonomy](./architecture/ADR-016-Pack-Taxonomy.md) for formal definition.
-
-### Open Source (Apache 2.0)
-
-Everything needed to create, verify, and analyze evidence locally:
-
-| Category | Components |
-|----------|------------|
-| **Evidence Contract** | Schema v1, JCS canonicalization, content-addressed IDs, deterministic bundles |
-| **CLI Workflow** | `export`, `verify`, `lint`, `diff`, `explore`, `show` |
-| **BYOS Storage** | `push`, `pull`, `list` with S3/Azure/GCS/local backends |
-| **Basic Signing** | Ed25519 local key signing and verification (v2.9.0) |
-| **Pack Engine** | `--pack` loader, composition, SARIF output, digest verification (v2.10.0) |
-| **Baseline Packs** | `eu-ai-act-baseline` (Article 12 mapping, v2.10.0), `soc2-baseline` (Common Criteria baseline, ADR-022) |
-| **Mandate Evidence** | Mandate types, signing, runtime enforcement, CloudEvents lifecycle (v2.11.0) |
-| **Runtime Security** | Policy engine, MCP proxy, eBPF/LSM monitor, mandate authorization |
-| **Developer Experience** | Python SDK, pytest plugin, GitHub Action |
-| **Output Formats** | SARIF, JUnit, JSON, console, NDJSON (audit/decision logs) |
-
-**Why open:** Standards adoption requires broad accessibility. The evidence format and baseline compliance checks should become infrastructure, not a product moat.
-
-### Enterprise Features (Commercial)
-
-Governance workflows and premium compliance for organizations:
-
-| Category | Components |
-|----------|------------|
-| **Identity & Access** | SSO/SAML/SCIM, RBAC, teams, approval workflows |
-| **Pro Compliance Packs** | `eu-ai-act-pro` (biometric rules, PDF reports), `soc2-pro`, industry packs — assurance depth + maintained mappings + auditor-friendly reporting |
-| **Managed Workflows** | Exception approvals, policy exceptions (waivers with expiry/owner/rationale), scheduled scans, compliance dashboards |
-| **Auditor Portal** | Read-only export, audit-ready bundles, packs + results + fingerprints (when Managed Store exists) |
-| **Advanced Signing** | Sigstore keyless, transparency log verification, org trust policies |
-| **Managed Storage** | WORM retention, legal hold, compliance attestation |
-| **Integrations** | SIEM connectors (Splunk/Sentinel), OTel pipeline templates |
-| **Fleet Management** | Policy distribution, runtime agent management |
-
-**Principle:** Gate *workflow scale* and *org operations*, not basic compliance checks. The "workflow moat" strategy: engine free, baseline free, managed workflows paid.
