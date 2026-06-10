@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.23.0] - 2026-06-10
+
+### Added
+- MCP upstream manifest-observation proxy mode (`assay-mcp-server proxy --upstream-command <cmd>
+  [--upstream-arg <a>]…`). An explicit, opt-in stdio proxy that sits in front of one upstream MCP
+  server, forwards only the session handshake, `ping`, and the `tools/list` /
+  `notifications/tools/list_changed` operations, observes the upstream `tools/list` read-only, and
+  (with `--mcp-manifest-observed-out`) emits `assay.mcp_manifest_observed.v0` with honest completeness
+  (`complete` / `partial` / `unknown` / `not_observed` / `ambiguous`, never read as clean when the
+  observation was incomplete). A non-allowlisted method such as `tools/call` is rejected with a
+  distinct proxy-originated error and is never forwarded upstream. A separate
+  `--proxy-observation-health-out` records how complete the observation was, kept out of the manifest
+  artifact (which stays the exact shape a consumer gates on). Spec:
+  `docs/reference/mcp-upstream-proxy-mode.md`.
+  - Does not support tool execution through the proxy.
+  - Does not enforce `tools/call` policy.
+  - Does not classify maliciousness.
+  - Does not support HTTP upstreams.
+  - Does not support multiple upstreams.
+
 ## [3.22.0] - 2026-06-10
 
 ### Added
