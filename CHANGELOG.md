@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Tool-decision surface (`assay.tool_decision_surface.v0`): the MCP proxy now records each observed
+  `tools/call` as a structured per-call decision, the privileged in-application actions kernel and
+  network enforcement cannot see (a deploy key added, a workspace member invited). Each record
+  carries the server identity, the rule-based privileged-action classification, a projected target
+  (sensitive ids hashed under per-field domains, raw args and secrets never stored), the policy
+  decision, and the response. The load-bearing rule travels in the shape: a tool returning success is
+  the provider's assertion (`side_effect_asserted`), never proof (`side_effect_verified` stays false
+  without independently checked audit evidence). Three rule-based classifiers ship
+  (`github_deploy_key`, `slack_add_member`, `workspace_admin`); no model or judge decides a
+  classification, and an unknown tool is `observed_unknown_tool`, never read as clean. Spec:
+  `docs/reference/tool-decision-surface.md`.
+- Credential-scope evidence: each classified privileged tool decision carries
+  `action.required_scope`, derived deterministically from the action category (never from arguments),
+  so a consumer can ask whether the credential alias the action used was appropriate. Credentials are
+  declared metadata and observed aliases, not verified provider grants; no token introspection. Spec:
+  `docs/reference/credential-scope.md`.
+
 ### Removed
 - The deprecated top-level command shims `assay discover`, `assay kill`, `assay tool`,
   `assay generate`, and `assay record` were retired. They had been hidden and printed a
