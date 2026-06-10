@@ -1,0 +1,16 @@
+{
+  "schema": "assay.tool_decision_surface.v0",
+  "observed_tool_decisions": [
+    {
+      "server": {"id": "workspace", "transport": "mcp", "declared_manifest_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"},
+      "tool": {"name": "workspace.grant_admin", "category": "workspace_admin"},
+      "classification": "classified",
+      "action": {"class": "privileged_admin_action", "verb": "grant", "resource_type": "workspace_role",
+                 "target": {"provider": "workspace", "org": "acme", "principal_hash": "sha256:cccc", "role": "admin"}},
+      "decision": {"effect": "allow", "source": "assay-mcp-server", "rule_id": "tool.workspace.grant_admin.allow", "enforced": true},
+      "response": {"status": "success", "side_effect_asserted": true, "side_effect_verified": false},
+      "redaction": {"arguments_redacted": true, "credential_alias": "workspace-admin", "secret_material_stored": false}
+    }
+  ],
+  "non_claims": ["does not prove SaaS-side persistence without external audit evidence","does not infer tool actions outside observed MCP proxy traffic","does not expose raw secrets or tokens"]
+}

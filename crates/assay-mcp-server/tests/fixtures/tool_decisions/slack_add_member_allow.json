@@ -1,0 +1,16 @@
+{
+  "schema": "assay.tool_decision_surface.v0",
+  "observed_tool_decisions": [
+    {
+      "server": {"id": "slack", "transport": "mcp", "declared_manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"},
+      "tool": {"name": "slack.add_member", "category": "slack_add_member"},
+      "classification": "classified",
+      "action": {"class": "privileged_admin_action", "verb": "add", "resource_type": "slack_membership",
+                 "target": {"provider": "slack", "workspace_id": "T0ALIAS", "channel_id": "C0ALIAS", "user_id_hash": "sha256:bbbb", "role": "member"}},
+      "decision": {"effect": "allow", "source": "assay-mcp-server", "rule_id": "tool.slack.add_member.allow", "enforced": true},
+      "response": {"status": "success", "side_effect_asserted": true, "side_effect_verified": false},
+      "redaction": {"arguments_redacted": true, "credential_alias": "slack-bot", "secret_material_stored": false}
+    }
+  ],
+  "non_claims": ["does not prove SaaS-side persistence without external audit evidence","does not infer tool actions outside observed MCP proxy traffic","does not expose raw secrets or tokens"]
+}

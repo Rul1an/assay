@@ -1,0 +1,17 @@
+{
+  "schema": "assay.tool_decision_surface.v0",
+  "observed_tool_decisions": [
+    {
+      "server": {"id": "github", "transport": "mcp", "declared_manifest_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+      "tool": {"name": "github.add_deploy_key", "category": "github_deploy_key"},
+      "classification": "classified_incomplete",
+      "action": {"class": "privileged_admin_action", "verb": "create", "resource_type": "github_deploy_key",
+                 "target": {"provider": "github", "owner": "org"}},
+      "decision": {"effect": "allow", "source": "assay-mcp-server", "rule_id": "tool.github.deploy_key.allow.prod", "enforced": true},
+      "response": {"status": "success", "side_effect_asserted": true, "side_effect_verified": false},
+      "redaction": {"arguments_redacted": true, "credential_alias": "github-prod-admin", "secret_material_stored": false},
+      "incomplete_reason": "missing required argument: repo"
+    }
+  ],
+  "non_claims": ["does not prove SaaS-side persistence without external audit evidence","does not infer tool actions outside observed MCP proxy traffic","does not expose raw secrets or tokens"]
+}
