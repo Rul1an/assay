@@ -334,18 +334,31 @@ fn default_mode_spawns_no_upstream_and_serves_local_tools() {
 }
 
 #[test]
-fn no_manifest_artifact_is_emitted_in_p61b() {
-    // P61b is a forwarding skeleton: there is no --mcp-manifest-observed-out flag and no artifact is
-    // written. The flag must not exist yet.
-    let out = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
-        .args(["proxy", "--help"])
-        .output()
-        .unwrap();
-    let help = String::from_utf8_lossy(&out.stdout);
-    // The help text legitimately describes "manifest-observation mode"; what must be absent is any
-    // artifact-emission flag.
+fn no_artifact_is_written_without_the_out_flag() {
+    // The manifest-observation flag exists (P61c) but is opt-in: with no --mcp-manifest-observed-out,
+    // the proxy writes no artifact. (Manifest emission itself is covered in proxy_manifest_e2e.rs.)
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let mut child = spawn_proxy(&log, None, "normal");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+    send(
+        &mut stdin,
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+    );
+    let _ = read_response(&mut out);
+    shutdown(child, stdin);
+
+    let stray: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.contains("manifest") || n.contains("observed"))
+        .collect();
     assert!(
-        !help.contains("mcp-manifest-observed-out") && !help.contains("--out"),
-        "P61b must not expose any manifest emission flag"
+        stray.is_empty(),
+        "no artifact without the out flag: {stray:?}"
     );
 }
