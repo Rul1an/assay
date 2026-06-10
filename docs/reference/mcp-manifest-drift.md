@@ -189,7 +189,10 @@ A read-only investigation of `assay-mcp-server` settled where an observed `tools
 Conclusion: live manifest observation is **not** a small tap on an existing seam; it requires a new
 MCP upstream passthrough/proxy mode (config naming an upstream, a connection/child manager, a
 forwarding handler, and a `tools/list` that observes the upstream response and its pagination chain).
-That is its own design, specified separately before any code. Until such a mode exists, this feature
+That is its own design, specified separately before any code — see
+[mcp-upstream-proxy-mode.md](mcp-upstream-proxy-mode.md) (a manifest-observation proxy mode that
+forwards a tiny method allowlist only and never forwards privileged `tools/call`). Until such a mode
+exists, this feature
 stays artifact/file-based: a producer builds `assay.mcp_manifest_observed.v0` from observed tool
 definitions, and the consumer reviews a supplied artifact against a declared baseline. The producer is
 deliberately not wired to `tools::list_tools()` — the server's own served tools are not an observed
