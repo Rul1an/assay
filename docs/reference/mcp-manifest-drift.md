@@ -153,11 +153,76 @@ Absence rule: "no observed `tools/list`" is not "no drift"; only "observed compl
 a matching digest" is "no drift". A digest mismatch is drift even under `unknown` completeness; a
 digest match under `unknown` completeness may not be claimed fully clean.
 
+## Granular per-tool drift (P60d, `assay.declared_mcp_manifest.v0`)
+
+The coarse gate (above) compares one overall `manifest_digest`. P60d adds **per-tool** drift: which
+tool was added, removed, or changed, with privileged tools flagged. **P60d explains which tool digest
+drifted; it still does not explain which field changed or whether the change is malicious.** Field-level
+attribution (description vs schema vs annotations) is P60d-v2.
+
+P60d v1 is **Option A — presence + per-tool digest, consumer-only**: it diffs the observed
+`tool_digests[]` (already in `assay.mcp_manifest_observed.v0`, P60b) against a declared per-tool
+baseline. **No producer change** — the observed artifact already carries `{name, tool_digest,
+privileged, privilege_classification, action_class}` per tool.
+
+### Baseline: `assay.declared_mcp_manifest.v0`
+
+Operator-pinned, declared-not-trusted (same discipline as the coarse `declared_mcp_manifests` map). It
+is structurally the `observed` block of a known-good complete run:
+```json
+{
+  "schema": "assay.declared_mcp_manifest.v0",
+  "server": { "id": "github" },
+  "canonicalization": "assay.mcp_manifest_projection.v0",
+  "manifest_digest": "sha256:...",
+  "tools": [
+    { "name": "github.add_deploy_key", "tool_digest": "sha256:...",
+      "privileged": true, "privilege_classification": "classified", "action_class": "github_deploy_key" }
+  ]
+}
+```
+`manifest_digest` recomputes from `tools[].{name, tool_digest}` via the same JCS canonicalization as the
+observed manifest (so a clean baseline's digest equals the P60a-anchored value). v1 baselines are
+hand-authored or copied from a clean observed run — no `promote` helper in v1.
+
+### Validity checks (each is inconclusive — never a per-tool diff against a bad baseline)
+
+```
+recompute(declared.tools) != declared.manifest_digest   -> declared_manifest_digest_mismatch
+duplicate names in declared.tools                        -> declared_mcp_manifest_ambiguous
+observed.server.id != declared.server.id                 -> mcp_manifest_server_mismatch
+observed.canonicalization != declared.canonicalization   -> mcp_manifest_canonicalization_mismatch
+observed.status = not_observed                           -> inconclusive_manifest_not_observed
+observed.status = ambiguous OR duplicate observed names  -> mcp_manifest_observation_ambiguous
+```
+And a consumer (P60d-b) check when BOTH baselines are supplied: the coarse
+`declared_mcp_manifests[server].manifest_digest` must equal `declared_mcp_manifest.manifest_digest`,
+else `declared_manifest_baseline_conflict` (two declared truths → inconclusive).
+
+### Per-tool finding matrix
+
+```
+observed name not in declared        -> observed privileged ? mcp_new_privileged_tool : mcp_tool_added
+declared name not in observed:
+  observed complete                  -> declared privileged ? mcp_privileged_tool_removed : mcp_tool_removed
+  observed partial/unknown           -> NO per-tool removal finding; one inconclusive_manifest_partial_observation
+                                        ("removals are not evaluable: the manifest observation was incomplete")
+name in both, tool_digest differs    -> (observed OR declared privileged) ? mcp_privileged_tool_changed : mcp_tool_changed
+name in both, tool_digest equal      -> no finding
+```
+Every per-tool finding contributes to `pending_tool_manifest_review`. Severity: the privileged variants
+(`mcp_new_privileged_tool`, `mcp_privileged_tool_changed`, `mcp_privileged_tool_removed`) are high; the
+non-privileged variants (`mcp_tool_added`, `mcp_tool_changed`, `mcp_tool_removed`) are findings too, at
+lower severity — a non-privileged tool's surface change can still affect prompt/tool behavior, so it is
+reviewable, just not as loud. Additions and changes among observed tools are assertable even under
+partial observation; **only removals are suppressed under partial/unknown** (a "missing" tool could be
+on an unobserved page).
+
 ## What v0 is NOT
 
-No per-tool granular drift reason codes (P60d/v1), no behavior-drift detection, no LLM risk scoring,
-no automatic block on legitimate description churn, no maliciousness classification, no pre-flight
-scan.
+No per-field attribution (which field changed) — that is P60d-v2; no behavior-drift detection, no LLM
+risk scoring, no automatic block on legitimate churn, no maliciousness classification, no pre-flight
+scan, no producer change in P60d v1.
 
 ## Producer (P60b)
 
@@ -205,13 +270,18 @@ P60a   spec + fixtures + canonicalization examples + a digest-recompute guard te
 P60b   producer: assay-mcp-server manifest_observed module emits assay.mcp_manifest_observed.v0
 P60c   Plimsoll: coarse drift gate -> pending_tool_manifest_review (opt-in, coverage-gated)
 P60b2  live observation: topology finding (above) -> manifest-observation proxy mode (SHIPPED v3.23.0)
-P60d   granular per-tool drift v1 + assay.declared_mcp_manifest.v0 (per-tool expected digests)
+P60d-a granular drift spec + assay.declared_mcp_manifest.v0 fixtures + guard test (NO producer change)
+P60d-b Plimsoll granular consumer (--declared-mcp-manifest) -> per-tool reason codes + coarse-consistency
+P60d-v2 LATER: field-level attribution (per-field digests in producer + baseline + consumer)
 ```
 
 ## Reference fixtures
 
 `crates/assay-mcp-server/tests/fixtures/mcp_manifest_drift/`: canonicalization examples (a per-tool
-projection and a manifest projection with their committed digests, recomputed in the guard test) and
-a verdict corpus (same digest, drift, description/schema/annotations changed, new privileged tool,
-tool removed, behavior-only identical metadata, not observed, partial pagination, duplicate names),
-each labelled with its expected v0 verdict.
+projection and a manifest projection with their committed digests, recomputed in the guard test); a
+coarse verdict corpus (same digest, drift, schema/annotations changed, new privileged tool, tool
+removed, not observed, partial pagination, duplicate names), each labelled with its expected v0
+verdict; and for P60d, a P60a-anchored per-tool baseline (`declared_per_tool_baseline.json`, whose
+`manifest_digest` the guard test recomputes and equals the committed P60a value) plus a granular-diff
+corpus (`granular_diff_cases.json`) covering the per-tool matrix and every validity check, each
+labelled with its expected findings and inconclusive codes.

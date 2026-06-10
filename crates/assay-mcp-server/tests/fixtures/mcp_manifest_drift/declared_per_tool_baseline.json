@@ -1,0 +1,25 @@
+{
+  "note": "operator-pinned per-tool baseline; manifest_digest recomputes from tools via the guard test and equals the committed P60a manifest_digest (same canonical tools)",
+  "schema": "assay.declared_mcp_manifest.v0",
+  "server": {
+    "id": "github"
+  },
+  "canonicalization": "assay.mcp_manifest_projection.v0",
+  "manifest_digest": "sha256:f8a95098345d600f7a2d742c4e941ace5e9594918b2aa82a9a8f48f72f701ffa",
+  "tools": [
+    {
+      "name": "search",
+      "tool_digest": "sha256:2318d9fd63878b81e992300635172e75053e086db757e31b7ebc917a7c721697",
+      "privileged": false,
+      "privilege_classification": "unclassified",
+      "action_class": null
+    },
+    {
+      "name": "github.add_deploy_key",
+      "tool_digest": "sha256:03c7e1d546c3440fb100938dcaa7578ac34ae81f28e5762e7f8a3197e272a9f6",
+      "privileged": true,
+      "privilege_classification": "classified",
+      "action_class": "github_deploy_key"
+    }
+  ]
+}
