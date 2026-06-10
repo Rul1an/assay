@@ -40,9 +40,15 @@ pub(super) fn network_endpoint_claim_scope_for(
 
 pub(super) fn kernel_layer_for(
     ringbuf_drops: u64,
+    event_size_mismatch: u64,
     cgroup_correlation: CgroupCorrelationStatus,
 ) -> KernelLayerStatus {
-    match (ringbuf_drops, cgroup_correlation) {
+    // Both ringbuf drops and event-size mismatches are lost events: records that never reached
+    // the decoded stream. Either one makes the kernel layer incomplete. The counts stay separate
+    // on the capture for diagnosis; here we only ask "was anything lost?", so summing for the
+    // 0-vs-nonzero decision is not a reporting conflation.
+    let lost = ringbuf_drops.saturating_add(event_size_mismatch);
+    match (lost, cgroup_correlation) {
         (_, CgroupCorrelationStatus::Failed | CgroupCorrelationStatus::Partial) => {
             KernelLayerStatus::Absent
         }
@@ -59,5 +65,48 @@ pub(super) fn health_ringbuf_drops(
         ringbuf_drops
     } else {
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_run_with_no_loss_is_complete() {
+        assert_eq!(
+            kernel_layer_for(0, 0, CgroupCorrelationStatus::Clean),
+            KernelLayerStatus::Complete
+        );
+    }
+
+    #[test]
+    fn event_size_mismatch_alone_degrades_kernel_layer() {
+        // A stale-object size mismatch is lost events, so even with zero ringbuf drops the kernel
+        // layer must not read as complete. "Saw nothing" is not clean if records were dropped.
+        assert_eq!(
+            kernel_layer_for(0, 3, CgroupCorrelationStatus::Clean),
+            KernelLayerStatus::PartialRingbufDrops
+        );
+    }
+
+    #[test]
+    fn ringbuf_drops_alone_still_degrades() {
+        assert_eq!(
+            kernel_layer_for(2, 0, CgroupCorrelationStatus::Clean),
+            KernelLayerStatus::PartialRingbufDrops
+        );
+    }
+
+    #[test]
+    fn non_clean_cgroup_is_absent_regardless_of_loss() {
+        assert_eq!(
+            kernel_layer_for(0, 0, CgroupCorrelationStatus::Partial),
+            KernelLayerStatus::Absent
+        );
+        assert_eq!(
+            kernel_layer_for(0, 9, CgroupCorrelationStatus::Failed),
+            KernelLayerStatus::Absent
+        );
     }
 }

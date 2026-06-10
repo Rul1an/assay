@@ -62,6 +62,10 @@ pub struct KernelLayerCapture {
     pub capability_surface: CapabilitySurface,
     pub event_count: u64,
     pub ringbuf_drops: u64,
+    /// Records dropped because their length did not match the pinned `MonitorEvent` size (stale
+    /// eBPF object). Like `ringbuf_drops`, this is lost events: it degrades kernel-layer
+    /// completeness so a run that silently dropped records is never read as complete.
+    pub event_size_mismatch: u64,
     drop_breakdown: RingbufDropBreakdown,
     emitted_breakdown: RingbufEmittedBreakdown,
     tracepoint_hook_breakdown: TracepointHookBreakdown,
@@ -179,6 +183,9 @@ impl KernelLayerBuilder {
             capability_surface: self.capability_surface,
             event_count: self.next_seq,
             ringbuf_drops: ringbuf_drop_delta(before, after),
+            event_size_mismatch: after
+                .event_size_mismatch
+                .saturating_sub(before.event_size_mismatch),
             drop_breakdown: ringbuf_drop_breakdown(before, after),
             emitted_breakdown: ringbuf_emitted_breakdown(before, after),
             tracepoint_hook_breakdown: tracepoint_hook_breakdown(before, after),
@@ -206,6 +213,7 @@ impl KernelLayerCapture {
             capability_surface,
             event_count,
             ringbuf_drops,
+            event_size_mismatch,
             drop_breakdown,
             emitted_breakdown,
             tracepoint_hook_breakdown,
@@ -228,7 +236,7 @@ impl KernelLayerCapture {
             archive.observation_health.ringbuf_drops =
                 health_ringbuf_drops(ringbuf_drops, cgroup_correlation);
             archive.observation_health.kernel_layer =
-                kernel_layer_for(ringbuf_drops, cgroup_correlation);
+                kernel_layer_for(ringbuf_drops, event_size_mismatch, cgroup_correlation);
             archive.observation_health.cgroup_correlation = cgroup_correlation;
             if archive.observation_health.kernel_layer == KernelLayerStatus::Absent {
                 archive.observation_health.network_protocol_coverage =
