@@ -180,6 +180,37 @@ fn declared_baseline_is_self_consistent_and_anchored_to_p60a() {
 }
 
 #[test]
+fn declared_baseline_carries_field_digests_consistent_with_the_anchor() {
+    // P60d-v2: the declared baseline gains optional field_digests (additive — the v1 manifest_digest
+    // self-consistency test above still passes, since field_digests are outside that preimage).
+    let base = fx("declared_per_tool_baseline.json");
+    let anchor = fx("canonicalization_example.json");
+    for t in base["tools"].as_array().unwrap() {
+        let fd = &t["field_digests"];
+        assert!(fd.is_object(), "each declared tool carries field_digests");
+        for field in [
+            "description",
+            "input_schema",
+            "output_schema",
+            "annotations",
+        ] {
+            assert!(fd[field].is_string(), "{field} present");
+        }
+    }
+    // The privileged deploy tool's per-field digests equal the committed anchor (same canonical tool).
+    let deploy = base["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "github.add_deploy_key")
+        .unwrap();
+    assert_eq!(
+        deploy["field_digests"], anchor["per_tool"]["expected_field_digests"],
+        "baseline field_digests must match the committed anchor for the same tool"
+    );
+}
+
+#[test]
 fn granular_diff_corpus_matches_expected() {
     let corpus = fx("granular_diff_cases.json");
     let mut failures = Vec::new();

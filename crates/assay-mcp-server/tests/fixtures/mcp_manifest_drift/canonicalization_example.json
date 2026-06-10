@@ -14,7 +14,13 @@
       "output_schema": null,
       "annotations": null
     },
-    "expected_tool_digest": "sha256:03c7e1d546c3440fb100938dcaa7578ac34ae81f28e5762e7f8a3197e272a9f6"
+    "expected_tool_digest": "sha256:03c7e1d546c3440fb100938dcaa7578ac34ae81f28e5762e7f8a3197e272a9f6",
+    "expected_field_digests": {
+      "description": "sha256:7e326787191c47250d1541c8dd2e5c8e9e8c5345ef3da8b66694e32788a29d99",
+      "input_schema": "sha256:52e5c928edb4433b517b5410a20c6a8a2ed87ff90b7931c000ba2a43fca3644c",
+      "output_schema": "sha256:6969128f97f2ae0b5576343b492d312e1ab80eedf990f4bba8366c4622e808b5",
+      "annotations": "sha256:9d456a3d9cbf04f45cec915bcf7e8f02c034bf81abc077151b74bf5b06c4234b"
+    }
   },
   "manifest": {
     "projection_id": "assay.mcp_manifest_projection.v0",
