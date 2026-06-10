@@ -95,6 +95,25 @@ MCP client  ──stdio──►  assay-mcp-server (proxy mode, v0)  ──stdio
 - **unsupported methods.** a non-allowlisted method (including `tools/call`) gets a `proxy_unsupported`
   error, never a silent relay and never a fabricated success.
 
+### Non-allowlisted method matrix (the denied boundary, P61d)
+
+Manifest-observation proxy mode is **not** a general MCP proxy. Every method outside the exhaustive
+allowlist above is denied and the upstream receives none of it:
+
+| Client message | v0 behavior |
+|----------------|-------------|
+| `tools/call` | `proxy_unsupported` (request), never forwarded |
+| `resources/read`, `resources/list` | `proxy_unsupported`, never forwarded |
+| `prompts/get`, `prompts/list` | `proxy_unsupported`, never forwarded |
+| `sampling/createMessage`, `completion/complete` | `proxy_unsupported`, never forwarded |
+| any unknown/custom method (request) | `proxy_unsupported`, never forwarded |
+| any non-allowlisted client **notification** (no id) | dropped (no id to answer), never forwarded |
+
+A denied request always carries `data.origin: "assay-proxy"` and `data.reason: "method_not_allowlisted"`
+so it is distinguishable from an upstream error. This is hardening of the negative boundary, not a new
+capability: there is no policy decision point, no `proxy_denied`, no credential-scope, and no consumer
+logic here.
+
 ## `tools/list` observation + pagination (the payoff)
 
 - forward `tools/list`; observe the response read-only.

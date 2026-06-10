@@ -161,6 +161,98 @@ fn non_allowlisted_method_is_denied_and_not_forwarded() {
     assert!(!read_methods(&log).contains(&"resources/list".to_string()));
 }
 
+// P61d: the non-allowlisted method matrix. Manifest-observation proxy mode is not a general MCP
+// proxy — every method outside the exhaustive allowlist is proxy_unsupported and the upstream
+// receives none of them. No PDP, no proxy_denied, no credential-scope, no Plimsoll.
+const DENIED_METHODS: &[&str] = &[
+    "tools/call",
+    "resources/read",
+    "resources/list",
+    "prompts/get",
+    "prompts/list",
+    "sampling/createMessage",
+    "completion/complete",
+    "custom/frobnicate",
+];
+
+#[test]
+fn non_allowlisted_methods_are_unsupported_and_never_forwarded() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let mut child = spawn_proxy(&log, None, "normal");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+
+    let mut id = 100;
+    for method in DENIED_METHODS {
+        id += 1;
+        send(
+            &mut stdin,
+            serde_json::json!({"jsonrpc": "2.0", "id": id, "method": method}),
+        );
+        let r = read_response(&mut out);
+        assert_eq!(r["id"], id);
+        assert_eq!(
+            r["error"]["code"], PROXY_UNSUPPORTED,
+            "{method} must be unsupported"
+        );
+        assert_eq!(r["error"]["data"]["origin"], "assay-proxy", "{method}");
+        assert_eq!(
+            r["error"]["data"]["reason"], "method_not_allowlisted",
+            "{method}"
+        );
+    }
+
+    shutdown(child, stdin);
+    let methods = read_methods(&log);
+    for method in DENIED_METHODS {
+        assert!(
+            !methods.contains(&method.to_string()),
+            "INVARIANT VIOLATED: {method} reached the upstream: {methods:?}"
+        );
+    }
+}
+
+#[test]
+fn non_allowlisted_client_notification_is_dropped_and_not_forwarded() {
+    // A non-allowlisted client notification (no id) cannot be answered, so it is dropped and never
+    // forwarded. A following allowlisted request still works, proving the stream is intact.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let mut child = spawn_proxy(&log, None, "normal");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+
+    send(
+        &mut stdin,
+        serde_json::json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {}}),
+    );
+    // Liveness: a following allowlisted ping is answered, so the dropped notification broke nothing.
+    send(
+        &mut stdin,
+        serde_json::json!({"jsonrpc": "2.0", "id": 50, "method": "ping"}),
+    );
+    let r = read_response(&mut out);
+    assert_eq!(r["id"], 50);
+
+    shutdown(child, stdin);
+    let methods = read_methods(&log);
+    assert!(
+        !methods.contains(&"notifications/cancelled".to_string()),
+        "a non-allowlisted notification must not reach the upstream: {methods:?}"
+    );
+    assert!(
+        methods.contains(&"ping".to_string()),
+        "the allowlisted ping was forwarded"
+    );
+}
+
 #[test]
 fn proxy_does_not_inject_inbound_transport_auth() {
     // Option 1 (verbatim forwarding): the proxy injects no Authorization/header/token of its own. We
