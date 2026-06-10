@@ -1,0 +1,359 @@
+{
+  "projection_id": "assay.mcp_manifest_projection.v0",
+  "cases": [
+    {
+      "id": "same_digest_complete",
+      "baseline_manifest_digest": "sha256:da458611faca8360295bb00e074430d68515bb56475f0b1233458a5347904a2d",
+      "observed": {
+        "tools": [
+          {
+            "name": "search",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          },
+          {
+            "name": "github.get_issue",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          }
+        ],
+        "tools_list_observed": true,
+        "tools_list_complete": "complete"
+      },
+      "expected_verdict": "no_finding"
+    },
+    {
+      "id": "different_digest",
+      "baseline_manifest_digest": "sha256:da458611faca8360295bb00e074430d68515bb56475f0b1233458a5347904a2d",
+      "observed": {
+        "tools": [
+          {
+            "name": "search",
+            "description": "changed",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          },
+          {
+            "name": "github.get_issue",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          }
+        ],
+        "tools_list_observed": true,
+        "tools_list_complete": "complete"
+      },
+      "expected_verdict": "pending_tool_manifest_review"
+    },
+    {
+      "id": "description_changed_non_privileged",
+      "baseline_manifest_digest": "sha256:da458611faca8360295bb00e074430d68515bb56475f0b1233458a5347904a2d",
+      "observed": {
+        "tools": [
+          {
+            "name": "search",
+            "description": "now cached",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          },
+          {
+            "name": "github.get_issue",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          }
+        ],
+        "tools_list_observed": true,
+        "tools_list_complete": "complete"
+      },
+      "expected_verdict": "pending_tool_manifest_review"
+    },
+    {
+      "id": "schema_changed",
+      "baseline_manifest_digest": "sha256:da458611faca8360295bb00e074430d68515bb56475f0b1233458a5347904a2d",
+      "observed": {
+        "tools": [
+          {
+            "name": "search",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object",
+              "required": [
+                "q"
+              ]
+            },
+            "output_schema": null,
+            "annotations": null
+          },
+          {
+            "name": "github.get_issue",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          }
+        ],
+        "tools_list_observed": true,
+        "tools_list_complete": "complete"
+      },
+      "expected_verdict": "pending_tool_manifest_review"
+    },
+    {
+      "id": "new_privileged_tool",
+      "baseline_manifest_digest": "sha256:da458611faca8360295bb00e074430d68515bb56475f0b1233458a5347904a2d",
+      "observed": {
+        "tools": [
+          {
+            "name": "search",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          },
+          {
+            "name": "github.get_issue",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          },
+          {
+            "name": "github.add_deploy_key",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          }
+        ],
+        "tools_list_observed": true,
+        "tools_list_complete": "complete"
+      },
+      "expected_verdict": "pending_tool_manifest_review"
+    },
+    {
+      "id": "tool_removed",
+      "baseline_manifest_digest": "sha256:da458611faca8360295bb00e074430d68515bb56475f0b1233458a5347904a2d",
+      "observed": {
+        "tools": [
+          {
+            "name": "search",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          }
+        ],
+        "tools_list_observed": true,
+        "tools_list_complete": "complete"
+      },
+      "expected_verdict": "pending_tool_manifest_review"
+    },
+    {
+      "id": "annotations_changed",
+      "baseline_manifest_digest": "sha256:da458611faca8360295bb00e074430d68515bb56475f0b1233458a5347904a2d",
+      "observed": {
+        "tools": [
+          {
+            "name": "search",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": {
+              "readOnlyHint": true
+            }
+          },
+          {
+            "name": "github.get_issue",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          }
+        ],
+        "tools_list_observed": true,
+        "tools_list_complete": "complete"
+      },
+      "expected_verdict": "pending_tool_manifest_review"
+    },
+    {
+      "id": "behavior_only_identical_metadata",
+      "baseline_manifest_digest": "sha256:da458611faca8360295bb00e074430d68515bb56475f0b1233458a5347904a2d",
+      "observed": {
+        "tools": [
+          {
+            "name": "search",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          },
+          {
+            "name": "github.get_issue",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          }
+        ],
+        "tools_list_observed": true,
+        "tools_list_complete": "complete"
+      },
+      "expected_verdict": "no_finding"
+    },
+    {
+      "id": "not_observed",
+      "baseline_manifest_digest": "sha256:da458611faca8360295bb00e074430d68515bb56475f0b1233458a5347904a2d",
+      "observed": {
+        "tools": [],
+        "tools_list_observed": false,
+        "tools_list_complete": "complete"
+      },
+      "expected_verdict": "inconclusive_manifest_not_observed"
+    },
+    {
+      "id": "partial_pagination",
+      "baseline_manifest_digest": "sha256:da458611faca8360295bb00e074430d68515bb56475f0b1233458a5347904a2d",
+      "observed": {
+        "tools": [
+          {
+            "name": "search",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          },
+          {
+            "name": "github.get_issue",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          }
+        ],
+        "tools_list_observed": true,
+        "tools_list_complete": "partial"
+      },
+      "expected_verdict": "inconclusive_manifest_partial_observation"
+    },
+    {
+      "id": "digest_match_unknown_completeness",
+      "baseline_manifest_digest": "sha256:da458611faca8360295bb00e074430d68515bb56475f0b1233458a5347904a2d",
+      "observed": {
+        "tools": [
+          {
+            "name": "search",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          },
+          {
+            "name": "github.get_issue",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          }
+        ],
+        "tools_list_observed": true,
+        "tools_list_complete": "unknown"
+      },
+      "expected_verdict": "no_finding_with_coverage_warning"
+    },
+    {
+      "id": "digest_mismatch_unknown_completeness",
+      "baseline_manifest_digest": "sha256:da458611faca8360295bb00e074430d68515bb56475f0b1233458a5347904a2d",
+      "observed": {
+        "tools": [
+          {
+            "name": "search",
+            "description": "x",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          }
+        ],
+        "tools_list_observed": true,
+        "tools_list_complete": "unknown"
+      },
+      "expected_verdict": "pending_tool_manifest_review"
+    },
+    {
+      "id": "duplicate_tool_names",
+      "baseline_manifest_digest": "sha256:da458611faca8360295bb00e074430d68515bb56475f0b1233458a5347904a2d",
+      "observed": {
+        "tools": [
+          {
+            "name": "search",
+            "description": "does a thing",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          },
+          {
+            "name": "search",
+            "description": "dup",
+            "input_schema": {
+              "type": "object"
+            },
+            "output_schema": null,
+            "annotations": null
+          }
+        ],
+        "tools_list_observed": true,
+        "tools_list_complete": "complete"
+      },
+      "expected_verdict": "manifest_observation_ambiguous"
+    }
+  ]
+}
