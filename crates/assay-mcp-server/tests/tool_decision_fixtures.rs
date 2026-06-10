@@ -86,6 +86,21 @@ fn tool_decision_fixtures_hold_the_spec_invariants() {
                 "{name}: secret_material_stored must be false"
             );
 
+            // A classified privileged tool carries a derived required_scope (non-null string); an
+            // unclassified tool carries null (read downstream as required_scope_unknown, not "none").
+            let req = &d["action"]["required_scope"];
+            if d["tool"]["category"].is_string() {
+                assert!(
+                    req.as_str().map(|s| !s.is_empty()).unwrap_or(false),
+                    "{name}: a classified action must carry a non-empty required_scope"
+                );
+            } else {
+                assert!(
+                    req.is_null(),
+                    "{name}: an unclassified action must carry required_scope=null, got {req}"
+                );
+            }
+
             // Asserted is not verified: a fixture must never claim a verified side effect, since
             // none of these carry independently-checked audit evidence.
             assert_eq!(

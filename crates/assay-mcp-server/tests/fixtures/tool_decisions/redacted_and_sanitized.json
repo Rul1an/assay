@@ -23,7 +23,8 @@
           "repo": "prod-repo",
           "key_title_hash": "sha256:d71c8f02c8ced33cb74494d0d6a1b3582b332ca82b781b09c362a168e40d85ca",
           "read_only": true
-        }
+        },
+        "required_scope": "repo:deploy_key:write"
       },
       "decision": {
         "effect": "allow",

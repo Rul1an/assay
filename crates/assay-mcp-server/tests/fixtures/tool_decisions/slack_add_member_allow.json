@@ -22,7 +22,8 @@
           "workspace_id_hash": "sha256:e4cfe2c3698fd59b58fd5a075e378f38d857421174faffe3317d3f86473f0190",
           "channel_id_hash": "sha256:d7f40313c37246eca3ae64aaa3c65db4fc52d02e73f1d3e01cd9c8650ee42e1a",
           "principal_hash": "sha256:fccfe5ed09f484c1f7523fd8f9fea1bb2e85ddb0845ad61225e604f2c013620d"
-        }
+        },
+        "required_scope": "conversations:members:write"
       },
       "decision": {
         "effect": "allow",

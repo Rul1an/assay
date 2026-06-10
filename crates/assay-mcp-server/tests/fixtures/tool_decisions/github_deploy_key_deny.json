@@ -22,7 +22,8 @@
           "owner": "org",
           "repo": "prod-repo",
           "read_only": false
-        }
+        },
+        "required_scope": "repo:deploy_key:write"
       },
       "decision": {
         "effect": "deny",
