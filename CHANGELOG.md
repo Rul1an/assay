@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.21.0] - 2026-06-10
+
 ### Added
 - Landlock TCP-connect egress enforcement for `assay sandbox` (`--enforce-net`, requires
   `--enforce`): builds a combined FS+NET Landlock ruleset that allows only the explicit TCP
