@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.22.0] - 2026-06-10
+
 ### Added
 - Tool-decision surface (`assay.tool_decision_surface.v0`): the MCP proxy now records each observed
   `tools/call` as a structured per-call decision, the privileged in-application actions kernel and
@@ -21,6 +23,11 @@ All notable changes to this project will be documented in this file.
   so a consumer can ask whether the credential alias the action used was appropriate. Credentials are
   declared metadata and observed aliases, not verified provider grants; no token introspection. Spec:
   `docs/reference/credential-scope.md`.
+- Side-effect receipt spec (`docs/reference/side-effect-receipt.md`, spec + fixtures, experiment):
+  an honesty ladder for privileged side effects (`asserted` -> `observed_confirmed` -> `verified`)
+  and a binding contract. `verified` never means Assay queried the provider; it requires an
+  independently imported provider audit record (`assay.provider_audit_record.v0`) whose binding Assay
+  recomputes from committed bytes via canonical JCS. No producer/verifier yet.
 
 ### Removed
 - The deprecated top-level command shims `assay discover`, `assay kill`, `assay tool`,
