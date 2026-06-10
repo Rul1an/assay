@@ -1,0 +1,18 @@
+{
+  "schema": "assay.provider_audit_record.v0",
+  "provider": "github",
+  "record_id": "audit-log-entry-0000",
+  "subject": {
+    "action_class": "github_deploy_key",
+    "verb": "create",
+    "target": {
+      "owner": "org",
+      "repo": "other-repo",
+      "key_title_hash": "sha256:a65a94d25524f87fbb5ce6d3fde202c02a5b532f27e1ba3b5708076e1ba75ccf"
+    }
+  },
+  "binding_digest": "sha256:3546cc0feefe1a918cd2498c03c341a2e003527e815c51cd1b4aa0acb7774484",
+  "non_claims": [
+    "imported from a provider audit export; Assay did not query the provider"
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "schema": "assay.tool_decision_surface.v0",
+  "observed_tool_decisions": [
+    {
+      "server": {
+        "id": "github",
+        "transport": "mcp",
+        "declared_manifest_digest": "sha256:1111"
+      },
+      "tool": {
+        "name": "github.add_deploy_key",
+        "category": "github_deploy_key"
+      },
+      "classification": "classified",
+      "reason_code": "classified_github_deploy_key",
+      "action": {
+        "class": "privileged_admin_action",
+        "verb": "create",
+        "resource_type": "github_deploy_key",
+        "target": {
+          "provider": "github",
+          "owner": "org",
+          "repo": "prod-repo",
+          "key_title_hash": "sha256:a65a94d25524f87fbb5ce6d3fde202c02a5b532f27e1ba3b5708076e1ba75ccf",
+          "read_only": false
+        },
+        "required_scope": "repo:deploy_key:write"
+      },
+      "decision": {
+        "effect": "allow",
+        "source": "assay-mcp-server",
+        "rule_id": "tool.github.deploy_key.allow.prod",
+        "enforced": true
+      },
+      "response": {
+        "status": "success",
+        "side_effect_asserted": true,
+        "side_effect_verified": false,
+        "side_effect": {
+          "asserted": true,
+          "level": "asserted",
+          "verification_source": null,
+          "verification_subject_digest": null
+        }
+      },
+      "redaction": {
+        "arguments_redacted": true,
+        "credential_alias": "github-prod-admin",
+        "secret_material_stored": false
+      }
+    }
+  ],
+  "non_claims": [
+    "does not prove SaaS-side persistence without external audit evidence",
+    "does not infer tool actions outside observed MCP proxy traffic",
+    "does not expose raw secrets or tokens"
+  ]
+}
