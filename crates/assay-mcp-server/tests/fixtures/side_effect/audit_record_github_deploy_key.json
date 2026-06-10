@@ -1,0 +1,19 @@
+{
+  "schema": "assay.provider_audit_record.v0",
+  "provider": "github",
+  "record_id": "audit-log-entry-9931",
+  "subject": {
+    "action_class": "github_deploy_key",
+    "verb": "create",
+    "target": {
+      "owner": "org",
+      "repo": "prod-repo",
+      "key_title_hash": "sha256:a65a94d25524f87fbb5ce6d3fde202c02a5b532f27e1ba3b5708076e1ba75ccf"
+    }
+  },
+  "binding_digest": "sha256:31f2007b91477601789c8803c3e32912a8a4510851cc55397d49a65bbc5e4ec3",
+  "non_claims": [
+    "imported from a provider audit export; Assay did not query the provider",
+    "verifies that an audit entry binds to the observed call, not that the entry is authentic beyond its own signature"
+  ]
+}
