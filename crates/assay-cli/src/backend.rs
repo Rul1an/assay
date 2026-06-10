@@ -330,6 +330,130 @@ mod landlock_impl {
 
         expanded
     }
+
+    /// Build a NET-only Landlock ruleset that handles `CONNECT_TCP` (hard requirement) and allows the
+    /// given TCP-connect ports. Used by the self-probe: connecting to a port NOT in this list under
+    /// the applied ruleset must be denied. FS is intentionally not handled here (the probe only tests
+    /// the network rule; Landlock FS does not affect sockets).
+    pub(super) fn build_net_ruleset(allowed_ports: &[u16]) -> anyhow::Result<RulesetCreated> {
+        let mut ruleset = Ruleset::default()
+            .set_compatibility(CompatLevel::HardRequirement)
+            .handle_access(AccessNet::ConnectTcp)?
+            .create()?;
+        for &port in allowed_ports {
+            ruleset = ruleset.add_rule(NetPort::new(port, AccessNet::ConnectTcp))?;
+        }
+        Ok(ruleset)
+    }
+}
+
+/// Outcome of the enforcement self-probe: the result of a single connect to a denied port, attempted
+/// from inside a child that applied the Landlock-net ruleset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelfProbeOutcome {
+    /// The denied connect failed with `EACCES`: the block held (the proven-block signal).
+    BlockedEacces,
+    /// The connect SUCCEEDED: the ruleset did NOT block it (block failed).
+    Connected,
+    /// The connect failed with some other errno (a weak signal, never a proven block).
+    OtherErrno(i32),
+    /// The probe could not run (no_new_privs / restrict_self / socket failed). Must be surfaced, not
+    /// silently treated as a block.
+    ProbeInfraError(&'static str),
+}
+
+/// Run the enforcement self-probe: in a throwaway child, set `no_new_privs`, apply a NET ruleset that
+/// allows `allowed_ports`, then attempt a TCP connect to `127.0.0.1:deny_port` (which is NOT allowed).
+/// The child reports the outcome via its exit code; the parent never assumes a block. AS-safe: only
+/// raw syscalls run between fork and `_exit`.
+#[cfg(target_os = "linux")]
+pub fn self_probe_denied_connect(
+    allowed_ports: &[u16],
+    deny_port: u16,
+) -> anyhow::Result<SelfProbeOutcome> {
+    use std::os::fd::AsRawFd;
+
+    // Sentinels well above the connect-errno range so an infra failure is never read as an errno.
+    const EXIT_NNP_FAILED: i32 = 200;
+    const EXIT_RESTRICT_FAILED: i32 = 201;
+    const EXIT_SOCKET_FAILED: i32 = 202;
+    const PR_SET_NO_NEW_PRIVS: libc::c_int = 38;
+
+    let created = landlock_impl::build_net_ruleset(allowed_ports)?;
+    let owned: Option<std::os::fd::OwnedFd> = created.into();
+    let raw_fd = owned.as_ref().map(|f| f.as_raw_fd()).unwrap_or(-1);
+
+    // SAFETY: the child runs only async-signal-safe syscalls (prctl, landlock_restrict_self, socket,
+    // connect, _exit). No allocations, no Rust destructors (we _exit). The parent only waitpid.
+    let outcome = unsafe {
+        let pid = libc::fork();
+        if pid == 0 {
+            if libc::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+                libc::_exit(EXIT_NNP_FAILED);
+            }
+            if libc::syscall(libc::SYS_landlock_restrict_self, raw_fd, 0) != 0 {
+                libc::_exit(EXIT_RESTRICT_FAILED);
+            }
+            let sfd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
+            if sfd < 0 {
+                libc::_exit(EXIT_SOCKET_FAILED);
+            }
+            let addr = libc::sockaddr_in {
+                sin_family: libc::AF_INET as libc::sa_family_t,
+                sin_port: deny_port.to_be(),
+                sin_addr: libc::in_addr {
+                    s_addr: 0x7f00_0001u32.to_be(), // 127.0.0.1
+                },
+                sin_zero: [0; 8],
+            };
+            let ret = libc::connect(
+                sfd,
+                std::ptr::addr_of!(addr) as *const libc::sockaddr,
+                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            );
+            if ret == 0 {
+                libc::_exit(0); // connected => block FAILED
+            }
+            let e = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            let code = if e <= 0 || e > 199 { 199 } else { e };
+            libc::_exit(code);
+        } else if pid > 0 {
+            let mut status: libc::c_int = 0;
+            if libc::waitpid(pid, &mut status, 0) < 0 {
+                return Err(anyhow::anyhow!("self-probe waitpid failed"));
+            }
+            if !libc::WIFEXITED(status) {
+                SelfProbeOutcome::ProbeInfraError("child terminated by signal")
+            } else {
+                classify_self_probe_exit(libc::WEXITSTATUS(status))
+            }
+        } else {
+            return Err(anyhow::anyhow!("self-probe fork failed"));
+        }
+    };
+    drop(owned);
+    Ok(outcome)
+}
+
+/// Pure mapping of the self-probe child's exit code to an outcome. Unit-tested cross-platform.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn classify_self_probe_exit(code: i32) -> SelfProbeOutcome {
+    match code {
+        0 => SelfProbeOutcome::Connected,
+        200 => SelfProbeOutcome::ProbeInfraError("no_new_privs_failed"),
+        201 => SelfProbeOutcome::ProbeInfraError("restrict_self_failed"),
+        202 => SelfProbeOutcome::ProbeInfraError("socket_failed"),
+        e if e == libc::EACCES => SelfProbeOutcome::BlockedEacces,
+        e => SelfProbeOutcome::OtherErrno(e),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn self_probe_denied_connect(
+    _allowed_ports: &[u16],
+    _deny_port: u16,
+) -> anyhow::Result<SelfProbeOutcome> {
+    Ok(SelfProbeOutcome::ProbeInfraError("not linux"))
 }
 
 // =============================================================================
@@ -354,6 +478,43 @@ mod landlock_impl {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn self_probe_exit_eacces_is_blocked() {
+        assert_eq!(
+            classify_self_probe_exit(libc::EACCES),
+            SelfProbeOutcome::BlockedEacces
+        );
+    }
+
+    #[test]
+    fn self_probe_exit_zero_is_connected_block_failed() {
+        assert_eq!(classify_self_probe_exit(0), SelfProbeOutcome::Connected);
+    }
+
+    #[test]
+    fn self_probe_exit_weak_errno_is_other_not_blocked() {
+        // A weak signal must never read as a proven block.
+        for e in [libc::ECONNREFUSED, libc::ETIMEDOUT, libc::ENETUNREACH] {
+            assert_eq!(classify_self_probe_exit(e), SelfProbeOutcome::OtherErrno(e));
+        }
+    }
+
+    #[test]
+    fn self_probe_exit_sentinels_are_infra_errors_not_errno() {
+        assert!(matches!(
+            classify_self_probe_exit(200),
+            SelfProbeOutcome::ProbeInfraError("no_new_privs_failed")
+        ));
+        assert!(matches!(
+            classify_self_probe_exit(201),
+            SelfProbeOutcome::ProbeInfraError("restrict_self_failed")
+        ));
+        assert!(matches!(
+            classify_self_probe_exit(202),
+            SelfProbeOutcome::ProbeInfraError("socket_failed")
+        ));
+    }
 
     #[test]
     fn test_detect_backend_fallback() {
