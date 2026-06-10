@@ -40,6 +40,11 @@ pub struct MonitorStatsSnapshot {
     pub socket_allowed: u64,
     pub socket_events_emitted: u64,
     pub socket_ringbuf_dropped: u64,
+    /// Userspace count of ring-buffer records rejected because their length did not match the
+    /// pinned `MonitorEvent` size. A non-zero value almost always means a stale eBPF object
+    /// (built from an older `MonitorEvent` layout) was loaded against a newer userspace decoder;
+    /// the records are dropped fail-closed, so this is an observation gap, not decoded garbage.
+    pub event_size_mismatch: u64,
 }
 
 impl MonitorStatsSnapshot {

@@ -57,3 +57,34 @@ pub fn send_parsed(
     // best-effort send
     let _ = tx.blocking_send(ev);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_event_rejects_short_record_with_got_and_need() {
+        // A stale eBPF object emits the previous 40 + 480 = 520 byte layout while userspace now
+        // expects 40 + 512 = 552. The parser must reject the short record (fail-closed), reporting
+        // the observed and expected sizes, rather than decoding a truncated struct.
+        let need = core::mem::size_of::<MonitorEvent>();
+        assert_eq!(
+            need, 552,
+            "MonitorEvent ABI size changed; update the stale-object test"
+        );
+        let stale = vec![0u8; 520];
+        match parse_event(&stale) {
+            Err(MonitorError::InvalidEvent { got, need: n }) => {
+                assert_eq!(got, 520);
+                assert_eq!(n, 552);
+            }
+            other => panic!("expected InvalidEvent for a 520-byte record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_event_accepts_exact_size_record() {
+        let ev = parse_event(&vec![0u8; core::mem::size_of::<MonitorEvent>()]);
+        assert!(ev.is_ok(), "a record of the exact pinned size must parse");
+    }
+}

@@ -17,14 +17,29 @@ use aya::{
     programs::{CgroupAttachMode, CgroupSockAddr, Lsm, TracePoint},
     Btf, Ebpf,
 };
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 #[cfg(target_os = "linux")]
+/// One-shot, actionable warning emitted on the first event-size mismatch of a run. Further
+/// mismatches are counted, not logged, so a stale object does not drown the log in per-event noise.
+#[cfg(target_os = "linux")]
+const STALE_OBJECT_WARNING: &str = "WARN: monitor event size mismatch: a ring-buffer record did \
+not match the pinned MonitorEvent size. This almost always means a stale eBPF object (built from \
+an older MonitorEvent layout) was loaded against a newer userspace decoder. Rebuild the eBPF \
+object from the same commit as assay-monitor:\n  scripts/ci/install-ebpf-toolchain.sh\n  cargo \
+xtask build-ebpf --release --no-docker\nMismatched records are dropped fail-closed and counted; \
+further mismatches are not logged individually.";
+
 pub struct LinuxMonitor {
     bpf: Arc<Mutex<Ebpf>>,
     links: Vec<MonitorLink>,
+    /// Userspace counter for ring-buffer records whose length did not match the pinned
+    /// `MonitorEvent` size (almost always a stale eBPF object). Shared with the consumer thread
+    /// spawned in `listen()` and read back in `snapshot_stats`.
+    event_size_mismatch: Arc<AtomicU64>,
 }
 
 #[cfg(target_os = "linux")]
@@ -46,6 +61,7 @@ impl LinuxMonitor {
         Ok(Self {
             bpf: Arc::new(Mutex::new(bpf)),
             links: Vec::new(),
+            event_size_mismatch: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -423,6 +439,9 @@ impl LinuxMonitor {
         stats.socket_events_emitted = array.get(&SOCKET_STAT_EVENTS_EMITTED, 0).unwrap_or(0);
         stats.socket_ringbuf_dropped = array.get(&SOCKET_STAT_RINGBUF_DROPPED, 0).unwrap_or(0);
 
+        // Userspace-tracked: filled by the consumer thread in `listen()`, not a kernel map.
+        stats.event_size_mismatch = self.event_size_mismatch.load(Ordering::Relaxed);
+
         Ok(stats)
     }
 
@@ -443,6 +462,7 @@ impl LinuxMonitor {
             )
         };
 
+        let mismatch = Arc::clone(&self.event_size_mismatch);
         std::thread::spawn(move || {
             let mut ready = false;
             'outer: loop {
@@ -455,6 +475,11 @@ impl LinuxMonitor {
                         continue;
                     }
                     let ev = events::parse_event(&item);
+                    if matches!(&ev, Err(MonitorError::InvalidEvent { .. }))
+                        && mismatch.fetch_add(1, Ordering::Relaxed) == 0
+                    {
+                        eprintln!("{STALE_OBJECT_WARNING}");
+                    }
                     if tx.blocking_send(ev).is_err() {
                         break 'outer;
                     }
@@ -466,6 +491,11 @@ impl LinuxMonitor {
                         continue;
                     }
                     let ev = events::parse_event(&item);
+                    if matches!(&ev, Err(MonitorError::InvalidEvent { .. }))
+                        && mismatch.fetch_add(1, Ordering::Relaxed) == 0
+                    {
+                        eprintln!("{STALE_OBJECT_WARNING}");
+                    }
                     if tx.blocking_send(ev).is_err() {
                         break 'outer;
                     }
