@@ -5,7 +5,7 @@ portable evidence receipts, verifiable bundles, and bounded Trust Basis
 claims.**
 
 Assay is positioned as a **trust compiler for agent systems**: MCP policy
-enforcement is the wedge, while the product surface is canonical evidence,
+enforcement is the fast path, while the product surface is canonical evidence,
 portable receipts, Trust Basis, Trust Card, and reviewable CI projections.
 It is not an eval runner, hosted dashboard, generic MCP/policy tool, or
 upstream truth oracle. See the [main README](../README.md), [What Assay is and

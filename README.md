@@ -70,13 +70,15 @@ CI: [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-securi
 
 No hosted backend. No API keys for core flows. Deterministic: same input, same decision.
 
-> **v3.13.0 CLI UX:** `assay run --format json` emits machine-readable run
-> results to stdout, `model: trace` errors clearly when `--trace-file` is
-> missing, `assay validate eval.yaml` works beside `--config eval.yaml`, and
-> `assay trust-card` is the canonical Trust Card command spelling. MCP runtime
-> commands are grouped under `assay mcp`, with hidden compatibility shims for
-> the previous flat `assay discover`, `assay kill`, and `assay tool ...` paths.
-> See [CHANGELOG.md](CHANGELOG.md) for the full release notes.
+> **v3.21.0 runtime enforcement (Linux):** `assay sandbox --enforce-net` enforces a
+> TCP-connect port allowlist with Landlock, a second kernel route beside the connect4/eBPF
+> egress path, denying any TCP connect to a non-allowlisted port. It records the outcome in a
+> separate `assay.enforcement_health.v1` artifact, and `--probe-enforcement` adds a per-run
+> real-block check (a denied connect blocked with `EACCES`, the harness listener never reached).
+> Enforcement is opt-in and fail-closed: a network policy it cannot express as an explicit port
+> allowlist is refused rather than partially applied, and a requested health artifact that cannot
+> be written is an error, never a silent absence. It is bounded by design and makes no IP/CIDR,
+> hostname, UDP, or QUIC claim. See [CHANGELOG.md](CHANGELOG.md) for the full release notes.
 
 <details>
 <summary>Evidence levels and non-goals</summary>
@@ -292,7 +294,7 @@ PRs that violate policy get blocked; SARIF can surface in the Security tab.
 | **Deterministic** | Same input, same decision — not probabilistic. |
 | **Portable artifacts** | Bundles, Trust Basis, Trust Card, SARIF — for CI, review, audit. |
 | **Bounded claims** | Explicit about what is **verified** vs **visible** vs **absent** — no score-first UX. |
-| **MCP-native wedge** | `assay mcp wrap` is the fast path; `assay mcp discover`, `assay mcp kill`, and `assay mcp tool` keep the runtime surface grouped. Adapters extend the same engine. |
+| **MCP-native** | `assay mcp wrap` is the fast path; `assay mcp discover`, `assay mcp kill`, and `assay mcp tool` keep the runtime surface grouped. Adapters extend the same engine. |
 | **Offline-first** | No backend required for core enforcement and bundle verification. |
 
 <details>

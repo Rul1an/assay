@@ -10,7 +10,7 @@
 
 Assay compiles **agent runtime signals** and selected external outcomes into
 **verifiable evidence** and bounded **Trust Basis claims**. MCP policy
-enforcement is the wedge: Assay can sit between an agent and its tools, make
+enforcement is the fast path: Assay can sit between an agent and its tools, make
 deterministic allow/deny decisions, and preserve the evidence chain for CI,
 security review, and audit without a hosted backend.
 
