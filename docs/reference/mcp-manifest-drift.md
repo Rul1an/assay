@@ -168,16 +168,39 @@ duplicate names produce `status: ambiguous` with a null `manifest_digest`. The p
 nothing about whether drift matters — baseline comparison and verdicts are the consumer's job (P60c).
 
 The live observation wiring — capturing a proxied `tools/list` (including the full pagination chain to
-prove `complete`) and an output path/flag — is the next slice; P60b lands the producer and its
+prove `complete`) and an output path/flag — is a separate slice; P60b lands the producer and its
 exact-digest guarantee.
+
+### Live observation (P60b2) — topology finding
+
+A read-only investigation of `assay-mcp-server` settled where an observed `tools/list` could come from:
+
+- upstream forwarding seam: **none** — the server terminates the JSON-RPC protocol and serves its own
+  built-in tools locally;
+- `tools/call` path: handled locally (policy evaluation read from disk and synthesized), not relayed
+  to an upstream;
+- `tools/list` path: always the static built-in list (`tools::list_tools()`), never an upstream
+  response;
+- server identity: a constant label, not a real upstream identity; no pagination/cursor state and no
+  upstream-passthrough tests exist.
+
+Conclusion: live manifest observation is **not** a small tap on an existing seam; it requires a new
+MCP upstream passthrough/proxy mode (config naming an upstream, a connection/child manager, a
+forwarding handler, and a `tools/list` that observes the upstream response and its pagination chain).
+That is its own design, specified separately before any code. Until such a mode exists, this feature
+stays artifact/file-based: a producer builds `assay.mcp_manifest_observed.v0` from observed tool
+definitions, and the consumer reviews a supplied artifact against a declared baseline. The producer is
+deliberately not wired to `tools::list_tools()` — the server's own served tools are not an observed
+upstream manifest, and emitting them as one would misstate what was observed.
 
 ## PR sequence
 
 ```
-P60a  spec + fixtures + canonicalization examples + a digest-recompute guard test
-P60b  producer: assay-mcp-server manifest_observed module emits assay.mcp_manifest_observed.v0
-P60c  Plimsoll: coarse drift gate -> pending_tool_manifest_review (opt-in, coverage-gated)
-P60d  granular per-tool drift v1 + assay.declared_mcp_manifest.v0 (per-tool expected digests)
+P60a   spec + fixtures + canonicalization examples + a digest-recompute guard test
+P60b   producer: assay-mcp-server manifest_observed module emits assay.mcp_manifest_observed.v0
+P60c   Plimsoll: coarse drift gate -> pending_tool_manifest_review (opt-in, coverage-gated)
+P60b2  live observation: topology finding (above) -> requires a separate MCP passthrough/proxy mode
+P60d   granular per-tool drift v1 + assay.declared_mcp_manifest.v0 (per-tool expected digests)
 ```
 
 ## Reference fixtures
