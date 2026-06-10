@@ -287,6 +287,10 @@ tool_digest EQUAL but >=1 field digest differs
 A changed tool is **never silently dropped**: it always yields a finding (field-level when attribution
 is complete and consistent, else the v1 changed finding) plus the matching attribution note.
 
+`field_digests` is **complete** only when both the observed and declared tool entries contain all four
+fields: `description`, `input_schema`, `output_schema`, and `annotations`. Partial `field_digests` is
+treated as unavailable for attribution (a missing field key is never read as "unchanged").
+
 ### Reason codes
 
 ```
@@ -309,28 +313,38 @@ changed finding only when attribution is complete and consistent. All field-leve
 
 Description drift matters, but v2 still classifies no maliciousness, so a blanket "high for every
 description change" is not hardcoded (it would invite review fatigue). Operators may choose to treat
-description changes as high severity in stricter review profiles.
+description changes as high severity in stricter review profiles. Severity is review prioritization,
+not maliciousness classification.
 
 ### Consistency limitation (stated plainly)
 
 `field_digests` and `tool_digest` are independent projections of the same observed tool definition;
 there is no cryptographic link forcing them to agree, and the consumer cannot cross-check them from the
 artifact alone (different preimages; the raw values are not present). The producer computes both from
-the same bytes and a producer-side guard test proves that, so the consumer trusts `field_digests`
-exactly as it already trusts `tool_digest`; the two `field_attribution_inconsistent` rules above catch
-the cases where they disagree. Binding `tool_digest` to `field_digests` would change the `tool_digest`
-canonicalization and break P60a–d, so it is out of scope.
+the same bytes and a producer-side guard test proves that. The consumer treats `field_digests` as
+optional attribution metadata after schema validation. **The canonical `tool_digest` remains
+authoritative for whether the tool changed.** Field attribution can explain that change only when
+complete and consistent; it never overrides the canonical tool digest — and the two
+`field_attribution_inconsistent` rules above catch the cases where the two disagree. Binding
+`tool_digest` to `field_digests` would change the `tool_digest` canonicalization and break P60a–d, so
+it is out of scope.
 
 ### P60d-v2 PR slicing
 
-```
-P60d-v2-a  assay PRODUCER change: manifest_observed emits optional field_digests (4 per tool) +
-           assay.declared_mcp_manifest.v0 gains optional field_digests; fixtures + guard tests proving
-           (i) field_digests recompute via JCS, (ii) tool_digest UNCHANGED, (iii) manifest_digest
-           UNCHANGED, (iv) existing P60a/P60d-v1 fixtures still byte-equal. No Plimsoll code.
-P60d-v2-b  Plimsoll field-level consumer: emit field-change reason codes; handle the
-           unavailable / inconsistent fallbacks; severity table. No producer change.
-```
+**P60d-v2-a — Assay producer + fixtures + guard tests**
+- Add optional `field_digests` to `assay.mcp_manifest_observed.v0` per-tool entries.
+- Add optional `field_digests` to `assay.declared_mcp_manifest.v0` fixtures.
+- Recompute field digests via `assay_core::mcp::jcs`.
+- Prove existing `tool_digest` and `manifest_digest` values are byte-identical to P60a/P60d-v1.
+- No Plimsoll changes.
+
+**P60d-v2-b — Plimsoll field-level consumer**
+- Consume optional `field_digests`.
+- Emit field-level reason codes only when attribution is complete and consistent.
+- Fall back to v1 changed-tool findings when attribution is unavailable or inconsistent.
+- No producer changes.
+
+P60d-v2-a makes field-level attribution available; P60d-v2-b decides how Plimsoll uses it.
 
 ### Not in P60d-v2
 
@@ -340,9 +354,10 @@ scoring; LLM judge; behavior-drift detection; severity policy profiles in code; 
 
 ## What v0 is NOT
 
-No per-field attribution (which field changed) — that is P60d-v2; no behavior-drift detection, no LLM
-risk scoring, no automatic block on legitimate churn, no maliciousness classification, no pre-flight
-scan, no producer change in P60d v1.
+In v0/v1: no per-field attribution (which field changed) — the optional `field_digests` extension is
+specified in Field-level attribution (P60d-v2) above and ships separately; no behavior-drift detection,
+no LLM risk scoring, no automatic block on legitimate churn, no maliciousness classification, no
+pre-flight scan, no producer change in P60d v1.
 
 ## Producer (P60b)
 
@@ -390,10 +405,9 @@ P60a   spec + fixtures + canonicalization examples + a digest-recompute guard te
 P60b   producer: assay-mcp-server manifest_observed module emits assay.mcp_manifest_observed.v0
 P60c   Plimsoll: coarse drift gate -> pending_tool_manifest_review (opt-in, coverage-gated)
 P60b2  live observation: topology finding (above) -> manifest-observation proxy mode (SHIPPED v3.23.0)
-P60d-a    granular drift spec + assay.declared_mcp_manifest.v0 fixtures + guard test (NO producer change)
-P60d-b    Plimsoll granular consumer (--declared-mcp-manifest) -> per-tool reason codes + coarse-consistency
-P60d-v2-a assay PRODUCER adds optional field_digests (additive v0) + fixtures + backward-compat guard
-P60d-v2-b Plimsoll field-level consumer (field-change codes + unavailable/inconsistent fallbacks)
+P60d-a granular drift spec + assay.declared_mcp_manifest.v0 fixtures + guard test (NO producer change)
+P60d-b Plimsoll granular consumer (--declared-mcp-manifest) -> per-tool reason codes + coarse-consistency
+P60d-v2 field-level attribution (optional field_digests) — slicing in the Field-level attribution section
 ```
 
 ## Reference fixtures
