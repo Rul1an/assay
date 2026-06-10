@@ -14,7 +14,18 @@ const KNOWN_CLASSIFICATIONS: &[&str] = &[
     "classified",
     "classified_incomplete",
     "observed_unknown_tool",
+    "redaction_failed",
     "not_observed",
+];
+
+const KNOWN_REASON_CODES: &[&str] = &[
+    "classified_github_deploy_key",
+    "classified_slack_add_member",
+    "classified_workspace_admin",
+    "missing_required_target_field",
+    "unknown_tool_name",
+    "redacted_secret_argument",
+    "unsupported_argument_shape",
 ];
 
 #[test]
@@ -59,6 +70,13 @@ fn tool_decision_fixtures_hold_the_spec_invariants() {
                 KNOWN_CLASSIFICATIONS.contains(&classification),
                 "{name}: unknown classification {classification:?} (an unknown tool must be \
                  observed_unknown_tool, never absent/clean)"
+            );
+
+            // Every decision carries a machine-readable reason code from the pinned set.
+            let reason = d["reason_code"].as_str().unwrap_or("");
+            assert!(
+                KNOWN_REASON_CODES.contains(&reason),
+                "{name}: unknown reason_code {reason:?}"
             );
 
             // No raw secret material ever rides in the record.

@@ -2,14 +2,44 @@
   "schema": "assay.tool_decision_surface.v0",
   "observed_tool_decisions": [
     {
-      "server": {"id": "misc", "transport": "mcp", "declared_manifest_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"},
-      "tool": {"name": "misc.do_thing", "category": null},
+      "server": {
+        "id": "misc",
+        "transport": "mcp",
+        "declared_manifest_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+      },
+      "tool": {
+        "name": "misc.do_thing",
+        "category": null
+      },
       "classification": "observed_unknown_tool",
-      "action": {"class": "unclassified", "verb": null, "resource_type": null, "target": null},
-      "decision": {"effect": "allow", "source": "assay-mcp-server", "rule_id": "tool.default.allow", "enforced": true},
-      "response": {"status": "success", "side_effect_asserted": true, "side_effect_verified": false},
-      "redaction": {"arguments_redacted": true, "credential_alias": null, "secret_material_stored": false}
+      "reason_code": "unknown_tool_name",
+      "action": {
+        "class": "unclassified",
+        "verb": null,
+        "resource_type": null,
+        "target": null
+      },
+      "decision": {
+        "effect": "allow",
+        "source": "assay-mcp-server",
+        "rule_id": "tool.default.allow",
+        "enforced": true
+      },
+      "response": {
+        "status": "success",
+        "side_effect_asserted": true,
+        "side_effect_verified": false
+      },
+      "redaction": {
+        "arguments_redacted": true,
+        "credential_alias": null,
+        "secret_material_stored": false
+      }
     }
   ],
-  "non_claims": ["does not prove SaaS-side persistence without external audit evidence","does not infer tool actions outside observed MCP proxy traffic","does not expose raw secrets or tokens"]
+  "non_claims": [
+    "does not prove SaaS-side persistence without external audit evidence",
+    "does not infer tool actions outside observed MCP proxy traffic",
+    "does not expose raw secrets or tokens"
+  ]
 }
