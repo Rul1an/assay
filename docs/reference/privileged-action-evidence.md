@@ -13,7 +13,7 @@ observed tool call
   -> declared-vs-observed diff                (declared tool surface)
   -> was the credential scope appropriate?    (credential-scope)
   -> how strong is the side-effect evidence?  (side-effect ladder)
-  -> did the tool manifest drift?             (manifest-drift, experiment)
+  -> did the tool manifest drift?             (manifest-drift, coarse gate)
 ```
 
 ## Record types
@@ -24,6 +24,7 @@ observed tool call
 | `assay.declared_tool_surface.v0` | declared/allowed privileged actions, for observed-vs-declared review | [declared-tool-surface.md](declared-tool-surface.md) |
 | `action.required_scope` (+ declared credentials) | the scope an action requires vs the alias's declared scope | [credential-scope.md](credential-scope.md) |
 | `assay.provider_audit_record.v0` | an imported provider audit entry, bound to an observed call by digest recompute | [side-effect-receipt.md](side-effect-receipt.md) |
+| `assay.mcp_manifest_observed.v0` | an observed MCP tool manifest as canonical digests, for coarse drift review against a declared baseline | [mcp-manifest-drift.md](mcp-manifest-drift.md) |
 
 ## Evidence ladder (side effects)
 
@@ -60,14 +61,27 @@ provider-verified grants; there is no token introspection.
 - raw secrets, tokens, and key material are never stored; sensitive identifiers are hashed under
   per-field domains; an unknown or incomplete observation is inconclusive, never read as clean.
 
-## What is shipped vs experiment-only
+## Status: shipped, experiment-only, parked
 
-Shipped (releasable): the tool-decision surface, the rule-based classifiers, the declared-vs-observed
-gate, credential-scope evidence, the side-effect receipt spec, and the Plimsoll consumer that ranks
-the side-effect ladder.
+**Shipped (releasable):** the tool-decision surface and rule-based classifiers; the
+declared-vs-observed gate; credential-scope evidence; the side-effect receipt spec and the consumer
+that ranks the side-effect ladder (`asserted` / `observed_confirmed` / `audit_record_bound`); and the
+MCP tool-manifest **coarse** drift path — a producer that builds `assay.mcp_manifest_observed.v0` from
+observed tool definitions and a consumer that reviews a supplied artifact against a declared
+manifest-digest baseline, resolving a mismatch to `pending_tool_manifest_review`.
 
-Characterized but kept experiment-only for now (not in a shipped feature): the credential-overbreadth
-distribution (the scope lattice is a static model, not a provider-verified taxonomy), and MCP
-tool-manifest drift detection. Manifest drift is the next candidate to productize as a feature; a
-legitimate manifest change surfaces as drift and resolves to `pending_tool_manifest_review`, never a
-maliciousness verdict.
+**Experiment-only (characterized, not a shipped feature):** the credential-overbreadth distribution
+(the scope lattice is a static model, not a provider-verified taxonomy); MCP tool lifecycle; and an
+OTel log-based event projection.
+
+**Parked (needs a separate design before any code):** live upstream manifest observation, and
+granular per-tool manifest drift.
+
+The load-bearing boundary for the manifest line: **the tool-manifest path is complete for supplied
+artifacts. Live upstream observation is not a small wiring step — `assay-mcp-server` today terminates
+the protocol and serves its own tools, so observing an upstream manifest on the wire requires a
+separate MCP upstream passthrough/proxy-mode design (JSON-RPC forwarding, the auth/token boundary,
+server identity, `tools/list` pagination, the policy decision point, response observation, and
+confused-deputy risks).** Until that mode exists, the manifest path stays artifact/file-based, and the
+producer is deliberately not wired to the server's own served tools — they are not an observed
+upstream manifest. See [mcp-manifest-drift.md](mcp-manifest-drift.md) for the topology finding.
