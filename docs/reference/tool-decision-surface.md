@@ -56,7 +56,11 @@ The classifier is honest about what it could and could not determine:
 | `classified` | a known privileged tool was observed and its target projected |
 | `classified_incomplete` | known tool, but required argument fields were missing |
 | `observed_unknown_tool` | a tool call was observed but matched no classifier |
+| `redaction_failed` | a value that had to be projected could not be safely redacted (reserved) |
 | `not_observed` | the tool path was outside the proxy; nothing observed |
+
+The classifier is total: every observed call yields exactly one of these states, never nothing. Each
+decision also carries a machine-readable `reason_code` so downstream never parses prose.
 
 An unknown tool is never silently treated as clean, and missing arguments are never treated as safe.
 "No observed tool calls" does not mean "no tool capability"; only "no observed tool calls plus
@@ -76,11 +80,18 @@ complete tool observation" means "no observed tool use in this run" (see P58 cov
       },
       "tool": { "name": "github.add_deploy_key", "category": "github_deploy_key" },
       "classification": "classified",
+      "reason_code": "classified_github_deploy_key",
       "action": {
         "class": "privileged_admin_action",
         "verb": "create",
         "resource_type": "github_deploy_key",
-        "target": { "provider": "github", "owner": "org", "repo": "prod-repo" }
+        "target": {
+          "provider": "github",
+          "owner": "org",
+          "repo": "prod-repo",
+          "key_title_hash": "sha256:...",
+          "read_only": false
+        }
       },
       "decision": {
         "effect": "allow",
@@ -113,37 +124,58 @@ complete tool observation" means "no observed tool use in this run" (see P58 cov
 Classifiers are rule-based and explicit. No model or judge decides a classification. Start narrow,
 with three concrete cases; broaden only with a fixture per added case.
 
+The classifier reads arguments only to project the named target fields below. Everything else, every
+unknown field and every secret-like value, is dropped, never copied. `owner` and `repo` are plain
+labels; principal-like identifiers are hashed (see Redaction).
+
 ### `github_deploy_key`
 
-- Tool names / aliases: `github.add_deploy_key`, `create_deploy_key`, equivalents.
-- Required argument fields: `owner`, `repo` (a missing one yields `classified_incomplete`).
-- Target projection: `owner`, `repo`, `key_title_hash` (or redacted title), `read_only` flag if
-  present.
+- Tool leaf names: `add_deploy_key`, `create_deploy_key`.
+- Required argument fields: `owner`, `repo` (a missing one yields `classified_incomplete`,
+  `reason_code: missing_required_target_field`, `detail: missing_github_owner_or_repo`).
+- Target projection: `owner`, `repo` (plain), `key_title_hash` (the title is hashed, never stored),
+  `read_only` flag if present. `resource_type: github_deploy_key`.
+- Dropped, never hashed: `public_key`, `private_key`, `token`, and the like.
 - Non-claims: does not store public or private key material; does not prove the key works; does not
   prove GitHub persisted it without audit confirmation.
 
 ### `slack_add_member`
 
-- Tool names / aliases: `slack.add_member`, `conversations.invite`, equivalents.
-- Required fields: workspace or channel identifier, principal identifier.
-- Target projection: `workspace_id` or alias, `channel_id` or user-group, `user_id` hash or redacted
-  principal, role/class if present.
+- Tool leaf names: `add_member`, `invite`.
+- Required fields: a scope (`workspace_id` and/or `channel_id`) plus a principal (`user_id` / `user`).
+- Target projection: `workspace_id_hash`, `channel_id_hash` (null for workspace-level membership),
+  `principal_hash`. All are hashed under their own domains. `resource_type: workspace_member`.
 - Non-claims: does not prove Slack accepted the membership unless verified response/audit evidence;
-  does not store tokens.
+  does not store tokens or raw principals.
 
 ### `workspace_admin`
 
-A category for `grant_admin`, `change_role`, `invite_external`, `create_workspace_token`,
-`modify_org_policy`. Kept deliberately narrow in P57: one concrete tool fixture, not the whole class.
+- Tool leaf names (a deliberately narrow set): `grant_admin`, `change_role`, `invite_external`,
+  `modify_org_policy`, `create_workspace_token`.
+- Required fields: a workspace (`workspace_id` / `workspace` / `org`) plus a principal.
+- Target projection: `workspace_id_hash`, `principal_hash`, `role` (plain label if present).
+  `resource_type: workspace_role`.
+- Anything outside this verb set is `observed_unknown_tool`; the classifier does not guess.
 
 ## Redaction and sanitization
 
 - Raw secrets and tokens never appear in the record. A credential is referenced by a stable alias
   (`credential_alias`), and `secret_material_stored` is always `false`.
-- Argument values that carry sensitive identifiers are redacted or hashed, not stored verbatim
-  (`arguments_redacted: true`).
-- Hostile strings in arguments (terminal escapes, control characters) are sanitized before the record
-  is written, the same discipline the evidence TUI/rendering already applies.
+- Sensitive identifiers (principals, workspace/channel ids, key titles) are not stored verbatim; they
+  are hashed under a **domain-separated** preimage `assay.tool_target.v0:<domain>:<normalized>`, so a
+  hash from one field can never collide with another. This is pseudonymization, not anonymization:
+  equal inputs yield equal hashes, so the only claim is that the raw value is not stored.
+- Secret-like values (`public_key`, `private_key`, `token`, `authorization`, `secret`, `credential`,
+  ...) are **dropped, not hashed**: a hash of a public key can still leak correlation, and a token
+  hash invites offline brute force.
+- Hostile strings (terminal escapes, control characters) are sanitized before the record is written,
+  the same discipline the evidence TUI/rendering already applies.
+
+## Reason codes
+
+Machine-readable, never parsed from prose: `classified_github_deploy_key`,
+`classified_slack_add_member`, `classified_workspace_admin`, `missing_required_target_field`,
+`unknown_tool_name`, `redacted_secret_argument`, `unsupported_argument_shape`.
 
 ## Reference fixtures
 

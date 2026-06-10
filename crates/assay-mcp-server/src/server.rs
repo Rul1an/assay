@@ -391,6 +391,9 @@ impl Server {
                             let decision = build_decision(&ObservedCall {
                                 server_id: "mcp",
                                 tool_name: name,
+                                // Inspected transiently by the classifier to project named target
+                                // fields (hashed); never copied into the record verbatim.
+                                args,
                                 effect,
                                 status: &status,
                                 rule_id: None,

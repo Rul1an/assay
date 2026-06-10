@@ -2,15 +2,53 @@
   "schema": "assay.tool_decision_surface.v0",
   "observed_tool_decisions": [
     {
-      "server": {"id": "github", "transport": "mcp", "declared_manifest_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
-      "tool": {"name": "github.add_deploy_key", "category": "github_deploy_key"},
+      "server": {
+        "id": "github",
+        "transport": "mcp",
+        "declared_manifest_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "tool": {
+        "name": "github.add_deploy_key",
+        "category": "github_deploy_key"
+      },
       "classification": "classified",
-      "action": {"class": "privileged_admin_action", "verb": "create", "resource_type": "github_deploy_key",
-                 "target": {"provider": "github", "owner": "org", "repo": "prod-repo", "key_title": "ci-key��", "read_only": true}},
-      "decision": {"effect": "allow", "source": "assay-mcp-server", "rule_id": "tool.github.deploy_key.allow.prod", "enforced": true},
-      "response": {"status": "success", "side_effect_asserted": true, "side_effect_verified": false},
-      "redaction": {"arguments_redacted": true, "credential_alias": "github-prod-admin", "secret_material_stored": false, "sanitized_fields": ["action.target.key_title"]}
+      "reason_code": "classified_github_deploy_key",
+      "action": {
+        "class": "privileged_admin_action",
+        "verb": "create",
+        "resource_type": "github_deploy_key",
+        "target": {
+          "provider": "github",
+          "owner": "org",
+          "repo": "prod-repo",
+          "key_title_hash": "sha256:d71c8f02c8ced33cb74494d0d6a1b3582b332ca82b781b09c362a168e40d85ca",
+          "read_only": true
+        }
+      },
+      "decision": {
+        "effect": "allow",
+        "source": "assay-mcp-server",
+        "rule_id": "tool.github.deploy_key.allow.prod",
+        "enforced": true
+      },
+      "response": {
+        "status": "success",
+        "side_effect_asserted": true,
+        "side_effect_verified": false
+      },
+      "redaction": {
+        "arguments_redacted": true,
+        "credential_alias": "github-prod-admin",
+        "secret_material_stored": false,
+        "sanitized_fields": [
+          "tool.name"
+        ]
+      }
     }
   ],
-  "non_claims": ["does not prove SaaS-side persistence without external audit evidence","does not infer tool actions outside observed MCP proxy traffic","does not expose raw secrets or tokens"]
+  "non_claims": [
+    "does not prove SaaS-side persistence without external audit evidence",
+    "does not infer tool actions outside observed MCP proxy traffic",
+    "does not expose raw secrets or tokens"
+  ]
 }
