@@ -1,8 +1,9 @@
 # MCP tool-manifest drift (`assay.mcp_manifest_observed.v0`)
 
-Status: spec + reference fixtures (P60a). No producer/consumer wired yet; the `assay-mcp-server`
-producer (P60b) and the Plimsoll coarse-drift gate (P60c) build on this shape. Part of the
-[privileged-action evidence](privileged-action-evidence.md) set.
+Status: coarse path shipped — spec + fixtures + digest guard (P60a), the `assay-mcp-server` producer
+module (P60b), and the consumer coarse-drift gate (P60c, released in Plimsoll v0.8.0). Live upstream
+observation is parked behind a separate passthrough/proxy-mode design (see the topology finding below).
+Part of the [privileged-action evidence](privileged-action-evidence.md) set.
 
 ## Why this exists
 
@@ -60,9 +61,10 @@ Tools are sorted by `name`, then by `tool_digest` if duplicate names ever occur.
 
 ## Observed manifest record (`assay.mcp_manifest_observed.v0`)
 
-Emitted by the proxy from the observed `tools/list`. The proxy observes **every** `tools/list`
-response and carries the latest. Per-tool digests are diagnostic/supporting detail in v0; the v0
-Plimsoll gate uses only the overall `manifest_digest` (per-tool drift reason codes are P60d/v1).
+Built by the producer from observed tool definitions. (The intended live source is the latest fully
+observed `tools/list`; capturing that on the wire is parked behind the passthrough/proxy-mode design —
+see the topology finding below.) Per-tool digests are diagnostic/supporting detail in v0; the v0
+consumer gate uses only the overall `manifest_digest` (per-tool drift reason codes are P60d/v1).
 
 ```json
 {
