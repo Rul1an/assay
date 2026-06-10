@@ -23,12 +23,14 @@ fn mcp_group_is_visible_and_legacy_flat_commands_are_hidden() {
 }
 
 #[test]
-fn legacy_flat_mcp_command_prints_deprecation_warning() {
+fn retired_flat_mcp_command_is_rejected() {
+    // `assay kill` was a deprecated shim for `assay mcp kill`; the shim is retired, so the flat
+    // path is now rejected as an unrecognized subcommand rather than warning and running.
     let output = assay_cmd().arg("kill").output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("`assay kill` is deprecated; use `assay mcp kill` instead"),
-        "missing legacy MCP deprecation warning: {stderr}"
+        stderr.contains("unrecognized subcommand"),
+        "expected the retired flat `kill` shim to be rejected as an unrecognized subcommand: {stderr}"
     );
 }
