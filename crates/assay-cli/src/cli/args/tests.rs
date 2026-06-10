@@ -49,7 +49,7 @@ fn trust_card_command_accepts_canonical_and_legacy_names() {
 }
 
 #[test]
-fn mcp_group_accepts_canonical_paths_and_legacy_shims_are_hidden() {
+fn mcp_group_accepts_canonical_paths_and_legacy_shims_are_removed() {
     let visible: Vec<_> = Cli::command()
         .get_subcommands()
         .filter(|cmd| !cmd.is_hide_set())
@@ -88,21 +88,14 @@ fn mcp_group_accepts_canonical_paths_and_legacy_shims_are_hidden() {
         })
     ));
 
-    let legacy_discover = Cli::try_parse_from(["assay", "discover", "--format", "json"])
-        .expect("legacy discover shim should parse");
-    assert!(matches!(legacy_discover.cmd, Command::Discover(_)));
-
-    let legacy_kill =
-        Cli::try_parse_from(["assay", "kill", "proc-123"]).expect("legacy kill shim should parse");
-    assert!(matches!(legacy_kill.cmd, Command::Kill(_)));
-
-    let legacy_tool = Cli::try_parse_from(["assay", "tool", "keygen", "--out", "keys"])
-        .expect("legacy tool shim should parse");
-    assert!(matches!(legacy_tool.cmd, Command::Tool(_)));
+    // The legacy top-level shims were retired; only the canonical `assay mcp ...` paths remain.
+    assert!(Cli::try_parse_from(["assay", "discover", "--format", "json"]).is_err());
+    assert!(Cli::try_parse_from(["assay", "kill", "proc-123"]).is_err());
+    assert!(Cli::try_parse_from(["assay", "tool", "keygen", "--out", "keys"]).is_err());
 }
 
 #[test]
-fn policy_group_accepts_authoring_paths_and_legacy_shims_are_hidden() {
+fn policy_group_accepts_authoring_paths_and_legacy_shims_are_removed() {
     let visible: Vec<_> = Cli::command()
         .get_subcommands()
         .filter(|cmd| !cmd.is_hide_set())
@@ -138,14 +131,11 @@ fn policy_group_accepts_authoring_paths_and_legacy_shims_are_hidden() {
         })
     ));
 
-    let legacy_generate =
-        Cli::try_parse_from(["assay", "generate", "--input", "trace.jsonl", "--dry-run"])
-            .expect("legacy generate shim should parse");
-    assert!(matches!(legacy_generate.cmd, Command::Generate(_)));
-
-    let legacy_record = Cli::try_parse_from(["assay", "record", "--", "echo", "hello"])
-        .expect("legacy record shim should parse");
-    assert!(matches!(legacy_record.cmd, Command::Record(_)));
+    // The legacy top-level shims were retired; only the canonical `assay policy ...` paths remain.
+    assert!(
+        Cli::try_parse_from(["assay", "generate", "--input", "trace.jsonl", "--dry-run"]).is_err()
+    );
+    assert!(Cli::try_parse_from(["assay", "record", "--", "echo", "hello"]).is_err());
 }
 
 #[cfg(feature = "sim")]

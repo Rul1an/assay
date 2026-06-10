@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+- The deprecated top-level command shims `assay discover`, `assay kill`, `assay tool`,
+  `assay generate`, and `assay record` were retired. They had been hidden and printed a
+  deprecation warning since the command-grouping pass; use the canonical paths instead:
+  `assay mcp discover`, `assay mcp kill`, `assay mcp tool`, `assay policy generate`, and
+  `assay policy record`. The underlying behavior, flags, output, and exit codes are unchanged.
+
 ### Added
 - `assay sandbox --probe-enforcement` (with `--enforce-net`): runs a self-probe before the
   workload that, from inside the enforcing ruleset, attempts one connect to an ephemeral denied

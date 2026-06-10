@@ -229,8 +229,8 @@ assay run --config eval.yaml --trace-file traces.jsonl --baseline baseline.json
 
 ### Pattern 2: Learning Mode
 ```bash
-assay record --output policy.yaml -- your-agent-command
-assay generate -i traces/session.jsonl --output policy.yaml
+assay policy record --output policy.yaml -- your-agent-command
+assay policy generate -i traces/session.jsonl --output policy.yaml
 ```
 
 ### Pattern 3: Debug Violation

@@ -74,7 +74,7 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 
 ### Policy Management
 
-#### `assay generate`
+#### `assay policy generate`
 **Purpose**: Generate policy from traces (learning mode)
 **Entry**: `crates/assay-cli/src/cli/commands/generate.rs::run()`
 **Flow**: Analyze traces → generate policy constraints → write `policy.yaml`
@@ -84,7 +84,7 @@ All CLI commands are defined in `crates/assay-cli/src/cli/args.rs` and dispatche
 - `--from-trace <PATH>`: Generate from trace file
 - `--output <PATH>`: Output policy file
 
-#### `assay record`
+#### `assay policy record`
 **Purpose**: Capture and generate in one flow
 **Entry**: `crates/assay-cli/src/cli/commands/record.rs::run()`
 **Flow**: Capture traces → generate policy → save both

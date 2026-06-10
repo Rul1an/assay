@@ -157,13 +157,13 @@ The GitHub Action lives in this monorepo under `assay-action/` and is referenced
 - **`init.rs`**: `assay init` command
 - **`import.rs`**: `assay import` command
 - **`trace.rs`**: `assay trace` command
-- **`generate/mod.rs`**: `assay generate` orchestrator (RFC-003 G6)
+- **`generate/mod.rs`**: `assay policy generate` orchestrator (RFC-003 G6)
   - **`generate/args.rs`**: `GenerateArgs` and validation (G2)
   - **`generate/model.rs`**: `Policy`, `Meta`, `Section`, `Entry` DTOs (G2)
   - **`generate/ingest.rs`**: `read_events`, `aggregate`, `Stats` (G3)
   - **`generate/profile.rs`**: Profile classification (Wilson scoring) (G4)
   - **`generate/diff.rs`**: Policy diffing and reporting (G5)
-- **`record.rs`**: `assay record` command
+- **`record.rs`**: `assay policy record` command
 - **`migrate.rs`**: `assay migrate` command
 - **`doctor.rs`**: `assay doctor` command
 - **`explain.rs`**: `assay explain` command

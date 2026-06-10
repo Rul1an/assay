@@ -37,7 +37,7 @@ Assay already has three related surfaces:
   drift detection.
 - MCP proxy discovery, which computes tool identity from `tools/list` responses
   and caches it for later `tools/call` decisions.
-- `assay tool sign` / `assay tool verify`, which use `x-assay-sig`, JCS, and
+- `assay mcp tool sign` / `assay mcp tool verify`, which use `x-assay-sig`, JCS, and
   DSSE-style PAE over a tool definition with the signature field removed.
 
 Those seams are useful but not yet the same as a single, self-describing

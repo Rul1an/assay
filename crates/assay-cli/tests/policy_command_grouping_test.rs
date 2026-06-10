@@ -24,12 +24,14 @@ fn policy_group_exposes_authoring_commands_and_legacy_flat_commands_are_hidden()
 }
 
 #[test]
-fn legacy_flat_policy_generate_prints_deprecation_warning() {
+fn retired_flat_policy_generate_is_rejected() {
+    // `assay generate` was a deprecated shim for `assay policy generate`; the shim is retired, so
+    // the flat path is now rejected as an unrecognized subcommand rather than warning and running.
     let output = assay_cmd().arg("generate").output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("`assay generate` is deprecated; use `assay policy generate` instead"),
-        "missing legacy policy deprecation warning: {stderr}"
+        stderr.contains("unrecognized subcommand"),
+        "expected the retired flat `generate` shim to be rejected as an unrecognized subcommand: {stderr}"
     );
 }

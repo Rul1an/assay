@@ -89,8 +89,8 @@ flowchart TD
     START[Developing policy?] --> EXISTING{Have existing<br/>behavior to model?}
 
     EXISTING -->|Yes| LEARNING[Learning mode]
-    LEARNING --> RECORD[assay record -- your-command]
-    RECORD --> GENERATE[assay generate -i trace.jsonl]
+    LEARNING --> RECORD[assay policy record -- your-command]
+    RECORD --> GENERATE[assay policy generate -i trace.jsonl]
     GENERATE --> REVIEW[Review and refine]
 
     EXISTING -->|No| MANUAL[Manual policy writing]
@@ -178,8 +178,8 @@ flowchart TD
 | CI gate (strict) | `assay ci` | `--trace-file`, `--sarif` |
 | Debug setup | `assay doctor` | (no options needed) |
 | Explain failures | `assay explain` | `--trace`, `--policy` |
-| Generate policy | `assay generate` | `--from-profile` |
-| Record behavior | `assay record` | `--output <policy.yaml> -- <command>` |
+| Generate policy | `assay policy generate` | `--from-profile` |
+| Record behavior | `assay policy record` | `--output <policy.yaml> -- <command>` |
 | Check coverage | `assay coverage` | `--min-coverage 80` |
 | MCP enforcement | `assay mcp wrap` | `--policy`, `--dry-run` |
 | Export evidence | `assay evidence export` | `--profile`, `--out` |
@@ -216,7 +216,7 @@ flowchart TD
 
 ### For Policy Development
 - **From scratch**: Write `policy.yaml` manually
-- **From behavior**: `assay generate --from-profile profile.json`
+- **From behavior**: `assay policy generate --from-profile profile.json`
 - **Test coverage**: `assay coverage --trace-file traces.jsonl`
 
 ### For Debugging

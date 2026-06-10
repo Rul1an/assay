@@ -148,7 +148,7 @@ impl Inventory {
         None
     }
 
-    /// Convenience for `assay kill --all`
+    /// Convenience for `assay mcp kill --all`
     pub fn running_process_servers(&self) -> Vec<RunningProcessServer> {
         let mut out: Vec<RunningProcessServer> = self
             .servers

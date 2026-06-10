@@ -87,20 +87,8 @@ pub enum Command {
     Version,
     /// Validate, format, and migrate policies
     Policy(PolicyArgs),
-    /// Discover MCP servers on this machine
-    #[command(hide = true)]
-    Discover(DiscoverArgs),
-    /// Kill/Terminate MCP servers
-    #[command(hide = true)]
-    Kill(super::commands::kill::KillArgs),
     /// Runtime eBPF Monitor (Linux only)
     Monitor(super::commands::monitor::MonitorArgs),
-    /// Learning Mode: Generate policy from trace or profile
-    #[command(hide = true)]
-    Generate(super::commands::generate::GenerateArgs),
-    /// Learning Mode: Capture and Generate in one flow
-    #[command(hide = true)]
-    Record(super::commands::record::RecordArgs),
     /// Internal Assay-Runner Phase 1 spike command
     #[cfg(feature = "runner")]
     #[command(name = "runner-spike", hide = true)]
@@ -120,9 +108,6 @@ pub enum Command {
     Sim(SimArgs),
     /// Interactive installer and environment setup
     Setup(SetupArgs),
-    /// Tool signing and verification
-    #[command(hide = true)]
-    Tool(ToolArgs),
     /// Generate canonical trust-basis artifacts from verified evidence bundles
     #[command(name = "trust-basis")]
     TrustBasis(TrustBasisArgs),

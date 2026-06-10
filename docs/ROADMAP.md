@@ -193,8 +193,8 @@ artifact schemas, Trust Basis semantics, or MCP policy behavior.
 
 The `v3.14.0` release line also includes the Tier 2a policy-authoring grouping:
 `assay policy generate` and `assay policy record` are canonical, while the
-previous top-level `assay generate` and `assay record` paths remain hidden
-compatibility shims with `stderr` deprecation warnings. It also adds
+previous top-level `assay generate` and `assay record` paths were hidden
+compatibility shims (since retired in favor of the canonical `assay policy` paths). It also adds
 `assay evidence verify-mcp-records` as a downstream verifier for SEP-2787
 attestation and server execution-record fixture pairing. The rest of the CLI
 grouping RFC remains deliberately trigger-gated: `trust` and `replay` should

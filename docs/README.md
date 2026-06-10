@@ -138,13 +138,13 @@ Generate policies from observed behavior instead of writing them by hand:
 
 ```bash
 # From a single trace
-assay generate -i trace.jsonl --heuristics
+assay policy generate -i trace.jsonl --heuristics
 
 # From multiple runs (stability analysis)
 assay profile init --output profile.yaml --name my-app
 assay profile update --profile profile.yaml -i run1.jsonl --run-id run-1
 assay profile update --profile profile.yaml -i run2.jsonl --run-id run-2
-assay generate --profile profile.yaml --min-stability 0.8
+assay policy generate --profile profile.yaml --min-stability 0.8
 ```
 
 ### Diagnostics

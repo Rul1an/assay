@@ -189,8 +189,9 @@ assay policy generate   # was: generate  ("Learning Mode: Generate policy from t
 assay policy record     # was: record    ("Learning Mode: Capture and Generate in one flow")
 ```
 
-Status: implemented. The old top-level `assay generate` and `assay record`
-paths remain hidden compatibility shims with stderr deprecation warnings.
+Status: implemented, then tightened. The grouped `assay policy ...` paths are
+canonical; the old top-level `assay generate` / `assay record` shims were
+subsequently removed.
 
 Optional, weaker fit:
 

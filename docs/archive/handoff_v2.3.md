@@ -91,7 +91,7 @@ Assay can now learn “stable behavior” across repeated runs (Multi-Run).
 ### Profile Workflow
 1.  `assay profile init`
 2.  `assay profile update --run-id <id>` (Idempotent merge)
-3.  `assay generate --profile profile.yaml`
+3.  `assay policy generate --profile profile.yaml`
 
 ### Safety Belts
 *   **Confidence-Aware Gating**: Uses **Wilson Lower Bound** (95% CI) as default gate to filter noise.
