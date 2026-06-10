@@ -1,0 +1,29 @@
+{
+  "schema": "assay.declared_tool_surface.v0",
+  "declared_tool_actions": [
+    {
+      "id": "github.deploy_key.prod",
+      "provider": "github",
+      "action_class": "github_deploy_key",
+      "allowed_targets": [ { "owner": "org", "repo": "prod-repo" } ],
+      "allowed_effects": ["allow", "deny"],
+      "required_decision": "explicit_policy"
+    },
+    {
+      "id": "slack.add_member.acme",
+      "provider": "slack",
+      "action_class": "slack_add_member",
+      "allowed_targets": [ { "workspace_id": "T0123" } ],
+      "allowed_effects": ["allow", "deny"],
+      "required_decision": "explicit_policy"
+    },
+    {
+      "id": "workspace.grant_admin.acme",
+      "provider": "workspace",
+      "action_class": "workspace_admin",
+      "allowed_targets": [ { "workspace_id": "acme" } ],
+      "allowed_effects": ["allow", "deny"],
+      "required_decision": "explicit_policy"
+    }
+  ]
+}
