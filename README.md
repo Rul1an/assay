@@ -39,6 +39,8 @@ The core workflow is intentionally small: import or record a bounded outcome, bu
 
 For observed runtime evidence specifically, the same boundary discipline runs end to end: a coverage descriptor declares what the capture can and cannot support, claim-class cells record each claim as `claim_strength` x `claim_basis`, and a gate refuses to let a claim exceed what was observed. See the [coverage-honesty walkthrough](examples/coverage-honesty-walkthrough/) and the [claim-class semantics](docs/reference/observability/claim-semantics-overview.md).
 
+For privileged tool actions specifically, the MCP proxy records each observed `tools/call` as a structured tool-decision (`assay.tool_decision_surface.v0`): the privileged in-application actions kernel and network enforcement cannot see, such as a deploy key added or a workspace member invited. Rule-based classifiers tag the action and project a target with sensitive ids hashed and raw arguments never stored, and the shape keeps the asserted-versus-verified line honest: a tool returning success is the provider's assertion, never proof, until independently checked audit evidence confirms it. See [tool-decision surface](docs/reference/tool-decision-surface.md) and [credential-scope](docs/reference/credential-scope.md).
+
 ```text
 Trust Basis Gate
 Status: OK
