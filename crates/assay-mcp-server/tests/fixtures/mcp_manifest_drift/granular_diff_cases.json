@@ -1,0 +1,908 @@
+{
+  "canonicalization": "assay.mcp_manifest_projection.v0",
+  "cases": [
+    {
+      "id": "identical_no_findings",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": true,
+          "tools_list_complete": "complete",
+          "tool_digests": [
+            {
+              "name": "search",
+              "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+              "privileged": false
+            },
+            {
+              "name": "github.add_deploy_key",
+              "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+              "privileged": true
+            }
+          ]
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:f91fb844b0b68133d26d8955d96b1dfea1e7492c697fbab57f7165ee65376174",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [],
+        "inconclusive": []
+      }
+    },
+    {
+      "id": "tool_added_non_privileged",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": true,
+          "tools_list_complete": "complete",
+          "tool_digests": [
+            {
+              "name": "search",
+              "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+              "privileged": false
+            },
+            {
+              "name": "github.add_deploy_key",
+              "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+              "privileged": true
+            },
+            {
+              "name": "misc.echo",
+              "tool_digest": "sha256:34c7e831a42550d80b92e4089c1edea507f91132855e35efe265f412891d0988",
+              "privileged": false
+            }
+          ]
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:f91fb844b0b68133d26d8955d96b1dfea1e7492c697fbab57f7165ee65376174",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [
+          {
+            "name": "misc.echo",
+            "reason_code": "mcp_tool_added"
+          }
+        ],
+        "inconclusive": []
+      }
+    },
+    {
+      "id": "new_privileged_tool",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": true,
+          "tools_list_complete": "complete",
+          "tool_digests": [
+            {
+              "name": "search",
+              "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+              "privileged": false
+            },
+            {
+              "name": "github.add_deploy_key",
+              "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+              "privileged": true
+            },
+            {
+              "name": "slack.add_member",
+              "tool_digest": "sha256:572794972d4751584b31553d126db4da487c1896a3b1ae627182befe661774c7",
+              "privileged": true
+            }
+          ]
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:f91fb844b0b68133d26d8955d96b1dfea1e7492c697fbab57f7165ee65376174",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [
+          {
+            "name": "slack.add_member",
+            "reason_code": "mcp_new_privileged_tool"
+          }
+        ],
+        "inconclusive": []
+      }
+    },
+    {
+      "id": "tool_changed_non_privileged",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": true,
+          "tools_list_complete": "complete",
+          "tool_digests": [
+            {
+              "name": "search",
+              "tool_digest": "sha256:45ec3246881aa16e54678e87563418a34ef9049441483ae7f9ecd54069b0eb26",
+              "privileged": false
+            },
+            {
+              "name": "github.add_deploy_key",
+              "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+              "privileged": true
+            }
+          ]
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:f91fb844b0b68133d26d8955d96b1dfea1e7492c697fbab57f7165ee65376174",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [
+          {
+            "name": "search",
+            "reason_code": "mcp_tool_changed"
+          }
+        ],
+        "inconclusive": []
+      }
+    },
+    {
+      "id": "privileged_tool_changed",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": true,
+          "tools_list_complete": "complete",
+          "tool_digests": [
+            {
+              "name": "search",
+              "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+              "privileged": false
+            },
+            {
+              "name": "github.add_deploy_key",
+              "tool_digest": "sha256:8898aafda90ab0fb1c06bea6c0fc8cf381032e39c8068eac2e92ee1cfb45ae18",
+              "privileged": true
+            }
+          ]
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:f91fb844b0b68133d26d8955d96b1dfea1e7492c697fbab57f7165ee65376174",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [
+          {
+            "name": "github.add_deploy_key",
+            "reason_code": "mcp_privileged_tool_changed"
+          }
+        ],
+        "inconclusive": []
+      }
+    },
+    {
+      "id": "tool_removed_complete_non_privileged",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": true,
+          "tools_list_complete": "complete",
+          "tool_digests": [
+            {
+              "name": "github.add_deploy_key",
+              "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+              "privileged": true
+            }
+          ]
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:f91fb844b0b68133d26d8955d96b1dfea1e7492c697fbab57f7165ee65376174",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [
+          {
+            "name": "search",
+            "reason_code": "mcp_tool_removed"
+          }
+        ],
+        "inconclusive": []
+      }
+    },
+    {
+      "id": "privileged_tool_removed_complete",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": true,
+          "tools_list_complete": "complete",
+          "tool_digests": [
+            {
+              "name": "search",
+              "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+              "privileged": false
+            }
+          ]
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:f91fb844b0b68133d26d8955d96b1dfea1e7492c697fbab57f7165ee65376174",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [
+          {
+            "name": "github.add_deploy_key",
+            "reason_code": "mcp_privileged_tool_removed"
+          }
+        ],
+        "inconclusive": []
+      }
+    },
+    {
+      "id": "removal_under_partial_no_per_tool_finding",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": true,
+          "tools_list_complete": "partial",
+          "tool_digests": [
+            {
+              "name": "search",
+              "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+              "privileged": false
+            }
+          ]
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:f91fb844b0b68133d26d8955d96b1dfea1e7492c697fbab57f7165ee65376174",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [],
+        "inconclusive": [
+          "inconclusive_manifest_partial_observation"
+        ]
+      }
+    },
+    {
+      "id": "removal_under_unknown_no_per_tool_finding",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": true,
+          "tools_list_complete": "unknown",
+          "tool_digests": [
+            {
+              "name": "search",
+              "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+              "privileged": false
+            }
+          ]
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:f91fb844b0b68133d26d8955d96b1dfea1e7492c697fbab57f7165ee65376174",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [],
+        "inconclusive": [
+          "inconclusive_manifest_partial_observation"
+        ]
+      }
+    },
+    {
+      "id": "added_under_partial_still_asserted",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": true,
+          "tools_list_complete": "partial",
+          "tool_digests": [
+            {
+              "name": "search",
+              "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+              "privileged": false
+            },
+            {
+              "name": "github.add_deploy_key",
+              "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+              "privileged": true
+            },
+            {
+              "name": "slack.add_member",
+              "tool_digest": "sha256:572794972d4751584b31553d126db4da487c1896a3b1ae627182befe661774c7",
+              "privileged": true
+            }
+          ]
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:f91fb844b0b68133d26d8955d96b1dfea1e7492c697fbab57f7165ee65376174",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [
+          {
+            "name": "slack.add_member",
+            "reason_code": "mcp_new_privileged_tool"
+          }
+        ],
+        "inconclusive": []
+      }
+    },
+    {
+      "id": "declared_self_inconsistent",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": true,
+          "tools_list_complete": "complete",
+          "tool_digests": [
+            {
+              "name": "search",
+              "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+              "privileged": false
+            },
+            {
+              "name": "github.add_deploy_key",
+              "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+              "privileged": true
+            }
+          ]
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [],
+        "inconclusive": [
+          "declared_manifest_digest_mismatch"
+        ]
+      }
+    },
+    {
+      "id": "server_id_mismatch",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": true,
+          "tools_list_complete": "complete",
+          "tool_digests": [
+            {
+              "name": "search",
+              "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+              "privileged": false
+            },
+            {
+              "name": "github.add_deploy_key",
+              "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+              "privileged": true
+            }
+          ]
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "gitlab"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:f91fb844b0b68133d26d8955d96b1dfea1e7492c697fbab57f7165ee65376174",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [],
+        "inconclusive": [
+          "mcp_manifest_server_mismatch"
+        ]
+      }
+    },
+    {
+      "id": "canonicalization_mismatch",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.other.v9",
+          "tools_list_observed": true,
+          "tools_list_complete": "complete",
+          "tool_digests": [
+            {
+              "name": "search",
+              "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+              "privileged": false
+            },
+            {
+              "name": "github.add_deploy_key",
+              "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+              "privileged": true
+            }
+          ]
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:f91fb844b0b68133d26d8955d96b1dfea1e7492c697fbab57f7165ee65376174",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [],
+        "inconclusive": [
+          "mcp_manifest_canonicalization_mismatch"
+        ]
+      }
+    },
+    {
+      "id": "duplicate_observed_names",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": true,
+          "tools_list_complete": "complete",
+          "tool_digests": [
+            {
+              "name": "search",
+              "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+              "privileged": false
+            },
+            {
+              "name": "search",
+              "tool_digest": "sha256:9eb6203435cb3e0033f544e3bf6f1b74b138c765fc489a38a092e8f7adbd9638",
+              "privileged": false
+            },
+            {
+              "name": "github.add_deploy_key",
+              "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+              "privileged": true
+            }
+          ]
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:f91fb844b0b68133d26d8955d96b1dfea1e7492c697fbab57f7165ee65376174",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [],
+        "inconclusive": [
+          "mcp_manifest_observation_ambiguous"
+        ]
+      }
+    },
+    {
+      "id": "duplicate_declared_names",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": true,
+          "tools_list_complete": "complete",
+          "tool_digests": [
+            {
+              "name": "search",
+              "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+              "privileged": false
+            },
+            {
+              "name": "github.add_deploy_key",
+              "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+              "privileged": true
+            }
+          ]
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:8a3fac05c93fe195bdb343817358f5c0757df1169ea787f7609f6b7a5445e8e2",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "search",
+            "tool_digest": "sha256:6059d4788210fbfb95dc5695570304467e078b8b09fcfad430cbd77a914724d1",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [],
+        "inconclusive": [
+          "declared_mcp_manifest_ambiguous"
+        ]
+      }
+    },
+    {
+      "id": "observed_not_observed",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "not_observed",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": false,
+          "tools_list_complete": "unknown",
+          "tool_digests": []
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:f91fb844b0b68133d26d8955d96b1dfea1e7492c697fbab57f7165ee65376174",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [],
+        "inconclusive": [
+          "inconclusive_manifest_not_observed"
+        ]
+      }
+    },
+    {
+      "id": "observed_ambiguous_status",
+      "observed": {
+        "schema": "assay.mcp_manifest_observed.v0",
+        "status": "ambiguous",
+        "server": {
+          "id": "github"
+        },
+        "observed": {
+          "canonicalization": "assay.mcp_manifest_projection.v0",
+          "tools_list_observed": true,
+          "tools_list_complete": "complete",
+          "tool_digests": []
+        }
+      },
+      "declared": {
+        "schema": "assay.declared_mcp_manifest.v0",
+        "server": {
+          "id": "github"
+        },
+        "canonicalization": "assay.mcp_manifest_projection.v0",
+        "manifest_digest": "sha256:f91fb844b0b68133d26d8955d96b1dfea1e7492c697fbab57f7165ee65376174",
+        "tools": [
+          {
+            "name": "search",
+            "tool_digest": "sha256:f69acbb7bce749bcef576c0a99c7eb34f3c18204ad1a2e53dd24d71f0c0a1fcf",
+            "privileged": false
+          },
+          {
+            "name": "github.add_deploy_key",
+            "tool_digest": "sha256:d03045bf0eaf02288a02ba0fd116867972fb64ce14f05075ea0eafcbb1a87cb1",
+            "privileged": true
+          }
+        ]
+      },
+      "expected": {
+        "findings": [],
+        "inconclusive": [
+          "mcp_manifest_observation_ambiguous"
+        ]
+      }
+    }
+  ]
+}
