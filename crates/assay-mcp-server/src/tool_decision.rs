@@ -122,6 +122,20 @@ fn unknown() -> Classified {
     }
 }
 
+/// The scope a classified action requires, derived deterministically from the action category. This
+/// is Assay's static claim about what the action needs, NOT a provider-verified grant requirement and
+/// NOT inferred from arguments. `None` for an unclassified tool (the consumer reads that as
+/// `required_scope_unknown`, never as "no scope needed"). A consumer compares this against the scopes
+/// an operator declared for the credential alias (see docs/reference/credential-scope.md).
+fn required_scope_for(category: Option<&str>) -> Option<&'static str> {
+    match category {
+        Some("github_deploy_key") => Some("repo:deploy_key:write"),
+        Some("slack_add_member") => Some("conversations:members:write"),
+        Some("workspace_admin") => Some("workspace:admin"),
+        _ => None,
+    }
+}
+
 fn incomplete(
     category: &'static str,
     verb: &'static str,
@@ -314,7 +328,10 @@ pub fn build_decision(call: &ObservedCall<'_>) -> Value {
             "resource_type": c.resource_type.map(Value::from).unwrap_or(Value::Null),
             // The target carries only named, allowlisted fields the classifier projected (sensitive
             // ids hashed under per-field domains); never raw args, never secret material.
-            "target": c.target
+            "target": c.target,
+            // Static scope this action requires (from the category, not the args). Null when
+            // unclassified: the consumer reads that as required_scope_unknown, never "no scope".
+            "required_scope": required_scope_for(c.category).map(Value::from).unwrap_or(Value::Null)
         },
         "decision": {
             "effect": call.effect.as_str(),
@@ -531,6 +548,43 @@ mod tests {
             json!(target_hash("workspace_principal", "bob@example.com"))
         );
         assert_eq!(t["role"], json!("admin"));
+    }
+
+    #[test]
+    fn required_scope_is_derived_from_category_not_args() {
+        let gh = build_decision(&call(
+            "github.add_deploy_key",
+            &json!({"owner": "org", "repo": "r"}),
+            Effect::Allow,
+            "success",
+        ));
+        assert_eq!(
+            gh["action"]["required_scope"],
+            json!("repo:deploy_key:write")
+        );
+
+        let sl = build_decision(&call(
+            "slack.add_member",
+            &json!({"workspace_id": "T", "user_id": "U"}),
+            Effect::Allow,
+            "success",
+        ));
+        assert_eq!(
+            sl["action"]["required_scope"],
+            json!("conversations:members:write")
+        );
+
+        let wa = build_decision(&call(
+            "workspace.grant_admin",
+            &json!({"workspace_id": "a", "principal": "p"}),
+            Effect::Allow,
+            "success",
+        ));
+        assert_eq!(wa["action"]["required_scope"], json!("workspace:admin"));
+
+        // Unclassified tool: null, never a scope and never "no scope needed".
+        let unk = build_decision(&call("misc.do_thing", &json!({}), Effect::Allow, "success"));
+        assert_eq!(unk["action"]["required_scope"], Value::Null);
     }
 
     #[test]

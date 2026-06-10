@@ -17,7 +17,8 @@
         "class": "unclassified",
         "verb": null,
         "resource_type": null,
-        "target": null
+        "target": null,
+        "required_scope": null
       },
       "decision": {
         "effect": "allow",

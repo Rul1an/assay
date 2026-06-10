@@ -22,7 +22,8 @@
           "workspace_id_hash": "sha256:2443f42f97a4e38e039eaab087b51040b31f61dfac89d7cf75d397cd2033675b",
           "principal_hash": "sha256:879a6f5abcca30d0334b3238baac9ea116a195b66d3d56eebf447552f8e1aede",
           "role": "admin"
-        }
+        },
+        "required_scope": "workspace:admin"
       },
       "decision": {
         "effect": "allow",

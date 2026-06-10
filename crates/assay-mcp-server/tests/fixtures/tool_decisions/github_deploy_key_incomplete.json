@@ -20,7 +20,8 @@
         "target": {
           "provider": "github",
           "owner": "org"
-        }
+        },
+        "required_scope": "repo:deploy_key:write"
       },
       "decision": {
         "effect": "allow",
