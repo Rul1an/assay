@@ -1,0 +1,47 @@
+{
+  "note": "recomputed in the guard test via assay_core::mcp::jcs; if these drift, verifier and fixtures disagree",
+  "per_tool": {
+    "projection": {
+      "name": "github.add_deploy_key",
+      "description": "Add a deploy key",
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "owner",
+          "repo"
+        ]
+      },
+      "output_schema": null,
+      "annotations": null
+    },
+    "expected_tool_digest": "sha256:03c7e1d546c3440fb100938dcaa7578ac34ae81f28e5762e7f8a3197e272a9f6"
+  },
+  "manifest": {
+    "projection_id": "assay.mcp_manifest_projection.v0",
+    "tools": [
+      {
+        "name": "search",
+        "description": "does a thing",
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": null,
+        "annotations": null
+      },
+      {
+        "name": "github.add_deploy_key",
+        "description": "Add a deploy key",
+        "input_schema": {
+          "type": "object",
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "output_schema": null,
+        "annotations": null
+      }
+    ],
+    "expected_manifest_digest": "sha256:f8a95098345d600f7a2d742c4e941ace5e9594918b2aa82a9a8f48f72f701ffa"
+  }
+}
