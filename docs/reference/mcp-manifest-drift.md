@@ -2,8 +2,8 @@
 
 Status: coarse path shipped — spec + fixtures + digest guard (P60a), the `assay-mcp-server` producer
 module (P60b), and the consumer coarse-drift gate (P60c, released in Plimsoll v0.8.0). Live upstream
-observation is parked behind a separate passthrough/proxy-mode design (see the topology finding below).
-Part of the [privileged-action evidence](privileged-action-evidence.md) set.
+observation now ships too, as the opt-in [manifest-observation proxy mode](mcp-upstream-proxy-mode.md)
+(assay v3.23.0). Part of the [privileged-action evidence](privileged-action-evidence.md) set.
 
 ## Why this exists
 
@@ -61,10 +61,11 @@ Tools are sorted by `name`, then by `tool_digest` if duplicate names ever occur.
 
 ## Observed manifest record (`assay.mcp_manifest_observed.v0`)
 
-Built by the producer from observed tool definitions. (The intended live source is the latest fully
-observed `tools/list`; capturing that on the wire is parked behind the passthrough/proxy-mode design —
-see the topology finding below.) Per-tool digests are diagnostic/supporting detail in v0; the v0
-consumer gate uses only the overall `manifest_digest` (per-tool drift reason codes are P60d/v1).
+Built by the producer from observed tool definitions. The live source is the latest fully observed
+`tools/list`, captured on the wire by the [manifest-observation proxy mode](mcp-upstream-proxy-mode.md)
+(assay v3.23.0); the producer also serves supplied-artifact review. Per-tool digests are
+diagnostic/supporting detail in v0; the v0 consumer gate uses only the overall `manifest_digest`
+(per-tool drift reason codes are P60d/v1).
 
 ```json
 {
@@ -189,14 +190,13 @@ A read-only investigation of `assay-mcp-server` settled where an observed `tools
 Conclusion: live manifest observation is **not** a small tap on an existing seam; it requires a new
 MCP upstream passthrough/proxy mode (config naming an upstream, a connection/child manager, a
 forwarding handler, and a `tools/list` that observes the upstream response and its pagination chain).
-That is its own design, specified separately before any code — see
-[mcp-upstream-proxy-mode.md](mcp-upstream-proxy-mode.md) (a manifest-observation proxy mode that
-forwards a tiny method allowlist only and never forwards privileged `tools/call`). Until such a mode
-exists, this feature
-stays artifact/file-based: a producer builds `assay.mcp_manifest_observed.v0` from observed tool
-definitions, and the consumer reviews a supplied artifact against a declared baseline. The producer is
-deliberately not wired to `tools::list_tools()` — the server's own served tools are not an observed
-upstream manifest, and emitting them as one would misstate what was observed.
+That was its own design, specified separately before any code, and **shipped in assay v3.23.0** as the
+opt-in [manifest-observation proxy mode](mcp-upstream-proxy-mode.md) (it forwards a tiny method
+allowlist only and never forwards privileged `tools/call`). The artifact/file-based path remains too: a
+producer builds `assay.mcp_manifest_observed.v0` from observed tool definitions, and the consumer
+reviews a supplied artifact against a declared baseline. The producer is deliberately not wired to
+`tools::list_tools()` — the server's own served tools are not an observed upstream manifest, and
+emitting them as one would misstate what was observed.
 
 ## PR sequence
 
@@ -204,7 +204,7 @@ upstream manifest, and emitting them as one would misstate what was observed.
 P60a   spec + fixtures + canonicalization examples + a digest-recompute guard test
 P60b   producer: assay-mcp-server manifest_observed module emits assay.mcp_manifest_observed.v0
 P60c   Plimsoll: coarse drift gate -> pending_tool_manifest_review (opt-in, coverage-gated)
-P60b2  live observation: topology finding (above) -> requires a separate MCP passthrough/proxy mode
+P60b2  live observation: topology finding (above) -> manifest-observation proxy mode (SHIPPED v3.23.0)
 P60d   granular per-tool drift v1 + assay.declared_mcp_manifest.v0 (per-tool expected digests)
 ```
 

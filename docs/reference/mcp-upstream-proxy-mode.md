@@ -1,11 +1,16 @@
-# MCP upstream proxy mode — manifest-observation v0 (P61a)
+# MCP upstream proxy mode — manifest-observation v0 (P61)
 
-Status: review-spec, no code (P61a). This is a **new arc (P61), not a P60 slice.** It answers the
-question the P60 manifest-drift work parked: how does Assay observe a live upstream MCP tool surface at
-all? The answer requires a proxy, and a credential-bearing proxy is a security-load-bearing component,
-so the design is fixed here before any code. Related: [mcp-manifest-drift.md](mcp-manifest-drift.md)
-(the artifact this mode would feed) and the [privileged-action evidence](privileged-action-evidence.md)
-set.
+Status: **shipped in assay v3.23.0** — manifest-observation v0 (P61a design, P61b forwarding skeleton,
+P61c live `tools/list` observation + `assay.mcp_manifest_observed.v0` emission, P61d denied-method
+hardening). The enforcing `tools/call` proxy (P61e) is a separate, not-yet-specified arc — a heavier
+security boundary (caller authorization, upstream credential use, a policy decision before forwarding,
+confused-deputy prevention, `proxy_denied` semantics, side-effect-evidence interaction) that needs its
+own review-spec before any code. This doc remains the design of record for the shipped manifest-
+observation mode. Related: [mcp-manifest-drift.md](mcp-manifest-drift.md) (the artifact this mode
+feeds) and the [privileged-action evidence](privileged-action-evidence.md) set.
+
+The P61 v0 proxy is an opt-in manifest-observation proxy. It observes upstream `tools/list` traffic
+and emits manifest evidence with honest completeness. It does not execute tools through the proxy.
 
 ## The decision (Q1): terminating server vs upstream proxy
 
@@ -207,14 +212,14 @@ classification.
 ## PR sequence (P61) — no privileged `tools/call` forwarding in P61b–d
 
 ```
-P61a  this proxy-mode spec (design doc, no code)
+P61a  this proxy-mode spec (design doc, no code)                                            [SHIPPED v3.23.0]
 P61b  stdio upstream connection manager + initialize/initialized + tools/list forwarding (allowlist),
-      no-token-passthrough invariant + failure semantics + the negative forwarding invariant tested
-P61c  tools/list pagination tracker + emit assay.mcp_manifest_observed.v0 + proxy observation-health
+      no-token-passthrough invariant + failure semantics + the negative forwarding invariant tested  [SHIPPED v3.23.0]
+P61c  tools/list pagination tracker + emit assay.mcp_manifest_observed.v0 + proxy observation-health   [SHIPPED v3.23.0]
 P61d  explicit proxy_unsupported behavior for tools/call (and non-allowlisted methods) in
-      manifest-observation mode, with tests proving privileged calls are never forwarded
+      manifest-observation mode, with tests proving privileged calls are never forwarded               [SHIPPED v3.23.0]
 P61e  LATER, separate arc: enforcing tools/call proxy with a fail-closed policy decision point and the
-      full confused-deputy mitigations — only if/when specified
+      full confused-deputy mitigations — only if/when specified (review-spec first)                    [NOT STARTED]
 ```
 
 P61b carries the **negative forwarding invariant test from day one**: a `tools/call` sent in

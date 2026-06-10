@@ -68,20 +68,24 @@ declared-vs-observed gate; credential-scope evidence; the side-effect receipt sp
 that ranks the side-effect ladder (`asserted` / `observed_confirmed` / `audit_record_bound`); and the
 MCP tool-manifest **coarse** drift path — a producer that builds `assay.mcp_manifest_observed.v0` from
 observed tool definitions and a consumer that reviews a supplied artifact against a declared
-manifest-digest baseline, resolving a mismatch to `pending_tool_manifest_review`.
+manifest-digest baseline, resolving a mismatch to `pending_tool_manifest_review`; and (assay v3.23.0)
+the **MCP upstream manifest-observation proxy mode**, which observes a live upstream `tools/list` and
+emits that artifact with honest completeness, while never executing tools through the proxy (see
+[mcp-upstream-proxy-mode.md](mcp-upstream-proxy-mode.md)).
 
 **Experiment-only (characterized, not a shipped feature):** the credential-overbreadth distribution
 (the scope lattice is a static model, not a provider-verified taxonomy); MCP tool lifecycle; and an
 OTel log-based event projection.
 
-**Parked (needs a separate design before any code):** live upstream manifest observation, and
-granular per-tool manifest drift.
+**Parked (needs a separate design before any code):** granular per-tool manifest drift; and the
+enforcing `tools/call` proxy (a heavier security boundary — caller authorization, upstream credential
+use, a policy decision before forwarding, confused-deputy prevention — that needs its own review-spec).
 
-The load-bearing boundary for the manifest line: **the tool-manifest path is complete for supplied
-artifacts. Live upstream observation is not a small wiring step — `assay-mcp-server` today terminates
-the protocol and serves its own tools, so observing an upstream manifest on the wire requires a
-separate MCP upstream passthrough/proxy-mode design (JSON-RPC forwarding, the auth/token boundary,
-server identity, `tools/list` pagination, the policy decision point, response observation, and
-confused-deputy risks).** Until that mode exists, the manifest path stays artifact/file-based, and the
-producer is deliberately not wired to the server's own served tools — they are not an observed
-upstream manifest. See [mcp-manifest-drift.md](mcp-manifest-drift.md) for the topology finding.
+The load-bearing boundary for the manifest line: **live upstream observation was not a small wiring
+step.** `assay-mcp-server` terminates the protocol and serves its own tools, so observing an upstream
+manifest on the wire needed a dedicated mode, delivered in v3.23.0 as the opt-in
+[manifest-observation proxy](mcp-upstream-proxy-mode.md) (it forwards a tiny allowlist, observes
+`tools/list` with honest completeness, and never forwards `tools/call`). The artifact/file-based path
+remains for supplied artifacts, and the producer is still not wired to the server's own served tools —
+they are not an observed upstream manifest. See [mcp-manifest-drift.md](mcp-manifest-drift.md) for the
+topology finding that led here.
