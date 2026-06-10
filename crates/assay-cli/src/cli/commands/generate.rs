@@ -3,11 +3,11 @@
 //! # Usage
 //! ```bash
 //! # Single-run mode
-//! assay generate -i trace.jsonl --heuristics
+//! assay policy generate -i trace.jsonl --heuristics
 //!
 //! # Profile mode (stability analysis)
-//! assay generate --profile profile.yaml --min-stability 0.8
-//! assay generate --profile profile.yaml --min-stability 0.8 --new-is-risky
+//! assay policy generate --profile profile.yaml --min-stability 0.8
+//! assay policy generate --profile profile.yaml --min-stability 0.8 --new-is-risky
 //! ```
 
 use anyhow::Result;

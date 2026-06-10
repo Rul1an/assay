@@ -149,8 +149,8 @@ Files changed:
 When regenerating policy from new traces, show what changed.
 
 ```bash
-assay generate --input trace.jsonl --diff           # Compare with existing policy.yaml
-assay generate --input trace.jsonl --diff --dry-run  # Preview without writing
+assay policy generate --input trace.jsonl --diff           # Compare with existing policy.yaml
+assay policy generate --input trace.jsonl --diff --dry-run  # Preview without writing
 ```
 
 Output:

@@ -2,9 +2,7 @@
 
 Generate policy scaffolding from trace or profile inputs.
 
-The legacy top-level form `assay generate` remains available as a hidden
-compatibility shim and prints a deprecation warning. New usage should prefer
-`assay policy generate`.
+The legacy top-level form `assay generate` was removed; use `assay policy generate`.
 
 ---
 

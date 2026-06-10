@@ -76,4 +76,4 @@ schemas:
 
 - **Export evidence**: `assay evidence export --profile profile.yaml --out evidence.tar.gz`
 - **Add to CI**: copy the [GitHub Action snippet](../../README.md#gate-your-ci) to your workflow
-- **Generate policy from behavior**: `assay generate --from-trace trace.jsonl`
+- **Generate policy from behavior**: `assay policy generate --from-trace trace.jsonl`

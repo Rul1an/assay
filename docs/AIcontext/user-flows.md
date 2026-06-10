@@ -155,7 +155,7 @@ assay run --config eval.yaml --trace-file traces.jsonl
 ```mermaid
 flowchart TD
     start[Start Policy Development] --> profile[Capture Command Behavior]
-    profile --> record[assay record --output policy.yaml -- command]
+    profile --> record[assay policy record --output policy.yaml -- command]
     record --> policy[Generated policy.yaml]
     policy --> review[Review & Refine]
     review --> test[Test with traces]
@@ -167,8 +167,8 @@ flowchart TD
 
 **Learning Mode Commands:**
 
-1. **Capture + generate policy**: `assay record --output policy.yaml -- <your-command>`
-2. **Optional generate from existing trace**: `assay generate -i traces.jsonl --output policy.yaml`
+1. **Capture + generate policy**: `assay policy record --output policy.yaml -- <your-command>`
+2. **Optional generate from existing trace**: `assay policy generate -i traces.jsonl --output policy.yaml`
 3. **Review**: Edit generated policy to add custom constraints
 4. **Test**: `assay validate --config eval.yaml --trace-file traces.jsonl`
 5. **Deploy**: Commit policy.yaml to repository
@@ -442,7 +442,7 @@ See [CI Infrastructure](ci-infrastructure.md) for detailed documentation.
 | First-time setup | Flow 1 | `assay init` |
 | CI integration | Flow 2 | `Rul1an/assay/assay-action@v2` |
 | Recording traces | Flow 3 | `AssayClient` or `assay import` |
-| Policy development | Flow 4 | `assay generate` |
+| Policy development | Flow 4 | `assay policy generate` |
 | Production security | Flow 5 | `assay mcp wrap` + `assay monitor` |
 | Regression testing | Flow 6 | `assay run --baseline` |
 | Python development | Flow 7 | Python SDK |

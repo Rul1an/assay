@@ -2,9 +2,9 @@
 
 Policy authoring, validation, formatting, and migration commands.
 
-The policy family now owns policy-authoring commands. The legacy top-level
-forms `assay generate` and `assay record` remain available as hidden
-compatibility shims and print deprecation warnings.
+The policy family owns policy-authoring commands. The legacy top-level forms
+`assay generate` and `assay record` were removed; use `assay policy generate`
+and `assay policy record`.
 
 ---
 
@@ -52,9 +52,7 @@ assay policy validate --input policy.yaml
 
 ## Compatibility
 
-- `assay generate ...` still runs as a hidden compatibility shim for
-  `assay policy generate ...`.
-- `assay record ...` still runs as a hidden compatibility shim for
-  `assay policy record ...`.
+- The legacy top-level `assay generate ...` and `assay record ...` paths were
+  removed; use `assay policy generate ...` and `assay policy record ...`.
 - Output shapes, exit codes, generated policy behavior, and policy schema
   semantics are unchanged.
