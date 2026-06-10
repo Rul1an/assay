@@ -26,13 +26,15 @@ v0 is a **manifest-observation proxy**. It exists to observe a live upstream too
 more:
 
 - forwards the `initialize` / `initialized` handshake to the upstream;
-- forwards `tools/list` (and read/list operations on an explicit allowlist) and observes the response
-  read-only;
+- forwards `tools/list` and observes the response read-only (the full v0 allowlist is below);
 - tracks the `tools/list` pagination chain and emits `assay.mcp_manifest_observed.v0` (the P60b
   producer), with honest completeness;
-- **does not forward privileged `tools/call`.** A `tools/call` (and any mutating method not on the
-  allowlist) returns a distinct proxy-space `proxy_unsupported` response and is never relayed to the
-  upstream.
+- **does not forward privileged `tools/call`.** A `tools/call` (and any method not on the allowlist)
+  returns a distinct proxy-space `proxy_unsupported` response and is never relayed to the upstream.
+
+**Scope guard (state this whenever P61a is cited):** P60 remains artifact/file-based until P61 exists.
+P61 v0 only enables live upstream manifest observation. P61 v0 does **not** enable tool-call execution
+through the proxy.
 
 **There is no observe-only forwarding of privileged `tools/call` in v0.** A proxy that holds upstream
 credentials and relays privileged calls without a blocking decision is the confused-deputy trap. So
@@ -42,9 +44,8 @@ a separate later arc (P61e), not part of this mode.
 
 ## Claim and non-claims
 
-**Claim (v0):** in an explicit, opt-in proxy mode against one configured stdio upstream,
-`assay-mcp-server` forwards the session handshake and list/read operations, observes the upstream
-`tools/list` read-only, and emits the live observed tool manifest with honest completeness.
+**Claim (v0):** Assay can observe the live upstream `tools/list` surface in an explicit stdio proxy
+mode and emit manifest evidence with honest completeness.
 
 **Non-claims:**
 - **does not support privileged `tools/call` forwarding in v0** (it is explicitly unsupported, not
@@ -76,17 +77,21 @@ MCP client  ──stdio──►  assay-mcp-server (proxy mode, v0)  ──stdio
 
 ## Forwarding semantics (v0)
 
-- **Method allowlist.** v0 forwards only: `initialize`, `notifications/initialized`, `tools/list`, and
-  a bounded set of read/list operations (e.g. `ping`, and other non-mutating list/read methods) on an
-  explicit allowlist. Everything else — first and foremost `tools/call` — is **not** forwarded.
+- **Method allowlist (exhaustive for v0).** v0 forwards only these methods: `initialize`,
+  `notifications/initialized`, `ping`, `tools/list`, and the `notifications/tools/list_changed`
+  notification. Nothing else is forwarded — first and foremost `tools/call`. There are deliberately no
+  other read/list methods in v0: the goal is live manifest observation, not general read-only MCP
+  forwarding, and "is this list/read method safe — could it return data/PII/secrets?" is a question v0
+  refuses to open. A broader allowlist is a future decision, not v0.
 - **id correlation.** 1:1 request-id passthrough; the proxy originates **no** requests of its own in
   v0 (no relisting on the client's behalf), so there is no id remapping.
 - **notifications.** forwarded in the correct direction; `notifications/tools/list_changed` is observed
   as a run fact (see manifest observation) and passed through.
 - **handshake.** `initialize`/`initialized` are forwarded so the client negotiates capabilities with
   the real upstream; the proxy observes the negotiated capabilities, never fakes them.
-- **no response mutation.** the proxy never alters a forwarded response. The only client-visible
-  responses the proxy *originates* are proxy-space deny/failure/unsupported (below).
+- **no mutation of forwarded responses.** the proxy never mutates forwarded upstream responses. The
+  only client-visible responses originated by the proxy are proxy-space failure/unsupported responses
+  (and, in the future enforcing arc, `proxy_denied`).
 - **unsupported methods.** a non-allowlisted method (including `tools/call`) gets a `proxy_unsupported`
   error, never a silent relay and never a fabricated success.
 
@@ -134,9 +139,8 @@ them:
   trivially — no privileged `tools/call` is forwarded, so caller-induced privileged upstream actions
   cannot occur. Any future forwarding arc (P61e) must add **per-caller authorization at a policy
   decision point before forwarding**, least-privilege on the upstream credential (ties into the shipped
-  credential-scope evidence), and must not upgrade or broaden caller authority (aligned at concept
-  level with the MCP authorization direction: audience-bound tokens, resource indicators). No silent
-  mixing of Assay's own tools with the upstream's tools (a spoofing/poisoning vector).
+  credential-scope evidence), and must not upgrade or broaden caller authority. No silent mixing of
+  Assay's own tools with the upstream's tools (a spoofing/poisoning vector).
 
 ## Failure semantics
 
@@ -186,13 +190,18 @@ classification.
 ```
 P61a  this proxy-mode spec (design doc, no code)
 P61b  stdio upstream connection manager + initialize/initialized + tools/list forwarding (allowlist),
-      no-token-passthrough invariant + failure semantics tested
+      no-token-passthrough invariant + failure semantics + the negative forwarding invariant tested
 P61c  tools/list pagination tracker + emit assay.mcp_manifest_observed.v0 + proxy observation-health
 P61d  explicit proxy_unsupported behavior for tools/call (and non-allowlisted methods) in
       manifest-observation mode, with tests proving privileged calls are never forwarded
 P61e  LATER, separate arc: enforcing tools/call proxy with a fail-closed policy decision point and the
       full confused-deputy mitigations — only if/when specified
 ```
+
+P61b carries the **negative forwarding invariant test from day one**: a `tools/call` sent in
+manifest-observation mode → the upstream receives nothing → the client gets `proxy_unsupported`. The
+"never forward privileged calls observe-only" invariant must be testable the moment a forwarding layer
+exists; P61d then expands the non-allowlisted-method matrix and its docs.
 
 ## Design rules (binding for the whole arc)
 
