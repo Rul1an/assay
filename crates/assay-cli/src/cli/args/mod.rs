@@ -87,10 +87,10 @@ pub enum Command {
     Version,
     /// Validate, format, and migrate policies
     Policy(PolicyArgs),
-    /// Discover MCP servers on this machine (v1.8)
+    /// Discover MCP servers on this machine
     #[command(hide = true)]
     Discover(DiscoverArgs),
-    /// Kill/Terminate MCP servers (v1.8)
+    /// Kill/Terminate MCP servers
     #[command(hide = true)]
     Kill(super::commands::kill::KillArgs),
     /// Runtime eBPF Monitor (Linux only)
@@ -107,7 +107,7 @@ pub enum Command {
     RunnerSpike(super::commands::runner_spike::RunnerSpikeArgs),
     /// Manage multi-run profiles for stability analysis
     Profile(super::commands::profile::ProfileArgs),
-    /// Secure execution sandbox (v0.1)
+    /// Run a command in a sandbox with optional Landlock filesystem and TCP-connect egress enforcement
     Sandbox(SandboxArgs),
     /// Evidence bundles, imports, verification, and stores
     Evidence(EvidenceArgs),
@@ -118,7 +118,7 @@ pub enum Command {
     /// Attack Simulation (Hardening/Compliance)
     #[cfg(feature = "sim")]
     Sim(SimArgs),
-    /// Interactive installer and environment setup (Phase 2)
+    /// Interactive installer and environment setup
     Setup(SetupArgs),
     /// Tool signing and verification
     #[command(hide = true)]
