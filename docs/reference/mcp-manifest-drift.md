@@ -67,7 +67,8 @@ Plimsoll gate uses only the overall `manifest_digest` (per-tool drift reason cod
 ```json
 {
   "schema": "assay.mcp_manifest_observed.v0",
-  "server": { "id": "github", "declared_manifest_digest": "sha256:..." },
+  "status": "observed",
+  "server": { "id": "github" },
   "observed": {
     "manifest_digest": "sha256:...",
     "canonicalization": "assay.mcp_manifest_projection.v0",
@@ -93,6 +94,15 @@ Plimsoll gate uses only the overall `manifest_digest` (per-tool drift reason cod
   ]
 }
 ```
+
+### `status` (enum: `observed` | `not_observed` | `ambiguous`)
+
+The top-level observation state, so the consumer never has to infer it:
+- `observed` — a `tools/list` was observed; `manifest_digest` is computed;
+- `not_observed` — no `tools/list` was observed; an artifact state, never a missing file. `manifest_digest`
+  is null, `tools_list_observed` false, `tools_list_complete` unknown, `tool_digests` empty;
+- `ambiguous` — the observed list has duplicate tool names. `manifest_digest` is null (an ambiguous
+  identity is never claimed clean), but per-tool detail and counts are still carried.
 
 ### `tools_list_complete` (enum: `complete` | `partial` | `unknown`)
 
@@ -146,11 +156,26 @@ No per-tool granular drift reason codes (P60d/v1), no behavior-drift detection, 
 no automatic block on legitimate description churn, no maliciousness classification, no pre-flight
 scan.
 
+## Producer (P60b)
+
+`assay-mcp-server` carries the producer module (`manifest_observed`) that builds this record from
+observed tool definitions. It reuses exactly the P60a canonicalization, so it reproduces the committed
+P60a digests byte-for-byte (a cross-layer guard test feeds the canonical-example raw tool definitions
+through the producer and asserts the committed `tool_digest`/`manifest_digest`). `privileged` is taken
+from the P57c classifier keyed on the tool name (the server's annotations ride into the digest but
+never decide privilege); `tools_list_complete` is supplied by the observer and never guessed here;
+duplicate names produce `status: ambiguous` with a null `manifest_digest`. The producer decides
+nothing about whether drift matters — baseline comparison and verdicts are the consumer's job (P60c).
+
+The live observation wiring — capturing a proxied `tools/list` (including the full pagination chain to
+prove `complete`) and an output path/flag — is the next slice; P60b lands the producer and its
+exact-digest guarantee.
+
 ## PR sequence
 
 ```
-P60a  this spec + fixtures + canonicalization examples + a digest-recompute guard test
-P60b  producer: assay-mcp-server emits assay.mcp_manifest_observed.v0 (digest-only gate input, coverage)
+P60a  spec + fixtures + canonicalization examples + a digest-recompute guard test
+P60b  producer: assay-mcp-server manifest_observed module emits assay.mcp_manifest_observed.v0
 P60c  Plimsoll: coarse drift gate -> pending_tool_manifest_review (opt-in, coverage-gated)
 P60d  granular per-tool drift v1 + assay.declared_mcp_manifest.v0 (per-tool expected digests)
 ```
