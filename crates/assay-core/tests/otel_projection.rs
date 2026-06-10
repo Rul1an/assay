@@ -284,3 +284,40 @@ fn bless_golden_fixture() {
     )
     .unwrap();
 }
+
+/// #1408: the projection must map high-volume evidence to SPANS, never to span-events on a single
+/// span. The OTel span-event count limit (default 128) silently drops events beyond the cap, and
+/// (per the characterization in docs/reference/otel-span-event-limit.md) drops the OLDEST first. By
+/// emitting one span per tool/decision and carrying detail in attributes, the projection never relies
+/// on span-events, so that limit does not apply to it. This test guards that invariant: a future
+/// change that introduced an `events` array on a span would regress it.
+#[test]
+fn projection_maps_volume_to_spans_not_span_events() {
+    let tools: Vec<String> = (0..200).map(|i| format!("tool_{i}")).collect();
+    let surface = json!({
+        "schema": "assay.runner.capability_surface.v0",
+        "mcp_tools": tools,
+        "policy_decisions": []
+    });
+    let p = project(&surface, None, None);
+    // High tool count becomes many spans, not many events on one span.
+    let tool_spans = p
+        .spans
+        .iter()
+        .filter(|s| s.name.starts_with("execute_tool "))
+        .count();
+    assert_eq!(
+        tool_spans, 200,
+        "each observed tool must project to its own span"
+    );
+
+    // No span carries an `events` array: the projection has no span-event surface to overflow.
+    let value = serde_json::to_value(&p).unwrap();
+    for span in value["spans"].as_array().unwrap() {
+        assert!(
+            span.get("events").is_none(),
+            "projected spans must not carry span-events (would be subject to the OTel 128-event \
+             drop limit); found events on span {span:?}"
+        );
+    }
+}

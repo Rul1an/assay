@@ -1,0 +1,139 @@
+{
+  "schema": "assay.experiment.otel_span_event_limit.v0",
+  "otel_sdk": {
+    "language": "python",
+    "package": "opentelemetry-sdk",
+    "version": "1.42.1"
+  },
+  "default_max_events": 128,
+  "routes": {
+    "default": {
+      "max_events": 128,
+      "cases": [
+        {
+          "events_in": 0,
+          "events_exported": 0,
+          "events_dropped": 0,
+          "event_order_policy_observed": "n/a",
+          "first_kept": null,
+          "last_kept": null
+        },
+        {
+          "events_in": 1,
+          "events_exported": 1,
+          "events_dropped": 0,
+          "event_order_policy_observed": "first_n",
+          "first_kept": "ev_0",
+          "last_kept": "ev_0"
+        },
+        {
+          "events_in": 127,
+          "events_exported": 127,
+          "events_dropped": 0,
+          "event_order_policy_observed": "first_n",
+          "first_kept": "ev_0",
+          "last_kept": "ev_126"
+        },
+        {
+          "events_in": 128,
+          "events_exported": 128,
+          "events_dropped": 0,
+          "event_order_policy_observed": "first_n",
+          "first_kept": "ev_0",
+          "last_kept": "ev_127"
+        },
+        {
+          "events_in": 129,
+          "events_exported": 128,
+          "events_dropped": 1,
+          "event_order_policy_observed": "last_n",
+          "first_kept": "ev_1",
+          "last_kept": "ev_128"
+        },
+        {
+          "events_in": 256,
+          "events_exported": 128,
+          "events_dropped": 128,
+          "event_order_policy_observed": "last_n",
+          "first_kept": "ev_128",
+          "last_kept": "ev_255"
+        },
+        {
+          "events_in": 512,
+          "events_exported": 128,
+          "events_dropped": 384,
+          "event_order_policy_observed": "last_n",
+          "first_kept": "ev_384",
+          "last_kept": "ev_511"
+        }
+      ]
+    },
+    "configured_512": {
+      "max_events": 512,
+      "cases": [
+        {
+          "events_in": 0,
+          "events_exported": 0,
+          "events_dropped": 0,
+          "event_order_policy_observed": "n/a",
+          "first_kept": null,
+          "last_kept": null
+        },
+        {
+          "events_in": 1,
+          "events_exported": 1,
+          "events_dropped": 0,
+          "event_order_policy_observed": "first_n",
+          "first_kept": "ev_0",
+          "last_kept": "ev_0"
+        },
+        {
+          "events_in": 127,
+          "events_exported": 127,
+          "events_dropped": 0,
+          "event_order_policy_observed": "first_n",
+          "first_kept": "ev_0",
+          "last_kept": "ev_126"
+        },
+        {
+          "events_in": 128,
+          "events_exported": 128,
+          "events_dropped": 0,
+          "event_order_policy_observed": "first_n",
+          "first_kept": "ev_0",
+          "last_kept": "ev_127"
+        },
+        {
+          "events_in": 129,
+          "events_exported": 129,
+          "events_dropped": 0,
+          "event_order_policy_observed": "first_n",
+          "first_kept": "ev_0",
+          "last_kept": "ev_128"
+        },
+        {
+          "events_in": 256,
+          "events_exported": 256,
+          "events_dropped": 0,
+          "event_order_policy_observed": "first_n",
+          "first_kept": "ev_0",
+          "last_kept": "ev_255"
+        },
+        {
+          "events_in": 512,
+          "events_exported": 512,
+          "events_dropped": 0,
+          "event_order_policy_observed": "first_n",
+          "first_kept": "ev_0",
+          "last_kept": "ev_511"
+        }
+      ]
+    }
+  },
+  "non_claims": [
+    "characterized behavior of one SDK (python opentelemetry-sdk), not all OTel SDKs",
+    "does not prove backend-specific retention or drop reporting",
+    "does not change assay.otel_projection.v0 semantics",
+    "the assay projection emits spans, not span-events, so this limit does not apply to it today"
+  ]
+}
