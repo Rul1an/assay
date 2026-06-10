@@ -21,7 +21,8 @@ struct Args {
 enum Mode {
     /// Run as an MCP upstream proxy (manifest-observation v0): forward a tiny method allowlist to a
     /// stdio upstream and deny everything else (tools/call included). This mode does NOT execute tool
-    /// calls through the proxy and emits no manifest artifact yet. --policy-root is unused here.
+    /// calls through the proxy; it observes the upstream tools/list and (with --mcp-manifest-observed-out)
+    /// emits manifest evidence only. --policy-root is unused here.
     Proxy {
         /// The upstream MCP server command to spawn (stdio transport).
         #[arg(long)]
@@ -30,6 +31,15 @@ enum Mode {
         /// upstream command can take its own flags (e.g. `--upstream-arg -u`).
         #[arg(long = "upstream-arg", allow_hyphen_values = true)]
         upstream_args: Vec<String>,
+        /// Write the observed tool manifest (assay.mcp_manifest_observed.v0) to this path at shutdown
+        /// (and on each completed tools/list chain). When set and no tools/list is observed, a
+        /// status:not_observed artifact is written — never an absent file.
+        #[arg(long)]
+        mcp_manifest_observed_out: Option<PathBuf>,
+        /// Write a small proxy observation-health record (assay.proxy_observation_health.v0) to this
+        /// path at shutdown: how complete the observation was, separate from the manifest itself.
+        #[arg(long)]
+        proxy_observation_health_out: Option<PathBuf>,
     },
 }
 
@@ -62,13 +72,21 @@ async fn main() -> Result<()> {
         Some(Mode::Proxy {
             upstream_command,
             upstream_args,
+            mcp_manifest_observed_out,
+            proxy_observation_health_out,
         }) => {
             tracing::info!(
                 event = "proxy_start",
                 upstream_command = %upstream_command,
                 mode = "manifest_observation_v0"
             );
-            proxy::run(upstream_command, upstream_args).await
+            proxy::run(
+                upstream_command,
+                upstream_args,
+                mcp_manifest_observed_out,
+                proxy_observation_health_out,
+            )
+            .await
         }
         None => {
             tracing::info!(
