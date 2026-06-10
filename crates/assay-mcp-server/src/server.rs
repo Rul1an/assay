@@ -363,6 +363,46 @@ impl Server {
                             }
                         }
 
+                        // P57b: emit the observed tool decision (assay.tool_decision_surface.v0) as
+                        // its own structured event. Redaction and the asserted-vs-verified rule are
+                        // enforced inside build_decision; this site never has SaaS-verified evidence.
+                        {
+                            use crate::tool_decision::{build_decision, Effect, ObservedCall};
+                            let (effect, status) = match &result {
+                                Ok(val) => {
+                                    let allowed = val
+                                        .get("allowed")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false);
+                                    if let Some(code) = val
+                                        .get("error")
+                                        .and_then(|e| e.get("code"))
+                                        .and_then(|v| v.as_str())
+                                    {
+                                        (Effect::Error, code.to_string())
+                                    } else if allowed {
+                                        (Effect::Allow, "success".to_string())
+                                    } else {
+                                        (Effect::Deny, "blocked".to_string())
+                                    }
+                                }
+                                Err(_) => (Effect::Error, "crash".to_string()),
+                            };
+                            let decision = build_decision(&ObservedCall {
+                                server_id: "mcp",
+                                tool_name: name,
+                                effect,
+                                status: &status,
+                                rule_id: None,
+                            });
+                            tracing::info!(
+                                event = "tool_decision",
+                                rid = %rid,
+                                rpc_id = ?req.id,
+                                decision = %serde_json::to_string(&decision).unwrap_or_default(),
+                            );
+                        }
+
                         match result {
                             Ok(res) => {
                                 // MCP Compliance: Wrap result in CallToolResult structure
