@@ -53,9 +53,10 @@ Repository state observed on 2026-06-11:
     skips;
   - kernel/eBPF gating that avoids self-hosted runner work unless relevant;
   - delegated runner lane proof for selected runner-sensitive PRs.
-- Existing required-branch-protection guidance in
-  `docs/BRANCH-PROTECTION-SETUP.md` recommends `CI` as the minimal required
-  status check, with other checks visible and reviewed when relevant.
+- Live branch protection on `main`, observed through GitHub on 2026-06-11,
+  requires `CI`, `lane-check`, and `host-capability-check` with strict
+  up-to-date status checks enabled. `docs/BRANCH-PROTECTION-SETUP.md` should
+  stay reconciled with that live state.
 - Existing public docs and evidence artifacts include guides, references,
   receipt schemas, MCP proxy docs, runner fixtures, experiment reports, JUnit,
   SARIF, Trust Basis output, and compressed evidence examples.
@@ -177,6 +178,16 @@ Logging contract:
 
 The guard is a backstop, not a guarantee. Human public-artifact review remains
 primary because fixed matchers miss variants, spacing, morphology, and context.
+
+Relationship to the existing public/private boundary guard:
+
+- The existing CI boundary guard protects repository policy vocabulary and
+  product-boundary drift in source-visible surfaces.
+- The public-artifact sanitization guard is broader: it treats every
+  non-generated public file or emitted public artifact as a publication
+  candidate and prevents private vocabulary from leaving the repo boundary.
+- If both guards inspect the same file, either one may fail the PR; neither
+  should suppress or downgrade the other.
 
 ### Claims And Evidence Boundary Guard
 
@@ -353,9 +364,11 @@ Before making any branch-protection changes:
 4. Treat future job renames as breaking changes because they can silently
    un-gate protected branches.
 
-Current documented minimal required context:
+Currently required live branch-protection contexts:
 
 - `CI`
+- `lane-check`
+- `host-capability-check`
 
 Context groups that should stay visible and reviewed when relevant:
 
@@ -366,7 +379,6 @@ Context groups that should stay visible and reviewed when relevant:
 - `Smoke Install (E2E)`
 - `Parity Tests`
 - `assay-action-contract-tests`
-- `Assay-Runner Lane Check`
 - `Split Wave 0 Gates`
 
 Do not require a workflow by branch protection if that workflow uses top-level
