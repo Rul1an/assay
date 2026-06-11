@@ -395,6 +395,14 @@ Proposed required context names for the next branch-protection review:
 Checked-in ruleset activation lives at
 `.github/rulesets/main-required-ci-contexts.json`.
 
+Import note: the checked-in ruleset is config-as-code only until imported in
+GitHub settings. It intentionally mirrors the current live branch protection for
+`CI`, `lane-check`, and `host-capability-check`, so importing it does not weaken
+the existing required-check set. Add `bypass_actors` only if the repository
+owner intentionally wants to preserve an admin bypass path; otherwise
+`strict_required_status_checks_policy: true` means merges must be rebased-current
+and green.
+
 Do not make these required in this slice:
 
 - Manual, release-only, scheduled-only, or host-capability-specific jobs.
