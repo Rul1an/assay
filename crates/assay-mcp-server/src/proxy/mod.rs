@@ -42,19 +42,19 @@ const ALLOWLIST: &[&str] = &[
 // are unambiguously distinguishable from upstream errors regardless of code.
 const PROXY_UNSUPPORTED: i32 = -32040;
 const PROXY_FAILED: i32 = -32041;
-// PROXY_DENIED: a P61e enforcing-mode policy denial. P61e-c1 replaces the single deny-all boundary
-// with the caller-allowance PDP, so the `reason` is now the precedence-pinned gate that fired
-// (unclassified_tool_call / classification_incomplete / no_declared_allowance / pdp_gate_unavailable).
+// PROXY_DENIED: a P61e enforcing-mode policy denial. The `reason` is the precedence-pinned gate that
+// fired (unclassified_tool_call / classification_incomplete / no_declared_allowance /
+// credential_scope_insufficient / credential_scope_unknown / manifest_baseline_missing /
+// manifest_current_observation_incomplete / manifest_drifted_since_approval).
 const PROXY_DENIED: i32 = -32042;
 
 const HEALTH_SCHEMA: &str = "assay.proxy_observation_health.v0";
 
 /// Proxy run mode. Observe (P61a-d, shipped) forwards the allowlist and answers `tools/call` with
-/// `proxy_unsupported`. Enforce runs the c1 caller-allowance PDP on every `tools/call`: the call is
-/// classified and denied with the precedence-pinned reason of the first gate that fails; a call that
-/// passes the c1 gates is still denied with `pdp_gate_unavailable` (there is deliberately no allow /
-/// forward path before c3). Everything other than `tools/call` is identical to Observe. The c1 deny
-/// reasons supersede the P61e-b `enforcing_mode_deny_all` boundary.
+/// `proxy_unsupported`. Enforce runs the P61e-c PDP on every `tools/call` — classification,
+/// caller-allowance, credential-scope, and drift gates — denying with the precedence-pinned reason of
+/// the first gate that fails and FORWARDING only a call that clears every gate (the single allow path).
+/// Everything other than `tools/call` is identical to Observe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Observe,
@@ -203,6 +203,32 @@ impl Observer {
         self.tools_list_changed_observed = true;
     }
 
+    /// The current observed per-tool `tool_digest` for `tool_name`, from the latest COMPLETE observed
+    /// manifest (P61c). Read-only. Used by the enforcing drift gate (P61e-c3): no complete manifest
+    /// observed this session, or the tool absent from a complete manifest, are both fail-closed (the
+    /// gate cannot establish a current digest), never an allow.
+    fn observed_tool_digest(&self, tool_name: &str) -> enforce::ObservedToolDigest {
+        let tools = match &self.latest_complete {
+            Some(t) => t,
+            None => return enforce::ObservedToolDigest::NoCompleteManifest,
+        };
+        let server = self
+            .server_id
+            .clone()
+            .unwrap_or_else(|| "upstream".to_string());
+        let manifest = manifest_observed::build_observed(&server, tools, Completeness::Complete);
+        if let Some(arr) = manifest["observed"]["tool_digests"].as_array() {
+            for e in arr {
+                if e.get("name").and_then(|n| n.as_str()) == Some(tool_name) {
+                    if let Some(d) = e.get("tool_digest").and_then(|d| d.as_str()) {
+                        return enforce::ObservedToolDigest::Present(d.to_string());
+                    }
+                }
+            }
+        }
+        enforce::ObservedToolDigest::CompleteButToolAbsent
+    }
+
     /// Compute the final emission: latest complete wins; otherwise the best observed; otherwise
     /// not_observed. Closes any still-active chain as incomplete first.
     fn finalize(&mut self) -> Emission {
@@ -316,14 +342,16 @@ fn write_json_atomic(path: &Path, value: &Value) -> std::io::Result<()> {
 }
 
 /// Run the proxy against one stdio upstream. `mode` selects observe (manifest-observation, P61a-d) or
-/// enforce (the c1 caller-allowance PDP on `tools/call`, P61e-c1); the only behavioral difference is
-/// how `tools/call` is answered. `policy` is required and present in enforce mode (loaded + validated
-/// at startup) and `None` in observe mode. Manifest emission flags apply to observe only.
+/// enforce (the P61e-c PDP on `tools/call`); the only behavioral difference is how `tools/call` is
+/// answered. `policy` and `baseline` are both required and present in enforce mode (loaded + validated
+/// at startup) and `None` in observe mode: the c3 drift gate compares the current observed per-tool
+/// digest against the approved `baseline`. Manifest emission flags apply to observe only.
 pub async fn run(
     upstream_command: String,
     upstream_args: Vec<String>,
     mode: Mode,
     policy: Option<enforce::EnforcePolicy>,
+    baseline: Option<enforce::DeclaredManifest>,
     manifest_out: Option<PathBuf>,
     health_out: Option<PathBuf>,
 ) -> Result<()> {
@@ -459,50 +487,73 @@ pub async fn run(
                     break;
                 }
             }
+            Some(method) if mode == Mode::Enforce && method == "tools/call" => {
+                // The enforcing PDP runs on every tools/call. policy + baseline are always Some in
+                // enforce mode (loaded + validated at startup). This is the ONLY path that forwards a
+                // privileged call — and only after a clear allow (the confused-deputy discipline).
+                let policy = policy
+                    .as_ref()
+                    .expect("enforce mode without a loaded policy is a startup bug");
+                let baseline = baseline
+                    .as_ref()
+                    .expect("enforce mode without a loaded baseline is a startup bug");
+                let tool_name = v
+                    .pointer("/params/name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("");
+                let empty = json!({});
+                let call_args = v.pointer("/params/arguments").unwrap_or(&empty);
+                // The current observed per-tool digest, from this session's observed tools/list
+                // (read-only). The guard is dropped before any await below.
+                let observed = observer.lock().await.observed_tool_digest(tool_name);
+                let decision = enforce::decide(policy, baseline, &observed, tool_name, call_args);
+                // Diagnostic decision log — operability/correlation only, NOT the canonical
+                // assay.enforcement_decision.v0 evidence artifact (that is P61e-d).
+                tracing::info!(
+                    event = "enforce_decision",
+                    caller = %policy.caller.id,
+                    tool = %tool_name,
+                    action_class = decision.action_class.as_deref().unwrap_or("none"),
+                    target_digest = decision.target_digest.as_deref().unwrap_or("none"),
+                    decision = if decision.allow { "allow" } else { "deny" },
+                    reason = decision.reason,
+                    forwarded = decision.allow,
+                    note = "diagnostic decision log; not canonical evidence"
+                );
+                if decision.allow {
+                    // Forward the privileged call; the upstream's response relays verbatim via the
+                    // upstream reader (a tools/call response is not a list response, so it is untouched).
+                    if forward_line(&mut child_stdin, &line).await.is_err() {
+                        break;
+                    }
+                } else {
+                    match v.get("id") {
+                        Some(id) if !id.is_null() => {
+                            let _ = tx.send(proxy_error_line(
+                                id.clone(),
+                                PROXY_DENIED,
+                                decision.reason,
+                                &format!(
+                                    "tools/call denied by enforcing proxy: {}",
+                                    decision.reason
+                                ),
+                            ));
+                        }
+                        _ => { /* denied notification: nothing to answer, drop it */ }
+                    }
+                }
+            }
             Some(method) => {
-                // Denied: tools/call and every other non-allowlisted method. Never sent upstream. In
-                // enforce mode a tools/call goes through the c1 caller-allowance PDP and is denied with
-                // the precedence-pinned reason of the first gate that fires (proxy_denied); every other
-                // non-allowlisted method — and all of observe mode — stays proxy_unsupported.
-                let (code, reason, message): (i32, &str, String) =
-                    if mode == Mode::Enforce && method == "tools/call" {
-                        // policy is always Some in enforce mode (loaded + validated at startup).
-                        let policy = policy
-                            .as_ref()
-                            .expect("enforce mode without a loaded policy is a startup bug");
-                        let tool_name = v
-                            .pointer("/params/name")
-                            .and_then(|n| n.as_str())
-                            .unwrap_or("");
-                        let empty = json!({});
-                        let call_args = v.pointer("/params/arguments").unwrap_or(&empty);
-                        let decision = enforce::decide(policy, tool_name, call_args);
-                        // Diagnostic decision log — for operability/correlation only, NOT a canonical
-                        // evidence artifact (the enforcement_decision record is a later slice, P61e-d).
-                        tracing::info!(
-                            event = "enforce_decision",
-                            caller = %policy.caller.id,
-                            tool = %tool_name,
-                            action_class = decision.action_class.as_deref().unwrap_or("none"),
-                            target_digest = decision.target_digest.as_deref().unwrap_or("none"),
-                            reason = decision.reason,
-                            note = "diagnostic decision log; not canonical evidence"
-                        );
-                        (
-                            PROXY_DENIED,
-                            decision.reason,
-                            format!("tools/call denied by enforcing proxy: {}", decision.reason),
-                        )
-                    } else {
-                        (
-                            PROXY_UNSUPPORTED,
-                            "method_not_allowlisted",
-                            format!("method {method:?} is not forwarded in this proxy mode"),
-                        )
-                    };
+                // Every other non-allowlisted method — and observe mode's tools/call — is never sent
+                // upstream and stays proxy_unsupported (distinct from the enforce-mode proxy_denied).
                 match v.get("id") {
                     Some(id) if !id.is_null() => {
-                        let _ = tx.send(proxy_error_line(id.clone(), code, reason, &message));
+                        let _ = tx.send(proxy_error_line(
+                            id.clone(),
+                            PROXY_UNSUPPORTED,
+                            "method_not_allowlisted",
+                            &format!("method {method:?} is not forwarded in this proxy mode"),
+                        ));
                     }
                     _ => { /* denied notification: nothing to answer, drop it */ }
                 }
