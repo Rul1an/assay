@@ -245,9 +245,17 @@ is cheap, stable, and actionable.
 Keep or add:
 
 - weekly workflow security drift (`zizmor`);
-- OpenSSF Scorecard;
-- OSV-Scanner for Rust, Python, JavaScript, and GitHub Actions dependency
-  surfaces;
+- OpenSSF Scorecard as a scheduled advisory. The first implementation uses the
+  default `GITHUB_TOKEN`, which can read repository rulesets but may not fully
+  measure classic branch-protection or webhook settings unless a future
+  read/admin token is intentionally added.
+- OSV-Scanner for non-Rust dependency surfaces with resolved manifests or
+  lockfiles. RustSec remains owned by `cargo-deny` and `cargo-audit`, including
+  any deliberately documented advisory ignores, so scheduled OSV must not
+  resurface `Cargo.lock` with a different verdict unless an `osv-scanner.toml`
+  mirrors the same Rust policy. The explicit non-Rust target list must fail
+  closed when a listed target is removed, or when a new tracked
+  `package-lock.json` or `requirements*.txt` appears outside the list.
 - CodeQL/default code scanning for Rust-adjacent glue where available, Python,
   JavaScript/TypeScript, shell, and workflow files;
 - ClusterFuzzLite only for small deterministic parsers/canonicalizers and
@@ -260,6 +268,13 @@ Keep or add:
   source;
 - scheduled stale evidence-artifact inventory for compressed fixtures, large
   generated docs assets, and run output.
+
+The scheduled supply-chain posture workflows are advisory only. They run on a
+weekly cadence plus manual dispatch, do not run on ordinary pull requests, do
+not mutate rulesets, and must not be added as required contexts without a
+separate context-capture review. Advisory vulnerability findings should not
+fail the scheduled OSV job, but scanner execution failures, malformed output,
+or target-list coverage drift should fail loudly.
 
 Do not schedule by default:
 

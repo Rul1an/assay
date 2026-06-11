@@ -1,0 +1,149 @@
+name: Scheduled OSV Advisory
+
+on:
+  schedule:
+    - cron: "47 5 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  osv-non-rust:
+    name: OSV non-Rust advisory scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve OSV target coverage
+        id: osv-targets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          target_file=".github/osv/non-rust-manifests.txt"
+          listed=()
+          while IFS= read -r path; do
+            listed+=("$path")
+          done < <(grep -Ev '^[[:space:]]*(#|$)' "$target_file" | LC_ALL=C sort -u)
+
+          if [ "${#listed[@]}" -eq 0 ]; then
+            echo "::error::OSV target list is empty"
+            exit 1
+          fi
+
+          missing=0
+          for path in "${listed[@]}"; do
+            if ! git ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+              echo "::error file=$target_file::listed OSV target is not tracked: $path"
+              missing=1
+            elif [ ! -f "$path" ]; then
+              echo "::error file=$target_file::listed OSV target is missing: $path"
+              missing=1
+            fi
+
+            case "$path" in
+              Cargo.lock|*/Cargo.lock)
+                echo "::error file=$target_file::Rust lockfile belongs to cargo-deny/cargo-audit, not scheduled OSV: $path"
+                missing=1
+                ;;
+            esac
+          done
+
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+          expected="$(mktemp)"
+          discovered="$(mktemp)"
+          printf '%s\n' "${listed[@]}" > "$expected"
+          git ls-files | grep -E '(^|/)(package-lock\.json|requirements[^/]*\.txt)$' | LC_ALL=C sort -u > "$discovered"
+
+          if unlisted="$(comm -13 "$expected" "$discovered")" && [ -n "$unlisted" ]; then
+            while IFS= read -r path; do
+              echo "::error file=$target_file::tracked non-Rust dependency input is not in scheduled OSV target list: $path"
+            done <<< "$unlisted"
+            exit 1
+          fi
+
+          {
+            echo "scan_args<<OSV_SCAN_ARGS"
+            echo "--format=json"
+            echo "--output=osv-results.json"
+            printf '%s\n' "${listed[@]}"
+            echo "OSV_SCAN_ARGS"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "osv-target-count=${#listed[@]}"
+
+      - name: Run OSV scanner
+        id: osv-scan
+        uses: google/osv-scanner-action/osv-scanner-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
+        with:
+          scan-args: ${{ steps.osv-targets.outputs.scan_args }}
+        continue-on-error: true
+
+      - name: Validate OSV scanner result
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -s osv-results.json ]; then
+            echo "::error::OSV scanner did not produce a JSON result"
+            exit 1
+          fi
+
+          vuln_count="$(
+            python3 - <<'PY'
+          import json
+          import sys
+
+          with open("osv-results.json", "r", encoding="utf-8") as handle:
+              data = json.load(handle)
+
+          count = 0
+
+          def walk(value):
+              global count
+              if isinstance(value, dict):
+                  for key, child in value.items():
+                      if key == "vulnerabilities" and isinstance(child, list):
+                          count += len(child)
+                      walk(child)
+              elif isinstance(value, list):
+                  for item in value:
+                      walk(item)
+
+          walk(data)
+          print(count)
+          PY
+          )"
+
+          echo "osv-vulnerability-results=$vuln_count"
+
+          if [ "${{ steps.osv-scan.outcome }}" != "success" ] && [ "$vuln_count" -eq 0 ]; then
+            echo "::error::OSV scanner exited non-zero without vulnerability results; treating this as scanner execution failure"
+            exit 1
+          fi
+
+      - name: Build advisory SARIF
+        uses: google/osv-scanner-action/osv-reporter-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
+        with:
+          scan-args: |-
+            --output=osv-results.sarif
+            --new=osv-results.json
+            --gh-annotations=false
+            --fail-on-vuln=false
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        with:
+          sarif_file: osv-results.sarif
+          category: osv-scanner-non-rust
