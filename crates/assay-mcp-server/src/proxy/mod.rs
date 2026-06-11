@@ -45,7 +45,8 @@ const PROXY_FAILED: i32 = -32041;
 // PROXY_DENIED: a P61e enforcing-mode policy denial. The `reason` is the precedence-pinned gate that
 // fired (unclassified_tool_call / classification_incomplete / no_declared_allowance /
 // credential_scope_insufficient / credential_scope_unknown / manifest_baseline_missing /
-// manifest_current_observation_incomplete / manifest_drifted_since_approval).
+// manifest_current_observation_incomplete / manifest_observation_ambiguous /
+// manifest_drifted_since_approval).
 const PROXY_DENIED: i32 = -32042;
 
 const HEALTH_SCHEMA: &str = "assay.proxy_observation_health.v0";
@@ -91,6 +92,11 @@ struct Observer {
     outstanding_cursor: bool,
     op_active: bool,
     latest_complete: Option<Vec<Value>>,
+    /// True once a `tools/list_changed` is observed AFTER `latest_complete` was set, until a fresh
+    /// complete chain replaces it. The enforcing drift gate (P61e-c3) must not authorize against a
+    /// stale manifest: a post-approval `tools/list_changed` is exactly the rug-pull signal, so the
+    /// current complete observation is invalidated until a fresh complete `tools/list` is observed.
+    complete_superseded_by_change: bool,
     /// Most recent non-complete accumulation and its kind ("partial" | "unknown").
     best_incomplete: Option<(Vec<Value>, &'static str)>,
     observed_list_operations: u64,
@@ -189,6 +195,8 @@ impl Observer {
         self.op_active = false;
         if self.chain_started {
             self.latest_complete = Some(self.acc.clone());
+            // A fresh complete observation supersedes any prior list_changed invalidation.
+            self.complete_superseded_by_change = false;
             true
         } else {
             self.best_incomplete = Some((self.acc.clone(), "unknown"));
@@ -201,22 +209,35 @@ impl Observer {
 
     fn on_list_changed(&mut self) {
         self.tools_list_changed_observed = true;
+        // Invalidate the current complete observation for the enforcing drift gate: the surface may
+        // have mutated, so a stale digest must not authorize a privileged call until re-observed.
+        self.complete_superseded_by_change = true;
     }
 
     /// The current observed per-tool `tool_digest` for `tool_name`, from the latest COMPLETE observed
-    /// manifest (P61c). Read-only. Used by the enforcing drift gate (P61e-c3): no complete manifest
-    /// observed this session, or the tool absent from a complete manifest, are both fail-closed (the
-    /// gate cannot establish a current digest), never an allow.
+    /// manifest (P61c). Read-only. Used by the enforcing drift gate (P61e-c3); every non-`Present`
+    /// outcome is fail-closed (the gate cannot establish a current digest), never an allow:
+    /// - no complete manifest observed, OR one invalidated by a later `tools/list_changed` -> NoCompleteManifest;
+    /// - a duplicate-name (ambiguous) observed manifest -> Ambiguous (the observation is inconclusive,
+    ///   per the manifest-drift contract — never pick one of the colliding digests);
+    /// - the tool absent from an otherwise-clean complete manifest -> CompleteButToolAbsent.
     fn observed_tool_digest(&self, tool_name: &str) -> enforce::ObservedToolDigest {
+        // A post-approval list_changed invalidates the current complete view until it is re-observed.
         let tools = match &self.latest_complete {
-            Some(t) => t,
-            None => return enforce::ObservedToolDigest::NoCompleteManifest,
+            Some(t) if !self.complete_superseded_by_change => t,
+            _ => return enforce::ObservedToolDigest::NoCompleteManifest,
         };
         let server = self
             .server_id
             .clone()
             .unwrap_or_else(|| "upstream".to_string());
         let manifest = manifest_observed::build_observed(&server, tools, Completeness::Complete);
+        // A duplicate-name manifest is `status: ambiguous` (manifest_digest withheld): the observation
+        // is inconclusive, so the drift gate must deny rather than pick one of the colliding per-tool
+        // digests. See docs/reference/mcp-manifest-drift.md.
+        if manifest["status"].as_str() != Some("observed") {
+            return enforce::ObservedToolDigest::Ambiguous;
+        }
         if let Some(arr) = manifest["observed"]["tool_digests"].as_array() {
             for e in arr {
                 if e.get("name").and_then(|n| n.as_str()) == Some(tool_name) {
@@ -652,5 +673,82 @@ async fn degraded_loop(reason: &str) {
                 let _ = out.flush().await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn tool(name: &str) -> Value {
+        json!({"name": name, "description": "d", "inputSchema": {"type": "object"}})
+    }
+
+    /// Drive a single complete cursorless tools/list (request + terminal response) into the observer.
+    fn observe_complete(obs: &mut Observer, id: i64, tools: Vec<Value>) {
+        let idv = json!(id);
+        obs.on_client_tools_list(Some(&idv), false);
+        let _ = obs.on_upstream_response(&json!({"id": id, "result": {"tools": tools}}));
+    }
+
+    #[test]
+    fn observed_digest_none_when_no_complete_manifest() {
+        let obs = Observer::default();
+        assert!(matches!(
+            obs.observed_tool_digest("github.add_deploy_key"),
+            enforce::ObservedToolDigest::NoCompleteManifest
+        ));
+    }
+
+    #[test]
+    fn observed_digest_present_then_invalidated_by_list_changed_then_restored() {
+        let mut obs = Observer::default();
+        observe_complete(&mut obs, 2, vec![tool("github.add_deploy_key")]);
+        assert!(matches!(
+            obs.observed_tool_digest("github.add_deploy_key"),
+            enforce::ObservedToolDigest::Present(_)
+        ));
+
+        // A post-approval tools/list_changed invalidates the current complete observation: the drift
+        // gate must NOT authorize against the prior (possibly rug-pulled) manifest until re-observed.
+        obs.on_list_changed();
+        assert!(
+            matches!(
+                obs.observed_tool_digest("github.add_deploy_key"),
+                enforce::ObservedToolDigest::NoCompleteManifest
+            ),
+            "stale-after-change must not authorize against the prior manifest"
+        );
+
+        // A fresh complete observation restores a usable current digest.
+        observe_complete(&mut obs, 4, vec![tool("github.add_deploy_key")]);
+        assert!(matches!(
+            obs.observed_tool_digest("github.add_deploy_key"),
+            enforce::ObservedToolDigest::Present(_)
+        ));
+    }
+
+    #[test]
+    fn observed_digest_ambiguous_on_duplicate_tool_names() {
+        let mut obs = Observer::default();
+        observe_complete(&mut obs, 2, vec![tool("dup"), tool("dup")]);
+        assert!(
+            matches!(
+                obs.observed_tool_digest("dup"),
+                enforce::ObservedToolDigest::Ambiguous
+            ),
+            "a duplicate-name observed manifest is inconclusive -> Ambiguous, never a picked digest"
+        );
+    }
+
+    #[test]
+    fn observed_digest_tool_absent_is_complete_but_tool_absent() {
+        let mut obs = Observer::default();
+        observe_complete(&mut obs, 2, vec![tool("search")]);
+        assert!(matches!(
+            obs.observed_tool_digest("github.add_deploy_key"),
+            enforce::ObservedToolDigest::CompleteButToolAbsent
+        ));
     }
 }

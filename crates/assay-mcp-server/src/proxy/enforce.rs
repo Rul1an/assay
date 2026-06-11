@@ -94,8 +94,12 @@ impl DeclaredManifest {
 /// observed `tools/list` (P61c). Distinguishes "no complete manifest observed this session" from
 /// "observed complete but this tool is absent" — both are fail-closed, never an allow.
 pub enum ObservedToolDigest {
-    /// No COMPLETE `tools/list` has been observed in this session.
+    /// No COMPLETE `tools/list` has been observed this session, or the last complete observation was
+    /// invalidated by a later `tools/list_changed` and not yet re-observed.
     NoCompleteManifest,
+    /// The complete observed manifest has duplicate tool names (`status: ambiguous`): inconclusive, so
+    /// the drift gate must deny rather than pick one of the colliding per-tool digests.
+    Ambiguous,
     /// A complete manifest was observed, but it does not contain the invoked tool.
     CompleteButToolAbsent,
     /// The current observed `tool_digest` for the invoked tool.
@@ -119,6 +123,7 @@ pub fn load_declared_manifest(path: &Path) -> Result<DeclaredManifest> {
     if manifest.tools.is_empty() {
         bail!("--declared-mcp-manifest: tools must be a non-empty array");
     }
+    let mut seen = std::collections::HashSet::new();
     for t in &manifest.tools {
         if t.name.trim().is_empty() {
             bail!("--declared-mcp-manifest: every tool must have a non-empty name");
@@ -128,6 +133,14 @@ pub fn load_declared_manifest(path: &Path) -> Result<DeclaredManifest> {
                 "--declared-mcp-manifest: tool {:?} tool_digest must be a sha256: digest, got {:?}",
                 t.name,
                 t.tool_digest
+            );
+        }
+        // Duplicate declared names are `declared_mcp_manifest_ambiguous` (manifest-drift contract): a
+        // first-match-wins lookup over an ambiguous approval baseline is unsafe, so fail startup.
+        if !seen.insert(t.name.as_str()) {
+            bail!(
+                "--declared-mcp-manifest: duplicate tool name {:?} (an approval baseline must be unambiguous)",
+                t.name
             );
         }
     }
@@ -250,8 +263,18 @@ pub fn decide(
     };
     let observed_digest = match observed {
         ObservedToolDigest::Present(d) => d.as_str(),
-        // No complete observation, or the tool is absent from the complete manifest: either way there
-        // is no current digest to compare, so drift cannot be ruled out -> fail closed.
+        // A duplicate-name (ambiguous) observed manifest is inconclusive — deny with a distinct reason
+        // rather than compare against one of the colliding digests.
+        ObservedToolDigest::Ambiguous => {
+            return Decision::deny(
+                "manifest_observation_ambiguous",
+                Some(action_class.to_string()),
+                Some(tdig),
+            )
+        }
+        // No complete observation (or one invalidated by a later tools/list_changed), or the tool is
+        // absent from the complete manifest: either way there is no current digest to compare, so
+        // drift cannot be ruled out -> fail closed.
         ObservedToolDigest::NoCompleteManifest | ObservedToolDigest::CompleteButToolAbsent => {
             return Decision::deny(
                 "manifest_current_observation_incomplete",
@@ -722,6 +745,15 @@ allowances:
     }
 
     #[test]
+    fn ambiguous_observation_denies_observation_ambiguous() {
+        // A duplicate-name (ambiguous) observed manifest is inconclusive -> deny, never pick a digest.
+        let baseline = baseline_with(TOOL, APPROVED);
+        let d = decide_drift(&baseline, &ObservedToolDigest::Ambiguous);
+        assert!(!d.allow);
+        assert_eq!(d.reason, "manifest_observation_ambiguous");
+    }
+
+    #[test]
     fn drifted_when_observed_digest_differs_from_baseline() {
         let baseline = baseline_with(TOOL, APPROVED);
         let d = decide_drift(
@@ -795,6 +827,15 @@ allowances:
         // tool_digest is required (not Option) -> a tool missing it fails to parse.
         assert!(manifest_from(
             r#"{"schema":"assay.declared_mcp_manifest.v0","tools":[{"name":"t"}]}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn duplicate_baseline_tool_names_fail_load() {
+        // An approval baseline must be unambiguous: duplicate names fail startup (no first-match-wins).
+        assert!(manifest_from(
+            r#"{"schema":"assay.declared_mcp_manifest.v0","tools":[{"name":"t","tool_digest":"sha256:a"},{"name":"t","tool_digest":"sha256:b"}]}"#
         )
         .is_err());
     }
