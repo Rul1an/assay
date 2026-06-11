@@ -36,3 +36,4 @@ jobs:
           python3 scripts/ci/check-public-artifact-sanitization.py
           --trusted-hmac-env PUBLIC_ARTIFACT_DENYLIST_HMAC_SHA256
           --trusted-hmac-key-env PUBLIC_ARTIFACT_DENYLIST_HMAC_KEY
+          --trusted-hmac-canary-file .github/sanitizer/trusted-hmac-canary.txt

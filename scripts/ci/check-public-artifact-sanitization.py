@@ -16,8 +16,10 @@ Without that trusted input, it is the required fork-safe structural gate.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import hmac
+import io
 import os
 import re
 import subprocess
@@ -231,6 +233,26 @@ def scan_trusted_hmacs(
     return findings
 
 
+def trusted_hmac_canary_path(root: Path, raw_path: str) -> Path:
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = root / path
+    return path.resolve()
+
+
+def split_canary_findings(
+    findings: Sequence[Finding], canary_rel: Path
+) -> tuple[list[Finding], list[Finding]]:
+    canary_findings: list[Finding] = []
+    real_findings: list[Finding] = []
+    for finding in findings:
+        if finding.path == canary_rel:
+            canary_findings.append(finding)
+        else:
+            real_findings.append(finding)
+    return real_findings, canary_findings
+
+
 def print_findings(findings: Sequence[Finding]) -> None:
     counts: dict[str, int] = {}
     for finding in findings:
@@ -269,6 +291,82 @@ def self_test() -> None:
         assert len(trusted_findings) == 1
         assert trusted_findings[0].path == Path("README.md")
         assert trusted_findings[0].category == "trusted_private_hash_match"
+        canary_findings = [
+            Finding(Path(".github/sanitizer/trusted-hmac-canary.txt"), 1, "trusted_private_hash_match"),
+            Finding(Path("README.md"), 3, "trusted_private_hash_match"),
+        ]
+        real_findings, canary_hits = split_canary_findings(
+            canary_findings, Path(".github/sanitizer/trusted-hmac-canary.txt")
+        )
+        assert len(real_findings) == 1
+        assert len(canary_hits) == 1
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        canary_phrase = " ".join(
+            (
+                "public",
+                "sanitizer",
+                "hmac",
+                "canary",
+            )
+        )
+        (root / ".github" / "sanitizer").mkdir(parents=True)
+        (root / "README.md").write_text("hello\n", encoding="utf-8")
+        (root / ".github" / "sanitizer" / "trusted-hmac-canary.txt").write_text(
+            f"{canary_phrase}\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "add", "."], cwd=root, check=True)
+        trusted_key = "trusted-test-key"
+        trusted_digest = hmac.new(
+            trusted_key.encode("utf-8"), canary_phrase.encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+        old_workspace = os.environ.get("GITHUB_WORKSPACE")
+        old_digests = os.environ.get("TEST_HMAC_DIGESTS")
+        old_key = os.environ.get("TEST_HMAC_KEY")
+        try:
+            os.environ["GITHUB_WORKSPACE"] = str(root)
+
+            def run_with_env(digests: str | None, key: str | None) -> int:
+                if digests is None:
+                    os.environ.pop("TEST_HMAC_DIGESTS", None)
+                else:
+                    os.environ["TEST_HMAC_DIGESTS"] = digests
+                if key is None:
+                    os.environ.pop("TEST_HMAC_KEY", None)
+                else:
+                    os.environ["TEST_HMAC_KEY"] = key
+                with contextlib.redirect_stdout(io.StringIO()):
+                    return main(
+                        [
+                            "--trusted-hmac-env",
+                            "TEST_HMAC_DIGESTS",
+                            "--trusted-hmac-key-env",
+                            "TEST_HMAC_KEY",
+                            "--trusted-hmac-canary-file",
+                            ".github/sanitizer/trusted-hmac-canary.txt",
+                        ]
+                    )
+
+            assert run_with_env(None, None) == 0
+            assert run_with_env(trusted_digest, None) == 1
+            assert run_with_env(None, trusted_key) == 1
+            assert run_with_env("not-a-digest", trusted_key) == 1
+            assert run_with_env(trusted_digest, "wrong-key") == 1
+            assert run_with_env(trusted_digest, trusted_key) == 0
+        finally:
+            if old_workspace is None:
+                os.environ.pop("GITHUB_WORKSPACE", None)
+            else:
+                os.environ["GITHUB_WORKSPACE"] = old_workspace
+            if old_digests is None:
+                os.environ.pop("TEST_HMAC_DIGESTS", None)
+            else:
+                os.environ["TEST_HMAC_DIGESTS"] = old_digests
+            if old_key is None:
+                os.environ.pop("TEST_HMAC_KEY", None)
+            else:
+                os.environ["TEST_HMAC_KEY"] = old_key
     print("self-test=passed")
 
 
@@ -285,6 +383,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--trusted-hmac-key-env",
         help="Environment variable containing the HMAC key for the trusted scan.",
+    )
+    parser.add_argument(
+        "--trusted-hmac-canary-file",
+        help=(
+            "Repository-relative canary fixture that must match the trusted "
+            "HMAC list when trusted config is present."
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -318,6 +423,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             trusted_findings = scan_trusted_hmacs(
                 files, root, denylist_digests, raw_key.encode("utf-8")
             )
+            if args.trusted_hmac_canary_file:
+                canary_path = trusted_hmac_canary_path(root, args.trusted_hmac_canary_file)
+                try:
+                    canary_rel = canary_path.relative_to(root)
+                except ValueError:
+                    print("trusted-private-list=failed")
+                    print("trusted-private-list-reason=hmac_canary_outside_workspace")
+                    return 1
+                if not canary_path.exists():
+                    print("trusted-private-list=failed")
+                    print("trusted-private-list-reason=hmac_canary_missing")
+                    return 1
+                trusted_findings, canary_findings = split_canary_findings(
+                    trusted_findings, canary_rel
+                )
+                if not canary_findings:
+                    print("trusted-private-list=failed")
+                    print("trusted-private-list-reason=hmac_canary_mismatch")
+                    return 1
             if trusted_findings:
                 print_findings(trusted_findings)
                 return 1

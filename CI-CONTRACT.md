@@ -172,6 +172,10 @@ Required-gate split:
 - The trusted HMAC-list layer is part of the sanitizer workflow, not a
   separate required context, until a future context-capture/import review says
   otherwise.
+- When the trusted HMAC-list layer runs, the list must include the digest for
+  the committed public canary fixture. The scanner fails closed on a canary
+  miss so key encoding, normalization, or generator drift cannot silently turn
+  the trusted layer into a no-op.
 - The trusted list must enumerate every spelling, casing, and spacing variant of
   a term. Normalization lowercases, splits on non-alphanumerics, and HMACs
   one-to-five-token windows per line, so a compound spelling and a spaced or
