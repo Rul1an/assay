@@ -121,7 +121,8 @@ jobs:
         run: |
           rm -rf ~/.cargo/advisory-db
           # RUSTSEC-2023-0071 (rsa Marvin Attack): no fixed upgrade; assay-mcp-server JWT (see deny.toml)
-          cargo audit --ignore RUSTSEC-2023-0071
+          # RUSTSEC-2026-0176 (pyo3 nth/nth_back OOB): not reachable in assay; pyo3 0.29 migration tracked in #1651
+          cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0176
 
   clippy:
     name: Clippy (deny warnings)
