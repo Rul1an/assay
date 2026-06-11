@@ -392,6 +392,9 @@ Proposed required context names for the next branch-protection review:
 - `host-capability-check`
 - `public-artifact-sanitization`
 
+Checked-in ruleset activation lives at
+`.github/rulesets/main-required-ci-contexts.json`.
+
 Do not make these required in this slice:
 
 - Manual, release-only, scheduled-only, or host-capability-specific jobs.

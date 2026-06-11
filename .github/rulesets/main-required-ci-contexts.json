@@ -1,0 +1,46 @@
+{
+  "name": "main-required-ci-contexts",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "~DEFAULT_BRANCH",
+        "refs/heads/release/*"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          {
+            "context": "CI",
+            "integration_id": 15368
+          },
+          {
+            "context": "lane-check",
+            "integration_id": 15368
+          },
+          {
+            "context": "host-capability-check",
+            "integration_id": 15368
+          },
+          {
+            "context": "public-artifact-sanitization",
+            "integration_id": 15368
+          }
+        ]
+      }
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "deletion"
+    }
+  ]
+}
