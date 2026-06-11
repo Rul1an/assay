@@ -168,6 +168,9 @@ Required-gate split:
   pushes, and scheduled checks that can access the private source safely.
 - A degraded fork run must say that private-list comparison was skipped without
   exposing the list, while still enforcing structural public-artifact rules.
+- The trusted hashed-list layer is part of the sanitizer workflow, not a
+  separate required context, until a future context-capture/import review says
+  otherwise.
 
 Logging contract:
 
