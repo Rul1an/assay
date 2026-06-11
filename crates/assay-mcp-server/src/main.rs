@@ -64,6 +64,12 @@ enum Mode {
         /// in enforcing mode; a missing/unreadable/malformed/wrong-schema baseline is a startup failure.
         #[arg(long)]
         declared_mcp_manifest: PathBuf,
+        /// Optional NDJSON path for the per-call `assay.enforcement_decision.v0` evidence record
+        /// (P61e-d): one record per `tools/call` decision. The record is a policy decision only and
+        /// never asserts the upstream side effect. An allowed call whose record cannot be written
+        /// fails closed (it is not forwarded).
+        #[arg(long)]
+        enforcement_decision_out: Option<PathBuf>,
     },
 }
 
@@ -108,8 +114,7 @@ async fn main() -> Result<()> {
                 upstream_command,
                 upstream_args,
                 proxy::Mode::Observe,
-                None,
-                None,
+                proxy::enforce::EnforceInputs::default(),
                 mcp_manifest_observed_out,
                 proxy_observation_health_out,
             )
@@ -120,6 +125,7 @@ async fn main() -> Result<()> {
             upstream_args,
             enforce_policy,
             declared_mcp_manifest,
+            enforcement_decision_out,
         }) => {
             // Load + validate BOTH inputs BEFORE starting the proxy. A bad policy or baseline is a
             // misconfigured service: fail startup with a non-zero exit, never start an enforcing proxy
@@ -137,8 +143,11 @@ async fn main() -> Result<()> {
                 upstream_command,
                 upstream_args,
                 proxy::Mode::Enforce,
-                Some(policy),
-                Some(baseline),
+                proxy::enforce::EnforceInputs {
+                    policy: Some(policy),
+                    baseline: Some(baseline),
+                    decision_out: enforcement_decision_out,
+                },
                 None,
                 None,
             )
