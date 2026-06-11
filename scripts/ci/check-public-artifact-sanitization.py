@@ -23,7 +23,6 @@ import io
 import os
 import re
 import subprocess
-import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -146,6 +145,8 @@ def should_scan(path: Path, root: Path) -> bool:
     if path.suffix.lower() in EXCLUDED_SUFFIXES:
         return False
     try:
+        if path.is_symlink():
+            return False
         if path.stat().st_size > TEXT_BYTES_LIMIT:
             return False
     except FileNotFoundError:
@@ -279,7 +280,17 @@ def self_test() -> None:
         (root / "target" / "generated.txt").write_text(
             "DO NOT PUBLISH\n", encoding="utf-8"
         )
-        findings = scan_files([root / "README.md", root / "target" / "generated.txt"], root)
+        files = [root / "README.md", root / "target" / "generated.txt"]
+        outside = root.parent / "outside-marker.txt"
+        outside.write_text(f"{marker}\n", encoding="utf-8")
+        symlink = root / "linked-marker.txt"
+        try:
+            symlink.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            pass
+        else:
+            files.append(symlink)
+        findings = scan_files(files, root)
         assert len(findings) == 1
         assert findings[0].path == Path("README.md")
         assert findings[0].category == "publication_blocker_marker"
