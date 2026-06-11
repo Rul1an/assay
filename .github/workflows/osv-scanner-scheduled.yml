@@ -22,29 +22,116 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Resolve OSV target coverage
+        id: osv-targets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          target_file=".github/osv/non-rust-manifests.txt"
+          listed=()
+          while IFS= read -r path; do
+            listed+=("$path")
+          done < <(grep -Ev '^[[:space:]]*(#|$)' "$target_file" | LC_ALL=C sort -u)
+
+          if [ "${#listed[@]}" -eq 0 ]; then
+            echo "::error::OSV target list is empty"
+            exit 1
+          fi
+
+          missing=0
+          for path in "${listed[@]}"; do
+            if ! git ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+              echo "::error file=$target_file::listed OSV target is not tracked: $path"
+              missing=1
+            elif [ ! -f "$path" ]; then
+              echo "::error file=$target_file::listed OSV target is missing: $path"
+              missing=1
+            fi
+
+            case "$path" in
+              Cargo.lock|*/Cargo.lock)
+                echo "::error file=$target_file::Rust lockfile belongs to cargo-deny/cargo-audit, not scheduled OSV: $path"
+                missing=1
+                ;;
+            esac
+          done
+
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+          expected="$(mktemp)"
+          discovered="$(mktemp)"
+          printf '%s\n' "${listed[@]}" > "$expected"
+          git ls-files | grep -E '(^|/)(package-lock\.json|requirements[^/]*\.txt)$' | LC_ALL=C sort -u > "$discovered"
+
+          if unlisted="$(comm -13 "$expected" "$discovered")" && [ -n "$unlisted" ]; then
+            while IFS= read -r path; do
+              echo "::error file=$target_file::tracked non-Rust dependency input is not in scheduled OSV target list: $path"
+            done <<< "$unlisted"
+            exit 1
+          fi
+
+          {
+            echo "scan_args<<OSV_SCAN_ARGS"
+            echo "--format=json"
+            echo "--output=osv-results.json"
+            printf '%s\n' "${listed[@]}"
+            echo "OSV_SCAN_ARGS"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "osv-target-count=${#listed[@]}"
+
       - name: Run OSV scanner
+        id: osv-scan
         uses: google/osv-scanner-action/osv-scanner-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
         with:
-          scan-args: |-
-            --format=json
-            --output=osv-results.json
-            docs/experiments/runner-vs-otel-2026-05/workload/package-lock.json
-            docs/requirements-ci.txt
-            examples/agentevals-trajectory-strict-match-evidence/requirements.txt
-            examples/autoevals-exactmatch-evidence/requirements.txt
-            examples/crewai-event-evidence/requirements.txt
-            examples/guardrails-validation-outcome-evidence/requirements.txt
-            examples/langgraph-task-evidence/requirements.txt
-            examples/langwatch-custom-span-evaluation-evidence/requirements.txt
-            examples/mcp-compliance/package-lock.json
-            examples/openai-agents-trace-evidence/requirements.txt
-            examples/openfeature-evaluation-details-evidence/requirements.txt
-            examples/phoenix-span-annotation-evidence/requirements.txt
-            examples/promptfoo-assertion-grading-result-evidence/package-lock.json
-            examples/pydantic-ai-eval-report-evidence/requirements.txt
-            runner-fixtures/gemini-google-genai/requirements.txt
-            runner-fixtures/openai-agents/package-lock.json
+          scan-args: ${{ steps.osv-targets.outputs.scan_args }}
         continue-on-error: true
+
+      - name: Validate OSV scanner result
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -s osv-results.json ]; then
+            echo "::error::OSV scanner did not produce a JSON result"
+            exit 1
+          fi
+
+          vuln_count="$(
+            python3 - <<'PY'
+          import json
+          import sys
+
+          with open("osv-results.json", "r", encoding="utf-8") as handle:
+              data = json.load(handle)
+
+          count = 0
+
+          def walk(value):
+              global count
+              if isinstance(value, dict):
+                  for key, child in value.items():
+                      if key == "vulnerabilities" and isinstance(child, list):
+                          count += len(child)
+                      walk(child)
+              elif isinstance(value, list):
+                  for item in value:
+                      walk(item)
+
+          walk(data)
+          print(count)
+          PY
+          )"
+
+          echo "osv-vulnerability-results=$vuln_count"
+
+          if [ "${{ steps.osv-scan.outcome }}" != "success" ] && [ "$vuln_count" -eq 0 ]; then
+            echo "::error::OSV scanner exited non-zero without vulnerability results; treating this as scanner execution failure"
+            exit 1
+          fi
 
       - name: Build advisory SARIF
         uses: google/osv-scanner-action/osv-reporter-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
