@@ -259,10 +259,14 @@ the action. Allowing a call and proving its effect are different, and the proxy 
 The `assay.enforcement_decision.v0` artifact, emitted by the enforcing path and kept **separate** from
 the manifest-observation artifact (the standing observation/enforcement separation). It records, per
 `tools/call`: caller id, the P57c-classified action + projected target (sensitive ids hashed) + target
-digest, the decision (`allow`/`deny`), the machine reason, the `fail_closed` flag, the `forwarded` flag,
-the derived `drift_state` (`satisfied` on allow / the specific drift reason / `not_evaluated` when an
-earlier gate denied), and the credential **alias** (never the token or the declared scopes). It does
-not assert the side effect.
+digest, the decision (`allow`/`deny`), the machine reason, the `fail_closed` flag, the derived
+`drift_state` (`satisfied` on allow / the specific drift reason / `not_evaluated` when an earlier gate
+denied), and the credential **alias** (never the token or the declared scopes). It records the **policy
+decision only** — it does not assert the side effect, and it deliberately carries **no transport-outcome
+field**: because it is written *before* the forward (so an allowed call is never forwarded unrecorded),
+it cannot honestly claim delivery, so an `allow` is the decision to forward and never a claim that the
+call reached or was performed by the upstream. A forward that then fails surfaces to the caller as
+`proxy_failed` (§12), never as a delivery claim in the record.
 
 **Implementation (P61e-d):** opt-in via `--enforcement-decision-out <path>`; the proxy appends one
 compact JSON record per decision (NDJSON), for both allow and deny, so a killed proxy still keeps the

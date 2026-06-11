@@ -356,12 +356,14 @@ pub fn decision_record(
             "target": c.target,
             "target_digest": decision.target_digest,
         },
+        // The proxy's POLICY decision, true at write time. It is written before the forward (so an
+        // allowed call is never forwarded unrecorded), and therefore deliberately does NOT carry a
+        // transport-outcome field: it must not claim the call reached the upstream. A forward that
+        // then fails surfaces to the caller as `proxy_failed` (§12), never as a delivery claim here.
         "decision": if decision.allow { "allow" } else { "deny" },
         "reason": decision.reason,
         // The PDP is fail-closed by construction: every deny is a fail-closed outcome.
         "fail_closed": !decision.allow,
-        // Only an allowed call is forwarded to the upstream.
-        "forwarded": decision.allow,
         "drift_state": drift_state(decision),
         // Operator config reference only — never the token, never the declared scopes.
         "credential_alias": policy
@@ -370,6 +372,7 @@ pub fn decision_record(
             .map(|c| sanitize(&c.alias)),
         "non_claims": [
             "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
+            "an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)",
             "credential referenced by alias only, never the token or declared scopes",
             "deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict",
             "not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"
@@ -926,11 +929,15 @@ allowances:
         assert_eq!(rec["decision"], "deny");
         assert_eq!(rec["reason"], "unclassified_tool_call");
         assert_eq!(rec["fail_closed"], true);
-        assert_eq!(rec["forwarded"], false);
         assert_eq!(rec["drift_state"], "not_evaluated");
         assert_eq!(rec["caller"]["id"], "ci-agent");
         assert_eq!(rec["credential_alias"], "gh-deploy");
         assert!(rec["non_claims"].is_array());
+        // The record carries no transport-outcome field — it must not claim delivery.
+        assert!(
+            rec.get("forwarded").is_none(),
+            "no transport claim in the decision record"
+        );
         // The declared scopes are never serialized into the record (alias only).
         let s = serde_json::to_string(&rec).unwrap();
         assert!(
@@ -940,7 +947,7 @@ allowances:
     }
 
     #[test]
-    fn decision_record_for_an_allow_marks_forwarded_and_drift_satisfied() {
+    fn decision_record_for_an_allow_is_policy_decision_not_a_delivery_claim() {
         let p = policy_from(VALID).unwrap();
         let d = decide_match(&p, "github.add_deploy_key", &acme_call()); // matching -> allow
         assert!(d.allow);
@@ -948,10 +955,14 @@ allowances:
         assert_eq!(rec["decision"], "allow");
         assert_eq!(rec["reason"], "allow");
         assert_eq!(rec["fail_closed"], false);
-        assert_eq!(rec["forwarded"], true);
         assert_eq!(rec["drift_state"], "satisfied");
         assert_eq!(rec["tool"]["action_class"], "github_deploy_key");
         assert_eq!(rec["action"]["target"]["owner"], "acme");
+        // The decision (allow) is the durable fact; the record never asserts the call was delivered.
+        assert!(
+            rec.get("forwarded").is_none(),
+            "an allow decision must not be a transport/delivery claim"
+        );
     }
 
     #[test]

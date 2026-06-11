@@ -559,7 +559,6 @@ pub async fn run(
                     target_digest = decision.target_digest.as_deref().unwrap_or("none"),
                     decision = if decision.allow { "allow" } else { "deny" },
                     reason = decision.reason,
-                    forwarded = decision.allow,
                     note = "diagnostic decision log; not canonical evidence"
                 );
                 // P61e-d: write the canonical per-call evidence record (NDJSON) before acting. The
