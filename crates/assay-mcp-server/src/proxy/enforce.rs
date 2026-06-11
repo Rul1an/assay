@@ -188,13 +188,16 @@ fn credential_scope_gate(policy: &EnforcePolicy, action_class: &str) -> Option<&
     }
 }
 
-/// The non-required scope vocabulary for one action class. `required` itself comes from
-/// `required_scope_for` (one source of truth); this lattice only classifies the OTHER recognized
-/// scopes, matching the E10 credential-overbreadth experiment so the gate and the measurement agree.
+/// The non-required scope vocabulary for one action class, kept identical to the AUTHORITATIVE P59
+/// credential-scope contract (docs/reference/credential-scope.md), NOT the richer E10 measurement
+/// vocabulary. The enforcement gate must never cover a scope the documented contract says it should
+/// not — "broadening the lattice is a deliberate, fixture-backed change, not a guess." `required`
+/// itself comes from `required_scope_for` (one source of truth); this lattice classifies the OTHER
+/// recognized scopes. Any scope not listed here is unrecognized -> Unknown (never silently covered).
 struct ScopeLattice {
     /// Covers the required scope without admin breadth.
     broader_ok: &'static [&'static str],
-    /// Covers via admin/wildcard breadth (overbroad — still covers; a recommendation, not a block).
+    /// Covers via admin breadth (overbroad — still covers; a recommendation, not a block).
     overbroad: &'static [&'static str],
     /// Recognized but does not cover.
     non_covering: &'static [&'static str],
@@ -202,33 +205,28 @@ struct ScopeLattice {
     ambiguous: &'static [&'static str],
 }
 
+/// Only `github_deploy_key` has a documented coverage contract today (credential-scope.md §"initial
+/// GitHub lattice"). Any other classified privileged action has no documented lattice yet, so it is
+/// fail-closed (`Unknown` -> `credential_scope_unknown`) until its own contract slice lands — never a
+/// guessed coverage. (Such classes also cannot currently reach this gate: c1's allowance matcher only
+/// admits `github_deploy_key`.)
 fn lattice_for(action_class: &str) -> Option<ScopeLattice> {
     match action_class {
+        // Matches credential-scope.md exactly: covered by {repo:deploy_key:write, repo:admin};
+        // NOT covered by {repo:read, repo:metadata, repo:contents:read}; everything else unknown.
+        // repo:write is deliberately NOT a covering scope (it is not in the documented contract).
         "github_deploy_key" => Some(ScopeLattice {
-            broader_ok: &["repo:write"],
-            overbroad: &["repo:admin", "admin", "*"],
-            non_covering: &["repo:read", "repo:metadata"],
-            ambiguous: &["repo"],
-        }),
-        "slack_add_member" => Some(ScopeLattice {
-            broader_ok: &["conversations:write"],
-            overbroad: &["admin", "workspace:admin", "*"],
-            non_covering: &["conversations:read"],
-            ambiguous: &["conversations"],
-        }),
-        "workspace_admin" => Some(ScopeLattice {
-            // required is already admin-level: there is no non-admin broader scope.
             broader_ok: &[],
-            overbroad: &["*", "org:admin", "superadmin"],
-            non_covering: &["workspace:read", "member"],
-            ambiguous: &["workspace"],
+            overbroad: &["repo:admin"],
+            non_covering: &["repo:read", "repo:metadata", "repo:contents:read"],
+            ambiguous: &[],
         }),
         _ => None,
     }
 }
 
-/// Deterministic scope coverage, mirroring the E10 lattice precedence: a too-coarse (ambiguous) or
-/// unrecognized scope yields Unknown BEFORE any insufficiency verdict ("unknown is not insufficient").
+/// Deterministic scope coverage. A too-coarse (ambiguous) or unrecognized scope yields Unknown BEFORE
+/// any insufficiency verdict ("unknown is not insufficient").
 fn scope_covers(action_class: &str, required: &str, declared: &[String]) -> ScopeCoverage {
     let lat = match lattice_for(action_class) {
         Some(l) => l,
@@ -390,8 +388,10 @@ allowances:
     }
 
     #[test]
-    fn too_coarse_scope_is_credential_scope_unknown_not_insufficient() {
-        // "repo" is ambiguous (can't tell action-specific from admin) -> unknown takes precedence.
+    fn coarse_repo_scope_is_unrecognized_and_unknown() {
+        // "repo" is NOT in the documented contract (only repo:deploy_key:write / repo:admin cover,
+        // repo:read/metadata/contents:read are recognized-non-covering); so "repo" is unrecognized
+        // -> unknown, never silently covered and never "insufficient".
         let p =
             allow_acme_with_cred("upstream_credential:\n  alias: \"gh\"\n  scopes: [\"repo\"]\n");
         let d = decide(&p, "github.add_deploy_key", &acme_call());
@@ -407,17 +407,20 @@ allowances:
     }
 
     #[test]
-    fn broader_non_admin_scope_covers_and_reaches_pdp() {
+    fn repo_write_does_not_cover_deploy_key_per_p59_contract() {
+        // repo:write is NOT a covering scope in credential-scope.md — it is unrecognized -> unknown,
+        // NOT a silent pass. (The c2 gate must never be broader than the documented contract.)
         let p = allow_acme_with_cred(
             "upstream_credential:\n  alias: \"gh\"\n  scopes: [\"repo:write\"]\n",
         );
         let d = decide(&p, "github.add_deploy_key", &acme_call());
-        assert_eq!(d.reason, "pdp_gate_unavailable");
+        assert_eq!(d.reason, "credential_scope_unknown");
     }
 
     #[test]
-    fn overbroad_scope_still_covers_and_reaches_pdp() {
-        // overbroad covers the required scope; overbroad is a recommendation, never a block in v0.
+    fn repo_admin_covers_and_reaches_pdp() {
+        // repo:admin is a documented covering (admin-breadth) scope; overbroad still covers and is a
+        // recommendation, never a block in v0.
         let p = allow_acme_with_cred(
             "upstream_credential:\n  alias: \"gh\"\n  scopes: [\"repo:admin\"]\n",
         );
@@ -452,7 +455,10 @@ allowances:
     }
 
     #[test]
-    fn scope_covers_matches_the_e10_lattice() {
+    fn scope_covers_matches_the_p59_contract() {
+        // The enforcement lattice equals credential-scope.md exactly: covered by
+        // {repo:deploy_key:write, repo:admin}; NOT covered by {repo:read, repo:metadata,
+        // repo:contents:read}; everything else (incl. repo:write, repo) is unrecognized -> unknown.
         let req = "repo:deploy_key:write";
         let cov = |s: &[&str]| {
             matches!(
@@ -464,31 +470,41 @@ allowances:
                 ScopeCoverage::Covered
             )
         };
-        assert!(cov(&["repo:deploy_key:write"]), "exact");
-        assert!(cov(&["repo:write"]), "broader_ok");
-        assert!(cov(&["repo:admin"]), "overbroad covers");
+        assert!(cov(&["repo:deploy_key:write"]), "exact covers");
+        assert!(cov(&["repo:admin"]), "admin breadth covers");
+        // repo:write is NOT in the documented contract -> unrecognized -> unknown (not covered).
         assert!(matches!(
-            scope_covers("github_deploy_key", req, &["repo:read".to_string()]),
-            ScopeCoverage::Insufficient
+            scope_covers("github_deploy_key", req, &["repo:write".to_string()]),
+            ScopeCoverage::Unknown
         ));
+        for ns in ["repo:read", "repo:metadata", "repo:contents:read"] {
+            assert!(
+                matches!(
+                    scope_covers("github_deploy_key", req, &[ns.to_string()]),
+                    ScopeCoverage::Insufficient
+                ),
+                "{ns} is recognized-non-covering -> insufficient"
+            );
+        }
         assert!(matches!(
             scope_covers("github_deploy_key", req, &["repo".to_string()]),
             ScopeCoverage::Unknown
         ));
+        // An unrecognized scope alongside a recognized non-covering one -> unknown takes precedence.
         assert!(
             matches!(
                 scope_covers(
                     "github_deploy_key",
                     req,
-                    &["repo".to_string(), "repo:read".to_string()]
+                    &["banana".to_string(), "repo:read".to_string()]
                 ),
                 ScopeCoverage::Unknown
             ),
-            "ambiguous takes precedence over insufficient"
+            "unknown takes precedence over insufficient"
         );
-        // No lattice for an unknown class -> Unknown (fail-closed).
+        // No documented lattice for another class -> Unknown (fail-closed).
         assert!(matches!(
-            scope_covers("nope", req, &["repo:write".to_string()]),
+            scope_covers("slack_add_member", req, &["repo:admin".to_string()]),
             ScopeCoverage::Unknown
         ));
     }

@@ -162,7 +162,7 @@ unclassified_tool_call                  no_declared_allowance
 credential_scope_insufficient           credential_scope_unknown
 manifest_baseline_missing               manifest_current_observation_incomplete
 manifest_drifted_since_approval         policy_unavailable
-policy_error                            pdp_gate_unavailable      (P61e-c1 only)
+policy_error                            pdp_gate_unavailable      (pre-c3 rollout only; c1/c2)
 enforcing_mode_deny_all   (SUPERSEDED — see below)
 ```
 A denied call never reaches the upstream. `credential_scope_unknown` is distinct from
@@ -191,10 +191,13 @@ removed when c3 lands; `enforcing_mode_deny_all` is retired and no longer emitte
   token introspection. When coverage cannot be determined, the call is denied with
   `credential_scope_unknown`, never silently `credential_scope_insufficient` (an unknown is not an
   insufficiency). This gate is **P61e-c2 (shipped)**: it reads the policy's `upstream_credential.scopes`
-  against the action's `required_scope_for(category)` through a deterministic lattice shared with the
-  E10 overbreadth experiment. Overbroad still covers (overbroad is a recommendation, never a block in
-  v0); an absent credential, an unrecognized scope, and a too-coarse (ambiguous) scope are all
-  `credential_scope_unknown`.
+  against the action's `required_scope_for(category)` through a deterministic lattice that matches the
+  authoritative [credential-scope contract](credential-scope.md) exactly (`repo:deploy_key:write` is
+  covered only by `repo:deploy_key:write` and `repo:admin`). The enforcement gate is never broader than
+  that documented contract — `repo:write`, for instance, does NOT cover, and any scope not in the
+  contract is unrecognized → `credential_scope_unknown`. Overbroad (admin breadth) still covers and is a
+  recommendation, never a block in v0; an absent credential, an unrecognized scope, and a non-covering
+  scope deny.
 - **Audience binding (concept-aligned, RFC 8707 / OAuth 2.1).** The proxy must not let a token or
   credential issued for one audience be borrowed to reach another; it does not upgrade or broaden
   caller authority. v0 need not implement token minting, but it must state and enforce that the proxy
@@ -302,15 +305,21 @@ digest, reason) **for operability only — it is a diagnostic log, not the canon
 
 **Implementation note (P61e-c2):** the PDP gains a third gate after the allowance match — the
 credential-scope gate. It reads the policy's `upstream_credential.scopes` against the action's
-`required_scope_for(category)` (P59) through a deterministic lattice shared with the E10 overbreadth
-experiment, so the gate and the measurement agree. Precedence is now classification → allowance →
-credential-scope → `pdp_gate_unavailable`. Coverage maps to: covered (exact / broader-non-admin /
-overbroad — overbroad still covers, a recommendation not a block) → fall through; recognized but
-non-covering → `credential_scope_insufficient`; absent credential / unrecognized scope / too-coarse
-(ambiguous) scope → `credential_scope_unknown` (an unknown is not an insufficiency). Fail-closed: an
-unknown required scope denies (`credential_scope_unknown`), never a silent pass. The policy grows an
-optional `upstream_credential: {alias, scopes}` block; the alias is reserved for the P61e-d evidence
-record and is not read by the gate. Still no allow path — a call that clears the credential-scope gate
+`required_scope_for(category)` (P59) through a deterministic lattice that matches the authoritative
+[credential-scope contract](credential-scope.md) exactly — NOT the richer E10 measurement vocabulary.
+The enforcement gate is never broader than the documented contract (`repo:deploy_key:write` is covered
+only by `repo:deploy_key:write` and `repo:admin`; `repo:write` is unrecognized and does not cover), so
+broadening it is a deliberate, contract-and-fixture-backed change, never a guess. Precedence is now
+classification → allowance → credential-scope → `pdp_gate_unavailable`. Coverage maps to: covered
+(exact or admin-breadth — overbroad still covers, a recommendation not a block) → fall through;
+recognized but non-covering → `credential_scope_insufficient`; absent credential / unrecognized scope →
+`credential_scope_unknown` (an unknown is not an insufficiency). Fail-closed: an unknown required scope
+denies (`credential_scope_unknown`), never a silent pass. Only `github_deploy_key` has a documented
+lattice today; any other classified class is fail-closed `credential_scope_unknown` until its own
+contract slice lands (and is unreachable anyway — c1's allowance matcher only admits `github_deploy_key`).
+The policy grows an optional `upstream_credential: {alias, scopes}` block; the alias is reserved for the
+P61e-d evidence record and is not read by the gate. Still no allow path — a call that clears the
+credential-scope gate
 is denied with `pdp_gate_unavailable`.
 
 **P61e-b is deliberately just a deny-all enforcing proxy** — no policy decision point, no inputs, no
