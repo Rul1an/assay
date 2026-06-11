@@ -1,0 +1,34 @@
+name: Claims Boundary Guard
+
+on:
+  pull_request:
+    paths:
+      - "README.md"
+      - "CHANGELOG.md"
+      - "CI-CONTRACT.md"
+      - "docs/**"
+      - "assay-action/action.yml"
+      - "assay-action/action.yaml"
+      - "scripts/ci/check-claims-boundary.py"
+      - ".github/workflows/claims-boundary.yml"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  claims-boundary:
+    name: claims-boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Self-test claims-boundary guard
+        run: python3 scripts/ci/check-claims-boundary.py --self-test
+
+      - name: Scan public prose
+        run: python3 scripts/ci/check-claims-boundary.py
