@@ -98,6 +98,39 @@ fn spawn_enforce(log: &Path, policy: &Path, baseline: &Path, mode: &str) -> Chil
         .expect("spawn enforce proxy (is python installed?)")
 }
 
+/// Spawn the enforcing proxy that also writes the per-call enforcement-decision NDJSON (P61e-d).
+fn spawn_enforce_with_decisions(
+    log: &Path,
+    policy: &Path,
+    baseline: &Path,
+    mode: &str,
+    decisions: &Path,
+) -> Child {
+    Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+        .args([
+            "proxy-enforce",
+            "--upstream-command",
+            python(),
+            "--upstream-arg",
+            "-u",
+            "--upstream-arg",
+            mock_path().to_str().unwrap(),
+            "--enforce-policy",
+            policy.to_str().unwrap(),
+            "--declared-mcp-manifest",
+            baseline.to_str().unwrap(),
+            "--enforcement-decision-out",
+            decisions.to_str().unwrap(),
+        ])
+        .env("MOCK_UPSTREAM_LOG", log)
+        .env("MOCK_UPSTREAM_MODE", mode)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("spawn enforce proxy (is python installed?)")
+}
+
 fn send(stdin: &mut ChildStdin, v: Value) {
     writeln!(stdin, "{v}").expect("write");
     stdin.flush().expect("flush");
@@ -371,6 +404,72 @@ fn fully_allowed_call_is_forwarded_and_response_relayed() {
     assert!(
         methods.contains(&"tools/call".to_string()),
         "the allowed tools/call must reach the upstream: {methods:?}"
+    );
+}
+
+// --- P61e-d: per-call enforcement_decision.v0 records ---------------------------------------------
+
+#[test]
+fn enforcement_decision_records_are_written_for_deny_and_allow() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let decisions = dir.path().join("decisions.ndjson");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut child =
+        spawn_enforce_with_decisions(&log, &policy, &approved_baseline_path(), "p60a", &decisions);
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+    // Observe a complete manifest so the allowed call can clear the drift gate.
+    send(
+        &mut stdin,
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+    );
+    let _ = read_response(&mut out);
+    // 1) unclassified -> deny.
+    send(
+        &mut stdin,
+        serde_json::json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                           "params": {"name": "echo", "arguments": {}}}),
+    );
+    let _ = read_response(&mut out);
+    // 2) fully allowed -> forward.
+    send(
+        &mut stdin,
+        serde_json::json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                           "params": {"name": "github.add_deploy_key",
+                                      "arguments": {"owner": "acme", "repo": "prod-app"}}}),
+    );
+    let r = read_response(&mut out);
+    assert_eq!(r["result"]["content"][0]["text"], "forwarded-ok");
+
+    shutdown(child, stdin);
+
+    let body = std::fs::read_to_string(&decisions).expect("decisions file written");
+    let recs: Vec<Value> = body
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).expect("each line is a JSON record"))
+        .collect();
+    assert_eq!(recs.len(), 2, "one record per tools/call decision: {body}");
+
+    assert_eq!(recs[0]["schema"], "assay.enforcement_decision.v0");
+    assert_eq!(recs[0]["decision"], "deny");
+    assert_eq!(recs[0]["reason"], "unclassified_tool_call");
+    assert_eq!(recs[0]["forwarded"], false);
+
+    assert_eq!(recs[1]["decision"], "allow");
+    assert_eq!(recs[1]["forwarded"], true);
+    assert_eq!(recs[1]["drift_state"], "satisfied");
+    assert_eq!(recs[1]["tool"]["action_class"], "github_deploy_key");
+    assert_eq!(recs[1]["credential_alias"], "gh-deploy");
+
+    // The declared credential scopes never appear in the evidence stream (alias only).
+    assert!(
+        !body.contains("repo:deploy_key:write"),
+        "declared scopes must not leak into the decision records"
     );
 }
 

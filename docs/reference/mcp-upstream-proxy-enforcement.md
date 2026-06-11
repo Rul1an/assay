@@ -4,11 +4,12 @@ Status: **review-spec, no code.** A new arc and the heaviest risk class in the p
 the shipped, opt-in [manifest-observation proxy](mcp-upstream-proxy-mode.md) (P61a–d, assay v3.23.0)
 from observe-only to **enforcing**: it forwards a privileged `tools/call` only after a fail-closed
 policy decision. Tracked as [#1624]. The binding decisions are agreed (§16, "Resolved decisions"); this
-is the design of record. Shipped: P61e-b (the deny-all enforcing run mode), P61e-c1 (caller-allowance),
-P61e-c2 (credential-scope), and **P61e-c3 (the drift gate + the first allow/forward path)**. As of c3
-the enforcing proxy forwards a privileged `tools/call` — but only after a clear allow from every gate
-(classification, caller-allowance, credential-scope, drift), the narrowest such path; everything else is
-a fail-closed deny. The remaining slice is P61e-d (the `assay.enforcement_decision.v0` evidence record).
+is the design of record. **The arc is complete and shipped:** P61e-b (the deny-all enforcing run mode),
+P61e-c1 (caller-allowance), P61e-c2 (credential-scope), P61e-c3 (the drift gate + the first allow/forward
+path), and **P61e-d (the `assay.enforcement_decision.v0` per-call evidence record)**. The enforcing proxy
+forwards a privileged `tools/call` only after a clear allow from every gate (classification,
+caller-allowance, credential-scope, drift) — the narrowest such path — records every decision as
+evidence, and keeps the forwarded call's side effect *asserted*, never proven.
 
 The one-line scope: **the manifest-observation proxy answers "did this tool surface change?"; the
 enforcing proxy answers "should this specific privileged call be forwarded, right now, for this
@@ -253,16 +254,23 @@ ladder (`asserted` < `observed_confirmed` < `audit_record_bound`) is unchanged. 
 notes the proxy *allowed and forwarded* the call; it never claims the upstream performed or persisted
 the action. Allowing a call and proving its effect are different, and the proxy only does the first.
 
-## 11. Enforcement decision record (separate carrier)
+## 11. Enforcement decision record (separate carrier) — P61e-d, shipped
 
-A new `assay.enforcement_decision.v0` artifact, emitted by the enforcing path and kept **separate** from
+The `assay.enforcement_decision.v0` artifact, emitted by the enforcing path and kept **separate** from
 the manifest-observation artifact (the standing observation/enforcement separation). It records, per
-privileged call: caller identity, the P57c-classified action + projected target (sensitive ids hashed),
-the decision (`allow`/`deny`), the machine reason, the fail-closed flag, the drift-gate state, and the
-credential alias (never the secret). It does not assert the side effect.
+`tools/call`: caller id, the P57c-classified action + projected target (sensitive ids hashed) + target
+digest, the decision (`allow`/`deny`), the machine reason, the `fail_closed` flag, the `forwarded` flag,
+the derived `drift_state` (`satisfied` on allow / the specific drift reason / `not_evaluated` when an
+earlier gate denied), and the credential **alias** (never the token or the declared scopes). It does
+not assert the side effect.
 
-**Deferred to P61e-d** — the record is not in P61e-b. P61e-b proves runtime *denial semantics* first;
-the per-call record follows once those semantics are settled.
+**Implementation (P61e-d):** opt-in via `--enforcement-decision-out <path>`; the proxy appends one
+compact JSON record per decision (NDJSON), for both allow and deny, so a killed proxy still keeps the
+decisions recorded so far. The record is deterministic (no timestamp). The diagnostic `tracing` line
+from c1–c3 stays as operability output; this artifact is the canonical evidence carrier. Safety rule
+(see §12): a record-write failure on an allowed call fails closed — the call is **not** forwarded
+(`proxy_failed` / `enforcement_record_write_failed`), never a silent unrecorded forward; a deny stands
+regardless (a missing deny-record is a completeness gap, logged, not a safety gap).
 
 **Name discipline (no overlap with the existing carrier):**
 - `assay.enforcement_health.v0` = mechanism / runtime-capability state (was enforcement active, did the
@@ -276,8 +284,12 @@ the per-call record follows once those semantics are settled.
 - PDP cannot decide → `proxy_denied` (fail-closed), never forwarded;
 - upstream unreachable on an *allowed* call → `proxy_failed` (the decision stands; the forward failed);
 - malformed upstream response → never trusted (as P61a);
-- the enforcement record is written for both allow and deny; a record-write failure on a requested
-  output path is a non-zero exit, not a silent allow.
+- the enforcement record (P61e-d) is written for both allow and deny when `--enforcement-decision-out`
+  is set; a per-call record-write failure on an **allowed** call fails that call closed
+  (`proxy_failed` / `enforcement_record_write_failed`), so it is never a silent unrecorded forward; a
+  **denied** call's record-write failure is logged but the deny still stands (the call is fail-closed
+  either way). The per-call streaming record fails the individual call closed rather than exiting the
+  whole session.
 
 ## 13. What enforcing-v0 is NOT
 
@@ -305,7 +317,9 @@ P61e-c  split gate-by-gate, each fail-closed and independently tested, NO forwar
         forward path: a call that clears every gate is forwarded; pdp_gate_unavailable is removed.
         (SHIPPED.)
 P61e-d  the assay.enforcement_decision.v0 record + the side-effect-evidence interaction (asserted),
-        kept separate from the observation artifact; Plimsoll consumes it separately (later)
+        kept separate from the observation artifact; Plimsoll consumes it separately (later). (SHIPPED:
+        opt-in --enforcement-decision-out NDJSON, one record per decision, allow+deny, fail-closed on
+        an unrecordable allow.)
 ```
 
 **Implementation note (P61e-c1):** the enforcing subcommand now requires `--enforce-policy <path>` (a
