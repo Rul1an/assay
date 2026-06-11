@@ -161,8 +161,8 @@ unknown_caller                          classification_incomplete
 unclassified_tool_call                  no_declared_allowance
 credential_scope_insufficient           credential_scope_unknown
 manifest_baseline_missing               manifest_current_observation_incomplete
-manifest_drifted_since_approval         policy_unavailable
-policy_error
+manifest_observation_ambiguous          manifest_drifted_since_approval
+policy_unavailable                      policy_error
 ```
 A denied call never reaches the upstream. `credential_scope_unknown` is distinct from
 `credential_scope_insufficient`: when coverage cannot be determined the denial reason is *unknown*, not
@@ -217,6 +217,18 @@ The drift gate needs **both** of two evidence inputs, and is fail-closed without
   `tools/list` (P61c). If the session has no complete current observation, or the invoked tool is absent
   from a complete one, the drift state is `proxy_denied` (`manifest_current_observation_incomplete`),
   because you cannot compare against a baseline without a current complete view of that tool.
+
+Two observation-integrity rules close the rug-pull window (both fail-closed):
+- **a post-approval `tools/list_changed` invalidates the current complete observation** — the surface
+  may have mutated, which is exactly the rug-pull signal, so the proxy will not authorize against the
+  prior manifest until a fresh complete `tools/list` is re-observed
+  (`manifest_current_observation_incomplete` until then). Observing a clean manifest then receiving a
+  `list_changed` must never leave a stale digest authorizing a privileged call;
+- **a duplicate-name (ambiguous) observed manifest is inconclusive** — when the observed `tools/list`
+  has colliding tool names the manifest is `status: ambiguous` (its `manifest_digest` is withheld; see
+  [mcp-manifest-drift.md](mcp-manifest-drift.md)), so the gate denies `manifest_observation_ambiguous`
+  rather than pick one of the colliding per-tool digests. Likewise, **a duplicate-name declared baseline
+  fails startup** (an approval baseline must be unambiguous — no first-match-wins).
 
 The comparison is the per-tool `tool_digest`, looked up by tool name in both the baseline and the
 current observed manifest (the same canonical P60 projection on both sides; server id is not part of the
