@@ -1,0 +1,62 @@
+name: Scheduled OSV Advisory
+
+on:
+  schedule:
+    - cron: "47 5 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  osv-non-rust:
+    name: OSV non-Rust advisory scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run OSV scanner
+        uses: google/osv-scanner-action/osv-scanner-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
+        with:
+          scan-args: |-
+            --format=json
+            --output=osv-results.json
+            docs/experiments/runner-vs-otel-2026-05/workload/package-lock.json
+            docs/requirements-ci.txt
+            examples/agentevals-trajectory-strict-match-evidence/requirements.txt
+            examples/autoevals-exactmatch-evidence/requirements.txt
+            examples/crewai-event-evidence/requirements.txt
+            examples/guardrails-validation-outcome-evidence/requirements.txt
+            examples/langgraph-task-evidence/requirements.txt
+            examples/langwatch-custom-span-evaluation-evidence/requirements.txt
+            examples/mcp-compliance/package-lock.json
+            examples/openai-agents-trace-evidence/requirements.txt
+            examples/openfeature-evaluation-details-evidence/requirements.txt
+            examples/phoenix-span-annotation-evidence/requirements.txt
+            examples/promptfoo-assertion-grading-result-evidence/package-lock.json
+            examples/pydantic-ai-eval-report-evidence/requirements.txt
+            runner-fixtures/gemini-google-genai/requirements.txt
+            runner-fixtures/openai-agents/package-lock.json
+        continue-on-error: true
+
+      - name: Build advisory SARIF
+        uses: google/osv-scanner-action/osv-reporter-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
+        with:
+          scan-args: |-
+            --output=osv-results.sarif
+            --new=osv-results.json
+            --gh-annotations=false
+            --fail-on-vuln=false
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        with:
+          sarif_file: osv-results.sarif
+          category: osv-scanner-non-rust
