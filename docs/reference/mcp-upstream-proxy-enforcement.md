@@ -286,6 +286,7 @@ regardless (a missing deny-record is a completeness gap, logged, not a safety ga
 **Correlation (forward-looking, not shipped):** v0 carries no request-id, so a record is correlated to
 its call and to an upstream observation by order + content. An optional, caller-supplied, opaque
 per-call correlation id — echoed by the proxy, never minted by it (so the record stays deterministic),
+validated to a bounded safe shape before it lands (so the id can't smuggle content into the evidence),
 and carrying no transport claim — is specified as the clean join-key in
 [enforcement-decision-correlation-id.md](enforcement-decision-correlation-id.md). It is additive within
 v0, not a schema bump.

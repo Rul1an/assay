@@ -46,11 +46,14 @@ record, and a cooperating/controlled upstream's observation.
 ## Transport (echo path)
 
 - **Caller → proxy:** the token rides in MCP request `_meta` (the protocol's extensibility slot) under
-  a reserved key, or an equivalent agreed request field.
-- **Proxy → record:** copied verbatim into the decision record (the new optional field below).
-- **Proxy → upstream:** forwarded in the onward request `_meta`. A real upstream that ignores `_meta`
-  is unaffected; in that case driver↔record correlation alone already removes the harness's
-  order-dependence (a controlled upstream that *does* read it gives the full three-way join).
+  the one reserved key (below).
+- **Proxy → record:** copied into the decision record **only after it passes the safe-shape check
+  below**; a token that fails validation is dropped (the record carries no `correlation_id`, or an
+  explicit `correlation_id_invalid` diagnostic — see below), never the raw bytes.
+- **Proxy → upstream:** the same validated token is forwarded in the onward request `_meta`. A real
+  upstream that ignores `_meta` is unaffected; in that case driver↔record correlation alone already
+  removes the harness's order-dependence (a controlled upstream that *does* read it gives the full
+  three-way join).
 
 ## Field shape
 
@@ -64,6 +67,32 @@ A single optional field on the existing per-call record:
   "...": "all existing v0 fields unchanged"
 }
 ```
+
+## Safe shape (the id is evidence — bound it before it lands)
+
+The token is caller-controlled and ends up in a persisted evidence artifact, so the proxy must treat it
+as hostile input and pin a bounded shape — otherwise the correlation id becomes a channel for smuggling
+content (PII, secrets, oversized blobs, control characters) into the evidence stream. The producer
+validates before it copies, and **never** persists raw unvalidated bytes:
+
+- **One reserved `_meta` key**, fixed and documented (e.g. `assay.correlation_id`); any other key is
+  ignored. No free-form metadata is hoovered into the record.
+- **String only.** Non-string (object, array, number, bool) → rejected.
+- **Bounded length.** A small fixed cap (e.g. ≤ 128 chars); over-length → rejected, never truncated
+  (truncation would forge a different id).
+- **Constrained charset.** A safe, opaque alphabet only — recommend a UUID, or `base64url` / hex
+  (`[A-Za-z0-9_-]`). No whitespace, no control characters, no terminal escapes (the same hostile-input
+  discipline already applied to rendered evidence strings).
+- **Opaque by contract.** It is a join-key, not a place for content. The spec states plainly that
+  callers must not put PII or secrets in it; the charset/length bound makes accidental smuggling hard,
+  and the value-free rule keeps it from being mistaken for data.
+- **Invalid → omit or diagnose, never trust.** A token that fails any check is dropped: the record
+  omits `correlation_id` and falls back to order+content, **or** carries an explicit boolean
+  `correlation_id_invalid: true` diagnostic (no raw value) so the gap is visible rather than silent.
+  Pick one and pin it in the implementation; the default is omit-with-fallback.
+
+This keeps the id a safe equality key and never an evidence leak. Determinism is unaffected — a fixed
+valid input yields a fixed record; a rejected input yields the deterministic fallback.
 
 ## Versioning decision (the one real choice — recommend additive within v0)
 
@@ -104,10 +133,14 @@ v0 fields or their canonicalization.
 
 ## Implementation steps (when greenlit — a separate PR)
 
-1. Reserve the `_meta` key and the optional record field name; document the absent/null fallback.
-2. Producer: echo the caller `_meta` token verbatim into the record and onto the onward request; emit
-   nothing when absent.
-3. Producer guard test: the record stays **deterministic** given a fixed id, and the field is absent
-   when the caller supplied none (no proxy-minted value, no timestamp).
+1. Reserve the one `_meta` key and the optional record field name; document the absent/null fallback
+   and the chosen invalid-handling (omit-with-fallback vs `correlation_id_invalid` diagnostic).
+2. Producer: read the caller `_meta` token, run the **safe-shape check** (string, ≤ cap, safe charset,
+   no control chars), and only then copy the validated token into the record and onto the onward
+   request; emit nothing (or the diagnostic) when absent or invalid — never the raw bytes.
+3. Producer guard tests: the record stays **deterministic** given a fixed valid id; the field is absent
+   when the caller supplied none; and a too-long / wrong-charset / non-string / control-char token is
+   rejected (record omits it or sets the diagnostic, never persists the raw value). No proxy-minted
+   value, no timestamp.
 4. The enforcement-proof harness: add the join-on-id path with order+content fallback.
 5. Plimsoll: optional per-id view; gate semantics unchanged.
