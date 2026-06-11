@@ -259,7 +259,7 @@ def self_test() -> None:
         assert len(findings) == 1
         assert findings[0].path == Path("README.md")
         assert findings[0].category == "publication_blocker_marker"
-        trusted_hash = hashlib.sha256("alpha beta".encode("utf-8")).hexdigest()
+        trusted_hash = hashlib.sha256(b"alpha beta").hexdigest()
         trusted_findings = scan_trusted_hashes([root / "README.md"], root, {trusted_hash})
         assert len(trusted_findings) == 1
         assert trusted_findings[0].path == Path("README.md")
