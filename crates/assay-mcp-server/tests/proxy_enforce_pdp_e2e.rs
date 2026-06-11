@@ -458,13 +458,23 @@ fn enforcement_decision_records_are_written_for_deny_and_allow() {
     assert_eq!(recs[0]["schema"], "assay.enforcement_decision.v0");
     assert_eq!(recs[0]["decision"], "deny");
     assert_eq!(recs[0]["reason"], "unclassified_tool_call");
-    assert_eq!(recs[0]["forwarded"], false);
 
     assert_eq!(recs[1]["decision"], "allow");
-    assert_eq!(recs[1]["forwarded"], true);
     assert_eq!(recs[1]["drift_state"], "satisfied");
     assert_eq!(recs[1]["tool"]["action_class"], "github_deploy_key");
     assert_eq!(recs[1]["credential_alias"], "gh-deploy");
+
+    // The record carries no transport-outcome field — an allow is the policy decision, not a delivery
+    // claim. The actual delivery is proven separately: only the allowed call reaches the upstream.
+    assert!(
+        body.lines().all(|l| !l.contains("\"forwarded\"")),
+        "decision records must not claim transport delivery: {body}"
+    );
+    let methods = read_methods(&log);
+    assert!(
+        methods.contains(&"tools/call".to_string()),
+        "the allowed call really reached the upstream: {methods:?}"
+    );
 
     // The declared credential scopes never appear in the evidence stream (alias only).
     assert!(
