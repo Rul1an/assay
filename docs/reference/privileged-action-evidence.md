@@ -79,7 +79,8 @@ OTel log-based event projection.
 
 **Parked (needs a separate design before any code):** granular per-tool manifest drift; and the
 enforcing `tools/call` proxy (a heavier security boundary — caller authorization, upstream credential
-use, a policy decision before forwarding, confused-deputy prevention — that needs its own review-spec).
+use, a policy decision before forwarding, confused-deputy prevention — specified as a review-spec in
+[mcp-proxy-enforcement.md](mcp-proxy-enforcement.md), no code yet).
 
 The load-bearing boundary for the manifest line: **live upstream observation was not a small wiring
 step.** `assay-mcp-server` terminates the protocol and serves its own tools, so observing an upstream
