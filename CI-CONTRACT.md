@@ -171,6 +171,11 @@ Required-gate split:
 - The trusted hashed-list layer is part of the sanitizer workflow, not a
   separate required context, until a future context-capture/import review says
   otherwise.
+- The trusted list must enumerate every spelling, casing, and spacing variant of
+  a term. Normalization lowercases, splits on non-alphanumerics, and hashes
+  one-to-five-token windows per line, so a compound spelling and a spaced or
+  hyphenated spelling of the same term produce different hashes. Variant
+  completeness is a property of the trusted list, not the scanner.
 
 Logging contract:
 
