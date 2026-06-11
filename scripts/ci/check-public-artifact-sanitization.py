@@ -149,7 +149,7 @@ def should_scan(path: Path, root: Path) -> bool:
             return False
         if path.stat().st_size > TEXT_BYTES_LIMIT:
             return False
-    except OSError:
+    except FileNotFoundError:
         return False
     return True
 
