@@ -205,10 +205,52 @@ Relationship to the existing public/private boundary guard:
 
 ### Claims And Evidence Boundary Guard
 
-Add or keep a lightweight required check for public wording in changed docs,
-examples, schemas, release notes, and generated public artifacts.
+Add an advisory, non-required claims-boundary check for public wording in
+tracked prose. This guard is regression prevention, not a cleanup lane: the
+initial implementation must run with zero findings on the current public
+corpus before it ships.
 
-Claims should:
+The guard is deliberately narrow. It matches only curated affirmative
+constructions where weak evidence is equated with strong security, trust, or
+compliance claims. It must not flag isolated words such as `proof`, `secure`,
+`compliance`, or `green`.
+
+Initial rule registry:
+
+- `gate-as-truth`: CI, gate, check, scan, badge, green, or passing status
+  phrased as proving, guaranteeing, ensuring, or meaning safety, security,
+  compliance, trust, production readiness, or truth.
+- `proof-of-x`: affirmative `proof of` or `guarantee of` compliance, security,
+  safety, or trust.
+- `tool-guarantees`: Assay, this action, a gate, or a check phrased as proving,
+  guaranteeing, or ensuring that an agent, tool, or call is safe, secure,
+  compliant, or trusted.
+
+The guard must stay negation-aware. Bounded forms such as "not a proof of
+compliance", "records the decision, not proof of the effect", and "asserted,
+not verified" are examples of the discipline working and must not fail the
+check. A reviewed exception may use an inline
+`claims-guard: allow: <reason>` marker; the reason is required so the exception
+is auditable.
+
+Unlike the private-vocabulary sanitizer, this check may print the flagged
+sentence because the text is public and authors need the sentence to repair the
+claim. It must print the rule name and a bounded-rephrase suggestion. Its rule
+list is public and checked into the repository; no secret, HMAC, or private
+term list is involved.
+
+Scope:
+
+- root `README.md`, `CHANGELOG.md`, and `CI-CONTRACT.md`;
+- `docs/**` prose files;
+- the action marketplace metadata in `assay-action/action.yml` or
+  `assay-action/action.yaml`.
+
+The workflow trigger should also include the checker and workflow files
+themselves so self-test and review changes exercise the guard, but code,
+tests, fixtures, and private notes are not prose scan targets.
+
+Claims in public prose should:
 
 - name the artifact, event, fixture, or observation shape being checked;
 - distinguish producer, consumer, verifier, conformance, and release lanes;
@@ -235,6 +277,9 @@ For MCP proxy enforcement specifically:
   provider-verified grant evidence;
 - every forwarding-mode PR needs confused-deputy, drift, caller identity,
   credential scope, and declared/current-manifest gates in the PR description.
+
+Do not add this check to branch protection until it has run quietly across many
+ordinary PRs and the live check name is captured in the ruleset contract.
 
 ## 2. Scheduled Checks
 
