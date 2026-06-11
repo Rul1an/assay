@@ -1,12 +1,12 @@
-//! P61e-c1/c2: the enforcing-proxy policy decision point — caller-allowance + credential-scope gates,
-//! deny-only. Spec: docs/reference/mcp-upstream-proxy-enforcement.md.
+//! P61e-c1/c2/c3: the enforcing-proxy policy decision point — caller-allowance + credential-scope +
+//! drift gates, plus the first allow/forward path. Spec: docs/reference/mcp-upstream-proxy-enforcement.md.
 //!
-//! Scope so far: parse the `--enforce-policy` file, classify an observed `tools/call`, and decide a
-//! DENY with a precedence-pinned reason. c1 added the caller-allowance gate; c2 adds the
-//! credential-scope gate (the declared upstream credential must cover the action's required scope).
-//! There is still no allow path and no forwarding (that arrives in c3, with the drift gate). A
-//! `tools/call` that passes every enabled gate is still denied with `pdp_gate_unavailable`, a temporary
-//! rollout reason removed when c3 lands.
+//! Scope: parse the `--enforce-policy` file and the `--declared-mcp-manifest` baseline, classify an
+//! observed `tools/call`, and decide. c1 added the caller-allowance gate; c2 the credential-scope gate;
+//! c3 the drift gate (the current observed per-tool digest must equal the approved baseline digest,
+//! with both a baseline and a current COMPLETE observation required) AND the first allow path: a call
+//! that clears every gate is forwarded. The temporary `pdp_gate_unavailable` reason is gone — every
+//! outcome is now either a precedence-pinned deny or an allow.
 //!
 //! Caller identity is the static `caller.id` from the policy only — no transport/env/request
 //! inference — so a single stdio session is bound to one configured caller and `unknown_caller`
@@ -61,6 +61,79 @@ pub struct Target {
     pub repo: String,
 }
 
+const DECLARED_MANIFEST_SCHEMA: &str = "assay.declared_mcp_manifest.v0";
+
+/// The operator-pinned approval-time baseline (`assay.declared_mcp_manifest.v0`): the per-tool
+/// `tool_digest` the caller approved. The drift gate (c3) compares the current observed per-tool digest
+/// against this. It is the ONLY source of the approval baseline — never the first observed session
+/// manifest (spec §16-B).
+#[derive(Debug, Deserialize)]
+pub struct DeclaredManifest {
+    pub schema: String,
+    #[serde(default)]
+    pub tools: Vec<BaselineTool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BaselineTool {
+    pub name: String,
+    pub tool_digest: String,
+}
+
+impl DeclaredManifest {
+    /// The approved `tool_digest` for `name`, or `None` if this tool has no approved baseline.
+    pub fn tool_digest_for(&self, name: &str) -> Option<&str> {
+        self.tools
+            .iter()
+            .find(|t| t.name == name)
+            .map(|t| t.tool_digest.as_str())
+    }
+}
+
+/// The current observed per-tool digest for the invoked tool, computed by the proxy from its own
+/// observed `tools/list` (P61c). Distinguishes "no complete manifest observed this session" from
+/// "observed complete but this tool is absent" — both are fail-closed, never an allow.
+pub enum ObservedToolDigest {
+    /// No COMPLETE `tools/list` has been observed in this session.
+    NoCompleteManifest,
+    /// A complete manifest was observed, but it does not contain the invoked tool.
+    CompleteButToolAbsent,
+    /// The current observed `tool_digest` for the invoked tool.
+    Present(String),
+}
+
+/// Load + STRICTLY validate the declared-manifest baseline. Like the enforce policy, any failure here
+/// is a STARTUP failure (non-zero exit), never a runtime deny: in enforcing mode an approval baseline
+/// is required, and a proxy that would forward privileged calls without a valid baseline must not start.
+pub fn load_declared_manifest(path: &Path) -> Result<DeclaredManifest> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("reading --declared-mcp-manifest {}", path.display()))?;
+    let manifest: DeclaredManifest =
+        serde_json::from_str(&text).with_context(|| "parsing --declared-mcp-manifest JSON")?;
+    if manifest.schema != DECLARED_MANIFEST_SCHEMA {
+        bail!(
+            "--declared-mcp-manifest: schema must be {DECLARED_MANIFEST_SCHEMA}, got {:?}",
+            manifest.schema
+        );
+    }
+    if manifest.tools.is_empty() {
+        bail!("--declared-mcp-manifest: tools must be a non-empty array");
+    }
+    for t in &manifest.tools {
+        if t.name.trim().is_empty() {
+            bail!("--declared-mcp-manifest: every tool must have a non-empty name");
+        }
+        if !t.tool_digest.starts_with("sha256:") {
+            bail!(
+                "--declared-mcp-manifest: tool {:?} tool_digest must be a sha256: digest, got {:?}",
+                t.name,
+                t.tool_digest
+            );
+        }
+    }
+    Ok(manifest)
+}
+
 /// Load + validate the enforce policy. Any failure here is a STARTUP failure (the caller surfaces it
 /// as a non-zero exit), never a runtime deny: an enforcing proxy without a valid policy is a
 /// misconfigured service and must not start.
@@ -83,38 +156,60 @@ pub fn target_digest(target: &Value) -> String {
     format!("sha256:{}", sha256_hex(&preimage))
 }
 
-/// A c1 decision. There is no `Allow` in c1 — every outcome is a deny with a reason.
+/// A PDP decision. `allow == true` means forward the call to the upstream; otherwise `reason` is the
+/// precedence-pinned deny reason. When `allow` is true `reason` is the constant `"allow"`.
 pub struct Decision {
+    pub allow: bool,
     pub reason: &'static str,
     pub action_class: Option<String>,
     pub target_digest: Option<String>,
 }
 
-/// The PDP. Precedence (first failing gate wins), all still deny (no allow/forward before c3):
+impl Decision {
+    fn deny(
+        reason: &'static str,
+        action_class: Option<String>,
+        target_digest: Option<String>,
+    ) -> Decision {
+        Decision {
+            allow: false,
+            reason,
+            action_class,
+            target_digest,
+        }
+    }
+}
+
+/// The PDP. Precedence (first failing gate wins); only a call that clears EVERY gate is allowed:
 /// 1. classification (before allowance, so a missing-target call reads as classification_incomplete,
 ///    never as a target mismatch);
 /// 2. caller-allowance match (github_deploy_key {owner, repo} only so far);
 /// 3. credential-scope (c2): the declared upstream credential must cover the action's required scope,
 ///    else credential_scope_insufficient / credential_scope_unknown;
-/// 4. all enabled gates passed -> pdp_gate_unavailable (the drift gate c3 + allow path are not enabled).
-pub fn decide(policy: &EnforcePolicy, tool_name: &str, args: &Value) -> Decision {
+/// 4. drift (c3): the current observed per-tool digest must equal the approved baseline digest, with
+///    BOTH a baseline (else manifest_baseline_missing) and a current complete observation (else
+///    manifest_current_observation_incomplete) required; a digest change is manifest_drifted_since_approval;
+/// 5. all gates passed -> ALLOW (forward). There is no `pdp_gate_unavailable` — c3 removed it.
+pub fn decide(
+    policy: &EnforcePolicy,
+    baseline: &DeclaredManifest,
+    observed: &ObservedToolDigest,
+    tool_name: &str,
+    args: &Value,
+) -> Decision {
     let c = classify(tool_name, args);
 
     // 1. classification gate — fail-closed before any allowance matching.
     if c.category.is_none() {
-        return Decision {
-            reason: "unclassified_tool_call",
-            action_class: None,
-            target_digest: None,
-        };
+        return Decision::deny("unclassified_tool_call", None, None);
     }
     if c.state != "classified" {
         // classified_incomplete / redaction_failed / any non-final state -> not enough to authorize.
-        return Decision {
-            reason: "classification_incomplete",
-            action_class: c.category.map(|s| s.to_string()),
-            target_digest: Some(target_digest(&c.target)),
-        };
+        return Decision::deny(
+            "classification_incomplete",
+            c.category.map(|s| s.to_string()),
+            Some(target_digest(&c.target)),
+        );
     }
 
     let action_class = c.category.unwrap();
@@ -126,28 +221,59 @@ pub fn decide(policy: &EnforcePolicy, tool_name: &str, args: &Value) -> Decision
         .iter()
         .any(|a| a.action_class == action_class && allowance_matches(a, action_class, &c.target));
     if !matched {
-        return Decision {
-            reason: "no_declared_allowance",
-            action_class: Some(action_class.to_string()),
-            target_digest: Some(tdig),
-        };
+        return Decision::deny(
+            "no_declared_allowance",
+            Some(action_class.to_string()),
+            Some(tdig),
+        );
     }
 
     // 3. credential-scope gate (c2): the declared upstream credential must cover the action's required
     // scope. Fail-closed — an absent credential, an unrecognized scope, or a too-coarse scope is a
     // credential_scope_unknown (coverage cannot be determined), never a silent pass.
     if let Some(reason) = credential_scope_gate(policy, action_class) {
-        return Decision {
-            reason,
-            action_class: Some(action_class.to_string()),
-            target_digest: Some(tdig),
-        };
+        return Decision::deny(reason, Some(action_class.to_string()), Some(tdig));
     }
 
-    // 4. c2 stops here: the drift gate (c3) and the allow/forward path are not enabled yet, so a call
-    // that clears every enabled gate is still denied.
+    // 4. drift gate (c3): the tool the caller is invoking must be the one approved. Both inputs are
+    // required and fail-closed: the approved baseline (never the first observed session manifest) AND a
+    // current COMPLETE observation of this tool's surface. "no drift observed" is never "no drift".
+    let baseline_digest = match baseline.tool_digest_for(tool_name) {
+        Some(d) => d,
+        None => {
+            return Decision::deny(
+                "manifest_baseline_missing",
+                Some(action_class.to_string()),
+                Some(tdig),
+            )
+        }
+    };
+    let observed_digest = match observed {
+        ObservedToolDigest::Present(d) => d.as_str(),
+        // No complete observation, or the tool is absent from the complete manifest: either way there
+        // is no current digest to compare, so drift cannot be ruled out -> fail closed.
+        ObservedToolDigest::NoCompleteManifest | ObservedToolDigest::CompleteButToolAbsent => {
+            return Decision::deny(
+                "manifest_current_observation_incomplete",
+                Some(action_class.to_string()),
+                Some(tdig),
+            )
+        }
+    };
+    if baseline_digest != observed_digest {
+        return Decision::deny(
+            "manifest_drifted_since_approval",
+            Some(action_class.to_string()),
+            Some(tdig),
+        );
+    }
+
+    // 5. every gate passed -> ALLOW (forward). This is the only allow path, and it is deliberately the
+    // narrowest one: exact caller allowance + covered credential scope + an approved baseline whose
+    // per-tool digest exactly equals the current complete observed digest.
     Decision {
-        reason: "pdp_gate_unavailable",
+        allow: true,
+        reason: "allow",
         action_class: Some(action_class.to_string()),
         target_digest: Some(tdig),
     }
@@ -309,6 +435,32 @@ allowances:
         json!({"owner": "acme", "repo": "prod-app"})
     }
 
+    const TOOL: &str = "github.add_deploy_key";
+    const APPROVED: &str = "sha256:approved-digest";
+
+    /// A single-tool declared baseline (loaded + strictly validated like at startup).
+    fn baseline_with(name: &str, digest: &str) -> DeclaredManifest {
+        let j = format!(
+            r#"{{"schema":"assay.declared_mcp_manifest.v0","tools":[{{"name":"{name}","tool_digest":"{digest}"}}]}}"#
+        );
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(j.as_bytes()).unwrap();
+        load_declared_manifest(f.path()).unwrap()
+    }
+
+    /// `decide` with a baseline + observed digest that MATCH for `github.add_deploy_key`, so only the
+    /// gates BEFORE the drift gate can produce a deny (the classification/allowance/credential tests).
+    /// A call that also clears those earlier gates therefore reaches an ALLOW here.
+    fn decide_match(p: &EnforcePolicy, tool: &str, args: &Value) -> Decision {
+        decide(
+            p,
+            &baseline_with(TOOL, APPROVED),
+            &ObservedToolDigest::Present(APPROVED.to_string()),
+            tool,
+            args,
+        )
+    }
+
     #[test]
     fn loads_a_valid_policy() {
         let p = policy_from(VALID).unwrap();
@@ -331,7 +483,7 @@ allowances:
     #[test]
     fn unclassified_tool_is_denied_unclassified() {
         let p = policy_from(VALID).unwrap();
-        let d = decide(&p, "misc.do_thing", &json!({}));
+        let d = decide_match(&p, "misc.do_thing", &json!({}));
         assert_eq!(d.reason, "unclassified_tool_call");
     }
 
@@ -340,14 +492,14 @@ allowances:
         // Missing repo -> classified_incomplete; must read as classification_incomplete, NOT
         // no_declared_allowance/target-mismatch.
         let p = policy_from(VALID).unwrap();
-        let d = decide(&p, "github.add_deploy_key", &json!({"owner": "acme"}));
+        let d = decide_match(&p, "github.add_deploy_key", &json!({"owner": "acme"}));
         assert_eq!(d.reason, "classification_incomplete");
     }
 
     #[test]
     fn classified_without_allowance_is_denied_no_declared_allowance() {
         let p = policy_from(VALID).unwrap();
-        let d = decide(
+        let d = decide_match(
             &p,
             "github.add_deploy_key",
             &json!({"owner": "other", "repo": "x"}),
@@ -357,15 +509,13 @@ allowances:
     }
 
     #[test]
-    fn matching_allowance_and_covering_scope_reaches_pdp_gate_unavailable() {
-        // VALID declares a credential whose scope exactly covers the required scope, so the call
-        // clears the allowance AND credential-scope gates — and is still denied (no allow path yet).
+    fn all_gates_pass_with_matching_digest_allows() {
+        // VALID clears classification + allowance + credential-scope; with a baseline + observed digest
+        // that match (decide_match), the drift gate passes too -> the one and only allow path fires.
         let p = policy_from(VALID).unwrap();
-        let d = decide(&p, "github.add_deploy_key", &acme_call());
-        assert_eq!(
-            d.reason, "pdp_gate_unavailable",
-            "every enabled gate passed; there is no allow path before c3"
-        );
+        let d = decide_match(&p, "github.add_deploy_key", &acme_call());
+        assert!(d.allow, "every gate passed -> forward");
+        assert_eq!(d.reason, "allow");
     }
 
     // --- c2 credential-scope gate (runs only after the allowance matches) -----------------------
@@ -374,7 +524,7 @@ allowances:
     fn no_declared_credential_is_credential_scope_unknown() {
         // Allowance matches, but no credential is declared -> coverage cannot be determined.
         let p = allow_acme_with_cred("");
-        let d = decide(&p, "github.add_deploy_key", &acme_call());
+        let d = decide_match(&p, "github.add_deploy_key", &acme_call());
         assert_eq!(d.reason, "credential_scope_unknown");
     }
 
@@ -383,7 +533,7 @@ allowances:
         let p = allow_acme_with_cred(
             "upstream_credential:\n  alias: \"gh\"\n  scopes: [\"repo:read\"]\n",
         );
-        let d = decide(&p, "github.add_deploy_key", &acme_call());
+        let d = decide_match(&p, "github.add_deploy_key", &acme_call());
         assert_eq!(d.reason, "credential_scope_insufficient");
     }
 
@@ -394,7 +544,7 @@ allowances:
         // -> unknown, never silently covered and never "insufficient".
         let p =
             allow_acme_with_cred("upstream_credential:\n  alias: \"gh\"\n  scopes: [\"repo\"]\n");
-        let d = decide(&p, "github.add_deploy_key", &acme_call());
+        let d = decide_match(&p, "github.add_deploy_key", &acme_call());
         assert_eq!(d.reason, "credential_scope_unknown");
     }
 
@@ -402,7 +552,7 @@ allowances:
     fn unrecognized_scope_is_credential_scope_unknown() {
         let p =
             allow_acme_with_cred("upstream_credential:\n  alias: \"gh\"\n  scopes: [\"banana\"]\n");
-        let d = decide(&p, "github.add_deploy_key", &acme_call());
+        let d = decide_match(&p, "github.add_deploy_key", &acme_call());
         assert_eq!(d.reason, "credential_scope_unknown");
     }
 
@@ -413,19 +563,20 @@ allowances:
         let p = allow_acme_with_cred(
             "upstream_credential:\n  alias: \"gh\"\n  scopes: [\"repo:write\"]\n",
         );
-        let d = decide(&p, "github.add_deploy_key", &acme_call());
+        let d = decide_match(&p, "github.add_deploy_key", &acme_call());
         assert_eq!(d.reason, "credential_scope_unknown");
     }
 
     #[test]
-    fn repo_admin_covers_and_reaches_pdp() {
-        // repo:admin is a documented covering (admin-breadth) scope; overbroad still covers and is a
-        // recommendation, never a block in v0.
+    fn repo_admin_covers_then_matching_digest_allows() {
+        // repo:admin covers the credential gate (admin breadth); with a matching baseline + observed
+        // digest the drift gate passes too -> allow.
         let p = allow_acme_with_cred(
             "upstream_credential:\n  alias: \"gh\"\n  scopes: [\"repo:admin\"]\n",
         );
-        let d = decide(&p, "github.add_deploy_key", &acme_call());
-        assert_eq!(d.reason, "pdp_gate_unavailable");
+        let d = decide_match(&p, "github.add_deploy_key", &acme_call());
+        assert!(d.allow);
+        assert_eq!(d.reason, "allow");
     }
 
     #[test]
@@ -446,7 +597,7 @@ allowances:
         let p = allow_acme_with_cred(
             "upstream_credential:\n  alias: \"gh\"\n  scopes: [\"repo:read\"]\n",
         );
-        let d = decide(
+        let d = decide_match(
             &p,
             "github.add_deploy_key",
             &json!({"owner": "other", "repo": "x"}),
@@ -524,5 +675,127 @@ allowances:
             a, raw,
             "domain prefix must change the digest vs a bare hash"
         );
+    }
+
+    // --- c3 drift gate (runs only after classification + allowance + credential-scope pass) ---------
+
+    /// `decide` for the acme call with VALID, a given baseline, and a given observed digest state.
+    fn decide_drift(baseline: &DeclaredManifest, observed: &ObservedToolDigest) -> Decision {
+        let p = policy_from(VALID).unwrap();
+        decide(
+            &p,
+            baseline,
+            observed,
+            "github.add_deploy_key",
+            &acme_call(),
+        )
+    }
+
+    #[test]
+    fn baseline_missing_when_tool_absent_from_baseline() {
+        // A baseline that has SOME tool but not the invoked one -> this tool has no approved baseline.
+        let baseline = baseline_with("other.tool", APPROVED);
+        let d = decide_drift(
+            &baseline,
+            &ObservedToolDigest::Present(APPROVED.to_string()),
+        );
+        assert!(!d.allow);
+        assert_eq!(d.reason, "manifest_baseline_missing");
+    }
+
+    #[test]
+    fn current_observation_incomplete_when_no_complete_manifest() {
+        let baseline = baseline_with(TOOL, APPROVED);
+        let d = decide_drift(&baseline, &ObservedToolDigest::NoCompleteManifest);
+        assert!(!d.allow);
+        assert_eq!(d.reason, "manifest_current_observation_incomplete");
+    }
+
+    #[test]
+    fn current_observation_incomplete_when_tool_absent_from_observed() {
+        // A complete manifest that does not contain the invoked tool: no current digest to compare,
+        // so drift cannot be ruled out -> fail closed (not an allow).
+        let baseline = baseline_with(TOOL, APPROVED);
+        let d = decide_drift(&baseline, &ObservedToolDigest::CompleteButToolAbsent);
+        assert!(!d.allow);
+        assert_eq!(d.reason, "manifest_current_observation_incomplete");
+    }
+
+    #[test]
+    fn drifted_when_observed_digest_differs_from_baseline() {
+        let baseline = baseline_with(TOOL, APPROVED);
+        let d = decide_drift(
+            &baseline,
+            &ObservedToolDigest::Present("sha256:something-else".to_string()),
+        );
+        assert!(!d.allow);
+        assert_eq!(d.reason, "manifest_drifted_since_approval");
+    }
+
+    #[test]
+    fn allows_only_when_baseline_and_observed_digests_match_exactly() {
+        let baseline = baseline_with(TOOL, APPROVED);
+        let d = decide_drift(
+            &baseline,
+            &ObservedToolDigest::Present(APPROVED.to_string()),
+        );
+        assert!(
+            d.allow,
+            "exact digest match clears the drift gate -> forward"
+        );
+        assert_eq!(d.reason, "allow");
+    }
+
+    // --- declared-manifest baseline loader (strict, startup-validated) ------------------------------
+
+    fn manifest_from(json: &str) -> Result<DeclaredManifest> {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(json.as_bytes()).unwrap();
+        load_declared_manifest(f.path())
+    }
+
+    #[test]
+    fn valid_baseline_loads() {
+        let m = manifest_from(
+            r#"{"schema":"assay.declared_mcp_manifest.v0","tools":[{"name":"github.add_deploy_key","tool_digest":"sha256:abc"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            m.tool_digest_for("github.add_deploy_key"),
+            Some("sha256:abc")
+        );
+        assert_eq!(m.tool_digest_for("nope"), None);
+    }
+
+    #[test]
+    fn wrong_schema_baseline_fails() {
+        assert!(manifest_from(
+            r#"{"schema":"assay.mcp_manifest_observed.v0","tools":[{"name":"t","tool_digest":"sha256:abc"}]}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn empty_tools_baseline_fails() {
+        assert!(
+            manifest_from(r#"{"schema":"assay.declared_mcp_manifest.v0","tools":[]}"#).is_err()
+        );
+    }
+
+    #[test]
+    fn non_sha256_digest_fails() {
+        assert!(manifest_from(
+            r#"{"schema":"assay.declared_mcp_manifest.v0","tools":[{"name":"t","tool_digest":"deadbeef"}]}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn tool_without_digest_fails() {
+        // tool_digest is required (not Option) -> a tool missing it fails to parse.
+        assert!(manifest_from(
+            r#"{"schema":"assay.declared_mcp_manifest.v0","tools":[{"name":"t"}]}"#
+        )
+        .is_err());
     }
 }

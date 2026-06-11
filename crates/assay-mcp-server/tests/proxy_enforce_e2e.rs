@@ -61,7 +61,15 @@ fn spawn_observe(log: &std::path::Path) -> Child {
         .expect("spawn observe proxy (is python installed?)")
 }
 
-/// Spawn the enforcing proxy ("proxy-enforce" subcommand) with the given policy file.
+/// The committed approved baseline (`assay.declared_mcp_manifest.v0`). Enforcing mode requires
+/// `--declared-mcp-manifest`; these deny tests never reach the drift gate (echo is unclassified), so
+/// any valid baseline suffices.
+fn baseline_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/mcp_manifest_drift/declared_per_tool_baseline.json")
+}
+
+/// Spawn the enforcing proxy ("proxy-enforce" subcommand) with the given policy + the required baseline.
 fn spawn_enforce(log: &std::path::Path, policy: &std::path::Path) -> Child {
     Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
         .args([
@@ -74,6 +82,8 @@ fn spawn_enforce(log: &std::path::Path, policy: &std::path::Path) -> Child {
             mock_path().to_str().unwrap(),
             "--enforce-policy",
             policy.to_str().unwrap(),
+            "--declared-mcp-manifest",
+            baseline_path().to_str().unwrap(),
         ])
         .env("MOCK_UPSTREAM_LOG", log)
         .env("MOCK_UPSTREAM_MODE", "normal")

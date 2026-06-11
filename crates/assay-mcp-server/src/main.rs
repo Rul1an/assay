@@ -41,13 +41,13 @@ enum Mode {
         #[arg(long)]
         proxy_observation_health_out: Option<PathBuf>,
     },
-    /// Run as an MCP upstream ENFORCING proxy (P61e-c1): an explicit, separate run mode — a different
-    /// risk class from `proxy`, never a variant of it. Every `tools/call` runs through the c1
-    /// caller-allowance policy decision point and is denied with the precedence-pinned reason of the
-    /// first gate that fails; a call that passes the c1 gates is still denied with
-    /// `pdp_gate_unavailable` (there is deliberately no allow / forward path before c3). The handshake,
-    /// `ping`, and `tools/list` still forward; other methods stay `proxy_unsupported`. A missing,
-    /// unreadable, or malformed `--enforce-policy` fails startup (non-zero exit) — never a runtime deny.
+    /// Run as an MCP upstream ENFORCING proxy (P61e-c): an explicit, separate run mode — a different
+    /// risk class from `proxy`, never a variant of it. Every `tools/call` runs through the policy
+    /// decision point (caller-allowance, credential-scope, drift); a call that clears every gate is
+    /// forwarded, otherwise it is denied with the precedence-pinned reason of the first gate that fails.
+    /// The handshake, `ping`, and `tools/list` still forward; other methods stay `proxy_unsupported`.
+    /// A missing/unreadable/malformed `--enforce-policy` OR `--declared-mcp-manifest` fails startup
+    /// (non-zero exit) — never a runtime deny: in enforcing mode both inputs are required.
     ProxyEnforce {
         /// The upstream MCP server command to spawn (stdio transport).
         #[arg(long)]
@@ -55,10 +55,15 @@ enum Mode {
         /// Arguments passed to the upstream command (repeatable). Hyphen-led values are allowed.
         #[arg(long = "upstream-arg", allow_hyphen_values = true)]
         upstream_args: Vec<String>,
-        /// Path to the enforce policy (YAML): the static `caller.id` and the caller's allowances. A
-        /// missing/unreadable/malformed policy is a startup failure, not a runtime deny.
+        /// Path to the enforce policy (YAML): the static `caller.id`, the upstream credential, and the
+        /// caller's allowances. A missing/unreadable/malformed policy is a startup failure.
         #[arg(long)]
         enforce_policy: PathBuf,
+        /// Path to the approved declared-manifest baseline (`assay.declared_mcp_manifest.v0`, JSON):
+        /// the per-tool `tool_digest` the caller approved, against which the drift gate compares. Required
+        /// in enforcing mode; a missing/unreadable/malformed/wrong-schema baseline is a startup failure.
+        #[arg(long)]
+        declared_mcp_manifest: PathBuf,
     },
 }
 
@@ -104,6 +109,7 @@ async fn main() -> Result<()> {
                 upstream_args,
                 proxy::Mode::Observe,
                 None,
+                None,
                 mcp_manifest_observed_out,
                 proxy_observation_health_out,
             )
@@ -113,22 +119,26 @@ async fn main() -> Result<()> {
             upstream_command,
             upstream_args,
             enforce_policy,
+            declared_mcp_manifest,
         }) => {
-            // Load + validate the policy BEFORE starting the proxy. A bad policy is a misconfigured
-            // service: fail startup with a non-zero exit, never start an enforcing proxy that cannot
-            // decide (and never degrade to a runtime deny).
+            // Load + validate BOTH inputs BEFORE starting the proxy. A bad policy or baseline is a
+            // misconfigured service: fail startup with a non-zero exit, never start an enforcing proxy
+            // that cannot decide (and never degrade to a runtime deny).
             let policy = proxy::enforce::load(&enforce_policy)?;
+            let baseline = proxy::enforce::load_declared_manifest(&declared_mcp_manifest)?;
             tracing::info!(
                 event = "proxy_start",
                 upstream_command = %upstream_command,
-                mode = "enforce_pdp_c1",
-                caller = %policy.caller.id
+                mode = "enforce_pdp_c3",
+                caller = %policy.caller.id,
+                baseline_tools = baseline.tools.len()
             );
             proxy::run(
                 upstream_command,
                 upstream_args,
                 proxy::Mode::Enforce,
                 Some(policy),
+                Some(baseline),
                 None,
                 None,
             )

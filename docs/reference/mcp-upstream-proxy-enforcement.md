@@ -4,11 +4,11 @@ Status: **review-spec, no code.** A new arc and the heaviest risk class in the p
 the shipped, opt-in [manifest-observation proxy](mcp-upstream-proxy-mode.md) (P61a–d, assay v3.23.0)
 from observe-only to **enforcing**: it forwards a privileged `tools/call` only after a fail-closed
 policy decision. Tracked as [#1624]. The binding decisions are agreed (§16, "Resolved decisions"); this
-is the design of record. Shipped so far: P61e-b (the deny-all enforcing run mode), P61e-c1 (the
-caller-allowance policy decision point), and **P61e-c2 (the credential-scope gate)** — all deny-only, no
-`tools/call` is forwarded yet. The arc forwards privileged calls only after the c3 drift gate and the
-first allow path land, because forwarding with an upstream credential makes the proxy a confused deputy
-unless every dimension here is locked first.
+is the design of record. Shipped: P61e-b (the deny-all enforcing run mode), P61e-c1 (caller-allowance),
+P61e-c2 (credential-scope), and **P61e-c3 (the drift gate + the first allow/forward path)**. As of c3
+the enforcing proxy forwards a privileged `tools/call` — but only after a clear allow from every gate
+(classification, caller-allowance, credential-scope, drift), the narrowest such path; everything else is
+a fail-closed deny. The remaining slice is P61e-d (the `assay.enforcement_decision.v0` evidence record).
 
 The one-line scope: **the manifest-observation proxy answers "did this tool surface change?"; the
 enforcing proxy answers "should this specific privileged call be forwarded, right now, for this
@@ -162,21 +162,17 @@ unclassified_tool_call                  no_declared_allowance
 credential_scope_insufficient           credential_scope_unknown
 manifest_baseline_missing               manifest_current_observation_incomplete
 manifest_drifted_since_approval         policy_unavailable
-policy_error                            pdp_gate_unavailable      (pre-c3 rollout only; c1/c2)
-enforcing_mode_deny_all   (SUPERSEDED — see below)
+policy_error
 ```
 A denied call never reaches the upstream. `credential_scope_unknown` is distinct from
 `credential_scope_insufficient`: when coverage cannot be determined the denial reason is *unknown*, not
 *insufficient* (see §8).
 
-**Reason history across the slices.** P61e-b used exactly one reason — `enforcing_mode_deny_all` (the
-whole `tools/call` surface denied before any gate existed). **P61e-c1 supersedes it** with the
-caller-allowance PDP: a `tools/call` is now denied with the precedence-pinned reason of the first gate
-that fires — `unclassified_tool_call`, then `classification_incomplete`, then `no_declared_allowance`.
-A call that clears every c1 gate is still denied with **`pdp_gate_unavailable`**, a temporary rollout
-reason that exists only because there is deliberately no allow / forward path before c3 (the
-credential-scope gate is c2, the drift gate and the first allow are c3). `pdp_gate_unavailable` is
-removed when c3 lands; `enforcing_mode_deny_all` is retired and no longer emitted.
+**Reason history across the slices.** P61e-b used a single `enforcing_mode_deny_all`; c1 superseded it
+with per-gate reasons (`unclassified_tool_call` → `classification_incomplete` → `no_declared_allowance`),
+and while c1/c2 had no allow path a fully-cleared call denied with a temporary `pdp_gate_unavailable`.
+**c3 removes both**: `enforcing_mode_deny_all` and `pdp_gate_unavailable` are retired and no longer
+emitted — a call that clears every gate is now forwarded, and every deny is a real gate reason.
 
 ## 8. Credential boundary (locked from P61a, extended)
 
@@ -203,22 +199,29 @@ removed when c3 lands; `enforcing_mode_deny_all` is retired and no longer emitte
   caller authority. v0 need not implement token minting, but it must state and enforce that the proxy
   does not broaden authority.
 
-## 9. Drift-aware enforcement (the novel contribution)
+## 9. Drift-aware enforcement (the novel contribution) — P61e-c3, shipped
 
 Enforcement is tied to the manifest-drift state, connecting P60 (manifest drift), E12 (tool lifecycle),
 and P61e (enforcement): a privileged call to a tool whose **contract digest changed since the caller
 approved it** is invoking something other than what was approved — the post-approval-mutation payoff.
-The drift gate (P61e-c) needs **both** of two evidence inputs, and is fail-closed without either:
+The drift gate needs **both** of two evidence inputs, and is fail-closed without either:
 
 - **the approval-time baseline comes from a declared approved manifest artifact only** — the
   `assay.declared_mcp_manifest.v0` baseline (or a future approval record that references it), **never
   the first observed complete manifest of the session**. A first-observed baseline can already be a
-  post-rug-pull state, so pinning it and calling it "approval-time" would pin the wrong state. No
-  declared approved baseline → `proxy_denied` (`manifest_baseline_missing`);
-- **a current complete observed manifest is required** — if the session has no complete current
-  observation of the invoked tool's surface, the drift state is `proxy_denied`
-  (`manifest_current_observation_incomplete`), because you cannot compare against a baseline without a
-  current complete view.
+  post-rug-pull state, so pinning it and calling it "approval-time" would pin the wrong state. The
+  baseline is the required `--declared-mcp-manifest` startup input (a missing/invalid/wrong-schema
+  baseline fails startup, like the policy); a baseline that lacks the invoked tool → `proxy_denied`
+  (`manifest_baseline_missing`);
+- **a current complete observed manifest is required** — the proxy reads it from its own observed
+  `tools/list` (P61c). If the session has no complete current observation, or the invoked tool is absent
+  from a complete one, the drift state is `proxy_denied` (`manifest_current_observation_incomplete`),
+  because you cannot compare against a baseline without a current complete view of that tool.
+
+The comparison is the per-tool `tool_digest`, looked up by tool name in both the baseline and the
+current observed manifest (the same canonical P60 projection on both sides; server id is not part of the
+per-tool digest). It compares the tool's *contract*, never the call arguments (those are the allowance
+gate). An exact digest match clears the gate; any difference is `manifest_drifted_since_approval`.
 
 With both in hand:
 - current contract digest **equals** the declared approved baseline → the drift gate is satisfied
@@ -288,6 +291,7 @@ P61e-c  split gate-by-gate, each fail-closed and independently tested, NO forwar
         (P59); credential_scope_insufficient / credential_scope_unknown. Still no forwarding. (SHIPPED.)
   c3    drift-aware gate (declared baseline + current complete manifest, P60/E12) + the FIRST allow /
         forward path: a call that clears every gate is forwarded; pdp_gate_unavailable is removed.
+        (SHIPPED.)
 P61e-d  the assay.enforcement_decision.v0 record + the side-effect-evidence interaction (asserted),
         kept separate from the observation artifact; Plimsoll consumes it separately (later)
 ```
@@ -318,9 +322,25 @@ denies (`credential_scope_unknown`), never a silent pass. Only `github_deploy_ke
 lattice today; any other classified class is fail-closed `credential_scope_unknown` until its own
 contract slice lands (and is unreachable anyway — c1's allowance matcher only admits `github_deploy_key`).
 The policy grows an optional `upstream_credential: {alias, scopes}` block; the alias is reserved for the
-P61e-d evidence record and is not read by the gate. Still no allow path — a call that clears the
-credential-scope gate
-is denied with `pdp_gate_unavailable`.
+P61e-d evidence record and is not read by the gate. (In c2 a call that cleared the credential-scope gate
+was still denied with the temporary `pdp_gate_unavailable`; c3 replaces that with the drift gate and the
+allow path.)
+
+**Implementation note (P61e-c3):** the PDP gains the fourth and final v0 gate — drift — and the first
+allow/forward path. The enforcing subcommand now ALSO requires `--declared-mcp-manifest <path>` (the
+`assay.declared_mcp_manifest.v0` JSON baseline); a missing/unreadable/malformed/wrong-schema baseline
+fails startup, exactly like the policy — in enforcing mode both inputs are required, so the proxy never
+"enforces" without an approval baseline. The drift gate compares the invoked tool's approved baseline
+`tool_digest` against the current observed `tool_digest` (read from the proxy's own complete `tools/list`
+observation), denying `manifest_baseline_missing` (tool absent from the baseline),
+`manifest_current_observation_incomplete` (no complete current observation of the tool), or
+`manifest_drifted_since_approval` (digests differ). Precedence is classification → allowance →
+credential-scope → drift → ALLOW. A call that clears every gate is forwarded to the upstream and the
+upstream's reply is relayed verbatim — the single, narrowest allow path (exact allowance + covered
+credential + an approved baseline whose per-tool digest exactly equals the current complete observed
+digest), and the only place a privileged `tools/call` is forwarded. `pdp_gate_unavailable` is gone. The
+per-decision diagnostic `tracing` line now also carries `decision=allow|deny` and `forwarded`; it
+remains operability-only, NOT the canonical `assay.enforcement_decision.v0` record (that is P61e-d).
 
 **P61e-b is deliberately just a deny-all enforcing proxy** — no policy decision point, no inputs, no
 allow path. It lands the enforcement *boundary* so "fail-closed" and the `proxy_denied`-vs-

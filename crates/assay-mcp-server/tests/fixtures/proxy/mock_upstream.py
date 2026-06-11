@@ -132,9 +132,17 @@ def main():
             _send({"jsonrpc": "2.0", "id": mid, "result": {}})
         elif method == "tools/list":
             _handle_tools_list(mid, (msg.get("params") or {}).get("cursor"))
+        elif method == "tools/call":
+            # Only the enforcing proxy's allow path forwards tools/call to us (P61e-c3). Answer with a
+            # canned success so the test can assert the upstream's reply was relayed verbatim.
+            _send({
+                "jsonrpc": "2.0",
+                "id": mid,
+                "result": {"content": [{"type": "text", "text": "forwarded-ok"}], "isError": False},
+            })
         elif method is not None and mid is not None:
-            # Should never happen: the proxy denies non-allowlisted methods before they reach us. If a
-            # request slips through, fail loudly rather than silently accept it.
+            # Should never happen for other methods: the proxy denies non-allowlisted methods before
+            # they reach us. If a request slips through, fail loudly rather than silently accept it.
             _send({
                 "jsonrpc": "2.0",
                 "id": mid,
