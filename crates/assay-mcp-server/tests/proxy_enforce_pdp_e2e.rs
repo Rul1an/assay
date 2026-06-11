@@ -26,8 +26,35 @@ fn mock_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/proxy/mock_upstream.py")
 }
 
-/// A policy that allows github_deploy_key on exactly acme/prod-app.
+/// A policy that allows github_deploy_key on exactly acme/prod-app, with a credential whose scope
+/// exactly covers the required scope (so a matching call clears the c2 credential-scope gate too).
 const ALLOW_ACME: &str = r#"
+caller:
+  id: "ci-agent"
+upstream_credential:
+  alias: "gh-deploy"
+  scopes: ["repo:deploy_key:write"]
+allowances:
+  - action_class: "github_deploy_key"
+    targets:
+      - { owner: "acme", repo: "prod-app" }
+"#;
+
+/// Same allowance, but the declared credential does NOT cover the required scope.
+const ALLOW_ACME_INSUFFICIENT_CRED: &str = r#"
+caller:
+  id: "ci-agent"
+upstream_credential:
+  alias: "gh-ro"
+  scopes: ["repo:read"]
+allowances:
+  - action_class: "github_deploy_key"
+    targets:
+      - { owner: "acme", repo: "prod-app" }
+"#;
+
+/// Same allowance, but no credential is declared at all (coverage cannot be determined).
+const ALLOW_ACME_NO_CRED: &str = r#"
 caller:
   id: "ci-agent"
 allowances:
@@ -188,8 +215,9 @@ fn allowance_target_mismatch_denied_no_declared_allowance() {
 }
 
 #[test]
-fn matching_allowance_reaches_pdp_gate_unavailable() {
-    // The one path that clears every c1 gate is still denied: c1 has no allow/forward path.
+fn matching_allowance_and_covering_scope_reaches_pdp_gate_unavailable() {
+    // The one path that clears every enabled gate (allowance + credential-scope) is still denied:
+    // there is no allow/forward path before c3.
     let (reason, methods) = deny_reason_for(
         ALLOW_ACME,
         serde_json::json!({"name": "github.add_deploy_key",
@@ -200,6 +228,29 @@ fn matching_allowance_reaches_pdp_gate_unavailable() {
         !methods.contains(&"tools/call".to_string()),
         "even a fully-allowed call does not forward before c3"
     );
+}
+
+// --- c2 credential-scope gate (runs after the allowance matches) --------------------------------
+
+#[test]
+fn insufficient_credential_scope_denied() {
+    let (reason, _) = deny_reason_for(
+        ALLOW_ACME_INSUFFICIENT_CRED,
+        serde_json::json!({"name": "github.add_deploy_key",
+                           "arguments": {"owner": "acme", "repo": "prod-app"}}),
+    );
+    assert_eq!(reason, "credential_scope_insufficient");
+}
+
+#[test]
+fn no_declared_credential_is_scope_unknown() {
+    // Coverage cannot be determined -> unknown, never a silent pass and never "insufficient".
+    let (reason, _) = deny_reason_for(
+        ALLOW_ACME_NO_CRED,
+        serde_json::json!({"name": "github.add_deploy_key",
+                           "arguments": {"owner": "acme", "repo": "prod-app"}}),
+    );
+    assert_eq!(reason, "credential_scope_unknown");
 }
 
 // --- startup failures (non-zero exit, never a runtime deny) -------------------------------------
