@@ -40,9 +40,21 @@ const ALLOWLIST: &[&str] = &[
 // are unambiguously distinguishable from upstream errors regardless of code.
 const PROXY_UNSUPPORTED: i32 = -32040;
 const PROXY_FAILED: i32 = -32041;
-// PROXY_DENIED (-32042) is reserved for the future enforcing arc (P61e); it never occurs in v0.
+// PROXY_DENIED: a P61e enforcing-mode policy denial. In P61e-b the only reason is the deny-all
+// boundary; gate-specific reasons arrive with the allow path (P61e-c).
+const PROXY_DENIED: i32 = -32042;
 
 const HEALTH_SCHEMA: &str = "assay.proxy_observation_health.v0";
+
+/// Proxy run mode. Observe (P61a-d, shipped) forwards the allowlist and answers `tools/call` with
+/// `proxy_unsupported`. Enforce (P61e-b) is deny-all: a `tools/call` is denied with `proxy_denied`
+/// (`enforcing_mode_deny_all`) and never forwarded; everything else is identical to Observe. The allow
+/// path / policy decision point is a later slice (P61e-c).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Observe,
+    Enforce,
+}
 
 fn proxy_error_line(id: Value, code: i32, reason: &str, message: &str) -> String {
     json!({
@@ -298,10 +310,13 @@ fn write_json_atomic(path: &Path, value: &Value) -> std::io::Result<()> {
     }
 }
 
-/// Run the manifest-observation proxy against one stdio upstream.
+/// Run the proxy against one stdio upstream. `mode` selects observe (manifest-observation, P61a-d) or
+/// enforce (deny-all `tools/call`, P61e-b); the only behavioral difference is how `tools/call` is
+/// answered. Manifest emission flags apply to observe only.
 pub async fn run(
     upstream_command: String,
     upstream_args: Vec<String>,
+    mode: Mode,
     manifest_out: Option<PathBuf>,
     health_out: Option<PathBuf>,
 ) -> Result<()> {
@@ -438,17 +453,28 @@ pub async fn run(
                 }
             }
             Some(method) => {
-                // Denied: tools/call and every other non-allowlisted method. Never sent upstream.
+                // Denied: tools/call and every other non-allowlisted method. Never sent upstream. In
+                // enforce mode a tools/call is a POLICY denial (proxy_denied, enforcing_mode_deny_all);
+                // every other non-allowlisted method — and all of observe mode — stays proxy_unsupported.
+                let (code, reason, message): (i32, &str, String) = if mode == Mode::Enforce
+                    && method == "tools/call"
+                {
+                    (
+                            PROXY_DENIED,
+                            "enforcing_mode_deny_all",
+                            "tools/call is denied in enforcing proxy mode (deny-all; no allow path yet)"
+                                .to_string(),
+                        )
+                } else {
+                    (
+                        PROXY_UNSUPPORTED,
+                        "method_not_allowlisted",
+                        format!("method {method:?} is not forwarded in this proxy mode"),
+                    )
+                };
                 match v.get("id") {
                     Some(id) if !id.is_null() => {
-                        let _ = tx.send(proxy_error_line(
-                            id.clone(),
-                            PROXY_UNSUPPORTED,
-                            "method_not_allowlisted",
-                            &format!(
-                                "method {method:?} is not forwarded in manifest-observation proxy mode"
-                            ),
-                        ));
+                        let _ = tx.send(proxy_error_line(id.clone(), code, reason, &message));
                     }
                     _ => { /* denied notification: nothing to answer, drop it */ }
                 }
