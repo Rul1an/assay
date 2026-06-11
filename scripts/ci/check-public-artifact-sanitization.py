@@ -7,16 +7,17 @@ This check is intentionally safe for public PR logs:
 - it reports only category names and locations;
 - it never prints matched text.
 
-When a trusted workflow provides hashed private-list entries through an
-environment variable, this script can compare normalized token and n-gram hashes
-without printing matched terms or hash values. Without that trusted input, it is
-the required fork-safe structural gate.
+When a trusted workflow provides HMAC-SHA256 private-list entries plus the HMAC
+key through environment variables, this script can compare normalized token and
+n-gram HMACs without printing matched terms, digest values, or key material.
+Without that trusted input, it is the required fork-safe structural gate.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import os
 import re
 import subprocess
@@ -179,42 +180,43 @@ def scan_files(files: Iterable[Path], root: Path) -> list[Finding]:
     return findings
 
 
-def parse_hashes(raw: str) -> set[str]:
-    hashes: set[str] = set()
+def parse_digest_set(raw: str) -> set[str]:
+    digests: set[str] = set()
     invalid_count = 0
     for item in re.split(r"[\s,]+", raw.strip()):
         if not item:
             continue
-        value = item.removeprefix("sha256:").lower()
+        value = item.removeprefix("hmac-sha256:").lower()
         if re.fullmatch(r"[0-9a-f]{64}", value):
-            hashes.add(value)
+            digests.add(value)
         else:
             invalid_count += 1
     if invalid_count:
-        raise ValueError(f"invalid hashed denylist entries: {invalid_count}")
-    return hashes
+        raise ValueError(f"invalid HMAC denylist entries: {invalid_count}")
+    return digests
 
 
 def normalized_tokens(line: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", line.lower())
 
 
-def candidate_hashes(line: str, max_ngram: int = 5) -> set[str]:
+def candidate_hmacs(line: str, key: bytes, max_ngram: int = 5) -> set[str]:
     tokens = normalized_tokens(line)
-    hashes: set[str] = set()
+    digests: set[str] = set()
     for start in range(len(tokens)):
         upper = min(len(tokens), start + max_ngram)
         for end in range(start + 1, upper + 1):
             phrase = " ".join(tokens[start:end])
-            hashes.add(hashlib.sha256(phrase.encode("utf-8")).hexdigest())
-    return hashes
+            digest = hmac.new(key, phrase.encode("utf-8"), hashlib.sha256).hexdigest()
+            digests.add(digest)
+    return digests
 
 
-def scan_trusted_hashes(
-    files: Iterable[Path], root: Path, denylist_hashes: set[str]
+def scan_trusted_hmacs(
+    files: Iterable[Path], root: Path, denylist_digests: set[str], key: bytes
 ) -> list[Finding]:
     findings: list[Finding] = []
-    if not denylist_hashes:
+    if not denylist_digests:
         return findings
     for path in files:
         if not should_scan(path, root):
@@ -224,7 +226,7 @@ def scan_trusted_hashes(
             continue
         rel = path.relative_to(root)
         for line_no, line in enumerate(text.splitlines(), start=1):
-            if candidate_hashes(line) & denylist_hashes:
+            if candidate_hmacs(line, key) & denylist_digests:
                 findings.append(Finding(rel, line_no, "trusted_private_hash_match"))
     return findings
 
@@ -259,8 +261,11 @@ def self_test() -> None:
         assert len(findings) == 1
         assert findings[0].path == Path("README.md")
         assert findings[0].category == "publication_blocker_marker"
-        trusted_hash = hashlib.sha256(b"alpha beta").hexdigest()
-        trusted_findings = scan_trusted_hashes([root / "README.md"], root, {trusted_hash})
+        trusted_key = b"trusted-test-key"
+        trusted_digest = hmac.new(trusted_key, b"alpha beta", hashlib.sha256).hexdigest()
+        trusted_findings = scan_trusted_hmacs(
+            [root / "README.md"], root, {trusted_digest}, trusted_key
+        )
         assert len(trusted_findings) == 1
         assert trusted_findings[0].path == Path("README.md")
         assert trusted_findings[0].category == "trusted_private_hash_match"
@@ -271,11 +276,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument(
-        "--trusted-hash-env",
+        "--trusted-hmac-env",
         help=(
-            "Environment variable containing newline/comma separated sha256 "
-            "hashes for the trusted private-list scan."
+            "Environment variable containing newline/comma separated HMAC-SHA256 "
+            "digests for the trusted private-list scan."
         ),
+    )
+    parser.add_argument(
+        "--trusted-hmac-key-env",
+        help="Environment variable containing the HMAC key for the trusted scan.",
     )
     args = parser.parse_args(argv)
 
@@ -289,19 +298,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     if findings:
         print_findings(findings)
         return 1
-    if args.trusted_hash_env:
-        raw_hashes = os.environ.get(args.trusted_hash_env, "")
-        if not raw_hashes.strip():
+    if args.trusted_hmac_env or args.trusted_hmac_key_env:
+        raw_digests = os.environ.get(args.trusted_hmac_env or "", "")
+        raw_key = os.environ.get(args.trusted_hmac_key_env or "", "")
+        if not raw_digests.strip() and not raw_key.strip():
             print("trusted-private-list=skipped")
-            print("trusted-private-list-reason=hash_source_unavailable")
+            print("trusted-private-list-reason=hmac_source_unavailable")
+        elif not raw_digests.strip() or not raw_key.strip():
+            print("trusted-private-list=failed")
+            print("trusted-private-list-reason=hmac_configuration_incomplete")
+            return 1
         else:
             try:
-                denylist_hashes = parse_hashes(raw_hashes)
+                denylist_digests = parse_digest_set(raw_digests)
             except ValueError as exc:
                 print("trusted-private-list=failed")
                 print(str(exc))
                 return 1
-            trusted_findings = scan_trusted_hashes(files, root, denylist_hashes)
+            trusted_findings = scan_trusted_hmacs(
+                files, root, denylist_digests, raw_key.encode("utf-8")
+            )
             if trusted_findings:
                 print_findings(trusted_findings)
                 return 1

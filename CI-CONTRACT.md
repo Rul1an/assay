@@ -155,8 +155,8 @@ Hard rule:
 
 Acceptable implementation patterns:
 
-- Compare normalized tokens or n-grams against hashed entries supplied from a
-  private source.
+- Compare normalized tokens or n-grams against HMAC-SHA256 entries supplied from
+  a private source plus a separate private HMAC key.
 - Run plaintext sensitive-list checks only in trusted private contexts where
   logs are not public and untrusted PR code cannot read the list.
 - On fork PRs, run only the public-safe structural portion.
@@ -164,24 +164,26 @@ Acceptable implementation patterns:
 Required-gate split:
 
 - The public-safe structural portion is required on every PR, including forks.
-- The full hashed-denylist comparison runs only for trusted same-repository PRs,
-  pushes, and scheduled checks that can access the private source safely.
+- The full HMAC-denylist comparison runs only for trusted same-repository PRs,
+  pushes, and scheduled checks that can access the private source and HMAC key
+  safely.
 - A degraded fork run must say that private-list comparison was skipped without
   exposing the list, while still enforcing structural public-artifact rules.
-- The trusted hashed-list layer is part of the sanitizer workflow, not a
+- The trusted HMAC-list layer is part of the sanitizer workflow, not a
   separate required context, until a future context-capture/import review says
   otherwise.
 - The trusted list must enumerate every spelling, casing, and spacing variant of
-  a term. Normalization lowercases, splits on non-alphanumerics, and hashes
+  a term. Normalization lowercases, splits on non-alphanumerics, and HMACs
   one-to-five-token windows per line, so a compound spelling and a spaced or
-  hyphenated spelling of the same term produce different hashes. Variant
+  hyphenated spelling of the same term produce different digests. Variant
   completeness is a property of the trusted list, not the scanner.
 
 Logging contract:
 
 - Report only counts and locations, for example `3 matches in README.md:42`.
 - Never print matched text.
-- Never print the sensitive term, phrase, or unhashed denylist entry.
+- Never print the sensitive term, phrase, unhashed denylist entry, digest, or
+  HMAC key.
 - Treat printing the matched term as a CI bug and a sanitization failure.
 
 The guard is a backstop, not a guarantee. Human public-artifact review remains
@@ -250,8 +252,8 @@ Keep or add:
   Security is available;
 - scheduled release-smoke rehearsal that does not publish;
 - scheduled MCP proxy fixture replay with no live providers;
-- scheduled public-artifact sanitization trusted run with the full private
-  hashed source;
+- scheduled public-artifact sanitization trusted run with the full private HMAC
+  source;
 - scheduled stale evidence-artifact inventory for compressed fixtures, large
   generated docs assets, and run output.
 

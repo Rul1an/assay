@@ -28,9 +28,11 @@ jobs:
       - name: Scan tracked public artifacts
         run: python3 scripts/ci/check-public-artifact-sanitization.py
 
-      - name: Trusted private-list hash scan
+      - name: Trusted private-list HMAC scan
         env:
-          PUBLIC_ARTIFACT_DENYLIST_SHA256: ${{ secrets.PUBLIC_ARTIFACT_DENYLIST_SHA256 }}
+          PUBLIC_ARTIFACT_DENYLIST_HMAC_SHA256: ${{ secrets.PUBLIC_ARTIFACT_DENYLIST_HMAC_SHA256 }}
+          PUBLIC_ARTIFACT_DENYLIST_HMAC_KEY: ${{ secrets.PUBLIC_ARTIFACT_DENYLIST_HMAC_KEY }}
         run: >
           python3 scripts/ci/check-public-artifact-sanitization.py
-          --trusted-hash-env PUBLIC_ARTIFACT_DENYLIST_SHA256
+          --trusted-hmac-env PUBLIC_ARTIFACT_DENYLIST_HMAC_SHA256
+          --trusted-hmac-key-env PUBLIC_ARTIFACT_DENYLIST_HMAC_KEY
