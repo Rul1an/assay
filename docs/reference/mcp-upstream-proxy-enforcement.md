@@ -4,10 +4,11 @@ Status: **review-spec, no code.** A new arc and the heaviest risk class in the p
 the shipped, opt-in [manifest-observation proxy](mcp-upstream-proxy-mode.md) (P61a–d, assay v3.23.0)
 from observe-only to **enforcing**: it forwards a privileged `tools/call` only after a fail-closed
 policy decision. Tracked as [#1624]. The binding decisions are agreed (§16, "Resolved decisions"); this
-is the design of record. Shipped so far: P61e-b (the deny-all enforcing run mode) and **P61e-c1 (the
-caller-allowance policy decision point, deny-only — no `tools/call` is forwarded yet)**. The arc forwards
-privileged calls only after the c2 credential-scope and c3 drift gates land, because forwarding with an
-upstream credential makes the proxy a confused deputy unless every dimension here is locked first.
+is the design of record. Shipped so far: P61e-b (the deny-all enforcing run mode), P61e-c1 (the
+caller-allowance policy decision point), and **P61e-c2 (the credential-scope gate)** — all deny-only, no
+`tools/call` is forwarded yet. The arc forwards privileged calls only after the c3 drift gate and the
+first allow path land, because forwarding with an upstream credential makes the proxy a confused deputy
+unless every dimension here is locked first.
 
 The one-line scope: **the manifest-observation proxy answers "did this tool surface change?"; the
 enforcing proxy answers "should this specific privileged call be forwarded, right now, for this
@@ -113,14 +114,18 @@ allowed to do** — not merely "the proxy can reach the upstream."
 
 - **Caller identity is declared, not inferred (decided).** Over stdio there is no transport identity,
   so v0 is **one caller per stdio session**, declared via explicit config — never inferred from the
-  transport, no multi-caller, no OAuth, no token introspection. The shipped c1 `--enforce-policy` shape:
+  transport, no multi-caller, no OAuth, no token introspection. The shipped `--enforce-policy` shape
+  (c1 caller/allowances + the c2 `upstream_credential` block):
   ```yaml
   caller:
     id: "ci-agent"
+  upstream_credential:                      # c2: the single credential the proxy holds
+    alias: "gh-deploy"                       # referenced in evidence by alias, never by value
+    scopes: ["repo:deploy_key:write"]        # checked against the action's required scope
   allowances:
-    - action_class: "github_deploy_key"   # c1 knows this class only
+    - action_class: "github_deploy_key"      # the only class with a matcher so far
       targets:
-        - { owner: "acme", repo: "prod-app" }   # exact owner+repo; no wildcard in c1
+        - { owner: "acme", repo: "prod-app" }   # exact owner+repo; no wildcard
   ```
   A missing `caller.id` fails **startup** (not a runtime deny — see §14), so `unknown_caller` cannot
   occur at runtime under the static-config model. Multi-caller is a later arc. The allowance uses
@@ -157,7 +162,7 @@ unclassified_tool_call                  no_declared_allowance
 credential_scope_insufficient           credential_scope_unknown
 manifest_baseline_missing               manifest_current_observation_incomplete
 manifest_drifted_since_approval         policy_unavailable
-policy_error                            pdp_gate_unavailable      (P61e-c1 only)
+policy_error                            pdp_gate_unavailable      (pre-c3 rollout only; c1/c2)
 enforcing_mode_deny_all   (SUPERSEDED — see below)
 ```
 A denied call never reaches the upstream. `credential_scope_unknown` is distinct from
@@ -185,7 +190,14 @@ removed when c3 lands; `enforcing_mode_deny_all` is retired and no longer emitte
   credential scope coverage is policy metadata, not a provider-verified token grant** — there is no
   token introspection. When coverage cannot be determined, the call is denied with
   `credential_scope_unknown`, never silently `credential_scope_insufficient` (an unknown is not an
-  insufficiency). This gate is P61e-c.
+  insufficiency). This gate is **P61e-c2 (shipped)**: it reads the policy's `upstream_credential.scopes`
+  against the action's `required_scope_for(category)` through a deterministic lattice that matches the
+  authoritative [credential-scope contract](credential-scope.md) exactly (`repo:deploy_key:write` is
+  covered only by `repo:deploy_key:write` and `repo:admin`). The enforcement gate is never broader than
+  that documented contract — `repo:write`, for instance, does NOT cover, and any scope not in the
+  contract is unrecognized → `credential_scope_unknown`. Overbroad (admin breadth) still covers and is a
+  recommendation, never a block in v0; an absent credential, an unrecognized scope, and a non-covering
+  scope deny.
 - **Audience binding (concept-aligned, RFC 8707 / OAuth 2.1).** The proxy must not let a token or
   credential issued for one audience be borrowed to reach another; it does not upgrade or broaden
   caller authority. v0 need not implement token minting, but it must state and enforce that the proxy
@@ -273,7 +285,7 @@ P61e-c  split gate-by-gate, each fail-closed and independently tested, NO forwar
         (classification gate before allowance); a fully-allowed call is still denied
         (pdp_gate_unavailable). github_deploy_key {owner, repo} only; no wildcard. (SHIPPED.)
   c2    credential-scope gate (deny-only): the call's required scope vs the declared credential scope
-        (P59); credential_scope_insufficient / credential_scope_unknown. Still no forwarding.
+        (P59); credential_scope_insufficient / credential_scope_unknown. Still no forwarding. (SHIPPED.)
   c3    drift-aware gate (declared baseline + current complete manifest, P60/E12) + the FIRST allow /
         forward path: a call that clears every gate is forwarded; pdp_gate_unavailable is removed.
 P61e-d  the assay.enforcement_decision.v0 record + the side-effect-evidence interaction (asserted),
@@ -290,6 +302,26 @@ PDP precedence is classification → allowance → `pdp_gate_unavailable`; the c
 mismatch. The proxy emits a per-decision `tracing` line (caller, action class, a domain-separated target
 digest, reason) **for operability only — it is a diagnostic log, not the canonical
 `assay.enforcement_decision.v0` evidence artifact** (that is P61e-d). c1 still forwards no `tools/call`.
+
+**Implementation note (P61e-c2):** the PDP gains a third gate after the allowance match — the
+credential-scope gate. It reads the policy's `upstream_credential.scopes` against the action's
+`required_scope_for(category)` (P59) through a deterministic lattice that matches the authoritative
+[credential-scope contract](credential-scope.md) exactly — NOT the richer E10 measurement vocabulary.
+The enforcement gate is never broader than the documented contract (`repo:deploy_key:write` is covered
+only by `repo:deploy_key:write` and `repo:admin`; `repo:write` is unrecognized and does not cover), so
+broadening it is a deliberate, contract-and-fixture-backed change, never a guess. Precedence is now
+classification → allowance → credential-scope → `pdp_gate_unavailable`. Coverage maps to: covered
+(exact or admin-breadth — overbroad still covers, a recommendation not a block) → fall through;
+recognized but non-covering → `credential_scope_insufficient`; absent credential / unrecognized scope →
+`credential_scope_unknown` (an unknown is not an insufficiency). Fail-closed: an unknown required scope
+denies (`credential_scope_unknown`), never a silent pass. Only `github_deploy_key` has a documented
+lattice today; any other classified class is fail-closed `credential_scope_unknown` until its own
+contract slice lands (and is unreachable anyway — c1's allowance matcher only admits `github_deploy_key`).
+The policy grows an optional `upstream_credential: {alias, scopes}` block; the alias is reserved for the
+P61e-d evidence record and is not read by the gate. Still no allow path — a call that clears the
+credential-scope gate
+is denied with `pdp_gate_unavailable`.
+
 **P61e-b is deliberately just a deny-all enforcing proxy** — no policy decision point, no inputs, no
 allow path. It lands the enforcement *boundary* so "fail-closed" and the `proxy_denied`-vs-
 `proxy_unsupported` distinction are testable the moment the mode exists (the same discipline as P61b's

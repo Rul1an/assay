@@ -126,8 +126,9 @@ fn unknown() -> Classified {
 /// is Assay's static claim about what the action needs, NOT a provider-verified grant requirement and
 /// NOT inferred from arguments. `None` for an unclassified tool (the consumer reads that as
 /// `required_scope_unknown`, never as "no scope needed"). A consumer compares this against the scopes
-/// an operator declared for the credential alias (see docs/reference/credential-scope.md).
-fn required_scope_for(category: Option<&str>) -> Option<&'static str> {
+/// an operator declared for the credential alias (see docs/reference/credential-scope.md). The
+/// enforcing proxy's credential-scope gate (P61e-c2) reads this as the per-action required scope.
+pub fn required_scope_for(category: Option<&str>) -> Option<&'static str> {
     match category {
         Some("github_deploy_key") => Some("repo:deploy_key:write"),
         Some("slack_add_member") => Some("conversations:members:write"),
