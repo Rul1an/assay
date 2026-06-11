@@ -3,10 +3,11 @@
 Status: **review-spec, no code.** A new arc and the heaviest risk class in the proxy line. It extends
 the shipped, opt-in [manifest-observation proxy](mcp-upstream-proxy-mode.md) (P61a–d, assay v3.23.0)
 from observe-only to **enforcing**: it forwards a privileged `tools/call` only after a fail-closed
-policy decision. Tracked as [#1624]. The binding decisions are now agreed (§16, "Resolved decisions");
-this is the design of record. No code lands in this doc — P61e-b (a deny-all enforcing mode) is the
-next slice — because forwarding privileged calls with an upstream credential makes the proxy a confused
-deputy unless every dimension here is locked first.
+policy decision. Tracked as [#1624]. The binding decisions are agreed (§16, "Resolved decisions"); this
+is the design of record. Shipped so far: P61e-b (the deny-all enforcing run mode) and **P61e-c1 (the
+caller-allowance policy decision point, deny-only — no `tools/call` is forwarded yet)**. The arc forwards
+privileged calls only after the c2 credential-scope and c3 drift gates land, because forwarding with an
+upstream credential makes the proxy a confused deputy unless every dimension here is locked first.
 
 The one-line scope: **the manifest-observation proxy answers "did this tool surface change?"; the
 enforcing proxy answers "should this specific privileged call be forwarded, right now, for this
@@ -112,13 +113,19 @@ allowed to do** — not merely "the proxy can reach the upstream."
 
 - **Caller identity is declared, not inferred (decided).** Over stdio there is no transport identity,
   so v0 is **one caller per stdio session**, declared via explicit config — never inferred from the
-  transport, no multi-caller, no OAuth, no token introspection:
+  transport, no multi-caller, no OAuth, no token introspection. The shipped c1 `--enforce-policy` shape:
   ```yaml
   caller:
     id: "ci-agent"
+  allowances:
+    - action_class: "github_deploy_key"   # c1 knows this class only
+      targets:
+        - { owner: "acme", repo: "prod-app" }   # exact owner+repo; no wildcard in c1
   ```
-  A privileged call with no declared caller id → `proxy_denied` (`unknown_caller`). Multi-caller is a
-  later arc.
+  A missing `caller.id` fails **startup** (not a runtime deny — see §14), so `unknown_caller` cannot
+  occur at runtime under the static-config model. Multi-caller is a later arc. The allowance uses
+  `targets:` (not `allowed_effects:`); an `action_class` other than `github_deploy_key` has no verifiable
+  matcher in c1 and is fail-closed (`no_declared_allowance`) until its own gate slice.
 - **Per-caller consent/authorization.** The proxy keeps a per-caller registry of allowed privileged
   action classes/targets (operator-declared, consistent with the [declared tool surface](declared-tool-surface.md),
   P58). A privileged call with no matching per-caller allowance is denied, never forwarded.
@@ -150,13 +157,21 @@ unclassified_tool_call                  no_declared_allowance
 credential_scope_insufficient           credential_scope_unknown
 manifest_baseline_missing               manifest_current_observation_incomplete
 manifest_drifted_since_approval         policy_unavailable
-policy_error                            enforcing_mode_deny_all   (P61e-b only)
+policy_error                            pdp_gate_unavailable      (P61e-c1 only)
+enforcing_mode_deny_all   (SUPERSEDED — see below)
 ```
-A denied call never reaches the upstream. **P61e-b** uses exactly one reason — `enforcing_mode_deny_all`
-(the whole `tools/call` surface is denied before any allow path exists); the gate-specific reasons
-arrive with the gates in P61e-c. `credential_scope_unknown` is distinct from
+A denied call never reaches the upstream. `credential_scope_unknown` is distinct from
 `credential_scope_insufficient`: when coverage cannot be determined the denial reason is *unknown*, not
 *insufficient* (see §8).
+
+**Reason history across the slices.** P61e-b used exactly one reason — `enforcing_mode_deny_all` (the
+whole `tools/call` surface denied before any gate existed). **P61e-c1 supersedes it** with the
+caller-allowance PDP: a `tools/call` is now denied with the precedence-pinned reason of the first gate
+that fires — `unclassified_tool_call`, then `classification_incomplete`, then `no_declared_allowance`.
+A call that clears every c1 gate is still denied with **`pdp_gate_unavailable`**, a temporary rollout
+reason that exists only because there is deliberately no allow / forward path before c3 (the
+credential-scope gate is c2, the drift gate and the first allow are c3). `pdp_gate_unavailable` is
+removed when c3 lands; `enforcing_mode_deny_all` is retired and no longer emitted.
 
 ## 8. Credential boundary (locked from P61a, extended)
 
@@ -251,12 +266,30 @@ P61e-a  this review-spec (design doc, no code)
 P61e-b  the enforcing run mode exists and is DENY-ALL: every tools/call -> proxy_denied
         (enforcing_mode_deny_all), the upstream receives nothing, the allowlisted list methods still
         forward, an unknown method is proxy_unsupported. NO PDP skeleton, NO inputs, NO allow path.
-P61e-c  the allow path + PDP: caller identity (config) + per-caller authorization (P58 declared
-        allowance) + credential-scope gate (P59) + the drift-aware gate (declared baseline + current
-        complete manifest, P60/E12) — every gate fail-closed and independently tested
+        (SHIPPED, superseded by c1.)
+P61e-c  split gate-by-gate, each fail-closed and independently tested, NO forwarding before c3:
+  c1    caller-allowance gate (deny-only): --enforce-policy with caller.id + per-caller allowances
+        (P58); the PDP classifies each tools/call and denies with the first-failing-gate reason
+        (classification gate before allowance); a fully-allowed call is still denied
+        (pdp_gate_unavailable). github_deploy_key {owner, repo} only; no wildcard. (SHIPPED.)
+  c2    credential-scope gate (deny-only): the call's required scope vs the declared credential scope
+        (P59); credential_scope_insufficient / credential_scope_unknown. Still no forwarding.
+  c3    drift-aware gate (declared baseline + current complete manifest, P60/E12) + the FIRST allow /
+        forward path: a call that clears every gate is forwarded; pdp_gate_unavailable is removed.
 P61e-d  the assay.enforcement_decision.v0 record + the side-effect-evidence interaction (asserted),
         kept separate from the observation artifact; Plimsoll consumes it separately (later)
 ```
+
+**Implementation note (P61e-c1):** the enforcing subcommand now requires `--enforce-policy <path>` (a
+YAML file with `caller.id` and the caller's `allowances`). A missing, unreadable, or malformed policy —
+or one without `caller.id` — is a **startup failure (non-zero exit), never a runtime deny**: an
+enforcing proxy that cannot decide is a misconfigured service and must not start. Caller identity is the
+static `caller.id` only (no transport/env inference), so `unknown_caller` cannot occur at runtime. The
+PDP precedence is classification → allowance → `pdp_gate_unavailable`; the classification gate runs
+*before* allowance so a missing-target call reads as `classification_incomplete`, never as a target
+mismatch. The proxy emits a per-decision `tracing` line (caller, action class, a domain-separated target
+digest, reason) **for operability only — it is a diagnostic log, not the canonical
+`assay.enforcement_decision.v0` evidence artifact** (that is P61e-d). c1 still forwards no `tools/call`.
 **P61e-b is deliberately just a deny-all enforcing proxy** — no policy decision point, no inputs, no
 allow path. It lands the enforcement *boundary* so "fail-closed" and the `proxy_denied`-vs-
 `proxy_unsupported` distinction are testable the moment the mode exists (the same discipline as P61b's
