@@ -15,10 +15,20 @@
 use anyhow::{bail, Context, Result};
 use assay_core::mcp::jcs;
 use assay_mcp_server::cache::sha256_hex;
-use assay_mcp_server::tool_decision::{classify, required_scope_for};
+use assay_mcp_server::tool_decision::{classify, required_scope_for, sanitize};
 use serde::Deserialize;
-use serde_json::Value;
-use std::path::Path;
+use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
+
+/// The enforce-mode inputs to the proxy, grouped so `run` stays within a sane arity. All fields are
+/// absent in observe mode; `policy` and `baseline` are always present in enforce mode (loaded at
+/// startup) and `decision_out` is the optional P61e-d evidence path.
+#[derive(Default)]
+pub struct EnforceInputs {
+    pub policy: Option<EnforcePolicy>,
+    pub baseline: Option<DeclaredManifest>,
+    pub decision_out: Option<PathBuf>,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct EnforcePolicy {
@@ -300,6 +310,71 @@ pub fn decide(
         action_class: Some(action_class.to_string()),
         target_digest: Some(tdig),
     }
+}
+
+/// The drift-gate state for the evidence record, derived from the decision (so `decide` stays
+/// unchanged). `satisfied` on allow; the specific drift reason when the drift gate denied;
+/// `not_evaluated` when an earlier gate denied before the drift gate ran.
+fn drift_state(decision: &Decision) -> &'static str {
+    if decision.allow {
+        return "satisfied";
+    }
+    match decision.reason {
+        "manifest_baseline_missing" => "baseline_missing",
+        "manifest_current_observation_incomplete" => "current_observation_incomplete",
+        "manifest_observation_ambiguous" => "observation_ambiguous",
+        "manifest_drifted_since_approval" => "drifted",
+        _ => "not_evaluated",
+    }
+}
+
+/// Build the per-call `assay.enforcement_decision.v0` evidence record (P61e-d). Emitted by the
+/// enforcing path for BOTH allow and deny; deterministic (no timestamp). It records the policy
+/// decision only — it never asserts or verifies the upstream side effect (which stays `asserted` on
+/// the E9 ladder). The credential is referenced by alias, never by value, and the projected target
+/// carries only the classifier's allowlisted fields (sensitive ids already hashed). This is NOT the
+/// observation artifact (`assay.mcp_manifest_observed.v0`) nor the mechanism artifact
+/// (`assay.enforcement_health.v0`); the three carriers stay separate.
+pub fn decision_record(
+    policy: &EnforcePolicy,
+    decision: &Decision,
+    tool_name: &str,
+    args: &Value,
+) -> Value {
+    let c = classify(tool_name, args);
+    json!({
+        "schema": "assay.enforcement_decision.v0",
+        "caller": { "id": sanitize(&policy.caller.id) },
+        "tool": {
+            "name": sanitize(tool_name),
+            "action_class": decision.action_class,
+        },
+        "action": {
+            "verb": c.verb,
+            "resource_type": c.resource_type,
+            // Projected target: allowlisted fields only, sensitive ids hashed by the classifier.
+            "target": c.target,
+            "target_digest": decision.target_digest,
+        },
+        "decision": if decision.allow { "allow" } else { "deny" },
+        "reason": decision.reason,
+        // The PDP is fail-closed by construction: every deny is a fail-closed outcome.
+        "fail_closed": !decision.allow,
+        // Only an allowed call is forwarded to the upstream.
+        "forwarded": decision.allow,
+        "drift_state": drift_state(decision),
+        // Operator config reference only — never the token, never the declared scopes.
+        "credential_alias": policy
+            .upstream_credential
+            .as_ref()
+            .map(|c| sanitize(&c.alias)),
+        "non_claims": [
+            "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
+            "credential referenced by alias only, never the token or declared scopes",
+            "deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict",
+            "not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"
+        ]
+    })
 }
 
 /// Coverage of a declared credential's scopes against an action's required scope.
@@ -838,5 +913,61 @@ allowances:
             r#"{"schema":"assay.declared_mcp_manifest.v0","tools":[{"name":"t","tool_digest":"sha256:a"},{"name":"t","tool_digest":"sha256:b"}]}"#
         )
         .is_err());
+    }
+
+    // --- P61e-d: enforcement_decision.v0 record ----------------------------------------------------
+
+    #[test]
+    fn decision_record_for_a_deny_is_shaped_and_leak_free() {
+        let p = policy_from(VALID).unwrap();
+        let d = decide_match(&p, "misc.do_thing", &json!({})); // unclassified -> deny
+        let rec = decision_record(&p, &d, "misc.do_thing", &json!({}));
+        assert_eq!(rec["schema"], "assay.enforcement_decision.v0");
+        assert_eq!(rec["decision"], "deny");
+        assert_eq!(rec["reason"], "unclassified_tool_call");
+        assert_eq!(rec["fail_closed"], true);
+        assert_eq!(rec["forwarded"], false);
+        assert_eq!(rec["drift_state"], "not_evaluated");
+        assert_eq!(rec["caller"]["id"], "ci-agent");
+        assert_eq!(rec["credential_alias"], "gh-deploy");
+        assert!(rec["non_claims"].is_array());
+        // The declared scopes are never serialized into the record (alias only).
+        let s = serde_json::to_string(&rec).unwrap();
+        assert!(
+            !s.contains("repo:deploy_key:write"),
+            "declared credential scopes must not leak into the decision record"
+        );
+    }
+
+    #[test]
+    fn decision_record_for_an_allow_marks_forwarded_and_drift_satisfied() {
+        let p = policy_from(VALID).unwrap();
+        let d = decide_match(&p, "github.add_deploy_key", &acme_call()); // matching -> allow
+        assert!(d.allow);
+        let rec = decision_record(&p, &d, "github.add_deploy_key", &acme_call());
+        assert_eq!(rec["decision"], "allow");
+        assert_eq!(rec["reason"], "allow");
+        assert_eq!(rec["fail_closed"], false);
+        assert_eq!(rec["forwarded"], true);
+        assert_eq!(rec["drift_state"], "satisfied");
+        assert_eq!(rec["tool"]["action_class"], "github_deploy_key");
+        assert_eq!(rec["action"]["target"]["owner"], "acme");
+    }
+
+    #[test]
+    fn decision_record_drift_state_reflects_the_drift_gate() {
+        let p = policy_from(VALID).unwrap();
+        let baseline = baseline_with(TOOL, APPROVED);
+        let d = decide(
+            &p,
+            &baseline,
+            &ObservedToolDigest::Present("sha256:something-else".to_string()),
+            "github.add_deploy_key",
+            &acme_call(),
+        );
+        assert_eq!(d.reason, "manifest_drifted_since_approval");
+        let rec = decision_record(&p, &d, "github.add_deploy_key", &acme_call());
+        assert_eq!(rec["decision"], "deny");
+        assert_eq!(rec["drift_state"], "drifted");
     }
 }

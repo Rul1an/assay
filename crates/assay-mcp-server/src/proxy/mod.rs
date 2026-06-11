@@ -332,6 +332,21 @@ fn health_from(manifest: &Value, em: &Emission, obs: &Observer) -> Value {
     })
 }
 
+/// Append one `assay.enforcement_decision.v0` record as an NDJSON line (P61e-d). Per-call streaming,
+/// so a killed proxy still keeps the decisions recorded so far; the record is one compact JSON object
+/// per line. A failure here is surfaced to the caller, which fails an allowed call closed rather than
+/// forwarding it unrecorded.
+fn append_decision_record(path: &Path, record: &Value) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let line = serde_json::to_string(record)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    writeln!(f, "{line}")
+}
+
 /// Atomic-ish write: serialize to a sibling temp file in the same directory, then rename over the
 /// destination. On Windows `rename` will not replace an existing file, so fall back to remove+rename
 /// (not atomic there, documented). A missing parent directory makes this fail, surfacing as a
@@ -366,16 +381,22 @@ fn write_json_atomic(path: &Path, value: &Value) -> std::io::Result<()> {
 /// enforce (the P61e-c PDP on `tools/call`); the only behavioral difference is how `tools/call` is
 /// answered. `policy` and `baseline` are both required and present in enforce mode (loaded + validated
 /// at startup) and `None` in observe mode: the c3 drift gate compares the current observed per-tool
-/// digest against the approved `baseline`. Manifest emission flags apply to observe only.
+/// digest against the approved `baseline`. `decision_out` (enforce only) is the optional NDJSON path
+/// for the per-call `assay.enforcement_decision.v0` evidence record (P61e-d). Manifest emission flags
+/// apply to observe only.
 pub async fn run(
     upstream_command: String,
     upstream_args: Vec<String>,
     mode: Mode,
-    policy: Option<enforce::EnforcePolicy>,
-    baseline: Option<enforce::DeclaredManifest>,
+    enforce_inputs: enforce::EnforceInputs,
     manifest_out: Option<PathBuf>,
     health_out: Option<PathBuf>,
 ) -> Result<()> {
+    let enforce::EnforceInputs {
+        policy,
+        baseline,
+        decision_out,
+    } = enforce_inputs;
     let spawned = Command::new(&upstream_command)
         .args(&upstream_args)
         .stdin(Stdio::piped())
@@ -541,13 +562,48 @@ pub async fn run(
                     forwarded = decision.allow,
                     note = "diagnostic decision log; not canonical evidence"
                 );
-                if decision.allow {
+                // P61e-d: write the canonical per-call evidence record (NDJSON) before acting. The
+                // safety rule (spec §12): a record-write failure on a requested path must never become
+                // a silent unrecorded forward, so an allowed call that cannot be recorded fails closed.
+                let record_ok = match &decision_out {
+                    Some(path) => {
+                        let record =
+                            enforce::decision_record(policy, &decision, tool_name, call_args);
+                        match append_decision_record(path, &record) {
+                            Ok(()) => true,
+                            Err(e) => {
+                                tracing::error!(
+                                    event = "enforcement_record_write_failed",
+                                    error = %e,
+                                    path = %path.display()
+                                );
+                                false
+                            }
+                        }
+                    }
+                    None => true,
+                };
+                if decision.allow && !record_ok {
+                    // Fail-closed: never forward an allowed call we could not record.
+                    if let Some(id) = v.get("id") {
+                        if !id.is_null() {
+                            let _ = tx.send(proxy_error_line(
+                                id.clone(),
+                                PROXY_FAILED,
+                                "enforcement_record_write_failed",
+                                "enforcement decision could not be recorded; call not forwarded",
+                            ));
+                        }
+                    }
+                } else if decision.allow {
                     // Forward the privileged call; the upstream's response relays verbatim via the
                     // upstream reader (a tools/call response is not a list response, so it is untouched).
                     if forward_line(&mut child_stdin, &line).await.is_err() {
                         break;
                     }
                 } else {
+                    // A deny stands regardless of a record-write failure (the call is fail-closed
+                    // either way); a missing deny-record is a completeness gap, already logged above.
                     match v.get("id") {
                         Some(id) if !id.is_null() => {
                             let _ = tx.send(proxy_error_line(
