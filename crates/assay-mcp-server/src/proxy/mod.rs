@@ -16,6 +16,8 @@
 //! confused-deputy trap. The manifest artifact is exactly the P60b shape the consumer already gates on;
 //! "how completely was it observed" lives in the separate observation-health artifact, never folded in.
 
+pub mod enforce;
+
 use anyhow::{Context, Result};
 use assay_mcp_server::manifest_observed::{self, Completeness};
 use serde_json::{json, Value};
@@ -40,16 +42,19 @@ const ALLOWLIST: &[&str] = &[
 // are unambiguously distinguishable from upstream errors regardless of code.
 const PROXY_UNSUPPORTED: i32 = -32040;
 const PROXY_FAILED: i32 = -32041;
-// PROXY_DENIED: a P61e enforcing-mode policy denial. In P61e-b the only reason is the deny-all
-// boundary; gate-specific reasons arrive with the allow path (P61e-c).
+// PROXY_DENIED: a P61e enforcing-mode policy denial. P61e-c1 replaces the single deny-all boundary
+// with the caller-allowance PDP, so the `reason` is now the precedence-pinned gate that fired
+// (unclassified_tool_call / classification_incomplete / no_declared_allowance / pdp_gate_unavailable).
 const PROXY_DENIED: i32 = -32042;
 
 const HEALTH_SCHEMA: &str = "assay.proxy_observation_health.v0";
 
 /// Proxy run mode. Observe (P61a-d, shipped) forwards the allowlist and answers `tools/call` with
-/// `proxy_unsupported`. Enforce (P61e-b) is deny-all: a `tools/call` is denied with `proxy_denied`
-/// (`enforcing_mode_deny_all`) and never forwarded; everything else is identical to Observe. The allow
-/// path / policy decision point is a later slice (P61e-c).
+/// `proxy_unsupported`. Enforce runs the c1 caller-allowance PDP on every `tools/call`: the call is
+/// classified and denied with the precedence-pinned reason of the first gate that fails; a call that
+/// passes the c1 gates is still denied with `pdp_gate_unavailable` (there is deliberately no allow /
+/// forward path before c3). Everything other than `tools/call` is identical to Observe. The c1 deny
+/// reasons supersede the P61e-b `enforcing_mode_deny_all` boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Observe,
@@ -311,12 +316,14 @@ fn write_json_atomic(path: &Path, value: &Value) -> std::io::Result<()> {
 }
 
 /// Run the proxy against one stdio upstream. `mode` selects observe (manifest-observation, P61a-d) or
-/// enforce (deny-all `tools/call`, P61e-b); the only behavioral difference is how `tools/call` is
-/// answered. Manifest emission flags apply to observe only.
+/// enforce (the c1 caller-allowance PDP on `tools/call`, P61e-c1); the only behavioral difference is
+/// how `tools/call` is answered. `policy` is required and present in enforce mode (loaded + validated
+/// at startup) and `None` in observe mode. Manifest emission flags apply to observe only.
 pub async fn run(
     upstream_command: String,
     upstream_args: Vec<String>,
     mode: Mode,
+    policy: Option<enforce::EnforcePolicy>,
     manifest_out: Option<PathBuf>,
     health_out: Option<PathBuf>,
 ) -> Result<()> {
@@ -454,24 +461,45 @@ pub async fn run(
             }
             Some(method) => {
                 // Denied: tools/call and every other non-allowlisted method. Never sent upstream. In
-                // enforce mode a tools/call is a POLICY denial (proxy_denied, enforcing_mode_deny_all);
-                // every other non-allowlisted method — and all of observe mode — stays proxy_unsupported.
-                let (code, reason, message): (i32, &str, String) = if mode == Mode::Enforce
-                    && method == "tools/call"
-                {
-                    (
+                // enforce mode a tools/call goes through the c1 caller-allowance PDP and is denied with
+                // the precedence-pinned reason of the first gate that fires (proxy_denied); every other
+                // non-allowlisted method — and all of observe mode — stays proxy_unsupported.
+                let (code, reason, message): (i32, &str, String) =
+                    if mode == Mode::Enforce && method == "tools/call" {
+                        // policy is always Some in enforce mode (loaded + validated at startup).
+                        let policy = policy
+                            .as_ref()
+                            .expect("enforce mode without a loaded policy is a startup bug");
+                        let tool_name = v
+                            .pointer("/params/name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("");
+                        let empty = json!({});
+                        let call_args = v.pointer("/params/arguments").unwrap_or(&empty);
+                        let decision = enforce::decide(policy, tool_name, call_args);
+                        // Diagnostic decision log — for operability/correlation only, NOT a canonical
+                        // evidence artifact (the enforcement_decision record is a later slice, P61e-d).
+                        tracing::info!(
+                            event = "enforce_decision",
+                            caller = %policy.caller.id,
+                            tool = %tool_name,
+                            action_class = decision.action_class.as_deref().unwrap_or("none"),
+                            target_digest = decision.target_digest.as_deref().unwrap_or("none"),
+                            reason = decision.reason,
+                            note = "diagnostic decision log; not canonical evidence"
+                        );
+                        (
                             PROXY_DENIED,
-                            "enforcing_mode_deny_all",
-                            "tools/call is denied in enforcing proxy mode (deny-all; no allow path yet)"
-                                .to_string(),
+                            decision.reason,
+                            format!("tools/call denied by enforcing proxy: {}", decision.reason),
                         )
-                } else {
-                    (
-                        PROXY_UNSUPPORTED,
-                        "method_not_allowlisted",
-                        format!("method {method:?} is not forwarded in this proxy mode"),
-                    )
-                };
+                    } else {
+                        (
+                            PROXY_UNSUPPORTED,
+                            "method_not_allowlisted",
+                            format!("method {method:?} is not forwarded in this proxy mode"),
+                        )
+                    };
                 match v.get("id") {
                     Some(id) if !id.is_null() => {
                         let _ = tx.send(proxy_error_line(id.clone(), code, reason, &message));

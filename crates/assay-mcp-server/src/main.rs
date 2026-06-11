@@ -41,11 +41,13 @@ enum Mode {
         #[arg(long)]
         proxy_observation_health_out: Option<PathBuf>,
     },
-    /// Run as an MCP upstream ENFORCING proxy (P61e-b, deny-all): an explicit, separate run mode — a
-    /// different risk class from `proxy`, never a variant of it. Every `tools/call` is denied with
-    /// `proxy_denied` (`enforcing_mode_deny_all`) and never forwarded upstream; the handshake, `ping`,
-    /// and `tools/list` still forward; other methods stay `proxy_unsupported`. There is no allow path,
-    /// no policy decision point, no credential or drift gate in v0 (those are P61e-c).
+    /// Run as an MCP upstream ENFORCING proxy (P61e-c1): an explicit, separate run mode — a different
+    /// risk class from `proxy`, never a variant of it. Every `tools/call` runs through the c1
+    /// caller-allowance policy decision point and is denied with the precedence-pinned reason of the
+    /// first gate that fails; a call that passes the c1 gates is still denied with
+    /// `pdp_gate_unavailable` (there is deliberately no allow / forward path before c3). The handshake,
+    /// `ping`, and `tools/list` still forward; other methods stay `proxy_unsupported`. A missing,
+    /// unreadable, or malformed `--enforce-policy` fails startup (non-zero exit) — never a runtime deny.
     ProxyEnforce {
         /// The upstream MCP server command to spawn (stdio transport).
         #[arg(long)]
@@ -53,6 +55,10 @@ enum Mode {
         /// Arguments passed to the upstream command (repeatable). Hyphen-led values are allowed.
         #[arg(long = "upstream-arg", allow_hyphen_values = true)]
         upstream_args: Vec<String>,
+        /// Path to the enforce policy (YAML): the static `caller.id` and the caller's allowances. A
+        /// missing/unreadable/malformed policy is a startup failure, not a runtime deny.
+        #[arg(long)]
+        enforce_policy: PathBuf,
     },
 }
 
@@ -97,6 +103,7 @@ async fn main() -> Result<()> {
                 upstream_command,
                 upstream_args,
                 proxy::Mode::Observe,
+                None,
                 mcp_manifest_observed_out,
                 proxy_observation_health_out,
             )
@@ -105,16 +112,23 @@ async fn main() -> Result<()> {
         Some(Mode::ProxyEnforce {
             upstream_command,
             upstream_args,
+            enforce_policy,
         }) => {
+            // Load + validate the policy BEFORE starting the proxy. A bad policy is a misconfigured
+            // service: fail startup with a non-zero exit, never start an enforcing proxy that cannot
+            // decide (and never degrade to a runtime deny).
+            let policy = proxy::enforce::load(&enforce_policy)?;
             tracing::info!(
                 event = "proxy_start",
                 upstream_command = %upstream_command,
-                mode = "enforce_deny_all_v0"
+                mode = "enforce_pdp_c1",
+                caller = %policy.caller.id
             );
             proxy::run(
                 upstream_command,
                 upstream_args,
                 proxy::Mode::Enforce,
+                Some(policy),
                 None,
                 None,
             )
