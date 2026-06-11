@@ -381,12 +381,30 @@ Context groups that should stay visible and reviewed when relevant:
 - `assay-action-contract-tests`
 - `Split Wave 0 Gates`
 
+Observed from the CI baseline implementation PR `#1638`:
+
+- `public-artifact-sanitization`
+
+Proposed required context names for the next branch-protection review:
+
+- `CI`
+- `lane-check`
+- `host-capability-check`
+- `public-artifact-sanitization`
+
+Do not make these required in this slice:
+
+- Manual, release-only, scheduled-only, or host-capability-specific jobs.
+- Matrix leaf jobs that are already summarized by a stable required gate.
+- External advisory checks unless the repository owner intentionally accepts
+  their availability as a merge dependency.
+
 Do not require a workflow by branch protection if that workflow uses top-level
 path filters that can skip the run entirely. Either keep it advisory or make it
 always start and skip internally.
 
-Exact names for new sanitization, claims-boundary, Scorecard, OSV, CodeQL, or
-ClusterFuzzLite jobs: to be filled from live implementation PRs.
+Future Scorecard, OSV, CodeQL, ClusterFuzzLite, or claims-boundary jobs should
+be added here only after their live PR check names are observed.
 
 ## 7. Target Workflow Files
 
