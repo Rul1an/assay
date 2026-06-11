@@ -10,7 +10,7 @@ Dit document geeft een uitgebreid overzicht van alle GitHub Actions-workflows in
 
 | Workflow | Bestand | Triggers | Jobs | Doel |
 |----------|---------|----------|------|------|
-| **CI** | `ci.yml` | push (main, debug/**), pull_request (paths-ignore docs), workflow_dispatch | clippy, open-core-boundary, perf, test, ebpf-smoke-ubuntu, ebpf-smoke-self-hosted | Kern-CI: lint, boundary check, Criterion benches, tests (matrix ubuntu/macos/windows), eBPF smoke (Ubuntu + self-hosted). |
+| **CI** | `ci.yml` | push (main, debug/**), pull_request (paths-ignore docs), workflow_dispatch | clippy, distribution-boundary, perf, test, ebpf-smoke-ubuntu, ebpf-smoke-self-hosted | Kern-CI: lint, boundary check, Criterion benches, tests (matrix ubuntu/macos/windows), eBPF smoke (Ubuntu + self-hosted). |
 | **Example CI Gate** | `baseline-gate-demo.yml` | pull_request (paths: examples/baseline-gate/**, workflow) | gate | Demo: baseline-gate PR — cache .eval/.assay, build release, replay traces, baseline check; cache-hit in summary. |
 | **Perf (main baseline)** | `perf_main.yml` | push (main), schedule (nightly 03:00 UTC) | benches | Bencher: Criterion-baseline op main + nightly; benchmarks `sw/50x400b`, `sw/12xlarge` (store_write_heavy) en `sr/wc` (suite_run_worstcase); stdin/pipe-modus; thresholds (t_test, upper_boundary 0.99). |
 | **Perf (PR compare)** | `perf_pr.yml` | pull_request (opened, reopened, edited, synchronize) | benches | Bencher: PR vergelijken met main (start-point, clone-thresholds); zelfde threshold-flags als main; soft (geen --err); alleen same-repo. |
@@ -98,7 +98,7 @@ Detail van `ci.yml`: jobs en volgorde.
 flowchart TB
   subgraph ci["CI (ci.yml)"]
     CLIPPY[clippy]
-    BOUNDARY[open-core-boundary]
+    BOUNDARY[distribution-boundary]
     PERF[perf]
     TEST[test matrix: ubuntu, macos, windows]
     EBPF_UBUNTU[ebpf-smoke-ubuntu]
@@ -111,7 +111,7 @@ flowchart TB
   EBPF_SELF -.->|"if: !fork PR"| only_same_repo[Same-repo only]
 ```
 
-- **Parallel (geen needs):** clippy, open-core-boundary, perf, test — draaien gelijktijdig.
+- **Parallel (geen needs):** clippy, distribution-boundary, perf, test — draaien gelijktijdig.
 - **test** heeft matrix: `ubuntu-latest`, `macos-latest`, `windows-latest`; Linux test volledige workspace (excl. assay-ebpf, assay-it); niet-Linux excl. ook assay-monitor, assay-cli.
 - **ebpf-smoke-ubuntu** en **ebpf-smoke-self-hosted** hebben `needs: [test]`; self-hosted draait alleen als geen fork-PR.
 
@@ -197,7 +197,7 @@ flowchart TB
 |--------|---------------|
 | **Doel** | Elke push/PR (behalve doc-only) linten, testen en Criterion-benches + eBPF smoke uitvoeren. |
 | **Triggers** | `push` naar main of `debug/**`; `pull_request` (paths-ignore: docs, *.md, .gitignore); `workflow_dispatch`. |
-| **Jobs** | **clippy:** `cargo clippy --workspace --all-targets -- -D warnings`. **open-core-boundary:** script check open core boundary. **perf:** `cargo bench` (assay-core, assay-cli) met `--quick`, upload Criterion-artifact, log cache-hit. **test:** matrix ubuntu/macos/windows; sccache + mold (Linux); cargo test (exclusies per OS). **ebpf-smoke-ubuntu:** needs test; LSM verify in Docker (soft skip). **ebpf-smoke-self-hosted:** needs test; alleen non-fork PR; self-hosted runner; LSM strict. |
+| **Jobs** | **clippy:** `cargo clippy --workspace --all-targets -- -D warnings`. **distribution-boundary:** script check distribution boundary. **perf:** `cargo bench` (assay-core, assay-cli) met `--quick`, upload Criterion-artifact, log cache-hit. **test:** matrix ubuntu/macos/windows; sccache + mold (Linux); cargo test (exclusies per OS). **ebpf-smoke-ubuntu:** needs test; LSM verify in Docker (soft skip). **ebpf-smoke-self-hosted:** needs test; alleen non-fork PR; self-hosted runner; LSM strict. |
 | **Afhankelijkheden** | Alleen test → ebpf-smoke-*; overige jobs parallel. |
 | **Cache** | Swatinem/rust-cache; perf-job logt cache-hit in job summary. |
 | **Assessment** | Duidelijke scheiding lint/test/perf/eBPF; paths-ignore voorkomt CI op doc-only wijzigingen; eBPF op twee runners (Ubuntu + self-hosted) voor betere dekking. |

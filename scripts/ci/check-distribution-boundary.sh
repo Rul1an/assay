@@ -9,7 +9,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 errors=0
 
-echo "=== Open Core Boundary Check ==="
+echo "=== Distribution Boundary Check ==="
 echo ""
 
 # 1. Check that packs/enterprise/ contains no pack.yaml files
@@ -82,6 +82,6 @@ if [ $errors -eq 0 ]; then
     exit 0
 else
     echo "Found $errors error(s)."
-    echo "See ADR-016 for open core boundary definition."
+    echo "See ADR-016 for the pack distribution boundary definition."
     exit 1
 fi

@@ -156,8 +156,8 @@ jobs:
           components: clippy
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
-  open-core-boundary:
-    name: Open Core Boundary Check
+  distribution-boundary:
+    name: Distribution boundary check
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -165,8 +165,8 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           persist-credentials: false
-      - name: Check open core boundary
-        run: ./scripts/ci/check-open-core-boundary.sh
+      - name: Check distribution boundary
+        run: ./scripts/ci/check-distribution-boundary.sh
 
   publish-shape-cli:
     # Guardrail: catch v3.11.0-style regressions where `assay-cli` accumulates
@@ -669,7 +669,7 @@ jobs:
     name: CI
     runs-on: ubuntu-latest
     if: always()
-    needs: [scope, deps-security, clippy, open-core-boundary, vendored-packs, mcp-registry-foundation, perf, test, ebpf-smoke-ubuntu]
+    needs: [scope, deps-security, clippy, distribution-boundary, vendored-packs, mcp-registry-foundation, perf, test, ebpf-smoke-ubuntu]
     steps:
       - name: Evaluate required job results
         env:
@@ -677,7 +677,7 @@ jobs:
           LIGHTWEIGHT_ONLY: ${{ needs.scope.outputs.lightweight_only }}
           DEPS_SECURITY_RESULT: ${{ needs.deps-security.result }}
           CLIPPY_RESULT: ${{ needs.clippy.result }}
-          OPEN_CORE_BOUNDARY_RESULT: ${{ needs.open-core-boundary.result }}
+          DISTRIBUTION_BOUNDARY_RESULT: ${{ needs.distribution-boundary.result }}
           VENDORED_PACKS_RESULT: ${{ needs.vendored-packs.result }}
           MCP_REGISTRY_FOUNDATION_RESULT: ${{ needs.mcp-registry-foundation.result }}
           PERF_RESULT: ${{ needs.perf.result }}
@@ -692,7 +692,7 @@ jobs:
             "scope:${SCOPE_RESULT}" \
             "deps-security:${DEPS_SECURITY_RESULT}" \
             "clippy:${CLIPPY_RESULT}" \
-            "open-core-boundary:${OPEN_CORE_BOUNDARY_RESULT}" \
+            "distribution-boundary:${DISTRIBUTION_BOUNDARY_RESULT}" \
             "vendored-packs:${VENDORED_PACKS_RESULT}" \
             "mcp-registry-foundation:${MCP_REGISTRY_FOUNDATION_RESULT}" \
             "perf:${PERF_RESULT}" \
