@@ -40,8 +40,14 @@ assay-mcp-server proxy enforce ...   # enforcing tools/call (P61e)
 ```
 Nested `proxy observe` / `proxy enforce` subcommands; if the clap layout makes nesting awkward, two
 top-level subcommands `proxy-observe` / `proxy-enforce`. Either way the enforcing mode is its own
-command, never implicit. A deployment that does not run `proxy enforce` keeps P61b–d's behavior (every
-`tools/call` → `proxy_unsupported`).
+command, never implicit. A deployment that does not run the enforcing mode keeps P61b–d's behavior
+(every `tools/call` → `proxy_unsupported`).
+
+**Implementation note (v0, P61e-b):** the shipped CLI spelling is the top-level **`proxy-enforce`**
+subcommand (a sibling of the existing `proxy`), chosen so the shipped `proxy --upstream-command …`
+invocation is untouched and the enforcing slice stays the smallest possible change in a
+security-load-bearing PR. The design concept is unchanged — an explicit, separate enforcing proxy mode;
+folding it into nested `proxy observe` / `proxy enforce` is a later ergonomic change, not a v0 concern.
 
 ## 2. Claim, non-claims, boundary
 

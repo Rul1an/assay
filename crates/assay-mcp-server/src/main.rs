@@ -41,6 +41,19 @@ enum Mode {
         #[arg(long)]
         proxy_observation_health_out: Option<PathBuf>,
     },
+    /// Run as an MCP upstream ENFORCING proxy (P61e-b, deny-all): an explicit, separate run mode — a
+    /// different risk class from `proxy`, never a variant of it. Every `tools/call` is denied with
+    /// `proxy_denied` (`enforcing_mode_deny_all`) and never forwarded upstream; the handshake, `ping`,
+    /// and `tools/list` still forward; other methods stay `proxy_unsupported`. There is no allow path,
+    /// no policy decision point, no credential or drift gate in v0 (those are P61e-c).
+    ProxyEnforce {
+        /// The upstream MCP server command to spawn (stdio transport).
+        #[arg(long)]
+        upstream_command: String,
+        /// Arguments passed to the upstream command (repeatable). Hyphen-led values are allowed.
+        #[arg(long = "upstream-arg", allow_hyphen_values = true)]
+        upstream_args: Vec<String>,
+    },
 }
 
 use tracing_subscriber::{fmt, EnvFilter};
@@ -83,8 +96,27 @@ async fn main() -> Result<()> {
             proxy::run(
                 upstream_command,
                 upstream_args,
+                proxy::Mode::Observe,
                 mcp_manifest_observed_out,
                 proxy_observation_health_out,
+            )
+            .await
+        }
+        Some(Mode::ProxyEnforce {
+            upstream_command,
+            upstream_args,
+        }) => {
+            tracing::info!(
+                event = "proxy_start",
+                upstream_command = %upstream_command,
+                mode = "enforce_deny_all_v0"
+            );
+            proxy::run(
+                upstream_command,
+                upstream_args,
+                proxy::Mode::Enforce,
+                None,
+                None,
             )
             .await
         }
