@@ -334,7 +334,10 @@ This keeps `proxy_denied` (policy denial, enforcing mode) cleanly separate from 
   must return a concrete decision. A `--decision-mode review` is a later, explicit opt-in, not v0 (§9).
 - **D. Caller identity source — decided:** **one caller per stdio session, declared via explicit
   config** (`caller.id`); no inferred transport identity, no multi-caller, no OAuth, no token
-  introspection. Missing caller → `proxy_denied` (`unknown_caller`) (§5).
+  introspection. A missing `caller.id` **fails startup** (non-zero exit, before the proxy starts — see
+  §14), so under this static one-caller-per-stdio-session model `unknown_caller` cannot occur at
+  runtime. (The `unknown_caller` reason stays reserved in the §7 pinned set for a future multi-caller
+  arc where caller identity is per-request rather than static-config.) (§5, §14)
 - **E. Scope of v0 — decided:** stdio + one upstream + deny-all (P61e-b) then narrow allow (P61e-c);
   no token minting, no OAuth resource-server behavior, no HTTP upstream, no multi-upstream (§13).
 
