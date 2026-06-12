@@ -96,7 +96,10 @@ repos:
 
       - id: cargo-audit
         name: cargo audit (RustSec)
-        entry: bash -lc 'cargo audit'
+        # Keep the ignore list in lockstep with .github/workflows/ci.yml and deny.toml: these
+        # advisories are triaged as not reachable (rsa Marvin Attack; pyo3 0.24 nth/nth_back and
+        # PyCFunction::new_closure), retired by the pyo3 0.29 migration (#1651).
+        entry: bash -lc 'cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0176 --ignore RUSTSEC-2026-0177'
         language: system
         pass_filenames: false
         files: ^Cargo\.lock$
