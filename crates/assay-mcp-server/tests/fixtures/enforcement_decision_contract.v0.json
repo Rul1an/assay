@@ -1,0 +1,352 @@
+{
+  "schema_contract": "assay.enforcement_decision.v0",
+  "generated_by": "assay crates/assay-mcp-server enforce::decision_record (pdp_golden_contract_fixture)",
+  "note": "Canonical producer output, regenerated from decision_record. Consumers (e.g. Rul1an/plimsoll#45) vendor this file verbatim. Regenerate with ASSAY_UPDATE_GOLDEN=1.",
+  "records": [
+    {
+      "case": "unclassified_tool_call",
+      "record": {
+        "schema": "assay.enforcement_decision.v0",
+        "caller": {
+          "id": "ci-agent"
+        },
+        "tool": {
+          "name": "misc.do_thing",
+          "action_class": null
+        },
+        "action": {
+          "verb": null,
+          "resource_type": null,
+          "target": null,
+          "target_digest": null
+        },
+        "decision": "deny",
+        "reason": "unclassified_tool_call",
+        "fail_closed": true,
+        "drift_state": "not_evaluated",
+        "credential_alias": "gh-deploy",
+        "non_claims": [
+          "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
+          "an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)",
+          "credential referenced by alias only, never the token or declared scopes",
+          "deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict",
+          "not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"
+        ]
+      }
+    },
+    {
+      "case": "classification_incomplete",
+      "record": {
+        "schema": "assay.enforcement_decision.v0",
+        "caller": {
+          "id": "ci-agent"
+        },
+        "tool": {
+          "name": "github.add_deploy_key",
+          "action_class": "github_deploy_key"
+        },
+        "action": {
+          "verb": "create",
+          "resource_type": "github_deploy_key",
+          "target": {
+            "provider": "github",
+            "owner": "acme"
+          },
+          "target_digest": "sha256:df4be9dfaa840f625ba03f5d577e6276a732f565c9527521138cfee1874546cf"
+        },
+        "decision": "deny",
+        "reason": "classification_incomplete",
+        "fail_closed": true,
+        "drift_state": "not_evaluated",
+        "credential_alias": "gh-deploy",
+        "non_claims": [
+          "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
+          "an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)",
+          "credential referenced by alias only, never the token or declared scopes",
+          "deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict",
+          "not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"
+        ]
+      }
+    },
+    {
+      "case": "no_declared_allowance",
+      "record": {
+        "schema": "assay.enforcement_decision.v0",
+        "caller": {
+          "id": "ci-agent"
+        },
+        "tool": {
+          "name": "github.add_deploy_key",
+          "action_class": "github_deploy_key"
+        },
+        "action": {
+          "verb": "create",
+          "resource_type": "github_deploy_key",
+          "target": {
+            "provider": "github",
+            "owner": "other",
+            "repo": "x"
+          },
+          "target_digest": "sha256:8809c01daec4774b30f8ce69ced56c843546cce9a4d39db437461870678cab84"
+        },
+        "decision": "deny",
+        "reason": "no_declared_allowance",
+        "fail_closed": true,
+        "drift_state": "not_evaluated",
+        "credential_alias": "gh-deploy",
+        "non_claims": [
+          "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
+          "an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)",
+          "credential referenced by alias only, never the token or declared scopes",
+          "deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict",
+          "not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"
+        ]
+      }
+    },
+    {
+      "case": "credential_scope_unknown",
+      "record": {
+        "schema": "assay.enforcement_decision.v0",
+        "caller": {
+          "id": "ci-agent"
+        },
+        "tool": {
+          "name": "github.add_deploy_key",
+          "action_class": "github_deploy_key"
+        },
+        "action": {
+          "verb": "create",
+          "resource_type": "github_deploy_key",
+          "target": {
+            "provider": "github",
+            "owner": "acme",
+            "repo": "prod-app"
+          },
+          "target_digest": "sha256:c3ff823d7fb2ee33b9f1a3f7be6eaf849acb980b6ec960731506436b56384dfc"
+        },
+        "decision": "deny",
+        "reason": "credential_scope_unknown",
+        "fail_closed": true,
+        "drift_state": "not_evaluated",
+        "credential_alias": null,
+        "non_claims": [
+          "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
+          "an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)",
+          "credential referenced by alias only, never the token or declared scopes",
+          "deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict",
+          "not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"
+        ]
+      }
+    },
+    {
+      "case": "credential_scope_insufficient",
+      "record": {
+        "schema": "assay.enforcement_decision.v0",
+        "caller": {
+          "id": "ci-agent"
+        },
+        "tool": {
+          "name": "github.add_deploy_key",
+          "action_class": "github_deploy_key"
+        },
+        "action": {
+          "verb": "create",
+          "resource_type": "github_deploy_key",
+          "target": {
+            "provider": "github",
+            "owner": "acme",
+            "repo": "prod-app"
+          },
+          "target_digest": "sha256:c3ff823d7fb2ee33b9f1a3f7be6eaf849acb980b6ec960731506436b56384dfc"
+        },
+        "decision": "deny",
+        "reason": "credential_scope_insufficient",
+        "fail_closed": true,
+        "drift_state": "not_evaluated",
+        "credential_alias": "gh-ro",
+        "non_claims": [
+          "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
+          "an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)",
+          "credential referenced by alias only, never the token or declared scopes",
+          "deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict",
+          "not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"
+        ]
+      }
+    },
+    {
+      "case": "manifest_baseline_missing",
+      "record": {
+        "schema": "assay.enforcement_decision.v0",
+        "caller": {
+          "id": "ci-agent"
+        },
+        "tool": {
+          "name": "github.add_deploy_key",
+          "action_class": "github_deploy_key"
+        },
+        "action": {
+          "verb": "create",
+          "resource_type": "github_deploy_key",
+          "target": {
+            "provider": "github",
+            "owner": "acme",
+            "repo": "prod-app"
+          },
+          "target_digest": "sha256:c3ff823d7fb2ee33b9f1a3f7be6eaf849acb980b6ec960731506436b56384dfc"
+        },
+        "decision": "deny",
+        "reason": "manifest_baseline_missing",
+        "fail_closed": true,
+        "drift_state": "baseline_missing",
+        "credential_alias": "gh-deploy",
+        "non_claims": [
+          "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
+          "an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)",
+          "credential referenced by alias only, never the token or declared scopes",
+          "deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict",
+          "not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"
+        ]
+      }
+    },
+    {
+      "case": "manifest_current_observation_incomplete",
+      "record": {
+        "schema": "assay.enforcement_decision.v0",
+        "caller": {
+          "id": "ci-agent"
+        },
+        "tool": {
+          "name": "github.add_deploy_key",
+          "action_class": "github_deploy_key"
+        },
+        "action": {
+          "verb": "create",
+          "resource_type": "github_deploy_key",
+          "target": {
+            "provider": "github",
+            "owner": "acme",
+            "repo": "prod-app"
+          },
+          "target_digest": "sha256:c3ff823d7fb2ee33b9f1a3f7be6eaf849acb980b6ec960731506436b56384dfc"
+        },
+        "decision": "deny",
+        "reason": "manifest_current_observation_incomplete",
+        "fail_closed": true,
+        "drift_state": "current_observation_incomplete",
+        "credential_alias": "gh-deploy",
+        "non_claims": [
+          "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
+          "an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)",
+          "credential referenced by alias only, never the token or declared scopes",
+          "deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict",
+          "not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"
+        ]
+      }
+    },
+    {
+      "case": "manifest_observation_ambiguous",
+      "record": {
+        "schema": "assay.enforcement_decision.v0",
+        "caller": {
+          "id": "ci-agent"
+        },
+        "tool": {
+          "name": "github.add_deploy_key",
+          "action_class": "github_deploy_key"
+        },
+        "action": {
+          "verb": "create",
+          "resource_type": "github_deploy_key",
+          "target": {
+            "provider": "github",
+            "owner": "acme",
+            "repo": "prod-app"
+          },
+          "target_digest": "sha256:c3ff823d7fb2ee33b9f1a3f7be6eaf849acb980b6ec960731506436b56384dfc"
+        },
+        "decision": "deny",
+        "reason": "manifest_observation_ambiguous",
+        "fail_closed": true,
+        "drift_state": "observation_ambiguous",
+        "credential_alias": "gh-deploy",
+        "non_claims": [
+          "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
+          "an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)",
+          "credential referenced by alias only, never the token or declared scopes",
+          "deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict",
+          "not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"
+        ]
+      }
+    },
+    {
+      "case": "manifest_drifted_since_approval",
+      "record": {
+        "schema": "assay.enforcement_decision.v0",
+        "caller": {
+          "id": "ci-agent"
+        },
+        "tool": {
+          "name": "github.add_deploy_key",
+          "action_class": "github_deploy_key"
+        },
+        "action": {
+          "verb": "create",
+          "resource_type": "github_deploy_key",
+          "target": {
+            "provider": "github",
+            "owner": "acme",
+            "repo": "prod-app"
+          },
+          "target_digest": "sha256:c3ff823d7fb2ee33b9f1a3f7be6eaf849acb980b6ec960731506436b56384dfc"
+        },
+        "decision": "deny",
+        "reason": "manifest_drifted_since_approval",
+        "fail_closed": true,
+        "drift_state": "drifted",
+        "credential_alias": "gh-deploy",
+        "non_claims": [
+          "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
+          "an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)",
+          "credential referenced by alias only, never the token or declared scopes",
+          "deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict",
+          "not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"
+        ]
+      }
+    },
+    {
+      "case": "all_gates_pass_allow",
+      "record": {
+        "schema": "assay.enforcement_decision.v0",
+        "caller": {
+          "id": "ci-agent"
+        },
+        "tool": {
+          "name": "github.add_deploy_key",
+          "action_class": "github_deploy_key"
+        },
+        "action": {
+          "verb": "create",
+          "resource_type": "github_deploy_key",
+          "target": {
+            "provider": "github",
+            "owner": "acme",
+            "repo": "prod-app"
+          },
+          "target_digest": "sha256:c3ff823d7fb2ee33b9f1a3f7be6eaf849acb980b6ec960731506436b56384dfc"
+        },
+        "decision": "allow",
+        "reason": "allow",
+        "fail_closed": false,
+        "drift_state": "satisfied",
+        "credential_alias": "gh-deploy",
+        "non_claims": [
+          "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
+          "an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)",
+          "credential referenced by alias only, never the token or declared scopes",
+          "deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict",
+          "not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"
+        ]
+      }
+    }
+  ]
+}
