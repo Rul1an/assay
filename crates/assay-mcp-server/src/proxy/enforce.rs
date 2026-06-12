@@ -981,4 +981,338 @@ allowances:
         assert_eq!(rec["decision"], "deny");
         assert_eq!(rec["drift_state"], "drifted");
     }
+
+    // ---- PDP golden corpus (Rul1an/assay#1649) -------------------------------------------------
+    //
+    // A deterministic truth table over `decide` covering every gate combination, asserting the
+    // (decision, reason, drift_state, action_class) AND the emitted `assay.enforcement_decision.v0`
+    // record shape per case. This is the oracle the wave's E15/E17 validate against, and the contract
+    // a consumer (plimsoll) tests against so it cannot drift from the producer (the #39/#40 slip).
+    // No case forwards: `decide` is a pure decision; the record never carries a `forwarded` field.
+
+    /// A `github_deploy_key` allowance for acme/prod-app with a custom (or empty) credential block.
+    fn cred_policy(cred_block: &str) -> EnforcePolicy {
+        allow_acme_with_cred(cred_block)
+    }
+
+    /// One golden row: an owned scenario plus its expected verdict and record fields.
+    struct GoldenCase {
+        name: &'static str,
+        policy: EnforcePolicy,
+        baseline: DeclaredManifest,
+        observed: ObservedToolDigest,
+        tool: &'static str,
+        args: Value,
+        reason: &'static str,
+        allow: bool,
+        drift_state: &'static str,
+        action_class: Option<&'static str>,
+    }
+
+    fn matching_baseline() -> DeclaredManifest {
+        baseline_with(TOOL, APPROVED)
+    }
+    fn matching_observed() -> ObservedToolDigest {
+        ObservedToolDigest::Present(APPROVED.to_string())
+    }
+
+    fn golden_corpus() -> Vec<GoldenCase> {
+        let ro_cred = "upstream_credential:\n  alias: \"gh-ro\"\n  scopes: [\"repo:read\"]\n";
+        vec![
+            // 1. classification gate
+            GoldenCase {
+                name: "unclassified_tool_call",
+                policy: policy_from(VALID).unwrap(),
+                baseline: matching_baseline(),
+                observed: matching_observed(),
+                tool: "misc.do_thing",
+                args: json!({}),
+                reason: "unclassified_tool_call",
+                allow: false,
+                drift_state: "not_evaluated",
+                action_class: None,
+            },
+            GoldenCase {
+                name: "classification_incomplete",
+                policy: policy_from(VALID).unwrap(),
+                baseline: matching_baseline(),
+                observed: matching_observed(),
+                tool: TOOL,
+                args: json!({"owner": "acme"}), // missing repo
+                reason: "classification_incomplete",
+                allow: false,
+                drift_state: "not_evaluated",
+                action_class: Some("github_deploy_key"),
+            },
+            // 2. caller-allowance gate (two scenarios, same precedence-pinned reason)
+            GoldenCase {
+                name: "no_declared_allowance",
+                policy: policy_from(VALID).unwrap(),
+                baseline: matching_baseline(),
+                observed: matching_observed(),
+                tool: TOOL,
+                args: json!({"owner": "other", "repo": "x"}),
+                reason: "no_declared_allowance",
+                allow: false,
+                drift_state: "not_evaluated",
+                action_class: Some("github_deploy_key"),
+            },
+            GoldenCase {
+                name: "allowance_target_mismatch",
+                policy: policy_from(VALID).unwrap(),
+                baseline: matching_baseline(),
+                observed: matching_observed(),
+                tool: TOOL,
+                args: json!({"owner": "acme", "repo": "other-repo"}),
+                reason: "no_declared_allowance",
+                allow: false,
+                drift_state: "not_evaluated",
+                action_class: Some("github_deploy_key"),
+            },
+            // 3. credential-scope gate
+            GoldenCase {
+                name: "credential_scope_unknown",
+                policy: cred_policy(""), // no declared credential
+                baseline: matching_baseline(),
+                observed: matching_observed(),
+                tool: TOOL,
+                args: acme_call(),
+                reason: "credential_scope_unknown",
+                allow: false,
+                drift_state: "not_evaluated",
+                action_class: Some("github_deploy_key"),
+            },
+            GoldenCase {
+                name: "credential_scope_insufficient",
+                policy: cred_policy(ro_cred),
+                baseline: matching_baseline(),
+                observed: matching_observed(),
+                tool: TOOL,
+                args: acme_call(),
+                reason: "credential_scope_insufficient",
+                allow: false,
+                drift_state: "not_evaluated",
+                action_class: Some("github_deploy_key"),
+            },
+            // 4. drift gate
+            GoldenCase {
+                name: "manifest_baseline_missing",
+                policy: policy_from(VALID).unwrap(),
+                baseline: baseline_with("github.other_tool", APPROVED), // baseline lacks TOOL
+                observed: matching_observed(),
+                tool: TOOL,
+                args: acme_call(),
+                reason: "manifest_baseline_missing",
+                allow: false,
+                drift_state: "baseline_missing",
+                action_class: Some("github_deploy_key"),
+            },
+            GoldenCase {
+                name: "manifest_current_observation_incomplete",
+                policy: policy_from(VALID).unwrap(),
+                baseline: matching_baseline(),
+                observed: ObservedToolDigest::NoCompleteManifest,
+                tool: TOOL,
+                args: acme_call(),
+                reason: "manifest_current_observation_incomplete",
+                allow: false,
+                drift_state: "current_observation_incomplete",
+                action_class: Some("github_deploy_key"),
+            },
+            GoldenCase {
+                name: "manifest_current_observation_incomplete_tool_absent",
+                policy: policy_from(VALID).unwrap(),
+                baseline: matching_baseline(),
+                observed: ObservedToolDigest::CompleteButToolAbsent,
+                tool: TOOL,
+                args: acme_call(),
+                reason: "manifest_current_observation_incomplete",
+                allow: false,
+                drift_state: "current_observation_incomplete",
+                action_class: Some("github_deploy_key"),
+            },
+            GoldenCase {
+                name: "manifest_observation_ambiguous",
+                policy: policy_from(VALID).unwrap(),
+                baseline: matching_baseline(),
+                observed: ObservedToolDigest::Ambiguous,
+                tool: TOOL,
+                args: acme_call(),
+                reason: "manifest_observation_ambiguous",
+                allow: false,
+                drift_state: "observation_ambiguous",
+                action_class: Some("github_deploy_key"),
+            },
+            GoldenCase {
+                name: "manifest_drifted_since_approval",
+                policy: policy_from(VALID).unwrap(),
+                baseline: matching_baseline(),
+                observed: ObservedToolDigest::Present("sha256:something-else".to_string()),
+                tool: TOOL,
+                args: acme_call(),
+                reason: "manifest_drifted_since_approval",
+                allow: false,
+                drift_state: "drifted",
+                action_class: Some("github_deploy_key"),
+            },
+            // 5. all gates pass -> allow (decision-only; no forward in the corpus)
+            GoldenCase {
+                name: "all_gates_pass_allow",
+                policy: policy_from(VALID).unwrap(),
+                baseline: matching_baseline(),
+                observed: matching_observed(),
+                tool: TOOL,
+                args: acme_call(),
+                reason: "allow",
+                allow: true,
+                drift_state: "satisfied",
+                action_class: Some("github_deploy_key"),
+            },
+        ]
+    }
+
+    #[test]
+    fn pdp_golden_corpus_truth_table() {
+        let corpus = golden_corpus();
+        let cases_total = corpus.len();
+        let mut expected_reason_match = 0usize;
+        let mut unexpected_allows = 0usize;
+        let mut unexpected_forwards = 0usize;
+
+        for c in &corpus {
+            let d = decide(&c.policy, &c.baseline, &c.observed, c.tool, &c.args);
+
+            // verdict
+            assert_eq!(d.allow, c.allow, "{}: allow", c.name);
+            assert_eq!(d.reason, c.reason, "{}: reason", c.name);
+            if d.reason == c.reason {
+                expected_reason_match += 1;
+            }
+            if d.allow && !c.allow {
+                unexpected_allows += 1;
+            }
+
+            // emitted record shape (the producer+consumer contract)
+            let rec = decision_record(&c.policy, &d, c.tool, &c.args);
+            assert_eq!(rec["schema"], "assay.enforcement_decision.v0", "{}", c.name);
+            assert_eq!(
+                rec["decision"],
+                if c.allow { "allow" } else { "deny" },
+                "{}: decision",
+                c.name
+            );
+            assert_eq!(rec["reason"], c.reason, "{}: record reason", c.name);
+            assert_eq!(rec["fail_closed"], !c.allow, "{}: fail_closed", c.name);
+            assert_eq!(rec["drift_state"], c.drift_state, "{}: drift_state", c.name);
+            match c.action_class {
+                None => assert!(
+                    rec["tool"]["action_class"].is_null(),
+                    "{}: action_class must be null",
+                    c.name
+                ),
+                Some(ac) => assert_eq!(rec["tool"]["action_class"], ac, "{}: action_class", c.name),
+            }
+            // an allow is a decision-to-forward, never a delivery claim: no `forwarded` field, ever.
+            if rec.get("forwarded").is_some() {
+                unexpected_forwards += 1;
+            }
+
+            // No credential material leaks: the record references the credential by ALIAS only, never
+            // the declared scopes and never a token. (The contract a consumer reads must be safe to
+            // store and project.)
+            let serialized = rec.to_string();
+            if let Some(cred) = c.policy.upstream_credential.as_ref() {
+                for scope in &cred.scopes {
+                    assert!(
+                        !serialized.contains(scope.as_str()),
+                        "{}: declared scope {:?} leaked into the decision record",
+                        c.name,
+                        scope
+                    );
+                }
+                // credential_alias, when present, is exactly the alias string — not the scopes.
+                assert_eq!(
+                    rec["credential_alias"], cred.alias,
+                    "{}: credential_alias must be the alias only",
+                    c.name
+                );
+            } else {
+                // no declared credential -> the alias field is null, never fabricated.
+                assert!(
+                    rec["credential_alias"].is_null(),
+                    "{}: credential_alias must be null when no credential is declared",
+                    c.name
+                );
+            }
+        }
+
+        // The corpus measurement (assay.experiment.pdp_golden.v0): every reason matches, nothing is
+        // allowed that should deny, and no record claims a forward.
+        assert_eq!(expected_reason_match, cases_total, "expected_reason_match");
+        assert_eq!(unexpected_allows, 0, "unexpected_allows must be 0");
+        assert_eq!(unexpected_forwards, 0, "unexpected_forwards must be 0");
+        // exactly one allow row in the whole corpus
+        assert_eq!(
+            corpus.iter().filter(|c| c.allow).count(),
+            1,
+            "the corpus has exactly one all-gates-pass allow row"
+        );
+    }
+
+    #[test]
+    fn pdp_golden_reason_precedence() {
+        // First failing gate wins. Each row would fail a LATER gate too; the earlier reason must win.
+        let valid = policy_from(VALID).unwrap();
+        let no_cred = cred_policy("");
+
+        // classification > allowance: an unclassified tool whose (irrelevant) target would also miss
+        // the allowance still reads unclassified.
+        let d = decide(
+            &valid,
+            &matching_baseline(),
+            &matching_observed(),
+            "misc.do_thing",
+            &json!({"owner": "other"}),
+        );
+        assert_eq!(
+            d.reason, "unclassified_tool_call",
+            "classification > allowance"
+        );
+
+        // classification_incomplete > allowance: acme + missing repo cannot match the allowance, yet
+        // it reads as classification_incomplete, not no_declared_allowance.
+        let d = decide(
+            &valid,
+            &matching_baseline(),
+            &matching_observed(),
+            TOOL,
+            &json!({"owner": "acme"}),
+        );
+        assert_eq!(
+            d.reason, "classification_incomplete",
+            "classification_incomplete > allowance"
+        );
+
+        // allowance > credential: a non-matching target with a broken (absent) credential reads as
+        // no_declared_allowance, never credential_scope_unknown.
+        let d = decide(
+            &no_cred,
+            &matching_baseline(),
+            &matching_observed(),
+            TOOL,
+            &json!({"owner": "other", "repo": "x"}),
+        );
+        assert_eq!(d.reason, "no_declared_allowance", "allowance > credential");
+
+        // credential > drift: an absent credential AND a drifted observation both fail; the credential
+        // reason wins because c2 runs before c3.
+        let d = decide(
+            &no_cred,
+            &matching_baseline(),
+            &ObservedToolDigest::Present("sha256:something-else".to_string()),
+            TOOL,
+            &acme_call(),
+        );
+        assert_eq!(d.reason, "credential_scope_unknown", "credential > drift");
+    }
 }
