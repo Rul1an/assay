@@ -1315,4 +1315,90 @@ allowances:
         );
         assert_eq!(d.reason, "credential_scope_unknown", "credential > drift");
     }
+
+    // ---- Shared producer/consumer contract fixture (Rul1an/plimsoll#45) ------------------------
+    //
+    // The canonical `assay.enforcement_decision.v0` contract is the REAL output of `decision_record`,
+    // not a hand-authored mirror. This test regenerates one record per distinct producer outcome (the
+    // allow row plus every deny reason, with real `target_digest` and the full `non_claims`) and
+    // asserts it equals the committed fixture as a serde_json::Value (order-independent). Plimsoll
+    // vendors the SAME file and asserts its consumer accepts every record, so neither side can drift.
+    // Regenerate after an intentional producer change: ASSAY_UPDATE_GOLDEN=1 cargo test -p
+    // assay-mcp-server --bins pdp_golden_contract_fixture.
+
+    fn contract_fixture_path() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/enforcement_decision_contract.v0.json")
+    }
+
+    /// One real producer record per distinct decision outcome (deduped by reason; the two
+    /// current_observation_incomplete cases collapse to one identical record).
+    fn contract_records() -> Vec<Value> {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut out = Vec::new();
+        for c in golden_corpus() {
+            let d = decide(&c.policy, &c.baseline, &c.observed, c.tool, &c.args);
+            if !seen.insert(d.reason) {
+                continue; // one canonical record per reason
+            }
+            let rec = decision_record(&c.policy, &d, c.tool, &c.args);
+            out.push(json!({ "case": c.name, "record": rec }));
+        }
+        out
+    }
+
+    fn contract_document() -> Value {
+        json!({
+            "schema_contract": "assay.enforcement_decision.v0",
+            "generated_by": "assay crates/assay-mcp-server enforce::decision_record (pdp_golden_contract_fixture)",
+            "note": "Canonical producer output, regenerated from decision_record. Consumers (e.g. Rul1an/plimsoll#45) vendor this file verbatim. Regenerate with ASSAY_UPDATE_GOLDEN=1.",
+            "records": contract_records(),
+        })
+    }
+
+    #[test]
+    fn pdp_golden_contract_fixture() {
+        let generated = contract_document();
+        let path = contract_fixture_path();
+
+        if std::env::var("ASSAY_UPDATE_GOLDEN").is_ok() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let pretty = serde_json::to_string_pretty(&generated).unwrap();
+            std::fs::write(&path, format!("{pretty}\n")).unwrap();
+        }
+
+        let committed_text = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+            panic!(
+                "missing {}; regenerate with ASSAY_UPDATE_GOLDEN=1",
+                path.display()
+            )
+        });
+        let committed: Value = serde_json::from_str(&committed_text).unwrap();
+        assert_eq!(
+            committed, generated,
+            "the committed contract fixture is stale; regenerate with ASSAY_UPDATE_GOLDEN=1"
+        );
+
+        // Sanity: every record is the v0 carrier, carries no `forwarded` field, and references the
+        // credential by alias only (no scopes key) — the discipline the consumer relies on.
+        let records = generated["records"].as_array().unwrap();
+        assert!(!records.is_empty());
+        for entry in records {
+            let rec = &entry["record"];
+            assert_eq!(rec["schema"], "assay.enforcement_decision.v0");
+            assert!(
+                rec.get("forwarded").is_none(),
+                "no record may carry a forwarded field"
+            );
+            let alias = &rec["credential_alias"];
+            assert!(
+                alias.is_null() || alias.is_string(),
+                "credential_alias is alias-or-null"
+            );
+            assert!(
+                rec.get("scopes").is_none(),
+                "a record must not carry a scopes key"
+            );
+        }
+    }
 }
