@@ -31,6 +31,9 @@ ignore = [
     # iterates via .iter().enumerate(), never .nth() on pyo3 iterators. Fix = pyo3 0.29 migration (#1651);
     # remove this ignore when that lands.
     "RUSTSEC-2026-0176",
+    # pyo3 missing `Sync` bound on `PyCFunction::new_closure` closures. Not reachable: assay never calls
+    # PyCFunction::new_closure. TEMPORARY ignore until the pyo3 0.29 migration (#1651) — remove it then.
+    "RUSTSEC-2026-0177",
 ]
 
 # =============================================================================
