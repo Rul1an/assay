@@ -27,7 +27,11 @@ jobs:
 
       - name: Build and Install Assay (from source)
         run: |
-          cargo install --path crates/assay-cli --debug
+          # --locked: install with the committed Cargo.lock, not a fresh resolution. Without it
+          # `cargo install` re-resolves to the newest semver-compatible deps, which can pull a broken
+          # upstream combination (e.g. ratatui-widgets 0.3.1 + time 0.3.48 -> E0119) that the pinned
+          # lockfile avoids. Matches the --locked the other `cargo install` calls in CI already use.
+          cargo install --path crates/assay-cli --debug --locked
           assay --version
 
       - name: Migrate config (check-only, strict)
