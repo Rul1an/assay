@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.24.0] - 2026-06-12
+
+### Added
+- Enforcing-proxy policy decision point (P61e-c), an explicit opt-in `assay-mcp-server proxy-enforce`
+  mode that decides each `tools/call` before forwarding. It is fail-closed by construction and runs
+  three gates in fixed precedence: a caller-allowance gate, a credential-scope gate (c2) that denies
+  when the declared upstream credential does not cover the action's required scope, and a manifest
+  drift gate (c3) that requires both an approval-time baseline and a current complete observation and
+  denies when the invoked tool's digest drifted since approval. Only a call clearing every gate is
+  forwarded; there is no observe-only forwarding and no allow path without a current complete manifest.
+  - It is not an authorization server and makes no grant decision of its own.
+  - An allow is the decision to forward; it is not proof the call was delivered or that a side effect
+    occurred (a transport failure surfaces to the caller, never as a delivery claim).
+  - It decides per call; it does not reason about multi-step or sequential behaviour.
+- `assay.enforcement_decision.v0` per-call evidence record (P61e-d): a deterministic record emitted for
+  both allow and deny, carrying the decision, the precedence-pinned reason, `fail_closed`, the
+  `drift_state`, and the credential alias (never the token or scopes). It records the policy decision
+  only and carries no `forwarded` / delivery field.
+- PDP golden corpus: an in-repo deterministic truth table over `enforce.rs::decide` covering every gate
+  outcome, with reason precedence pinned and the emitted record shape asserted per case — the oracle the
+  decision logic is regression-locked against.
+- Canonical `assay.enforcement_decision.v0` contract fixture regenerated from `decision_record`, so a
+  downstream consumer can vendor the exact producer output rather than a hand-authored mirror.
+
+### Changed
+- Supply-chain and public-artifact hardening: scheduled supply-chain posture, an HMAC-based trusted
+  sanitizer layer, RUSTSEC advisory triage (`RUSTSEC-2026-0176`/`-0177` documented as not reachable,
+  pending the pyo3 0.29 migration), and a `--locked` from-source smoke install.
+
 ## [3.23.0] - 2026-06-10
 
 ### Added
