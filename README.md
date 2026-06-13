@@ -47,6 +47,8 @@ assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
 ❌ DENY   exec       cmd=ls                          reason=tool_denied
 ```
 
+![Assay decides each MCP tool call before it runs, fail-closed, with the reason](demo/output/screenshots/mcp-wrap-demo.svg)
+
 Wire it into Cursor, Claude Code, or Codex in one line with `assay mcp config-path <editor>`. New to the threat model? Start with the [OWASP MCP Top 10 mapping](docs/security/OWASP-MCP-TOP10-MAPPING.md), which lays out, per risk, what Assay covers and what it deliberately does not.
 
 ---
