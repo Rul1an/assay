@@ -5,7 +5,9 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 readme.workspace = true
-description = "CLI for Assay"
+description = "Policy-as-code gate for MCP agent tool calls, with verifiable evidence and Linux kernel enforcement."
+keywords = ["mcp", "ai-agents", "agent-security", "policy-as-code", "evidence"]
+categories = ["command-line-utilities", "development-tools::testing"]
 
 [lints]
 workspace = true
