@@ -1,8 +1,8 @@
 <p align="center">
   <h1 align="center">Assay</h1>
   <p align="center">
-    <strong>Evidence compiler for agent review artifacts</strong><br />
-    <span>Portable evidence receipts, verifiable bundles, and bounded Trust Basis claims for agent systems.</span>
+    <strong>Policy-as-code for MCP agents: enforce what a tool call can do, prove what it did, and stay honest about what you can't.</strong><br />
+    <span>A deterministic, fail-closed policy gate for MCP tool calls, with real kernel-level (eBPF/LSM) enforcement on Linux and offline-verifiable evidence. CI-native, no backend, bounded by design.</span>
   </p>
   <p align="center">
     <a href="https://crates.io/crates/assay-cli"><img src="https://img.shields.io/crates/v/assay-cli.svg" alt="Crates.io"></a>
@@ -10,15 +10,44 @@
     <a href="https://github.com/Rul1an/assay/blob/main/LICENSE"><img src="https://img.shields.io/crates/l/assay-core.svg" alt="License"></a>
   </p>
   <p align="center">
-    <a href="#see-it-work">See It Work</a> ·
-    <a href="docs/use-cases/evidence-receipts-from-promptfoo-jsonl.md">Promptfoo JSONL</a> ·
-    <a href="docs/use-cases/openfeature-evaluationdetails-to-ci-review-artifact.md">OpenFeature</a> ·
-    <a href="docs/use-cases/cyclonedx-mlbom-model-to-inventory-receipt.md">CycloneDX ML-BOM</a> ·
-    <a href="examples/mcp-quickstart/">Quick Start</a> ·
-    <a href="docs/guides/github-action.md">CI Guide</a> ·
+    <a href="#try-it-in-30-seconds">Quickstart</a> ·
+    <a href="#enforce-prove-stay-honest">How it works</a> ·
+    <a href="#see-it-work">See it work</a> ·
+    <a href="examples/mcp-quickstart/">MCP example</a> ·
+    <a href="docs/guides/github-action.md">CI guide</a> ·
+    <a href="docs/security/OWASP-MCP-TOP10-MAPPING.md">OWASP MCP Top 10</a> ·
     <a href="https://github.com/Rul1an/assay/discussions">Discussions</a>
   </p>
 </p>
+
+---
+
+In 2026 agents got real tool access through MCP, and the attacks came with it: tool poisoning, rug pulls, confused-deputy OAuth, dozens of CVEs in the first months alone. Most tools scan a server or filter a prompt. Assay sits at the tool-call boundary and does three things, in order.
+
+### Enforce, prove, stay honest
+
+- **Enforce.** A deterministic, fail-closed policy gate decides every MCP `tools/call` before it runs, with the precise reason for each allow or deny. On Linux it adds real kernel-level enforcement: a proven IPv4/TCP connect-egress block (eBPF/LSM) and a Landlock TCP-connect port allowlist, both opt-in and fail-closed. A policy it cannot express exactly is refused, never half-applied.
+- **Prove.** Every decision and observed effect becomes an offline-verifiable, tamper-evident evidence bundle, alongside pinned per-call carriers: the verdict, the pre-call establish journey, and declared-vs-observed tool-annotation conformance. All reviewable in CI, with no hosted backend.
+- **Stay honest.** Each claim carries its basis (`verified`, `self_reported`, `inferred`, or `absent`), and a gate refuses to let a claim exceed what was actually observed. A tool returning "success" is the provider's assertion, never proof, until evidence confirms it. Assay ships no single safety score and never claims more than it can prove.
+
+### Try it in 30 seconds
+
+```bash
+cargo install assay-cli
+
+mkdir -p /tmp/assay-demo && echo "safe content" > /tmp/assay-demo/safe.txt
+
+assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
+  -- npx @modelcontextprotocol/server-filesystem /tmp/assay-demo
+```
+
+```
+✅ ALLOW  read_file  path=/tmp/assay-demo/safe.txt  reason=policy_allow
+❌ DENY   read_file  path=/tmp/outside-demo.txt      reason=path_constraint_violation
+❌ DENY   exec       cmd=ls                          reason=tool_denied
+```
+
+Wire it into Cursor, Claude Code, or Codex in one line with `assay mcp config-path <editor>`. New to the threat model? Start with the [OWASP MCP Top 10 mapping](docs/security/OWASP-MCP-TOP10-MAPPING.md), which lays out, per risk, what Assay covers and what it deliberately does not.
 
 ---
 
