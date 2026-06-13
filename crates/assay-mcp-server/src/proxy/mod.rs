@@ -20,6 +20,11 @@ pub mod enforce;
 // Pre-call manifest-establish decision layer (P61e, Increment 1). Pure logic + the
 // `assay.manifest_establish.v0` sibling carrier; not yet wired into the relay (Increment 2).
 pub mod establish;
+// Internal request routing for the establish flow (P61e, Increment 2 slice 1): reserved-id namespace,
+// pending registry, single-reader suppression routing, and client-id collision rejection. The
+// suppression decision and collision guard are wired below (behavior-preserving); proxy-originated
+// re-list lands in slice 2.
+pub mod relay_routing;
 
 use anyhow::{Context, Result};
 use assay_mcp_server::manifest_observed::{self, Completeness};
@@ -439,11 +444,17 @@ pub async fn run(
         }
     });
 
+    // Establish registry (P61e Increment 2): shared between the establish caller (slice 2) and the
+    // single upstream reader. In slice 1 nothing registers a reserved id, so routing is a no-op and the
+    // relay is behavior-identical to before.
+    let establish_registry = relay_routing::EstablishRegistry::default();
+
     // Upstream → client: tap (read-only) then relay verbatim. A non-JSON upstream line is never
     // relayed as success.
     let up_tx = tx.clone();
     let up_obs = observer.clone();
     let up_manifest_out = manifest_out.clone();
+    let up_registry = establish_registry.clone();
     let upstream_reader = tokio::spawn(async move {
         let mut lines = BufReader::new(child_stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
@@ -483,7 +494,18 @@ pub async fn run(
                             let _ = write_json_atomic(path, &m);
                         }
                     }
-                    let _ = up_tx.send(line);
+                    // Single-reader routing: a response to a pending proxy-originated establish request
+                    // is diverted to the registry and SUPPRESSED from the client stream; everything
+                    // else (and a reserved id that is not pending) relays verbatim. In slice 1 nothing
+                    // is ever pending, so this always relays.
+                    match relay_routing::route_upstream(&v, |id| up_registry.is_pending(id)) {
+                        relay_routing::UpstreamRoute::DivertToEstablish(id) => {
+                            up_registry.resolve(&id, v);
+                        }
+                        relay_routing::UpstreamRoute::RelayToClient => {
+                            let _ = up_tx.send(line);
+                        }
+                    }
                 }
                 Err(_) => {
                     let _ = up_tx.send(proxy_error_line(
@@ -515,6 +537,22 @@ pub async fn run(
                 continue;
             }
         };
+
+        // Reserved-id collision guard (P61e Increment 2): the proxy reserves the `assay-establish-` id
+        // namespace for its own originated requests. A client REQUEST whose id lands in that namespace
+        // is rejected, never forwarded — otherwise a colliding client id could cause a real client
+        // response to be routed into (and swallowed by) the establish registry. Only requests are
+        // gated: a client RESPONSE to an upstream-initiated request (no `method`) still relays verbatim
+        // via the response path below, so the relay stays behavior-preserving for it.
+        if relay_routing::is_reserved_client_request(&v) {
+            let _ = tx.send(proxy_error_line(
+                v.get("id").cloned().unwrap_or(Value::Null),
+                PROXY_FAILED,
+                "reserved_id_namespace",
+                "client request id collides with the proxy's reserved establish id namespace; rejected",
+            ));
+            continue;
+        }
 
         match v.get("method").and_then(|m| m.as_str()) {
             Some(method) if ALLOWLIST.contains(&method) => {
