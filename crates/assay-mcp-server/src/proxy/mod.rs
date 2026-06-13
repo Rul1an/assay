@@ -17,6 +17,9 @@
 //! "how completely was it observed" lives in the separate observation-health artifact, never folded in.
 
 pub mod enforce;
+// Pure producer contract for assay.tool_annotation_conformance.v0 (Increment 5a).
+// Live annotation capture/emission lands in a later slice.
+pub mod annotation_conformance;
 // Pre-call manifest-establish decision layer (P61e, Increment 1). Pure logic + the
 // `assay.manifest_establish.v0` sibling carrier; not yet wired into the relay (Increment 2).
 pub mod establish;
