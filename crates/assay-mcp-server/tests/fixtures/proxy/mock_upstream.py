@@ -78,6 +78,10 @@ def _handle_tools_list(mid, cursor):
         _result(mid, [_tool("alpha")], next_cursor="c1")
     elif MODE == "duplicate":
         _result(mid, [_tool("dup"), _tool("dup", "second with same name")])
+    elif MODE == "drop_list":
+        # Receive the tools/list but never answer it: the proxy's establish must time out and fail
+        # closed within its deadline. The request is still logged, so "establish was attempted" holds.
+        return
     elif MODE == "complete_then_partial":
         # First cursorless start completes; a later cursorless start advertises a next page (the test
         # never follows it), so the run ends with a complete chain plus a later incomplete one.

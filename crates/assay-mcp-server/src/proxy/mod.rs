@@ -59,6 +59,20 @@ const PROXY_DENIED: i32 = -32042;
 
 const HEALTH_SCHEMA: &str = "assay.proxy_observation_health.v0";
 
+/// The one total deadline for a pre-call manifest-establish run (Increment 2b). The operator-facing
+/// CLI surface lands in slice 2c; for now this is a private default, with an internal env override
+/// (`ASSAY_ESTABLISH_BUDGET_MS`) used only to keep the timeout acceptance test fast and deterministic —
+/// it is not an operator interface.
+const DEFAULT_ESTABLISH_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn establish_budget() -> std::time::Duration {
+    std::env::var("ASSAY_ESTABLISH_BUDGET_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(DEFAULT_ESTABLISH_BUDGET)
+}
+
 /// Proxy run mode. Observe (P61a-d, shipped) forwards the allowlist and answers `tools/call` with
 /// `proxy_unsupported`. Enforce runs the P61e-c PDP on every `tools/call` — classification,
 /// caller-allowance, credential-scope, and drift gates — denying with the precedence-pinned reason of
@@ -453,6 +467,10 @@ pub async fn run(
     // single upstream reader. In slice 1 nothing registers a reserved id, so routing is a no-op and the
     // relay is behavior-identical to before.
     let establish_registry = relay_routing::EstablishRegistry::default();
+    // Monotonic reserved-id source for proxy-originated establish requests (one per page), and the one
+    // total establish deadline (Increment 2b).
+    let establish_id_counter = std::sync::atomic::AtomicU64::new(1);
+    let establish_budget = establish_budget();
 
     // Upstream → client: tap (read-only) then relay verbatim. A non-JSON upstream line is never
     // relayed as success.
@@ -605,7 +623,43 @@ pub async fn run(
                 // The current observed per-tool digest, from this session's observed tools/list
                 // (read-only). The guard is dropped before any await below.
                 let observed = observer.lock().await.observed_tool_digest(tool_name);
-                let decision = enforce::decide(policy, baseline, &observed, tool_name, call_args);
+                let mut decision =
+                    enforce::decide(policy, baseline, &observed, tool_name, call_args);
+                // Pre-decision recovery for the manifest-availability gap ONLY (Increment 2b): when the
+                // sole reason for the deny is that no current complete manifest was observed for this
+                // tool, attempt ONE bounded proxy-originated re-list, then re-decide over the fresh
+                // observation. The trigger is explicit on BOTH the reason and the establish action so a
+                // future ObservedToolDigest/reason combination can never accidentally establish outside
+                // the gap. This never relaxes a gate: Ambiguous, baseline-missing, and real drift skip
+                // establish and stay denied, and a failed/timed-out establish leaves the deny standing.
+                // enforcement_decision.v0 records only the EFFECTIVE (re-decided) decision below.
+                let est_action = establish::establish_action(&observed);
+                if !decision.allow
+                    && decision.reason == "manifest_current_observation_incomplete"
+                    && matches!(
+                        est_action,
+                        establish::EstablishAction::ReList | establish::EstablishAction::ReListOnce
+                    )
+                {
+                    let run_outcome = run_establish(
+                        &mut child_stdin,
+                        &establish_registry,
+                        &observer,
+                        &establish_id_counter,
+                        establish_budget,
+                    )
+                    .await;
+                    let observed2 = observer.lock().await.observed_tool_digest(tool_name);
+                    decision = enforce::decide(policy, baseline, &observed2, tool_name, call_args);
+                    tracing::info!(
+                        event = "establish_attempted",
+                        tool = %tool_name,
+                        run_outcome = ?run_outcome,
+                        effective_decision = if decision.allow { "allow" } else { "deny" },
+                        reason = decision.reason,
+                        note = "pre-call manifest-establish; verdict lives in enforcement_decision.v0"
+                    );
+                }
                 // Diagnostic decision log — operability/correlation only, NOT the canonical
                 // assay.enforcement_decision.v0 evidence artifact (that is P61e-d).
                 tracing::info!(
