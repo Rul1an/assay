@@ -31,6 +31,24 @@ pub fn extract_declared_annotations(annotations: &Value) -> DeclaredToolAnnotati
     }
 }
 
+/// Whether the called tool's declared annotations were read from a completely observed manifest.
+/// `Incomplete` (no complete manifest, an ambiguous one, or the tool absent) forces `inconclusive`:
+/// the annotations were not observed, which is distinct from a server that declared none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObservationBasis {
+    Complete,
+    Incomplete,
+}
+
+impl ObservationBasis {
+    fn as_str(self) -> &'static str {
+        match self {
+            ObservationBasis::Complete => "complete",
+            ObservationBasis::Incomplete => "incomplete",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ObservedBehavior {
     Mutating,
@@ -62,14 +80,24 @@ fn push_axis(axes: &mut Vec<&'static str>, axis: &'static str) {
     }
 }
 
-/// Build one `assay.tool_annotation_conformance.v0` record from declared annotations and the
-/// rule-based classification of the call. `tool_digest` is not available until the live observer
-/// wiring slice, so 5a emits it as null while pinning the append-only field in the v0 shape.
+/// Build one record with a `Complete` observation basis and no recorded digest. Convenience for
+/// unit tests that exercise the conformance logic against a known declaration.
 pub fn conformance_for(declared: &DeclaredToolAnnotations, tool_name: &str, args: &Value) -> Value {
-    build_tool_annotation_conformance_record(declared, tool_name, None, args)
+    build_tool_annotation_conformance_record(
+        ObservationBasis::Complete,
+        declared,
+        tool_name,
+        None,
+        args,
+    )
 }
 
+/// Build one `assay.tool_annotation_conformance.v0` record from the declared annotations and the
+/// rule-based classification of the call. When `basis` is `Incomplete` the declared annotations were
+/// not observed, so the record forces `inconclusive` with null declared hints and digest (the
+/// classifier's observed behavior is still recorded) rather than reading absence as "undeclared".
 pub fn build_tool_annotation_conformance_record(
+    basis: ObservationBasis,
     declared: &DeclaredToolAnnotations,
     tool_name: &str,
     tool_digest: Option<&str>,
@@ -82,30 +110,40 @@ pub fn build_tool_annotation_conformance_record(
         None
     };
 
-    let mut assessed_axes = Vec::new();
+    let complete = basis == ObservationBasis::Complete;
+    let declared = if complete {
+        *declared
+    } else {
+        DeclaredToolAnnotations::default()
+    };
+    let tool_digest = if complete { tool_digest } else { None };
+
+    let mut assessed_axes: Vec<&'static str> = Vec::new();
     let mut mismatch_kind: Option<&'static str> = None;
 
-    if let Some(read_only) = declared.read_only {
-        if behavior.is_some() {
-            push_axis(&mut assessed_axes, "read_only");
-            if read_only {
-                mismatch_kind = Some("declared_read_only_observed_mutating");
+    if complete {
+        if let Some(read_only) = declared.read_only {
+            if behavior.is_some() {
+                push_axis(&mut assessed_axes, "read_only");
+                if read_only {
+                    mismatch_kind = Some("declared_read_only_observed_mutating");
+                }
             }
         }
-    }
 
-    if declared.read_only != Some(true) {
-        if let Some(destructive) = declared.destructive {
-            if let Some(observed) = behavior {
-                push_axis(&mut assessed_axes, "destructive");
-                if !destructive && observed == ObservedBehavior::Destructive {
-                    mismatch_kind = Some("declared_non_destructive_observed_destructive");
+        if declared.read_only != Some(true) {
+            if let Some(destructive) = declared.destructive {
+                if let Some(observed) = behavior {
+                    push_axis(&mut assessed_axes, "destructive");
+                    if !destructive && observed == ObservedBehavior::Destructive {
+                        mismatch_kind = Some("declared_non_destructive_observed_destructive");
+                    }
                 }
             }
         }
     }
 
-    let conformance = if behavior.is_none() {
+    let conformance = if !complete || behavior.is_none() {
         "inconclusive"
     } else if assessed_axes.is_empty() {
         "undeclared"
@@ -115,7 +153,7 @@ pub fn build_tool_annotation_conformance_record(
         "consistent"
     };
 
-    let mut unassessed_axes = Vec::new();
+    let mut unassessed_axes: Vec<&'static str> = Vec::new();
     if declared.idempotent.is_some() {
         unassessed_axes.push("idempotent");
     }
@@ -125,6 +163,7 @@ pub fn build_tool_annotation_conformance_record(
 
     json!({
         "schema": TOOL_ANNOTATION_CONFORMANCE_SCHEMA,
+        "observation_basis": basis.as_str(),
         "tool": {
             "name": sanitize(tool_name),
             "tool_digest": tool_digest,
@@ -150,6 +189,7 @@ pub fn build_tool_annotation_conformance_record(
             "consistent does not certify the server or the annotation as trustworthy",
             "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
             "observed behavior is Assay's call classification, not verification of the upstream side effect",
+            "observation_basis incomplete means annotations were not observed, not that the server declared none",
             "idempotentHint and openWorldHint are recorded but not assessed in v0"
         ]
     })
@@ -390,6 +430,100 @@ mod tests {
         assert_eq!(declared.open_world, None);
     }
 
+    // ---- Observation basis and verb-sync (Increment 5b) ---------------------------------------
+
+    #[test]
+    fn incomplete_basis_forces_inconclusive_with_null_declared_and_digest() {
+        // Declared hints and digest are nulled (annotations were not observed), but the classifier's
+        // observed behavior is still recorded; conformance is forced inconclusive, never undeclared.
+        let rec = build_tool_annotation_conformance_record(
+            ObservationBasis::Incomplete,
+            &DeclaredToolAnnotations {
+                read_only: Some(true),
+                destructive: Some(false),
+                idempotent: None,
+                open_world: None,
+            },
+            "github.add_deploy_key",
+            Some("sha256:ignored-when-incomplete"),
+            &json!({"owner": "acme", "repo": "prod-app"}),
+        );
+        assert_eq!(rec["observation_basis"], json!("incomplete"));
+        assert_eq!(rec["conformance"], json!("inconclusive"));
+        assert_eq!(rec["mismatch_kind"], Value::Null);
+        assert_eq!(rec["assessed_axes"], json!([]));
+        assert_eq!(rec["tool"]["tool_digest"], Value::Null);
+        assert_eq!(rec["declared"]["read_only"], Value::Null);
+        assert_eq!(rec["declared"]["destructive"], Value::Null);
+        assert_eq!(rec["observed"]["behavior_class"], json!("mutating"));
+    }
+
+    #[test]
+    fn complete_basis_records_observation_basis_and_digest() {
+        let rec = build_tool_annotation_conformance_record(
+            ObservationBasis::Complete,
+            &DeclaredToolAnnotations {
+                read_only: Some(true),
+                destructive: None,
+                idempotent: None,
+                open_world: None,
+            },
+            "github.add_deploy_key",
+            Some("sha256:abc"),
+            &json!({"owner": "acme", "repo": "prod-app"}),
+        );
+        assert_eq!(rec["observation_basis"], json!("complete"));
+        assert_eq!(rec["tool"]["tool_digest"], json!("sha256:abc"));
+        assert_eq!(rec["conformance"], json!("mismatched"));
+    }
+
+    #[test]
+    fn every_classifier_verb_maps_to_an_observed_behavior() {
+        // observed_behavior() must stay in sync with the verbs tool_decision::classify can emit.
+        // classify currently emits only privileged mutating/destructive verbs, so each must map; a
+        // new privileged verb added there without a mapping would silently downgrade a contradiction
+        // to inconclusive. A non-mutating verb, if ever added, maps to None by design.
+        let calls = [
+            (
+                "github.add_deploy_key",
+                json!({"owner": "acme", "repo": "prod-app"}),
+            ),
+            (
+                "slack.add_member",
+                json!({"workspace_id": "acme", "user_id": "u1"}),
+            ),
+            (
+                "workspace.grant_admin",
+                json!({"workspace_id": "acme", "principal": "p"}),
+            ),
+            (
+                "workspace.change_role",
+                json!({"workspace_id": "acme", "principal": "p"}),
+            ),
+            (
+                "workspace.invite_external",
+                json!({"workspace_id": "acme", "principal": "p"}),
+            ),
+            (
+                "workspace.modify_org_policy",
+                json!({"workspace_id": "acme", "principal": "p"}),
+            ),
+            (
+                "workspace.create_workspace_token",
+                json!({"workspace_id": "acme", "principal": "p"}),
+            ),
+        ];
+        for (tool, args) in calls {
+            let classified = classify(tool, &args);
+            assert_eq!(classified.state, "classified", "{tool} should classify");
+            assert!(
+                observed_behavior(classified.verb).is_some(),
+                "verb {:?} from {tool} has no observed_behavior mapping",
+                classified.verb
+            );
+        }
+    }
+
     // ---- Shared producer/consumer contract fixture (Increment 5) ------------------------------
     //
     // The canonical `assay.tool_annotation_conformance.v0` contract is REAL output of
@@ -403,10 +537,20 @@ mod tests {
             .join("tests/fixtures/tool_annotation_conformance_contract.v0.json")
     }
 
+    type ContractCase = (
+        &'static str,
+        ObservationBasis,
+        DeclaredToolAnnotations,
+        &'static str,
+        Value,
+        Option<&'static str>,
+    );
+
     fn contract_records() -> Vec<Value> {
-        let cases: &[(&str, DeclaredToolAnnotations, &str, Value, Option<&str>)] = &[
+        let cases: Vec<ContractCase> = vec![
             (
                 "consistent_read_only_false_additive",
+                ObservationBasis::Complete,
                 DeclaredToolAnnotations {
                     read_only: Some(false),
                     destructive: None,
@@ -419,6 +563,7 @@ mod tests {
             ),
             (
                 "consistent_destructive_false_additive",
+                ObservationBasis::Complete,
                 DeclaredToolAnnotations {
                     read_only: Some(false),
                     destructive: Some(false),
@@ -431,6 +576,7 @@ mod tests {
             ),
             (
                 "mismatched_read_only_mutating",
+                ObservationBasis::Complete,
                 DeclaredToolAnnotations {
                     read_only: Some(true),
                     destructive: None,
@@ -443,6 +589,7 @@ mod tests {
             ),
             (
                 "mismatched_non_destructive_destructive",
+                ObservationBasis::Complete,
                 DeclaredToolAnnotations {
                     read_only: Some(false),
                     destructive: Some(false),
@@ -455,6 +602,7 @@ mod tests {
             ),
             (
                 "undeclared",
+                ObservationBasis::Complete,
                 DeclaredToolAnnotations {
                     read_only: None,
                     destructive: None,
@@ -467,6 +615,7 @@ mod tests {
             ),
             (
                 "inconclusive_unknown_tool",
+                ObservationBasis::Complete,
                 DeclaredToolAnnotations {
                     read_only: Some(true),
                     destructive: Some(false),
@@ -479,6 +628,7 @@ mod tests {
             ),
             (
                 "unassessed_axes_recorded",
+                ObservationBasis::Complete,
                 DeclaredToolAnnotations {
                     read_only: None,
                     destructive: None,
@@ -489,14 +639,23 @@ mod tests {
                 json!({"owner": "acme", "repo": "prod-app"}),
                 Some("sha256:tooldigest-unassessed"),
             ),
+            (
+                "incomplete_manifest_inconclusive",
+                ObservationBasis::Incomplete,
+                DeclaredToolAnnotations::default(),
+                "github.add_deploy_key",
+                json!({"owner": "acme", "repo": "prod-app"}),
+                None,
+            ),
         ];
 
         cases
             .iter()
-            .map(|(case, declared, tool, args, tool_digest)| {
+            .map(|(case, basis, declared, tool, args, tool_digest)| {
                 json!({
                     "case": case,
                     "record": build_tool_annotation_conformance_record(
+                        *basis,
                         declared,
                         tool,
                         *tool_digest,
@@ -540,7 +699,7 @@ mod tests {
         );
 
         let records = generated["records"].as_array().unwrap();
-        assert_eq!(records.len(), 7);
+        assert_eq!(records.len(), 8);
         for entry in records {
             let rec = &entry["record"];
             assert_eq!(rec["schema"], json!(TOOL_ANNOTATION_CONFORMANCE_SCHEMA));
@@ -555,6 +714,7 @@ mod tests {
                     "declared",
                     "mismatch_kind",
                     "non_claims",
+                    "observation_basis",
                     "observed",
                     "schema",
                     "tool",

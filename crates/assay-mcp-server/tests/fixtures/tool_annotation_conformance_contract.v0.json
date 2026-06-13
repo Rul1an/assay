@@ -7,6 +7,7 @@
       "case": "consistent_read_only_false_additive",
       "record": {
         "schema": "assay.tool_annotation_conformance.v0",
+        "observation_basis": "complete",
         "tool": {
           "name": "github.add_deploy_key",
           "tool_digest": "sha256:tooldigest-consistent-readonly-false",
@@ -34,6 +35,7 @@
           "consistent does not certify the server or the annotation as trustworthy",
           "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
           "observed behavior is Assay's call classification, not verification of the upstream side effect",
+          "observation_basis incomplete means annotations were not observed, not that the server declared none",
           "idempotentHint and openWorldHint are recorded but not assessed in v0"
         ]
       }
@@ -42,6 +44,7 @@
       "case": "consistent_destructive_false_additive",
       "record": {
         "schema": "assay.tool_annotation_conformance.v0",
+        "observation_basis": "complete",
         "tool": {
           "name": "github.add_deploy_key",
           "tool_digest": "sha256:tooldigest-consistent-nondestructive",
@@ -70,6 +73,7 @@
           "consistent does not certify the server or the annotation as trustworthy",
           "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
           "observed behavior is Assay's call classification, not verification of the upstream side effect",
+          "observation_basis incomplete means annotations were not observed, not that the server declared none",
           "idempotentHint and openWorldHint are recorded but not assessed in v0"
         ]
       }
@@ -78,6 +82,7 @@
       "case": "mismatched_read_only_mutating",
       "record": {
         "schema": "assay.tool_annotation_conformance.v0",
+        "observation_basis": "complete",
         "tool": {
           "name": "github.add_deploy_key",
           "tool_digest": "sha256:tooldigest-readonly-mismatch",
@@ -105,6 +110,7 @@
           "consistent does not certify the server or the annotation as trustworthy",
           "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
           "observed behavior is Assay's call classification, not verification of the upstream side effect",
+          "observation_basis incomplete means annotations were not observed, not that the server declared none",
           "idempotentHint and openWorldHint are recorded but not assessed in v0"
         ]
       }
@@ -113,6 +119,7 @@
       "case": "mismatched_non_destructive_destructive",
       "record": {
         "schema": "assay.tool_annotation_conformance.v0",
+        "observation_basis": "complete",
         "tool": {
           "name": "workspace.modify_org_policy",
           "tool_digest": "sha256:tooldigest-destructive-mismatch",
@@ -141,6 +148,7 @@
           "consistent does not certify the server or the annotation as trustworthy",
           "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
           "observed behavior is Assay's call classification, not verification of the upstream side effect",
+          "observation_basis incomplete means annotations were not observed, not that the server declared none",
           "idempotentHint and openWorldHint are recorded but not assessed in v0"
         ]
       }
@@ -149,6 +157,7 @@
       "case": "undeclared",
       "record": {
         "schema": "assay.tool_annotation_conformance.v0",
+        "observation_basis": "complete",
         "tool": {
           "name": "github.add_deploy_key",
           "tool_digest": "sha256:tooldigest-undeclared",
@@ -174,6 +183,7 @@
           "consistent does not certify the server or the annotation as trustworthy",
           "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
           "observed behavior is Assay's call classification, not verification of the upstream side effect",
+          "observation_basis incomplete means annotations were not observed, not that the server declared none",
           "idempotentHint and openWorldHint are recorded but not assessed in v0"
         ]
       }
@@ -182,6 +192,7 @@
       "case": "inconclusive_unknown_tool",
       "record": {
         "schema": "assay.tool_annotation_conformance.v0",
+        "observation_basis": "complete",
         "tool": {
           "name": "unknown.tool",
           "tool_digest": "sha256:tooldigest-unknown",
@@ -207,6 +218,7 @@
           "consistent does not certify the server or the annotation as trustworthy",
           "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
           "observed behavior is Assay's call classification, not verification of the upstream side effect",
+          "observation_basis incomplete means annotations were not observed, not that the server declared none",
           "idempotentHint and openWorldHint are recorded but not assessed in v0"
         ]
       }
@@ -215,6 +227,7 @@
       "case": "unassessed_axes_recorded",
       "record": {
         "schema": "assay.tool_annotation_conformance.v0",
+        "observation_basis": "complete",
         "tool": {
           "name": "github.add_deploy_key",
           "tool_digest": "sha256:tooldigest-unassessed",
@@ -243,6 +256,42 @@
           "consistent does not certify the server or the annotation as trustworthy",
           "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
           "observed behavior is Assay's call classification, not verification of the upstream side effect",
+          "observation_basis incomplete means annotations were not observed, not that the server declared none",
+          "idempotentHint and openWorldHint are recorded but not assessed in v0"
+        ]
+      }
+    },
+    {
+      "case": "incomplete_manifest_inconclusive",
+      "record": {
+        "schema": "assay.tool_annotation_conformance.v0",
+        "observation_basis": "incomplete",
+        "tool": {
+          "name": "github.add_deploy_key",
+          "tool_digest": null,
+          "action_class": "github_deploy_key"
+        },
+        "declared": {
+          "read_only": null,
+          "destructive": null,
+          "idempotent": null,
+          "open_world": null
+        },
+        "observed": {
+          "classification_state": "classified",
+          "verb": "create",
+          "behavior_class": "mutating"
+        },
+        "conformance": "inconclusive",
+        "mismatch_kind": null,
+        "assessed_axes": [],
+        "unassessed_axes": [],
+        "non_claims": [
+          "tool annotations are untrusted hints, not security guarantees",
+          "consistent does not certify the server or the annotation as trustworthy",
+          "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
+          "observed behavior is Assay's call classification, not verification of the upstream side effect",
+          "observation_basis incomplete means annotations were not observed, not that the server declared none",
           "idempotentHint and openWorldHint are recorded but not assessed in v0"
         ]
       }
