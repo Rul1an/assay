@@ -72,6 +72,22 @@ pub(crate) fn log_kill(
 pub(crate) fn format_monitor_event(event_type: u32, pid: u32, data: &[u8]) -> Option<String> {
     use assay_common::{EVENT_CONNECT, EVENT_FILE_BLOCKED, EVENT_OPENAT};
 
+    // The live path always passes a full fixed-size event payload, but the slice contract is also
+    // exercised by unit tests, so read fixed offsets with checked access and a zero fallback rather
+    // than indexing, which would panic on a short buffer.
+    fn read_u64(data: &[u8], start: usize) -> u64 {
+        data.get(start..start + 8)
+            .and_then(|s| <[u8; 8]>::try_from(s).ok())
+            .map(u64::from_ne_bytes)
+            .unwrap_or(0)
+    }
+    fn read_u32(data: &[u8], start: usize) -> u32 {
+        data.get(start..start + 4)
+            .and_then(|s| <[u8; 4]>::try_from(s).ok())
+            .map(u32::from_ne_bytes)
+            .unwrap_or(0)
+    }
+
     let line = match event_type {
         EVENT_OPENAT => format!("[PID {}] openat: {}", pid, decode_utf8_cstr(data)),
         EVENT_CONNECT => format!(
@@ -97,14 +113,9 @@ pub(crate) fn format_monitor_event(event_type: u32, pid: u32, data: &[u8]) -> Op
             dump_prefix_hex(data, 20)
         ),
         112 => {
-            let dev_bytes: [u8; 8] = data[0..8].try_into().unwrap_or([0; 8]);
-            let ino_bytes: [u8; 8] = data[8..16].try_into().unwrap_or([0; 8]);
-            let gen_bytes: [u8; 4] = data[16..20].try_into().unwrap_or([0; 4]);
-
-            let dev = u64::from_ne_bytes(dev_bytes);
-            let ino = u64::from_ne_bytes(ino_bytes);
-            let gen = u32::from_ne_bytes(gen_bytes);
-
+            let dev = read_u64(data, 0);
+            let ino = read_u64(data, 8);
+            let gen = read_u32(data, 16);
             format!(
                 "[PID {}] 🔒 INODE RESOLVED: dev={} (0x{:x}) ino={} gen={}",
                 pid, dev, dev, ino, gen
@@ -131,15 +142,16 @@ pub(crate) fn format_monitor_event(event_type: u32, pid: u32, data: &[u8]) -> Op
         107 => format!("[PID {}] 🐛 DEBUG: Name Pointer NULL", pid),
         108 => format!(
             "[PID {}] 🐛 DEBUG: LSM Hook Entry (MonitorAll={})",
-            pid, data[0]
+            pid,
+            data.first().copied().unwrap_or(0)
         ),
         109 => format!("[PID {}] 🐛 DEBUG: Passed Monitor Check", pid),
         110 => {
-            let ptr = u64::from_ne_bytes(data[0..8].try_into().unwrap());
+            let ptr = read_u64(data, 0);
             format!("[PID {}] 🐛 DEBUG: Read Dentry Ptr: {:#x}", pid, ptr)
         }
         111 => {
-            let ptr = u64::from_ne_bytes(data[0..8].try_into().unwrap());
+            let ptr = read_u64(data, 0);
             format!("[PID {}] 🐛 DEBUG: Read Name Ptr: {:#x}", pid, ptr)
         }
         _ => return None,
@@ -220,5 +232,15 @@ mod tests {
     #[test]
     fn unknown_event_type_produces_no_line() {
         assert_eq!(format_monitor_event(999, 4242, &[]), None);
+    }
+
+    #[test]
+    fn short_buffers_do_not_panic_in_indexed_arms() {
+        // The slice contract must stay bounds-safe: event types that read fixed offsets fall back
+        // to zero on a short buffer instead of panicking (the live path always passes a full one).
+        for event_type in [108u32, 110, 111, 112] {
+            let line = format_monitor_event(event_type, 7, &[]).unwrap();
+            assert!(line.starts_with("[PID 7] "), "{line}");
+        }
     }
 }
