@@ -603,3 +603,236 @@ fn wrong_schema_declared_manifest_fails_startup() {
         "a wrong-schema baseline must fail startup"
     );
 }
+
+// =================================================================================================
+// Increment 2b: pre-call manifest-establish wiring (establish -> re-decide -> forward|deny).
+// =================================================================================================
+
+const DEPLOY_KEY_CALL_ID: i64 = 9;
+
+fn deploy_key_call() -> Value {
+    serde_json::json!({
+        "jsonrpc": "2.0", "id": DEPLOY_KEY_CALL_ID, "method": "tools/call",
+        "params": {"name": "github.add_deploy_key", "arguments": {"owner": "acme", "repo": "prod-app"}}
+    })
+}
+
+/// Read every remaining stdout line to EOF (used to prove nothing leaked to the client).
+fn drain_stdout(reader: &mut BufReader<ChildStdout>) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut buf = String::new();
+    loop {
+        buf.clear();
+        match reader.read_line(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {
+                let t = buf.trim();
+                if !t.is_empty() {
+                    lines.push(t.to_string());
+                }
+            }
+        }
+    }
+    lines
+}
+
+#[test]
+fn establish_then_allow_forwards_without_a_client_list() {
+    // init -> tools/call with NO client tools/list: observed is NoCompleteManifest, so the proxy runs a
+    // pre-call establish (proxy-originated tools/list). The p60a mock answers a complete manifest whose
+    // github.add_deploy_key digest matches the approved baseline, the re-decided call is ALLOWED and
+    // forwarded, and the EFFECTIVE allow is recorded. The first real establish-derived allow path.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let decisions = dir.path().join("decisions.ndjson");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut child =
+        spawn_enforce_with_decisions(&log, &policy, &approved_baseline_path(), "p60a", &decisions);
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let init_resp = read_response(&mut out);
+    assert_eq!(init_resp["result"]["serverInfo"]["name"], "mock-upstream");
+
+    send(&mut stdin, deploy_key_call());
+    let r = read_response(&mut out);
+    assert_eq!(r["id"], DEPLOY_KEY_CALL_ID);
+    assert_eq!(
+        r["result"]["content"][0]["text"], "forwarded-ok",
+        "establish completes the manifest and the re-decided call is forwarded; got {r}"
+    );
+
+    shutdown(child, stdin);
+
+    // The upstream saw the synthetic establish tools/list AND the forwarded tools/call.
+    let methods = read_methods(&log);
+    assert!(
+        methods.contains(&"tools/list".to_string()),
+        "establish must originate a tools/list; methods={methods:?}"
+    );
+    assert!(
+        methods.contains(&"tools/call".to_string()),
+        "the allowed call must be forwarded; methods={methods:?}"
+    );
+
+    // Non-leakage (end-to-end): no client-visible line carries a reserved establish id, and nothing
+    // leaks beyond the two responses to the client's own requests.
+    assert!(!serde_json::to_string(&init_resp)
+        .unwrap()
+        .contains("assay-establish-"));
+    assert!(!serde_json::to_string(&r)
+        .unwrap()
+        .contains("assay-establish-"));
+    for line in drain_stdout(&mut out) {
+        assert!(
+            !line.contains("assay-establish-"),
+            "a synthetic establish line leaked to the client: {line}"
+        );
+    }
+
+    // Record-before-forward: the EFFECTIVE (allow) decision was written to enforcement_decision.v0.
+    let recs = std::fs::read_to_string(&decisions).unwrap_or_default();
+    assert!(
+        recs.contains("assay.enforcement_decision.v0") && recs.contains("allow"),
+        "the effective allow decision must be recorded before forwarding; recs={recs}"
+    );
+}
+
+#[test]
+fn establish_timeout_denies_to_client_within_budget() {
+    // The mock receives the establish tools/list but never answers it. The establish must time out
+    // within its (test-shrunk) budget and return a deny to the ORIGINAL tools/call -- the client is
+    // never left hanging behind a blocked establish.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+        .args([
+            "proxy-enforce",
+            "--upstream-command",
+            python(),
+            "--upstream-arg",
+            "-u",
+            "--upstream-arg",
+            mock_path().to_str().unwrap(),
+            "--enforce-policy",
+            policy.to_str().unwrap(),
+            "--declared-mcp-manifest",
+            approved_baseline_path().to_str().unwrap(),
+        ])
+        .env("MOCK_UPSTREAM_LOG", &log)
+        .env("MOCK_UPSTREAM_MODE", "drop_list")
+        .env("ASSAY_ESTABLISH_BUDGET_MS", "300")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("spawn enforce proxy (is python installed?)");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+    let start = std::time::Instant::now();
+    send(&mut stdin, deploy_key_call());
+    let r = read_response(&mut out);
+    let elapsed = start.elapsed();
+
+    assert_eq!(r["id"], DEPLOY_KEY_CALL_ID);
+    assert_eq!(
+        r["error"]["code"], PROXY_DENIED,
+        "establish timeout -> deny; got {r}"
+    );
+    assert_eq!(
+        r["error"]["data"]["reason"],
+        "manifest_current_observation_incomplete"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(3),
+        "the client must get its deny within budget + margin, not hang; took {elapsed:?}"
+    );
+
+    shutdown(child, stdin);
+    let methods = read_methods(&log);
+    assert!(
+        methods.contains(&"tools/list".to_string()),
+        "establish was attempted (synthetic list sent); methods={methods:?}"
+    );
+    assert!(
+        !methods.contains(&"tools/call".to_string()),
+        "a timed-out establish never forwards the call; methods={methods:?}"
+    );
+}
+
+#[test]
+fn ambiguous_observation_denies_without_attempting_establish() {
+    // The client observes a duplicate-name (ambiguous) tools/list, then calls. Ambiguity cannot be
+    // resolved by re-listing, so the proxy denies WITHOUT originating an establish tools/list.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut child = spawn_enforce(&log, &policy, &approved_baseline_path(), "duplicate");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+    send(
+        &mut stdin,
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+    );
+    let _ = read_response(&mut out);
+    send(&mut stdin, deploy_key_call());
+    let r = read_response(&mut out);
+    assert_eq!(r["error"]["code"], PROXY_DENIED);
+    assert_eq!(
+        r["error"]["data"]["reason"],
+        "manifest_observation_ambiguous"
+    );
+
+    shutdown(child, stdin);
+    let lists = read_methods(&log)
+        .iter()
+        .filter(|m| m.as_str() == "tools/list")
+        .count();
+    assert_eq!(
+        lists, 1,
+        "ambiguous must NOT trigger an establish re-list; only the client's list should appear"
+    );
+}
+
+#[test]
+fn establish_completes_but_tool_absent_denies() {
+    // normal mode returns a complete manifest that lacks github.add_deploy_key. init -> tools/call with
+    // no client list: establish originates a list, gets a complete manifest WITHOUT the tool
+    // (CompleteButToolAbsent) -> re-decide deny. The synthetic list was attempted; the call is not
+    // forwarded.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut child = spawn_enforce(&log, &policy, &approved_baseline_path(), "normal");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+    send(&mut stdin, deploy_key_call());
+    let r = read_response(&mut out);
+    assert_eq!(r["error"]["code"], PROXY_DENIED);
+    assert_eq!(
+        r["error"]["data"]["reason"],
+        "manifest_current_observation_incomplete"
+    );
+
+    shutdown(child, stdin);
+    let methods = read_methods(&log);
+    assert!(
+        methods.contains(&"tools/list".to_string()),
+        "establish was attempted; methods={methods:?}"
+    );
+    assert!(
+        !methods.contains(&"tools/call".to_string()),
+        "an absent tool is never forwarded; methods={methods:?}"
+    );
+}
