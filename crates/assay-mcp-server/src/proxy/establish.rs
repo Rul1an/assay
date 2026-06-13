@@ -384,7 +384,7 @@ mod tests {
     // The canonical `assay.manifest_establish.v0` producer output, one record per stable
     // (establish_path, run_outcome) shape, regenerated from `build_manifest_establish_record` (the real
     // producer helper) so a consumer (Rul1an/plimsoll) can vendor it verbatim. After an intentional
-    // producer change: ASSAY_UPDATE_GOLDEN=1 cargo test -p assay-mcp-server --bins
+    // producer change: ASSAY_UPDATE_GOLDEN=1 cargo test -p assay-mcp-server
     // manifest_establish_contract_fixture.
 
     fn manifest_establish_contract_fixture_path() -> std::path::PathBuf {
