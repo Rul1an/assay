@@ -21,7 +21,7 @@ use std::time::Duration;
 use serde_json::Value;
 use tokio::sync::oneshot;
 
-/// Reserved id namespace for proxy-originated requests. A high-entropy nonce is appended per request
+/// Reserved id namespace for proxy-originated requests. A high-entropy suffix is appended per request
 /// (slice 2). A client request whose id is a string in this namespace is rejected, so a client id can
 /// never be mistaken for — or swallow — an establish response.
 pub const RESERVED_ID_PREFIX: &str = "assay-establish-";
@@ -33,18 +33,25 @@ pub fn is_reserved_id(id: &Value) -> bool {
         .is_some_and(|s| s.starts_with(RESERVED_ID_PREFIX))
 }
 
-/// Mint a reserved request id from a high-entropy nonce (the caller supplies the nonce; slice 2 uses a
+/// Mint a reserved request id from a high-entropy suffix (the caller supplies it; slice 2 uses a
 /// CSPRNG). Pure/deterministic for testability.
 #[allow(dead_code)] // registration side: wired by slice 2.
-pub fn mint_reserved_id(nonce: &str) -> String {
-    format!("{RESERVED_ID_PREFIX}{nonce}")
+pub fn mint_reserved_id(entropy: &str) -> String {
+    format!("{RESERVED_ID_PREFIX}{entropy}")
 }
 
-/// Does this client request carry a reserved id? Such a request MUST be rejected, never forwarded:
-/// otherwise a malicious or unlucky client id collision could route a real client response into (and be
-/// swallowed by) the establish registry.
+/// Pure id-only check: does this message carry a reserved id? Used by `is_reserved_client_request`.
 pub fn client_id_is_reserved(v: &Value) -> bool {
     v.get("id").map(is_reserved_id).unwrap_or(false)
+}
+
+/// True iff `v` is a client REQUEST (has a `method`) carrying a reserved id. ONLY requests are
+/// rejected: a client RESPONSE to an upstream-initiated request has no `method`, so it is never matched
+/// even with a reserved id and still relays to the upstream via the normal response path. Rejecting
+/// such requests prevents a malicious or unlucky client id from routing a real response into — and being
+/// swallowed by — the establish registry.
+pub fn is_reserved_client_request(v: &Value) -> bool {
+    v.get("method").is_some() && client_id_is_reserved(v)
 }
 
 /// Where the single upstream reader should send a parsed upstream line.
@@ -83,15 +90,36 @@ pub struct EstablishRegistry {
 }
 
 impl EstablishRegistry {
-    /// Register a reserved id; returns the receiver the caller awaits (slice 2).
+    /// Register a reserved id; returns a `PendingEstablish` guard (removes the id on drop) and the
+    /// receiver the caller awaits (slice 2). Returns `None` if the id is ALREADY pending: the registry
+    /// is one-id/one-waiter, so a duplicate is refused rather than clobbering the existing waiter — the
+    /// caller treats `None` as a failed establish and fails closed.
     #[allow(dead_code)] // registration side: wired by slice 2.
-    pub fn register(&self, id: String) -> oneshot::Receiver<Value> {
+    pub fn register(&self, id: String) -> Option<(PendingEstablish, oneshot::Receiver<Value>)> {
         let (tx, rx) = oneshot::channel();
+        {
+            let mut pending = self.pending.lock().expect("establish registry mutex");
+            if pending.contains_key(&id) {
+                return None;
+            }
+            pending.insert(id.clone(), tx);
+        }
+        Some((
+            PendingEstablish {
+                registry: self.clone(),
+                id,
+            },
+            rx,
+        ))
+    }
+
+    /// Remove a pending id without delivering a value (idempotent). Used by `PendingEstablish::drop`, so
+    /// a timed-out or abandoned establish can never leave a stale entry growing the map unbounded.
+    pub fn cancel(&self, id: &str) {
         self.pending
             .lock()
             .expect("establish registry mutex")
-            .insert(id, tx);
-        rx
+            .remove(id);
     }
 
     /// Is this reserved id currently awaiting a response? Drives the reader's routing decision.
@@ -122,8 +150,25 @@ impl EstablishRegistry {
     }
 }
 
+/// RAII guard for an in-flight establish request: removes its id from the registry on drop, so a
+/// timed-out or abandoned request can never leave the `pending` map growing unbounded. A successful
+/// `resolve` already removed the id, which makes the drop a no-op.
+#[allow(dead_code)] // registration side: wired by slice 2.
+pub struct PendingEstablish {
+    registry: EstablishRegistry,
+    id: String,
+}
+
+impl Drop for PendingEstablish {
+    fn drop(&mut self) {
+        self.registry.cancel(&self.id);
+    }
+}
+
 /// Await an establish response under one per-operation timeout. `None` on timeout or a dropped sender,
-/// which the caller treats as a failed establish (fail-closed). Wired by slice 2.
+/// which the caller treats as a failed establish (fail-closed). The caller keeps the `PendingEstablish`
+/// guard alive across this await and drops it afterward, so the registry entry is always reclaimed —
+/// on success (via `resolve`) or on timeout/abandon (via the guard's drop). Wired by slice 2.
 #[allow(dead_code)] // registration side: wired by slice 2.
 pub async fn await_establish(rx: oneshot::Receiver<Value>, budget: Duration) -> Option<Value> {
     match tokio::time::timeout(budget, rx).await {
@@ -149,24 +194,27 @@ mod tests {
 
     #[test]
     fn mint_reserved_id_uses_the_prefix() {
-        let id = mint_reserved_id("nonce-deadbeef");
+        let id = mint_reserved_id("unit-sample-id");
         assert!(id.starts_with(RESERVED_ID_PREFIX));
         assert!(is_reserved_id(&json!(id)));
     }
 
     #[test]
-    fn client_request_with_reserved_id_is_flagged() {
-        assert!(client_id_is_reserved(
+    fn reserved_client_request_matches_only_requests_not_responses() {
+        // a REQUEST (has method) with a reserved id is rejected
+        assert!(is_reserved_client_request(
             &json!({"id": "assay-establish-x", "method": "tools/call"})
         ));
-        assert!(!client_id_is_reserved(
-            &json!({"id": 7, "method": "tools/call"})
+        // a RESPONSE (no method) with a reserved id is NOT matched -> still relays via the response path
+        assert!(!is_reserved_client_request(
+            &json!({"id": "assay-establish-x", "result": {"ok": true}})
         ));
-        assert!(!client_id_is_reserved(
+        // a request with a normal id is not matched
+        assert!(!is_reserved_client_request(
             &json!({"id": "client-7", "method": "tools/call"})
         ));
-        // a notification (no id) is never reserved
-        assert!(!client_id_is_reserved(
+        // a notification (no id) is never matched
+        assert!(!is_reserved_client_request(
             &json!({"method": "notifications/initialized"})
         ));
     }
@@ -203,7 +251,7 @@ mod tests {
     async fn register_then_resolve_delivers_value_and_suppresses() {
         let reg = EstablishRegistry::default();
         let id = "assay-establish-1".to_string();
-        let rx = reg.register(id.clone());
+        let (guard, rx) = reg.register(id.clone()).expect("first register succeeds");
         assert!(reg.is_pending(&id));
         let resolved = reg.resolve(&id, json!({"result": {"tools": []}}));
         assert!(
@@ -213,6 +261,8 @@ mod tests {
         assert!(!reg.is_pending(&id), "entry removed after resolve");
         let got = await_establish(rx, Duration::from_secs(1)).await;
         assert_eq!(got, Some(json!({"result": {"tools": []}})));
+        drop(guard); // idempotent: entry already removed by resolve
+        assert!(!reg.is_pending(&id));
     }
 
     #[tokio::test]
@@ -222,11 +272,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn establish_times_out_fail_closed_when_never_resolved() {
+    async fn establish_times_out_fail_closed_and_guard_reclaims_entry() {
         let reg = EstablishRegistry::default();
-        let rx = reg.register("assay-establish-timeout".to_string());
+        let id = "assay-establish-timeout".to_string();
+        let (guard, rx) = reg.register(id.clone()).expect("register succeeds");
+        assert!(reg.is_pending(&id));
         // never resolved -> the per-operation timeout elapses -> None (caller fails closed)
         let got = await_establish(rx, Duration::from_millis(20)).await;
         assert_eq!(got, None);
+        // the guard's drop reclaims the entry, so a non-responsive upstream cannot grow the map.
+        drop(guard);
+        assert!(
+            !reg.is_pending(&id),
+            "timed-out establish must not leave a stale pending entry"
+        );
+    }
+
+    #[tokio::test]
+    async fn duplicate_register_is_refused_and_does_not_clobber_the_first_waiter() {
+        let reg = EstablishRegistry::default();
+        let id = "assay-establish-dup".to_string();
+        let (_guard, rx1) = reg.register(id.clone()).expect("first register succeeds");
+        // a second register for the same id is refused (one-id/one-waiter), not a silent overwrite.
+        assert!(reg.register(id.clone()).is_none());
+        // the first waiter is intact: resolving delivers to it.
+        assert!(reg.resolve(&id, json!({"result": {"tools": []}})));
+        let got = await_establish(rx1, Duration::from_secs(1)).await;
+        assert_eq!(got, Some(json!({"result": {"tools": []}})));
     }
 }

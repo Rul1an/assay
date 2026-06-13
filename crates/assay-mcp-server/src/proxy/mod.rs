@@ -539,10 +539,12 @@ pub async fn run(
         };
 
         // Reserved-id collision guard (P61e Increment 2): the proxy reserves the `assay-establish-` id
-        // namespace for its own originated requests. A client request whose id lands in that namespace
+        // namespace for its own originated requests. A client REQUEST whose id lands in that namespace
         // is rejected, never forwarded — otherwise a colliding client id could cause a real client
-        // response to be routed into (and swallowed by) the establish registry.
-        if relay_routing::client_id_is_reserved(&v) {
+        // response to be routed into (and swallowed by) the establish registry. Only requests are
+        // gated: a client RESPONSE to an upstream-initiated request (no `method`) still relays verbatim
+        // via the response path below, so the relay stays behavior-preserving for it.
+        if relay_routing::is_reserved_client_request(&v) {
             let _ = tx.send(proxy_error_line(
                 v.get("id").cloned().unwrap_or(Value::Null),
                 PROXY_FAILED,
