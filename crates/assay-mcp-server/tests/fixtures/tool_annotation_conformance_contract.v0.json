@@ -1,0 +1,251 @@
+{
+  "schema_contract": "assay.tool_annotation_conformance.v0",
+  "generated_by": "assay crates/assay-mcp-server proxy::annotation_conformance::build_tool_annotation_conformance_record (tool_annotation_conformance_contract_fixture)",
+  "note": "Canonical producer output, regenerated from build_tool_annotation_conformance_record. Consumers vendor this file verbatim. Regenerate with ASSAY_UPDATE_GOLDEN=1.",
+  "records": [
+    {
+      "case": "consistent_read_only_false_additive",
+      "record": {
+        "schema": "assay.tool_annotation_conformance.v0",
+        "tool": {
+          "name": "github.add_deploy_key",
+          "tool_digest": "sha256:tooldigest-consistent-readonly-false",
+          "action_class": "github_deploy_key"
+        },
+        "declared": {
+          "read_only": false,
+          "destructive": null,
+          "idempotent": null,
+          "open_world": null
+        },
+        "observed": {
+          "classification_state": "classified",
+          "verb": "create",
+          "behavior_class": "mutating"
+        },
+        "conformance": "consistent",
+        "mismatch_kind": null,
+        "assessed_axes": [
+          "read_only"
+        ],
+        "unassessed_axes": [],
+        "non_claims": [
+          "tool annotations are untrusted hints, not security guarantees",
+          "consistent does not certify the server or the annotation as trustworthy",
+          "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
+          "observed behavior is Assay's call classification, not verification of the upstream side effect",
+          "idempotentHint and openWorldHint are recorded but not assessed in v0"
+        ]
+      }
+    },
+    {
+      "case": "consistent_destructive_false_additive",
+      "record": {
+        "schema": "assay.tool_annotation_conformance.v0",
+        "tool": {
+          "name": "github.add_deploy_key",
+          "tool_digest": "sha256:tooldigest-consistent-nondestructive",
+          "action_class": "github_deploy_key"
+        },
+        "declared": {
+          "read_only": false,
+          "destructive": false,
+          "idempotent": null,
+          "open_world": null
+        },
+        "observed": {
+          "classification_state": "classified",
+          "verb": "create",
+          "behavior_class": "mutating"
+        },
+        "conformance": "consistent",
+        "mismatch_kind": null,
+        "assessed_axes": [
+          "read_only",
+          "destructive"
+        ],
+        "unassessed_axes": [],
+        "non_claims": [
+          "tool annotations are untrusted hints, not security guarantees",
+          "consistent does not certify the server or the annotation as trustworthy",
+          "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
+          "observed behavior is Assay's call classification, not verification of the upstream side effect",
+          "idempotentHint and openWorldHint are recorded but not assessed in v0"
+        ]
+      }
+    },
+    {
+      "case": "mismatched_read_only_mutating",
+      "record": {
+        "schema": "assay.tool_annotation_conformance.v0",
+        "tool": {
+          "name": "github.add_deploy_key",
+          "tool_digest": "sha256:tooldigest-readonly-mismatch",
+          "action_class": "github_deploy_key"
+        },
+        "declared": {
+          "read_only": true,
+          "destructive": null,
+          "idempotent": null,
+          "open_world": null
+        },
+        "observed": {
+          "classification_state": "classified",
+          "verb": "create",
+          "behavior_class": "mutating"
+        },
+        "conformance": "mismatched",
+        "mismatch_kind": "declared_read_only_observed_mutating",
+        "assessed_axes": [
+          "read_only"
+        ],
+        "unassessed_axes": [],
+        "non_claims": [
+          "tool annotations are untrusted hints, not security guarantees",
+          "consistent does not certify the server or the annotation as trustworthy",
+          "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
+          "observed behavior is Assay's call classification, not verification of the upstream side effect",
+          "idempotentHint and openWorldHint are recorded but not assessed in v0"
+        ]
+      }
+    },
+    {
+      "case": "mismatched_non_destructive_destructive",
+      "record": {
+        "schema": "assay.tool_annotation_conformance.v0",
+        "tool": {
+          "name": "workspace.modify_org_policy",
+          "tool_digest": "sha256:tooldigest-destructive-mismatch",
+          "action_class": "workspace_admin"
+        },
+        "declared": {
+          "read_only": false,
+          "destructive": false,
+          "idempotent": null,
+          "open_world": null
+        },
+        "observed": {
+          "classification_state": "classified",
+          "verb": "modify",
+          "behavior_class": "destructive"
+        },
+        "conformance": "mismatched",
+        "mismatch_kind": "declared_non_destructive_observed_destructive",
+        "assessed_axes": [
+          "read_only",
+          "destructive"
+        ],
+        "unassessed_axes": [],
+        "non_claims": [
+          "tool annotations are untrusted hints, not security guarantees",
+          "consistent does not certify the server or the annotation as trustworthy",
+          "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
+          "observed behavior is Assay's call classification, not verification of the upstream side effect",
+          "idempotentHint and openWorldHint are recorded but not assessed in v0"
+        ]
+      }
+    },
+    {
+      "case": "undeclared",
+      "record": {
+        "schema": "assay.tool_annotation_conformance.v0",
+        "tool": {
+          "name": "github.add_deploy_key",
+          "tool_digest": "sha256:tooldigest-undeclared",
+          "action_class": "github_deploy_key"
+        },
+        "declared": {
+          "read_only": null,
+          "destructive": null,
+          "idempotent": null,
+          "open_world": null
+        },
+        "observed": {
+          "classification_state": "classified",
+          "verb": "create",
+          "behavior_class": "mutating"
+        },
+        "conformance": "undeclared",
+        "mismatch_kind": null,
+        "assessed_axes": [],
+        "unassessed_axes": [],
+        "non_claims": [
+          "tool annotations are untrusted hints, not security guarantees",
+          "consistent does not certify the server or the annotation as trustworthy",
+          "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
+          "observed behavior is Assay's call classification, not verification of the upstream side effect",
+          "idempotentHint and openWorldHint are recorded but not assessed in v0"
+        ]
+      }
+    },
+    {
+      "case": "inconclusive_unknown_tool",
+      "record": {
+        "schema": "assay.tool_annotation_conformance.v0",
+        "tool": {
+          "name": "unknown.tool",
+          "tool_digest": "sha256:tooldigest-unknown",
+          "action_class": null
+        },
+        "declared": {
+          "read_only": true,
+          "destructive": false,
+          "idempotent": null,
+          "open_world": null
+        },
+        "observed": {
+          "classification_state": "observed_unknown_tool",
+          "verb": null,
+          "behavior_class": null
+        },
+        "conformance": "inconclusive",
+        "mismatch_kind": null,
+        "assessed_axes": [],
+        "unassessed_axes": [],
+        "non_claims": [
+          "tool annotations are untrusted hints, not security guarantees",
+          "consistent does not certify the server or the annotation as trustworthy",
+          "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
+          "observed behavior is Assay's call classification, not verification of the upstream side effect",
+          "idempotentHint and openWorldHint are recorded but not assessed in v0"
+        ]
+      }
+    },
+    {
+      "case": "unassessed_axes_recorded",
+      "record": {
+        "schema": "assay.tool_annotation_conformance.v0",
+        "tool": {
+          "name": "github.add_deploy_key",
+          "tool_digest": "sha256:tooldigest-unassessed",
+          "action_class": "github_deploy_key"
+        },
+        "declared": {
+          "read_only": null,
+          "destructive": null,
+          "idempotent": true,
+          "open_world": false
+        },
+        "observed": {
+          "classification_state": "classified",
+          "verb": "create",
+          "behavior_class": "mutating"
+        },
+        "conformance": "undeclared",
+        "mismatch_kind": null,
+        "assessed_axes": [],
+        "unassessed_axes": [
+          "idempotent",
+          "open_world"
+        ],
+        "non_claims": [
+          "tool annotations are untrusted hints, not security guarantees",
+          "consistent does not certify the server or the annotation as trustworthy",
+          "mismatch is a conformance signal, not a maliciousness verdict or an enforcement decision",
+          "observed behavior is Assay's call classification, not verification of the upstream side effect",
+          "idempotentHint and openWorldHint are recorded but not assessed in v0"
+        ]
+      }
+    }
+  ]
+}
