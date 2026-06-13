@@ -33,6 +33,13 @@ Increment 3 does **not**:
 
 ## Files
 
+Use these roots in every command below:
+
+```bash
+ASSAY_ROOT=$(git rev-parse --show-toplevel)
+PLIMSOLL_ROOT=$(cd ../plimsoll 2>/dev/null && pwd -P || cd "$ASSAY_ROOT/../plimsoll" && pwd -P)
+```
+
 Assay producer side:
 
 - Modify: `crates/assay-mcp-server/src/proxy/establish.rs`
@@ -40,15 +47,15 @@ Assay producer side:
 
 Plimsoll consumer side:
 
-- Modify: `/Users/roelschuurkes/plimsoll/src/plimsoll/review.py`
-- Create: `/Users/roelschuurkes/plimsoll/tests/fixtures/manifest_establish_contract.v0.json`
-- Create: `/Users/roelschuurkes/plimsoll/tests/fixtures/manifest_establish_contract.provenance.json`
-- Create: `/Users/roelschuurkes/plimsoll/tests/fixtures/manifest_establish_consumer_rejection.v0.json`
-- Create: `/Users/roelschuurkes/plimsoll/tests/test_manifest_establish_contract.py`
-- Create: `/Users/roelschuurkes/plimsoll/tests/test_manifest_establish.py`
-- Create: `/Users/roelschuurkes/plimsoll/scripts/check_vendored_assay_manifest_establish_contract.py`
-- Create: `/Users/roelschuurkes/plimsoll/.github/workflows/vendored-manifest-establish-contract.yml`
-- Modify: `/Users/roelschuurkes/plimsoll/CHANGELOG.md`
+- Modify: `$PLIMSOLL_ROOT/src/plimsoll/review.py`
+- Create: `$PLIMSOLL_ROOT/tests/fixtures/manifest_establish_contract.v0.json`
+- Create: `$PLIMSOLL_ROOT/tests/fixtures/manifest_establish_contract.provenance.json`
+- Create: `$PLIMSOLL_ROOT/tests/fixtures/manifest_establish_consumer_rejection.v0.json`
+- Create: `$PLIMSOLL_ROOT/tests/test_manifest_establish_contract.py`
+- Create: `$PLIMSOLL_ROOT/tests/test_manifest_establish.py`
+- Create: `$PLIMSOLL_ROOT/scripts/check_vendored_assay_manifest_establish_contract.py`
+- Create: `$PLIMSOLL_ROOT/.github/workflows/vendored-manifest-establish-contract.yml`
+- Modify: `$PLIMSOLL_ROOT/CHANGELOG.md`
 
 ## Contract Shape
 
@@ -264,6 +271,20 @@ fn manifest_establish_contract_fixture() {
             rec.get("forwarded").is_none(),
             "manifest-establish records must not carry transport/delivery claims"
         );
+        for forbidden in [
+            "caller_id",
+            "tool_name",
+            "target_digest",
+            "transport",
+            "side_effect",
+            "side_effects",
+            "credential_alias",
+        ] {
+            assert!(
+                rec.get(forbidden).is_none(),
+                "manifest-establish records must not carry {forbidden}"
+            );
+        }
     }
 }
 ```
@@ -273,7 +294,7 @@ fn manifest_establish_contract_fixture() {
 Run:
 
 ```bash
-ASSAY_UPDATE_GOLDEN=1 cargo test -p assay-mcp-server --bins manifest_establish_contract_fixture
+ASSAY_UPDATE_GOLDEN=1 cargo test -p assay-mcp-server manifest_establish_contract_fixture
 ```
 
 Expected: test passes and creates `crates/assay-mcp-server/tests/fixtures/manifest_establish_contract.v0.json`.
@@ -283,7 +304,7 @@ Expected: test passes and creates `crates/assay-mcp-server/tests/fixtures/manife
 Run:
 
 ```bash
-cargo test -p assay-mcp-server --bins manifest_establish_contract_fixture
+cargo test -p assay-mcp-server manifest_establish_contract_fixture
 cargo test -p assay-mcp-server establish
 cargo fmt --check
 ```
@@ -306,12 +327,12 @@ Expected: one signed commit. Open this as the Assay Increment 3 producer-contrac
 
 **Files:**
 
-- Modify: `/Users/roelschuurkes/plimsoll/src/plimsoll/review.py`
-- Create: `/Users/roelschuurkes/plimsoll/tests/test_manifest_establish.py`
+- Modify: `$PLIMSOLL_ROOT/src/plimsoll/review.py`
+- Create: `$PLIMSOLL_ROOT/tests/test_manifest_establish.py`
 
 - [ ] **Step 1: Write failing classifier tests**
 
-Create `/Users/roelschuurkes/plimsoll/tests/test_manifest_establish.py`:
+Create `$PLIMSOLL_ROOT/tests/test_manifest_establish.py`:
 
 ```python
 import unittest
@@ -420,7 +441,7 @@ if __name__ == "__main__":
 Run:
 
 ```bash
-cd /Users/roelschuurkes/plimsoll
+cd "$PLIMSOLL_ROOT"
 python -m unittest tests.test_manifest_establish -v
 ```
 
@@ -428,7 +449,7 @@ Expected: import errors for the missing functions.
 
 - [ ] **Step 3: Add constants and classifier**
 
-In `/Users/roelschuurkes/plimsoll/src/plimsoll/review.py`, after the enforcement-decision section or immediately before it, add:
+In `$PLIMSOLL_ROOT/src/plimsoll/review.py`, after the enforcement-decision section or immediately before it, add:
 
 ```python
 # ----- manifest establish (P61e establish journey carrier) -------------------
@@ -466,8 +487,19 @@ def _classify_manifest_establish_record(rec) -> str:
     action_class = rec.get("action_class")
     if action_class is not None and not (isinstance(action_class, str) and action_class):
         return "malformed"
-    if "decision" in rec or "forwarded" in rec or "credential_alias" in rec:
-        return "inconsistent"
+    for forbidden in (
+        "caller_id",
+        "tool_name",
+        "target_digest",
+        "transport",
+        "side_effect",
+        "side_effects",
+        "credential_alias",
+        "forwarded",
+        "decision",
+    ):
+        if forbidden in rec:
+            return "inconsistent"
     if attempted is not _MANIFEST_ESTABLISH_ATTEMPTED[path]:
         return "inconsistent"
     return "valid"
@@ -561,7 +593,7 @@ def manifest_establish_findings(records, expect: bool):
 Run:
 
 ```bash
-cd /Users/roelschuurkes/plimsoll
+cd "$PLIMSOLL_ROOT"
 python -m unittest tests.test_manifest_establish -v
 ```
 
@@ -571,8 +603,8 @@ Expected: all tests pass.
 
 **Files:**
 
-- Modify: `/Users/roelschuurkes/plimsoll/src/plimsoll/review.py`
-- Modify: `/Users/roelschuurkes/plimsoll/tests/test_manifest_establish.py`
+- Modify: `$PLIMSOLL_ROOT/src/plimsoll/review.py`
+- Modify: `$PLIMSOLL_ROOT/tests/test_manifest_establish.py`
 
 - [ ] **Step 1: Extend `build_review` and CLI loading**
 
@@ -672,7 +704,7 @@ Pass `manifest_establish=manifest_establish` into `build_review`.
 
 - [ ] **Step 4: Add end-to-end review tests**
 
-Append to `/Users/roelschuurkes/plimsoll/tests/test_manifest_establish.py`:
+Append to `$PLIMSOLL_ROOT/tests/test_manifest_establish.py`:
 
 ```python
 import json
@@ -744,7 +776,7 @@ class TestManifestEstablishReviewIntegration(unittest.TestCase):
 Run:
 
 ```bash
-cd /Users/roelschuurkes/plimsoll
+cd "$PLIMSOLL_ROOT"
 python -m unittest tests.test_manifest_establish -v
 ```
 
@@ -754,18 +786,18 @@ Expected: all tests pass.
 
 **Files:**
 
-- Create: `/Users/roelschuurkes/plimsoll/tests/fixtures/manifest_establish_contract.v0.json`
-- Create: `/Users/roelschuurkes/plimsoll/tests/fixtures/manifest_establish_contract.provenance.json`
-- Create: `/Users/roelschuurkes/plimsoll/tests/fixtures/manifest_establish_consumer_rejection.v0.json`
-- Create: `/Users/roelschuurkes/plimsoll/tests/test_manifest_establish_contract.py`
+- Create: `$PLIMSOLL_ROOT/tests/fixtures/manifest_establish_contract.v0.json`
+- Create: `$PLIMSOLL_ROOT/tests/fixtures/manifest_establish_contract.provenance.json`
+- Create: `$PLIMSOLL_ROOT/tests/fixtures/manifest_establish_consumer_rejection.v0.json`
+- Create: `$PLIMSOLL_ROOT/tests/test_manifest_establish_contract.py`
 
 - [ ] **Step 1: Vendor the Assay fixture byte-for-byte**
 
 From the merged Assay producer-contract PR:
 
 ```bash
-cd /Users/roelschuurkes/plimsoll
-cp /Users/roelschuurkes/assay/crates/assay-mcp-server/tests/fixtures/manifest_establish_contract.v0.json \
+cd "$PLIMSOLL_ROOT"
+cp "$ASSAY_ROOT/crates/assay-mcp-server/tests/fixtures/manifest_establish_contract.v0.json" \
   tests/fixtures/manifest_establish_contract.v0.json
 shasum -a 256 tests/fixtures/manifest_establish_contract.v0.json
 ```
@@ -774,12 +806,12 @@ Expected: record the printed SHA-256 for the provenance sidecar.
 
 - [ ] **Step 2: Create provenance sidecar**
 
-Create `/Users/roelschuurkes/plimsoll/tests/fixtures/manifest_establish_contract.provenance.json`
+Create `$PLIMSOLL_ROOT/tests/fixtures/manifest_establish_contract.provenance.json`
 from the merged Assay producer-contract branch:
 
 ```bash
-cd /Users/roelschuurkes/plimsoll
-SOURCE_COMMIT=$(git -C /Users/roelschuurkes/assay rev-parse HEAD)
+cd "$PLIMSOLL_ROOT"
+SOURCE_COMMIT=$(git -C "$ASSAY_ROOT" rev-parse HEAD)
 SOURCE_PR=$(gh pr list \
   --repo Rul1an/assay \
   --state merged \
@@ -810,7 +842,7 @@ Expected: the sidecar records the exact source commit, source PR number, and ven
 
 - [ ] **Step 3: Create rejection fixture**
 
-Create `/Users/roelschuurkes/plimsoll/tests/fixtures/manifest_establish_consumer_rejection.v0.json`:
+Create `$PLIMSOLL_ROOT/tests/fixtures/manifest_establish_consumer_rejection.v0.json`:
 
 ```json
 {
@@ -883,7 +915,7 @@ Create `/Users/roelschuurkes/plimsoll/tests/fixtures/manifest_establish_consumer
 
 - [ ] **Step 4: Create contract test**
 
-Create `/Users/roelschuurkes/plimsoll/tests/test_manifest_establish_contract.py`:
+Create `$PLIMSOLL_ROOT/tests/test_manifest_establish_contract.py`:
 
 ```python
 """Shared producer/consumer contract for `assay.manifest_establish.v0`.
@@ -941,9 +973,18 @@ class TestManifestEstablishContract(unittest.TestCase):
         for entry in self.cases:
             with self.subTest(case=entry["case"]):
                 rec = entry["record"]
-                self.assertNotIn("decision", rec)
-                self.assertNotIn("forwarded", rec)
-                self.assertNotIn("credential_alias", rec)
+                for forbidden in (
+                    "caller_id",
+                    "tool_name",
+                    "target_digest",
+                    "transport",
+                    "side_effect",
+                    "side_effects",
+                    "credential_alias",
+                    "forwarded",
+                    "decision",
+                ):
+                    self.assertNotIn(forbidden, rec)
 
     def test_rejection_fixture_is_rejected_as_expected(self):
         for entry in self.rejection:
@@ -963,7 +1004,7 @@ if __name__ == "__main__":
 Run:
 
 ```bash
-cd /Users/roelschuurkes/plimsoll
+cd "$PLIMSOLL_ROOT"
 python -m unittest tests.test_manifest_establish_contract -v
 ```
 
@@ -973,15 +1014,15 @@ Expected: all tests pass.
 
 **Files:**
 
-- Create: `/Users/roelschuurkes/plimsoll/scripts/check_vendored_assay_manifest_establish_contract.py`
-- Create: `/Users/roelschuurkes/plimsoll/.github/workflows/vendored-manifest-establish-contract.yml`
+- Create: `$PLIMSOLL_ROOT/scripts/check_vendored_assay_manifest_establish_contract.py`
+- Create: `$PLIMSOLL_ROOT/.github/workflows/vendored-manifest-establish-contract.yml`
 
 - [ ] **Step 1: Copy and adapt the existing freshness script**
 
 Copy the existing enforcement-decision guard:
 
 ```bash
-cd /Users/roelschuurkes/plimsoll
+cd "$PLIMSOLL_ROOT"
 cp scripts/check_vendored_assay_contract.py scripts/check_vendored_assay_manifest_establish_contract.py
 ```
 
@@ -1014,7 +1055,7 @@ assay commit through the gh CLI.
 Run:
 
 ```bash
-cd /Users/roelschuurkes/plimsoll
+cd "$PLIMSOLL_ROOT"
 python3 scripts/check_vendored_assay_manifest_establish_contract.py --self-test
 python3 scripts/check_vendored_assay_manifest_establish_contract.py
 ```
@@ -1028,7 +1069,7 @@ vendored-assay-contract=ok
 
 - [ ] **Step 3: Add path-scoped workflow**
 
-Create `/Users/roelschuurkes/plimsoll/.github/workflows/vendored-manifest-establish-contract.yml`:
+Create `$PLIMSOLL_ROOT/.github/workflows/vendored-manifest-establish-contract.yml`:
 
 ```yaml
 name: Vendored Manifest Establish Contract Freshness
@@ -1079,7 +1120,7 @@ jobs:
 Run:
 
 ```bash
-cd /Users/roelschuurkes/plimsoll
+cd "$PLIMSOLL_ROOT"
 ruby -e 'require "yaml"; YAML.load_file(".github/workflows/vendored-manifest-establish-contract.yml"); puts "yaml=ok"'
 ```
 
@@ -1093,7 +1134,7 @@ yaml=ok
 
 **Files:**
 
-- Modify: `/Users/roelschuurkes/plimsoll/CHANGELOG.md`
+- Modify: `$PLIMSOLL_ROOT/CHANGELOG.md`
 
 - [ ] **Step 1: Add changelog entry**
 
@@ -1110,7 +1151,7 @@ Under `[Unreleased]`, add:
 Run:
 
 ```bash
-cd /Users/roelschuurkes/plimsoll
+cd "$PLIMSOLL_ROOT"
 python -m unittest
 ruff check .
 ruff format --check .
@@ -1126,7 +1167,7 @@ Expected: all pass.
 Run:
 
 ```bash
-cd /Users/roelschuurkes/plimsoll
+cd "$PLIMSOLL_ROOT"
 git add src/plimsoll/review.py \
   tests/test_manifest_establish.py \
   tests/test_manifest_establish_contract.py \
@@ -1146,7 +1187,7 @@ Expected: one Plimsoll commit.
 Run:
 
 ```bash
-cd /Users/roelschuurkes/plimsoll
+cd "$PLIMSOLL_ROOT"
 git push -u origin codex/manifest-establish-consumer
 gh pr create \
   --repo Rul1an/plimsoll \
@@ -1170,8 +1211,8 @@ Expected: ready PR with CI running.
 Run:
 
 ```bash
-cd /Users/roelschuurkes/assay
-cargo test -p assay-mcp-server --bins manifest_establish_contract_fixture
+cd "$ASSAY_ROOT"
+cargo test -p assay-mcp-server manifest_establish_contract_fixture
 cargo test -p assay-mcp-server establish
 cargo fmt --check
 ```
@@ -1183,7 +1224,7 @@ Expected: all pass.
 Run:
 
 ```bash
-cd /Users/roelschuurkes/plimsoll
+cd "$PLIMSOLL_ROOT"
 python -m unittest tests.test_manifest_establish tests.test_manifest_establish_contract -v
 python -m unittest
 ruff check .
@@ -1198,7 +1239,7 @@ Expected: all pass.
 Verify:
 
 ```bash
-cd /Users/roelschuurkes/plimsoll
+cd "$PLIMSOLL_ROOT"
 python3 scripts/check_vendored_assay_manifest_establish_contract.py
 ```
 
@@ -1213,11 +1254,11 @@ vendored-assay-contract=ok
 Search:
 
 ```bash
-cd /Users/roelschuurkes/plimsoll
-rg -n '"forwarded"|"decision"|"credential_alias"' tests/fixtures/manifest_establish_contract.v0.json src/plimsoll/review.py tests/test_manifest_establish*.py
+cd "$PLIMSOLL_ROOT"
+rg -n '"forwarded"|"decision"|"credential_alias"|"caller_id"|"tool_name"|"target_digest"|"transport"|"side_effect"' tests/fixtures/manifest_establish_contract.v0.json src/plimsoll/review.py tests/test_manifest_establish*.py
 ```
 
-Expected: fixture has no `forwarded`, no `decision`, no `credential_alias`; consumer tests mention those strings only as rejection cases.
+Expected: fixture has no `forwarded`, no `decision`, no `credential_alias`, no caller/tool/target/transport fields, and no side-effect claim fields; consumer tests mention those strings only as rejection cases.
 
 ## Self-Review
 
