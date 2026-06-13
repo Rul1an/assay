@@ -31,6 +31,11 @@ pub struct EnforceInputs {
     pub baseline: Option<DeclaredManifest>,
     pub decision_out: Option<PathBuf>,
     pub establish_out: Option<PathBuf>,
+    /// Optional NDJSON path for the per-call `assay.tool_annotation_conformance.v0` carrier
+    /// (Increment 5b): the server's declared annotation hints vs Assay's observed call
+    /// classification. Orthogonal to the verdict; on an allowed call a write failure fails closed,
+    /// the same evidence rule as the other carriers.
+    pub tool_conformance_out: Option<PathBuf>,
     pub establish_budget: std::time::Duration,
 }
 

@@ -76,6 +76,12 @@ enum Mode {
         /// scope/target/token. On an allowed call a write failure fails closed (not forwarded).
         #[arg(long)]
         manifest_establish_out: Option<PathBuf>,
+        /// Optional NDJSON path for the per-call `assay.tool_annotation_conformance.v0` carrier
+        /// (Increment 5b): one record per `tools/call` comparing the server's declared annotation
+        /// hints with Assay's observed call classification. Orthogonal to the verdict (its outcome
+        /// never changes allow/deny); on an allowed call a write failure fails closed (not forwarded).
+        #[arg(long)]
+        tool_conformance_out: Option<PathBuf>,
         /// Total deadline (ms) for one pre-call manifest-establish run. Default 5000; must be greater
         /// than 0, and is capped at 60000.
         #[arg(long, default_value_t = 5000)]
@@ -137,6 +143,7 @@ async fn main() -> Result<()> {
             declared_mcp_manifest,
             enforcement_decision_out,
             manifest_establish_out,
+            tool_conformance_out,
             manifest_establish_budget_ms,
         }) => {
             // Load + validate BOTH inputs BEFORE starting the proxy. A bad policy or baseline is a
@@ -174,6 +181,7 @@ async fn main() -> Result<()> {
                     baseline: Some(baseline),
                     decision_out: enforcement_decision_out,
                     establish_out: manifest_establish_out,
+                    tool_conformance_out,
                     establish_budget: std::time::Duration::from_millis(budget_ms),
                 },
                 None,

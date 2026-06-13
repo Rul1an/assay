@@ -1145,3 +1145,225 @@ fn establish_budget_zero_fails_startup() {
         "a zero establish budget must be rejected at startup"
     );
 }
+
+// =================================================================================================
+// Increment 5b: assay.tool_annotation_conformance.v0 carrier emission (relay wiring).
+// =================================================================================================
+
+/// Spawn the enforcing proxy writing the enforcement-decision NDJSON and, optionally, the
+/// tool-annotation conformance carrier NDJSON, with an optional establish budget (ms).
+fn spawn_enforce_conformance(
+    log: &Path,
+    policy: &Path,
+    baseline: &Path,
+    mode: &str,
+    decisions: &Path,
+    conformance: Option<&Path>,
+    budget_ms: Option<u64>,
+) -> Child {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"));
+    cmd.arg("proxy-enforce")
+        .args(["--upstream-command", python()])
+        .args(["--upstream-arg", "-u"])
+        .args(["--upstream-arg", mock_path().to_str().unwrap()])
+        .args(["--enforce-policy", policy.to_str().unwrap()])
+        .args(["--declared-mcp-manifest", baseline.to_str().unwrap()])
+        .args(["--enforcement-decision-out", decisions.to_str().unwrap()]);
+    if let Some(c) = conformance {
+        cmd.args(["--tool-conformance-out", c.to_str().unwrap()]);
+    }
+    if let Some(ms) = budget_ms {
+        cmd.args(["--manifest-establish-budget-ms", &ms.to_string()]);
+    }
+    cmd.env("MOCK_UPSTREAM_LOG", log)
+        .env("MOCK_UPSTREAM_MODE", mode)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("spawn enforce proxy (is python installed?)")
+}
+
+fn read_conformance_records(path: &Path) -> Vec<Value> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).expect("conformance record JSON"))
+        .collect()
+}
+
+#[test]
+fn complete_manifest_allow_emits_conformance_record() {
+    // A client tools/list completes a matching manifest -> allow + forward. The conformance carrier
+    // records observation_basis=complete with the real per-tool digest; the mock declares no
+    // annotations, so conformance is `undeclared`, orthogonal to the allow verdict.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let decisions = dir.path().join("decisions.ndjson");
+    let conformance = dir.path().join("conformance.ndjson");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut child = spawn_enforce_conformance(
+        &log,
+        &policy,
+        &approved_baseline_path(),
+        "p60a",
+        &decisions,
+        Some(&conformance),
+        None,
+    );
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+    send(
+        &mut stdin,
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+    );
+    let _ = read_response(&mut out);
+    send(&mut stdin, deploy_key_call());
+    let r = read_response(&mut out);
+    assert_eq!(r["result"]["content"][0]["text"], "forwarded-ok");
+    shutdown(child, stdin);
+
+    let recs = read_conformance_records(&conformance);
+    assert_eq!(recs.len(), 1, "one conformance record per tools/call");
+    let rec = &recs[0];
+    assert_eq!(rec["schema"], "assay.tool_annotation_conformance.v0");
+    assert_eq!(rec["observation_basis"], "complete");
+    assert!(
+        rec["tool"]["tool_digest"]
+            .as_str()
+            .is_some_and(|d| d.starts_with("sha256:")),
+        "complete basis records the real per-tool digest: {rec}"
+    );
+    assert_eq!(rec["conformance"], "undeclared");
+    // Orthogonal allow in the separate verdict carrier.
+    let dec = std::fs::read_to_string(&decisions).unwrap_or_default();
+    assert!(dec.contains("assay.enforcement_decision.v0") && dec.contains("allow"));
+}
+
+#[test]
+fn incomplete_manifest_emits_inconclusive_conformance() {
+    // No client list + drop_list: the establish re-list times out, the effective observation is
+    // never complete, so the call is denied AND the conformance carrier records
+    // observation_basis=incomplete with a null digest and inconclusive conformance (annotations were
+    // not observed, never a false `undeclared`).
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let decisions = dir.path().join("decisions.ndjson");
+    let conformance = dir.path().join("conformance.ndjson");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut child = spawn_enforce_conformance(
+        &log,
+        &policy,
+        &approved_baseline_path(),
+        "drop_list",
+        &decisions,
+        Some(&conformance),
+        Some(300),
+    );
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+    send(&mut stdin, deploy_key_call());
+    let r = read_response(&mut out);
+    assert_eq!(
+        r["error"]["data"]["reason"],
+        "manifest_current_observation_incomplete"
+    );
+    shutdown(child, stdin);
+
+    let recs = read_conformance_records(&conformance);
+    assert_eq!(recs.len(), 1);
+    let rec = &recs[0];
+    assert_eq!(rec["observation_basis"], "incomplete");
+    assert_eq!(rec["conformance"], "inconclusive");
+    assert_eq!(rec["tool"]["tool_digest"], Value::Null);
+}
+
+#[test]
+fn conformance_flag_off_writes_no_file() {
+    // Without --tool-conformance-out, no carrier file is produced.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let decisions = dir.path().join("decisions.ndjson");
+    let conformance = dir.path().join("conformance.ndjson");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut child = spawn_enforce_conformance(
+        &log,
+        &policy,
+        &approved_baseline_path(),
+        "p60a",
+        &decisions,
+        None,
+        None,
+    );
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+    send(
+        &mut stdin,
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+    );
+    let _ = read_response(&mut out);
+    send(&mut stdin, deploy_key_call());
+    let _ = read_response(&mut out);
+    shutdown(child, stdin);
+
+    assert!(
+        !conformance.exists(),
+        "no conformance file is written when the flag is off"
+    );
+}
+
+#[test]
+fn conformance_write_failure_on_allow_fails_closed() {
+    // The conformance path is a directory, so the append fails. On an allow that must fail closed
+    // (proxy_failed): an allow is the decision to forward, never a forwarded-but-unrecorded call.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let decisions = dir.path().join("decisions.ndjson");
+    let conformance_dir = dir.path().join("conformance_is_a_dir");
+    std::fs::create_dir(&conformance_dir).unwrap();
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut child = spawn_enforce_conformance(
+        &log,
+        &policy,
+        &approved_baseline_path(),
+        "p60a",
+        &decisions,
+        Some(&conformance_dir),
+        None,
+    );
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+    send(
+        &mut stdin,
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+    );
+    let _ = read_response(&mut out);
+    send(&mut stdin, deploy_key_call());
+    let r = read_response(&mut out);
+    assert_eq!(r["error"]["data"]["origin"], "assay-proxy");
+    assert_eq!(
+        r["error"]["data"]["reason"],
+        "enforcement_record_write_failed"
+    );
+    shutdown(child, stdin);
+    // The silent-unrecorded-forward regression this guards: a fail-closed allow must never reach
+    // the upstream.
+    let methods = read_methods(&log);
+    assert!(
+        !methods.contains(&"tools/call".to_string()),
+        "a fail-closed allow must never reach the upstream: {methods:?}"
+    );
+}
