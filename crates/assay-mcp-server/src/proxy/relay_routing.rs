@@ -71,23 +71,28 @@ pub enum UpstreamRoute {
     SuppressReserved,
 }
 
-/// Pure routing decision. A reserved id routes to `DivertToEstablish` when it is currently pending and
-/// to `SuppressReserved` otherwise — a reserved id is NEVER relayed to the client, because the reserved
-/// namespace belongs to the proxy (client requests in it are rejected), so a reserved-id upstream
-/// response is always proxy-originated. Everything else (normal responses, notifications without an id)
-/// relays.
+/// Pure routing decision. Reserved-id routing applies ONLY to RESPONSE objects (no `method`, with
+/// `result` or `error`): a reserved-id response routes to `DivertToEstablish` when pending and
+/// `SuppressReserved` otherwise — a reserved-id RESPONSE is never relayed to the client, because the
+/// reserved namespace belongs to the proxy (client requests in it are rejected), so it is always
+/// proxy-originated. An upstream-to-client REQUEST or notification (has a `method`) is relayed verbatim
+/// even if its id is reserved — it is not a response to a proxy-originated establish request, so it must
+/// not be diverted into a waiter or suppressed. Everything else relays.
 pub fn route_upstream(v: &Value, is_pending: impl Fn(&str) -> bool) -> UpstreamRoute {
-    match v.get("id") {
-        Some(id) if is_reserved_id(id) => {
-            let id = id.as_str().unwrap_or_default().to_string();
-            if !id.is_empty() && is_pending(&id) {
-                UpstreamRoute::DivertToEstablish(id)
-            } else {
-                UpstreamRoute::SuppressReserved
+    let is_response =
+        v.get("method").is_none() && (v.get("result").is_some() || v.get("error").is_some());
+    if is_response {
+        if let Some(id) = v.get("id") {
+            if is_reserved_id(id) {
+                let id = id.as_str().unwrap_or_default().to_string();
+                if !id.is_empty() && is_pending(&id) {
+                    return UpstreamRoute::DivertToEstablish(id);
+                }
+                return UpstreamRoute::SuppressReserved;
             }
         }
-        _ => UpstreamRoute::RelayToClient,
     }
+    UpstreamRoute::RelayToClient
 }
 
 /// Registry of in-flight proxy-originated establish requests, shared between the establish caller
@@ -255,6 +260,31 @@ mod tests {
         // a late/duplicate establish reply or an unprompted reserved id). Relaying would leak it.
         assert_eq!(
             route_upstream(&v, |_| false),
+            UpstreamRoute::SuppressReserved
+        );
+    }
+
+    #[test]
+    fn reserved_id_request_or_non_response_is_relayed_not_diverted() {
+        // An upstream-to-client REQUEST (has `method`) carrying a reserved id is NOT a response to a
+        // proxy-originated establish: it relays to the client even when the id is pending, and is never
+        // diverted into a waiter or suppressed.
+        let req = json!({"id": "assay-establish-1", "method": "ping"});
+        assert_eq!(route_upstream(&req, |_| true), UpstreamRoute::RelayToClient);
+        assert_eq!(
+            route_upstream(&req, |_| false),
+            UpstreamRoute::RelayToClient
+        );
+        // A reserved id with neither method nor result/error is not a well-formed response either.
+        let bare = json!({"id": "assay-establish-1"});
+        assert_eq!(
+            route_upstream(&bare, |_| true),
+            UpstreamRoute::RelayToClient
+        );
+        // An error response with a reserved id is still a response -> suppressed when not pending.
+        let err = json!({"id": "assay-establish-1", "error": {"code": -1, "message": "x"}});
+        assert_eq!(
+            route_upstream(&err, |_| false),
             UpstreamRoute::SuppressReserved
         );
     }

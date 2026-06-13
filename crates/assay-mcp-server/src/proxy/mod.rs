@@ -172,6 +172,11 @@ impl Observer {
     /// Tap an upstream response. Returns true iff a chain just COMPLETED (so the caller may write the
     /// latest-complete manifest mid-run).
     fn on_upstream_response(&mut self, v: &Value) -> bool {
+        // A message carrying a `method` is a request or notification, never a response to a tools/list
+        // request — never fold it into the accumulation, even if its id matches a list request id.
+        if v.get("method").is_some() {
+            return false;
+        }
         if self.server_id.is_none() {
             if let Some(name) = v
                 .pointer("/result/serverInfo/name")
@@ -991,6 +996,24 @@ mod tests {
         assert!(matches!(
             obs.observed_tool_digest("github.add_deploy_key"),
             enforce::ObservedToolDigest::CompleteButToolAbsent
+        ));
+    }
+
+    #[test]
+    fn on_upstream_response_ignores_method_bearing_messages() {
+        // An upstream-to-client REQUEST carrying an id that matches a tracked list req id must NOT be
+        // folded into the accumulation or complete the chain — it is a request, not a list response.
+        let mut obs = Observer::default();
+        obs.on_client_tools_list(Some(&json!("assay-establish-1")), false);
+        let completed =
+            obs.on_upstream_response(&json!({"id": "assay-establish-1", "method": "ping"}));
+        assert!(
+            !completed,
+            "a method-bearing message must never complete a chain"
+        );
+        assert!(matches!(
+            obs.observed_tool_digest("anything"),
+            enforce::ObservedToolDigest::NoCompleteManifest
         ));
     }
 
