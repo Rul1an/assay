@@ -22,12 +22,16 @@ use std::path::{Path, PathBuf};
 
 /// The enforce-mode inputs to the proxy, grouped so `run` stays within a sane arity. All fields are
 /// absent in observe mode; `policy` and `baseline` are always present in enforce mode (loaded at
-/// startup) and `decision_out` is the optional P61e-d evidence path.
+/// startup), `decision_out` is the optional P61e-d evidence path, `establish_out` is the optional
+/// `assay.manifest_establish.v0` carrier path (Increment 2c), and `establish_budget` is the one total
+/// deadline for a pre-call establish run.
 #[derive(Default)]
 pub struct EnforceInputs {
     pub policy: Option<EnforcePolicy>,
     pub baseline: Option<DeclaredManifest>,
     pub decision_out: Option<PathBuf>,
+    pub establish_out: Option<PathBuf>,
+    pub establish_budget: std::time::Duration,
 }
 
 #[derive(Debug, Deserialize)]

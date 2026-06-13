@@ -70,6 +70,16 @@ enum Mode {
         /// fails closed (it is not forwarded).
         #[arg(long)]
         enforcement_decision_out: Option<PathBuf>,
+        /// Optional NDJSON path for the per-call `assay.manifest_establish.v0` carrier (Increment 2c):
+        /// one record per `tools/call` describing the establish JOURNEY (path + run_outcome), sibling to
+        /// and separate from `assay.enforcement_decision.v0` (the verdict carrier). It carries no raw
+        /// scope/target/token. On an allowed call a write failure fails closed (not forwarded).
+        #[arg(long)]
+        manifest_establish_out: Option<PathBuf>,
+        /// Total deadline (ms) for one pre-call manifest-establish run. Default 5000; must be greater
+        /// than 0, and is capped at 60000.
+        #[arg(long, default_value_t = 5000)]
+        manifest_establish_budget_ms: u64,
     },
 }
 
@@ -126,18 +136,34 @@ async fn main() -> Result<()> {
             enforce_policy,
             declared_mcp_manifest,
             enforcement_decision_out,
+            manifest_establish_out,
+            manifest_establish_budget_ms,
         }) => {
             // Load + validate BOTH inputs BEFORE starting the proxy. A bad policy or baseline is a
             // misconfigured service: fail startup with a non-zero exit, never start an enforcing proxy
             // that cannot decide (and never degrade to a runtime deny).
             let policy = proxy::enforce::load(&enforce_policy)?;
             let baseline = proxy::enforce::load_declared_manifest(&declared_mcp_manifest)?;
+            // Validate the establish budget at startup (a misconfig fails fast, never a runtime deny):
+            // 0 is rejected, and the value is capped at 60_000 ms.
+            if manifest_establish_budget_ms == 0 {
+                anyhow::bail!("--manifest-establish-budget-ms must be greater than 0");
+            }
+            let budget_ms = manifest_establish_budget_ms.min(60_000);
+            if budget_ms != manifest_establish_budget_ms {
+                tracing::warn!(
+                    event = "establish_budget_capped",
+                    requested_ms = manifest_establish_budget_ms,
+                    capped_ms = budget_ms
+                );
+            }
             tracing::info!(
                 event = "proxy_start",
                 upstream_command = %upstream_command,
                 mode = "enforce_pdp_c3",
                 caller = %policy.caller.id,
-                baseline_tools = baseline.tools.len()
+                baseline_tools = baseline.tools.len(),
+                establish_budget_ms = budget_ms
             );
             proxy::run(
                 upstream_command,
@@ -147,6 +173,8 @@ async fn main() -> Result<()> {
                     policy: Some(policy),
                     baseline: Some(baseline),
                     decision_out: enforcement_decision_out,
+                    establish_out: manifest_establish_out,
+                    establish_budget: std::time::Duration::from_millis(budget_ms),
                 },
                 None,
                 None,

@@ -59,20 +59,6 @@ const PROXY_DENIED: i32 = -32042;
 
 const HEALTH_SCHEMA: &str = "assay.proxy_observation_health.v0";
 
-/// The one total deadline for a pre-call manifest-establish run (Increment 2b). The operator-facing
-/// CLI surface lands in slice 2c; for now this is a private default, with an internal env override
-/// (`ASSAY_ESTABLISH_BUDGET_MS`) used only to keep the timeout acceptance test fast and deterministic —
-/// it is not an operator interface.
-const DEFAULT_ESTABLISH_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
-
-fn establish_budget() -> std::time::Duration {
-    std::env::var("ASSAY_ESTABLISH_BUDGET_MS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .map(std::time::Duration::from_millis)
-        .unwrap_or(DEFAULT_ESTABLISH_BUDGET)
-}
-
 /// Proxy run mode. Observe (P61a-d, shipped) forwards the allowlist and answers `tools/call` with
 /// `proxy_unsupported`. Enforce runs the P61e-c PDP on every `tools/call` — classification,
 /// caller-allowance, credential-scope, and drift gates — denying with the precedence-pinned reason of
@@ -423,6 +409,8 @@ pub async fn run(
         policy,
         baseline,
         decision_out,
+        establish_out,
+        establish_budget,
     } = enforce_inputs;
     let spawned = Command::new(&upstream_command)
         .args(&upstream_args)
@@ -467,10 +455,9 @@ pub async fn run(
     // single upstream reader. In slice 1 nothing registers a reserved id, so routing is a no-op and the
     // relay is behavior-identical to before.
     let establish_registry = relay_routing::EstablishRegistry::default();
-    // Monotonic reserved-id source for proxy-originated establish requests (one per page), and the one
-    // total establish deadline (Increment 2b).
+    // Monotonic reserved-id source for proxy-originated establish requests (one per page). The total
+    // establish deadline arrives via EnforceInputs (operator `--manifest-establish-budget-ms`, 2c).
     let establish_id_counter = std::sync::atomic::AtomicU64::new(1);
-    let establish_budget = establish_budget();
 
     // Upstream → client: tap (read-only) then relay verbatim. A non-JSON upstream line is never
     // relayed as success.
@@ -634,6 +621,7 @@ pub async fn run(
                 // establish and stay denied, and a failed/timed-out establish leaves the deny standing.
                 // enforcement_decision.v0 records only the EFFECTIVE (re-decided) decision below.
                 let est_action = establish::establish_action(&observed);
+                let mut run_outcome: Option<EstablishRunOutcome> = None;
                 if !decision.allow
                     && decision.reason == "manifest_current_observation_incomplete"
                     && matches!(
@@ -641,7 +629,7 @@ pub async fn run(
                         establish::EstablishAction::ReList | establish::EstablishAction::ReListOnce
                     )
                 {
-                    let run_outcome = run_establish(
+                    let outcome = run_establish(
                         &mut child_stdin,
                         &establish_registry,
                         &observer,
@@ -649,17 +637,28 @@ pub async fn run(
                         establish_budget,
                     )
                     .await;
+                    run_outcome = Some(outcome);
                     let observed2 = observer.lock().await.observed_tool_digest(tool_name);
                     decision = enforce::decide(policy, baseline, &observed2, tool_name, call_args);
                     tracing::info!(
                         event = "establish_attempted",
                         tool = %tool_name,
-                        run_outcome = ?run_outcome,
+                        run_outcome = ?outcome,
                         effective_decision = if decision.allow { "allow" } else { "deny" },
                         reason = decision.reason,
                         note = "pre-call manifest-establish; verdict lives in enforcement_decision.v0"
                     );
                 }
+                // Establish-journey carrier inputs (Increment 2c): the path the call took and the
+                // diagnostic run outcome. `not_performed` when no establish ran (NotNeeded / Ambiguous).
+                let est_outcome = run_outcome
+                    .map(|r| r.to_carrier())
+                    .unwrap_or(establish::EstablishOutcome::NotPerformed);
+                let establish_path =
+                    establish::establish_path(est_action, est_outcome, decision.allow);
+                let run_outcome_str = run_outcome
+                    .map(|r| r.as_str())
+                    .unwrap_or(establish::RUN_OUTCOME_NOT_PERFORMED);
                 // Diagnostic decision log — operability/correlation only, NOT the canonical
                 // assay.enforcement_decision.v0 evidence artifact (that is P61e-d).
                 tracing::info!(
@@ -675,7 +674,7 @@ pub async fn run(
                 // P61e-d: write the canonical per-call evidence record (NDJSON) before acting. The
                 // safety rule (spec §12): a record-write failure on a requested path must never become
                 // a silent unrecorded forward, so an allowed call that cannot be recorded fails closed.
-                let record_ok = match &decision_out {
+                let decision_record_ok = match &decision_out {
                     Some(path) => {
                         let record =
                             enforce::decision_record(policy, &decision, tool_name, call_args);
@@ -693,15 +692,41 @@ pub async fn run(
                     }
                     None => true,
                 };
-                if decision.allow && !record_ok {
-                    // Fail-closed: never forward an allowed call we could not record.
+                // Increment 2c: write the sibling assay.manifest_establish.v0 carrier AFTER the verdict
+                // record, never mixed into it. Same fail-closed rule: on an allowed call a carrier-write
+                // failure must not silently forward; on a denied call the deny stands and the failure is
+                // a logged completeness gap.
+                let establish_record_ok = match &establish_out {
+                    Some(path) => {
+                        let record = establish::build_manifest_establish_record(
+                            establish_path,
+                            decision.action_class.as_deref(),
+                            run_outcome_str,
+                        );
+                        match append_decision_record(path, &record) {
+                            Ok(()) => true,
+                            Err(e) => {
+                                tracing::error!(
+                                    event = "manifest_establish_record_write_failed",
+                                    error = %e,
+                                    path = %path.display()
+                                );
+                                false
+                            }
+                        }
+                    }
+                    None => true,
+                };
+                let records_ok = decision_record_ok && establish_record_ok;
+                if decision.allow && !records_ok {
+                    // Fail-closed: never forward an allowed call whose required record(s) we could not write.
                     if let Some(id) = v.get("id") {
                         if !id.is_null() {
                             let _ = tx.send(proxy_error_line(
                                 id.clone(),
                                 PROXY_FAILED,
                                 "enforcement_record_write_failed",
-                                "enforcement decision could not be recorded; call not forwarded",
+                                "a required enforcement/establish record could not be written; call not forwarded",
                             ));
                         }
                     }
@@ -837,11 +862,23 @@ enum EstablishRunOutcome {
 impl EstablishRunOutcome {
     /// Map the detailed run result to the coarse carrier outcome. Only `Complete` is an establish
     /// success; everything else fails closed.
-    #[allow(dead_code)] // wired into the tools/call path by slice 2b.
     fn to_carrier(self) -> establish::EstablishOutcome {
         match self {
             EstablishRunOutcome::Complete => establish::EstablishOutcome::EstablishedComplete,
             _ => establish::EstablishOutcome::EstablishFailed,
+        }
+    }
+
+    /// snake_case label for the `run_outcome` field of `assay.manifest_establish.v0`. Diagnostic only;
+    /// never a verdict. The no-establish case (`not_performed`) is supplied by the caller, not here.
+    fn as_str(self) -> &'static str {
+        match self {
+            EstablishRunOutcome::Complete => "complete",
+            EstablishRunOutcome::TimedOut => "timed_out",
+            EstablishRunOutcome::Partial => "partial",
+            EstablishRunOutcome::TransportError => "transport_error",
+            EstablishRunOutcome::ErrorResponse => "error_response",
+            EstablishRunOutcome::RegisterRefused => "register_refused",
         }
     }
 }

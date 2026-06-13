@@ -59,7 +59,21 @@ Plimsoll consumer side:
 
 ## Contract Shape
 
-The producer fixture contains one real record per stable establish path:
+> **Increment 2c amendment (run_outcome) — SUPERSEDES the 4-field shape.** The carrier landed in 2c
+> (`assay#1665`, slice 2c) with **five** fields: `run_outcome` is added. `build_manifest_establish_record`
+> now takes `run_outcome: &str` (not a bool), and **`establish_attempted` is DERIVED** from it
+> (`establish_attempted == (run_outcome != "not_performed")`) so the two can never disagree. Valid
+> `run_outcome` values: `complete | timed_out | partial | transport_error | error_response |
+> register_refused | not_performed` (`not_performed` ⇔ no establish ran). Per-path values:
+> `no_establish_needed → not_performed`; `established_then_allowed → complete`;
+> `established_then_denied → complete`; `immediate_deny` → `not_performed` (ambiguous / no attempt)
+> OR a failed-run value (`timed_out` / `partial` / `transport_error` / `error_response` /
+> `register_refused`) when a re-list was attempted but failed. The classifier MUST validate
+> `run_outcome` against that set and enforce the derived `establish_attempted` invariant; a
+> missing/invalid `run_outcome` is `malformed`. Every 4-field record example below is illustrative of
+> the path/attempted logic only — the real record carries `run_outcome` as the fifth field.
+
+The producer fixture contains one real record per stable (establish_path, run_outcome) shape:
 
 ```json
 {
@@ -73,7 +87,8 @@ The producer fixture contains one real record per stable establish path:
         "schema": "assay.manifest_establish.v0",
         "establish_path": "no_establish_needed",
         "establish_attempted": false,
-        "action_class": "github_deploy_key"
+        "action_class": "github_deploy_key",
+        "run_outcome": "not_performed"
       }
     },
     {
@@ -82,7 +97,8 @@ The producer fixture contains one real record per stable establish path:
         "schema": "assay.manifest_establish.v0",
         "establish_path": "established_then_allowed",
         "establish_attempted": true,
-        "action_class": "github_deploy_key"
+        "action_class": "github_deploy_key",
+        "run_outcome": "complete"
       }
     },
     {
@@ -91,7 +107,8 @@ The producer fixture contains one real record per stable establish path:
         "schema": "assay.manifest_establish.v0",
         "establish_path": "established_then_denied",
         "establish_attempted": true,
-        "action_class": "github_deploy_key"
+        "action_class": "github_deploy_key",
+        "run_outcome": "complete"
       }
     },
     {
@@ -100,7 +117,8 @@ The producer fixture contains one real record per stable establish path:
         "schema": "assay.manifest_establish.v0",
         "establish_path": "immediate_deny",
         "establish_attempted": false,
-        "action_class": "github_deploy_key"
+        "action_class": "github_deploy_key",
+        "run_outcome": "not_performed"
       }
     },
     {
@@ -109,7 +127,8 @@ The producer fixture contains one real record per stable establish path:
         "schema": "assay.manifest_establish.v0",
         "establish_path": "immediate_deny",
         "establish_attempted": false,
-        "action_class": null
+        "action_class": null,
+        "run_outcome": "not_performed"
       }
     },
     {
@@ -118,16 +137,23 @@ The producer fixture contains one real record per stable establish path:
         "schema": "assay.manifest_establish.v0",
         "establish_path": "immediate_deny",
         "establish_attempted": true,
-        "action_class": "github_deploy_key"
+        "action_class": "github_deploy_key",
+        "run_outcome": "timed_out"
       }
     }
   ]
 }
 ```
 
-`immediate_deny` is the only path that pairs with BOTH `establish_attempted` values: `false` when no establish was attempted (an inconclusive/ambiguous observation that establish cannot resolve), and `true` when a re-list WAS attempted but failed (timeout, partial/incomplete list, transport error, or an unusable/ambiguous fresh observation — the `EstablishFailed` outcome). Both are valid producer output and both must round-trip; the consumer must not assume `immediate_deny ⇒ not attempted`.
+`immediate_deny` is the only path that pairs with BOTH `establish_attempted` values: `false` /
+`run_outcome:not_performed` when no establish was attempted (an inconclusive/ambiguous observation that
+establish cannot resolve), and `true` with a failed `run_outcome` (`timed_out`/`partial`/
+`transport_error`/`error_response`/`register_refused`) when a re-list WAS attempted but failed. Both are
+valid producer output and both must round-trip; the consumer must not assume `immediate_deny ⇒ not
+attempted`.
 
-This deliberately carries no caller id, tool name, target digest, credential alias, transport, delivery, side-effect, or `decision` field. Those belong to `assay.enforcement_decision.v0`.
+This deliberately carries no caller id, tool name, target digest, credential alias, transport, delivery,
+side-effect, or `decision` field. Those belong to `assay.enforcement_decision.v0`.
 
 ## Task 1: Assay Producer Contract Fixture
 
@@ -197,13 +223,15 @@ fn manifest_establish_contract_fixture_path() -> std::path::PathBuf {
 }
 
 fn manifest_establish_contract_records() -> Vec<Value> {
+    // build_manifest_establish_record takes run_outcome (&str) and DERIVES establish_attempted
+    // (true iff run_outcome != "not_performed") — see Increment 2c.
     vec![
         json!({
             "case": "no_establish_needed",
             "record": build_manifest_establish_record(
                 EstablishPath::NoEstablishNeeded,
                 Some("github_deploy_key"),
-                false,
+                "not_performed",
             ),
         }),
         json!({
@@ -211,7 +239,7 @@ fn manifest_establish_contract_records() -> Vec<Value> {
             "record": build_manifest_establish_record(
                 EstablishPath::EstablishedThenAllowed,
                 Some("github_deploy_key"),
-                true,
+                "complete",
             ),
         }),
         json!({
@@ -219,7 +247,7 @@ fn manifest_establish_contract_records() -> Vec<Value> {
             "record": build_manifest_establish_record(
                 EstablishPath::EstablishedThenDenied,
                 Some("github_deploy_key"),
-                true,
+                "complete",
             ),
         }),
         json!({
@@ -227,7 +255,7 @@ fn manifest_establish_contract_records() -> Vec<Value> {
             "record": build_manifest_establish_record(
                 EstablishPath::ImmediateDeny,
                 Some("github_deploy_key"),
-                false,
+                "not_performed",
             ),
         }),
         json!({
@@ -235,17 +263,18 @@ fn manifest_establish_contract_records() -> Vec<Value> {
             "record": build_manifest_establish_record(
                 EstablishPath::ImmediateDeny,
                 None,
-                false,
+                "not_performed",
             ),
         }),
         json!({
             // immediate_deny is also reached when a re-list WAS attempted but failed
-            // (EstablishFailed: timeout/partial/transport/unusable). establish_attempted = true.
+            // (EstablishFailed: timeout/partial/transport/unusable) -> run_outcome != not_performed,
+            // so the derived establish_attempted = true.
             "case": "immediate_deny_after_failed_establish",
             "record": build_manifest_establish_record(
                 EstablishPath::ImmediateDeny,
                 Some("github_deploy_key"),
-                true,
+                "timed_out",
             ),
         }),
     ]
@@ -373,12 +402,17 @@ from plimsoll.review import (
 )
 
 
-def _rec(path="no_establish_needed", attempted=False, action_class="github_deploy_key"):
+def _rec(path="no_establish_needed", attempted=False, action_class="github_deploy_key", run_outcome=None):
+    # run_outcome defaults coherently with `attempted` (complete if attempted else not_performed); pass
+    # it explicitly to test a failed-establish immediate_deny (e.g. run_outcome="timed_out").
+    if run_outcome is None:
+        run_outcome = "complete" if attempted else "not_performed"
     return {
         "schema": "assay.manifest_establish.v0",
         "establish_path": path,
         "establish_attempted": attempted,
         "action_class": action_class,
+        "run_outcome": run_outcome,
     }
 
 
@@ -512,6 +546,19 @@ _MANIFEST_ESTABLISH_ATTEMPTED = {
     "established_then_denied": True,
 }
 
+# Increment 2c: the diagnostic run outcome. `not_performed` ⇔ no establish ran. The producer derives
+# `establish_attempted` from this (true iff run_outcome != "not_performed"), and the consumer enforces
+# that invariant below.
+_MANIFEST_ESTABLISH_RUN_OUTCOMES = {
+    "complete",
+    "timed_out",
+    "partial",
+    "transport_error",
+    "error_response",
+    "register_refused",
+    "not_performed",
+}
+
 
 def _classify_manifest_establish_record(rec) -> str:
     if not isinstance(rec, dict):
@@ -520,7 +567,12 @@ def _classify_manifest_establish_record(rec) -> str:
         return "unsupported_schema"
     path = rec.get("establish_path")
     attempted = rec.get("establish_attempted")
-    if path not in _MANIFEST_ESTABLISH_PATHS or not isinstance(attempted, bool):
+    run_outcome = rec.get("run_outcome")
+    if (
+        path not in _MANIFEST_ESTABLISH_PATHS
+        or not isinstance(attempted, bool)
+        or run_outcome not in _MANIFEST_ESTABLISH_RUN_OUTCOMES
+    ):
         return "malformed"
     action_class = rec.get("action_class")
     if action_class is not None and not (isinstance(action_class, str) and action_class):
@@ -541,7 +593,11 @@ def _classify_manifest_establish_record(rec) -> str:
     expected_attempted = _MANIFEST_ESTABLISH_ATTEMPTED.get(path)
     if expected_attempted is not None and attempted is not expected_attempted:
         return "inconsistent"
-    # immediate_deny accepts either attempted value (ambiguous vs failed establish); no extra check.
+    # Derived invariant: establish_attempted iff an establish actually ran (run_outcome != not_performed).
+    if attempted != (run_outcome != "not_performed"):
+        return "inconsistent"
+    # immediate_deny accepts either attempted value (ambiguous vs failed establish); the run_outcome
+    # invariant above already constrains the pair.
     return "valid"
 ```
 
@@ -918,12 +974,45 @@ Create `$PLIMSOLL_ROOT/tests/fixtures/manifest_establish_consumer_rejection.v0.j
       "expected": "malformed"
     },
     {
+      "case": "missing_run_outcome",
+      "record": {
+        "schema": "assay.manifest_establish.v0",
+        "establish_path": "no_establish_needed",
+        "establish_attempted": false,
+        "action_class": "github_deploy_key"
+      },
+      "expected": "malformed"
+    },
+    {
+      "case": "invalid_run_outcome",
+      "record": {
+        "schema": "assay.manifest_establish.v0",
+        "establish_path": "no_establish_needed",
+        "establish_attempted": false,
+        "action_class": "github_deploy_key",
+        "run_outcome": "succeeded"
+      },
+      "expected": "malformed"
+    },
+    {
       "case": "attempted_flag_contradicts_path",
       "record": {
         "schema": "assay.manifest_establish.v0",
         "establish_path": "established_then_allowed",
         "establish_attempted": false,
-        "action_class": "github_deploy_key"
+        "action_class": "github_deploy_key",
+        "run_outcome": "complete"
+      },
+      "expected": "inconsistent"
+    },
+    {
+      "case": "attempted_flag_contradicts_run_outcome",
+      "record": {
+        "schema": "assay.manifest_establish.v0",
+        "establish_path": "immediate_deny",
+        "establish_attempted": true,
+        "action_class": "github_deploy_key",
+        "run_outcome": "not_performed"
       },
       "expected": "inconsistent"
     },
@@ -934,6 +1023,7 @@ Create `$PLIMSOLL_ROOT/tests/fixtures/manifest_establish_consumer_rejection.v0.j
         "establish_path": "no_establish_needed",
         "establish_attempted": false,
         "action_class": "github_deploy_key",
+        "run_outcome": "not_performed",
         "decision": "allow"
       },
       "expected": "inconsistent"
@@ -945,6 +1035,7 @@ Create `$PLIMSOLL_ROOT/tests/fixtures/manifest_establish_consumer_rejection.v0.j
         "establish_path": "no_establish_needed",
         "establish_attempted": false,
         "action_class": "github_deploy_key",
+        "run_outcome": "not_performed",
         "forwarded": true
       },
       "expected": "inconsistent"

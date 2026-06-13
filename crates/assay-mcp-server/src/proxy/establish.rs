@@ -125,18 +125,28 @@ pub fn establish_path(
     }
 }
 
+/// The diagnostic outcome of the establish run for the carrier. `not_performed` when no establish ran
+/// (the carrier's `establish_attempted` is derived from this). The other values are the snake_case
+/// `EstablishRunOutcome` variants. It is journey/operability only, NEVER a verdict — the allow/deny
+/// lives in `assay.enforcement_decision.v0`.
+pub const RUN_OUTCOME_NOT_PERFORMED: &str = "not_performed";
+
 /// Build the sibling `assay.manifest_establish.v0` carrier record. Kept intentionally small and
-/// separate from the enforcement-decision record.
+/// separate from the enforcement-decision record. `establish_attempted` is DERIVED from `run_outcome`
+/// (true iff an establish actually ran), so the two fields can never disagree — the invariant
+/// `establish_attempted == (run_outcome != "not_performed")` holds by construction.
 pub fn build_manifest_establish_record(
     path: EstablishPath,
     action_class: Option<&str>,
-    establish_attempted: bool,
+    run_outcome: &str,
 ) -> Value {
+    let establish_attempted = run_outcome != RUN_OUTCOME_NOT_PERFORMED;
     json!({
         "schema": MANIFEST_ESTABLISH_SCHEMA,
         "establish_path": path.as_str(),
         "establish_attempted": establish_attempted,
         "action_class": action_class,
+        "run_outcome": run_outcome,
     })
 }
 
@@ -324,13 +334,32 @@ mod tests {
         let rec = build_manifest_establish_record(
             EstablishPath::EstablishedThenAllowed,
             Some("github_deploy_key"),
-            true,
+            "complete",
         );
         assert_eq!(rec["schema"], json!("assay.manifest_establish.v0"));
         assert_ne!(rec["schema"], json!("assay.enforcement_decision.v0"));
         assert_eq!(rec["establish_path"], json!("established_then_allowed"));
+        assert_eq!(rec["run_outcome"], json!("complete"));
+        // establish_attempted is DERIVED from run_outcome -> true here (an establish ran).
         assert_eq!(rec["establish_attempted"], json!(true));
         assert_eq!(rec["action_class"], json!("github_deploy_key"));
+    }
+
+    #[test]
+    fn carrier_record_derives_not_performed_as_not_attempted() {
+        // run_outcome "not_performed" must derive establish_attempted = false (the invariant).
+        let rec = build_manifest_establish_record(
+            EstablishPath::NoEstablishNeeded,
+            Some("github_deploy_key"),
+            "not_performed",
+        );
+        assert_eq!(rec["run_outcome"], json!("not_performed"));
+        assert_eq!(rec["establish_attempted"], json!(false));
+        // immediate_deny with no establish (ambiguous) is also not_performed -> not attempted.
+        let rec2 =
+            build_manifest_establish_record(EstablishPath::ImmediateDeny, None, "not_performed");
+        assert_eq!(rec2["establish_attempted"], json!(false));
+        assert_eq!(rec2["action_class"], json!(null));
     }
 
     #[test]
