@@ -59,10 +59,13 @@ pub fn establish_action(observed: &ObservedToolDigest) -> EstablishAction {
 pub enum EstablishOutcome {
     /// No establish was attempted (Increment 1 default, or `EstablishAction::DenyWithoutEstablish`).
     NotPerformed,
-    /// A fresh complete observation was obtained (Increment 2).
+    /// A fresh complete, terminal, non-ambiguous observation was obtained, WHETHER OR NOT it contains
+    /// the invoked tool. A complete re-list that simply lacks the tool is NOT a failure here: it is
+    /// `EstablishedComplete`, and `decide()` then denies (yielding `EstablishedThenDenied`) (Increment 2).
     EstablishedComplete,
-    /// The establish attempt failed: timeout, partial/incomplete list, transport error, or still
-    /// ambiguous / still tool-absent (Increment 2).
+    /// The establish attempt failed to produce a usable complete observation: timeout, a
+    /// partial/incomplete list, a transport error, or an unusable (e.g. ambiguous) observation. Tool
+    /// absence from an otherwise complete list is NOT a failure (see `EstablishedComplete`) (Increment 2).
     EstablishFailed,
 }
 
@@ -93,10 +96,15 @@ impl EstablishPath {
 
 /// Resolve the establish path from the action, the attempt outcome, and the re-evaluated decision.
 ///
-/// Load-bearing invariant: the ONLY path that corresponds to an allow is `EstablishedThenAllowed`, and
-/// it requires BOTH an `EstablishedComplete` outcome AND a `decide_allowed` re-evaluation. A
-/// not-performed or failed establish therefore never allows, and `DenyWithoutEstablish` (ambiguous)
-/// never allows regardless of outcome.
+/// Load-bearing invariant: the only ESTABLISH-DERIVED allow path is `EstablishedThenAllowed`, and it
+/// requires BOTH an `EstablishedComplete` outcome AND a `decide_allowed` re-evaluation. A not-performed
+/// or failed establish therefore never produces an establish-derived allow, and `DenyWithoutEstablish`
+/// (ambiguous) never allows regardless of outcome.
+///
+/// `NoEstablishNeeded` is ORTHOGONAL to the verdict, not a deny: when a current complete manifest
+/// already exists, the call takes `NoEstablishNeeded` and the separate `assay.enforcement_decision.v0`
+/// record carries the allow or deny. So `NoEstablishNeeded` + an allowed enforcement decision is a valid
+/// combination. This carrier describes the establish JOURNEY only; it is never a verdict proxy.
 pub fn establish_path(
     action: EstablishAction,
     outcome: EstablishOutcome,
@@ -182,6 +190,25 @@ mod tests {
             ),
             EstablishPath::NoEstablishNeeded
         );
+    }
+
+    #[test]
+    fn no_establish_needed_coexists_with_allow() {
+        // A current complete manifest already exists, so no establish runs and the call takes
+        // NoEstablishNeeded REGARDLESS of the enforcement verdict. NoEstablishNeeded is verdict-
+        // orthogonal: it is never ImmediateDeny, and `NoEstablishNeeded` + an allowed enforcement
+        // decision (carried separately in assay.enforcement_decision.v0) is a valid combination.
+        for outcome in [
+            EstablishOutcome::NotPerformed,
+            EstablishOutcome::EstablishFailed,
+            EstablishOutcome::EstablishedComplete,
+        ] {
+            for decide_allowed in [true, false] {
+                let path = establish_path(EstablishAction::NotNeeded, outcome, decide_allowed);
+                assert_eq!(path, EstablishPath::NoEstablishNeeded);
+                assert_ne!(path, EstablishPath::ImmediateDeny);
+            }
+        }
     }
 
     #[test]
