@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.25.0] - 2026-06-13
+
+### Added
+- Pre-call manifest-establish for the enforcing proxy (P61e Increment 2). When a `tools/call` would
+  be denied solely because no current complete `tools/list` was observed for the tool, the proxy runs
+  one bounded, proxy-originated re-list against a single total deadline, then re-decides on the
+  effective observation and acts on that verdict. It never relaxes a gate: ambiguous observations, a
+  missing baseline, and real digest drift stay denied, and a failed or timed-out re-list leaves the
+  deny standing. The journey is emitted as a separate `assay.manifest_establish.v0` carrier (establish
+  path + run outcome, never the allow/deny verdict) under `--manifest-establish-out`, with a
+  `--manifest-establish-budget-ms` operator flag (default 5000).
+- `assay.tool_annotation_conformance.v0`, a carrier comparing the server's untrusted declared tool
+  annotations (`readOnlyHint` / `destructiveHint`) against Assay's own observed call classification.
+  Emitted per `tools/call` under `--tool-conformance-out`, read from the same effective observation as
+  the verdict, with an `observation_basis` (`complete` / `incomplete`) that keeps an unobserved
+  manifest honest rather than reporting a false "undeclared". It is descriptive and orthogonal: a
+  mismatch is never a verdict and never gates the call, and the allow/deny verdict stays in
+  `assay.enforcement_decision.v0`.
+- Pinned producer contracts for downstream consumers: golden fixtures for `assay.manifest_establish.v0`,
+  `assay.tool_annotation_conformance.v0`, and a combined `assay.combined_carrier_acceptance.v0`
+  fixture, each regenerated from the real producer builders and proving the verdict / journey /
+  conformance carriers stay non-correlated.
+- The `assay monitor` output line shapes are pinned by a pure, platform-independent
+  `format_monitor_event` plus a contract test, so a change to the scraped lines is caught at the
+  producer.
+
 ## [3.24.0] - 2026-06-12
 
 ### Added
