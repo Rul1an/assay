@@ -720,10 +720,11 @@ fn establish_timeout_denies_to_client_within_budget() {
             policy.to_str().unwrap(),
             "--declared-mcp-manifest",
             approved_baseline_path().to_str().unwrap(),
+            "--manifest-establish-budget-ms",
+            "300",
         ])
         .env("MOCK_UPSTREAM_LOG", &log)
         .env("MOCK_UPSTREAM_MODE", "drop_list")
-        .env("ASSAY_ESTABLISH_BUDGET_MS", "300")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -834,5 +835,313 @@ fn establish_completes_but_tool_absent_denies() {
     assert!(
         !methods.contains(&"tools/call".to_string()),
         "an absent tool is never forwarded; methods={methods:?}"
+    );
+}
+
+// =================================================================================================
+// Increment 2c: assay.manifest_establish.v0 carrier emission + operator budget flag.
+// =================================================================================================
+
+/// Spawn the enforcing proxy writing BOTH the enforcement-decision NDJSON and the manifest-establish
+/// carrier NDJSON, with an optional establish budget (ms).
+fn spawn_enforce_recording(
+    log: &Path,
+    policy: &Path,
+    baseline: &Path,
+    mode: &str,
+    decisions: &Path,
+    establish: &Path,
+    budget_ms: Option<u64>,
+) -> Child {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"));
+    cmd.arg("proxy-enforce")
+        .args(["--upstream-command", python()])
+        .args(["--upstream-arg", "-u"])
+        .args(["--upstream-arg", mock_path().to_str().unwrap()])
+        .args(["--enforce-policy", policy.to_str().unwrap()])
+        .args(["--declared-mcp-manifest", baseline.to_str().unwrap()])
+        .args(["--enforcement-decision-out", decisions.to_str().unwrap()])
+        .args(["--manifest-establish-out", establish.to_str().unwrap()]);
+    if let Some(ms) = budget_ms {
+        cmd.args(["--manifest-establish-budget-ms", &ms.to_string()]);
+    }
+    cmd.env("MOCK_UPSTREAM_LOG", log)
+        .env("MOCK_UPSTREAM_MODE", mode)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("spawn enforce proxy (is python installed?)")
+}
+
+fn read_establish_records(path: &Path) -> Vec<Value> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).expect("establish record JSON"))
+        .collect()
+}
+
+/// The carrier carries no raw scope/target/token/credential/caller/args — journey only.
+fn assert_no_secrets(rec: &Value) {
+    let s = serde_json::to_string(rec).unwrap();
+    for forbidden in [
+        "target_digest",
+        "scope",
+        "token",
+        "credential",
+        "caller",
+        "arguments",
+        "owner",
+        "repo",
+    ] {
+        assert!(
+            !s.contains(forbidden),
+            "manifest_establish record must not carry `{forbidden}`: {s}"
+        );
+    }
+    // Exactly the five v0 fields, nothing more.
+    let obj = rec.as_object().expect("record is an object");
+    let mut keys: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "action_class",
+            "establish_attempted",
+            "establish_path",
+            "run_outcome",
+            "schema"
+        ]
+    );
+}
+
+#[test]
+fn no_establish_needed_allow_writes_carrier_and_decision() {
+    // A client tools/list establishes a current complete manifest the old way; the call is allowed with
+    // NO establish run -> carrier is no_establish_needed / not_performed / not attempted, alongside an
+    // allowed enforcement decision (the two carriers are orthogonal).
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let decisions = dir.path().join("decisions.ndjson");
+    let establish = dir.path().join("establish.ndjson");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut child = spawn_enforce_recording(
+        &log,
+        &policy,
+        &approved_baseline_path(),
+        "p60a",
+        &decisions,
+        &establish,
+        None,
+    );
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+    send(
+        &mut stdin,
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+    );
+    let _ = read_response(&mut out);
+    send(&mut stdin, deploy_key_call());
+    let r = read_response(&mut out);
+    assert_eq!(r["result"]["content"][0]["text"], "forwarded-ok");
+
+    shutdown(child, stdin);
+    let recs = read_establish_records(&establish);
+    assert_eq!(recs.len(), 1, "one establish record per tools/call");
+    let rec = &recs[0];
+    assert_eq!(rec["establish_path"], "no_establish_needed");
+    assert_eq!(rec["run_outcome"], "not_performed");
+    assert_eq!(rec["establish_attempted"], serde_json::json!(false));
+    assert_no_secrets(rec);
+    // Orthogonal allowed decision in the separate verdict carrier.
+    let dec = std::fs::read_to_string(&decisions).unwrap_or_default();
+    assert!(dec.contains("assay.enforcement_decision.v0") && dec.contains("allow"));
+}
+
+#[test]
+fn establish_then_allow_writes_established_then_allowed() {
+    // No client list -> establish runs, p60a completes a matching manifest -> allow + forward. Carrier
+    // is established_then_allowed / complete / attempted.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let decisions = dir.path().join("decisions.ndjson");
+    let establish = dir.path().join("establish.ndjson");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut child = spawn_enforce_recording(
+        &log,
+        &policy,
+        &approved_baseline_path(),
+        "p60a",
+        &decisions,
+        &establish,
+        None,
+    );
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+    send(&mut stdin, deploy_key_call());
+    let r = read_response(&mut out);
+    assert_eq!(r["result"]["content"][0]["text"], "forwarded-ok");
+
+    shutdown(child, stdin);
+    let recs = read_establish_records(&establish);
+    assert_eq!(recs.len(), 1);
+    let rec = &recs[0];
+    assert_eq!(rec["establish_path"], "established_then_allowed");
+    assert_eq!(rec["run_outcome"], "complete");
+    assert_eq!(rec["establish_attempted"], serde_json::json!(true));
+    assert_eq!(rec["action_class"], "github_deploy_key");
+    assert_no_secrets(rec);
+}
+
+#[test]
+fn establish_complete_but_absent_writes_established_then_denied() {
+    // normal mode completes a manifest WITHOUT the tool -> CompleteButToolAbsent -> deny. The establish
+    // ran and completed, so run_outcome is complete and the path is established_then_denied.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let decisions = dir.path().join("decisions.ndjson");
+    let establish = dir.path().join("establish.ndjson");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut child = spawn_enforce_recording(
+        &log,
+        &policy,
+        &approved_baseline_path(),
+        "normal",
+        &decisions,
+        &establish,
+        None,
+    );
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+    send(&mut stdin, deploy_key_call());
+    let r = read_response(&mut out);
+    assert_eq!(r["error"]["code"], PROXY_DENIED);
+
+    shutdown(child, stdin);
+    let recs = read_establish_records(&establish);
+    assert_eq!(recs.len(), 1);
+    let rec = &recs[0];
+    assert_eq!(rec["establish_path"], "established_then_denied");
+    assert_eq!(rec["run_outcome"], "complete");
+    assert_eq!(rec["establish_attempted"], serde_json::json!(true));
+    assert_no_secrets(rec);
+}
+
+#[test]
+fn establish_timeout_writes_immediate_deny_timed_out() {
+    // drop_list never answers the synthetic list -> establish times out within the budget -> deny. The
+    // establish was attempted (run_outcome timed_out) but produced no completion -> immediate_deny.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let decisions = dir.path().join("decisions.ndjson");
+    let establish = dir.path().join("establish.ndjson");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut child = spawn_enforce_recording(
+        &log,
+        &policy,
+        &approved_baseline_path(),
+        "drop_list",
+        &decisions,
+        &establish,
+        Some(300),
+    );
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+    send(&mut stdin, deploy_key_call());
+    let r = read_response(&mut out);
+    assert_eq!(r["error"]["code"], PROXY_DENIED);
+
+    shutdown(child, stdin);
+    let recs = read_establish_records(&establish);
+    assert_eq!(recs.len(), 1);
+    let rec = &recs[0];
+    assert_eq!(rec["establish_path"], "immediate_deny");
+    assert_eq!(rec["run_outcome"], "timed_out");
+    assert_eq!(rec["establish_attempted"], serde_json::json!(true));
+    assert_no_secrets(rec);
+}
+
+#[test]
+fn ambiguous_writes_immediate_deny_not_performed_no_synthetic_list() {
+    // Ambiguous observation -> deny WITHOUT establish. Carrier is immediate_deny / not_performed / not
+    // attempted, and the upstream saw only the client's tools/list (no synthetic establish list).
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("methods.log");
+    let decisions = dir.path().join("decisions.ndjson");
+    let establish = dir.path().join("establish.ndjson");
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let mut child = spawn_enforce_recording(
+        &log,
+        &policy,
+        &approved_baseline_path(),
+        "duplicate",
+        &decisions,
+        &establish,
+        None,
+    );
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+
+    send(&mut stdin, init());
+    let _ = read_response(&mut out);
+    send(
+        &mut stdin,
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+    );
+    let _ = read_response(&mut out);
+    send(&mut stdin, deploy_key_call());
+    let r = read_response(&mut out);
+    assert_eq!(
+        r["error"]["data"]["reason"],
+        "manifest_observation_ambiguous"
+    );
+
+    shutdown(child, stdin);
+    let recs = read_establish_records(&establish);
+    assert_eq!(recs.len(), 1);
+    let rec = &recs[0];
+    assert_eq!(rec["establish_path"], "immediate_deny");
+    assert_eq!(rec["run_outcome"], "not_performed");
+    assert_eq!(rec["establish_attempted"], serde_json::json!(false));
+    assert_no_secrets(rec);
+    let lists = read_methods(&log)
+        .iter()
+        .filter(|m| m.as_str() == "tools/list")
+        .count();
+    assert_eq!(
+        lists, 1,
+        "ambiguous must not originate a synthetic establish list"
+    );
+}
+
+#[test]
+fn establish_budget_zero_fails_startup() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
+    let status = run_startup(&[
+        "--enforce-policy",
+        policy.to_str().unwrap(),
+        "--declared-mcp-manifest",
+        approved_baseline_path().to_str().unwrap(),
+        "--manifest-establish-budget-ms",
+        "0",
+    ]);
+    assert!(
+        !status.success(),
+        "a zero establish budget must be rejected at startup"
     );
 }
