@@ -463,6 +463,16 @@ pub async fn run(
             }
             match serde_json::from_str::<Value>(&line) {
                 Ok(v) => {
+                    // Single-reader routing, decided BEFORE the observer tap. A reserved id is the
+                    // proxy's namespace (client requests in it are rejected), so any reserved-id upstream
+                    // response is proxy-originated: a pending one is diverted to the establish caller and
+                    // suppressed from the client; a NON-pending one (a late/duplicate establish reply, or
+                    // an unprompted reserved id from the upstream) is dropped with NO relay and NO tap,
+                    // so it can neither leak to the client nor corrupt the observer accumulation.
+                    let route = relay_routing::route_upstream(&v, |id| up_registry.is_pending(id));
+                    if matches!(route, relay_routing::UpstreamRoute::SuppressReserved) {
+                        continue;
+                    }
                     let completed = {
                         let mut o = up_obs.lock().await;
                         if v.get("method").and_then(|m| m.as_str())
@@ -494,16 +504,17 @@ pub async fn run(
                             let _ = write_json_atomic(path, &m);
                         }
                     }
-                    // Single-reader routing: a response to a pending proxy-originated establish request
-                    // is diverted to the registry and SUPPRESSED from the client stream; everything
-                    // else (and a reserved id that is not pending) relays verbatim. In slice 1 nothing
-                    // is ever pending, so this always relays.
-                    match relay_routing::route_upstream(&v, |id| up_registry.is_pending(id)) {
+                    match route {
                         relay_routing::UpstreamRoute::DivertToEstablish(id) => {
+                            // A pending establish page: fold into the observer (above) then deliver to
+                            // the waiting caller; suppressed from the client.
                             up_registry.resolve(&id, v);
                         }
                         relay_routing::UpstreamRoute::RelayToClient => {
                             let _ = up_tx.send(line);
+                        }
+                        relay_routing::UpstreamRoute::SuppressReserved => {
+                            unreachable!("SuppressReserved is handled before the observer tap")
                         }
                     }
                 }
@@ -816,16 +827,19 @@ async fn run_establish<W: AsyncWriteExt + Unpin>(
         let remaining = deadline - now;
         let n = id_counter.fetch_add(1, Ordering::Relaxed);
         let id = relay_routing::mint_reserved_id(&n.to_string());
-        // Register the synthetic request with the observer (cursor/no-cursor) BEFORE writing, so the
-        // reader recognizes the response as a list page, and with the registry so it is diverted.
-        observer
-            .lock()
-            .await
-            .on_client_tools_list(Some(&Value::String(id.clone())), cursor.is_some());
+        // Register with the REGISTRY first. The invariant is: no successful registration, no observer
+        // mutation — so a refused (duplicate) registration fails closed without having started or
+        // cleared a synthetic list operation that was never written upstream.
         let (guard, rx) = match registry.register(id.clone()) {
             Some(pair) => pair,
             None => return EstablishRunOutcome::RegisterRefused,
         };
+        // Only now register the synthetic request with the observer (cursor/no-cursor), still BEFORE the
+        // write, so the reader recognizes the response as a list page and folds it in.
+        observer
+            .lock()
+            .await
+            .on_client_tools_list(Some(&Value::String(id.clone())), cursor.is_some());
         let mut req = serde_json::Map::new();
         req.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
         req.insert("id".to_string(), Value::String(id.clone()));
@@ -1062,6 +1076,36 @@ mod tests {
             !registry.is_pending("assay-establish-1"),
             "a timed-out establish must reclaim its pending entry"
         );
+    }
+
+    #[tokio::test]
+    async fn run_establish_register_refused_does_not_mutate_observer() {
+        use std::sync::atomic::AtomicU64;
+
+        let observer = Arc::new(Mutex::new(Observer::default()));
+        let registry = relay_routing::EstablishRegistry::default();
+        let counter = AtomicU64::new(1);
+        // Pre-occupy the id the counter will mint, so the runner's register() is refused.
+        let (_held, _rx) = registry
+            .register("assay-establish-1".to_string())
+            .expect("pre-register the colliding id");
+        let (mut wr, _rd) = tokio::io::duplex(8192);
+
+        let outcome = run_establish(
+            &mut wr,
+            &registry,
+            &observer,
+            &counter,
+            std::time::Duration::from_secs(2),
+        )
+        .await;
+
+        assert_eq!(outcome, EstablishRunOutcome::RegisterRefused);
+        // Invariant: no successful registration -> no observer mutation. No synthetic list operation
+        // was started, so the observer is untouched.
+        assert_eq!(observer.lock().await.observed_list_operations, 0);
+        // The pre-existing pending entry was not clobbered.
+        assert!(registry.is_pending("assay-establish-1"));
     }
 
     fn req_id(line: &str) -> String {

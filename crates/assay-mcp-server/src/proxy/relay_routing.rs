@@ -57,15 +57,25 @@ pub fn is_reserved_client_request(v: &Value) -> bool {
 /// Where the single upstream reader should send a parsed upstream line.
 #[derive(Debug, PartialEq, Eq)]
 pub enum UpstreamRoute {
-    /// Relay verbatim to the client (the default for all normal traffic).
+    /// Relay verbatim to the client (the default for all normal traffic — any non-reserved id, and
+    /// notifications without an id).
     RelayToClient,
-    /// Divert to the establish registry under this reserved id; suppress from the client stream.
+    /// A reserved id that is CURRENTLY PENDING: divert to the establish registry under this id and
+    /// suppress it from the client stream.
     DivertToEstablish(String),
+    /// A reserved id that is NOT (or no longer) pending. The reserved namespace is the proxy's own
+    /// (client requests carrying a reserved id are rejected by the collision guard), so any reserved-id
+    /// upstream response is proxy-originated: a late or duplicate establish reply, or an unprompted
+    /// reserved id from the upstream. It must be suppressed from the client stream — relaying it would
+    /// leak a synthetic, proxy-originated response to the client.
+    SuppressReserved,
 }
 
-/// Pure routing decision. A line is diverted ONLY when it carries a reserved id that is CURRENTLY
-/// PENDING in the registry. A reserved id that is not pending still relays to the client (never
-/// silently swallowed), and everything else (normal responses, notifications without an id) relays.
+/// Pure routing decision. A reserved id routes to `DivertToEstablish` when it is currently pending and
+/// to `SuppressReserved` otherwise — a reserved id is NEVER relayed to the client, because the reserved
+/// namespace belongs to the proxy (client requests in it are rejected), so a reserved-id upstream
+/// response is always proxy-originated. Everything else (normal responses, notifications without an id)
+/// relays.
 pub fn route_upstream(v: &Value, is_pending: impl Fn(&str) -> bool) -> UpstreamRoute {
     match v.get("id") {
         Some(id) if is_reserved_id(id) => {
@@ -73,7 +83,7 @@ pub fn route_upstream(v: &Value, is_pending: impl Fn(&str) -> bool) -> UpstreamR
             if !id.is_empty() && is_pending(&id) {
                 UpstreamRoute::DivertToEstablish(id)
             } else {
-                UpstreamRoute::RelayToClient
+                UpstreamRoute::SuppressReserved
             }
         }
         _ => UpstreamRoute::RelayToClient,
@@ -234,15 +244,19 @@ mod tests {
     }
 
     #[test]
-    fn reserved_response_diverts_only_when_pending() {
+    fn reserved_response_diverts_when_pending_else_suppressed_never_relayed() {
         let v = json!({"id": "assay-establish-abc", "result": {"tools": []}});
-        // pending -> divert (suppressed from client)
+        // pending -> divert to the establish caller (suppressed from client)
         assert_eq!(
             route_upstream(&v, |id| id == "assay-establish-abc"),
             UpstreamRoute::DivertToEstablish("assay-establish-abc".to_string())
         );
-        // reserved but NOT pending -> relay, never silently swallow
-        assert_eq!(route_upstream(&v, |_| false), UpstreamRoute::RelayToClient);
+        // reserved but NOT pending -> SUPPRESSED, never relayed to the client (it is proxy-originated:
+        // a late/duplicate establish reply or an unprompted reserved id). Relaying would leak it.
+        assert_eq!(
+            route_upstream(&v, |_| false),
+            UpstreamRoute::SuppressReserved
+        );
     }
 
     // --- registry + timeout ---
