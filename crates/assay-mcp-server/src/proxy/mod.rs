@@ -851,10 +851,19 @@ async fn run_establish<W: AsyncWriteExt + Unpin>(
             req.insert("params".to_string(), json!({ "cursor": c }));
         }
         let line = Value::Object(req).to_string();
-        if forward_line(child_stdin, &line).await.is_err() {
-            return EstablishRunOutcome::TransportError; // guard drops on return -> entry reclaimed
+        // Bound the synthetic write by the SAME total deadline: if the upstream stops reading stdin or
+        // the pipe backpressures, the write must not hang past the promised budget before we even await.
+        match tokio::time::timeout(remaining, forward_line(child_stdin, &line)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => return EstablishRunOutcome::TransportError, // guard drops -> entry reclaimed
+            Err(_) => return timed_out(pages_received),               // write itself timed out
         }
-        let resp = relay_routing::await_establish(rx, remaining).await;
+        // Recompute the budget AFTER the write so the response await uses only the time that is left.
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return timed_out(pages_received);
+        }
+        let resp = relay_routing::await_establish(rx, deadline - now).await;
         drop(guard); // reclaim the pending entry on every outcome (success, timeout, or error)
         let resp = match resp {
             Some(v) => v,
@@ -864,11 +873,18 @@ async fn run_establish<W: AsyncWriteExt + Unpin>(
             return EstablishRunOutcome::ErrorResponse;
         }
         pages_received += 1;
-        match resp.pointer("/result/nextCursor").and_then(|c| c.as_str()) {
-            Some(next) if !next.is_empty() => {
-                cursor = Some(next.to_string());
+        // Completion MUST match the Observer's rule (on_upstream_response): a chain is complete only when
+        // nextCursor is absent or JSON null. Any non-null nextCursor means more pages — paginate when it
+        // is a usable non-empty string, otherwise the upstream claims more pages but gives no usable
+        // cursor (empty/non-string): malformed, fail closed and never falsely report Complete.
+        let next = resp.pointer("/result/nextCursor");
+        if next.map(|c| !c.is_null()).unwrap_or(false) {
+            match next.and_then(|c| c.as_str()) {
+                Some(s) if !s.is_empty() => cursor = Some(s.to_string()),
+                _ => return EstablishRunOutcome::ErrorResponse,
             }
-            _ => return EstablishRunOutcome::Complete,
+        } else {
+            return EstablishRunOutcome::Complete;
         }
     }
 }
@@ -1106,6 +1122,77 @@ mod tests {
         assert_eq!(observer.lock().await.observed_list_operations, 0);
         // The pre-existing pending entry was not clobbered.
         assert!(registry.is_pending("assay-establish-1"));
+    }
+
+    #[tokio::test]
+    async fn run_establish_unusable_nextcursor_never_completes() {
+        use std::sync::atomic::AtomicU64;
+        use tokio::io::{AsyncBufReadExt, BufReader};
+
+        let observer = Arc::new(Mutex::new(Observer::default()));
+        let registry = relay_routing::EstablishRegistry::default();
+        let counter = AtomicU64::new(1);
+        let (mut wr, rd) = tokio::io::duplex(8192);
+
+        // A page that claims more pages with a NON-null but non-string nextCursor (numeric): the
+        // Observer treats it as "more pages pending" (incomplete), so the runner must NOT report
+        // Complete. It aligns by failing closed (ErrorResponse) instead.
+        let fake_reader = {
+            let observer = observer.clone();
+            let registry = registry.clone();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(rd).lines();
+                let id1 = req_id(&lines.next_line().await.unwrap().unwrap());
+                let page = json!({"id": id1, "result": {"tools": [tool("x")], "nextCursor": 7}});
+                observer.lock().await.on_upstream_response(&page);
+                registry.resolve(&id1, page);
+            })
+        };
+
+        let outcome = run_establish(
+            &mut wr,
+            &registry,
+            &observer,
+            &counter,
+            std::time::Duration::from_secs(2),
+        )
+        .await;
+        fake_reader.await.unwrap();
+
+        assert_ne!(outcome, EstablishRunOutcome::Complete);
+        assert_eq!(outcome, EstablishRunOutcome::ErrorResponse);
+        // The Observer also did not complete the chain, so the two views agree: not complete.
+        assert!(matches!(
+            observer.lock().await.observed_tool_digest("x"),
+            enforce::ObservedToolDigest::NoCompleteManifest
+        ));
+    }
+
+    #[tokio::test]
+    async fn run_establish_write_is_bounded_by_total_deadline() {
+        use std::sync::atomic::AtomicU64;
+
+        let observer = Arc::new(Mutex::new(Observer::default()));
+        let registry = relay_routing::EstablishRegistry::default();
+        let counter = AtomicU64::new(1);
+        // 1-byte buffer, kept open but never read: the synthetic write backpressures (not a broken
+        // pipe), so an unbounded write would hang. The deadline-bounded write must time out instead.
+        let (mut wr, _rd) = tokio::io::duplex(1);
+
+        let outcome = run_establish(
+            &mut wr,
+            &registry,
+            &observer,
+            &counter,
+            std::time::Duration::from_millis(20),
+        )
+        .await;
+
+        assert_eq!(outcome, EstablishRunOutcome::TimedOut);
+        assert!(
+            !registry.is_pending("assay-establish-1"),
+            "a write-timeout must still reclaim the pending entry"
+        );
     }
 
     fn req_id(line: &str) -> String {
