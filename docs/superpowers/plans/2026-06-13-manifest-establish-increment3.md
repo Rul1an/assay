@@ -60,7 +60,7 @@ Plimsoll consumer side:
 ## Contract Shape
 
 > **Increment 2c amendment (run_outcome) — SUPERSEDES the 4-field shape.** The carrier landed in 2c
-> (`assay#1664`/2c) with **five** fields: `run_outcome` is added. `build_manifest_establish_record`
+> (`assay#1665`, slice 2c) with **five** fields: `run_outcome` is added. `build_manifest_establish_record`
 > now takes `run_outcome: &str` (not a bool), and **`establish_attempted` is DERIVED** from it
 > (`establish_attempted == (run_outcome != "not_performed")`) so the two can never disagree. Valid
 > `run_outcome` values: `complete | timed_out | partial | transport_error | error_response |
@@ -974,12 +974,45 @@ Create `$PLIMSOLL_ROOT/tests/fixtures/manifest_establish_consumer_rejection.v0.j
       "expected": "malformed"
     },
     {
+      "case": "missing_run_outcome",
+      "record": {
+        "schema": "assay.manifest_establish.v0",
+        "establish_path": "no_establish_needed",
+        "establish_attempted": false,
+        "action_class": "github_deploy_key"
+      },
+      "expected": "malformed"
+    },
+    {
+      "case": "invalid_run_outcome",
+      "record": {
+        "schema": "assay.manifest_establish.v0",
+        "establish_path": "no_establish_needed",
+        "establish_attempted": false,
+        "action_class": "github_deploy_key",
+        "run_outcome": "succeeded"
+      },
+      "expected": "malformed"
+    },
+    {
       "case": "attempted_flag_contradicts_path",
       "record": {
         "schema": "assay.manifest_establish.v0",
         "establish_path": "established_then_allowed",
         "establish_attempted": false,
-        "action_class": "github_deploy_key"
+        "action_class": "github_deploy_key",
+        "run_outcome": "complete"
+      },
+      "expected": "inconsistent"
+    },
+    {
+      "case": "attempted_flag_contradicts_run_outcome",
+      "record": {
+        "schema": "assay.manifest_establish.v0",
+        "establish_path": "immediate_deny",
+        "establish_attempted": true,
+        "action_class": "github_deploy_key",
+        "run_outcome": "not_performed"
       },
       "expected": "inconsistent"
     },
@@ -990,6 +1023,7 @@ Create `$PLIMSOLL_ROOT/tests/fixtures/manifest_establish_consumer_rejection.v0.j
         "establish_path": "no_establish_needed",
         "establish_attempted": false,
         "action_class": "github_deploy_key",
+        "run_outcome": "not_performed",
         "decision": "allow"
       },
       "expected": "inconsistent"
@@ -1001,6 +1035,7 @@ Create `$PLIMSOLL_ROOT/tests/fixtures/manifest_establish_consumer_rejection.v0.j
         "establish_path": "no_establish_needed",
         "establish_attempted": false,
         "action_class": "github_deploy_key",
+        "run_outcome": "not_performed",
         "forwarded": true
       },
       "expected": "inconsistent"
