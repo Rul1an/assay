@@ -111,10 +111,21 @@ The producer fixture contains one real record per stable establish path:
         "establish_attempted": false,
         "action_class": null
       }
+    },
+    {
+      "case": "immediate_deny_after_failed_establish",
+      "record": {
+        "schema": "assay.manifest_establish.v0",
+        "establish_path": "immediate_deny",
+        "establish_attempted": true,
+        "action_class": "github_deploy_key"
+      }
     }
   ]
 }
 ```
+
+`immediate_deny` is the only path that pairs with BOTH `establish_attempted` values: `false` when no establish was attempted (an inconclusive/ambiguous observation that establish cannot resolve), and `true` when a re-list WAS attempted but failed (timeout, partial/incomplete list, transport error, or an unusable/ambiguous fresh observation — the `EstablishFailed` outcome). Both are valid producer output and both must round-trip; the consumer must not assume `immediate_deny ⇒ not attempted`.
 
 This deliberately carries no caller id, tool name, target digest, credential alias, transport, delivery, side-effect, or `decision` field. Those belong to `assay.enforcement_decision.v0`.
 
@@ -124,6 +135,14 @@ This deliberately carries no caller id, tool name, target digest, credential ali
 
 - Modify: `crates/assay-mcp-server/src/proxy/establish.rs`
 - Create: `crates/assay-mcp-server/tests/fixtures/manifest_establish_contract.v0.json`
+
+> **Already done by `assay#1659` — do NOT redo.** Steps 1–3 below (tightening the `establish_path`
+> doc comment and adding the `NoEstablishNeeded + allow` coexistence test) were merged in `#1659`. The
+> comment already reads "only establish-derived allow path" / "NoEstablishNeeded is orthogonal", and the
+> test exists as `no_establish_needed_coexists_with_allow`. Re-applying Steps 1–3 verbatim would re-edit
+> the comment and create a duplicate test under a second name. Treat Steps 1–3 as satisfied and start at
+> **Step 4** (the producer-contract generation). Steps 1–3 are kept below only as the rationale of
+> record.
 
 - [ ] **Step 1: Tighten the path doc comment before adding the fixture**
 
@@ -217,6 +236,16 @@ fn manifest_establish_contract_records() -> Vec<Value> {
                 EstablishPath::ImmediateDeny,
                 None,
                 false,
+            ),
+        }),
+        json!({
+            // immediate_deny is also reached when a re-list WAS attempted but failed
+            // (EstablishFailed: timeout/partial/transport/unusable). establish_attempted = true.
+            "case": "immediate_deny_after_failed_establish",
+            "record": build_manifest_establish_record(
+                EstablishPath::ImmediateDeny,
+                Some("github_deploy_key"),
+                true,
             ),
         }),
     ]
@@ -368,6 +397,12 @@ class TestManifestEstablish(unittest.TestCase):
             _classify_manifest_establish_record(_rec("immediate_deny", False, None)),
             "valid",
         )
+        # immediate_deny pairs with BOTH attempted values: false = ambiguous (no attempt),
+        # true = a re-list was attempted but failed (EstablishFailed). Both are valid.
+        self.assertEqual(
+            _classify_manifest_establish_record(_rec("immediate_deny", True)),
+            "valid",
+        )
 
     def test_unsupported_schema_and_malformed(self):
         self.assertEqual(
@@ -467,11 +502,14 @@ _MANIFEST_ESTABLISH_PATHS = {
     "immediate_deny",
 }
 
+# Only the three deterministic paths pin `establish_attempted`. `immediate_deny` is intentionally
+# absent: it pairs with `false` (no establish attempted — an inconclusive/ambiguous observation) AND
+# with `true` (a re-list was attempted but failed: EstablishFailed). Both are valid producer output, so
+# `immediate_deny` is not constrained here.
 _MANIFEST_ESTABLISH_ATTEMPTED = {
     "no_establish_needed": False,
     "established_then_allowed": True,
     "established_then_denied": True,
-    "immediate_deny": False,
 }
 
 
@@ -500,8 +538,10 @@ def _classify_manifest_establish_record(rec) -> str:
     ):
         if forbidden in rec:
             return "inconsistent"
-    if attempted is not _MANIFEST_ESTABLISH_ATTEMPTED[path]:
+    expected_attempted = _MANIFEST_ESTABLISH_ATTEMPTED.get(path)
+    if expected_attempted is not None and attempted is not expected_attempted:
         return "inconsistent"
+    # immediate_deny accepts either attempted value (ambiguous vs failed establish); no extra check.
     return "valid"
 ```
 
