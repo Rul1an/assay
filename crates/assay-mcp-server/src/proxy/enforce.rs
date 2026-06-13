@@ -506,6 +506,9 @@ fn allowance_matches(a: &Allowance, action_class: &str, target: &Value) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::establish::{
+        self, build_manifest_establish_record, EstablishPath, RUN_OUTCOME_NOT_PERFORMED,
+    };
     use serde_json::json;
     use std::io::Write;
 
@@ -1403,6 +1406,220 @@ allowances:
                 rec.get("scopes").is_none(),
                 "a record must not carry a scopes key"
             );
+        }
+    }
+
+    // ---- Combined carrier acceptance fixture (Increment 4) -------------------------------------
+    //
+    // This fixture pairs the REAL producer output of `assay.enforcement_decision.v0` and
+    // `assay.manifest_establish.v0` for canonical establish journeys. It is deliberately a consumer
+    // acceptance fixture, not a new carrier: consumers should read the verdict from
+    // `enforcement_decision` and the journey from `manifest_establish`, never infer one from the
+    // other. Regenerate after an intentional producer change: ASSAY_UPDATE_GOLDEN=1 cargo test -p
+    // assay-mcp-server --bins combined_carrier_acceptance_fixture.
+
+    fn combined_fixture_path() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/combined_carrier_acceptance.v0.json")
+    }
+
+    struct CombinedCase {
+        name: &'static str,
+        policy: EnforcePolicy,
+        baseline: DeclaredManifest,
+        observed: ObservedToolDigest,
+        tool: &'static str,
+        args: Value,
+        establish_path: EstablishPath,
+        run_outcome: &'static str,
+        note: &'static str,
+    }
+
+    fn combined_cases() -> Vec<CombinedCase> {
+        vec![
+            CombinedCase {
+                name: "no_establish_needed_allow",
+                policy: policy_from(VALID).unwrap(),
+                baseline: matching_baseline(),
+                observed: matching_observed(),
+                tool: TOOL,
+                args: acme_call(),
+                establish_path: EstablishPath::NoEstablishNeeded,
+                run_outcome: RUN_OUTCOME_NOT_PERFORMED,
+                note: "current complete observation already existed; verdict carrier allows independently",
+            },
+            CombinedCase {
+                name: "established_then_allowed",
+                policy: policy_from(VALID).unwrap(),
+                baseline: matching_baseline(),
+                observed: matching_observed(),
+                tool: TOOL,
+                args: acme_call(),
+                establish_path: EstablishPath::EstablishedThenAllowed,
+                run_outcome: "complete",
+                note: "establish produced a complete current observation and the re-decided call allowed",
+            },
+            CombinedCase {
+                name: "established_then_denied_tool_absent",
+                policy: policy_from(VALID).unwrap(),
+                baseline: matching_baseline(),
+                observed: ObservedToolDigest::CompleteButToolAbsent,
+                tool: TOOL,
+                args: acme_call(),
+                establish_path: EstablishPath::EstablishedThenDenied,
+                run_outcome: "complete",
+                note: "establish completed but the tool remained absent; verdict carrier denies",
+            },
+            CombinedCase {
+                name: "establish_timed_out_immediate_deny",
+                policy: policy_from(VALID).unwrap(),
+                baseline: matching_baseline(),
+                observed: ObservedToolDigest::NoCompleteManifest,
+                tool: TOOL,
+                args: acme_call(),
+                establish_path: EstablishPath::ImmediateDeny,
+                run_outcome: "timed_out",
+                note: "establish was attempted but failed to complete; original fail-closed verdict stands",
+            },
+            CombinedCase {
+                name: "ambiguous_immediate_deny_no_establish",
+                policy: policy_from(VALID).unwrap(),
+                baseline: matching_baseline(),
+                observed: ObservedToolDigest::Ambiguous,
+                tool: TOOL,
+                args: acme_call(),
+                establish_path: EstablishPath::ImmediateDeny,
+                run_outcome: RUN_OUTCOME_NOT_PERFORMED,
+                note: "ambiguous observation is denied without establish; establish cannot resolve ambiguity",
+            },
+            CombinedCase {
+                name: "baseline_missing_immediate_deny_no_establish",
+                policy: policy_from(VALID).unwrap(),
+                baseline: baseline_with("github.other_tool", APPROVED),
+                observed: matching_observed(),
+                tool: TOOL,
+                args: acme_call(),
+                establish_path: EstablishPath::ImmediateDeny,
+                run_outcome: RUN_OUTCOME_NOT_PERFORMED,
+                note: "establish only supplies current observation; it never supplies a missing baseline",
+            },
+            CombinedCase {
+                name: "drifted_immediate_deny_no_establish",
+                policy: policy_from(VALID).unwrap(),
+                baseline: matching_baseline(),
+                observed: ObservedToolDigest::Present("sha256:something-else".to_string()),
+                tool: TOOL,
+                args: acme_call(),
+                establish_path: EstablishPath::ImmediateDeny,
+                run_outcome: RUN_OUTCOME_NOT_PERFORMED,
+                note: "establish cannot clear real digest drift; the drift verdict stands",
+            },
+        ]
+    }
+
+    fn combined_record(c: &CombinedCase) -> Value {
+        let decision = decide(&c.policy, &c.baseline, &c.observed, c.tool, &c.args);
+        json!({
+            "case": c.name,
+            "note": c.note,
+            "enforcement_decision": decision_record(&c.policy, &decision, c.tool, &c.args),
+            "manifest_establish": build_manifest_establish_record(
+                c.establish_path,
+                decision.action_class.as_deref(),
+                c.run_outcome,
+            ),
+        })
+    }
+
+    fn combined_document() -> Value {
+        let records: Vec<Value> = combined_cases().iter().map(combined_record).collect();
+        let mismatch_decision_case = CombinedCase {
+            name: "consumer_negative_control_established_then_allowed_with_deny_verdict",
+            policy: policy_from(VALID).unwrap(),
+            baseline: matching_baseline(),
+            observed: ObservedToolDigest::NoCompleteManifest,
+            tool: TOOL,
+            args: acme_call(),
+            establish_path: EstablishPath::EstablishedThenAllowed,
+            run_outcome: "complete",
+            note: "consumer-only negative control: records are individually valid, but the journey must not be promoted into a verdict",
+        };
+        json!({
+            "schema_contract": "assay.combined_carrier_acceptance.v0",
+            "generated_by": "assay crates/assay-mcp-server enforce::decision_record + proxy::establish::build_manifest_establish_record (combined_carrier_acceptance_fixture)",
+            "note": "Combined acceptance fixture for consumers. Verdict lives only in enforcement_decision; manifest_establish is journey/diagnostic only. Consumer negative controls are intentionally not live producer scenarios.",
+            "records": records,
+            "consumer_negative_controls": [
+                combined_record(&mismatch_decision_case),
+            ],
+        })
+    }
+
+    #[test]
+    fn combined_carrier_acceptance_fixture() {
+        let generated = combined_document();
+        let path = combined_fixture_path();
+
+        if std::env::var("ASSAY_UPDATE_GOLDEN").is_ok() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let pretty = serde_json::to_string_pretty(&generated).unwrap();
+            std::fs::write(&path, format!("{pretty}\n")).unwrap();
+        }
+
+        let committed_text = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+            panic!(
+                "missing {}; regenerate with ASSAY_UPDATE_GOLDEN=1",
+                path.display()
+            )
+        });
+        let committed: Value = serde_json::from_str(&committed_text).unwrap();
+        assert_eq!(
+            committed, generated,
+            "the committed combined-carrier fixture is stale; regenerate with ASSAY_UPDATE_GOLDEN=1"
+        );
+
+        let records = generated["records"].as_array().unwrap();
+        assert_eq!(records.len(), 7);
+        for entry in records
+            .iter()
+            .chain(generated["consumer_negative_controls"].as_array().unwrap())
+        {
+            let decision = &entry["enforcement_decision"];
+            let establish = &entry["manifest_establish"];
+            assert_eq!(decision["schema"], "assay.enforcement_decision.v0");
+            assert_eq!(establish["schema"], establish::MANIFEST_ESTABLISH_SCHEMA);
+            assert!(
+                decision.get("forwarded").is_none(),
+                "{}: decision record must not claim delivery",
+                entry["case"]
+            );
+            assert!(
+                establish.get("decision").is_none() && establish.get("reason").is_none(),
+                "{}: establish carrier must not carry verdict fields",
+                entry["case"]
+            );
+            let decision_text = serde_json::to_string(decision).unwrap();
+            assert!(
+                !decision_text.contains("repo:deploy_key:write"),
+                "{}: declared credential scopes must not leak",
+                entry["case"]
+            );
+            let establish_text = serde_json::to_string(establish).unwrap();
+            for forbidden in [
+                "target_digest",
+                "scope",
+                "token",
+                "credential",
+                "caller",
+                "owner",
+                "repo",
+            ] {
+                assert!(
+                    !establish_text.contains(forbidden),
+                    "{}: manifest_establish must stay journey-only and omit `{forbidden}`",
+                    entry["case"]
+                );
+            }
         }
     }
 }
