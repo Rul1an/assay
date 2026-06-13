@@ -3,7 +3,6 @@
 //! This carrier compares untrusted MCP ToolAnnotations against Assay's own rule-based call
 //! classification. It is deliberately orthogonal to the enforcement verdict: a mismatch is a
 //! conformance signal, never a deny, and a consistent record is not trust certification.
-#![allow(dead_code)]
 
 use assay_mcp_server::tool_decision::{classify, sanitize};
 use serde_json::{json, Value};
@@ -80,8 +79,9 @@ fn push_axis(axes: &mut Vec<&'static str>, axis: &'static str) {
     }
 }
 
-/// Build one record with a `Complete` observation basis and no recorded digest. Convenience for
-/// unit tests that exercise the conformance logic against a known declaration.
+/// Build one record with a `Complete` observation basis and no recorded digest. Test-only
+/// convenience that exercises the conformance logic against a known declaration.
+#[cfg(test)]
 pub fn conformance_for(declared: &DeclaredToolAnnotations, tool_name: &str, args: &Value) -> Value {
     build_tool_annotation_conformance_record(
         ObservationBasis::Complete,

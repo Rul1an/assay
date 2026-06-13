@@ -266,6 +266,30 @@ impl Observer {
         enforce::ObservedToolDigest::CompleteButToolAbsent
     }
 
+    /// The effective per-tool observation for `tool_name`, from the SAME current complete manifest
+    /// the drift gate reads via `observed_tool_digest`: the digest outcome plus, when the tool is
+    /// `Present`, its raw declared `annotations` (`Value::Null` when the tool declared none).
+    /// Read-only. Used by the Increment 5b tool-annotation conformance carrier so it cannot read a
+    /// different manifest view than the verdict did. A non-`Present` digest yields `None`
+    /// annotations: the declared annotations were not observed, so the conformance basis is incomplete.
+    fn effective_tool_observation(
+        &self,
+        tool_name: &str,
+    ) -> (enforce::ObservedToolDigest, Option<Value>) {
+        let digest = self.observed_tool_digest(tool_name);
+        let annotations = if matches!(digest, enforce::ObservedToolDigest::Present(_)) {
+            self.latest_complete.as_ref().and_then(|tools| {
+                tools
+                    .iter()
+                    .find(|t| t.get("name").and_then(|n| n.as_str()) == Some(tool_name))
+                    .map(|t| t.get("annotations").cloned().unwrap_or(Value::Null))
+            })
+        } else {
+            None
+        };
+        (digest, annotations)
+    }
+
     /// Compute the final emission: latest complete wins; otherwise the best observed; otherwise
     /// not_observed. Closes any still-active chain as incomplete first.
     fn finalize(&mut self) -> Emission {
@@ -413,6 +437,7 @@ pub async fn run(
         baseline,
         decision_out,
         establish_out,
+        tool_conformance_out,
         establish_budget,
     } = enforce_inputs;
     let spawned = Command::new(&upstream_command)
@@ -720,7 +745,46 @@ pub async fn run(
                     }
                     None => true,
                 };
-                let records_ok = decision_record_ok && establish_record_ok;
+                // Increment 5b: write the assay.tool_annotation_conformance.v0 carrier AFTER the
+                // verdict and establish carriers. Its OUTCOME is orthogonal to the verdict, but a
+                // requested-record write failure follows the same fail-closed-on-allow evidence rule.
+                // Declared annotations are read from the SAME effective snapshot the decision used.
+                let conformance_record_ok = match &tool_conformance_out {
+                    Some(path) => {
+                        let (eff_digest, eff_annotations) =
+                            observer.lock().await.effective_tool_observation(tool_name);
+                        let basis = if matches!(eff_digest, enforce::ObservedToolDigest::Present(_))
+                        {
+                            annotation_conformance::ObservationBasis::Complete
+                        } else {
+                            annotation_conformance::ObservationBasis::Incomplete
+                        };
+                        let declared = annotation_conformance::extract_declared_annotations(
+                            eff_annotations.as_ref().unwrap_or(&Value::Null),
+                        );
+                        let digest = match &eff_digest {
+                            enforce::ObservedToolDigest::Present(d) => Some(d.as_str()),
+                            _ => None,
+                        };
+                        let record =
+                            annotation_conformance::build_tool_annotation_conformance_record(
+                                basis, &declared, tool_name, digest, call_args,
+                            );
+                        match append_decision_record(path, &record) {
+                            Ok(()) => true,
+                            Err(e) => {
+                                tracing::error!(
+                                    event = "tool_conformance_record_write_failed",
+                                    error = %e,
+                                    path = %path.display()
+                                );
+                                false
+                            }
+                        }
+                    }
+                    None => true,
+                };
+                let records_ok = decision_record_ok && establish_record_ok && conformance_record_ok;
                 if decision.allow && !records_ok {
                     // Fail-closed: never forward an allowed call whose required record(s) we could not write.
                     if let Some(id) = v.get("id") {
