@@ -743,6 +743,122 @@ async fn forward_line<W: AsyncWriteExt + Unpin>(w: &mut W, line: &str) -> std::i
     w.flush().await
 }
 
+/// The detailed result of a proxy-originated establish run. The carrier (`assay.manifest_establish.v0`)
+/// collapses every non-complete variant to `EstablishFailed` per #1659; the runner returns the specific
+/// reason so the wiring (slice 2b) can log/diagnose timeout vs partial vs transport vs upstream error
+/// without expanding the coarse carrier contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // wired into the tools/call path by slice 2b.
+enum EstablishRunOutcome {
+    /// A terminal (no-`nextCursor`) page completed the chain.
+    Complete,
+    /// The total deadline elapsed before any page was received.
+    TimedOut,
+    /// At least one page arrived but the chain did not reach a terminal page within the deadline.
+    Partial,
+    /// Failed to write the synthetic request, or the response channel dropped.
+    TransportError,
+    /// The upstream answered a synthetic request with a JSON-RPC error.
+    ErrorResponse,
+    /// A reserved id was already pending (unreachable with the monotonic counter; fail-closed anyway).
+    RegisterRefused,
+}
+
+impl EstablishRunOutcome {
+    /// Map the detailed run result to the coarse carrier outcome. Only `Complete` is an establish
+    /// success; everything else fails closed.
+    #[allow(dead_code)] // wired into the tools/call path by slice 2b.
+    fn to_carrier(self) -> establish::EstablishOutcome {
+        match self {
+            EstablishRunOutcome::Complete => establish::EstablishOutcome::EstablishedComplete,
+            _ => establish::EstablishOutcome::EstablishFailed,
+        }
+    }
+}
+
+/// Drive a proxy-originated, possibly paginated `tools/list` against the upstream child to establish a
+/// current complete observation, under ONE total deadline across ALL pages (P61e Increment 2 — never a
+/// per-page timeout, so a many-page upstream cannot inflate the budget to `N * timeout`).
+///
+/// Each page is registered with BOTH the observer (`on_client_tools_list`, so the single upstream reader
+/// recognizes the response as a list page and folds it into `latest_complete`) and the registry (so the
+/// reader diverts that response here and suppresses it from the client stream). The cursor chain is
+/// driven to its terminal page; a `nextCursor` response is NEVER enough to claim completion. Fail-closed:
+/// timeout / partial / transport error / upstream error / refused registration all return a non-complete
+/// outcome, and the caller re-runs `decide()` over whatever the observer now holds. The `PendingEstablish`
+/// guard reclaims each page's registry entry on every outcome, so a non-responsive upstream cannot grow
+/// the map. Wired into the tools/call path by slice 2b.
+#[allow(dead_code)] // wired into the tools/call path by slice 2b.
+async fn run_establish<W: AsyncWriteExt + Unpin>(
+    child_stdin: &mut W,
+    registry: &relay_routing::EstablishRegistry,
+    observer: &Arc<Mutex<Observer>>,
+    id_counter: &std::sync::atomic::AtomicU64,
+    budget: std::time::Duration,
+) -> EstablishRunOutcome {
+    use std::sync::atomic::Ordering;
+    let deadline = tokio::time::Instant::now() + budget;
+    let mut cursor: Option<String> = None;
+    let mut pages_received: u32 = 0;
+    // A timeout before any page is TimedOut; after at least one page it is Partial.
+    let timed_out = |pages: u32| {
+        if pages > 0 {
+            EstablishRunOutcome::Partial
+        } else {
+            EstablishRunOutcome::TimedOut
+        }
+    };
+    loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return timed_out(pages_received);
+        }
+        let remaining = deadline - now;
+        let n = id_counter.fetch_add(1, Ordering::Relaxed);
+        let id = relay_routing::mint_reserved_id(&n.to_string());
+        // Register the synthetic request with the observer (cursor/no-cursor) BEFORE writing, so the
+        // reader recognizes the response as a list page, and with the registry so it is diverted.
+        observer
+            .lock()
+            .await
+            .on_client_tools_list(Some(&Value::String(id.clone())), cursor.is_some());
+        let (guard, rx) = match registry.register(id.clone()) {
+            Some(pair) => pair,
+            None => return EstablishRunOutcome::RegisterRefused,
+        };
+        let mut req = serde_json::Map::new();
+        req.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
+        req.insert("id".to_string(), Value::String(id.clone()));
+        req.insert(
+            "method".to_string(),
+            Value::String("tools/list".to_string()),
+        );
+        if let Some(c) = &cursor {
+            req.insert("params".to_string(), json!({ "cursor": c }));
+        }
+        let line = Value::Object(req).to_string();
+        if forward_line(child_stdin, &line).await.is_err() {
+            return EstablishRunOutcome::TransportError; // guard drops on return -> entry reclaimed
+        }
+        let resp = relay_routing::await_establish(rx, remaining).await;
+        drop(guard); // reclaim the pending entry on every outcome (success, timeout, or error)
+        let resp = match resp {
+            Some(v) => v,
+            None => return timed_out(pages_received),
+        };
+        if resp.get("error").is_some() {
+            return EstablishRunOutcome::ErrorResponse;
+        }
+        pages_received += 1;
+        match resp.pointer("/result/nextCursor").and_then(|c| c.as_str()) {
+            Some(next) if !next.is_empty() => {
+                cursor = Some(next.to_string());
+            }
+            _ => return EstablishRunOutcome::Complete,
+        }
+    }
+}
+
 /// Upstream unavailable: never forward, never fabricate. Answer every client request with a
 /// proxy-originated failure until the client closes stdin.
 async fn degraded_loop(reason: &str) {
@@ -846,5 +962,112 @@ mod tests {
             obs.observed_tool_digest("github.add_deploy_key"),
             enforce::ObservedToolDigest::CompleteButToolAbsent
         ));
+    }
+
+    // --- run_establish orchestration (P61e Increment 2 slice 2a) ---
+
+    #[tokio::test]
+    async fn run_establish_paginates_to_complete_and_updates_observer() {
+        use std::sync::atomic::AtomicU64;
+        use tokio::io::{AsyncBufReadExt, BufReader};
+
+        let observer = Arc::new(Mutex::new(Observer::default()));
+        let registry = relay_routing::EstablishRegistry::default();
+        let counter = AtomicU64::new(1);
+        // run_establish writes its tools/list requests to `wr`; the fake reader consumes them from `rd`.
+        let (mut wr, rd) = tokio::io::duplex(8192);
+
+        // Fake upstream reader: mimic the real single reader (tap observer, then divert+resolve), over a
+        // two-page cursor chain. Page 1 carries a nextCursor; page 2 is terminal.
+        let fake_reader = {
+            let observer = observer.clone();
+            let registry = registry.clone();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(rd).lines();
+                let id1 = req_id(&lines.next_line().await.unwrap().unwrap());
+                let page1 = json!({
+                    "id": id1,
+                    "result": {"tools": [tool("github.create_deploy_key")], "nextCursor": "cursor-2"}
+                });
+                observer.lock().await.on_upstream_response(&page1);
+                assert!(
+                    registry.resolve(&id1, page1),
+                    "page 1 must be a pending establish id"
+                );
+                let id2 = req_id(&lines.next_line().await.unwrap().unwrap());
+                let page2 = json!({"id": id2, "result": {"tools": [tool("github.list_repos")]}});
+                observer.lock().await.on_upstream_response(&page2);
+                assert!(
+                    registry.resolve(&id2, page2),
+                    "page 2 must be a pending establish id"
+                );
+            })
+        };
+
+        let outcome = run_establish(
+            &mut wr,
+            &registry,
+            &observer,
+            &counter,
+            std::time::Duration::from_secs(2),
+        )
+        .await;
+        fake_reader.await.unwrap();
+
+        assert_eq!(outcome, EstablishRunOutcome::Complete);
+        assert_eq!(
+            outcome.to_carrier(),
+            establish::EstablishOutcome::EstablishedComplete
+        );
+        // The observer now holds a current complete manifest folded from both pages.
+        assert!(matches!(
+            observer
+                .lock()
+                .await
+                .observed_tool_digest("github.create_deploy_key"),
+            enforce::ObservedToolDigest::Present(_)
+        ));
+        // No pending entries leaked.
+        assert!(!registry.is_pending("assay-establish-1"));
+        assert!(!registry.is_pending("assay-establish-2"));
+    }
+
+    #[tokio::test]
+    async fn run_establish_times_out_fail_closed_and_leaves_no_pending() {
+        use std::sync::atomic::AtomicU64;
+
+        let observer = Arc::new(Mutex::new(Observer::default()));
+        let registry = relay_routing::EstablishRegistry::default();
+        let counter = AtomicU64::new(1);
+        // Keep the read half alive (so the write succeeds) but never resolve -> the per-operation
+        // timeout elapses and establish fails closed.
+        let (mut wr, _rd) = tokio::io::duplex(8192);
+
+        let outcome = run_establish(
+            &mut wr,
+            &registry,
+            &observer,
+            &counter,
+            std::time::Duration::from_millis(20),
+        )
+        .await;
+
+        // No page ever arrived, so this is TimedOut (not Partial), and it fails closed at the carrier.
+        assert_eq!(outcome, EstablishRunOutcome::TimedOut);
+        assert_eq!(
+            outcome.to_carrier(),
+            establish::EstablishOutcome::EstablishFailed
+        );
+        assert!(
+            !registry.is_pending("assay-establish-1"),
+            "a timed-out establish must reclaim its pending entry"
+        );
+    }
+
+    fn req_id(line: &str) -> String {
+        serde_json::from_str::<Value>(line).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
     }
 }
