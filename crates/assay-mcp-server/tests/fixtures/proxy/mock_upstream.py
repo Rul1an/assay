@@ -34,12 +34,17 @@ def _send(obj):
     sys.stdout.flush()
 
 
-def _tool(name, description="echoes input", input_schema=None):
-    return {
+def _tool(name, description="echoes input", input_schema=None, annotations=None):
+    tool = {
         "name": name,
         "description": description,
         "inputSchema": input_schema if input_schema is not None else {"type": "object"},
     }
+    # Only attach `annotations` when declared, so an undeclared tool projects to a null annotations
+    # field (never an empty object) and reproduces the existing committed digests verbatim.
+    if annotations is not None:
+        tool["annotations"] = annotations
+    return tool
 
 
 def _result(mid, tools, next_cursor=None):
@@ -60,6 +65,21 @@ _P60A_TOOLS = [
     ),
 ]
 
+# The same canonical tools as p60a, but github.add_deploy_key DECLARES readOnlyHint:true while the call
+# is still a create/mutating action. The annotation rides into the per-tool projection (and so the
+# tool_digest), so the live conformance-mismatch e2e must pin an approved baseline carrying this SAME
+# annotated digest: the drift gate then allows the call while the conformance carrier records a
+# `mismatched` (declared read-only, observed mutating) signal — the core non-correlation property.
+_P60A_READONLY_ANNOTATION_TOOLS = [
+    _tool("search", "does a thing", {"type": "object"}),
+    _tool(
+        "github.add_deploy_key",
+        "Add a deploy key",
+        {"type": "object", "required": ["owner", "repo"]},
+        annotations={"readOnlyHint": True},
+    ),
+]
+
 
 def _handle_tools_list(mid, cursor):
     if MODE == "malformed":
@@ -68,6 +88,8 @@ def _handle_tools_list(mid, cursor):
         sys.stdout.flush()
     elif MODE == "p60a":
         _result(mid, _P60A_TOOLS)
+    elif MODE == "p60a_readonly_annotation":
+        _result(mid, _P60A_READONLY_ANNOTATION_TOOLS)
     elif MODE == "paginated":
         if cursor is None:
             _result(mid, [_tool("alpha")], next_cursor="c1")
