@@ -8,7 +8,9 @@ pure producer contract. 5b wires it into the enforcing proxy.
 Capture the declared MCP tool annotation hints from the observed `tools/list` snapshot, and emit one
 `assay.tool_annotation_conformance.v0` record per enforced `tools/call`, beside the existing
 `assay.enforcement_decision.v0` (verdict) and `assay.manifest_establish.v0` (journey) carriers. The
-conformance carrier stays orthogonal: it never changes the verdict and never gates the call.
+conformance carrier stays orthogonal: its outcome never changes the verdict and never gates the call
+(an evidence-write failure can still fail closed before delivery, like the other carriers; see
+record-write ordering below).
 
 ## Grounding and future hook
 
@@ -74,9 +76,12 @@ When `--tool-conformance-out <path>` is set, the proxy writes one NDJSON record 
 
 ## Non-correlation
 
-The conformance record is computed at the `tools/call` boundary and never changes the verdict or
-gates the call. It covers the call, not any asynchronous task execution a server may start.
-UI-driven tool calls route through the same call path and are covered without special handling.
+The conformance outcome is computed at the `tools/call` boundary: the record contents never change
+the verdict, and a mismatch never gates the call. A failure to write a requested record is a separate
+evidence-integrity rule that can fail closed before delivery, the same rule the other carriers follow
+(see record-write ordering). It covers the call, not any asynchronous task execution a server may
+start. UI-driven tool calls route through the same call path and are covered without special
+handling.
 
 ## Slices
 
@@ -101,7 +106,7 @@ UI-driven tool calls route through the same call path and are covered without sp
 
 ## Non-claims
 
-- tool annotations are untrusted hints, read only to compare, never to decide privilege or the
+- tool annotations are untrusted hints, read-only to compare, never to decide privilege or the
   verdict;
 - a `consistent` record is not trust certification; a `mismatched` record is not a maliciousness
   verdict or an enforcement decision;
