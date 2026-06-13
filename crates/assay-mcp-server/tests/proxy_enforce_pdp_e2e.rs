@@ -1359,4 +1359,11 @@ fn conformance_write_failure_on_allow_fails_closed() {
         "enforcement_record_write_failed"
     );
     shutdown(child, stdin);
+    // The silent-unrecorded-forward regression this guards: a fail-closed allow must never reach
+    // the upstream.
+    let methods = read_methods(&log);
+    assert!(
+        !methods.contains(&"tools/call".to_string()),
+        "a fail-closed allow must never reach the upstream: {methods:?}"
+    );
 }

@@ -666,12 +666,19 @@ pub async fn run(
                     )
                     .await;
                     run_outcome = Some(outcome);
-                    let observed2 = observer.lock().await.observed_tool_digest(tool_name);
-                    decision = enforce::decide(policy, baseline, &observed2, tool_name, call_args);
+                }
+                // Capture ONE effective observation after establish has run or been skipped, and decide
+                // the FINAL verdict from it. The Increment 5b conformance carrier reads its declared
+                // annotations and digest from this SAME snapshot, so the verdict and the carrier can
+                // never diverge even if the upstream reader mutates observer state between two reads.
+                let (eff_digest, eff_annotations) =
+                    observer.lock().await.effective_tool_observation(tool_name);
+                decision = enforce::decide(policy, baseline, &eff_digest, tool_name, call_args);
+                if run_outcome.is_some() {
                     tracing::info!(
                         event = "establish_attempted",
                         tool = %tool_name,
-                        run_outcome = ?outcome,
+                        run_outcome = ?run_outcome,
                         effective_decision = if decision.allow { "allow" } else { "deny" },
                         reason = decision.reason,
                         note = "pre-call manifest-establish; verdict lives in enforcement_decision.v0"
@@ -748,11 +755,9 @@ pub async fn run(
                 // Increment 5b: write the assay.tool_annotation_conformance.v0 carrier AFTER the
                 // verdict and establish carriers. Its OUTCOME is orthogonal to the verdict, but a
                 // requested-record write failure follows the same fail-closed-on-allow evidence rule.
-                // Declared annotations are read from the SAME effective snapshot the decision used.
+                // `eff_digest` / `eff_annotations` are the SAME snapshot the verdict was decided from.
                 let conformance_record_ok = match &tool_conformance_out {
                     Some(path) => {
-                        let (eff_digest, eff_annotations) =
-                            observer.lock().await.effective_tool_observation(tool_name);
                         let basis = if matches!(eff_digest, enforce::ObservedToolDigest::Present(_))
                         {
                             annotation_conformance::ObservationBasis::Complete
@@ -793,7 +798,7 @@ pub async fn run(
                                 id.clone(),
                                 PROXY_FAILED,
                                 "enforcement_record_write_failed",
-                                "a required enforcement/establish record could not be written; call not forwarded",
+                                "a required evidence record (enforcement_decision / manifest_establish / tool_annotation_conformance) could not be written; call not forwarded",
                             ));
                         }
                     }
