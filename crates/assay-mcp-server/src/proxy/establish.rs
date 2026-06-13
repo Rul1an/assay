@@ -378,4 +378,146 @@ mod tests {
         );
         assert_eq!(EstablishPath::ImmediateDeny.as_str(), "immediate_deny");
     }
+
+    // --- producer contract fixture (Increment 3, Task 1) ---
+    //
+    // The canonical `assay.manifest_establish.v0` producer output, one record per stable
+    // (establish_path, run_outcome) shape, regenerated from `build_manifest_establish_record` (the real
+    // producer helper) so a consumer (Rul1an/plimsoll) can vendor it verbatim. After an intentional
+    // producer change: ASSAY_UPDATE_GOLDEN=1 cargo test -p assay-mcp-server --bins
+    // manifest_establish_contract_fixture.
+
+    fn manifest_establish_contract_fixture_path() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/manifest_establish_contract.v0.json")
+    }
+
+    fn manifest_establish_contract_records() -> Vec<Value> {
+        // `establish_attempted` is DERIVED from run_outcome by the builder, so each record's pair is
+        // coherent by construction. Covers every stable shape, including the two distinct immediate_deny
+        // pairs (not_performed = ambiguous/no attempt; a failed run_outcome = re-list attempted-but-failed).
+        let cases: &[(&str, EstablishPath, Option<&str>, &str)] = &[
+            (
+                "no_establish_needed",
+                EstablishPath::NoEstablishNeeded,
+                Some("github_deploy_key"),
+                "not_performed",
+            ),
+            (
+                "established_then_allowed",
+                EstablishPath::EstablishedThenAllowed,
+                Some("github_deploy_key"),
+                "complete",
+            ),
+            (
+                "established_then_denied",
+                EstablishPath::EstablishedThenDenied,
+                Some("github_deploy_key"),
+                "complete",
+            ),
+            (
+                "immediate_deny",
+                EstablishPath::ImmediateDeny,
+                Some("github_deploy_key"),
+                "not_performed",
+            ),
+            (
+                "unclassified_immediate_deny",
+                EstablishPath::ImmediateDeny,
+                None,
+                "not_performed",
+            ),
+            (
+                "immediate_deny_after_failed_establish",
+                EstablishPath::ImmediateDeny,
+                Some("github_deploy_key"),
+                "timed_out",
+            ),
+        ];
+        cases
+            .iter()
+            .map(|(case, path, action_class, run_outcome)| {
+                json!({
+                    "case": case,
+                    "record": build_manifest_establish_record(*path, *action_class, run_outcome),
+                })
+            })
+            .collect()
+    }
+
+    fn manifest_establish_contract_document() -> Value {
+        json!({
+            "schema_contract": MANIFEST_ESTABLISH_SCHEMA,
+            "generated_by": "assay crates/assay-mcp-server proxy::establish::build_manifest_establish_record (manifest_establish_contract_fixture)",
+            "note": "Canonical producer output, regenerated from build_manifest_establish_record. Consumers vendor this file verbatim. Regenerate with ASSAY_UPDATE_GOLDEN=1.",
+            "records": manifest_establish_contract_records(),
+        })
+    }
+
+    #[test]
+    fn manifest_establish_contract_fixture() {
+        let generated = manifest_establish_contract_document();
+        let path = manifest_establish_contract_fixture_path();
+
+        if std::env::var("ASSAY_UPDATE_GOLDEN").is_ok() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let pretty = serde_json::to_string_pretty(&generated).unwrap();
+            std::fs::write(&path, format!("{pretty}\n")).unwrap();
+        }
+
+        let committed_text = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+            panic!(
+                "missing {}; regenerate with ASSAY_UPDATE_GOLDEN=1",
+                path.display()
+            )
+        });
+        let committed: Value = serde_json::from_str(&committed_text).unwrap();
+        assert_eq!(
+            committed, generated,
+            "the committed manifest-establish contract fixture is stale; regenerate with ASSAY_UPDATE_GOLDEN=1"
+        );
+
+        // Sanity: every record is the v0 carrier, exactly the five journey fields, the derived
+        // establish_attempted invariant holds, and NO verdict/delivery/secret field is present.
+        let records = generated["records"].as_array().unwrap();
+        assert_eq!(records.len(), 6);
+        for entry in records {
+            let rec = &entry["record"];
+            assert_eq!(rec["schema"], json!(MANIFEST_ESTABLISH_SCHEMA));
+            let attempted = rec["establish_attempted"].as_bool().unwrap();
+            let run_outcome = rec["run_outcome"].as_str().unwrap();
+            assert_eq!(
+                attempted,
+                run_outcome != RUN_OUTCOME_NOT_PERFORMED,
+                "establish_attempted must be derived from run_outcome"
+            );
+            let obj = rec.as_object().unwrap();
+            let mut keys: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
+            keys.sort_unstable();
+            assert_eq!(
+                keys,
+                [
+                    "action_class",
+                    "establish_attempted",
+                    "establish_path",
+                    "run_outcome",
+                    "schema"
+                ]
+            );
+            for forbidden in [
+                "decision",
+                "reason",
+                "forwarded",
+                "target_digest",
+                "caller_id",
+                "credential_alias",
+                "scopes",
+            ] {
+                assert!(
+                    rec.get(forbidden).is_none(),
+                    "carrier must not carry `{forbidden}`"
+                );
+            }
+        }
+    }
 }

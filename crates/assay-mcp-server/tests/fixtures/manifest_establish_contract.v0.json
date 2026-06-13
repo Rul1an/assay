@@ -1,0 +1,67 @@
+{
+  "schema_contract": "assay.manifest_establish.v0",
+  "generated_by": "assay crates/assay-mcp-server proxy::establish::build_manifest_establish_record (manifest_establish_contract_fixture)",
+  "note": "Canonical producer output, regenerated from build_manifest_establish_record. Consumers vendor this file verbatim. Regenerate with ASSAY_UPDATE_GOLDEN=1.",
+  "records": [
+    {
+      "case": "no_establish_needed",
+      "record": {
+        "schema": "assay.manifest_establish.v0",
+        "establish_path": "no_establish_needed",
+        "establish_attempted": false,
+        "action_class": "github_deploy_key",
+        "run_outcome": "not_performed"
+      }
+    },
+    {
+      "case": "established_then_allowed",
+      "record": {
+        "schema": "assay.manifest_establish.v0",
+        "establish_path": "established_then_allowed",
+        "establish_attempted": true,
+        "action_class": "github_deploy_key",
+        "run_outcome": "complete"
+      }
+    },
+    {
+      "case": "established_then_denied",
+      "record": {
+        "schema": "assay.manifest_establish.v0",
+        "establish_path": "established_then_denied",
+        "establish_attempted": true,
+        "action_class": "github_deploy_key",
+        "run_outcome": "complete"
+      }
+    },
+    {
+      "case": "immediate_deny",
+      "record": {
+        "schema": "assay.manifest_establish.v0",
+        "establish_path": "immediate_deny",
+        "establish_attempted": false,
+        "action_class": "github_deploy_key",
+        "run_outcome": "not_performed"
+      }
+    },
+    {
+      "case": "unclassified_immediate_deny",
+      "record": {
+        "schema": "assay.manifest_establish.v0",
+        "establish_path": "immediate_deny",
+        "establish_attempted": false,
+        "action_class": null,
+        "run_outcome": "not_performed"
+      }
+    },
+    {
+      "case": "immediate_deny_after_failed_establish",
+      "record": {
+        "schema": "assay.manifest_establish.v0",
+        "establish_path": "immediate_deny",
+        "establish_attempted": true,
+        "action_class": "github_deploy_key",
+        "run_outcome": "timed_out"
+      }
+    }
+  ]
+}
