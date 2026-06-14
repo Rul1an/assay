@@ -49,7 +49,7 @@ impl CoverageAnalyzer {
 
     fn analyze(
         &self,
-        traces: Vec<Vec<PyObject>>,
+        traces: Vec<Vec<Py<PyAny>>>,
         threshold: f64,
         py: Python<'_>,
     ) -> PyResult<String> {
@@ -123,7 +123,7 @@ impl TraceExplainer {
         }
     }
 
-    fn explain(&self, traces: Vec<PyObject>, py: Python<'_>) -> PyResult<String> {
+    fn explain(&self, traces: Vec<Py<PyAny>>, py: Python<'_>) -> PyResult<String> {
         let mut tool_calls = Vec::new();
         for obj in traces {
             let bound = obj.bind(py);
@@ -189,7 +189,7 @@ impl AssayClient {
     /// Raises:
     ///     RuntimeError: If no trace_file was configured or writing fails.
     ///     ValueError: If the trace object cannot be serialized to JSON.
-    fn record_trace(&self, trace: PyObject, py: Python<'_>) -> PyResult<()> {
+    fn record_trace(&self, trace: Py<PyAny>, py: Python<'_>) -> PyResult<()> {
         if let Some(mutex) = &self.writer {
             let mut writer = mutex
                 .lock()
