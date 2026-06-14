@@ -572,11 +572,10 @@ jobs:
 
           **GitHub Action:**
           ```yaml
-          - uses: Rul1an/assay-action@v2
+          - uses: Rul1an/assay-action@v3
             with:
-              policy: policies/agent.yaml
-              traces: traces/
-              min-coverage: 80
+              bundles: ".assay/evidence/*.tar.gz"
+              fail_on: error
           ```
 
           **Manual download:**
