@@ -1,0 +1,5 @@
+DENY no_declared_allowance
+DENY credential_scope_insufficient
+DENY manifest_drifted_since_approval
+ALLOW allow
+ALLOW allow +conformance:mismatched

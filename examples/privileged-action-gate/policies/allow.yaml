@@ -1,0 +1,11 @@
+# Fully declared: github_deploy_key is allowed on acme/prod-app, and the credential carries the
+# scope that action requires. With a matching observed manifest this is the only path that forwards.
+caller:
+  id: "ci-agent"
+upstream_credential:
+  alias: "gh-deploy"
+  scopes: ["repo:deploy_key:write"]
+allowances:
+  - action_class: "github_deploy_key"
+    targets:
+      - { owner: "acme", repo: "prod-app" }
