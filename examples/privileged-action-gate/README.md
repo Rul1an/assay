@@ -41,6 +41,22 @@ worth knowing about; it is evidence, not a denial.
 - observed behaviour is the proxy's classification of the call, not verification of the upstream
   side effect.
 
+## Wire it into a PR gate
+
+Project the decisions to SARIF and upload them to the GitHub Security tab. A denied privileged
+action becomes a SARIF result; a clean run produces none:
+
+```bash
+./sarif.sh enforcement.sarif        # runs the scenarios, writes the SARIF
+# or, from your own decisions stream:
+assay-mcp-server enforcement-sarif --input decisions.ndjson --output enforcement.sarif
+```
+
+`pr-gate.example.yml` is a copy-paste workflow: run your agent under the enforcing proxy, project the
+decisions to SARIF, upload to the Security tab, and fail the PR when any privileged action is denied.
+The PR is **red** when an action is not declared, scoped, and approved, **green** when every action
+passes the gate. The conformance signal stays out of the gate — it is separate evidence, never a deny.
+
 ## How it works
 
 `run.sh` drives `assay-mcp-server proxy-enforce` against `mock_github_mcp.py` for each scenario,

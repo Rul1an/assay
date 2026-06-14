@@ -87,6 +87,17 @@ enum Mode {
         #[arg(long, default_value_t = 5000)]
         manifest_establish_budget_ms: u64,
     },
+    /// Project an `assay.enforcement_decision.v0` NDJSON stream into a SARIF 2.1.0 report for the
+    /// GitHub Security tab. Only deny records become results; allow and non-enforcement records are
+    /// skipped. Reads/writes stdin/stdout when the path is omitted or "-".
+    EnforcementSarif {
+        /// Input NDJSON path of enforcement_decision.v0 records ("-" or omitted = stdin).
+        #[arg(long, default_value = "-")]
+        input: String,
+        /// Output SARIF path ("-" or omitted = stdout).
+        #[arg(long, default_value = "-")]
+        output: String,
+    },
 }
 
 use tracing_subscriber::{fmt, EnvFilter};
@@ -188,6 +199,39 @@ async fn main() -> Result<()> {
                 None,
             )
             .await
+        }
+        Some(Mode::EnforcementSarif { input, output }) => {
+            use assay_mcp_server::enforcement_sarif::enforcement_decisions_to_sarif;
+            use std::io::{Read, Write};
+            let raw = if input == "-" {
+                let mut s = String::new();
+                std::io::stdin().read_to_string(&mut s)?;
+                s
+            } else {
+                std::fs::read_to_string(&input)?
+            };
+            // Tolerant NDJSON: skip blank/unparseable lines rather than abort the projection.
+            let records: Vec<serde_json::Value> = raw
+                .lines()
+                .filter_map(|line| {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        None
+                    } else {
+                        serde_json::from_str::<serde_json::Value>(line).ok()
+                    }
+                })
+                .collect();
+            let sarif = enforcement_decisions_to_sarif(&records);
+            let pretty = serde_json::to_string_pretty(&sarif)?;
+            if output == "-" {
+                let mut stdout = std::io::stdout();
+                stdout.write_all(pretty.as_bytes())?;
+                stdout.write_all(b"\n")?;
+            } else {
+                std::fs::write(&output, format!("{pretty}\n"))?;
+            }
+            Ok(())
         }
         None => {
             tracing::info!(
