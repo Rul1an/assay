@@ -1,0 +1,80 @@
+name: MCP Registry Publish
+
+# Publish the rendered release/server.json to the official MCP registry
+# (registry.modelcontextprotocol.io) via GitHub OIDC.
+#
+# release.yml already RENDERS server.json and attaches it as a release asset, but never publishes
+# it, so the registry entry lags the current release (the last manual publish was 3.9.2). This adds
+# the missing publish step. It is a small standalone workflow on purpose: it does not touch the
+# release build pipeline, it auto-publishes on every release, and it can refresh an existing release
+# on demand via workflow_dispatch.
+#
+# GitHub OIDC proves the io.github.<owner> namespace belongs to this repository owner, so no stored
+# registry secret is needed.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to (re)publish, e.g. v3.25.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write # OIDC: proves the io.github.<owner> namespace == repository owner
+
+concurrency:
+  group: mcp-registry-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to MCP registry
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "release" ]; then
+            tag="${{ github.event.release.tag_name }}"
+          else
+            tag="${{ inputs.version }}"
+          fi
+          case "$tag" in
+            v[0-9]*) ;;
+            *) echo "::error::expected a vX.Y.Z release tag, got '$tag'"; exit 1 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Download server.json from the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "${{ steps.tag.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern server.json \
+            --dir .
+          test -s server.json
+
+      - name: Install mcp-publisher
+        run: |
+          set -euo pipefail
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_${os}_${arch}.tar.gz" \
+            | tar xz mcp-publisher
+          chmod +x mcp-publisher
+
+      - name: Validate server.json
+        run: ./mcp-publisher validate server.json
+
+      - name: Login (GitHub OIDC) and publish
+        run: |
+          set -euo pipefail
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish server.json
