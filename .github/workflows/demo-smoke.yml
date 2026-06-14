@@ -1,0 +1,34 @@
+name: Demo smoke (privileged-action-gate)
+
+# The privileged-action-gate example is the README hero. Its GIF is rendered locally from the
+# checked-in demo.tape (the deterministic source); rendered GIFs vary by font/environment, so this
+# workflow does NOT re-render or assert byte-equality. It smoke-tests the DEMO ITSELF: the example
+# still runs offline and still produces the exact verdicts + reason codes in expected-output.txt,
+# so the hero can never silently drift from the producer. Regenerate the GIF locally with:
+#   vhs examples/privileged-action-gate/demo.tape
+
+on:
+  pull_request:
+    paths:
+      - "examples/privileged-action-gate/**"
+      - "README.md"
+      - ".github/workflows/demo-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Run + verify the example
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - name: Build assay-mcp-server
+        run: cargo build -q -p assay-mcp-server
+      - name: Smoke-test the example (verdicts match expected-output.txt)
+        run: examples/privileged-action-gate/verify.sh

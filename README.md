@@ -160,6 +160,31 @@ Assay does **not** ship a primary aggregate trust score or a `safe/unsafe` badge
 
 ## See It Work
 
+An agent tries a privileged action — `github.add_deploy_key` — through the enforcing proxy. Assay
+decides per call **before it forwards** and writes a replayable evidence record. One command,
+offline, against a local mock (no real credentials, no real GitHub call):
+
+![privileged-action PR-gate demo](examples/privileged-action-gate/demo.gif)
+
+```bash
+cd examples/privileged-action-gate && ./run.sh
+```
+
+```
+❌ DENY   github.add_deploy_key  reason=no_declared_allowance
+❌ DENY   github.add_deploy_key  reason=credential_scope_insufficient
+❌ DENY   github.add_deploy_key  reason=manifest_drifted_since_approval
+✅ ALLOW  github.add_deploy_key  reason=allow
+✅ ALLOW  github.add_deploy_key  reason=allow  + conformance: mismatched (declared_read_only_observed_mutating)  [separate, non-gating]
+```
+
+A deny is fail-closed caution, not a verdict on intent; an allow is the decision to forward, never
+proof the action happened. The last line is **separate** evidence — the tool declared itself
+read-only while the observed call was mutating — recorded beside the verdict, never a gate. Full
+walkthrough: [examples/privileged-action-gate/](examples/privileged-action-gate/).
+
+### A simpler first example
+
 [![SafeSkill 72/100](https://img.shields.io/badge/SafeSkill-72%2F100_Passes%20with%20Notes-yellow)](https://safeskill.dev/scan/rul1an-assay)
 
 ```bash
