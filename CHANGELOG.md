@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.26.0] - 2026-06-14
+
+### Added
+- `assay-mcp-server enforcement-sarif`, projecting an `assay.enforcement_decision.v0` NDJSON stream
+  into a SARIF 2.1.0 report for the GitHub Security tab. Only `deny` records become results (level
+  `warning`); `allow` and non-enforcement records are skipped, and the projection reads only the
+  sanitized fields the record already exposes (tool name, action class, reason, drift state), never
+  raw arguments or targets. Reads stdin and writes stdout when paths are omitted.
+- A copy-paste pull-request gate workflow template and a runnable, offline privileged-action example
+  under `examples/privileged-action-gate`: an agent's `tools/call` runs through the enforcing proxy,
+  the per-call decisions are projected to SARIF, and the PR fails when any privileged action is
+  denied. The conformance signal stays out of the gate.
+- Publishing of the MCP registry `server.json` via GitHub OIDC on release, so the registry entry
+  tracks each published version.
+
+### Fixed
+- The `enforcement-sarif` projection now nests the finding under `locations[].physicalLocation` with a
+  nested logical location, instead of placing `logicalLocations` directly on a SARIF result. The
+  previous shape was rejected by GitHub code scanning whenever a report carried at least one deny, so
+  a deny never reached the Security tab; a zero-deny report uploaded cleanly, which is why it was
+  missed. A regression test now forbids the rejected shape.
+
 ## [3.25.0] - 2026-06-13
 
 ### Added
