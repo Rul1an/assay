@@ -27,13 +27,6 @@ ignore = [
     # rsa: transitive via jsonwebtoken (assay-mcp-server). No safe upgrade; timing sidechannel.
     # JWT verification is server-side; accept risk for MCP auth until jsonwebtoken/rsa offer a fix.
     "RUSTSEC-2023-0071",
-    # pyo3 OOB reads in BoundList/TupleIterator nth/nth_back (large n). Not reachable: assay-python-sdk
-    # iterates via .iter().enumerate(), never .nth() on pyo3 iterators. Fix = pyo3 0.29 migration (#1651);
-    # remove this ignore when that lands.
-    "RUSTSEC-2026-0176",
-    # pyo3 missing `Sync` bound on `PyCFunction::new_closure` closures. Not reachable: assay never calls
-    # PyCFunction::new_closure. TEMPORARY ignore until the pyo3 0.29 migration (#1651) — remove it then.
-    "RUSTSEC-2026-0177",
 ]
 
 # =============================================================================
