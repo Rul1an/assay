@@ -11,6 +11,7 @@ on:
   pull_request:
     paths:
       - "examples/privileged-action-gate/**"
+      - "README.md"
       - ".github/workflows/demo-smoke.yml"
   workflow_dispatch:
 

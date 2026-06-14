@@ -1,7 +1,8 @@
 # VHS tape — the deterministic source for the privileged-action-gate demo GIF.
 # Render: `vhs examples/privileged-action-gate/demo.tape` from the repo root (needs a built
-# assay-mcp-server). CI regenerates and smoke-tests the render; the GIF itself may vary by
-# font/environment, so CI verifies the render runs and that verify.sh passes, not byte-equality.
+# assay-mcp-server). The GIF is regenerated locally from this tape, not in CI — rendered GIFs vary
+# by font/environment. CI instead smoke-tests the demo behaviour (verify.sh), so the hero cannot
+# silently drift from the producer.
 Output examples/privileged-action-gate/demo.gif
 
 Set Shell bash
