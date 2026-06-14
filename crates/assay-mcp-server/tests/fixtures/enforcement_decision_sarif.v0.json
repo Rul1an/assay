@@ -36,10 +36,23 @@
           "message": {
             "text": "Privileged tool action denied before forward: github.add_deploy_key (github_deploy_key) — no_declared_allowance"
           },
-          "logicalLocations": [
+          "locations": [
             {
-              "name": "github.add_deploy_key",
-              "kind": "function"
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".assay/enforcement-decisions.ndjson"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "github.add_deploy_key",
+                  "kind": "function"
+                }
+              ]
             }
           ],
           "properties": {
@@ -56,10 +69,23 @@
           "message": {
             "text": "Privileged tool action denied before forward: github.add_deploy_key (github_deploy_key) — credential_scope_insufficient"
           },
-          "logicalLocations": [
+          "locations": [
             {
-              "name": "github.add_deploy_key",
-              "kind": "function"
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".assay/enforcement-decisions.ndjson"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "github.add_deploy_key",
+                  "kind": "function"
+                }
+              ]
             }
           ],
           "properties": {
@@ -76,10 +102,23 @@
           "message": {
             "text": "Privileged tool action denied before forward: github.add_deploy_key (github_deploy_key) — manifest_drifted_since_approval"
           },
-          "logicalLocations": [
+          "locations": [
             {
-              "name": "github.add_deploy_key",
-              "kind": "function"
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".assay/enforcement-decisions.ndjson"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "github.add_deploy_key",
+                  "kind": "function"
+                }
+              ]
             }
           ],
           "properties": {

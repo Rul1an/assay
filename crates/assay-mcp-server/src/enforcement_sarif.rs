@@ -14,6 +14,11 @@ use serde_json::{json, Value};
 /// The carrier this projection consumes.
 pub const ENFORCEMENT_DECISION_SCHEMA: &str = "assay.enforcement_decision.v0";
 
+/// Synthetic, repo-relative location for each finding. An enforcement decision is not tied to a
+/// source line, but GitHub code scanning requires every result to carry a `locations` entry, so each
+/// result points at this stable synthetic path and names the tool as a logical location.
+const SYNTHETIC_LOCATION_URI: &str = ".assay/enforcement-decisions.ndjson";
+
 /// Project enforcement-decision records into a SARIF 2.1.0 document. Deterministic; only `deny`
 /// records produce results.
 pub fn enforcement_decisions_to_sarif(records: &[Value]) -> Value {
@@ -51,7 +56,13 @@ pub fn enforcement_decisions_to_sarif(records: &[Value]) -> Value {
                     action_class.unwrap_or("unclassified")
                 )
             },
-            "logicalLocations": [{ "name": tool, "kind": "function" }],
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": { "uri": SYNTHETIC_LOCATION_URI },
+                    "region": { "startLine": 1, "startColumn": 1 }
+                },
+                "logicalLocations": [{ "name": tool, "kind": "function" }]
+            }],
             "properties": {
                 "decision": "deny",
                 "reason": reason,
@@ -194,6 +205,32 @@ mod tests {
                 "SARIF must not leak `{forbidden}`"
             );
         }
+    }
+
+    #[test]
+    fn result_location_shape_is_github_valid() {
+        // GitHub's SARIF uploader rejects `logicalLocations` placed directly on a result; it must
+        // nest inside `locations[].location` next to a `physicalLocation`. This guards the exact
+        // shape GitHub once rejected (a deny that failed to upload to the Security tab).
+        let recs = vec![deny(
+            "no_declared_allowance",
+            "github.add_deploy_key",
+            "github_deploy_key",
+            "not_evaluated",
+        )];
+        let sarif = enforcement_decisions_to_sarif(&recs);
+        let result = &sarif["runs"][0]["results"][0];
+        assert!(
+            result.get("logicalLocations").is_none(),
+            "logicalLocations must not sit directly on a result"
+        );
+        let loc = &result["locations"][0];
+        assert_eq!(
+            loc["physicalLocation"]["artifactLocation"]["uri"],
+            SYNTHETIC_LOCATION_URI
+        );
+        assert_eq!(loc["physicalLocation"]["region"]["startLine"], 1);
+        assert_eq!(loc["logicalLocations"][0]["name"], "github.add_deploy_key");
     }
 
     #[test]
