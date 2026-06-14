@@ -9,7 +9,7 @@ against a local mock: no real credentials, no real GitHub call.
 ./run.sh
 ```
 
-```
+```text
 Privileged action under review: github.add_deploy_key on acme/prod-app
 
 ❌ DENY   github.add_deploy_key  reason=no_declared_allowance
@@ -47,7 +47,7 @@ worth knowing about; it is evidence, not a denial.
 varying only the policy (`policies/`), the approved baseline (`baseline-approved*.json`), and the
 mock's tool surface (`MOCK_MODE`). It sends one `tools/call`; the proxy's bounded pre-call establish
 observes the surface, the PDP decides, and the decision is written to a temporary
-`enforcement_decision.v0` record that `run.sh` reads back. No client `tools/list` is sent, so the
+`assay.enforcement_decision.v0` record that `run.sh` reads back. No client `tools/list` is sent, so the
 observation comes only from the establish step and the run is deterministic.
 
 `./verify.sh` asserts the verdicts and reason codes match `expected-output.txt`.
