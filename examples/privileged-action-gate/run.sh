@@ -43,6 +43,14 @@ run() {
         --enforcement-decision-out "$dec" \
         --tool-conformance-out "$conf" \
         >/dev/null 2>&1 || true
+  # The proxy denies per call (its own non-zero on a denied call is expected and tolerated above),
+  # but a missing decision record means the proxy did not run at all — fail loudly rather than print
+  # a silent, verdict-less demo with exit 0.
+  if [ ! -s "$dec" ]; then
+    echo "ERROR: no enforcement_decision record for ${policy} / ${baseline} / MOCK_MODE=${mode}" >&2
+    echo "  (build assay-mcp-server, and ensure python3 is on PATH for the mock)" >&2
+    exit 1
+  fi
   "$PY" - "$dec" "$conf" <<'PYEOF'
 import json, sys
 dec, conf = sys.argv[1], sys.argv[2]
