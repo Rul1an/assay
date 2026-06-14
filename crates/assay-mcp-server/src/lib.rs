@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod cache;
 pub mod config;
+pub mod enforcement_sarif;
 pub mod manifest_observed;
 pub mod security;
 pub mod server;

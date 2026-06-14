@@ -1,0 +1,96 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "assay",
+          "informationUri": "https://github.com/Rul1an/assay",
+          "rules": [
+            {
+              "id": "no_declared_allowance",
+              "shortDescription": {
+                "text": "No allowance declares this privileged action for the caller"
+              }
+            },
+            {
+              "id": "credential_scope_insufficient",
+              "shortDescription": {
+                "text": "The declared credential scope does not cover the action"
+              }
+            },
+            {
+              "id": "manifest_drifted_since_approval",
+              "shortDescription": {
+                "text": "The observed tool surface changed since approval"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "no_declared_allowance",
+          "level": "warning",
+          "message": {
+            "text": "Privileged tool action denied before forward: github.add_deploy_key (github_deploy_key) — no_declared_allowance"
+          },
+          "logicalLocations": [
+            {
+              "name": "github.add_deploy_key",
+              "kind": "function"
+            }
+          ],
+          "properties": {
+            "decision": "deny",
+            "reason": "no_declared_allowance",
+            "action_class": "github_deploy_key",
+            "drift_state": "not_evaluated",
+            "fail_closed": true
+          }
+        },
+        {
+          "ruleId": "credential_scope_insufficient",
+          "level": "warning",
+          "message": {
+            "text": "Privileged tool action denied before forward: github.add_deploy_key (github_deploy_key) — credential_scope_insufficient"
+          },
+          "logicalLocations": [
+            {
+              "name": "github.add_deploy_key",
+              "kind": "function"
+            }
+          ],
+          "properties": {
+            "decision": "deny",
+            "reason": "credential_scope_insufficient",
+            "action_class": "github_deploy_key",
+            "drift_state": "not_evaluated",
+            "fail_closed": true
+          }
+        },
+        {
+          "ruleId": "manifest_drifted_since_approval",
+          "level": "warning",
+          "message": {
+            "text": "Privileged tool action denied before forward: github.add_deploy_key (github_deploy_key) — manifest_drifted_since_approval"
+          },
+          "logicalLocations": [
+            {
+              "name": "github.add_deploy_key",
+              "kind": "function"
+            }
+          ],
+          "properties": {
+            "decision": "deny",
+            "reason": "manifest_drifted_since_approval",
+            "action_class": "github_deploy_key",
+            "drift_state": "drifted",
+            "fail_closed": true
+          }
+        }
+      ]
+    }
+  ]
+}
