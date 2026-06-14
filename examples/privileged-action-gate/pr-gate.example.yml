@@ -36,7 +36,12 @@ jobs:
       - name: Project decisions to SARIF
         run: assay-mcp-server enforcement-sarif --input decisions.ndjson --output enforcement.sarif
 
+      # Fork PRs run with a read-only GITHUB_TOKEN, so the Security-tab upload is skipped there.
+      # To get SARIF on fork PRs, split this into a pull_request job that uploads the SARIF as an
+      # artifact plus a workflow_run job (security-events: write) that publishes it. The deny gate
+      # below still runs on fork PRs regardless.
       - name: Upload SARIF to the Security tab
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         uses: github/codeql-action/upload-sarif@439137e1b50c27ba9e2f9befc93e43091b449c34 # v3
         with:
           sarif_file: enforcement.sarif

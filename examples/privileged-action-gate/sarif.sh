@@ -47,5 +47,11 @@ if [ ! -s "$DEC" ]; then
 fi
 
 "$ASSAY" enforcement-sarif --input "$DEC" --output "$OUT"
-n="$("$PY" -c "import json,sys; print(len(json.load(open('$OUT'))['runs'][0]['results']))")"
+# Pass $OUT as argv (not interpolated into the program text) to avoid any code injection.
+n="$("$PY" -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["runs"][0]["results"]))' "$OUT")"
+# The five scenarios produce exactly three denies; fail if that ever stops holding.
+if [ "$n" != "3" ]; then
+  echo "ERROR: expected 3 SARIF results (the three deny axes), got $n" >&2
+  exit 1
+fi
 echo "wrote $OUT ($n SARIF result(s) — one per denied privileged action)"
