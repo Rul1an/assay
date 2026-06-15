@@ -18,7 +18,12 @@ use super::config_path::{detect_config_path, McpClient};
 
 pub async fn run(args: InventoryArgs) -> anyhow::Result<i32> {
     let mut servers = scan_config_files(super::discover::get_config_search_paths());
-    servers.extend(scan_processes());
+    // --no-process-scan scopes the inventory to config sources only. We then report process_scan as
+    // not_scanned (we did not look), never partial: honest about coverage and deterministic (no
+    // host-dependent process rows), which is what reproducible inventory review needs.
+    if !args.no_process_scan {
+        servers.extend(scan_processes());
+    }
 
     // Coverage is declared honestly per source. A config client whose path exists was scanned
     // (complete); a resolvable-but-absent path is not_scanned (we cannot claim it is absent); an
@@ -43,7 +48,7 @@ pub async fn run(args: InventoryArgs) -> anyhow::Result<i32> {
 
     let coverage = ScannerCoverage {
         config_sources,
-        process_scan: process_scan_coverage(),
+        process_scan: process_scan_coverage(args.no_process_scan),
         network_scan: CoverageState::Unsupported,
     };
 
@@ -58,12 +63,17 @@ pub async fn run(args: InventoryArgs) -> anyhow::Result<i32> {
     Ok(crate::exit_codes::EXIT_SUCCESS)
 }
 
-/// Process discovery is a cmdline substring heuristic (`mcp-server` / `@modelcontextprotocol/server` /
-/// `mcp_server`), not an exhaustive enumeration, so it is `Partial`: it can surface a running server but
-/// can never support an absence claim ("no MCP process is running"). Keep it `Partial` until the
-/// detector is exhaustive.
-fn process_scan_coverage() -> CoverageState {
-    CoverageState::Partial
+/// Process-scan coverage. With `--no-process-scan` the scan is scoped out, so coverage is
+/// `NotScanned` (we did not look) - honest and absence-unsupporting. Otherwise process discovery is a
+/// cmdline substring heuristic (`mcp-server` / `@modelcontextprotocol/server` / `mcp_server`), not an
+/// exhaustive enumeration, so it is `Partial`: it can surface a running server but can never support an
+/// absence claim. Neither state ever claims absence; only a `Complete` scan could.
+fn process_scan_coverage(no_process_scan: bool) -> CoverageState {
+    if no_process_scan {
+        CoverageState::NotScanned
+    } else {
+        CoverageState::Partial
+    }
 }
 
 #[cfg(test)]
@@ -72,7 +82,13 @@ mod tests {
 
     #[test]
     fn heuristic_process_coverage_never_supports_absence() {
-        assert_eq!(process_scan_coverage(), CoverageState::Partial);
-        assert!(!process_scan_coverage().supports_absence_claim());
+        assert_eq!(process_scan_coverage(false), CoverageState::Partial);
+        assert!(!process_scan_coverage(false).supports_absence_claim());
+    }
+
+    #[test]
+    fn scoped_out_process_coverage_is_not_scanned_and_unsupporting() {
+        assert_eq!(process_scan_coverage(true), CoverageState::NotScanned);
+        assert!(!process_scan_coverage(true).supports_absence_claim());
     }
 }

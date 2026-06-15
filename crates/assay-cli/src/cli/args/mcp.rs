@@ -149,4 +149,10 @@ pub struct InventoryArgs {
     /// Write the assay.mcp_server_inventory.v0 carrier to this path ("-" or omitted = stdout).
     #[arg(long, default_value = "-")]
     pub out: String,
+
+    /// Scope the scan to config files only: skip running-process discovery and report
+    /// process_scan coverage as not_scanned (honest: not looked), never partial. Deterministic,
+    /// useful for CI and reproducible inventory review.
+    #[arg(long)]
+    pub no_process_scan: bool,
 }
