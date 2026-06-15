@@ -43,7 +43,7 @@ pub async fn run(args: InventoryArgs) -> anyhow::Result<i32> {
 
     let coverage = ScannerCoverage {
         config_sources,
-        process_scan: CoverageState::Complete,
+        process_scan: process_scan_coverage(),
         network_scan: CoverageState::Unsupported,
     };
 
@@ -56,4 +56,23 @@ pub async fn run(args: InventoryArgs) -> anyhow::Result<i32> {
         std::fs::write(&args.out, rendered)?;
     }
     Ok(crate::exit_codes::EXIT_SUCCESS)
+}
+
+/// Process discovery is a cmdline substring heuristic (`mcp-server` / `@modelcontextprotocol/server` /
+/// `mcp_server`), not an exhaustive enumeration, so it is `Partial`: it can surface a running server but
+/// can never support an absence claim ("no MCP process is running"). Keep it `Partial` until the
+/// detector is exhaustive.
+fn process_scan_coverage() -> CoverageState {
+    CoverageState::Partial
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn heuristic_process_coverage_never_supports_absence() {
+        assert_eq!(process_scan_coverage(), CoverageState::Partial);
+        assert!(!process_scan_coverage().supports_absence_claim());
+    }
 }

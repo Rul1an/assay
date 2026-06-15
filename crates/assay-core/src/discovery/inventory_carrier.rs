@@ -35,6 +35,14 @@ pub enum CoverageState {
     Unsupported,
 }
 
+impl CoverageState {
+    /// Only a `Complete` scan of a source can support an absence claim for it. Any other state means
+    /// "not observed is not absent" - in particular a heuristic scanner must never be `Complete`.
+    pub fn supports_absence_claim(self) -> bool {
+        matches!(self, CoverageState::Complete)
+    }
+}
+
 /// What the scan actually covered, declared honestly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScannerCoverage {
@@ -44,7 +52,7 @@ pub struct ScannerCoverage {
 }
 
 fn digest(value: &Value) -> String {
-    let bytes = serde_jcs::to_vec(value).unwrap_or_default();
+    let bytes = serde_jcs::to_vec(value).expect("inventory carrier values are JSON-serializable");
     format!("sha256:{}", hex::encode(Sha256::digest(&bytes)))
 }
 
@@ -131,7 +139,15 @@ pub fn to_inventory_carrier_v0(servers: &[DiscoveredServer], coverage: &ScannerC
     let mut rows: Vec<(String, String, Value)> = servers
         .iter()
         .map(|server| {
-            let (transport, command, args) = transport_parts(&server.transport);
+            let (transport, mut command, args) = transport_parts(&server.transport);
+            // A running-process row carries no transport command, but the source has the cmdline.
+            // Hash that (still never raw) so a consumer can identify/compare what was observed rather
+            // than seeing every process row collapse to the same empty digest.
+            if command.is_empty() {
+                if let DiscoverySource::RunningProcess { cmdline, .. } = &server.source {
+                    command = cmdline.clone();
+                }
+            }
             let source = source_id(&server.source);
             let row = json!({
                 "server_id": server.id,
@@ -336,5 +352,59 @@ mod tests {
         assert!(!serde_json::to_string(&carrier)
             .unwrap()
             .contains("localhost:8080"));
+    }
+
+    fn process_server(id: &str, pid: u32, cmdline: &str) -> DiscoveredServer {
+        DiscoveredServer {
+            id: id.to_string(),
+            name: None,
+            source: DiscoverySource::RunningProcess {
+                pid,
+                cmdline: cmdline.to_string(),
+                started_at: None,
+                user: None,
+            },
+            transport: Transport::Unknown,
+            status: ServerStatus::Running,
+            policy_status: PolicyStatus::Unmanaged,
+            auth: AuthStatus::Unknown,
+            env_vars: Vec::new(),
+            risk_hints: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn process_rows_hash_distinct_cmdlines_without_leaking_them() {
+        let servers = vec![
+            process_server("proc-1", 1, "node /opt/a/mcp-server.js --port 1"),
+            process_server("proc-2", 2, "node /opt/b/mcp-server.js --port 2"),
+        ];
+        let carrier = to_inventory_carrier_v0(&servers, &fixture_coverage());
+        let rows = carrier["servers"].as_array().unwrap();
+        // Distinct cmdlines -> distinct command digests (not the empty-input collision).
+        assert_ne!(rows[0]["command_digest"], rows[1]["command_digest"]);
+        assert!(rows[0]["command_digest"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:"));
+        // ...and the raw cmdline never appears in the carrier.
+        let blob = serde_json::to_string(&carrier).unwrap();
+        assert!(!blob.contains("/opt/a/mcp-server.js") && !blob.contains("--port"));
+    }
+
+    #[test]
+    fn only_complete_coverage_supports_an_absence_claim() {
+        assert!(CoverageState::Complete.supports_absence_claim());
+        for state in [
+            CoverageState::Partial,
+            CoverageState::NotScanned,
+            CoverageState::Unavailable,
+            CoverageState::Unsupported,
+        ] {
+            assert!(
+                !state.supports_absence_claim(),
+                "{state:?} must not support an absence claim"
+            );
+        }
     }
 }
