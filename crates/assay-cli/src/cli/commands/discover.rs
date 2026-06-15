@@ -243,7 +243,7 @@ fn print_table(inv: &Inventory) {
     );
 }
 
-fn get_config_search_paths() -> Vec<PathBuf> {
+pub(crate) fn get_config_search_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(home) = dirs::home_dir() {
         // macOS / Linux standard paths

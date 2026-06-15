@@ -1,0 +1,36 @@
+{
+  "schema": "assay.mcp_server_inventory.v0",
+  "scanner_coverage": {
+    "config_sources": {
+      "claude_desktop": "complete",
+      "cursor": "not_scanned"
+    },
+    "process_scan": "unavailable",
+    "network_scan": "unsupported"
+  },
+  "servers": [
+    {
+      "server_id": "github-tools",
+      "source": "claude_desktop_mcp_config",
+      "transport": "stdio",
+      "command_digest": "sha256:9d141730c5ec2795cac99c12762aa305d81be46e8a684f574ba9c5f5facb7f15",
+      "args_digest": "sha256:7faeae878e6cac29aca30b80eb9f8e43c8c6960b651f58ae5a73e71818265399",
+      "credential_indicators": [
+        "env:GITHUB_TOKEN"
+      ],
+      "observed_state": "observed"
+    },
+    {
+      "server_id": "notes",
+      "source": "claude_desktop_mcp_config",
+      "transport": "stdio",
+      "command_digest": "sha256:0f61677887e8c665271ec70d4b9e18812f4528206ad3161dc70021a0b1bda2e3",
+      "args_digest": "sha256:4e8d21aed32ac767fefcb108b79d84361146887a774a2d1092a326ca65e3e1e1",
+      "credential_indicators": [],
+      "observed_state": "observed"
+    }
+  ],
+  "non_claims": [
+    "absence from inventory is not absence from environment unless scanner coverage is complete"
+  ]
+}

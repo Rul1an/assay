@@ -17,6 +17,8 @@ pub enum McpSub {
     ConfigPath(ConfigPathArgs),
     /// Discover MCP servers on this machine
     Discover(DiscoverArgs),
+    /// Emit the assay.mcp_server_inventory.v0 carrier (coverage-honest, hashed command/args)
+    Inventory(InventoryArgs),
     /// Kill or terminate MCP server processes
     Kill(KillArgs),
     /// Sign and verify MCP tool definitions
@@ -140,4 +142,11 @@ pub struct DiscoverArgs {
     /// Policy file to use for configuration
     #[arg(long)]
     pub policy: Option<PathBuf>,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct InventoryArgs {
+    /// Write the assay.mcp_server_inventory.v0 carrier to this path ("-" or omitted = stdout).
+    #[arg(long, default_value = "-")]
+    pub out: String,
 }
