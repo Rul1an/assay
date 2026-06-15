@@ -1,5 +1,15 @@
 use crate::model::{TestResultRow, TestStatus};
+use crate::render_safety::{render_safe, Sink, MAX_RENDER_FIELD};
 use std::path::Path;
+
+/// Render-safety (MCP01a): an untrusted result `message` carries model content, so it is rendered
+/// through the render-safety pipeline (redact, control-strip, bound) which also performs the JUnit
+/// XML-escape itself. This REPLACES the plain [`escape`] call on these fields rather than wrapping it,
+/// so the value is never XML-escaped twice. Assay/config-owned `suite` and `test_id` keep plain
+/// [`escape`] (XML-escape only, no redaction).
+fn safe_message(s: &str) -> String {
+    render_safe(Sink::Junit, s, MAX_RENDER_FIELD)
+}
 
 pub fn write_junit(suite: &str, results: &[TestResultRow], out: &Path) -> anyhow::Result<()> {
     let mut xml = String::new();
@@ -12,9 +22,10 @@ pub fn write_junit(suite: &str, results: &[TestResultRow], out: &Path) -> anyhow
         xml.push_str(&format!(r#"  <testcase name="{}">"#, escape(&r.test_id)));
         match r.status {
             TestStatus::Pass | TestStatus::AllowedOnError => {}
-            TestStatus::Skipped => {
-                xml.push_str(&format!(r#"<skipped message="{}"/>"#, escape(&r.message)))
-            }
+            TestStatus::Skipped => xml.push_str(&format!(
+                r#"<skipped message="{}"/>"#,
+                safe_message(&r.message)
+            )),
             TestStatus::Warn | TestStatus::Flaky | TestStatus::Unstable => {
                 // Use clear warning label in system-out
                 let label = match r.status {
@@ -25,15 +36,17 @@ pub fn write_junit(suite: &str, results: &[TestResultRow], out: &Path) -> anyhow
                 xml.push_str(&format!(
                     r#"<system-out>{}: {}</system-out>"#,
                     label,
-                    escape(&r.message)
+                    safe_message(&r.message)
                 ));
             }
-            TestStatus::Fail => {
-                xml.push_str(&format!(r#"<failure message="{}"/>"#, escape(&r.message)))
-            }
-            TestStatus::Error => {
-                xml.push_str(&format!(r#"<error message="{}"/>"#, escape(&r.message)))
-            }
+            TestStatus::Fail => xml.push_str(&format!(
+                r#"<failure message="{}"/>"#,
+                safe_message(&r.message)
+            )),
+            TestStatus::Error => xml.push_str(&format!(
+                r#"<error message="{}"/>"#,
+                safe_message(&r.message)
+            )),
         }
         xml.push_str("</testcase>\n");
     }
