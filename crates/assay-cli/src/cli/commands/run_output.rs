@@ -264,6 +264,19 @@ pub(crate) fn write_extended_run_json(
         }
     }
 
+    // Render-safety (MCP01a-5 completion): the on-disk run.json carries the same untrusted result
+    // `message` / `details.*` content as the `--format json` stdout renderer
+    // (`assay_core::report::json::render_json`), but this file writer serialized the raw artifacts
+    // directly and so bypassed redaction. Route the assembled document through the same render-safety
+    // walk so the file matches the stdout renderer: as a record sink it redacts and control-strips
+    // but does not truncate (`usize::MAX`); assay-owned keys (ids, status, reason_code, exit_code,
+    // digests, seeds) stay byte-stable. `resolution.message` is redacted like any other `message`.
+    let v = assay_core::render_safety::render_details_safe(
+        assay_core::render_safety::Sink::Json,
+        &v,
+        usize::MAX,
+    );
+
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -328,6 +341,67 @@ pub(crate) fn export_baseline(
     b.save(path)?;
     eprintln!("exported baseline to {}", path.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod run_json_render_safety_tests {
+    use super::write_extended_run_json;
+    use crate::exit_codes::{ReasonCode, RunOutcome};
+    use assay_core::model::{TestResultRow, TestStatus};
+    use assay_core::report::RunArtifacts;
+
+    /// MCP01a-5 regression: the on-disk run.json file writer must redact untrusted result
+    /// `message` / `details.*` content, matching the `--format json` stdout renderer. This guards the
+    /// gap where `write_extended_run_json` serialized raw artifacts and leaked secrets to the file.
+    #[test]
+    fn on_disk_run_json_is_render_safe() {
+        let secret = format!("ghp_{}", "A".repeat(36));
+        let artifacts = RunArtifacts {
+            run_id: 7,
+            suite: "owned-suite".into(),
+            results: vec![TestResultRow {
+                test_id: "t_owned".into(),
+                status: TestStatus::Fail,
+                score: Some(0.0),
+                cached: false,
+                message: format!("failed: leaked {secret}"),
+                details: serde_json::json!({
+                    "prompt": format!("ask {secret} alice@example.com"),
+                    "metrics": { "must_contain": { "details": { "message": format!("missing {secret}") } } },
+                }),
+                duration_ms: Some(3),
+                fingerprint: Some("fp_owned".into()),
+                skip_reason: None,
+                attempts: None,
+                error_policy_applied: None,
+            }],
+            order_seed: None,
+            runner_clone_ms: None,
+        };
+        let outcome = RunOutcome::from_reason(ReasonCode::ETestFailed, None, None);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.json");
+        write_extended_run_json(&artifacts, &outcome, &path, None).unwrap();
+        let out = std::fs::read_to_string(&path).unwrap();
+
+        // Structure preserved + hostile values gone, markers present.
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(!out.contains(&secret), "on-disk run.json leaked secret");
+        assert!(!out.contains("ghp_"));
+        assert!(
+            !out.contains("alice@example.com"),
+            "on-disk run.json leaked pii"
+        );
+        assert!(
+            out.contains("<redacted:"),
+            "on-disk run.json fired no redaction"
+        );
+        // Assay-owned fields stay byte-stable.
+        assert_eq!(parsed["suite"], "owned-suite");
+        assert_eq!(parsed["results"][0]["test_id"], "t_owned");
+        assert_eq!(parsed["results"][0]["fingerprint"], "fp_owned");
+        assert_eq!(parsed["reason_code"], "E_TEST_FAILED");
+    }
 }
 
 #[cfg(test)]
