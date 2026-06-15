@@ -1,0 +1,297 @@
+{
+  "schema_contract": "assay.mcp_server_inventory.v0",
+  "note": "M1 MCP inventory coverage / shadow-server zoo. Expected findings are derived from declared server allowlist, observed inventory rows, and scanner coverage. The corpus proves coverage-honesty only; it is not a host scanner implementation.",
+  "cases": [
+    {
+      "case": "approved_stdio_server_in_config",
+      "declared_servers": [
+        {
+          "server_id": "github-tools",
+          "transport": "stdio",
+          "command_digest": "sha256:cmd-github-v1",
+          "args_digest": "sha256:args-github-v1"
+        }
+      ],
+      "inventory": {
+        "schema": "assay.mcp_server_inventory.v0",
+        "scanner_coverage": {
+          "config_sources": {
+            "vscode": "complete"
+          },
+          "process_scan": "not_applicable",
+          "network_scan": "not_applicable"
+        },
+        "servers": [
+          {
+            "server_id": "github-tools",
+            "source": "vscode_mcp_config",
+            "transport": "stdio",
+            "command_digest": "sha256:cmd-github-v1",
+            "args_digest": "sha256:args-github-v1",
+            "observed_state": "observed"
+          }
+        ],
+        "non_claims": [
+          "absence from inventory is not absence from environment unless scanner coverage is complete"
+        ]
+      },
+      "expected_findings": []
+    },
+    {
+      "case": "unapproved_stdio_server_in_config",
+      "declared_servers": [],
+      "inventory": {
+        "schema": "assay.mcp_server_inventory.v0",
+        "scanner_coverage": {
+          "config_sources": {
+            "vscode": "complete"
+          },
+          "process_scan": "not_applicable",
+          "network_scan": "not_applicable"
+        },
+        "servers": [
+          {
+            "server_id": "unknown-tools",
+            "source": "vscode_mcp_config",
+            "transport": "stdio",
+            "command_digest": "sha256:cmd-unknown-v1",
+            "args_digest": "sha256:args-unknown-v1",
+            "observed_state": "observed"
+          }
+        ],
+        "non_claims": [
+          "absence from inventory is not absence from environment unless scanner coverage is complete"
+        ]
+      },
+      "expected_findings": [
+        "shadow_mcp_server_observed"
+      ]
+    },
+    {
+      "case": "approved_server_command_drift",
+      "declared_servers": [
+        {
+          "server_id": "github-tools",
+          "transport": "stdio",
+          "command_digest": "sha256:cmd-github-v1",
+          "args_digest": "sha256:args-github-v1"
+        }
+      ],
+      "inventory": {
+        "schema": "assay.mcp_server_inventory.v0",
+        "scanner_coverage": {
+          "config_sources": {
+            "vscode": "complete"
+          },
+          "process_scan": "not_applicable",
+          "network_scan": "not_applicable"
+        },
+        "servers": [
+          {
+            "server_id": "github-tools",
+            "source": "vscode_mcp_config",
+            "transport": "stdio",
+            "command_digest": "sha256:cmd-github-v2",
+            "args_digest": "sha256:args-github-v1",
+            "observed_state": "observed"
+          }
+        ],
+        "non_claims": [
+          "absence from inventory is not absence from environment unless scanner coverage is complete"
+        ]
+      },
+      "expected_findings": [
+        "mcp_server_command_drift"
+      ]
+    },
+    {
+      "case": "approved_server_args_drift",
+      "declared_servers": [
+        {
+          "server_id": "github-tools",
+          "transport": "stdio",
+          "command_digest": "sha256:cmd-github-v1",
+          "args_digest": "sha256:args-github-v1"
+        }
+      ],
+      "inventory": {
+        "schema": "assay.mcp_server_inventory.v0",
+        "scanner_coverage": {
+          "config_sources": {
+            "vscode": "complete"
+          },
+          "process_scan": "not_applicable",
+          "network_scan": "not_applicable"
+        },
+        "servers": [
+          {
+            "server_id": "github-tools",
+            "source": "vscode_mcp_config",
+            "transport": "stdio",
+            "command_digest": "sha256:cmd-github-v1",
+            "args_digest": "sha256:args-github-debug",
+            "observed_state": "observed"
+          }
+        ],
+        "non_claims": [
+          "absence from inventory is not absence from environment unless scanner coverage is complete"
+        ]
+      },
+      "expected_findings": [
+        "mcp_server_args_drift"
+      ]
+    },
+    {
+      "case": "duplicate_server_id_different_command",
+      "declared_servers": [
+        {
+          "server_id": "github-tools",
+          "transport": "stdio",
+          "command_digest": "sha256:cmd-github-v1",
+          "args_digest": "sha256:args-github-v1"
+        }
+      ],
+      "inventory": {
+        "schema": "assay.mcp_server_inventory.v0",
+        "scanner_coverage": {
+          "config_sources": {
+            "vscode": "complete",
+            "cursor": "complete"
+          },
+          "process_scan": "not_applicable",
+          "network_scan": "not_applicable"
+        },
+        "servers": [
+          {
+            "server_id": "github-tools",
+            "source": "vscode_mcp_config",
+            "transport": "stdio",
+            "command_digest": "sha256:cmd-github-v1",
+            "args_digest": "sha256:args-github-v1",
+            "observed_state": "observed"
+          },
+          {
+            "server_id": "github-tools",
+            "source": "cursor_mcp_config",
+            "transport": "stdio",
+            "command_digest": "sha256:cmd-github-shadow",
+            "args_digest": "sha256:args-github-v1",
+            "observed_state": "observed"
+          }
+        ],
+        "non_claims": [
+          "absence from inventory is not absence from environment unless scanner coverage is complete"
+        ]
+      },
+      "expected_findings": [
+        "duplicate_mcp_server_identity",
+        "mcp_server_command_drift"
+      ]
+    },
+    {
+      "case": "http_mcp_endpoint_not_in_allowlist",
+      "declared_servers": [],
+      "inventory": {
+        "schema": "assay.mcp_server_inventory.v0",
+        "scanner_coverage": {
+          "config_sources": {
+            "vscode": "complete"
+          },
+          "process_scan": "not_applicable",
+          "network_scan": "complete"
+        },
+        "servers": [
+          {
+            "server_id": "local-http-tools",
+            "source": "http_endpoint",
+            "transport": "http",
+            "command_digest": "sha256:http-endpoint-localhost-8080",
+            "args_digest": "sha256:http-endpoint-empty",
+            "observed_state": "observed"
+          }
+        ],
+        "non_claims": [
+          "absence from inventory is not absence from environment unless scanner coverage is complete"
+        ]
+      },
+      "expected_findings": [
+        "shadow_mcp_server_observed"
+      ]
+    },
+    {
+      "case": "server_only_visible_in_process_scan",
+      "declared_servers": [],
+      "inventory": {
+        "schema": "assay.mcp_server_inventory.v0",
+        "scanner_coverage": {
+          "config_sources": {
+            "vscode": "not_scanned"
+          },
+          "process_scan": "complete",
+          "network_scan": "not_applicable"
+        },
+        "servers": [
+          {
+            "server_id": "process-discovered-tools",
+            "source": "process_scan",
+            "transport": "stdio",
+            "command_digest": "sha256:cmd-process-discovered",
+            "args_digest": "sha256:args-process-discovered",
+            "observed_state": "observed"
+          }
+        ],
+        "non_claims": [
+          "absence from inventory is not absence from environment unless scanner coverage is complete"
+        ]
+      },
+      "expected_findings": [
+        "shadow_mcp_server_observed",
+        "mcp_inventory_coverage_incomplete"
+      ]
+    },
+    {
+      "case": "config_source_not_scanned",
+      "declared_servers": [],
+      "inventory": {
+        "schema": "assay.mcp_server_inventory.v0",
+        "scanner_coverage": {
+          "config_sources": {
+            "vscode": "complete",
+            "cursor": "not_scanned"
+          },
+          "process_scan": "not_applicable",
+          "network_scan": "not_applicable"
+        },
+        "servers": [],
+        "non_claims": [
+          "absence from inventory is not absence from environment unless scanner coverage is complete"
+        ]
+      },
+      "expected_findings": [
+        "mcp_inventory_coverage_incomplete"
+      ]
+    },
+    {
+      "case": "no_servers_found_but_coverage_incomplete",
+      "declared_servers": [],
+      "inventory": {
+        "schema": "assay.mcp_server_inventory.v0",
+        "scanner_coverage": {
+          "config_sources": {
+            "vscode": "not_scanned",
+            "cursor": "not_scanned"
+          },
+          "process_scan": "unavailable",
+          "network_scan": "not_applicable"
+        },
+        "servers": [],
+        "non_claims": [
+          "absence from inventory is not absence from environment unless scanner coverage is complete"
+        ]
+      },
+      "expected_findings": [
+        "mcp_inventory_coverage_incomplete"
+      ]
+    }
+  ]
+}
