@@ -90,10 +90,18 @@ fn hostile_artifacts() -> RunArtifacts {
         "ok".to_string(),
         serde_json::json!({ "prompt": "benign prompt", "response": "all good" }),
     );
+    // AllowedOnError carries the underlying provider/config error in its message (rendered raw on the
+    // console before this slice). Its message must be render-safe everywhere it surfaces.
+    let allowed = row(
+        "t_allowed",
+        TestStatus::AllowedOnError,
+        format!("allowed by error policy: provider 500 {}", secret()),
+        serde_json::json!({}),
+    );
     RunArtifacts {
         run_id: 1,
         suite: SUITE.to_string(),
-        results: vec![fail, error, pass],
+        results: vec![fail, error, pass, allowed],
         order_seed: None,
         runner_clone_ms: None,
     }
@@ -136,6 +144,16 @@ fn run_json_record_sink_is_render_safe() {
 
     // Benign content under an untrusted key survives (no over-redaction).
     assert_eq!(parsed["results"][0]["details"]["expected"], BENIGN);
+
+    // Every status's top-level message is render-safe, incl. AllowedOnError (the console paths at
+    // console.rs:165/211 route the same message through safe_msg).
+    let allowed_msg = parsed["results"][3]["message"].as_str().unwrap();
+    assert_eq!(parsed["results"][3]["test_id"], "t_allowed");
+    assert!(
+        !allowed_msg.contains("ghp_"),
+        "AllowedOnError message leaked secret"
+    );
+    assert!(allowed_msg.contains("<redacted:github-token>"));
 
     // Anti-evasion: a control byte glued inside the token still redacts to a clean placeholder.
     assert_eq!(

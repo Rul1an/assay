@@ -162,7 +162,7 @@ pub fn print_summary(results: &[TestResultRow], explain_skip: bool) {
                 };
                 eprintln!("{} {:<20} {}  {}", icon, r.test_id, score_str, duration);
                 if r.status == TestStatus::AllowedOnError {
-                    eprintln!("    (Allowed by error policy: {})", r.message);
+                    eprintln!("    (Allowed by error policy: {})", safe_msg(&r.message));
                 }
             }
             TestStatus::Skipped => {
@@ -208,7 +208,7 @@ pub fn print_summary(results: &[TestResultRow], explain_skip: bool) {
                     }
                     eprintln!("    To rerun: assay run --refresh-cache");
                 } else {
-                    eprintln!("⏭️  {:<20} SKIPPED ({})", r.test_id, r.message);
+                    eprintln!("⏭️  {:<20} SKIPPED ({})", r.test_id, safe_msg(&r.message));
                 }
             }
             TestStatus::Flaky => {
