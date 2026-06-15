@@ -24,7 +24,7 @@
       "terminal_control_leak_count": 0,
       "redaction_before_truncation": true,
       "benign_preserved": true,
-      "sink_specific_encoding": "json_string"
+      "sink_specific_encoding": "json_serializer"
     },
     {
       "sink": "sarif",
@@ -36,7 +36,7 @@
       "terminal_control_leak_count": 0,
       "redaction_before_truncation": true,
       "benign_preserved": true,
-      "sink_specific_encoding": "json_string"
+      "sink_specific_encoding": "json_serializer"
     },
     {
       "sink": "junit",

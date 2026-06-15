@@ -6,7 +6,9 @@
 //! on THIS conformance, not on the capture receipt (which proves only that capture redaction ran).
 
 use super::corpus::{corpus_digest, BENIGN, HOSTILE};
-use super::{render_safe, render_truncate_first_unsafe, Sink, MAX_RENDER_FIELD};
+use super::{
+    has_residual_control, render_safe, render_truncate_first_unsafe, Sink, MAX_RENDER_FIELD,
+};
 use serde::{Deserialize, Serialize};
 
 pub const SCHEMA: &str = "assay.render_safety_conformance.v0";
@@ -39,13 +41,16 @@ fn sink_conformance(sink: Sink) -> SinkConformance {
 
     for probe in HOSTILE.iter() {
         let out = render_safe(sink, &probe.input, MAX_RENDER_FIELD);
-        if out.contains(&probe.needle) {
-            match probe.class {
-                "secret" => raw_secret_leak_count += 1,
-                "pii" => raw_pii_leak_count += 1,
-                "control" => terminal_control_leak_count += 1,
-                _ => {}
+        match probe.class {
+            // Control: reject ANY residual terminal/bidi control, not just this probe's needle.
+            "control" => {
+                if has_residual_control(&out) {
+                    terminal_control_leak_count += 1;
+                }
             }
+            "secret" if out.contains(&probe.needle) => raw_secret_leak_count += 1,
+            "pii" if out.contains(&probe.needle) => raw_pii_leak_count += 1,
+            _ => {}
         }
     }
 

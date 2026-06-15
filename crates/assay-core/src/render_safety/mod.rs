@@ -47,11 +47,14 @@ impl Sink {
         }
     }
 
-    /// The name of the sink-specific final encoding.
+    /// The name of the sink-specific final encoding. Structured sinks (json/sarif/otel) return the
+    /// value-safe text and let their serializer escape it (`*_serializer` / `attribute_value`); the
+    /// adapter must not pre-escape or a downstream serde serializer would double-encode. String-built
+    /// sinks (junit/markdown) neutralize active markup in-adapter.
     pub fn encoding(self) -> &'static str {
         match self {
             Sink::Stdout => "terminal_safe",
-            Sink::Json | Sink::Sarif => "json_string",
+            Sink::Json | Sink::Sarif => "json_serializer",
             Sink::Junit => "xml_escape",
             Sink::Markdown => "markdown_neutralize",
             Sink::Otel => "attribute_value",
@@ -128,6 +131,21 @@ pub fn strip_control(input: &str) -> String {
     CONTROL_RE.replace_all(&no_esc, "\u{fffd}").into_owned()
 }
 
+/// True if any terminal-control or Unicode bidi-formatting character remains (tab/newline/CR are
+/// allowed). The conformance leak predicate for control-class probes: stronger than matching a single
+/// corpus needle, it rejects ANY residual control in rendered output.
+pub fn has_residual_control(s: &str) -> bool {
+    s.chars().any(|c| {
+        c == '\u{7f}'
+            || ('\u{00}'..='\u{08}').contains(&c)
+            || c == '\u{0b}'
+            || c == '\u{0c}'
+            || ('\u{0e}'..='\u{1f}').contains(&c)
+            || ('\u{202a}'..='\u{202e}').contains(&c)
+            || ('\u{2066}'..='\u{2069}').contains(&c)
+    })
+}
+
 fn bound(text: &str, max_len: usize) -> String {
     if text.chars().count() <= max_len {
         return text.to_string();
@@ -154,13 +172,14 @@ fn markdown_neutralize(s: &str) -> String {
 }
 
 /// The sink-specific final encode, applied to already-redacted, control-stripped, bounded text.
+///
+/// Structured sinks (stdout/otel/json/sarif) return the value-safe text unchanged: the value is
+/// placed into a JSON/attribute structure whose serializer (serde) applies escaping, so pre-escaping
+/// here would double-encode. String-built sinks (junit/markdown) neutralize active markup themselves
+/// because their output is often concatenated, not serializer-escaped.
 fn encode(sink: Sink, text: &str) -> String {
     match sink {
-        Sink::Stdout | Sink::Otel => text.to_string(),
-        // JSON / SARIF messages are JSON strings: emit the escaped string literal (with quotes).
-        Sink::Json | Sink::Sarif => {
-            serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string())
-        }
+        Sink::Stdout | Sink::Otel | Sink::Json | Sink::Sarif => text.to_string(),
         Sink::Junit => xml_escape(text),
         Sink::Markdown => markdown_neutralize(text),
     }
@@ -200,8 +219,7 @@ mod tests {
     use super::*;
 
     fn has_control(s: &str) -> bool {
-        s.chars()
-            .any(|c| c == '\u{1b}' || c == '\u{07}' || ('\u{202a}'..='\u{202e}').contains(&c))
+        s.contains('\u{1b}') || s.contains('\u{07}') || has_residual_control(s)
     }
 
     #[test]
@@ -271,6 +289,16 @@ mod tests {
     fn sink_encodings_are_distinct_where_expected() {
         assert_eq!(Sink::Junit.encoding(), "xml_escape");
         assert_eq!(Sink::Markdown.encoding(), "markdown_neutralize");
-        assert_eq!(Sink::Sarif.encoding(), "json_string");
+        // Structured sinks defer escaping to their serializer (no in-adapter pre-escape).
+        assert_eq!(Sink::Sarif.encoding(), "json_serializer");
+    }
+
+    #[test]
+    fn structured_sinks_return_unescaped_value_text() {
+        // A benign value with JSON-special chars must come back unescaped, so a downstream serde
+        // serializer does not double-encode it. (Active-markup sinks still neutralize in-adapter.)
+        let v = r#"path "C:\tmp" <ok>"#;
+        assert_eq!(render_safe(Sink::Json, v, MAX_RENDER_FIELD), v);
+        assert!(render_safe(Sink::Junit, v, MAX_RENDER_FIELD).contains("&lt;ok&gt;"));
     }
 }
