@@ -39,9 +39,15 @@ cannot support an absence claim** (not observed is not absent unless coverage is
 ## Usage
 
 ```bash
-assay mcp inventory                 # carrier to stdout
-assay mcp inventory --out inv.json  # carrier to a file
+assay mcp inventory                      # carrier to stdout
+assay mcp inventory --out inv.json       # carrier to a file
+assay mcp inventory --no-process-scan    # config sources only; process_scan = not_scanned
 ```
+
+`--no-process-scan` scopes the scan to config files: it skips running-process discovery and reports
+`process_scan` coverage as `not_scanned` (honest: not looked, never `partial`). This keeps the carrier
+deterministic (no host-dependent process rows), which is what reproducible inventory review and CI
+need. Absence is still never claimed for `not_scanned`.
 
 ## Non-claims
 
