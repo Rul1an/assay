@@ -18,6 +18,12 @@ pub const SCHEMA: &str = "assay.token_passthrough_conformance.v0";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProbedSource {
     pub source: String,
+    /// Always true: a known inbound-credential location the boundary watches.
+    pub probed: bool,
+    /// True only where the tested consuming path actually validates this field as authn. On the
+    /// stdio consuming path the `server.rs` validator consumes the initialize-param auth fields; the
+    /// `http.*` headers are the outbound-forbidden denylist (`SENSITIVE_HEADER_NAMES`) and are
+    /// consumed as inbound authn only under an HTTP transport, which this topology does not exercise.
     pub consumed: bool,
 }
 
@@ -55,10 +61,11 @@ pub fn value_leaks(consumed_value: &str, outbound_surface: &str) -> bool {
     !consumed_value.is_empty() && outbound_surface.contains(consumed_value)
 }
 
-fn source(s: &str) -> ProbedSource {
+fn source(s: &str, consumed: bool) -> ProbedSource {
     ProbedSource {
         source: s.to_string(),
-        consumed: true,
+        probed: true,
+        consumed,
     }
 }
 
@@ -71,11 +78,14 @@ pub fn consuming_path_conformance() -> TokenPassthroughConformance {
         schema: SCHEMA.to_string(),
         topology: "consuming_path".to_string(),
         probed_inbound_auth_sources: vec![
-            source("http.authorization"),
-            source("http.cookie"),
-            source("http.x_api_key"),
-            source("initialize.params.authorization"),
-            source("initialize.params.initializationOptions.authorization"),
+            // http.* are probed (the outbound-forbidden denylist), consumed as inbound authn only
+            // under an HTTP transport, which the stdio consuming path does not exercise.
+            source("http.authorization", false),
+            source("http.cookie", false),
+            source("http.x_api_key", false),
+            // The stdio consuming path's `server.rs` validator consumes these as authn.
+            source("initialize.params.authorization", true),
+            source("initialize.params.initializationOptions.authorization", true),
         ],
         outbound_channels: vec![
             OutboundChannel {
@@ -109,6 +119,9 @@ pub fn consuming_path_conformance() -> TokenPassthroughConformance {
         },
         non_claims: vec![
             "tracks only consumed inbound authentication values".to_string(),
+            "probed http.* header sources are the outbound-forbidden denylist; they are consumed as \
+             inbound authn only under an HTTP transport, not on this stdio consuming path"
+                .to_string(),
             "does not scrub arbitrary credential-shaped user payload".to_string(),
             "transparent relay forwarding is not treated as a confused-deputy leak when the relay \
              does not consume the credential"
@@ -168,10 +181,22 @@ mod tests {
         // value-free: no token values anywhere in the serialized carrier.
         let blob = serde_json::to_string(&report).unwrap();
         assert!(!blob.contains("NEVER_FORWARD") && !blob.contains("Bearer "));
-        assert!(report
+        // Every source is probed; only the initialize-param fields the server.rs validator actually
+        // consumes are marked consumed (the http.* denylist is not, on this stdio consuming path).
+        assert!(report.probed_inbound_auth_sources.iter().all(|s| s.probed));
+        let consumed: Vec<&str> = report
             .probed_inbound_auth_sources
             .iter()
-            .all(|s| s.consumed));
+            .filter(|s| s.consumed)
+            .map(|s| s.source.as_str())
+            .collect();
+        assert_eq!(
+            consumed,
+            vec![
+                "initialize.params.authorization",
+                "initialize.params.initializationOptions.authorization",
+            ]
+        );
     }
 
     #[test]
