@@ -20,6 +20,53 @@ pub struct Redaction {
     pub key_id: String,
 }
 
+/// Schema id for the standalone, versioned capture-side redaction receipt (MCP01a).
+pub const REDACTION_RECEIPT_SCHEMA: &str = "assay.redaction_receipt.v0";
+
+/// Standalone, versioned capture-side redaction receipt: the ADR-034 `Redaction` summary promoted to
+/// a first-class carrier so it can be emitted and consumed on its own, not only nested in
+/// observation_health. Capture evidence ONLY — it proves redaction ran at capture, NOT that rendered
+/// sinks are safe (that is `assay.render_safety_conformance.v0`). MCP01 Strong is not claimed from
+/// this receipt alone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RedactionReceipt {
+    pub schema: String,
+    #[serde(flatten)]
+    pub redaction: Redaction,
+}
+
+/// Expectation-aware consumer reading of a redaction receipt (the value a reviewer gates on).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RedactionReceiptStatus {
+    /// `shape_and_flag` | `shape_only`: capture redaction was active.
+    Active,
+    /// `disabled_unsafe`: redaction was off — hard not-clean, the evidence may carry raw credentials.
+    Blocked,
+    /// An unrecognised mode: not reviewed, never silently clean.
+    Unsupported,
+}
+
+impl RedactionReceipt {
+    pub fn new(redaction: Redaction) -> Self {
+        Self {
+            schema: REDACTION_RECEIPT_SCHEMA.to_string(),
+            redaction,
+        }
+    }
+
+    /// The gate reading. `disabled_unsafe` blocks; a recognised active mode is active; anything else
+    /// is unsupported (never clean). A *missing* receipt is the consumer's concern (incomplete), not
+    /// representable here.
+    pub fn status(&self) -> RedactionReceiptStatus {
+        match self.redaction.mode.as_str() {
+            "shape_and_flag" | "shape_only" => RedactionReceiptStatus::Active,
+            "disabled_unsafe" => RedactionReceiptStatus::Blocked,
+            _ => RedactionReceiptStatus::Unsupported,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KernelLayerStatus {
@@ -196,6 +243,46 @@ impl ObservationHealth {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sample_redaction(mode: &str) -> Redaction {
+        Redaction {
+            mode: mode.to_string(),
+            redacted_count: 2,
+            by_rule: BTreeMap::from([("github-token".to_string(), 2u64)]),
+            by_field: BTreeMap::from([("process_execs".to_string(), 2u64)]),
+            key_scope: "host_local".to_string(),
+            key_id: "hmac-sha256:abc123".to_string(),
+        }
+    }
+
+    #[test]
+    fn redaction_receipt_contract_shape_and_roundtrip() {
+        let receipt = RedactionReceipt::new(sample_redaction("shape_and_flag"));
+        let value = serde_json::to_value(&receipt).unwrap();
+        // The schema tag sits alongside the flattened receipt fields (a standalone carrier shape).
+        assert_eq!(value["schema"], "assay.redaction_receipt.v0");
+        assert_eq!(value["mode"], "shape_and_flag");
+        assert_eq!(value["redacted_count"], 2);
+        assert_eq!(value["key_id"], "hmac-sha256:abc123");
+        let back: RedactionReceipt = serde_json::from_value(value).unwrap();
+        assert_eq!(back, receipt);
+    }
+
+    #[test]
+    fn redaction_receipt_status_is_expectation_aware() {
+        assert_eq!(
+            RedactionReceipt::new(sample_redaction("shape_and_flag")).status(),
+            RedactionReceiptStatus::Active
+        );
+        assert_eq!(
+            RedactionReceipt::new(sample_redaction("disabled_unsafe")).status(),
+            RedactionReceiptStatus::Blocked
+        );
+        assert_eq!(
+            RedactionReceipt::new(sample_redaction("future_mode")).status(),
+            RedactionReceiptStatus::Unsupported
+        );
+    }
 
     #[test]
     fn ringbuf_drops_force_partial_kernel_layer() {

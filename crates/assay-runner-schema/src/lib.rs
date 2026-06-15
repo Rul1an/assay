@@ -47,7 +47,8 @@ pub use fidelity::{
 pub use health::{
     CgroupCorrelationStatus, KernelLayerStatus, NetworkEndpointClaimScope,
     NetworkProtocolCoverageStatus, ObservationHealth, ObservationHealthError, PolicyLayerStatus,
-    Redaction, SdkLayerStatus, OBSERVATION_HEALTH_SCHEMA,
+    Redaction, RedactionReceipt, RedactionReceiptStatus, SdkLayerStatus, OBSERVATION_HEALTH_SCHEMA,
+    REDACTION_RECEIPT_SCHEMA,
 };
 pub use sdk_event::{SdkLayerEvent, SDK_EVENT_SCHEMA};
 pub use surface::{CapabilitySurface, CapabilitySurfaceError, CAPABILITY_SURFACE_SCHEMA};

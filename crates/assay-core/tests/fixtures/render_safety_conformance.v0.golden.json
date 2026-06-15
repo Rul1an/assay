@@ -1,0 +1,78 @@
+{
+  "schema": "assay.render_safety_conformance.v0",
+  "corpus_digest": "sha256:c903b6ec1246f0b4298f3e07f41346c0803873cf5f91a0a63cb1e75e5652eb5c",
+  "sinks": [
+    {
+      "sink": "stdout",
+      "renderer": "assay-core",
+      "hostile_probe_count": 10,
+      "benign_control_count": 5,
+      "raw_secret_leak_count": 0,
+      "raw_pii_leak_count": 0,
+      "terminal_control_leak_count": 0,
+      "redaction_before_truncation": true,
+      "benign_preserved": true,
+      "sink_specific_encoding": "terminal_safe"
+    },
+    {
+      "sink": "json",
+      "renderer": "assay-core",
+      "hostile_probe_count": 10,
+      "benign_control_count": 5,
+      "raw_secret_leak_count": 0,
+      "raw_pii_leak_count": 0,
+      "terminal_control_leak_count": 0,
+      "redaction_before_truncation": true,
+      "benign_preserved": true,
+      "sink_specific_encoding": "json_serializer"
+    },
+    {
+      "sink": "sarif",
+      "renderer": "assay-core",
+      "hostile_probe_count": 10,
+      "benign_control_count": 5,
+      "raw_secret_leak_count": 0,
+      "raw_pii_leak_count": 0,
+      "terminal_control_leak_count": 0,
+      "redaction_before_truncation": true,
+      "benign_preserved": true,
+      "sink_specific_encoding": "json_serializer"
+    },
+    {
+      "sink": "junit",
+      "renderer": "assay-core",
+      "hostile_probe_count": 10,
+      "benign_control_count": 5,
+      "raw_secret_leak_count": 0,
+      "raw_pii_leak_count": 0,
+      "terminal_control_leak_count": 0,
+      "redaction_before_truncation": true,
+      "benign_preserved": true,
+      "sink_specific_encoding": "xml_escape"
+    },
+    {
+      "sink": "markdown",
+      "renderer": "assay-core",
+      "hostile_probe_count": 10,
+      "benign_control_count": 5,
+      "raw_secret_leak_count": 0,
+      "raw_pii_leak_count": 0,
+      "terminal_control_leak_count": 0,
+      "redaction_before_truncation": true,
+      "benign_preserved": true,
+      "sink_specific_encoding": "markdown_neutralize"
+    },
+    {
+      "sink": "otel",
+      "renderer": "assay-core",
+      "hostile_probe_count": 10,
+      "benign_control_count": 5,
+      "raw_secret_leak_count": 0,
+      "raw_pii_leak_count": 0,
+      "terminal_control_leak_count": 0,
+      "redaction_before_truncation": true,
+      "benign_preserved": true,
+      "sink_specific_encoding": "attribute_value"
+    }
+  ]
+}
