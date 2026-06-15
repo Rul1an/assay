@@ -389,7 +389,7 @@ mod run_json_render_safety_tests {
         // Structure preserved + hostile values gone, markers present.
         let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(!out.contains(&secret), "on-disk run.json leaked secret");
-        assert!(!out.contains("ghp_"));
+        assert!(!out.contains("ghp_"), "raw token prefix leaked to run.json");
         assert!(
             !out.contains("alice@example.com"),
             "on-disk run.json leaked pii"
@@ -425,7 +425,7 @@ mod run_json_render_safety_tests {
             !out.contains(&secret),
             "minimal run.json leaked secret in resolution.message"
         );
-        assert!(!out.contains("ghp_"));
+        assert!(!out.contains("ghp_"), "raw token prefix leaked to run.json");
         assert!(
             out.contains("<redacted:"),
             "minimal run.json fired no redaction"

@@ -57,7 +57,10 @@ fn assay_run_writes_render_safe_run_json_to_disk() {
         !run_json.contains(&secret),
         "real `assay run` leaked the secret to run.json on disk"
     );
-    assert!(!run_json.contains("ghp_"));
+    assert!(
+        !run_json.contains("ghp_"),
+        "real `assay run` leaked a raw token prefix to run.json on disk"
+    );
     assert!(
         !run_json.contains(email),
         "real `assay run` leaked PII to run.json on disk"
