@@ -153,4 +153,30 @@ async fn test_no_passthrough_e2e() {
         "expected exactly one outbound request (tool must not have skipped; check ASSAY_TEST_OUTBOUND_URL)"
     );
     assert_no_sensitive_headers(&received);
+    // MCP01a-3 value-sentinel: the EXACT consumed inbound auth value must not re-emit on ANY outbound
+    // surface (header values, URL, or body), not just be absent by header name. Every inbound auth
+    // value above carries the marker `NEVER_FORWARD`, so its presence anywhere outbound is a leak.
+    assert_no_inbound_value_leaked(&received);
+}
+
+/// Value-sentinel proof (MCP01a-3): the consumed inbound credential VALUE never appears on an outbound
+/// surface. Checks header values, the URL, and the body, not header names. Value-free failure (the
+/// surface, not the value).
+fn assert_no_inbound_value_leaked(requests: &[wiremock::Request]) {
+    const INBOUND_VALUE_SENTINEL: &str = "NEVER_FORWARD";
+    for (i, req) in requests.iter().enumerate() {
+        let mut surfaces: Vec<String> = vec![req.url.as_str().to_string()];
+        for (_name, value) in req.headers.iter() {
+            surfaces.push(value.to_str().unwrap_or("<binary>").to_string());
+        }
+        surfaces.push(String::from_utf8_lossy(&req.body).to_string());
+        if surfaces.iter().any(|s| s.contains(INBOUND_VALUE_SENTINEL)) {
+            panic!(
+                "MCP01a-3 value passthrough violated: request #{} re-emitted a consumed inbound \
+                 authentication value on an outbound surface (header value, URL, or body). \
+                 Sentinel marker {INBOUND_VALUE_SENTINEL:?} found; value not logged.",
+                i + 1
+            );
+        }
+    }
 }

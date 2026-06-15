@@ -5,5 +5,6 @@ pub mod enforcement_sarif;
 pub mod manifest_observed;
 pub mod security;
 pub mod server;
+pub mod token_passthrough;
 pub mod tool_decision;
 pub mod tools;
