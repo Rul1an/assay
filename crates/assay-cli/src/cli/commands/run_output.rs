@@ -209,7 +209,7 @@ pub(crate) fn summary_from_outcome(
 pub(crate) fn write_extended_run_json(
     artifacts: &assay_core::report::RunArtifacts,
     outcome: &crate::exit_codes::RunOutcome,
-    path: &PathBuf,
+    path: &Path,
     sarif_omitted: Option<u64>,
 ) -> anyhow::Result<()> {
     // Manually construct the JSON to inject outcome fields
@@ -264,19 +264,23 @@ pub(crate) fn write_extended_run_json(
         }
     }
 
-    // Render-safety (MCP01a-5 completion): the on-disk run.json carries the same untrusted result
-    // `message` / `details.*` content as the `--format json` stdout renderer
-    // (`assay_core::report::json::render_json`), but this file writer serialized the raw artifacts
-    // directly and so bypassed redaction. Route the assembled document through the same render-safety
-    // walk so the file matches the stdout renderer: as a record sink it redacts and control-strips
-    // but does not truncate (`usize::MAX`); assay-owned keys (ids, status, reason_code, exit_code,
-    // digests, seeds) stay byte-stable. `resolution.message` is redacted like any other `message`.
+    write_sanitized_run_json(path, v)
+}
+
+/// Sanitize a run.json document and write it. Render-safety (MCP01a-5): EVERY run.json writer routes
+/// its assembled value through the same `render_details_safe` walk as the `--format json` stdout
+/// renderer (`assay_core::report::json::render_json`), so the untrusted result `message` /
+/// `details.*` / `resolution.message` content is redacted on disk too — the file-writers used to
+/// serialize raw artifacts and bypass redaction. As a record sink it redacts and control-strips but
+/// does not truncate (`usize::MAX`); assay-owned keys (ids, status, reason_code, exit_code, digests,
+/// seeds) stay byte-stable. Shared by both the extended and minimal (early-error) writers so neither
+/// path can drift back to raw.
+fn write_sanitized_run_json(path: &Path, v: serde_json::Value) -> anyhow::Result<()> {
     let v = assay_core::render_safety::render_details_safe(
         assay_core::render_safety::Sink::Json,
         &v,
         usize::MAX,
     );
-
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -286,9 +290,11 @@ pub(crate) fn write_extended_run_json(
 
 pub(crate) fn write_run_json_minimal(
     outcome: &crate::exit_codes::RunOutcome,
-    path: &PathBuf,
+    path: &Path,
 ) -> anyhow::Result<()> {
     // Minimal JSON for early exits (no artifacts available). E7.2: seed fields present for schema stability (null when unknown).
+    // `resolution` carries the outcome (incl. its `message`, which on config/arg errors echoes
+    // external path/parse text), so this goes through the shared sanitizer like the extended writer.
     let v = serde_json::json!({
         "exit_code": outcome.exit_code,
         "reason_code": outcome.reason_code,
@@ -298,11 +304,7 @@ pub(crate) fn write_run_json_minimal(
         "judge_seed": null,
         "resolution": outcome
     });
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, serde_json::to_string_pretty(&v)?)?;
-    Ok(())
+    write_sanitized_run_json(path, v)
 }
 
 pub(crate) fn export_baseline(
@@ -401,6 +403,35 @@ mod run_json_render_safety_tests {
         assert_eq!(parsed["results"][0]["test_id"], "t_owned");
         assert_eq!(parsed["results"][0]["fingerprint"], "fp_owned");
         assert_eq!(parsed["reason_code"], "E_TEST_FAILED");
+    }
+
+    /// MCP01a-5 regression: the early-error / replay-failure minimal writer shares the same sanitizer,
+    /// so a config/arg-error `resolution.message` (which can echo external path/parse text) is redacted
+    /// on disk too — not just the artifact-bearing extended writer.
+    #[test]
+    fn minimal_run_json_resolution_message_is_render_safe() {
+        let secret = format!("ghp_{}", "Z".repeat(36));
+        let outcome = RunOutcome::from_reason(
+            ReasonCode::ETraceNotFound,
+            Some(format!("trace not found: {secret}")),
+            None,
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.json");
+        super::write_run_json_minimal(&outcome, &path).unwrap();
+        let out = std::fs::read_to_string(&path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            !out.contains(&secret),
+            "minimal run.json leaked secret in resolution.message"
+        );
+        assert!(!out.contains("ghp_"));
+        assert!(
+            out.contains("<redacted:"),
+            "minimal run.json fired no redaction"
+        );
+        // Assay-owned reason_code stays byte-stable.
+        assert_eq!(parsed["reason_code"], "E_TRACE_NOT_FOUND");
     }
 }
 

@@ -12,7 +12,7 @@ pub(crate) fn write_error_artifacts(
 ) -> anyhow::Result<i32> {
     let mut o = RunOutcome::from_reason(reason, Some(message), None);
     o.exit_code = reason.exit_code_for(version);
-    if let Err(e) = write_run_json_minimal(&o, &run_json_path.to_path_buf()) {
+    if let Err(e) = write_run_json_minimal(&o, run_json_path) {
         eprintln!("WARNING: failed to write run.json: {}", e);
     }
 
