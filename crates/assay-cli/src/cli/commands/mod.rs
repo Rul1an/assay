@@ -21,6 +21,7 @@ pub mod heuristics;
 pub mod import;
 pub mod init;
 pub mod init_ci;
+pub mod inventory;
 pub mod kill;
 pub mod mcp;
 pub mod migrate;
