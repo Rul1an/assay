@@ -204,6 +204,76 @@ pub fn render_safe(sink: Sink, input: &str, max_len: usize) -> String {
     render_safe_with_outcome(sink, input, max_len).0
 }
 
+/// Object keys whose string values carry untrusted model / agent / tool / user content and must be
+/// rendered sink-safe wherever they appear in a `details` tree or result row. Everything not on this
+/// list (assay-owned ids, schema names, reason codes, status enums, artifact digests, timestamps,
+/// counts, policy ids, fingerprints) stays raw. The list IS the safety boundary: a key matches by
+/// name at any depth, and once inside an untrusted-keyed subtree every string leaf is untrusted (so a
+/// structured `expected`/`actual`/`assertions[].message` is covered without enumerating its shape).
+pub const UNTRUSTED_FIELDS: &[&str] = &[
+    "prompt",
+    "response",
+    "output",
+    "error",
+    "rationale",
+    "message",
+    "expected",
+    "actual",
+    "diff",
+    "tool_output",
+    "stdout",
+    "stderr",
+];
+
+fn is_untrusted_key(key: &str) -> bool {
+    UNTRUSTED_FIELDS.contains(&key)
+}
+
+/// Recursively render the untrusted string leaves of a `details` / result JSON value safe for `sink`,
+/// leaving assay-owned keys structurally untouched (byte-stable, not merely no-op'd). A string leaf is
+/// untrusted when its own key — or any ancestor key — is in [`UNTRUSTED_FIELDS`]; numbers, bools and
+/// null pass through unchanged. This is the recursive allowlist-by-key-name companion to
+/// [`render_safe`], for whole-blob sinks (the `run.json` serializer) where each field cannot be wired
+/// by hand. `max_len` bounds each rendered leaf; pass [`usize::MAX`] for a record sink that must keep
+/// full (redacted) content rather than a truncated preview.
+pub fn render_details_safe(
+    sink: Sink,
+    value: &serde_json::Value,
+    max_len: usize,
+) -> serde_json::Value {
+    render_details_inner(sink, value, max_len, false)
+}
+
+fn render_details_inner(
+    sink: Sink,
+    value: &serde_json::Value,
+    max_len: usize,
+    in_untrusted: bool,
+) -> serde_json::Value {
+    use serde_json::Value;
+    match value {
+        Value::String(s) if in_untrusted => Value::String(render_safe(sink, s, max_len)),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|v| render_details_inner(sink, v, max_len, in_untrusted))
+                .collect(),
+        ),
+        Value::Object(map) => {
+            let mut out = serde_json::Map::with_capacity(map.len());
+            for (k, v) in map {
+                let child_untrusted = in_untrusted || is_untrusted_key(k);
+                out.insert(
+                    k.clone(),
+                    render_details_inner(sink, v, max_len, child_untrusted),
+                );
+            }
+            Value::Object(out)
+        }
+        other => other.clone(),
+    }
+}
+
 /// DELIBERATELY WRONG order (truncate raw input FIRST, then redact): used only by the differential
 /// test to prove that this order leaks a truncated secret prefix. Never call this in product code.
 #[doc(hidden)]
@@ -291,6 +361,59 @@ mod tests {
         assert_eq!(Sink::Markdown.encoding(), "markdown_neutralize");
         // Structured sinks defer escaping to their serializer (no in-adapter pre-escape).
         assert_eq!(Sink::Sarif.encoding(), "json_serializer");
+    }
+
+    #[test]
+    fn details_walker_redacts_untrusted_keeps_owned_byte_stable() {
+        let secret = format!("ghp_{}", "D".repeat(36));
+        let email = "alice@example.com";
+        let details = serde_json::json!({
+            "prompt": format!("ask {secret}"),
+            "assertions": [{ "message": format!("got {email}") }, { "passed": true }],
+            "expected": "uuid 123e4567-e89b-12d3-a456-426614174000",
+            "skip": { "fingerprint": "abc123def456", "reason": "fingerprint_match" },
+            "score_pct": 42,
+        });
+        let safe = render_details_safe(Sink::Json, &details, usize::MAX);
+        let blob = safe.to_string();
+        // Untrusted leaves redacted (prompt at any depth, assertions[].message nested).
+        assert!(!blob.contains(&secret), "prompt secret leaked");
+        assert!(!blob.contains(email), "nested assertion pii leaked");
+        assert!(blob.contains("<redacted:"), "no redaction markers fired");
+        // Benign content UNDER an untrusted key survives (no over-redaction).
+        assert_eq!(
+            safe["expected"],
+            serde_json::json!("uuid 123e4567-e89b-12d3-a456-426614174000")
+        );
+        // Assay-owned keys are structurally untouched (not merely a render_safe no-op).
+        assert_eq!(
+            safe["skip"]["fingerprint"],
+            serde_json::json!("abc123def456")
+        );
+        assert_eq!(
+            safe["skip"]["reason"],
+            serde_json::json!("fingerprint_match")
+        );
+        assert_eq!(safe["score_pct"], serde_json::json!(42));
+        // A non-string leaf under an untrusted-keyed subtree passes through.
+        assert_eq!(safe["assertions"][1]["passed"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn details_walker_record_sink_keeps_full_length_but_strips_secret() {
+        // run.json is a record sink: redact + control-strip, but no truncation marker (usize::MAX).
+        let secret = format!("ghp_{}", "E".repeat(36));
+        let long = format!("{} {secret}", "z".repeat(400));
+        let details = serde_json::json!({ "response": long });
+        let safe = render_details_safe(Sink::Json, &details, usize::MAX);
+        let rendered = safe["response"].as_str().unwrap();
+        assert!(!rendered.contains(&secret), "record sink leaked secret");
+        assert!(rendered.contains("<redacted:github-token>"));
+        assert!(
+            !rendered.contains("(truncated)"),
+            "record sink must not truncate"
+        );
+        assert!(rendered.len() > 400, "record sink preserved full length");
     }
 
     #[test]

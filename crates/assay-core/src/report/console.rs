@@ -1,8 +1,27 @@
 use crate::model::{TestResultRow, TestStatus};
+use crate::render_safety::{render_safe, Sink, MAX_RENDER_FIELD};
 use crate::report::progress::{ProgressEvent, ProgressSink};
 use crate::report::summary::{JudgeMetrics, Seeds};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+/// Inline-preview bound for a failing test's prompt on the console.
+const CONSOLE_PROMPT_MAX: usize = 100;
+
+/// Render a failing test's prompt for the console preview. Render-safety (MCP01a): the prompt is
+/// untrusted model/agent content, so it is redacted and control-stripped BEFORE the 100-char display
+/// bound (the load-bearing redact-before-truncate order — a secret can never survive as a truncated
+/// prefix). Char-based bounding also removes the prior `&prompt[..100]` UTF-8 boundary panic. Pure and
+/// unit-testable.
+pub fn console_prompt_preview(prompt: &str) -> String {
+    render_safe(Sink::Stdout, prompt, CONSOLE_PROMPT_MAX)
+}
+
+/// Render an untrusted result/assertion message safe for the terminal sink (redact, control-strip,
+/// bound). Used for every model-derived string the console prints.
+fn safe_msg(s: &str) -> String {
+    render_safe(Sink::Stdout, s, MAX_RENDER_FIELD)
+}
 
 // --- E4.3 Progress N/M (throttled, completion-order) ---
 
@@ -196,46 +215,45 @@ pub fn print_summary(results: &[TestResultRow], explain_skip: bool) {
                 flaky += 1;
                 eprintln!("⚠️  {:<20} FLAKY {}", r.test_id, duration);
                 if !r.message.is_empty() {
-                    eprintln!("    {}", r.message);
+                    eprintln!("    {}", safe_msg(&r.message));
                 }
             }
             TestStatus::Unstable => {
                 unstable += 1;
                 eprintln!("⚠️  {:<20} UNSTABLE {}", r.test_id, duration);
                 if !r.message.is_empty() {
-                    eprintln!("    {}", r.message);
+                    eprintln!("    {}", safe_msg(&r.message));
                 }
             }
             TestStatus::Warn => {
                 warn += 1;
                 eprintln!("⚠️  {:<20} WARN {}", r.test_id, duration);
                 if !r.message.is_empty() {
-                    eprintln!("    {}", r.message);
+                    eprintln!("    {}", safe_msg(&r.message));
                 }
             }
             TestStatus::Fail => {
                 fail += 1;
-                eprintln!("❌ {:<20} {}  {}", r.test_id, r.message, duration);
+                eprintln!(
+                    "❌ {:<20} {}  {}",
+                    r.test_id,
+                    safe_msg(&r.message),
+                    duration
+                );
                 if let Some(prompt) = r.details.get("prompt").and_then(|p| p.as_str()) {
-                    // Truncate if extremely long, but typically we want to see it
-                    let display_prompt = if prompt.len() > 100 {
-                        format!("{}...", &prompt[..100])
-                    } else {
-                        prompt.to_string()
-                    };
-                    eprintln!("      Prompt: \"{}\"", display_prompt);
+                    eprintln!("      Prompt: \"{}\"", console_prompt_preview(prompt));
                 }
                 if let Some(failures) = r.details.get("assertions").and_then(|a| a.as_array()) {
                     for f in failures {
                         if let Some(msg) = f.get("message").and_then(|m| m.as_str()) {
-                            eprintln!("      → {}", msg);
+                            eprintln!("      → {}", safe_msg(msg));
                         }
                     }
                 }
             }
             TestStatus::Error => {
                 error += 1;
-                eprintln!("💥 {:<20} ERROR: {}", r.test_id, r.message);
+                eprintln!("💥 {:<20} ERROR: {}", r.test_id, safe_msg(&r.message));
             }
         }
     }

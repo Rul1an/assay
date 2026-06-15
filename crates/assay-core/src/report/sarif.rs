@@ -1,4 +1,5 @@
 use crate::model::{TestResultRow, TestStatus};
+use crate::render_safety::{render_safe, Sink, MAX_RENDER_FIELD};
 use std::path::Path;
 
 /// Default maximum number of results to include in SARIF output.
@@ -102,7 +103,16 @@ pub fn write_sarif_with_limit(
             serde_json::json!({
                 "ruleId": "assay",
                 "level": level,
-                "message": { "text": format!("{}: {}", r.test_id, r.message) },
+                // Render-safety (MCP01a): `test_id` is assay/config-owned (serde-escaped raw);
+                // `r.message` carries untrusted model content, so it is rendered sink-safe (redacted,
+                // control-stripped, bounded) before serde escapes the final value text.
+                "message": {
+                    "text": format!(
+                        "{}: {}",
+                        r.test_id,
+                        render_safe(Sink::Sarif, &r.message, MAX_RENDER_FIELD)
+                    )
+                },
                 "locations": [{
                     "physicalLocation": {
                         "artifactLocation": { "uri": SYNTHETIC_LOCATION_URI },
