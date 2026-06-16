@@ -54,6 +54,7 @@ pub mod error;
 pub mod lockfile;
 pub mod reference;
 pub mod resolver;
+pub mod supply_chain;
 pub mod trust;
 pub mod types;
 pub mod verify;
