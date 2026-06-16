@@ -214,8 +214,6 @@ pub struct SigstoreBundleInput {
     pub now_unix_secs: u64,
     pub expected_san: String,
     pub expected_issuer: String,
-    /// Whether transparency-log inclusion is required (drives the Rekor verifier's missing-proof status).
-    pub rekor_requirement: TransparencyRequirement,
 }
 
 /// A Sigstore bundle parsed exactly ONCE into neutral evidence (a-3.4 design-of-record): every Sigstore
@@ -245,9 +243,11 @@ fn parse_sigstore_bundle(bundle_json: &[u8]) -> Result<ParsedSigstoreBundleEvide
     if bundle.get("messageSignature").is_some() {
         return Err(CheckStatus::UnsupportedFormat);
     }
-    let dsse = match bundle.get("dsseEnvelope") {
+    // Require the content to be a JSON object: `serde_json::to_vec` succeeds for null/strings too, so a
+    // non-object dsseEnvelope must not reach `sigstore_bundle: Verified`.
+    let dsse = match bundle.get("dsseEnvelope").filter(|v| v.is_object()) {
         Some(v) => v,
-        None => return Err(CheckStatus::Failed), // no content
+        None => return Err(CheckStatus::Failed), // no (object) content
     };
     let material = match bundle.get("verificationMaterial") {
         Some(v) => v,
@@ -434,7 +434,7 @@ fn verify_provenance(input: &VerifyInput<'_>) -> ProvenanceOutcome {
             verified_level: SlsaLevel(0),
         },
         ProvenanceInput::SigstoreBundle(sb) => {
-            verify_sigstore_bundle_provenance(sb, &input.subject)
+            verify_sigstore_bundle_provenance(sb, &input.subject, &input.policy)
         }
         ProvenanceInput::Unsupported(kind) => {
             // PEP740 / npm adapters are not yet supported; report unsupported, never pass.
@@ -564,9 +564,18 @@ fn verify_provenance(input: &VerifyInput<'_>) -> ProvenanceOutcome {
 fn verify_sigstore_bundle_provenance(
     sb: &SigstoreBundleInput,
     subject: &Subject,
+    policy: &Policy,
 ) -> ProvenanceOutcome {
     let na = CheckStatus::NotApplicable;
     let want = hex_of(&subject.digest);
+    // Policy is the single source of truth for whether inclusion is required: it drives both the Rekor
+    // verifier's missing-proof status here AND the Incomplete decision in compute_policy_result, so the
+    // two can never disagree.
+    let rekor_requirement = if policy.require_rekor_inclusion {
+        TransparencyRequirement::Required
+    } else {
+        TransparencyRequirement::Optional
+    };
     match parse_sigstore_bundle(&sb.bundle_json) {
         Err(status) => ProvenanceOutcome {
             checks: ProvenanceChecks {
@@ -609,7 +618,7 @@ fn verify_sigstore_bundle_provenance(
             let rekor_inclusion = verify_rekor_v2_inclusion_offline(
                 &sb.bundle_json,
                 &sb.rekor_trusted_root_json,
-                sb.rekor_requirement,
+                rekor_requirement,
             )
             .status;
 
@@ -1231,7 +1240,6 @@ mod tests {
                 now_unix_secs: 1_750_000_000,
                 expected_san: "x".to_string(),
                 expected_issuer: "y".to_string(),
-                rekor_requirement: TransparencyRequirement::Optional,
             })),
             pinning: clean_pinning(),
             policy: policy(0),

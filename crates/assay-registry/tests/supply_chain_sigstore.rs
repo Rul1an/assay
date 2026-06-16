@@ -8,7 +8,6 @@
 //! Plimsoll-consumable until the paired a-3.4b consumer lands; no witness/relabel may rely on the new
 //! fields until then.
 
-use assay_registry::rekor::TransparencyRequirement;
 use assay_registry::supply_chain::{
     verify_supply_chain, CheckStatus, ContainerRef, PinningInput, Policy, ProvenanceInput,
     SigstoreBundleInput, SlsaLevel, Subject, VerifyInput,
@@ -50,7 +49,7 @@ fn fulcio_material() -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     (vec![root.clone()], inters.to_vec())
 }
 
-fn base_bundle_input(bundle_json: Vec<u8>, req: TransparencyRequirement) -> SigstoreBundleInput {
+fn base_bundle_input(bundle_json: Vec<u8>) -> SigstoreBundleInput {
     let (roots, inters) = fulcio_material();
     SigstoreBundleInput {
         bundle_json,
@@ -60,7 +59,6 @@ fn base_bundle_input(bundle_json: Vec<u8>, req: TransparencyRequirement) -> Sigs
         now_unix_secs: NOW,
         expected_san: REAL_SAN.to_string(),
         expected_issuer: REAL_ISSUER.to_string(),
-        rekor_requirement: req,
     }
 }
 
@@ -116,13 +114,7 @@ fn bundle_value() -> Value {
 // --- Test 1: real happy path -> every dimension Verified, transparency NotChecked, Pass ---
 #[test]
 fn real_sigstore_dsse_happy_path_is_pass() {
-    let report = run(
-        base_bundle_input(
-            fixture("bundle.sigstore.json"),
-            TransparencyRequirement::Required,
-        ),
-        policy(),
-    );
+    let report = run(base_bundle_input(fixture("bundle.sigstore.json")), policy());
     let p = &report.checks.provenance;
     assert_eq!(p.cert_chain, CheckStatus::Verified, "cert_chain");
     assert_eq!(p.identity, CheckStatus::Verified, "identity");
@@ -160,10 +152,7 @@ fn real_sigstore_dsse_happy_path_is_pass() {
 // --- Test 2 (LOAD-BEARING orthogonality): wrong identity, but Rekor + DSSE still Verified -> Fail ---
 #[test]
 fn wrong_identity_with_rekor_and_dsse_verified_is_fail() {
-    let mut sb = base_bundle_input(
-        fixture("bundle.sigstore.json"),
-        TransparencyRequirement::Required,
-    );
+    let mut sb = base_bundle_input(fixture("bundle.sigstore.json"));
     sb.expected_san =
         "https://github.com/attacker/evil/.github/workflows/x.yml@refs/heads/main".to_string();
     let report = run(sb, policy());
@@ -197,10 +186,7 @@ fn tampered_dsse_signature_fails_both_dsse_and_rekor() {
     b["dsseEnvelope"]["signatures"][0]["sig"] = Value::String(B64.encode(&raw));
     let bundle_json = serde_json::to_vec(&b).unwrap();
 
-    let report = run(
-        base_bundle_input(bundle_json, TransparencyRequirement::Required),
-        policy(),
-    );
+    let report = run(base_bundle_input(bundle_json), policy());
     let p = &report.checks.provenance;
     assert_eq!(p.dsse_pae, CheckStatus::Failed, "dsse_pae must fail");
     // Coupling: the Rekor v2 entry binds the DSSE signature (canonicalizedBody.signature.content), so a
@@ -221,13 +207,7 @@ fn tampered_dsse_signature_fails_both_dsse_and_rekor() {
 fn timestamp_freshness_required_is_incomplete() {
     let mut pol = policy();
     pol.require_timestamp_freshness = true;
-    let report = run(
-        base_bundle_input(
-            fixture("bundle.sigstore.json"),
-            TransparencyRequirement::Required,
-        ),
-        pol,
-    );
+    let report = run(base_bundle_input(fixture("bundle.sigstore.json")), pol);
     assert_eq!(
         report.checks.provenance.timestamp_freshness,
         CheckStatus::NotChecked
@@ -243,13 +223,7 @@ fn timestamp_freshness_required_is_incomplete() {
 fn unsupported_bundle_shape_is_incomplete() {
     let mut b = bundle_value();
     b["mediaType"] = Value::String("application/vnd.dev.sigstore.bundle.v0.1+json".to_string());
-    let report = run(
-        base_bundle_input(
-            serde_json::to_vec(&b).unwrap(),
-            TransparencyRequirement::Required,
-        ),
-        policy(),
-    );
+    let report = run(base_bundle_input(serde_json::to_vec(&b).unwrap()), policy());
     let p = &report.checks.provenance;
     assert_eq!(p.sigstore_bundle, CheckStatus::UnsupportedFormat);
     assert_eq!(p.cert_chain, CheckStatus::UnsupportedFormat);
@@ -265,13 +239,7 @@ fn unsupported_bundle_shape_is_incomplete() {
 // --- Test 6: malformed bundle bytes -> sigstore_bundle Failed (blocking), Fail ---
 #[test]
 fn malformed_bundle_bytes_is_fail() {
-    let report = run(
-        base_bundle_input(
-            b"{ not valid json".to_vec(),
-            TransparencyRequirement::Required,
-        ),
-        policy(),
-    );
+    let report = run(base_bundle_input(b"{ not valid json".to_vec()), policy());
     let p = &report.checks.provenance;
     assert_eq!(p.sigstore_bundle, CheckStatus::Failed);
     assert_eq!(p.cert_chain, CheckStatus::Failed);
@@ -291,13 +259,7 @@ fn required_rekor_absent_is_incomplete() {
         .remove("tlogEntries");
     let mut pol = policy();
     pol.require_rekor_inclusion = true;
-    let report = run(
-        base_bundle_input(
-            serde_json::to_vec(&b).unwrap(),
-            TransparencyRequirement::Required,
-        ),
-        pol,
-    );
+    let report = run(base_bundle_input(serde_json::to_vec(&b).unwrap()), pol);
     let p = &report.checks.provenance;
     // Chain/identity/dsse remain verified; only inclusion is absent.
     assert_eq!(p.cert_chain, CheckStatus::Verified);
@@ -318,13 +280,7 @@ fn optional_rekor_absent_is_pass_offline_first() {
         .as_object_mut()
         .unwrap()
         .remove("tlogEntries");
-    let report = run(
-        base_bundle_input(
-            serde_json::to_vec(&b).unwrap(),
-            TransparencyRequirement::Optional,
-        ),
-        policy(),
-    );
+    let report = run(base_bundle_input(serde_json::to_vec(&b).unwrap()), policy());
     let p = &report.checks.provenance;
     assert_eq!(p.rekor_inclusion, CheckStatus::NotPresent);
     assert_eq!(p.cert_chain, CheckStatus::Verified);
@@ -337,13 +293,7 @@ fn optional_rekor_absent_is_pass_offline_first() {
 // --- Contract: the carrier shape is append-only v0 with the new dimensions + not_checked serialized ---
 #[test]
 fn carrier_shape_is_append_only_v0_with_new_dimensions() {
-    let report = run(
-        base_bundle_input(
-            fixture("bundle.sigstore.json"),
-            TransparencyRequirement::Required,
-        ),
-        policy(),
-    );
+    let report = run(base_bundle_input(fixture("bundle.sigstore.json")), policy());
     let v = serde_json::to_value(&report).unwrap();
     assert_eq!(v["schema"], "assay.supply_chain_conformance.v0");
     let prov = &v["checks"]["provenance"];
