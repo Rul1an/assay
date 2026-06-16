@@ -358,4 +358,32 @@ mod tests {
             out.reason
         );
     }
+
+    /// `keyid` is a non-authoritative hint in DSSE: verification depends ONLY on the supplied leaf SPKI.
+    /// A bogus keyid, or no keyid at all, must not change the verdict and must never grant trust or
+    /// produce an identity_mismatch.
+    #[test]
+    fn keyid_is_ignored_as_non_authoritative_hint() {
+        let (leaf, key) = leaf_with_key();
+        let payload = statement(ARTIFACT_SHA256);
+        let sig = sign(&key, &dsse_pae(IN_TOTO_PAYLOAD_TYPE, &payload));
+
+        // (a) a bogus, non-matching keyid still verifies against the leaf key.
+        let env_bogus = format!(
+            r#"{{"payloadType":"{IN_TOTO_PAYLOAD_TYPE}","payload":"{}","signatures":[{{"keyid":"bogus-non-matching-keyid","sig":"{}"}}]}}"#,
+            BASE64.encode(&payload),
+            BASE64.encode(&sig)
+        );
+        let out = verify_dsse_envelope_offline(&leaf, env_bogus.as_bytes(), ARTIFACT_SHA256);
+        assert_eq!(out.status, CheckStatus::Verified, "{}", out.reason);
+
+        // (b) keyid absent entirely still verifies (cert-based DSSE often omits it).
+        let env_absent = format!(
+            r#"{{"payloadType":"{IN_TOTO_PAYLOAD_TYPE}","payload":"{}","signatures":[{{"sig":"{}"}}]}}"#,
+            BASE64.encode(&payload),
+            BASE64.encode(&sig)
+        );
+        let out = verify_dsse_envelope_offline(&leaf, env_absent.as_bytes(), ARTIFACT_SHA256);
+        assert_eq!(out.status, CheckStatus::Verified, "{}", out.reason);
+    }
 }
