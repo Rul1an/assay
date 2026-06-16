@@ -13,7 +13,7 @@
 //!
 //! 1. chain failure       -> `Failed` / `TrustRootUnavailable`
 //! 2. identity failure    -> `IdentityMismatch` / `UnsupportedFormat` / `Failed`
-//! 3. signature failure   -> `Failed` (or `UnsupportedFormat` for a non-P256 key)
+//! 3. signature: non-P256 key / non-DER encoding -> `UnsupportedFormat`; crypto-invalid -> `Failed`
 //! 4. subject mismatch    -> `SubjectDigestMismatch`
 //! 5. only then           -> `Verified`
 
@@ -41,11 +41,14 @@ impl SignatureOutcome {
     }
 }
 
-/// Verify a raw ECDSA P-256 signature over `message` using the public key embedded in `leaf_der`.
+/// Verify a raw **DER-encoded** ECDSA/P-256 signature over `message` using the public key embedded in
+/// `leaf_der`.
 ///
 /// This is a low-level cryptographic primitive. It does NOT apply DSSE PAE and does NOT parse any
-/// envelope — `message` is verified verbatim. A non-P256 leaf key is `UnsupportedFormat`; a signature
-/// that does not verify (tampered, or made by another key) is `Failed`.
+/// envelope — `message` is verified verbatim. The signature encoding accepted is ASN.1 DER (not
+/// fixed-width IEEE P1363). The two failure axes are kept distinct: a non-P256 leaf key or a
+/// non-DER/malformed signature *encoding* is `UnsupportedFormat`; a well-formed signature that is
+/// cryptographically invalid (tampered, or made by another key) is `Failed`.
 pub fn verify_leaf_ecdsa_signature_over_bytes(
     leaf_der: &[u8],
     message: &[u8],
@@ -72,7 +75,12 @@ pub fn verify_leaf_ecdsa_signature_over_bytes(
     };
     let sig = match Signature::from_der(signature_der) {
         Ok(s) => s,
-        Err(_) => return SignatureOutcome::new(CheckStatus::Failed, "malformed ECDSA signature"),
+        Err(_) => {
+            return SignatureOutcome::new(
+                CheckStatus::UnsupportedFormat,
+                "signature is not a DER-encoded ECDSA signature",
+            )
+        }
     };
     match vk.verify(message, &sig) {
         Ok(()) => SignatureOutcome::new(
@@ -98,12 +106,16 @@ struct InTotoSubject {
     digest: BTreeMap<String, String>,
 }
 
-/// Parse an in-toto Statement and bind its subject `sha256` digest to `expected_sha256` (hex,
+/// Parse an in-toto Statement and bind its single subject's `sha256` digest to `expected_sha256` (hex,
 /// case-insensitive).
 ///
-/// This reads the Statement's `subject[].digest` only — it is NOT a DSSE / Sigstore check. A subject
-/// whose digest is a non-sha256 algorithm is `UnsupportedFormat`; a Statement with no subject digest at
-/// all (or that does not parse) is `Failed`.
+/// This reads the Statement's `subject[].digest` only — it is NOT a DSSE / Sigstore check. It binds a
+/// **single** subject: a statement with anything other than exactly one subject is `UnsupportedFormat`,
+/// because "some subject carries the expected digest" is unsafe — a decoy subject could carry the
+/// expected digest while the real artifact subject does not. Subject-NAME binding (matching a specific
+/// subject) is a later carrier/adapter concern, not this primitive. A subject whose digest is a
+/// non-sha256 algorithm is `UnsupportedFormat`; a subject with no digest at all (or a statement that does
+/// not parse) is `Failed`.
 pub fn bind_in_toto_subject_digest(
     statement_json: &[u8],
     expected_sha256: &str,
@@ -113,33 +125,33 @@ pub fn bind_in_toto_subject_digest(
         Err(_) => return SignatureOutcome::new(CheckStatus::Failed, "malformed in-toto statement"),
     };
 
-    let mut saw_non_sha256_digest = false;
-    for subject in &statement.subject {
-        if let Some(sha256) = subject.digest.get("sha256") {
-            return if sha256.eq_ignore_ascii_case(expected_sha256) {
-                SignatureOutcome::new(
-                    CheckStatus::Verified,
-                    "subject sha256 matches the expected artifact digest",
-                )
-            } else {
-                SignatureOutcome::new(
-                    CheckStatus::SubjectDigestMismatch,
-                    "subject sha256 does not match the expected artifact digest",
-                )
-            };
+    // Exactly one subject. More than one is ambiguous (which subject is "the" artifact?) and accepting a
+    // match from any of them would let a decoy subject launder the digest; zero subjects has nothing to
+    // bind.
+    let subject = match statement.subject.as_slice() {
+        [only] => only,
+        _ => {
+            return SignatureOutcome::new(
+                CheckStatus::UnsupportedFormat,
+                "statement does not carry exactly one subject",
+            )
         }
-        if !subject.digest.is_empty() {
-            saw_non_sha256_digest = true;
-        }
-    }
+    };
 
-    if saw_non_sha256_digest {
-        SignatureOutcome::new(
+    match subject.digest.get("sha256") {
+        Some(sha256) if sha256.eq_ignore_ascii_case(expected_sha256) => SignatureOutcome::new(
+            CheckStatus::Verified,
+            "subject sha256 matches the expected artifact digest",
+        ),
+        Some(_) => SignatureOutcome::new(
+            CheckStatus::SubjectDigestMismatch,
+            "subject sha256 does not match the expected artifact digest",
+        ),
+        None if !subject.digest.is_empty() => SignatureOutcome::new(
             CheckStatus::UnsupportedFormat,
             "subject digest algorithm is not sha256",
-        )
-    } else {
-        SignatureOutcome::new(CheckStatus::Failed, "statement has no subject digest")
+        ),
+        None => SignatureOutcome::new(CheckStatus::Failed, "statement has no subject digest"),
     }
 }
 
@@ -334,6 +346,15 @@ mod tests {
         assert_eq!(out.status, CheckStatus::UnsupportedFormat, "{}", out.reason);
     }
 
+    #[test]
+    fn malformed_signature_encoding_is_unsupported_format() {
+        // A P-256 leaf, but the signature bytes are not a DER-encoded ECDSA signature. This is an
+        // encoding problem (UnsupportedFormat), distinct from a well-formed-but-invalid signature.
+        let (_root, leaf, _key) = build_p256(SAN_URI);
+        let out = verify_leaf_ecdsa_signature_over_bytes(&leaf, b"msg", b"not-a-der-signature");
+        assert_eq!(out.status, CheckStatus::UnsupportedFormat, "{}", out.reason);
+    }
+
     // --- in-toto subject digest binder ---
 
     #[test]
@@ -366,6 +387,18 @@ mod tests {
         let stmt = br#"{"subject":[{"name":"a","digest":{}}]}"#;
         let out = bind_in_toto_subject_digest(stmt, ARTIFACT_SHA256);
         assert_eq!(out.status, CheckStatus::Failed, "{}", out.reason);
+    }
+
+    #[test]
+    fn multiple_subjects_is_unsupported_format() {
+        // Decoy-subject attack: a decoy subject carries the expected digest while the real artifact
+        // subject does not. Accepting "some subject matches" would launder the digest, so a multi-subject
+        // statement is refused outright rather than scanned for any match.
+        let stmt = format!(
+            r#"{{"subject":[{{"name":"decoy","digest":{{"sha256":"{ARTIFACT_SHA256}"}}}},{{"name":"real-artifact","digest":{{"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}}}}]}}"#
+        );
+        let out = bind_in_toto_subject_digest(stmt.as_bytes(), ARTIFACT_SHA256);
+        assert_eq!(out.status, CheckStatus::UnsupportedFormat, "{}", out.reason);
     }
 
     #[test]
