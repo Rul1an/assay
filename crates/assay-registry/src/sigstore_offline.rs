@@ -21,10 +21,16 @@ use crate::supply_chain::CheckStatus;
 /// expects (Fulcio leaf certificates carry this EKU).
 const EKU_CODE_SIGNING: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x03];
 
-/// ECDSA P-256 / SHA-256 — the algorithm Fulcio leaf certificates are signed with. Pinned explicitly so
-/// the verifier accepts only what Sigstore actually uses, not an open set.
-static SUPPORTED_SIG_ALGS: &[&dyn SignatureVerificationAlgorithm] =
-    &[webpki::ring::ECDSA_P256_SHA256];
+/// The ECDSA signature algorithms a Fulcio certificate chain is signed with. The Fulcio leaf KEY is
+/// ECDSA P-256, but per the Fulcio certificate specification the CA chain (intermediate -> root) signs
+/// with ECDSA NIST P-384 / SHA-384 (the spec requires "ECDSA NIST P-384 or stronger, or RSA-4096" for
+/// CAs). Chain validation must therefore accept BOTH P-256/SHA-256 and P-384/SHA-384, otherwise a real
+/// Fulcio chain is rejected. Pinned to exactly this set so the verifier accepts only what Sigstore
+/// actually uses, not an open algorithm set (e.g. Ed25519 / RSA / P-521 are still rejected).
+static SUPPORTED_SIG_ALGS: &[&dyn SignatureVerificationAlgorithm] = &[
+    webpki::ring::ECDSA_P256_SHA256,
+    webpki::ring::ECDSA_P384_SHA384,
+];
 
 /// The outcome of offline chain validation: a `CheckStatus` plus a value-free reason for the carrier.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,7 +120,8 @@ mod tests {
     use super::*;
     use rcgen::{
         BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose,
-        IsCa, Issuer, KeyPair, KeyUsagePurpose, PKCS_ECDSA_P256_SHA256,
+        IsCa, Issuer, KeyPair, KeyUsagePurpose, SignatureAlgorithm, PKCS_ECDSA_P256_SHA256,
+        PKCS_ECDSA_P384_SHA384, PKCS_ED25519,
     };
     use time::{Duration, OffsetDateTime};
 
@@ -165,6 +172,13 @@ mod tests {
     /// valid at NOW. Roots/intermediates carry CA:TRUE + keyCertSign (the Fulcio shape); the leaf carries
     /// the code-signing EKU. Returns `(root_der, intermediate_der, leaf_der)`.
     fn build_three_tier() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+        build_three_tier_alg(&PKCS_ECDSA_P256_SHA256)
+    }
+
+    /// As [`build_three_tier`], but every certificate in the chain is keyed/signed with `alg`. Real Fulcio
+    /// chains sign the CA tier with ECDSA P-384/SHA-384, so the P-384 variant exercises the real-world
+    /// algorithm; the Ed25519 variant proves an unsupported algorithm is still rejected.
+    fn build_three_tier_alg(alg: &'static SignatureAlgorithm) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
         let nb = at(NOW as i64) - Duration::days(1);
         let na = at(NOW as i64) + Duration::days(1);
         let ca_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
@@ -178,7 +192,7 @@ mod tests {
         };
 
         // Self-signed root.
-        let root_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();
+        let root_key = KeyPair::generate_for(alg).unwrap();
         let mut root_params = CertificateParams::new(Vec::<String>::new()).unwrap();
         root_params.distinguished_name = dn("Assay Test Root CA");
         root_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -190,7 +204,7 @@ mod tests {
         // Intermediate CA, signed by the root. Faithful to the Fulcio profile: CA:TRUE with pathlen:0,
         // CertSign+CRLSign, AND the code-signing EKU. webpki's `Required` EKU check chains through every
         // non-anchor node, so a real Fulcio intermediate (which carries this EKU) is exactly what passes.
-        let int_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();
+        let int_key = KeyPair::generate_for(alg).unwrap();
         let mut int_params = CertificateParams::new(Vec::<String>::new()).unwrap();
         int_params.distinguished_name = dn("Assay Test Intermediate CA");
         int_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
@@ -202,7 +216,7 @@ mod tests {
         let int_cert = int_params.signed_by(&int_key, &root_issuer).unwrap();
 
         // Leaf, signed by the intermediate.
-        let leaf_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();
+        let leaf_key = KeyPair::generate_for(alg).unwrap();
         let mut leaf_params = CertificateParams::new(vec![IDENTITY.to_string()]).unwrap();
         leaf_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::CodeSigning];
         leaf_params.not_before = nb;
@@ -257,6 +271,25 @@ mod tests {
         let (root, intermediate, leaf) = build_three_tier();
         let out = verify_cert_chain_offline(&leaf, &[&intermediate], &[&root], NOW);
         assert_eq!(out.status, CheckStatus::Verified, "{}", out.reason);
+    }
+
+    #[test]
+    fn p384_chain_verifies() {
+        // Real Fulcio CAs sign with ECDSA P-384/SHA-384. A leaf -> intermediate -> root chain signed with
+        // P-384 must validate, otherwise the verifier rejects genuine Fulcio bytes (proven separately by
+        // the real-vector test in tests/fulcio_chain.rs).
+        let (root, intermediate, leaf) = build_three_tier_alg(&PKCS_ECDSA_P384_SHA384);
+        let out = verify_cert_chain_offline(&leaf, &[&intermediate], &[&root], NOW);
+        assert_eq!(out.status, CheckStatus::Verified, "{}", out.reason);
+    }
+
+    #[test]
+    fn unsupported_signature_algorithm_still_fails() {
+        // Adding P-384 must NOT open the verifier to an arbitrary algorithm set: an Ed25519-signed chain
+        // (not in SUPPORTED_SIG_ALGS) is still rejected.
+        let (root, intermediate, leaf) = build_three_tier_alg(&PKCS_ED25519);
+        let out = verify_cert_chain_offline(&leaf, &[&intermediate], &[&root], NOW);
+        assert_eq!(out.status, CheckStatus::Failed, "{}", out.reason);
     }
 
     #[test]
