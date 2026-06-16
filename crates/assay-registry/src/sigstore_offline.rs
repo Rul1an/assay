@@ -7,9 +7,10 @@
 //! lookup.** `cert-chain-valid` is NOT `identity-authorized`: identity extraction + the Sigstore policy
 //! checks (issuer/SAN, Rekor inclusion) are separate slices (a-3.1 identity, a-3.3 Rekor).
 //!
-//! Scope (this increment): chain validation + validity-window. Status mapping (locked in the MCP04
-//! design-of-record): no pinned roots -> `TrustRootUnavailable`; chain does not validate against the
-//! pinned roots -> `Failed`; expired / not-yet-valid -> `Failed`; chain valid -> `Verified`.
+//! Scope (this increment): chain validation + validity-window + the code-signing EKU requirement.
+//! Status mapping (locked in the MCP04 design-of-record): no pinned roots -> `TrustRootUnavailable`;
+//! chain does not validate against the pinned roots -> `Failed`; expired / not-yet-valid -> `Failed`;
+//! leaf lacks the required code-signing EKU -> `Failed`; chain valid -> `Verified`.
 
 use rustls_pki_types::{CertificateDer, SignatureVerificationAlgorithm, UnixTime};
 use webpki::{anchor_from_trusted_cert, EndEntityCert, KeyUsage};
@@ -101,6 +102,9 @@ pub fn verify_cert_chain_offline(
             CheckStatus::Failed,
             "chain does not validate against pinned roots",
         ),
+        Err(webpki::Error::RequiredEkuNotFoundContext(_)) => {
+            CertChainOutcome::new(CheckStatus::Failed, "required code-signing EKU absent")
+        }
         Err(_) => CertChainOutcome::new(CheckStatus::Failed, "certificate chain invalid"),
     }
 }
@@ -109,8 +113,8 @@ pub fn verify_cert_chain_offline(
 mod tests {
     use super::*;
     use rcgen::{
-        BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
-        PKCS_ECDSA_P256_SHA256,
+        BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose,
+        IsCa, Issuer, KeyPair, KeyUsagePurpose, PKCS_ECDSA_P256_SHA256,
     };
     use time::{Duration, OffsetDateTime};
 
@@ -124,8 +128,18 @@ mod tests {
     }
 
     /// Build a synthetic CA + ECDSA-P256 leaf (code-signing EKU, SAN = IDENTITY) with the given validity
-    /// window, all in-memory. `offset_now` is the rcgen `OffsetDateTime` matching NOW for the window.
+    /// window, all in-memory.
     fn build_pki(not_before: OffsetDateTime, not_after: OffsetDateTime) -> Pki {
+        build_pki_with_eku(not_before, not_after, true)
+    }
+
+    /// As [`build_pki`], but `code_signing` controls whether the leaf carries the code-signing EKU. The
+    /// `false` variant exists to prove the EKU requirement is load-bearing.
+    fn build_pki_with_eku(
+        not_before: OffsetDateTime,
+        not_after: OffsetDateTime,
+        code_signing: bool,
+    ) -> Pki {
         let ca_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();
         let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -133,7 +147,9 @@ mod tests {
 
         let leaf_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();
         let mut leaf_params = CertificateParams::new(vec![IDENTITY.to_string()]).unwrap();
-        leaf_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::CodeSigning];
+        if code_signing {
+            leaf_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::CodeSigning];
+        }
         leaf_params.not_before = not_before;
         leaf_params.not_after = not_after;
         let issuer = Issuer::from_params(&ca_params, &ca_key);
@@ -143,6 +159,62 @@ mod tests {
             ca_der: ca_cert.der().to_vec(),
             leaf_der: leaf_cert.der().to_vec(),
         }
+    }
+
+    /// A realistic three-tier chain `leaf -> intermediate CA -> self-signed root`, all ECDSA-P256 and
+    /// valid at NOW. Roots/intermediates carry CA:TRUE + keyCertSign (the Fulcio shape); the leaf carries
+    /// the code-signing EKU. Returns `(root_der, intermediate_der, leaf_der)`.
+    fn build_three_tier() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+        let nb = at(NOW as i64) - Duration::days(1);
+        let na = at(NOW as i64) + Duration::days(1);
+        let ca_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+
+        // Distinct subject names so webpki can build the path unambiguously (an empty DN on both CAs
+        // would make root and intermediate indistinguishable to name-based chain building).
+        let dn = |cn: &str| {
+            let mut d = DistinguishedName::new();
+            d.push(DnType::CommonName, cn);
+            d
+        };
+
+        // Self-signed root.
+        let root_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut root_params = CertificateParams::new(Vec::<String>::new()).unwrap();
+        root_params.distinguished_name = dn("Assay Test Root CA");
+        root_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        root_params.key_usages = ca_usages.clone();
+        root_params.not_before = nb;
+        root_params.not_after = na;
+        let root_cert = root_params.self_signed(&root_key).unwrap();
+
+        // Intermediate CA, signed by the root. Faithful to the Fulcio profile: CA:TRUE with pathlen:0,
+        // CertSign+CRLSign, AND the code-signing EKU. webpki's `Required` EKU check chains through every
+        // non-anchor node, so a real Fulcio intermediate (which carries this EKU) is exactly what passes.
+        let int_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut int_params = CertificateParams::new(Vec::<String>::new()).unwrap();
+        int_params.distinguished_name = dn("Assay Test Intermediate CA");
+        int_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
+        int_params.key_usages = ca_usages;
+        int_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::CodeSigning];
+        int_params.not_before = nb;
+        int_params.not_after = na;
+        let root_issuer = Issuer::from_params(&root_params, &root_key);
+        let int_cert = int_params.signed_by(&int_key, &root_issuer).unwrap();
+
+        // Leaf, signed by the intermediate.
+        let leaf_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut leaf_params = CertificateParams::new(vec![IDENTITY.to_string()]).unwrap();
+        leaf_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::CodeSigning];
+        leaf_params.not_before = nb;
+        leaf_params.not_after = na;
+        let int_issuer = Issuer::from_params(&int_params, &int_key);
+        let leaf_cert = leaf_params.signed_by(&leaf_key, &int_issuer).unwrap();
+
+        (
+            root_cert.der().to_vec(),
+            int_cert.der().to_vec(),
+            leaf_cert.der().to_vec(),
+        )
     }
 
     fn at(secs: i64) -> OffsetDateTime {
@@ -177,6 +249,46 @@ mod tests {
         let other = valid_window(); // a different, valid CA that did NOT sign pki.leaf
         let out = verify_cert_chain_offline(&pki.leaf_der, &[], &[&other.ca_der], NOW);
         assert_eq!(out.status, CheckStatus::Failed, "{}", out.reason);
+    }
+
+    #[test]
+    fn leaf_via_intermediate_to_pinned_root_verifies() {
+        // The realistic Sigstore/Fulcio shape: leaf -> intermediate -> pinned root.
+        let (root, intermediate, leaf) = build_three_tier();
+        let out = verify_cert_chain_offline(&leaf, &[&intermediate], &[&root], NOW);
+        assert_eq!(out.status, CheckStatus::Verified, "{}", out.reason);
+    }
+
+    #[test]
+    fn missing_intermediate_fails() {
+        // Same chain, but the intermediate is withheld: the leaf cannot reach the pinned root, and we
+        // do not fetch the missing link.
+        let (root, _intermediate, leaf) = build_three_tier();
+        let out = verify_cert_chain_offline(&leaf, &[], &[&root], NOW);
+        assert_eq!(out.status, CheckStatus::Failed, "{}", out.reason);
+    }
+
+    #[test]
+    fn wrong_intermediate_fails() {
+        // An intermediate from an unrelated chain does not bridge this leaf to the pinned root.
+        let (root, _intermediate, leaf) = build_three_tier();
+        let (_other_root, other_int, _other_leaf) = build_three_tier();
+        let out = verify_cert_chain_offline(&leaf, &[&other_int], &[&root], NOW);
+        assert_eq!(out.status, CheckStatus::Failed, "{}", out.reason);
+    }
+
+    #[test]
+    fn leaf_without_code_signing_eku_fails() {
+        // An otherwise-valid leaf -> root chain, but the leaf lacks the code-signing EKU. The required
+        // EKU is load-bearing: the verifier must reject it rather than accept any end-entity cert.
+        let pki = build_pki_with_eku(
+            at(NOW as i64) - Duration::days(1),
+            at(NOW as i64) + Duration::days(1),
+            false,
+        );
+        let out = verify_cert_chain_offline(&pki.leaf_der, &[], &[&pki.ca_der], NOW);
+        assert_eq!(out.status, CheckStatus::Failed, "{}", out.reason);
+        assert_eq!(out.reason, "required code-signing EKU absent");
     }
 
     #[test]
