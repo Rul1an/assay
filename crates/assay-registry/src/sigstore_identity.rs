@@ -14,6 +14,7 @@
 //! Status mapping (locked in the MCP04 design-of-record):
 //! - chain does not validate -> the chain status is returned verbatim (`Failed` / `TrustRootUnavailable`)
 //! - non-empty subject -> `Failed` (Fulcio issued certs MUST have an empty subject; identity lives in SAN)
+//! - SAN not marked critical (required on an empty-subject cert) -> `Failed`
 //! - not exactly one SAN, or an unsupported SAN type -> `UnsupportedFormat`
 //! - only the deprecated v1 issuer extension present -> `UnsupportedFormat`
 //! - SAN or issuer absent, or different from expected -> `IdentityMismatch`
@@ -105,6 +106,15 @@ pub fn verify_identity_offline(
             )
         }
     };
+    // RFC 5280 / Fulcio: a leaf whose subject is empty (already enforced above) MUST carry the SAN as a
+    // critical extension. A non-critical SAN on an empty-subject cert is a profile violation, not merely
+    // an unsupported shape.
+    if !san_ext.critical {
+        return IdentityOutcome::new(
+            CheckStatus::Failed,
+            "subject alternative name is not marked critical",
+        );
+    }
     let san = match SubjectAltName::from_der(san_ext.extn_value.as_bytes()) {
         Ok(s) => s,
         Err(_) => {
@@ -209,11 +219,34 @@ mod tests {
         v
     }
 
+    const SAN_OID: &[u64] = &[2, 5, 29, 17];
+    const EMAIL_SAN: &str = "signer@example.com";
+
+    /// DER-encode a GeneralNames SEQUENCE holding a single URI (`[6]` IA5String, IMPLICIT). Short-form
+    /// length only — used to inject a SAN as a (non-critical) custom extension, which rcgen will not do
+    /// on an empty-subject leaf (it forces SAN-critical there).
+    fn der_general_names_uri(uri: &str) -> Vec<u8> {
+        let b = uri.as_bytes();
+        assert!(b.len() < 126, "test uri too long for short-form length");
+        let mut inner = vec![0x86, b.len() as u8];
+        inner.extend_from_slice(b);
+        let mut out = vec![0x30, inner.len() as u8];
+        out.extend_from_slice(&inner);
+        out
+    }
+
     /// How to shape the leaf's identity fields for a given test.
     struct LeafSpec {
         sans: Vec<SanType>,
         /// `(oid, issuer-value)`; the value is DER-UTF8-encoded into the extension content.
         issuer_ext: Option<(&'static [u64], &'static str)>,
+        /// Raw v2-issuer extension content, bypassing `der_utf8` (for malformed-content tests). When
+        /// `Some`, it is used instead of `issuer_ext`.
+        issuer_raw: Option<Vec<u8>>,
+        /// Inject the SAN as a NON-critical custom extension over `SAN_URI` (rcgen forces SAN-critical on
+        /// an empty subject, so this is the only way to model that profile violation). When true, `sans`
+        /// is ignored.
+        san_noncritical: bool,
         empty_subject: bool,
     }
 
@@ -223,6 +256,8 @@ mod tests {
             Self {
                 sans: vec![uri_san(SAN_URI)],
                 issuer_ext: Some((FULCIO_V2_OID, ISSUER)),
+                issuer_raw: None,
+                san_noncritical: false,
                 empty_subject: true,
             }
         }
@@ -253,9 +288,27 @@ mod tests {
         if spec.empty_subject {
             leaf_params.distinguished_name = DistinguishedName::new();
         }
-        leaf_params.subject_alt_names = spec.sans.clone();
+        if spec.san_noncritical {
+            // Bypass rcgen's SAN handling (which marks an empty-subject SAN critical) and inject the SAN
+            // as a non-critical custom extension over the same OID.
+            leaf_params
+                .custom_extensions
+                .push(CustomExtension::from_oid_content(
+                    SAN_OID,
+                    der_general_names_uri(SAN_URI),
+                ));
+        } else {
+            leaf_params.subject_alt_names = spec.sans.clone();
+        }
         leaf_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::CodeSigning];
-        if let Some((oid, value)) = spec.issuer_ext {
+        if let Some(raw) = &spec.issuer_raw {
+            leaf_params
+                .custom_extensions
+                .push(CustomExtension::from_oid_content(
+                    FULCIO_V2_OID,
+                    raw.clone(),
+                ));
+        } else if let Some((oid, value)) = spec.issuer_ext {
             leaf_params
                 .custom_extensions
                 .push(CustomExtension::from_oid_content(oid, der_utf8(value)));
@@ -351,6 +404,44 @@ mod tests {
         let out = verify_identity_offline(&leaf, &[], &[&root], NOW, &expected());
         assert_eq!(out.status, CheckStatus::Failed, "{}", out.reason);
         assert_eq!(out.reason, "certificate has a non-empty subject");
+    }
+
+    #[test]
+    fn email_san_matches_verifies() {
+        // The supported-but-previously-untested email (Rfc822Name) SAN branch.
+        let mut spec = LeafSpec::fulcio();
+        spec.sans = vec![SanType::Rfc822Name(EMAIL_SAN.try_into().unwrap())];
+        let (root, leaf) = build(&spec);
+        let expected = ExpectedIdentity {
+            san: EMAIL_SAN,
+            issuer: ISSUER,
+        };
+        let out = verify_identity_offline(&leaf, &[], &[&root], NOW, &expected);
+        assert_eq!(out.status, CheckStatus::Verified, "{}", out.reason);
+    }
+
+    #[test]
+    fn malformed_issuer_extension_is_unsupported_format() {
+        // The v2 issuer extension is present but its content is not a DER-encoded string.
+        let mut spec = LeafSpec::fulcio();
+        spec.issuer_raw = Some(vec![0xff, 0x02, 0x01, 0x02]);
+        let (root, leaf) = build(&spec);
+        let out = verify_identity_offline(&leaf, &[], &[&root], NOW, &expected());
+        assert_eq!(out.status, CheckStatus::UnsupportedFormat, "{}", out.reason);
+    }
+
+    #[test]
+    fn noncritical_san_on_empty_subject_fails() {
+        // RFC 5280 / Fulcio: an empty-subject leaf MUST carry the SAN as a critical extension.
+        let mut spec = LeafSpec::fulcio();
+        spec.san_noncritical = true;
+        let (root, leaf) = build(&spec);
+        let out = verify_identity_offline(&leaf, &[], &[&root], NOW, &expected());
+        assert_eq!(out.status, CheckStatus::Failed, "{}", out.reason);
+        assert_eq!(
+            out.reason,
+            "subject alternative name is not marked critical"
+        );
     }
 
     /// The headline non-claim: a leaf that chains cleanly to the pinned root but carries the WRONG

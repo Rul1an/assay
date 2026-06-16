@@ -56,6 +56,7 @@ pub mod reference;
 pub mod resolver;
 pub mod sigstore_identity;
 pub mod sigstore_offline;
+pub mod sigstore_signature;
 pub mod supply_chain;
 pub mod trust;
 pub mod types;
