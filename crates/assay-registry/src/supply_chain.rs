@@ -17,6 +17,12 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use ed25519_dalek::{Signature, Verifier};
 use serde::{Deserialize, Serialize};
 
+use crate::rekor::{verify_rekor_v2_inclusion_offline, TransparencyRequirement};
+use crate::sigstore_identity::{verify_identity_offline, ExpectedIdentity};
+use crate::sigstore_offline::verify_cert_chain_offline;
+use crate::sigstore_signature::{
+    bind_in_toto_subject_digest, verify_leaf_ecdsa_signature_over_bytes,
+};
 use crate::trust::TrustStore;
 use crate::types::DsseEnvelope;
 
@@ -40,6 +46,12 @@ pub enum CheckStatus {
     PolicyNotSatisfied,
     SubjectDigestMismatch,
     IdentityMismatch,
+    /// A dimension that is relevant but deliberately NOT verified in this slice (e.g. timestamp
+    /// freshness / log consistency / witness cosignatures are not computed offline). Distinct from
+    /// `NotApplicable` (does not apply) and `NotPresent` (applies but is absent). Append-only addition
+    /// (MCP04a-3.4): a consumer that has not been updated must NOT read it as `verified` — see the paired
+    /// Plimsoll a-3.4b consumer.
+    NotChecked,
 }
 
 impl CheckStatus {
@@ -103,6 +115,21 @@ pub struct ProvenanceChecks {
     pub builder_identity: CheckStatus,
     pub sigstore_bundle: CheckStatus,
     pub rekor_inclusion: CheckStatus,
+    // --- MCP04a-3.4 append-only Sigstore-keyless dimensions ---
+    /// Fulcio leaf chains to a pinned root (a-3.1). Distinct from `dsse_signature` (pinned-key Ed25519).
+    pub cert_chain: CheckStatus,
+    /// Fulcio SAN + OIDC issuer match the expected identity (a-3.2a). DISTINCT from `builder_identity`
+    /// (the SLSA builder id) — this is the keyless signer identity.
+    pub identity: CheckStatus,
+    /// DSSE PAE signature verifies under the leaf key (a-3.3a). Distinct from `dsse_signature` (the
+    /// pinned-key in-toto/SLSA path).
+    pub dsse_pae: CheckStatus,
+    /// Signing-time freshness (RFC3161 TSA). Not computed offline in this slice -> `NotChecked`.
+    pub timestamp_freshness: CheckStatus,
+    /// Transparency-log consistency proof. Not computed offline in this slice -> `NotChecked`.
+    pub consistency: CheckStatus,
+    /// Witness cosignatures on the checkpoint. Not computed offline in this slice -> `NotChecked`.
+    pub witnessing: CheckStatus,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -159,20 +186,123 @@ pub struct SupplyChainConformance {
 
 // ---- Inputs -------------------------------------------------------------------------------------
 
-/// Provenance encountered on the artifact. `Dsse` is the pinned-key in-toto/SLSA path this slice
-/// verifies; `Unsupported` is recorded `unsupported_format` (the MCP04a-3 surfaces).
+/// Provenance encountered on the artifact. `Dsse` is the pinned-key in-toto/SLSA path; `SigstoreBundle`
+/// is the MCP04a-3.4 keyless path (Fulcio + DSSE + Rekor v2), composed from the a-3.1..a-3.3c primitives;
+/// `Unsupported` is recorded `unsupported_format`.
 pub enum ProvenanceInput {
     None,
     Dsse(DsseEnvelope),
+    SigstoreBundle(Box<SigstoreBundleInput>),
     Unsupported(UnsupportedProvenance),
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum UnsupportedProvenance {
-    SigstoreBundle,
     Pep740,
     NpmProvenance,
     UnknownPredicate,
+}
+
+/// A keyless Sigstore DSSE bundle plus the PINNED trust material needed to verify it offline. The bundle
+/// supplies only the leaf certificate + DSSE content; Fulcio roots/intermediates and the Rekor trusted
+/// root are the verifier's own pinned material (never taken from the bundle).
+pub struct SigstoreBundleInput {
+    pub bundle_json: Vec<u8>,
+    pub fulcio_roots: Vec<Vec<u8>>,
+    pub fulcio_intermediates: Vec<Vec<u8>>,
+    pub rekor_trusted_root_json: Vec<u8>,
+    /// Verification time for the cert-chain validity window (cert validity, NOT timestamp freshness).
+    pub now_unix_secs: u64,
+    pub expected_san: String,
+    pub expected_issuer: String,
+}
+
+/// A Sigstore bundle parsed exactly ONCE into neutral evidence (a-3.4 design-of-record): every Sigstore
+/// dimension is computed from the SAME bytes, so `identity` can never read one leaf while `rekor` binds
+/// another. The raw bundle bytes go to the Rekor verifier directly (it parses its own tlog section).
+///
+/// `dsse_pae` is computed as a SIGNATURE-only check (PAE over `payload_type` + `statement_payload`,
+/// verified under the leaf key) — kept separate from `subject_digest_binding`, so a validly-signed
+/// statement for the wrong artifact reads `dsse_pae=verified` + `subject_digest_binding=subject_digest_mismatch`,
+/// not a conflated `dsse_pae=subject_digest_mismatch`.
+struct ParsedSigstoreBundleEvidence {
+    leaf_der: Vec<u8>,
+    /// DSSE `payloadType`, if present (one input to the PAE).
+    payload_type: Option<String>,
+    /// Decoded DSSE `payload` (the in-toto Statement bytes): the PAE payload AND the subject-binding input.
+    statement_payload: Vec<u8>,
+    /// Decoded DSSE signature bytes, present only when the envelope carries exactly one signature.
+    dsse_signature: Option<Vec<u8>>,
+}
+
+const BUNDLE_MEDIA_TYPE_V0_3: &str = "application/vnd.dev.sigstore.bundle.v0.3+json";
+
+/// Shape/availability gate for the Sigstore DSSE path. Returns the neutral evidence on success, or the
+/// `sigstore_bundle` `CheckStatus` to record on failure: `UnsupportedFormat` for a well-formed but
+/// unsupported shape (wrong mediaType, `messageSignature`, `x509CertificateChain`/`publicKey` material,
+/// missing certificate), `Failed` for bytes that should have parsed but did not (malformed JSON, missing
+/// content, un-decodable leaf). Mirrors the a-3.3b shape gate, but a-3.4 owns the parse so the dimensions
+/// share one evidence object. NOT a trust verdict — the trust verdicts are the orthogonal dimensions.
+fn parse_sigstore_bundle(bundle_json: &[u8]) -> Result<ParsedSigstoreBundleEvidence, CheckStatus> {
+    let bundle: serde_json::Value =
+        serde_json::from_slice(bundle_json).map_err(|_| CheckStatus::Failed)?;
+
+    if bundle.get("mediaType").and_then(|v| v.as_str()) != Some(BUNDLE_MEDIA_TYPE_V0_3) {
+        return Err(CheckStatus::UnsupportedFormat);
+    }
+    if bundle.get("messageSignature").is_some() {
+        return Err(CheckStatus::UnsupportedFormat);
+    }
+    // Require the content to be a JSON object: `serde_json::to_vec` succeeds for null/strings too, so a
+    // non-object dsseEnvelope must not reach `sigstore_bundle: Verified`.
+    let dsse = match bundle.get("dsseEnvelope").filter(|v| v.is_object()) {
+        Some(v) => v,
+        None => return Err(CheckStatus::Failed), // no (object) content
+    };
+    let material = match bundle.get("verificationMaterial") {
+        Some(v) => v,
+        None => return Err(CheckStatus::Failed),
+    };
+    if material.get("x509CertificateChain").is_some() || material.get("publicKey").is_some() {
+        return Err(CheckStatus::UnsupportedFormat);
+    }
+    let raw_bytes = match material
+        .pointer("/certificate/rawBytes")
+        .and_then(|v| v.as_str())
+    {
+        Some(s) => s,
+        None => return Err(CheckStatus::UnsupportedFormat),
+    };
+    let leaf_der = BASE64
+        .decode(raw_bytes.as_bytes())
+        .map_err(|_| CheckStatus::Failed)?;
+    // Best-effort envelope-internal fields. A missing/undecodable payloadType/payload/signature is not a
+    // bundle-shape failure here (the dsse_pae / subject dimensions report it); bind over empty -> Failed,
+    // and an absent payloadType/signature -> dsse_pae UnsupportedFormat.
+    let payload_type = dsse
+        .get("payloadType")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let statement_payload = dsse
+        .get("payload")
+        .and_then(|v| v.as_str())
+        .and_then(|p| BASE64.decode(p.as_bytes()).ok())
+        .unwrap_or_default();
+    // Exactly one signature (matches the a-3.3a DSSE shape); 0 or >1 -> no signature -> dsse_pae Unsupported.
+    let dsse_signature = match dsse.get("signatures").and_then(|v| v.as_array()) {
+        Some(sigs) if sigs.len() == 1 => sigs[0]
+            .get("sig")
+            .and_then(|v| v.as_str())
+            .and_then(|s| BASE64.decode(s.as_bytes()).ok()),
+        _ => None,
+    };
+
+    Ok(ParsedSigstoreBundleEvidence {
+        leaf_der,
+        payload_type,
+        statement_payload,
+        dsse_signature,
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -193,6 +323,16 @@ pub struct PinningInput {
 pub struct Policy {
     pub required_builder_id: Option<String>,
     pub required_slsa_build_level: SlsaLevel,
+    // --- MCP04a-3.4 transparency-extension requirements (offline-first: false = report-only) ---
+    /// Require transparency-log inclusion: a non-`Verified` `rekor_inclusion` is then Incomplete.
+    pub require_rekor_inclusion: bool,
+    /// Require signing-time freshness: `timestamp_freshness` is `NotChecked` offline, so requiring it
+    /// yields Incomplete (never a magic pass).
+    pub require_timestamp_freshness: bool,
+    /// Require a log-consistency proof: `consistency` is `NotChecked` offline -> Incomplete when required.
+    pub require_consistency: bool,
+    /// Require witness cosignatures: `witnessing` is `NotChecked` offline -> Incomplete when required.
+    pub require_witnessing: bool,
 }
 
 pub struct VerifyInput<'a> {
@@ -306,16 +446,25 @@ fn verify_provenance(input: &VerifyInput<'_>) -> ProvenanceOutcome {
                 builder_identity: CheckStatus::NotPresent,
                 sigstore_bundle: CheckStatus::NotPresent,
                 rekor_inclusion: CheckStatus::NotPresent,
+                cert_chain: CheckStatus::NotPresent,
+                identity: CheckStatus::NotPresent,
+                dsse_pae: CheckStatus::NotPresent,
+                timestamp_freshness: na,
+                consistency: na,
+                witnessing: na,
             },
             subject_digest_binding: CheckStatus::NotPresent,
             verified_level: SlsaLevel(0),
         },
+        ProvenanceInput::SigstoreBundle(sb) => {
+            verify_sigstore_bundle_provenance(sb, &input.subject, &input.policy)
+        }
         ProvenanceInput::Unsupported(kind) => {
-            // Sigstore-based formats land in MCP04a-3; report unsupported, never pass.
+            // PEP740 / npm adapters are not yet supported; report unsupported, never pass.
             let sigstore = match kind {
-                UnsupportedProvenance::SigstoreBundle
-                | UnsupportedProvenance::Pep740
-                | UnsupportedProvenance::NpmProvenance => CheckStatus::UnsupportedFormat,
+                UnsupportedProvenance::Pep740 | UnsupportedProvenance::NpmProvenance => {
+                    CheckStatus::UnsupportedFormat
+                }
                 UnsupportedProvenance::UnknownPredicate => CheckStatus::NotApplicable,
             };
             ProvenanceOutcome {
@@ -325,6 +474,12 @@ fn verify_provenance(input: &VerifyInput<'_>) -> ProvenanceOutcome {
                     builder_identity: CheckStatus::UnsupportedFormat,
                     sigstore_bundle: sigstore,
                     rekor_inclusion: CheckStatus::NotApplicable,
+                    cert_chain: CheckStatus::UnsupportedFormat,
+                    identity: CheckStatus::UnsupportedFormat,
+                    dsse_pae: CheckStatus::UnsupportedFormat,
+                    timestamp_freshness: na,
+                    consistency: na,
+                    witnessing: na,
                 },
                 subject_digest_binding: CheckStatus::NotApplicable,
                 verified_level: SlsaLevel(0),
@@ -407,9 +562,134 @@ fn verify_provenance(input: &VerifyInput<'_>) -> ProvenanceOutcome {
                     builder_identity,
                     sigstore_bundle: CheckStatus::NotApplicable,
                     rekor_inclusion: CheckStatus::NotApplicable,
+                    // The keyless Sigstore dimensions do not apply to the pinned-key DSSE path.
+                    cert_chain: na,
+                    identity: na,
+                    dsse_pae: na,
+                    timestamp_freshness: na,
+                    consistency: na,
+                    witnessing: na,
                 },
                 subject_digest_binding,
                 verified_level,
+            }
+        }
+    }
+}
+
+/// Compose the offline Sigstore-keyless primitives (a-3.1 chain, a-3.2a identity, a-3.3a DSSE/PAE,
+/// a-3.2b subject binding, a-3.3c Rekor v2 inclusion) into the provenance dimensions, computed ORTHOGONALLY
+/// from a single shared parse of the bundle. A failing dimension never short-circuits the others; the only
+/// early-exit is a bundle shape/parse failure (then the dependent dimensions inherit that status). DSSE/PAE
+/// and Rekor inclusion are cryptographically coupled by the Rekor v2 leaf-bind; identity is the independent
+/// policy axis Rekor does not bind. `sigstore_bundle=Verified` means the shape was decomposable, NOT a
+/// trust verdict.
+fn verify_sigstore_bundle_provenance(
+    sb: &SigstoreBundleInput,
+    subject: &Subject,
+    policy: &Policy,
+) -> ProvenanceOutcome {
+    let na = CheckStatus::NotApplicable;
+    let want = hex_of(&subject.digest);
+    // Policy is the single source of truth for whether inclusion is required: it drives both the Rekor
+    // verifier's missing-proof status here AND the Incomplete decision in compute_policy_result, so the
+    // two can never disagree.
+    let rekor_requirement = if policy.require_rekor_inclusion {
+        TransparencyRequirement::Required
+    } else {
+        TransparencyRequirement::Optional
+    };
+    match parse_sigstore_bundle(&sb.bundle_json) {
+        Err(status) => ProvenanceOutcome {
+            checks: ProvenanceChecks {
+                dsse_signature: na,
+                slsa_provenance: na,
+                builder_identity: na,
+                sigstore_bundle: status,
+                rekor_inclusion: status,
+                cert_chain: status,
+                identity: status,
+                dsse_pae: status,
+                timestamp_freshness: CheckStatus::NotChecked,
+                consistency: CheckStatus::NotChecked,
+                witnessing: CheckStatus::NotChecked,
+            },
+            subject_digest_binding: status,
+            verified_level: SlsaLevel(0),
+        },
+        Ok(ev) => {
+            let roots: Vec<&[u8]> = sb.fulcio_roots.iter().map(|v| v.as_slice()).collect();
+            let inters: Vec<&[u8]> = sb
+                .fulcio_intermediates
+                .iter()
+                .map(|v| v.as_slice())
+                .collect();
+            let expected = ExpectedIdentity {
+                san: &sb.expected_san,
+                issuer: &sb.expected_issuer,
+            };
+
+            let cert_chain =
+                verify_cert_chain_offline(&ev.leaf_der, &inters, &roots, sb.now_unix_secs).status;
+            let identity =
+                verify_identity_offline(&ev.leaf_der, &inters, &roots, sb.now_unix_secs, &expected)
+                    .status;
+            // dsse_pae is SIGNATURE-only: the leaf-key ECDSA signature over the DSSE PAE
+            // (payloadType + payload). It deliberately does NOT bind the subject digest -- that is the
+            // orthogonal `subject_digest_binding` dimension, so a validly-signed statement for the wrong
+            // artifact reads dsse_pae=Verified + subject_digest_binding=SubjectDigestMismatch. We do not
+            // route this through verify_dsse_envelope_offline (which also binds the subject and would
+            // conflate the two layers). The payloadType MUST be the in-toto type: the signer controls it,
+            // and accepting any type would let a valid signature over a different DSSE payload (carrying a
+            // lookalike `subject`) pass -- the payload-type-confusion guard the DSSE PAE exists to enforce.
+            let dsse_pae = match (&ev.payload_type, &ev.dsse_signature) {
+                (Some(pt), Some(sig))
+                    if pt == DSSE_PAYLOAD_TYPE && !ev.statement_payload.is_empty() =>
+                {
+                    let pae = build_pae(pt, &ev.statement_payload);
+                    verify_leaf_ecdsa_signature_over_bytes(&ev.leaf_der, &pae, sig).status
+                }
+                // Wrong/missing payloadType, missing payload, or not exactly one signature -> unsupported.
+                _ => CheckStatus::UnsupportedFormat,
+            };
+            // subject_digest_binding is the in-toto Statement layer: only meaningful for an in-toto
+            // payloadType carrying a Statement/v1 document. A non-in-toto payload has no in-toto subject.
+            let subject_digest_binding = match ev.payload_type.as_deref() {
+                Some(DSSE_PAYLOAD_TYPE) => {
+                    match serde_json::from_slice::<InTotoStatement>(&ev.statement_payload) {
+                        Ok(s) if s.type_ == STATEMENT_TYPE_V1 => {
+                            bind_in_toto_subject_digest(&ev.statement_payload, want).status
+                        }
+                        Ok(_) => CheckStatus::UnsupportedFormat,
+                        Err(_) => CheckStatus::Failed,
+                    }
+                }
+                _ => CheckStatus::UnsupportedFormat,
+            };
+            let rekor_inclusion = verify_rekor_v2_inclusion_offline(
+                &sb.bundle_json,
+                &sb.rekor_trusted_root_json,
+                rekor_requirement,
+            )
+            .status;
+
+            ProvenanceOutcome {
+                checks: ProvenanceChecks {
+                    // The pinned-key in-toto/SLSA fields do not apply to the keyless path.
+                    dsse_signature: na,
+                    slsa_provenance: na,
+                    builder_identity: na,
+                    sigstore_bundle: CheckStatus::Verified,
+                    rekor_inclusion,
+                    cert_chain,
+                    identity,
+                    dsse_pae,
+                    timestamp_freshness: CheckStatus::NotChecked,
+                    consistency: CheckStatus::NotChecked,
+                    witnessing: CheckStatus::NotChecked,
+                },
+                subject_digest_binding,
+                verified_level: SlsaLevel(0),
             }
         }
     }
@@ -459,6 +739,12 @@ fn all_statuses(c: &Checks) -> Vec<CheckStatus> {
         c.provenance.builder_identity,
         c.provenance.sigstore_bundle,
         c.provenance.rekor_inclusion,
+        c.provenance.cert_chain,
+        c.provenance.identity,
+        c.provenance.dsse_pae,
+        c.provenance.timestamp_freshness,
+        c.provenance.consistency,
+        c.provenance.witnessing,
         c.pinning.version_pinned,
         c.pinning.digest_pinned,
         c.pinning.lockfile_subject_matches_artifact,
@@ -467,19 +753,55 @@ fn all_statuses(c: &Checks) -> Vec<CheckStatus> {
     ]
 }
 
-/// Producer-side policy summary. Plimsoll (MCP04a-2) applies the nuanced, policy-aware mapping; this is
-/// the carrier's own coarse verdict: any blocking status -> Fail; else a required-but-unverified
-/// provenance or any pending status -> Incomplete; else Pass.
+/// All statuses EXCEPT the transparency-extension dimensions (rekor_inclusion + timestamp/consistency/
+/// witnessing). Those are optional-by-default (offline-first) and gated by `require_*`, so they are not
+/// swept by the generic "any pending -> Incomplete" rule.
+fn non_transparency_statuses(c: &Checks) -> Vec<CheckStatus> {
+    vec![
+        c.integrity.artifact_digest,
+        c.integrity.subject_digest_binding,
+        c.provenance.dsse_signature,
+        c.provenance.slsa_provenance,
+        c.provenance.builder_identity,
+        c.provenance.sigstore_bundle,
+        c.provenance.cert_chain,
+        c.provenance.identity,
+        c.provenance.dsse_pae,
+        c.pinning.version_pinned,
+        c.pinning.digest_pinned,
+        c.pinning.lockfile_subject_matches_artifact,
+        c.pinning.no_floating_source_ref,
+        c.pinning.no_tag_only_container_ref,
+    ]
+}
+
+/// Producer-side policy summary. Plimsoll (MCP04a-2 / a-3.4b) applies the nuanced, policy-aware mapping;
+/// this is the carrier's own coarse verdict: any blocking status -> Fail; else a required transparency
+/// dimension that is not verified, a required-but-unverified SLSA provenance, or any non-transparency
+/// pending status -> Incomplete; else Pass. Transparency dimensions are offline-first: not-verified only
+/// uncleans when the policy requires it (a `NotChecked` timestamp/consistency/witness is otherwise a
+/// coverage limit, never a magic pass).
 fn compute_policy_result(checks: &Checks, policy: &Policy) -> PolicyResult {
-    let statuses = all_statuses(checks);
-    if statuses.iter().any(|s| s.is_blocking()) {
+    if all_statuses(checks).iter().any(|s| s.is_blocking()) {
         return PolicyResult::Fail;
     }
-    let provenance_required = policy.required_slsa_build_level > SlsaLevel(0);
-    if provenance_required && checks.provenance.slsa_provenance != CheckStatus::Verified {
+    let p = &checks.provenance;
+    let required_unverified = (policy.require_rekor_inclusion
+        && p.rekor_inclusion != CheckStatus::Verified)
+        || (policy.require_timestamp_freshness && p.timestamp_freshness != CheckStatus::Verified)
+        || (policy.require_consistency && p.consistency != CheckStatus::Verified)
+        || (policy.require_witnessing && p.witnessing != CheckStatus::Verified);
+    if required_unverified {
         return PolicyResult::Incomplete;
     }
-    if statuses.iter().any(|s| s.is_pending()) {
+    let provenance_required = policy.required_slsa_build_level > SlsaLevel(0);
+    if provenance_required && p.slsa_provenance != CheckStatus::Verified {
+        return PolicyResult::Incomplete;
+    }
+    if non_transparency_statuses(checks)
+        .iter()
+        .any(|s| s.is_pending())
+    {
         return PolicyResult::Incomplete;
     }
     PolicyResult::Pass
@@ -505,6 +827,21 @@ pub fn verify_supply_chain(input: VerifyInput<'_>) -> SupplyChainConformance {
     };
     let policy_result = compute_policy_result(&checks, &input.policy);
 
+    // The keyless Sigstore path is in play exactly when the transparency extensions are NotChecked; only
+    // then do we record the freshness/consistency/witness coverage gaps (honest, not over-claimed).
+    let sigstore_path = checks.provenance.timestamp_freshness == CheckStatus::NotChecked;
+    let mut limits = vec![
+        "transitive dependencies not re-fetched".to_string(),
+        "PEP 740 / npm provenance adapters not verified in this slice".to_string(),
+        "live transparency-log lookup not performed offline".to_string(),
+    ];
+    if sigstore_path {
+        limits
+            .push("timestamp freshness not checked (RFC3161; Rekor v2 issues no SET)".to_string());
+        limits.push("transparency-log consistency proof not checked".to_string());
+        limits.push("witness cosignatures not checked".to_string());
+    }
+
     SupplyChainConformance {
         schema: SCHEMA.to_string(),
         subject: input.subject,
@@ -522,12 +859,7 @@ pub fn verify_supply_chain(input: VerifyInput<'_>) -> SupplyChainConformance {
                 "lockfile".to_string(),
                 "provenance".to_string(),
             ],
-            limits: vec![
-                "transitive dependencies not re-fetched".to_string(),
-                "sigstore keyless / PEP 740 / npm provenance not verified in this slice"
-                    .to_string(),
-                "live transparency-log lookup not performed offline".to_string(),
-            ],
+            limits,
         },
         non_claims: vec![
             "provenance verification does not prove code safety".to_string(),
@@ -635,6 +967,10 @@ mod tests {
         Policy {
             required_builder_id: Some(BUILDER.to_string()),
             required_slsa_build_level: SlsaLevel(level),
+            require_rekor_inclusion: false,
+            require_timestamp_freshness: false,
+            require_consistency: false,
+            require_witnessing: false,
         }
     }
 
@@ -696,10 +1032,9 @@ mod tests {
     }
 
     #[test]
-    fn sigstore_pep740_npm_are_unsupported_format_never_pass() {
+    fn pep740_npm_are_unsupported_format_never_pass() {
         let store = TrustStore::new();
         for kind in [
-            UnsupportedProvenance::SigstoreBundle,
             UnsupportedProvenance::Pep740,
             UnsupportedProvenance::NpmProvenance,
         ] {
@@ -938,5 +1273,39 @@ mod tests {
         assert_eq!(v["verified"]["slsa_build_level"], "L0");
         assert!(v["policy_result"].is_string());
         assert!(v["non_claims"].as_array().unwrap().len() >= 4);
+    }
+
+    #[test]
+    fn sigstore_bundle_parse_failure_is_failed_never_verified() {
+        // Hermetic (no fixture): a malformed Sigstore bundle must mark `sigstore_bundle` and every
+        // dependent dimension Failed, the transparency extensions NotChecked, and never be `is_clean`.
+        let store = TrustStore::new();
+        let report = verify_supply_chain(VerifyInput {
+            subject: subject(),
+            expected_artifact_digest: None,
+            provenance: ProvenanceInput::SigstoreBundle(Box::new(SigstoreBundleInput {
+                bundle_json: b"not a bundle".to_vec(),
+                fulcio_roots: vec![],
+                fulcio_intermediates: vec![],
+                rekor_trusted_root_json: b"{}".to_vec(),
+                now_unix_secs: 1_750_000_000,
+                expected_san: "x".to_string(),
+                expected_issuer: "y".to_string(),
+            })),
+            pinning: clean_pinning(),
+            policy: policy(0),
+            trust_store: &store,
+        });
+        let p = &report.checks.provenance;
+        assert_eq!(p.sigstore_bundle, CheckStatus::Failed);
+        assert_eq!(p.cert_chain, CheckStatus::Failed);
+        assert_eq!(p.identity, CheckStatus::Failed);
+        assert_eq!(p.dsse_pae, CheckStatus::Failed);
+        assert_eq!(p.rekor_inclusion, CheckStatus::Failed);
+        assert_eq!(p.timestamp_freshness, CheckStatus::NotChecked);
+        assert_eq!(p.consistency, CheckStatus::NotChecked);
+        assert_eq!(p.witnessing, CheckStatus::NotChecked);
+        assert_eq!(report.policy_result, PolicyResult::Fail);
+        assert!(!is_clean(&report));
     }
 }
