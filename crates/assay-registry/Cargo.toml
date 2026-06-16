@@ -67,6 +67,8 @@ rand = "0.8"
 
 [dev-dependencies]
 base64 = "0.22"
+# Already a normal dependency; declared here too so integration tests can mutate Rekor v2 vectors cleanly.
+serde_json = { workspace = true, features = ["std"] }
 # Test-only synthetic PKI for the offline Sigstore cert-chain verifier (hermetic fixtures, no network).
 rcgen = "0.14"
 time = "0.3"

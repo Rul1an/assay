@@ -54,6 +54,7 @@ pub mod dsse;
 pub mod error;
 pub mod lockfile;
 pub mod reference;
+pub mod rekor;
 pub mod resolver;
 pub mod sigstore_bundle;
 pub mod sigstore_identity;
