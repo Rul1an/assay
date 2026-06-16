@@ -55,6 +55,7 @@ pub mod error;
 pub mod lockfile;
 pub mod reference;
 pub mod resolver;
+pub mod sigstore_bundle;
 pub mod sigstore_identity;
 pub mod sigstore_offline;
 pub mod sigstore_signature;
