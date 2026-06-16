@@ -4,7 +4,7 @@ How Assay addresses the [OWASP MCP Top 10](https://owasp.org/www-project-mcp-top
 
 | OWASP Risk | ID | Assay Coverage | How |
 |-----------|-----|---------------|-----|
-| Token Mismanagement & Secret Exposure | MCP01 | Partial | Evidence lint detects secrets in subjects (`ASSAY-W001`). Policy can deny tools that expose credentials. |
+| Token Mismanagement & Secret Exposure | MCP01 | Strong (scoped) | Render-safety pipeline (control-strip → redact → bound → sink-encode) over the Assay CLI rendered sinks (console, `run.json`, SARIF, JUnit) and the Plimsoll review sinks, conformance-verified; redaction precedes bounding so a secret cannot survive as a truncated prefix. Proxy credential-boundary conformance (`assay.token_passthrough_conformance.v0`) shows a consumed inbound auth value is not re-emitted on outbound headers/body/env. Evidence lint also flags secrets in subjects (`ASSAY-W001`); policy can deny credential-exposing tools. Pattern-based detection, scoped to rendered sinks. Plimsoll consumer private. See note below. |
 | Privilege Escalation via Scope Creep | MCP02 | Strong | `restrict_scope` enforcement limits tool arguments at runtime. Policy constraints enforce path/param boundaries. |
 | Tool Poisoning | MCP03 | Strong | Tool signing (`x-assay-sig`), identity verification, tool metadata hashing. [Delegation spoofing experiment](../architecture/RESULTS-EXPERIMENT-DELEGATION-SPOOFING-2026q2.md) tested trust-domain verification. |
 | Supply Chain Attacks & Dependency Tampering | MCP04 | Partial | Pack digest verification (SHA-256/JCS). Adapter identity pinning. Lockfile support in registry client. |
@@ -15,11 +15,13 @@ How Assay addresses the [OWASP MCP Top 10](https://owasp.org/www-project-mcp-top
 | Shadow MCP Servers | MCP09 | Strong (scoped) | Assay inventory carrier (`assay.mcp_server_inventory.v0`, coverage-honest, command/args hashed) + Plimsoll allowlist review over scanned config/process sources; coverage limits reported. No absence claim outside scanned sources. Plimsoll consumer private. See note below. |
 | Context Injection & Over-Sharing | MCP10 | Strong | `redact_args` enforcement strips sensitive fields. Context envelope hardening validates completeness. [Protocol evidence experiment](../architecture/RESULTS-EXPERIMENT-PROTOCOL-EVIDENCE-INTERPRETATION-2026q2.md) tested consumer-side interpretation. |
 
+> **Note on MCP01 "Strong (scoped)".** "Strong" here means rendered outputs carry no raw credential / PII / terminal-control values. A render-safety pipeline redacts before bounding (so a secret cannot survive as a truncated prefix) across the Assay CLI rendered sinks (console, `run.json`, SARIF, JUnit) and the Plimsoll review sinks, proven by render-safety conformance over a hostile corpus; the proxy does not re-emit a consumed inbound auth value (token-passthrough conformance). Detection is pattern-based and may miss a novel secret format. Scope is rendered sinks — not capture-side redaction, and not token lifecycle / rotation / vaulting. The Assay CLI render-safety is public; the Plimsoll review consumer is currently private. It is not Complete coverage.
+
 > **Note on MCP09 "Strong (scoped)".** "Strong" here means the workflow has deterministic producer evidence and a validated review consumer. The public Assay artifact is the inventory carrier (`assay mcp inventory`); the Plimsoll review consumer is currently private, so public users can reproduce the evidence producer but not the full review/gating path from this repository alone. It does not mean Assay detects all shadow MCP servers, and it is not Complete coverage.
 
 ## Summary
 
-Assay provides **Strong** or **Complete** coverage for 8 of 10 OWASP MCP risks, with **Partial** coverage for the remaining 2 (MCP01, MCP04). MCP09 is **Strong (scoped)** — see the note above.
+Assay provides **Strong** or **Complete** coverage for 9 of 10 OWASP MCP risks, with **Partial** coverage for the remaining 1 (MCP04). MCP01 and MCP09 are **Strong (scoped)** — see the notes above.
 
 The strongest alignment is with **MCP08 (Lack of Audit and Telemetry)** — Assay's evidence bundles, decision logs, and replay capabilities are a direct and comprehensive answer to this risk.
 
