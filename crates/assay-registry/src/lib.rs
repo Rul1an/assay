@@ -50,6 +50,7 @@ pub mod cache;
 pub mod canonicalize;
 pub mod client;
 mod digest;
+pub mod dsse;
 pub mod error;
 pub mod lockfile;
 pub mod reference;
