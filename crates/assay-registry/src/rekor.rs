@@ -7,16 +7,23 @@
 //! NOT verify the certificate chain, identity, DSSE envelope, subject-digest binding, **timestamp
 //! freshness** (Rekor v2 issues no SET; freshness is RFC3161, a separate slice), log **consistency**,
 //! **witness** cosignatures, or live log state. A `Verified` here means: this bundle's Rekor v2 entry is
-//! included in a checkpoint signed by a pinned Rekor key — nothing more. `rekor_verified` alone is never a
-//! bundle verdict; it only composes with bundle verification (a-3.4).
+//! included in a checkpoint signed by the pinned log's key — nothing more. `rekor_verified` alone is never
+//! a bundle verdict; it only composes with bundle verification (a-3.4).
 //!
-//! Status precedence (locked): unsupported shape -> `UnsupportedFormat`; missing pinned material ->
-//! `TrustRootUnavailable`; missing proof when Required -> `OnlineRequired` (Optional -> `NotPresent`);
-//! invalid checkpoint signature / unsigned-or-mismatched root / bad inclusion path / leaf-bind mismatch ->
-//! `Failed`; valid -> `Verified`.
+//! Log attribution is bound, not just "some pinned key verifies": the entry's `logId.keyId` selects the
+//! pinned log; the checkpoint signature's key hint must match that log; and the signature must verify under
+//! that specific log's key. Exactly one supported v2 entry is allowed. The `canonicalizedBody` is parsed
+//! with a STRICT schema (`deny_unknown_fields` + apiVersion/kind/algorithm checks) before its fields are
+//! bound to the bundle, so an unsupported body shape cannot leak through as `Verified`.
+//!
+//! Status precedence (locked): unsupported shape (wrong version / >1 entry / unsupported body) ->
+//! `UnsupportedFormat`; missing pinned material -> `TrustRootUnavailable`; missing proof when Required ->
+//! `OnlineRequired` (Optional -> `NotPresent`); wrong log / invalid checkpoint signature / unsigned-or-
+//! mismatched root / bad inclusion path / leaf-bind mismatch -> `Failed`; valid -> `Verified`.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use ed25519_dalek::{Signature, VerifyingKey};
+use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -24,6 +31,7 @@ use crate::supply_chain::CheckStatus;
 
 const HASHEDREKORD_KIND: &str = "hashedrekord";
 const HASHEDREKORD_V002: &str = "0.0.2";
+const SUPPORTED_DIGEST_ALG: &str = "SHA2_256";
 
 /// Whether the caller requires transparency-log inclusion. A-3.3c only sets the LOCAL status; the gating
 /// decision (does this block?) belongs to the carrier / Plimsoll policy (a-3.4).
@@ -58,58 +66,75 @@ fn sha256(parts: &[&[u8]]) -> [u8; 32] {
     h.finalize().into()
 }
 
-/// Extract pinned Ed25519 verifier keys (raw 32-byte) from a Sigstore trusted-root's `tlogs[]`. The key
-/// material is `PKIX_ED25519` SPKI DER (44 bytes); the raw key is the trailing 32 bytes. The ECDSA tlog
-/// (old v1 log) is ignored — this slice verifies Ed25519 checkpoints only.
-fn pinned_ed25519_keys(trusted_root: &Value) -> Vec<[u8; 32]> {
-    let mut keys = Vec::new();
-    if let Some(tlogs) = trusted_root.get("tlogs").and_then(Value::as_array) {
-        for t in tlogs {
-            if t.pointer("/publicKey/keyDetails").and_then(Value::as_str) != Some("PKIX_ED25519") {
-                continue;
-            }
-            let Some(raw) = t
-                .pointer("/publicKey/rawBytes")
-                .and_then(Value::as_str)
-                .and_then(b64)
-            else {
-                continue;
-            };
-            let key: Option<[u8; 32]> = match raw.len() {
-                44 => raw[12..44].try_into().ok(), // SPKI DER -> trailing 32 raw bytes
-                32 => raw[..].try_into().ok(),
-                _ => None,
-            };
-            if let Some(k) = key {
-                keys.push(k);
-            }
+/// A pinned transparency-log: its raw Ed25519 verifier key and its full log id (the `logId.keyId`).
+struct PinnedTlog {
+    key: [u8; 32],
+    log_id: Vec<u8>,
+}
+
+/// Extract pinned Ed25519 tlogs from a Sigstore trusted root. `publicKey.rawBytes` for `PKIX_ED25519` is
+/// SPKI DER (44 bytes; raw key = trailing 32). `logId.keyId` is the log's identity. ECDSA tlogs (the old
+/// v1 log) are ignored.
+fn pinned_tlogs(trusted_root: &Value) -> Vec<PinnedTlog> {
+    let mut out = Vec::new();
+    let Some(tlogs) = trusted_root.get("tlogs").and_then(Value::as_array) else {
+        return out;
+    };
+    for t in tlogs {
+        if t.pointer("/publicKey/keyDetails").and_then(Value::as_str) != Some("PKIX_ED25519") {
+            continue;
+        }
+        let Some(raw) = t
+            .pointer("/publicKey/rawBytes")
+            .and_then(Value::as_str)
+            .and_then(b64)
+        else {
+            continue;
+        };
+        let key: Option<[u8; 32]> = match raw.len() {
+            44 => raw[12..44].try_into().ok(),
+            32 => raw[..].try_into().ok(),
+            _ => None,
+        };
+        let log_id = t
+            .pointer("/logId/keyId")
+            .and_then(Value::as_str)
+            .and_then(b64);
+        if let (Some(key), Some(log_id)) = (key, log_id) {
+            out.push(PinnedTlog { key, log_id });
         }
     }
-    keys
+    out
+}
+
+/// One checkpoint signature line: the key name, the 4-byte key hint, and the raw signature bytes.
+struct CheckpointSig {
+    name: String,
+    key_hint: [u8; 4],
+    sig: Vec<u8>,
 }
 
 /// A parsed C2SP signed-note checkpoint.
 struct Checkpoint {
-    /// The exact bytes the signature is computed over: the note text up to AND including the newline
-    /// before the blank-line separator.
     signed_text: Vec<u8>,
+    origin: String,
     tree_size: u64,
     root_hash: Vec<u8>,
-    /// Each signature: the raw signature bytes (after the 4-byte C2SP key-id prefix).
-    signatures: Vec<Vec<u8>>,
+    signatures: Vec<CheckpointSig>,
 }
 
 /// Parse a checkpoint envelope (C2SP signed note). Body = `origin\n treeSize\n base64(rootHash)\n`
-/// (+ optional extension lines), a blank line, then `— <name> base64(keyid[4] || sig)` line(s). Returns
-/// `None` if the structure or the three required body lines are malformed.
+/// (+ optional extension lines), a blank line, then `— <name> base64(keyid[4] || sig)` line(s). The full
+/// signed text (everything up to and including the newline before the blank line, extensions included) is
+/// preserved for signature verification.
 fn parse_checkpoint(envelope: &str) -> Option<Checkpoint> {
     let sep = envelope.find("\n\n")?;
-    let signed_text = envelope.as_bytes()[..=sep].to_vec(); // includes the \n ending the last body line
+    let signed_text = envelope.as_bytes()[..=sep].to_vec();
     let body = &envelope[..sep];
     let sig_block = &envelope[sep + 2..];
 
     let mut lines = body.split('\n');
-    let _origin = lines.next()?;
+    let origin = lines.next()?.to_string();
     let tree_size: u64 = lines.next()?.trim().parse().ok()?;
     let root_hash = b64(lines.next()?.trim())?;
     if root_hash.len() != 32 {
@@ -120,19 +145,26 @@ fn parse_checkpoint(envelope: &str) -> Option<Checkpoint> {
     for line in sig_block.split('\n') {
         let line = line.trim_end_matches('\r');
         let Some(rest) = line.strip_prefix("\u{2014} ") else {
-            continue; // not a signature line (em-dash + space)
+            continue;
         };
-        let Some((_name, b64sig)) = rest.split_once(' ') else {
+        let Some((name, b64sig)) = rest.split_once(' ') else {
             continue;
         };
         let Some(decoded) = b64(b64sig) else { continue };
         if decoded.len() < 4 {
             continue;
         }
-        signatures.push(decoded[4..].to_vec()); // strip the 4-byte key-id prefix
+        let mut key_hint = [0u8; 4];
+        key_hint.copy_from_slice(&decoded[..4]);
+        signatures.push(CheckpointSig {
+            name: name.to_string(),
+            key_hint,
+            sig: decoded[4..].to_vec(),
+        });
     }
     Some(Checkpoint {
         signed_text,
+        origin,
         tree_size,
         root_hash,
         signatures,
@@ -140,8 +172,7 @@ fn parse_checkpoint(envelope: &str) -> Option<Checkpoint> {
 }
 
 /// RFC 6962 §2.1.1 inclusion-proof verification. Recomputes the tree root from the leaf hash, the leaf
-/// index `m`, the tree size `n`, and the proof `hashes` (leaf->root order). Returns the recomputed root,
-/// or `None` if indices/proof length are inconsistent.
+/// index `m`, the tree size `n`, and the proof `hashes` (leaf->root order).
 fn rfc6962_root(
     leaf_hash: [u8; 32],
     mut fnode: u64,
@@ -155,7 +186,7 @@ fn rfc6962_root(
     let mut r = leaf_hash;
     for p in hashes {
         if snode == 0 {
-            return None; // proof too long for this tree size
+            return None;
         }
         if fnode & 1 == 1 || fnode == snode {
             r = sha256(&[&[0x01], p, &r]);
@@ -170,9 +201,65 @@ fn rfc6962_root(
         snode >>= 1;
     }
     if snode != 0 {
-        return None; // proof too short
+        return None;
     }
     Some(r)
+}
+
+// --- strict HashedRekord v0.0.2 body schema (deny_unknown_fields rejects unsupported shapes) ---
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HashedRekordBody {
+    #[serde(rename = "apiVersion")]
+    api_version: String,
+    kind: String,
+    spec: BodySpec,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BodySpec {
+    #[serde(rename = "hashedRekordV002")]
+    hashed_rekord_v002: BodyV002,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BodyV002 {
+    data: BodyData,
+    signature: BodySignature,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BodyData {
+    algorithm: String,
+    digest: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BodySignature {
+    content: String,
+    verifier: BodyVerifier,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BodyVerifier {
+    #[serde(rename = "keyDetails")]
+    #[allow(dead_code)]
+    key_details: String,
+    #[serde(rename = "x509Certificate")]
+    x509_certificate: BodyCert,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BodyCert {
+    #[serde(rename = "rawBytes")]
+    raw_bytes: String,
 }
 
 fn missing_proof(requirement: TransparencyRequirement) -> RekorInclusionOutcome {
@@ -191,7 +278,7 @@ fn missing_proof(requirement: TransparencyRequirement) -> RekorInclusionOutcome 
 /// Verify a Sigstore bundle's Rekor v2 inclusion proof offline against the pinned trusted-root material.
 ///
 /// `bundle_json` is the Sigstore bundle; `trusted_root_json` is the caller's pinned trust material (only
-/// its Ed25519 `tlogs[]` key is used). See the module docs for the exact (narrow) meaning of `Verified`.
+/// its Ed25519 `tlogs[]` keys are used). See the module docs for the exact (narrow) meaning of `Verified`.
 pub fn verify_rekor_v2_inclusion_offline(
     bundle_json: &[u8],
     trusted_root_json: &[u8],
@@ -207,25 +294,35 @@ pub fn verify_rekor_v2_inclusion_offline(
         );
     };
 
-    let entry = bundle.pointer("/verificationMaterial/tlogEntries/0");
-
-    // (1) Unsupported shape wins first: a present entry that is not Rekor v2 hashedrekord 0.0.2.
-    if let Some(entry) = entry.filter(|e| e.is_object()) {
-        let kind = entry.pointer("/kindVersion/kind").and_then(Value::as_str);
-        let version = entry
-            .pointer("/kindVersion/version")
-            .and_then(Value::as_str);
-        if kind != Some(HASHEDREKORD_KIND) || version != Some(HASHEDREKORD_V002) {
+    // (1) Cardinality + shape (UnsupportedFormat wins first).
+    let entries = bundle
+        .pointer("/verificationMaterial/tlogEntries")
+        .and_then(Value::as_array);
+    let entry: Option<&Value> = match entries {
+        Some(arr) if arr.len() > 1 => {
             return RekorInclusionOutcome::new(
                 CheckStatus::UnsupportedFormat,
-                "not a Rekor v2 hashedrekord 0.0.2 entry",
-            );
+                "bundle carries more than one tlog entry",
+            )
         }
-    }
+        Some(arr) if arr.len() == 1 => {
+            let e = &arr[0];
+            let kind = e.pointer("/kindVersion/kind").and_then(Value::as_str);
+            let version = e.pointer("/kindVersion/version").and_then(Value::as_str);
+            if kind != Some(HASHEDREKORD_KIND) || version != Some(HASHEDREKORD_V002) {
+                return RekorInclusionOutcome::new(
+                    CheckStatus::UnsupportedFormat,
+                    "not a Rekor v2 hashedrekord 0.0.2 entry",
+                );
+            }
+            Some(e)
+        }
+        _ => None,
+    };
 
     // (2) Missing pinned material.
-    let keys = pinned_ed25519_keys(&trusted_root);
-    if keys.is_empty() {
+    let pinned = pinned_tlogs(&trusted_root);
+    if pinned.is_empty() {
         return RekorInclusionOutcome::new(
             CheckStatus::TrustRootUnavailable,
             "no pinned Ed25519 Rekor verifier key in trusted root",
@@ -233,7 +330,7 @@ pub fn verify_rekor_v2_inclusion_offline(
     }
 
     // (3) Missing proof.
-    let Some(entry) = entry.filter(|e| e.is_object()) else {
+    let Some(entry) = entry else {
         return missing_proof(requirement);
     };
     let Some(ip) = entry.pointer("/inclusionProof").filter(|p| p.is_object()) else {
@@ -243,30 +340,50 @@ pub fn verify_rekor_v2_inclusion_offline(
         return missing_proof(requirement);
     };
 
-    // (4) Checkpoint signature: parse the signed note and require >=1 signature that verifies under a
-    // pinned Ed25519 key over the exact signed text. (The pinned key is the anchor; trying each pinned
-    // key is sound and avoids depending on a key-id derivation.)
+    // (Log identity) Select the pinned log by the entry's logId; the bundle cannot point at a log we do
+    // not pin.
+    let Some(entry_log_id) = entry
+        .pointer("/logId/keyId")
+        .and_then(Value::as_str)
+        .and_then(b64)
+    else {
+        return RekorInclusionOutcome::new(CheckStatus::Failed, "tlog entry has no logId");
+    };
+    let Some(log) = pinned.iter().find(|p| p.log_id == entry_log_id) else {
+        return RekorInclusionOutcome::new(
+            CheckStatus::Failed,
+            "tlog entry references a log not in the pinned trusted root",
+        );
+    };
+
+    // (4) Checkpoint signature: verify under THIS pinned log's key only, with the key hint and origin
+    // bound. The 4-byte hint must equal the selected log id prefix; the signature line name must equal the
+    // checkpoint origin; and the Ed25519 signature must verify over the exact signed text.
     let Some(checkpoint) = parse_checkpoint(checkpoint_env) else {
         return RekorInclusionOutcome::new(CheckStatus::Failed, "malformed checkpoint");
     };
-    let checkpoint_ok = checkpoint.signatures.iter().any(|sig| {
-        let Ok(sig_arr): Result<[u8; 64], _> = sig.as_slice().try_into() else {
-            return false;
-        };
-        let signature = Signature::from_bytes(&sig_arr);
-        keys.iter().any(|k| {
-            VerifyingKey::from_bytes(k)
-                .map(|vk| {
-                    vk.verify_strict(&checkpoint.signed_text, &signature)
+    if checkpoint.tree_size == 0 {
+        return RekorInclusionOutcome::new(CheckStatus::UnsupportedFormat, "empty checkpoint tree");
+    }
+    let Ok(verifying_key) = VerifyingKey::from_bytes(&log.key) else {
+        return RekorInclusionOutcome::new(CheckStatus::TrustRootUnavailable, "invalid pinned key");
+    };
+    let log_hint = &log.log_id[..log.log_id.len().min(4)];
+    let checkpoint_ok = checkpoint.signatures.iter().any(|s| {
+        s.name == checkpoint.origin
+            && &s.key_hint[..] == log_hint
+            && <[u8; 64]>::try_from(s.sig.as_slice())
+                .map(|arr| {
+                    verifying_key
+                        .verify_strict(&checkpoint.signed_text, &Signature::from_bytes(&arr))
                         .is_ok()
                 })
                 .unwrap_or(false)
-        })
     });
     if !checkpoint_ok {
         return RekorInclusionOutcome::new(
             CheckStatus::Failed,
-            "checkpoint signature does not verify under any pinned Rekor key",
+            "checkpoint signature does not verify under the pinned log key",
         );
     }
 
@@ -331,34 +448,49 @@ pub fn verify_rekor_v2_inclusion_offline(
         );
     }
 
-    // (D-LEAF=B) Bind the logged entry to THIS bundle: parse the canonicalizedBody and require its
-    // embedded leaf cert + signature (+ artifact digest when present) match the bundle. This proves the
-    // logged entry is the bundle's entry, not an unrelated body that happens to be in the log.
-    let Ok(body) = serde_json::from_slice::<Value>(&canonicalized_body) else {
-        return RekorInclusionOutcome::new(CheckStatus::Failed, "malformed canonicalizedBody JSON");
+    // (D-LEAF=B) Parse the canonicalizedBody with a STRICT schema, validate the supported shape, and bind
+    // its embedded cert + signature (+ artifact digest for messageSignature) to THIS bundle.
+    let Ok(body) = serde_json::from_slice::<HashedRekordBody>(&canonicalized_body) else {
+        return RekorInclusionOutcome::new(
+            CheckStatus::UnsupportedFormat,
+            "canonicalizedBody is not a supported hashedrekord v0.0.2 shape",
+        );
     };
-    let body_cert =
-        body.pointer("/spec/hashedRekordV002/signature/verifier/x509Certificate/rawBytes");
-    let bundle_cert = bundle.pointer("/verificationMaterial/certificate/rawBytes");
-    if body_cert.is_none() || body_cert != bundle_cert {
+    if body.api_version != HASHEDREKORD_V002
+        || body.kind != HASHEDREKORD_KIND
+        || body.spec.hashed_rekord_v002.data.algorithm != SUPPORTED_DIGEST_ALG
+    {
+        return RekorInclusionOutcome::new(
+            CheckStatus::UnsupportedFormat,
+            "unsupported canonicalizedBody apiVersion/kind/algorithm",
+        );
+    }
+    let v002 = &body.spec.hashed_rekord_v002;
+
+    let bundle_cert = bundle
+        .pointer("/verificationMaterial/certificate/rawBytes")
+        .and_then(Value::as_str);
+    if bundle_cert != Some(v002.signature.verifier.x509_certificate.raw_bytes.as_str()) {
         return RekorInclusionOutcome::new(
             CheckStatus::Failed,
             "logged entry certificate does not match the bundle",
         );
     }
-    let body_sig = body.pointer("/spec/hashedRekordV002/signature/content");
     let bundle_sig = bundle
         .pointer("/messageSignature/signature")
-        .or_else(|| bundle.pointer("/dsseEnvelope/signatures/0/sig"));
-    if body_sig.is_none() || body_sig != bundle_sig {
+        .or_else(|| bundle.pointer("/dsseEnvelope/signatures/0/sig"))
+        .and_then(Value::as_str);
+    if bundle_sig != Some(v002.signature.content.as_str()) {
         return RekorInclusionOutcome::new(
             CheckStatus::Failed,
             "logged entry signature does not match the bundle",
         );
     }
-    if let Some(bundle_digest) = bundle.pointer("/messageSignature/messageDigest/digest") {
-        let body_digest = body.pointer("/spec/hashedRekordV002/data/digest");
-        if body_digest != Some(bundle_digest) {
+    if let Some(bundle_digest) = bundle
+        .pointer("/messageSignature/messageDigest/digest")
+        .and_then(Value::as_str)
+    {
+        if v002.data.digest != bundle_digest {
             return RekorInclusionOutcome::new(
                 CheckStatus::Failed,
                 "logged entry artifact digest does not match the bundle",
@@ -370,4 +502,58 @@ pub fn verify_rekor_v2_inclusion_offline(
         CheckStatus::Verified,
         "Rekor v2 inclusion proof verifies against pinned checkpoint material",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const VALID_BODY: &str = r#"{"apiVersion":"0.0.2","kind":"hashedrekord","spec":{"hashedRekordV002":{"data":{"algorithm":"SHA2_256","digest":"AA=="},"signature":{"content":"AA==","verifier":{"keyDetails":"PKIX_ECDSA_P256_SHA_256","x509Certificate":{"rawBytes":"AA=="}}}}}}"#;
+
+    fn parses(body: &str) -> bool {
+        serde_json::from_str::<HashedRekordBody>(body).is_ok()
+    }
+
+    #[test]
+    fn strict_body_schema_accepts_supported_shape() {
+        assert!(parses(VALID_BODY));
+    }
+
+    #[test]
+    fn strict_body_schema_rejects_unknown_top_level_field() {
+        let body = VALID_BODY.replacen(
+            r#""kind":"hashedrekord""#,
+            r#""kind":"hashedrekord","extra":"x""#,
+            1,
+        );
+        assert!(
+            !parses(&body),
+            "deny_unknown_fields must reject extra top-level field"
+        );
+    }
+
+    #[test]
+    fn strict_body_schema_rejects_unknown_nested_field() {
+        let body = VALID_BODY.replacen(
+            r#""algorithm":"SHA2_256""#,
+            r#""algorithm":"SHA2_256","rogue":"x""#,
+            1,
+        );
+        assert!(
+            !parses(&body),
+            "deny_unknown_fields must reject extra nested field"
+        );
+    }
+
+    #[test]
+    fn strict_body_schema_rejects_missing_required_field() {
+        let body = VALID_BODY.replacen(r#","digest":"AA=="#, "", 1);
+        assert!(!parses(&body), "missing required field must not parse");
+    }
+
+    #[test]
+    fn rfc6962_rejects_out_of_range_index() {
+        // leaf index >= tree size is impossible -> None.
+        assert!(rfc6962_root([0u8; 32], 5, 5, &[]).is_none());
+    }
 }

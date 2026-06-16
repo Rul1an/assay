@@ -87,23 +87,115 @@ fn checkpoint_no_matching_signature_fails() {
 }
 
 #[test]
-fn checkpoint_missing_root_hash_does_not_verify() {
+fn checkpoint_missing_root_hash_is_failed() {
     let outcome = verify(
         "rekor2-checkpoint-missing-root-hash_fail",
         TransparencyRequirement::Required,
     );
-    assert_ne!(outcome.status, CheckStatus::Verified, "{}", outcome.reason);
+    assert_eq!(outcome.status, CheckStatus::Failed, "{}", outcome.reason);
+}
+
+#[test]
+fn cosigned_checkpoint_verifies_via_pinned_log_signature() {
+    // A checkpoint with multiple signatures (log + witness cosigs) verifies as long as the pinned log's
+    // own signature (name == origin, hint == log id) is present and valid. Witness cosigs are ignored.
+    let outcome = verify(
+        "rekor2-checkpoint-two-sigs-cosigned",
+        TransparencyRequirement::Required,
+    );
+    assert_eq!(outcome.status, CheckStatus::Verified, "{}", outcome.reason);
 }
 
 // --- DSSE-layer negative ---
 
 #[test]
-fn dsse_mismatch_signature_does_not_verify() {
+fn dsse_mismatch_signature_is_failed() {
     let outcome = verify(
         "rekor2-dsse-mismatch-sig_fail",
         TransparencyRequirement::Required,
     );
-    assert_ne!(outcome.status, CheckStatus::Verified, "{}", outcome.reason);
+    assert_eq!(outcome.status, CheckStatus::Failed, "{}", outcome.reason);
+}
+
+// --- log-identity + cardinality + proof-math negatives (programmatic mutations of the real vector) ---
+
+fn happy_bundle_value() -> serde_json::Value {
+    serde_json::from_slice(&fixture("rekor2-happy-path", "bundle.sigstore.json")).unwrap()
+}
+
+fn verify_value(bundle: &serde_json::Value) -> RekorInclusionOutcome {
+    verify_rekor_v2_inclusion_offline(
+        serde_json::to_vec(bundle).unwrap().as_slice(),
+        &fixture("rekor2-happy-path", "trusted_root.json"),
+        TransparencyRequirement::Required,
+    )
+}
+
+#[test]
+fn entry_log_id_not_in_trusted_root_is_failed() {
+    let mut b = happy_bundle_value();
+    b["verificationMaterial"]["tlogEntries"][0]["logId"]["keyId"] =
+        serde_json::json!("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+    let outcome = verify_value(&b);
+    assert_eq!(outcome.status, CheckStatus::Failed, "{}", outcome.reason);
+}
+
+#[test]
+fn multiple_tlog_entries_is_unsupported_format() {
+    let mut b = happy_bundle_value();
+    let entry = b["verificationMaterial"]["tlogEntries"][0].clone();
+    b["verificationMaterial"]["tlogEntries"]
+        .as_array_mut()
+        .unwrap()
+        .push(entry);
+    let outcome = verify_value(&b);
+    assert_eq!(
+        outcome.status,
+        CheckStatus::UnsupportedFormat,
+        "{}",
+        outcome.reason
+    );
+}
+
+#[test]
+fn wrong_log_index_is_failed() {
+    let mut b = happy_bundle_value();
+    b["verificationMaterial"]["tlogEntries"][0]["inclusionProof"]["logIndex"] =
+        serde_json::json!("100");
+    let outcome = verify_value(&b);
+    assert_eq!(outcome.status, CheckStatus::Failed, "{}", outcome.reason);
+}
+
+#[test]
+fn log_index_at_or_past_tree_size_is_failed() {
+    let mut b = happy_bundle_value();
+    // treeSize is 736 in the vector; logIndex == treeSize is out of range.
+    b["verificationMaterial"]["tlogEntries"][0]["inclusionProof"]["logIndex"] =
+        serde_json::json!("736");
+    let outcome = verify_value(&b);
+    assert_eq!(outcome.status, CheckStatus::Failed, "{}", outcome.reason);
+}
+
+#[test]
+fn checkpoint_origin_mismatch_is_failed() {
+    let mut b = happy_bundle_value();
+    let env = b["verificationMaterial"]["tlogEntries"][0]["inclusionProof"]["checkpoint"]
+        ["envelope"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // Rewrite the origin (first body line); this changes the signed text AND the sig-line name binding,
+    // so the checkpoint signature can no longer verify under the pinned log.
+    let mutated = env.replacen(
+        "log2025-alpha1.rekor.sigstage.dev\n",
+        "evil.example.com\n",
+        1,
+    );
+    assert_ne!(mutated, env, "expected to rewrite the checkpoint origin");
+    b["verificationMaterial"]["tlogEntries"][0]["inclusionProof"]["checkpoint"]["envelope"] =
+        serde_json::json!(mutated);
+    let outcome = verify_value(&b);
+    assert_eq!(outcome.status, CheckStatus::Failed, "{}", outcome.reason);
 }
 
 // --- D-LEAF=B leaf-binding negative (the anti-false-green) ---
