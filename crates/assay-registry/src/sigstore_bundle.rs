@@ -567,4 +567,33 @@ mod tests {
         // Verified on the composed primitives; the tlogEntries are neither verified nor required here.
         assert_eq!(out.status, CheckStatus::Verified, "{}", out.reason);
     }
+
+    /// The real boundary: tlog material present does NOT compensate for a missing pinned trust root. Even
+    /// with tlogEntries in the bundle, withholding the pinned root is `TrustRootUnavailable`, never
+    /// `Verified` — transparency metadata is not trust material.
+    #[test]
+    fn tlog_present_but_root_withheld_is_trust_root_unavailable() {
+        let pki = build_pki(SAN_URI);
+        let stmt = statement(ARTIFACT_SHA256);
+        let sig = sign(&pki.leaf_key, &pae(IN_TOTO_TYPE, &stmt));
+        let b = format!(
+            r#"{{"mediaType":"{BUNDLE_MEDIA_TYPE_V0_3}","verificationMaterial":{{"certificate":{{"rawBytes":"{}"}},"tlogEntries":[{{"logIndex":"1","inclusionProof":{{"checkpoint":{{"envelope":"x"}}}}}}]}},"dsseEnvelope":{}}}"#,
+            BASE64.encode(&pki.leaf),
+            dsse_envelope(&stmt, &sig)
+        );
+        let out = verify_sigstore_dsse_bundle_offline(
+            b.as_bytes(),
+            &[&pki.intermediate],
+            &[], // pinned root withheld
+            NOW,
+            &expected(),
+            ARTIFACT_SHA256,
+        );
+        assert_eq!(
+            out.status,
+            CheckStatus::TrustRootUnavailable,
+            "{}",
+            out.reason
+        );
+    }
 }
