@@ -29,7 +29,7 @@ Per kanaal: link, stappen, en exact wat in te vullen. Laatste verificatie: 2026-
 ```
 Assay is a policy-as-code proxy that sits between AI agents (Cursor, Claude, etc.) and their MCP tool servers. Every tool call gets an explicit ALLOW or DENY, and every decision produces a tamper-evident evidence bundle you can audit, diff, and replay.
 
-The problem: the average MCP server scores 34/100 on security (https://dev.to/elliotllliu/we-scanned-17-popular-mcp-servers-heres-what-we-found-321c). Assay gives you the policy gate and audit trail to fix that. Covers 9 of 10 OWASP MCP Top 10 risks.
+The problem: the average MCP server scores 34/100 on security (https://dev.to/elliotllliu/we-scanned-17-popular-mcp-servers-heres-what-we-found-321c). Assay gives you the policy gate and audit trail to fix that. It maps Strong-or-better coverage across all ten OWASP MCP Top 10 risks (three scoped, with explicit limits), not a claim the Top 10 is solved.
 
 Quick start (2 commands):
   cargo install assay-cli
@@ -91,7 +91,7 @@ assay mcp wrap --policy policy.yaml -- your-mcp-server
 SARIF results in GitHub Security tab.
 
 ## OWASP coverage
-Assay covers 9 of 10 OWASP MCP Top 10 risks. [Full mapping](https://github.com/Rul1an/assay/blob/main/docs/security/OWASP-MCP-TOP10-MAPPING.md).
+Assay maps Strong-or-better coverage across all ten OWASP MCP Top 10 risks (three scoped, with explicit limits). [Full mapping](https://github.com/Rul1an/assay/blob/main/docs/security/OWASP-MCP-TOP10-MAPPING.md).
 
 ## Links
 - [GitHub](https://github.com/Rul1an/assay)
@@ -137,7 +137,7 @@ cargo install assay-cli
 assay mcp wrap --policy policy.yaml -- npx @modelcontextprotocol/server-filesystem /tmp/demo
 ```
 
-**Differentiator:** Deterministic, offline-first, no API keys. Covers 9/10 OWASP MCP Top 10 risks. Evidence bundles are tamper-evident and replayable.
+**Differentiator:** Deterministic, offline-first, no API keys. Strong-or-better across all ten OWASP MCP Top 10 risks (three scoped). Evidence bundles are tamper-evident and replayable.
 
 MIT licensed. [GitHub](https://github.com/Rul1an/assay)
 ```
@@ -192,7 +192,7 @@ MIT licensed. [GitHub](https://github.com/Rul1an/assay)
 | Veld | Waarde |
 |------|--------|
 | **Server name** | `Assay` |
-| **Description** | `The firewall for MCP tool calls. Policy-as-code enforcement with replayable evidence bundles. Block, audit, replay. Covers 9/10 OWASP MCP Top 10.` |
+| **Description** | `The firewall for MCP tool calls. Policy-as-code enforcement with replayable evidence bundles. Block, audit, replay. Strong-or-better across all ten OWASP MCP Top 10 risks (three scoped).` |
 | **Category** | Security / Developer Tools |
 | **Pricing** | Free |
 | **GitHub** | `https://github.com/Rul1an/assay` (zonder www. — `www.github.com` faalt de security scan) |
@@ -337,7 +337,7 @@ Apigene lijkt "vendor-verified official servers" te cureren. Er is geen publiek 
 ### Suggestie
 Stuur mail naar hun contact met:
 - **Onderwerp:** `Request to add Assay to MCP Server Directory`
-- **Body:** Assay is an open-source MCP policy firewall with evidence bundles. GitHub: https://github.com/Rul1an/assay. Covers 9/10 OWASP MCP Top 10. Would like to be listed in the Apigene directory.
+- **Body:** Assay is an open-source MCP policy firewall with evidence bundles. GitHub: https://github.com/Rul1an/assay. Strong-or-better across all ten OWASP MCP Top 10 risks (three scoped). Would like to be listed in the Apigene directory.
 
 ---
 
@@ -371,7 +371,7 @@ Assay is an open-source policy-as-code proxy for MCP tool calls. It sits between
 - MCP02 (Privilege Escalation): restrict_scope enforcement
 - MCP05 (Command Injection): Policy deny, argument validation
 - MCP07 (Auth): approval_required, mandate system
-- Covers 9/10 OWASP MCP Top 10 risks
+- Strong-or-better across all ten OWASP MCP Top 10 risks (three scoped, with explicit limits)
 
 ## Installation
 ```bash
@@ -458,7 +458,7 @@ Geen duidelijk submit-formulier gevonden. Mogelijk via contact of "Add" op de si
 
 ### Suggestie voor contact
 - **Onderwerp:** `Add Assay — MCP policy firewall`
-- **Body:** Assay is an open-source MCP tool-call firewall with replayable evidence bundles. GitHub: https://github.com/Rul1an/assay. Covers 9/10 OWASP MCP Top 10. Would like to be listed.
+- **Body:** Assay is an open-source MCP tool-call firewall with replayable evidence bundles. GitHub: https://github.com/Rul1an/assay. Strong-or-better across all ten OWASP MCP Top 10 risks (three scoped). Would like to be listed.
 
 ---
 

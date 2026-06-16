@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.27.0] - 2026-06-16
+
+### Added
+- Offline Sigstore-keyless supply-chain verification for MCP packs, composed into the
+  `assay.supply_chain_conformance.v0` carrier with orthogonal per-dimension statuses: Fulcio
+  certificate chain against pinned roots (ECDSA P-256 and P-384), Fulcio identity (SAN + OIDC issuer),
+  DSSE/PAE signature, in-toto subject-digest binding, and Rekor v2 offline inclusion under pinned
+  verifier material. A new `not_checked` status distinguishes deliberately-unverified dimensions
+  (timestamp freshness, log consistency, witnessing) from absent or failed ones. Fully offline: no
+  network, no live transparency-log lookup. (#1701–#1710)
+- Render-safety pipeline for rendered outputs (control-strip → redact → bound → sink-encode) across the
+  Assay CLI sinks (console, `run.json`, SARIF, JUnit), with `assay.render_safety_conformance.v0` and a
+  redaction receipt; redaction precedes bounding so a secret cannot survive as a truncated prefix. Proxy
+  credential-boundary conformance (`assay.token_passthrough_conformance.v0`) shows a consumed inbound
+  auth value is not re-emitted on outbound headers, body, or env. (#1691–#1694)
+
+### Changed
+- OWASP MCP Top 10 mapping: MCP01 and MCP04 promoted to **Strong (scoped)**. The mapping now has no
+  Partial rows — Strong-or-better across all ten risks, with MCP01, MCP04, and MCP09 explicitly scoped
+  to the evidence Assay verifies and carrying explicit coverage limits. This is not a claim that the
+  OWASP MCP Top 10 is solved or eliminated. (#1700, #1711)
+
 ## [3.26.0] - 2026-06-14
 
 ### Added
