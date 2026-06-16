@@ -2,11 +2,12 @@
 //! upstream vector (sigstore-conformance `rekor2-dsse-happy-path`) plus surgical serde_json mutations. No
 //! synthetic PKI: every dimension is exercised on real Fulcio/DSSE/Rekor-v2 bytes.
 //!
-//! PRODUCER-ONLY NOTE (a-3.4): this carrier adds append-only provenance dimensions (cert_chain, identity,
-//! dsse_pae, timestamp_freshness, consistency, witnessing) and a new `not_checked` status. The existing
-//! Plimsoll a-2 consumer is forward-tolerant but clean-by-omission for these, so this carrier is NOT
-//! Plimsoll-consumable until the paired a-3.4b consumer lands; no witness/relabel may rely on the new
-//! fields until then.
+//! NOTE (a-3.4): this carrier adds append-only provenance dimensions (cert_chain, identity, dsse_pae,
+//! timestamp_freshness, consistency, witnessing) and a new `not_checked` status to the public Assay
+//! producer shape of `assay.supply_chain_conformance.v0`. The paired review consumer is maintained
+//! outside this public crate; its consume semantics are validated by the MCP04 a-4/M6 end-to-end witness,
+//! which the public coverage relabel relies on for these fields. This test stays focused on the producer
+//! carrier contract.
 
 use assay_registry::supply_chain::{
     verify_supply_chain, CheckStatus, ContainerRef, PinningInput, Policy, ProvenanceInput,
