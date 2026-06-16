@@ -23,7 +23,7 @@ How Assay addresses the [OWASP MCP Top 10](https://owasp.org/www-project-mcp-top
 
 ## Summary
 
-Assay provides **Strong** or **Complete** coverage across all 10 OWASP MCP risks. MCP01, MCP04, and MCP09 are **Strong (scoped)** — each bounded to the evidence it verifies, with explicit coverage limits in the notes above rather than a claim of completeness.
+Assay now has no **Partial** rows in this mapping; MCP01, MCP04, and MCP09 remain explicitly **Strong (scoped)**. Scoped coverage means evidence-backed controls within Assay's verified boundary, not complete coverage of the risk category.
 
 The strongest alignment is with **MCP08 (Lack of Audit and Telemetry)** — Assay's evidence bundles, decision logs, and replay capabilities are a direct and comprehensive answer to this risk.
 
