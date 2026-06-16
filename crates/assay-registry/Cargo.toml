@@ -47,6 +47,11 @@ rustls-pki-types = "1"
 # MCP04a-3.2 identity extraction: DER parse of the Fulcio leaf SAN + issuer OID extension. der/spki/
 # const-oid are already in the tree at the versions x509-cert 0.2 pins, so this adds no new crypto stack.
 x509-cert = { version = "0.2", default-features = false, features = ["pem"] }
+# MCP04a-3.2b raw ECDSA-over-bytes primitive: verify a P-256 signature under the leaf SPKI. p256/ecdsa
+# are already in the tree at these versions (transitive). This is a sub-primitive only — NOT DSSE
+# envelope / Sigstore bundle / Rekor verification.
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+ecdsa = { version = "0.16", features = ["der"] }
 
 # Pack parsing (reuse from evidence)
 serde_jcs = "=0.2.0"
