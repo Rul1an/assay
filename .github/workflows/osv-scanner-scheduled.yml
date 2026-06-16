@@ -85,7 +85,7 @@ jobs:
 
       - name: Run OSV scanner
         id: osv-scan
-        uses: google/osv-scanner-action/osv-scanner-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
+        uses: google/osv-scanner-action/osv-scanner-action@fa4ff678dd5d0a4fa3d628e57af8162873e93cd6 # v2.3.8
         with:
           scan-args: ${{ steps.osv-targets.outputs.scan_args }}
         continue-on-error: true
@@ -134,7 +134,7 @@ jobs:
           fi
 
       - name: Build advisory SARIF
-        uses: google/osv-scanner-action/osv-reporter-action@8dc09193bb540e09b23da07ad7e30bd33bf87018 # v2.3.8
+        uses: google/osv-scanner-action/osv-reporter-action@fa4ff678dd5d0a4fa3d628e57af8162873e93cd6 # v2.3.8
         with:
           scan-args: |-
             --output=osv-results.sarif
