@@ -16,6 +16,11 @@
 //! with a STRICT schema (`deny_unknown_fields` + apiVersion/kind/algorithm checks) before its fields are
 //! bound to the bundle, so an unsupported body shape cannot leak through as `Verified`.
 //!
+//! Scoped-policy note (NOT universal spec claims): as Assay's offline v2-conformance policy this verifier
+//! additionally requires the checkpoint signature-line name to equal the checkpoint origin, and (when the
+//! pinned trusted root carries a `baseUrl`) the checkpoint origin to equal that pinned log host. C2SP only
+//! says the key name SHOULD match the origin; the equality and host-binding are Assay's stricter choice.
+//!
 //! Status precedence (locked): unsupported shape (wrong version / >1 entry / unsupported body) ->
 //! `UnsupportedFormat`; missing pinned material -> `TrustRootUnavailable`; missing proof when Required ->
 //! `OnlineRequired` (Optional -> `NotPresent`); wrong log / invalid checkpoint signature / unsigned-or-
@@ -66,10 +71,23 @@ fn sha256(parts: &[&[u8]]) -> [u8; 32] {
     h.finalize().into()
 }
 
-/// A pinned transparency-log: its raw Ed25519 verifier key and its full log id (the `logId.keyId`).
+/// A pinned transparency-log: its raw Ed25519 verifier key, its full log id (the `logId.keyId`), and the
+/// normalized host of its `baseUrl` (the operator-pinned origin), when present.
 struct PinnedTlog {
     key: [u8; 32],
     log_id: Vec<u8>,
+    origin: Option<String>,
+}
+
+/// Normalize a trusted-root `baseUrl` to a checkpoint origin host: drop the scheme and any trailing slash.
+/// (The Rekor v2 checkpoint origin for the public/staging logs is the bare host.)
+fn normalize_origin(base_url: &str) -> String {
+    base_url
+        .strip_prefix("https://")
+        .or_else(|| base_url.strip_prefix("http://"))
+        .unwrap_or(base_url)
+        .trim_end_matches('/')
+        .to_string()
 }
 
 /// Extract pinned Ed25519 tlogs from a Sigstore trusted root. `publicKey.rawBytes` for `PKIX_ED25519` is
@@ -100,8 +118,16 @@ fn pinned_tlogs(trusted_root: &Value) -> Vec<PinnedTlog> {
             .pointer("/logId/keyId")
             .and_then(Value::as_str)
             .and_then(b64);
+        let origin = t
+            .get("baseUrl")
+            .and_then(Value::as_str)
+            .map(normalize_origin);
         if let (Some(key), Some(log_id)) = (key, log_id) {
-            out.push(PinnedTlog { key, log_id });
+            out.push(PinnedTlog {
+                key,
+                log_id,
+                origin,
+            });
         }
     }
     out
@@ -215,6 +241,15 @@ struct HashedRekordBody {
     api_version: String,
     kind: String,
     spec: BodySpec,
+}
+
+impl HashedRekordBody {
+    /// Whether this is the single supported entry shape: hashedrekord v0.0.2 with a SHA2_256 digest.
+    fn shape_supported(&self) -> bool {
+        self.api_version == HASHEDREKORD_V002
+            && self.kind == HASHEDREKORD_KIND
+            && self.spec.hashed_rekord_v002.data.algorithm == SUPPORTED_DIGEST_ALG
+    }
 }
 
 #[derive(Deserialize)]
@@ -365,6 +400,18 @@ pub fn verify_rekor_v2_inclusion_offline(
     if checkpoint.tree_size == 0 {
         return RekorInclusionOutcome::new(CheckStatus::UnsupportedFormat, "empty checkpoint tree");
     }
+    // Bind the checkpoint origin to the OPERATOR-pinned log host (defense-in-depth + explicit
+    // attribution). The signature already binds the origin to the key cryptographically; this also
+    // requires the verified checkpoint to be for the log the operator pinned. Enforced when the pinned
+    // trusted root carries a baseUrl.
+    if let Some(expected_origin) = log.origin.as_deref() {
+        if checkpoint.origin != expected_origin {
+            return RekorInclusionOutcome::new(
+                CheckStatus::Failed,
+                "checkpoint origin does not match the pinned log",
+            );
+        }
+    }
     let Ok(verifying_key) = VerifyingKey::from_bytes(&log.key) else {
         return RekorInclusionOutcome::new(CheckStatus::TrustRootUnavailable, "invalid pinned key");
     };
@@ -456,10 +503,7 @@ pub fn verify_rekor_v2_inclusion_offline(
             "canonicalizedBody is not a supported hashedrekord v0.0.2 shape",
         );
     };
-    if body.api_version != HASHEDREKORD_V002
-        || body.kind != HASHEDREKORD_KIND
-        || body.spec.hashed_rekord_v002.data.algorithm != SUPPORTED_DIGEST_ALG
-    {
+    if !body.shape_supported() {
         return RekorInclusionOutcome::new(
             CheckStatus::UnsupportedFormat,
             "unsupported canonicalizedBody apiVersion/kind/algorithm",
@@ -549,6 +593,56 @@ mod tests {
     fn strict_body_schema_rejects_missing_required_field() {
         let body = VALID_BODY.replacen(r#","digest":"AA=="#, "", 1);
         assert!(!parses(&body), "missing required field must not parse");
+    }
+
+    #[test]
+    fn strict_body_schema_rejects_duplicate_field() {
+        // serde's derived struct deserializer rejects a duplicate field.
+        let body = VALID_BODY.replacen(
+            r#""kind":"hashedrekord""#,
+            r#""kind":"hashedrekord","kind":"x""#,
+            1,
+        );
+        assert!(!parses(&body), "duplicate field must not parse");
+    }
+
+    fn shape_ok(body: &str) -> bool {
+        serde_json::from_str::<HashedRekordBody>(body)
+            .map(|b| b.shape_supported())
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn shape_check_accepts_supported_then_rejects_wrong_values() {
+        assert!(shape_ok(VALID_BODY));
+        assert!(!shape_ok(&VALID_BODY.replacen(
+            r#""apiVersion":"0.0.2""#,
+            r#""apiVersion":"0.0.1""#,
+            1
+        )));
+        assert!(!shape_ok(&VALID_BODY.replacen(
+            r#""kind":"hashedrekord""#,
+            r#""kind":"dsse""#,
+            1
+        )));
+        assert!(!shape_ok(&VALID_BODY.replacen(
+            r#""algorithm":"SHA2_256""#,
+            r#""algorithm":"SHA2_512""#,
+            1
+        )));
+    }
+
+    #[test]
+    fn normalize_origin_strips_scheme_and_trailing_slash() {
+        assert_eq!(
+            normalize_origin("https://log.example.dev/"),
+            "log.example.dev"
+        );
+        assert_eq!(
+            normalize_origin("http://log.example.dev"),
+            "log.example.dev"
+        );
+        assert_eq!(normalize_origin("log.example.dev"), "log.example.dev");
     }
 
     #[test]

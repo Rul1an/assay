@@ -198,6 +198,43 @@ fn checkpoint_origin_mismatch_is_failed() {
     assert_eq!(outcome.status, CheckStatus::Failed, "{}", outcome.reason);
 }
 
+#[test]
+fn checkpoint_origin_not_matching_pinned_baseurl_is_failed() {
+    // Isolate the origin<->pinned-baseUrl binding: keep a VALID checkpoint signature + key, but rewrite
+    // the pinned trusted-root baseUrl host. The signature still verifies, yet the verified checkpoint is
+    // for a log the operator did not pin -> Failed. (The origin-rewrite test cannot isolate this, since
+    // rewriting the origin also breaks the signature.)
+    let mut tr: serde_json::Value =
+        serde_json::from_slice(&fixture("rekor2-happy-path", "trusted_root.json")).unwrap();
+    for t in tr["tlogs"].as_array_mut().unwrap() {
+        if t["publicKey"]["keyDetails"] == serde_json::json!("PKIX_ED25519") {
+            t["baseUrl"] = serde_json::json!("https://other.example.com");
+        }
+    }
+    let outcome = verify_rekor_v2_inclusion_offline(
+        &fixture("rekor2-happy-path", "bundle.sigstore.json"),
+        serde_json::to_vec(&tr).unwrap().as_slice(),
+        TransparencyRequirement::Required,
+    );
+    assert_eq!(outcome.status, CheckStatus::Failed, "{}", outcome.reason);
+}
+
+#[test]
+fn proof_hash_wrong_length_is_unsupported_format() {
+    use base64::{engine::general_purpose::STANDARD as B64, Engine};
+    let mut b = happy_bundle_value();
+    // A 31-byte (wrong-length) inclusion hash is a parser/shape problem, not a crypto failure.
+    b["verificationMaterial"]["tlogEntries"][0]["inclusionProof"]["hashes"][0] =
+        serde_json::json!(B64.encode([0u8; 31]));
+    let outcome = verify_value(&b);
+    assert_eq!(
+        outcome.status,
+        CheckStatus::UnsupportedFormat,
+        "{}",
+        outcome.reason
+    );
+}
+
 // --- D-LEAF=B leaf-binding negative (the anti-false-green) ---
 
 #[test]
