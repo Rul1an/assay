@@ -16,7 +16,7 @@ How Assay addresses the [OWASP MCP Top 10](https://owasp.org/www-project-mcp-top
 | Context Injection & Over-Sharing | MCP10 | Strong | `redact_args` enforcement strips sensitive fields. Context envelope hardening validates completeness. [Protocol evidence experiment](../architecture/RESULTS-EXPERIMENT-PROTOCOL-EVIDENCE-INTERPRETATION-2026q2.md) tested consumer-side interpretation. |
 
 > **Note on MCP01 "Strong (scoped)".** "Strong" here means rendered outputs carry no raw credential / PII / terminal-control values. A render-safety pipeline redacts before bounding (so a secret cannot survive as a truncated prefix) across the Assay CLI rendered sinks (console, `run.json`, SARIF, JUnit) and the Plimsoll review sinks, proven by render-safety conformance over a hostile corpus; the proxy does not re-emit a consumed inbound auth value (token-passthrough conformance). Detection is pattern-based and may miss a novel secret format. Scope is rendered sinks — not capture-side redaction, and not token lifecycle / rotation / vaulting. The Assay CLI render-safety is public; the Plimsoll review consumer is currently private. It is not Complete coverage.
-
+>
 > **Note on MCP09 "Strong (scoped)".** "Strong" here means the workflow has deterministic producer evidence and a validated review consumer. The public Assay artifact is the inventory carrier (`assay mcp inventory`); the Plimsoll review consumer is currently private, so public users can reproduce the evidence producer but not the full review/gating path from this repository alone. It does not mean Assay detects all shadow MCP servers, and it is not Complete coverage.
 
 ## Summary
