@@ -235,6 +235,7 @@ mod tests {
 
     fn der_utf8(s: &str) -> Vec<u8> {
         let b = s.as_bytes();
+        assert!(b.len() < 128, "test issuer too long for short-form length");
         let mut v = vec![0x0c, b.len() as u8];
         v.extend_from_slice(b);
         v
