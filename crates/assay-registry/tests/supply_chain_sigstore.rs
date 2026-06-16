@@ -149,6 +149,60 @@ fn real_sigstore_dsse_happy_path_is_pass() {
         .any(|l| l.contains("timestamp freshness not checked")));
 }
 
+// --- Test 1b (LOAD-BEARING): valid DSSE signature, but the EVALUATED artifact != the statement subject.
+// dsse_pae is signature-only, so it stays Verified (the signature over the real statement is valid); the
+// mismatch isolates to subject_digest_binding. Rekor stays Verified (the bundle entry is unchanged) -- the
+// mismatch is "evaluated artifact vs statement subject", not "bundle vs log". ---
+#[test]
+fn valid_signature_wrong_subject_isolates_to_subject_binding() {
+    let wrong = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+    let store = TrustStore::new();
+    let report = verify_supply_chain(VerifyInput {
+        subject: Subject {
+            name: "mcp-pack".to_string(),
+            version: "1.0.0".to_string(),
+            digest: wrong.to_string(),
+        },
+        expected_artifact_digest: None,
+        provenance: ProvenanceInput::SigstoreBundle(Box::new(base_bundle_input(fixture(
+            "bundle.sigstore.json",
+        )))),
+        // Pin the lockfile to the (wrong) evaluated digest so pinning is clean and the ONLY failure is
+        // the subject binding.
+        pinning: PinningInput {
+            version_pinned: true,
+            digest_pinned: Some(true),
+            lockfile_digest: Some(wrong.to_string()),
+            floating_source_ref: false,
+            container_ref: Some(ContainerRef::DigestPinned),
+        },
+        policy: policy(),
+        trust_store: &store,
+    });
+    let p = &report.checks.provenance;
+    assert_eq!(
+        p.dsse_pae,
+        CheckStatus::Verified,
+        "signature is valid over the statement; dsse_pae must not absorb the subject mismatch"
+    );
+    assert_eq!(
+        report.checks.integrity.subject_digest_binding,
+        CheckStatus::SubjectDigestMismatch,
+        "the subject mismatch isolates here"
+    );
+    assert_eq!(
+        p.rekor_inclusion,
+        CheckStatus::Verified,
+        "rekor entry unchanged"
+    );
+    assert_eq!(p.cert_chain, CheckStatus::Verified);
+    assert_eq!(p.identity, CheckStatus::Verified);
+    assert_eq!(
+        report.policy_result,
+        assay_registry::supply_chain::PolicyResult::Fail
+    );
+}
+
 // --- Test 2 (LOAD-BEARING orthogonality): wrong identity, but Rekor + DSSE still Verified -> Fail ---
 #[test]
 fn wrong_identity_with_rekor_and_dsse_verified_is_fail() {

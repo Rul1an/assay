@@ -17,11 +17,12 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use ed25519_dalek::{Signature, Verifier};
 use serde::{Deserialize, Serialize};
 
-use crate::dsse::verify_dsse_envelope_offline;
 use crate::rekor::{verify_rekor_v2_inclusion_offline, TransparencyRequirement};
 use crate::sigstore_identity::{verify_identity_offline, ExpectedIdentity};
 use crate::sigstore_offline::verify_cert_chain_offline;
-use crate::sigstore_signature::bind_in_toto_subject_digest;
+use crate::sigstore_signature::{
+    bind_in_toto_subject_digest, verify_leaf_ecdsa_signature_over_bytes,
+};
 use crate::trust::TrustStore;
 use crate::types::DsseEnvelope;
 
@@ -219,10 +220,19 @@ pub struct SigstoreBundleInput {
 /// A Sigstore bundle parsed exactly ONCE into neutral evidence (a-3.4 design-of-record): every Sigstore
 /// dimension is computed from the SAME bytes, so `identity` can never read one leaf while `rekor` binds
 /// another. The raw bundle bytes go to the Rekor verifier directly (it parses its own tlog section).
+///
+/// `dsse_pae` is computed as a SIGNATURE-only check (PAE over `payload_type` + `statement_payload`,
+/// verified under the leaf key) — kept separate from `subject_digest_binding`, so a validly-signed
+/// statement for the wrong artifact reads `dsse_pae=verified` + `subject_digest_binding=subject_digest_mismatch`,
+/// not a conflated `dsse_pae=subject_digest_mismatch`.
 struct ParsedSigstoreBundleEvidence {
     leaf_der: Vec<u8>,
-    dsse_envelope_bytes: Vec<u8>,
+    /// DSSE `payloadType`, if present (one input to the PAE).
+    payload_type: Option<String>,
+    /// Decoded DSSE `payload` (the in-toto Statement bytes): the PAE payload AND the subject-binding input.
     statement_payload: Vec<u8>,
+    /// Decoded DSSE signature bytes, present only when the envelope carries exactly one signature.
+    dsse_signature: Option<Vec<u8>>,
 }
 
 const BUNDLE_MEDIA_TYPE_V0_3: &str = "application/vnd.dev.sigstore.bundle.v0.3+json";
@@ -266,19 +276,32 @@ fn parse_sigstore_bundle(bundle_json: &[u8]) -> Result<ParsedSigstoreBundleEvide
     let leaf_der = BASE64
         .decode(raw_bytes.as_bytes())
         .map_err(|_| CheckStatus::Failed)?;
-    let dsse_envelope_bytes = serde_json::to_vec(dsse).map_err(|_| CheckStatus::Failed)?;
-    // Best-effort: the in-toto statement payload for subject binding. A missing/undecodable payload is not
-    // a shape failure here (the dsse_pae / subject dimensions report it); bind over empty -> Failed.
+    // Best-effort envelope-internal fields. A missing/undecodable payloadType/payload/signature is not a
+    // bundle-shape failure here (the dsse_pae / subject dimensions report it); bind over empty -> Failed,
+    // and an absent payloadType/signature -> dsse_pae UnsupportedFormat.
+    let payload_type = dsse
+        .get("payloadType")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let statement_payload = dsse
         .get("payload")
         .and_then(|v| v.as_str())
         .and_then(|p| BASE64.decode(p.as_bytes()).ok())
         .unwrap_or_default();
+    // Exactly one signature (matches the a-3.3a DSSE shape); 0 or >1 -> no signature -> dsse_pae Unsupported.
+    let dsse_signature = match dsse.get("signatures").and_then(|v| v.as_array()) {
+        Some(sigs) if sigs.len() == 1 => sigs[0]
+            .get("sig")
+            .and_then(|v| v.as_str())
+            .and_then(|s| BASE64.decode(s.as_bytes()).ok()),
+        _ => None,
+    };
 
     Ok(ParsedSigstoreBundleEvidence {
         leaf_der,
-        dsse_envelope_bytes,
+        payload_type,
         statement_payload,
+        dsse_signature,
     })
 }
 
@@ -611,8 +634,20 @@ fn verify_sigstore_bundle_provenance(
             let identity =
                 verify_identity_offline(&ev.leaf_der, &inters, &roots, sb.now_unix_secs, &expected)
                     .status;
-            let dsse_pae =
-                verify_dsse_envelope_offline(&ev.leaf_der, &ev.dsse_envelope_bytes, want).status;
+            // dsse_pae is SIGNATURE-only: the leaf-key ECDSA signature over the DSSE PAE
+            // (payloadType + payload). It deliberately does NOT bind the subject digest -- that is the
+            // orthogonal `subject_digest_binding` dimension, so a validly-signed statement for the wrong
+            // artifact reads dsse_pae=Verified + subject_digest_binding=SubjectDigestMismatch. We do not
+            // route this through verify_dsse_envelope_offline (which also binds the subject and would
+            // conflate the two layers).
+            let dsse_pae = match (&ev.payload_type, &ev.dsse_signature) {
+                (Some(pt), Some(sig)) if !ev.statement_payload.is_empty() => {
+                    let pae = build_pae(pt, &ev.statement_payload);
+                    verify_leaf_ecdsa_signature_over_bytes(&ev.leaf_der, &pae, sig).status
+                }
+                // Missing payloadType / payload / exactly-one-signature -> malformed envelope shape.
+                _ => CheckStatus::UnsupportedFormat,
+            };
             let subject_digest_binding =
                 bind_in_toto_subject_digest(&ev.statement_payload, want).status;
             let rekor_inclusion = verify_rekor_v2_inclusion_offline(
