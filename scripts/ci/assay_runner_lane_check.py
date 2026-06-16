@@ -8,9 +8,11 @@ the base branch without installing repository dependencies or executing PR code.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -30,6 +32,21 @@ COMMENT_MARKER = "<!-- assay-runner-lane-check -->"
 # created PR metadata endpoints such as /pulls/{number}/files.
 RETRYABLE_HTTP_CODES = {404, 502, 503, 504}
 HTTP_RETRY_ATTEMPTS = 3
+# Connection-level failures urllib/http.client can raise on a transient GitHub
+# API blip (network reset, DNS hiccup, the remote closing the socket without a
+# response). http.client.RemoteDisconnected -- the observed
+# "Remote end closed connection without response" crash -- is a
+# ConnectionResetError *and* an http.client.HTTPException, which makes it a
+# sibling of urllib.error.URLError under OSError, not a subclass: catching
+# URLError alone does not cover it. socket.timeout aliases TimeoutError on
+# Python 3.10+ but is a distinct class on older runtimes, so list both.
+TRANSIENT_REQUEST_ERRORS = (
+    urllib.error.URLError,
+    http.client.HTTPException,
+    ConnectionError,
+    TimeoutError,
+    socket.timeout,
+)
 
 
 class Gate(IntEnum):
@@ -123,7 +140,10 @@ def urlopen_with_retry(request: urllib.request.Request):
             exc.close()
             if exc.code not in RETRYABLE_HTTP_CODES or attempt == attempts - 1:
                 raise
-        except (urllib.error.URLError, TimeoutError) as exc:
+        except TRANSIENT_REQUEST_ERRORS as exc:
+            # urllib.error.HTTPError is caught above (it is a URLError subclass
+            # but needs the status-code-aware branch); everything else here is
+            # a connection-level blip worth retrying on a GET.
             last_error = exc
             if attempt == attempts - 1:
                 raise
@@ -284,7 +304,7 @@ def load_pr(api: GitHubApi, number: int) -> PullRequest:
             head_sha=str(pr["head"]["sha"]),
             files=tuple(str(item["filename"]) for item in files),
         )
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+    except TRANSIENT_REQUEST_ERRORS as exc:
         fallback = load_pr_from_event_and_git(number)
         if fallback is not None:
             print(
@@ -362,7 +382,10 @@ def load_issue_comments(api: GitHubApi, number: int) -> list[dict[str, object]]:
 def safe_load_issue_comments(api: GitHubApi, number: int) -> list[dict[str, object]]:
     try:
         return load_issue_comments(api, number)
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+    except TRANSIENT_REQUEST_ERRORS as exc:
+        # A transient comments-list failure (e.g. http.client.RemoteDisconnected
+        # mid-pagination) must not crash the lane check: degrade to body-only
+        # evidence, which is still checked downstream.
         print(
             f"warning: could not read PR comments; PR body evidence will still be checked: {exc}",
             file=sys.stderr,
@@ -401,7 +424,7 @@ def find_valid_delegated_run(
     for run_id in run_ids:
         try:
             run = dict(api.request("GET", f"/actions/runs/{run_id}"))
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+        except TRANSIENT_REQUEST_ERRORS as exc:
             diagnostics.append(f"run {run_id}: could not read workflow run ({exc})")
             continue
         diagnostic = delegated_run_diagnostic(run, run_id, head_sha)
@@ -588,7 +611,7 @@ def maybe_comment(
         return
     try:
         post_or_update_comment(api, pr_number, comments, body)
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+    except TRANSIENT_REQUEST_ERRORS as exc:
         print(f"warning: could not post/update PR comment: {exc}", file=sys.stderr)
 
 
@@ -690,6 +713,8 @@ def self_test() -> None:
     assert "Dependabot maintainer flow" in guidance
     assert "gates=openai-agents-kernel-policy" in guidance
 
+    _test_connection_resilience()
+
     # Phase 2D Slice 6B mechanical absence check: assert that assay-cli no
     # longer consumes the assay-runner-spike wrapper. The check is
     # encoded here in self_test rather than as a runtime workflow step
@@ -697,6 +722,80 @@ def self_test() -> None:
     # touching the classifier itself, including any future PR that
     # might silently re-introduce a spike dependency.
     _assert_assay_cli_does_not_consume_spike()
+
+
+def _test_connection_resilience() -> None:
+    """Regression for the assay PR #1706 lane-check crash: a transient
+    connection-level error (`http.client.RemoteDisconnected`,
+    "Remote end closed connection without response") must be retried in the
+    request helper and, if it persists on the comments listing, degrade to
+    body-only evidence rather than crashing the whole lane-check job.
+    """
+
+    def remote_disconnected() -> http.client.RemoteDisconnected:
+        return http.client.RemoteDisconnected(
+            "Remote end closed connection without response"
+        )
+
+    # (1) urlopen_with_retry recovers when a GET blips once then succeeds.
+    class _FakeResponse:
+        pass
+
+    attempts_seen = {"count": 0}
+
+    def flaky_urlopen(_request, timeout=None):
+        attempts_seen["count"] += 1
+        if attempts_seen["count"] == 1:
+            raise remote_disconnected()
+        return _FakeResponse()
+
+    request = urllib.request.Request(
+        "https://api.github.com/repos/x/y/issues/1/comments"
+    )
+    orig_urlopen = urllib.request.urlopen
+    orig_sleep = time.sleep
+    try:
+        urllib.request.urlopen = flaky_urlopen
+        time.sleep = lambda _seconds: None
+        recovered = urlopen_with_retry(request)
+    finally:
+        urllib.request.urlopen = orig_urlopen
+        time.sleep = orig_sleep
+    assert isinstance(recovered, _FakeResponse)
+    assert attempts_seen["count"] == 2
+
+    # (2) A persistent connection failure on a GET is retried the bounded
+    #     number of times and then re-raised for the caller to handle.
+    persistent = {"count": 0}
+
+    def always_disconnect(_request, timeout=None):
+        persistent["count"] += 1
+        raise remote_disconnected()
+
+    reraised = False
+    orig_urlopen = urllib.request.urlopen
+    orig_sleep = time.sleep
+    try:
+        urllib.request.urlopen = always_disconnect
+        time.sleep = lambda _seconds: None
+        try:
+            urlopen_with_retry(request)
+        except http.client.RemoteDisconnected:
+            reraised = True
+    finally:
+        urllib.request.urlopen = orig_urlopen
+        time.sleep = orig_sleep
+    assert reraised
+    assert persistent["count"] == HTTP_RETRY_ATTEMPTS
+
+    # (3) safe_load_issue_comments degrades to body-only evidence (returns [])
+    #     when the comments call keeps failing with a connection-level error,
+    #     instead of raising and crashing the lane check.
+    class _RemoteDisconnectedApi:
+        def paginated(self, _path):
+            raise remote_disconnected()
+
+    assert safe_load_issue_comments(_RemoteDisconnectedApi(), 1) == []
 
 
 def _assert_assay_cli_does_not_consume_spike() -> None:
