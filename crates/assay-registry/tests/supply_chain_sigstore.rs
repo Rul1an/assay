@@ -203,6 +203,36 @@ fn valid_signature_wrong_subject_isolates_to_subject_binding() {
     );
 }
 
+// --- Test 1c: payload-type-confusion guard. A non-in-toto payloadType must NOT verify, even though the
+// bundle shape decomposes. dsse_pae/subject_digest_binding -> UnsupportedFormat; sigstore_bundle stays
+// Verified (shape vs trust separation). ---
+#[test]
+fn non_in_toto_payload_type_is_unsupported_not_verified() {
+    let mut b = bundle_value();
+    b["dsseEnvelope"]["payloadType"] = Value::String("application/vnd.evil+json".to_string());
+    let report = run(base_bundle_input(serde_json::to_vec(&b).unwrap()), policy());
+    let p = &report.checks.provenance;
+    assert_eq!(
+        p.dsse_pae,
+        CheckStatus::UnsupportedFormat,
+        "a non-in-toto payloadType must not yield dsse_pae=Verified"
+    );
+    assert_eq!(
+        report.checks.integrity.subject_digest_binding,
+        CheckStatus::UnsupportedFormat,
+        "no in-toto subject to bind for a non-in-toto payload"
+    );
+    assert_eq!(
+        p.sigstore_bundle,
+        CheckStatus::Verified,
+        "bundle shape still decomposes; the type is an envelope-internal trust concern"
+    );
+    assert_eq!(
+        report.policy_result,
+        assay_registry::supply_chain::PolicyResult::Incomplete
+    );
+}
+
 // --- Test 2 (LOAD-BEARING orthogonality): wrong identity, but Rekor + DSSE still Verified -> Fail ---
 #[test]
 fn wrong_identity_with_rekor_and_dsse_verified_is_fail() {

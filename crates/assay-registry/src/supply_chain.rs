@@ -639,17 +639,33 @@ fn verify_sigstore_bundle_provenance(
             // orthogonal `subject_digest_binding` dimension, so a validly-signed statement for the wrong
             // artifact reads dsse_pae=Verified + subject_digest_binding=SubjectDigestMismatch. We do not
             // route this through verify_dsse_envelope_offline (which also binds the subject and would
-            // conflate the two layers).
+            // conflate the two layers). The payloadType MUST be the in-toto type: the signer controls it,
+            // and accepting any type would let a valid signature over a different DSSE payload (carrying a
+            // lookalike `subject`) pass -- the payload-type-confusion guard the DSSE PAE exists to enforce.
             let dsse_pae = match (&ev.payload_type, &ev.dsse_signature) {
-                (Some(pt), Some(sig)) if !ev.statement_payload.is_empty() => {
+                (Some(pt), Some(sig))
+                    if pt == DSSE_PAYLOAD_TYPE && !ev.statement_payload.is_empty() =>
+                {
                     let pae = build_pae(pt, &ev.statement_payload);
                     verify_leaf_ecdsa_signature_over_bytes(&ev.leaf_der, &pae, sig).status
                 }
-                // Missing payloadType / payload / exactly-one-signature -> malformed envelope shape.
+                // Wrong/missing payloadType, missing payload, or not exactly one signature -> unsupported.
                 _ => CheckStatus::UnsupportedFormat,
             };
-            let subject_digest_binding =
-                bind_in_toto_subject_digest(&ev.statement_payload, want).status;
+            // subject_digest_binding is the in-toto Statement layer: only meaningful for an in-toto
+            // payloadType carrying a Statement/v1 document. A non-in-toto payload has no in-toto subject.
+            let subject_digest_binding = match ev.payload_type.as_deref() {
+                Some(DSSE_PAYLOAD_TYPE) => {
+                    match serde_json::from_slice::<InTotoStatement>(&ev.statement_payload) {
+                        Ok(s) if s.type_ == STATEMENT_TYPE_V1 => {
+                            bind_in_toto_subject_digest(&ev.statement_payload, want).status
+                        }
+                        Ok(_) => CheckStatus::UnsupportedFormat,
+                        Err(_) => CheckStatus::Failed,
+                    }
+                }
+                _ => CheckStatus::UnsupportedFormat,
+            };
             let rekor_inclusion = verify_rekor_v2_inclusion_offline(
                 &sb.bundle_json,
                 &sb.rekor_trusted_root_json,
