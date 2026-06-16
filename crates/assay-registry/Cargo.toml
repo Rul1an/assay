@@ -44,6 +44,9 @@ rustls-webpki = { version = "0.103", default-features = false, features = ["allo
 # The DER/UnixTime/SignatureVerificationAlgorithm types webpki's API speaks live in rustls-pki-types
 # (webpki renames it to `pki_types` internally and does not re-export it). Pin the same version webpki uses.
 rustls-pki-types = "1"
+# MCP04a-3.2 identity extraction: DER parse of the Fulcio leaf SAN + issuer OID extension. der/spki/
+# const-oid are already in the tree at the versions x509-cert 0.2 pins, so this adds no new crypto stack.
+x509-cert = { version = "0.2", default-features = false, features = ["pem"] }
 
 # Pack parsing (reuse from evidence)
 serde_jcs = "=0.2.0"

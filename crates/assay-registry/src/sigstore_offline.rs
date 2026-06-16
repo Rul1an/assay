@@ -5,7 +5,7 @@
 //! outcome onto the supply-chain `CheckStatus` vocabulary. **No network: the verdict is produced solely
 //! from the certificate bytes passed in plus the pinned root bytes — there is no client, no async, no
 //! lookup.** `cert-chain-valid` is NOT `identity-authorized`: identity extraction + the Sigstore policy
-//! checks (issuer/SAN, Rekor inclusion) are separate slices (a-3.1 identity, a-3.3 Rekor).
+//! checks (issuer/SAN, Rekor inclusion) are separate slices (a-3.2 identity, a-3.3 Rekor).
 //!
 //! Scope (this increment): chain validation + validity-window + the code-signing EKU requirement.
 //! Status mapping (locked in the MCP04 design-of-record): no pinned roots -> `TrustRootUnavailable`;
