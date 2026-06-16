@@ -37,6 +37,14 @@ base64 = "0.22"
 ed25519-dalek = { version = "2.1", features = ["pkcs8", "rand_core"] }
 pkcs8 = { version = "0.11", features = ["pem"] }
 
+# Sigstore offline verification (MCP04a-3): X.509 path validation only, pinned trust roots, NO network.
+# rustls-webpki is already in the tree (transitive); it does the chain validation so we never hand-roll
+# it. Sigstore policy semantics (identity, Rekor) stay separate.
+rustls-webpki = { version = "0.103", default-features = false, features = ["alloc", "std", "ring"] }
+# The DER/UnixTime/SignatureVerificationAlgorithm types webpki's API speaks live in rustls-pki-types
+# (webpki renames it to `pki_types` internally and does not re-export it). Pin the same version webpki uses.
+rustls-pki-types = "1"
+
 # Pack parsing (reuse from evidence)
 serde_jcs = "=0.2.0"
 
@@ -51,6 +59,9 @@ rand = "0.8"
 
 [dev-dependencies]
 base64 = "0.22"
+# Test-only synthetic PKI for the offline Sigstore cert-chain verifier (hermetic fixtures, no network).
+rcgen = "0.14"
+time = "0.3"
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 wiremock = "0.6"
