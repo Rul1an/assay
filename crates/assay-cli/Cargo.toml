@@ -53,6 +53,7 @@ assay-common = { workspace = true, features = ["std"] }
 assay-policy = { workspace = true }
 assay-metrics = { workspace = true }
 assay-evidence = { workspace = true }
+assay-registry = { workspace = true }
 assay-mcp-server = { workspace = true }
 assay-runner-core = { workspace = true, optional = true }
 assay-runner-schema = { workspace = true, optional = true }

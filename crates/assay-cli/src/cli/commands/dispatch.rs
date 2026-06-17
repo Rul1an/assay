@@ -32,6 +32,7 @@ pub async fn dispatch(cli: Cli, legacy_mode: bool) -> anyhow::Result<i32> {
         Command::Demo(args) => super::demo::cmd_demo(args).await,
         Command::InitCi(args) => super::init_ci::cmd_init_ci(args),
         Command::Mcp(args) => super::mcp::run(args).await,
+        Command::Registry(args) => super::registry::run(args).await,
         Command::Monitor(args) => super::monitor::run(args).await,
         Command::Policy(args) => super::policy::run(args).await,
         #[cfg(feature = "runner")]

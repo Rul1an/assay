@@ -1,0 +1,16 @@
+{
+  "schema": "assay.supply_chain_conformance.input.v0",
+  "subject": {
+    "name": "example-pack",
+    "version": "1.0.0",
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "expected_artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "provenance": { "kind": "unsupported", "format": "pep740" },
+  "pinning": {
+    "version_pinned": true,
+    "digest_pinned": true,
+    "floating_source_ref": false
+  },
+  "policy": { "required_slsa_build_level": 0 }
+}

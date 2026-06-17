@@ -36,6 +36,7 @@ pub mod profile_types;
 pub mod project_otel;
 pub(crate) mod quarantine;
 pub mod record;
+pub mod registry;
 pub(crate) mod reporting;
 pub(crate) mod run;
 pub(crate) mod run_output;
@@ -47,6 +48,7 @@ pub(crate) mod session_state_window;
 pub mod setup;
 #[cfg(feature = "sim")]
 pub mod sim;
+pub mod supply_chain_conformance;
 pub mod tool;
 pub mod trust_basis;
 pub mod trust_card;
