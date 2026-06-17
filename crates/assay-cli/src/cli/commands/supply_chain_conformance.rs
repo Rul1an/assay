@@ -227,13 +227,33 @@ pub async fn run(args: SupplyChainConformanceArgs) -> anyhow::Result<i32> {
     };
 
     let rendered = format!("{}\n", serde_json::to_string_pretty(&carrier)?);
-    if args.out == "-" {
-        std::io::stdout().write_all(rendered.as_bytes())?;
-    } else if let Err(e) = std::fs::write(&args.out, &rendered) {
-        eprintln!("[infra_error] cannot write {}: {e}", args.out);
-        return Ok(EXIT_INFRA_ERROR);
+    // Output-write failures are an infra/output problem regardless of the target: stdout and file
+    // writes route through the same mapping, so a broken pipe on stdout is EXIT_INFRA_ERROR just like
+    // an unwritable file path (never the generic `?` bubble).
+    let write_result = if args.out == "-" {
+        std::io::stdout().write_all(rendered.as_bytes())
+    } else {
+        std::fs::write(&args.out, &rendered)
+    };
+    let target = if args.out == "-" {
+        "stdout"
+    } else {
+        args.out.as_str()
+    };
+    Ok(map_write_result(target, write_result))
+}
+
+/// Map an output-write result to an exit code. A write failure is an infra/output problem
+/// (`EXIT_INFRA_ERROR`), applied uniformly to stdout and file targets so the exit-code contract is
+/// the same whatever `--out` points at.
+fn map_write_result(target: &str, result: std::io::Result<()>) -> i32 {
+    match result {
+        Ok(()) => EXIT_SUCCESS,
+        Err(e) => {
+            eprintln!("[infra_error] cannot write output ({target}): {e}");
+            EXIT_INFRA_ERROR
+        }
     }
-    Ok(EXIT_SUCCESS)
 }
 
 #[cfg(test)]
@@ -340,6 +360,27 @@ mod tests {
     #[test]
     fn deferred_sigstore_bundle_is_rejected_not_ignored() {
         assert!(build_carrier(&descriptor(json!({ "kind": "sigstore_bundle" }))).is_err());
+    }
+
+    #[test]
+    fn write_failure_maps_to_infra_error_for_any_target() {
+        use std::io::{Error, ErrorKind};
+        // A write failure is EXIT_INFRA_ERROR uniformly — stdout (broken pipe) and file alike.
+        assert_eq!(
+            map_write_result(
+                "stdout",
+                Err(Error::new(ErrorKind::BrokenPipe, "pipe closed"))
+            ),
+            EXIT_INFRA_ERROR
+        );
+        assert_eq!(
+            map_write_result(
+                "/tmp/x.json",
+                Err(Error::new(ErrorKind::PermissionDenied, "nope"))
+            ),
+            EXIT_INFRA_ERROR
+        );
+        assert_eq!(map_write_result("stdout", Ok(())), EXIT_SUCCESS);
     }
 
     #[test]
