@@ -1,0 +1,38 @@
+{
+  "all_expected": true,
+  "all_invariants_hold": true,
+  "cases": 17,
+  "failures": [],
+  "invariants": {
+    "canonicalization_explicit": true,
+    "canonicalization_profile_authority_is_consumer_controlled": true,
+    "clean_only_on_independent_recomputation": true,
+    "digest_only_is_inconclusive": true,
+    "producer_envelope_not_authoritative": true,
+    "producer_self_clean_never_promotes": true,
+    "producer_state_never_consulted": true,
+    "redacted_projection_cannot_launder": true,
+    "schema_authority_is_consumer_controlled": true,
+    "unresolved_ref_fails_closed": true
+  },
+  "non_claims": [
+    "recomputation is not trust: a recomputed verdict means the bytes match the content address under the declared canonicalization and schema, not that the producer is honest, the issuer or signature is trusted, or the claimed effect occurred",
+    "grounding the claim against an independent observed basis (agrees/contradicts/unobserved) is a separate axis; verifying issuer or signature trust is another",
+    "operates on committed bytes only; queries no live producer, MCP, or attestation service",
+    "required fields, completeness rules, and canonicalization profile meanings are resolved by the consumer's own trusted registries; producer-supplied schema hints, body-local schema overrides, and embedded profile definitions are never an input to the verdict",
+    "jcs-json-v1 is RFC 8785 over a float-free value space and cbor-deterministic-v1 is RFC 8949 sec 4.2 over the value types used here; full float and value-space coverage is out of scope for this vector set",
+    "counts describe this vector set only, not real-world prevalence"
+  ],
+  "schema": "assay.experiment.e43_evidenceref_recompute_consumer.v0",
+  "verdict_counts": {
+    "canonicalization_mismatch": 1,
+    "digest_mismatch": 2,
+    "malformed_ref": 2,
+    "recomputed": 2,
+    "redacted_projection_incomplete": 4,
+    "schema_mismatch": 1,
+    "unresolvable_digest_only": 2,
+    "unresolved_ref": 1,
+    "unsupported_canonicalization": 2
+  }
+}
