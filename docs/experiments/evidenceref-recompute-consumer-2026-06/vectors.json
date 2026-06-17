@@ -1,0 +1,523 @@
+{
+  "canonicalization_profiles": {
+    "cbor-deterministic-v1": {
+      "description": "RFC 8949 section 4.2 core deterministic encoding (definite lengths, shortest ints, map keys sorted by encoded-key bytes), value space limited to these vectors",
+      "digest_encoding": "hex",
+      "digest_prefix": "sha256:",
+      "hash": "sha256"
+    },
+    "jcs-json-v1": {
+      "description": "RFC 8785 (JCS) over the JSON object, float-free value space in these vectors",
+      "digest_encoding": "hex",
+      "digest_prefix": "sha256:",
+      "hash": "sha256"
+    }
+  },
+  "cases": [
+    {
+      "body_store": {
+        "loc1": {
+          "decision": "allow",
+          "effect": {
+            "wrote": "x"
+          },
+          "schema": "assay.policy_decision",
+          "schema_version": "v1",
+          "target": {
+            "path": "/etc/x"
+          }
+        }
+      },
+      "expected": {
+        "reason": "bytes_match_address_under_declared_canon_and_schema_complete",
+        "verdict": "recomputed"
+      },
+      "id": "c1_happy_jcs",
+      "kind": "happy",
+      "ref": {
+        "canonicalization": "jcs-json-v1",
+        "digest": "sha256:3ae3ef028e933e3125d85c52773e2a49d5dd485a16b99e33434b06976c7bc8f9",
+        "ref": "loc1",
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {
+        "loc2": {
+          "decision": "deny",
+          "effect": {
+            "blocked": "connect"
+          },
+          "schema": "assay.policy_decision",
+          "schema_version": "v1",
+          "target": {
+            "host": "10.0.0.1"
+          }
+        }
+      },
+      "expected": {
+        "reason": "bytes_match_address_under_declared_canon_and_schema_complete",
+        "verdict": "recomputed"
+      },
+      "id": "c2_happy_cbor",
+      "kind": "happy",
+      "ref": {
+        "canonicalization": "cbor-deterministic-v1",
+        "digest": "sha256:a93006659b206fd99acc28892b250eb3592f7afc36c8c3e376ad652c949eea02",
+        "ref": "loc2",
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {},
+      "expected": {
+        "reason": "digest_alone_insufficient_no_resolvable_body",
+        "verdict": "unresolvable_digest_only"
+      },
+      "id": "c3_digest_only_no_body",
+      "kind": "inconclusive",
+      "ref": {
+        "canonicalization": "jcs-json-v1",
+        "digest": "sha256:2af69c55290e7aa7d2d49100b1243b64d1f637b063af24d5d016d4599419938a",
+        "ref": null,
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {
+        "other": {
+          "decision": "allow",
+          "effect": {
+            "wrote": "z"
+          },
+          "schema": "assay.policy_decision",
+          "schema_version": "v1",
+          "target": {
+            "path": "/z"
+          }
+        }
+      },
+      "expected": {
+        "reason": "ref_present_but_body_not_resolvable",
+        "verdict": "unresolved_ref"
+      },
+      "id": "c4_unresolved_ref",
+      "kind": "inconclusive",
+      "ref": {
+        "canonicalization": "jcs-json-v1",
+        "digest": "sha256:ca919fdb3c3ea915a21cf741384d1a3bac7a2ea12652a263d2951c4c9c15350a",
+        "ref": "missing",
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {
+        "loc5": {
+          "decision": "allow",
+          "effect": {
+            "wrote": "b"
+          },
+          "schema": "assay.policy_decision",
+          "schema_version": "v1",
+          "target": {
+            "path": "/b"
+          }
+        }
+      },
+      "expected": {
+        "reason": "recompute_under_declared_canon_diverges_from_committed_digest",
+        "verdict": "digest_mismatch"
+      },
+      "id": "c5_digest_mismatch",
+      "kind": "fail",
+      "ref": {
+        "canonicalization": "jcs-json-v1",
+        "digest": "sha256:95e59f875fbe51fae17abe45b7a6a4e2deffc03d9d18622a94e530328e013650",
+        "ref": "loc5",
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {
+        "loc6": {
+          "decision": "deny",
+          "effect": {
+            "blocked": "write"
+          },
+          "schema": "assay.policy_decision",
+          "schema_version": "v1",
+          "target": {
+            "path": "/c"
+          }
+        }
+      },
+      "expected": {
+        "reason": "digest_matches_cbor-deterministic-v1_not_declared_jcs-json-v1",
+        "verdict": "canonicalization_mismatch"
+      },
+      "id": "c6_canon_mismatch",
+      "kind": "fail",
+      "ref": {
+        "canonicalization": "jcs-json-v1",
+        "digest": "sha256:c2d831d8d9cf72a7a4eefbaee0889c5fbae093d93475c05e133ed63fe1e19b1b",
+        "ref": "loc6",
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {
+        "loc7": {
+          "decision": "allow",
+          "effect": {
+            "wrote": "d"
+          },
+          "schema": "assay.policy_decision",
+          "schema_version": "v1",
+          "target": {
+            "path": "/d"
+          }
+        }
+      },
+      "expected": {
+        "reason": "declared_profile_not_in_consumer_profile_registry",
+        "verdict": "unsupported_canonicalization"
+      },
+      "id": "c7_unsupported_canon",
+      "kind": "inconclusive",
+      "ref": {
+        "canonicalization": "protobuf-canonical-v1",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "ref": "loc7",
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {
+        "loc8": {
+          "decision": "allow",
+          "effect": {
+            "wrote": "e"
+          },
+          "schema": "assay.other",
+          "schema_version": "v1",
+          "target": {
+            "path": "/e"
+          }
+        }
+      },
+      "expected": {
+        "reason": "body_schema_differs_from_declared",
+        "verdict": "schema_mismatch"
+      },
+      "id": "c8_schema_mismatch",
+      "kind": "fail",
+      "ref": {
+        "canonicalization": "jcs-json-v1",
+        "digest": "sha256:759b2f235c124ab3e90818a02e89bf6a53c567b81d1a1f93c6d5fc5d9c378732",
+        "ref": "loc8",
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {
+        "loc9": {
+          "decision": "allow",
+          "effect": {
+            "_redacted": true
+          },
+          "redacted_fields": [
+            "effect"
+          ],
+          "schema": "assay.policy_decision",
+          "schema_version": "v1",
+          "target": {
+            "path": "/f"
+          }
+        }
+      },
+      "expected": {
+        "reason": "missing_or_redacted_required_evidence:effect",
+        "verdict": "redacted_projection_incomplete"
+      },
+      "id": "c9_redacted_projection_marked",
+      "kind": "redaction",
+      "ref": {
+        "canonicalization": "jcs-json-v1",
+        "digest": "sha256:ff9b930b9686bc79c4a38ba93c2eed207367fc537832c044c4b9a433fcb6767f",
+        "ref": "loc9",
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {
+        "loc10": {
+          "decision": "allow",
+          "schema": "assay.policy_decision",
+          "schema_version": "v1",
+          "target": {
+            "path": "/g"
+          }
+        }
+      },
+      "expected": {
+        "reason": "missing_or_redacted_required_evidence:effect",
+        "verdict": "redacted_projection_incomplete"
+      },
+      "id": "c10_silent_elision",
+      "kind": "redaction",
+      "ref": {
+        "canonicalization": "jcs-json-v1",
+        "digest": "sha256:05bcbde9e5c6f46d7e3ec60f2e74267725eac34a4b5a86c9765c425b63078a70",
+        "ref": "loc10",
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {},
+      "expected": {
+        "reason": "digest_alone_insufficient_no_resolvable_body",
+        "verdict": "unresolvable_digest_only"
+      },
+      "id": "c11_producer_clean_no_body",
+      "kind": "producer_self_clean",
+      "ref": {
+        "canonicalization": "jcs-json-v1",
+        "digest": "sha256:bc0a08b16f5f1ed69fb28aa6867c5f7894331da275a0915efa5dc180c157791a",
+        "producer_state": "clean",
+        "ref": null,
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {
+        "loc12": {
+          "decision": "allow",
+          "effect": {
+            "wrote": "j"
+          },
+          "schema": "assay.policy_decision",
+          "schema_version": "v1",
+          "target": {
+            "path": "/j"
+          }
+        }
+      },
+      "expected": {
+        "reason": "recompute_under_declared_canon_diverges_from_committed_digest",
+        "verdict": "digest_mismatch"
+      },
+      "id": "c12_producer_clean_mismatch",
+      "kind": "producer_self_clean",
+      "ref": {
+        "canonicalization": "jcs-json-v1",
+        "digest": "sha256:0d287f3555272d22c50fa319a722338e7e356c4873bda9ed2a0102ad1e4497ba",
+        "producer_state": "clean",
+        "ref": "loc12",
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {
+        "loc13": {
+          "decision": "allow",
+          "effect": {},
+          "schema": "assay.policy_decision",
+          "schema_version": "v1",
+          "target": {}
+        }
+      },
+      "expected": {
+        "reason": "missing_required_field_digest_or_canonicalization",
+        "verdict": "malformed_ref"
+      },
+      "id": "c13_malformed_no_digest",
+      "kind": "fail",
+      "ref": {
+        "canonicalization": "jcs-json-v1",
+        "ref": "loc13",
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {
+        "loc14": {
+          "decision": "allow",
+          "effect": {
+            "wrote": "k"
+          },
+          "schema": "assay.policy_decision",
+          "schema_version": "v1",
+          "target": {
+            "path": "/k"
+          }
+        }
+      },
+      "expected": {
+        "reason": "missing_required_field_digest_or_canonicalization",
+        "verdict": "malformed_ref"
+      },
+      "id": "c14_malformed_no_canon",
+      "kind": "fail",
+      "ref": {
+        "digest": "sha256:60e87d3fdec07b3ea51fe0eb94d0bf388a2a6a862f2523c8c9eb564378fee6c3",
+        "ref": "loc14",
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {
+        "loc15": {
+          "decision": "allow",
+          "effect": {
+            "_redacted": true
+          },
+          "schema": "assay.policy_decision",
+          "schema_version": "v1",
+          "target": {
+            "path": "/l"
+          }
+        }
+      },
+      "expected": {
+        "reason": "missing_or_redacted_required_evidence:effect",
+        "verdict": "redacted_projection_incomplete"
+      },
+      "id": "c15_producer_schema_hint",
+      "kind": "schema_authority",
+      "ref": {
+        "canonicalization": "jcs-json-v1",
+        "digest": "sha256:fff58a192e0497505fde0fe1c03ec7cd1b52d77ea0d84f57052afa2810292144",
+        "producer_schema_hint": {
+          "required_fields": []
+        },
+        "ref": "loc15",
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {
+        "loc16": {
+          "_schema": {
+            "required_fields": []
+          },
+          "decision": "allow",
+          "effect": {
+            "_redacted": true
+          },
+          "schema": "assay.policy_decision",
+          "schema_version": "v1",
+          "target": {
+            "path": "/m"
+          }
+        }
+      },
+      "expected": {
+        "reason": "missing_or_redacted_required_evidence:effect",
+        "verdict": "redacted_projection_incomplete"
+      },
+      "id": "c16_body_local_schema_override",
+      "kind": "schema_authority",
+      "ref": {
+        "canonicalization": "jcs-json-v1",
+        "digest": "sha256:f49b8089bc63b2e613dc5be9eaa72adad365573567234802def848fb53724c26",
+        "ref": "loc16",
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    },
+    {
+      "body_store": {
+        "loc17": {
+          "decision": "allow",
+          "effect": {
+            "wrote": "n"
+          },
+          "schema": "assay.policy_decision",
+          "schema_version": "v1",
+          "target": {
+            "path": "/n"
+          }
+        }
+      },
+      "expected": {
+        "reason": "declared_profile_not_in_consumer_profile_registry",
+        "verdict": "unsupported_canonicalization"
+      },
+      "id": "c17_producer_defined_canon",
+      "kind": "profile_authority",
+      "ref": {
+        "canonicalization": {
+          "name": "jcs-json-v1",
+          "rules": "producer-defined-do-not-honor"
+        },
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "ref": "loc17",
+        "schema": "assay.policy_decision",
+        "schema_version": "v1",
+        "type": "policy_decision"
+      }
+    }
+  ],
+  "schema": "assay.experiment.evidenceref_recompute_consumer.v0",
+  "schema_registry": {
+    "assay.policy_decision/v1": {
+      "required_fields": [
+        "schema",
+        "schema_version",
+        "decision",
+        "effect",
+        "target"
+      ]
+    },
+    "assay.sequence/v1": {
+      "required_fields": [
+        "schema",
+        "schema_version",
+        "sequence",
+        "terminal"
+      ]
+    }
+  },
+  "verdicts": [
+    "recomputed",
+    "digest_mismatch",
+    "canonicalization_mismatch",
+    "schema_mismatch",
+    "malformed_ref",
+    "unresolvable_digest_only",
+    "unresolved_ref",
+    "unsupported_canonicalization",
+    "redacted_projection_incomplete"
+  ]
+}
