@@ -238,6 +238,20 @@ The Trust Card is a deterministic render of the same claim rows plus frozen non-
 
 </details>
 
+### Supply-chain conformance carrier
+
+`assay registry supply-chain-conformance` emits an `assay.supply_chain_conformance.v0` carrier from a local input descriptor, entirely offline:
+
+```bash
+assay registry supply-chain-conformance \
+  --input crates/assay-cli/tests/fixtures/supply_chain_conformance_input.example.json \
+  --out supply-chain-conformance.json \
+  --offline
+# -> supply-chain-conformance.json (assay.supply_chain_conformance.v0)
+```
+
+The example descriptor ships in the source distribution and the repository test fixtures; binary release archives ship the `assay` binary, README, and LICENSE, and do not bundle fixture descriptors. The command reports per-dimension carrier status from local input — it does not assert supply-chain safety, policy approval, compliance, Sigstore trust, Rekor inclusion, issuer identity, or runtime integrity.
+
 ## Add to Cursor in 30 Seconds
 
 Assay ships a helper that finds your local Cursor MCP config path and prints a ready-to-paste entry:

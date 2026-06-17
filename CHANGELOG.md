@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.28.0] - 2026-06-17
+
 ### Added
 - `assay registry supply-chain-conformance` emits the `assay.supply_chain_conformance.v0` carrier from a
   local input descriptor (`assay.supply_chain_conformance.input.v0`), running the existing
