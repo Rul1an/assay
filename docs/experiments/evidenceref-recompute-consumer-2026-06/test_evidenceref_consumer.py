@@ -205,4 +205,4 @@ def test_vectors_path_is_confined_to_working_directory(tmp_path):
         capture_output=True, text=True,
     )
     assert result.returncode != 0
-    assert "outside the working directory" in (result.stdout + result.stderr)
+    assert "refusing an absolute vectors path" in (result.stdout + result.stderr)

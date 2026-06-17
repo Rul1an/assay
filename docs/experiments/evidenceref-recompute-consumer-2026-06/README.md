@@ -10,11 +10,11 @@ a separate independent reproducer, machine-readable vectors, reproducible from t
 
 ## Run
 
-```
+```bash
 python3 evidenceref_consumer.py emit   > vectors.json   # regenerate the vector bytes
 python3 evidenceref_consumer.py verify vectors.json      # reference: reproduce + measurement
 python3 independent_consumer.py vectors.json             # independent: reproduce from bytes alone
-pytest                                                   # 21 tests: matrix, invariants, interop
+pytest                                                   # 22 tests: matrix, invariants, interop
 ```
 
 Over 17 vectors the consumer reaches a clean (`recomputed`) verdict exactly twice; every other verdict is

@@ -38,14 +38,27 @@ import sys
 
 
 def _confined_path(arg: str) -> str:
-    """Resolve a vectors path, confined to the current working directory tree. An experiment runner
-    should not be coaxed into reading an arbitrary filesystem path, so a resolved path that escapes the
-    working directory is refused. The normalize-then-verify-prefix guard also keeps an operator-supplied
+    """Resolve and validate a vectors path, confined to the working-directory tree. The runner reads a
+    local JSON vectors file only, so the operator-supplied argument is rejected unless it is a relative,
+    traversal-free path to an existing .json file inside the current working directory. The explicit
+    absolute / parent-traversal rejection and the realpath prefix check together keep an untrusted
     argument from reaching the filesystem unchecked."""
+    if not arg or not arg.strip():
+        raise SystemExit("refusing an empty vectors path")
+    normalized = arg.replace("\\", "/")
+    if os.path.isabs(arg) or os.path.isabs(normalized):
+        raise SystemExit(f"refusing an absolute vectors path: {arg!r}")
+    parts = [p for p in normalized.split("/") if p not in ("", ".")]
+    if any(p == ".." for p in parts):
+        raise SystemExit(f"refusing a vectors path with parent traversal: {arg!r}")
     base = os.path.realpath(os.getcwd())
-    resolved = os.path.realpath(os.path.join(base, arg))
+    resolved = os.path.realpath(os.path.join(base, *parts))
     if resolved != base and not resolved.startswith(base + os.sep):
         raise SystemExit(f"refusing a vectors path outside the working directory: {arg!r}")
+    if not resolved.endswith(".json"):
+        raise SystemExit(f"refusing a non-json vectors path: {arg!r}")
+    if not os.path.isfile(resolved):
+        raise SystemExit(f"refusing a non-file vectors path: {arg!r}")
     return resolved
 
 # --------------------------------------------------------------------------------------------------
