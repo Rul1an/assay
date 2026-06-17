@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay registry supply-chain-conformance` emits the `assay.supply_chain_conformance.v0` carrier from a
+  local input descriptor (`assay.supply_chain_conformance.input.v0`), running the existing
+  `assay-registry` supply-chain producer offline over caller-supplied inputs. It performs offline checks
+  and reports carrier status; it does not assert supply-chain safety, policy approval, compliance,
+  Sigstore trust, Rekor inclusion, issuer identity, or artifact runtime integrity. The descriptor is
+  strict (unknown fields/variants are rejected, not ignored). v1 maps `none` and `unsupported`
+  provenance (exercising the pinning, expected-digest, and policy dimensions); the signature-bearing
+  `dsse` / `sigstore_bundle` paths are modeled but deferred to a follow-up (rejected with a clear error).
+  A carrier is emitted at exit 0 even when `policy_result` is `incomplete`/`fail`; a missing/unreadable/
+  malformed descriptor exits non-zero.
+
 ## [3.27.0] - 2026-06-16
 
 ### Added

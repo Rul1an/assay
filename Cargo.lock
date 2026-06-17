@@ -231,6 +231,7 @@ dependencies = [
  "assay-metrics",
  "assay-monitor",
  "assay-policy",
+ "assay-registry",
  "assay-runner-core",
  "assay-runner-linux",
  "assay-runner-schema",
