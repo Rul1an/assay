@@ -23,7 +23,7 @@
     "jcs-json-v1 is RFC 8785 over a float-free value space and cbor-deterministic-v1 is RFC 8949 sec 4.2 over the value types used here; full float and value-space coverage is out of scope for this vector set",
     "counts describe this vector set only, not real-world prevalence"
   ],
-  "schema": "assay.experiment.e43_evidenceref_recompute_consumer.v0",
+  "schema": "assay.experiment.evidenceref_recompute_consumer.v0",
   "verdict_counts": {
     "canonicalization_mismatch": 1,
     "digest_mismatch": 2,

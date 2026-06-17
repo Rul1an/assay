@@ -489,7 +489,7 @@
       }
     }
   ],
-  "schema": "assay.experiment.e43_evidenceref_recompute_consumer.v0",
+  "schema": "assay.experiment.evidenceref_recompute_consumer.v0",
   "schema_registry": {
     "assay.policy_decision/v1": {
       "required_fields": [

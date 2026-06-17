@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""E43 - independent evidenceRef recomputation consumer (reference runner + emitter).
+"""Independent evidenceRef recomputation consumer (reference runner + emitter).
 
 Resolves a content-addressed `evidenceRef` and re-derives one fail-closed verdict FROM COMMITTED
 BYTES, the recomputation layer beneath claim grounding. The consumer never trusts the producer: a `recomputed`
@@ -10,12 +10,13 @@ complete evidence record. Anything short of that is non-clean - either a positiv
 inconclusive state (`unresolvable_digest_only` / `unresolved_ref` / `unsupported_canonicalization` /
 `redacted_projection_incomplete`). The producer's own `producer_state` ("clean") is NEVER an input.
 
-Two canonicalization profiles are implemented, so the reference is a neutral join point and not one
-producer's envelope in disguise: `jcs-json-v1` (RFC 8785 JCS over the JSON object) and
-`cbor-deterministic-v1` (RFC 8949 sec 4.2 core deterministic encoding). The same logical object
-yields a different digest under each, and each ref resolves only under its own declared profile.
+Two canonicalization profiles are implemented, so the join point stays at
+`{digest, canonicalization, schema}` rather than at one producer's serialization: `jcs-json-v1`
+(RFC 8785 JCS over the JSON object) and `cbor-deterministic-v1` (RFC 8949 sec 4.2 core deterministic
+encoding). The same logical object yields a different digest under each, and each ref resolves only
+under its own declared profile.
 
-Hard guardrails (the point of this slice, not just interop):
+Hard guardrails (the point here, not just interop):
   - clean ONLY on independent recomputation; `producer_state` is never consulted.
   - a redacted or silently-elided projection cannot launder missing evidence into clean: completeness
     is schema-driven (required evidence fields present AND not redaction placeholders), so both a
@@ -31,8 +32,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pathlib
 import sys
+
+
+def _confined_path(arg: str) -> str:
+    """Resolve a vectors path, confined to the current working directory tree. An experiment runner
+    should not be coaxed into reading an arbitrary filesystem path, so a resolved path that escapes the
+    working directory is refused. The normalize-then-verify-prefix guard also keeps an operator-supplied
+    argument from reaching the filesystem unchecked."""
+    base = os.path.realpath(os.getcwd())
+    resolved = os.path.realpath(os.path.join(base, arg))
+    if resolved != base and not resolved.startswith(base + os.sep):
+        raise SystemExit(f"refusing a vectors path outside the working directory: {arg!r}")
+    return resolved
 
 # --------------------------------------------------------------------------------------------------
 # Canonicalization profiles (public spec; any conformant implementation reproduces these bytes).
@@ -338,7 +352,7 @@ def build_corpus() -> list[dict]:
 
 def emit() -> dict:
     return {
-        "schema": "assay.experiment.e43_evidenceref_recompute_consumer.v0",
+        "schema": "assay.experiment.evidenceref_recompute_consumer.v0",
         "canonicalization_profiles": CANON_PROFILES,
         "schema_registry": SCHEMA_REGISTRY,
         "verdicts": [
@@ -446,7 +460,7 @@ def measure(doc: dict) -> dict:
     }
 
     return {
-        "schema": "assay.experiment.e43_evidenceref_recompute_consumer.v0",
+        "schema": "assay.experiment.evidenceref_recompute_consumer.v0",
         "cases": len(cases),
         "verdict_counts": counts,
         "all_expected": not failures,
@@ -477,7 +491,7 @@ def main(argv: list[str]) -> int:
         return 0
     if len(argv) >= 2 and argv[1] == "verify":
         path = argv[2] if len(argv) > 2 else "vectors.json"
-        doc = json.loads(pathlib.Path(path).read_text())
+        doc = json.loads(pathlib.Path(_confined_path(path)).read_text())
     else:
         doc = emit()
     result = measure(doc)

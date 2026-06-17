@@ -1,4 +1,4 @@
-"""E43 - tests for the independent evidenceRef recomputation consumer.
+"""Tests for the independent evidenceRef recomputation consumer.
 
 Covers the full happy + negative matrix, the load-bearing fail-closed invariants, the cross-profile
 (JCS vs deterministic-CBOR) distinctness, and the two-implementation interop bar: the reference
@@ -172,24 +172,37 @@ def test_cbor_is_rfc8949_deterministic():
 
 def test_cli_emit_and_independent_runner_agree_via_files(tmp_path):
     """End-to-end through the published bytes: emit vectors.json, both runners agree on it."""
-    vectors = tmp_path / "vectors.json"
     emitted = subprocess.run(
         [sys.executable, str(HERE / "evidenceref_consumer.py"), "emit"],
         capture_output=True, text=True, check=True,
     ).stdout
-    vectors.write_text(emitted)
+    (tmp_path / "vectors.json").write_text(emitted)
     doc = json.loads(emitted)
-    assert doc["schema"] == "assay.experiment.e43_evidenceref_recompute_consumer.v0"
+    assert doc["schema"] == "assay.experiment.evidenceref_recompute_consumer.v0"
 
+    # Run from tmp_path so the confined vectors path resolves inside the working directory.
     verify = subprocess.run(
-        [sys.executable, str(HERE / "evidenceref_consumer.py"), "verify", str(vectors)],
-        capture_output=True, text=True,
+        [sys.executable, str(HERE / "evidenceref_consumer.py"), "verify", "vectors.json"],
+        cwd=tmp_path, capture_output=True, text=True,
     )
     assert verify.returncode == 0, verify.stdout + verify.stderr
 
     independent = subprocess.run(
-        [sys.executable, str(HERE / "independent_consumer.py"), str(vectors)],
-        capture_output=True, text=True,
+        [sys.executable, str(HERE / "independent_consumer.py"), "vectors.json"],
+        cwd=tmp_path, capture_output=True, text=True,
     )
     assert independent.returncode == 0, independent.stdout + independent.stderr
     assert json.loads(independent.stdout)["all_reproduced"] is True
+
+
+def test_vectors_path_is_confined_to_working_directory(tmp_path):
+    """A path that resolves outside the working directory is refused rather than read."""
+    outside = tmp_path / "vectors.json"
+    outside.write_text("{}")
+    # cwd here is the test's directory, not tmp_path, so the absolute path escapes and is refused.
+    result = subprocess.run(
+        [sys.executable, str(HERE / "independent_consumer.py"), str(outside)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert "outside the working directory" in (result.stdout + result.stderr)

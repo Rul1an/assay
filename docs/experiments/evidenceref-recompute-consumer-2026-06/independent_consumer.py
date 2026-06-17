@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independent reproducer for the E43 evidenceRef recomputation vectors.
+"""Independent reproducer for the evidenceRef recomputation vectors.
 
 Reads `vectors.json` ALONE and re-derives every expected verdict with separate code that does NOT
 import `evidenceref_consumer.py`. It implements the two canonicalization profiles from their public
@@ -14,9 +14,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 
 SUPPORTED_CANON = ("jcs-json-v1", "cbor-deterministic-v1")
+
+
+def _confined_path(arg: str) -> str:
+    """Resolve a vectors path, confined to the current working directory tree, so the reproducer
+    cannot be pointed at an arbitrary filesystem path. The normalize-then-verify-prefix guard keeps an
+    operator-supplied argument from reaching the filesystem unchecked."""
+    base = os.path.realpath(os.getcwd())
+    resolved = os.path.realpath(os.path.join(base, arg))
+    if resolved != base and not resolved.startswith(base + os.sep):
+        raise SystemExit(f"refusing a vectors path outside the working directory: {arg!r}")
+    return resolved
 
 
 def jcs(obj) -> bytes:
@@ -98,7 +110,7 @@ def reproduce(ref: dict, body_store: dict, registry: dict) -> dict:
 
 def main() -> int:
     path = sys.argv[1] if len(sys.argv) > 1 else "vectors.json"
-    with open(path, encoding="utf-8") as fh:
+    with open(_confined_path(path), encoding="utf-8") as fh:
         doc = json.load(fh)
     registry = doc.get("schema_registry", {})
     failures = [
