@@ -252,6 +252,18 @@ assay registry supply-chain-conformance \
 
 The example descriptor ships in the source distribution and the repository test fixtures; binary release archives ship the `assay` binary, README, and LICENSE, and do not bundle fixture descriptors. The command reports per-dimension carrier status from local input — it does not assert supply-chain safety, policy approval, compliance, Sigstore trust, Rekor inclusion, issuer identity, or runtime integrity.
 
+The `dsse` provenance kind verifies a local DSSE-wrapped in-toto/SLSA envelope against caller-supplied pinned Ed25519 key material:
+
+```bash
+assay registry supply-chain-conformance \
+  --input crates/assay-cli/tests/fixtures/supply_chain_conformance_dsse/input.dsse.example.json \
+  --out supply-chain-conformance.json \
+  --offline
+# -> supply-chain-conformance.json (assay.supply_chain_conformance.v0)
+```
+
+The DSSE example uses local fixture evidence and caller-supplied pinned Ed25519 key material. It emits an `assay.supply_chain_conformance.v0` carrier with carrier status derived from the supplied evidence. It does not assert ecosystem trust, Sigstore trust, Rekor inclusion, issuer identity, policy approval, compliance, supply-chain safety, or runtime integrity.
+
 ## Add to Cursor in 30 Seconds
 
 Assay ships a helper that finds your local Cursor MCP config path and prints a ready-to-paste entry:

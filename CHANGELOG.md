@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.29.0] - 2026-06-18
+
 ### Added
 - `assay registry supply-chain-conformance` now supports the `dsse` provenance kind: it verifies a local
   DSSE-wrapped in-toto/SLSA provenance envelope against caller-supplied pinned Ed25519 key material
