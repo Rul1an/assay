@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay registry supply-chain-conformance` now supports the `dsse` provenance kind: it verifies a local
+  DSSE-wrapped in-toto/SLSA provenance envelope against caller-supplied pinned Ed25519 key material
+  (STANDARD-base64 SPKI DER), entirely offline, via the existing `assay-registry` verifier — no new
+  cryptography. The descriptor gains `provenance.payload_type` (must be `application/vnd.in-toto+json`),
+  `provenance.envelope_path`, and `provenance.trusted_key_path`; the latter two resolve relative to the
+  descriptor file and reject absolute paths, `..`, URLs, and symlink escape. The carrier schema and
+  `assay.supply_chain_conformance.input.v0` are unchanged (additive fields). Well-formed-but-failing
+  evidence (wrong key, tampered payload, subject mismatch, or a Rekor/timestamp/consistency/witnessing
+  requirement) yields a not-clean carrier at exit 0, never a magic pass; descriptor/path/parse errors
+  exit non-zero. The keyless `sigstore_bundle` path remains deferred. It still asserts no supply-chain
+  safety, ecosystem trust, Sigstore trust, Rekor inclusion, issuer identity, policy approval, compliance,
+  or runtime integrity.
+
 ## [3.28.0] - 2026-06-17
 
 ### Added
