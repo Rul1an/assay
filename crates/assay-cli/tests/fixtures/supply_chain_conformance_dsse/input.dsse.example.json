@@ -1,0 +1,24 @@
+{
+  "schema": "assay.supply_chain_conformance.input.v0",
+  "subject": {
+    "name": "example-artifact",
+    "version": "1.0.0",
+    "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "expected_artifact_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "provenance": {
+    "kind": "dsse",
+    "payload_type": "application/vnd.in-toto+json",
+    "envelope_path": "slsa-provenance.dsse.json",
+    "trusted_key_path": "pinned-ed25519.trustedkey.json"
+  },
+  "pinning": {
+    "version_pinned": true,
+    "digest_pinned": true,
+    "lockfile_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "policy": {
+    "required_builder_id": "https://github.com/example/builder@refs/tags/v1",
+    "required_slsa_build_level": 1
+  }
+}

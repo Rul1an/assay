@@ -15,9 +15,10 @@ pub struct RegistryArgs {
 pub enum RegistrySub {
     /// Emit the assay.supply_chain_conformance.v0 carrier from a local input descriptor.
     ///
-    /// Performs offline checks over the supplied inputs and reports carrier status. It does not
-    /// assert supply-chain safety, policy approval, compliance, Sigstore trust, Rekor inclusion,
-    /// issuer identity, or artifact runtime integrity.
+    /// Performs offline checks over the supplied inputs and reports carrier status. The `dsse`
+    /// provenance kind verifies a local DSSE-wrapped in-toto/SLSA envelope against caller-supplied
+    /// pinned Ed25519 key material (offline). It does not assert supply-chain safety, ecosystem trust,
+    /// Sigstore trust, Rekor inclusion, issuer identity, policy approval, compliance, or runtime integrity.
     #[command(name = "supply-chain-conformance")]
     SupplyChainConformance(SupplyChainConformanceArgs),
 }

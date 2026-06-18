@@ -1,0 +1,1 @@
+{"_type":"https://in-toto.io/Statement/v1","subject":[{"name":"art","digest":{"sha256":"1111111111111111111111111111111111111111111111111111111111111111"}}],"predicateType":"https://slsa.dev/provenance/v1","predicate":{"runDetails":{"builder":{"id":"https://github.com/example/builder@refs/tags/v1"}}}}
