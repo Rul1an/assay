@@ -197,6 +197,9 @@ pub(crate) fn verify_and_collect(events: &[EvidenceEvent]) -> (Report, Vec<TdtDe
     }
 
     let ok = checks.iter().all(|c| c.ok);
+    if !ok {
+        verified.clear();
+    }
     let report = Report {
         schema: "assay.tool_decision_truth.verify.report.v0",
         ok,
@@ -345,6 +348,22 @@ mod tests {
             .checks
             .iter()
             .any(|c| c.id.ends_with("_duplicate_citation")));
+    }
+
+    #[test]
+    fn failed_report_returns_no_verified_decisions() {
+        let c = carrier("deploy", json!({"env": "prod"}), 0, "c0");
+        let r = row_for(&c);
+        let (report, verified) = verify_and_collect(&[
+            ev(CARRIER_EVENT_TYPE, c, 0),
+            ev(ROW_EVENT_TYPE, r.clone(), 1),
+            ev(ROW_EVENT_TYPE, r, 2), // duplicate citation makes the report fail
+        ]);
+        assert!(!report.ok);
+        assert!(
+            verified.is_empty(),
+            "failed semantic verification must not expose verified decisions to projection callers"
+        );
     }
 
     #[test]

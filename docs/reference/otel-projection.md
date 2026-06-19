@@ -96,8 +96,7 @@ contract and its fixtures stand on their own first.
 ## Tool-decision-truth projection (`assay.tool_decision_truth.otel_projection.v0`, experimental)
 
 A second, experimental projection turns VERIFIED tool-decision-truth recipe rows into the same OTel
-GenAI + OpenInference view (see [tool-decision-truth.md](tool-decision-truth.md)). It runs over an
-evidence bundle, not loose carriers:
+GenAI + OpenInference view. It runs over an evidence bundle, not loose carriers:
 
 ```bash
 assay project-otel --evidence-bundle tdt.tar.gz
