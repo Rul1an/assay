@@ -42,7 +42,7 @@ semantically correct.
 - does not prove provider-side side effects happened or persisted;
 - does not certify safety, compliance, or policy quality;
 - does not replace enforcement and does not make an allow/deny decision in the action path;
-- mints carriers as evidence only; the live producer takes no action on the verdict and never blocks or alters the observed call;
+- mints carriers as evidence only; the live producer takes no action on the verdict and never proves provider-side execution or side effects;
 - does not claim complete coverage when required evidence is absent;
 - does not expose raw tool arguments, secrets, tokens, or key material;
 - does not provide an OpenTelemetry projection or pinned OTel snapshot;
@@ -203,8 +203,9 @@ verdict, which is the honest result.
 
 Producer non-claims:
 
-- it takes no action on the verdict; it never forwards, blocks, or alters the observed call, and a
-  carrier is minted even for a call that is about to be denied;
+- it takes no action on the verdict; it never forwards, blocks, or alters the policy-evaluated tool
+  call request. A carrier may be minted for a policy-evaluated call even when the proxy then denies
+  forwarding it; the carrier records the evaluated tool-decision input, not provider-side execution;
 - it is not enforcement and not a consumer; acting on a verdict is a separate concern this producer
   does not address;
 - it stays experimental and opt-in, and is off unless the flag and the key material are supplied.
