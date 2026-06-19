@@ -220,6 +220,7 @@ mod tests {
             server_id: "test-server".to_string(),
             decision_log_path: None,
             event_source: Some("assay://test/client-branches".to_string()),
+            tdt_producer: None,
         }
     }
 

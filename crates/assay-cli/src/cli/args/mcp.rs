@@ -112,6 +112,15 @@ pub struct McpWrapArgs {
     #[arg(long, value_name = "URI")]
     pub event_source: Option<String>,
 
+    /// EXPERIMENTAL (unstable): opt-in tool-decision-truth carrier producer. Append
+    /// `assay.tool_decision_truth.v0` carriers (one JSON object per line) to this NDJSON file during the
+    /// run, as a separate sink alongside the decision log. Requires ASSAY_TDT_HMAC_KEY and
+    /// ASSAY_TDT_HMAC_KEY_ID in the environment; the producer fails closed at startup if either is
+    /// missing or malformed. The key is read from the environment, held in memory only, and never logged
+    /// or persisted. Evidence-only: no runtime action is taken on the verdict.
+    #[arg(long = "tool-decision-truth-out", value_name = "PATH")]
+    pub tool_decision_truth_out: Option<PathBuf>,
+
     /// Command to wrap (use -- to separate args)
     #[arg(required = true, last = true, allow_hyphen_values = true)]
     pub command: Vec<String>,

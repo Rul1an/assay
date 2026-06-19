@@ -16,6 +16,8 @@ pub mod push;
 pub mod pydantic_case_result;
 pub mod schema;
 pub mod store_status;
+pub mod tool_decision_truth;
+pub mod verify_tool_decision_truth;
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
@@ -39,6 +41,9 @@ pub enum EvidenceCmd {
     /// Verify MCP tunnel observed-facts fixture boundaries and join classification
     #[command(name = "verify-mcp-tunnel-observed")]
     VerifyMcpTunnelObserved(mcp_tunnel_observed::McpTunnelObservedArgs),
+    /// Verify experimental tool-decision-truth recipe rows against their carriers in a bundle
+    #[command(name = "verify-tool-decision-truth")]
+    VerifyToolDecisionTruth(verify_tool_decision_truth::VerifyToolDecisionTruthArgs),
     /// Inspect a bundle's contents (verify + show table)
     Show(EvidenceShowArgs),
     /// Import external evidence into an Assay evidence bundle
@@ -127,6 +132,9 @@ pub enum EvidenceImportCmd {
     /// Import Promptfoo CLI JSONL assertion component results
     #[command(name = "promptfoo-jsonl")]
     PromptfooJsonl(promptfoo_jsonl::PromptfooJsonlArgs),
+    /// Import an experimental tool-decision-truth carrier as a bound recipe row
+    #[command(name = "tool-decision-truth")]
+    ToolDecisionTruth(tool_decision_truth::ToolDecisionTruthArgs),
 }
 
 pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
@@ -137,6 +145,9 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
         EvidenceCmd::VerifyMcpSupersession(a) => mcp_supersession::cmd_verify_mcp_supersession(a),
         EvidenceCmd::VerifyMcpTunnelObserved(a) => {
             mcp_tunnel_observed::cmd_verify_mcp_tunnel_observed(a)
+        }
+        EvidenceCmd::VerifyToolDecisionTruth(a) => {
+            verify_tool_decision_truth::cmd_verify_tool_decision_truth(a)
         }
         EvidenceCmd::Show(a) => cmd_show(a),
         EvidenceCmd::Import(a) => cmd_import(a),
@@ -165,6 +176,7 @@ fn cmd_import(args: EvidenceImportArgs) -> Result<i32> {
         }
         EvidenceImportCmd::LiveKitToolAction(a) => livekit_tool_action::cmd_livekit_tool_action(a),
         EvidenceImportCmd::PromptfooJsonl(a) => promptfoo_jsonl::cmd_promptfoo_jsonl(a),
+        EvidenceImportCmd::ToolDecisionTruth(a) => tool_decision_truth::cmd_tool_decision_truth(a),
     }
 }
 

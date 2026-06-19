@@ -30,6 +30,64 @@ pub struct ProxyConfig {
     pub decision_log_path: Option<std::path::PathBuf>,
     /// CloudEvents source URI (validated, required when logging enabled)
     pub event_source: Option<String>,
+    /// EXPERIMENTAL (unstable): opt-in tool-decision-truth carrier producer. `None` disables it. The
+    /// secret HMAC key lives inside [`TdtProducer`], whose manual `Debug` redacts it, so deriving `Debug`
+    /// on this config does not leak the key.
+    pub tdt_producer: Option<TdtProducer>,
+}
+
+/// EXPERIMENTAL (unstable): opt-in producer of `assay.tool_decision_truth.v0` carriers, written
+/// append-only as NDJSON (one carrier per line) to a sink kept separate from — never folded into — the
+/// decision log. The decision log is operational decision output; a carrier is a content-addressed
+/// evidence record with its own HMAC/key semantics and claim ceiling, so the two stay distinct. The
+/// producer is evidence-only: it takes no runtime action on the verdict and never enforces or blocks.
+///
+/// The HMAC key is held in memory only and is never logged or persisted; the manual `Debug` impl redacts
+/// it so it cannot leak through a `{:?}` of the surrounding [`ProxyConfig`].
+#[derive(Clone)]
+pub struct TdtProducer {
+    out_path: std::path::PathBuf,
+    key: Vec<u8>,
+    key_id: String,
+}
+
+impl TdtProducer {
+    /// Build a producer from a sink path and key material. The caller is responsible for failing closed
+    /// (before constructing this) when the producer is enabled but the key/key_id is missing or
+    /// malformed; this type does not re-validate beyond what `tool_decision_truth::args_digest` enforces
+    /// at digest time.
+    pub fn new(out_path: std::path::PathBuf, key: Vec<u8>, key_id: String) -> Self {
+        Self {
+            out_path,
+            key,
+            key_id,
+        }
+    }
+
+    /// Append-only NDJSON sink for minted carriers.
+    pub(crate) fn out_path(&self) -> &std::path::Path {
+        &self.out_path
+    }
+
+    /// HMAC key for `args_digest` (secret; never logged or persisted).
+    pub(crate) fn key(&self) -> &[u8] {
+        &self.key
+    }
+
+    /// Stable key identifier bound into the digest prefix.
+    pub(crate) fn key_id(&self) -> &str {
+        &self.key_id
+    }
+}
+
+impl std::fmt::Debug for TdtProducer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TdtProducer")
+            .field("out_path", &self.out_path)
+            .field("key", &"<redacted>")
+            .field("key_id", &self.key_id)
+            .finish()
+    }
 }
 
 /// Raw config as provided by CLI/config files before validation.
@@ -74,6 +132,9 @@ impl ProxyConfig {
             server_id: raw.server_id,
             decision_log_path: raw.decision_log_path,
             event_source,
+            // Opt-in producer is wired by the caller after validation (env key, fail-closed), never
+            // from the raw CLI/config struct.
+            tdt_producer: None,
         })
     }
 }

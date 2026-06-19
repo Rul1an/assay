@@ -22,6 +22,7 @@ observed tool call
 |--------|-----------------|-----------|
 | `assay.tool_decision_surface.v0` | per-call: server, classified action + projected target, decision, response, redaction | [tool-decision-surface.md](tool-decision-surface.md) |
 | `assay.declared_tool_surface.v0` | declared/allowed privileged actions, for observed-vs-declared review | [declared-tool-surface.md](declared-tool-surface.md) |
+| `assay.tool_decision_truth.v0` | experimental declared-vs-observed policy-decision carrier, digest, verdict, and pack-row primitive | [tool-decision-truth.md](tool-decision-truth.md) |
 | `action.required_scope` (+ declared credentials) | the scope an action requires vs the alias's declared scope | [credential-scope.md](credential-scope.md) |
 | `assay.provider_audit_record.v0` | an imported provider audit entry, bound to an observed call by digest recompute | [side-effect-receipt.md](side-effect-receipt.md) |
 | `assay.mcp_manifest_observed.v0` | an observed MCP tool manifest as canonical digests, for coarse drift review against a declared baseline | [mcp-manifest-drift.md](mcp-manifest-drift.md) |
@@ -74,8 +75,9 @@ emits that artifact with honest completeness, while never executing tools throug
 [mcp-upstream-proxy-mode.md](mcp-upstream-proxy-mode.md)).
 
 **Experiment-only (characterized, not a shipped feature):** the credential-overbreadth distribution
-(the scope lattice is a static model, not a provider-verified taxonomy); MCP tool lifecycle; and an
-OTel log-based event projection.
+(the scope lattice is a static model, not a provider-verified taxonomy); MCP tool lifecycle; the
+tool-decision truth-layer primitives and conformance vectors; and an OTel log-based event
+projection.
 
 **Parked (needs a separate design before any code):** granular per-tool manifest drift; and the
 enforcing `tools/call` proxy (a heavier security boundary — caller authorization, upstream credential
