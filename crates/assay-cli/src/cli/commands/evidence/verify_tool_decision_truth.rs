@@ -9,6 +9,7 @@
 use crate::exit_codes;
 use anyhow::{Context, Result};
 use assay_core::mcp::tool_decision_truth as tdt;
+use assay_core::otel::projection::TdtDecision;
 use assay_evidence::bundle::BundleReader;
 use assay_evidence::types::EvidenceEvent;
 use clap::{Args, ValueEnum};
@@ -50,21 +51,21 @@ pub enum VerifyFormat {
 }
 
 #[derive(Debug, Serialize)]
-struct Report {
-    schema: &'static str,
-    ok: bool,
-    carrier_count: usize,
-    row_count: usize,
-    verified_rows: usize,
-    checks: Vec<Check>,
-    claims_not_made: Vec<&'static str>,
+pub(crate) struct Report {
+    pub(crate) schema: &'static str,
+    pub(crate) ok: bool,
+    pub(crate) carrier_count: usize,
+    pub(crate) row_count: usize,
+    pub(crate) verified_rows: usize,
+    pub(crate) checks: Vec<Check>,
+    pub(crate) claims_not_made: Vec<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
-struct Check {
-    id: String,
-    ok: bool,
-    detail: String,
+pub(crate) struct Check {
+    pub(crate) id: String,
+    pub(crate) ok: bool,
+    pub(crate) detail: String,
 }
 
 pub fn cmd_verify_tool_decision_truth(args: VerifyToolDecisionTruthArgs) -> Result<i32> {
@@ -85,6 +86,12 @@ pub fn cmd_verify_tool_decision_truth(args: VerifyToolDecisionTruthArgs) -> Resu
 }
 
 fn build_report(events: &[EvidenceEvent]) -> Report {
+    verify_and_collect(events).0
+}
+
+/// The single pairing + fail-closed verification pass. Returns the report AND the verified decisions
+/// (the projector consumes these typed pairs, so projection never re-scans a bundle or re-pairs).
+pub(crate) fn verify_and_collect(events: &[EvidenceEvent]) -> (Report, Vec<TdtDecision>) {
     let mut checks = Vec::new();
 
     // 1. Index carriers by content digest. Two carriers with the same content digest are ambiguous, so
@@ -122,6 +129,7 @@ fn build_report(events: &[EvidenceEvent]) -> Report {
     //    citing one digest are ambiguous; a row citing no present carrier fails.
     let mut row_count = 0usize;
     let mut verified_rows = 0usize;
+    let mut verified: Vec<TdtDecision> = Vec::new();
     let mut cited_digests: HashSet<String> = HashSet::new();
     for ev in events.iter().filter(|e| e.type_ == ROW_EVENT_TYPE) {
         row_count += 1;
@@ -157,6 +165,16 @@ fn build_report(events: &[EvidenceEvent]) -> Report {
         let ok = tdt::verify_recipe_row(row, carrier, run_verdict);
         if ok {
             verified_rows += 1;
+            verified.push(TdtDecision {
+                carrier: (**carrier).clone(),
+                carrier_content_digest: cited.to_string(),
+                decision_identity_digest: row
+                    .get("decision_identity_digest")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                run_verdict: run_verdict.to_string(),
+            });
         }
         checks.push(Check {
             id: format!("row_{}_verifies", ev.id),
@@ -179,7 +197,7 @@ fn build_report(events: &[EvidenceEvent]) -> Report {
     }
 
     let ok = checks.iter().all(|c| c.ok);
-    Report {
+    let report = Report {
         schema: "assay.tool_decision_truth.verify.report.v0",
         ok,
         carrier_count,
@@ -187,7 +205,8 @@ fn build_report(events: &[EvidenceEvent]) -> Report {
         verified_rows,
         checks,
         claims_not_made: CLAIMS_NOT_MADE.to_vec(),
-    }
+    };
+    (report, verified)
 }
 
 fn fail(id: &str, detail: String) -> Check {
