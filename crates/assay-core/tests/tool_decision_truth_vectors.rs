@@ -15,8 +15,10 @@ use std::fs;
 use std::path::PathBuf;
 
 // A fixed test key/key_id: real carriers are keyed, but the key never enters the fixture (only key_id).
+// The key_id is deliberately neutral so the committed `hmac-sha256:<key_id>:<hex>` digests in the golden
+// fixture do not trip generic API-key secret scanners.
 const TEST_KEY: &[u8] = b"tool-decision-truth-vectors-key-v0";
-const TEST_KID: &str = "test-key-v0";
+const TEST_KID: &str = "fixture-kid-v0";
 
 fn fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
