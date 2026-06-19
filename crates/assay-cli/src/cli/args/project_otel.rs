@@ -8,17 +8,26 @@ use std::path::PathBuf;
 /// `docs/reference/otel-projection.md`.
 #[derive(clap::Args, Debug, Clone)]
 pub struct ProjectOtelArgs {
-    /// Path to an `assay.runner.capability_surface.v0` JSON file (required).
-    #[arg(long = "capability-surface")]
-    pub capability_surface: PathBuf,
+    /// Path to an `assay.runner.capability_surface.v0` JSON file. Mutually exclusive with
+    /// `--evidence-bundle`; exactly one input is required.
+    #[arg(long = "capability-surface", conflicts_with = "evidence_bundle")]
+    pub capability_surface: Option<PathBuf>,
+
+    /// EXPERIMENTAL: project verified tool-decision-truth recipe rows from an evidence bundle (.tar.gz).
+    /// The bundle is verified first; nothing is written unless every row verifies.
+    #[arg(
+        long = "evidence-bundle",
+        conflicts_with_all = ["capability_surface", "observation_health", "enforcement_health"]
+    )]
+    pub evidence_bundle: Option<PathBuf>,
 
     /// Optional path to an `assay.runner.observation_health.v0` JSON file.
-    #[arg(long = "observation-health")]
+    #[arg(long = "observation-health", conflicts_with = "evidence_bundle")]
     pub observation_health: Option<PathBuf>,
 
     /// Optional path to an `assay.enforcement_health.v0` JSON file. Absent means no enforcement
     /// claim is made (it does NOT assert that enforcement was absent — that lives in the carrier).
-    #[arg(long = "enforcement-health")]
+    #[arg(long = "enforcement-health", conflicts_with = "evidence_bundle")]
     pub enforcement_health: Option<PathBuf>,
 
     /// Write the projection JSON here instead of stdout. On success stdout stays empty.

@@ -1,0 +1,59 @@
+{
+  "schema": "assay.tool_decision_truth.otel_projection.v0",
+  "semconv": {
+    "otel_genai": "1.37.0-development",
+    "openinference": "pinned"
+  },
+  "spans": [
+    {
+      "name": "execute_tool deploy",
+      "kind": "INTERNAL",
+      "attributes": {
+        "gen_ai.operation.name": "execute_tool",
+        "gen_ai.tool.name": "deploy",
+        "tool.name": "deploy",
+        "openinference.span.kind": "TOOL",
+        "assay.claim_class": "derived",
+        "assay.tdt.schema": "assay.tool_decision_truth.v0",
+        "assay.tdt.decision_verdict": "match",
+        "assay.tdt.observed_input_digest": "sha256:3e8b231ffc03c2653a2cb1034aa3ae805d8c01596c00f7bc0250b3f753c41125",
+        "assay.tdt.declared_policy_digest": "sha256:8804c617ffa59298111f5961f506d170102444ef61771d06a1103d64a6d37430",
+        "assay.tdt.source_class": "authoritative_boundary",
+        "assay.tdt.run_verdict": "match",
+        "assay.tdt.decision_identity_digest": "sha256:79d73560d15ef51c57e9fd430da114f4fb7854d2985185676e09501c94ded415",
+        "assay.tdt.carrier_content_digest": "sha256:8165dcbd5e76fa84d6d068915857d0abae00333f9de4b7eb2f39d0db6e5e72e9"
+      }
+    },
+    {
+      "name": "execute_tool delete_all",
+      "kind": "INTERNAL",
+      "attributes": {
+        "gen_ai.operation.name": "execute_tool",
+        "gen_ai.tool.name": "delete_all",
+        "tool.name": "delete_all",
+        "openinference.span.kind": "TOOL",
+        "assay.claim_class": "derived",
+        "assay.tdt.schema": "assay.tool_decision_truth.v0",
+        "assay.tdt.decision_verdict": "mismatch",
+        "assay.tdt.observed_input_digest": "sha256:cb6ec84420714fb3e904aa4ccff3551b01e5dc874cf77f5491723a7c287aec95",
+        "assay.tdt.declared_policy_digest": "sha256:8804c617ffa59298111f5961f506d170102444ef61771d06a1103d64a6d37430",
+        "assay.tdt.source_class": "authoritative_boundary",
+        "assay.tdt.run_verdict": "mismatch",
+        "assay.tdt.decision_identity_digest": "sha256:8334bebd58341ff1636d0f6bd25e2ec3e372d0573b31808381662204f746745c",
+        "assay.tdt.carrier_content_digest": "sha256:98edb0d2ae052fe2fdbf90b0e8740812a98fb2b0d84e1c17d4a358398f84de1f"
+      }
+    }
+  ],
+  "resource_attributes": {
+    "service.name": "assay"
+  },
+  "lossy": true,
+  "source_of_truth": "assay artifacts",
+  "non_claims": [
+    "This projection is a one-directional, lossy view; the assay artifacts remain authoritative.",
+    "gen_ai.* and openinference.* fields are a projection, not the source of truth.",
+    "A tool-decision-truth verdict is a derived comparison over observed and declared data (assay.claim_class=derived); it is not a raw observation, not enforcement, and not an intent or safety judgement.",
+    "Raw tool arguments and the keyed args_digest are not projected; this view carries only the higher-level observed-input, declared-policy, decision-identity, and carrier-content digests.",
+    "Pinned to OTel GenAI semconv 1.37.0-development and OpenInference pinned; a version bump is explicit."
+  ]
+}
