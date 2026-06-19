@@ -163,6 +163,11 @@ pub fn build_record(
     {
         return None;
     }
+    // The declared digest is supplied by the caller; reject a malformed one so a carrier cannot embed a
+    // bogus `declared_policy_digest` that later passes pack verification.
+    if !is_sha256_digest(declared_policy_digest) {
+        return None;
+    }
     let ad = args_digest(args, key, key_id)?;
     let oid = observed_input_digest(tool_name, &ad, order)?;
     Some(json!({
@@ -367,8 +372,10 @@ pub fn decision_verdict(
     identity_state: &str,
     evidence: &DecisionEvidence,
 ) -> &'static str {
-    let mut p = policy.clone();
-    p.normalize_legacy_shapes();
+    // Use the SAME normalized+migrated view as the declared digest, so a legacy-constraint-only policy
+    // (whose constraint the digest binds as a migrated schema) is actually evaluated here, instead of the
+    // gate seeing "no schema" and passing it.
+    let p = policy.normalized_declared_view_experimental();
     let tc = evidence.tool_classes.as_deref();
     let approval = applicability(
         nonempty(&p.tools.approval_required),
@@ -484,6 +491,26 @@ fn is_sha256_digest(s: &str) -> bool {
     }
 }
 
+/// Whether `s` is one of the four lattice verdicts. A pack row may only bind a real verdict, not an
+/// arbitrary label like `approved`.
+fn is_verdict(s: &str) -> bool {
+    matches!(s, "match" | "incomplete" | "mismatch" | "invalid")
+}
+
+/// Whether `run_verdict` is consistent with the carrier's own `decision_verdict`. A run verdict is the
+/// lattice-max over its decisions, so it must be at least as severe as any single decision: a row may not
+/// claim `match` while the carrier it cites recorded `mismatch`. A carrier with no (or null) decision
+/// verdict imposes no constraint.
+fn run_verdict_covers_carrier(carrier: &Value, run_verdict: &str) -> bool {
+    match carrier.get("decision_verdict") {
+        // Only a genuinely absent verdict imposes no constraint.
+        None | Some(Value::Null) => true,
+        Some(Value::String(cv)) if is_verdict(cv) => verdict_rank(run_verdict) >= verdict_rank(cv),
+        // A present-but-malformed carrier verdict fails closed rather than passing unconstrained.
+        _ => false,
+    }
+}
+
 /// Digest over the decision identity (the two pinned digests). This is the stable logical handle that
 /// JOINS a pack row to a carrier; it is NOT the carrier content digest (see [`carrier_content_digest`]).
 pub fn decision_identity_digest(
@@ -529,12 +556,18 @@ pub fn evidence_ref(carrier_content_digest: &str, reference: &str) -> Value {
 /// identity, and the run verdict together. EXPERIMENTAL. `None` if the carrier lacks its identity digests
 /// or canonicalization fails.
 pub fn pack_recipe_row(carrier: &Value, run_verdict: &str, reference: &str) -> Option<Value> {
+    if !is_verdict(run_verdict) || !run_verdict_covers_carrier(carrier, run_verdict) {
+        return None;
+    }
     let oid = carrier
         .get("observed_input_digest")
         .and_then(|v| v.as_str())?;
     let dpd = carrier
         .get("declared_policy_digest")
         .and_then(|v| v.as_str())?;
+    if !is_sha256_digest(oid) || !is_sha256_digest(dpd) {
+        return None;
+    }
     let content = carrier_content_digest(carrier)?;
     let identity = decision_identity_digest(oid, dpd)?;
     let er = evidence_ref(&content, reference);
@@ -581,6 +614,11 @@ pub fn verify_recipe_row(row: &Value, carrier: &Value, run_verdict: &str) -> boo
     if row.get("run_verdict").and_then(|v| v.as_str()) != Some(run_verdict) {
         return false;
     }
+    // The verdict must be a real lattice verdict and at least as severe as the carrier's own decision, so
+    // a row cannot bind a bogus label or claim a cleaner verdict than the carrier it cites.
+    if !is_verdict(run_verdict) || !run_verdict_covers_carrier(carrier, run_verdict) {
+        return false;
+    }
     // Digests must be well-formed before they are trusted as citations.
     let Some(er_digest) = er.get("digest").and_then(|d| d.as_str()) else {
         return false;
@@ -607,6 +645,9 @@ pub fn verify_recipe_row(row: &Value, carrier: &Value, run_verdict: &str) -> boo
     ) else {
         return false;
     };
+    if !is_sha256_digest(oid) || !is_sha256_digest(dpd) {
+        return false;
+    }
     match decision_identity_digest(oid, dpd) {
         Some(i) if i == row_identity => {}
         _ => return false,
@@ -632,6 +673,8 @@ mod tests {
     const KEY: &[u8] = b"reference-test-key-v0";
     const KID: &str = "test-key-v0";
     const PROV: (&str, &str, &str, &str) = ("authoritative_boundary", "c1", "ok", "present");
+    // A well-formed declared digest (build_record now rejects malformed ones).
+    const DECL: &str = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
     fn ad(args: Value) -> String {
         args_digest(&args, KEY, KID).unwrap()
@@ -639,16 +682,7 @@ mod tests {
 
     fn rec(tool: &str, args: Value, order: i64, prov: (&str, &str, &str, &str)) -> Value {
         build_record(
-            tool,
-            &args,
-            order,
-            "sha256:decl",
-            KEY,
-            KID,
-            prov.0,
-            prov.1,
-            prov.2,
-            prov.3,
+            tool, &args, order, DECL, KEY, KID, prov.0, prov.1, prov.2, prov.3,
         )
         .unwrap()
     }
@@ -735,23 +769,34 @@ mod tests {
     fn build_record_rejects_out_of_contract_provenance() {
         let args = json!({"path": "/x"});
         let mk = |sc: &str, rs: &str, id: &str| {
-            build_record(
-                "read_file",
-                &args,
-                0,
-                "sha256:d",
-                KEY,
-                KID,
-                sc,
-                "c1",
-                rs,
-                id,
-            )
+            build_record("read_file", &args, 0, DECL, KEY, KID, sc, "c1", rs, id)
         };
         assert!(mk("authoritative_boundary", "ok", "present").is_some());
         assert!(mk("made_up_source", "ok", "present").is_none());
         assert!(mk("authoritative_boundary", "maybe", "present").is_none());
         assert!(mk("authoritative_boundary", "ok", "unknown_state").is_none());
+    }
+
+    #[test]
+    fn build_record_rejects_malformed_declared_digest() {
+        let args = json!({"path": "/x"});
+        let mk = |decl: &str| {
+            build_record(
+                "read_file",
+                &args,
+                0,
+                decl,
+                KEY,
+                KID,
+                "authoritative_boundary",
+                "c1",
+                "ok",
+                "present",
+            )
+        };
+        assert!(mk(DECL).is_some()); // well-formed sha256
+        assert!(mk("sha256:decl").is_none()); // too short
+        assert!(mk("not-a-digest").is_none()); // wrong prefix
     }
 
     #[test]
@@ -1022,6 +1067,34 @@ mod gate_tests {
     }
 
     #[test]
+    fn legacy_constraints_are_evaluated_by_the_verdict() {
+        // A legacy-constraint-only policy: the declared digest binds a migrated schema, and the verdict
+        // must evaluate that SAME migrated schema rather than seeing "no schema" and passing under
+        // unconstrained = allow. Before the shared normalized view, the second case was a false `match`.
+        let p = p_from(json!({
+            "version": "1",
+            "tools": {"allow": ["deploy"]},
+            "constraints": [{"tool": "deploy", "params": {"env": {"matches": "^prod$"}}}],
+            "enforcement": {"unconstrained_tools": "allow"}
+        }));
+        let e = DecisionEvidence::default();
+        assert_eq!(
+            decision_verdict(&p, "deploy", Some(&json!({"env": "prod"})), "present", &e),
+            "match"
+        );
+        assert_eq!(
+            decision_verdict(
+                &p,
+                "deploy",
+                Some(&json!({"env": "staging"})),
+                "present",
+                &e
+            ),
+            "mismatch"
+        );
+    }
+
+    #[test]
     fn run_lattice_and_order_integrity() {
         assert_eq!(run_verdict(&["match", "incomplete"], &[0, 1]), "incomplete");
         assert_eq!(run_verdict(&["match", "mismatch"], &[0, 1]), "mismatch");
@@ -1078,19 +1151,32 @@ mod pack_tests {
 
     const REF: &str = "audit://decision/c1";
 
-    /// A real carrier: a row cites THIS, not synthetic digest strings.
+    fn pack_policy(allow: &str, deny: &str) -> McpPolicy {
+        serde_json::from_value(json!({
+            "version": "1",
+            "tools": {"allow": [allow], "deny": [deny]},
+            "schemas": {"deploy": {"type": "object", "required": ["env"],
+                "properties": {"env": {"enum": ["staging", "prod"]}}}},
+            "enforcement": {"unconstrained_tools": "warn"}
+        }))
+        .unwrap()
+    }
+
+    /// A real, fully-classified carrier (real declared digest + decision_verdict): a row cites THIS, not
+    /// synthetic digest strings.
     fn carrier() -> Value {
-        build_record(
+        build_classified_record(
+            &pack_policy("deploy", "delete_all"),
             "deploy",
             &json!({"env": "prod"}),
             0,
-            "sha256:decl",
             b"reference-test-key-v0",
             "test-key-v0",
             "authoritative_boundary",
             "c1",
             "ok",
             "present",
+            &DecisionEvidence::default(),
         )
         .unwrap()
     }
@@ -1243,5 +1329,70 @@ mod pack_tests {
             &c,
             "match"
         ));
+    }
+
+    #[test]
+    fn verify_rejects_carrier_with_malformed_embedded_digest() {
+        // Even if a row cites the carrier's content + identity perfectly, a malformed embedded digest in
+        // the carrier is rejected: identity recomputation must not trust an ill-formed input.
+        let mut bad = carrier();
+        bad["observed_input_digest"] = json!("sha256:bad"); // not 64 hex
+        let content = carrier_content_digest(&bad).unwrap();
+        let identity = decision_identity_digest(
+            "sha256:bad",
+            bad["declared_policy_digest"].as_str().unwrap(),
+        )
+        .unwrap();
+        let row = coherent_row(RECIPE, evidence_ref(&content, REF), &identity, "match");
+        assert!(!verify_recipe_row(&row, &bad, "match"));
+    }
+
+    #[test]
+    fn pack_row_rejects_bogus_or_understated_verdict() {
+        let c = carrier();
+        assert_eq!(c["decision_verdict"], json!("match"));
+        // A non-verdict label is refused outright.
+        assert!(pack_recipe_row(&c, "approved", REF).is_none());
+
+        // A carrier whose own decision is `mismatch` cannot be cited with a cleaner run verdict.
+        let mismatch_carrier = build_classified_record(
+            &pack_policy("deploy", "delete_all"),
+            "delete_all",
+            &json!({}),
+            0,
+            b"reference-test-key-v0",
+            "test-key-v0",
+            "authoritative_boundary",
+            "c1",
+            "ok",
+            "present",
+            &DecisionEvidence::default(),
+        )
+        .unwrap();
+        assert_eq!(mismatch_carrier["decision_verdict"], json!("mismatch"));
+        assert!(pack_recipe_row(&mismatch_carrier, "match", REF).is_none()); // understated -> refused
+        let row = pack_recipe_row(&mismatch_carrier, "mismatch", REF).unwrap(); // >= carrier verdict
+        assert!(verify_recipe_row(&row, &mismatch_carrier, "mismatch"));
+
+        // verify also rejects a hand-crafted row that understates the carrier verdict.
+        let content = carrier_content_digest(&mismatch_carrier).unwrap();
+        let identity = decision_identity_digest(
+            mismatch_carrier["observed_input_digest"].as_str().unwrap(),
+            mismatch_carrier["declared_policy_digest"].as_str().unwrap(),
+        )
+        .unwrap();
+        let understating = coherent_row(RECIPE, evidence_ref(&content, REF), &identity, "match");
+        assert!(!verify_recipe_row(
+            &understating,
+            &mismatch_carrier,
+            "match"
+        ));
+
+        // A carrier carrying a malformed (non-lattice) decision_verdict fails closed: it imposes a
+        // constraint no run verdict can satisfy, so no row may cite it.
+        let mut malformed = carrier();
+        malformed["decision_verdict"] = json!("approved");
+        assert!(pack_recipe_row(&malformed, "match", REF).is_none());
+        assert!(pack_recipe_row(&malformed, "invalid", REF).is_none());
     }
 }

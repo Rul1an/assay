@@ -80,8 +80,8 @@ impl McpPolicy {
 
     /// EXPERIMENTAL (unstable, may change): the declared-CONSTRAINT digest for the tool-decision
     /// truth-layer. Unlike `policy_digest` (the whole policy, Vec-structural), this projects to the
-    /// declared-constraint surface only — `version`, the `tools` allow/deny + class/approval/scope lists,
-    /// per-tool `schemas`, and `enforcement` — excluding operational knobs (`runtime_monitor`,
+    /// declared-constraint surface only — `version`, the `tools` allow/deny + class/approval/scope/redaction
+    /// lists, per-tool `schemas`, and `enforcement` — excluding operational knobs (`runtime_monitor`,
     /// `kill_switch`, `limits`, `discovery`, `signatures`, `tool_pins`, taxonomy), and SEMANTICALLY
     /// NORMALIZES the set-like fields (sorts them by canonical bytes) so a reordered-but-equal policy
     /// yields the same digest while a real membership/constraint change still moves it. Legacy v1 shapes
@@ -95,19 +95,26 @@ impl McpPolicy {
     /// refinement. Returns `None` if any fragment fails to canonicalize. Not a stability guarantee:
     /// names/shape may change until promoted out of experimental.
     pub fn declared_constraint_digest_experimental(&self) -> Option<String> {
-        let mut p = self.clone();
-        p.normalize_legacy_shapes();
-        // Explicit schemas are more authoritative than a legacy constraint that migrates to the same
-        // tool. Capture them before migration and re-apply after, so an explicitly declared schema always
-        // wins over a migrated one (migration would otherwise overwrite it) and the digest reflects the
-        // enforced constraint.
-        let explicit_schemas = p.schemas.clone();
-        p.migrate_constraints_to_schemas();
-        p.schemas.extend(explicit_schemas);
+        let p = self.normalized_declared_view_experimental();
         let full = serde_json::to_value(&p).ok()?;
         let proj = project_and_normalize_declared(&full)?;
         let canonical = jcs::to_string(&proj).ok()?;
         Some(format!("sha256:{}", sha256_hex(&canonical)))
+    }
+
+    /// EXPERIMENTAL: the single normalized declared view that BOTH the declared digest and the
+    /// tool-decision verdict gate evaluate, so the two can never disagree about what is declared. Legacy
+    /// root-level allow/deny are normalized, legacy `constraints` are migrated into per-tool schemas, and
+    /// an explicitly declared schema takes precedence over a migrated one (migration would otherwise
+    /// overwrite it). Without this shared view a legacy-constraint-only policy would bind a migrated schema
+    /// in the digest while the verdict saw "no schema" and could pass it.
+    pub fn normalized_declared_view_experimental(&self) -> McpPolicy {
+        let mut p = self.clone();
+        p.normalize_legacy_shapes();
+        let explicit_schemas = p.schemas.clone();
+        p.migrate_constraints_to_schemas();
+        p.schemas.extend(explicit_schemas);
+        p
     }
 
     /// Single evaluation entry point for CLI and Server
@@ -224,6 +231,8 @@ fn project_and_normalize_declared(full: &Value) -> Option<Value> {
                 "approval_required_classes",
                 "restrict_scope",
                 "restrict_scope_classes",
+                "redact_args",
+                "redact_args_classes",
             ] {
                 if let Some(arr) = tools.get(k).and_then(|a| a.as_array()) {
                     let mut a = arr.clone();
@@ -327,9 +336,10 @@ mod declared_constraint_digest_experimental_tests {
     }
 
     #[test]
-    fn non_surface_tools_field_does_not_move_digest() {
-        // Fields outside the declared-constraint surface (e.g. redact_args) are projected out, so they
-        // cannot move the digest; a surface field (allow) still moves it.
+    fn redaction_lists_are_in_surface_but_contract_is_not() {
+        // redact_args / redact_args_classes ARE declared constraints the verdict gate evaluates, so they
+        // must move the digest (digest binds exactly what the verdict decides). The redact_args_contract
+        // operational detail is NOT in the surface and does not move it.
         let base = policy(
             json!([]),
             json!({"tools": {"allow": ["read_file"], "deny": ["delete_all"]}}),
@@ -341,7 +351,17 @@ mod declared_constraint_digest_experimental_tests {
                 "redact_args": ["password", "token"], "redact_args_classes": ["secret"]}}),
         )
         .declared_constraint_digest_experimental();
-        assert_eq!(base, with_redact);
+        assert_ne!(base, with_redact); // redaction lists now move the digest
+
+        let with_contract = policy(
+            json!([]),
+            json!({"tools": {"allow": ["read_file"], "deny": ["delete_all"],
+                "redact_args_contract": {"redaction_target": "args.token",
+                    "redaction_mode": "drop", "redaction_scope": "request"}}}),
+        )
+        .declared_constraint_digest_experimental();
+        assert_eq!(base, with_contract); // the operational contract is non-surface
+
         let with_more_allow = policy(
             json!([]),
             json!({"tools": {"allow": ["read_file", "deploy"], "deny": ["delete_all"]}}),
