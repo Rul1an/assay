@@ -153,3 +153,25 @@ fn out_flag_writes_file_and_leaves_stdout_empty() {
         "--out file must match the committed golden projection"
     );
 }
+
+#[test]
+fn evidence_bundle_rejects_capability_surface_context_flags() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("project_otel_arg_conflict");
+    fs::create_dir_all(&dir).unwrap();
+    let bundle = dir.join("tdt.tar.gz");
+    let observation = dir.join("observation-health.json");
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "project-otel",
+            "--evidence-bundle",
+            bundle.to_str().unwrap(),
+            "--observation-health",
+            observation.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("cannot be used with"));
+}
