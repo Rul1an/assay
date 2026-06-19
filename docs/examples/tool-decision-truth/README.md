@@ -2,7 +2,10 @@
 
 A runnable walkthrough of the experimental tool-decision truth-layer public surface. A single supplied
 **carrier** goes through **import, verify, project**, so you can see what each step produces and what it
-proves. See [the reference](../../reference/tool-decision-truth.md) for the full contract, the claim
+proves. This is the **supplied-carrier flow**: it starts from a carrier you already have and inspects,
+imports, verifies, and projects it. The complementary **live-produced-carrier flow**, where a real run
+mints carriers at the policy boundary, is the opt-in producer described under *Live producer* in
+[the reference](../../reference/tool-decision-truth.md), which also carries the full contract, the claim
 ceiling, and the non-claims. This is EXPERIMENTAL (unstable); names and digests may change.
 
 The pieces, in order: the carrier and its recipe row are the content-addressed **evidence** (the record),
@@ -102,9 +105,10 @@ spans) and not enforcement. No raw arguments and no `args_digest` are projected.
 
 ## What this example does NOT show
 
-It uses a *supplied* carrier rather than minting one in a live run. Carriers can also be minted live by
-the opt-in, evidence-only producer (`assay mcp wrap --tool-decision-truth-out`); see the **Live
-producer** section of the [reference](../../reference/tool-decision-truth.md). This example takes the
-carrier as given, and it does not act on the verdict (a consumer gate is a separate step). The verdict
-is a contract statement: `match` means "inside the declared set", not "safe", "intended", or
-"enforced". See the [reference](../../reference/tool-decision-truth.md) for the full boundaries.
+It shows only the supplied-carrier flow. The **live-produced-carrier flow**, where the opt-in,
+evidence-only producer (`assay mcp wrap --tool-decision-truth-out`) mints carriers during a real run,
+is a separate step; see the *Live producer* section of the
+[reference](../../reference/tool-decision-truth.md). This example takes the carrier as given, and it
+does not act on the verdict (a consumer gate is a separate step). The verdict is a contract statement:
+`match` means "inside the declared set", not "safe", "intended", or "enforced". See the
+[reference](../../reference/tool-decision-truth.md) for the full boundaries.
