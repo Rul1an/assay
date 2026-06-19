@@ -32,6 +32,10 @@ const DEFAULT_RUN_ID: &str = "import-tool-decision-truth";
 const FORBIDDEN_RAW_ARG_KEYS: &[&str] = &["args", "arguments", "input", "tool_arguments"];
 /// The four lattice verdicts.
 const VERDICTS: &[&str] = &["match", "incomplete", "mismatch", "invalid"];
+/// Append-only carrier provenance vocabulary (mirrors the builder; re-checked at this import gate).
+const SOURCE_CLASSES: &[&str] = &["authoritative_boundary", "reported_trace", "inferred"];
+const RESULT_STATUSES: &[&str] = &["ok", "error", "n/a"];
+const IDENTITY_STATES: &[&str] = &["present", "absent", "required_missing", "invalid"];
 
 #[derive(Debug, Args, Clone)]
 pub struct ToolDecisionTruthArgs {
@@ -162,6 +166,34 @@ fn validate_carrier(carrier: &Value) -> Result<()> {
         bail!("carrier decision_identity must equal {{observed_input_digest, declared_policy_digest}}");
     }
 
+    // observed_input_digest must RECOMPUTE from {tool_name, args_digest, order}; a valid shape alone
+    // would let a stale or fictional digest still bind a row.
+    let tool_name = obj
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("carrier missing string tool_name"))?;
+    let order = obj
+        .get("order")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| anyhow::anyhow!("carrier order must be an integer"))?;
+    match tdt::observed_input_digest(tool_name, args_digest, order) {
+        Some(recomputed) if recomputed.as_str() == oid => {}
+        Some(_) => bail!(
+            "carrier observed_input_digest does not recompute from {{tool_name, args_digest, order}}"
+        ),
+        None => bail!("carrier observed_input_digest could not be recomputed"),
+    }
+
+    // Provenance vocabulary is fail-closed here too: PR9a is the gate where an external carrier enters a
+    // pack, so it repeats the builder's append-only vocabulary guard rather than trusting the producer.
+    require_enum(carrier, "source_class", SOURCE_CLASSES)?;
+    require_enum(carrier, "result_status", RESULT_STATUSES)?;
+    require_enum(carrier, "identity_state", IDENTITY_STATES)?;
+    carrier
+        .get("call_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("carrier missing string call_id"))?;
+
     match obj.get("decision_verdict") {
         None | Some(Value::Null) => {}
         Some(Value::String(v)) if VERDICTS.contains(&v.as_str()) => {}
@@ -220,6 +252,17 @@ fn require_sha256<'a>(obj: &'a Value, field: &str) -> Result<&'a str> {
         bail!("carrier {field} must be sha256:<64 hex>, got {value:?}");
     }
     Ok(value)
+}
+
+fn require_enum(carrier: &Value, field: &str, allowed: &[&str]) -> Result<()> {
+    match carrier.get(field).and_then(Value::as_str) {
+        Some(value) if allowed.contains(&value) => Ok(()),
+        Some(value) => bail!(
+            "carrier {field} {value:?} is not one of {}",
+            allowed.join("|")
+        ),
+        None => bail!("carrier missing string {field}"),
+    }
 }
 
 fn parse_import_time(value: Option<&str>) -> Result<DateTime<Utc>> {
@@ -352,5 +395,46 @@ mod tests {
         let carrier = sample_carrier();
         let err = run_import(&carrier, "bad:run").unwrap_err();
         assert!(err.to_string().contains("run_id cannot contain ':'"));
+    }
+
+    #[test]
+    fn import_rejects_stale_observed_input_digest() {
+        // Changing tool_name without updating observed_input_digest fails (the digest is recomputed).
+        let mut carrier = sample_carrier();
+        carrier["tool_name"] = json!("delete_all");
+        let err = run_import(&carrier, "tdt_test").unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("observed_input_digest does not recompute"));
+
+        // Same for a changed order.
+        let mut carrier2 = sample_carrier();
+        carrier2["order"] = json!(7);
+        let err2 = run_import(&carrier2, "tdt_test").unwrap_err();
+        assert!(err2
+            .to_string()
+            .contains("observed_input_digest does not recompute"));
+    }
+
+    #[test]
+    fn import_rejects_out_of_vocab_provenance() {
+        for (field, bad) in [
+            ("source_class", json!("made_up")),
+            ("result_status", json!("maybe")),
+            ("identity_state", json!("unknown")),
+        ] {
+            let mut carrier = sample_carrier();
+            carrier[field] = bad;
+            let err = run_import(&carrier, "tdt_test").unwrap_err();
+            assert!(
+                err.to_string().contains(&format!("carrier {field}")),
+                "field {field} must be rejected: {err}"
+            );
+        }
+        // Missing call_id is rejected.
+        let mut carrier = sample_carrier();
+        carrier.as_object_mut().unwrap().remove("call_id");
+        let err = run_import(&carrier, "tdt_test").unwrap_err();
+        assert!(err.to_string().contains("call_id"));
     }
 }
