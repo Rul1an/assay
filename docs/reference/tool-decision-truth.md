@@ -42,6 +42,7 @@ semantically correct.
 - does not prove provider-side side effects happened or persisted;
 - does not certify safety, compliance, or policy quality;
 - does not replace enforcement and does not make an allow/deny decision in the action path;
+- mints carriers as evidence only; the live producer takes no action on the verdict and never proves provider-side execution or side effects;
 - does not claim complete coverage when required evidence is absent;
 - does not expose raw tool arguments, secrets, tokens, or key material;
 - does not provide an OpenTelemetry projection or pinned OTel snapshot;
@@ -163,6 +164,52 @@ Allowed carrier vocabularies are append-only:
 
 The carrier builder rejects unknown values rather than minting a label a consumer might trust.
 
+## Live producer
+
+An opt-in producer can mint these carriers during a real MCP session, so the contract is exercised by
+an actual policy evaluation at the boundary instead of being authored after the fact. It is
+experimental and evidence-only.
+
+`assay mcp wrap --tool-decision-truth-out carriers.ndjson -- <server>` enables it. Each evaluated tool
+call appends one carrier as a single line to that file. The sink is append-only and is kept separate
+from the decision log on purpose: a decision-log entry is operational output that a policy decision
+happened, while a carrier is a content-addressed evidence record with its own key semantics and claim
+ceiling. Folding them into one stream would blur those two records.
+
+The producer is keyed. It requires two environment variables:
+
+- `ASSAY_TDT_HMAC_KEY`: the HMAC key for `args_digest`;
+- `ASSAY_TDT_HMAC_KEY_ID`: the key id recorded in the digest prefix.
+
+It fails closed at startup, before the wrapped server is spawned, if the producer is enabled but any
+of three things is wrong: the key is missing or empty; the key id is missing, empty, or contains
+characters outside `[A-Za-z0-9._-]`; or the sink path cannot be opened for append. A half-configured
+producer that would mint nothing is a startup error, not a warning. The key is read once, held in
+memory only, removed from this process's environment before the wrapped child is spawned so the child
+cannot inherit it, and never logged or persisted.
+
+At the boundary the producer records provenance honestly:
+
+- `source_class` is `authoritative_boundary`;
+- `result_status` is `ok`, which describes the policy-evaluation event itself, not a claim about the
+  tool's side effects;
+- `identity_state` is `present` or `absent`, from the runtime identity at this seam;
+- only the keyed `args_digest` is written, never raw arguments.
+
+The proxy does not observe class membership, approval, scope, or redaction at this seam, so any
+declared constraint of that kind resolves to `incomplete`, never a guessed `match`. A policy that
+allows a tool but declares no argument schema for it therefore mints a carrier with an `incomplete`
+verdict, which is the honest result.
+
+Producer non-claims:
+
+- it takes no action on the verdict; it never forwards, blocks, or alters the policy-evaluated tool
+  call request. A carrier may be minted for a policy-evaluated call even when the proxy then denies
+  forwarding it; the carrier records the evaluated tool-decision input, not provider-side execution;
+- it is not enforcement and not a consumer; acting on a verdict is a separate concern this producer
+  does not address;
+- it stays experimental and opt-in, and is off unless the flag and the key material are supplied.
+
 ## Pack recipe-row primitive
 
 The recipe-row helper binds a carrier to an Evidence Pack row without defining a new pack version.
@@ -225,8 +272,9 @@ Green:
 - runtime helper behavior;
 - declared digest and verdict-gate coherence;
 - carrier-content pack-row primitive;
-- fail-closed verifier; and
-- conformance vectors with recompute-from-bytes guard.
+- fail-closed verifier;
+- conformance vectors with recompute-from-bytes guard; and
+- live carrier producer, opt-in and evidence-only.
 
 Open:
 
