@@ -60,78 +60,161 @@ pub fn list_tools() -> Vec<Value> {
     let mut list: Vec<Value> = vec![
         serde_json::json!({
             "name": "assay_check_args",
-            "description": "Validate tool arguments against a policy schema.",
+            "description": "Validate one proposed MCP tool call against an Assay policy file. Checks the tool name and JSON arguments against allow/deny rules and per-tool schemas, then returns an allow/deny decision with violations. This tool does not execute the target tool.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "tool": { "type": "string" },
-                    "arguments": { "type": "object" },
-                    "policy": { "type": "string" }
+                    "tool": {
+                        "type": "string",
+                        "description": "Exact MCP tool name to evaluate, for example `github.add_deploy_key`."
+                    },
+                    "arguments": {
+                        "type": "object",
+                        "description": "JSON object that would be sent to the tool. Assay validates this object against the matching policy schema."
+                    },
+                    "policy": {
+                        "type": "string",
+                        "description": "Policy file path relative to the configured policy root, for example `policy.yaml`."
+                    }
                 },
-                "required": ["tool", "arguments"]
+                "required": ["tool", "arguments", "policy"],
+                "additionalProperties": false
             }
         }),
         serde_json::json!({
             "name": "assay_check_sequence",
-            "description": "Validate if a tool call is allowed given the history.",
+            "description": "Check whether a proposed next tool call is allowed by the sequence rules in an Assay policy. Provide the prior tool-name history and the next tool name; Assay returns sequence violations without executing any tools.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "history": { "type": "array", "items": { "type": "string" } },
-                    "next_tool": { "type": "string" },
-                    "policy": { "type": "string" }
+                    "history": {
+                        "type": "array",
+                        "description": "Tool names already observed in order before the proposed next call.",
+                        "items": { "type": "string" }
+                    },
+                    "next_tool": {
+                        "type": "string",
+                        "description": "Tool name being considered as the next call."
+                    },
+                    "policy": {
+                        "type": "string",
+                        "description": "Policy file path relative to the configured policy root."
+                    }
                 },
-                "required": ["history", "next_tool"]
+                "required": ["history", "next_tool", "policy"],
+                "additionalProperties": false
             }
         }),
         serde_json::json!({
             "name": "assay_policy_decide",
-            "description": "Check if a tool is blocked by policy.",
+            "description": "Return a lightweight allow/deny decision for a tool name using the policy blocklist. Use this for quick tool-name gating; use `assay_check_args` when argument/schema validation is needed.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "tool": { "type": "string" },
-                    "policy": { "type": "string" }
+                    "tool": {
+                        "type": "string",
+                        "description": "Exact MCP tool name to check against the policy blocklist."
+                    },
+                    "policy": {
+                        "type": "string",
+                        "description": "Policy file path relative to the configured policy root."
+                    }
                 },
-                "required": ["tool", "policy"]
+                "required": ["tool", "policy"],
+                "additionalProperties": false
             }
         }),
         serde_json::json!({
             "name": "assay_check_coverage",
-            "description": "Analyze trace coverage against a policy.",
+            "description": "Measure how well one or more recorded tool-call traces cover an Assay policy. Returns coverage percentages, unseen tools or rules, and whether the supplied threshold is met; it does not claim runtime safety or provider truth.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "policy": { "type": "string" },
+                    "policy": {
+                        "type": "string",
+                        "description": "Policy file path relative to the configured policy root."
+                    },
                     "traces": {
                         "type": "array",
+                        "description": "Trace records to compare against the policy.",
                         "items": {
                             "type": "object",
                             "properties": {
-                                "id": { "type": "string" },
-                                "tools": { "type": "array", "items": { "type": "string" } },
-                                "rules_triggered": { "type": "array", "items": { "type": "string" } }
+                                "id": {
+                                    "type": "string",
+                                    "description": "Optional trace identifier used in reports."
+                                },
+                                "tools": {
+                                    "type": "array",
+                                    "description": "Tool names observed in this trace.",
+                                    "items": { "type": "string" }
+                                },
+                                "rules_triggered": {
+                                    "type": "array",
+                                    "description": "Optional policy rule identifiers observed as triggered in this trace.",
+                                    "items": { "type": "string" }
+                                }
                             },
-                            "required": ["tools"]
+                            "required": ["tools"],
+                            "additionalProperties": false
                         }
                     },
-                    "threshold": { "type": "number" },
-                    "format": { "type": "string", "enum": ["json", "markdown", "github"] }
+                    "threshold": {
+                        "type": "number",
+                        "description": "Minimum acceptable coverage percentage from 0 to 100. Defaults to 80.",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "default": 80
+                    },
+                    "format": {
+                        "type": "string",
+                        "description": "Response format for the coverage report.",
+                        "enum": ["json", "markdown", "github"],
+                        "default": "json"
+                    }
                 },
-                "required": ["policy", "traces"]
+                "required": ["policy", "traces"],
+                "additionalProperties": false
             }
         }),
         serde_json::json!({
             "name": "assay_explain_trace",
-            "description": "Explain trace evaluation against a policy",
+            "description": "Explain how an ordered trace of tool calls evaluates against an Assay policy. Produces step-by-step rule evaluation and blocked-step counts in JSON, Markdown, terminal text, or HTML.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "policy": { "type": "string" },
-                    "trace": { "type": "array" },
-                    "format": { "type": "string", "enum": ["json", "markdown", "terminal", "html"] }
+                    "policy": {
+                        "type": "string",
+                        "description": "Policy file path relative to the configured policy root."
+                    },
+                    "trace": {
+                        "type": "array",
+                        "description": "Ordered tool-call trace to explain.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "tool": {
+                                    "type": "string",
+                                    "description": "Tool name for this trace step."
+                                },
+                                "args": {
+                                    "type": "object",
+                                    "description": "Optional JSON arguments observed for this trace step."
+                                }
+                            },
+                            "required": ["tool"],
+                            "additionalProperties": false
+                        }
+                    },
+                    "format": {
+                        "type": "string",
+                        "description": "Response format for the explanation.",
+                        "enum": ["json", "markdown", "terminal", "html"],
+                        "default": "json"
+                    }
                 },
-                "required": ["policy", "trace"]
+                "required": ["policy", "trace"],
+                "additionalProperties": false
             }
         }),
     ];
