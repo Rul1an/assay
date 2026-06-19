@@ -4,11 +4,13 @@
 //! carrier record whose decision identity is the `(observed_input_digest, declared_policy_digest)` pair.
 //! The declared side is [`super::policy::McpPolicy::declared_constraint_digest_experimental`].
 //!
-//! This slice carries the record shape only; no verdict is computed here (a later slice owns the gate),
-//! so the classification zone is carried but not decided. Not a stability guarantee: the schema, field
-//! names, and digests may change until this is promoted out of experimental.
+//! It also provides a deterministic verdict gate (tool / args / identity axes folded with the lattice
+//! `invalid > mismatch > incomplete > match`) and a run-level aggregate over an ordered set of decisions.
+//! Not a stability guarantee: the schema, field names, and digests may change until this is promoted out
+//! of experimental.
 
 use super::jcs;
+use super::policy::{McpPolicy, UnconstrainedMode};
 use crate::fingerprint::sha256_hex;
 use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{json, Map, Value};
@@ -127,6 +129,167 @@ pub fn build_record(
             "declared_policy_digest": declared_policy_digest,
         },
     }))
+}
+
+// ── EXPERIMENTAL verdict gate + run lattice ──────────────────────────────────────────────────────
+// Classify an observed decision against the declared McpPolicy over independent axes (tool / args /
+// identity), fold per-decision with the lattice `invalid > mismatch > incomplete > match`, and aggregate
+// a run with the same lattice plus order integrity. Undecidable resolves to `incomplete`, never a silent
+// pass. Mirrors the private reference-spec; unstable until promoted out of experimental.
+
+/// Lattice rank: `invalid > mismatch > incomplete > match`. Unknown strings rank as `invalid`.
+fn verdict_rank(v: &str) -> u8 {
+    match v {
+        "match" => 0,
+        "incomplete" => 1,
+        "mismatch" => 2,
+        _ => 3, // "invalid" and anything unexpected
+    }
+}
+
+fn to_static_verdict(v: &str) -> &'static str {
+    match v {
+        "match" => "match",
+        "incomplete" => "incomplete",
+        "mismatch" => "mismatch",
+        _ => "invalid",
+    }
+}
+
+fn enforcement_axis(mode: &UnconstrainedMode) -> &'static str {
+    match mode {
+        UnconstrainedMode::Deny => "mismatch",
+        UnconstrainedMode::Allow => "match",
+        UnconstrainedMode::Warn => "incomplete",
+    }
+}
+
+fn tool_axis(policy: &McpPolicy, tool_name: &str) -> &'static str {
+    if policy
+        .tools
+        .deny
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .any(|t| t == tool_name)
+    {
+        return "mismatch";
+    }
+    let allow = policy.tools.allow.as_deref().unwrap_or(&[]);
+    if !allow.is_empty() {
+        return if allow.iter().any(|t| t == tool_name) {
+            "match"
+        } else {
+            "mismatch"
+        };
+    }
+    enforcement_axis(&policy.enforcement.unconstrained_tools)
+}
+
+fn args_axis(policy: &McpPolicy, tool_name: &str, args: Option<&Value>) -> &'static str {
+    let Some(args) = args else {
+        return "incomplete"; // arguments not captured by the adapter
+    };
+    if !policy.schemas.contains_key(tool_name) {
+        return enforcement_axis(&policy.enforcement.unconstrained_tools);
+    }
+    // v0/experimental: compiles schemas per call; a cached validator is a later optimization.
+    match policy.compile_all_schemas().get(tool_name) {
+        Some(validator) => {
+            if validator.is_valid(args) {
+                "match"
+            } else {
+                "mismatch"
+            }
+        }
+        None => "incomplete", // schema present but did not compile -> cannot decide
+    }
+}
+
+fn identity_axis(identity_state: &str) -> &'static str {
+    match identity_state {
+        "present" | "absent" => "match", // absent does NOT block match
+        "required_missing" => "incomplete",
+        _ => "invalid", // "invalid" (and anything unexpected) -> invalid on the identity axis
+    }
+}
+
+/// Per-decision verdict over the declared policy: the lattice-max of the tool, args, and identity axes.
+/// Legacy root-level allow/deny are normalized first. EXPERIMENTAL (unstable).
+pub fn decision_verdict(
+    policy: &McpPolicy,
+    tool_name: &str,
+    args: Option<&Value>,
+    identity_state: &str,
+) -> &'static str {
+    let mut p = policy.clone();
+    p.normalize_legacy_shapes();
+    [
+        tool_axis(&p, tool_name),
+        args_axis(&p, tool_name, args),
+        identity_axis(identity_state),
+    ]
+    .into_iter()
+    .max_by_key(|&v| verdict_rank(v))
+    .unwrap_or("match")
+}
+
+/// Run-level verdict: the lattice-max over per-decision verdicts, plus order integrity. Duplicate `order`
+/// values make the observed sequence ambiguous and force `invalid` (a run whose order cannot be
+/// established is not certified). EXPERIMENTAL (unstable).
+pub fn run_verdict(decision_verdicts: &[&str], orders: &[i64]) -> &'static str {
+    let mut seen = std::collections::HashSet::new();
+    for o in orders {
+        if !seen.insert(*o) {
+            return "invalid";
+        }
+    }
+    let mut worst: &'static str = "match";
+    for v in decision_verdicts {
+        let s = to_static_verdict(v);
+        if verdict_rank(s) > verdict_rank(worst) {
+            worst = s;
+        }
+    }
+    worst
+}
+
+/// Build a fully-classified carrier record: the declared digest is taken from `policy`, the observed-input
+/// identity from [`build_record`], and the classification zone carries the [`decision_verdict`].
+/// EXPERIMENTAL. Returns `None` if a digest cannot be canonicalized.
+#[allow(clippy::too_many_arguments)]
+pub fn build_classified_record(
+    policy: &McpPolicy,
+    tool_name: &str,
+    args: &Value,
+    order: i64,
+    key: &[u8],
+    key_id: &str,
+    source_class: &str,
+    call_id: &str,
+    result_status: &str,
+    identity_state: &str,
+) -> Option<Value> {
+    let declared = policy.declared_constraint_digest_experimental()?;
+    let mut record = build_record(
+        tool_name,
+        args,
+        order,
+        &declared,
+        key,
+        key_id,
+        source_class,
+        call_id,
+        result_status,
+        identity_state,
+    )?;
+    record["decision_verdict"] = json!(decision_verdict(
+        policy,
+        tool_name,
+        Some(args),
+        identity_state
+    ));
+    Some(record)
 }
 
 #[cfg(test)]
@@ -258,5 +421,116 @@ mod tests {
             keys,
             vec!["declared_policy_digest", "observed_input_digest"]
         );
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+
+    const KEY: &[u8] = b"k";
+    const KID: &str = "kid";
+
+    fn policy() -> McpPolicy {
+        serde_json::from_value(json!({
+            "version": "1",
+            "tools": {"allow": ["read_file", "deploy"], "deny": ["delete_all"]},
+            "schemas": {"deploy": {"type": "object", "required": ["env"],
+                "properties": {"env": {"enum": ["staging", "prod"]}}}},
+            "enforcement": {"unconstrained_tools": "warn"}
+        }))
+        .unwrap()
+    }
+
+    fn v(tool: &str, args: Option<Value>, id: &str) -> &'static str {
+        decision_verdict(&policy(), tool, args.as_ref(), id)
+    }
+
+    #[test]
+    fn per_decision_verdict_matrix() {
+        // allowed tool, args satisfy the schema, identity present -> match
+        assert_eq!(
+            v("deploy", Some(json!({"env": "staging"})), "present"),
+            "match"
+        );
+        // denied tool -> mismatch
+        assert_eq!(v("delete_all", Some(json!({})), "present"), "mismatch");
+        // tool absent from a non-empty allow-list -> mismatch
+        assert_eq!(v("exfiltrate", Some(json!({})), "present"), "mismatch");
+        // allowed tool, arg violates the enum -> mismatch
+        assert_eq!(
+            v("deploy", Some(json!({"env": "dev"})), "present"),
+            "mismatch"
+        );
+        // allowed tool, args not captured -> incomplete
+        assert_eq!(v("deploy", None, "present"), "incomplete");
+        // allowed tool with no schema under enforcement=warn -> incomplete
+        assert_eq!(
+            v("read_file", Some(json!({"path": "/x"})), "present"),
+            "incomplete"
+        );
+        // identity required but missing -> incomplete
+        assert_eq!(
+            v(
+                "deploy",
+                Some(json!({"env": "staging"})),
+                "required_missing"
+            ),
+            "incomplete"
+        );
+        // identity present but invalid -> invalid
+        assert_eq!(
+            v("deploy", Some(json!({"env": "staging"})), "invalid"),
+            "invalid"
+        );
+    }
+
+    #[test]
+    fn absent_identity_does_not_block_match() {
+        assert_eq!(v("deploy", Some(json!({"env": "prod"})), "absent"), "match");
+    }
+
+    #[test]
+    fn run_lattice_and_order_integrity() {
+        assert_eq!(run_verdict(&["match", "incomplete"], &[0, 1]), "incomplete");
+        assert_eq!(run_verdict(&["match", "mismatch"], &[0, 1]), "mismatch");
+        assert_eq!(
+            run_verdict(&["match", "mismatch", "invalid"], &[0, 1, 2]),
+            "invalid"
+        );
+        assert_eq!(run_verdict(&["match", "match"], &[0, 0]), "invalid"); // duplicate order
+        assert_eq!(run_verdict(&["match"], &[0]), "match");
+    }
+
+    #[test]
+    fn build_classified_record_carries_the_verdict() {
+        let m = build_classified_record(
+            &policy(),
+            "deploy",
+            &json!({"env": "staging"}),
+            0,
+            KEY,
+            KID,
+            "authoritative_boundary",
+            "c1",
+            "ok",
+            "present",
+        )
+        .unwrap();
+        assert_eq!(m["decision_verdict"], json!("match"));
+        let mm = build_classified_record(
+            &policy(),
+            "delete_all",
+            &json!({}),
+            0,
+            KEY,
+            KID,
+            "authoritative_boundary",
+            "c1",
+            "ok",
+            "present",
+        )
+        .unwrap();
+        assert_eq!(mm["decision_verdict"], json!("mismatch"));
     }
 }
