@@ -1,0 +1,229 @@
+{
+  "schema": "assay.tool_decision_truth.vectors.v0",
+  "declared_policy": {
+    "version": "1",
+    "tools": {
+      "allow": [
+        "read_file",
+        "deploy"
+      ],
+      "deny": [
+        "delete_all"
+      ]
+    },
+    "schemas": {
+      "deploy": {
+        "type": "object",
+        "required": [
+          "env"
+        ],
+        "properties": {
+          "env": {
+            "enum": [
+              "staging",
+              "prod"
+            ]
+          }
+        }
+      }
+    },
+    "enforcement": {
+      "unconstrained_tools": "warn"
+    }
+  },
+  "cases": [
+    {
+      "id": "match",
+      "observed": [
+        {
+          "tool_name": "deploy",
+          "args": {
+            "env": "staging"
+          },
+          "order": 0,
+          "identity_state": "present"
+        }
+      ],
+      "expected": {
+        "decisions": [
+          "match"
+        ],
+        "run_verdict": "match"
+      }
+    },
+    {
+      "id": "mismatch_denied_tool",
+      "observed": [
+        {
+          "tool_name": "delete_all",
+          "args": {},
+          "order": 0,
+          "identity_state": "present"
+        }
+      ],
+      "expected": {
+        "decisions": [
+          "mismatch"
+        ],
+        "run_verdict": "mismatch"
+      }
+    },
+    {
+      "id": "mismatch_arg_enum",
+      "observed": [
+        {
+          "tool_name": "deploy",
+          "args": {
+            "env": "dev"
+          },
+          "order": 0,
+          "identity_state": "present"
+        }
+      ],
+      "expected": {
+        "decisions": [
+          "mismatch"
+        ],
+        "run_verdict": "mismatch"
+      }
+    },
+    {
+      "id": "incomplete_args_uncaptured",
+      "observed": [
+        {
+          "tool_name": "deploy",
+          "args": null,
+          "order": 0,
+          "identity_state": "present"
+        }
+      ],
+      "expected": {
+        "decisions": [
+          "incomplete"
+        ],
+        "run_verdict": "incomplete"
+      }
+    },
+    {
+      "id": "incomplete_unconstrained_warn",
+      "observed": [
+        {
+          "tool_name": "read_file",
+          "args": {
+            "path": "/x"
+          },
+          "order": 0,
+          "identity_state": "present"
+        }
+      ],
+      "expected": {
+        "decisions": [
+          "incomplete"
+        ],
+        "run_verdict": "incomplete"
+      }
+    },
+    {
+      "id": "incomplete_required_missing_identity",
+      "observed": [
+        {
+          "tool_name": "deploy",
+          "args": {
+            "env": "staging"
+          },
+          "order": 0,
+          "identity_state": "required_missing"
+        }
+      ],
+      "expected": {
+        "decisions": [
+          "incomplete"
+        ],
+        "run_verdict": "incomplete"
+      }
+    },
+    {
+      "id": "invalid_identity",
+      "observed": [
+        {
+          "tool_name": "deploy",
+          "args": {
+            "env": "staging"
+          },
+          "order": 0,
+          "identity_state": "invalid"
+        }
+      ],
+      "expected": {
+        "decisions": [
+          "invalid"
+        ],
+        "run_verdict": "invalid"
+      }
+    },
+    {
+      "id": "run_lattice_mismatch",
+      "observed": [
+        {
+          "tool_name": "deploy",
+          "args": {
+            "env": "staging"
+          },
+          "order": 0,
+          "identity_state": "present"
+        },
+        {
+          "tool_name": "delete_all",
+          "args": {},
+          "order": 1,
+          "identity_state": "present"
+        }
+      ],
+      "expected": {
+        "decisions": [
+          "match",
+          "mismatch"
+        ],
+        "run_verdict": "mismatch"
+      }
+    }
+  ],
+  "pack_rows": [
+    {
+      "observed_input_digest": "sha256:obs-1",
+      "declared_policy_digest": "sha256:decl-1",
+      "run_verdict": "match",
+      "ref": "audit://decision/c1",
+      "row": {
+        "recipe": "tool_decision_truth.v0",
+        "evidence_ref": {
+          "type": "tool_decision_truth",
+          "digest": "sha256:d20738a356ae4346c601aebcc6c19d78167b12af8a6fdc9b545b10eee9a9e703",
+          "canonicalization": "jcs-json-v1",
+          "schema": "assay.tool_decision_truth.v0",
+          "ref": "audit://decision/c1"
+        },
+        "run_verdict": "match",
+        "coherence_binding": "sha256:690036844f74a38b973a0861fc6d6567e5a8e7a7f025e5560bc50af266c11c4d"
+      }
+    },
+    {
+      "observed_input_digest": "sha256:obs-2",
+      "declared_policy_digest": "sha256:decl-2",
+      "run_verdict": "mismatch",
+      "ref": "audit://decision/c2",
+      "row": {
+        "recipe": "tool_decision_truth.v0",
+        "evidence_ref": {
+          "type": "tool_decision_truth",
+          "digest": "sha256:86190144108df05f1c24a08daefde0b777c9c6423528a9b2a13ec06943f8e9aa",
+          "canonicalization": "jcs-json-v1",
+          "schema": "assay.tool_decision_truth.v0",
+          "ref": "audit://decision/c2"
+        },
+        "run_verdict": "mismatch",
+        "coherence_binding": "sha256:ada5867b078c5c32c61586eed33a775b4324461acbaba389c2fcd4a5988ca386"
+      }
+    }
+  ]
+}
