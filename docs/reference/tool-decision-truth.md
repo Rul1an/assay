@@ -45,7 +45,8 @@ semantically correct.
 - mints carriers as evidence only; the live producer takes no action on the verdict and never proves provider-side execution or side effects;
 - does not claim complete coverage when required evidence is absent;
 - does not expose raw tool arguments, secrets, tokens, or key material;
-- does not provide an OpenTelemetry projection or pinned OTel snapshot;
+- does not provide an OTLP exporter or live telemetry path; the experimental OTel projection is a
+  lossy view over verified evidence;
 - does not integrate with the pack writer yet; the recipe-row primitive exists separately;
 - does not provide a stable external schema until the experimental marker is removed.
 
@@ -273,11 +274,12 @@ Green:
 - declared digest and verdict-gate coherence;
 - carrier-content pack-row primitive;
 - fail-closed verifier;
-- conformance vectors with recompute-from-bytes guard; and
+- conformance vectors with recompute-from-bytes guard;
+- import, verify, and OTel projection over a verified evidence bundle; and
 - live carrier producer, opt-in and evidence-only.
 
 Open:
 
-- OpenTelemetry export against a pinned snapshot;
-- integrated pack emission; and
+- OTLP export or a live telemetry path;
+- production pack-emission path; and
 - promotion from experimental names to a stable public schema.
