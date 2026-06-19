@@ -20,6 +20,8 @@ use std::path::PathBuf;
 
 /// Event type carrying a tool-decision-truth carrier.
 const CARRIER_EVENT_TYPE: &str = "assay.tool_decision_truth.v0";
+/// Schema the carrier PAYLOAD must self-declare (the event type alone is envelope metadata).
+const CARRIER_SCHEMA: &str = "assay.tool_decision_truth.v0";
 /// Event type carrying a recipe row that cites a carrier.
 const ROW_EVENT_TYPE: &str = "assay.tool_decision_truth.recipe_row.v0";
 
@@ -91,6 +93,15 @@ fn build_report(events: &[EvidenceEvent]) -> Report {
     let mut carrier_count = 0usize;
     for ev in events.iter().filter(|e| e.type_ == CARRIER_EVENT_TYPE) {
         carrier_count += 1;
+        // The carrier PAYLOAD must self-declare the carrier schema; the event type alone is envelope
+        // metadata, so a wrong-schema payload is not trusted as a carrier even if a row cites it.
+        if ev.payload.get("schema").and_then(Value::as_str) != Some(CARRIER_SCHEMA) {
+            checks.push(fail(
+                &format!("carrier_{}_schema", ev.id),
+                format!("carrier payload must declare schema {CARRIER_SCHEMA:?}"),
+            ));
+            continue;
+        }
         match tdt::carrier_content_digest(&ev.payload) {
             Some(digest) => {
                 if carriers.insert(digest.clone(), &ev.payload).is_some() {
@@ -327,6 +338,19 @@ mod tests {
             .checks
             .iter()
             .any(|c| c.id.ends_with("_carrier_present")));
+    }
+
+    #[test]
+    fn carrier_with_wrong_payload_schema_fails() {
+        // The event type says carrier, but the payload does not self-declare the carrier schema. Even a
+        // row that cites it correctly by content digest must not verify.
+        let mut c = carrier("deploy", json!({"env": "prod"}), 0, "c0");
+        c["schema"] = json!("assay.not_a_carrier.v0");
+        let verdict = c["decision_verdict"].as_str().unwrap().to_string();
+        let r = tdt::pack_recipe_row(&c, &verdict, "assay://evidence-event/run/0").unwrap();
+        let report = build_report(&[ev(CARRIER_EVENT_TYPE, c, 0), ev(ROW_EVENT_TYPE, r, 1)]);
+        assert!(!report.ok);
+        assert!(report.checks.iter().any(|c| c.id.ends_with("_schema")));
     }
 
     #[test]
