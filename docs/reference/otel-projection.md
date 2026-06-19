@@ -92,3 +92,28 @@ projection JSON document, it does not export OTLP, open a network connection, or
 This is the projection function, its fixtures, and the read-only `assay project-otel` CLI wrapper.
 There is no OTLP exporter and no live telemetry path yet; those are later slices, kept separate so the
 contract and its fixtures stand on their own first.
+
+## Tool-decision-truth projection (`assay.tool_decision_truth.otel_projection.v0`, experimental)
+
+A second, experimental projection turns VERIFIED tool-decision-truth recipe rows into the same OTel
+GenAI + OpenInference view. It runs over an evidence bundle, not loose carriers:
+
+```bash
+assay project-otel --evidence-bundle tdt.tar.gz
+```
+
+The bundle is verified first — `verify-tool-decision-truth` pairs each recipe row with the carrier it
+cites by content digest and runs the fail-closed check — and **the projection is only produced if every
+row verifies**. On a failed verification nothing is serialized or written, not even to `--out`: this is
+a view over verified evidence, never a best-effort trace extractor. `--evidence-bundle` and
+`--capability-surface` are mutually exclusive.
+
+Each verified decision becomes one `TOOL` span (`gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`,
+`openinference.span.kind=TOOL`). The verdict and the digests ride in `assay.tdt.*`
+(`decision_verdict`, `run_verdict`, `observed_input_digest`, `declared_policy_digest`,
+`decision_identity_digest`, `carrier_content_digest`, `source_class`), and `assay.claim_class="derived"`
+marks the span as a derived comparison over observed and declared data — not a raw observation (unlike
+the capability-surface tool spans) and not enforcement. **No raw arguments and no `args_digest` are
+projected**; the view carries only the higher-level identity and content digests. The same `lossy:true`
+/ `source_of_truth` / pinned-semconv discipline applies. Golden fixture:
+`crates/assay-core/tests/fixtures/tdt_otel_projection/`.

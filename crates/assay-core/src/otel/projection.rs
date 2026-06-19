@@ -28,6 +28,9 @@ use serde_json::{Map, Value};
 /// Schema id of this projection artifact.
 pub const PROJECTION_SCHEMA: &str = "assay.otel_projection.v0";
 
+/// Schema id of the tool-decision-truth projection artifact (EXPERIMENTAL).
+pub const TDT_PROJECTION_SCHEMA: &str = "assay.tool_decision_truth.otel_projection.v0";
+
 /// Pinned OTel GenAI semconv target, flagged Development to match upstream status. This projection
 /// targets the GenAI *agent/tool* span surface (`execute_tool`, `gen_ai.tool.*`), which is newer than
 /// the LLM-*client* span surface the rest of the `otel` module pins at 1.28.0 (`semconv::V1_28_0`):
@@ -244,5 +247,216 @@ pub fn project(
         lossy: true,
         source_of_truth: SOURCE_OF_TRUTH.to_string(),
         non_claims,
+    }
+}
+
+/// One verified tool-decision-truth decision to project. The pairing and the fail-closed verification
+/// happened in the verifier; this carries the already-verified carrier plus the two digests the row
+/// bound, so the projector never re-pairs, re-verifies, or re-scans a bundle.
+#[derive(Debug, Clone)]
+pub struct TdtDecision {
+    /// The verified carrier payload (`assay.tool_decision_truth.v0`).
+    pub carrier: Value,
+    /// The carrier content digest the row cited (from the verified row).
+    pub carrier_content_digest: String,
+    /// The decision identity digest (from the verified row).
+    pub decision_identity_digest: String,
+    /// The run verdict the row bound (from the verified row).
+    pub run_verdict: String,
+}
+
+/// Project VERIFIED tool-decision-truth decisions into the OTel GenAI + OpenInference view (EXPERIMENTAL).
+///
+/// Each decision becomes one `TOOL` span (`gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`,
+/// `openinference.span.kind=TOOL`), with the verdict and the four digests in `assay.tdt.*`. The honesty
+/// qualifier `assay.claim_class="derived"` marks the span as a derived comparison over observed and
+/// declared data, not a raw observation (like the capability-surface tool spans) and not enforcement. No
+/// raw tool arguments are ever projected: only specific carrier fields are read, never the args.
+pub fn project_tool_decision_truth(decisions: &[TdtDecision]) -> Projection {
+    let mut resource: Map<String, Value> = Map::new();
+    resource.insert("service.name".into(), Value::String("assay".into()));
+
+    let mut spans: Vec<ProjectedSpan> = Vec::new();
+    for d in decisions {
+        let carrier = &d.carrier;
+        let tool = str_field(carrier, "tool_name").unwrap_or_default();
+
+        let mut attrs = Map::new();
+        attrs.insert(
+            "gen_ai.operation.name".into(),
+            Value::String("execute_tool".into()),
+        );
+        if !tool.is_empty() {
+            attrs.insert("gen_ai.tool.name".into(), Value::String(tool.clone()));
+            attrs.insert("tool.name".into(), Value::String(tool.clone()));
+        }
+        attrs.insert(
+            "openinference.span.kind".into(),
+            Value::String("TOOL".into()),
+        );
+        // A verdict is a derived comparison over observed + declared, not a raw observation, not
+        // enforcement, and not an intent/safety judgement.
+        attrs.insert("assay.claim_class".into(), Value::String("derived".into()));
+
+        // tool-decision-truth specifics the standard vocabulary has no field for stay in assay.tdt.*.
+        for (carrier_key, attr_key) in [
+            ("schema", "assay.tdt.schema"),
+            ("decision_verdict", "assay.tdt.decision_verdict"),
+            ("observed_input_digest", "assay.tdt.observed_input_digest"),
+            ("declared_policy_digest", "assay.tdt.declared_policy_digest"),
+            ("source_class", "assay.tdt.source_class"),
+        ] {
+            if let Some(v) = str_field(carrier, carrier_key) {
+                attrs.insert(attr_key.into(), Value::String(v));
+            }
+        }
+        attrs.insert(
+            "assay.tdt.run_verdict".into(),
+            Value::String(d.run_verdict.clone()),
+        );
+        attrs.insert(
+            "assay.tdt.decision_identity_digest".into(),
+            Value::String(d.decision_identity_digest.clone()),
+        );
+        attrs.insert(
+            "assay.tdt.carrier_content_digest".into(),
+            Value::String(d.carrier_content_digest.clone()),
+        );
+
+        spans.push(ProjectedSpan {
+            name: format!("execute_tool {tool}"),
+            kind: "INTERNAL".into(),
+            attributes: attrs,
+        });
+    }
+
+    let non_claims = vec![
+        "This projection is a one-directional, lossy view; the assay artifacts remain authoritative."
+            .to_string(),
+        "gen_ai.* and openinference.* fields are a projection, not the source of truth.".to_string(),
+        "A tool-decision-truth verdict is a derived comparison over observed and declared data \
+         (assay.claim_class=derived); it is not a raw observation, not enforcement, and not an intent \
+         or safety judgement."
+            .to_string(),
+        "Raw tool arguments and the keyed args_digest are not projected; this view carries only the \
+         higher-level observed-input, declared-policy, decision-identity, and carrier-content digests."
+            .to_string(),
+        format!(
+            "Pinned to OTel GenAI semconv {OTEL_GENAI_SEMCONV} and OpenInference {OPENINFERENCE_SEMCONV}; \
+             a version bump is explicit."
+        ),
+    ];
+
+    Projection {
+        schema: TDT_PROJECTION_SCHEMA.to_string(),
+        semconv: Semconv {
+            otel_genai: OTEL_GENAI_SEMCONV.to_string(),
+            openinference: OPENINFERENCE_SEMCONV.to_string(),
+        },
+        spans,
+        resource_attributes: resource,
+        lossy: true,
+        source_of_truth: SOURCE_OF_TRUTH.to_string(),
+        non_claims,
+    }
+}
+
+#[cfg(test)]
+mod tdt_tests {
+    use super::*;
+    use crate::mcp::policy::McpPolicy;
+    use crate::mcp::tool_decision_truth::{self as tdt, DecisionEvidence};
+    use serde_json::json;
+
+    // Build the projector input from a REAL carrier so the test tracks the actual primitive (the digests
+    // are genuine, not placeholder shapes) without duplicating any pairing logic.
+    fn decision() -> TdtDecision {
+        let policy: McpPolicy = serde_json::from_value(json!({
+            "version": "1",
+            "tools": {"allow": ["deploy"], "deny": ["delete_all"]},
+            "schemas": {"deploy": {"type": "object", "required": ["env"],
+                "properties": {"env": {"enum": ["staging", "prod"]}}}},
+            "enforcement": {"unconstrained_tools": "warn"}
+        }))
+        .unwrap();
+        let carrier = tdt::build_classified_record(
+            &policy,
+            "deploy",
+            &json!({"env": "prod"}),
+            0,
+            b"projection-test-key-v0",
+            "fixture-kid-v0",
+            "authoritative_boundary",
+            "c0",
+            "ok",
+            "present",
+            &DecisionEvidence::default(),
+        )
+        .unwrap();
+        let carrier_content_digest = tdt::carrier_content_digest(&carrier).unwrap();
+        let decision_identity_digest = tdt::decision_identity_digest(
+            carrier["observed_input_digest"].as_str().unwrap(),
+            carrier["declared_policy_digest"].as_str().unwrap(),
+        )
+        .unwrap();
+        let run_verdict = carrier["decision_verdict"].as_str().unwrap().to_string();
+        TdtDecision {
+            carrier,
+            carrier_content_digest,
+            decision_identity_digest,
+            run_verdict,
+        }
+    }
+
+    #[test]
+    fn projects_a_derived_tool_span_with_tdt_attrs() {
+        let d = decision();
+        let p = project_tool_decision_truth(std::slice::from_ref(&d));
+        assert_eq!(p.schema, TDT_PROJECTION_SCHEMA);
+        assert!(p.lossy);
+        assert_eq!(p.spans.len(), 1);
+        let a = &p.spans[0].attributes;
+        assert_eq!(a["gen_ai.operation.name"], json!("execute_tool"));
+        assert_eq!(a["gen_ai.tool.name"], json!("deploy"));
+        assert_eq!(a["openinference.span.kind"], json!("TOOL"));
+        assert_eq!(a["assay.claim_class"], json!("derived"));
+        assert_eq!(a["assay.tdt.decision_verdict"], json!("match"));
+        assert_eq!(a["assay.tdt.source_class"], json!("authoritative_boundary"));
+        // The projected digests equal the real primitive's digests, not placeholder shapes.
+        assert_eq!(
+            a["assay.tdt.observed_input_digest"],
+            d.carrier["observed_input_digest"]
+        );
+        assert_eq!(
+            a["assay.tdt.declared_policy_digest"],
+            d.carrier["declared_policy_digest"]
+        );
+        assert_eq!(
+            a["assay.tdt.carrier_content_digest"],
+            json!(d.carrier_content_digest)
+        );
+        assert_eq!(
+            a["assay.tdt.decision_identity_digest"],
+            json!(d.decision_identity_digest)
+        );
+    }
+
+    #[test]
+    fn never_projects_raw_arguments_or_args_digest() {
+        let d = decision();
+        let args_digest_value = d.carrier["args_digest"].as_str().unwrap().to_string();
+        let p = project_tool_decision_truth(std::slice::from_ref(&d));
+        // The projection carries only identity/content digests: no args_digest attribute and no raw
+        // arguments. (The word "args_digest" appears only in the honest non_claims text, never as data.)
+        for span in &p.spans {
+            assert!(!span.attributes.contains_key("assay.tdt.args_digest"));
+            assert!(!span.attributes.contains_key("gen_ai.tool.call.arguments"));
+            for value in span.attributes.values() {
+                assert_ne!(value.as_str(), Some(args_digest_value.as_str()));
+            }
+        }
+        let serialized = serde_json::to_string(&p).unwrap();
+        assert!(!serialized.contains(&args_digest_value));
+        assert!(!serialized.contains("\"arguments\""));
     }
 }
