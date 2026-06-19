@@ -105,8 +105,9 @@ assay project-otel --evidence-bundle tdt.tar.gz
 The bundle is verified first — `verify-tool-decision-truth` pairs each recipe row with the carrier it
 cites by content digest and runs the fail-closed check — and **the projection is only produced if every
 row verifies**. On a failed verification nothing is serialized or written, not even to `--out`: this is
-a view over verified evidence, never a best-effort trace extractor. `--evidence-bundle` and
-`--capability-surface` are mutually exclusive.
+a view over verified evidence, never a best-effort trace extractor. `--evidence-bundle` is mutually
+exclusive with the capability-surface inputs: `--capability-surface`, `--observation-health`, and
+`--enforcement-health`.
 
 Each verified decision becomes one `TOOL` span (`gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`,
 `openinference.span.kind=TOOL`). The verdict and the digests ride in `assay.tdt.*`
