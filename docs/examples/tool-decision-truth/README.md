@@ -27,7 +27,7 @@ assay evidence import tool-decision-truth \
   --run-id example-tdt
 ```
 
-```
+```text
 Imported tool-decision-truth carrier + recipe row to tdt.tar.gz
 ```
 
@@ -44,7 +44,7 @@ invalid carrier never reaches the bundle.
 assay evidence verify-tool-decision-truth tdt.tar.gz
 ```
 
-```
+```text
 Tool-Decision-Truth Verification
 ================================
 OK:             yes
