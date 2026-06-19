@@ -1,0 +1,8 @@
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "name": "assay-mcp-server",
+  "description": "Assay is a fail-closed policy and evidence layer for MCP tool execution. The MCP server exposes local policy checks, sequence review, trace coverage, and trace explanation tools for reviewing tool calls before or after agent workflows run.",
+  "maintainers": [
+    "Rul1an"
+  ]
+}
