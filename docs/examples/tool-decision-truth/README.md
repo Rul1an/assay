@@ -102,8 +102,9 @@ spans) and not enforcement. No raw arguments and no `args_digest` are projected.
 
 ## What this example does NOT show
 
-It uses a *supplied* carrier. It does not mint one in a live run (that producer, and its key
-provisioning, are a separate step) and it does not act on the verdict (a consumer gate is a separate
-step). The verdict is a contract statement: `match` means "inside the declared set", not "safe",
-"intended", or "enforced". See the [reference](../../reference/tool-decision-truth.md) for the full
-boundaries.
+It uses a *supplied* carrier rather than minting one in a live run. Carriers can also be minted live by
+the opt-in, evidence-only producer (`assay mcp wrap --tool-decision-truth-out`); see the **Live
+producer** section of the [reference](../../reference/tool-decision-truth.md). This example takes the
+carrier as given, and it does not act on the verdict (a consumer gate is a separate step). The verdict
+is a contract statement: `match` means "inside the declared set", not "safe", "intended", or
+"enforced". See the [reference](../../reference/tool-decision-truth.md) for the full boundaries.
