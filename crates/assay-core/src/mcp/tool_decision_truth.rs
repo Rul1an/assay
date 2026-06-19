@@ -292,6 +292,95 @@ pub fn build_classified_record(
     Some(record)
 }
 
+// ── EXPERIMENTAL pack recipe-row binding (cite-by-digest; no pack v2) ─────────────────────────────
+// Bind a tool-decision-truth carrier into an Evidence Pack as a proven recipe row: an evidenceRef cites
+// the carrier by its content digest, and a coherence_binding ties the row to that citation plus the run
+// verdict, so a tampered carrier fails the row closed. Mirrors the private reference-spec; unstable.
+
+/// Recipe id for the pack row (experimental).
+pub const RECIPE: &str = "tool_decision_truth.v0";
+
+/// Digest over the decision identity (the two pinned digests) — the handle a pack row cites the carrier by.
+pub fn carrier_digest(observed_input_digest: &str, declared_policy_digest: &str) -> Option<String> {
+    let identity = json!({
+        "observed_input_digest": observed_input_digest,
+        "declared_policy_digest": declared_policy_digest,
+    });
+    Some(format!(
+        "sha256:{}",
+        sha256_hex(&jcs::to_string(&identity).ok()?)
+    ))
+}
+
+/// The cross-ecosystem envelope a pack row cites the carrier by: `{type, digest, canonicalization, schema, ref}`.
+pub fn evidence_ref(carrier_digest: &str, reference: &str) -> Value {
+    json!({
+        "type": "tool_decision_truth",
+        "digest": carrier_digest,
+        "canonicalization": "jcs-json-v1",
+        "schema": SCHEMA,
+        "ref": reference,
+    })
+}
+
+/// Build a proven recipe row binding the carrier into the existing Evidence Pack (no pack v2). The
+/// `coherence_binding` digests the row's citation + recipe + run verdict, so a tampered carrier breaks
+/// both the cited digest and the binding (fail-closed). EXPERIMENTAL. `None` on canonicalization failure.
+pub fn pack_recipe_row(
+    observed_input_digest: &str,
+    declared_policy_digest: &str,
+    run_verdict: &str,
+    reference: &str,
+) -> Option<Value> {
+    let cd = carrier_digest(observed_input_digest, declared_policy_digest)?;
+    let er = evidence_ref(&cd, reference);
+    let binding_input = json!({"recipe": RECIPE, "evidence_ref": er, "run_verdict": run_verdict});
+    let coherence_binding = format!(
+        "sha256:{}",
+        sha256_hex(&jcs::to_string(&binding_input).ok()?)
+    );
+    Some(json!({
+        "recipe": RECIPE,
+        "evidence_ref": er,
+        "run_verdict": run_verdict,
+        "coherence_binding": coherence_binding,
+    }))
+}
+
+/// Verify a recipe row coheres with the carrier it cites: the evidenceRef digest must equal the recomputed
+/// carrier digest, and the `coherence_binding` must recompute from the row's own citation + recipe +
+/// verdict. A tampered carrier (different identity) or a changed verdict fails closed.
+pub fn verify_recipe_row(
+    row: &Value,
+    observed_input_digest: &str,
+    declared_policy_digest: &str,
+    run_verdict: &str,
+) -> bool {
+    let Some(cd) = carrier_digest(observed_input_digest, declared_policy_digest) else {
+        return false;
+    };
+    let cited = row
+        .get("evidence_ref")
+        .and_then(|e| e.get("digest"))
+        .and_then(|d| d.as_str());
+    if cited != Some(cd.as_str()) {
+        return false;
+    }
+    let Some(er) = row.get("evidence_ref").cloned() else {
+        return false;
+    };
+    let recipe = row
+        .get("recipe")
+        .and_then(|r| r.as_str())
+        .unwrap_or_default();
+    let binding_input = json!({"recipe": recipe, "evidence_ref": er, "run_verdict": run_verdict});
+    let expected = match jcs::to_string(&binding_input) {
+        Ok(s) => format!("sha256:{}", sha256_hex(&s)),
+        Err(_) => return false,
+    };
+    row.get("coherence_binding").and_then(|c| c.as_str()) == Some(expected.as_str())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,5 +621,44 @@ mod gate_tests {
         )
         .unwrap();
         assert_eq!(mm["decision_verdict"], json!("mismatch"));
+    }
+}
+
+#[cfg(test)]
+mod pack_tests {
+    use super::*;
+
+    const OID: &str = "sha256:observed";
+    const DPD: &str = "sha256:declared";
+    const REF: &str = "audit://decision/c1";
+
+    #[test]
+    fn evidence_ref_has_the_five_envelope_fields() {
+        let cd = carrier_digest(OID, DPD).unwrap();
+        let er = evidence_ref(&cd, REF);
+        let mut keys: Vec<&String> = er.as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            vec!["canonicalization", "digest", "ref", "schema", "type"]
+        );
+        assert_eq!(er["schema"], json!(SCHEMA));
+        assert_eq!(er["digest"], json!(cd));
+    }
+
+    #[test]
+    fn recipe_row_coheres_with_its_carrier() {
+        let row = pack_recipe_row(OID, DPD, "match", REF).unwrap();
+        assert!(verify_recipe_row(&row, OID, DPD, "match"));
+    }
+
+    #[test]
+    fn tampered_carrier_or_verdict_fails_closed() {
+        let row = pack_recipe_row(OID, DPD, "match", REF).unwrap();
+        // A different carrier identity (tampered observed/declared digest) must not cohere.
+        assert!(!verify_recipe_row(&row, "sha256:TAMPERED", DPD, "match"));
+        assert!(!verify_recipe_row(&row, OID, "sha256:TAMPERED", "match"));
+        // A changed run verdict must not cohere (the coherence_binding covers it).
+        assert!(!verify_recipe_row(&row, OID, DPD, "mismatch"));
     }
 }
