@@ -16,6 +16,7 @@ pub mod push;
 pub mod pydantic_case_result;
 pub mod schema;
 pub mod store_status;
+pub mod tool_decision_truth;
 pub mod verify_tool_decision_truth;
 
 use anyhow::{Context, Result};
@@ -131,6 +132,9 @@ pub enum EvidenceImportCmd {
     /// Import Promptfoo CLI JSONL assertion component results
     #[command(name = "promptfoo-jsonl")]
     PromptfooJsonl(promptfoo_jsonl::PromptfooJsonlArgs),
+    /// Import an experimental tool-decision-truth carrier as a bound recipe row
+    #[command(name = "tool-decision-truth")]
+    ToolDecisionTruth(tool_decision_truth::ToolDecisionTruthArgs),
 }
 
 pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
@@ -172,6 +176,7 @@ fn cmd_import(args: EvidenceImportArgs) -> Result<i32> {
         }
         EvidenceImportCmd::LiveKitToolAction(a) => livekit_tool_action::cmd_livekit_tool_action(a),
         EvidenceImportCmd::PromptfooJsonl(a) => promptfoo_jsonl::cmd_promptfoo_jsonl(a),
+        EvidenceImportCmd::ToolDecisionTruth(a) => tool_decision_truth::cmd_tool_decision_truth(a),
     }
 }
 
