@@ -123,6 +123,11 @@ fn sort_by_canon(arr: &mut [Value]) {
     });
 }
 
+/// Sorts the set-like fields of a JSON-Schema fragment: the top-level `required`, and `enum` within each
+/// direct child of `properties`. KNOWN LIMITATION (acceptable for the experimental status): nested schema
+/// structures are NOT recursed. `items`, `additionalProperties`, `allOf`/`anyOf`/`oneOf`, and nested
+/// object properties keep their given order, so a reordered-but-equal nested schema could still move the
+/// digest. v0 declared schemas are flat; recursive normalization is a v-next refinement.
 fn normalize_schema(sch: &Value) -> Value {
     let mut out = match sch.as_object() {
         Some(o) => o.clone(),
@@ -221,8 +226,9 @@ mod declared_constraint_digest_experimental_tests {
 
     #[test]
     fn reorder_class_and_scope_lists_are_semantically_stable() {
+        // `extra` fully overrides the base `tools` object below, so the first (allow) arg is unused here.
         let a = policy(
-            json!(["read_file"]),
+            json!([]),
             json!({"tools": {
                 "allow": ["read_file"],
                 "deny": ["delete_all"],
@@ -233,7 +239,7 @@ mod declared_constraint_digest_experimental_tests {
         )
         .declared_constraint_digest_experimental();
         let b = policy(
-            json!(["read_file"]),
+            json!([]),
             json!({"tools": {
                 "allow": ["read_file"],
                 "deny": ["delete_all"],
