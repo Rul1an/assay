@@ -34,20 +34,23 @@ const SECRET_DROP: &[&str] = &[
     "private_key",
 ];
 
-/// The projection that feeds the argument digest: secret-like keys dropped; object keys are canonicalized
-/// by JCS at digest time. A non-object value is passed through unchanged.
-fn project_args_for_digest(args: &Value) -> Value {
-    match args.as_object() {
-        Some(obj) => {
+/// The projection that feeds the argument digest: secret-like keys are dropped RECURSIVELY (at every
+/// nesting level, both in objects and inside arrays), so a nested `token`/`password` never reaches the
+/// digest input. Object keys are canonicalized by JCS at digest time.
+fn project_args_for_digest(value: &Value) -> Value {
+    match value {
+        Value::Object(obj) => {
             let mut out = Map::new();
             for (k, v) in obj {
-                if !SECRET_DROP.contains(&k.as_str()) {
-                    out.insert(k.clone(), v.clone());
+                if SECRET_DROP.contains(&k.as_str()) {
+                    continue;
                 }
+                out.insert(k.clone(), project_args_for_digest(v));
             }
             Value::Object(out)
         }
-        None => args.clone(),
+        Value::Array(arr) => Value::Array(arr.iter().map(project_args_for_digest).collect()),
+        other => other.clone(),
     }
 }
 
@@ -55,28 +58,31 @@ fn project_args_for_digest(args: &Value) -> Value {
 /// keys and a verifier can tell which key produced it. A low-entropy argument cannot be dictionary-
 /// recovered from the digest by anyone without the key. The raw arguments never enter the record.
 ///
-/// This is the shape of the primitive; real key provisioning, rotation, and per-tool domain scoping are
-/// a later concern.
-pub fn args_digest(args: &Value, key: &[u8], key_id: &str) -> String {
+/// Returns `None` on canonicalization failure rather than defaulting to an empty preimage (which would
+/// collapse distinct inputs to the same digest and break identity correctness). This is the shape of the
+/// primitive; real key provisioning, rotation, and per-tool domain scoping are a later concern.
+pub fn args_digest(args: &Value, key: &[u8], key_id: &str) -> Option<String> {
     let proj = project_args_for_digest(args);
-    let canonical = jcs::to_string(&proj).unwrap_or_default();
+    let canonical = jcs::to_string(&proj).ok()?;
     let preimage = format!("{ARGS_DIGEST_DOMAIN}:{key_id}:{canonical}");
     let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts a key of any length");
     mac.update(preimage.as_bytes());
-    format!(
+    Some(format!(
         "hmac-sha256:{key_id}:{}",
         hex::encode(mac.finalize().into_bytes())
-    )
+    ))
 }
 
 /// Digest over the stable observed-input identity triple only (`tool_name`, `args_digest`, `order`).
-pub fn observed_input_digest(tool_name: &str, args_digest: &str, order: i64) -> String {
+/// Returns `None` on canonicalization failure (never a silent empty-preimage digest).
+pub fn observed_input_digest(tool_name: &str, args_digest: &str, order: i64) -> Option<String> {
     let v = json!({"tool_name": tool_name, "args_digest": args_digest, "order": order});
-    let canonical = jcs::to_string(&v).unwrap_or_default();
-    format!("sha256:{}", sha256_hex(&canonical))
+    let canonical = jcs::to_string(&v).ok()?;
+    Some(format!("sha256:{}", sha256_hex(&canonical)))
 }
 
-/// Build a 3-zone tool-decision-truth carrier record (experimental).
+/// Build a 3-zone tool-decision-truth carrier record (experimental). Returns `None` if a digest cannot
+/// be canonicalized.
 ///
 /// Zone (i) observed-input identity is the only thing inside `observed_input_digest`. Zone (ii)
 /// observation provenance and zone (iii) classification output are recorded but excluded from the
@@ -95,10 +101,10 @@ pub fn build_record(
     call_id: &str,
     result_status: &str,
     identity_state: &str,
-) -> Value {
-    let ad = args_digest(args, key, key_id);
-    let oid = observed_input_digest(tool_name, &ad, order);
-    json!({
+) -> Option<Value> {
+    let ad = args_digest(args, key, key_id)?;
+    let oid = observed_input_digest(tool_name, &ad, order)?;
+    Some(json!({
         "schema": SCHEMA,
         // (i) observed-input identity — the ONLY fields inside observed_input_digest
         "tool_name": tool_name,
@@ -120,7 +126,7 @@ pub fn build_record(
             "observed_input_digest": oid,
             "declared_policy_digest": declared_policy_digest,
         },
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -129,21 +135,58 @@ mod tests {
 
     const KEY: &[u8] = b"reference-test-key-v0";
     const KID: &str = "test-key-v0";
+    const PROV: (&str, &str, &str, &str) = ("authoritative_boundary", "c1", "ok", "present");
+
+    fn ad(args: Value) -> String {
+        args_digest(&args, KEY, KID).unwrap()
+    }
+
+    fn rec(tool: &str, args: Value, order: i64, prov: (&str, &str, &str, &str)) -> Value {
+        build_record(
+            tool,
+            &args,
+            order,
+            "sha256:decl",
+            KEY,
+            KID,
+            prov.0,
+            prov.1,
+            prov.2,
+            prov.3,
+        )
+        .unwrap()
+    }
 
     #[test]
-    fn args_digest_drops_secret_fields() {
-        // A SECRET_DROP field never affects the digest (it is dropped, not hashed).
-        let with_a = args_digest(&json!({"path": "/x", "token": "aaa"}), KEY, KID);
-        let with_b = args_digest(&json!({"path": "/x", "token": "bbb"}), KEY, KID);
-        let without = args_digest(&json!({"path": "/x"}), KEY, KID);
-        assert_eq!(with_a, with_b);
-        assert_eq!(with_a, without);
+    fn args_digest_drops_secret_fields_recursively() {
+        // SECRET_DROP keys never affect the digest, at the top level AND nested in objects/arrays.
+        assert_eq!(
+            ad(json!({"path": "/x", "token": "aaa"})),
+            ad(json!({"path": "/x", "token": "bbb"}))
+        );
+        assert_eq!(
+            ad(json!({"path": "/x", "token": "aaa"})),
+            ad(json!({"path": "/x"}))
+        );
+        // nested object:
+        assert_eq!(
+            ad(json!({"cfg": {"host": "h", "token": "aaa"}})),
+            ad(json!({"cfg": {"host": "h", "token": "bbb"}}))
+        );
+        assert_eq!(
+            ad(json!({"cfg": {"host": "h", "token": "aaa"}})),
+            ad(json!({"cfg": {"host": "h"}}))
+        );
+        // inside an array:
+        assert_eq!(
+            ad(json!({"items": [{"password": "p1"}, {"k": "v"}]})),
+            ad(json!({"items": [{"password": "p2"}, {"k": "v"}]}))
+        );
     }
 
     #[test]
     fn args_digest_carries_key_id() {
-        let d = args_digest(&json!({"path": "/x"}), KEY, KID);
-        assert!(d.starts_with("hmac-sha256:test-key-v0:"), "{d}");
+        assert!(ad(json!({"path": "/x"})).starts_with("hmac-sha256:test-key-v0:"));
     }
 
     #[test]
@@ -153,110 +196,50 @@ mod tests {
         let truth = args_digest(&json!({"admin": true}), KEY, KID);
         let space = [json!({"admin": true}), json!({"admin": false})];
         assert!(space.iter().any(|c| args_digest(c, KEY, KID) == truth));
-        let attacker = b"attacker-guess";
-        assert!(!space.iter().any(|c| args_digest(c, attacker, KID) == truth));
+        assert!(!space
+            .iter()
+            .any(|c| args_digest(c, b"attacker-guess", KID) == truth));
     }
 
     #[test]
-    fn observed_input_digest_stable_under_provenance_changes() {
+    fn identity_stable_under_provenance_changes() {
         // Same observed inputs, different provenance / labels => identical identity (replay-stable).
-        let a = build_record(
+        let a = rec("read_file", json!({"path": "/a"}), 0, PROV);
+        let b = rec(
             "read_file",
-            &json!({"path": "/a"}),
+            json!({"path": "/a"}),
             0,
-            "sha256:decl",
-            KEY,
-            KID,
-            "authoritative_boundary",
-            "c1",
-            "ok",
-            "present",
-        );
-        let b = build_record(
-            "read_file",
-            &json!({"path": "/a"}),
-            0,
-            "sha256:decl",
-            KEY,
-            KID,
-            "reported_trace",
-            "c2",
-            "error",
-            "absent",
+            ("reported_trace", "c2", "error", "absent"),
         );
         assert_eq!(a["observed_input_digest"], b["observed_input_digest"]);
         assert_eq!(a["decision_identity"], b["decision_identity"]);
     }
 
     #[test]
-    fn observed_input_digest_changes_with_inputs() {
-        let base = build_record(
-            "read_file",
-            &json!({"path": "/a"}),
-            0,
-            "sha256:decl",
-            KEY,
-            KID,
-            "authoritative_boundary",
-            "c1",
-            "ok",
-            "present",
-        );
-        let tool = build_record(
-            "list_dir",
-            &json!({"path": "/a"}),
-            0,
-            "sha256:decl",
-            KEY,
-            KID,
-            "authoritative_boundary",
-            "c1",
-            "ok",
-            "present",
-        );
-        let args = build_record(
-            "read_file",
-            &json!({"path": "/b"}),
-            0,
-            "sha256:decl",
-            KEY,
-            KID,
-            "authoritative_boundary",
-            "c1",
-            "ok",
-            "present",
-        );
-        let order = build_record(
-            "read_file",
-            &json!({"path": "/a"}),
-            5,
-            "sha256:decl",
-            KEY,
-            KID,
-            "authoritative_boundary",
-            "c1",
-            "ok",
-            "present",
-        );
+    fn identity_changes_with_observed_inputs() {
+        let base = rec("read_file", json!({"path": "/a"}), 0, PROV);
         let oid = &base["observed_input_digest"];
-        assert_ne!(oid, &tool["observed_input_digest"]);
-        assert_ne!(oid, &args["observed_input_digest"]);
-        assert_ne!(oid, &order["observed_input_digest"]);
+        assert_ne!(
+            oid,
+            &rec("list_dir", json!({"path": "/a"}), 0, PROV)["observed_input_digest"]
+        );
+        assert_ne!(
+            oid,
+            &rec("read_file", json!({"path": "/b"}), 0, PROV)["observed_input_digest"]
+        );
+        assert_ne!(
+            oid,
+            &rec("read_file", json!({"path": "/a"}), 5, PROV)["observed_input_digest"]
+        );
     }
 
     #[test]
     fn record_never_carries_raw_args() {
-        let r = build_record(
+        let r = rec(
             "read_file",
-            &json!({"path": "/a", "token": "secret"}),
+            json!({"path": "/a", "token": "secret"}),
             0,
-            "sha256:decl",
-            KEY,
-            KID,
-            "authoritative_boundary",
-            "c1",
-            "ok",
-            "present",
+            PROV,
         );
         assert!(r.get("args").is_none() && r.get("arguments").is_none());
         assert!(r["args_digest"]
@@ -267,18 +250,7 @@ mod tests {
 
     #[test]
     fn decision_identity_is_the_two_digests_only() {
-        let r = build_record(
-            "read_file",
-            &json!({"path": "/a"}),
-            0,
-            "sha256:decl",
-            KEY,
-            KID,
-            "authoritative_boundary",
-            "c1",
-            "ok",
-            "present",
-        );
+        let r = rec("read_file", json!({"path": "/a"}), 0, PROV);
         let di = r["decision_identity"].as_object().unwrap();
         let mut keys: Vec<&String> = di.keys().collect();
         keys.sort();
