@@ -47,7 +47,9 @@ semantically correct.
 - does not expose raw tool arguments, secrets, tokens, or key material;
 - does not provide an OTLP exporter or live telemetry path; the experimental OTel projection is a
   lossy view over verified evidence;
-- does not integrate with the pack writer yet; the recipe-row primitive exists separately;
+- does not yet emit into a production pack; the import path binds the carrier and recipe row into an
+  evidence bundle and the verifier checks them, but writing into a production pack is a separate
+  follow-up;
 - does not provide a stable external schema until the experimental marker is removed.
 
 ## Three zones
