@@ -238,6 +238,11 @@ pub fn decision_verdict(
 /// values make the observed sequence ambiguous and force `invalid` (a run whose order cannot be
 /// established is not certified). EXPERIMENTAL (unstable).
 pub fn run_verdict(decision_verdicts: &[&str], orders: &[i64]) -> &'static str {
+    // Arity guard: per-decision verdicts and their orders must line up. A mismatch is untrusted input
+    // (a verdict with no order, or an order with no verdict), so the run is invalid.
+    if decision_verdicts.len() != orders.len() {
+        return "invalid";
+    }
     let mut seen = std::collections::HashSet::new();
     for o in orders {
         if !seen.insert(*o) {
@@ -356,24 +361,28 @@ pub fn verify_recipe_row(
     declared_policy_digest: &str,
     run_verdict: &str,
 ) -> bool {
-    let Some(cd) = carrier_digest(observed_input_digest, declared_policy_digest) else {
-        return false;
-    };
-    let cited = row
-        .get("evidence_ref")
-        .and_then(|e| e.get("digest"))
-        .and_then(|d| d.as_str());
-    if cited != Some(cd.as_str()) {
+    // This verifies THIS recipe and envelope, not just internal coherence: the row must declare this
+    // recipe and the tool-decision-truth evidenceRef envelope (type / schema / canonicalization), else a
+    // foreign row with a self-consistent binding would falsely verify.
+    if row.get("recipe").and_then(|r| r.as_str()) != Some(RECIPE) {
         return false;
     }
     let Some(er) = row.get("evidence_ref").cloned() else {
         return false;
     };
-    let recipe = row
-        .get("recipe")
-        .and_then(|r| r.as_str())
-        .unwrap_or_default();
-    let binding_input = json!({"recipe": recipe, "evidence_ref": er, "run_verdict": run_verdict});
+    if er.get("type").and_then(|x| x.as_str()) != Some("tool_decision_truth")
+        || er.get("schema").and_then(|x| x.as_str()) != Some(SCHEMA)
+        || er.get("canonicalization").and_then(|x| x.as_str()) != Some("jcs-json-v1")
+    {
+        return false;
+    }
+    let Some(cd) = carrier_digest(observed_input_digest, declared_policy_digest) else {
+        return false;
+    };
+    if er.get("digest").and_then(|d| d.as_str()) != Some(cd.as_str()) {
+        return false;
+    }
+    let binding_input = json!({"recipe": RECIPE, "evidence_ref": er, "run_verdict": run_verdict});
     let expected = match jcs::to_string(&binding_input) {
         Ok(s) => format!("sha256:{}", sha256_hex(&s)),
         Err(_) => return false,
@@ -589,6 +598,9 @@ mod gate_tests {
         );
         assert_eq!(run_verdict(&["match", "match"], &[0, 0]), "invalid"); // duplicate order
         assert_eq!(run_verdict(&["match"], &[0]), "match");
+        // arity mismatch between verdicts and orders -> invalid
+        assert_eq!(run_verdict(&["match", "match"], &[0]), "invalid");
+        assert_eq!(run_verdict(&["match"], &[0, 1]), "invalid");
     }
 
     #[test]
@@ -660,5 +672,50 @@ mod pack_tests {
         assert!(!verify_recipe_row(&row, OID, "sha256:TAMPERED", "match"));
         // A changed run verdict must not cohere (the coherence_binding covers it).
         assert!(!verify_recipe_row(&row, OID, DPD, "mismatch"));
+    }
+
+    /// A row whose coherence_binding is self-consistent over the given (possibly foreign) recipe/envelope.
+    fn coherent_row(recipe: &str, er: Value, run_verdict: &str) -> Value {
+        let binding_input =
+            json!({"recipe": recipe, "evidence_ref": er, "run_verdict": run_verdict});
+        let cb = format!(
+            "sha256:{}",
+            crate::fingerprint::sha256_hex(&crate::mcp::jcs::to_string(&binding_input).unwrap())
+        );
+        json!({"recipe": recipe, "evidence_ref": er, "run_verdict": run_verdict, "coherence_binding": cb})
+    }
+
+    #[test]
+    fn verify_rejects_foreign_recipe_or_envelope_even_when_self_coherent() {
+        let cd = carrier_digest(OID, DPD).unwrap();
+        let good_er = evidence_ref(&cd, REF);
+        // Sanity: the proper recipe + envelope verifies.
+        assert!(verify_recipe_row(
+            &coherent_row(RECIPE, good_er.clone(), "match"),
+            OID,
+            DPD,
+            "match"
+        ));
+        // A self-coherent row with a FOREIGN recipe is rejected.
+        assert!(!verify_recipe_row(
+            &coherent_row("other.recipe.v0", good_er.clone(), "match"),
+            OID,
+            DPD,
+            "match"
+        ));
+        // Foreign envelope type / schema / canonicalization are each rejected.
+        for (field, bad) in [
+            ("type", json!("other")),
+            ("schema", json!("other.schema.v0")),
+            ("canonicalization", json!("cbor-deterministic-v1")),
+        ] {
+            let mut er = good_er.as_object().unwrap().clone();
+            er.insert(field.to_string(), bad);
+            let row = coherent_row(RECIPE, Value::Object(er), "match");
+            assert!(
+                !verify_recipe_row(&row, OID, DPD, "match"),
+                "field {field} must be rejected"
+            );
+        }
     }
 }

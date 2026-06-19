@@ -162,8 +162,11 @@ fn project_and_normalize_declared(full: &Value) -> Value {
                 proj.insert(key.to_string(), v.clone());
             }
         }
+        // Project `tools` to ONLY the declared-constraint surface (allowlisted keys), each sorted. Never
+        // clone the whole object, so fields outside the surface (e.g. `redact_args`,
+        // `restrict_scope_contract`, or any future `ToolPolicy` field) cannot move the digest.
         if let Some(tools) = o.get("tools").and_then(|t| t.as_object()) {
-            let mut t = tools.clone();
+            let mut t = serde_json::Map::new();
             for k in [
                 "allow",
                 "deny",
@@ -174,7 +177,7 @@ fn project_and_normalize_declared(full: &Value) -> Value {
                 "restrict_scope",
                 "restrict_scope_classes",
             ] {
-                if let Some(arr) = t.get(k).and_then(|a| a.as_array()) {
+                if let Some(arr) = tools.get(k).and_then(|a| a.as_array()) {
                     let mut a = arr.clone();
                     sort_by_canon(&mut a);
                     t.insert(k.to_string(), Value::Array(a));
@@ -273,5 +276,29 @@ mod declared_constraint_digest_experimental_tests {
         )
         .declared_constraint_digest_experimental();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn non_surface_tools_field_does_not_move_digest() {
+        // Fields outside the declared-constraint surface (e.g. redact_args) are projected out, so they
+        // cannot move the digest; a surface field (allow) still moves it.
+        let base = policy(
+            json!([]),
+            json!({"tools": {"allow": ["read_file"], "deny": ["delete_all"]}}),
+        )
+        .declared_constraint_digest_experimental();
+        let with_redact = policy(
+            json!([]),
+            json!({"tools": {"allow": ["read_file"], "deny": ["delete_all"],
+                "redact_args": ["password", "token"], "redact_args_classes": ["secret"]}}),
+        )
+        .declared_constraint_digest_experimental();
+        assert_eq!(base, with_redact);
+        let with_more_allow = policy(
+            json!([]),
+            json!({"tools": {"allow": ["read_file", "deploy"], "deny": ["delete_all"]}}),
+        )
+        .declared_constraint_digest_experimental();
+        assert_ne!(base, with_more_allow);
     }
 }
