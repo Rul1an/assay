@@ -70,14 +70,27 @@ impl McpPolicy {
     /// `kill_switch`, `limits`, `discovery`, `signatures`, `tool_pins`, taxonomy), and SEMANTICALLY
     /// NORMALIZES the set-like fields (sorts them by canonical bytes) so a reordered-but-equal policy
     /// yields the same digest while a real membership/constraint change still moves it. Legacy v1 shapes
-    /// are normalized first. Not a stability guarantee: names/shape may change until promoted out of
-    /// experimental.
+    /// are normalized first; an explicitly declared schema takes precedence over a legacy constraint that
+    /// migrates to the same tool, so the digest reflects what is actually enforced.
+    ///
+    /// Schema normalization is FLAT v0 only: the top-level `required` and each direct
+    /// `properties.*.enum` are order-normalized, but nested schema structures (`items`,
+    /// `additionalProperties`, `allOf`/`anyOf`/`oneOf`, nested object properties) are not recursed, so a
+    /// reordered-but-equal nested schema could still move the digest. Recursive normalization is a v-next
+    /// refinement. Returns `None` if any fragment fails to canonicalize. Not a stability guarantee:
+    /// names/shape may change until promoted out of experimental.
     pub fn declared_constraint_digest_experimental(&self) -> Option<String> {
         let mut p = self.clone();
         p.normalize_legacy_shapes();
+        // Explicit schemas are more authoritative than a legacy constraint that migrates to the same
+        // tool. Capture them before migration and re-apply after, so an explicitly declared schema always
+        // wins over a migrated one (migration would otherwise overwrite it) and the digest reflects the
+        // enforced constraint.
+        let explicit_schemas = p.schemas.clone();
         p.migrate_constraints_to_schemas();
+        p.schemas.extend(explicit_schemas);
         let full = serde_json::to_value(&p).ok()?;
-        let proj = project_and_normalize_declared(&full);
+        let proj = project_and_normalize_declared(&full)?;
         let canonical = jcs::to_string(&proj).ok()?;
         Some(format!("sha256:{}", sha256_hex(&canonical)))
     }
@@ -115,12 +128,19 @@ impl McpPolicy {
 // reordered-but-semantically-equal policy does not move the digest. Mirrors the tool-decision
 // truth-layer reference-spec; unstable until promoted out of experimental.
 
-fn sort_by_canon(arr: &mut [Value]) {
-    arr.sort_by(|a, b| {
-        jcs::to_string(a)
-            .unwrap_or_default()
-            .cmp(&jcs::to_string(b).unwrap_or_default())
-    });
+/// Sort an array by the canonical (JCS) bytes of each element. Returns `None` if any element fails to
+/// canonicalize, rather than treating a failure as an empty string (which could silently reorder distinct
+/// values and so move — or fail to move — the digest for the wrong reason).
+fn sort_by_canon(arr: &mut [Value]) -> Option<()> {
+    let mut keyed: Vec<(String, Value)> = Vec::with_capacity(arr.len());
+    for v in arr.iter() {
+        keyed.push((jcs::to_string(v).ok()?, v.clone()));
+    }
+    keyed.sort_by(|a, b| a.0.cmp(&b.0));
+    for (slot, (_, v)) in arr.iter_mut().zip(keyed) {
+        *slot = v;
+    }
+    Some(())
 }
 
 /// Sorts the set-like fields of a JSON-Schema fragment: the top-level `required`, and `enum` within each
@@ -128,14 +148,14 @@ fn sort_by_canon(arr: &mut [Value]) {
 /// structures are NOT recursed. `items`, `additionalProperties`, `allOf`/`anyOf`/`oneOf`, and nested
 /// object properties keep their given order, so a reordered-but-equal nested schema could still move the
 /// digest. v0 declared schemas are flat; recursive normalization is a v-next refinement.
-fn normalize_schema(sch: &Value) -> Value {
+fn normalize_schema(sch: &Value) -> Option<Value> {
     let mut out = match sch.as_object() {
         Some(o) => o.clone(),
-        None => return sch.clone(),
+        None => return Some(sch.clone()),
     };
     if let Some(req) = out.get("required").and_then(|r| r.as_array()) {
         let mut r = req.clone();
-        sort_by_canon(&mut r);
+        sort_by_canon(&mut r)?;
         out.insert("required".to_string(), Value::Array(r));
     }
     if let Some(props) = out.get("properties").and_then(|p| p.as_object()) {
@@ -143,7 +163,7 @@ fn normalize_schema(sch: &Value) -> Value {
         for (field, spec) in props {
             if let Some(en) = spec.get("enum").and_then(|e| e.as_array()) {
                 let mut e = en.clone();
-                sort_by_canon(&mut e);
+                sort_by_canon(&mut e)?;
                 let mut so = spec.as_object().cloned().unwrap_or_default();
                 so.insert("enum".to_string(), Value::Array(e));
                 p.insert(field.clone(), Value::Object(so));
@@ -151,10 +171,10 @@ fn normalize_schema(sch: &Value) -> Value {
         }
         out.insert("properties".to_string(), Value::Object(p));
     }
-    Value::Object(out)
+    Some(Value::Object(out))
 }
 
-fn project_and_normalize_declared(full: &Value) -> Value {
+fn project_and_normalize_declared(full: &Value) -> Option<Value> {
     let mut proj = serde_json::Map::new();
     if let Some(o) = full.as_object() {
         for key in ["version", "enforcement"] {
@@ -179,7 +199,7 @@ fn project_and_normalize_declared(full: &Value) -> Value {
             ] {
                 if let Some(arr) = tools.get(k).and_then(|a| a.as_array()) {
                     let mut a = arr.clone();
-                    sort_by_canon(&mut a);
+                    sort_by_canon(&mut a)?;
                     t.insert(k.to_string(), Value::Array(a));
                 }
             }
@@ -188,12 +208,12 @@ fn project_and_normalize_declared(full: &Value) -> Value {
         if let Some(schemas) = o.get("schemas").and_then(|s| s.as_object()) {
             let mut s = serde_json::Map::new();
             for (name, sch) in schemas {
-                s.insert(name.clone(), normalize_schema(sch));
+                s.insert(name.clone(), normalize_schema(sch)?);
             }
             proj.insert("schemas".to_string(), Value::Object(s));
         }
     }
-    Value::Object(proj)
+    Some(Value::Object(proj))
 }
 
 #[cfg(test)]
@@ -300,5 +320,30 @@ mod declared_constraint_digest_experimental_tests {
         )
         .declared_constraint_digest_experimental();
         assert_ne!(base, with_more_allow);
+    }
+
+    #[test]
+    fn explicit_schema_wins_over_migrated_legacy_constraint() {
+        // The base policy already declares an explicit `schemas.deploy`. Adding a legacy `constraints`
+        // entry for the SAME tool (which would migrate to a different deploy schema) must not change the
+        // digest: the explicit schema takes precedence, so a mixed-shape policy is not silently rewritten.
+        let explicit_only =
+            policy(json!(["deploy"]), json!({})).declared_constraint_digest_experimental();
+        let with_legacy_constraint = policy(
+            json!(["deploy"]),
+            json!({"constraints": [{"tool": "deploy", "params": {"env": {"matches": "^prod$"}}}]}),
+        )
+        .declared_constraint_digest_experimental();
+        assert!(explicit_only.is_some());
+        assert_eq!(explicit_only, with_legacy_constraint);
+
+        // A legacy constraint for a tool with NO explicit schema still contributes (migration is not a
+        // no-op): it adds that tool's schema, moving the digest.
+        let legacy_new_tool = policy(
+            json!(["deploy"]),
+            json!({"constraints": [{"tool": "scale", "params": {"replicas": {"matches": "^[0-9]+$"}}}]}),
+        )
+        .declared_constraint_digest_experimental();
+        assert_ne!(explicit_only, legacy_new_tool);
     }
 }

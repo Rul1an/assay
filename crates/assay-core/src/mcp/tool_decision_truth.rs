@@ -24,17 +24,51 @@ pub const SCHEMA: &str = "assay.tool_decision_truth.v0";
 /// Domain tag mixed into the keyed argument digest.
 const ARGS_DIGEST_DOMAIN: &str = "assay.tool_args.v0";
 
-/// Argument keys whose values are dropped entirely before the digest (never even keyed): a token or a
-/// password is not something a consumer needs to compare, so dropping is strictly safer than hashing.
-const SECRET_DROP: &[&str] = &[
+/// Append-only provenance/status vocabulary for the carrier record. The carrier builder validates the
+/// three free-text provenance fields against these, so an adapter cannot stamp an arbitrary
+/// source/status/identity label that a consumer would then trust.
+const SOURCE_CLASSES: &[&str] = &["authoritative_boundary", "reported_trace", "inferred"];
+const RESULT_STATUSES: &[&str] = &["ok", "error", "n/a"];
+const IDENTITY_STATES: &[&str] = &["present", "absent", "required_missing", "invalid"];
+
+/// Secret-key tokens compared AFTER normalization (lowercase, with `_`/`-`/spaces removed). A key whose
+/// normalized form equals one of these is dropped entirely before the digest (never even keyed): a token
+/// or a password is not something a consumer needs to compare, so dropping is strictly safer than hashing.
+/// Normalizing the key first means `Authorization`, `client_secret`, `refresh_token`, `apiKey`, and
+/// `api-key` are all caught by one entry, rather than depending on an exact, case-sensitive spelling.
+const SECRET_KEY_TOKENS: &[&str] = &[
     "token",
-    "access_token",
+    "accesstoken",
+    "refreshtoken",
+    "authtoken",
+    "idtoken",
+    "sessiontoken",
     "password",
-    "api_key",
+    "passwd",
+    "apikey",
     "secret",
+    "clientsecret",
+    "secretkey",
     "authorization",
-    "private_key",
+    "credential",
+    "credentials",
+    "privatekey",
+    "secretaccesskey",
 ];
+
+/// Normalize an argument key for secret classification: lowercase and drop `_`, `-`, and spaces, so
+/// `access_token`, `accessToken`, and `Access-Token` collapse to the same token.
+fn normalize_key(key: &str) -> String {
+    key.chars()
+        .filter(|c| *c != '_' && *c != '-' && *c != ' ')
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// Whether an argument key names a secret whose value must be dropped before the digest.
+fn is_secret_key(key: &str) -> bool {
+    SECRET_KEY_TOKENS.contains(&normalize_key(key).as_str())
+}
 
 /// The projection that feeds the argument digest: secret-like keys are dropped RECURSIVELY (at every
 /// nesting level, both in objects and inside arrays), so a nested `token`/`password` never reaches the
@@ -44,7 +78,7 @@ fn project_args_for_digest(value: &Value) -> Value {
         Value::Object(obj) => {
             let mut out = Map::new();
             for (k, v) in obj {
-                if SECRET_DROP.contains(&k.as_str()) {
+                if is_secret_key(k) {
                     continue;
                 }
                 out.insert(k.clone(), project_args_for_digest(v));
@@ -56,14 +90,29 @@ fn project_args_for_digest(value: &Value) -> Value {
     }
 }
 
+/// Whether a `key_id` is well-formed: non-empty and drawn from `[A-Za-z0-9._-]`. The id rides verbatim in
+/// the colon-delimited digest preimage and output, so an id with a colon, whitespace, or other delimiter
+/// could forge or confuse the framing; rejecting out-of-charset ids keeps the digest string unambiguous.
+fn is_valid_key_id(key_id: &str) -> bool {
+    !key_id.is_empty()
+        && key_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
 /// Domain-separated, keyed argument digest. The `key_id` rides in the digest so a deployment can rotate
 /// keys and a verifier can tell which key produced it. A low-entropy argument cannot be dictionary-
 /// recovered from the digest by anyone without the key. The raw arguments never enter the record.
 ///
-/// Returns `None` on canonicalization failure rather than defaulting to an empty preimage (which would
+/// Returns `None` when the inputs cannot produce a sound, unambiguous digest: an empty `key` (which would
+/// provide no privacy and emit a guessable MAC), a `key_id` outside `[A-Za-z0-9._-]` (which could confuse
+/// the colon-delimited framing), or a canonicalization failure (defaulting to an empty preimage would
 /// collapse distinct inputs to the same digest and break identity correctness). This is the shape of the
 /// primitive; real key provisioning, rotation, and per-tool domain scoping are a later concern.
 pub fn args_digest(args: &Value, key: &[u8], key_id: &str) -> Option<String> {
+    if key.is_empty() || !is_valid_key_id(key_id) {
+        return None;
+    }
     let proj = project_args_for_digest(args);
     let canonical = jcs::to_string(&proj).ok()?;
     let preimage = format!("{ARGS_DIGEST_DOMAIN}:{key_id}:{canonical}");
@@ -84,7 +133,9 @@ pub fn observed_input_digest(tool_name: &str, args_digest: &str, order: i64) -> 
 }
 
 /// Build a 3-zone tool-decision-truth carrier record (experimental). Returns `None` if a digest cannot
-/// be canonicalized.
+/// be canonicalized, or if `source_class`, `result_status`, or `identity_state` is outside the
+/// append-only carrier vocabulary ([`SOURCE_CLASSES`] / [`RESULT_STATUSES`] / [`IDENTITY_STATES`]) — an
+/// adapter cannot stamp an arbitrary provenance label that a consumer would then trust.
 ///
 /// Zone (i) observed-input identity is the only thing inside `observed_input_digest`. Zone (ii)
 /// observation provenance and zone (iii) classification output are recorded but excluded from the
@@ -104,6 +155,12 @@ pub fn build_record(
     result_status: &str,
     identity_state: &str,
 ) -> Option<Value> {
+    if !SOURCE_CLASSES.contains(&source_class)
+        || !RESULT_STATUSES.contains(&result_status)
+        || !IDENTITY_STATES.contains(&identity_state)
+    {
+        return None;
+    }
     let ad = args_digest(args, key, key_id)?;
     let oid = observed_input_digest(tool_name, &ad, order)?;
     Some(json!({
@@ -448,6 +505,75 @@ mod tests {
     #[test]
     fn args_digest_carries_key_id() {
         assert!(ad(json!({"path": "/x"})).starts_with("hmac-sha256:test-key-v0:"));
+    }
+
+    #[test]
+    fn secret_classifier_catches_case_and_separator_variants() {
+        // The canonical secret keys, plus camelCase, kebab-case, and UPPER variants, are all dropped, so
+        // changing only a secret-named value never moves the digest.
+        let base = ad(json!({"path": "/x"}));
+        for secret in [
+            "Authorization",
+            "authorization",
+            "client_secret",
+            "clientSecret",
+            "refresh_token",
+            "refreshToken",
+            "ACCESS_TOKEN",
+            "access-token",
+            "apiKey",
+            "api-key",
+            "privateKey",
+            "secretAccessKey",
+        ] {
+            let mut withv = serde_json::Map::new();
+            withv.insert("path".into(), json!("/x"));
+            withv.insert(secret.into(), json!("super-secret-value"));
+            assert_eq!(
+                ad(Value::Object(withv)),
+                base,
+                "secret-named key `{secret}` must be dropped before the digest"
+            );
+        }
+    }
+
+    #[test]
+    fn non_secret_key_still_contributes() {
+        // A field that is not a secret (even if it shares letters with one) is kept, so a real change
+        // moves the digest.
+        assert_ne!(ad(json!({"account": "a"})), ad(json!({"account": "b"})));
+    }
+
+    #[test]
+    fn args_digest_rejects_empty_key_and_bad_key_id() {
+        assert!(args_digest(&json!({"path": "/x"}), b"", KID).is_none());
+        assert!(args_digest(&json!({"path": "/x"}), KEY, "").is_none());
+        assert!(args_digest(&json!({"path": "/x"}), KEY, "bad id").is_none()); // whitespace
+        assert!(args_digest(&json!({"path": "/x"}), KEY, "bad:id").is_none()); // framing delimiter
+        assert!(args_digest(&json!({"path": "/x"}), KEY, "good.key_id-v0").is_some());
+    }
+
+    #[test]
+    fn build_record_rejects_out_of_contract_provenance() {
+        let args = json!({"path": "/x"});
+        let mk = |sc: &str, rs: &str, id: &str| {
+            build_record(
+                "read_file",
+                &args,
+                0,
+                "sha256:d",
+                KEY,
+                KID,
+                sc,
+                "c1",
+                rs,
+                id,
+            )
+        };
+        assert!(mk("authoritative_boundary", "ok", "present").is_some());
+        assert!(mk("made_up_source", "ok", "present").is_none());
+        assert!(mk("authoritative_boundary", "maybe", "present").is_none());
+        assert!(mk("authoritative_boundary", "ok", "unknown_state").is_none());
     }
 
     #[test]
