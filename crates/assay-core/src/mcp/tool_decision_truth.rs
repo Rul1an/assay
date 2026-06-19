@@ -4,13 +4,15 @@
 //! carrier record whose decision identity is the `(observed_input_digest, declared_policy_digest)` pair.
 //! The declared side is [`super::policy::McpPolicy::declared_constraint_digest_experimental`].
 //!
-//! It also provides a deterministic verdict gate (tool / args / identity axes folded with the lattice
-//! `invalid > mismatch > incomplete > match`) and a run-level aggregate over an ordered set of decisions.
-//! Not a stability guarantee: the schema, field names, and digests may change until this is promoted out
-//! of experimental.
+//! It also provides a deterministic verdict gate over every axis the declared digest binds (tool name,
+//! args schema, identity, classes, approval, scope, redaction), folded with the lattice
+//! `invalid > mismatch > incomplete > match`, plus a run-level aggregate over an ordered set of decisions.
+//! A declared constraint the gate cannot yet evaluate resolves to `incomplete`, so `match` never silently
+//! means "the subset we checked matched". Not a stability guarantee: the schema, field names, and digests
+//! may change until this is promoted out of experimental.
 
 use super::jcs;
-use super::policy::{McpPolicy, UnconstrainedMode};
+use super::policy::{ArgsCheck, McpPolicy, UnconstrainedMode};
 use crate::fingerprint::sha256_hex;
 use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{json, Map, Value};
@@ -189,10 +191,12 @@ pub fn build_record(
 }
 
 // ── EXPERIMENTAL verdict gate + run lattice ──────────────────────────────────────────────────────
-// Classify an observed decision against the declared McpPolicy over independent axes (tool / args /
-// identity), fold per-decision with the lattice `invalid > mismatch > incomplete > match`, and aggregate
-// a run with the same lattice plus order integrity. Undecidable resolves to `incomplete`, never a silent
-// pass. Mirrors the private reference-spec; unstable until promoted out of experimental.
+// Classify an observed decision against the declared McpPolicy over independent axes (tool name, args
+// schema, identity, classes, approval, scope, redaction), fold per-decision with the lattice
+// `invalid > mismatch > incomplete > match`, and aggregate a run with the same lattice plus order
+// integrity. A declared constraint that cannot be evaluated with the supplied evidence resolves to
+// `incomplete`, never a silent pass. Mirrors the private reference-spec; unstable until promoted out of
+// experimental.
 
 /// Lattice rank: `invalid > mismatch > incomplete > match`. Unknown strings rank as `invalid`.
 fn verdict_rank(v: &str) -> u8 {
@@ -221,20 +225,21 @@ fn enforcement_axis(mode: &UnconstrainedMode) -> &'static str {
     }
 }
 
+fn nonempty(list: &Option<Vec<String>>) -> &[String] {
+    list.as_deref().unwrap_or(&[])
+}
+
 fn tool_axis(policy: &McpPolicy, tool_name: &str) -> &'static str {
-    if policy
-        .tools
-        .deny
-        .as_deref()
-        .unwrap_or(&[])
-        .iter()
-        .any(|t| t == tool_name)
-    {
+    // Reuse the engine's own pattern semantics (`*`, prefix, suffix, infix, exact) so the gate does not
+    // drift from how the real policy engine matches names. A literal `delete_*` deny now blocks
+    // `delete_all`, instead of slipping through because the gate used exact equality.
+    let matches = |p: &String| McpPolicy::tool_name_matches_experimental(tool_name, p);
+    if nonempty(&policy.tools.deny).iter().any(matches) {
         return "mismatch";
     }
-    let allow = policy.tools.allow.as_deref().unwrap_or(&[]);
+    let allow = nonempty(&policy.tools.allow);
     if !allow.is_empty() {
-        return if allow.iter().any(|t| t == tool_name) {
+        return if allow.iter().any(matches) {
             "match"
         } else {
             "mismatch"
@@ -247,19 +252,14 @@ fn args_axis(policy: &McpPolicy, tool_name: &str, args: Option<&Value>) -> &'sta
     let Some(args) = args else {
         return "incomplete"; // arguments not captured by the adapter
     };
-    if !policy.schemas.contains_key(tool_name) {
-        return enforcement_axis(&policy.enforcement.unconstrained_tools);
-    }
-    // v0/experimental: compiles schemas per call; a cached validator is a later optimization.
-    match policy.compile_all_schemas().get(tool_name) {
-        Some(validator) => {
-            if validator.is_valid(args) {
-                "match"
-            } else {
-                "mismatch"
-            }
-        }
-        None => "incomplete", // schema present but did not compile -> cannot decide
+    // v0/experimental: compiles the declared schema per call (a cached validator is a later
+    // optimization) and, crucially, does NOT panic on a malformed declared schema.
+    match policy.check_tool_args_experimental(tool_name, args) {
+        ArgsCheck::NoSchema => enforcement_axis(&policy.enforcement.unconstrained_tools),
+        ArgsCheck::Valid => "match",
+        ArgsCheck::Invalid => "mismatch",
+        // A declared schema that does not compile is an invalid declaration, not missing evidence.
+        ArgsCheck::Malformed => "invalid",
     }
 }
 
@@ -271,20 +271,131 @@ fn identity_axis(identity_state: &str) -> &'static str {
     }
 }
 
-/// Per-decision verdict over the declared policy: the lattice-max of the tool, args, and identity axes.
-/// Legacy root-level allow/deny are normalized first. EXPERIMENTAL (unstable).
+/// Class allow/deny axis. Not declared -> not applicable (`match`). Declared but no tool-class evidence ->
+/// `incomplete`. Otherwise a denied class -> `mismatch`, and a non-empty allow-list the tool's classes
+/// miss -> `mismatch`.
+fn class_axis(policy: &McpPolicy, tool_classes: Option<&[String]>) -> &'static str {
+    let deny_c = nonempty(&policy.tools.deny_classes);
+    let allow_c = nonempty(&policy.tools.allow_classes);
+    if deny_c.is_empty() && allow_c.is_empty() {
+        return "match"; // not declared -> not applicable to this decision
+    }
+    let Some(tc) = tool_classes else {
+        return "incomplete"; // declared but the tool's class membership was not supplied
+    };
+    if !deny_c.is_empty() && tc.iter().any(|c| deny_c.contains(c)) {
+        return "mismatch";
+    }
+    if !allow_c.is_empty() && !tc.iter().any(|c| allow_c.contains(c)) {
+        return "mismatch";
+    }
+    "match"
+}
+
+/// Whether a name/class-scoped obligation (approval, scope, redaction) applies to this decision.
+enum Applicability {
+    Applicable,
+    NotApplicable,
+    /// Class-scoped, but the tool's class membership was not supplied, so applicability is undecidable.
+    Undeterminable,
+}
+
+fn applicability(
+    names: &[String],
+    classes: &[String],
+    tool_name: &str,
+    tool_classes: Option<&[String]>,
+) -> Applicability {
+    if names
+        .iter()
+        .any(|p| McpPolicy::tool_name_matches_experimental(tool_name, p))
+    {
+        return Applicability::Applicable;
+    }
+    if classes.is_empty() {
+        return Applicability::NotApplicable; // only name-scoped, and no name matched
+    }
+    match tool_classes {
+        None => Applicability::Undeterminable,
+        Some(tc) if tc.iter().any(|c| classes.contains(c)) => Applicability::Applicable,
+        Some(_) => Applicability::NotApplicable,
+    }
+}
+
+/// Obligation axis (approval / scope / redaction): not applicable -> `match`; applicable but no evidence
+/// it was satisfied -> `incomplete`; applicable and satisfied -> `match`; applicable and not satisfied ->
+/// `mismatch`. This is the discipline that "not evaluated yet" never silently becomes `match`.
+fn obligation_axis(applic: Applicability, satisfied: Option<bool>) -> &'static str {
+    match applic {
+        Applicability::NotApplicable => "match",
+        Applicability::Undeterminable => "incomplete",
+        Applicability::Applicable => match satisfied {
+            None => "incomplete",
+            Some(true) => "match",
+            Some(false) => "mismatch",
+        },
+    }
+}
+
+/// EXPERIMENTAL: runtime evidence the verdict gate needs to decide declared constraints beyond the tool
+/// name, args schema, and identity. Every field is optional; an absent field for a DECLARED constraint
+/// resolves that axis to `incomplete`, never a silent `match`. v0 carries the evidence explicitly so a
+/// caller sees exactly what a `match` requires; richer evaluators (deriving classes from a taxonomy,
+/// validating approval artifacts and scope/redaction results) are future work.
+#[derive(Debug, Clone, Default)]
+pub struct DecisionEvidence {
+    /// The observed tool's class memberships, for `allow_classes`/`deny_classes` and class-scoped
+    /// approval/scope/redaction applicability.
+    pub tool_classes: Option<Vec<String>>,
+    /// Whether the required approval was obtained for this call.
+    pub approval_obtained: Option<bool>,
+    /// Whether the declared scope restriction was satisfied for this call.
+    pub scope_satisfied: Option<bool>,
+    /// Whether the declared argument redaction was applied for this call.
+    pub redaction_applied: Option<bool>,
+}
+
+/// Per-decision verdict over the declared policy: the lattice-max of every axis the declared digest binds
+/// (tool name, args schema, identity, classes, approval, scope, redaction). The cardinal rule is that a
+/// declared constraint the gate cannot yet evaluate resolves to `incomplete`, so `match` means "every
+/// declared constraint relevant to this decision was evaluated or proven not applicable", never "the
+/// subset the gate knows about matched". Legacy root-level allow/deny are normalized first. EXPERIMENTAL.
 pub fn decision_verdict(
     policy: &McpPolicy,
     tool_name: &str,
     args: Option<&Value>,
     identity_state: &str,
+    evidence: &DecisionEvidence,
 ) -> &'static str {
     let mut p = policy.clone();
     p.normalize_legacy_shapes();
+    let tc = evidence.tool_classes.as_deref();
+    let approval = applicability(
+        nonempty(&p.tools.approval_required),
+        nonempty(&p.tools.approval_required_classes),
+        tool_name,
+        tc,
+    );
+    let scope = applicability(
+        nonempty(&p.tools.restrict_scope),
+        nonempty(&p.tools.restrict_scope_classes),
+        tool_name,
+        tc,
+    );
+    let redaction = applicability(
+        nonempty(&p.tools.redact_args),
+        nonempty(&p.tools.redact_args_classes),
+        tool_name,
+        tc,
+    );
     [
         tool_axis(&p, tool_name),
         args_axis(&p, tool_name, args),
         identity_axis(identity_state),
+        class_axis(&p, tc),
+        obligation_axis(approval, evidence.approval_obtained),
+        obligation_axis(scope, evidence.scope_satisfied),
+        obligation_axis(redaction, evidence.redaction_applied),
     ]
     .into_iter()
     .max_by_key(|&v| verdict_rank(v))
@@ -317,8 +428,8 @@ pub fn run_verdict(decision_verdicts: &[&str], orders: &[i64]) -> &'static str {
 }
 
 /// Build a fully-classified carrier record: the declared digest is taken from `policy`, the observed-input
-/// identity from [`build_record`], and the classification zone carries the [`decision_verdict`].
-/// EXPERIMENTAL. Returns `None` if a digest cannot be canonicalized.
+/// identity from [`build_record`], and the classification zone carries the [`decision_verdict`] computed
+/// with the supplied `evidence`. EXPERIMENTAL. Returns `None` if a digest cannot be canonicalized.
 #[allow(clippy::too_many_arguments)]
 pub fn build_classified_record(
     policy: &McpPolicy,
@@ -331,6 +442,7 @@ pub fn build_classified_record(
     call_id: &str,
     result_status: &str,
     identity_state: &str,
+    evidence: &DecisionEvidence,
 ) -> Option<Value> {
     let declared = policy.declared_constraint_digest_experimental()?;
     let mut record = build_record(
@@ -349,7 +461,8 @@ pub fn build_classified_record(
         policy,
         tool_name,
         Some(args),
-        identity_state
+        identity_state,
+        evidence
     ));
     Some(record)
 }
@@ -362,8 +475,21 @@ pub fn build_classified_record(
 /// Recipe id for the pack row (experimental).
 pub const RECIPE: &str = "tool_decision_truth.v0";
 
-/// Digest over the decision identity (the two pinned digests) — the handle a pack row cites the carrier by.
-pub fn carrier_digest(observed_input_digest: &str, declared_policy_digest: &str) -> Option<String> {
+/// Whether `s` is a well-formed `sha256:<64 lowercase hex>` digest. The pack verifier rejects rows whose
+/// citation digests are not this shape, so a malformed or truncated digest cannot pass as a citation.
+fn is_sha256_digest(s: &str) -> bool {
+    match s.strip_prefix("sha256:") {
+        Some(hex) => hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
+        None => false,
+    }
+}
+
+/// Digest over the decision identity (the two pinned digests). This is the stable logical handle that
+/// JOINS a pack row to a carrier; it is NOT the carrier content digest (see [`carrier_content_digest`]).
+pub fn decision_identity_digest(
+    observed_input_digest: &str,
+    declared_policy_digest: &str,
+) -> Option<String> {
     let identity = json!({
         "observed_input_digest": observed_input_digest,
         "declared_policy_digest": declared_policy_digest,
@@ -374,29 +500,50 @@ pub fn carrier_digest(observed_input_digest: &str, declared_policy_digest: &str)
     ))
 }
 
-/// The cross-ecosystem envelope a pack row cites the carrier by: `{type, digest, canonicalization, schema, ref}`.
-pub fn evidence_ref(carrier_digest: &str, reference: &str) -> Value {
+/// Digest over the FULL canonical carrier record bytes. Unlike [`decision_identity_digest`], this binds
+/// every carrier field (observation provenance, classification, labels), so tampering ANY field changes
+/// the digest and fails the citing row closed.
+pub fn carrier_content_digest(carrier: &Value) -> Option<String> {
+    Some(format!(
+        "sha256:{}",
+        sha256_hex(&jcs::to_string(carrier).ok()?)
+    ))
+}
+
+/// The cross-ecosystem envelope a pack row cites the carrier by. `digest` is the carrier CONTENT digest,
+/// and `digest_subject` says so explicitly so a reader never mistakes it for the identity handle.
+pub fn evidence_ref(carrier_content_digest: &str, reference: &str) -> Value {
     json!({
         "type": "tool_decision_truth",
-        "digest": carrier_digest,
+        "digest": carrier_content_digest,
+        "digest_subject": "carrier_content",
         "canonicalization": "jcs-json-v1",
         "schema": SCHEMA,
         "ref": reference,
     })
 }
 
-/// Build a proven recipe row binding the carrier into the existing Evidence Pack (no pack v2). The
-/// `coherence_binding` digests the row's citation + recipe + run verdict, so a tampered carrier breaks
-/// both the cited digest and the binding (fail-closed). EXPERIMENTAL. `None` on canonicalization failure.
-pub fn pack_recipe_row(
-    observed_input_digest: &str,
-    declared_policy_digest: &str,
-    run_verdict: &str,
-    reference: &str,
-) -> Option<Value> {
-    let cd = carrier_digest(observed_input_digest, declared_policy_digest)?;
-    let er = evidence_ref(&cd, reference);
-    let binding_input = json!({"recipe": RECIPE, "evidence_ref": er, "run_verdict": run_verdict});
+/// Build a proven recipe row binding a real carrier into the existing Evidence Pack (no pack v2). The row
+/// cites the carrier by its CONTENT digest (so tampering any carrier field fails closed) and carries the
+/// `decision_identity_digest` as a join key; the `coherence_binding` digests the recipe, the citation, the
+/// identity, and the run verdict together. EXPERIMENTAL. `None` if the carrier lacks its identity digests
+/// or canonicalization fails.
+pub fn pack_recipe_row(carrier: &Value, run_verdict: &str, reference: &str) -> Option<Value> {
+    let oid = carrier
+        .get("observed_input_digest")
+        .and_then(|v| v.as_str())?;
+    let dpd = carrier
+        .get("declared_policy_digest")
+        .and_then(|v| v.as_str())?;
+    let content = carrier_content_digest(carrier)?;
+    let identity = decision_identity_digest(oid, dpd)?;
+    let er = evidence_ref(&content, reference);
+    let binding_input = json!({
+        "recipe": RECIPE,
+        "evidence_ref": er,
+        "decision_identity_digest": identity,
+        "run_verdict": run_verdict,
+    });
     let coherence_binding = format!(
         "sha256:{}",
         sha256_hex(&jcs::to_string(&binding_input).ok()?)
@@ -404,23 +551,19 @@ pub fn pack_recipe_row(
     Some(json!({
         "recipe": RECIPE,
         "evidence_ref": er,
+        "decision_identity_digest": identity,
         "run_verdict": run_verdict,
         "coherence_binding": coherence_binding,
     }))
 }
 
-/// Verify a recipe row coheres with the carrier it cites: the evidenceRef digest must equal the recomputed
-/// carrier digest, and the `coherence_binding` must recompute from the row's own citation + recipe +
-/// verdict. A tampered carrier (different identity) or a changed verdict fails closed.
-pub fn verify_recipe_row(
-    row: &Value,
-    observed_input_digest: &str,
-    declared_policy_digest: &str,
-    run_verdict: &str,
-) -> bool {
-    // This verifies THIS recipe and envelope, not just internal coherence: the row must declare this
-    // recipe and the tool-decision-truth evidenceRef envelope (type / schema / canonicalization), else a
-    // foreign row with a self-consistent binding would falsely verify.
+/// Verify a recipe row coheres with the carrier it cites. ALL must hold: the row declares THIS recipe and
+/// the tool-decision-truth envelope (type / schema / canonicalization / digest_subject); the citation
+/// digest and the join key are well-formed `sha256:` digests; the citation digest equals the recomputed
+/// carrier CONTENT digest; the join key equals the identity recomputed from the carrier's OWN embedded
+/// digests; the supplied `run_verdict` equals the row's own field; and the `coherence_binding` recomputes
+/// from the row's exact fields. Tampering any carrier field, the identity, or the verdict fails closed.
+pub fn verify_recipe_row(row: &Value, carrier: &Value, run_verdict: &str) -> bool {
     if row.get("recipe").and_then(|r| r.as_str()) != Some(RECIPE) {
         return false;
     }
@@ -430,16 +573,51 @@ pub fn verify_recipe_row(
     if er.get("type").and_then(|x| x.as_str()) != Some("tool_decision_truth")
         || er.get("schema").and_then(|x| x.as_str()) != Some(SCHEMA)
         || er.get("canonicalization").and_then(|x| x.as_str()) != Some("jcs-json-v1")
+        || er.get("digest_subject").and_then(|x| x.as_str()) != Some("carrier_content")
     {
         return false;
     }
-    let Some(cd) = carrier_digest(observed_input_digest, declared_policy_digest) else {
-        return false;
-    };
-    if er.get("digest").and_then(|d| d.as_str()) != Some(cd.as_str()) {
+    // A displayed run verdict must not drift from the bound one.
+    if row.get("run_verdict").and_then(|v| v.as_str()) != Some(run_verdict) {
         return false;
     }
-    let binding_input = json!({"recipe": RECIPE, "evidence_ref": er, "run_verdict": run_verdict});
+    // Digests must be well-formed before they are trusted as citations.
+    let Some(er_digest) = er.get("digest").and_then(|d| d.as_str()) else {
+        return false;
+    };
+    let Some(row_identity) = row.get("decision_identity_digest").and_then(|d| d.as_str()) else {
+        return false;
+    };
+    if !is_sha256_digest(er_digest) || !is_sha256_digest(row_identity) {
+        return false;
+    }
+    // The cited content digest must equal the recomputed carrier content digest.
+    match carrier_content_digest(carrier) {
+        Some(c) if c == er_digest => {}
+        _ => return false,
+    }
+    // The join key must equal the identity recomputed from the carrier's OWN embedded digests.
+    let (Some(oid), Some(dpd)) = (
+        carrier
+            .get("observed_input_digest")
+            .and_then(|v| v.as_str()),
+        carrier
+            .get("declared_policy_digest")
+            .and_then(|v| v.as_str()),
+    ) else {
+        return false;
+    };
+    match decision_identity_digest(oid, dpd) {
+        Some(i) if i == row_identity => {}
+        _ => return false,
+    }
+    // Finally the binding must recompute from the row's own fields.
+    let binding_input = json!({
+        "recipe": RECIPE,
+        "evidence_ref": er,
+        "decision_identity_digest": row_identity,
+        "run_verdict": run_verdict,
+    });
     let expected = match jcs::to_string(&binding_input) {
         Ok(s) => format!("sha256:{}", sha256_hex(&s)),
         Err(_) => return false,
@@ -477,7 +655,7 @@ mod tests {
 
     #[test]
     fn args_digest_drops_secret_fields_recursively() {
-        // SECRET_DROP keys never affect the digest, at the top level AND nested in objects/arrays.
+        // secret-named keys never affect the digest, at the top level AND nested in objects/arrays.
         assert_eq!(
             ad(json!({"path": "/x", "token": "aaa"})),
             ad(json!({"path": "/x", "token": "bbb"}))
@@ -667,7 +845,17 @@ mod gate_tests {
     }
 
     fn v(tool: &str, args: Option<Value>, id: &str) -> &'static str {
-        decision_verdict(&policy(), tool, args.as_ref(), id)
+        decision_verdict(
+            &policy(),
+            tool,
+            args.as_ref(),
+            id,
+            &DecisionEvidence::default(),
+        )
+    }
+
+    fn p_from(v: Value) -> McpPolicy {
+        serde_json::from_value(v).unwrap()
     }
 
     #[test]
@@ -715,6 +903,125 @@ mod gate_tests {
     }
 
     #[test]
+    fn tool_axis_uses_engine_pattern_semantics() {
+        // A literal-prefix deny pattern blocks the matching tool; exact equality would have missed it.
+        let p = p_from(json!({
+            "version": "1",
+            "tools": {"deny": ["delete_*"]},
+            "enforcement": {"unconstrained_tools": "allow"}
+        }));
+        let e = DecisionEvidence::default();
+        assert_eq!(
+            decision_verdict(&p, "delete_all", Some(&json!({})), "present", &e),
+            "mismatch"
+        );
+        assert_eq!(
+            decision_verdict(&p, "read_file", Some(&json!({})), "present", &e),
+            "match"
+        );
+    }
+
+    #[test]
+    fn declared_constraint_without_evidence_is_incomplete_not_match() {
+        // approval_required is declared for the tool but no approval evidence is supplied: the decision
+        // can never be `match`; it is at least `incomplete`. With evidence it resolves either way.
+        let p = p_from(json!({
+            "version": "1",
+            "tools": {"allow": ["pay"], "approval_required": ["pay"]},
+            "enforcement": {"unconstrained_tools": "allow"}
+        }));
+        assert_eq!(
+            decision_verdict(
+                &p,
+                "pay",
+                Some(&json!({})),
+                "present",
+                &DecisionEvidence::default()
+            ),
+            "incomplete"
+        );
+        let approved = DecisionEvidence {
+            approval_obtained: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(
+            decision_verdict(&p, "pay", Some(&json!({})), "present", &approved),
+            "match"
+        );
+        let denied = DecisionEvidence {
+            approval_obtained: Some(false),
+            ..Default::default()
+        };
+        assert_eq!(
+            decision_verdict(&p, "pay", Some(&json!({})), "present", &denied),
+            "mismatch"
+        );
+    }
+
+    #[test]
+    fn class_axis_needs_class_evidence() {
+        let p = p_from(json!({
+            "version": "1",
+            "tools": {"allow": ["x"], "deny_classes": ["network"]},
+            "enforcement": {"unconstrained_tools": "allow"}
+        }));
+        // deny_classes declared but no tool-class evidence -> incomplete
+        assert_eq!(
+            decision_verdict(
+                &p,
+                "x",
+                Some(&json!({})),
+                "present",
+                &DecisionEvidence::default()
+            ),
+            "incomplete"
+        );
+        // tool is in a denied class -> mismatch
+        let net = DecisionEvidence {
+            tool_classes: Some(vec!["network".into()]),
+            ..Default::default()
+        };
+        assert_eq!(
+            decision_verdict(&p, "x", Some(&json!({})), "present", &net),
+            "mismatch"
+        );
+        // tool not in a denied class -> match
+        let fs = DecisionEvidence {
+            tool_classes: Some(vec!["fs".into()]),
+            ..Default::default()
+        };
+        assert_eq!(
+            decision_verdict(&p, "x", Some(&json!({})), "present", &fs),
+            "match"
+        );
+    }
+
+    #[test]
+    fn malformed_declared_schema_is_invalid_not_panic() {
+        // A declared schema that does not compile maps to `invalid` (and must not panic the gate).
+        let p = p_from(json!({
+            "version": "1",
+            "tools": {"allow": ["t"]},
+            "schemas": {"t": {"$ref": "#/$defs/missing"}},
+            "enforcement": {"unconstrained_tools": "allow"}
+        }));
+        assert_eq!(
+            p.check_tool_args_experimental("t", &json!({})),
+            ArgsCheck::Malformed
+        );
+        assert_eq!(
+            decision_verdict(
+                &p,
+                "t",
+                Some(&json!({})),
+                "present",
+                &DecisionEvidence::default()
+            ),
+            "invalid"
+        );
+    }
+
+    #[test]
     fn run_lattice_and_order_integrity() {
         assert_eq!(run_verdict(&["match", "incomplete"], &[0, 1]), "incomplete");
         assert_eq!(run_verdict(&["match", "mismatch"], &[0, 1]), "mismatch");
@@ -731,6 +1038,7 @@ mod gate_tests {
 
     #[test]
     fn build_classified_record_carries_the_verdict() {
+        let e = DecisionEvidence::default();
         let m = build_classified_record(
             &policy(),
             "deploy",
@@ -742,6 +1050,7 @@ mod gate_tests {
             "c1",
             "ok",
             "present",
+            &e,
         )
         .unwrap();
         assert_eq!(m["decision_verdict"], json!("match"));
@@ -756,6 +1065,7 @@ mod gate_tests {
             "c1",
             "ok",
             "present",
+            &e,
         )
         .unwrap();
         assert_eq!(mm["decision_verdict"], json!("mismatch"));
@@ -766,82 +1076,172 @@ mod gate_tests {
 mod pack_tests {
     use super::*;
 
-    const OID: &str = "sha256:observed";
-    const DPD: &str = "sha256:declared";
     const REF: &str = "audit://decision/c1";
 
+    /// A real carrier: a row cites THIS, not synthetic digest strings.
+    fn carrier() -> Value {
+        build_record(
+            "deploy",
+            &json!({"env": "prod"}),
+            0,
+            "sha256:decl",
+            b"reference-test-key-v0",
+            "test-key-v0",
+            "authoritative_boundary",
+            "c1",
+            "ok",
+            "present",
+        )
+        .unwrap()
+    }
+
     #[test]
-    fn evidence_ref_has_the_five_envelope_fields() {
-        let cd = carrier_digest(OID, DPD).unwrap();
+    fn evidence_ref_has_the_envelope_fields() {
+        let cd = carrier_content_digest(&carrier()).unwrap();
         let er = evidence_ref(&cd, REF);
         let mut keys: Vec<&String> = er.as_object().unwrap().keys().collect();
         keys.sort();
         assert_eq!(
             keys,
-            vec!["canonicalization", "digest", "ref", "schema", "type"]
+            vec![
+                "canonicalization",
+                "digest",
+                "digest_subject",
+                "ref",
+                "schema",
+                "type"
+            ]
         );
         assert_eq!(er["schema"], json!(SCHEMA));
         assert_eq!(er["digest"], json!(cd));
+        assert_eq!(er["digest_subject"], json!("carrier_content"));
     }
 
     #[test]
-    fn recipe_row_coheres_with_its_carrier() {
-        let row = pack_recipe_row(OID, DPD, "match", REF).unwrap();
-        assert!(verify_recipe_row(&row, OID, DPD, "match"));
+    fn content_and_identity_digests_are_distinct_and_well_formed() {
+        let c = carrier();
+        let content = carrier_content_digest(&c).unwrap();
+        let identity = decision_identity_digest(
+            c["observed_input_digest"].as_str().unwrap(),
+            c["declared_policy_digest"].as_str().unwrap(),
+        )
+        .unwrap();
+        // Different subjects -> different digests, both well-formed sha256.
+        assert_ne!(content, identity);
+        assert!(super::is_sha256_digest(&content));
+        assert!(super::is_sha256_digest(&identity));
     }
 
     #[test]
-    fn tampered_carrier_or_verdict_fails_closed() {
-        let row = pack_recipe_row(OID, DPD, "match", REF).unwrap();
-        // A different carrier identity (tampered observed/declared digest) must not cohere.
-        assert!(!verify_recipe_row(&row, "sha256:TAMPERED", DPD, "match"));
-        assert!(!verify_recipe_row(&row, OID, "sha256:TAMPERED", "match"));
-        // A changed run verdict must not cohere (the coherence_binding covers it).
-        assert!(!verify_recipe_row(&row, OID, DPD, "mismatch"));
+    fn recipe_row_coheres_with_its_real_carrier() {
+        let c = carrier();
+        let row = pack_recipe_row(&c, "match", REF).unwrap();
+        assert!(verify_recipe_row(&row, &c, "match"));
+        // The row cites the carrier CONTENT digest (so any field is bound), and carries the identity join.
+        assert_eq!(
+            row["evidence_ref"]["digest"],
+            json!(carrier_content_digest(&c).unwrap())
+        );
+        assert!(row.get("decision_identity_digest").is_some());
+    }
+
+    #[test]
+    fn tampering_any_carrier_field_or_the_verdict_fails_closed() {
+        let c = carrier();
+        let row = pack_recipe_row(&c, "match", REF).unwrap();
+        // Tampering a NON-identity provenance field still fails closed (content digest moved).
+        let mut tampered = c.clone();
+        tampered["result_status"] = json!("error");
+        assert!(!verify_recipe_row(&row, &tampered, "match"));
+        // Tampering the embedded identity fails closed too.
+        let mut tampered_id = c.clone();
+        tampered_id["observed_input_digest"] = json!("sha256:deadbeef");
+        assert!(!verify_recipe_row(&row, &tampered_id, "match"));
+        // A changed run verdict (vs the row's own field) fails closed.
+        assert!(!verify_recipe_row(&row, &c, "mismatch"));
     }
 
     /// A row whose coherence_binding is self-consistent over the given (possibly foreign) recipe/envelope.
-    fn coherent_row(recipe: &str, er: Value, run_verdict: &str) -> Value {
-        let binding_input =
-            json!({"recipe": recipe, "evidence_ref": er, "run_verdict": run_verdict});
+    fn coherent_row(recipe: &str, er: Value, identity: &str, run_verdict: &str) -> Value {
+        let binding_input = json!({
+            "recipe": recipe,
+            "evidence_ref": er,
+            "decision_identity_digest": identity,
+            "run_verdict": run_verdict,
+        });
         let cb = format!(
             "sha256:{}",
             crate::fingerprint::sha256_hex(&crate::mcp::jcs::to_string(&binding_input).unwrap())
         );
-        json!({"recipe": recipe, "evidence_ref": er, "run_verdict": run_verdict, "coherence_binding": cb})
+        json!({
+            "recipe": recipe,
+            "evidence_ref": er,
+            "decision_identity_digest": identity,
+            "run_verdict": run_verdict,
+            "coherence_binding": cb,
+        })
     }
 
     #[test]
     fn verify_rejects_foreign_recipe_or_envelope_even_when_self_coherent() {
-        let cd = carrier_digest(OID, DPD).unwrap();
-        let good_er = evidence_ref(&cd, REF);
-        // Sanity: the proper recipe + envelope verifies.
+        let c = carrier();
+        let content = carrier_content_digest(&c).unwrap();
+        let identity = decision_identity_digest(
+            c["observed_input_digest"].as_str().unwrap(),
+            c["declared_policy_digest"].as_str().unwrap(),
+        )
+        .unwrap();
+        let good_er = evidence_ref(&content, REF);
+        // Sanity: the proper recipe + envelope verifies against the real carrier.
         assert!(verify_recipe_row(
-            &coherent_row(RECIPE, good_er.clone(), "match"),
-            OID,
-            DPD,
+            &coherent_row(RECIPE, good_er.clone(), &identity, "match"),
+            &c,
             "match"
         ));
         // A self-coherent row with a FOREIGN recipe is rejected.
         assert!(!verify_recipe_row(
-            &coherent_row("other.recipe.v0", good_er.clone(), "match"),
-            OID,
-            DPD,
+            &coherent_row("other.recipe.v0", good_er.clone(), &identity, "match"),
+            &c,
             "match"
         ));
-        // Foreign envelope type / schema / canonicalization are each rejected.
+        // Foreign envelope type / schema / canonicalization / digest_subject are each rejected.
         for (field, bad) in [
             ("type", json!("other")),
             ("schema", json!("other.schema.v0")),
             ("canonicalization", json!("cbor-deterministic-v1")),
+            ("digest_subject", json!("decision_identity")),
         ] {
             let mut er = good_er.as_object().unwrap().clone();
             er.insert(field.to_string(), bad);
-            let row = coherent_row(RECIPE, Value::Object(er), "match");
+            let row = coherent_row(RECIPE, Value::Object(er), &identity, "match");
             assert!(
-                !verify_recipe_row(&row, OID, DPD, "match"),
-                "field {field} must be rejected"
+                !verify_recipe_row(&row, &c, "match"),
+                "envelope field {field} must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn verify_rejects_malformed_citation_digests() {
+        let c = carrier();
+        let identity = decision_identity_digest(
+            c["observed_input_digest"].as_str().unwrap(),
+            c["declared_policy_digest"].as_str().unwrap(),
+        )
+        .unwrap();
+        // A citation digest that is not sha256:<64 hex> is rejected even if everything else is coherent.
+        let bad_er = evidence_ref("sha256:short", REF);
+        assert!(!verify_recipe_row(
+            &coherent_row(RECIPE, bad_er, &identity, "match"),
+            &c,
+            "match"
+        ));
+        // A malformed identity join key is rejected too.
+        let good_er = evidence_ref(&carrier_content_digest(&c).unwrap(), REF);
+        assert!(!verify_recipe_row(
+            &coherent_row(RECIPE, good_er, "not-a-digest", "match"),
+            &c,
+            "match"
+        ));
     }
 }

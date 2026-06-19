@@ -1,7 +1,34 @@
-use super::{ConstraintRule, McpPolicy};
+use super::{ArgsCheck, ConstraintRule, McpPolicy};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// Defensively validate `args` against the declared per-tool schema WITHOUT panicking. Unlike
+/// [`compile_all_schemas`] (which fail-closes by panicking at load time), this is for the experimental
+/// verdict gate, where a malformed declared schema is a classification input (it maps to `invalid`), not
+/// an abort. `$defs` are injected the same way as the load-time compile.
+pub(super) fn check_tool_args(policy: &McpPolicy, tool_name: &str, args: &Value) -> ArgsCheck {
+    let Some(schema) = policy.schemas.get(tool_name) else {
+        return ArgsCheck::NoSchema;
+    };
+    let mut schema_to_compile = schema.clone();
+    if let Some(defs) = policy.schemas.get("$defs") {
+        if let Value::Object(map) = &mut schema_to_compile {
+            map.insert("$defs".to_string(), defs.clone());
+        }
+    }
+    match jsonschema::validator_for(&schema_to_compile) {
+        Ok(validator) => {
+            if validator.is_valid(args) {
+                ArgsCheck::Valid
+            } else {
+                ArgsCheck::Invalid
+            }
+        }
+        // A declared schema that does not compile is a malformed declaration, not merely missing evidence.
+        Err(_) => ArgsCheck::Malformed,
+    }
+}
 
 pub(super) fn migrate_constraints_to_schemas(policy: &mut McpPolicy) {
     for constraint in std::mem::take(&mut policy.constraints) {

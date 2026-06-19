@@ -21,6 +21,21 @@ pub(in crate::mcp::policy) use matcher::matches_tool_pattern;
 pub use response::make_deny_response;
 pub use types::*;
 
+/// EXPERIMENTAL: outcome of validating a tool call's arguments against the declared per-tool schema,
+/// used by the tool-decision verdict gate. Distinguishes "no schema declared" from "schema declared but
+/// malformed" so the gate can map a malformed declaration to `invalid` rather than to missing evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArgsCheck {
+    /// No per-tool schema is declared for this tool.
+    NoSchema,
+    /// A schema is declared and the arguments satisfy it.
+    Valid,
+    /// A schema is declared and the arguments violate it.
+    Invalid,
+    /// A schema is declared but does not compile (the declaration itself is invalid).
+    Malformed,
+}
+
 impl McpPolicy {
     pub fn new() -> Self {
         Self::default()
@@ -120,6 +135,19 @@ impl McpPolicy {
     // Proxy-specific check method (Legacy compatibility wrapper)
     pub fn check(&self, request: &JsonRpcRequest, state: &mut PolicyState) -> PolicyDecision {
         engine::check(self, request, state)
+    }
+
+    /// EXPERIMENTAL: whether a tool name matches a declared allow/deny entry, reusing the policy engine's
+    /// own pattern semantics (`*`, prefix `name_*`, suffix `*_name`, infix `*name*`, exact otherwise) so
+    /// the tool-decision verdict gate cannot drift from how the engine actually matches.
+    pub fn tool_name_matches_experimental(tool_name: &str, pattern: &str) -> bool {
+        matches_tool_pattern(tool_name, pattern)
+    }
+
+    /// EXPERIMENTAL: defensively validate `args` against the declared per-tool schema for the verdict
+    /// gate. Never panics on a malformed declared schema (it returns [`ArgsCheck::Malformed`]).
+    pub fn check_tool_args_experimental(&self, tool_name: &str, args: &Value) -> ArgsCheck {
+        schema::check_tool_args(self, tool_name, args)
     }
 }
 
