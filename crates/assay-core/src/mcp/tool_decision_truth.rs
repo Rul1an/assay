@@ -502,9 +502,12 @@ fn is_verdict(s: &str) -> bool {
 /// claim `match` while the carrier it cites recorded `mismatch`. A carrier with no (or null) decision
 /// verdict imposes no constraint.
 fn run_verdict_covers_carrier(carrier: &Value, run_verdict: &str) -> bool {
-    match carrier.get("decision_verdict").and_then(|v| v.as_str()) {
-        Some(cv) if is_verdict(cv) => verdict_rank(run_verdict) >= verdict_rank(cv),
-        _ => true,
+    match carrier.get("decision_verdict") {
+        // Only a genuinely absent verdict imposes no constraint.
+        None | Some(Value::Null) => true,
+        Some(Value::String(cv)) if is_verdict(cv) => verdict_rank(run_verdict) >= verdict_rank(cv),
+        // A present-but-malformed carrier verdict fails closed rather than passing unconstrained.
+        _ => false,
     }
 }
 
@@ -1384,5 +1387,12 @@ mod pack_tests {
             &mismatch_carrier,
             "match"
         ));
+
+        // A carrier carrying a malformed (non-lattice) decision_verdict fails closed: it imposes a
+        // constraint no run verdict can satisfy, so no row may cite it.
+        let mut malformed = carrier();
+        malformed["decision_verdict"] = json!("approved");
+        assert!(pack_recipe_row(&malformed, "match", REF).is_none());
+        assert!(pack_recipe_row(&malformed, "invalid", REF).is_none());
     }
 }
