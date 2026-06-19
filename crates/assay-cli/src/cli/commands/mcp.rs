@@ -241,6 +241,18 @@ fn tdt_producer_from_material(
             "ASSAY_TDT_HMAC_KEY_ID is empty or malformed (allowed characters: A-Z a-z 0-9 . _ -); the tool-decision-truth producer fails closed."
         );
     }
+    // Fail closed at startup when the opted-in sink cannot be opened. Otherwise a run could proceed with
+    // `--tool-decision-truth-out` enabled while minting no carriers, which is a half-configured producer.
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&out_path)
+        .with_context(|| {
+            format!(
+                "tool-decision-truth sink is not writable at {}; the producer fails closed",
+                out_path.display()
+            )
+        })?;
     Ok(TdtProducer::new(out_path, key.into_bytes(), key_id))
 }
 
@@ -611,6 +623,20 @@ mod tests {
         assert!(
             !dbg.contains("super-secret-key"),
             "Debug must not leak the key: {dbg}"
+        );
+    }
+
+    #[test]
+    fn tdt_producer_fails_closed_when_sink_cannot_be_opened() {
+        let dir = tempdir().unwrap();
+        let out = dir.path().join("missing-parent").join("carriers.ndjson");
+        let err =
+            tdt_producer_from_material(out, Some("super-secret-key".into()), Some("kid-v0".into()))
+                .unwrap_err()
+                .to_string();
+        assert!(
+            err.contains("tool-decision-truth sink is not writable"),
+            "got: {err}"
         );
     }
 
