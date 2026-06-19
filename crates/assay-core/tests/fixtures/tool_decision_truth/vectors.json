@@ -186,6 +186,53 @@
         ],
         "run_verdict": "mismatch"
       }
+    },
+    {
+      "id": "absent_identity_match",
+      "observed": [
+        {
+          "tool_name": "deploy",
+          "args": {
+            "env": "prod"
+          },
+          "order": 0,
+          "identity_state": "absent"
+        }
+      ],
+      "expected": {
+        "decisions": [
+          "match"
+        ],
+        "run_verdict": "match"
+      }
+    },
+    {
+      "id": "invalid_duplicate_order",
+      "observed": [
+        {
+          "tool_name": "deploy",
+          "args": {
+            "env": "staging"
+          },
+          "order": 0,
+          "identity_state": "present"
+        },
+        {
+          "tool_name": "read_file",
+          "args": {
+            "path": "/x"
+          },
+          "order": 0,
+          "identity_state": "present"
+        }
+      ],
+      "expected": {
+        "decisions": [
+          "match",
+          "incomplete"
+        ],
+        "run_verdict": "invalid"
+      }
     }
   ],
   "pack_rows": [

@@ -79,6 +79,17 @@ fn case_specs() -> Vec<CaseSpec> {
                 ("delete_all", Some(json!({})), 1, "present"),
             ],
         ),
+        (
+            "absent_identity_match",
+            vec![("deploy", Some(json!({"env": "prod"})), 0, "absent")],
+        ),
+        (
+            "invalid_duplicate_order",
+            vec![
+                ("deploy", Some(json!({"env": "staging"})), 0, "present"),
+                ("read_file", Some(json!({"path": "/x"})), 0, "present"),
+            ],
+        ),
     ]
 }
 
@@ -176,7 +187,13 @@ fn vectors_in_sync_and_reproduce_from_bytes() {
             };
             let id_state = d["identity_state"].as_str().unwrap();
             verdicts.push(tdt::decision_verdict(&p, tool, args, id_state));
-            orders.push(d["order"].as_i64().unwrap());
+            // Order is always an integer in these vectors; a non-integer order is out of scope (the gate
+            // types order as i64). This is a fixture-corruption guard, not a runtime classification path.
+            orders.push(
+                d["order"]
+                    .as_i64()
+                    .expect("vectors: decision order must be an integer"),
+            );
         }
         let expected: Vec<&str> = case["expected"]["decisions"]
             .as_array()
