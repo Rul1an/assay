@@ -833,6 +833,7 @@ flowchart TB
         assay_adapter_acp["assay-adapter-acp"]
         assay_adapter_api["assay-adapter-api"]
         assay_adapter_ucp["assay-adapter-ucp"]
+        assay_canonical["assay-canonical"]
         assay_cli["assay-cli"]
         assay_common["assay-common"]
         assay_core["assay-core"]
