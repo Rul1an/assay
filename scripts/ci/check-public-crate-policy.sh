@@ -24,6 +24,7 @@ set -euo pipefail
 public_crates=(
   assay-common
   assay-registry
+  assay-canonical
   assay-evidence
   assay-core
   assay-metrics
@@ -38,9 +39,6 @@ public_crates=(
 )
 
 non_crates_io_crates=(
-  # publish = false until a published crate depends on it; then it moves to public_crates
-  # and the publish order (same flow as the runner crates).
-  assay-canonical
   assay-adapter-api
   assay-adapter-acp
   assay-adapter-a2a
