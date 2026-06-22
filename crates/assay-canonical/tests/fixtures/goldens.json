@@ -1,0 +1,128 @@
+[
+  {
+    "class": "set",
+    "id": "env_filtered_passed_keys_set",
+    "new_digest": "sha256:20620e9201506024937362f8ac725a1d1d4a75e9dcc67638694690f0adf4e2aa",
+    "note": "Vec<String> env-key sets: order/dups carry no meaning -> normalize. Producer-unsorted here, so the digest moves on adoption -> profile bump + old/new golden.",
+    "old_digest": "sha256:82d00cf76d9abc956d82cf127e727d79348caacee078c2684406e4a128820a8f",
+    "record": {
+      "dropped_keys": [
+        "AWS_SECRET",
+        "TOKEN"
+      ],
+      "passed_keys": [
+        "PATH",
+        "HOME",
+        "PATH"
+      ]
+    },
+    "reordered": {
+      "dropped_keys": [
+        "TOKEN",
+        "AWS_SECRET"
+      ],
+      "passed_keys": [
+        "HOME",
+        "PATH"
+      ]
+    },
+    "reordered_new_digest": "sha256:20620e9201506024937362f8ac725a1d1d4a75e9dcc67638694690f0adf4e2aa",
+    "schema": "assay-evidence/PayloadEnvFiltered",
+    "set_paths": [
+      [
+        "passed_keys"
+      ],
+      [
+        "dropped_keys"
+      ]
+    ]
+  },
+  {
+    "class": "set",
+    "id": "tool_classes_set_producer_sorted",
+    "new_digest": "sha256:405ac6c1c055f417bed98c7f326dfbd2ffe06ab28579d1e28993a0c94c36e048",
+    "note": "Vec<String> already producer-sorted -> normalization is a no-op for a conforming producer (no digest change); the contract formalizes and locks it.",
+    "old_digest": "sha256:405ac6c1c055f417bed98c7f326dfbd2ffe06ab28579d1e28993a0c94c36e048",
+    "record": {
+      "matched_tool_classes": [
+        "net.connect"
+      ],
+      "tool_classes": [
+        "fs.read",
+        "net.connect"
+      ]
+    },
+    "reordered": {
+      "matched_tool_classes": [
+        "net.connect"
+      ],
+      "tool_classes": [
+        "net.connect",
+        "fs.read"
+      ]
+    },
+    "reordered_new_digest": "sha256:405ac6c1c055f417bed98c7f326dfbd2ffe06ab28579d1e28993a0c94c36e048",
+    "schema": "assay.tool.decision/DecisionData",
+    "set_paths": [
+      [
+        "tool_classes"
+      ],
+      [
+        "matched_tool_classes"
+      ]
+    ]
+  },
+  {
+    "class": "ordered",
+    "id": "policy_extends_ordered",
+    "new_digest": "sha256:d1f8e39310702eae1cd7667d56959e5ee4fbe92bbb67242cbefb41d32b72fb7d",
+    "note": "policy extends precedence is order-significant -> NOT a set -> reordering MUST move the digest.",
+    "old_digest": "sha256:d1f8e39310702eae1cd7667d56959e5ee4fbe92bbb67242cbefb41d32b72fb7d",
+    "record": {
+      "extends": [
+        "base-allow",
+        "tighten-net"
+      ]
+    },
+    "reordered": {
+      "extends": [
+        "tighten-net",
+        "base-allow"
+      ]
+    },
+    "reordered_new_digest": "sha256:cda1a2be085ed2507038425fa337a4c071c44d2db6e864850ab0cc4a393b29b2",
+    "schema": "assay-evidence/PayloadPolicySuggested",
+    "set_paths": []
+  },
+  {
+    "class": "already_canonical_set",
+    "id": "capability_surface_btreeset_already_canonical",
+    "new_digest": "sha256:dddf3b4d38e7cd37ed4184e036180ab1a9b5802598c8c48460ac0be7d73e71f5",
+    "note": "ILLUSTRATIVE: the contract treats this as a semantic set that is already canonical in the product TYPE (BTreeSet<String> -> serialized sorted + unique). This is NOT a product-serialization parity proof: a real BTreeSet would never emit the reordered bytes, so the Python record here only demonstrates the contract. The product PR pins serialization with a real Rust golden.",
+    "old_digest": "sha256:dddf3b4d38e7cd37ed4184e036180ab1a9b5802598c8c48460ac0be7d73e71f5",
+    "record": {
+      "mcp_tools": [
+        "a",
+        "b"
+      ],
+      "network_endpoints": []
+    },
+    "reordered": {
+      "mcp_tools": [
+        "b",
+        "a"
+      ],
+      "network_endpoints": []
+    },
+    "reordered_new_digest": "sha256:dddf3b4d38e7cd37ed4184e036180ab1a9b5802598c8c48460ac0be7d73e71f5",
+    "schema": "assay.runner.capability_surface.v0",
+    "set_paths": [
+      [
+        "mcp_tools"
+      ],
+      [
+        "network_endpoints"
+      ]
+    ]
+  }
+]
