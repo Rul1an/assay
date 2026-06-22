@@ -220,6 +220,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "assay-canonical"
+version = "3.29.0"
+dependencies = [
+ "hex",
+ "serde",
+ "serde_jcs",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "assay-cli"
 version = "3.29.0"
 dependencies = [
