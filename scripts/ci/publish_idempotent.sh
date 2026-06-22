@@ -18,6 +18,7 @@ echo "📦 Starting Idempotent Publisher..."
 CRATES=(
   "assay-common"
   "assay-registry"
+  "assay-canonical"
   "assay-evidence"
   "assay-core"
   "assay-metrics"

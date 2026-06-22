@@ -362,6 +362,7 @@ name = "assay-evidence"
 version = "3.29.0"
 dependencies = [
  "anyhow",
+ "assay-canonical",
  "assert_fs",
  "async-trait",
  "base64",

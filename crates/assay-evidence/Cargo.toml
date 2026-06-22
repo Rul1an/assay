@@ -9,6 +9,9 @@ description = "Tamper-evident, cryptographically verifiable evidence bundles for
 readme.workspace = true
 
 [dependencies]
+# Internal: shared canonicalization (JCS + content-id). Same serde_jcs pin, so the bytes (and every
+# content/mandate digest) are unchanged; this is a deduplication, not a behaviour change.
+assay-canonical = { workspace = true }
 # Core serialization
 serde = { workspace = true, features = ["derive", "std", "alloc"] }
 serde_json = { workspace = true, features = ["preserve_order", "std", "alloc"] }

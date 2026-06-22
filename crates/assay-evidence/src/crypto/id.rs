@@ -11,9 +11,8 @@
 //! 2. Hash inputs use JCS (RFC 8785) canonical JSON.
 //! 3. All hashes are SHA-256 with "sha256:" prefix.
 
-use crate::crypto::jcs;
 use crate::types::EvidenceEvent;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -96,10 +95,7 @@ pub fn compute_content_hash(event: &EvidenceEvent) -> Result<String> {
         payload: &event.payload,
     };
 
-    let canonical_bytes = jcs::to_vec(&input)?;
-    let hash = Sha256::digest(&canonical_bytes);
-
-    Ok(format!("sha256:{}", hex::encode(hash)))
+    assay_canonical::content_id(&input).context("failed to compute content hash")
 }
 
 /// Calculate the Stream Identity ID.

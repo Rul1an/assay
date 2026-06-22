@@ -80,6 +80,7 @@ assay-monitor = { path = "crates/assay-monitor", version = "3.19.1" }
 assay-metrics = { path = "crates/assay-metrics", version = "3.19.1" }
 assay-policy = { path = "crates/assay-policy", version = "3.19.1" }
 assay-mcp-server = { path = "crates/assay-mcp-server", version = "3.19.1" }
+assay-canonical = { path = "crates/assay-canonical", version = "3.19.1" }
 assay-evidence = { path = "crates/assay-evidence", version = "3.19.1" }
 assay-sim = { path = "crates/assay-sim", version = "3.19.1" }
 assay-registry = { path = "crates/assay-registry", version = "3.19.1" }

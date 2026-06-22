@@ -1,7 +1,8 @@
-//! JSON Canonicalization Scheme (RFC 8785) implementation.
+//! JSON Canonicalization Scheme (RFC 8785) for cryptographic operations.
 //!
-//! Provides deterministic JSON serialization for cryptographic operations.
-//! Uses `serde_jcs` which guarantees:
+//! Thin wrapper that delegates to [`assay_canonical::jcs`] (the shared canonicalization crate, pinned
+//! to the same `serde_jcs`), so the byte output here is identical to before this crate adopted it.
+//! Guarantees:
 //!
 //! - Lexicographic key ordering
 //! - No insignificant whitespace
@@ -31,7 +32,7 @@ use serde::Serialize;
 /// assert_eq!(bytes, br#"{"a":1,"b":2}"#);
 /// ```
 pub fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-    serde_jcs::to_vec(value).context("failed to serialize canonical json")
+    assay_canonical::jcs::to_vec(value).context("failed to serialize canonical json")
 }
 
 /// Serialize to JCS Canonical JSON string.
@@ -47,7 +48,7 @@ pub fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>> {
 /// assert_eq!(s, r#"{"a":2,"z":1}"#);
 /// ```
 pub fn to_string<T: Serialize>(value: &T) -> Result<String> {
-    serde_jcs::to_string(value).context("failed to serialize canonical json string")
+    assay_canonical::jcs::to_string(value).context("failed to serialize canonical json string")
 }
 
 #[cfg(test)]

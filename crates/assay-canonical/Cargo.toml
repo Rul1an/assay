@@ -5,10 +5,6 @@ edition.workspace = true
 description = "Deterministic canonicalization: RFC 8785 (JCS) bytes, sha256 content-addressed IDs, and schema-aware set-path normalization for semantic digests."
 license.workspace = true
 repository.workspace = true
-# Not published yet: nothing in the published surface depends on it. When a published crate (e.g.
-# assay-evidence) adopts it, that PR flips this to publishable and adds it to the publish order, the
-# same flow the runner crates followed.
-publish = false
 
 [lints]
 workspace = true

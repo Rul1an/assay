@@ -13,10 +13,8 @@
 //!
 //! Where `hashable_content` excludes both `mandate_id` and `signature`.
 
-use crate::crypto::jcs;
 use crate::mandate::types::MandateContent;
 use anyhow::{Context as _, Result};
-use sha2::{Digest, Sha256};
 
 /// Compute the mandate_id from mandate content.
 ///
@@ -55,14 +53,7 @@ use sha2::{Digest, Sha256};
 /// assert_eq!(id.len(), 71);
 /// ```
 pub fn compute_mandate_id(content: &MandateContent) -> Result<String> {
-    // Serialize to JCS canonical form
-    let canonical_bytes = jcs::to_vec(content).context("failed to canonicalize mandate content")?;
-
-    // Compute SHA-256
-    let hash = Sha256::digest(&canonical_bytes);
-
-    // Format as sha256:hex
-    Ok(format!("sha256:{}", hex::encode(hash)))
+    assay_canonical::content_id(content).context("failed to compute mandate_id")
 }
 
 /// Verify that a mandate_id matches its content.
@@ -89,10 +80,7 @@ pub fn verify_mandate_id(content: &MandateContent, claimed_id: &str) -> Result<b
 /// transaction_ref = "sha256:" + hex(SHA256(JCS(transaction_object)))
 /// ```
 pub fn compute_transaction_ref<T: serde::Serialize>(transaction: &T) -> Result<String> {
-    let canonical_bytes =
-        jcs::to_vec(transaction).context("failed to canonicalize transaction object")?;
-    let hash = Sha256::digest(&canonical_bytes);
-    Ok(format!("sha256:{}", hex::encode(hash)))
+    assay_canonical::content_id(transaction).context("failed to compute transaction_ref")
 }
 
 #[cfg(test)]
