@@ -13,6 +13,13 @@ use serde_json::{Map, Value};
 
 use crate::Error;
 
+/// Marker prefix the strict map visitor stamps onto its custom serde error for a duplicate key.
+/// [`parse_strict`] matches this once, at the parse boundary, to promote the failure to a typed
+/// [`Error::DuplicateKey`] — the only place the marker string is interpreted, so callers never have
+/// to. Producer ([`StrictVisitor::visit_map`]) and consumer ([`parse_strict`]) share this constant
+/// so they cannot drift apart.
+const DUPLICATE_KEY_MARKER: &str = "duplicate object key: ";
+
 /// A [`serde_json::Value`] parsed with duplicate object keys rejected at every depth.
 struct StrictValue(Value);
 
@@ -82,7 +89,7 @@ impl<'de> Visitor<'de> for StrictVisitor {
         while let Some(key) = map.next_key::<String>()? {
             let StrictValue(val) = map.next_value()?;
             if out.insert(key.clone(), val).is_some() {
-                return Err(de::Error::custom(format!("duplicate object key: {key}")));
+                return Err(de::Error::custom(format!("{DUPLICATE_KEY_MARKER}{key}")));
             }
         }
         Ok(Value::Object(out))
@@ -101,7 +108,32 @@ impl<'de> Visitor<'de> for StrictVisitor {
 pub fn parse_strict(raw: &str) -> Result<Value, Error> {
     serde_json::from_str::<StrictValue>(raw)
         .map(|s| s.0)
-        .map_err(|e| Error::Parse(e.to_string()))
+        .map_err(classify_parse_error)
+}
+
+/// Map a `serde_json` failure to the typed [`Error`], promoting the duplicate-key marker stamped by
+/// [`StrictVisitor::visit_map`] to [`Error::DuplicateKey`]; everything else is generic
+/// [`Error::Parse`]. Matching the marker here, once, keeps the message-sniffing at the boundary so
+/// the public API exposes a clean variant instead of a string a caller has to parse.
+fn classify_parse_error(e: serde_json::Error) -> Error {
+    let msg = e.to_string();
+    match duplicate_key(&msg) {
+        Some(key) => Error::DuplicateKey(key),
+        None => Error::Parse(msg),
+    }
+}
+
+/// Recover the offending key from a duplicate-key marker message, or `None` for an ordinary parse
+/// error. `serde_json` appends ` at line L column C` to custom errors; the last such suffix is
+/// trimmed so the variant carries just the key. Classification stays correct even if that suffix
+/// format ever changes — only the trailing trim depends on it.
+fn duplicate_key(msg: &str) -> Option<String> {
+    let rest = msg.strip_prefix(DUPLICATE_KEY_MARKER)?;
+    let key = match rest.rfind(" at line ") {
+        Some(pos) => &rest[..pos],
+        None => rest,
+    };
+    Some(key.to_owned())
 }
 
 #[cfg(test)]
@@ -113,14 +145,29 @@ mod tests {
     fn rejects_top_level_duplicate_keys() {
         assert!(matches!(
             parse_strict(r#"{"a":1,"a":2}"#),
-            Err(Error::Parse(_))
+            Err(Error::DuplicateKey(k)) if k == "a"
         ));
     }
 
     #[test]
     fn rejects_nested_duplicate_keys() {
-        assert!(parse_strict(r#"{"outer":{"k":1,"k":2}}"#).is_err());
-        assert!(parse_strict(r#"{"xs":[{"k":1,"k":2}]}"#).is_err());
+        assert!(matches!(
+            parse_strict(r#"{"outer":{"k":1,"k":2}}"#),
+            Err(Error::DuplicateKey(k)) if k == "k"
+        ));
+        assert!(matches!(
+            parse_strict(r#"{"xs":[{"k":1,"k":2}]}"#),
+            Err(Error::DuplicateKey(k)) if k == "k"
+        ));
+    }
+
+    #[test]
+    fn malformed_json_stays_a_parse_error() {
+        // Ordinary syntax errors must not be reclassified as duplicate-key rejections: the two map
+        // to distinct reason classes downstream.
+        assert!(matches!(parse_strict("{not json"), Err(Error::Parse(_))));
+        assert!(matches!(parse_strict(""), Err(Error::Parse(_))));
+        assert!(matches!(parse_strict(r#"{"a":}"#), Err(Error::Parse(_))));
     }
 
     #[test]
