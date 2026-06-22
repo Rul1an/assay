@@ -41,14 +41,24 @@ pub use parse::parse_strict;
 pub use profile::{ensure_supported_profile, semantic_digest, PROFILE};
 
 /// An error from canonicalizing, parsing, or profiling a value.
+///
+/// Non-exhaustive: new parse or canonicalization failure modes can be added without breaking
+/// downstream consumers, so callers should include a wildcard match arm.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// The value could not be serialized to canonical (RFC 8785) JSON.
     #[error("canonicalization failed: {0}")]
     Canonicalize(String),
-    /// Raw JSON could not be parsed under the strict (duplicate-key-rejecting) rules.
+    /// Raw JSON could not be parsed as JSON (malformed syntax). Duplicate object keys are rejected
+    /// too, but surface as the distinct [`Error::DuplicateKey`] so the two can be told apart.
     #[error("strict JSON parse failed: {0}")]
     Parse(String),
+    /// Raw JSON contained a duplicate object key, rejected at any nesting depth; carries the offending
+    /// key. Split out from [`Error::Parse`] so a consumer can distinguish a duplicate-key rejection
+    /// from ordinary malformed JSON without string-matching the error message.
+    #[error("duplicate object key: {0}")]
+    DuplicateKey(String),
     /// A record was produced under a `canonicalization_profile` this build does not implement; a
     /// consumer must fail closed rather than recompute it under the current rules.
     #[error("unknown canonicalization profile: {0}")]
