@@ -874,6 +874,7 @@ flowchart TB
     assay_core --> assay_adapter_api
     assay_core --> assay_common
     assay_ebpf --> assay_common
+    assay_evidence --> assay_canonical
     assay_it --> assay_core
     assay_mcp_server --> assay_common
     assay_mcp_server --> assay_core
