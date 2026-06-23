@@ -73,6 +73,8 @@ fn generate_bundle() -> Vec<u8> {
         contains_pii: false,
         contains_secrets: false,
         content_hash: None, // Optional in v1
+        semantic_digest: None,
+        digest_profile: None,
 
         payload: serde_json::json!({"foo": "bar", "baz": 123}),
     };

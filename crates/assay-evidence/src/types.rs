@@ -144,6 +144,22 @@ pub struct EvidenceEvent {
     #[serde(rename = "assaycontenthash")]
     pub content_hash: Option<String>,
 
+    /// SOFT correlation digest: a semantic-equivalence digest over the payload, computed via
+    /// [`assay_canonical::semantic_digest`] under `digest_profile`. **Additive and soft** — it is
+    /// excluded from `content_hash` (adding it never moves the hard hash), is never on the verification
+    /// or admission path, and never substitutes the hard `content_hash` / `mandate_id`. A consumer uses
+    /// it only to correlate / group equivalent payloads.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "assaysemanticdigest"
+    )]
+    pub semantic_digest: Option<String>,
+
+    /// The profile under which `semantic_digest` was computed — soft metadata that travels with the
+    /// digest as part of the correlation key (never integrity). `None` when `semantic_digest` is absent.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "assaydigestprofile")]
+    pub digest_profile: Option<String>,
+
     #[serde(rename = "data")]
     pub payload: serde_json::Value,
 }
@@ -180,8 +196,28 @@ impl EvidenceEvent {
             contains_pii: false,
             contains_secrets: false,
             content_hash: None,
+            semantic_digest: None,
+            digest_profile: None,
             payload,
         }
+    }
+
+    /// Attach the SOFT semantic-equivalence digest: a correlation digest over the payload, computed via
+    /// [`assay_canonical::semantic_digest`] under `profile`. Additive and soft — it is excluded from
+    /// `content_hash`, never on the verification/admission path, and never a substitute for the hard
+    /// `content_hash` / `mandate_id`. Errors only if canonicalization fails (e.g. a malformed set value).
+    pub fn with_semantic_digest(
+        mut self,
+        set_paths: &[assay_canonical::set_paths::SetPath],
+        profile: &str,
+    ) -> Result<Self, assay_canonical::Error> {
+        self.semantic_digest = Some(assay_canonical::semantic_digest(
+            &self.payload,
+            set_paths,
+            profile,
+        )?);
+        self.digest_profile = Some(profile.to_string());
+        Ok(self)
     }
 
     /// Set subject
@@ -388,6 +424,73 @@ mod tests {
             serde_json::json!({}),
         );
         assert_eq!(event.specversion, CE_SPECVERSION);
+    }
+
+    #[test]
+    fn with_semantic_digest_sets_soft_pair_set_order_invariant() {
+        // the soft digest IS the assay-canonical semantic_digest over the payload; set order invariant
+        let paths = vec![vec!["passed_keys".to_string()]];
+        let profile = "assay.semantic-digest.jcs-rfc8785.v1";
+        let e1 = EvidenceEvent::new(
+            "assay.test",
+            "urn:assay:test",
+            "r",
+            0,
+            serde_json::json!({"passed_keys": ["B", "A"]}),
+        )
+        .with_semantic_digest(&paths, profile)
+        .unwrap();
+        let e2 = EvidenceEvent::new(
+            "assay.test",
+            "urn:assay:test",
+            "r",
+            1,
+            serde_json::json!({"passed_keys": ["A", "B"]}),
+        )
+        .with_semantic_digest(&paths, profile)
+        .unwrap();
+        assert_eq!(e1.semantic_digest, e2.semantic_digest); // set order does not move the digest
+        assert_eq!(e1.digest_profile.as_deref(), Some(profile));
+        assert!(e1.semantic_digest.as_ref().unwrap().starts_with("sha256:"));
+    }
+
+    #[test]
+    fn soft_pair_absent_is_backwards_compatible() {
+        // a today's event (no soft pair) serializes WITHOUT the soft keys
+        let event = EvidenceEvent::new(
+            "assay.test",
+            "urn:assay:test",
+            "r",
+            0,
+            serde_json::json!({}),
+        );
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(!json.contains("assaysemanticdigest"));
+        assert!(!json.contains("assaydigestprofile"));
+        let back: EvidenceEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.semantic_digest, None);
+        assert_eq!(back.digest_profile, None);
+    }
+
+    #[test]
+    fn soft_pair_round_trips_when_present() {
+        let mut event = EvidenceEvent::new(
+            "assay.test",
+            "urn:assay:test",
+            "r",
+            0,
+            serde_json::json!({}),
+        );
+        event.semantic_digest = Some("sha256:abc".to_string());
+        event.digest_profile = Some("assay.semantic-digest.jcs-rfc8785.v1".to_string());
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("assaysemanticdigest"));
+        let back: EvidenceEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.semantic_digest.as_deref(), Some("sha256:abc"));
+        assert_eq!(
+            back.digest_profile.as_deref(),
+            Some("assay.semantic-digest.jcs-rfc8785.v1")
+        );
     }
 
     #[test]
