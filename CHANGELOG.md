@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.30.0] - 2026-06-23
+
+### Added
+- `assay-canonical` crate: strict JSON parse (rejects duplicate object keys and non-finite constants),
+  RFC 8785 (JCS) canonicalization, content-id digests, registered set-paths, and the semantic-digest
+  profile. First published in this release. (#1737, #1741)
+- `EvidenceEvent` carries an additive, optional `semantic_digest` + `digest_profile` pair — a soft
+  correlation/equivalence overlay alongside the hard `content_hash`, computed via `assay-canonical`
+  (RFC 8785). It is never included in `content_hash`, never on the verify/admission path, and never
+  substitutes `content_hash`/`mandate_id`. Absent by default (omitted from serialization). (#1750)
+
+### Changed
+- `assay-evidence` routes JCS and content-id digests through `assay-canonical` (byte-identical; goldens
+  unchanged). (#1739)
+- `assay-canonical::Error` is `#[non_exhaustive]` and exposes a typed `Error::DuplicateKey` carrying the
+  offending key, distinct from `Error::Parse`. (#1741)
+
+### Security
+- Bump `quinn-proto` to 0.11.15 for RUSTSEC-2026-0185 (remote memory exhaustion from unbounded
+  out-of-order stream reassembly). (#1742)
+
 ## [3.29.0] - 2026-06-18
 
 ### Added
