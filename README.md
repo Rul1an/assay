@@ -39,7 +39,7 @@ assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
   -- npx @modelcontextprotocol/server-filesystem /tmp/assay-demo
 ```
 
-```
+```text
 ✅ ALLOW  read_file  path=/tmp/assay-demo/safe.txt  reason=policy_allow
 ❌ DENY   read_file  path=/tmp/outside-demo.txt      reason=path_constraint_violation
 ❌ DENY   exec       cmd=ls                          reason=tool_denied
@@ -61,7 +61,7 @@ Wire it into Cursor, Claude Code, or Codex in one line with `assay mcp config-pa
 | **SARIF / CI** | GitHub Action, Security-tab integration, policy gates on PRs. |
 | **Attestation** | Export a bundle as an in-toto / DSSE statement (v0), anchor-pluggable. |
 
-```
+```text
   Agent ──► Assay ──► MCP Server
               ├─ ✅ ALLOW / ❌ DENY  (policy, with reason)
               ├─► 📋 Evidence bundle (offline-verifiable)
