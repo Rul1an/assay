@@ -148,7 +148,8 @@ pub struct EvidenceEvent {
     /// [`assay_canonical::semantic_digest`] under `digest_profile`. **Additive and soft** — it is
     /// excluded from `content_hash` (adding it never moves the hard hash), is never on the verification
     /// or admission path, and never substitutes the hard `content_hash` / `mandate_id`. A consumer uses
-    /// it only to correlate / group equivalent payloads.
+    /// it only to correlate / group equivalent payloads. Set this and `digest_profile` together or
+    /// neither — a consumer treats a digest without its profile as uncorrelatable.
     #[serde(
         skip_serializing_if = "Option::is_none",
         rename = "assaysemanticdigest"
@@ -157,6 +158,8 @@ pub struct EvidenceEvent {
 
     /// The profile under which `semantic_digest` was computed — soft metadata that travels with the
     /// digest as part of the correlation key (never integrity). `None` when `semantic_digest` is absent.
+    /// It MUST be scoped to the payload's schema / equivalence subject: a profile reused across
+    /// unrelated payload shapes would let semantically-different payloads correlate falsely.
     #[serde(skip_serializing_if = "Option::is_none", rename = "assaydigestprofile")]
     pub digest_profile: Option<String>,
 
@@ -206,6 +209,9 @@ impl EvidenceEvent {
     /// [`assay_canonical::semantic_digest`] under `profile`. Additive and soft — it is excluded from
     /// `content_hash`, never on the verification/admission path, and never a substitute for the hard
     /// `content_hash` / `mandate_id`. Errors only if canonicalization fails (e.g. a malformed set value).
+    ///
+    /// `profile` MUST be scoped to this payload's schema / equivalence subject — reusing one profile
+    /// across unrelated payload shapes would let semantically-different payloads correlate falsely.
     pub fn with_semantic_digest(
         mut self,
         set_paths: &[assay_canonical::set_paths::SetPath],
