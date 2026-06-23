@@ -198,6 +198,30 @@ mod tests {
         );
     }
 
+    /// PR-B: the SOFT semantic_digest / digest_profile are excluded from content_hash, so adding them
+    /// is additive — the hard hash (and therefore verification) is unaffected.
+    #[test]
+    fn test_content_hash_excludes_soft_semantic_digest() {
+        let mut event = EvidenceEvent::new(
+            "assay.test",
+            "urn:assay:test",
+            "run_test",
+            0,
+            serde_json::json!({"foo": "bar"}),
+        );
+        event.time = Utc.timestamp_opt(1700000000, 0).unwrap();
+        let before = compute_content_hash(&event).unwrap();
+
+        event.semantic_digest = Some("sha256:SOFT_VALUE".to_string());
+        event.digest_profile = Some("assay.semantic-digest.jcs-rfc8785.v1".to_string());
+        let after = compute_content_hash(&event).unwrap();
+
+        assert_eq!(
+            before, after,
+            "soft semantic_digest/digest_profile MUST be excluded from content_hash (additive, soft)"
+        );
+    }
+
     /// Verify that content hash is deterministic (same input = same output)
     #[test]
     fn test_content_hash_determinism() {
