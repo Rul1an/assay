@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.31.0] - 2026-06-24
+
+### Added
+- `assay.coding_agent.evidence_pack.v0` evidence primitive in `assay-evidence`: a typed payload for one
+  coding-agent run (declared scope, observed effects, per-surface coverage, source class, non-claims) plus a
+  `coding_agent_evidence_event(...)` helper that sets the hard `content_hash`. Facts only: no verdict, no
+  effect-sufficiency, no policy decision (those stay downstream). `network` is required in the declared scope
+  and in coverage; observed absence stays explicit, never a missing field. (#1754)
+
 ## [3.30.0] - 2026-06-23
 
 ### Added
