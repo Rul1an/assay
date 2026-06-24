@@ -1,5 +1,6 @@
 pub mod attestation;
 pub mod bundle;
+pub mod coding_agent;
 pub mod crypto;
 pub mod diff;
 pub mod g3_authorization_context;
@@ -18,6 +19,12 @@ pub use bundle::{
     verify_bundle, verify_bundle_with_limits, AlgorithmMeta, BundleInfo, BundleReader,
     BundleWriter, ErrorClass, ErrorCode, FileMeta, Manifest, VerifyError, VerifyLimits,
     VerifyLimitsOverrides, VerifyResult,
+};
+pub use coding_agent::{
+    coding_agent_evidence_event, CodingAgentCoverage, CodingAgentCoverageState,
+    CodingAgentDeclaredScope, CodingAgentEvidencePayload, CodingAgentNetworkPolicy,
+    CodingAgentObservedEffects, CodingAgentSourceClass, CODING_AGENT_EVIDENCE_EVENT_TYPE,
+    CODING_AGENT_EVIDENCE_SOURCE,
 };
 pub use lint::packs::{load_pack, load_packs, LoadedPack, PackError, PackSource};
 pub use ndjson::{read_events, write_events, NdjsonEvents};

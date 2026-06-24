@@ -282,10 +282,11 @@ impl EvidenceEvent {
 // -- Strongly Typed Payload Helpers --
 
 /// Typed payload variants (for convenience, not enforced by contract)
-#[expect(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "payload")]
 pub enum Payload {
+    #[serde(rename = "assay.coding_agent.evidence_pack.v0")]
+    CodingAgentEvidencePack(crate::coding_agent::CodingAgentEvidencePayload),
     #[serde(rename = "assay.env.filtered")]
     EnvFiltered(PayloadEnvFiltered),
     #[serde(rename = "assay.tool.decision")]
