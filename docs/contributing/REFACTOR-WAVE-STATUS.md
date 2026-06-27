@@ -32,6 +32,7 @@ It answers four questions:
 | Wave68 | Metrics args_valid | `#1535` | Closed-loop | split args_valid metric into facade + `args_valid_next/{matcher,policy,evaluator,tests}.rs`; kept `ArgsValidMetric` public surface stable |
 | Wave69 | Policy tiers | `#1538` | Closed-loop | split policy tier compiler into facade + `tiers_next/{types,compiler,classifier,maps,tests}.rs`; kept `assay_policy::tiers::*` public surface stable |
 | Wave70 | Evidence mandate core types | `#1540` | Closed-loop | split mandate core data model into facade + `core_next/*`; added serde contract guard for `MandateContent` JSON shape |
+| Wave71 | Hotspot LOC under 600 | in progress | Active | current handwritten `>=600` LOC files are being reduced by subsystem waves with `review-hotspot-loc-under-600.sh` as the final closure gate |
 | Housekeeping | Refactor artifacts | `#1527` | Closed-loop | removed historical per-wave `SPLIT-*` docs and `review-wave*.sh` scripts after the durable generic gate landed |
 | Housekeeping | Stale review scripts | `#1529` | Closed-loop | removed non-wave review scripts that still referenced deleted `SPLIT-*` docs |
 
