@@ -1,10 +1,16 @@
 use anyhow::{Context, Result};
 use clap::{ArgGroup, Args, ValueEnum};
-use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
+
+mod report;
+
+use report::{
+    print_table_report, AttestationReport, BackLinkReport, BindingReport, CheckReport,
+    DecisionReport, OutcomeReport, PairingReport, VerificationScope,
+};
 
 #[derive(Debug, Args, Clone)]
 #[command(group(
@@ -62,73 +68,6 @@ pub enum FallbackProjection {
 pub enum McpExecutionRecordFormat {
     Json,
     Table,
-}
-
-#[derive(Debug, Serialize)]
-struct PairingReport {
-    schema: &'static str,
-    ok: bool,
-    canonicalization: &'static str,
-    verification_scope: VerificationScope,
-    binding: BindingReport,
-    attestation: Option<AttestationReport>,
-    decision: DecisionReport,
-    outcome: Option<OutcomeReport>,
-    checks: Vec<CheckReport>,
-    claims_not_made: Vec<&'static str>,
-}
-
-#[derive(Debug, Serialize)]
-struct VerificationScope {
-    role: &'static str,
-    note: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-struct AttestationReport {
-    digest: String,
-    nonce: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct BindingReport {
-    mode: &'static str,
-    digest: String,
-    digest_source: &'static str,
-    /// Self-describing projection id for the named fallback; `None` for whole-envelope / attestation.
-    projection: Option<&'static str>,
-    nonce: Option<String>,
-    nonce_source: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-struct DecisionReport {
-    decision: Option<String>,
-    decided_at: Option<String>,
-    backlink: BackLinkReport,
-    signature_present: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct OutcomeReport {
-    status: Option<String>,
-    completed_at: Option<String>,
-    decision_digest: Option<String>,
-    backlink: BackLinkReport,
-    signature_present: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct BackLinkReport {
-    attestation_digest: Option<String>,
-    attestation_nonce: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct CheckReport {
-    id: &'static str,
-    ok: bool,
-    detail: String,
 }
 
 pub fn cmd_verify_mcp_records(args: McpExecutionRecordArgs) -> Result<i32> {
@@ -561,40 +500,4 @@ fn check_present(id: &'static str, value: Option<&str>, description: &str) -> Ch
             "missing value".to_string()
         },
     }
-}
-
-fn print_table_report(report: &PairingReport) {
-    println!("MCP Execution Record Pairing Report");
-    println!("===================================");
-    println!("OK:               {}", if report.ok { "yes" } else { "no" });
-    println!("Role:             {}", report.verification_scope.role);
-    println!("Binding:          {}", report.binding.mode);
-    println!("Binding digest:   {}", report.binding.digest);
-    println!(
-        "Binding nonce:    {}",
-        report.binding.nonce.as_deref().unwrap_or("-")
-    );
-    println!(
-        "Decision:         {}",
-        report.decision.decision.as_deref().unwrap_or("-")
-    );
-    if let Some(outcome) = &report.outcome {
-        println!(
-            "Outcome:          {}",
-            outcome.status.as_deref().unwrap_or("-")
-        );
-    } else {
-        println!("Outcome:          -");
-    }
-    println!();
-    for check in &report.checks {
-        println!(
-            "{:<36} {:<4} {}",
-            check.id,
-            if check.ok { "ok" } else { "fail" },
-            check.detail
-        );
-    }
-    println!();
-    println!("Claims not made: {}", report.claims_not_made.join(", "));
 }

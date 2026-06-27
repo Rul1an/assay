@@ -1,13 +1,13 @@
-//! MCP04a-3.3c — offline Rekor **v2** inclusion verification.
+//! MCP04a-3.3c - offline Rekor **v2** inclusion verification.
 //!
 //! Verifies that a Sigstore bundle's Rekor **v2** transparency-log entry (`hashedrekord` v0.0.2) is
-//! included in a **signed checkpoint** under caller-PINNED Rekor verifier material — fully offline.
+//! included in a **signed checkpoint** under caller-PINNED Rekor verifier material - fully offline.
 //!
 //! This is a transparency dimension ONLY and is orthogonal to chain / identity / DSSE validity. It does
 //! NOT verify the certificate chain, identity, DSSE envelope, subject-digest binding, **timestamp
 //! freshness** (Rekor v2 issues no SET; freshness is RFC3161, a separate slice), log **consistency**,
 //! **witness** cosignatures, or live log state. A `Verified` here means: this bundle's Rekor v2 entry is
-//! included in a checkpoint signed by the pinned log's key — nothing more. `rekor_verified` alone is never
+//! included in a checkpoint signed by the pinned log's key - nothing more. `rekor_verified` alone is never
 //! a bundle verdict; it only composes with bundle verification (a-3.4).
 //!
 //! Log attribution is bound, not just "some pinned key verifies": the entry's `logId.keyId` selects the
@@ -26,17 +26,25 @@
 //! `OnlineRequired` (Optional -> `NotPresent`); wrong log / invalid checkpoint signature / unsigned-or-
 //! mismatched root / bad inclusion path / leaf-bind mismatch -> `Failed`; valid -> `Verified`.
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use ed25519_dalek::{Signature, VerifyingKey};
-use serde::Deserialize;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 use crate::supply_chain::CheckStatus;
 
-const HASHEDREKORD_KIND: &str = "hashedrekord";
-const HASHEDREKORD_V002: &str = "0.0.2";
-const SUPPORTED_DIGEST_ALG: &str = "SHA2_256";
+mod body;
+mod checkpoint;
+mod trusted_root;
+
+#[cfg(test)]
+mod tests;
+
+use body::HashedRekordBody;
+use checkpoint::{b64, parse_checkpoint, rfc6962_root, sha256};
+use trusted_root::pinned_tlogs;
+
+pub(super) const HASHEDREKORD_KIND: &str = "hashedrekord";
+pub(super) const HASHEDREKORD_V002: &str = "0.0.2";
+pub(super) const SUPPORTED_DIGEST_ALG: &str = "SHA2_256";
 
 /// Whether the caller requires transparency-log inclusion. A-3.3c only sets the LOCAL status; the gating
 /// decision (does this block?) belongs to the carrier / Plimsoll policy (a-3.4).
@@ -57,244 +65,6 @@ impl RekorInclusionOutcome {
     fn new(status: CheckStatus, reason: &'static str) -> Self {
         Self { status, reason }
     }
-}
-
-fn b64(s: &str) -> Option<Vec<u8>> {
-    BASE64.decode(s.as_bytes()).ok()
-}
-
-fn sha256(parts: &[&[u8]]) -> [u8; 32] {
-    let mut h = Sha256::new();
-    for p in parts {
-        h.update(p);
-    }
-    h.finalize().into()
-}
-
-/// A pinned transparency-log: its raw Ed25519 verifier key, its full log id (the `logId.keyId`), and the
-/// normalized host of its `baseUrl` (the operator-pinned origin), when present.
-struct PinnedTlog {
-    key: [u8; 32],
-    log_id: Vec<u8>,
-    origin: Option<String>,
-}
-
-/// Normalize a trusted-root `baseUrl` to a checkpoint origin host: drop the scheme and any trailing slash.
-/// (The Rekor v2 checkpoint origin for the public/staging logs is the bare host.)
-fn normalize_origin(base_url: &str) -> String {
-    base_url
-        .strip_prefix("https://")
-        .or_else(|| base_url.strip_prefix("http://"))
-        .unwrap_or(base_url)
-        .trim_end_matches('/')
-        .to_string()
-}
-
-/// Extract pinned Ed25519 tlogs from a Sigstore trusted root. `publicKey.rawBytes` for `PKIX_ED25519` is
-/// SPKI DER (44 bytes; raw key = trailing 32). `logId.keyId` is the log's identity. ECDSA tlogs (the old
-/// v1 log) are ignored.
-fn pinned_tlogs(trusted_root: &Value) -> Vec<PinnedTlog> {
-    let mut out = Vec::new();
-    let Some(tlogs) = trusted_root.get("tlogs").and_then(Value::as_array) else {
-        return out;
-    };
-    for t in tlogs {
-        if t.pointer("/publicKey/keyDetails").and_then(Value::as_str) != Some("PKIX_ED25519") {
-            continue;
-        }
-        let Some(raw) = t
-            .pointer("/publicKey/rawBytes")
-            .and_then(Value::as_str)
-            .and_then(b64)
-        else {
-            continue;
-        };
-        let key: Option<[u8; 32]> = match raw.len() {
-            44 => raw[12..44].try_into().ok(),
-            32 => raw[..].try_into().ok(),
-            _ => None,
-        };
-        let log_id = t
-            .pointer("/logId/keyId")
-            .and_then(Value::as_str)
-            .and_then(b64);
-        let origin = t
-            .get("baseUrl")
-            .and_then(Value::as_str)
-            .map(normalize_origin);
-        if let (Some(key), Some(log_id)) = (key, log_id) {
-            out.push(PinnedTlog {
-                key,
-                log_id,
-                origin,
-            });
-        }
-    }
-    out
-}
-
-/// One checkpoint signature line: the key name, the 4-byte key hint, and the raw signature bytes.
-struct CheckpointSig {
-    name: String,
-    key_hint: [u8; 4],
-    sig: Vec<u8>,
-}
-
-/// A parsed C2SP signed-note checkpoint.
-struct Checkpoint {
-    signed_text: Vec<u8>,
-    origin: String,
-    tree_size: u64,
-    root_hash: Vec<u8>,
-    signatures: Vec<CheckpointSig>,
-}
-
-/// Parse a checkpoint envelope (C2SP signed note). Body = `origin\n treeSize\n base64(rootHash)\n`
-/// (+ optional extension lines), a blank line, then `— <name> base64(keyid[4] || sig)` line(s). The full
-/// signed text (everything up to and including the newline before the blank line, extensions included) is
-/// preserved for signature verification.
-fn parse_checkpoint(envelope: &str) -> Option<Checkpoint> {
-    let sep = envelope.find("\n\n")?;
-    let signed_text = envelope.as_bytes()[..=sep].to_vec();
-    let body = &envelope[..sep];
-    let sig_block = &envelope[sep + 2..];
-
-    let mut lines = body.split('\n');
-    let origin = lines.next()?.to_string();
-    let tree_size: u64 = lines.next()?.trim().parse().ok()?;
-    let root_hash = b64(lines.next()?.trim())?;
-    if root_hash.len() != 32 {
-        return None;
-    }
-
-    let mut signatures = Vec::new();
-    for line in sig_block.split('\n') {
-        let line = line.trim_end_matches('\r');
-        let Some(rest) = line.strip_prefix("\u{2014} ") else {
-            continue;
-        };
-        let Some((name, b64sig)) = rest.split_once(' ') else {
-            continue;
-        };
-        let Some(decoded) = b64(b64sig) else { continue };
-        if decoded.len() < 4 {
-            continue;
-        }
-        let mut key_hint = [0u8; 4];
-        key_hint.copy_from_slice(&decoded[..4]);
-        signatures.push(CheckpointSig {
-            name: name.to_string(),
-            key_hint,
-            sig: decoded[4..].to_vec(),
-        });
-    }
-    Some(Checkpoint {
-        signed_text,
-        origin,
-        tree_size,
-        root_hash,
-        signatures,
-    })
-}
-
-/// RFC 6962 §2.1.1 inclusion-proof verification. Recomputes the tree root from the leaf hash, the leaf
-/// index `m`, the tree size `n`, and the proof `hashes` (leaf->root order).
-fn rfc6962_root(
-    leaf_hash: [u8; 32],
-    mut fnode: u64,
-    tree_size: u64,
-    hashes: &[[u8; 32]],
-) -> Option<[u8; 32]> {
-    if fnode >= tree_size {
-        return None;
-    }
-    let mut snode = tree_size - 1;
-    let mut r = leaf_hash;
-    for p in hashes {
-        if snode == 0 {
-            return None;
-        }
-        if fnode & 1 == 1 || fnode == snode {
-            r = sha256(&[&[0x01], p, &r]);
-            while fnode & 1 == 0 && fnode != 0 {
-                fnode >>= 1;
-                snode >>= 1;
-            }
-        } else {
-            r = sha256(&[&[0x01], &r, p]);
-        }
-        fnode >>= 1;
-        snode >>= 1;
-    }
-    if snode != 0 {
-        return None;
-    }
-    Some(r)
-}
-
-// --- strict HashedRekord v0.0.2 body schema (deny_unknown_fields rejects unsupported shapes) ---
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct HashedRekordBody {
-    #[serde(rename = "apiVersion")]
-    api_version: String,
-    kind: String,
-    spec: BodySpec,
-}
-
-impl HashedRekordBody {
-    /// Whether this is the single supported entry shape: hashedrekord v0.0.2 with a SHA2_256 digest.
-    fn shape_supported(&self) -> bool {
-        self.api_version == HASHEDREKORD_V002
-            && self.kind == HASHEDREKORD_KIND
-            && self.spec.hashed_rekord_v002.data.algorithm == SUPPORTED_DIGEST_ALG
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BodySpec {
-    #[serde(rename = "hashedRekordV002")]
-    hashed_rekord_v002: BodyV002,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BodyV002 {
-    data: BodyData,
-    signature: BodySignature,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BodyData {
-    algorithm: String,
-    digest: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BodySignature {
-    content: String,
-    verifier: BodyVerifier,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BodyVerifier {
-    #[serde(rename = "keyDetails")]
-    #[allow(dead_code)]
-    key_details: String,
-    #[serde(rename = "x509Certificate")]
-    x509_certificate: BodyCert,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BodyCert {
-    #[serde(rename = "rawBytes")]
-    raw_bytes: String,
 }
 
 fn missing_proof(requirement: TransparencyRequirement) -> RekorInclusionOutcome {
@@ -546,156 +316,4 @@ pub fn verify_rekor_v2_inclusion_offline(
         CheckStatus::Verified,
         "Rekor v2 inclusion proof verifies against pinned checkpoint material",
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const VALID_BODY: &str = r#"{"apiVersion":"0.0.2","kind":"hashedrekord","spec":{"hashedRekordV002":{"data":{"algorithm":"SHA2_256","digest":"AA=="},"signature":{"content":"AA==","verifier":{"keyDetails":"PKIX_ECDSA_P256_SHA_256","x509Certificate":{"rawBytes":"AA=="}}}}}}"#;
-
-    fn parses(body: &str) -> bool {
-        serde_json::from_str::<HashedRekordBody>(body).is_ok()
-    }
-
-    #[test]
-    fn strict_body_schema_accepts_supported_shape() {
-        assert!(parses(VALID_BODY));
-    }
-
-    #[test]
-    fn strict_body_schema_rejects_unknown_top_level_field() {
-        let body = VALID_BODY.replacen(
-            r#""kind":"hashedrekord""#,
-            r#""kind":"hashedrekord","extra":"x""#,
-            1,
-        );
-        assert!(
-            !parses(&body),
-            "deny_unknown_fields must reject extra top-level field"
-        );
-    }
-
-    #[test]
-    fn strict_body_schema_rejects_unknown_nested_field() {
-        let body = VALID_BODY.replacen(
-            r#""algorithm":"SHA2_256""#,
-            r#""algorithm":"SHA2_256","rogue":"x""#,
-            1,
-        );
-        assert!(
-            !parses(&body),
-            "deny_unknown_fields must reject extra nested field"
-        );
-    }
-
-    #[test]
-    fn strict_body_schema_rejects_missing_required_field() {
-        let body = VALID_BODY.replacen(r#","digest":"AA=="#, "", 1);
-        assert!(!parses(&body), "missing required field must not parse");
-    }
-
-    #[test]
-    fn strict_body_schema_rejects_duplicate_field() {
-        // serde's derived struct deserializer rejects a duplicate field.
-        let body = VALID_BODY.replacen(
-            r#""kind":"hashedrekord""#,
-            r#""kind":"hashedrekord","kind":"x""#,
-            1,
-        );
-        assert!(!parses(&body), "duplicate field must not parse");
-    }
-
-    fn shape_ok(body: &str) -> bool {
-        serde_json::from_str::<HashedRekordBody>(body)
-            .map(|b| b.shape_supported())
-            .unwrap_or(false)
-    }
-
-    #[test]
-    fn shape_check_accepts_supported_then_rejects_wrong_values() {
-        assert!(shape_ok(VALID_BODY));
-        assert!(!shape_ok(&VALID_BODY.replacen(
-            r#""apiVersion":"0.0.2""#,
-            r#""apiVersion":"0.0.1""#,
-            1
-        )));
-        assert!(!shape_ok(&VALID_BODY.replacen(
-            r#""kind":"hashedrekord""#,
-            r#""kind":"dsse""#,
-            1
-        )));
-        assert!(!shape_ok(&VALID_BODY.replacen(
-            r#""algorithm":"SHA2_256""#,
-            r#""algorithm":"SHA2_512""#,
-            1
-        )));
-    }
-
-    #[test]
-    fn normalize_origin_strips_scheme_and_trailing_slash() {
-        assert_eq!(
-            normalize_origin("https://log.example.dev/"),
-            "log.example.dev"
-        );
-        assert_eq!(
-            normalize_origin("http://log.example.dev"),
-            "log.example.dev"
-        );
-        assert_eq!(normalize_origin("log.example.dev"), "log.example.dev");
-    }
-
-    #[test]
-    fn rfc6962_rejects_out_of_range_index() {
-        // leaf index >= tree size is impossible -> None.
-        assert!(rfc6962_root([0u8; 32], 5, 5, &[]).is_none());
-    }
-
-    #[test]
-    fn checkpoint_signed_text_includes_extension_lines() {
-        // Regression (carried from a-3.3c): a C2SP checkpoint may carry optional extension lines after the
-        // root-hash line. parse_checkpoint must extract the fields from the first three lines yet PRESERVE
-        // the extension lines in `signed_text`, because the checkpoint signature covers the whole note text
-        // (everything up to the blank line). Truncating the signed body at the root hash would silently
-        // break signature verification for any real checkpoint that uses extensions.
-        use ed25519_dalek::ed25519::signature::Signer;
-        use ed25519_dalek::SigningKey;
-
-        let origin = "rekor.example.dev";
-        let tree_size = 42u64;
-        let root_hash = [0x11u8; 32];
-        let b64root = BASE64.encode(root_hash);
-        // Note text = origin / tree_size / base64(root) / two extension lines, each terminated by '\n'.
-        let text = format!(
-            "{origin}\n{tree_size}\n{b64root}\nTimestamp: 1700000000\nVendor: assay-regression\n"
-        );
-
-        // Sign the FULL note text (extensions included), as a real log signs the checkpoint.
-        let sk = SigningKey::from_bytes(&[7u8; 32]);
-        let vk = sk.verifying_key();
-        let sig = sk.sign(text.as_bytes());
-
-        // Envelope = text, a blank line, then a C2SP signature line "— <name> base64(keyhint||sig)".
-        let mut hinted = vec![0xAA, 0xBB, 0xCC, 0xDD];
-        hinted.extend_from_slice(&sig.to_bytes());
-        let envelope = format!("{text}\n\u{2014} {origin} {}\n", BASE64.encode(&hinted));
-
-        let cp = parse_checkpoint(&envelope).expect("checkpoint with extension lines must parse");
-
-        // Fields come from the first three lines; the extension lines do not disturb them.
-        assert_eq!(cp.origin, origin);
-        assert_eq!(cp.tree_size, tree_size);
-        assert_eq!(cp.root_hash, root_hash.to_vec());
-
-        // The signed text preserves the extension lines verbatim (up to and including the newline before
-        // the blank line), so the signature over the full text verifies.
-        assert_eq!(cp.signed_text, text.as_bytes());
-        assert!(vk.verify_strict(&cp.signed_text, &sig).is_ok());
-
-        // A signature computed over only the 3-line body (extensions dropped) must NOT verify against the
-        // preserved signed text — this is precisely what the regression guards against.
-        let truncated = format!("{origin}\n{tree_size}\n{b64root}\n");
-        let sig_trunc = sk.sign(truncated.as_bytes());
-        assert!(vk.verify_strict(&cp.signed_text, &sig_trunc).is_err());
-    }
 }

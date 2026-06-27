@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.31.1] - 2026-06-27
+
+### Changed
+- Refactor-only source hygiene release: split remaining handwritten Rust hotspots across CLI MCP
+  commands, MCP proxy enforcement, evidence tests, registry supply-chain helpers, runner kernel/redaction
+  tests, and tool-decision truth helpers so every handwritten Rust source file stays below 600 LOC.
+- Add `scripts/ci/review-hotspot-loc-under-600.sh` as a reusable review gate for the hotspot threshold.
+
 ## [3.31.0] - 2026-06-24
 
 ### Added
