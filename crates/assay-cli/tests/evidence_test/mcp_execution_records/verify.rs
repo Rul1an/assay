@@ -5,8 +5,9 @@ use std::fs;
 use tempfile::tempdir;
 
 use super::fixtures::{
-    attestation_json, decision_json, decision_json_with_value, jcs_digest_json, outcome_json,
-    outcome_json_with_backlink, request_envelope_json, ATTESTATION_DIGEST,
+    attestation_digest, attestation_json, binding_nonce, decision_json, decision_json_with_value,
+    jcs_digest_json, outcome_json, outcome_json_with_backlink, request_envelope_json,
+    substituted_binding_nonce,
 };
 
 #[test]
@@ -15,11 +16,17 @@ fn verify_mcp_records_reports_pairing_as_independent_consumer() {
     let attestation = dir.path().join("attestation.json");
     let decision = dir.path().join("decision.json");
     let outcome = dir.path().join("outcome.json");
-    let decision_body = decision_json(ATTESTATION_DIGEST);
+    let attestation_digest = attestation_digest();
+    let binding_nonce = binding_nonce();
+    let decision_body = decision_json(&attestation_digest);
     let decision_digest = jcs_digest_json(&decision_body);
     fs::write(&attestation, attestation_json()).unwrap();
     fs::write(&decision, decision_body).unwrap();
-    fs::write(&outcome, outcome_json(ATTESTATION_DIGEST, &decision_digest)).unwrap();
+    fs::write(
+        &outcome,
+        outcome_json(&attestation_digest, &decision_digest),
+    )
+    .unwrap();
 
     let output = Command::cargo_bin("assay")
         .unwrap()
@@ -45,10 +52,19 @@ fn verify_mcp_records_reports_pairing_as_independent_consumer() {
     assert_eq!(report["ok"], true);
     assert_eq!(report["verification_scope"]["role"], "independent-consumer");
     assert_eq!(report["binding"]["mode"], "sep2787_attestation");
-    assert_eq!(report["binding"]["digest"], ATTESTATION_DIGEST);
-    assert_eq!(report["binding"]["nonce"], "nonce-1");
+    assert_eq!(
+        report["binding"]["digest"].as_str(),
+        Some(attestation_digest.as_str())
+    );
+    assert_eq!(
+        report["binding"]["nonce"].as_str(),
+        Some(binding_nonce.as_str())
+    );
     assert_eq!(report["binding"]["nonce_source"], "issuerAsserted.nonce");
-    assert_eq!(report["attestation"]["digest"], ATTESTATION_DIGEST);
+    assert_eq!(
+        report["attestation"]["digest"].as_str(),
+        Some(attestation_digest.as_str())
+    );
     assert_eq!(report["decision"]["decision"], "allow");
     assert_eq!(report["outcome"]["status"], "executed");
     assert_eq!(report["outcome"]["decision_digest"], decision_digest);
@@ -70,11 +86,12 @@ fn verify_mcp_records_fails_when_outcome_binds_different_decision() {
     let attestation = dir.path().join("attestation.json");
     let decision = dir.path().join("decision.json");
     let outcome = dir.path().join("outcome.json");
+    let attestation_digest = attestation_digest();
     fs::write(&attestation, attestation_json()).unwrap();
-    fs::write(&decision, decision_json(ATTESTATION_DIGEST)).unwrap();
+    fs::write(&decision, decision_json(&attestation_digest)).unwrap();
     fs::write(
         &outcome,
-        outcome_json(ATTESTATION_DIGEST, "sha256:0000000000000000"),
+        outcome_json(&attestation_digest, "sha256:0000000000000000"),
     )
     .unwrap();
 
@@ -160,7 +177,11 @@ fn verify_mcp_records_accepts_request_envelope_fallback_pairing() {
     assert_eq!(report["binding"]["mode"], "request_envelope");
     assert_eq!(report["binding"]["digest"], envelope_digest);
     assert_eq!(report["binding"]["digest_source"], "request_envelope_jcs");
-    assert_eq!(report["binding"]["nonce"], "nonce-1");
+    let binding_nonce = binding_nonce();
+    assert_eq!(
+        report["binding"]["nonce"].as_str(),
+        Some(binding_nonce.as_str())
+    );
     assert_eq!(
         report["binding"]["nonce_source"],
         "record_backlink_consistency"
@@ -250,9 +271,10 @@ fn verify_mcp_records_fallback_fails_on_outcome_nonce_substitution() {
     let decision_digest = jcs_digest_json(&decision_body);
     fs::write(&request_envelope, request_envelope_json()).unwrap();
     fs::write(&decision, decision_body).unwrap();
+    let substituted_nonce = substituted_binding_nonce();
     fs::write(
         &outcome,
-        outcome_json_with_backlink(&envelope_digest, "nonce-2", &decision_digest),
+        outcome_json_with_backlink(&envelope_digest, &substituted_nonce, &decision_digest),
     )
     .unwrap();
 
@@ -280,9 +302,10 @@ fn verify_mcp_records_requires_exactly_one_binding_input() {
     let request_envelope = dir.path().join("request-envelope.json");
     let attestation = dir.path().join("attestation.json");
     let decision = dir.path().join("decision.json");
+    let attestation_digest = attestation_digest();
     fs::write(&request_envelope, request_envelope_json()).unwrap();
     fs::write(&attestation, attestation_json()).unwrap();
-    fs::write(&decision, decision_json(ATTESTATION_DIGEST)).unwrap();
+    fs::write(&decision, decision_json(&attestation_digest)).unwrap();
 
     Command::cargo_bin("assay")
         .unwrap()
@@ -325,8 +348,9 @@ fn verify_mcp_records_accepts_decision_only_pairing() {
     let dir = tempdir().unwrap();
     let attestation = dir.path().join("attestation.json");
     let decision = dir.path().join("decision.json");
+    let attestation_digest = attestation_digest();
     fs::write(&attestation, attestation_json()).unwrap();
-    fs::write(&decision, decision_json(ATTESTATION_DIGEST)).unwrap();
+    fs::write(&decision, decision_json(&attestation_digest)).unwrap();
 
     let output = Command::cargo_bin("assay")
         .unwrap()
@@ -361,10 +385,11 @@ fn verify_mcp_records_fails_on_unknown_decision_enum() {
     let dir = tempdir().unwrap();
     let attestation = dir.path().join("attestation.json");
     let decision = dir.path().join("decision.json");
+    let attestation_digest = attestation_digest();
     fs::write(&attestation, attestation_json()).unwrap();
     fs::write(
         &decision,
-        decision_json_with_value(ATTESTATION_DIGEST, "defer"),
+        decision_json_with_value(&attestation_digest, "defer"),
     )
     .unwrap();
 
