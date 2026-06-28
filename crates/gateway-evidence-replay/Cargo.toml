@@ -1,5 +1,9 @@
 [package]
 name = "gateway-evidence-replay"
+# Internal/experimental MVP: a CLI binary shipped via release artifacts, not crates.io. Not a public
+# crate surface (publishing one is a deliberate Gate-D decision); registered in
+# scripts/ci/check-public-crate-policy.sh non_crates_io_crates.
+publish = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true

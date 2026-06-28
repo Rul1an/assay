@@ -46,6 +46,7 @@ non_crates_io_crates=(
   assay-it
   assay-ebpf
   assay-xtask
+  gateway-evidence-replay
 )
 
 command -v cargo >/dev/null 2>&1 || { echo "cargo missing" >&2; exit 1; }
