@@ -1,0 +1,26 @@
+[package]
+name = "gateway-evidence-replay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Deterministic replay verifier for gateway-path evidence bundles."
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "gateway-evidence-replay"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+chrono = { workspace = true, features = ["std"] }
+clap.workspace = true
+serde = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

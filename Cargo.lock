@@ -2050,6 +2050,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-evidence-replay"
+version = "3.31.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
