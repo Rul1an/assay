@@ -28,9 +28,9 @@ pub fn verify_bundle(bundle: &EvidenceBundle) -> ReplayResult {
         return ReplayResult::invalid();
     }
 
-    if bundle.coverage != Coverage::Complete {
-        return ReplayResult::new(Status::Incomplete, None, vec![Reason::CoverageNotComplete]);
-    }
+    let Some(ceiling) = bundle.source_class.ceiling() else {
+        return ReplayResult::new(Status::Invalid, None, vec![Reason::UnknownSourceClass]);
+    };
 
     let evidence = &bundle.evidence;
     if !evidence.signature_verified || !evidence.runtime_measurement_verified {
@@ -49,14 +49,6 @@ pub fn verify_bundle(bundle: &EvidenceBundle) -> ReplayResult {
     };
     if valid_until < now {
         return ReplayResult::new(Status::Incomplete, None, vec![Reason::AttestationStale]);
-    }
-
-    if evidence.stream_commitment.is_none() {
-        return ReplayResult::new(
-            Status::Incomplete,
-            None,
-            vec![Reason::StreamEvidenceMissing],
-        );
     }
 
     let mut mismatches = Vec::new();
@@ -93,7 +85,9 @@ pub fn verify_bundle(bundle: &EvidenceBundle) -> ReplayResult {
         mismatches.push(Reason::PolicyHashMismatch);
     }
     if let Some(expected_stream) = bundle.claim.expected_stream_commitment.as_ref() {
-        if evidence.stream_commitment.as_deref() != Some(expected_stream.as_str()) {
+        if evidence.stream_commitment.is_some()
+            && evidence.stream_commitment.as_deref() != Some(expected_stream.as_str())
+        {
             mismatches.push(Reason::StreamCommitmentMismatch);
         }
     }
@@ -102,9 +96,17 @@ pub fn verify_bundle(bundle: &EvidenceBundle) -> ReplayResult {
         return ReplayResult::new(Status::PathMismatch, None, mismatches);
     }
 
-    let Some(ceiling) = bundle.source_class.ceiling() else {
-        return ReplayResult::new(Status::Invalid, None, vec![Reason::UnknownSourceClass]);
-    };
+    if evidence.stream_commitment.is_none() {
+        return ReplayResult::new(
+            Status::Incomplete,
+            None,
+            vec![Reason::StreamEvidenceMissing],
+        );
+    }
+
+    if bundle.coverage != Coverage::Complete {
+        return ReplayResult::new(Status::Incomplete, None, vec![Reason::CoverageNotComplete]);
+    }
 
     ReplayResult::new(Status::PathVerified, Some(ceiling), Vec::new())
 }

@@ -25,7 +25,7 @@ struct Vector {
 #[test]
 fn all_gateway_path_vectors_reproduce() {
     let vectors: VectorFile = serde_json::from_str(VECTORS).expect("vectors parse");
-    assert_eq!(vectors.vectors.len(), 13);
+    assert_eq!(vectors.vectors.len(), 17);
 
     for vector in vectors.vectors {
         let got = verify_json_value(vector.inputs);

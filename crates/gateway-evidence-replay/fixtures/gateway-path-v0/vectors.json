@@ -471,6 +471,165 @@
       ]
     },
     {
+      "vector_id": "gw_partial_route_substitution_mismatch",
+      "inputs": {
+        "request_id": "req-014",
+        "coverage": "partial",
+        "source_class": "boundary_observed",
+        "now": "2026-06-28T10:00:00Z",
+        "claim": {
+          "requested_route": "openai:gpt-4.1",
+          "expected_fallback": null,
+          "expected_endpoint": "https://api.openai.example/v1/responses",
+          "expected_stream_commitment": "stream:nnn"
+        },
+        "policy": {
+          "allowed_routes": [
+            "openai:gpt-4.1"
+          ],
+          "allowed_fallbacks": [],
+          "endpoint": "https://api.openai.example/v1/responses",
+          "policy_hash": "sha256:policy-n"
+        },
+        "evidence": {
+          "signature_verified": true,
+          "runtime_measurement_verified": true,
+          "attestation_valid_until": "2026-06-28T10:05:00Z",
+          "selected_route": "local:cheap-model",
+          "fallback_route": null,
+          "endpoint": "https://api.openai.example/v1/responses",
+          "policy_hash": "sha256:policy-n",
+          "stream_commitment": "stream:nnn"
+        },
+        "profile": "gateway-path.v0"
+      },
+      "expected_status": "path_mismatch",
+      "expected_ceiling": null,
+      "expected_reasons": [
+        "route_not_allowed",
+        "route_substitution"
+      ]
+    },
+    {
+      "vector_id": "gw_partial_hidden_fallback_mismatch",
+      "inputs": {
+        "request_id": "req-015",
+        "coverage": "partial",
+        "source_class": "boundary_observed",
+        "now": "2026-06-28T10:00:00Z",
+        "claim": {
+          "requested_route": "openai:gpt-4.1",
+          "expected_fallback": null,
+          "expected_endpoint": "https://api.openai.example/v1/responses",
+          "expected_stream_commitment": "stream:ooo"
+        },
+        "policy": {
+          "allowed_routes": [
+            "openai:gpt-4.1"
+          ],
+          "allowed_fallbacks": [
+            "anthropic:claude-4-sonnet"
+          ],
+          "endpoint": "https://api.openai.example/v1/responses",
+          "policy_hash": "sha256:policy-o"
+        },
+        "evidence": {
+          "signature_verified": true,
+          "runtime_measurement_verified": true,
+          "attestation_valid_until": "2026-06-28T10:05:00Z",
+          "selected_route": "openai:gpt-4.1",
+          "fallback_route": "anthropic:claude-4-sonnet",
+          "endpoint": "https://api.openai.example/v1/responses",
+          "policy_hash": "sha256:policy-o",
+          "stream_commitment": "stream:ooo"
+        },
+        "profile": "gateway-path.v0"
+      },
+      "expected_status": "path_mismatch",
+      "expected_ceiling": null,
+      "expected_reasons": [
+        "fallback_mismatch"
+      ]
+    },
+    {
+      "vector_id": "gw_unknown_source_with_mismatch_invalid",
+      "inputs": {
+        "request_id": "req-016",
+        "coverage": "complete",
+        "source_class": "gateway_self_claimed",
+        "now": "2026-06-28T10:00:00Z",
+        "claim": {
+          "requested_route": "openai:gpt-4.1",
+          "expected_fallback": null,
+          "expected_endpoint": "https://api.openai.example/v1/responses",
+          "expected_stream_commitment": "stream:ppp"
+        },
+        "policy": {
+          "allowed_routes": [
+            "openai:gpt-4.1"
+          ],
+          "allowed_fallbacks": [],
+          "endpoint": "https://api.openai.example/v1/responses",
+          "policy_hash": "sha256:policy-p"
+        },
+        "evidence": {
+          "signature_verified": true,
+          "runtime_measurement_verified": true,
+          "attestation_valid_until": "2026-06-28T10:05:00Z",
+          "selected_route": "local:cheap-model",
+          "fallback_route": null,
+          "endpoint": "https://api.openai.example/v1/responses",
+          "policy_hash": "sha256:policy-p",
+          "stream_commitment": "stream:ppp"
+        },
+        "profile": "gateway-path.v0"
+      },
+      "expected_status": "invalid",
+      "expected_ceiling": null,
+      "expected_reasons": [
+        "unknown_source_class"
+      ]
+    },
+    {
+      "vector_id": "gw_malformed_attestation_timestamp_invalid",
+      "inputs": {
+        "request_id": "req-017",
+        "coverage": "complete",
+        "source_class": "boundary_observed",
+        "now": "2026-06-28T10:00:00Z",
+        "claim": {
+          "requested_route": "openai:gpt-4.1",
+          "expected_fallback": null,
+          "expected_endpoint": "https://api.openai.example/v1/responses",
+          "expected_stream_commitment": "stream:qqq"
+        },
+        "policy": {
+          "allowed_routes": [
+            "openai:gpt-4.1"
+          ],
+          "allowed_fallbacks": [],
+          "endpoint": "https://api.openai.example/v1/responses",
+          "policy_hash": "sha256:policy-q"
+        },
+        "evidence": {
+          "signature_verified": true,
+          "runtime_measurement_verified": true,
+          "attestation_valid_until": "2026-06-28 10:05:00",
+          "selected_route": "openai:gpt-4.1",
+          "fallback_route": null,
+          "endpoint": "https://api.openai.example/v1/responses",
+          "policy_hash": "sha256:policy-q",
+          "stream_commitment": "stream:qqq"
+        },
+        "profile": "gateway-path.v0"
+      },
+      "expected_status": "invalid",
+      "expected_ceiling": null,
+      "expected_reasons": [
+        "malformed_input"
+      ]
+    },
+    {
       "vector_id": "gw_malformed_top_level_invalid",
       "inputs": "not-an-object",
       "expected_status": "invalid",

@@ -22,6 +22,8 @@ pub enum SourceClass {
     ReceiverReceipt,
     BoundaryObserved,
     ThirdPartyObserved,
+    // Deliberate exception to the closed schema: unknown provenance is a
+    // typed fail-closed reason, not a generic malformed shape.
     #[serde(other)]
     Unknown,
 }
@@ -234,6 +236,9 @@ pub struct Evidence {
 impl Evidence {
     fn validate_shape(&self) -> Result<(), ShapeError> {
         require_optional_nonempty(self.attestation_valid_until.as_deref())?;
+        if let Some(value) = self.attestation_valid_until.as_deref() {
+            parse_utc(value)?;
+        }
         require_nonempty(&self.selected_route)?;
         require_optional_nonempty(self.fallback_route.as_deref())?;
         require_optional_nonempty(self.endpoint.as_deref())?;
