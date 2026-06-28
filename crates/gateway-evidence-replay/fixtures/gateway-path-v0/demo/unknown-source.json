@@ -1,0 +1,33 @@
+{
+  "request_id": "demo-unknown-source",
+  "coverage": "complete",
+  "source_class": "gateway_self_claimed",
+  "now": "2026-06-28T10:00:00Z",
+  "claim": {
+    "requested_route": "openai:gpt-4.1",
+    "expected_fallback": null,
+    "expected_endpoint": "https://api.openai.example/v1/responses",
+    "expected_stream_commitment": "stream:demo-unknown"
+  },
+  "policy": {
+    "allowed_routes": [
+      "openai:gpt-4.1"
+    ],
+    "allowed_fallbacks": [
+      "openai:gpt-4.1-mini"
+    ],
+    "endpoint": "https://api.openai.example/v1/responses",
+    "policy_hash": "sha256:demo-policy"
+  },
+  "evidence": {
+    "signature_verified": true,
+    "runtime_measurement_verified": true,
+    "attestation_valid_until": "2026-06-28T10:05:00Z",
+    "selected_route": "openai:gpt-4.1",
+    "fallback_route": null,
+    "endpoint": "https://api.openai.example/v1/responses",
+    "policy_hash": "sha256:demo-policy",
+    "stream_commitment": "stream:demo-unknown"
+  },
+  "profile": "gateway-path.v0"
+}
