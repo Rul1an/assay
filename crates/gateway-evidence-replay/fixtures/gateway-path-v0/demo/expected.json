@@ -1,0 +1,35 @@
+{
+  "profile": "gateway-path.v0.demo.expected",
+  "cases": [
+    {
+      "file": "clean-route.json",
+      "status": "path_verified",
+      "ceiling": "observed_in_path",
+      "reasons": []
+    },
+    {
+      "file": "partial-route-substitution.json",
+      "status": "path_mismatch",
+      "ceiling": null,
+      "reasons": [
+        "route_substitution"
+      ]
+    },
+    {
+      "file": "stale-attestation.json",
+      "status": "incomplete",
+      "ceiling": null,
+      "reasons": [
+        "attestation_stale"
+      ]
+    },
+    {
+      "file": "unknown-source.json",
+      "status": "invalid",
+      "ceiling": null,
+      "reasons": [
+        "unknown_source_class"
+      ]
+    }
+  ]
+}
