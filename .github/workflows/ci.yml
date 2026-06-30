@@ -115,6 +115,8 @@ jobs:
         run: cargo install --locked cargo-deny
       - name: Install cargo-audit
         run: cargo install --locked cargo-audit
+      - name: Check Aya/eBPF dependency alignment
+        run: ./scripts/ci/check-aya-ebpf-alignment.sh
       - name: cargo deny (advisories, licenses, bans, sources)
         run: cargo deny check advisories bans licenses sources
       - name: cargo audit (RustSec)
@@ -325,7 +327,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
 
