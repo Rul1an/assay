@@ -105,9 +105,9 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
     let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
 
     // Validates that we have a file pointer (arg 0)
-    // SAFETY: The LSM hook supplies argument 0 as a kernel `file` pointer. The
-    // pointer is checked for null before any typed field access.
-    let file_ptr: *const c_void = unsafe { ctx.arg(0) };
+    // The LSM hook supplies argument 0 as a kernel `file` pointer. The pointer
+    // is checked for null before any typed field access.
+    let file_ptr: *const c_void = ctx.arg(0);
     if file_ptr.is_null() {
         return Ok(0);
     }
@@ -187,7 +187,7 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
             // pointer arguments are passed to the helper.
             unsafe {
                 aya_ebpf::helpers::bpf_printk!(
-                    b"LSM: BLOCKED %llu:%llu (Exact Gen %u) rule=%u\0",
+                    c"LSM: BLOCKED %llu:%llu (Exact Gen %u) rule=%u",
                     s_dev as u64,
                     i_ino,
                     i_gen,
@@ -244,7 +244,7 @@ fn try_file_open_lsm(ctx: LsmContext) -> Result<i32, i32> {
         // arguments are passed to the helper.
         unsafe {
             aya_ebpf::helpers::bpf_printk!(
-                b"LSM: BLOCKED %llu:%llu (Fallback Gen) rule=%u\0",
+                c"LSM: BLOCKED %llu:%llu (Fallback Gen) rule=%u",
                 s_dev as u64,
                 i_ino,
                 *rule_id

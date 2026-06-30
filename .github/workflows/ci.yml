@@ -115,6 +115,8 @@ jobs:
         run: cargo install --locked cargo-deny
       - name: Install cargo-audit
         run: cargo install --locked cargo-audit
+      - name: Check Aya/eBPF dependency alignment
+        run: ./scripts/ci/check-aya-ebpf-alignment.sh
       - name: cargo deny (advisories, licenses, bans, sources)
         run: cargo deny check advisories bans licenses sources
       - name: cargo audit (RustSec)

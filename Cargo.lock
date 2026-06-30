@@ -693,10 +693,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "aya-ebpf"
-version = "0.1.0"
-source = "git+https://github.com/aya-rs/aya?tag=aya-v0.13.0#df94371c3fd447d49878660b4bc8c64a3e13890a"
+name = "aya-build"
+version = "0.2.0"
+source = "git+https://github.com/aya-rs/aya?tag=aya-v0.14.0#302985c72850cd9a8f1d791a11d247a4fbe1c5b1"
 dependencies = [
+ "anyhow",
+ "cargo_metadata",
+ "rustc_version",
+ "which",
+]
+
+[[package]]
+name = "aya-ebpf"
+version = "0.2.0"
+source = "git+https://github.com/aya-rs/aya?tag=aya-v0.14.0#302985c72850cd9a8f1d791a11d247a4fbe1c5b1"
+dependencies = [
+ "aya-build",
  "aya-ebpf-bindings",
  "aya-ebpf-cty",
  "aya-ebpf-macros",
@@ -705,24 +717,28 @@ dependencies = [
 
 [[package]]
 name = "aya-ebpf-bindings"
-version = "0.1.0"
-source = "git+https://github.com/aya-rs/aya?tag=aya-v0.13.0#df94371c3fd447d49878660b4bc8c64a3e13890a"
+version = "0.2.0"
+source = "git+https://github.com/aya-rs/aya?tag=aya-v0.14.0#302985c72850cd9a8f1d791a11d247a4fbe1c5b1"
 dependencies = [
+ "aya-build",
  "aya-ebpf-cty",
 ]
 
 [[package]]
 name = "aya-ebpf-cty"
-version = "0.2.1"
-source = "git+https://github.com/aya-rs/aya?tag=aya-v0.13.0#df94371c3fd447d49878660b4bc8c64a3e13890a"
+version = "0.3.0"
+source = "git+https://github.com/aya-rs/aya?tag=aya-v0.14.0#302985c72850cd9a8f1d791a11d247a4fbe1c5b1"
+dependencies = [
+ "aya-build",
+]
 
 [[package]]
 name = "aya-ebpf-macros"
-version = "0.1.0"
-source = "git+https://github.com/aya-rs/aya?tag=aya-v0.13.0#df94371c3fd447d49878660b4bc8c64a3e13890a"
+version = "0.2.0"
+source = "git+https://github.com/aya-rs/aya?tag=aya-v0.14.0#302985c72850cd9a8f1d791a11d247a4fbe1c5b1"
 dependencies = [
- "proc-macro-error",
  "proc-macro2",
+ "proc-macro2-diagnostics",
  "quote",
  "syn 2.0.117",
 ]
@@ -734,17 +750,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "476912cd6322ecf481a48f9db82207406a472563875eef014e927800522aac5c"
 dependencies = [
  "aya",
- "aya-log-common 0.2.0",
+ "aya-log-common 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "log",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "aya-log-common"
-version = "0.1.14"
-source = "git+https://github.com/aya-rs/aya?tag=aya-v0.13.0#df94371c3fd447d49878660b4bc8c64a3e13890a"
-dependencies = [
- "num_enum",
 ]
 
 [[package]]
@@ -757,21 +765,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "aya-log-common"
+version = "0.2.0"
+source = "git+https://github.com/aya-rs/aya?tag=aya-v0.14.0#302985c72850cd9a8f1d791a11d247a4fbe1c5b1"
+dependencies = [
+ "num_enum",
+]
+
+[[package]]
 name = "aya-log-ebpf"
-version = "0.1.0"
-source = "git+https://github.com/aya-rs/aya?tag=aya-v0.13.0#df94371c3fd447d49878660b4bc8c64a3e13890a"
+version = "0.2.0"
+source = "git+https://github.com/aya-rs/aya?tag=aya-v0.14.0#302985c72850cd9a8f1d791a11d247a4fbe1c5b1"
 dependencies = [
  "aya-ebpf",
- "aya-log-common 0.1.14",
+ "aya-log-common 0.2.0 (git+https://github.com/aya-rs/aya?tag=aya-v0.14.0)",
  "aya-log-ebpf-macros",
 ]
 
 [[package]]
 name = "aya-log-ebpf-macros"
-version = "0.1.0"
-source = "git+https://github.com/aya-rs/aya?tag=aya-v0.13.0#df94371c3fd447d49878660b4bc8c64a3e13890a"
+version = "0.2.0"
+source = "git+https://github.com/aya-rs/aya?tag=aya-v0.14.0#302985c72850cd9a8f1d791a11d247a4fbe1c5b1"
 dependencies = [
- "aya-log-common 0.1.14",
+ "aya-log-common 0.2.0 (git+https://github.com/aya-rs/aya?tag=aya-v0.14.0)",
  "aya-log-parser",
  "proc-macro2",
  "quote",
@@ -780,10 +796,10 @@ dependencies = [
 
 [[package]]
 name = "aya-log-parser"
-version = "0.1.13"
-source = "git+https://github.com/aya-rs/aya?tag=aya-v0.13.0#df94371c3fd447d49878660b4bc8c64a3e13890a"
+version = "0.2.0"
+source = "git+https://github.com/aya-rs/aya?tag=aya-v0.14.0#302985c72850cd9a8f1d791a11d247a4fbe1c5b1"
 dependencies = [
- "aya-log-common 0.1.14",
+ "aya-log-common 0.2.0 (git+https://github.com/aya-rs/aya?tag=aya-v0.14.0)",
 ]
 
 [[package]]
@@ -931,6 +947,39 @@ name = "bytes"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ae3f5d315924270530207e2a68396c3cc547f6dca3fbdca317cfb1a51edb593"
+
+[[package]]
+name = "camino"
+version = "1.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f2d30e4173c4026932d51d31d6b0613b1fd3014bf3f9f8943d4ba139c437ba0"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
+name = "cargo-platform"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd0061da739915fae12ea00e16397555ed4371a6bb285431aab930f61b0aa4ba"
+dependencies = [
+ "serde",
+ "serde_core",
+]
+
+[[package]]
+name = "cargo_metadata"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef987d17b0a113becdd19d3d0022d04d7ef41f9efe4f3fb63ac44ba61df3ade9"
+dependencies = [
+ "camino",
+ "cargo-platform",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "cast"
@@ -3729,35 +3778,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "proc-macro-error"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c"
-dependencies = [
- "proc-macro-error-attr",
- "proc-macro2",
- "quote",
- "version_check",
-]
-
-[[package]]
-name = "proc-macro-error-attr"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1be40180e52ecc98ad80b184934baf3d0d29f979574e439af5a55274b35f869"
-dependencies = [
- "proc-macro2",
- "quote",
- "version_check",
-]
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "proc-macro2-diagnostics"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af066a9c399a26e020ada66a034357a868728e72cd426f3adcd35f80d88d88c8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+ "version_check",
 ]
 
 [[package]]
@@ -4650,6 +4688,10 @@ name = "semver"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
+dependencies = [
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "serde"
@@ -5886,6 +5928,15 @@ dependencies = [
  "lazy_static",
  "serde",
  "wezterm-dynamic",
+]
+
+[[package]]
+name = "which"
+version = "8.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48d7cd18d4acb58fb3cdfe9ea54e6cd96a4e7d4cc45c56338b236e82dad47248"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
