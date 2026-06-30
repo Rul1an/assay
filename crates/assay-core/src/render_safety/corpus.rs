@@ -48,6 +48,7 @@ lazy_static! {
             p("email", "pii", "alice@example.com".to_string(), "alice@example.com".to_string()),
             p("slack_user_id", "pii", "U01ABCDEFG".to_string(), "U01ABCDEFG".to_string()),
             p("ansi_escape", "control", "\u{1b}[31mRED\u{1b}[0m".to_string(), "\u{1b}".to_string()),
+            p("c1_csi", "control", "\u{009b}31mRED".to_string(), "\u{009b}".to_string()),
             p("unicode_bidi", "control", "\u{202e}reversed\u{202c}".to_string(), "\u{202e}".to_string()),
             // Secret near the truncation boundary: guards redact-before-truncate.
             p("long_secret_prefix", "secret", boundary, "ghp_".to_string()),
