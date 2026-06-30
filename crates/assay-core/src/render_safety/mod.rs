@@ -120,7 +120,7 @@ lazy_static! {
     static ref LONE_ESC: Regex = Regex::new(r"\x1b").unwrap();
     // C0/C1 control (keep \t \n \r), DEL, and Unicode bidi formatting overrides.
     static ref CONTROL_RE: Regex =
-        Regex::new(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u{202a}-\u{202e}\u{2066}-\u{2069}]").unwrap();
+        Regex::new(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u{80}-\u{9f}\u{202a}-\u{202e}\u{2066}-\u{2069}]").unwrap();
 }
 
 /// Strip terminal-control: ANSI/OSC sequences, BEL, other C0/C1 controls (keeping tab/newline/CR),
@@ -141,6 +141,7 @@ pub fn has_residual_control(s: &str) -> bool {
             || c == '\u{0b}'
             || c == '\u{0c}'
             || ('\u{0e}'..='\u{1f}').contains(&c)
+            || ('\u{80}'..='\u{9f}').contains(&c)
             || ('\u{202a}'..='\u{202e}').contains(&c)
             || ('\u{2066}'..='\u{2069}').contains(&c)
     })

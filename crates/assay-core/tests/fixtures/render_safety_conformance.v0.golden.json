@@ -1,11 +1,11 @@
 {
   "schema": "assay.render_safety_conformance.v0",
-  "corpus_digest": "sha256:c903b6ec1246f0b4298f3e07f41346c0803873cf5f91a0a63cb1e75e5652eb5c",
+  "corpus_digest": "sha256:685c3e43b896be810c9ac218953352b5ca39386562d9cff9f0719f030760accd",
   "sinks": [
     {
       "sink": "stdout",
       "renderer": "assay-core",
-      "hostile_probe_count": 10,
+      "hostile_probe_count": 11,
       "benign_control_count": 5,
       "raw_secret_leak_count": 0,
       "raw_pii_leak_count": 0,
@@ -17,7 +17,7 @@
     {
       "sink": "json",
       "renderer": "assay-core",
-      "hostile_probe_count": 10,
+      "hostile_probe_count": 11,
       "benign_control_count": 5,
       "raw_secret_leak_count": 0,
       "raw_pii_leak_count": 0,
@@ -29,7 +29,7 @@
     {
       "sink": "sarif",
       "renderer": "assay-core",
-      "hostile_probe_count": 10,
+      "hostile_probe_count": 11,
       "benign_control_count": 5,
       "raw_secret_leak_count": 0,
       "raw_pii_leak_count": 0,
@@ -41,7 +41,7 @@
     {
       "sink": "junit",
       "renderer": "assay-core",
-      "hostile_probe_count": 10,
+      "hostile_probe_count": 11,
       "benign_control_count": 5,
       "raw_secret_leak_count": 0,
       "raw_pii_leak_count": 0,
@@ -53,7 +53,7 @@
     {
       "sink": "markdown",
       "renderer": "assay-core",
-      "hostile_probe_count": 10,
+      "hostile_probe_count": 11,
       "benign_control_count": 5,
       "raw_secret_leak_count": 0,
       "raw_pii_leak_count": 0,
@@ -65,7 +65,7 @@
     {
       "sink": "otel",
       "renderer": "assay-core",
-      "hostile_probe_count": 10,
+      "hostile_probe_count": 11,
       "benign_control_count": 5,
       "raw_secret_leak_count": 0,
       "raw_pii_leak_count": 0,
