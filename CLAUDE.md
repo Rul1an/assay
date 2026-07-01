@@ -6,23 +6,43 @@ Assay is a **Policy-as-Code** engine for Model Context Protocol (MCP) that valid
 
 ## Workspace Structure
 
-Rust monorepo with workspace version `2.15.0`.
+Rust monorepo with workspace version `3.31.1` (21 crates). Curated view, grouped by role:
 
 ```
 crates/
+  # Core engine + CLI
   assay-core/       Core evaluation engine (Runner, Store, MCP, Trace, Report, Providers, VCR, Replay Bundle)
   assay-cli/        CLI binary ("assay") - all user-facing commands
   assay-metrics/    Standard metrics (MustContain, RegexMatch, ArgsValid, SequenceValid, etc.)
-  assay-mcp-server/ MCP server/proxy for runtime policy enforcement (JSON-RPC over stdio)
-  assay-monitor/    Runtime eBPF/LSM monitoring (Linux only)
-  assay-policy/     Policy compilation (Tier 1: kernel, Tier 2: userspace)
+  assay-common/     Shared types (no_std compatible for eBPF)
+  assay-canonical/  Deterministic canonicalization: RFC 8785 (JCS) bytes, sha256 content IDs, semantic digests
+
+  # Evidence + distribution
   assay-evidence/   Evidence bundles (tar.gz with manifest.json + events.ndjson), lint, diff, sanitize
   assay-registry/   Pack Registry client (HTTP, DSSE verification, OIDC auth, local caching, lockfile v2)
-  assay-common/     Shared types (no_std compatible for eBPF)
+  gateway-evidence-replay/  Deterministic replay verifier for gateway-path evidence bundles (standalone)
+
+  # Policy + runtime enforcement
+  assay-policy/     Policy compilation (Tier 1: kernel, Tier 2: userspace)
+  assay-mcp-server/ MCP server/proxy for runtime policy enforcement (JSON-RPC over stdio)
+  assay-monitor/    Runtime eBPF/LSM monitoring (Linux only)
   assay-ebpf/       Kernel eBPF programs (LSM hooks + tracepoints)
+
+  # Measured-run substrate (internal/experimental "Assay-Runner", API unstable)
+  assay-runner-core/    Runner orchestration, archive assembly, layer normalizers
+  assay-runner-linux/   Linux-only platform adapter, cgroup placement primitives
+  assay-runner-schema/  Versioned schema types + constants for Runner v0 contracts
+
+  # Protocol adapters (evidence translation)
+  assay-adapter-api/  Adapter API contracts (shared trait surface)
+  assay-adapter-a2a/  A2A protocol adapter
+  assay-adapter-acp/  ACP protocol adapter
+  assay-adapter-ucp/  UCP protocol adapter
+
+  # Simulation + tooling
   assay-sim/        Attack simulation harness (chaos, differential, integrity testing)
   assay-xtask/      Build tooling
-assay-python-sdk/   Python SDK (PyO3 bindings + pytest plugin)
+assay-python-sdk/   Python SDK (PyO3 bindings + pytest plugin; crate name "assay-it")
 ```
 
 ## Key Commands
@@ -37,7 +57,7 @@ cargo xtask build-ebpf                      # Build eBPF (Linux)
 
 ## CLI Entry Points
 
-All commands defined in `crates/assay-cli/src/cli/args.rs`, dispatched in `crates/assay-cli/src/cli/commands/mod.rs`.
+All commands defined in `crates/assay-cli/src/cli/args/mod.rs`, dispatched in `crates/assay-cli/src/cli/commands/mod.rs`. The table below is a representative subset; the CLI has ~40 subcommands (see `commands/` for the full set, including `import`, `project-otel`, `inventory`, `discover`, and the `verify-*` evidence family).
 
 | Command | Purpose | Entry File |
 |---------|---------|------------|
@@ -90,16 +110,20 @@ Error classification: `ErrorClass` (Integrity/Contract/Security/Limits) + `Error
 ## Crate Dependency Graph
 
 ```
-assay-cli -> assay-core, assay-metrics, assay-monitor, assay-common, assay-policy, assay-evidence, assay-mcp-server, assay-sim (optional)
+assay-cli -> assay-core, assay-metrics, assay-monitor, assay-common, assay-policy, assay-evidence, assay-registry, assay-mcp-server, assay-runner-core, assay-runner-schema, assay-runner-linux, assay-sim
 assay-mcp-server -> assay-core, assay-common, assay-metrics
 assay-monitor -> assay-common, assay-policy
 assay-metrics -> assay-core, assay-common
-assay-core -> assay-common
+assay-core -> assay-adapter-api, assay-common
+assay-evidence -> assay-canonical
+assay-adapter-api -> assay-evidence
+assay-adapter-{a2a,acp,ucp} -> assay-adapter-api, assay-evidence
+assay-runner-core -> assay-common, assay-monitor, assay-runner-schema
 assay-sim -> assay-core, assay-evidence
 assay-ebpf -> assay-common
 ```
 
-Leaf crates (no internal dependencies): `assay-common`, `assay-policy`, `assay-evidence`, `assay-registry`, `assay-xtask`.
+Leaf crates (no internal dependencies): `assay-common`, `assay-canonical`, `assay-policy`, `assay-registry`, `assay-runner-schema`, `assay-runner-linux`, `gateway-evidence-replay`, `assay-xtask`.
 
 No circular dependencies. All dependencies flow in one direction.
 
@@ -234,7 +258,7 @@ See `docs/PERFORMANCE-ASSESSMENT.md` for full documentation.
 
 ## Conventions
 
-- Workspace version in root `Cargo.toml` (`version = "2.15.0"`)
+- Workspace version in root `Cargo.toml` (`version = "3.31.1"`)
 - Internal crate deps use `workspace = true` with path + version
 - `#[deny(unsafe_code)]` on all crates except assay-ebpf
 - Error handling: `anyhow` for applications, `thiserror` for libraries
