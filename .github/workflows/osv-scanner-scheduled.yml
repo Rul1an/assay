@@ -92,6 +92,8 @@ jobs:
 
       - name: Validate OSV scanner result
         shell: bash
+        env:
+          OSV_OUTCOME: ${{ steps.osv-scan.outcome }}
         run: |
           set -euo pipefail
 
@@ -128,7 +130,7 @@ jobs:
 
           echo "osv-vulnerability-results=$vuln_count"
 
-          if [ "${{ steps.osv-scan.outcome }}" != "success" ] && [ "$vuln_count" -eq 0 ]; then
+          if [ "$OSV_OUTCOME" != "success" ] && [ "$vuln_count" -eq 0 ]; then
             echo "::error::OSV scanner exited non-zero without vulnerability results; treating this as scanner execution failure"
             exit 1
           fi
