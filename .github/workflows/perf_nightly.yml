@@ -11,6 +11,9 @@ on:
         required: false
         default: '30'
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
