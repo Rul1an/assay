@@ -1,5 +1,7 @@
 name: Assay Gate
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   assay:
     runs-on: ubuntu-latest
