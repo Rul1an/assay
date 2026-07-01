@@ -12,10 +12,9 @@ concurrency:
 
 # Minimal permissions:
 # - contents:read for checkout
-# - actions:write for artifact upload
+# - upload-artifact uses the workflow-scoped runtime token; no actions:write
 permissions:
   contents: read
-  actions: write
 
 jobs:
   soak:

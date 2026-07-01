@@ -11,7 +11,8 @@ concurrency:
 
 permissions:
   contents: read
-  actions: write
+  # actions/upload-artifact only needs the workflow-scoped runtime token,
+  # not repository actions:write.
 
 jobs:
   otel_bridge:

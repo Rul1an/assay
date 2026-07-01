@@ -16,7 +16,6 @@ concurrency:
 
 permissions:
   contents: read
-  actions: write
 
 jobs:
   closure:
@@ -24,6 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     continue-on-error: true
+    permissions:
+      actions: read # gh run list/download readiness artifacts
+      contents: read
 
     steps:
       - name: Checkout
