@@ -16,13 +16,15 @@ on:
     - cron: "0 3 * * *"  # nightly UTC, full benches
 
 permissions:
-  checks: write
   contents: read
 
 jobs:
   benches:
     name: Criterion baseline (main)
     runs-on: ubuntu-latest
+    permissions:
+      checks: write # bencher can publish GitHub check summaries
+      contents: read
     env:
       QUICK: "1"
     steps:

@@ -16,9 +16,7 @@ on:
         type: boolean
 
 permissions:
-  checks: write
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   generate-docs:
@@ -27,9 +25,9 @@ jobs:
     # Only run on main repo, not forks
     if: github.repository == 'Rul1an/assay'
     permissions:
-      checks: write
-      contents: write
-      pull-requests: write
+      checks: write # publish the required CI check on generated docs PRs
+      contents: write # create-pull-request commits docs changes to docs/auto-update
+      pull-requests: write # create and auto-merge the generated docs PR
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
