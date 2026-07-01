@@ -1,0 +1,19 @@
+{
+  "schema": "assay.tool_decision_truth.v0",
+  "tool_name": "deploy",
+  "args_digest": "hmac-sha256:fixture-kid-v0:c6b5ae61ff4d034143dcecfffca65868bed7c7b701cb87971d495149d5616ffd",
+  "order": 0,
+  "source_class": "authoritative_boundary",
+  "call_id": "deploy_match",
+  "result_status": "ok",
+  "identity_state": "present",
+  "key_id": "fixture-kid-v0",
+  "declared_ref": null,
+  "decision_verdict": "match",
+  "observed_input_digest": "sha256:abb703de41b9a418d2f257c0c30810524aaf2590c563946170caf0e95768a90f",
+  "declared_policy_digest": "sha256:4c3c6a7a02a1877c0c68ea389e4c6234aff49db88827d3a8ef67d1e992e98e6f",
+  "decision_identity": {
+    "observed_input_digest": "sha256:abb703de41b9a418d2f257c0c30810524aaf2590c563946170caf0e95768a90f",
+    "declared_policy_digest": "sha256:4c3c6a7a02a1877c0c68ea389e4c6234aff49db88827d3a8ef67d1e992e98e6f"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "schema": "assay.runner.correlation_report.v0",
+  "run_id": "drift_fixture_b_gemini_001",
+  "status": "clean",
+  "notes": []
+}

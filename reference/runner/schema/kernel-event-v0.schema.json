@@ -1,0 +1,286 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/main/docs/reference/runner/schema/kernel-event-v0.schema.json",
+  "title": "Assay Runner Kernel Event v0",
+  "description": "Line schema for one layers/kernel.ndjson record. The stream is NDJSON: validate each non-empty line independently against this schema. Open-event metadata fields are optional so older v0 archives remain readable.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "run_id",
+    "seq",
+    "pid",
+    "event_type",
+    "kind",
+    "value"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.runner.kernel_event.v0"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "event_type": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Internal monitor event id. Known v0 ids are 1=openat, 2=connect, 4=exec, 10=file_blocked, 20=connect_blocked; unknown ids are represented by kind=event_<id>."
+    },
+    "kind": {
+      "anyOf": [
+        {
+          "enum": [
+            "openat",
+            "connect",
+            "exec",
+            "file_blocked",
+            "connect_blocked"
+          ]
+        },
+        {
+          "type": "string",
+          "pattern": "^event_[0-9]+$"
+        }
+      ],
+      "description": "Normalized kernel event kind. Known v0 kinds are enumerated; unrecognized monitor ids use event_<id>."
+    },
+    "value": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Normalized path or endpoint when available."
+    },
+    "flags": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Linux open flags captured from an open-style syscall."
+    },
+    "mode": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Linux create mode argument when present."
+    },
+    "resolve": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "openat2 resolve flags when non-zero."
+    },
+    "return_value": {
+      "type": "integer",
+      "description": "Syscall return value; non-negative means success for open-style events."
+    },
+    "access_mode": {
+      "enum": [
+        "read",
+        "write",
+        "read_write",
+        "unknown"
+      ],
+      "description": "Derived from flags & O_ACCMODE for open-style events."
+    },
+    "operation_flags": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "create",
+          "truncate",
+          "append",
+          "exclusive"
+        ]
+      },
+      "uniqueItems": true,
+      "description": "Derived operation hints from open flags. These are open-intent hints, not fd-level byte evidence."
+    },
+    "status": {
+      "enum": [
+        "success",
+        "error"
+      ],
+      "description": "Derived from return_value for open-style events."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "openat"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "event_type": {
+            "const": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "connect"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "event_type": {
+            "const": 2
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "exec"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "event_type": {
+            "const": 4
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "file_blocked"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "event_type": {
+            "const": 10
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "connect_blocked"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "event_type": {
+            "const": 20
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "return_value"
+        ]
+      }
+    }
+  ],
+  "examples": [
+    {
+      "schema": "assay.runner.kernel_event.v0",
+      "run_id": "run_001",
+      "seq": 0,
+      "pid": 1234,
+      "event_type": 1,
+      "kind": "openat",
+      "value": "/tmp/work/fixture-output.txt",
+      "flags": 577,
+      "mode": 420,
+      "return_value": 4,
+      "access_mode": "write",
+      "operation_flags": [
+        "create",
+        "truncate"
+      ],
+      "status": "success"
+    },
+    {
+      "schema": "assay.runner.kernel_event.v0",
+      "run_id": "run_001",
+      "seq": 1,
+      "pid": 1234,
+      "event_type": 2,
+      "kind": "connect",
+      "value": "203.0.113.10:443"
+    },
+    {
+      "schema": "assay.runner.kernel_event.v0",
+      "run_id": "run_001",
+      "seq": 2,
+      "pid": 1234,
+      "event_type": 4,
+      "kind": "exec",
+      "value": "/usr/bin/node"
+    },
+    {
+      "schema": "assay.runner.kernel_event.v0",
+      "run_id": "run_001",
+      "seq": 3,
+      "pid": 1234,
+      "event_type": 10,
+      "kind": "file_blocked",
+      "value": "/etc/shadow"
+    },
+    {
+      "schema": "assay.runner.kernel_event.v0",
+      "run_id": "run_001",
+      "seq": 4,
+      "pid": 1234,
+      "event_type": 20,
+      "kind": "connect_blocked",
+      "value": "198.51.100.7:25"
+    },
+    {
+      "schema": "assay.runner.kernel_event.v0",
+      "run_id": "run_001",
+      "seq": 5,
+      "pid": 1234,
+      "event_type": 999,
+      "kind": "event_999",
+      "value": null
+    }
+  ]
+}

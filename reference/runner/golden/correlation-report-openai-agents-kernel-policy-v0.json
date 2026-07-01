@@ -1,0 +1,17 @@
+{
+  "schema": "assay.runner.correlation_report.v0",
+  "run_id": "run_openai_agents_kernel_policy_determinism",
+  "status": "clean",
+  "bindings": [
+    {
+      "tool_call_id": "tc_runner_policy_001",
+      "policy_decision": "allow",
+      "kernel_event_count": 2,
+      "window": {
+        "start": "run_started",
+        "end": "run_finished"
+      }
+    }
+  ],
+  "ambiguities": []
+}
