@@ -70,7 +70,7 @@ jobs:
           python3 -c "import json; print(json.dumps(json.load(open('proof-out/doctor.json'))['landlock'], indent=2))"
 
       - name: Upload proof artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: host-capability-proof
           path: proof-out/
