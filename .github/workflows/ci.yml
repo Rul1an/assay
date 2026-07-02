@@ -123,7 +123,11 @@ jobs:
         run: |
           rm -rf ~/.cargo/advisory-db
           # RUSTSEC-2023-0071 (rsa Marvin Attack): no fixed upgrade; assay-mcp-server JWT (see deny.toml)
-          cargo audit --ignore RUSTSEC-2023-0071
+          # RUSTSEC-2026-0194/0195 (quick-xml): transitive via object_store 0.14.0; no compatible upgrade yet (see deny.toml)
+          cargo audit \
+            --ignore RUSTSEC-2023-0071 \
+            --ignore RUSTSEC-2026-0194 \
+            --ignore RUSTSEC-2026-0195
 
   clippy:
     name: Clippy (deny warnings)
