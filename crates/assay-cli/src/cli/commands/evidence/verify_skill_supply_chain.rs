@@ -46,20 +46,20 @@ pub enum VerifyFormat {
 }
 
 #[derive(Debug, Serialize)]
-struct Report {
+pub(crate) struct Report {
     schema: &'static str,
-    ok: bool,
+    pub(crate) ok: bool,
     carrier_count: usize,
     verified_carriers: usize,
-    checks: Vec<Check>,
+    pub(crate) checks: Vec<Check>,
     claims_not_made: Vec<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
-struct Check {
-    id: String,
-    ok: bool,
-    detail: String,
+pub(crate) struct Check {
+    pub(crate) id: String,
+    pub(crate) ok: bool,
+    pub(crate) detail: String,
 }
 
 pub fn cmd_verify_skill_supply_chain(args: VerifySkillSupplyChainArgs) -> Result<i32> {
@@ -79,7 +79,10 @@ pub fn cmd_verify_skill_supply_chain(args: VerifySkillSupplyChainArgs) -> Result
     Ok(if report.ok { exit_codes::OK } else { 2 })
 }
 
-fn build_report(events: &[EvidenceEvent]) -> Report {
+/// The single full bundle-level verification pass: per-carrier contract validation, verdict recompute,
+/// and duplicate-root rejection. `project-skill-bom` reuses this so "verify-before-project" enforces the
+/// same semantics as `verify-skill-supply-chain`, not a weaker per-carrier subset.
+pub(crate) fn build_report(events: &[EvidenceEvent]) -> Report {
     let mut checks = Vec::new();
     let mut carrier_count = 0usize;
     let mut verified = 0usize;

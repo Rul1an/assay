@@ -8,7 +8,7 @@
 //! no trust score and no `vulnerabilities`/VEX block, because the carrier asserts neither CVEs nor
 //! safety — only review sufficiency at the reviewed boundary.
 
-use super::skill_supply_chain::{validate_carrier, CARRIER_EVENT_TYPE};
+use super::skill_supply_chain::CARRIER_EVENT_TYPE;
 use crate::exit_codes;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -48,22 +48,23 @@ pub fn cmd_project_skill_bom(args: ProjectSkillBomArgs) -> Result<i32> {
         .events_vec()
         .context("failed to read bundle events")?;
 
+    // Verify FULLY before projecting, with the SAME semantics as `verify-skill-supply-chain`: this
+    // includes duplicate-root rejection, so a bundle that fails verification (e.g. ambiguous roots) is
+    // never projected into a BOM with duplicate bom-refs. Projection is a view over verified evidence.
+    let report = super::verify_skill_supply_chain::build_report(&events);
+    if !report.ok {
+        eprintln!("error: skill supply-chain verification failed; refusing to project unverified evidence");
+        for check in report.checks.iter().filter(|c| !c.ok) {
+            eprintln!("  fail: {} — {}", check.id, check.detail);
+        }
+        return Ok(exit_codes::EXIT_CONFIG_ERROR);
+    }
+
     let carriers: Vec<&Value> = events
         .iter()
         .filter(|e| e.type_ == CARRIER_EVENT_TYPE)
         .map(|e| &e.payload)
         .collect();
-    if carriers.is_empty() {
-        eprintln!("error: bundle contains no skill supply-chain carriers to project");
-        return Ok(exit_codes::EXIT_CONFIG_ERROR);
-    }
-    // Verify FULLY before projecting: refuse to emit a BOM over an incoherent carrier.
-    for carrier in &carriers {
-        if let Err(e) = validate_carrier(carrier) {
-            eprintln!("error: refusing to project unverified evidence: {e}");
-            return Ok(exit_codes::EXIT_CONFIG_ERROR);
-        }
-    }
 
     let bom = project_bom(&carriers);
     let json = serde_json::to_string_pretty(&bom)?;
@@ -131,10 +132,11 @@ fn project_bom(carriers: &[&Value]) -> Value {
         let deps = carrier.get("declared_dependencies");
         for pkg in channel(deps, "packages") {
             let name = pkg.get("name").and_then(Value::as_str).unwrap_or("unknown");
-            let version = pkg.get("version").and_then(Value::as_str);
             let dep_ref = format!("pkg:{name}");
             let mut comp = json!({"type": "library", "bom-ref": dep_ref, "name": name});
-            if let Some(v) = version {
+            // Capture treats any non-null scalar version as declared evidence (YAML parses a bare
+            // `2.0` as a number), so the BOM must not drop a numeric version — coerce it to a string.
+            if let Some(v) = version_string(pkg.get("version")) {
                 comp["version"] = json!(v);
             }
             components.push(comp);
@@ -168,6 +170,17 @@ fn project_bom(carriers: &[&Value]) -> Value {
         "components": components,
         "dependencies": dependencies,
     })
+}
+
+/// A declared version rendered as a string: a non-empty JSON string as-is, a JSON number stringified
+/// (the bundle's JCS canonicalization has already normalized it, so `2.0` reads back as `2`). Null,
+/// empty, or other types yield `None` so no `version` field is emitted.
+fn version_string(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+        Some(Value::Number(n)) => Some(n.to_string()),
+        _ => None,
+    }
 }
 
 fn channel<'a>(deps: Option<&'a Value>, name: &str) -> Vec<&'a Value> {
@@ -274,5 +287,75 @@ mod tests {
         let out = dir.path().join("bom.json");
         assert_eq!(project(&bundle, &out), exit_codes::EXIT_CONFIG_ERROR);
         assert!(!out.exists());
+    }
+
+    #[test]
+    fn refuses_to_project_bundle_with_duplicate_root_identity() {
+        // Two coherent carriers for the SAME root are ambiguous: the full verifier rejects them, so
+        // projection must too (no BOM with duplicate bom-refs). Regression for the verify-before-project
+        // gap where per-carrier validation alone would have let this through.
+        use crate::cli::commands::evidence::skill_supply_chain::CARRIER_EVENT_TYPE;
+        use assay_evidence::bundle::BundleWriter;
+        use assay_evidence::types::{EvidenceEvent, ProducerMeta};
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("dup.tar.gz");
+        let producer = ProducerMeta {
+            name: "t".into(),
+            version: "0".into(),
+            git: None,
+        };
+        let mut w = BundleWriter::new(std::fs::File::create(&bundle).unwrap())
+            .with_producer(producer.clone());
+        for seq in 0..2 {
+            w.add_event(
+                EvidenceEvent::new(CARRIER_EVENT_TYPE, "urn:t", "t", seq, sample_carrier())
+                    .with_producer(&producer),
+            );
+        }
+        w.finish().unwrap();
+        let out = dir.path().join("bom.json");
+        assert_eq!(project(&bundle, &out), exit_codes::EXIT_CONFIG_ERROR);
+        assert!(!out.exists());
+    }
+
+    #[test]
+    fn numeric_package_version_is_projected_as_a_string() {
+        // Regression for the numeric-version projection loss: capture accepts a YAML numeric version as
+        // declared evidence, so the BOM must render it (as a string), not drop it. The bundle's JCS
+        // canonicalization renders 2.0 as 2 (and 2 == 2.0 per the numeric-equality contract edge); the
+        // point of the regression is that the version is PRESENT, not the exact literal.
+        let mut carrier = sample_carrier();
+        carrier["declared_dependencies"] = json!({
+            "packages": [{"name": "requests", "version": 2.0}],
+            "services": [],
+            "skills": []
+        });
+        let (bundle, dir) = run_import(&carrier, "ver_test").unwrap();
+        let out = dir.path().join("bom.json");
+        assert_eq!(project(&bundle, &out), 0);
+        let bom: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        let lib = bom["components"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["type"] == "library" && c["name"] == "requests")
+            .expect("library component present");
+        assert_eq!(lib["version"], "2");
+
+        // A fractional version survives JCS unchanged and is rendered verbatim.
+        let mut c2 = sample_carrier();
+        c2["declared_dependencies"] =
+            json!({"packages": [{"name": "flask", "version": 2.5}], "services": [], "skills": []});
+        let (bundle2, dir2) = run_import(&c2, "ver_test2").unwrap();
+        let out2 = dir2.path().join("bom.json");
+        assert_eq!(project(&bundle2, &out2), 0);
+        let bom2: Value = serde_json::from_str(&std::fs::read_to_string(&out2).unwrap()).unwrap();
+        let lib2 = bom2["components"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["type"] == "library" && c["name"] == "flask")
+            .expect("library component present");
+        assert_eq!(lib2["version"], "2.5");
     }
 }
