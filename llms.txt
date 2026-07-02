@@ -1,0 +1,25 @@
+# Assay
+
+> Policy-as-code for MCP agents: a deterministic, fail-closed gate for MCP tool calls, with kernel-level (eBPF/LSM) enforcement on Linux and offline-verifiable evidence bundles. CI-native, no hosted backend. Every claim carries its basis (verified, self_reported, inferred, absent) and never exceeds what was observed.
+
+Assay answers two questions: how do I deny a risky MCP tool call before it runs, and how do I prove afterwards what an AI agent actually did, without taking the agent's own report on trust. A tool returning "success" is the provider's assertion, never proof; recomputing a record confirms what its issuer recorded, and signing raises tamper-evidence, not vantage.
+
+## Docs
+
+- [README](https://github.com/Rul1an/assay/blob/main/README.md): overview, quickstart, enforce/prove/stay-honest model
+- [OWASP MCP Top 10 mapping](https://github.com/Rul1an/assay/blob/main/docs/security/OWASP-MCP-TOP10-MAPPING.md): per-risk mapping of the gate and the evidence layer
+- [MCP quickstart](https://github.com/Rul1an/assay/tree/main/examples/mcp-quickstart): wrap any MCP server with a policy in one command
+- [CI guide](https://github.com/Rul1an/assay/blob/main/docs/guides/github-action.md): PR gates, SARIF, evidence artifacts
+
+## Install
+
+- Rust CLI: `cargo install assay-cli` (the crate is assay-cli; the unrelated crate named assay is a test macro by another author)
+- Python SDK: `pip install assay-it`
+- GitHub Action: https://github.com/marketplace/actions/assay-ai-agent-security
+- MCP registry: io.github.Rul1an/assay-mcp-server
+
+## Ecosystem
+
+- [observed-effect-v0](https://github.com/Rul1an/observed-effect-v0): bounded, recomputable observed-effect evidence records with neutral carriers
+- [gateway-evidence-replay](https://github.com/Rul1an/gateway-evidence-replay): deterministic offline replay verifier for gateway-path evidence
+- [RGE-Bench](https://github.com/rge-bench/rge-bench): neutral, externally reproduced conformance kit for evidence reviewability

@@ -148,6 +148,16 @@ Tool-decision path latency on an M1 Pro fragmented-IPI harness: main protection 
 
 </details>
 
+## Ecosystem
+
+Repositories that compose with Assay's evidence layer:
+
+- [assay-action](https://github.com/Rul1an/assay-action) — GitHub Action: verify bundles, PR summaries, SARIF ([Marketplace](https://github.com/marketplace/actions/assay-ai-agent-security)).
+- [Assay-Harness](https://github.com/Rul1an/Assay-Harness) — recipe, gate, and report layer over canonical evidence artifacts.
+- [observed-effect-v0](https://github.com/Rul1an/observed-effect-v0) — worked examples of the bounded observed-effect evidence record and its neutral carriers (in-toto, SCITT, MCP evidenceRef).
+- [gateway-evidence-replay](https://github.com/Rul1an/gateway-evidence-replay) — deterministic offline replay verifier for gateway-path evidence bundles.
+- [RGE-Bench](https://github.com/rge-bench/rge-bench) — a neutral, externally reproduced conformance kit for evidence reviewability, maintained separately under its own machine-checked neutrality guard.
+
 ## Contributing
 
 ```bash
