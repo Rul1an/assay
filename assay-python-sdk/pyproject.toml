@@ -19,7 +19,7 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
     "Topic :: Software Development :: Quality Assurance",
 ]
-keywords = ["assay", "policy", "testing", "coverage", "tracing"]
+keywords = ["assay", "policy", "testing", "coverage", "tracing", "mcp", "ai-agents", "agent-security", "evidence"]
 dynamic = ["version"]
 
 [project.urls]
