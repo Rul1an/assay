@@ -91,6 +91,15 @@ fn within_tree(path: &Path, base: &Path) -> bool {
     }
 }
 
+/// `true` only for a REGULAR file, checked WITHOUT following symlinks (a symlink, directory, FIFO, or
+/// other special file is rejected). Capture uses this so adjacent evidence and scanned markdown are
+/// never read through a symlink or blocked on a special target.
+fn is_regular_file(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|m| m.file_type().is_file())
+        .unwrap_or(false)
+}
+
 fn resolve_root(root: &Path) -> Result<Resolved> {
     let root_path = posix_relative(root);
     if is_symlink(root) {
@@ -144,6 +153,12 @@ fn resolve_root(root: &Path) -> Result<Resolved> {
 }
 
 fn has_front_matter(path: &Path) -> bool {
+    // Fail closed on non-regular files: this runs during the directory fallback scan BEFORE the
+    // resolved-markdown symlink refusal, so a symlinked or special (FIFO) `.md` must never be read
+    // here — it could point outside the reviewed tree or block on a special target.
+    if !is_regular_file(path) {
+        return false;
+    }
     fs::read_to_string(path)
         .ok()
         .map(|s| s.starts_with("---\n") || s.starts_with("---\r\n"))
@@ -254,9 +269,13 @@ fn capture_carrier(root: &Path) -> Result<Value> {
     let skills = channel_list(deps, "skills");
 
     // --- coverage: lockfiles (package channel) ---
+    // A lockfile only counts as retained evidence when it is a REGULAR file in the tree: a symlinked
+    // `requirements.txt -> /outside/...` points outside the reviewed boundary and must not upgrade
+    // coverage. `is_regular_file` does not follow the symlink; the name is a direct child so there is
+    // no `..` escape to consider.
     let has_lockfile = LOCKFILE_NAMES
         .iter()
-        .any(|n| resolved.dir.join(n).is_file());
+        .any(|n| is_regular_file(&resolved.dir.join(n)));
     let lockfiles = if packages.is_empty() {
         "not_applicable"
     } else if has_lockfile {
@@ -367,19 +386,28 @@ fn field_declared(item: &Value, field: &str) -> bool {
 }
 
 fn dir_has_scripts(dir: &Path) -> bool {
-    if dir.join("scripts").is_dir() {
+    // A `scripts/` directory counts only when it is a REAL directory in the tree (a symlinked
+    // `scripts -> /outside` must not mark script evidence present).
+    let scripts_dir = dir.join("scripts");
+    let real_scripts_dir = fs::symlink_metadata(&scripts_dir)
+        .map(|m| m.file_type().is_dir())
+        .unwrap_or(false);
+    if real_scripts_dir {
         return true;
     }
+    // Adjacent script files must be REGULAR files (not symlinks pointing outside the tree).
     let script_exts = ["sh", "py", "js", "ts", "rb", "ps1"];
     fs::read_dir(dir)
         .ok()
         .map(|entries| {
             entries.filter_map(|e| e.ok()).any(|e| {
-                e.path()
+                let path = e.path();
+                let is_script = path
                     .extension()
                     .and_then(|x| x.to_str())
                     .map(|x| script_exts.contains(&x))
-                    .unwrap_or(false)
+                    .unwrap_or(false);
+                is_script && is_regular_file(&path)
             })
         })
         .unwrap_or(false)
@@ -626,6 +654,61 @@ mod tests {
             .filter_map(Value::as_str)
             .collect();
         assert!(reasons.contains(&"traversal_not_retained"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_lockfile_outside_tree_does_not_upgrade_coverage() {
+        use std::os::unix::fs::symlink;
+        let tree = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let real_lock = write(outside.path(), "requirements.txt", "requests==2.0\n");
+        // A lockfile that is only a symlink pointing outside the reviewed tree.
+        symlink(&real_lock, tree.path().join("requirements.txt")).unwrap();
+        let md = write(
+            tree.path(),
+            "SKILL.md",
+            "---\nname: fetcher\ndependencies:\n  packages:\n    - name: requests\n      version: 2.0\n---\nBody.\n",
+        );
+        let carrier = capture_at(&md);
+        // The symlinked lockfile does not count: coverage stays not_present -> review_incomplete.
+        assert_eq!(carrier["coverage"]["lockfiles"], "not_present");
+        assert_eq!(carrier["verdict"], "review_incomplete");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_script_file_does_not_mark_scripts_present() {
+        use std::os::unix::fs::symlink;
+        let tree = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let real_script = write(outside.path(), "run.py", "print('x')\n");
+        symlink(&real_script, tree.path().join("run.py")).unwrap();
+        write(tree.path(), "SKILL.md", "---\nname: s\n---\nBody.\n");
+        let carrier = capture_at(&tree.path().join("SKILL.md"));
+        assert_eq!(carrier["coverage"]["scripts"], "not_applicable");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_fallback_never_reads_a_symlinked_markdown() {
+        use std::os::unix::fs::symlink;
+        let tree = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        // Front-matter content that lives outside the tree, reachable only via a symlinked .md.
+        let payload = write(
+            outside.path(),
+            "payload.md",
+            "---\nname: leaked\n---\nSecret.\n",
+        );
+        // A directory with NO conventional SKILL.md, only a symlinked notes.md -> outside payload.
+        std::fs::create_dir_all(tree.path().join("skilldir")).unwrap();
+        symlink(&payload, tree.path().join("skilldir/notes.md")).unwrap();
+        // has_front_matter fails closed on the symlink, so the fallback finds nothing to read.
+        let err = capture_carrier(&tree.path().join("skilldir")).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("no SKILL.md or front-matter markdown"));
     }
 
     #[cfg(unix)]
