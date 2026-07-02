@@ -251,9 +251,14 @@ pub(crate) fn validate_carrier(carrier: &Value) -> Result<()> {
         .get("transitive_traversal")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if verdict == "review_complete" && traversal != "present" {
+    // review_complete is legitimate either when the dependency graph was traversed (`present`) or when
+    // there were no declared dependencies to traverse (`not_applicable`). It is only incoherent when
+    // deps existed but traversal was not retained (`not_present`) — that must degrade to incomplete via
+    // the `traversal_not_retained` reason, so review_complete + not_present is rejected.
+    if verdict == "review_complete" && traversal == "not_present" {
         bail!(
-            "carrier verdict review_complete requires coverage.transitive_traversal to be present"
+            "carrier verdict review_complete is incoherent with transitive_traversal not_present; \
+             declare traversal present or not_applicable, or degrade the verdict"
         );
     }
 
