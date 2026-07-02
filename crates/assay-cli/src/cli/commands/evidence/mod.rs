@@ -15,8 +15,10 @@ pub mod pull;
 pub mod push;
 pub mod pydantic_case_result;
 pub mod schema;
+pub mod skill_supply_chain;
 pub mod store_status;
 pub mod tool_decision_truth;
+pub mod verify_skill_supply_chain;
 pub mod verify_tool_decision_truth;
 
 use anyhow::{Context, Result};
@@ -44,6 +46,9 @@ pub enum EvidenceCmd {
     /// Verify experimental tool-decision-truth recipe rows against their carriers in a bundle
     #[command(name = "verify-tool-decision-truth")]
     VerifyToolDecisionTruth(verify_tool_decision_truth::VerifyToolDecisionTruthArgs),
+    /// Verify experimental skill supply-chain carriers against the pinned contract in a bundle
+    #[command(name = "verify-skill-supply-chain")]
+    VerifySkillSupplyChain(verify_skill_supply_chain::VerifySkillSupplyChainArgs),
     /// Inspect a bundle's contents (verify + show table)
     Show(EvidenceShowArgs),
     /// Import external evidence into an Assay evidence bundle
@@ -135,6 +140,9 @@ pub enum EvidenceImportCmd {
     /// Import an experimental tool-decision-truth carrier as a bound recipe row
     #[command(name = "tool-decision-truth")]
     ToolDecisionTruth(tool_decision_truth::ToolDecisionTruthArgs),
+    /// Import an experimental skill supply-chain carrier (retained skill record)
+    #[command(name = "skill-supply-chain")]
+    SkillSupplyChain(skill_supply_chain::SkillSupplyChainArgs),
 }
 
 pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
@@ -148,6 +156,9 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
         }
         EvidenceCmd::VerifyToolDecisionTruth(a) => {
             verify_tool_decision_truth::cmd_verify_tool_decision_truth(a)
+        }
+        EvidenceCmd::VerifySkillSupplyChain(a) => {
+            verify_skill_supply_chain::cmd_verify_skill_supply_chain(a)
         }
         EvidenceCmd::Show(a) => cmd_show(a),
         EvidenceCmd::Import(a) => cmd_import(a),
@@ -177,6 +188,7 @@ fn cmd_import(args: EvidenceImportArgs) -> Result<i32> {
         EvidenceImportCmd::LiveKitToolAction(a) => livekit_tool_action::cmd_livekit_tool_action(a),
         EvidenceImportCmd::PromptfooJsonl(a) => promptfoo_jsonl::cmd_promptfoo_jsonl(a),
         EvidenceImportCmd::ToolDecisionTruth(a) => tool_decision_truth::cmd_tool_decision_truth(a),
+        EvidenceImportCmd::SkillSupplyChain(a) => skill_supply_chain::cmd_skill_supply_chain(a),
     }
 }
 
