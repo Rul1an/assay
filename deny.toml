@@ -27,6 +27,12 @@ ignore = [
     # rsa: transitive via jsonwebtoken (assay-mcp-server). No safe upgrade; timing sidechannel.
     # JWT verification is server-side; accept risk for MCP auth until jsonwebtoken/rsa offer a fix.
     "RUSTSEC-2023-0071",
+
+    # quick-xml: transitive via object_store 0.14.0. No compatible upgrade yet:
+    # object_store pins quick-xml ^0.40.1, while the fixed quick-xml is >=0.41.0.
+    # Remove both ignores when object_store releases a version that allows quick-xml >=0.41.0.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]
 
 # =============================================================================
