@@ -49,6 +49,9 @@ pub enum EvidenceCmd {
     /// Verify experimental skill supply-chain carriers against the pinned contract in a bundle
     #[command(name = "verify-skill-supply-chain")]
     VerifySkillSupplyChain(verify_skill_supply_chain::VerifySkillSupplyChainArgs),
+    /// Capture a local skill root as an experimental skill supply-chain carrier
+    #[command(name = "capture-skill-supply-chain")]
+    CaptureSkillSupplyChain(skill_supply_chain::CaptureSkillSupplyChainArgs),
     /// Inspect a bundle's contents (verify + show table)
     Show(EvidenceShowArgs),
     /// Import external evidence into an Assay evidence bundle
@@ -159,6 +162,9 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
         }
         EvidenceCmd::VerifySkillSupplyChain(a) => {
             verify_skill_supply_chain::cmd_verify_skill_supply_chain(a)
+        }
+        EvidenceCmd::CaptureSkillSupplyChain(a) => {
+            skill_supply_chain::cmd_capture_skill_supply_chain(a)
         }
         EvidenceCmd::Show(a) => cmd_show(a),
         EvidenceCmd::Import(a) => cmd_import(a),

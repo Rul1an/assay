@@ -18,10 +18,11 @@ use assay_evidence::bundle::BundleWriter;
 use assay_evidence::types::{EvidenceEvent, ProducerMeta};
 use chrono::{DateTime, Utc};
 use clap::Args;
-use serde_json::Value;
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Schema id of the carrier this importer accepts (also the event type).
 pub(crate) const CARRIER_SCHEMA: &str = "assay.skill_supply_chain.v0";
@@ -78,6 +79,21 @@ pub struct SkillSupplyChainArgs {
     pub import_time: Option<String>,
 }
 
+#[derive(Debug, Args, Clone)]
+pub struct CaptureSkillSupplyChainArgs {
+    /// Local skill file or skill directory to retain into a carrier
+    #[arg(long, value_name = "PATH")]
+    pub skill_root: PathBuf,
+
+    /// Canonical in-repository root path to record in the carrier, e.g. skills/release-notes
+    #[arg(long, value_name = "REL_PATH")]
+    pub root_path: String,
+
+    /// Output skill supply-chain carrier JSON path
+    #[arg(long, alias = "out", value_name = "PATH")]
+    pub carrier_out: PathBuf,
+}
+
 pub fn cmd_skill_supply_chain(args: SkillSupplyChainArgs) -> Result<i32> {
     if args.run_id.contains(':') {
         bail!("run_id cannot contain ':' because event ids use run_id:seq");
@@ -114,6 +130,248 @@ pub fn cmd_skill_supply_chain(args: SkillSupplyChainArgs) -> Result<i32> {
         args.bundle_out.display()
     );
     Ok(exit_codes::OK)
+}
+
+pub fn cmd_capture_skill_supply_chain(args: CaptureSkillSupplyChainArgs) -> Result<i32> {
+    let carrier = capture_carrier_from_skill_root(&args.skill_root, &args.root_path)?;
+    let mut rendered = serde_json::to_string_pretty(&carrier)?;
+    rendered.push('\n');
+    fs::write(&args.carrier_out, rendered)
+        .with_context(|| format!("failed to write carrier {}", args.carrier_out.display()))?;
+    eprintln!(
+        "Captured skill supply-chain carrier to {}",
+        args.carrier_out.display()
+    );
+    Ok(exit_codes::OK)
+}
+
+#[derive(Debug)]
+struct RetainedSkillFile {
+    relative_path: String,
+    bytes: Vec<u8>,
+}
+
+pub(crate) fn capture_carrier_from_skill_root(skill_root: &Path, root_path: &str) -> Result<Value> {
+    if !is_safe_skill_path(root_path) {
+        bail!("capture root_path {root_path:?} is unsafe");
+    }
+
+    let metadata = fs::symlink_metadata(skill_root)
+        .with_context(|| format!("failed to inspect skill root {}", skill_root.display()))?;
+    if metadata.file_type().is_symlink() {
+        bail!(
+            "skill root {} is a symlink; refusing to capture",
+            skill_root.display()
+        );
+    }
+
+    let mut retained_files = Vec::new();
+    if metadata.is_file() {
+        let file_name = skill_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| anyhow::anyhow!("skill root must have a UTF-8 file name"))?;
+        retained_files.push(RetainedSkillFile {
+            relative_path: file_name.to_string(),
+            bytes: fs::read(skill_root)
+                .with_context(|| format!("failed to read skill file {}", skill_root.display()))?,
+        });
+    } else if metadata.is_dir() {
+        collect_retained_skill_files(skill_root, skill_root, &mut retained_files)?;
+    } else {
+        bail!(
+            "skill root {} must be a regular file or directory",
+            skill_root.display()
+        );
+    }
+
+    if retained_files.is_empty() {
+        bail!(
+            "skill root {} did not contain retained files",
+            skill_root.display()
+        );
+    }
+    retained_files.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+
+    let root_name = root_path
+        .rsplit('/')
+        .find(|part| !part.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("root_path {root_path:?} must name a skill root"))?;
+    let retained_paths = retained_files
+        .iter()
+        .map(|file| file.relative_path.clone())
+        .collect::<Vec<_>>();
+    let front_matter = coverage_flag(retained_files.iter().any(has_front_matter));
+    let body_text = coverage_flag(retained_files.iter().any(has_body_text));
+    let scripts = if retained_files
+        .iter()
+        .any(|file| is_script_file(&file.relative_path))
+    {
+        "present"
+    } else {
+        "not_applicable"
+    };
+    let lockfiles = if retained_files
+        .iter()
+        .any(|file| is_lockfile(&file.relative_path))
+    {
+        "present"
+    } else {
+        "not_applicable"
+    };
+
+    let carrier = json!({
+        "schema": CARRIER_SCHEMA,
+        "root": {
+            "name": root_name,
+            "path": root_path,
+            "digest": digest_retained_files(&retained_files),
+            "retained_files": retained_paths,
+        },
+        "verdict": "review_incomplete",
+        "reason_codes": ["traversal_not_retained"],
+        "coverage": {
+            "front_matter": front_matter,
+            "body_text": body_text,
+            "scripts": scripts,
+            "lockfiles": lockfiles,
+            "transitive_traversal": "not_present",
+        },
+        "signals": [],
+        "non_claims": [
+            "review_complete_is_not_skill_safe",
+            "verdict_covers_one_root_at_one_capture_time",
+            "capture_does_not_scan_registries",
+            "capture_does_not_resolve_transitive_dependencies",
+            "capture_does_not_detect_malware",
+        ],
+    });
+    validate_carrier(&carrier)?;
+    Ok(carrier)
+}
+
+fn collect_retained_skill_files(
+    root: &Path,
+    current: &Path,
+    files: &mut Vec<RetainedSkillFile>,
+) -> Result<()> {
+    let mut entries = fs::read_dir(current)
+        .with_context(|| format!("failed to read skill directory {}", current.display()))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| format!("failed to list skill directory {}", current.display()))?;
+    entries.sort_by_key(|entry| entry.file_name());
+
+    for entry in entries {
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)
+            .with_context(|| format!("failed to inspect skill path {}", path.display()))?;
+        if metadata.file_type().is_symlink() {
+            bail!(
+                "skill path {} is a symlink; refusing to capture",
+                path.display()
+            );
+        }
+        if metadata.is_dir() {
+            collect_retained_skill_files(root, &path, files)?;
+        } else if metadata.is_file() {
+            let relative = path
+                .strip_prefix(root)
+                .expect("walked paths stay under root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            files.push(RetainedSkillFile {
+                relative_path: relative,
+                bytes: fs::read(&path)
+                    .with_context(|| format!("failed to read skill file {}", path.display()))?,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn digest_retained_files(files: &[RetainedSkillFile]) -> String {
+    let mut hasher = Sha256::new();
+    for file in files {
+        hasher.update(file.relative_path.as_bytes());
+        hasher.update(b"\0");
+        hasher.update((file.bytes.len() as u64).to_be_bytes());
+        hasher.update(b"\0");
+        hasher.update(&file.bytes);
+        hasher.update(b"\0");
+    }
+    format!("sha256:{}", hex::encode(hasher.finalize()))
+}
+
+fn coverage_flag(present: bool) -> &'static str {
+    if present {
+        "present"
+    } else {
+        "not_present"
+    }
+}
+
+fn has_front_matter(file: &RetainedSkillFile) -> bool {
+    if !is_markdown_file(&file.relative_path) {
+        return false;
+    }
+    let text = String::from_utf8_lossy(&file.bytes);
+    let Some(rest) = text.strip_prefix("---\n") else {
+        return false;
+    };
+    rest.lines().any(|line| line.trim() == "---")
+}
+
+fn has_body_text(file: &RetainedSkillFile) -> bool {
+    if !is_markdown_file(&file.relative_path) {
+        return false;
+    }
+    let text = String::from_utf8_lossy(&file.bytes);
+    !strip_front_matter(&text).trim().is_empty()
+}
+
+fn strip_front_matter(text: &str) -> &str {
+    let Some(rest) = text.strip_prefix("---\n") else {
+        return text;
+    };
+    let mut offset = 4;
+    for line in rest.split_inclusive('\n') {
+        offset += line.len();
+        if line.trim() == "---" {
+            return &text[offset..];
+        }
+    }
+    text
+}
+
+fn is_markdown_file(path: &str) -> bool {
+    path.eq_ignore_ascii_case("SKILL.md") || path.to_ascii_lowercase().ends_with(".md")
+}
+
+fn is_script_file(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.starts_with("scripts/")
+        || matches!(
+            lower.rsplit('.').next(),
+            Some("sh" | "bash" | "zsh" | "py" | "js" | "mjs" | "cjs" | "ts" | "tsx")
+        )
+}
+
+fn is_lockfile(path: &str) -> bool {
+    matches!(
+        path.rsplit('/').next(),
+        Some(
+            "Cargo.lock"
+                | "Gemfile.lock"
+                | "Pipfile.lock"
+                | "bun.lockb"
+                | "package-lock.json"
+                | "pnpm-lock.yaml"
+                | "poetry.lock"
+                | "requirements.lock"
+                | "uv.lock"
+                | "yarn.lock"
+        )
+    )
 }
 
 /// The verdict the reason codes require under the pinned worst-wins precedence.
@@ -372,6 +630,72 @@ pub(crate) mod tests {
             import_time: Some("2026-07-02T00:00:00Z".to_string()),
         })
         .map(|_| (out, dir))
+    }
+
+    #[test]
+    fn capture_local_skill_tree_emits_honest_incomplete_carrier() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_root = dir.path().join("skills/eval-esser");
+        fs::create_dir_all(&skill_root).unwrap();
+        fs::write(
+            skill_root.join("SKILL.md"),
+            "---\nname: eval-esser\n---\n\n# Eval Esser\n\nReview eval evidence.\n",
+        )
+        .unwrap();
+
+        let carrier = capture_carrier_from_skill_root(&skill_root, "skills/eval-esser").unwrap();
+
+        assert_eq!(carrier["schema"], json!(CARRIER_SCHEMA));
+        assert_eq!(carrier["root"]["name"], json!("eval-esser"));
+        assert_eq!(carrier["root"]["path"], json!("skills/eval-esser"));
+        assert!(carrier["root"]["digest"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:"));
+        assert_eq!(carrier["root"]["retained_files"], json!(["SKILL.md"]));
+        assert_eq!(carrier["verdict"], json!("review_incomplete"));
+        assert_eq!(carrier["reason_codes"], json!(["traversal_not_retained"]));
+        assert_eq!(carrier["coverage"]["front_matter"], json!("present"));
+        assert_eq!(carrier["coverage"]["body_text"], json!("present"));
+        assert_eq!(carrier["coverage"]["scripts"], json!("not_applicable"));
+        assert_eq!(carrier["coverage"]["lockfiles"], json!("not_applicable"));
+        assert_eq!(
+            carrier["coverage"]["transitive_traversal"],
+            json!("not_present")
+        );
+        assert_eq!(carrier["signals"], json!([]));
+        assert!(carrier["non_claims"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|claim| claim == "capture_does_not_resolve_transitive_dependencies"));
+        validate_carrier(&carrier).unwrap();
+    }
+
+    #[test]
+    fn capture_command_writes_carrier_json_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_root = dir.path().join("skills/release-notes");
+        fs::create_dir_all(&skill_root).unwrap();
+        fs::write(
+            skill_root.join("SKILL.md"),
+            "---\nname: release-notes\n---\n\n# Release Notes\n\nSummarize changes.\n",
+        )
+        .unwrap();
+        let carrier_out = dir.path().join("carrier.json");
+
+        cmd_capture_skill_supply_chain(CaptureSkillSupplyChainArgs {
+            skill_root,
+            root_path: "skills/release-notes".to_string(),
+            carrier_out: carrier_out.clone(),
+        })
+        .unwrap();
+
+        let carrier: Value =
+            serde_json::from_str(&fs::read_to_string(carrier_out).unwrap()).unwrap();
+        assert_eq!(carrier["root"]["path"], json!("skills/release-notes"));
+        assert_eq!(carrier["verdict"], json!("review_incomplete"));
+        validate_carrier(&carrier).unwrap();
     }
 
     #[test]
