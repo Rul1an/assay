@@ -1,3 +1,4 @@
+pub mod adapt_skill_scan;
 pub mod attest;
 pub mod cyclonedx_mlbom_model;
 pub mod diff;
@@ -10,12 +11,14 @@ pub mod mcp_execution_records;
 pub mod mcp_supersession;
 pub mod mcp_tunnel_observed;
 pub mod openfeature_details;
+pub mod project_skill_bom;
 pub mod promptfoo_jsonl;
 pub mod pull;
 pub mod push;
 pub mod pydantic_case_result;
 pub mod schema;
 pub mod skill_supply_chain;
+pub mod skill_supply_chain_capture;
 pub mod store_status;
 pub mod tool_decision_truth;
 pub mod verify_skill_supply_chain;
@@ -49,6 +52,15 @@ pub enum EvidenceCmd {
     /// Verify experimental skill supply-chain carriers against the pinned contract in a bundle
     #[command(name = "verify-skill-supply-chain")]
     VerifySkillSupplyChain(verify_skill_supply_chain::VerifySkillSupplyChainArgs),
+    /// Capture a skill root into an experimental skill supply-chain carrier (declarative, not a scanner)
+    #[command(name = "capture-skill-supply-chain")]
+    CaptureSkillSupplyChain(skill_supply_chain_capture::CaptureSkillSupplyChainArgs),
+    /// Project a verified skill supply-chain bundle into a CycloneDX 1.6 AI-BOM
+    #[command(name = "project-skill-bom")]
+    ProjectSkillBom(project_skill_bom::ProjectSkillBomArgs),
+    /// Attach SARIF scanner findings to a skill supply-chain carrier as occurrence signals
+    #[command(name = "adapt-skill-scan")]
+    AdaptSkillScan(adapt_skill_scan::AdaptSkillScanArgs),
     /// Inspect a bundle's contents (verify + show table)
     Show(EvidenceShowArgs),
     /// Import external evidence into an Assay evidence bundle
@@ -160,6 +172,11 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
         EvidenceCmd::VerifySkillSupplyChain(a) => {
             verify_skill_supply_chain::cmd_verify_skill_supply_chain(a)
         }
+        EvidenceCmd::CaptureSkillSupplyChain(a) => {
+            skill_supply_chain_capture::cmd_capture_skill_supply_chain(a)
+        }
+        EvidenceCmd::ProjectSkillBom(a) => project_skill_bom::cmd_project_skill_bom(a),
+        EvidenceCmd::AdaptSkillScan(a) => adapt_skill_scan::cmd_adapt_skill_scan(a),
         EvidenceCmd::Show(a) => cmd_show(a),
         EvidenceCmd::Import(a) => cmd_import(a),
         EvidenceCmd::Schema(a) => schema::cmd_schema(a),
