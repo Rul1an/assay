@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
 
 
 CONTRACT_DOC = "docs/reference/runner/ci-lanes.md"
@@ -258,21 +258,22 @@ def load_proof_pack_zip(data: bytes) -> tuple[ProofPackArtifact | None, tuple[st
     except zipfile.BadZipFile:
         return None, ("proof artifact is not a valid zip archive",)
 
-    required = ("manifest.json", "subject-checksums.txt", "attestation-bundle.json")
-    names = set(archive.namelist())
-    missing = [name for name in required if name not in names]
-    if missing:
-        joined = ", ".join(missing)
-        return None, (f"proof artifact missing required file(s): {joined}",)
+    with archive:
+        required = ("manifest.json", "subject-checksums.txt", "attestation-bundle.json")
+        names = set(archive.namelist())
+        missing = [name for name in required if name not in names]
+        if missing:
+            joined = ", ".join(missing)
+            return None, (f"proof artifact missing required file(s): {joined}",)
 
-    try:
-        manifest_bytes = archive.read("manifest.json")
-        checksums_bytes = archive.read("subject-checksums.txt")
-        bundle_bytes = archive.read("attestation-bundle.json")
-        manifest = json.loads(manifest_bytes.decode("utf-8"))
-        bundle = json.loads(bundle_bytes.decode("utf-8"))
-    except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return None, (f"proof artifact could not be decoded: {exc}",)
+        try:
+            manifest_bytes = archive.read("manifest.json")
+            checksums_bytes = archive.read("subject-checksums.txt")
+            bundle_bytes = archive.read("attestation-bundle.json")
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+            bundle = json.loads(bundle_bytes.decode("utf-8"))
+        except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return None, (f"proof artifact could not be decoded: {exc}",)
     if not isinstance(manifest, dict):
         return None, ("proof manifest is not a JSON object",)
     if not isinstance(bundle, dict):
@@ -941,29 +942,41 @@ def delegated_run_diagnostic(run: dict[str, object], run_id: str, head_sha: str)
     return None
 
 
+GH_ATTESTATION_CLAIM_KEYS = frozenset(
+    {
+        "githubWorkflowName",
+        "githubWorkflowTrigger",
+        "githubWorkflowRepository",
+        "sourceRepositoryDigest",
+        "githubWorkflowSHA",
+        "sourceRepositoryRef",
+        "runnerEnvironment",
+    }
+)
+
+
+def iter_dicts(value: object) -> Iterator[dict[str, object]]:
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from iter_dicts(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from iter_dicts(child)
+
+
 def attestation_verified_claims(verification: object) -> dict[str, object]:
-    """Return the first verified certificate claim object gh exposes.
+    """Return a verified certificate claim object gh exposes.
 
     `gh attestation verify --format json` has evolved shape across releases;
-    the current output is a list of records with `verificationResult`
-    metadata. Keep this extractor deliberately tolerant and validate the
-    load-bearing claims by name if they are present. The DSSE/SLSA payload
-    checks below still enforce the workflow/run semantics.
+    the current output nests certificate claims under each verified record.
+    Keep wrapper-shape handling tolerant, but fail closed if no object carries
+    any of the claim keys the lane-check validates.
     """
 
-    candidates: list[object]
-    if isinstance(verification, list):
-        candidates = verification
-    else:
-        candidates = [verification]
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
-        for key in ("verificationResult", "certificate", "certificates"):
-            value = candidate.get(key)
-            if isinstance(value, dict):
-                return value
-        return candidate
+    for candidate in iter_dicts(verification):
+        if GH_ATTESTATION_CLAIM_KEYS.intersection(candidate):
+            return candidate
     return {}
 
 
@@ -995,7 +1008,10 @@ def validate_gh_attestation_claims(
     }
     diagnostics: list[str] = []
     for key, expected in checks.items():
-        if not expected or key not in claims:
+        if not expected:
+            continue
+        if key not in claims:
+            diagnostics.append(f"attestation claim {key} missing")
             continue
         got = claims.get(key)
         if got != expected:
@@ -1716,6 +1732,7 @@ def _test_attested_proof_pack_helpers() -> None:
     assert validate_attestation_predicate(verified_statement, pack.manifest, run, GitHubApi("Rul1an/assay", "t")) == ()
     assert validate_gh_attestation_claims(
         [
+            {"attestation": {"bundle": {"mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json"}}},
             {
                 "verificationResult": {
                     "githubWorkflowName": DELEGATED_WORKFLOW_NAME,
@@ -1731,6 +1748,11 @@ def _test_attested_proof_pack_helpers() -> None:
         pack.manifest,
         GitHubApi("Rul1an/assay", "t"),
     ) == ()
+    assert "attestation claim githubWorkflowName missing" in validate_gh_attestation_claims(
+        [{"verificationResult": {"sourceRepositoryDigest": "abc123"}}],
+        pack.manifest,
+        GitHubApi("Rul1an/assay", "t"),
+    )
 
     bad_manifest = dict(manifest)
     bad_manifest["proof_pack"] = {"subjects": [{"path": "target/assay-ebpf.o", "sha256": "sha256:" + "b" * 64}]}
