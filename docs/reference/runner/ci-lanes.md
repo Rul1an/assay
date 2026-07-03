@@ -64,8 +64,13 @@ cleanup and checkout.
 1. Run ordinary continuous CI for every PR.
 2. For runner-impacting changes, dispatch the minimum delegated gate after the
    PR branch contains the final candidate commit.
-3. Record the workflow run URL, commit SHA, selected gate, and result in the
-   PR body or a PR comment.
+3. Prefer the attested delegated proof pack emitted by the delegated workflow:
+   `assay-runner-delegated-proof-pack-<run_id>` contains `manifest.json`,
+   `subject-checksums.txt`, and `attestation-bundle.json`. Lane-check verifies
+   the GitHub artifact attestation, the proof-pack subjects, the selected gate,
+   and the gated-path tree OIDs. During the transition, recording the workflow
+   run URL, commit SHA, selected gate, and result in the PR body or a PR comment
+   remains a compatibility fallback.
 4. Do not treat a delegated skip as success. In the delegated lane, exit `40`
    means the runner contract has drifted.
 5. Do not bypass required repository checks for runner-impacting changes.
@@ -86,6 +91,14 @@ Actions job named `lane-check` so checks-API and statuses-API results do not
 collide under the same display name. If maintainers want the refresh path
 itself to satisfy branch protection without manually rerunning the pull-request
 job, require the `lane-check/proof` status.
+
+Attested proof is content-addressed over the configured gated paths. If a
+delegated proof was produced on an earlier commit but the current PR head has
+identical tree OIDs for every content-provenance path in
+`scripts/ci/assay_runner_gated_paths.json`, lane-check may accept the proof
+without another delegated run. This does not claim anything about unrelated
+repository state; it only preserves the proof for the gated content the
+delegated host actually exercised.
 
 The workflow keeps `pull-requests: write` while the transition comment channel
 exists. Empirically, `issues: write` plus `pull-requests: read` is not enough to

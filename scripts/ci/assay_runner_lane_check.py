@@ -8,17 +8,23 @@ the base branch without installing repository dependencies or executing PR code.
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import http.client
+import io
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from dataclasses import dataclass
 from enum import IntEnum
 from functools import lru_cache
@@ -30,8 +36,12 @@ CONTRACT_DOC = "docs/reference/runner/ci-lanes.md"
 DEPENDABOT_FLOW_DOC = "docs/reference/runner/dependabot-lane-flow.md"
 GATED_PATHS_DOC = "scripts/ci/assay_runner_gated_paths.json"
 DELEGATED_WORKFLOW_NAME = "Runner Spike Delegated"
+DELEGATED_WORKFLOW_PATH = ".github/workflows/runner-spike-delegated.yml"
 COMMENT_MARKER = "<!-- assay-runner-lane-check -->"
 STATUS_CONTEXT = "lane-check/proof"
+PROOF_PACK_SCHEMA = "assay.runner.delegated_proof_pack.v1"
+PROOF_PACK_KIND = "delegated_runner_proof_pack"
+PROOF_PACK_CLAIM_CEILING = "delegated_gate_execution_only_not_runtime_safety"
 # 404 is retryable here because GitHub can briefly return it for freshly
 # created PR metadata endpoints such as /pulls/{number}/files.
 RETRYABLE_HTTP_CODES = {404, 502, 503, 504}
@@ -100,6 +110,22 @@ class ContentTreeComparison:
     diagnostics: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class AttestedProofCheck:
+    accepted: bool
+    run: dict[str, object] | None
+    diagnostics: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ProofPackArtifact:
+    manifest: dict[str, object]
+    manifest_bytes: bytes
+    checksums: dict[str, str]
+    bundle: dict[str, object]
+    bundle_bytes: bytes
+
+
 class GitHubApi:
     def __init__(self, repo: str, token: str) -> None:
         self.repo = repo
@@ -121,6 +147,20 @@ class GitHubApi:
         with urlopen_with_retry(request) as response:
             body = response.read().decode("utf-8")
             return json.loads(body) if body else {}
+
+    def download(self, path_or_url: str) -> bytes:
+        url = path_or_url if path_or_url.startswith("https://") else f"{self.base_url}{path_or_url}"
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "Authorization": f"Bearer {self.token}",
+            },
+            method="GET",
+        )
+        with urlopen_with_retry(request) as response:
+            return response.read()
 
     def paginated(self, path: str) -> list[object]:
         separator = "&" if "?" in path else "?"
@@ -178,6 +218,288 @@ def next_link(header: str) -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+def sha256_hex(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def proof_pack_artifact_name(run_id: str) -> str:
+    return f"assay-runner-delegated-proof-pack-{run_id}"
+
+
+def parse_subject_checksums(text: str) -> tuple[dict[str, str], tuple[str, ...]]:
+    checksums: dict[str, str] = {}
+    diagnostics: list[str] = []
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        parts = stripped.split(maxsplit=1)
+        if len(parts) != 2:
+            diagnostics.append(f"subject-checksums.txt:{line_number}: malformed checksum line")
+            continue
+        digest, path = parts
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            diagnostics.append(f"subject-checksums.txt:{line_number}: malformed sha256 digest")
+            continue
+        if path in checksums and checksums[path] != digest:
+            diagnostics.append(f"subject-checksums.txt:{line_number}: duplicate path {path!r} with different digest")
+            continue
+        checksums[path] = digest
+    if not checksums:
+        diagnostics.append("subject-checksums.txt: no subjects found")
+    return checksums, tuple(diagnostics)
+
+
+def load_proof_pack_zip(data: bytes) -> tuple[ProofPackArtifact | None, tuple[str, ...]]:
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile:
+        return None, ("proof artifact is not a valid zip archive",)
+
+    required = ("manifest.json", "subject-checksums.txt", "attestation-bundle.json")
+    names = set(archive.namelist())
+    missing = [name for name in required if name not in names]
+    if missing:
+        joined = ", ".join(missing)
+        return None, (f"proof artifact missing required file(s): {joined}",)
+
+    try:
+        manifest_bytes = archive.read("manifest.json")
+        checksums_bytes = archive.read("subject-checksums.txt")
+        bundle_bytes = archive.read("attestation-bundle.json")
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+        bundle = json.loads(bundle_bytes.decode("utf-8"))
+    except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return None, (f"proof artifact could not be decoded: {exc}",)
+    if not isinstance(manifest, dict):
+        return None, ("proof manifest is not a JSON object",)
+    if not isinstance(bundle, dict):
+        return None, ("proof attestation bundle is not a JSON object",)
+
+    try:
+        checksums_text = checksums_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return None, (f"subject-checksums.txt is not utf-8: {exc}",)
+    checksums, diagnostics = parse_subject_checksums(checksums_text)
+    if diagnostics:
+        return None, diagnostics
+
+    return (
+        ProofPackArtifact(
+            manifest=manifest,
+            manifest_bytes=manifest_bytes,
+            checksums=checksums,
+            bundle=bundle,
+            bundle_bytes=bundle_bytes,
+        ),
+        (),
+    )
+
+
+def download_proof_pack_artifact(
+    api: GitHubApi,
+    run_id: str,
+) -> tuple[ProofPackArtifact | None, tuple[str, ...]]:
+    try:
+        response = api.request("GET", f"/actions/runs/{run_id}/artifacts")
+    except TRANSIENT_REQUEST_ERRORS as exc:
+        return None, (f"run {run_id}: could not list artifacts ({exc})",)
+    if not isinstance(response, dict):
+        return None, (f"run {run_id}: artifacts response is not an object",)
+    raw_artifacts = response.get("artifacts")
+    if not isinstance(raw_artifacts, list):
+        return None, (f"run {run_id}: artifacts response missing artifacts list",)
+
+    expected_name = proof_pack_artifact_name(run_id)
+    candidates = [
+        artifact
+        for artifact in raw_artifacts
+        if isinstance(artifact, dict)
+        and artifact.get("name") == expected_name
+        and artifact.get("expired") is not True
+    ]
+    if not candidates:
+        return None, (f"run {run_id}: proof artifact {expected_name!r} not found or expired",)
+
+    artifact = dict(candidates[0])
+    download_url = artifact.get("archive_download_url")
+    if not isinstance(download_url, str) or not download_url:
+        return None, (f"run {run_id}: proof artifact missing archive_download_url",)
+    try:
+        data = api.download(download_url)
+    except TRANSIENT_REQUEST_ERRORS as exc:
+        return None, (f"run {run_id}: could not download proof artifact ({exc})",)
+    pack, diagnostics = load_proof_pack_zip(data)
+    return pack, tuple(f"run {run_id}: {line}" for line in diagnostics)
+
+
+def decode_dsse_statement(bundle: dict[str, object]) -> tuple[dict[str, object] | None, tuple[str, ...]]:
+    raw_envelope = bundle.get("dsseEnvelope")
+    if not isinstance(raw_envelope, dict):
+        return None, ("attestation bundle missing dsseEnvelope object",)
+    payload = raw_envelope.get("payload")
+    if not isinstance(payload, str) or not payload:
+        return None, ("attestation bundle missing dsseEnvelope.payload",)
+    try:
+        statement_bytes = base64.b64decode(payload, validate=True)
+        statement = json.loads(statement_bytes.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return None, (f"attestation bundle payload could not be decoded: {exc}",)
+    if not isinstance(statement, dict):
+        return None, ("attestation statement is not a JSON object",)
+    return statement, ()
+
+
+def statement_subject_digests(statement: dict[str, object]) -> tuple[dict[str, str], tuple[str, ...]]:
+    subjects = statement.get("subject")
+    if not isinstance(subjects, list):
+        return {}, ("attestation statement missing subject list",)
+    digests: dict[str, str] = {}
+    diagnostics: list[str] = []
+    for index, raw_subject in enumerate(subjects):
+        if not isinstance(raw_subject, dict):
+            diagnostics.append(f"attestation subject[{index}] is not an object")
+            continue
+        name = raw_subject.get("name")
+        raw_digest = raw_subject.get("digest")
+        if not isinstance(name, str) or not name:
+            diagnostics.append(f"attestation subject[{index}] missing name")
+            continue
+        if not isinstance(raw_digest, dict):
+            diagnostics.append(f"attestation subject {name!r} missing digest object")
+            continue
+        digest = raw_digest.get("sha256")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            diagnostics.append(f"attestation subject {name!r} missing sha256 digest")
+            continue
+        digests[name] = digest
+    if not digests:
+        diagnostics.append("attestation statement has no valid subjects")
+    return digests, tuple(diagnostics)
+
+
+def manifest_subjects(manifest: dict[str, object]) -> tuple[dict[str, str], tuple[str, ...]]:
+    raw_pack = manifest.get("proof_pack")
+    if not isinstance(raw_pack, dict):
+        return {}, ("proof manifest missing proof_pack object",)
+    raw_subjects = raw_pack.get("subjects")
+    if not isinstance(raw_subjects, list):
+        return {}, ("proof manifest missing proof_pack.subjects list",)
+    subjects: dict[str, str] = {}
+    diagnostics: list[str] = []
+    for index, raw_subject in enumerate(raw_subjects):
+        if not isinstance(raw_subject, dict):
+            diagnostics.append(f"proof_pack.subjects[{index}] is not an object")
+            continue
+        path = raw_subject.get("path")
+        digest = raw_subject.get("sha256")
+        if not isinstance(path, str) or not path:
+            diagnostics.append(f"proof_pack.subjects[{index}] missing path")
+            continue
+        if not isinstance(digest, str) or not digest.startswith("sha256:"):
+            diagnostics.append(f"proof_pack.subjects[{index}] missing sha256: digest")
+            continue
+        value = digest.removeprefix("sha256:")
+        if not re.fullmatch(r"[0-9a-f]{64}", value):
+            diagnostics.append(f"proof_pack.subjects[{index}] malformed sha256 digest")
+            continue
+        subjects[path] = value
+    if not subjects:
+        diagnostics.append("proof manifest has no valid proof_pack.subjects")
+    return subjects, tuple(diagnostics)
+
+
+def validate_attestation_statement(
+    pack: ProofPackArtifact,
+) -> tuple[dict[str, object] | None, tuple[str, ...]]:
+    statement, diagnostics = decode_dsse_statement(pack.bundle)
+    if statement is None:
+        return None, diagnostics
+
+    problems: list[str] = []
+    if statement.get("_type") != "https://in-toto.io/Statement/v1":
+        problems.append("attestation statement _type is not in-toto Statement v1")
+    if statement.get("predicateType") != "https://slsa.dev/provenance/v1":
+        problems.append("attestation statement predicateType is not SLSA provenance v1")
+
+    statement_digests, subject_diagnostics = statement_subject_digests(statement)
+    problems.extend(subject_diagnostics)
+    manifest_digests, manifest_diagnostics = manifest_subjects(pack.manifest)
+    problems.extend(manifest_diagnostics)
+
+    expected_manifest_digest = sha256_hex(pack.manifest_bytes)
+    recorded_manifest_digest = statement_digests.get("assay-runner-proof-upload/manifest.json")
+    if recorded_manifest_digest != expected_manifest_digest:
+        problems.append(
+            "attestation statement does not bind manifest.json digest "
+            f"{expected_manifest_digest}"
+        )
+    checksummed_manifest_digest = pack.checksums.get("assay-runner-proof-upload/manifest.json")
+    if checksummed_manifest_digest != expected_manifest_digest:
+        problems.append("subject-checksums.txt does not bind manifest.json digest")
+
+    for path, digest in manifest_digests.items():
+        if pack.checksums.get(path) != digest:
+            problems.append(f"{path}: manifest digest is not present in subject-checksums.txt")
+        if statement_digests.get(path) != digest:
+            problems.append(f"{path}: manifest digest is not present in attestation subjects")
+
+    predicate = statement.get("predicate")
+    if not isinstance(predicate, dict):
+        problems.append("attestation statement missing predicate object")
+
+    if problems:
+        return None, tuple(problems)
+    return statement, ()
+
+
+def run_gh_attestation_verify(
+    api: GitHubApi,
+    pack: ProofPackArtifact,
+) -> tuple[object | None, tuple[str, ...]]:
+    if shutil.which("gh") is None:
+        return None, ("gh CLI not available for attestation verification",)
+    with tempfile.TemporaryDirectory(prefix="assay-lane-attestation-") as tmp:
+        root = Path(tmp)
+        manifest_path = root / "manifest.json"
+        bundle_path = root / "attestation-bundle.json"
+        manifest_path.write_bytes(pack.manifest_bytes)
+        bundle_path.write_bytes(pack.bundle_bytes)
+        env = dict(os.environ)
+        if not env.get("GH_TOKEN"):
+            env["GH_TOKEN"] = api.token
+        try:
+            completed = subprocess.run(
+                [
+                    "gh",
+                    "attestation",
+                    "verify",
+                    str(manifest_path),
+                    "--bundle",
+                    str(bundle_path),
+                    "--repo",
+                    api.repo,
+                    "--format",
+                    "json",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+        except OSError as exc:
+            return None, (f"gh attestation verify could not run: {exc}",)
+    if completed.returncode != 0:
+        diagnostic = completed.stderr.strip() or completed.stdout.strip() or "unknown error"
+        return None, (f"gh attestation verify failed: {diagnostic}",)
+    try:
+        parsed = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        return None, (f"gh attestation verify output was not JSON: {exc}",)
+    return parsed, ()
 
 
 def starts(path: str, prefix: str) -> bool:
@@ -359,6 +681,48 @@ def compare_content_path_trees(
     if mismatches:
         return ContentTreeComparison(False, tuple(mismatches))
     return ContentTreeComparison(True, ())
+
+
+def current_content_path_trees(head_sha: str) -> tuple[dict[str, str], tuple[str, ...]]:
+    trees: dict[str, str] = {}
+    diagnostics: list[str] = []
+    for path in load_gated_path_config().content_provenance_paths:
+        try:
+            oid = subprocess.check_output(
+                ["git", "rev-parse", f"{head_sha}:{path}"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except (OSError, subprocess.CalledProcessError):
+            diagnostics.append(f"{path}: could not resolve current tree oid at {head_sha}")
+            continue
+        if not oid:
+            diagnostics.append(f"{path}: empty current tree oid at {head_sha}")
+            continue
+        trees[path] = oid
+    return trees, tuple(diagnostics)
+
+
+def content_tree_proof_accepts_head(
+    manifest: dict[str, object],
+    pr: PullRequest,
+) -> ContentTreeComparison:
+    uncovered = uncovered_content_provenance_files(pr.files)
+    source = manifest.get("source")
+    proof_head = str(source.get("head_sha") or "") if isinstance(source, dict) else ""
+    if uncovered and proof_head != pr.head_sha:
+        return ContentTreeComparison(
+            False,
+            tuple(f"{path}: gated path is not covered by content-provenance trees" for path in uncovered),
+        )
+    try:
+        fetch_ref_for_diff(pr.number, pr.head_sha)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        return ContentTreeComparison(False, (f"could not fetch PR head for content-tree comparison: {exc}",))
+    current_trees, diagnostics = current_content_path_trees(pr.head_sha)
+    if diagnostics:
+        return ContentTreeComparison(False, diagnostics)
+    return compare_content_path_trees(manifest, current_trees)
 
 
 def accepted_gates(expected: Gate) -> set[str]:
@@ -577,6 +941,287 @@ def delegated_run_diagnostic(run: dict[str, object], run_id: str, head_sha: str)
     return None
 
 
+def attestation_verified_claims(verification: object) -> dict[str, object]:
+    """Return the first verified certificate claim object gh exposes.
+
+    `gh attestation verify --format json` has evolved shape across releases;
+    the current output is a list of records with `verificationResult`
+    metadata. Keep this extractor deliberately tolerant and validate the
+    load-bearing claims by name if they are present. The DSSE/SLSA payload
+    checks below still enforce the workflow/run semantics.
+    """
+
+    candidates: list[object]
+    if isinstance(verification, list):
+        candidates = verification
+    else:
+        candidates = [verification]
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        for key in ("verificationResult", "certificate", "certificates"):
+            value = candidate.get(key)
+            if isinstance(value, dict):
+                return value
+        return candidate
+    return {}
+
+
+def validate_gh_attestation_claims(
+    verification: object,
+    manifest: dict[str, object],
+    api: GitHubApi,
+) -> tuple[str, ...]:
+    claims = attestation_verified_claims(verification)
+    if not claims:
+        return ("gh attestation verify returned no claim object",)
+
+    source = manifest.get("source")
+    expected_sha = str(source.get("head_sha") or "") if isinstance(source, dict) else ""
+    expected_ref = str(source.get("ref") or "") if isinstance(source, dict) else ""
+    expected_workflow_name = (
+        str(source.get("workflow_name") or "") if isinstance(source, dict) else DELEGATED_WORKFLOW_NAME
+    )
+    expected_workflow_sha = str(source.get("workflow_sha") or "") if isinstance(source, dict) else ""
+
+    checks = {
+        "githubWorkflowName": expected_workflow_name,
+        "githubWorkflowTrigger": "workflow_dispatch",
+        "githubWorkflowRepository": api.repo,
+        "sourceRepositoryDigest": expected_sha,
+        "githubWorkflowSHA": expected_workflow_sha or expected_sha,
+        "sourceRepositoryRef": expected_ref,
+        "runnerEnvironment": "self-hosted",
+    }
+    diagnostics: list[str] = []
+    for key, expected in checks.items():
+        if not expected or key not in claims:
+            continue
+        got = claims.get(key)
+        if got != expected:
+            diagnostics.append(f"attestation claim {key}={got!r}, expected {expected!r}")
+    return tuple(diagnostics)
+
+
+def validate_attestation_predicate(
+    statement: dict[str, object],
+    manifest: dict[str, object],
+    run: dict[str, object],
+    api: GitHubApi,
+) -> tuple[str, ...]:
+    source = manifest.get("source")
+    if not isinstance(source, dict):
+        return ("proof manifest missing source object",)
+    predicate = statement.get("predicate")
+    if not isinstance(predicate, dict):
+        return ("attestation statement missing predicate object",)
+    build_definition = predicate.get("buildDefinition")
+    run_details = predicate.get("runDetails")
+    diagnostics: list[str] = []
+    if not isinstance(build_definition, dict):
+        diagnostics.append("attestation predicate missing buildDefinition object")
+    else:
+        external = build_definition.get("externalParameters")
+        internal = build_definition.get("internalParameters")
+        if not isinstance(external, dict):
+            diagnostics.append("attestation predicate missing externalParameters object")
+        else:
+            workflow = external.get("workflow")
+            if not isinstance(workflow, dict):
+                diagnostics.append("attestation predicate missing workflow external parameter")
+            else:
+                expected_repo_url = f"https://github.com/{api.repo}"
+                if workflow.get("path") != DELEGATED_WORKFLOW_PATH:
+                    diagnostics.append(
+                        f"attestation workflow path {workflow.get('path')!r}, "
+                        f"expected {DELEGATED_WORKFLOW_PATH!r}"
+                    )
+                if workflow.get("repository") != expected_repo_url:
+                    diagnostics.append(
+                        f"attestation workflow repository {workflow.get('repository')!r}, "
+                        f"expected {expected_repo_url!r}"
+                    )
+                if workflow.get("ref") != source.get("ref"):
+                    diagnostics.append(
+                        f"attestation workflow ref {workflow.get('ref')!r}, "
+                        f"expected {source.get('ref')!r}"
+                    )
+        if not isinstance(internal, dict):
+            diagnostics.append("attestation predicate missing internalParameters object")
+        else:
+            github = internal.get("github")
+            if not isinstance(github, dict):
+                diagnostics.append("attestation predicate missing github internal parameters")
+            else:
+                if github.get("event_name") != "workflow_dispatch":
+                    diagnostics.append(
+                        f"attestation event_name {github.get('event_name')!r}, "
+                        "expected 'workflow_dispatch'"
+                    )
+                if github.get("runner_environment") != "self-hosted":
+                    diagnostics.append(
+                        f"attestation runner_environment {github.get('runner_environment')!r}, "
+                        "expected 'self-hosted'"
+                    )
+
+        resolved = build_definition.get("resolvedDependencies")
+        if isinstance(resolved, list):
+            expected_sha = source.get("head_sha")
+            found = False
+            for dependency in resolved:
+                if not isinstance(dependency, dict):
+                    continue
+                digest = dependency.get("digest")
+                if isinstance(digest, dict) and digest.get("gitCommit") == expected_sha:
+                    found = True
+                    break
+            if not found:
+                diagnostics.append("attestation resolvedDependencies missing source head commit")
+
+    if not isinstance(run_details, dict):
+        diagnostics.append("attestation predicate missing runDetails object")
+    else:
+        metadata = run_details.get("metadata")
+        if isinstance(metadata, dict):
+            invocation = str(metadata.get("invocationId") or "")
+            expected_prefix = f"{source.get('run_url')}/attempts/{source.get('run_attempt')}"
+            if invocation and invocation != expected_prefix:
+                diagnostics.append(
+                    f"attestation invocationId {invocation!r}, expected {expected_prefix!r}"
+                )
+
+    if str(source.get("run_id") or "") != str(run.get("id") or ""):
+        diagnostics.append("proof manifest run_id does not match workflow run")
+    if str(source.get("run_url") or "") != str(run.get("html_url") or ""):
+        diagnostics.append("proof manifest run_url does not match workflow run")
+    if str(source.get("head_sha") or "") != str(run.get("head_sha") or ""):
+        diagnostics.append("proof manifest head_sha does not match workflow run")
+    if str(source.get("repository") or "") != api.repo:
+        diagnostics.append("proof manifest repository does not match current repository")
+    if str(source.get("workflow_name") or "") != DELEGATED_WORKFLOW_NAME:
+        diagnostics.append("proof manifest workflow_name does not match delegated workflow")
+    if str(source.get("workflow_path") or "") != DELEGATED_WORKFLOW_PATH:
+        diagnostics.append("proof manifest workflow_path does not match delegated workflow")
+    return tuple(diagnostics)
+
+
+def validate_proof_manifest_semantics(
+    manifest: dict[str, object],
+    run: dict[str, object],
+    expected: Gate,
+    pr: PullRequest,
+    api: GitHubApi,
+) -> tuple[str, ...]:
+    diagnostics: list[str] = []
+    if manifest.get("schema") != PROOF_PACK_SCHEMA:
+        diagnostics.append(f"proof manifest schema is {manifest.get('schema')!r}")
+    if manifest.get("kind") != PROOF_PACK_KIND:
+        diagnostics.append(f"proof manifest kind is {manifest.get('kind')!r}")
+    if manifest.get("claim_ceiling") != PROOF_PACK_CLAIM_CEILING:
+        diagnostics.append("proof manifest claim_ceiling is not the delegated gate ceiling")
+
+    source = manifest.get("source")
+    if not isinstance(source, dict):
+        diagnostics.append("proof manifest missing source object")
+    else:
+        expected_source = {
+            "repository": api.repo,
+            "workflow_name": DELEGATED_WORKFLOW_NAME,
+            "workflow_path": DELEGATED_WORKFLOW_PATH,
+            "run_id": str(run.get("id") or ""),
+            "run_url": str(run.get("html_url") or ""),
+            "head_sha": str(run.get("head_sha") or ""),
+        }
+        for key, expected_value in expected_source.items():
+            if str(source.get(key) or "") != expected_value:
+                diagnostics.append(
+                    f"proof manifest source.{key}={source.get(key)!r}, "
+                    f"expected {expected_value!r}"
+                )
+
+    inputs = manifest.get("inputs")
+    if not isinstance(inputs, dict):
+        diagnostics.append("proof manifest missing inputs object")
+    else:
+        gate = str(inputs.get("gates") or "")
+        if gate not in accepted_gates(expected):
+            diagnostics.append(
+                f"proof manifest inputs.gates={gate!r}, "
+                f"expected one of {sorted(accepted_gates(expected))!r}"
+            )
+        if inputs.get("build_ebpf") != "true":
+            diagnostics.append("proof manifest inputs.build_ebpf must be 'true'")
+
+    tree_check = content_tree_proof_accepts_head(manifest, pr)
+    if not tree_check.accepted:
+        diagnostics.extend(tree_check.diagnostics)
+    return tuple(diagnostics)
+
+
+def run_ids_from_event() -> list[str]:
+    if os.environ.get("GITHUB_EVENT_NAME") != "workflow_run":
+        return []
+    run_id = os.environ.get("DELEGATED_WORKFLOW_RUN_ID", "")
+    return [run_id] if re.fullmatch(r"[0-9]+", run_id) else []
+
+
+def find_valid_attested_proof(
+    api: GitHubApi,
+    run_ids: Iterable[str],
+    pr: PullRequest,
+    expected: Gate,
+) -> AttestedProofCheck:
+    diagnostics: list[str] = []
+    for run_id in run_ids:
+        try:
+            run = dict(api.request("GET", f"/actions/runs/{run_id}"))
+        except TRANSIENT_REQUEST_ERRORS as exc:
+            diagnostics.append(f"run {run_id}: could not read workflow run ({exc})")
+            continue
+        basic = delegated_run_diagnostic(run, run_id, str(run.get("head_sha") or ""))
+        if basic is not None:
+            diagnostics.append(basic)
+            continue
+
+        pack, pack_diagnostics = download_proof_pack_artifact(api, run_id)
+        if pack is None:
+            diagnostics.extend(pack_diagnostics)
+            continue
+
+        statement, statement_diagnostics = validate_attestation_statement(pack)
+        if statement is None:
+            diagnostics.extend(f"run {run_id}: {line}" for line in statement_diagnostics)
+            continue
+
+        semantic_diagnostics = validate_proof_manifest_semantics(
+            pack.manifest,
+            run,
+            expected,
+            pr,
+            api,
+        )
+        if semantic_diagnostics:
+            diagnostics.extend(f"run {run_id}: {line}" for line in semantic_diagnostics)
+            continue
+
+        predicate_diagnostics = validate_attestation_predicate(statement, pack.manifest, run, api)
+        if predicate_diagnostics:
+            diagnostics.extend(f"run {run_id}: {line}" for line in predicate_diagnostics)
+            continue
+
+        verification, verify_diagnostics = run_gh_attestation_verify(api, pack)
+        if verification is None:
+            diagnostics.extend(f"run {run_id}: {line}" for line in verify_diagnostics)
+            continue
+        claim_diagnostics = validate_gh_attestation_claims(verification, pack.manifest, api)
+        if claim_diagnostics:
+            diagnostics.extend(f"run {run_id}: {line}" for line in claim_diagnostics)
+            continue
+
+        return AttestedProofCheck(True, run, tuple(diagnostics))
+    return AttestedProofCheck(False, None, tuple(diagnostics))
+
+
 def recorded_gate_ok(text: str, expected: Gate) -> bool:
     gates = accepted_gates(expected)
     if not gates:
@@ -593,7 +1238,7 @@ def comment_body(classification: Classification, pr: PullRequest, passed: bool, 
         proof = ""
     else:
         status = (
-            "PASS: delegated runner proof recorded and matched this PR head."
+            "PASS: delegated runner proof accepted for this PR."
             if passed
             else "FAIL: delegated runner proof is required before merge."
         )
@@ -734,35 +1379,55 @@ def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) ->
         )
         return 0
 
-    run_ids = run_ids_from_text(api.repo, text)
+    seen_run_ids: set[str] = set()
+    run_ids: list[str] = []
+    for run_id in [*run_ids_from_event(), *run_ids_from_text(api.repo, text)]:
+        if run_id not in seen_run_ids:
+            seen_run_ids.add(run_id)
+            run_ids.append(run_id)
+
+    attested = find_valid_attested_proof(api, run_ids, pr, classification.gate)
     valid_run, run_diagnostics = find_valid_delegated_run(api, run_ids, pr.head_sha)
     sha_ok = text_mentions_head_sha(text, pr.head_sha)
     gate_ok = recorded_gate_ok(text, classification.gate)
-    passed = valid_run is not None and sha_ok and gate_ok
+    fallback_passed = valid_run is not None and sha_ok and gate_ok
+    passed = attested.accepted or fallback_passed
 
     details: list[str] = []
-    if valid_run is None:
-        details.append("No successful `Runner Spike Delegated` workflow_dispatch run URL matched the PR head SHA.")
-    if not sha_ok:
+    if not run_ids:
+        details.append("No `Runner Spike Delegated` run URL or workflow_run event was available.")
+    if not attested.accepted:
+        details.append("No attested delegated proof pack matched this PR's gated content.")
+    if valid_run is None and not attested.accepted:
+        details.append("No legacy delegated run URL matched the PR head SHA.")
+    if not sha_ok and not attested.accepted:
         details.append("The PR body/comments do not record the current PR head SHA or its 12-character prefix.")
-    if not gate_ok:
+    if not gate_ok and not attested.accepted:
         details.append(
             f"The PR body/comments do not record `gate: {classification.gate.label}`"
             + (" or `gate: all`." if classification.gate != Gate.ALL else ".")
         )
+    if attested.diagnostics and not attested.accepted:
+        details.append(
+            "Attested proof diagnostics:\n"
+            + "\n".join(f"- {line}" for line in attested.diagnostics[:12])
+        )
     if run_diagnostics:
-        details.append("Run diagnostics:\n" + "\n".join(f"- {line}" for line in run_diagnostics[:8]))
-    if passed:
-        details.append(f"Matched delegated run: {valid_run.get('html_url')}")
+        details.append("Legacy run diagnostics:\n" + "\n".join(f"- {line}" for line in run_diagnostics[:8]))
+    if attested.accepted and attested.run is not None:
+        details.append(f"Matched attested delegated proof pack: {attested.run.get('html_url')}")
+    elif fallback_passed and valid_run is not None:
+        details.append(f"Matched legacy delegated run proof: {valid_run.get('html_url')}")
 
     detail = "\n\n".join(details)
     body = comment_body(classification, pr, passed, detail)
     maybe_comment(api, pr.number, comments, body, comment=comment)
-    status_description = (
-        f"delegated proof accepted: gates={classification.gate.label}"
-        if passed
-        else f"delegated proof required: gates={classification.gate.label}"
-    )
+    if attested.accepted:
+        status_description = f"attested delegated proof accepted: gates={classification.gate.label}"
+    elif fallback_passed:
+        status_description = f"legacy delegated proof accepted: gates={classification.gate.label}"
+    else:
+        status_description = f"delegated proof required: gates={classification.gate.label}"
     maybe_status(api, pr.head_sha, passed, status_description, status=status)
 
     if passed:
@@ -886,6 +1551,7 @@ def self_test() -> None:
     assert "conclusion" in delegated_run_diagnostic({**valid_run, "conclusion": "failure"}, "1", "abc123")
     assert "workflow name" in delegated_run_diagnostic({**valid_run, "name": "CI"}, "1", "abc123")
     _test_event_resolution_and_status_payload()
+    _test_attested_proof_pack_helpers()
 
     dependabot_pr = PullRequest(
         number=1,
@@ -961,6 +1627,137 @@ def _test_content_tree_comparison() -> None:
     error = compare_content_path_trees(error_manifest, current)
     assert not error.accepted
     assert "proof tree error" in error.diagnostics[0]
+
+
+def _test_attested_proof_pack_helpers() -> None:
+    manifest = {
+        "schema": PROOF_PACK_SCHEMA,
+        "kind": PROOF_PACK_KIND,
+        "claim_ceiling": PROOF_PACK_CLAIM_CEILING,
+        "source": {
+            "head_sha": "abc123",
+            "ref": "refs/heads/test",
+            "repository": "Rul1an/assay",
+            "run_attempt": "1",
+            "run_id": "12345",
+            "run_url": "https://github.com/Rul1an/assay/actions/runs/12345",
+            "workflow_name": DELEGATED_WORKFLOW_NAME,
+            "workflow_path": DELEGATED_WORKFLOW_PATH,
+            "workflow_sha": "abc123",
+        },
+        "inputs": {"gates": "all", "build_ebpf": "true"},
+        "content_provenance": {"path_trees": {}},
+        "proof_pack": {
+            "subjects": [
+                {"path": "target/assay-ebpf.o", "sha256": "sha256:" + "a" * 64},
+            ]
+        },
+    }
+    manifest_bytes = json.dumps(manifest, sort_keys=True).encode("utf-8")
+    statement = {
+        "_type": "https://in-toto.io/Statement/v1",
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "subject": [
+            {
+                "name": "assay-runner-proof-upload/manifest.json",
+                "digest": {"sha256": sha256_hex(manifest_bytes)},
+            },
+            {"name": "target/assay-ebpf.o", "digest": {"sha256": "a" * 64}},
+        ],
+        "predicate": {
+            "buildDefinition": {
+                "externalParameters": {
+                    "workflow": {
+                        "ref": "refs/heads/test",
+                        "repository": "https://github.com/Rul1an/assay",
+                        "path": DELEGATED_WORKFLOW_PATH,
+                    }
+                },
+                "internalParameters": {
+                    "github": {
+                        "event_name": "workflow_dispatch",
+                        "runner_environment": "self-hosted",
+                    }
+                },
+                "resolvedDependencies": [{"digest": {"gitCommit": "abc123"}}],
+            },
+            "runDetails": {
+                "metadata": {
+                    "invocationId": "https://github.com/Rul1an/assay/actions/runs/12345/attempts/1"
+                }
+            },
+        },
+    }
+    bundle = {
+        "dsseEnvelope": {
+            "payload": base64.b64encode(json.dumps(statement).encode("utf-8")).decode("ascii")
+        }
+    }
+    bundle_bytes = json.dumps(bundle, sort_keys=True).encode("utf-8")
+    checksums = (
+        f"{sha256_hex(manifest_bytes)}  assay-runner-proof-upload/manifest.json\n"
+        f"{'a' * 64}  target/assay-ebpf.o\n"
+    )
+    archive_buffer = io.BytesIO()
+    with zipfile.ZipFile(archive_buffer, "w") as archive:
+        archive.writestr("manifest.json", manifest_bytes)
+        archive.writestr("subject-checksums.txt", checksums)
+        archive.writestr("attestation-bundle.json", bundle_bytes)
+
+    pack, diagnostics = load_proof_pack_zip(archive_buffer.getvalue())
+    assert pack is not None, diagnostics
+    verified_statement, diagnostics = validate_attestation_statement(pack)
+    assert verified_statement is not None, diagnostics
+    run = {
+        "id": 12345,
+        "html_url": "https://github.com/Rul1an/assay/actions/runs/12345",
+        "head_sha": "abc123",
+    }
+    assert validate_attestation_predicate(verified_statement, pack.manifest, run, GitHubApi("Rul1an/assay", "t")) == ()
+    assert validate_gh_attestation_claims(
+        [
+            {
+                "verificationResult": {
+                    "githubWorkflowName": DELEGATED_WORKFLOW_NAME,
+                    "githubWorkflowTrigger": "workflow_dispatch",
+                    "githubWorkflowRepository": "Rul1an/assay",
+                    "sourceRepositoryDigest": "abc123",
+                    "githubWorkflowSHA": "abc123",
+                    "sourceRepositoryRef": "refs/heads/test",
+                    "runnerEnvironment": "self-hosted",
+                }
+            }
+        ],
+        pack.manifest,
+        GitHubApi("Rul1an/assay", "t"),
+    ) == ()
+
+    bad_manifest = dict(manifest)
+    bad_manifest["proof_pack"] = {"subjects": [{"path": "target/assay-ebpf.o", "sha256": "sha256:" + "b" * 64}]}
+    bad_pack = ProofPackArtifact(
+        manifest=bad_manifest,
+        manifest_bytes=json.dumps(bad_manifest).encode("utf-8"),
+        checksums=pack.checksums,
+        bundle=pack.bundle,
+        bundle_bytes=pack.bundle_bytes,
+    )
+    assert validate_attestation_statement(bad_pack)[0] is None
+
+    old_name = os.environ.get("GITHUB_EVENT_NAME")
+    old_run_id = os.environ.get("DELEGATED_WORKFLOW_RUN_ID")
+    os.environ["GITHUB_EVENT_NAME"] = "workflow_run"
+    os.environ["DELEGATED_WORKFLOW_RUN_ID"] = "98765"
+    try:
+        assert run_ids_from_event() == ["98765"]
+    finally:
+        if old_name is None:
+            os.environ.pop("GITHUB_EVENT_NAME", None)
+        else:
+            os.environ["GITHUB_EVENT_NAME"] = old_name
+        if old_run_id is None:
+            os.environ.pop("DELEGATED_WORKFLOW_RUN_ID", None)
+        else:
+            os.environ["DELEGATED_WORKFLOW_RUN_ID"] = old_run_id
 
 
 def _test_event_resolution_and_status_payload() -> None:
