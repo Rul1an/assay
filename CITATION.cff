@@ -13,3 +13,38 @@ keywords:
   - policy-as-code
   - evidence
   - ebpf
+references:
+  - type: standard
+    title: "JSON Canonicalization Scheme (JCS)"
+    authors:
+      - family-names: Rundgren
+        given-names: Anders
+      - family-names: Jordan
+        given-names: Bret
+      - family-names: Erdtman
+        given-names: Samuel
+    number: "RFC 8785"
+    institution:
+      name: "RFC Editor"
+    year: 2020
+    url: "https://www.rfc-editor.org/rfc/rfc8785"
+    notes: "Informational RFC, Independent Submission stream. Implemented by assay-canonical."
+  - type: standard
+    title: "Static Analysis Results Interchange Format (SARIF) Version 2.1.0"
+    authors:
+      - name: "OASIS SARIF Technical Committee"
+    institution:
+      name: "OASIS Open"
+    year: 2020
+    url: "https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html"
+    notes: "OASIS Standard. Emitted by assay evidence lint and the SARIF adapters."
+  - type: standard
+    title: "CycloneDX Bill of Materials Specification"
+    authors:
+      - name: "Ecma International TC54"
+    number: "ECMA-424"
+    institution:
+      name: "Ecma International"
+    year: 2024
+    url: "https://ecma-international.org/publications-and-standards/standards/ecma-424/"
+    notes: "Ecma standard. Target of the skill supply-chain CycloneDX projection."
