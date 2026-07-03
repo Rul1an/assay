@@ -22,6 +22,13 @@ permissions:
   contents: read
   actions: read
 
+concurrency:
+  # Shares the same singleton self-hosted VM as Runner Spike Delegated.
+  # Keep trusted proof producers serialized across refs until the host is
+  # moved to an ephemeral runner model.
+  group: assay-bpf-runner-host
+  cancel-in-progress: false
+
 jobs:
   proof:
     name: Produce host-capability proof

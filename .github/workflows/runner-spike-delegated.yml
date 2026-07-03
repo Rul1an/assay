@@ -23,7 +23,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: runner-spike-delegated-${{ github.ref }}
+  # The assay-bpf-runner host is a singleton for delegated kernel/eBPF
+  # validation. Serialize all delegated runs across refs so workspace and
+  # downloaded-action cache state cannot race between back-to-back dispatches.
+  group: assay-bpf-runner-host
   cancel-in-progress: false
 
 jobs:
@@ -166,13 +169,9 @@ jobs:
           cargo build -p assay-cli --no-default-features --features runner
 
       - name: Build eBPF artifact
+        id: canonical-ebpf
         if: inputs.build_ebpf
-        shell: bash
-        run: |
-          set -euo pipefail
-          scripts/ci/install-ebpf-toolchain.sh
-          cargo xtask build-ebpf --release --no-docker
-          test -f target/assay-ebpf.o
+        uses: ./.github/actions/canonical-ebpf-build
 
       - name: Verify eBPF artifact
         shell: bash
@@ -184,6 +183,10 @@ jobs:
             exit 1
           fi
           ls -lh target/assay-ebpf.o target/debug/assay
+          if [ -f target/assay-ebpf.provenance.json ]; then
+            echo "eBPF build provenance:"
+            python3 -m json.tool target/assay-ebpf.provenance.json
+          fi
 
       - name: Run delegated Phase 1 gates
         shell: bash
@@ -279,6 +282,7 @@ jobs:
             --head-sha "$GITHUB_SHA" \
             --workflow-sha "$workflow_sha" \
             --workflow-name "$GITHUB_WORKFLOW" \
+            --ebpf-provenance target/assay-ebpf.provenance.json \
             --retention-days 365
           {
             echo "### Delegated proof pack"

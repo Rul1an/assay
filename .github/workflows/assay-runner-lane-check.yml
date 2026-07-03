@@ -3,6 +3,9 @@ name: Assay-Runner Lane Check
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited, ready_for_review]
+  workflow_run:
+    workflows: ["Runner Spike Delegated"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -16,6 +19,7 @@ jobs:
   lane-check:
     name: lane-check
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'workflow_dispatch'
     permissions:
       actions: read
       contents: read
@@ -48,10 +52,88 @@ jobs:
         shell: bash
         run: python3 scripts/ci/assay_runner_lane_check.py --self-test
 
-      - name: Check PR delegated lane proof
+      - name: Resolve PR number
+        id: pr
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          import sys
+          import urllib.request
+
+          event_name = os.environ["GITHUB_EVENT_NAME"]
+          event_path = os.environ["GITHUB_EVENT_PATH"]
+          with open(event_path, encoding="utf-8") as handle:
+              event = json.load(handle)
+
+          if event_name == "pull_request":
+              print(f"pr_number={event['pull_request']['number']}")
+              raise SystemExit(0)
+
+          if event_name == "workflow_dispatch":
+              value = event.get("inputs", {}).get("pr_number", "")
+              if not value:
+                  print("workflow_dispatch did not include pr_number", file=sys.stderr)
+                  raise SystemExit(1)
+              print(f"pr_number={value}")
+              raise SystemExit(0)
+
+          if event_name != "workflow_run":
+              print(f"unsupported event: {event_name}", file=sys.stderr)
+              raise SystemExit(1)
+
+          workflow_run = event.get("workflow_run") or {}
+          pull_requests = workflow_run.get("pull_requests") or []
+          if pull_requests:
+              print(f"pr_number={pull_requests[0]['number']}")
+              raise SystemExit(0)
+
+          # Manual workflow_dispatch runs can omit workflow_run.pull_requests.
+          # Fall back to GitHub's commit-associated PR endpoint for the run SHA.
+          head_sha = workflow_run.get("head_sha") or ""
+          if not head_sha:
+              print("pr_number=")
+              raise SystemExit(0)
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/commits/{head_sha}/pulls",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "Authorization": f"Bearer {token}",
+              },
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  pulls = json.loads(response.read().decode("utf-8"))
+          except Exception as exc:
+              print(f"warning: could not resolve PR for delegated run: {exc}", file=sys.stderr)
+              print("pr_number=")
+              raise SystemExit(0)
+
+          if pulls:
+              print(f"pr_number={pulls[0]['number']}")
+          else:
+              print("pr_number=")
+          PY
+
+      - name: Check PR delegated lane proof
+        if: steps.pr.outputs.pr_number != ''
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
         run: python3 scripts/ci/assay_runner_lane_check.py --comment
+
+      - name: No associated PR for delegated run
+        if: github.event_name == 'workflow_run' && steps.pr.outputs.pr_number == ''
+        shell: bash
+        run: echo "No associated pull request found for delegated workflow_run; nothing to refresh."

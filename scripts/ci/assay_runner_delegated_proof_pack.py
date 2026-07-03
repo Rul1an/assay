@@ -64,6 +64,12 @@ def copy_payload_file(source: Path, output_root: Path, relative: Path) -> dict[s
     }
 
 
+def copy_optional_payload_file(source: Path | None, output_root: Path, relative: Path) -> dict[str, Any] | None:
+    if source is None or not source.exists():
+        return None
+    return copy_payload_file(source, output_root, relative)
+
+
 def pass_lines(log_path: Path) -> list[str]:
     if not log_path.exists():
         return []
@@ -169,6 +175,11 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
     output_root.mkdir(parents=True)
 
     gates = [collect_gate(gate, proof_root, output_root) for gate in selected_gates]
+    ebpf_provenance = copy_optional_payload_file(
+        args.ebpf_provenance,
+        output_root,
+        Path("build") / "assay-ebpf.provenance.json",
+    )
     manifest = {
         "schema": SCHEMA,
         "kind": KIND,
@@ -199,6 +210,9 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
             "separate_from_normalized_runner_evidence": True,
             "not_a_runner_emitted_artifact": True,
         },
+        "build_provenance": {
+            "ebpf": ebpf_provenance,
+        },
         "gates": gates,
         "payload_files": [],
         "pack_size_bytes": 0,
@@ -222,6 +236,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--head-sha", default="", help="workflow head SHA")
     parser.add_argument("--workflow-sha", default="", help="workflow definition SHA")
     parser.add_argument("--workflow-name", default="Runner Spike Delegated")
+    parser.add_argument("--ebpf-provenance", type=Path, help="optional canonical eBPF build provenance JSON")
     parser.add_argument("--retention-days", type=int, default=365)
     parser.add_argument("--soft-cap-bytes", type=int, default=50 * 1024 * 1024)
     return parser.parse_args(argv)
@@ -231,6 +246,8 @@ def self_test() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         proof_root = root / "proof"
+        ebpf_provenance = root / "assay-ebpf.provenance.json"
+        ebpf_provenance.write_text('{"schema":"assay.ci.ebpf_build_provenance.v0"}\n', encoding="utf-8")
         gate_dir = proof_root / "gates" / "kernel-only" / "run-1" / "extract"
         gate_dir.mkdir(parents=True)
         (proof_root / "gates" / "kernel-only" / "status.txt").write_text("passed\n", encoding="utf-8")
@@ -253,6 +270,7 @@ def self_test() -> None:
             head_sha="abc",
             workflow_sha="def",
             workflow_name="Runner Spike Delegated",
+            ebpf_provenance=ebpf_provenance,
             retention_days=365,
             soft_cap_bytes=50 * 1024 * 1024,
         )
@@ -271,6 +289,8 @@ def self_test() -> None:
             raise ProofPackError(f"self-test gate status mismatch: {statuses}")
         if not manifest["gates"][0]["archives"]:
             raise ProofPackError("self-test did not collect archive digest")
+        if not manifest["build_provenance"]["ebpf"]:
+            raise ProofPackError("self-test did not collect eBPF build provenance")
         if not (args.output_dir / "manifest.json").exists():
             raise ProofPackError("self-test did not write manifest")
 
