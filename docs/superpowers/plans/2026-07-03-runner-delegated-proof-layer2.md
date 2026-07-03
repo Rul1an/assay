@@ -2,8 +2,8 @@
 
 Date: 2026-07-03
 
-Status: implementation started after Layer 1 merged in #1785 and Layer 2
-preparation merged in #1786.
+Status: producer-side attestation emission merged in #1787; consumer-side
+lane-check acceptance is implemented in the follow-up slice.
 
 ## Goal
 
@@ -93,20 +93,23 @@ missing, null, or carries an error. Do not silently drop absent paths.
 
 ### 3. Verify attestations in lane-check
 
-Keep `assay_runner_lane_check.py` stdlib-only. Add a thin workflow step that
-uses `gh attestation verify ... --format json` and writes normalized JSON to a
-temporary file; pass that file into the Python script.
+Keep `assay_runner_lane_check.py` stdlib-only. The helper downloads the
+delegated proof-pack artifact, validates the manifest, subject checksums, DSSE
+payload, SLSA predicate shape, and content tree OIDs itself, then shells out to
+`gh attestation verify ... --bundle ... --format json` for the cryptographic
+GitHub artifact-attestation verification.
 
 Verification should be deterministic across GitHub CLI releases:
 
-- require a documented minimum `gh` version in the workflow step;
 - invoke `gh attestation verify --bundle <proof-pack-bundle> --format json`;
-- pass an explicit predicate type, `https://slsa.dev/provenance/v1`;
-- normalize the CLI JSON into the small schema consumed by
-  `assay_runner_lane_check.py`.
+- keep the Python-side DSSE/SLSA payload checks load-bearing, so small changes
+  in the `gh` JSON wrapper cannot silently weaken the contract;
+- treat unavailable or malformed `gh` verification as a rejected attested path
+  with comment-proof fallback during the transition.
 
-Online attestation lookup is only a fallback for diagnostics when the uploaded
-bundle is absent or corrupt during the transition period.
+Online attestation lookup is not used as the primary proof source. The uploaded
+bundle inside the proof-pack artifact is the replayed evidence. If the artifact
+expires or the bundle is absent, the attested path is unavailable.
 
 The script should verify:
 
