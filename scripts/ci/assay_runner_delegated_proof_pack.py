@@ -171,9 +171,8 @@ def validate_path_within_root(candidate: Path, root: Path, *, label: str) -> Pat
 
 
 def workspace_display_path(path: Path, workspace_root: Path) -> str:
-    # codeql[py/path-injection] Callers pass workspace-validated subject paths; this re-resolves to emit a relative display name.
-    resolved = path.resolve()
-    root = workspace_root.resolve()
+    resolved = validate_path_within_root(path, workspace_root, label="subject path")
+    root = workspace_root.resolve(strict=False)
     try:
         return str(resolved.relative_to(root))
     except ValueError as exc:
@@ -202,17 +201,29 @@ def subject_for_file(path: Path, *, name: str, role: str) -> dict[str, Any]:
     }
 
 
-def proof_subjects(output_root: Path, ebpf_object: Path | None, workspace_root: Path) -> list[dict[str, Any]]:
+def proof_subjects(
+    output_root: Path,
+    ebpf_object: Path | None,
+    workspace_root: Path,
+    *,
+    require_ebpf_object: bool,
+) -> list[dict[str, Any]]:
     subjects: list[dict[str, Any]] = []
-    # codeql[py/path-injection] eBPF object path is fixed/validated under the workspace before subject collection.
-    if ebpf_object is not None and ebpf_object.exists():
-        subjects.append(
-            subject_for_file(
-                ebpf_object,
-                name=workspace_display_path(ebpf_object, workspace_root),
-                role="ebpf_object",
+    if ebpf_object is None:
+        if require_ebpf_object:
+            raise ProofPackError("missing required eBPF object for build_ebpf=true proof")
+    else:
+        safe_ebpf_object = validate_path_within_root(ebpf_object, workspace_root, label="eBPF object")
+        if require_ebpf_object and not safe_ebpf_object.exists():
+            raise ProofPackError(f"missing required eBPF object for build_ebpf=true proof: {safe_ebpf_object}")
+        if safe_ebpf_object.exists():
+            subjects.append(
+                subject_for_file(
+                    safe_ebpf_object,
+                    name=workspace_display_path(safe_ebpf_object, workspace_root),
+                    role="ebpf_object",
+                )
             )
-        )
     for item in payload_files(output_root):
         physical = output_root / Path(item["path"])
         subjects.append(
@@ -295,10 +306,9 @@ def write_subject_checksums(
         if not digest.startswith("sha256:"):
             raise ProofPackError(f"unsupported subject digest for {subject['path']}: {digest}")
         lines.append(f"{digest[len('sha256:') :]}  {subject['path']}")
-    # codeql[py/path-injection] Checksum output is fixed under the workspace proof-pack upload directory.
-    checksum_path.parent.mkdir(parents=True, exist_ok=True)
-    # codeql[py/path-injection] Checksum output is fixed under the workspace proof-pack upload directory.
-    checksum_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    safe_checksum_path = validate_path_within_root(checksum_path, workspace_root, label="subject checksums")
+    safe_checksum_path.parent.mkdir(parents=True, exist_ok=True)
+    safe_checksum_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def total_size(output_root: Path) -> int:
@@ -326,6 +336,8 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
     workspace_root = Path.cwd().resolve(strict=False)
     proof_root = args.proof_root
     output_root = validate_path_within_root(args.output_dir, workspace_root, label="proof upload directory")
+    if output_root == workspace_root:
+        raise ProofPackError("proof upload directory must not be the workspace root")
     ebpf_object = validate_path_within_root(args.ebpf_object, workspace_root, label="eBPF object")
     ebpf_provenance_path = validate_path_within_root(
         args.ebpf_provenance,
@@ -349,7 +361,12 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
     )
     require_content_provenance = str(args.build_ebpf).lower() == "true"
     path_trees = load_path_trees(ebpf_provenance_path, require=require_content_provenance)
-    subjects = proof_subjects(output_root, ebpf_object, workspace_root)
+    subjects = proof_subjects(
+        output_root,
+        ebpf_object,
+        workspace_root,
+        require_ebpf_object=require_content_provenance,
+    )
     manifest = {
         "schema": SCHEMA,
         "kind": KIND,
@@ -457,7 +474,7 @@ def self_test() -> None:
         ebpf_provenance = root / "target" / "assay-ebpf.provenance.json"
         ebpf_provenance.parent.mkdir(parents=True, exist_ok=True)
         path_trees = {
-            path: {"oid": hashlib.sha1(path.encode("utf-8")).hexdigest(), "error": None}
+            path: {"oid": hashlib.sha256(path.encode("utf-8")).hexdigest(), "error": None}
             for path in load_required_content_provenance_paths()
         }
         ebpf_provenance.write_text(
@@ -582,6 +599,21 @@ def self_test() -> None:
                 raise
         else:
             raise ProofPackError("self-test accepted malformed provenance source")
+
+        missing_ebpf_args = argparse.Namespace(**{**vars(args), "output_dir": Path("missing-ebpf-upload")})
+        ebpf_object.unlink()
+        try:
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                build_manifest(missing_ebpf_args)
+            finally:
+                os.chdir(old_cwd)
+        except ProofPackError as exc:
+            if "missing required eBPF object" not in str(exc):
+                raise
+        else:
+            raise ProofPackError("self-test accepted build_ebpf=true without eBPF object")
 
 
 def main(argv: list[str]) -> int:
