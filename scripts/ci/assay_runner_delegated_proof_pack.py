@@ -52,6 +52,10 @@ class ProofPackError(Exception):
     pass
 
 
+def script_repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
 def sha256_file_hex(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -169,6 +173,22 @@ def validate_path_within_root(candidate: Path, root: Path, *, label: str) -> Pat
     except ValueError as exc:
         raise ProofPackError(f"{label} must be within workspace root {resolved_root}: {candidate}") from exc
     return resolved_candidate
+
+
+def validate_external_proof_root(candidate: Path, workspace_root: Path) -> Path:
+    if not candidate.is_absolute():
+        raise ProofPackError("--proof-root must be an absolute path")
+    # proof-root is intentionally outside the checked-out repo. It is the only
+    # externally supplied path in this script and is constrained before reads.
+    # codeql[py/path-injection]
+    resolved = candidate.resolve(strict=False)
+    if not resolved.exists() or not resolved.is_dir():
+        raise ProofPackError(f"--proof-root must be an existing directory: {resolved}")
+    try:
+        resolved.relative_to(workspace_root.resolve(strict=False))
+    except ValueError:
+        return resolved
+    raise ProofPackError("--proof-root must be outside the workspace root")
 
 
 def workspace_display_path(path: Path, workspace_root: Path) -> str:
@@ -339,14 +359,14 @@ def write_manifest(output_root: Path, manifest: dict[str, Any]) -> None:
     raise ProofPackError("manifest pack_size_bytes did not stabilize")
 
 
-def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
+def build_manifest(args: argparse.Namespace, *, workspace_root: Path | None = None) -> dict[str, Any]:
     selected_gates = GATE_SELECTIONS.get(args.gates)
     if selected_gates is None:
         allowed = ", ".join(sorted(GATE_SELECTIONS))
         raise ProofPackError(f"unsupported gates value {args.gates!r}; expected one of {allowed}")
 
-    workspace_root = Path.cwd().resolve(strict=False)
-    proof_root = args.proof_root
+    workspace_root = (workspace_root or script_repo_root()).resolve(strict=False)
+    proof_root = validate_external_proof_root(args.proof_root, workspace_root)
     output_root = workspace_root / DEFAULT_OUTPUT_DIR
     ebpf_object = workspace_root / DEFAULT_EBPF_OBJECT
     ebpf_provenance_path = workspace_root / DEFAULT_EBPF_PROVENANCE
@@ -460,9 +480,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def self_test() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as proof_tmp:
         root = Path(tmp)
-        proof_root = root / "proof"
+        proof_root = Path(proof_tmp)
         ebpf_object = root / "target" / "assay-ebpf.o"
         ebpf_object.parent.mkdir(parents=True)
         ebpf_object.write_bytes(b"ebpf")
@@ -516,7 +536,7 @@ def self_test() -> None:
         old_cwd = Path.cwd()
         try:
             os.chdir(root)
-            manifest = build_manifest(args)
+            manifest = build_manifest(args, workspace_root=root)
         finally:
             os.chdir(old_cwd)
         if manifest["schema"] != SCHEMA:
@@ -568,7 +588,7 @@ def self_test() -> None:
             old_cwd = Path.cwd()
             try:
                 os.chdir(root)
-                build_manifest(args)
+                build_manifest(args, workspace_root=root)
             finally:
                 os.chdir(old_cwd)
         except ProofPackError as exc:
@@ -584,7 +604,7 @@ def self_test() -> None:
             old_cwd = Path.cwd()
             try:
                 os.chdir(root)
-                build_manifest(args)
+                build_manifest(args, workspace_root=root)
             finally:
                 os.chdir(old_cwd)
         except ProofPackError as exc:
@@ -609,7 +629,7 @@ def self_test() -> None:
             old_cwd = Path.cwd()
             try:
                 os.chdir(root)
-                build_manifest(args)
+                build_manifest(args, workspace_root=root)
             finally:
                 os.chdir(old_cwd)
         except ProofPackError as exc:
