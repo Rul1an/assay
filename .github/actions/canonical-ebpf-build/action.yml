@@ -3,14 +3,14 @@ name: Canonical eBPF build
 description: Build target/assay-ebpf.o through the canonical CI path and emit provenance.
 
 inputs:
-  output-path:
-    description: Path where cargo xtask writes the eBPF object.
-    required: false
-    default: target/assay-ebpf.o
   provenance-path:
     description: Path for the JSON provenance file emitted by this action.
     required: false
     default: target/assay-ebpf.provenance.json
+  clean-ebpf-crate:
+    description: Force a clean assay-ebpf crate build before invoking xtask.
+    required: false
+    default: "false"
 
 outputs:
   object-path:
@@ -37,14 +37,18 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        if [ "${{ inputs.clean-ebpf-crate }}" = "true" ]; then
+          rm -f target/assay-ebpf.o
+          cargo clean -p assay-ebpf 2>/dev/null || true
+        fi
         cargo xtask build-ebpf --release --no-docker
-        test -f "${{ inputs.output-path }}"
+        test -f target/assay-ebpf.o
 
     - name: Emit eBPF build provenance
       id: provenance
       shell: bash
       env:
-        ASSAY_EBPF_OBJECT: ${{ inputs.output-path }}
+        ASSAY_EBPF_OBJECT: target/assay-ebpf.o
         ASSAY_EBPF_PROVENANCE: ${{ inputs.provenance-path }}
       run: |
         set -euo pipefail
@@ -62,10 +66,7 @@ runs:
             raise SystemExit(f"missing eBPF object: {obj}")
 
         def git_output(*args):
-            try:
-                return subprocess.check_output(["git", *args], text=True, stderr=subprocess.DEVNULL).strip()
-            except subprocess.CalledProcessError:
-                return None
+            return subprocess.check_output(["git", *args], text=True, stderr=subprocess.PIPE).strip()
 
         def sha256_file(path: Path) -> str:
             digest = hashlib.sha256()
@@ -75,16 +76,17 @@ runs:
             return digest.hexdigest()
 
         stat = obj.stat()
+        manifest = json.loads(Path("scripts/ci/assay_runner_gated_paths.json").read_text(encoding="utf-8"))
         path_trees = {}
-        for path in (
-            "crates/assay-ebpf",
-            "crates/assay-monitor",
-            "crates/assay-xtask",
-            "scripts/ci",
-        ):
-            tree = git_output("rev-parse", f"HEAD:{path}")
-            if tree:
-                path_trees[path] = tree
+        missing_trees = []
+        for path in manifest["content_provenance_paths"]:
+            entry = {"oid": None, "error": None}
+            try:
+                entry["oid"] = git_output("rev-parse", f"HEAD:{path}")
+            except subprocess.CalledProcessError as exc:
+                entry["error"] = (exc.stderr or "").strip() or "missing_at_head"
+                missing_trees.append(path)
+            path_trees[path] = entry
 
         document = {
             "schema": "assay.ci.ebpf_build_provenance.v0",
@@ -115,6 +117,9 @@ runs:
 
         provenance.parent.mkdir(parents=True, exist_ok=True)
         provenance.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        if missing_trees:
+            raise SystemExit("missing required provenance tree(s): " + ", ".join(missing_trees))
 
         github_output = os.environ.get("GITHUB_OUTPUT")
         if github_output:

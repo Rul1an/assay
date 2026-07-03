@@ -183,9 +183,13 @@ jobs:
             exit 1
           fi
           ls -lh target/assay-ebpf.o target/debug/assay
-          if [ -f target/assay-ebpf.provenance.json ]; then
+          ebpf_provenance="${{ steps.canonical-ebpf.outputs.provenance-path }}"
+          if [ -z "$ebpf_provenance" ]; then
+            ebpf_provenance="target/assay-ebpf.provenance.json"
+          fi
+          if [ -f "$ebpf_provenance" ]; then
             echo "eBPF build provenance:"
-            python3 -m json.tool target/assay-ebpf.provenance.json
+            python3 -m json.tool "$ebpf_provenance"
           fi
 
       - name: Run delegated Phase 1 gates
@@ -270,6 +274,10 @@ jobs:
           set -euo pipefail
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           workflow_sha="${GITHUB_WORKFLOW_SHA:-$GITHUB_SHA}"
+          ebpf_provenance="${{ steps.canonical-ebpf.outputs.provenance-path }}"
+          if [ -z "$ebpf_provenance" ]; then
+            ebpf_provenance="target/assay-ebpf.provenance.json"
+          fi
           python3 scripts/ci/assay_runner_delegated_proof_pack.py \
             --proof-root "$ASSAY_RUNNER_DELEGATED_PROOF_ROOT" \
             --output-dir "$ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD" \
@@ -282,7 +290,7 @@ jobs:
             --head-sha "$GITHUB_SHA" \
             --workflow-sha "$workflow_sha" \
             --workflow-name "$GITHUB_WORKFLOW" \
-            --ebpf-provenance target/assay-ebpf.provenance.json \
+            --ebpf-provenance "$ebpf_provenance" \
             --retention-days 365
           {
             echo "### Delegated proof pack"

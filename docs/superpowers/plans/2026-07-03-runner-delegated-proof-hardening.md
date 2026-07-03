@@ -17,10 +17,10 @@ This plan keeps the first implementation narrow. It hardens the host and build/p
 Ship as the first PR.
 
 1. Serialize `assay-bpf-runner` work with a host-global concurrency group on the trusted delegated workflows. This avoids `_actions` cache and workspace races across branches.
-2. Add `.github/actions/canonical-ebpf-build`, a local composite action that is the only Runner delegated eBPF build entrypoint.
-3. Have the action produce `target/assay-ebpf.provenance.json` with object path, SHA-256, size, mtime, head SHA, workflow metadata, and key tree OIDs for future content-addressed validation.
+2. Add `.github/actions/canonical-ebpf-build`, a local composite action that is the canonical eBPF build entrypoint for the delegated runner lane and the monitor attach smoke.
+3. Have the action produce `target/assay-ebpf.provenance.json` with object path, SHA-256, size, mtime, head SHA, workflow metadata, and key tree OIDs from the shared runner gated-path manifest for future content-addressed validation.
 4. Copy the provenance file into the delegated proof-pack upload directory so the existing artifact already carries the eBPF build facts.
-5. Add a `workflow_run` trigger to lane-check so a completed delegated run can refresh the lane result from a default-branch context.
+5. Add a `workflow_run` trigger to lane-check so a completed delegated run can refresh the PR comment and the PR-head commit status from a default-branch context.
 
 Non-goals for Layer 1:
 

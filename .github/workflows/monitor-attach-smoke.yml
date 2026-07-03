@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: monitor-attach-smoke-${{ github.ref }}
+  group: assay-bpf-runner-host
   cancel-in-progress: false
 
 jobs:
@@ -35,31 +35,19 @@ jobs:
         run: cargo build -p assay-cli --release
 
       - name: Build eBPF object
+        id: canonical-ebpf
         if: ${{ github.event.inputs.build_ebpf != 'false' }}
         # Build the eBPF object exactly like the delegated runner-spike gate: install the eBPF
         # toolchain and build in release with --no-docker. A debug-mode build produces programs the
         # verifier rejects (empty / "last insn is not an exit or jmp"), which is what made an earlier
         # smoke run mislook like an assay monitor attach bug.
-        run: |
-          scripts/ci/install-ebpf-toolchain.sh
-          # Force a real recompile on this persistent runner. A cached/no-op build lets xtask's
-          # artifact resolution hand back a stale object out of a weeks-old target/ dir, which is
-          # exactly the got=520/need=552 skew #1575 chased: the smoke then loads an object that is
-          # NOT the product of this checkout while looking canonical. Deleting the copied .o and
-          # cleaning the crate makes "built from this commit" true by construction.
-          rm -f target/assay-ebpf.o
-          cargo clean -p assay-ebpf 2>/dev/null || true
-          cargo xtask build-ebpf --release --no-docker
-          # Build provenance, so the canonical eBPF build path is self-documenting in the run log and
-          # nobody has to reconstruct in three months why this path is the right one (see #1570).
-          # The object hash + mtime pin WHICH artifact the smoke below will load (see #1575).
-          {
-            echo "ebpf_build_mode=release"
-            echo "ebpf_build_path=xtask --release --no-docker"
-            echo "toolchain_install=present"
-            echo "ebpf_object_sha256=$(sha256sum target/assay-ebpf.o | cut -d' ' -f1)"
-            echo "ebpf_object_mtime=$(stat -c %y target/assay-ebpf.o)"
-          } | tee "$RUNNER_TEMP/ebpf-build-provenance.txt"
+        uses: ./.github/actions/canonical-ebpf-build
+        with:
+          clean-ebpf-crate: "true"
+
+      - name: Show eBPF build provenance
+        if: ${{ github.event.inputs.build_ebpf != 'false' }}
+        run: python3 -m json.tool "${{ steps.canonical-ebpf.outputs.provenance-path }}"
 
       - name: Smoke - assay monitor must attach its observation probes
         run: |
