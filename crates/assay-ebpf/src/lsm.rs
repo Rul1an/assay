@@ -3,8 +3,8 @@ use crate::{
     inc_stat, CONFIG, DENY_INO, LSM_BYPASS, LSM_DENY, LSM_EVENTS, LSM_HIT, MONITORED_CGROUPS,
 };
 use assay_common::{
-    KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL, MONITOR_STAT_LSM_EVENTS_EMITTED,
-    MONITOR_STAT_LSM_RINGBUF_DROPPED,
+    MonitorEvent, DATA_LEN, KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL,
+    MONITOR_STAT_LSM_EVENTS_EMITTED, MONITOR_STAT_LSM_RINGBUF_DROPPED,
 };
 use aya_ebpf::{
     helpers::{bpf_get_current_cgroup_id, bpf_get_current_pid_tgid, bpf_probe_read_kernel},
@@ -45,22 +45,28 @@ fn emit_event(
     data: &[u8],
     _path_len: u32,
 ) {
-    if let Some(mut entry) = LSM_EVENTS.reserve::<[u8; 520]>(0) {
-        let buf = entry.as_mut_ptr() as *mut u8;
-        // SAFETY: `buf` points to a reserved LSM event ring-buffer entry. The
-        // fixed header and bounded payload bytes are initialized before submit.
+    // Reserve the shared MonitorEvent type, never a size literal: this path used to reserve
+    // `[u8; 520]` (an 8-byte pid+event_type header with data at offset 8), which predates the
+    // 40-byte MonitorEvent header and silently diverged when the shared struct grew. The
+    // userspace decoder rejects any record != size_of::<MonitorEvent>() fail-closed, so every
+    // LSM event was dropped as "invalid event size (got=520, need=552)" (#1575).
+    if let Some(mut entry) = LSM_EVENTS.reserve::<MonitorEvent>(0) {
+        let ev = entry.as_mut_ptr();
+        // SAFETY: `ev` points to a reserved `MonitorEvent` ring-buffer entry. The fixed
+        // header and bounded payload bytes are initialized before submit.
         unsafe {
-            // Write PID
             let pid = (bpf_get_current_pid_tgid() >> 32) as u32;
-            *(buf as *mut u32) = pid;
+            // Initializes the full 40-byte header and zeros the payload.
+            crate::write_event_header(ev, pid, event_id);
 
-            // Write Event Type
-            *(buf.add(4) as *mut u32) = event_id;
-
-            // Write Data
-            let data_ptr = buf.add(8);
-            let len = if data.len() > 512 { 512 } else { data.len() };
-            core::ptr::write_bytes(data_ptr, 0, 512);
+            // Write Data (byte layout within `data` unchanged; userspace decodes
+            // EVENT_FILE_BLOCKED payloads from the `data` field at the same offsets).
+            let data_ptr = (*ev).data.as_mut_ptr();
+            let len = if data.len() > DATA_LEN {
+                DATA_LEN
+            } else {
+                data.len()
+            };
             core::ptr::copy_nonoverlapping(data.as_ptr(), data_ptr, len);
 
             if event_id == assay_common::EVENT_FILE_BLOCKED && len >= FILE_BLOCKED_INO_OFFSET + 8 {
