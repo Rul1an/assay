@@ -155,6 +155,8 @@ def payload_files(output_root: Path) -> list[dict[str, Any]]:
 
 def validate_path_within_root(candidate: Path, root: Path, *, label: str) -> Path:
     resolved_root = root.resolve(strict=False)
+    if not candidate.is_absolute():
+        candidate = resolved_root / candidate
     resolved_candidate = candidate.resolve(strict=False)
     try:
         resolved_candidate.relative_to(resolved_root)
@@ -232,7 +234,12 @@ def load_path_trees(ebpf_provenance: Path | None, *, require: bool) -> dict[str,
     except json.JSONDecodeError as exc:
         raise ProofPackError(f"invalid eBPF provenance JSON: {exc}") from exc
 
-    path_trees = (((document.get("source") or {}).get("path_trees")) or {})
+    source = document.get("source")
+    if source is None:
+        source = {}
+    if not isinstance(source, dict):
+        raise ProofPackError("eBPF provenance source must be an object")
+    path_trees = source.get("path_trees") or {}
     if not isinstance(path_trees, dict):
         raise ProofPackError("eBPF provenance source.path_trees must be an object")
 
@@ -393,7 +400,7 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
         "pack_size_bytes": 0,
     }
     manifest["payload_files"] = payload_files(output_root)
-    manifest["proof_pack"]["subjects"] = proof_subjects(output_root, ebpf_object, workspace_root)
+    manifest["proof_pack"]["subjects"] = subjects
     write_manifest(output_root, manifest)
     if subject_checksums:
         write_subject_checksums(output_root, subject_checksums, manifest["proof_pack"]["subjects"], workspace_root)
@@ -432,6 +439,10 @@ def self_test() -> None:
         ebpf_object = root / "target" / "assay-ebpf.o"
         ebpf_object.parent.mkdir(parents=True)
         ebpf_object.write_bytes(b"ebpf")
+        if validate_path_within_root(Path("target/assay-ebpf.o"), root, label="self-test") != ebpf_object.resolve(
+            strict=False
+        ):
+            raise ProofPackError("self-test relative path did not resolve under workspace root")
         ebpf_provenance = root / "assay-ebpf.provenance.json"
         path_trees = {
             path: {"oid": hashlib.sha1(path.encode("utf-8")).hexdigest(), "error": None}
@@ -537,6 +548,23 @@ def self_test() -> None:
                 raise
         else:
             raise ProofPackError("self-test accepted broken content provenance")
+
+        malformed_source = root / "malformed-source-provenance.json"
+        malformed_source.write_text('{"source": "not-an-object"}\n', encoding="utf-8")
+        malformed_args = argparse.Namespace(
+            **{
+                **vars(args),
+                "output_dir": root / "malformed-upload",
+                "ebpf_provenance": malformed_source,
+            }
+        )
+        try:
+            build_manifest(malformed_args)
+        except ProofPackError as exc:
+            if "source must be an object" not in str(exc):
+                raise
+        else:
+            raise ProofPackError("self-test accepted malformed provenance source")
 
 
 def main(argv: list[str]) -> int:
