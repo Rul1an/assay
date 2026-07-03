@@ -276,13 +276,8 @@ jobs:
           set -euo pipefail
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           workflow_sha="${GITHUB_WORKFLOW_SHA:-$GITHUB_SHA}"
-          ebpf_provenance="${{ steps.canonical-ebpf.outputs.provenance-path }}"
-          if [ -z "$ebpf_provenance" ]; then
-            ebpf_provenance="target/assay-ebpf.provenance.json"
-          fi
           python3 scripts/ci/assay_runner_delegated_proof_pack.py \
             --proof-root "$ASSAY_RUNNER_DELEGATED_PROOF_ROOT" \
-            --output-dir "$ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD" \
             --gates "${{ inputs.gates }}" \
             --build-ebpf "${{ inputs.build_ebpf }}" \
             --run-id "$GITHUB_RUN_ID" \
@@ -294,9 +289,6 @@ jobs:
             --workflow-name "$GITHUB_WORKFLOW" \
             --workflow-path ".github/workflows/runner-spike-delegated.yml" \
             --repository "$GITHUB_REPOSITORY" \
-            --ebpf-provenance "$ebpf_provenance" \
-            --ebpf-object target/assay-ebpf.o \
-            --subject-checksums "$ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD/subject-checksums.txt" \
             --retention-days 365
           {
             echo "### Delegated proof pack"

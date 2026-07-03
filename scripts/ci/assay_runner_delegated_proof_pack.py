@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -42,6 +43,9 @@ SELECTED_JSON = {
 }
 GATED_PATHS_DOC = "scripts/ci/assay_runner_gated_paths.json"
 CLAIM_CEILING = "delegated_gate_execution_only_not_runtime_safety"
+DEFAULT_OUTPUT_DIR = Path("assay-runner-proof-upload")
+DEFAULT_EBPF_OBJECT = Path("target/assay-ebpf.o")
+DEFAULT_EBPF_PROVENANCE = Path("target/assay-ebpf.provenance.json")
 
 
 class ProofPackError(Exception):
@@ -311,19 +315,19 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
         allowed = ", ".join(sorted(GATE_SELECTIONS))
         raise ProofPackError(f"unsupported gates value {args.gates!r}; expected one of {allowed}")
 
-    workspace_root = args.workspace_root.resolve(strict=False)
+    workspace_root = Path.cwd().resolve(strict=False)
     proof_root = args.proof_root
-    output_root = validate_path_within_root(args.output_dir, workspace_root, label="--output-dir")
-    ebpf_object = validate_path_within_root(args.ebpf_object, workspace_root, label="--ebpf-object")
-    ebpf_provenance_path = (
-        validate_path_within_root(args.ebpf_provenance, workspace_root, label="--ebpf-provenance")
-        if args.ebpf_provenance is not None
-        else None
+    output_root = validate_path_within_root(args.output_dir, workspace_root, label="proof upload directory")
+    ebpf_object = validate_path_within_root(args.ebpf_object, workspace_root, label="eBPF object")
+    ebpf_provenance_path = validate_path_within_root(
+        args.ebpf_provenance,
+        workspace_root,
+        label="eBPF provenance",
     )
-    subject_checksums = (
-        validate_path_within_root(args.subject_checksums, workspace_root, label="--subject-checksums")
-        if args.subject_checksums is not None
-        else None
+    subject_checksums = validate_path_within_root(
+        output_root / "subject-checksums.txt",
+        workspace_root,
+        label="subject checksums",
     )
     if output_root.exists():
         shutil.rmtree(output_root)
@@ -411,7 +415,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--self-test", action="store_true", help="run a local collector self-test")
     parser.add_argument("--proof-root", type=Path, help="delegated proof work root")
-    parser.add_argument("--output-dir", type=Path, help="directory to upload as the proof-pack artifact")
     parser.add_argument("--gates", default="all", help="delegated gates input")
     parser.add_argument("--build-ebpf", default="true", help="delegated build_ebpf input")
     parser.add_argument("--run-id", default="", help="GitHub workflow run id")
@@ -423,13 +426,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--workflow-name", default="Runner Spike Delegated")
     parser.add_argument("--workflow-path", default=".github/workflows/runner-spike-delegated.yml")
     parser.add_argument("--repository", default="")
-    parser.add_argument("--ebpf-provenance", type=Path, help="optional canonical eBPF build provenance JSON")
-    parser.add_argument("--ebpf-object", type=Path, default=Path("target/assay-ebpf.o"), help="optional eBPF object subject")
-    parser.add_argument("--subject-checksums", type=Path, help="optional checksum file for artifact attestation subjects")
-    parser.add_argument("--workspace-root", type=Path, default=Path.cwd(), help="trusted workspace root for subject paths")
     parser.add_argument("--retention-days", type=int, default=365)
     parser.add_argument("--soft-cap-bytes", type=int, default=50 * 1024 * 1024)
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    args.output_dir = DEFAULT_OUTPUT_DIR
+    args.ebpf_object = DEFAULT_EBPF_OBJECT
+    args.ebpf_provenance = DEFAULT_EBPF_PROVENANCE
+    return args
 
 
 def self_test() -> None:
@@ -443,7 +446,8 @@ def self_test() -> None:
             strict=False
         ):
             raise ProofPackError("self-test relative path did not resolve under workspace root")
-        ebpf_provenance = root / "assay-ebpf.provenance.json"
+        ebpf_provenance = root / "target" / "assay-ebpf.provenance.json"
+        ebpf_provenance.parent.mkdir(parents=True, exist_ok=True)
         path_trees = {
             path: {"oid": hashlib.sha1(path.encode("utf-8")).hexdigest(), "error": None}
             for path in load_required_content_provenance_paths()
@@ -471,7 +475,7 @@ def self_test() -> None:
 
         args = argparse.Namespace(
             proof_root=proof_root,
-            output_dir=root / "upload",
+            output_dir=Path("upload"),
             gates="all",
             build_ebpf="true",
             run_id="123",
@@ -483,14 +487,17 @@ def self_test() -> None:
             workflow_name="Runner Spike Delegated",
             workflow_path=".github/workflows/runner-spike-delegated.yml",
             repository="Rul1an/assay",
-            ebpf_provenance=ebpf_provenance,
-            ebpf_object=ebpf_object,
-            subject_checksums=root / "upload" / "subject-checksums.txt",
-            workspace_root=root,
+            ebpf_provenance=Path("target/assay-ebpf.provenance.json"),
+            ebpf_object=Path("target/assay-ebpf.o"),
             retention_days=365,
             soft_cap_bytes=50 * 1024 * 1024,
         )
-        manifest = build_manifest(args)
+        old_cwd = Path.cwd()
+        try:
+            os.chdir(root)
+            manifest = build_manifest(args)
+        finally:
+            os.chdir(old_cwd)
         if manifest["schema"] != SCHEMA:
             raise ProofPackError("self-test manifest schema mismatch")
         if manifest["proof_pack"]["schema"] != SCHEMA:
@@ -521,9 +528,9 @@ def self_test() -> None:
             raise ProofPackError("self-test did not collect archive digest")
         if not manifest["build_provenance"]["ebpf"]:
             raise ProofPackError("self-test did not collect eBPF build provenance")
-        if not (args.output_dir / "manifest.json").exists():
+        if not (root / "upload" / "manifest.json").exists():
             raise ProofPackError("self-test did not write manifest")
-        checksums = args.subject_checksums.read_text(encoding="utf-8").splitlines()
+        checksums = (root / "upload" / "subject-checksums.txt").read_text(encoding="utf-8").splitlines()
         if not any(line.endswith("manifest.json") for line in checksums):
             raise ProofPackError("self-test checksum file did not include manifest")
         if len(checksums) != 1 + len(manifest["proof_pack"]["subjects"]):
@@ -535,14 +542,15 @@ def self_test() -> None:
         broken["source"]["path_trees"][first_path]["oid"] = None
         broken_provenance.write_text(json.dumps(broken) + "\n", encoding="utf-8")
         broken_args = argparse.Namespace(
-            **{
-                **vars(args),
-                "output_dir": root / "broken-upload",
-                "ebpf_provenance": broken_provenance,
-            }
+            **{**vars(args), "output_dir": Path("broken-upload"), "ebpf_provenance": broken_provenance}
         )
         try:
-            build_manifest(broken_args)
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                build_manifest(broken_args)
+            finally:
+                os.chdir(old_cwd)
         except ProofPackError as exc:
             if "invalid content provenance path tree" not in str(exc):
                 raise
@@ -552,14 +560,15 @@ def self_test() -> None:
         malformed_source = root / "malformed-source-provenance.json"
         malformed_source.write_text('{"source": "not-an-object"}\n', encoding="utf-8")
         malformed_args = argparse.Namespace(
-            **{
-                **vars(args),
-                "output_dir": root / "malformed-upload",
-                "ebpf_provenance": malformed_source,
-            }
+            **{**vars(args), "output_dir": Path("malformed-upload"), "ebpf_provenance": malformed_source}
         )
         try:
-            build_manifest(malformed_args)
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                build_manifest(malformed_args)
+            finally:
+                os.chdir(old_cwd)
         except ProofPackError as exc:
             if "source must be an object" not in str(exc):
                 raise
