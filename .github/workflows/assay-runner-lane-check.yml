@@ -3,6 +3,9 @@ name: Assay-Runner Lane Check
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited, ready_for_review]
+  workflow_run:
+    workflows: ["Runner Spike Delegated"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -16,29 +19,19 @@ jobs:
   lane-check:
     name: lane-check
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'workflow_dispatch'
     permissions:
       actions: read
       contents: read
       issues: write
-      pull-requests: read
+      pull-requests: write
+      statuses: write
     steps:
       - name: Checkout base helper
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           persist-credentials: false
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
-
-      - name: Bootstrap helper for first same-repo rollout
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f scripts/ci/assay_runner_lane_check.py ]; then
-            exit 0
-          fi
-          echo "::warning::Base helper is missing; bootstrapping lane-check helper from same-repo PR head."
-          git fetch --depth=1 origin "${{ github.event.pull_request.head.sha }}"
-          git checkout FETCH_HEAD -- scripts/ci/assay_runner_lane_check.py
 
       - name: Verify lane-check helper exists
         shell: bash
@@ -48,10 +41,45 @@ jobs:
         shell: bash
         run: python3 scripts/ci/assay_runner_lane_check.py --self-test
 
-      - name: Check PR delegated lane proof
+      - name: Resolve PR number
+        id: pr
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || inputs.pr_number }}
-        run: python3 scripts/ci/assay_runner_lane_check.py --comment
+        run: |
+          set -euo pipefail
+          case "${{ github.event_name }}" in
+            pull_request)
+              echo "pr_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+              ;;
+            workflow_dispatch)
+              echo "pr_number=${{ inputs.pr_number }}" >> "$GITHUB_OUTPUT"
+              ;;
+            workflow_run)
+              python3 scripts/ci/assay_runner_lane_check.py --resolve-pr-from-event >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "pr_number=" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Check PR delegated lane proof
+        if: steps.pr.outputs.pr_number != ''
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+        run: |
+          set -euo pipefail
+          args=(--comment)
+          if python3 scripts/ci/assay_runner_lane_check.py --help | grep -q -- "--status"; then
+            args+=(--status)
+          fi
+          python3 scripts/ci/assay_runner_lane_check.py "${args[@]}"
+
+      - name: No associated PR for delegated run
+        if: github.event_name == 'workflow_run' && steps.pr.outputs.pr_number == ''
+        shell: bash
+        run: echo "No associated pull request found for delegated workflow_run; nothing to refresh."

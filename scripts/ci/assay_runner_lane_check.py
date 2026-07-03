@@ -21,13 +21,17 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from enum import IntEnum
+from functools import lru_cache
+from pathlib import Path
 from typing import Iterable
 
 
 CONTRACT_DOC = "docs/reference/runner/ci-lanes.md"
 DEPENDABOT_FLOW_DOC = "docs/reference/runner/dependabot-lane-flow.md"
+GATED_PATHS_DOC = "scripts/ci/assay_runner_gated_paths.json"
 DELEGATED_WORKFLOW_NAME = "Runner Spike Delegated"
 COMMENT_MARKER = "<!-- assay-runner-lane-check -->"
+STATUS_CONTEXT = "lane-check/proof"
 # 404 is retryable here because GitHub can briefly return it for freshly
 # created PR metadata endpoints such as /pulls/{number}/files.
 RETRYABLE_HTTP_CODES = {404, 502, 503, 504}
@@ -81,6 +85,12 @@ class PullRequest:
     author_login: str
     head_sha: str
     files: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class GatedPathConfig:
+    all_gate_prefixes: tuple[str, ...]
+    all_gate_paths: frozenset[str]
 
 
 class GitHubApi:
@@ -167,7 +177,20 @@ def starts(path: str, prefix: str) -> bool:
     return path == prefix.rstrip("/") or path.startswith(prefix.rstrip("/") + "/")
 
 
+@lru_cache(maxsize=1)
+def load_gated_path_config() -> GatedPathConfig:
+    root = Path(__file__).resolve().parents[2]
+    manifest_path = root / GATED_PATHS_DOC
+    with manifest_path.open(encoding="utf-8") as handle:
+        manifest = json.load(handle)
+    return GatedPathConfig(
+        all_gate_prefixes=tuple(str(path) for path in manifest["all_gate_prefixes"]),
+        all_gate_paths=frozenset(str(path) for path in manifest["all_gate_paths"]),
+    )
+
+
 def classify_file(path: str) -> tuple[Gate, str | None]:
+    gated_paths = load_gated_path_config()
     docs_runner_prefixes = (
         "docs/reference/runner/",
         "docs/notes/ASSAY-RUNNER-",
@@ -182,25 +205,10 @@ def classify_file(path: str) -> tuple[Gate, str | None]:
     }:
         return Gate.NONE, None
 
-    all_prefixes = (
-        "crates/assay-runner-schema/",
-        "crates/assay-runner-core/",
-        "crates/assay-runner-linux/",
-        "crates/assay-monitor/",
-        "crates/assay-ebpf/",
-        "crates/assay-xtask/",
-    )
-    if any(starts(path, prefix) for prefix in all_prefixes):
+    if any(starts(path, prefix) for prefix in gated_paths.all_gate_prefixes):
         return Gate.ALL, f"{path}: shared runner/eBPF/monitor/xtask code requires gates=all"
 
-    if path in {
-        ".github/workflows/runner-spike-delegated.yml",
-        ".github/workflows/runner-spike-sdk.yml",
-        "crates/assay-cli/src/cli/commands/runner_spike.rs",
-        "crates/assay-cli/src/cgroup.rs",
-        "Cargo.toml",
-        "Cargo.lock",
-    }:
+    if path in gated_paths.all_gate_paths:
         return Gate.ALL, f"{path}: runner workflow, CLI, cgroup, or workspace dependency surface requires gates=all"
 
     if path.startswith("scripts/ci/runner-spike-kernel-only-"):
@@ -314,6 +322,51 @@ def load_pr(api: GitHubApi, number: int) -> PullRequest:
             )
             return fallback
         raise
+
+
+def resolve_pr_number_from_event(api: GitHubApi) -> str | None:
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+    event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+    if not event_path:
+        return None
+    try:
+        with open(event_path, encoding="utf-8") as handle:
+            event = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    if event_name == "pull_request":
+        raw_pr = event.get("pull_request") or {}
+        number = raw_pr.get("number")
+        return str(number) if number else None
+
+    if event_name == "workflow_dispatch":
+        value = (event.get("inputs") or {}).get("pr_number", "")
+        return str(value) if value else None
+
+    if event_name != "workflow_run":
+        return None
+
+    workflow_run = event.get("workflow_run") or {}
+    pull_requests = workflow_run.get("pull_requests") or []
+    if pull_requests:
+        number = pull_requests[0].get("number")
+        return str(number) if number else None
+
+    # Manual workflow_dispatch runs can omit workflow_run.pull_requests.
+    # Fall back to GitHub's commit-associated PR endpoint for the run SHA.
+    head_sha = str(workflow_run.get("head_sha") or "")
+    if not head_sha:
+        return None
+    try:
+        pulls = api.request("GET", f"/commits/{head_sha}/pulls")
+    except TRANSIENT_REQUEST_ERRORS as exc:
+        print(f"warning: could not resolve PR for delegated run: {exc}", file=sys.stderr)
+        return None
+    if not isinstance(pulls, list) or not pulls:
+        return None
+    number = dict(pulls[0]).get("number")
+    return str(number) if number else None
 
 
 def load_pr_from_event_and_git(number: int) -> PullRequest | None:
@@ -546,7 +599,44 @@ def post_or_update_comment(
         api.request("POST", f"/issues/{pr_number}/comments", {"body": body})
 
 
-def run_check(api: GitHubApi, pr_number: int, *, comment: bool) -> int:
+def status_target_url() -> str:
+    server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    if repo and run_id:
+        return f"{server_url}/{repo}/actions/runs/{run_id}"
+    return ""
+
+
+def post_commit_status(api: GitHubApi, sha: str, passed: bool, description: str) -> None:
+    payload: dict[str, object] = {
+        "state": "success" if passed else "failure",
+        "context": STATUS_CONTEXT,
+        "description": description[:140],
+    }
+    target_url = status_target_url()
+    if target_url:
+        payload["target_url"] = target_url
+    api.request("POST", f"/statuses/{sha}", payload)
+
+
+def maybe_status(
+    api: GitHubApi,
+    sha: str,
+    passed: bool,
+    description: str,
+    *,
+    status: bool,
+) -> None:
+    if not status:
+        return
+    try:
+        post_commit_status(api, sha, passed, description)
+    except TRANSIENT_REQUEST_ERRORS as exc:
+        print(f"warning: could not post commit status: {exc}", file=sys.stderr)
+
+
+def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) -> int:
     pr = load_pr(api, pr_number)
     classification = classify_files(pr.files)
     comments = safe_load_issue_comments(api, pr.number)
@@ -562,6 +652,13 @@ def run_check(api: GitHubApi, pr_number: int, *, comment: bool) -> int:
     if classification.gate == Gate.NONE:
         body = comment_body(classification, pr, True, "No runner-impacting paths were detected.")
         maybe_comment(api, pr.number, comments, body, comment=comment and existing_lane_comment(comments))
+        maybe_status(
+            api,
+            pr.head_sha,
+            True,
+            "no delegated runner proof required",
+            status=status,
+        )
         return 0
 
     run_ids = run_ids_from_text(api.repo, text)
@@ -588,6 +685,12 @@ def run_check(api: GitHubApi, pr_number: int, *, comment: bool) -> int:
     detail = "\n\n".join(details)
     body = comment_body(classification, pr, passed, detail)
     maybe_comment(api, pr.number, comments, body, comment=comment)
+    status_description = (
+        f"delegated proof accepted: gates={classification.gate.label}"
+        if passed
+        else f"delegated proof required: gates={classification.gate.label}"
+    )
+    maybe_status(api, pr.head_sha, passed, status_description, status=status)
 
     if passed:
         return 0
@@ -616,6 +719,11 @@ def maybe_comment(
 
 
 def self_test() -> None:
+    gated_paths = load_gated_path_config()
+    assert "crates/assay-runner-core/" in gated_paths.all_gate_prefixes
+    assert ".github/actions/canonical-ebpf-build/action.yml" in gated_paths.all_gate_paths
+    assert GATED_PATHS_DOC in gated_paths.all_gate_paths
+
     cases = [
         (["docs/reference/runner/ci-lanes.md"], Gate.NONE),
         (["docs/reference/observability/claim-boundary-positioning.md"], Gate.NONE),
@@ -638,6 +746,8 @@ def self_test() -> None:
             Gate.OPENAI_AGENTS_KERNEL_POLICY,
         ),
         (["scripts/ci/assay_runner_delegated_proof_pack.py"], Gate.ALL),
+        (["scripts/ci/assay_runner_gated_paths.json"], Gate.ALL),
+        ([".github/actions/canonical-ebpf-build/action.yml"], Gate.ALL),
         # Read-only contract validators under scripts/ci/ do not exercise
         # the kernel, eBPF, or runner runtime path. They project over
         # normalized evidence files only. The cross-runtime-diff v0
@@ -697,6 +807,7 @@ def self_test() -> None:
     assert "head_sha" in delegated_run_diagnostic({**valid_run, "head_sha": "def456"}, "1", "abc123")
     assert "conclusion" in delegated_run_diagnostic({**valid_run, "conclusion": "failure"}, "1", "abc123")
     assert "workflow name" in delegated_run_diagnostic({**valid_run, "name": "CI"}, "1", "abc123")
+    _test_event_resolution_and_status_payload()
 
     dependabot_pr = PullRequest(
         number=1,
@@ -722,6 +833,67 @@ def self_test() -> None:
     # touching the classifier itself, including any future PR that
     # might silently re-introduce a spike dependency.
     _assert_assay_cli_does_not_consume_spike()
+
+
+def _test_event_resolution_and_status_payload() -> None:
+    from tempfile import NamedTemporaryFile
+
+    class _FakeApi:
+        def __init__(self) -> None:
+            self.requests: list[tuple[str, str, object | None]] = []
+
+        def request(self, method: str, path: str, payload: object | None = None) -> object:
+            self.requests.append((method, path, payload))
+            if path == "/commits/deadbeef/pulls":
+                return [{"number": 79}]
+            return {}
+
+    def with_event(event_name: str, event: object) -> str | None:
+        old_name = os.environ.get("GITHUB_EVENT_NAME")
+        old_path = os.environ.get("GITHUB_EVENT_PATH")
+        with NamedTemporaryFile("w", encoding="utf-8") as handle:
+            json.dump(event, handle)
+            handle.flush()
+            os.environ["GITHUB_EVENT_NAME"] = event_name
+            os.environ["GITHUB_EVENT_PATH"] = handle.name
+            try:
+                return resolve_pr_number_from_event(_FakeApi())
+            finally:
+                if old_name is None:
+                    os.environ.pop("GITHUB_EVENT_NAME", None)
+                else:
+                    os.environ["GITHUB_EVENT_NAME"] = old_name
+                if old_path is None:
+                    os.environ.pop("GITHUB_EVENT_PATH", None)
+                else:
+                    os.environ["GITHUB_EVENT_PATH"] = old_path
+
+    assert with_event("pull_request", {"pull_request": {"number": 42}}) == "42"
+    assert with_event("workflow_dispatch", {"inputs": {"pr_number": "43"}}) == "43"
+    assert with_event("workflow_run", {"workflow_run": {"pull_requests": [{"number": 44}]}}) == "44"
+    assert with_event("workflow_run", {"workflow_run": {"head_sha": "deadbeef"}}) == "79"
+
+    fake = _FakeApi()
+    old_repo = os.environ.pop("GITHUB_REPOSITORY", None)
+    old_run_id = os.environ.pop("GITHUB_RUN_ID", None)
+    try:
+        post_commit_status(fake, "abc123", True, "ok")
+    finally:
+        if old_repo is not None:
+            os.environ["GITHUB_REPOSITORY"] = old_repo
+        if old_run_id is not None:
+            os.environ["GITHUB_RUN_ID"] = old_run_id
+    assert fake.requests == [
+        (
+            "POST",
+            "/statuses/abc123",
+            {
+                "state": "success",
+                "context": STATUS_CONTEXT,
+                "description": "ok",
+            },
+        )
+    ]
 
 
 def _test_connection_resilience() -> None:
@@ -898,9 +1070,11 @@ def _assert_assay_cli_does_not_consume_spike() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--resolve-pr-from-event", action="store_true")
     parser.add_argument("--pr-number", type=int, default=int(os.environ.get("PR_NUMBER", "0") or "0"))
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--comment", action="store_true")
+    parser.add_argument("--status", action="store_true")
     args = parser.parse_args()
 
     if args.self_test:
@@ -915,11 +1089,16 @@ def main() -> int:
     if not args.repo:
         print("--repo or GITHUB_REPOSITORY is required", file=sys.stderr)
         return 2
+    api = GitHubApi(args.repo, token)
+    if args.resolve_pr_from_event:
+        pr_number = resolve_pr_number_from_event(api) or ""
+        print(f"pr_number={pr_number}")
+        return 0
     if args.pr_number <= 0:
         print("--pr-number or PR_NUMBER is required", file=sys.stderr)
         return 2
 
-    return run_check(GitHubApi(args.repo, token), args.pr_number, comment=args.comment)
+    return run_check(api, args.pr_number, comment=args.comment, status=args.status)
 
 
 if __name__ == "__main__":

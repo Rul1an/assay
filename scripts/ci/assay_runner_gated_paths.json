@@ -1,0 +1,34 @@
+{
+  "schema": "assay.runner.gated_paths.v0",
+  "all_gate_prefixes": [
+    "crates/assay-runner-schema/",
+    "crates/assay-runner-core/",
+    "crates/assay-runner-linux/",
+    "crates/assay-monitor/",
+    "crates/assay-ebpf/",
+    "crates/assay-xtask/"
+  ],
+  "all_gate_paths": [
+    ".github/workflows/runner-spike-delegated.yml",
+    ".github/workflows/runner-spike-sdk.yml",
+    ".github/actions/canonical-ebpf-build/action.yml",
+    "crates/assay-cli/src/cli/commands/runner_spike.rs",
+    "crates/assay-cli/src/cgroup.rs",
+    "Cargo.toml",
+    "Cargo.lock",
+    "scripts/ci/assay_runner_delegated_proof_pack.py",
+    "scripts/ci/assay_runner_gated_paths.json"
+  ],
+  "content_provenance_paths": [
+    "crates/assay-runner-schema",
+    "crates/assay-runner-core",
+    "crates/assay-runner-linux",
+    "crates/assay-monitor",
+    "crates/assay-ebpf",
+    "crates/assay-xtask",
+    "scripts/ci",
+    ".github/workflows/runner-spike-delegated.yml",
+    ".github/workflows/runner-spike-sdk.yml",
+    ".github/actions/canonical-ebpf-build"
+  ]
+}

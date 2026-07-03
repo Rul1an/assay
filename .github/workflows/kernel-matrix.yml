@@ -290,8 +290,8 @@ jobs:
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 5
     concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}-cleanup-runner
-      cancel-in-progress: true
+      group: assay-bpf-runner-host
+      cancel-in-progress: false
     steps:
       - name: Nuke _actions cache (force fresh download for next job)
         shell: bash
@@ -339,8 +339,8 @@ jobs:
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 10
     concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ matrix.kernel }}
-      cancel-in-progress: true
+      group: assay-bpf-runner-host
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       max-parallel: 1

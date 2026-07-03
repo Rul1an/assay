@@ -1,0 +1,131 @@
+name: Canonical eBPF build
+
+description: Build target/assay-ebpf.o through the canonical CI path and emit provenance.
+
+inputs:
+  provenance-path:
+    description: Path for the JSON provenance file emitted by this action.
+    required: false
+    default: target/assay-ebpf.provenance.json
+  clean-ebpf-crate:
+    description: Force a clean assay-ebpf crate build before invoking xtask.
+    required: false
+    default: "false"
+
+outputs:
+  object-path:
+    description: Built eBPF object path.
+    value: ${{ steps.provenance.outputs.object-path }}
+  object-sha256:
+    description: SHA-256 digest of the built eBPF object.
+    value: ${{ steps.provenance.outputs.object-sha256 }}
+  object-size-bytes:
+    description: Size of the built eBPF object in bytes.
+    value: ${{ steps.provenance.outputs.object-size-bytes }}
+  provenance-path:
+    description: Path to the JSON provenance file.
+    value: ${{ steps.provenance.outputs.provenance-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install eBPF toolchain
+      shell: bash
+      run: scripts/ci/install-ebpf-toolchain.sh
+
+    - name: Build eBPF object
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ "${{ inputs.clean-ebpf-crate }}" = "true" ]; then
+          rm -f target/assay-ebpf.o
+          cargo clean -p assay-ebpf 2>/dev/null || true
+        fi
+        cargo xtask build-ebpf --release --no-docker
+        test -f target/assay-ebpf.o
+
+    - name: Emit eBPF build provenance
+      id: provenance
+      shell: bash
+      env:
+        ASSAY_EBPF_OBJECT: target/assay-ebpf.o
+        ASSAY_EBPF_PROVENANCE: ${{ inputs.provenance-path }}
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import hashlib
+        import json
+        import os
+        import subprocess
+        from datetime import datetime, timezone
+        from pathlib import Path
+
+        obj = Path(os.environ["ASSAY_EBPF_OBJECT"])
+        provenance = Path(os.environ["ASSAY_EBPF_PROVENANCE"])
+        if not obj.is_file():
+            raise SystemExit(f"missing eBPF object: {obj}")
+
+        def git_output(*args):
+            return subprocess.check_output(["git", *args], text=True, stderr=subprocess.PIPE).strip()
+
+        def sha256_file(path: Path) -> str:
+            digest = hashlib.sha256()
+            with path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            return digest.hexdigest()
+
+        stat = obj.stat()
+        manifest = json.loads(Path("scripts/ci/assay_runner_gated_paths.json").read_text(encoding="utf-8"))
+        path_trees = {}
+        missing_trees = []
+        for path in manifest["content_provenance_paths"]:
+            entry = {"oid": None, "error": None}
+            try:
+                entry["oid"] = git_output("rev-parse", f"HEAD:{path}")
+            except subprocess.CalledProcessError as exc:
+                entry["error"] = (exc.stderr or "").strip() or "missing_at_head"
+                missing_trees.append(path)
+            path_trees[path] = entry
+
+        document = {
+            "schema": "assay.ci.ebpf_build_provenance.v0",
+            "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "object": {
+                "path": str(obj),
+                "sha256": sha256_file(obj),
+                "size_bytes": stat.st_size,
+                "mtime_epoch": int(stat.st_mtime),
+                "mtime_utc": datetime.fromtimestamp(stat.st_mtime, timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            },
+            "source": {
+                "head_sha": os.environ.get("GITHUB_SHA", ""),
+                "ref": os.environ.get("GITHUB_REF", ""),
+                "repository": os.environ.get("GITHUB_REPOSITORY", ""),
+                "workflow": os.environ.get("GITHUB_WORKFLOW", ""),
+                "workflow_sha": os.environ.get("GITHUB_WORKFLOW_SHA", ""),
+                "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+                "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+                "path_trees": path_trees,
+            },
+            "build": {
+                "command": "cargo xtask build-ebpf --release --no-docker",
+                "toolchain_installer": "scripts/ci/install-ebpf-toolchain.sh",
+                "claim_ceiling": "build_provenance_only_not_runtime_behavior",
+            },
+        }
+
+        provenance.parent.mkdir(parents=True, exist_ok=True)
+        provenance.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        if missing_trees:
+            raise SystemExit("missing required provenance tree(s): " + ", ".join(missing_trees))
+
+        github_output = os.environ.get("GITHUB_OUTPUT")
+        if github_output:
+            with open(github_output, "a", encoding="utf-8") as handle:
+                handle.write(f"object-path={obj}\n")
+                handle.write(f"object-sha256={document['object']['sha256']}\n")
+                handle.write(f"object-size-bytes={document['object']['size_bytes']}\n")
+                handle.write(f"provenance-path={provenance}\n")
+        PY
