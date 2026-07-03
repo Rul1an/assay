@@ -161,7 +161,8 @@ def validate_path_within_root(candidate: Path, root: Path, *, label: str) -> Pat
     resolved_root = root.resolve(strict=False)
     if not candidate.is_absolute():
         candidate = resolved_root / candidate
-    # codeql[py/path-injection] Candidate paths are resolved under and checked against the trusted workspace root below.
+    # Candidate paths are resolved under and checked against the trusted workspace root below.
+    # codeql[py/path-injection]
     resolved_candidate = candidate.resolve(strict=False)
     try:
         resolved_candidate.relative_to(resolved_root)
@@ -194,7 +195,8 @@ def role_for_payload_path(path: str) -> str:
 def subject_for_file(path: Path, *, name: str, role: str) -> dict[str, Any]:
     return {
         "path": name,
-        # codeql[py/path-injection] Subject paths are constants or workspace-validated payload paths before this helper is called.
+        # Subject paths are constants or workspace-validated payload paths before this helper is called.
+        # codeql[py/path-injection]
         "bytes": path.stat().st_size,
         "sha256": sha256_file(path),
         "role": role,
@@ -214,8 +216,12 @@ def proof_subjects(
             raise ProofPackError("missing required eBPF object for build_ebpf=true proof")
     else:
         safe_ebpf_object = validate_path_within_root(ebpf_object, workspace_root, label="eBPF object")
+        # eBPF object path is fixed under the workspace before subject collection.
+        # codeql[py/path-injection]
         if require_ebpf_object and not safe_ebpf_object.exists():
             raise ProofPackError(f"missing required eBPF object for build_ebpf=true proof: {safe_ebpf_object}")
+        # eBPF object path is fixed under the workspace before subject collection.
+        # codeql[py/path-injection]
         if safe_ebpf_object.exists():
             subjects.append(
                 subject_for_file(
@@ -244,13 +250,15 @@ def load_required_content_provenance_paths() -> tuple[str, ...]:
 
 
 def load_path_trees(ebpf_provenance: Path | None, *, require: bool) -> dict[str, Any]:
-    # codeql[py/path-injection] eBPF provenance path is the fixed workspace-relative canonical provenance file.
+    # eBPF provenance path is the fixed workspace-relative canonical provenance file.
+    # codeql[py/path-injection]
     if ebpf_provenance is None or not ebpf_provenance.exists():
         if require:
             raise ProofPackError("missing required eBPF provenance for content-addressed proof")
         return {}
     try:
-        # codeql[py/path-injection] eBPF provenance path is the fixed workspace-relative canonical provenance file.
+        # eBPF provenance path is the fixed workspace-relative canonical provenance file.
+        # codeql[py/path-injection]
         document = json.loads(ebpf_provenance.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ProofPackError(f"invalid eBPF provenance JSON: {exc}") from exc
@@ -307,7 +315,11 @@ def write_subject_checksums(
             raise ProofPackError(f"unsupported subject digest for {subject['path']}: {digest}")
         lines.append(f"{digest[len('sha256:') :]}  {subject['path']}")
     safe_checksum_path = validate_path_within_root(checksum_path, workspace_root, label="subject checksums")
+    # Checksum output is fixed under the workspace proof-pack upload directory.
+    # codeql[py/path-injection]
     safe_checksum_path.parent.mkdir(parents=True, exist_ok=True)
+    # Checksum output is fixed under the workspace proof-pack upload directory.
+    # codeql[py/path-injection]
     safe_checksum_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
