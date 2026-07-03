@@ -25,7 +25,7 @@ Ship as the first PR.
 Known Layer 1 semantics:
 
 - The commit-status context emitted by lane-check is `lane-check/proof`, deliberately separate from the Actions job named `lane-check`. If the refresh path should satisfy branch protection without manually rerunning the pull-request check, `lane-check/proof` must be configured as the required status.
-- GitHub Actions concurrency keeps at most one running and one pending run per group. A third `assay-bpf-runner-host` run can evict the pending run even with `cancel-in-progress: false`. That is acceptable for Layer 1 because the host is a singleton and a canceled proof can be re-dispatched, but it is another reason Layer 3 should move the host to an ephemeral-runner model and keep the heavy proof path content-addressed.
+- GitHub Actions added `queue: max` for concurrency groups in May 2026, which would remove the default single-pending-slot eviction behavior. Do not add it while the repository's required `actionlint` hook rejects that key; either update/configure the linter first or ship the queue change in its own compatibility PR. Layer 3 still moves the host to an ephemeral-runner model so serialization is not also a workspace-contamination boundary.
 
 Non-goals for Layer 1:
 
@@ -43,6 +43,8 @@ Follow-up PR.
 - Teach lane-check to verify attestations and read workflow identity, source SHA, and gate inputs from the attestation/proof pack rather than from comments.
 - Keep comment parsing as a temporary fallback.
 - Accept a proof across rebases when the tree OIDs for gated paths match the attested/proven path trees.
+
+Concrete implementation plan: `docs/superpowers/plans/2026-07-03-runner-delegated-proof-layer2.md`.
 
 ## Layer 3: runner platform
 
