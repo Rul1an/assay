@@ -79,6 +79,14 @@ machine-visible path classification and delegated proof check for this
 contract. To make the contract hard-blocking, repository branch protection must
 mark that check as required.
 
+When a completed delegated workflow refreshes proof from a `workflow_run`
+context, the workflow also writes a PR-head commit status named
+`lane-check/proof`. That status is intentionally distinct from the Actions job
+named `lane-check` so checks-API and statuses-API results do not collide under
+the same display name. If maintainers want the refresh path itself to satisfy
+branch protection without manually rerunning the pull-request job, require the
+`lane-check/proof` status.
+
 The executable path mapping lives in
 `scripts/ci/assay_runner_lane_check.py` and must mirror the decision table on
 this page. Changes to this contract and changes to the classifier must land in

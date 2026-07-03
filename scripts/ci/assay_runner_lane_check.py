@@ -21,6 +21,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from enum import IntEnum
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
@@ -30,6 +31,7 @@ DEPENDABOT_FLOW_DOC = "docs/reference/runner/dependabot-lane-flow.md"
 GATED_PATHS_DOC = "scripts/ci/assay_runner_gated_paths.json"
 DELEGATED_WORKFLOW_NAME = "Runner Spike Delegated"
 COMMENT_MARKER = "<!-- assay-runner-lane-check -->"
+STATUS_CONTEXT = "lane-check/proof"
 # 404 is retryable here because GitHub can briefly return it for freshly
 # created PR metadata endpoints such as /pulls/{number}/files.
 RETRYABLE_HTTP_CODES = {404, 502, 503, 504}
@@ -175,6 +177,7 @@ def starts(path: str, prefix: str) -> bool:
     return path == prefix.rstrip("/") or path.startswith(prefix.rstrip("/") + "/")
 
 
+@lru_cache(maxsize=1)
 def load_gated_path_config() -> GatedPathConfig:
     root = Path(__file__).resolve().parents[2]
     manifest_path = root / GATED_PATHS_DOC
@@ -608,7 +611,7 @@ def status_target_url() -> str:
 def post_commit_status(api: GitHubApi, sha: str, passed: bool, description: str) -> None:
     payload: dict[str, object] = {
         "state": "success" if passed else "failure",
-        "context": "lane-check",
+        "context": STATUS_CONTEXT,
         "description": description[:140],
     }
     target_url = status_target_url()
@@ -804,6 +807,7 @@ def self_test() -> None:
     assert "head_sha" in delegated_run_diagnostic({**valid_run, "head_sha": "def456"}, "1", "abc123")
     assert "conclusion" in delegated_run_diagnostic({**valid_run, "conclusion": "failure"}, "1", "abc123")
     assert "workflow name" in delegated_run_diagnostic({**valid_run, "name": "CI"}, "1", "abc123")
+    _test_event_resolution_and_status_payload()
 
     dependabot_pr = PullRequest(
         number=1,
@@ -829,6 +833,67 @@ def self_test() -> None:
     # touching the classifier itself, including any future PR that
     # might silently re-introduce a spike dependency.
     _assert_assay_cli_does_not_consume_spike()
+
+
+def _test_event_resolution_and_status_payload() -> None:
+    from tempfile import NamedTemporaryFile
+
+    class _FakeApi:
+        def __init__(self) -> None:
+            self.requests: list[tuple[str, str, object | None]] = []
+
+        def request(self, method: str, path: str, payload: object | None = None) -> object:
+            self.requests.append((method, path, payload))
+            if path == "/commits/deadbeef/pulls":
+                return [{"number": 79}]
+            return {}
+
+    def with_event(event_name: str, event: object) -> str | None:
+        old_name = os.environ.get("GITHUB_EVENT_NAME")
+        old_path = os.environ.get("GITHUB_EVENT_PATH")
+        with NamedTemporaryFile("w", encoding="utf-8") as handle:
+            json.dump(event, handle)
+            handle.flush()
+            os.environ["GITHUB_EVENT_NAME"] = event_name
+            os.environ["GITHUB_EVENT_PATH"] = handle.name
+            try:
+                return resolve_pr_number_from_event(_FakeApi())
+            finally:
+                if old_name is None:
+                    os.environ.pop("GITHUB_EVENT_NAME", None)
+                else:
+                    os.environ["GITHUB_EVENT_NAME"] = old_name
+                if old_path is None:
+                    os.environ.pop("GITHUB_EVENT_PATH", None)
+                else:
+                    os.environ["GITHUB_EVENT_PATH"] = old_path
+
+    assert with_event("pull_request", {"pull_request": {"number": 42}}) == "42"
+    assert with_event("workflow_dispatch", {"inputs": {"pr_number": "43"}}) == "43"
+    assert with_event("workflow_run", {"workflow_run": {"pull_requests": [{"number": 44}]}}) == "44"
+    assert with_event("workflow_run", {"workflow_run": {"head_sha": "deadbeef"}}) == "79"
+
+    fake = _FakeApi()
+    old_repo = os.environ.pop("GITHUB_REPOSITORY", None)
+    old_run_id = os.environ.pop("GITHUB_RUN_ID", None)
+    try:
+        post_commit_status(fake, "abc123", True, "ok")
+    finally:
+        if old_repo is not None:
+            os.environ["GITHUB_REPOSITORY"] = old_repo
+        if old_run_id is not None:
+            os.environ["GITHUB_RUN_ID"] = old_run_id
+    assert fake.requests == [
+        (
+            "POST",
+            "/statuses/abc123",
+            {
+                "state": "success",
+                "context": STATUS_CONTEXT,
+                "description": "ok",
+            },
+        )
+    ]
 
 
 def _test_connection_resilience() -> None:
