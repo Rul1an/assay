@@ -573,6 +573,7 @@ version = "3.31.1"
 dependencies = [
  "anyhow",
  "clap",
+ "serde_json",
 ]
 
 [[package]]
