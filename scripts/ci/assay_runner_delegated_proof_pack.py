@@ -347,20 +347,10 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
 
     workspace_root = Path.cwd().resolve(strict=False)
     proof_root = args.proof_root
-    output_root = validate_path_within_root(args.output_dir, workspace_root, label="proof upload directory")
-    if output_root == workspace_root:
-        raise ProofPackError("proof upload directory must not be the workspace root")
-    ebpf_object = validate_path_within_root(args.ebpf_object, workspace_root, label="eBPF object")
-    ebpf_provenance_path = validate_path_within_root(
-        args.ebpf_provenance,
-        workspace_root,
-        label="eBPF provenance",
-    )
-    subject_checksums = validate_path_within_root(
-        output_root / "subject-checksums.txt",
-        workspace_root,
-        label="subject checksums",
-    )
+    output_root = workspace_root / DEFAULT_OUTPUT_DIR
+    ebpf_object = workspace_root / DEFAULT_EBPF_OBJECT
+    ebpf_provenance_path = workspace_root / DEFAULT_EBPF_PROVENANCE
+    subject_checksums = output_root / "subject-checksums.txt"
     if output_root.exists():
         shutil.rmtree(output_root)
     output_root.mkdir(parents=True)
@@ -466,9 +456,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--retention-days", type=int, default=365)
     parser.add_argument("--soft-cap-bytes", type=int, default=50 * 1024 * 1024)
     args = parser.parse_args(argv)
-    args.output_dir = DEFAULT_OUTPUT_DIR
-    args.ebpf_object = DEFAULT_EBPF_OBJECT
-    args.ebpf_provenance = DEFAULT_EBPF_PROVENANCE
     return args
 
 
@@ -512,7 +499,6 @@ def self_test() -> None:
 
         args = argparse.Namespace(
             proof_root=proof_root,
-            output_dir=Path("upload"),
             gates="all",
             build_ebpf="true",
             run_id="123",
@@ -524,8 +510,6 @@ def self_test() -> None:
             workflow_name="Runner Spike Delegated",
             workflow_path=".github/workflows/runner-spike-delegated.yml",
             repository="Rul1an/assay",
-            ebpf_provenance=Path("target/assay-ebpf.provenance.json"),
-            ebpf_object=Path("target/assay-ebpf.o"),
             retention_days=365,
             soft_cap_bytes=50 * 1024 * 1024,
         )
@@ -565,9 +549,9 @@ def self_test() -> None:
             raise ProofPackError("self-test did not collect archive digest")
         if not manifest["build_provenance"]["ebpf"]:
             raise ProofPackError("self-test did not collect eBPF build provenance")
-        if not (root / "upload" / "manifest.json").exists():
+        if not (root / DEFAULT_OUTPUT_DIR / "manifest.json").exists():
             raise ProofPackError("self-test did not write manifest")
-        checksums = (root / "upload" / "subject-checksums.txt").read_text(encoding="utf-8").splitlines()
+        checksums = (root / DEFAULT_OUTPUT_DIR / "subject-checksums.txt").read_text(encoding="utf-8").splitlines()
         if not any(line.endswith("manifest.json") for line in checksums):
             raise ProofPackError("self-test checksum file did not include manifest")
         if len(checksums) != 1 + len(manifest["proof_pack"]["subjects"]):
@@ -578,14 +562,13 @@ def self_test() -> None:
         first_path = load_required_content_provenance_paths()[0]
         broken["source"]["path_trees"][first_path]["oid"] = None
         broken_provenance.write_text(json.dumps(broken) + "\n", encoding="utf-8")
-        broken_args = argparse.Namespace(
-            **{**vars(args), "output_dir": Path("broken-upload"), "ebpf_provenance": broken_provenance}
-        )
+        ebpf_provenance.replace(root / DEFAULT_EBPF_PROVENANCE)
+        broken_provenance.replace(root / DEFAULT_EBPF_PROVENANCE)
         try:
             old_cwd = Path.cwd()
             try:
                 os.chdir(root)
-                build_manifest(broken_args)
+                build_manifest(args)
             finally:
                 os.chdir(old_cwd)
         except ProofPackError as exc:
@@ -596,14 +579,12 @@ def self_test() -> None:
 
         malformed_source = root / "malformed-source-provenance.json"
         malformed_source.write_text('{"source": "not-an-object"}\n', encoding="utf-8")
-        malformed_args = argparse.Namespace(
-            **{**vars(args), "output_dir": Path("malformed-upload"), "ebpf_provenance": malformed_source}
-        )
+        malformed_source.replace(root / DEFAULT_EBPF_PROVENANCE)
         try:
             old_cwd = Path.cwd()
             try:
                 os.chdir(root)
-                build_manifest(malformed_args)
+                build_manifest(args)
             finally:
                 os.chdir(old_cwd)
         except ProofPackError as exc:
@@ -612,13 +593,23 @@ def self_test() -> None:
         else:
             raise ProofPackError("self-test accepted malformed provenance source")
 
-        missing_ebpf_args = argparse.Namespace(**{**vars(args), "output_dir": Path("missing-ebpf-upload")})
+        ebpf_provenance.write_text(
+            json.dumps(
+                {
+                    "schema": "assay.ci.ebpf_build_provenance.v0",
+                    "source": {"path_trees": path_trees},
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         ebpf_object.unlink()
         try:
             old_cwd = Path.cwd()
             try:
                 os.chdir(root)
-                build_manifest(missing_ebpf_args)
+                build_manifest(args)
             finally:
                 os.chdir(old_cwd)
         except ProofPackError as exc:
@@ -635,12 +626,12 @@ def main(argv: list[str]) -> int:
             self_test()
             print("delegated proof-pack self-test ok")
             return 0
-        if args.proof_root is None or args.output_dir is None:
-            raise ProofPackError("--proof-root and --output-dir are required")
+        if args.proof_root is None:
+            raise ProofPackError("--proof-root is required")
         manifest = build_manifest(args)
         print(
             "delegated proof-pack manifest written: "
-            f"{args.output_dir / 'manifest.json'} ({manifest['pack_size_bytes']} bytes)"
+            f"{DEFAULT_OUTPUT_DIR / 'manifest.json'} ({manifest['pack_size_bytes']} bytes)"
         )
     except ProofPackError as exc:
         print(f"error: {exc}", file=sys.stderr)
