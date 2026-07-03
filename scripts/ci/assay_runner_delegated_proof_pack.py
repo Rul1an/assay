@@ -153,13 +153,23 @@ def payload_files(output_root: Path) -> list[dict[str, Any]]:
     return files
 
 
-def workspace_display_path(path: Path) -> str:
-    resolved = path.resolve()
-    cwd = Path.cwd().resolve()
+def validate_path_within_root(candidate: Path, root: Path, *, label: str) -> Path:
+    resolved_root = root.resolve(strict=False)
+    resolved_candidate = candidate.resolve(strict=False)
     try:
-        return str(resolved.relative_to(cwd))
-    except ValueError:
-        return str(path)
+        resolved_candidate.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ProofPackError(f"{label} must be within workspace root {resolved_root}: {candidate}") from exc
+    return resolved_candidate
+
+
+def workspace_display_path(path: Path, workspace_root: Path) -> str:
+    resolved = path.resolve()
+    root = workspace_root.resolve()
+    try:
+        return str(resolved.relative_to(root))
+    except ValueError as exc:
+        raise ProofPackError(f"path escapes workspace root {root}: {path}") from exc
 
 
 def role_for_payload_path(path: str) -> str:
@@ -183,13 +193,13 @@ def subject_for_file(path: Path, *, name: str, role: str) -> dict[str, Any]:
     }
 
 
-def proof_subjects(output_root: Path, ebpf_object: Path | None) -> list[dict[str, Any]]:
+def proof_subjects(output_root: Path, ebpf_object: Path | None, workspace_root: Path) -> list[dict[str, Any]]:
     subjects: list[dict[str, Any]] = []
     if ebpf_object is not None and ebpf_object.exists():
         subjects.append(
             subject_for_file(
                 ebpf_object,
-                name=workspace_display_path(ebpf_object),
+                name=workspace_display_path(ebpf_object, workspace_root),
                 role="ebpf_object",
             )
         )
@@ -198,7 +208,7 @@ def proof_subjects(output_root: Path, ebpf_object: Path | None) -> list[dict[str
         subjects.append(
             subject_for_file(
                 physical,
-                name=workspace_display_path(physical),
+                name=workspace_display_path(physical, workspace_root),
                 role=role_for_payload_path(item["path"]),
             )
         )
@@ -247,13 +257,18 @@ def load_path_trees(ebpf_provenance: Path | None, *, require: bool) -> dict[str,
     return normalized
 
 
-def write_subject_checksums(output_root: Path, checksum_path: Path, subjects: list[dict[str, Any]]) -> None:
+def write_subject_checksums(
+    output_root: Path,
+    checksum_path: Path,
+    subjects: list[dict[str, Any]],
+    workspace_root: Path,
+) -> None:
     lines: list[str] = []
     manifest_path = output_root / "manifest.json"
     attested_subjects = [
         subject_for_file(
             manifest_path,
-            name=workspace_display_path(manifest_path),
+            name=workspace_display_path(manifest_path, workspace_root),
             role="proof_pack_manifest",
         ),
         *subjects,
@@ -289,21 +304,33 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
         allowed = ", ".join(sorted(GATE_SELECTIONS))
         raise ProofPackError(f"unsupported gates value {args.gates!r}; expected one of {allowed}")
 
+    workspace_root = args.workspace_root.resolve(strict=False)
     proof_root = args.proof_root
-    output_root = args.output_dir
+    output_root = validate_path_within_root(args.output_dir, workspace_root, label="--output-dir")
+    ebpf_object = validate_path_within_root(args.ebpf_object, workspace_root, label="--ebpf-object")
+    ebpf_provenance_path = (
+        validate_path_within_root(args.ebpf_provenance, workspace_root, label="--ebpf-provenance")
+        if args.ebpf_provenance is not None
+        else None
+    )
+    subject_checksums = (
+        validate_path_within_root(args.subject_checksums, workspace_root, label="--subject-checksums")
+        if args.subject_checksums is not None
+        else None
+    )
     if output_root.exists():
         shutil.rmtree(output_root)
     output_root.mkdir(parents=True)
 
     gates = [collect_gate(gate, proof_root, output_root) for gate in selected_gates]
     ebpf_provenance = copy_optional_payload_file(
-        args.ebpf_provenance,
+        ebpf_provenance_path,
         output_root,
         Path("build") / "assay-ebpf.provenance.json",
     )
     require_content_provenance = str(args.build_ebpf).lower() == "true"
-    path_trees = load_path_trees(args.ebpf_provenance, require=require_content_provenance)
-    subjects = proof_subjects(output_root, args.ebpf_object)
+    path_trees = load_path_trees(ebpf_provenance_path, require=require_content_provenance)
+    subjects = proof_subjects(output_root, ebpf_object, workspace_root)
     manifest = {
         "schema": SCHEMA,
         "kind": KIND,
@@ -366,10 +393,10 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
         "pack_size_bytes": 0,
     }
     manifest["payload_files"] = payload_files(output_root)
-    manifest["proof_pack"]["subjects"] = proof_subjects(output_root, args.ebpf_object)
+    manifest["proof_pack"]["subjects"] = proof_subjects(output_root, ebpf_object, workspace_root)
     write_manifest(output_root, manifest)
-    if args.subject_checksums:
-        write_subject_checksums(output_root, args.subject_checksums, manifest["proof_pack"]["subjects"])
+    if subject_checksums:
+        write_subject_checksums(output_root, subject_checksums, manifest["proof_pack"]["subjects"], workspace_root)
     return manifest
 
 
@@ -392,6 +419,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--ebpf-provenance", type=Path, help="optional canonical eBPF build provenance JSON")
     parser.add_argument("--ebpf-object", type=Path, default=Path("target/assay-ebpf.o"), help="optional eBPF object subject")
     parser.add_argument("--subject-checksums", type=Path, help="optional checksum file for artifact attestation subjects")
+    parser.add_argument("--workspace-root", type=Path, default=Path.cwd(), help="trusted workspace root for subject paths")
     parser.add_argument("--retention-days", type=int, default=365)
     parser.add_argument("--soft-cap-bytes", type=int, default=50 * 1024 * 1024)
     return parser.parse_args(argv)
@@ -447,6 +475,7 @@ def self_test() -> None:
             ebpf_provenance=ebpf_provenance,
             ebpf_object=ebpf_object,
             subject_checksums=root / "upload" / "subject-checksums.txt",
+            workspace_root=root,
             retention_days=365,
             soft_cap_bytes=50 * 1024 * 1024,
         )
