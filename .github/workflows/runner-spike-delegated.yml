@@ -72,7 +72,9 @@ jobs:
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 90
     permissions:
+      attestations: write
       contents: read
+      id-token: write
     env:
       CARGO_INCREMENTAL: 0
       ASSAY_RUNNER_DELEGATED_PROOF_ROOT: /tmp/assay-runner-proof-${{ github.run_id }}
@@ -290,13 +292,38 @@ jobs:
             --head-sha "$GITHUB_SHA" \
             --workflow-sha "$workflow_sha" \
             --workflow-name "$GITHUB_WORKFLOW" \
+            --workflow-path ".github/workflows/runner-spike-delegated.yml" \
+            --repository "$GITHUB_REPOSITORY" \
             --ebpf-provenance "$ebpf_provenance" \
+            --ebpf-object target/assay-ebpf.o \
+            --subject-checksums "$ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD/subject-checksums.txt" \
             --retention-days 365
           {
             echo "### Delegated proof pack"
             echo "- artifact: assay-runner-delegated-proof-pack-${GITHUB_RUN_ID}"
             echo "- manifest: assay-runner-proof-upload/manifest.json"
+            echo "- subject-checksums: assay-runner-proof-upload/subject-checksums.txt"
             echo "- retention-days: 365"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attest delegated proof pack subjects
+        id: attest-proof-pack
+        if: always() && hashFiles('assay-runner-proof-upload/subject-checksums.txt') != ''
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-checksums: assay-runner-proof-upload/subject-checksums.txt
+          show-summary: true
+
+      - name: Retain delegated proof attestation bundle
+        if: always() && steps.attest-proof-pack.outputs.bundle-path != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "${{ steps.attest-proof-pack.outputs.bundle-path }}" \
+            "$ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD/attestation-bundle.json"
+          {
+            echo "- attestation-bundle: assay-runner-proof-upload/attestation-bundle.json"
+            echo "- attestation-url: ${{ steps.attest-proof-pack.outputs.attestation-url }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload delegated proof pack

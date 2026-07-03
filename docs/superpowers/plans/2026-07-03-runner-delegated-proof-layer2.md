@@ -2,7 +2,8 @@
 
 Date: 2026-07-03
 
-Status: prepared after Layer 1 merged in #1785.
+Status: implementation started after Layer 1 merged in #1785 and Layer 2
+preparation merged in #1786.
 
 ## Goal
 
@@ -122,6 +123,12 @@ If attestation verification is unavailable or malformed, fall back to the
 existing comment contract during the transition and mark the PR-head status
 description as `comment-fallback`.
 
+Implementation note: the first code slice may stop after producer-side
+attestation emission plus manifest v1, then use that real delegated proof pack
+to implement this consumer-side verifier in the next PR. Do not claim
+attestation acceptance in lane-check until a real artifact bundle from
+`Runner Spike Delegated` has been verified end-to-end.
+
 ### 4. Accept content-equivalent branch updates
 
 Add a content-addressed acceptance rule:
@@ -180,11 +187,13 @@ Run on GitHub before ready-for-review:
 
 ## Rollout
 
-1. Ship attestation emission and manifest v1 behind the existing proof-pack
-   upload.
-2. Teach lane-check to prefer attestation proof but keep comment fallback.
-3. Record both proof paths in step summary for one PR cycle.
-4. After one real runner-impacting PR passes attestation proof, decide whether
+1. Ship attestation emission, manifest v1, and the pure content-tree
+   comparison primitives behind the existing proof-pack upload.
+2. Use the first real attested delegated proof pack as the fixture for the
+   lane-check verifier slice.
+3. Teach lane-check to prefer attestation proof but keep comment fallback.
+4. Record both proof paths in step summary for one PR cycle.
+5. After one real runner-impacting PR passes attestation proof, decide whether
    to make attestation proof required and demote comments to diagnostics only.
 
 ## References

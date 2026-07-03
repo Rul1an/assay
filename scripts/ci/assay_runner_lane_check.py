@@ -91,6 +91,13 @@ class PullRequest:
 class GatedPathConfig:
     all_gate_prefixes: tuple[str, ...]
     all_gate_paths: frozenset[str]
+    content_provenance_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ContentTreeComparison:
+    accepted: bool
+    diagnostics: tuple[str, ...]
 
 
 class GitHubApi:
@@ -186,6 +193,7 @@ def load_gated_path_config() -> GatedPathConfig:
     return GatedPathConfig(
         all_gate_prefixes=tuple(str(path) for path in manifest["all_gate_prefixes"]),
         all_gate_paths=frozenset(str(path) for path in manifest["all_gate_paths"]),
+        content_provenance_paths=tuple(str(path) for path in manifest["content_provenance_paths"]),
     )
 
 
@@ -286,6 +294,71 @@ def classify_files(files: Iterable[str]) -> Classification:
         if reason:
             reasons.append(reason)
     return Classification(gate=gate, reasons=tuple(reasons))
+
+
+def content_provenance_covers_path(path: str, config: GatedPathConfig | None = None) -> bool:
+    gated_paths = config or load_gated_path_config()
+    return any(starts(path, prefix) for prefix in gated_paths.content_provenance_paths)
+
+
+def uncovered_content_provenance_files(files: Iterable[str]) -> tuple[str, ...]:
+    gated_paths = load_gated_path_config()
+    uncovered: list[str] = []
+    for path in files:
+        gate, _reason = classify_file(path)
+        if gate == Gate.NONE:
+            continue
+        if not content_provenance_covers_path(path, gated_paths):
+            uncovered.append(path)
+    return tuple(uncovered)
+
+
+def extract_proof_path_tree_oids(manifest: dict[str, object]) -> tuple[dict[str, str], tuple[str, ...]]:
+    gated_paths = load_gated_path_config()
+    raw_content = manifest.get("content_provenance")
+    if not isinstance(raw_content, dict):
+        return {}, ("proof manifest missing content_provenance object",)
+    raw_trees = raw_content.get("path_trees")
+    if not isinstance(raw_trees, dict):
+        return {}, ("proof manifest missing content_provenance.path_trees object",)
+
+    oids: dict[str, str] = {}
+    diagnostics: list[str] = []
+    for path in gated_paths.content_provenance_paths:
+        raw_entry = raw_trees.get(path)
+        if not isinstance(raw_entry, dict):
+            diagnostics.append(f"{path}: missing proof tree entry")
+            continue
+        oid = raw_entry.get("oid")
+        error = raw_entry.get("error")
+        if not isinstance(oid, str) or not oid:
+            diagnostics.append(f"{path}: missing proof tree oid")
+            continue
+        if error not in (None, ""):
+            diagnostics.append(f"{path}: proof tree error {error!r}")
+            continue
+        oids[path] = oid
+    return oids, tuple(diagnostics)
+
+
+def compare_content_path_trees(
+    proof_manifest: dict[str, object],
+    current_trees: dict[str, str],
+) -> ContentTreeComparison:
+    proof_oids, diagnostics = extract_proof_path_tree_oids(proof_manifest)
+    if diagnostics:
+        return ContentTreeComparison(False, diagnostics)
+
+    mismatches: list[str] = []
+    for path, proof_oid in proof_oids.items():
+        current_oid = current_trees.get(path)
+        if not current_oid:
+            mismatches.append(f"{path}: missing current tree oid")
+        elif current_oid != proof_oid:
+            mismatches.append(f"{path}: proof tree {proof_oid} != current tree {current_oid}")
+    if mismatches:
+        return ContentTreeComparison(False, tuple(mismatches))
+    return ContentTreeComparison(True, ())
 
 
 def accepted_gates(expected: Gate) -> set[str]:
@@ -723,6 +796,8 @@ def self_test() -> None:
     assert "crates/assay-runner-core/" in gated_paths.all_gate_prefixes
     assert ".github/actions/canonical-ebpf-build/action.yml" in gated_paths.all_gate_paths
     assert GATED_PATHS_DOC in gated_paths.all_gate_paths
+    assert "crates/assay-runner-core" in gated_paths.content_provenance_paths
+    assert "scripts/ci" in gated_paths.content_provenance_paths
 
     cases = [
         (["docs/reference/runner/ci-lanes.md"], Gate.NONE),
@@ -796,6 +871,9 @@ def self_test() -> None:
     assert recorded_gate_ok("- gates=all", Gate.OPENAI_AGENTS_KERNEL_POLICY)
     assert not recorded_gate_ok("- gate: kernel-only", Gate.ALL)
     assert not recorded_gate_ok("- gate: kernel-only", Gate.OPENAI_AGENTS_KERNEL_POLICY)
+    assert uncovered_content_provenance_files(["crates/assay-runner-core/src/lib.rs"]) == ()
+    assert uncovered_content_provenance_files(["Cargo.lock"]) == ("Cargo.lock",)
+    _test_content_tree_comparison()
 
     valid_run = {
         "name": DELEGATED_WORKFLOW_NAME,
@@ -833,6 +911,56 @@ def self_test() -> None:
     # touching the classifier itself, including any future PR that
     # might silently re-introduce a spike dependency.
     _assert_assay_cli_does_not_consume_spike()
+
+
+def _test_content_tree_comparison() -> None:
+    gated_paths = load_gated_path_config()
+    proof_manifest = {
+        "content_provenance": {
+            "path_trees": {
+                path: {"oid": f"oid:{path}", "error": None}
+                for path in gated_paths.content_provenance_paths
+            }
+        }
+    }
+    current = {
+        path: f"oid:{path}"
+        for path in gated_paths.content_provenance_paths
+    }
+    accepted = compare_content_path_trees(proof_manifest, current)
+    assert accepted.accepted, accepted.diagnostics
+
+    changed = dict(current)
+    changed[gated_paths.content_provenance_paths[0]] = "different"
+    mismatch = compare_content_path_trees(proof_manifest, changed)
+    assert not mismatch.accepted
+    assert "!=" in mismatch.diagnostics[0]
+
+    missing_entry_manifest = {
+        "content_provenance": {
+            "path_trees": {
+                path: {"oid": f"oid:{path}", "error": None}
+                for path in gated_paths.content_provenance_paths[1:]
+            }
+        }
+    }
+    missing = compare_content_path_trees(missing_entry_manifest, current)
+    assert not missing.accepted
+    assert "missing proof tree entry" in missing.diagnostics[0]
+
+    error_manifest = {
+        "content_provenance": {
+            "path_trees": {
+                path: {"oid": f"oid:{path}", "error": None}
+                for path in gated_paths.content_provenance_paths
+            }
+        }
+    }
+    first = gated_paths.content_provenance_paths[0]
+    error_manifest["content_provenance"]["path_trees"][first]["error"] = "missing_at_head"
+    error = compare_content_path_trees(error_manifest, current)
+    assert not error.accepted
+    assert "proof tree error" in error.diagnostics[0]
 
 
 def _test_event_resolution_and_status_payload() -> None:
