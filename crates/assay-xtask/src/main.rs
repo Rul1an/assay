@@ -2,7 +2,7 @@ use anyhow::Context as _;
 use clap::Parser;
 use std::fmt::Write as _;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 const DEFAULT_EBPF_RUST_TOOLCHAIN: &str = "nightly-2026-01-01";
 const DEFAULT_BPF_LINKER_VERSION: &str = "0.10.3";
@@ -158,6 +158,9 @@ fn build_ebpf_local(root: &PathBuf, opts: &BuildEbpfOpts) -> anyhow::Result<()> 
         "build-std=core",
         "--features",
         "ebpf",
+        // JSON messages on stdout (captured below); diagnostics still render
+        // human-readably on stderr.
+        "--message-format=json-render-diagnostics",
     ];
 
     if opts.release {
@@ -169,19 +172,22 @@ fn build_ebpf_local(root: &PathBuf, opts: &BuildEbpfOpts) -> anyhow::Result<()> 
         _ => "-C linker=bpf-linker".to_string(),
     };
 
-    let status = Command::new("cargo")
+    let output = Command::new("cargo")
         .current_dir(root)
         .args(&args)
         .env("RUSTFLAGS", rustflags)
-        .status()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .output()
         .context("Failed to run cargo build for ebpf (local)")?;
 
-    if !status.success() {
+    if !output.status.success() {
         anyhow::bail!("Failed to build eBPF program (local)");
     }
 
-    // Deterministic artifact copy
-    let src = resolve_ebpf_output(root, &opts.target, opts.release)
+    // Deterministic artifact copy. The source path comes from cargo's own
+    // artifact report for THIS invocation, never from filesystem guessing.
+    let src = resolve_ebpf_artifact(&String::from_utf8_lossy(&output.stdout))
         .context("Could not locate built eBPF artifact")?;
     let dst = root.join("target").join("assay-ebpf.o");
 
@@ -201,59 +207,48 @@ fn build_ebpf_local(root: &PathBuf, opts: &BuildEbpfOpts) -> anyhow::Result<()> 
     Ok(())
 }
 
-fn resolve_ebpf_output(
-    root: &std::path::Path,
-    target: &str,
-    release: bool,
-) -> anyhow::Result<PathBuf> {
-    let profile = if release { "release" } else { "debug" };
-
-    // Support custom target dir (respecting CARGO_TARGET_DIR env var if set)
-    let target_dir = std::env::var("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| root.join("target"));
-
-    // 1) Preferred: target/<triple>/<profile>/<bin-name>
-    // Cargo bin name is usually "assay-ebpf" (package name).
-    let preferred = target_dir.join(target).join(profile).join("assay-ebpf");
-    if preferred.exists() {
-        return Ok(preferred);
-    }
-
-    // 2) Some toolchains put it under deps/ with hashing or different naming.
-    // Fallback: pick newest file that starts with "assay_ebpf" or "assay-ebpf"
-    let deps_dir = root.join("target").join(target).join(profile).join("deps");
-    if deps_dir.is_dir() {
-        let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
-        for ent in std::fs::read_dir(&deps_dir)? {
-            let ent = ent?;
-            let p = ent.path();
-            if !p.is_file() {
-                continue;
-            }
-            let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
-            let looks_like = name.starts_with("assay_ebpf") || name.starts_with("assay-ebpf");
-            if !looks_like {
-                continue;
-            }
-            let mt = ent
-                .metadata()?
-                .modified()
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-            if best.as_ref().map(|(t, _)| mt > *t).unwrap_or(true) {
-                best = Some((mt, p));
-            }
+/// Resolve the built eBPF object from cargo's `--message-format=json` output.
+///
+/// Cargo emits a `compiler-artifact` message for every artifact belonging to
+/// this invocation — including fingerprint-validated cached ones ("fresh") —
+/// so the reported path is canonical by construction. Guessing filesystem
+/// paths instead (preferred-path-if-exists, newest-by-mtime in deps/) can
+/// return a stale object from an earlier build on persistent runners
+/// (issue #1575).
+fn resolve_ebpf_artifact(cargo_json_output: &str) -> anyhow::Result<PathBuf> {
+    let mut artifact: Option<PathBuf> = None;
+    for line in cargo_json_output.lines() {
+        let Ok(msg) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if msg["reason"] != "compiler-artifact" {
+            continue;
         }
-        if let Some((_, p)) = best {
-            return Ok(p);
+        let target = &msg["target"];
+        if target["name"] != "assay-ebpf" {
+            continue;
+        }
+        let is_bin = target["kind"]
+            .as_array()
+            .is_some_and(|kinds| kinds.iter().any(|k| k == "bin"));
+        if !is_bin {
+            continue;
+        }
+        let path = msg["executable"]
+            .as_str()
+            .or_else(|| msg["filenames"][0].as_str())
+            .map(PathBuf::from);
+        if path.is_some() {
+            // Keep the last match; cargo reports the final bin artifact last.
+            artifact = path;
         }
     }
-
-    anyhow::bail!(
-        "No eBPF artifact found. Looked in: {} and {}",
-        preferred.display(),
-        deps_dir.display()
-    );
+    artifact.context(
+        "cargo build succeeded but reported no compiler-artifact for the `assay-ebpf` bin target.\n\
+         Refusing to guess the artifact path from the filesystem: on persistent runners a\n\
+         stale object from an earlier build could be silently treated as canonical\n\
+         (see https://github.com/Rul1an/assay/issues/1575).",
+    )
 }
 
 fn build_ebpf_docker(root: &std::path::Path, opts: &BuildEbpfOpts) -> anyhow::Result<()> {
@@ -414,4 +409,96 @@ fn build_image() -> anyhow::Result<()> {
     }
     println!("Successfully built assay-ebpf-builder:latest");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_ebpf_artifact;
+
+    fn artifact_msg(name: &str, kind: &str, executable: Option<&str>, filename: &str) -> String {
+        let executable = match executable {
+            Some(p) => format!("\"{p}\""),
+            None => "null".to_string(),
+        };
+        format!(
+            r#"{{"reason":"compiler-artifact","package_id":"path+file:///w/crates/{name}#3.31.1","target":{{"name":"{name}","kind":["{kind}"],"crate_types":["{kind}"]}},"filenames":["{filename}"],"executable":{executable},"fresh":false}}"#
+        )
+    }
+
+    #[test]
+    fn picks_executable_from_bin_artifact() {
+        let out = [
+            artifact_msg("core", "lib", None, "/t/deps/libcore-abc.rlib"),
+            artifact_msg(
+                "assay-ebpf",
+                "bin",
+                Some("/t/bpfel-unknown-none/release/assay-ebpf"),
+                "/t/bpfel-unknown-none/release/assay-ebpf",
+            ),
+            r#"{"reason":"build-finished","success":true}"#.to_string(),
+        ]
+        .join("\n");
+        let path = resolve_ebpf_artifact(&out).unwrap();
+        assert_eq!(
+            path.to_str().unwrap(),
+            "/t/bpfel-unknown-none/release/assay-ebpf"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_filenames_when_executable_is_null() {
+        let out = artifact_msg(
+            "assay-ebpf",
+            "bin",
+            None,
+            "/t/bpfel-unknown-none/release/deps/assay_ebpf-1234",
+        );
+        let path = resolve_ebpf_artifact(&out).unwrap();
+        assert_eq!(
+            path.to_str().unwrap(),
+            "/t/bpfel-unknown-none/release/deps/assay_ebpf-1234"
+        );
+    }
+
+    #[test]
+    fn last_matching_bin_artifact_wins() {
+        let out = [
+            artifact_msg("assay-ebpf", "bin", Some("/t/old"), "/t/old"),
+            artifact_msg("assay-ebpf", "bin", Some("/t/new"), "/t/new"),
+        ]
+        .join("\n");
+        assert_eq!(
+            resolve_ebpf_artifact(&out).unwrap().to_str().unwrap(),
+            "/t/new"
+        );
+    }
+
+    #[test]
+    fn ignores_non_bin_and_other_packages() {
+        let out = [
+            artifact_msg("assay-ebpf", "lib", None, "/t/deps/libassay_ebpf.rlib"),
+            artifact_msg(
+                "assay-common",
+                "bin",
+                Some("/t/assay-common"),
+                "/t/assay-common",
+            ),
+        ]
+        .join("\n");
+        assert!(resolve_ebpf_artifact(&out).is_err());
+    }
+
+    #[test]
+    fn skips_non_json_lines_and_errors_clearly_when_absent() {
+        let out = "warning: something\nnot json at all\n";
+        let err = resolve_ebpf_artifact(out).unwrap_err().to_string();
+        assert!(
+            err.contains("assay-ebpf"),
+            "error should name the target: {err}"
+        );
+        assert!(
+            err.contains("1575"),
+            "error should reference issue #1575: {err}"
+        );
+    }
 }
