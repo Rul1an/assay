@@ -17,6 +17,7 @@
 //! "how completely was it observed" lives in the separate observation-health artifact, never folded in.
 
 pub mod annotation_conformance;
+pub mod denied_observation;
 pub mod enforce;
 pub mod establish;
 pub mod relay_routing;
@@ -75,6 +76,7 @@ pub async fn run(
         policy,
         baseline,
         decision_out,
+        denied_call_observation_out,
         establish_out,
         tool_conformance_out,
         establish_budget,
@@ -251,6 +253,7 @@ pub async fn run(
                     policy,
                     baseline,
                     decision_out: &decision_out,
+                    denied_call_observation_out: &denied_call_observation_out,
                     establish_out: &establish_out,
                     tool_conformance_out: &tool_conformance_out,
                     establish_budget,
