@@ -4,8 +4,8 @@ name: Runner Health
 
 on:
   schedule:
-    # Every 15 minutes
-    - cron: '*/15 * * * *'
+    # Every 6 hours
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 permissions:

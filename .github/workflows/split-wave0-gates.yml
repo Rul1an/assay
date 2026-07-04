@@ -11,6 +11,10 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: split-wave0-gates-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   WAVE0_SEMVER_BASELINE_SHA: "9cc23b4c684be7cfd81f170c4f66d59903dd76eb"
