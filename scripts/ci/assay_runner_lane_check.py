@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -46,6 +47,8 @@ PROOF_PACK_CLAIM_CEILING = "delegated_gate_execution_only_not_runtime_safety"
 # created PR metadata endpoints such as /pulls/{number}/files.
 RETRYABLE_HTTP_CODES = {404, 502, 503, 504}
 HTTP_RETRY_ATTEMPTS = 3
+PROOF_PACK_ARCHIVE_MAX_BYTES = 100 * 1024 * 1024
+PROOF_PACK_REQUIRED_MEMBER_MAX_BYTES = 16 * 1024 * 1024
 # Connection-level failures urllib/http.client can raise on a transient GitHub
 # API blip (network reset, DNS hiccup, the remote closing the socket without a
 # response). http.client.RemoteDisconnected -- the observed
@@ -126,6 +129,10 @@ class ProofPackArtifact:
     bundle_bytes: bytes
 
 
+class DownloadLimitExceeded(Exception):
+    pass
+
+
 class GitHubApi:
     def __init__(self, repo: str, token: str) -> None:
         self.repo = repo
@@ -148,7 +155,7 @@ class GitHubApi:
             body = response.read().decode("utf-8")
             return json.loads(body) if body else {}
 
-    def download(self, path_or_url: str) -> bytes:
+    def download(self, path_or_url: str, *, max_bytes: int | None = None) -> bytes:
         url = path_or_url if path_or_url.startswith("https://") else f"{self.base_url}{path_or_url}"
         opener = urllib.request.build_opener(_DropAuthorizationOnRedirect)
         request = urllib.request.Request(
@@ -161,7 +168,30 @@ class GitHubApi:
             method="GET",
         )
         with urlopen_with_retry(request, opener=opener) as response:
-            return response.read()
+            length = response.headers.get("Content-Length")
+            if max_bytes is not None and length:
+                try:
+                    if int(length) > max_bytes:
+                        raise DownloadLimitExceeded(
+                            f"download size {length} exceeds limit {max_bytes}"
+                        )
+                except ValueError:
+                    pass
+
+            body = bytearray()
+            while True:
+                read_size = 1024 * 1024
+                if max_bytes is not None:
+                    read_size = min(read_size, max_bytes - len(body) + 1)
+                chunk = response.read(read_size)
+                if not chunk:
+                    break
+                body.extend(chunk)
+                if max_bytes is not None and len(body) > max_bytes:
+                    raise DownloadLimitExceeded(
+                        f"download size exceeds limit {max_bytes}"
+                    )
+            return bytes(body)
 
     def paginated(self, path: str) -> list[object]:
         separator = "&" if "?" in path else "?"
@@ -272,7 +302,41 @@ def parse_subject_checksums(text: str) -> tuple[dict[str, str], tuple[str, ...]]
     return checksums, tuple(diagnostics)
 
 
+def read_zip_member(
+    archive: zipfile.ZipFile,
+    name: str,
+    *,
+    max_bytes: int,
+) -> tuple[bytes | None, str | None]:
+    try:
+        info = archive.getinfo(name)
+    except KeyError:
+        return None, f"proof artifact missing required file {name!r}"
+    if info.file_size > max_bytes:
+        return None, f"{name} size {info.file_size} exceeds limit {max_bytes}"
+
+    body = bytearray()
+    try:
+        with archive.open(info) as handle:
+            while True:
+                read_size = min(1024 * 1024, max_bytes - len(body) + 1)
+                chunk = handle.read(read_size)
+                if not chunk:
+                    break
+                body.extend(chunk)
+                if len(body) > max_bytes:
+                    return None, f"{name} decompressed size exceeds limit {max_bytes}"
+    except (OSError, RuntimeError, NotImplementedError, zipfile.BadZipFile) as exc:
+        return None, f"{name} could not be read from proof artifact: {exc}"
+    return bytes(body), None
+
+
 def load_proof_pack_zip(data: bytes) -> tuple[ProofPackArtifact | None, tuple[str, ...]]:
+    if len(data) > PROOF_PACK_ARCHIVE_MAX_BYTES:
+        return None, (
+            f"proof artifact archive size {len(data)} exceeds limit "
+            f"{PROOF_PACK_ARCHIVE_MAX_BYTES}",
+        )
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile:
@@ -286,10 +350,26 @@ def load_proof_pack_zip(data: bytes) -> tuple[ProofPackArtifact | None, tuple[st
             joined = ", ".join(missing)
             return None, (f"proof artifact missing required file(s): {joined}",)
 
+        manifest_bytes, manifest_error = read_zip_member(
+            archive,
+            "manifest.json",
+            max_bytes=PROOF_PACK_REQUIRED_MEMBER_MAX_BYTES,
+        )
+        checksums_bytes, checksums_error = read_zip_member(
+            archive,
+            "subject-checksums.txt",
+            max_bytes=PROOF_PACK_REQUIRED_MEMBER_MAX_BYTES,
+        )
+        bundle_bytes, bundle_error = read_zip_member(
+            archive,
+            "attestation-bundle.json",
+            max_bytes=PROOF_PACK_REQUIRED_MEMBER_MAX_BYTES,
+        )
+        member_errors = [error for error in (manifest_error, checksums_error, bundle_error) if error]
+        if member_errors:
+            return None, tuple(member_errors)
+
         try:
-            manifest_bytes = archive.read("manifest.json")
-            checksums_bytes = archive.read("subject-checksums.txt")
-            bundle_bytes = archive.read("attestation-bundle.json")
             manifest = json.loads(manifest_bytes.decode("utf-8"))
             bundle = json.loads(bundle_bytes.decode("utf-8"))
         except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -349,7 +429,9 @@ def download_proof_pack_artifact(
     if not isinstance(download_url, str) or not download_url:
         return None, (f"run {run_id}: proof artifact missing archive_download_url",)
     try:
-        data = api.download(download_url)
+        data = api.download(download_url, max_bytes=PROOF_PACK_ARCHIVE_MAX_BYTES)
+    except DownloadLimitExceeded as exc:
+        return None, (f"run {run_id}: proof artifact exceeds size limit ({exc})",)
     except TRANSIENT_REQUEST_ERRORS as exc:
         return None, (f"run {run_id}: could not download proof artifact ({exc})",)
     pack, diagnostics = load_proof_pack_zip(data)
@@ -467,6 +549,15 @@ def validate_attestation_statement(
         if statement_digests.get(path) != digest:
             problems.append(f"{path}: manifest digest is not present in attestation subjects")
 
+    expected_subject_paths = set(manifest_digests)
+    expected_subject_paths.add("assay-runner-proof-upload/manifest.json")
+    extra_checksums = sorted(set(pack.checksums) - expected_subject_paths)
+    if extra_checksums:
+        problems.append(f"subject-checksums.txt has unexpected subject(s): {extra_checksums!r}")
+    extra_statement_subjects = sorted(set(statement_digests) - expected_subject_paths)
+    if extra_statement_subjects:
+        problems.append(f"attestation statement has unexpected subject(s): {extra_statement_subjects!r}")
+
     predicate = statement.get("predicate")
     if not isinstance(predicate, dict):
         problems.append("attestation statement missing predicate object")
@@ -554,6 +645,10 @@ def classify_file(path: str) -> tuple[Gate, str | None]:
         ".github/workflows/assay-runner-lane-check.yml",
         "scripts/ci/assay_runner_lane_check.py",
     }:
+        # The proof consumer runs on GitHub-hosted Ubuntu, not on the delegated
+        # bpf host. Changes to it are covered by the head-running
+        # assay-runner-lane-check-self-test pre-commit hook, whose synthetic
+        # fixture exercises find_valid_attested_proof end to end.
         return Gate.NONE, None
 
     if any(starts(path, prefix) for prefix in gated_paths.all_gate_prefixes):
@@ -1101,7 +1196,9 @@ def validate_attestation_predicate(
                     )
 
         resolved = build_definition.get("resolvedDependencies")
-        if isinstance(resolved, list):
+        if not isinstance(resolved, list):
+            diagnostics.append("attestation predicate missing resolvedDependencies list")
+        else:
             expected_sha = source.get("head_sha")
             found = False
             for dependency in resolved:
@@ -1746,6 +1843,9 @@ def _test_attested_proof_pack_helpers() -> None:
     verified_statement, diagnostics = validate_attestation_statement(pack)
     assert verified_statement is not None, diagnostics
     run = {
+        "name": DELEGATED_WORKFLOW_NAME,
+        "event": "workflow_dispatch",
+        "conclusion": "success",
         "id": 12345,
         "html_url": "https://github.com/Rul1an/assay/actions/runs/12345",
         "head_sha": "abc123",
@@ -1785,6 +1885,143 @@ def _test_attested_proof_pack_helpers() -> None:
         bundle_bytes=pack.bundle_bytes,
     )
     assert validate_attestation_statement(bad_pack)[0] is None
+
+    extra_checksum_pack = ProofPackArtifact(
+        manifest=pack.manifest,
+        manifest_bytes=pack.manifest_bytes,
+        checksums={**pack.checksums, "unexpected.bin": "c" * 64},
+        bundle=pack.bundle,
+        bundle_bytes=pack.bundle_bytes,
+    )
+    extra_checksum_diagnostics = validate_attestation_statement(extra_checksum_pack)[1]
+    assert any("unexpected subject" in line for line in extra_checksum_diagnostics)
+
+    extra_statement = dict(statement)
+    extra_statement["subject"] = [
+        *statement["subject"],
+        {"name": "unexpected.bin", "digest": {"sha256": "c" * 64}},
+    ]
+    extra_bundle = {
+        "dsseEnvelope": {
+            "payload": base64.b64encode(json.dumps(extra_statement).encode("utf-8")).decode("ascii")
+        }
+    }
+    extra_statement_pack = ProofPackArtifact(
+        manifest=pack.manifest,
+        manifest_bytes=pack.manifest_bytes,
+        checksums=pack.checksums,
+        bundle=extra_bundle,
+        bundle_bytes=json.dumps(extra_bundle, sort_keys=True).encode("utf-8"),
+    )
+    extra_statement_diagnostics = validate_attestation_statement(extra_statement_pack)[1]
+    assert any("unexpected subject" in line for line in extra_statement_diagnostics)
+
+    missing_resolved_statement = json.loads(json.dumps(statement))
+    del missing_resolved_statement["predicate"]["buildDefinition"]["resolvedDependencies"]
+    missing_resolved = validate_attestation_predicate(
+        missing_resolved_statement,
+        pack.manifest,
+        run,
+        GitHubApi("Rul1an/assay", "t"),
+    )
+    assert "attestation predicate missing resolvedDependencies list" in missing_resolved
+
+    oversized_buffer = io.BytesIO()
+    with zipfile.ZipFile(oversized_buffer, "w") as oversized_archive:
+        oversized_archive.writestr("manifest.json", b"abcd")
+    with zipfile.ZipFile(io.BytesIO(oversized_buffer.getvalue())) as oversized_archive:
+        _bytes, member_error = read_zip_member(oversized_archive, "manifest.json", max_bytes=3)
+    assert member_error is not None and "exceeds limit" in member_error
+
+    corrupt_buffer = io.BytesIO()
+    with zipfile.ZipFile(corrupt_buffer, "w", compression=zipfile.ZIP_STORED) as corrupt_archive:
+        corrupt_archive.writestr("manifest.json", b'{"ok": true}')
+    corrupt_bytes = bytearray(corrupt_buffer.getvalue())
+    header_offset = corrupt_bytes.index(b"PK\x03\x04")
+    name_length = struct.unpack_from("<H", corrupt_bytes, header_offset + 26)[0]
+    extra_length = struct.unpack_from("<H", corrupt_bytes, header_offset + 28)[0]
+    payload_offset = header_offset + 30 + name_length + extra_length
+    corrupt_bytes[payload_offset] ^= 0xFF
+    with zipfile.ZipFile(io.BytesIO(corrupt_bytes)) as corrupt_archive:
+        _bytes, corrupt_error = read_zip_member(
+            corrupt_archive,
+            "manifest.json",
+            max_bytes=PROOF_PACK_REQUIRED_MEMBER_MAX_BYTES,
+        )
+    assert corrupt_error is not None and "could not be read" in corrupt_error
+
+    class _FakeAttestedApi:
+        repo = "Rul1an/assay"
+
+        def request(self, method: str, path: str, payload: object | None = None) -> object:
+            assert method == "GET"
+            if path == "/actions/runs/12345":
+                return run
+            if path == "/actions/runs/12345/artifacts":
+                return {
+                    "artifacts": [
+                        {
+                            "name": proof_pack_artifact_name("12345"),
+                            "expired": False,
+                            "archive_download_url": (
+                                "https://api.github.com/repos/Rul1an/assay/actions/artifacts/1/zip"
+                            ),
+                        }
+                    ]
+                }
+            raise AssertionError(f"unexpected request path {path!r}")
+
+        def download(self, path_or_url: str, *, max_bytes: int | None = None) -> bytes:
+            assert path_or_url.endswith("/actions/artifacts/1/zip")
+            assert max_bytes == PROOF_PACK_ARCHIVE_MAX_BYTES
+            return archive_buffer.getvalue()
+
+    def _fake_content_tree_accepts_head(
+        _manifest: dict[str, object],
+        _pr: PullRequest,
+    ) -> ContentTreeComparison:
+        return ContentTreeComparison(True, ())
+
+    def _fake_gh_verify(_api: GitHubApi, _pack: ProofPackArtifact):
+        return (
+            [
+                {
+                    "verificationResult": {
+                        "githubWorkflowName": DELEGATED_WORKFLOW_NAME,
+                        "githubWorkflowTrigger": "workflow_dispatch",
+                        "githubWorkflowRepository": "Rul1an/assay",
+                        "sourceRepositoryDigest": "abc123",
+                        "githubWorkflowSHA": "abc123",
+                        "sourceRepositoryRef": "refs/heads/test",
+                        "runnerEnvironment": "self-hosted",
+                    }
+                }
+            ],
+            (),
+        )
+
+    old_tree_accepts = globals()["content_tree_proof_accepts_head"]
+    old_gh_verify = globals()["run_gh_attestation_verify"]
+    try:
+        globals()["content_tree_proof_accepts_head"] = _fake_content_tree_accepts_head
+        globals()["run_gh_attestation_verify"] = _fake_gh_verify
+        accepted = find_valid_attested_proof(
+            _FakeAttestedApi(),
+            ["12345"],
+            PullRequest(
+                number=7,
+                title="synthetic accept path",
+                body="",
+                author_login="Rul1an",
+                head_sha="abc123",
+                files=(".github/workflows/runner-spike-delegated.yml",),
+            ),
+            Gate.ALL,
+        )
+    finally:
+        globals()["content_tree_proof_accepts_head"] = old_tree_accepts
+        globals()["run_gh_attestation_verify"] = old_gh_verify
+    assert accepted.accepted, accepted.diagnostics
 
     old_name = os.environ.get("GITHUB_EVENT_NAME")
     old_run_id = os.environ.get("DELEGATED_WORKFLOW_RUN_ID")
