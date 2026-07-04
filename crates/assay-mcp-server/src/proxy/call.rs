@@ -9,12 +9,16 @@ use super::establish_runner::{run_establish, EstablishRunOutcome};
 use super::io::{
     append_decision_record, forward_line, proxy_error_line, PROXY_DENIED, PROXY_FAILED,
 };
-use super::{annotation_conformance, enforce, establish, observer::Observer, relay_routing};
+use super::{
+    annotation_conformance, denied_observation, enforce, establish, observer::Observer,
+    relay_routing,
+};
 
 pub(super) struct EnforcementRuntime<'a> {
     pub(super) policy: &'a enforce::EnforcePolicy,
     pub(super) baseline: &'a enforce::DeclaredManifest,
     pub(super) decision_out: &'a Option<PathBuf>,
+    pub(super) denied_call_observation_out: &'a Option<PathBuf>,
     pub(super) establish_out: &'a Option<PathBuf>,
     pub(super) tool_conformance_out: &'a Option<PathBuf>,
     pub(super) establish_budget: Duration,
@@ -179,12 +183,24 @@ pub(super) async fn handle_tools_call<W: AsyncWriteExt + Unpin>(
         // A deny stands regardless of a record-write failure; a missing deny-record is logged above.
         match v.get("id") {
             Some(id) if !id.is_null() => {
-                let _ = runtime.tx.send(proxy_error_line(
+                let response_line = proxy_error_line(
                     id.clone(),
                     PROXY_DENIED,
                     decision.reason,
                     &format!("tools/call denied by enforcing proxy: {}", decision.reason),
-                ));
+                );
+                if let Some(path) = runtime.denied_call_observation_out {
+                    let record = denied_observation::denied_call_observation_record(
+                        tool_name,
+                        decision.target_digest.as_deref(),
+                        PROXY_DENIED,
+                        decision.reason,
+                        &response_line,
+                    );
+                    let _ =
+                        append_record_or_log("denied_call_observation_write_failed", path, &record);
+                }
+                let _ = runtime.tx.send(response_line);
             }
             _ => { /* denied notification: nothing to answer, drop it */ }
         }

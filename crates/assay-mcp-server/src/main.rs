@@ -70,6 +70,11 @@ enum Mode {
         /// fails closed (it is not forwarded).
         #[arg(long)]
         enforcement_decision_out: Option<PathBuf>,
+        /// Optional NDJSON path for `assay.denied_call_observation.v0`: one record per answered
+        /// proxy denial, retaining a digest/projection of the caller-visible denial surface. This is
+        /// an observation carrier, not a policy verdict.
+        #[arg(long)]
+        denied_call_observation_out: Option<PathBuf>,
         /// Optional NDJSON path for the per-call `assay.manifest_establish.v0` carrier (Increment 2c):
         /// one record per `tools/call` describing the establish JOURNEY (path + run_outcome), sibling to
         /// and separate from `assay.enforcement_decision.v0` (the verdict carrier). It carries no raw
@@ -153,6 +158,7 @@ async fn main() -> Result<()> {
             enforce_policy,
             declared_mcp_manifest,
             enforcement_decision_out,
+            denied_call_observation_out,
             manifest_establish_out,
             tool_conformance_out,
             manifest_establish_budget_ms,
@@ -191,6 +197,7 @@ async fn main() -> Result<()> {
                     policy: Some(policy),
                     baseline: Some(baseline),
                     decision_out: enforcement_decision_out,
+                    denied_call_observation_out,
                     establish_out: manifest_establish_out,
                     tool_conformance_out,
                     establish_budget: std::time::Duration::from_millis(budget_ms),

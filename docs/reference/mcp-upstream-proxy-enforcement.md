@@ -283,6 +283,26 @@ regardless (a missing deny-record is a completeness gap, logged, not a safety ga
   one. They never overlap: one is "could the mechanism enforce", the other is "what did the proxy
   decide for this call".
 
+## 11a. Denied-call observation record (separate carrier)
+
+The `assay.denied_call_observation.v0` artifact is an optional sibling carrier for the caller-visible
+proxy denial surface. It exists for post-hoc review of attribution claims such as "the caller saw an
+Assay proxy denial", without turning the observation into a policy verdict. The record carries the
+called tool name, the classified target digest when classification produced one, the proxy error code,
+`origin: assay-proxy`, the machine reason, and a `sha256:` digest of the exact JSON-RPC response line
+sent to the caller.
+
+**Implementation:** opt-in via `--denied-call-observation-out <path>` in `proxy-enforce`; the proxy
+appends one compact NDJSON record for each answered `proxy_denied` `tools/call`. The carrier is not
+written for allowed calls, and with the flag absent no file is created. A write failure is logged but
+does not change the denial response: the call is already fail-closed, and a missing observation record
+is a completeness gap, not a reason to synthesize a different verdict.
+
+**Non-claims:** this carrier does not decide policy, does not assert the upstream side effect, does
+not certify safety or maliciousness, and does not replace `assay.enforcement_decision.v0`. A consumer
+that wants to bind a caller-visible proxy denial to a policy decision must join this observation record
+to a digest-bound `assay.enforcement_decision.v0` deny record for the same tool and target digest.
+
 **Correlation (forward-looking, not shipped):** v0 carries no request-id, so a record is correlated to
 its call and to an upstream observation by order + content. An optional, caller-supplied, opaque
 per-call correlation id — echoed by the proxy, never minted by it (so the record stays deterministic),
