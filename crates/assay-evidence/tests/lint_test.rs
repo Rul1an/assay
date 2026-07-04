@@ -67,11 +67,11 @@ fn observed_proxy_refusal_event(seq: u64, tool_name: &str, target_digest: &str) 
                 "jsonrpc": "2.0",
                 "id": 7,
                 "error": {
-                    "code": -32600,
+                    "code": -32042,
                     "message": "tool call denied by policy",
                     "data": {
-                        "assay_proxy": "deny",
-                        "reason": "credential_scope"
+                        "origin": "assay-proxy",
+                        "reason": "credential_scope_insufficient"
                     }
                 }
             })

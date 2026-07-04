@@ -303,11 +303,20 @@ fn extract_enforcement_decision(
     Some((key, EnforcementDecisionSummary { decision }))
 }
 
+// The marker is the SHIPPED proxy deny wire shape (assay-mcp-server/src/proxy/io.rs):
+// `PROXY_DENIED = -32042` with `error.data.origin == "assay-proxy"`. Both are required so an
+// upstream error that merely reuses the code, or a data blob that merely names the origin,
+// does not read as an enforcement marker.
+const PROXY_DENIED_CODE: i64 = -32042;
+const PROXY_ORIGIN: &str = "assay-proxy";
+
 fn extract_proxy_refusal_marker(event: &EvidenceEvent) -> Option<EnforcementDecisionKey> {
     let payload = &event.payload;
     let observed_response = payload.get("observed_response")?.as_str()?;
     let response: Value = serde_json::from_str(observed_response).ok()?;
-    if response.pointer("/error/data/assay_proxy")?.as_str()? != "deny" {
+    if response.pointer("/error/code")?.as_i64()? != PROXY_DENIED_CODE
+        || response.pointer("/error/data/origin")?.as_str()? != PROXY_ORIGIN
+    {
         return None;
     }
 
