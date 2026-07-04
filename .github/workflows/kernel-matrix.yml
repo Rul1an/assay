@@ -292,6 +292,7 @@ jobs:
     concurrency:
       group: assay-bpf-runner-host
       cancel-in-progress: false
+      queue: max
     steps:
       - name: Nuke _actions cache (force fresh download for next job)
         shell: bash
@@ -341,6 +342,7 @@ jobs:
     concurrency:
       group: assay-bpf-runner-host
       cancel-in-progress: false
+      queue: max
     strategy:
       fail-fast: false
       max-parallel: 1

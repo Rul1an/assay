@@ -516,6 +516,7 @@ jobs:
     concurrency:
       group: assay-bpf-runner-host
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
     # Self-hosted runner has Rust in /opt/rust; jobs run with --noprofile so PATH can be minimal.

@@ -28,6 +28,7 @@ concurrency:
   # downloaded-action cache state cannot race between back-to-back dispatches.
   group: assay-bpf-runner-host
   cancel-in-progress: false
+  queue: max
 
 jobs:
   prepare-delegated-runner:

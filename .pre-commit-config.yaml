@@ -60,7 +60,14 @@ repos:
     rev: v1.7.10
     hooks:
       - id: actionlint
-        args: ["-config-file", ".github/actionlint.yaml"]
+        # GitHub Actions added concurrency.queue in May 2026; actionlint has not
+        # caught up yet (rhysd/actionlint#657). Keep all other actionlint checks
+        # active and remove this targeted ignore once upstream supports the key.
+        args:
+          - "-config-file"
+          - ".github/actionlint.yaml"
+          - "-ignore"
+          - 'unexpected key "queue" for "concurrency" section'
         files: ^\.github/workflows/.*\.ya?ml$
 
   # shellcheck (bash) — use system binary to avoid SSL/download issues
