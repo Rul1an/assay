@@ -4,10 +4,8 @@ Date: 2026-02-19
 Status: Closed on `main`
 
 ## What shipped
-- Informational nightly soak lane:
-  - `.github/workflows/adr025-nightly-soak.yml`
-- Informational nightly readiness lane:
-  - `.github/workflows/adr025-nightly-readiness.yml`
+- Informational nightly evidence lane:
+  - `.github/workflows/adr025-nightly-evidence.yml`
   - `scripts/ci/adr025-soak-readiness-report.sh`
 - Enforcement policy freeze (v1):
   - `docs/architecture/ADR-025-SOAK-ENFORCEMENT-POLICY.md`
@@ -58,7 +56,7 @@ Fail classes:
    - `bash scripts/ci/adr025-soak-enforce.sh --policy schemas/soak_readiness_policy_v1.json --readiness <path>`
 5. Classify outcome:
    - policy fail (`1`) vs measurement/contract fail (`2`)
-6. If needed, re-run nightly readiness (`workflow_dispatch`) and retry release.
+6. If needed, re-run nightly evidence (`workflow_dispatch`) and retry release.
 
 ## Post-closure checklist (verified)
 - `bash scripts/ci/review-adr025-i1-step4-a.sh`

@@ -5,7 +5,7 @@ Operational guidance for the ADR-025 I2 closure artifact integration in the **re
 PR lanes are intentionally unchanged.
 
 ## What exists
-- Nightly closure artifact workflow (informational): `.github/workflows/adr025-nightly-closure.yml`
+- Nightly closure artifact workflow (informational): `.github/workflows/adr025-nightly-evidence.yml`
   - artifact: `adr025-closure-report`
   - files: `closure_report_v1.json`, `closure_report_v1.md` (retention 14 days)
 - Release integration (Step4B):
@@ -41,13 +41,13 @@ The release step's decision is determined by `scripts/ci/adr025-closure-release.
 
 ## Triage snippets (log-first)
 Expected startup line:
-- `ADR-025 closure: mode=<mode> policy=<path> out_dir=<path> workflow=adr025-nightly-closure.yml test_mode=<0|1>`
+- `ADR-025 closure: mode=<mode> policy=<path> out_dir=<path> workflow=adr025-nightly-evidence.yml test_mode=<0|1>`
 
 Common signals:
 - Missing token:
   - `Measurement error: missing GH_TOKEN`
 - No successful nightly closure run:
-  - `Measurement error: could not find successful adr025-nightly-closure.yml run`
+  - `Measurement error: could not find successful adr025-nightly-evidence.yml run`
 - Download failure with debug tail:
   - `missing closure_report_v1.json in downloaded artifact; gh run download output: ...`
 - Type mismatch in report:
@@ -64,9 +64,9 @@ Symptoms:
   - `enforce`: exit `2` (blocks release)
 
 Actions:
-1) Check nightly closure workflow health and latest run outcome.
+1) Check nightly evidence workflow health and latest run outcome.
 2) Confirm artifact name is `adr025-closure-report`.
-3) Re-run nightly closure via workflow_dispatch if needed.
+3) Re-run nightly evidence via workflow_dispatch if needed.
 4) If log contains `gh run download output:`, use that tail to triage auth/artifact name issues first.
 
 ### B) Classifier mismatch / schema mismatch / invalid JSON

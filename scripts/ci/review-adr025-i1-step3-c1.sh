@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-WF=".github/workflows/adr025-nightly-soak.yml"
+WF=".github/workflows/adr025-nightly-evidence.yml"
 
 echo "[review] checking $WF exists"
 test -f "$WF"
@@ -28,7 +28,10 @@ rg -n "continue-on-error:\s*true" "$WF" >/dev/null || {
 echo "[review] ensure minimal permissions are explicitly set"
 rg -n "^permissions:" "$WF" >/dev/null || { echo "FAIL: missing permissions block"; exit 1; }
 rg -n "contents:\s*read" "$WF" >/dev/null || { echo "FAIL: missing contents: read"; exit 1; }
-rg -n "actions:\s*write" "$WF" >/dev/null || { echo "FAIL: missing actions: write (needed for artifacts)"; exit 1; }
+if rg -n "actions:\s*write" "$WF" >/dev/null; then
+  echo "FAIL: informational nightly must not request actions: write"
+  exit 1
+fi
 
 echo "[review] ensure actions are pinned to commit SHAs"
 if rg -n 'uses:\s+\S+@(v[0-9]+|stable|main|master|nightly)\b' "$WF" >/dev/null; then
@@ -39,5 +42,9 @@ rg -n 'uses:\s+\S+@[0-9a-f]{40}\b' "$WF" >/dev/null || {
   echo "FAIL: workflow must contain SHA-pinned actions"
   exit 1
 }
+
+echo "[review] ensure soak artifact contract"
+rg -n "name:\s*adr025-soak-report" "$WF" >/dev/null || { echo "FAIL: missing artifact name adr025-soak-report"; exit 1; }
+rg -n "retention-days:\s*14" "$WF" >/dev/null || { echo "FAIL: missing retention-days: 14"; exit 1; }
 
 echo "[review] done"

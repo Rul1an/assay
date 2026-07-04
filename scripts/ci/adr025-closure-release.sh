@@ -7,7 +7,7 @@ OUT_DIR="${OUT_DIR:-artifacts/adr025-closure}"
 CLOSURE_JSON=""
 RUN_ID=""
 
-WORKFLOW_NAME="adr025-nightly-closure.yml"
+WORKFLOW_NAME="adr025-nightly-evidence.yml"
 ARTIFACT_NAME="adr025-closure-report"
 
 TEST_MODE="${ASSAY_CLOSURE_RELEASE_TEST_MODE:-0}"

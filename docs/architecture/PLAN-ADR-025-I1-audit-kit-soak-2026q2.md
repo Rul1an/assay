@@ -119,8 +119,8 @@ Workflow/gating rollout:
 
 Step3 rollout status:
 
-1. C1 merged: informational nightly soak workflow (`adr025-nightly-soak.yml`).
-2. C2 merged: informational readiness aggregation workflow (`adr025-nightly-readiness.yml`) and report script (`scripts/ci/adr025-soak-readiness-report.sh`).
+1. C1 merged: informational nightly soak workflow, later consolidated into `adr025-nightly-evidence.yml`.
+2. C2 merged: informational readiness aggregation workflow, later consolidated into `adr025-nightly-evidence.yml`, and report script (`scripts/ci/adr025-soak-readiness-report.sh`).
 3. C3 merged: checklist/review-pack/reviewer gates and promotion criteria freeze.
 
 Step3 policy guarantee:

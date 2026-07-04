@@ -11,7 +11,7 @@ TEST_MODE="${ASSAY_OTEL_RELEASE_TEST_MODE:-0}"
 TEST_LOCAL_JSON="${ASSAY_OTEL_RELEASE_LOCAL_JSON:-}"
 TEST_SIMULATE_MISSING_ARTIFACT="${ASSAY_OTEL_RELEASE_SIMULATE_MISSING_ARTIFACT:-0}"
 
-WORKFLOW_NAME="adr025-nightly-otel-bridge.yml"
+WORKFLOW_NAME="adr025-nightly-evidence.yml"
 ARTIFACT_NAME="adr025-otel-bridge-report"
 ARTIFACT_JSON="otel_bridge_report_v1.json"
 ARTIFACT_MD="otel_bridge_report_v1.md"

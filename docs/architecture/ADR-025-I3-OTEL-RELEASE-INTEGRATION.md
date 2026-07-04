@@ -24,7 +24,7 @@ Out-of-scope (Step4):
 
 ## Inputs
 Nightly OTel bridge artifact (from I3 Step3):
-- workflow: `.github/workflows/adr025-nightly-otel-bridge.yml`
+- workflow: `.github/workflows/adr025-nightly-evidence.yml`
 - artifact name: `adr025-otel-bridge-report`
 - files:
   - `otel_bridge_report_v1.json`
