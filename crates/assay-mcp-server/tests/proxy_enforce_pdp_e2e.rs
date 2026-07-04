@@ -8,6 +8,8 @@
 
 #[path = "proxy_enforce_pdp_e2e/conformance.rs"]
 mod conformance;
+#[path = "proxy_enforce_pdp_e2e/denied_observation.rs"]
+mod denied_observation;
 #[path = "proxy_enforce_pdp_e2e/drift_allow.rs"]
 mod drift_allow;
 #[path = "proxy_enforce_pdp_e2e/establish.rs"]

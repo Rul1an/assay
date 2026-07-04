@@ -13,6 +13,10 @@ pub struct EnforceInputs {
     pub policy: Option<EnforcePolicy>,
     pub baseline: Option<DeclaredManifest>,
     pub decision_out: Option<PathBuf>,
+    /// Optional NDJSON path for `assay.denied_call_observation.v0`: the caller-visible proxy-deny
+    /// surface, bound to the call's tool and target digest when classification provides one. This is
+    /// an observation carrier, not the policy verdict.
+    pub denied_call_observation_out: Option<PathBuf>,
     pub establish_out: Option<PathBuf>,
     /// Optional NDJSON path for the per-call `assay.tool_annotation_conformance.v0` carrier
     /// (Increment 5b): the server's declared annotation hints vs Assay's observed call
