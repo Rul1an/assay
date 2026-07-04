@@ -256,12 +256,12 @@ fn check_enforcement_attribution_binding(
 
     let message = if decisions.iter().any(|record| record.decision == "allow") {
         format!(
-            "Observed response carries an enforcement marker for '{}' but is contradicted by a digest-bound allow record",
+            "Denied-call observation for '{}' is contradicted by a digest-bound allow record",
             key.tool_name
         )
     } else {
         format!(
-            "Observed response carries an enforcement marker for '{}' but no digest-bound assay.enforcement_decision.v0 deny record was retained",
+            "Denied-call observation for '{}' is not backed by a digest-bound assay.enforcement_decision.v0 deny record",
             key.tool_name
         )
     };
@@ -303,19 +303,24 @@ fn extract_enforcement_decision(
     Some((key, EnforcementDecisionSummary { decision }))
 }
 
-// The marker is the SHIPPED proxy deny wire shape (assay-mcp-server/src/proxy/io.rs):
-// `PROXY_DENIED = -32042` with `error.data.origin == "assay-proxy"`. Both are required so an
-// upstream error that merely reuses the code, or a data blob that merely names the origin,
-// does not read as an enforcement marker.
+// The marker is the SHIPPED denied-call observation carrier
+// (assay-mcp-server/src/proxy/denied_observation.rs): schema
+// `assay.denied_call_observation.v0` whose caller-visible error is the proxy deny wire shape,
+// `PROXY_DENIED = -32042` with `origin == "assay-proxy"` (assay-mcp-server/src/proxy/io.rs).
+// All three are required so an event that merely reuses the code, or merely names the origin,
+// does not read as an enforcement marker. An observation without a target digest is unbindable
+// and out of this rule's scope (binding cannot be checked for it).
+const DENIED_CALL_OBSERVATION_SCHEMA: &str = "assay.denied_call_observation.v0";
 const PROXY_DENIED_CODE: i64 = -32042;
 const PROXY_ORIGIN: &str = "assay-proxy";
 
 fn extract_proxy_refusal_marker(event: &EvidenceEvent) -> Option<EnforcementDecisionKey> {
     let payload = &event.payload;
-    let observed_response = payload.get("observed_response")?.as_str()?;
-    let response: Value = serde_json::from_str(observed_response).ok()?;
-    if response.pointer("/error/code")?.as_i64()? != PROXY_DENIED_CODE
-        || response.pointer("/error/data/origin")?.as_str()? != PROXY_ORIGIN
+    if payload.get("schema").and_then(Value::as_str) != Some(DENIED_CALL_OBSERVATION_SCHEMA) {
+        return None;
+    }
+    if payload.pointer("/caller_visible_error/code")?.as_i64()? != PROXY_DENIED_CODE
+        || payload.pointer("/caller_visible_error/origin")?.as_str()? != PROXY_ORIGIN
     {
         return None;
     }

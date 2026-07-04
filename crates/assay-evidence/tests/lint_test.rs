@@ -52,30 +52,41 @@ fn create_bundle_from_events(events: Vec<EvidenceEvent>) -> Vec<u8> {
     buffer
 }
 
+/// Mirrors the shipped `assay.denied_call_observation.v0` producer
+/// (assay-mcp-server/src/proxy/denied_observation.rs).
 fn observed_proxy_refusal_event(seq: u64, tool_name: &str, target_digest: &str) -> EvidenceEvent {
+    denied_call_observation_event(seq, tool_name, serde_json::json!(target_digest))
+}
+
+fn denied_call_observation_event(
+    seq: u64,
+    tool_name: &str,
+    target_digest: serde_json::Value,
+) -> EvidenceEvent {
     let mut event = EvidenceEvent::new(
         "assay.mcp_call.observed",
         "urn:assay:test",
         "run_lint",
         seq,
         serde_json::json!({
+            "schema": "assay.denied_call_observation.v0",
             "call": {
                 "tool_name": tool_name,
                 "target_digest": target_digest
             },
-            "observed_response": serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": 7,
-                "error": {
-                    "code": -32042,
-                    "message": "tool call denied by policy",
-                    "data": {
-                        "origin": "assay-proxy",
-                        "reason": "credential_scope_insufficient"
-                    }
-                }
-            })
-            .to_string()
+            "caller_visible_error": {
+                "code": -32042,
+                "origin": "assay-proxy",
+                "reason": "credential_scope_insufficient"
+            },
+            "caller_visible_response_digest":
+                "sha256:6d5a1f3b8c9e2d4a7b0c1e5f8a3d6b9c2e5f8a1d4b7c0e3f6a9d2c5b8e1f4a7d",
+            "non_claims": [
+                "caller-visible proxy denial observation only; policy decision lives in assay.enforcement_decision.v0",
+                "does not assert or verify the upstream side effect",
+                "does not assert maliciousness, safety, approval, or whole-action trust",
+                "must not be read as a replacement for the bound enforcement decision record"
+            ]
         }),
     );
     event.time = Utc.timestamp_opt(1700000000 + seq as i64, 0).unwrap();
@@ -161,7 +172,7 @@ fn test_w004_flags_proxy_marker_without_bound_decision_record() {
     assert_eq!(findings.len(), 1, "expected one ASSAY-W004 finding");
     assert!(findings[0]
         .message
-        .contains("no digest-bound assay.enforcement_decision.v0 deny record"));
+        .contains("not backed by a digest-bound assay.enforcement_decision.v0 deny record"));
 }
 
 #[test]
@@ -232,6 +243,26 @@ fn test_w004_does_not_match_prose_only_guardrail_log() {
             .iter()
             .all(|finding| finding.rule_id != "ASSAY-W004"),
         "ASSAY-W004 must not fall back to producer-log prose matching"
+    );
+}
+
+#[test]
+fn test_w004_skips_unbindable_observation_without_target_digest() {
+    // The shipped carrier emits `target_digest: null` when classification produced no digest.
+    // Binding cannot be checked for such an observation, so it is out of W004's scope.
+    let bundle = create_bundle_from_events(vec![denied_call_observation_event(
+        0,
+        "fs_write",
+        serde_json::Value::Null,
+    )]);
+    let report = lint_bundle(Cursor::new(&bundle), VerifyLimits::default()).unwrap();
+
+    assert!(
+        report
+            .findings
+            .iter()
+            .all(|finding| finding.rule_id != "ASSAY-W004"),
+        "an unbindable observation must not produce an ASSAY-W004 finding"
     );
 }
 
