@@ -42,6 +42,98 @@ fn create_bundle_with_secret_subject() -> Vec<u8> {
     buffer
 }
 
+fn create_bundle_from_events(events: Vec<EvidenceEvent>) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    let mut writer = BundleWriter::new(&mut buffer);
+    for event in events {
+        writer.add_event(event);
+    }
+    writer.finish().unwrap();
+    buffer
+}
+
+fn observed_proxy_refusal_event(seq: u64, tool_name: &str, target_digest: &str) -> EvidenceEvent {
+    let mut event = EvidenceEvent::new(
+        "assay.mcp_call.observed",
+        "urn:assay:test",
+        "run_lint",
+        seq,
+        serde_json::json!({
+            "call": {
+                "tool_name": tool_name,
+                "target_digest": target_digest
+            },
+            "observed_response": serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 7,
+                "error": {
+                    "code": -32600,
+                    "message": "tool call denied by policy",
+                    "data": {
+                        "assay_proxy": "deny",
+                        "reason": "credential_scope"
+                    }
+                }
+            })
+            .to_string()
+        }),
+    );
+    event.time = Utc.timestamp_opt(1700000000 + seq as i64, 0).unwrap();
+    event
+}
+
+fn enforcement_decision_event(
+    seq: u64,
+    tool_name: &str,
+    target_digest: &str,
+    decision: &str,
+) -> EvidenceEvent {
+    let mut event = EvidenceEvent::new(
+        "assay.enforcement_decision",
+        "urn:assay:test",
+        "run_lint",
+        seq,
+        serde_json::json!({
+            "schema": "assay.enforcement_decision.v0",
+            "tool": {
+                "name": tool_name,
+                "action_class": "fs_write"
+            },
+            "action": {
+                "verb": "write",
+                "resource_type": "file",
+                "target": {
+                    "path": "/workspace/out/report.md"
+                },
+                "target_digest": target_digest
+            },
+            "decision": decision,
+            "reason": decision,
+            "fail_closed": decision == "deny"
+        }),
+    );
+    event.time = Utc.timestamp_opt(1700000000 + seq as i64, 0).unwrap();
+    event
+}
+
+fn prose_only_guardrail_log_event(seq: u64) -> EvidenceEvent {
+    let mut event = EvidenceEvent::new(
+        "assay.mcp_call.observed",
+        "urn:assay:test",
+        "run_lint",
+        seq,
+        serde_json::json!({
+            "call": {
+                "tool_name": "fs_write",
+                "target_digest": "sha256:call-target"
+            },
+            "producer_log": ["guardrail blocked this call"]
+        }),
+    );
+    event.time = Utc.timestamp_opt(1700000000 + seq as i64, 0).unwrap();
+    event
+}
+
 #[test]
 fn test_golden_bundle_zero_findings() {
     let bundle = create_golden_bundle();
@@ -50,6 +142,97 @@ fn test_golden_bundle_zero_findings() {
     assert!(report.verified);
     assert_eq!(report.findings.len(), 0);
     assert_eq!(report.summary.total, 0);
+}
+
+#[test]
+fn test_w004_flags_proxy_marker_without_bound_decision_record() {
+    let bundle = create_bundle_from_events(vec![observed_proxy_refusal_event(
+        0,
+        "fs_write",
+        "sha256:call-target",
+    )]);
+    let report = lint_bundle(Cursor::new(&bundle), VerifyLimits::default()).unwrap();
+
+    let findings: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.rule_id == "ASSAY-W004")
+        .collect();
+    assert_eq!(findings.len(), 1, "expected one ASSAY-W004 finding");
+    assert!(findings[0]
+        .message
+        .contains("no digest-bound assay.enforcement_decision.v0 deny record"));
+}
+
+#[test]
+fn test_w004_flags_proxy_marker_contradicted_by_bound_allow_record() {
+    let bundle = create_bundle_from_events(vec![
+        observed_proxy_refusal_event(0, "fs_write", "sha256:call-target"),
+        enforcement_decision_event(1, "fs_write", "sha256:call-target", "allow"),
+    ]);
+    let report = lint_bundle(Cursor::new(&bundle), VerifyLimits::default()).unwrap();
+
+    let findings: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.rule_id == "ASSAY-W004")
+        .collect();
+    assert_eq!(findings.len(), 1, "expected one ASSAY-W004 finding");
+    assert!(findings[0].message.contains("contradicted by"));
+}
+
+#[test]
+fn test_w004_accepts_proxy_marker_with_bound_deny_record() {
+    let bundle = create_bundle_from_events(vec![
+        observed_proxy_refusal_event(0, "fs_write", "sha256:call-target"),
+        enforcement_decision_event(1, "fs_write", "sha256:call-target", "deny"),
+    ]);
+    let report = lint_bundle(Cursor::new(&bundle), VerifyLimits::default()).unwrap();
+
+    assert!(
+        report
+            .findings
+            .iter()
+            .all(|finding| finding.rule_id != "ASSAY-W004"),
+        "bound deny record should satisfy ASSAY-W004"
+    );
+}
+
+#[test]
+fn test_w004_sarif_rule_includes_security_severity() {
+    let bundle = create_bundle_from_events(vec![observed_proxy_refusal_event(
+        0,
+        "fs_write",
+        "sha256:call-target",
+    )]);
+    let report = lint_bundle(Cursor::new(&bundle), VerifyLimits::default()).unwrap();
+    let sarif = to_sarif(&report);
+
+    let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
+        .as_array()
+        .unwrap();
+    let w004_rule = rules
+        .iter()
+        .find(|rule| rule["id"] == "ASSAY-W004")
+        .unwrap();
+    assert_eq!(
+        w004_rule["properties"]["security-severity"].as_str(),
+        Some("4.0")
+    );
+}
+
+#[test]
+fn test_w004_does_not_match_prose_only_guardrail_log() {
+    let bundle = create_bundle_from_events(vec![prose_only_guardrail_log_event(0)]);
+    let report = lint_bundle(Cursor::new(&bundle), VerifyLimits::default()).unwrap();
+
+    assert!(
+        report
+            .findings
+            .iter()
+            .all(|finding| finding.rule_id != "ASSAY-W004"),
+        "ASSAY-W004 must not fall back to producer-log prose matching"
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use super::packs::executor::{PackExecutionMeta, PackExecutor};
 use super::packs::LoadedPack;
-use super::rules::{LintContext, RULES};
+use super::rules::{LintBundleIndex, LintContext, RULES};
 use super::{LintFinding, LintReport, LintSummary, Severity};
 use crate::bundle::writer::{verify_bundle_with_limits, VerifyLimits};
 use crate::ndjson::NdjsonEvents;
@@ -128,11 +128,13 @@ fn parse_events(events_bytes: &[u8]) -> Result<Vec<EvidenceEvent>> {
 /// Run built-in lint rules on events.
 fn run_builtin_rules(events: &[EvidenceEvent]) -> Vec<LintFinding> {
     let mut findings = Vec::new();
+    let bundle_index = LintBundleIndex::from_events(events);
 
     for (line_idx, event) in events.iter().enumerate() {
         let ctx = LintContext {
             line_number: line_idx + 1,
             seq: event.seq as usize,
+            bundle_index: &bundle_index,
         };
 
         for rule in RULES {
