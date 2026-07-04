@@ -73,7 +73,7 @@ the findings slice decides what should become evidence. The default
 ## Delegated Arm A / Arm B / Arm C
 
 Arm B and Arm C are dispatched manually through
-[`runner-otel-overhead-experiment.yml`](../../../.github/workflows/runner-otel-overhead-experiment.yml).
+[`runner-otel-overhead-experiment.yml`](/docs/experiments/workflows-archive/github-actions/runner-otel-overhead-experiment.yml).
 The workflow runs on `assay-bpf-runner` and exposes an `arm` input:
 
 - `arm-a-runner-only` runs `--arm arm-a-runner-only` with

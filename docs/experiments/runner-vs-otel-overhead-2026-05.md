@@ -835,7 +835,7 @@ Slice 12 result:
 |---|---|---|
 | 0 | This plan doc | Links from runner-vs-otel plan and README |
 | 1 | **Done**: local harness for Arm B wall-clock + size output, plus `overhead-sample-v0` and `overhead-summary-v0` schema sidecars | n=20 local dry run, no live API dependency, sidecar tests pass |
-| 2 | **Done**: delegated Arm C harness with health-gated samples via [`.github/workflows/runner-otel-overhead-experiment.yml`](../../.github/workflows/runner-otel-overhead-experiment.yml) | n=20 on `assay-bpf-runner`, all health gates clean |
+| 2 | **Done**: delegated Arm C harness with health-gated samples via [`docs/experiments/workflows-archive/github-actions/runner-otel-overhead-experiment.yml`](/docs/experiments/workflows-archive/github-actions/runner-otel-overhead-experiment.yml) | n=20 on `assay-bpf-runner`, all health gates clean |
 | 3 | **Done**: RSS collection per arm via `--measure-rss` / workflow `measure_rss=true` | n=5 on `assay-bpf-runner`, platform-specific parser tests, tool versions recorded per sample |
 | 4 | **Done**: summary renderer + BMF-compatible export | JSON schema-like tests over synthetic samples |
 | 5 | **Done**: initial findings update in [`runner-vs-otel-overhead-2026-05/findings.md`](runner-vs-otel-overhead-2026-05/findings.md) | No deltas unless same-host arms exist |

@@ -453,7 +453,7 @@ evidence:
 
 - local trace-only Arm B: [`runner-vs-otel-2026-05/run-arm-b.sh`](runner-vs-otel-2026-05/run-arm-b.sh);
 - delegated Arm C workflow:
-  [`.github/workflows/runner-otel-experiment.yml`](../../.github/workflows/runner-otel-experiment.yml);
+  [`docs/experiments/workflows-archive/github-actions/runner-otel-experiment.yml`](/docs/experiments/workflows-archive/github-actions/runner-otel-experiment.yml);
 - comparator:
   [`runner-vs-otel-2026-05/compare/compare.py`](runner-vs-otel-2026-05/compare/compare.py);
 - baseline evidence:
