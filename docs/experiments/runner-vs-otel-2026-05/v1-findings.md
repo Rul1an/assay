@@ -31,7 +31,7 @@
 > **Reproducibility (Arm C, delegated):**
 > - VM: Multipass Ubuntu 24.04.3 LTS, kernel `6.8.0-117-generic` (ARM64)
 > - GitHub Actions self-hosted runner labelled `assay-bpf-runner`
-> - Workflow: [`.github/workflows/runner-otel-experiment.yml`](../../../.github/workflows/runner-otel-experiment.yml)
+> - Workflow: [`docs/experiments/workflows-archive/github-actions/runner-otel-experiment.yml`](/docs/experiments/workflows-archive/github-actions/runner-otel-experiment.yml)
 >   dispatched against `main` with `repetitions=3`, `require_binding_match=true`,
 >   `build_ebpf=true`
 > - `cargo 1.94.0`, `rustc 1.94.0`, eBPF artifact built via `cargo xtask build-ebpf`
@@ -132,7 +132,7 @@ smoke test in `tests/test_compare.py::test_markdown_renders`.
 
 Three Arm C dual-capture iterations were performed on the
 `assay-bpf-runner` self-hosted runner via
-[`runner-otel-experiment.yml`](../../../.github/workflows/runner-otel-experiment.yml)
+[`runner-otel-experiment.yml`](/docs/experiments/workflows-archive/github-actions/runner-otel-experiment.yml)
 (GitHub Actions run `26372344619`, head `c6508780`,
 `repetitions=3 require_binding_match=true build_ebpf=true`). Per-run
 artifacts are committed under
@@ -255,7 +255,7 @@ Two changes, both small:
   emitter alongside the existing OTel tool spans. Both streams share
   the same `tool_call_id`, so the comparator can join L1 to L2 at
   tool level.
-- `.github/workflows/runner-otel-experiment.yml`: pass
+- `docs/experiments/workflows-archive/github-actions/runner-otel-experiment.yml`: pass
   `--sdk-event-log $RUN_DIR/sdk-events.ndjson` to
   `assay runner-spike run`, which is what triggers the env-var
   injection into the workload child and the post-run fold of the

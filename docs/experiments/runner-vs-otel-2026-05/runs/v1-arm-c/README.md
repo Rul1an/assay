@@ -8,7 +8,7 @@ that produced it is the canonical source.
 
 | Field | Value |
 |---|---|
-| Workflow | [`.github/workflows/runner-otel-experiment.yml`](../../../../../.github/workflows/runner-otel-experiment.yml) |
+| Workflow | [`docs/experiments/workflows-archive/github-actions/runner-otel-experiment.yml`](/docs/experiments/workflows-archive/github-actions/runner-otel-experiment.yml) |
 | Workflow run | <https://github.com/Rul1an/assay/actions/runs/26372344619> |
 | Head commit | `c6508780c8f77b38c773b7622fc4047fa481f826` |
 | Date | 2026-05-24 |

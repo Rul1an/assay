@@ -1,7 +1,7 @@
 # Cross-Runtime Drift — findings (live n=3 baseline)
 
 > **Status:** live baseline committed. The Slice 3 workflow
-> [`Cross-Runtime Drift Experiment`](../../../.github/workflows/cross-runtime-drift-experiment.yml)
+> [`Cross-Runtime Drift Experiment`](/docs/experiments/workflows-archive/github-actions/cross-runtime-drift-experiment.yml)
 > ran successfully on `assay-bpf-runner` as
 > [GitHub Actions run 26398427430](https://github.com/Rul1an/assay/actions/runs/26398427430)
 > on head `e3f6ef9d`, with `repetitions=3` and `build_ebpf=true`.

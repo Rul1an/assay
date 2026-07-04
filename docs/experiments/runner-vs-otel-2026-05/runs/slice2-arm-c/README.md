@@ -10,7 +10,7 @@ join resolves to `joined:tc_runner_policy_001`.
 
 | Field | Value |
 |---|---|
-| Workflow | [`.github/workflows/runner-otel-experiment.yml`](../../../../../.github/workflows/runner-otel-experiment.yml) |
+| Workflow | [`docs/experiments/workflows-archive/github-actions/runner-otel-experiment.yml`](/docs/experiments/workflows-archive/github-actions/runner-otel-experiment.yml) |
 | Workflow run | <https://github.com/Rul1an/assay/actions/runs/26373111099> |
 | Head commit | `0a1e6884` (workflow `--sdk-event-log` flag + workload SDK emitter) |
 | Date | 2026-05-24 |

@@ -11,22 +11,53 @@ name: Perf (PR compare)
 
 on:
   pull_request:
-    types: [opened, reopened, edited, synchronize]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "crates/**"
-      - "benches/**"
-      - ".github/workflows/perf_pr.yml"
+    types: [opened, reopened, edited, synchronize, closed]
 
 permissions:
   pull-requests: write
   contents: read
 
 jobs:
+  detect-benchmark-relevance:
+    name: Detect benchmark-relevant changes
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Detect benchmark-relevant paths
+        id: detect
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git diff --name-only "${BASE_SHA}...${HEAD_SHA}" > changed_files.txt
+          if grep -Eq '^(Cargo\.toml|Cargo\.lock|crates/|benches/|\.github/workflows/perf_pr\.yml)' changed_files.txt; then
+            relevant=true
+          else
+            relevant=false
+          fi
+          echo "relevant=${relevant}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Perf PR relevance"
+            echo "- relevant: ${relevant}"
+            echo "- changed files:"
+            sed 's/^/  - /' changed_files.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+
   benches:
     name: Criterion compare (PR vs main)
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: detect-benchmark-relevance
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.action != 'closed' && needs.detect-benchmark-relevance.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     # Bencher 404 (e.g. main baseline not found) should not block PR merge
     continue-on-error: true
@@ -74,6 +105,7 @@ jobs:
                 --github-actions "$GITHUB_TOKEN"
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .
+
       - name: Criterion (suite_run_worstcase)
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
@@ -97,3 +129,32 @@ jobs:
                 --github-actions "$GITHUB_TOKEN"
           test -d target/criterion
           find target/criterion -name estimates.json -print -quit | grep -q .
+
+  archive_pr_branch:
+    name: Archive closed PR branch with Bencher
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: bencherdev/bencher@0f8f620172ccd6225d40a7590598eb7b41718af8 # v0.6.2
+      - name: Archive closed PR branch with Bencher
+        env:
+          BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+        run: |
+          if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then
+            echo "Bencher not configured, skipping."
+            exit 0
+          fi
+          # Archive may fail if PR was closed before any benchmarks ran (branch doesn't exist in Bencher)
+          # This is expected and non-fatal
+          if ! bencher archive \
+            --project "$BENCHER_PROJECT" \
+            --token "$BENCHER_API_TOKEN" \
+            --branch "$GITHUB_HEAD_REF" 2>&1; then
+            echo "::notice::Branch '$GITHUB_HEAD_REF' not found in Bencher (no benchmarks ran). Skipping archive."
+          fi

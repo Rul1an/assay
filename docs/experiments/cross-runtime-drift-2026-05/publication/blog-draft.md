@@ -276,7 +276,7 @@ WORKLOAD_WORK_DIR=$(mktemp -d) GOOGLE_API_KEY=... node dist/workload.js
 Then run the contract-checker on each work directory; both should exit
 0. To get a fresh Runner archive (and therefore a fresh drift report),
 you need `assay runner-spike run` on a Linux/eBPF host — the
-[`Cross-Runtime Drift Experiment`](https://github.com/Rul1an/assay/blob/main/.github/workflows/cross-runtime-drift-experiment.yml)
+[`Cross-Runtime Drift Experiment`](https://github.com/Rul1an/assay/blob/main/docs/experiments/workflows-archive/github-actions/cross-runtime-drift-experiment.yml)
 workflow on `assay-bpf-runner` does this end-to-end and uploads
 both arm archives + the per-pair drift reports as artefacts. The
 committed baseline in this repo comes from run

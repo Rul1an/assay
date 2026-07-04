@@ -14,7 +14,7 @@ Linux/eBPF data.
 
 | Field | Value |
 |---|---|
-| Workflow | [`.github/workflows/runner-otel-experiment.yml`](../../../../../.github/workflows/runner-otel-experiment.yml) |
+| Workflow | [`docs/experiments/workflows-archive/github-actions/runner-otel-experiment.yml`](/docs/experiments/workflows-archive/github-actions/runner-otel-experiment.yml) |
 | Workflow run | <https://github.com/Rul1an/assay/actions/runs/26373990933> |
 | Head commit | `3dec3e1e` (workload Slice 3 + tampering-detection fix) |
 | Date | 2026-05-25 |

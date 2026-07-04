@@ -15,7 +15,7 @@ kernel-event evidence.
 
 | Field | Value |
 |---|---|
-| Workflow | [`.github/workflows/runner-otel-experiment.yml`](../../../../../.github/workflows/runner-otel-experiment.yml) |
+| Workflow | [`docs/experiments/workflows-archive/github-actions/runner-otel-experiment.yml`](/docs/experiments/workflows-archive/github-actions/runner-otel-experiment.yml) |
 | Workflow run | <https://github.com/Rul1an/assay/actions/runs/26442807783> |
 | Branch | `codex/runtime-drift-v02-rerender` |
 | Comparator/support commit | `08b1664b` |
