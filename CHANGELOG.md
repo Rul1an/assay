@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.32.0] - 2026-07-04
+
+### Added
+- Add the `gateway-evidence-replay` workspace crate: a deterministic offline replay verifier for
+  retained gateway-path evidence, with `gateway-path.v0` contract fixtures and a four-bundle demo. It
+  verifies only the retained path facts and explicitly does not claim provider honesty, model-output
+  truth, policy compliance, or end-to-end action trust.
+- Add skill supply-chain evidence commands to the Assay CLI:
+  - `assay evidence capture-skill-supply-chain`
+  - `assay evidence verify-skill-supply-chain`
+  - `assay evidence project-skill-bom`
+  - `assay evidence adapt-skill-scan`
+  The flow captures skill supply-chain facts, verifies the retained carrier, projects CycloneDX SBOM
+  evidence, and adapts scanner output to SARIF without turning those facts into a trust score.
+- Add gateway replay Gate-D demo docs and implemented-standards references, including the standalone
+  `gateway-evidence-replay` ecosystem pointer.
+
+### Changed
+- Harden the delegated runner proof layer: canonical eBPF build provenance, attested delegated proof
+  packs, content-addressed proof acceptance, stricter hostile-input limits, and self-tests for the
+  proof consumer path.
+- Simplify and harden CI workflows: preserve queued bpf-host runs, follow artifact redirects safely,
+  reduce workflow hot-path cost, archive obsolete experiment workflows, and consolidate ADR-025
+  nightly evidence into one sequenced informational workflow while preserving the readiness artifact
+  contract during the transition.
+- Update public discovery metadata (`CITATION.cff`, `README.md`, `llms.txt`, and PyPI keywords).
+
+### Fixed
+- Strip C1 terminal controls in render-safety handling.
+- Harden skill capture symlink containment.
+- Fix the eBPF LSM emit path to write current `MonitorEvent` records, with attach-smoke coverage for
+  ABI skew.
+- Resolve eBPF artifact paths from Cargo JSON messages instead of filesystem guessing.
+- Close shell-injection risk in MCP registry publish tag resolution and tighten workflow token
+  permissions.
+
 ## [3.31.1] - 2026-06-27
 
 ### Changed
