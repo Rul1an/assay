@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-WF=".github/workflows/adr025-nightly-readiness.yml"
+WF=".github/workflows/adr025-nightly-evidence.yml"
 
 echo "[review] checking $WF exists"
 test -f "$WF"

@@ -5,7 +5,7 @@ Operational guide for the ADR-025 I3 OTel bridge informational lane.
 This lane produces deterministic bridge artifacts for audit/debug and does not gate PR lanes.
 
 ## What runs
-- Workflow: `.github/workflows/adr025-nightly-otel-bridge.yml`
+- Workflow: `.github/workflows/adr025-nightly-evidence.yml` (`otel_bridge` job)
 - Generator: `scripts/ci/adr025-otel-bridge.sh`
 - Input fixture (Step3): `scripts/ci/fixtures/adr025-i3/otel_input_minimal.json`
 - Uploaded artifact: `adr025-otel-bridge-report`

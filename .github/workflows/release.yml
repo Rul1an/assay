@@ -441,9 +441,14 @@ jobs:
           set -euo pipefail
           mkdir -p input/readiness
 
-          rid="$(gh run list --workflow "adr025-nightly-readiness.yml" --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
+          rid="$(gh run list --workflow "adr025-nightly-evidence.yml" --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
           if [ -z "${rid}" ] || [ "${rid}" = "null" ]; then
-            echo "No successful adr025-nightly-readiness run found"
+            # Transitional fallback until the consolidated nightly has emitted
+            # its first readiness artifact on main.
+            rid="$(gh run list --workflow "adr025-nightly-readiness.yml" --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')" || true
+          fi
+          if [ -z "${rid}" ] || [ "${rid}" = "null" ]; then
+            echo "No successful adr025-nightly-evidence or legacy adr025-nightly-readiness run found"
             exit 2
           fi
           echo "Using readiness run id: ${rid}"

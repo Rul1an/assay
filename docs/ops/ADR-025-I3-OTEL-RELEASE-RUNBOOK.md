@@ -5,7 +5,7 @@ Operational guidance for ADR-025 I3 OTel bridge integration in the **release lan
 PR lanes remain unchanged.
 
 ## What exists
-- Nightly OTel bridge workflow (informational): `.github/workflows/adr025-nightly-otel-bridge.yml`
+- Nightly OTel bridge workflow (informational): `.github/workflows/adr025-nightly-evidence.yml`
   - artifact: `adr025-otel-bridge-report`
   - files: `otel_bridge_report_v1.json`, `otel_bridge_report_v1.md` (retention 14 days)
 - Release integration (Step4B):
@@ -63,7 +63,7 @@ Symptoms:
   - `enforce`: exit `2` (blocks release)
 
 Actions:
-1) Check latest run of `adr025-nightly-otel-bridge.yml`.
+1) Check latest run of `adr025-nightly-evidence.yml`.
 2) Confirm artifact name is exactly `adr025-otel-bridge-report`.
 3) Re-run nightly workflow via `workflow_dispatch` if needed.
 

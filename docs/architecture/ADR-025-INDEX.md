@@ -49,8 +49,7 @@ Key files:
   - `scripts/ci/adr025-soak-readiness-report.sh`
   - `scripts/ci/adr025-soak-enforce.sh`
 - workflows:
-  - `.github/workflows/adr025-nightly-soak.yml`
-  - `.github/workflows/adr025-nightly-readiness.yml`
+  - `.github/workflows/adr025-nightly-evidence.yml`
   - `.github/workflows/release.yml` (readiness enforcement step)
 
 ### I2 - Closure (completeness/provenance) + release attach
@@ -67,7 +66,7 @@ Key files:
   - `scripts/ci/adr025-closure-evaluate.sh`
   - `scripts/ci/adr025-closure-release.sh`
 - workflows:
-  - `.github/workflows/adr025-nightly-closure.yml`
+  - `.github/workflows/adr025-nightly-evidence.yml`
   - `.github/workflows/release.yml` (closure integration step)
 
 ### I3 - OTel bridge + release attach
@@ -83,19 +82,23 @@ Key files:
   - `scripts/ci/adr025-otel-bridge.sh`
   - `scripts/ci/adr025-otel-release.sh`
 - workflows:
-  - `.github/workflows/adr025-nightly-otel-bridge.yml`
+  - `.github/workflows/adr025-nightly-evidence.yml`
   - `.github/workflows/release.yml` (OTel integration step)
 
 ## Artifacts Map
 
 | Iteration | Artifact | Produced By | Contract |
 |---|---|---|---|
-| I1 | `adr025-soak-report` | `.github/workflows/adr025-nightly-soak.yml` | soak report JSON + retention 14 days |
-| I1 | `adr025-nightly-readiness` | `.github/workflows/adr025-nightly-readiness.yml` | `nightly_readiness.json` + `nightly_readiness.md`, retention 14 days |
-| I2 | `adr025-closure-report` | `.github/workflows/adr025-nightly-closure.yml` | `closure_report_v1.json` + `closure_report_v1.md`, retention 14 days |
+| I1 | `adr025-soak-report` | `.github/workflows/adr025-nightly-evidence.yml` | soak report JSON + retention 14 days |
+| I1 | `adr025-nightly-readiness` | `.github/workflows/adr025-nightly-evidence.yml` | `nightly_readiness.json` + `nightly_readiness.md`, retention 14 days |
+| I2 | `adr025-closure-report` | `.github/workflows/adr025-nightly-evidence.yml` | `closure_report_v1.json` + `closure_report_v1.md`, retention 14 days |
 | I2 | `adr025-closure-release-evidence` | `.github/workflows/release.yml` | closure evidence attached in release lane |
-| I3 | `adr025-otel-bridge-report` | `.github/workflows/adr025-nightly-otel-bridge.yml` | `otel_bridge_report_v1.json` + `otel_bridge_report_v1.md`, retention 14 days |
+| I3 | `adr025-otel-bridge-report` | `.github/workflows/adr025-nightly-evidence.yml` | `otel_bridge_report_v1.json` + `otel_bridge_report_v1.md`, retention 14 days |
 | I3 | `adr025-otel-bridge-release-evidence` | `.github/workflows/release.yml` | OTel evidence attached in release lane |
+
+Note: `.github/workflows/adr025-nightly-evidence.yml` is the consolidated
+informational ADR-025 lane. It emits the I1 soak/readiness artifacts, the I2
+closure artifact, and the I3 OTel bridge artifact in dependency order.
 
 ## Reviewer Gates Map
 

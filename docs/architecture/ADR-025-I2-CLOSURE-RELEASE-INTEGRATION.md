@@ -11,7 +11,7 @@ Integrate ADR-025 I2 closure evidence into release/promote flows with an explici
 
 ## Scope
 Release integration consumes the nightly closure artifact:
-- workflow: `adr025-nightly-closure.yml`
+- workflow: `adr025-nightly-evidence.yml`
 - artifact: `adr025-closure-report`
 - files:
   - `closure_report_v1.json`

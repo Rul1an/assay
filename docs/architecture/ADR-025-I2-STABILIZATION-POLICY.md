@@ -37,7 +37,7 @@ Default remains `attach` (I2 Step4A).
 
 ### Artifact contracts (current)
 - Nightly closure artifact:
-  - workflow: `adr025-nightly-closure.yml`
+  - workflow: `adr025-nightly-evidence.yml`
   - artifact: `adr025-closure-report`
   - files: `closure_report_v1.json`, `closure_report_v1.md` (retention 14 days)
 
