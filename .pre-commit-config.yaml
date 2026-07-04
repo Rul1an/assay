@@ -70,6 +70,16 @@ repos:
           - 'unexpected key "queue" for "concurrency" section'
         files: ^\.github/workflows/.*\.ya?ml$
 
+  # Assay-Runner proof consumer: runs on PR-head via pre-commit/Kernel Matrix lint.
+  - repo: local
+    hooks:
+      - id: assay-runner-lane-check-self-test
+        name: Assay-Runner lane-check self-test
+        entry: python3 scripts/ci/assay_runner_lane_check.py --self-test
+        language: system
+        pass_filenames: false
+        files: ^(scripts/ci/assay_runner_lane_check\.py|scripts/ci/assay_runner_gated_paths\.json|\.github/workflows/assay-runner-lane-check\.yml|\.pre-commit-config\.yaml)$
+
   # shellcheck (bash) — use system binary to avoid SSL/download issues
   - repo: local
     hooks:
