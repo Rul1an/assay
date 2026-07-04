@@ -1,5 +1,9 @@
 use super::{EventLocation, LintFinding, Severity};
 use crate::types::EvidenceEvent;
+use serde_json::Value;
+use std::collections::BTreeMap;
+
+type RuleCheck = for<'a> fn(&EvidenceEvent, &LintContext<'a>) -> Option<LintFinding>;
 
 /// Rule definition for the lint registry.
 pub struct RuleDefinition {
@@ -11,13 +15,62 @@ pub struct RuleDefinition {
     /// CVSS-like security severity (0.0–10.0) for GitHub Code Scanning integration.
     /// Only set for security-relevant rules.
     pub security_severity: Option<&'static str>,
-    pub check: fn(&EvidenceEvent, &LintContext) -> Option<LintFinding>,
+    pub check: RuleCheck,
 }
 
 /// Context passed to rule checks.
-pub struct LintContext {
+pub struct LintContext<'a> {
     pub line_number: usize, // 1-indexed
     pub seq: usize,
+    pub bundle_index: &'a LintBundleIndex,
+}
+
+/// Bundle-wide structural index used by built-in lint rules.
+///
+/// Rules stay single-event callbacks, but they can consult this precomputed
+/// view when a claim can only be checked against sibling records in the same
+/// verified bundle. The index is intentionally structural: it reads pinned
+/// schema fields and never searches prose/log text.
+#[derive(Debug, Default)]
+pub struct LintBundleIndex {
+    enforcement_decisions: BTreeMap<EnforcementDecisionKey, Vec<EnforcementDecisionSummary>>,
+}
+
+impl LintBundleIndex {
+    pub fn from_events(events: &[EvidenceEvent]) -> Self {
+        let mut index = Self::default();
+        for event in events {
+            if let Some((key, decision)) = extract_enforcement_decision(event) {
+                index
+                    .enforcement_decisions
+                    .entry(key)
+                    .or_default()
+                    .push(decision);
+            }
+        }
+        index
+    }
+
+    fn enforcement_decisions_for(
+        &self,
+        key: &EnforcementDecisionKey,
+    ) -> &[EnforcementDecisionSummary] {
+        self.enforcement_decisions
+            .get(key)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct EnforcementDecisionKey {
+    tool_name: String,
+    target_digest: String,
+}
+
+#[derive(Debug)]
+struct EnforcementDecisionSummary {
+    decision: String,
 }
 
 /// Static rule registry.
@@ -58,6 +111,16 @@ pub static RULES: &[RuleDefinition] = &[
         security_severity: Some("6.5"),
         check: check_secrets_flag_consistency,
     },
+    RuleDefinition {
+        id: "ASSAY-W004",
+        default_severity: Severity::Warn,
+        description:
+            "Observed enforcement marker is not supported by a bound enforcement decision record",
+        help_uri: Some("https://docs.assay.dev/lint/ASSAY-W004"),
+        tags: &["security", "enforcement", "attribution"],
+        security_severity: Some("4.0"),
+        check: check_enforcement_attribution_binding,
+    },
 ];
 
 /// Patterns that suggest secrets in subjects.
@@ -77,7 +140,7 @@ const SECRET_PATTERNS: &[&str] = &[
     "github_pat_",
 ];
 
-fn check_secret_in_subject(event: &EvidenceEvent, ctx: &LintContext) -> Option<LintFinding> {
+fn check_secret_in_subject(event: &EvidenceEvent, ctx: &LintContext<'_>) -> Option<LintFinding> {
     let subject = event.subject.as_deref()?;
     let lower = subject.to_lowercase();
 
@@ -105,7 +168,7 @@ fn check_secret_in_subject(event: &EvidenceEvent, ctx: &LintContext) -> Option<L
     None
 }
 
-fn check_pii_flag_consistency(event: &EvidenceEvent, ctx: &LintContext) -> Option<LintFinding> {
+fn check_pii_flag_consistency(event: &EvidenceEvent, ctx: &LintContext<'_>) -> Option<LintFinding> {
     if event.contains_pii && event.subject.as_deref().filter(|s| !s.is_empty()).is_some() {
         return Some(
             LintFinding::new(
@@ -125,7 +188,7 @@ fn check_pii_flag_consistency(event: &EvidenceEvent, ctx: &LintContext) -> Optio
     None
 }
 
-fn check_source_format(event: &EvidenceEvent, ctx: &LintContext) -> Option<LintFinding> {
+fn check_source_format(event: &EvidenceEvent, ctx: &LintContext<'_>) -> Option<LintFinding> {
     // Convention: source should be urn: or https:// scheme
     if !event.source.starts_with("urn:") && !event.source.starts_with("https://") {
         return Some(
@@ -149,7 +212,10 @@ fn check_source_format(event: &EvidenceEvent, ctx: &LintContext) -> Option<LintF
     None
 }
 
-fn check_secrets_flag_consistency(event: &EvidenceEvent, ctx: &LintContext) -> Option<LintFinding> {
+fn check_secrets_flag_consistency(
+    event: &EvidenceEvent,
+    ctx: &LintContext<'_>,
+) -> Option<LintFinding> {
     // If subject contains a secret pattern but contains_secrets is false, warn
     if let Some(subject) = &event.subject {
         let lower = subject.to_lowercase();
@@ -175,4 +241,100 @@ fn check_secrets_flag_consistency(event: &EvidenceEvent, ctx: &LintContext) -> O
         }
     }
     None
+}
+
+fn check_enforcement_attribution_binding(
+    event: &EvidenceEvent,
+    ctx: &LintContext<'_>,
+) -> Option<LintFinding> {
+    let key = extract_proxy_refusal_marker(event)?;
+    let decisions = ctx.bundle_index.enforcement_decisions_for(&key);
+
+    if decisions.iter().any(|record| record.decision == "deny") {
+        return None;
+    }
+
+    let message = if decisions.iter().any(|record| record.decision == "allow") {
+        format!(
+            "Denied-call observation for '{}' is contradicted by a digest-bound allow record",
+            key.tool_name
+        )
+    } else {
+        format!(
+            "Denied-call observation for '{}' is not backed by a digest-bound assay.enforcement_decision.v0 deny record",
+            key.tool_name
+        )
+    };
+
+    Some(
+        LintFinding::new(
+            "ASSAY-W004",
+            Severity::Warn,
+            message,
+            Some(EventLocation {
+                seq: ctx.seq,
+                line: ctx.line_number,
+                event_type: Some(event.type_.clone()),
+            }),
+            vec![
+                "security".into(),
+                "enforcement".into(),
+                "attribution".into(),
+            ],
+        )
+        .with_help_uri("https://docs.assay.dev/lint/ASSAY-W004"),
+    )
+}
+
+fn extract_enforcement_decision(
+    event: &EvidenceEvent,
+) -> Option<(EnforcementDecisionKey, EnforcementDecisionSummary)> {
+    let payload = &event.payload;
+    if payload.get("schema").and_then(Value::as_str) != Some("assay.enforcement_decision.v0") {
+        return None;
+    }
+
+    let key = EnforcementDecisionKey {
+        tool_name: non_empty(payload.pointer("/tool/name")?.as_str()?)?.to_string(),
+        target_digest: non_empty(payload.pointer("/action/target_digest")?.as_str()?)?.to_string(),
+    };
+    let decision = non_empty(payload.get("decision")?.as_str()?)?.to_string();
+
+    Some((key, EnforcementDecisionSummary { decision }))
+}
+
+// The marker is the SHIPPED denied-call observation carrier
+// (assay-mcp-server/src/proxy/denied_observation.rs): schema
+// `assay.denied_call_observation.v0` whose caller-visible error is the proxy deny wire shape,
+// `PROXY_DENIED = -32042` with `origin == "assay-proxy"` (assay-mcp-server/src/proxy/io.rs).
+// All three are required so an event that merely reuses the code, or merely names the origin,
+// does not read as an enforcement marker. An observation without a target digest is unbindable
+// and out of this rule's scope (binding cannot be checked for it).
+const DENIED_CALL_OBSERVATION_SCHEMA: &str = "assay.denied_call_observation.v0";
+const PROXY_DENIED_CODE: i64 = -32042;
+const PROXY_ORIGIN: &str = "assay-proxy";
+
+fn extract_proxy_refusal_marker(event: &EvidenceEvent) -> Option<EnforcementDecisionKey> {
+    let payload = &event.payload;
+    if payload.get("schema").and_then(Value::as_str) != Some(DENIED_CALL_OBSERVATION_SCHEMA) {
+        return None;
+    }
+    if payload.pointer("/caller_visible_error/code")?.as_i64()? != PROXY_DENIED_CODE
+        || payload.pointer("/caller_visible_error/origin")?.as_str()? != PROXY_ORIGIN
+    {
+        return None;
+    }
+
+    Some(EnforcementDecisionKey {
+        tool_name: non_empty(payload.pointer("/call/tool_name")?.as_str()?)?.to_string(),
+        target_digest: non_empty(payload.pointer("/call/target_digest")?.as_str()?)?.to_string(),
+    })
+}
+
+fn non_empty(value: &str) -> Option<&str> {
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
 }
