@@ -150,6 +150,7 @@ class GitHubApi:
 
     def download(self, path_or_url: str) -> bytes:
         url = path_or_url if path_or_url.startswith("https://") else f"{self.base_url}{path_or_url}"
+        opener = urllib.request.build_opener(_DropAuthorizationOnRedirect)
         request = urllib.request.Request(
             url,
             headers={
@@ -159,7 +160,7 @@ class GitHubApi:
             },
             method="GET",
         )
-        with urlopen_with_retry(request) as response:
+        with urlopen_with_retry(request, opener=opener) as response:
             return response.read()
 
     def paginated(self, path: str) -> list[object]:
@@ -184,11 +185,30 @@ class GitHubApi:
         return results
 
 
-def urlopen_with_retry(request: urllib.request.Request):
+class _DropAuthorizationOnRedirect(urllib.request.HTTPRedirectHandler):
+    """Do not forward GitHub bearer tokens to artifact archive redirects.
+
+    GitHub's artifact `archive_download_url` is an authenticated API endpoint
+    that redirects to a signed blob URL. urllib preserves request headers across
+    that redirect, and the blob backend rejects a GitHub `Authorization` header
+    even though the signed URL is otherwise valid. Authenticate the GitHub API
+    hop, then let the signed archive URL stand on its own.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is not None:
+            redirected.remove_header("Authorization")
+        return redirected
+
+
+def urlopen_with_retry(request: urllib.request.Request, opener=None):
     last_error: BaseException | None = None
     attempts = HTTP_RETRY_ATTEMPTS if request.get_method() == "GET" else 1
     for attempt in range(attempts):
         try:
+            if opener is not None:
+                return opener.open(request, timeout=30)
             return urllib.request.urlopen(request, timeout=30)
         except urllib.error.HTTPError as exc:
             last_error = exc
@@ -1585,6 +1605,7 @@ def self_test() -> None:
     assert "gates=openai-agents-kernel-policy" in guidance
 
     _test_connection_resilience()
+    _test_artifact_redirect_drops_authorization()
 
     # Phase 2D Slice 6B mechanical absence check: assert that assay-cli no
     # longer consumes the assay-runner-spike wrapper. The check is
@@ -1915,6 +1936,29 @@ def _test_connection_resilience() -> None:
             raise remote_disconnected()
 
     assert safe_load_issue_comments(_RemoteDisconnectedApi(), 1) == []
+
+
+def _test_artifact_redirect_drops_authorization() -> None:
+    request = urllib.request.Request(
+        "https://api.github.com/repos/Rul1an/assay/actions/artifacts/1/zip",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": "Bearer test-token",
+        },
+        method="GET",
+    )
+    redirected = _DropAuthorizationOnRedirect().redirect_request(
+        request,
+        None,
+        302,
+        "Found",
+        {},
+        "https://pipelines.actions.githubusercontent.com/signed/archive.zip?sig=abc",
+    )
+    assert redirected is not None
+    assert redirected.full_url.startswith("https://pipelines.actions.githubusercontent.com/")
+    assert redirected.get_header("Authorization") is None
+    assert redirected.get_header("Accept") == "application/vnd.github+json"
 
 
 def _assert_assay_cli_does_not_consume_spike() -> None:
