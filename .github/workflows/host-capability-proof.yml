@@ -28,6 +28,7 @@ concurrency:
   # moved to an ephemeral runner model.
   group: assay-bpf-runner-host
   cancel-in-progress: false
+  queue: max
 
 jobs:
   proof:

@@ -20,6 +20,7 @@ permissions:
 concurrency:
   group: assay-bpf-runner-host
   cancel-in-progress: false
+  queue: max
 
 jobs:
   smoke:
