@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.33.0] - 2026-07-05
+
+### Added
+- Add the opt-in `assay.denied_call_observation.v0` carrier for caller-visible MCP proxy denials.
+  It records the tool name, target digest when classification can bind one, structured proxy-deny
+  fields, and a response-line digest, while keeping caller observations separate from
+  `assay.enforcement_decision.v0` verdict records.
+- Add `ASSAY-W004`, a bundle-index-backed evidence lint rule for enforcement-attribution overreads.
+  It flags denied-call observations that lack a bound deny decision, and observations contradicted by
+  a bound allow decision, without treating the lint finding as proof of enforcement correctness.
+
 ## [3.32.0] - 2026-07-04
 
 ### Added
