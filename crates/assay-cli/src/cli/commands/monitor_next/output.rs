@@ -39,31 +39,21 @@ pub(crate) fn decode_file_blocked_payload(data: &[u8]) -> Option<(u64, u64, u64,
     Some((dev, ino, cgroup_id, rule_id))
 }
 
+/// Decode a type-20 (`EVENT_CONNECT_BLOCKED`) payload into the fields the live
+/// view renders: `(cgroup_id, destination, port, rule_id)`.
+///
+/// Thin adapter over [`assay_monitor::events::decode_blocked_socket_payload`], the
+/// single decode surface shared with the runner evidence exporter, so the byte
+/// layout lives in exactly one place next to the projection that writes it.
 #[cfg(any(target_os = "linux", test))]
 pub(crate) fn decode_blocked_net_payload(data: &[u8]) -> Option<(u64, String, u16, u32)> {
-    use std::net::{Ipv4Addr, Ipv6Addr};
-
-    if data.len() < 40 {
-        return None;
-    }
-
-    let cgroup_id = u64::from_ne_bytes(data[0..8].try_into().ok()?);
-    let family = u16::from_ne_bytes(data[8..10].try_into().ok()?);
-    let port = u16::from_ne_bytes(data[10..12].try_into().ok()?);
-    let rule_id = u32::from_ne_bytes(data[32..36].try_into().ok()?);
-    let dst = match family {
-        2 => {
-            let addr = Ipv4Addr::new(data[12], data[13], data[14], data[15]);
-            addr.to_string()
-        }
-        10 => {
-            let addr = Ipv6Addr::from(<[u8; 16]>::try_from(&data[16..32]).ok()?);
-            addr.to_string()
-        }
-        _ => return None,
-    };
-
-    Some((cgroup_id, dst, port, rule_id))
+    let decoded = assay_monitor::events::decode_blocked_socket_payload(data)?;
+    Some((
+        decoded.cgroup_id,
+        decoded.destination,
+        decoded.port,
+        decoded.rule_id,
+    ))
 }
 
 #[cfg(target_os = "linux")]

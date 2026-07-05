@@ -79,10 +79,12 @@ fn decoded_open_event(event: &MonitorEvent) -> DecodedKernelEvent {
 }
 
 fn decoded_connect_blocked_event(event: &MonitorEvent) -> DecodedKernelEvent {
-    if let Some(blocked) = decode_blocked_socket_payload(&event.data) {
+    // Decode through the shared surface in assay-monitor so this exporter and the
+    // CLI live view never drift on the projected socket-payload byte layout.
+    if let Some(blocked) = assay_monitor::events::decode_blocked_socket_payload(&event.data) {
         return DecodedKernelEvent {
             kind: "connect_blocked".to_string(),
-            value: Some(blocked.endpoint),
+            value: Some(blocked.endpoint()),
             cgroup_id: Some(blocked.cgroup_id),
             network_destination: Some(blocked.destination),
             network_port: Some(blocked.port),
@@ -97,48 +99,6 @@ fn decoded_connect_blocked_event(event: &MonitorEvent) -> DecodedKernelEvent {
         };
     }
     decoded_plain_event("connect_blocked", decode_sockaddr_endpoint(&event.data))
-}
-
-struct BlockedSocketPayload {
-    cgroup_id: u64,
-    destination: String,
-    endpoint: String,
-    port: u16,
-    rule_id: u32,
-}
-
-fn decode_blocked_socket_payload(bytes: &[u8]) -> Option<BlockedSocketPayload> {
-    if bytes.len() < 40 {
-        return None;
-    }
-    let cgroup_id = u64::from_ne_bytes(bytes[0..8].try_into().ok()?);
-    let family = u16::from_ne_bytes(bytes[8..10].try_into().ok()?);
-    let port = u16::from_ne_bytes(bytes[10..12].try_into().ok()?);
-    let rule_id = u32::from_ne_bytes(bytes[32..36].try_into().ok()?);
-    match family {
-        2 => {
-            let destination = Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15]).to_string();
-            Some(BlockedSocketPayload {
-                endpoint: format!("{destination}:{port}"),
-                destination,
-                port,
-                cgroup_id,
-                rule_id,
-            })
-        }
-        10 => {
-            let destination =
-                Ipv6Addr::from(<[u8; 16]>::try_from(&bytes[16..32]).ok()?).to_string();
-            Some(BlockedSocketPayload {
-                endpoint: format!("[{destination}]:{port}"),
-                destination,
-                port,
-                cgroup_id,
-                rule_id,
-            })
-        }
-        _ => None,
-    }
 }
 
 fn open_access_mode(flags: u64) -> &'static str {

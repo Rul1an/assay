@@ -59,6 +59,80 @@ pub fn parse_socket_event(bytes: &[u8]) -> Result<MonitorEvent, MonitorError> {
     Ok(out)
 }
 
+/// AF_INET / AF_INET6 as reported by the Linux socket layer. The eBPF probes only
+/// ever emit these two families for an `EVENT_CONNECT_BLOCKED` record.
+const AF_INET: u16 = 2;
+const AF_INET6: u16 = 10;
+
+/// Number of leading `MonitorEvent::data` bytes [`parse_socket_event`] populates
+/// for an `EVENT_CONNECT_BLOCKED` record. Decoders bounds-check against this.
+pub const BLOCKED_SOCKET_PAYLOAD_LEN: usize = 40;
+
+/// Decoded fields of an `EVENT_CONNECT_BLOCKED` payload written by
+/// [`parse_socket_event`].
+///
+/// This is the single decode surface for the projected socket payload: both the
+/// CLI live view and the runner evidence exporter read blocked-connect fields
+/// through [`decode_blocked_socket_payload`] rather than re-implementing the byte
+/// offsets, so the layout stays pinned in one place next to its writer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockedSocket {
+    pub cgroup_id: u64,
+    pub family: u16,
+    pub port: u16,
+    /// Bare destination address without a port, e.g. `203.0.113.7` or `2001:db8::1`.
+    /// Formatted exactly once, here, at decode time.
+    pub destination: String,
+    pub rule_id: u32,
+}
+
+impl BlockedSocket {
+    /// Render `destination:port`, bracketing IPv6 hosts like a [`std::net::SocketAddr`].
+    pub fn endpoint(&self) -> String {
+        if self.family == AF_INET6 {
+            format!("[{}]:{}", self.destination, self.port)
+        } else {
+            format!("{}:{}", self.destination, self.port)
+        }
+    }
+}
+
+/// Decode the `EVENT_CONNECT_BLOCKED` payload that [`parse_socket_event`] writes
+/// into `MonitorEvent::data`.
+///
+/// Returns `None` on a short buffer or an unsupported address family, matching the
+/// fail-closed contract of the other decoders. The `port` field is native-endian
+/// because the projection copies the `SocketEvent` fields verbatim (no byte-order
+/// conversion), unlike a raw kernel `sockaddr`.
+pub fn decode_blocked_socket_payload(data: &[u8]) -> Option<BlockedSocket> {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    if data.len() < BLOCKED_SOCKET_PAYLOAD_LEN {
+        return None;
+    }
+
+    // Offsets mirror the payload table documented on `parse_socket_event`:
+    // | cgroup_id u64 @0 | family u16 @8 | port u16 @10 | addr_v4 @12 |
+    // | addr_v6 [u8;16] @16 | rule_id u32 @32 |.
+    let cgroup_id = u64::from_ne_bytes(data[0..8].try_into().ok()?);
+    let family = u16::from_ne_bytes(data[8..10].try_into().ok()?);
+    let port = u16::from_ne_bytes(data[10..12].try_into().ok()?);
+    let rule_id = u32::from_ne_bytes(data[32..36].try_into().ok()?);
+    let destination = match family {
+        AF_INET => Ipv4Addr::new(data[12], data[13], data[14], data[15]).to_string(),
+        AF_INET6 => Ipv6Addr::from(<[u8; 16]>::try_from(&data[16..32]).ok()?).to_string(),
+        _ => return None,
+    };
+
+    Some(BlockedSocket {
+        cgroup_id,
+        family,
+        port,
+        destination,
+        rule_id,
+    })
+}
+
 /// Interpret `event.data` as a C-style nul-terminated string slice.
 ///
 /// Useful for EVENT_OPENAT payloads where eBPF writes a path into `data`.
@@ -142,5 +216,59 @@ mod tests {
         assert_eq!(&event.data[12..16], &[203, 0, 113, 7]);
         assert_eq!(&event.data[32..36], &17_u32.to_ne_bytes());
         assert_eq!(&event.data[36..40], &2_u32.to_ne_bytes());
+    }
+
+    /// The projection and the decoder must agree on the payload layout: whatever
+    /// `parse_socket_event` writes, `decode_blocked_socket_payload` reads back.
+    /// This round-trip is what makes the offset table impossible to drift.
+    #[test]
+    fn decode_blocked_socket_payload_round_trips_parse_socket_event() {
+        let mut bytes = vec![0_u8; core::mem::size_of::<assay_common::SocketEvent>()];
+        bytes[0..4].copy_from_slice(&assay_common::EVENT_CONNECT_BLOCKED.to_ne_bytes());
+        bytes[16..24].copy_from_slice(&99_u64.to_ne_bytes()); // cgroup_id
+        bytes[24..26].copy_from_slice(&AF_INET.to_ne_bytes()); // family
+        bytes[26..28].copy_from_slice(&443_u16.to_ne_bytes()); // port
+        bytes[28..32].copy_from_slice(&[203, 0, 113, 7]); // addr_v4
+        bytes[48..52].copy_from_slice(&17_u32.to_ne_bytes()); // rule_id
+
+        let event = parse_socket_event(&bytes).unwrap();
+        let decoded = decode_blocked_socket_payload(&event.data).expect("payload should decode");
+
+        assert_eq!(
+            decoded,
+            BlockedSocket {
+                cgroup_id: 99,
+                family: AF_INET,
+                port: 443,
+                destination: "203.0.113.7".to_string(),
+                rule_id: 17,
+            }
+        );
+        assert_eq!(decoded.endpoint(), "203.0.113.7:443");
+    }
+
+    #[test]
+    fn decode_blocked_socket_payload_reads_ipv6_and_brackets_endpoint() {
+        let mut data = [0_u8; BLOCKED_SOCKET_PAYLOAD_LEN];
+        data[0..8].copy_from_slice(&7_u64.to_ne_bytes());
+        data[8..10].copy_from_slice(&AF_INET6.to_ne_bytes());
+        data[10..12].copy_from_slice(&8080_u16.to_ne_bytes());
+        data[16..32].copy_from_slice(&std::net::Ipv6Addr::LOCALHOST.octets());
+        data[32..36].copy_from_slice(&5_u32.to_ne_bytes());
+
+        let decoded = decode_blocked_socket_payload(&data).expect("payload should decode");
+
+        assert_eq!(decoded.family, AF_INET6);
+        assert_eq!(decoded.destination, "::1");
+        assert_eq!(decoded.endpoint(), "[::1]:8080");
+    }
+
+    #[test]
+    fn decode_blocked_socket_payload_rejects_short_buffer_and_unknown_family() {
+        assert!(decode_blocked_socket_payload(&[0_u8; BLOCKED_SOCKET_PAYLOAD_LEN - 1]).is_none());
+
+        let mut data = [0_u8; BLOCKED_SOCKET_PAYLOAD_LEN];
+        data[8..10].copy_from_slice(&1_u16.to_ne_bytes()); // AF_UNIX, unsupported here
+        assert!(decode_blocked_socket_payload(&data).is_none());
     }
 }
