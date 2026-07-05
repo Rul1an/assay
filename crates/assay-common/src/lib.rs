@@ -73,6 +73,21 @@ pub struct MonitorEvent {
     pub data: [u8; DATA_LEN],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SocketEvent {
+    pub event_type: u32,
+    pub pid: u32,
+    pub timestamp_ns: u64,
+    pub cgroup_id: u64,
+    pub family: u16,
+    pub port: u16,
+    pub addr_v4: u32,
+    pub addr_v6: [u8; 16],
+    pub rule_id: u32,
+    pub action: u32,
+}
+
 /// Key used to identify an inode in BPF maps.
 ///
 /// # ABI and kernel assumptions
@@ -180,6 +195,11 @@ const _: [(); 552] = [(); core::mem::size_of::<MonitorEvent>()];
 
 // Alignment is 8 because the ABI carries u64/i64 syscall metadata.
 const _: [(); 8] = [(); core::mem::align_of::<MonitorEvent>()];
+
+// SocketEvent is the eBPF/userspace ABI emitted by cgroup_sock_addr hooks.
+// Size: 4 + 4 + 8 + 8 + 2 + 2 + 4 + 16 + 4 + 4 = 56 bytes.
+const _: [(); 56] = [(); core::mem::size_of::<SocketEvent>()];
+const _: [(); 8] = [(); core::mem::align_of::<SocketEvent>()];
 
 #[cfg(all(target_os = "linux", feature = "std"))]
 pub fn get_inode_generation(fd: std::os::fd::RawFd) -> std::io::Result<u32> {

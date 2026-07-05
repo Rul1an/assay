@@ -8,6 +8,10 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 pub(super) struct DecodedKernelEvent {
     pub(super) kind: String,
     pub(super) value: Option<String>,
+    pub(super) cgroup_id: Option<u64>,
+    pub(super) network_destination: Option<String>,
+    pub(super) network_port: Option<u16>,
+    pub(super) rule_id: Option<u32>,
     pub(super) flags: Option<u64>,
     pub(super) mode: Option<u64>,
     pub(super) resolve: Option<u64>,
@@ -25,9 +29,7 @@ pub(super) fn decode_monitor_event(event: &MonitorEvent) -> DecodedKernelEvent {
         EVENT_SENDMSG => decoded_plain_event("sendmsg", decode_sockaddr_endpoint(&event.data)),
         EVENT_EXEC => decoded_plain_event("exec", decode_c_string(&event.data)),
         EVENT_FILE_BLOCKED => decoded_plain_event("file_blocked", decode_c_string(&event.data)),
-        EVENT_CONNECT_BLOCKED => {
-            decoded_plain_event("connect_blocked", decode_sockaddr_endpoint(&event.data))
-        }
+        EVENT_CONNECT_BLOCKED => decoded_connect_blocked_event(event),
         other => decoded_plain_event(&format!("event_{other}"), None),
     }
 }
@@ -36,6 +38,10 @@ fn decoded_plain_event(kind: &str, value: Option<String>) -> DecodedKernelEvent 
     DecodedKernelEvent {
         kind: kind.to_string(),
         value,
+        cgroup_id: None,
+        network_destination: None,
+        network_port: None,
+        rule_id: None,
         flags: None,
         mode: None,
         resolve: None,
@@ -51,6 +57,10 @@ fn decoded_open_event(event: &MonitorEvent) -> DecodedKernelEvent {
     DecodedKernelEvent {
         kind: "openat".to_string(),
         value: decode_c_string(&event.data),
+        cgroup_id: None,
+        network_destination: None,
+        network_port: None,
+        rule_id: None,
         flags: Some(flags),
         mode: Some(event.mode),
         resolve: (event.resolve != 0).then_some(event.resolve),
@@ -66,6 +76,29 @@ fn decoded_open_event(event: &MonitorEvent) -> DecodedKernelEvent {
             .to_string(),
         ),
     }
+}
+
+fn decoded_connect_blocked_event(event: &MonitorEvent) -> DecodedKernelEvent {
+    // Decode through the shared surface in assay-monitor so this exporter and the
+    // CLI live view never drift on the projected socket-payload byte layout.
+    if let Some(blocked) = assay_monitor::events::decode_blocked_socket_payload(&event.data) {
+        return DecodedKernelEvent {
+            kind: "connect_blocked".to_string(),
+            value: Some(blocked.endpoint()),
+            cgroup_id: Some(blocked.cgroup_id),
+            network_destination: Some(blocked.destination),
+            network_port: Some(blocked.port),
+            rule_id: Some(blocked.rule_id),
+            flags: None,
+            mode: None,
+            resolve: None,
+            return_value: None,
+            access_mode: None,
+            operation_flags: Vec::new(),
+            status: None,
+        };
+    }
+    decoded_plain_event("connect_blocked", decode_sockaddr_endpoint(&event.data))
 }
 
 fn open_access_mode(flags: u64) -> &'static str {

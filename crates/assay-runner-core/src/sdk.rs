@@ -344,6 +344,7 @@ mod tests {
             .add_binding(assay_runner_schema::CorrelationBinding {
                 tool_call_id: "tc_runner_policy_001".to_string(),
                 policy_decision: Some("allow".to_string()),
+                cgroup_id: None,
                 kernel_event_count: 1,
                 window: assay_runner_schema::BindingWindow {
                     start: "run_started".to_string(),
@@ -370,6 +371,7 @@ mod tests {
             .add_binding(assay_runner_schema::CorrelationBinding {
                 tool_call_id: "tc_different_policy_call".to_string(),
                 policy_decision: Some("allow".to_string()),
+                cgroup_id: None,
                 kernel_event_count: 1,
                 window: assay_runner_schema::BindingWindow {
                     start: "run_started".to_string(),

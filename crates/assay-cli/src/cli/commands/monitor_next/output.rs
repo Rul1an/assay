@@ -39,6 +39,23 @@ pub(crate) fn decode_file_blocked_payload(data: &[u8]) -> Option<(u64, u64, u64,
     Some((dev, ino, cgroup_id, rule_id))
 }
 
+/// Decode a type-20 (`EVENT_CONNECT_BLOCKED`) payload into the fields the live
+/// view renders: `(cgroup_id, destination, port, rule_id)`.
+///
+/// Thin adapter over [`assay_monitor::events::decode_blocked_socket_payload`], the
+/// single decode surface shared with the runner evidence exporter, so the byte
+/// layout lives in exactly one place next to the projection that writes it.
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn decode_blocked_net_payload(data: &[u8]) -> Option<(u64, String, u16, u32)> {
+    let decoded = assay_monitor::events::decode_blocked_socket_payload(data)?;
+    Some((
+        decoded.cgroup_id,
+        decoded.destination,
+        decoded.port,
+        decoded.rule_id,
+    ))
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) fn log_violation(pid: u32, rule_id: &str, quiet: bool) {
     if !quiet {
@@ -107,11 +124,17 @@ pub(crate) fn format_monitor_event(event_type: u32, pid: u32, data: &[u8]) -> Op
             ),
         },
         11 => format!("[PID {}] 🟢 ALLOWED FILE: {}", pid, decode_utf8_cstr(data)),
-        20 => format!(
-            "[PID {}] 🛡️ BLOCKED NET : {}",
-            pid,
-            dump_prefix_hex(data, 20)
-        ),
+        20 => match decode_blocked_net_payload(data) {
+            Some((cgroup_id, dst, port, rule_id)) => format!(
+                "[PID {}] 🛡️ BLOCKED NET: dst={} port={} cgroup={} rule_id={}",
+                pid, dst, port, cgroup_id, rule_id
+            ),
+            None => format!(
+                "[PID {}] 🛡️ BLOCKED NET : {}",
+                pid,
+                dump_prefix_hex(data, 20)
+            ),
+        },
         112 => {
             let dev = read_u64(data, 0);
             let ino = read_u64(data, 8);
@@ -171,7 +194,7 @@ pub(crate) fn log_monitor_event(event: &assay_common::MonitorEvent, args: &Monit
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_file_blocked_payload, format_monitor_event};
+    use super::{decode_blocked_net_payload, decode_file_blocked_payload, format_monitor_event};
     use assay_common::{EVENT_CONNECT, EVENT_FILE_BLOCKED, EVENT_OPENAT};
 
     #[test]
@@ -184,6 +207,20 @@ mod tests {
 
         let decoded = decode_file_blocked_payload(&data).expect("payload should decode");
         assert_eq!(decoded, (42, 7, 99, 1234));
+    }
+
+    #[test]
+    fn decode_blocked_net_payload_reads_binary_layout() {
+        let mut data = [0u8; 40];
+        data[0..8].copy_from_slice(&42u64.to_ne_bytes());
+        data[8..10].copy_from_slice(&2u16.to_ne_bytes());
+        data[10..12].copy_from_slice(&443u16.to_ne_bytes());
+        data[12..16].copy_from_slice(&[203, 0, 113, 7]);
+        data[32..36].copy_from_slice(&9u32.to_ne_bytes());
+
+        let decoded = decode_blocked_net_payload(&data).expect("payload should decode");
+
+        assert_eq!(decoded, (42, "203.0.113.7".to_string(), 443, 9));
     }
 
     // The line shapes below are the producer contract that Plimsoll's capture scraper parses (see
@@ -218,6 +255,24 @@ mod tests {
         assert!(line.starts_with("[PID 4242] "), "{line}");
         assert!(
             line.ends_with(" BLOCKED FILE: dev=1 ino=2 cgroup=3 rule_id=4"),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn blocked_net_event_formats_decoded_payload() {
+        let mut data = [0u8; 40];
+        data[0..8].copy_from_slice(&42u64.to_ne_bytes());
+        data[8..10].copy_from_slice(&2u16.to_ne_bytes());
+        data[10..12].copy_from_slice(&443u16.to_ne_bytes());
+        data[12..16].copy_from_slice(&u32::from_ne_bytes([203, 0, 113, 7]).to_ne_bytes());
+        data[32..36].copy_from_slice(&9u32.to_ne_bytes());
+
+        let line = format_monitor_event(20, 4242, &data).unwrap();
+
+        assert!(line.starts_with("[PID 4242] "), "{line}");
+        assert!(
+            line.ends_with(" BLOCKED NET: dst=203.0.113.7 port=443 cgroup=42 rule_id=9"),
             "{line}"
         );
     }

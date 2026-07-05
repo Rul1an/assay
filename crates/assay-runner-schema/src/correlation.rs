@@ -21,6 +21,8 @@ pub struct BindingWindow {
 pub struct CorrelationBinding {
     pub tool_call_id: String,
     pub policy_decision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cgroup_id: Option<u64>,
     pub kernel_event_count: u64,
     pub window: BindingWindow,
 }

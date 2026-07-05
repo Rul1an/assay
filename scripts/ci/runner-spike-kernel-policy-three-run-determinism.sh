@@ -82,9 +82,20 @@ def read_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def normalize_correlation_for_determinism(report):
+    """Keep run-local binding keys in artifacts, but ignore them for repeatability."""
+    normalized = json.loads(json.dumps(report))
+    for binding in normalized.get("bindings", []):
+        if "cgroup_id" in binding:
+            binding["cgroup_id"] = "<run-local-cgroup-id>"
+    return normalized
+
+
 baseline_health = read_json(tmp_root / "run-1" / "extract" / "observation-health.json")
 baseline_surface = read_json(tmp_root / "run-1" / "extract" / "capability-surface.json")
-baseline_correlation = read_json(tmp_root / "run-1" / "extract" / "correlation-report.json")
+baseline_correlation = normalize_correlation_for_determinism(
+    read_json(tmp_root / "run-1" / "extract" / "correlation-report.json")
+)
 baseline_policy = (tmp_root / "run-1" / "extract" / "layers" / "policy.ndjson").read_text(
     encoding="utf-8"
 )
@@ -92,7 +103,9 @@ baseline_policy = (tmp_root / "run-1" / "extract" / "layers" / "policy.ndjson").
 for run in (2, 3):
     health = read_json(tmp_root / f"run-{run}" / "extract" / "observation-health.json")
     surface = read_json(tmp_root / f"run-{run}" / "extract" / "capability-surface.json")
-    correlation = read_json(tmp_root / f"run-{run}" / "extract" / "correlation-report.json")
+    correlation = normalize_correlation_for_determinism(
+        read_json(tmp_root / f"run-{run}" / "extract" / "correlation-report.json")
+    )
     policy = (tmp_root / f"run-{run}" / "extract" / "layers" / "policy.ndjson").read_text(
         encoding="utf-8"
     )

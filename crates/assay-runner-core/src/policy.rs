@@ -142,6 +142,22 @@ impl PolicyLayerCapture {
         self,
         archive: &mut RunnerSpikeArchive,
     ) -> Result<(), PolicyLayerError> {
+        self.apply_to_archive_inner(archive, None)
+    }
+
+    pub fn apply_to_archive_with_session_cgroup(
+        self,
+        archive: &mut RunnerSpikeArchive,
+        session_cgroup_id: u64,
+    ) -> Result<(), PolicyLayerError> {
+        self.apply_to_archive_inner(archive, Some(session_cgroup_id))
+    }
+
+    fn apply_to_archive_inner(
+        self,
+        archive: &mut RunnerSpikeArchive,
+        session_cgroup_id: Option<u64>,
+    ) -> Result<(), PolicyLayerError> {
         let PolicyLayerCapture {
             run_id,
             policy_layer_ndjson,
@@ -179,10 +195,18 @@ impl PolicyLayerCapture {
                 .mark_partial("policy_events_without_kernel_events");
         }
 
+        let unique_session_cgroup_id = session_cgroup_id.filter(|_| events.len() == 1);
+        if session_cgroup_id.is_some() && unique_session_cgroup_id.is_none() {
+            archive
+                .correlation_report
+                .mark_partial("session_cgroup_ambiguous_for_multiple_policy_events");
+        }
+
         for event in events {
             archive.correlation_report.add_binding(CorrelationBinding {
                 tool_call_id: event.tool_call_id,
                 policy_decision: Some(event.decision),
+                cgroup_id: unique_session_cgroup_id,
                 kernel_event_count,
                 window: BindingWindow {
                     start: "run_started".to_string(),
@@ -241,6 +265,9 @@ mod tests {
 
     const DECISION: &[u8] = br#"{"specversion":"1.0","id":"evt_decision_001","type":"assay.tool.decision","source":"assay://runner-spike/run_001","time":"2026-05-20T00:00:00Z","data":{"tool":"read_file","decision":"allow","reason_code":"P_TOOL_ALLOWED","tool_call_id":"tc_runner_policy_001"}}
 "#;
+    const TWO_DECISIONS: &[u8] = br#"{"type":"assay.tool.decision","source":"assay://runner-spike/run_001","data":{"tool":"read_file","decision":"allow","tool_call_id":"tc_runner_policy_001"}}
+{"type":"assay.tool.decision","source":"assay://runner-spike/run_001","data":{"tool":"write_file","decision":"deny","tool_call_id":"tc_runner_policy_002"}}
+"#;
 
     #[test]
     fn decision_log_records_policy_layer_and_surface() {
@@ -276,6 +303,55 @@ mod tests {
             "tc_runner_policy_001"
         );
         assert_eq!(archive.correlation_report.bindings[0].kernel_event_count, 1);
+    }
+
+    #[test]
+    fn unique_session_cgroup_records_tool_call_binding_key() {
+        let capture = PolicyLayerCapture::from_decision_ndjson("run_001", DECISION).unwrap();
+        let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+        archive.observation_health.kernel_layer = KernelLayerStatus::Complete;
+        archive.observation_health.cgroup_correlation = CgroupCorrelationStatus::Clean;
+        archive.kernel_layer_ndjson = b"{\"schema\":\"assay.runner.kernel_event.v0\"}\n".to_vec();
+
+        capture
+            .apply_to_archive_with_session_cgroup(&mut archive, 42)
+            .unwrap();
+
+        assert_eq!(archive.correlation_report.bindings.len(), 1);
+        assert_eq!(
+            archive.correlation_report.bindings[0].tool_call_id,
+            "tc_runner_policy_001"
+        );
+        assert_eq!(archive.correlation_report.bindings[0].cgroup_id, Some(42));
+        assert!(archive.correlation_report.ambiguities.is_empty());
+    }
+
+    #[test]
+    fn shared_session_cgroup_does_not_claim_per_call_binding_for_multiple_policy_events() {
+        let capture = PolicyLayerCapture::from_decision_ndjson("run_001", TWO_DECISIONS).unwrap();
+        let mut archive = RunnerSpikeArchive::empty("run_001", "linux");
+        archive.observation_health.kernel_layer = KernelLayerStatus::Complete;
+        archive.observation_health.cgroup_correlation = CgroupCorrelationStatus::Clean;
+        archive.kernel_layer_ndjson = b"{\"schema\":\"assay.runner.kernel_event.v0\"}\n".to_vec();
+
+        capture
+            .apply_to_archive_with_session_cgroup(&mut archive, 42)
+            .unwrap();
+
+        assert_eq!(
+            archive.correlation_report.status,
+            assay_runner_schema::CorrelationStatus::Partial
+        );
+        assert!(archive
+            .correlation_report
+            .bindings
+            .iter()
+            .all(|binding| binding.cgroup_id.is_none()));
+        assert!(archive
+            .correlation_report
+            .ambiguities
+            .iter()
+            .any(|ambiguity| ambiguity == "session_cgroup_ambiguous_for_multiple_policy_events"));
     }
 
     #[test]

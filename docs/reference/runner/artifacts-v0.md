@@ -125,6 +125,20 @@ These fields are optional so older v0 archives remain readable. Consumers that
 need read/write/create/remove distinctions must require the optional open
 metadata and treat older archives as inconclusive for that dimension.
 
+`connect_blocked` events may additionally carry decoded socket metadata:
+
+| Field | Type | Required | Semantics |
+|---|---|---:|---|
+| `cgroup_id` | integer | no | Linux cgroup id observed on the structured blocked-socket event |
+| `network_destination` | string | no | Decoded destination address for the blocked socket event |
+| `network_port` | integer | no | Decoded destination port for the blocked socket event |
+| `rule_id` | integer | no | Policy rule id carried by the blocked-socket event |
+
+These fields are optional and only describe the retained blocked-socket event
+that emitted them. Absence means the archive does not carry this binding key or
+decoded socket detail for the event; consumers must not infer that no blocked
+socket event occurred elsewhere.
+
 Open metadata example:
 
 ```json
@@ -156,6 +170,24 @@ Undecoded event example:
   "event_type": 999,
   "kind": "event_999",
   "value": null
+}
+```
+
+Blocked socket example:
+
+```json
+{
+  "schema": "assay.runner.kernel_event.v0",
+  "run_id": "run_001",
+  "seq": 4,
+  "pid": 1234,
+  "event_type": 20,
+  "kind": "connect_blocked",
+  "value": "198.51.100.7:25",
+  "cgroup_id": 123456789,
+  "network_destination": "198.51.100.7",
+  "network_port": 25,
+  "rule_id": 7
 }
 ```
 
@@ -330,6 +362,7 @@ Binding fields:
 |---|---|---:|---|
 | `tool_call_id` | string | yes | Tool-call id used to bind SDK and policy layers |
 | `policy_decision` | string or null | yes | Matched coarse policy outcome, when present (`allow` or `deny` in v0 accepted fixtures) |
+| `cgroup_id` | integer | no | Session cgroup id used as an adapter-derived binding key when the run has exactly one policy decision; absent when the key is unavailable or ambiguous |
 | `kernel_event_count` | integer | yes | Count of normalized kernel events in the binding window |
 | `window.start` | string | yes | Inclusive window start marker |
 | `window.end` | string | yes | Inclusive window end marker |
@@ -347,6 +380,13 @@ stable tool-call id, the runner must report a partial or failed correlation
 state until a separate call-id-less fixture and contract explicitly define the
 fallback semantics.
 
+When kernel capture is run inside a single session cgroup and the archive
+contains exactly one policy decision, v0 may retain that session `cgroup_id` on
+the binding as an adapter-derived join key. If the same session cgroup covers
+multiple policy decisions, the join is ambiguous: the binding must omit
+`cgroup_id` and the report must mark `status=partial` with
+`session_cgroup_ambiguous_for_multiple_policy_events`.
+
 Example:
 
 ```json
@@ -358,6 +398,7 @@ Example:
     {
       "tool_call_id": "tc_runner_policy_001",
       "policy_decision": "allow",
+      "cgroup_id": 123456789,
       "kernel_event_count": 2,
       "window": {
         "start": "run_started",
