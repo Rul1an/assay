@@ -448,7 +448,7 @@ impl LinuxMonitor {
     pub fn listen(&mut self) -> Result<EventStream, MonitorError> {
         let (tx, rx) = mpsc::channel(1024);
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
-        let (mut events_ring_buf, mut lsm_ring_buf) = {
+        let (mut events_ring_buf, mut lsm_ring_buf, mut socket_ring_buf) = {
             let mut bpf = self.bpf.lock().unwrap();
             let events_map = bpf
                 .take_map("EVENTS")
@@ -456,9 +456,11 @@ impl LinuxMonitor {
             let lsm_events_map = bpf
                 .take_map("LSM_EVENTS")
                 .ok_or(MonitorError::MapNotFound { name: "LSM_EVENTS" })?;
+            let socket_events_map = bpf.take_map("SOCKET_EVENTS");
             (
                 RingBuf::try_from(events_map)?,
                 RingBuf::try_from(lsm_events_map)?,
+                socket_events_map.map(RingBuf::try_from).transpose()?,
             )
         };
 
@@ -498,6 +500,26 @@ impl LinuxMonitor {
                     }
                     if tx.blocking_send(ev).is_err() {
                         break 'outer;
+                    }
+                }
+
+                // Poll cgroup socket events and project them into type-20
+                // MonitorEvent payloads so downstream evidence exporters retain
+                // cgroup/rule binding fields instead of opaque hex.
+                if let Some(socket_ring_buf) = socket_ring_buf.as_mut() {
+                    while let Some(item) = socket_ring_buf.next() {
+                        if item.is_empty() {
+                            continue;
+                        }
+                        let ev = events::parse_socket_event(&item);
+                        if matches!(&ev, Err(MonitorError::InvalidEvent { .. }))
+                            && mismatch.fetch_add(1, Ordering::Relaxed) == 0
+                        {
+                            eprintln!("{STALE_OBJECT_WARNING}");
+                        }
+                        if tx.blocking_send(ev).is_err() {
+                            break 'outer;
+                        }
                     }
                 }
                 if !ready {

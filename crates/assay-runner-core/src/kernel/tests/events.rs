@@ -197,20 +197,30 @@ fn ipv4_connect_event_records_network_capability() {
 
 #[test]
 fn connect_blocked_event_records_network_capability() {
-    let mut sockaddr = [0_u8; 16];
-    sockaddr[0..2].copy_from_slice(&2_u16.to_ne_bytes());
-    sockaddr[2..4].copy_from_slice(&443_u16.to_be_bytes());
-    sockaddr[4..8].copy_from_slice(&[10, 0, 0, 5]);
+    let mut socket_payload = [0_u8; 512];
+    socket_payload[0..8].copy_from_slice(&99_u64.to_ne_bytes());
+    socket_payload[8..10].copy_from_slice(&2_u16.to_ne_bytes());
+    socket_payload[10..12].copy_from_slice(&443_u16.to_ne_bytes());
+    socket_payload[12..16].copy_from_slice(&[10, 0, 0, 5]);
+    socket_payload[32..36].copy_from_slice(&17_u32.to_ne_bytes());
+    socket_payload[36..40].copy_from_slice(&2_u32.to_ne_bytes());
     let mut builder = KernelLayerBuilder::new("run_001").unwrap();
 
     builder
-        .push_monitor_event(&event(EVENT_CONNECT_BLOCKED, &sockaddr))
+        .push_monitor_event(&event(EVENT_CONNECT_BLOCKED, &socket_payload))
         .unwrap();
     let capture = builder.finish(
         &MonitorStatsSnapshot::default(),
         &MonitorStatsSnapshot::default(),
     );
+    let record: KernelLayerEvent = serde_json::from_slice(&capture.kernel_layer_ndjson).unwrap();
 
+    assert_eq!(record.kind, "connect_blocked");
+    assert_eq!(record.value.as_deref(), Some("10.0.0.5:443"));
+    assert_eq!(record.cgroup_id, Some(99));
+    assert_eq!(record.network_destination.as_deref(), Some("10.0.0.5"));
+    assert_eq!(record.network_port, Some(443));
+    assert_eq!(record.rule_id, Some(17));
     assert!(capture
         .capability_surface
         .network_endpoints

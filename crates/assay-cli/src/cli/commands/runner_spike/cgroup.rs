@@ -22,7 +22,7 @@ pub(super) async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> any
     use super::exit_status::{
         cgroup_correlation_label, exit_signal, exit_status_code, exit_status_label,
     };
-    use super::logs::apply_policy_then_sdk_logs_if_requested;
+    use super::logs::apply_policy_then_sdk_logs_with_session_cgroup_if_requested;
     use super::phases::{record_phase, write_phase_timing_log};
     use super::spec::{build_spec, bundle_output_path};
 
@@ -244,7 +244,12 @@ pub(super) async fn cmd_run_with_kernel_capture(args: RunnerSpikeRunArgs) -> any
     let after_stats = monitor.snapshot_stats()?;
     let capture = builder.finish(&before_stats, &after_stats);
     capture.apply_to_archive(&mut archive, cgroup_correlation)?;
-    apply_policy_then_sdk_logs_if_requested(&spec, &args, &mut archive)?;
+    apply_policy_then_sdk_logs_with_session_cgroup_if_requested(
+        &spec,
+        &args,
+        &mut archive,
+        session_cgroup.id(),
+    )?;
     spec.append_run_finished(&mut archive, 1, &status, clock.elapsed())?;
     record_phase(&mut phases, "event_flush_ms", event_flush_start);
 

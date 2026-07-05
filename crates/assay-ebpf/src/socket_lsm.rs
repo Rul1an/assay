@@ -1,6 +1,7 @@
 use assay_common::{
-    SOCKET_STATS_LEN, SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR, SOCKET_STAT_BLOCKED_PORT,
-    SOCKET_STAT_CHECKS, SOCKET_STAT_EVENTS_EMITTED, SOCKET_STAT_RINGBUF_DROPPED,
+    SocketEvent, SOCKET_STATS_LEN, SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR,
+    SOCKET_STAT_BLOCKED_PORT, SOCKET_STAT_CHECKS, SOCKET_STAT_EVENTS_EMITTED,
+    SOCKET_STAT_RINGBUF_DROPPED,
 };
 use aya_ebpf::{
     bindings::bpf_sock_addr,
@@ -36,20 +37,6 @@ static SOCKET_EVENTS: RingBuf = RingBuf::with_byte_size(128 * 1024, 0);
 
 #[map]
 static SOCKET_STATS: Array<u64> = Array::with_max_entries(SOCKET_STATS_LEN, 0);
-
-#[repr(C)]
-struct SocketEvent {
-    event_type: u32,
-    pid: u32,
-    timestamp_ns: u64,
-    cgroup_id: u64,
-    family: u16,
-    port: u16,
-    addr_v4: u32,
-    addr_v6: [u8; 16],
-    rule_id: u32,
-    action: u32,
-}
 
 #[cgroup_sock_addr(connect4)]
 pub fn connect4_hook(ctx: SockAddrContext) -> i32 {

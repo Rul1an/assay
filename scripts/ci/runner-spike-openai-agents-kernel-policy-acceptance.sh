@@ -243,7 +243,7 @@ sdk_events = [
     json.loads(line)
     for line in (extract_dir / "layers/sdk.ndjson").read_text(encoding="utf-8").splitlines()
 ]
-expect(len(policy_events) == 1, f"expected one policy event, got {len(policy_events)}")
+expect(policy_events, "expected at least one policy event")
 expect(len(sdk_events) == 3, f"expected three sdk events, got {len(sdk_events)}")
 
 policy_event = policy_events[0]
@@ -254,8 +254,11 @@ expect(policy_event["tool"] == "read_file", "policy event tool mismatch")
 expect(policy_event["decision"] == "allow", "policy event decision mismatch")
 
 source_events = [json.loads(line) for line in decision_log.read_text(encoding="utf-8").splitlines() if line.strip()]
-expect(len(source_events) == 1, f"expected one source decision event, got {len(source_events)}")
-expect(source_events[0]["type"] == "assay.tool.decision", "source decision event type mismatch")
+expect(
+    len(source_events) == len(policy_events),
+    f"source decision event count mismatch: source={len(source_events)} policy={len(policy_events)}",
+)
+expect(all(event["type"] == "assay.tool.decision" for event in source_events), "source decision event type mismatch")
 expect(
     source_events[0]["data"]["tool_call_id"] == policy_tool_call_id,
     "source decision tool_call_id mismatch",
@@ -310,9 +313,22 @@ else:
     expect(not hidden_write_events, "matched_safe_read recorded unexpected hidden write kernel event")
 
 bindings = correlation.get("bindings", [])
-expect(correlation["status"] == "clean", f"correlation status must be clean, got {correlation['status']!r}")
-expect(correlation.get("ambiguities", []) == [], f"correlation ambiguities must be empty: {correlation.get('ambiguities', [])!r}")
-expect(len(bindings) == 1, f"expected one correlation binding, got {len(bindings)}")
+ambiguities = correlation.get("ambiguities", [])
+session_cgroup_ambiguity = "session_cgroup_ambiguous_for_multiple_policy_events"
+if len(policy_events) == 1:
+    expect(correlation["status"] == "clean", f"correlation status must be clean, got {correlation['status']!r}")
+    expect(ambiguities == [], f"correlation ambiguities must be empty: {ambiguities!r}")
+    expect(len(bindings) == 1, f"expected one correlation binding, got {len(bindings)}")
+else:
+    expect(correlation["status"] == "partial", f"multi-decision correlation status must be partial, got {correlation['status']!r}")
+    expect(
+        ambiguities == [session_cgroup_ambiguity],
+        f"multi-decision correlation ambiguity mismatch: {ambiguities!r}",
+    )
+    expect(
+        len(bindings) == len(policy_events),
+        f"expected one correlation binding per policy event, got {len(bindings)} for {len(policy_events)} policy events",
+    )
 binding = bindings[0]
 expect(binding["tool_call_id"] == policy_tool_call_id, "binding tool_call_id mismatch")
 expect(binding["policy_decision"] == "allow", "binding policy_decision mismatch")

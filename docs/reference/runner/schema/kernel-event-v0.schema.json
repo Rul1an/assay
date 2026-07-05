@@ -107,6 +107,25 @@
         "error"
       ],
       "description": "Derived from return_value for open-style events."
+    },
+    "cgroup_id": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Linux cgroup id decoded from structured connect_blocked socket events when available."
+    },
+    "network_destination": {
+      "type": "string",
+      "description": "Decoded network destination address for structured connect_blocked socket events."
+    },
+    "network_port": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Decoded network destination port for structured connect_blocked socket events."
+    },
+    "rule_id": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Policy rule id decoded from structured connect_blocked socket events when available."
     }
   },
   "allOf": [
@@ -271,7 +290,11 @@
       "pid": 1234,
       "event_type": 20,
       "kind": "connect_blocked",
-      "value": "198.51.100.7:25"
+      "value": "198.51.100.7:25",
+      "cgroup_id": 123456789,
+      "network_destination": "198.51.100.7",
+      "network_port": 25,
+      "rule_id": 7
     },
     {
       "schema": "assay.runner.kernel_event.v0",

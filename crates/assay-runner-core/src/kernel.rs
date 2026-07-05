@@ -40,6 +40,14 @@ pub struct KernelLayerEvent {
     pub kind: String,
     pub value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub cgroup_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network_destination: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub flags: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<u64>,
@@ -158,6 +166,10 @@ impl KernelLayerBuilder {
             event_type: event.event_type,
             kind: decoded.kind,
             value: decoded.value,
+            cgroup_id: decoded.cgroup_id,
+            network_destination: decoded.network_destination,
+            network_port: decoded.network_port,
+            rule_id: decoded.rule_id,
             flags: decoded.flags,
             mode: decoded.mode,
             resolve: decoded.resolve,

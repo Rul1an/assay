@@ -8,6 +8,10 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 pub(super) struct DecodedKernelEvent {
     pub(super) kind: String,
     pub(super) value: Option<String>,
+    pub(super) cgroup_id: Option<u64>,
+    pub(super) network_destination: Option<String>,
+    pub(super) network_port: Option<u16>,
+    pub(super) rule_id: Option<u32>,
     pub(super) flags: Option<u64>,
     pub(super) mode: Option<u64>,
     pub(super) resolve: Option<u64>,
@@ -25,9 +29,7 @@ pub(super) fn decode_monitor_event(event: &MonitorEvent) -> DecodedKernelEvent {
         EVENT_SENDMSG => decoded_plain_event("sendmsg", decode_sockaddr_endpoint(&event.data)),
         EVENT_EXEC => decoded_plain_event("exec", decode_c_string(&event.data)),
         EVENT_FILE_BLOCKED => decoded_plain_event("file_blocked", decode_c_string(&event.data)),
-        EVENT_CONNECT_BLOCKED => {
-            decoded_plain_event("connect_blocked", decode_sockaddr_endpoint(&event.data))
-        }
+        EVENT_CONNECT_BLOCKED => decoded_connect_blocked_event(event),
         other => decoded_plain_event(&format!("event_{other}"), None),
     }
 }
@@ -36,6 +38,10 @@ fn decoded_plain_event(kind: &str, value: Option<String>) -> DecodedKernelEvent 
     DecodedKernelEvent {
         kind: kind.to_string(),
         value,
+        cgroup_id: None,
+        network_destination: None,
+        network_port: None,
+        rule_id: None,
         flags: None,
         mode: None,
         resolve: None,
@@ -51,6 +57,10 @@ fn decoded_open_event(event: &MonitorEvent) -> DecodedKernelEvent {
     DecodedKernelEvent {
         kind: "openat".to_string(),
         value: decode_c_string(&event.data),
+        cgroup_id: None,
+        network_destination: None,
+        network_port: None,
+        rule_id: None,
         flags: Some(flags),
         mode: Some(event.mode),
         resolve: (event.resolve != 0).then_some(event.resolve),
@@ -65,6 +75,69 @@ fn decoded_open_event(event: &MonitorEvent) -> DecodedKernelEvent {
             }
             .to_string(),
         ),
+    }
+}
+
+fn decoded_connect_blocked_event(event: &MonitorEvent) -> DecodedKernelEvent {
+    if let Some(blocked) = decode_blocked_socket_payload(&event.data) {
+        return DecodedKernelEvent {
+            kind: "connect_blocked".to_string(),
+            value: Some(blocked.endpoint),
+            cgroup_id: Some(blocked.cgroup_id),
+            network_destination: Some(blocked.destination),
+            network_port: Some(blocked.port),
+            rule_id: Some(blocked.rule_id),
+            flags: None,
+            mode: None,
+            resolve: None,
+            return_value: None,
+            access_mode: None,
+            operation_flags: Vec::new(),
+            status: None,
+        };
+    }
+    decoded_plain_event("connect_blocked", decode_sockaddr_endpoint(&event.data))
+}
+
+struct BlockedSocketPayload {
+    cgroup_id: u64,
+    destination: String,
+    endpoint: String,
+    port: u16,
+    rule_id: u32,
+}
+
+fn decode_blocked_socket_payload(bytes: &[u8]) -> Option<BlockedSocketPayload> {
+    if bytes.len() < 40 {
+        return None;
+    }
+    let cgroup_id = u64::from_ne_bytes(bytes[0..8].try_into().ok()?);
+    let family = u16::from_ne_bytes(bytes[8..10].try_into().ok()?);
+    let port = u16::from_ne_bytes(bytes[10..12].try_into().ok()?);
+    let rule_id = u32::from_ne_bytes(bytes[32..36].try_into().ok()?);
+    match family {
+        2 => {
+            let destination = Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15]).to_string();
+            Some(BlockedSocketPayload {
+                endpoint: format!("{destination}:{port}"),
+                destination,
+                port,
+                cgroup_id,
+                rule_id,
+            })
+        }
+        10 => {
+            let destination =
+                Ipv6Addr::from(<[u8; 16]>::try_from(&bytes[16..32]).ok()?).to_string();
+            Some(BlockedSocketPayload {
+                endpoint: format!("[{destination}]:{port}"),
+                destination,
+                port,
+                cgroup_id,
+                rule_id,
+            })
+        }
+        _ => None,
     }
 }
 
