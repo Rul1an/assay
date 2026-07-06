@@ -34,7 +34,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 sha2 = "0.11"
 hex = "0.4"
 base64 = "0.22"
-ed25519-dalek = { version = "2.1", features = ["pkcs8", "rand_core"] }
+ed25519-dalek = { version = "3.0", features = ["pkcs8", "rand_core"] }
 pkcs8 = { version = "0.11", features = ["pem"] }
 
 # Sigstore offline verification (MCP04a-3): X.509 path validation only, pinned trust roots, NO network.
