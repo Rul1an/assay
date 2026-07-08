@@ -34,7 +34,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 sha2 = "0.11"
 hex = "0.4"
 base64 = "0.22"
-ed25519-dalek = { version = "2.1", features = ["pkcs8", "rand_core"] }
+ed25519-dalek = { version = "3.0", features = ["alloc", "pkcs8", "rand_core"] }
 pkcs8 = { version = "0.11", features = ["pem"] }
 
 # Sigstore offline verification (MCP04a-3): X.509 path validation only, pinned trust roots, NO network.
@@ -67,6 +67,7 @@ rand = "0.8"
 
 [dev-dependencies]
 base64 = "0.22"
+getrandom = { version = "0.4", features = ["sys_rng"] }
 # Already a normal dependency; declared here too so integration tests can mutate Rekor v2 vectors cleanly.
 serde_json = { workspace = true, features = ["std"] }
 # Test-only synthetic PKI for the offline Sigstore cert-chain verifier (hermetic fixtures, no network).

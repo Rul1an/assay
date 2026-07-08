@@ -364,9 +364,11 @@ mod tests {
         Scope, Validity,
     };
     use chrono::TimeZone;
+    use getrandom::{rand_core::UnwrapErr, SysRng};
 
     fn generate_keypair() -> SigningKey {
-        SigningKey::generate(&mut rand::thread_rng())
+        let mut csprng = UnwrapErr(SysRng);
+        SigningKey::generate(&mut csprng)
     }
 
     fn create_test_content() -> MandateContent {

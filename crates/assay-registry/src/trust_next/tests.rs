@@ -7,9 +7,11 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::Utc;
 use ed25519_dalek::pkcs8::EncodePublicKey;
 use ed25519_dalek::SigningKey;
+use getrandom::{rand_core::UnwrapErr, SysRng};
 
 fn generate_trusted_key() -> (SigningKey, TrustedKey) {
-    let signing_key = SigningKey::generate(&mut rand::thread_rng());
+    let mut csprng = UnwrapErr(SysRng);
+    let signing_key = SigningKey::generate(&mut csprng);
     let verifying_key = signing_key.verifying_key();
 
     let spki_der = verifying_key.to_public_key_der().unwrap();

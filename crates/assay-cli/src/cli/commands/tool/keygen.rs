@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use clap::Args;
 use ed25519_dalek::SigningKey;
+use getrandom::{rand_core::UnwrapErr, SysRng};
 use std::fs;
 use std::path::PathBuf;
 
@@ -58,7 +59,8 @@ fn run_keygen(args: KeygenArgs) -> Result<()> {
     }
 
     // Generate keypair
-    let signing_key = SigningKey::generate(&mut rand::thread_rng());
+    let mut csprng = UnwrapErr(SysRng);
+    let signing_key = SigningKey::generate(&mut csprng);
     let verifying_key = signing_key.verifying_key();
 
     // Encode as PEM
