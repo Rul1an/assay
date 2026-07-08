@@ -539,7 +539,8 @@ impl DecisionData {
         if let Some(artifact) = artifact {
             if let Ok(canonical) = crate::mcp::jcs::to_string(artifact) {
                 self.approval_artifact_digest = Some(format!(
-                    "sha256:{}",
+                    "{}:{}",
+                    APPROVAL_ARTIFACT_DIGEST_ALG_SHA256,
                     crate::fingerprint::sha256_hex(&canonical)
                 ));
                 self.approval_artifact_digest_alg =
