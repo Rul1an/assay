@@ -20,6 +20,7 @@ use assay_evidence::mandate::{
 };
 use chrono::{TimeZone, Utc};
 use ed25519_dalek::SigningKey;
+use getrandom::{rand_core::UnwrapErr, SysRng};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -273,7 +274,8 @@ fn test_negative_content_id_mismatch() {
 fn test_negative_wrong_key() {
     let content = test_content();
     let key1 = test_key();
-    let key2 = SigningKey::generate(&mut rand::thread_rng());
+    let mut csprng = UnwrapErr(SysRng);
+    let key2 = SigningKey::generate(&mut csprng);
 
     let signed = sign_mandate(&content, &key1).unwrap();
 

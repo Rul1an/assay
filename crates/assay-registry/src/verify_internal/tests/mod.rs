@@ -1,5 +1,6 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use ed25519_dalek::SigningKey;
+use getrandom::{rand_core::UnwrapErr, SysRng};
 
 use crate::error::{RegistryError, RegistryResult};
 use crate::trust::TrustStore;
@@ -30,7 +31,8 @@ fn verify_dsse_signature_bytes(
 }
 
 fn generate_keypair() -> SigningKey {
-    SigningKey::generate(&mut rand::thread_rng())
+    let mut csprng = UnwrapErr(SysRng);
+    SigningKey::generate(&mut csprng)
 }
 
 // Legacy compatibility helper kept test-local: production path verifies
