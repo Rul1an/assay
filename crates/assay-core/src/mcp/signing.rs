@@ -316,10 +316,12 @@ pub fn is_signed(tool: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use getrandom::{rand_core::UnwrapErr, SysRng};
     use serde_json::json;
 
     fn generate_keypair() -> SigningKey {
-        SigningKey::generate(&mut rand::thread_rng())
+        let mut csprng = UnwrapErr(SysRng);
+        SigningKey::generate(&mut csprng)
     }
 
     #[test]
