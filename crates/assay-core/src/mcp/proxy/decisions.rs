@@ -109,6 +109,9 @@ pub(super) fn emit_decision(
     event.data.obligation_outcomes =
         crate::mcp::obligations::execute_log_only(&metadata.obligations, tool);
     event.data.approval_state = metadata.approval_state.clone();
+    event
+        .data
+        .apply_approval_artifact_retention(metadata.approval_artifact.as_ref());
     if let Some(artifact) = &metadata.approval_artifact {
         event.data.approval_id = Some(artifact.approval_id.clone());
         event.data.approver = Some(artifact.approver.clone());
@@ -155,6 +158,7 @@ pub(super) fn emit_decision(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::policy::{ApprovalArtifact, ApprovalFreshness};
     use crate::mcp::tool_definition::{
         TOOL_DEFINITION_CANONICALIZATION_JCS_MCP_TOOL_DEFINITION_V1,
         TOOL_DEFINITION_DIGEST_ALG_SHA256, TOOL_DEFINITION_SCHEMA_V1,
@@ -327,6 +331,72 @@ mod tests {
         assert_eq!(data.lane.as_deref(), Some("local-dev"));
         assert_eq!(data.principal.as_deref(), Some("user:alice"));
         assert_eq!(data.auth_context_summary.as_deref(), Some("local session"));
+    }
+
+    #[test]
+    fn proxy_contract_emit_decision_projects_approval_retention_digest() {
+        let artifact = ApprovalArtifact {
+            approval_id: "apr_001".to_string(),
+            approver: "alice@example.com".to_string(),
+            issued_at: "2026-03-11T11:00:00Z".to_string(),
+            expires_at: "2026-03-11T12:00:00Z".to_string(),
+            scope: "tool:deploy".to_string(),
+            bound_tool: "deploy_service".to_string(),
+            bound_resource: "service/prod".to_string(),
+        };
+        let expected_digest = format!(
+            "sha256:{}",
+            crate::fingerprint::sha256_hex(&crate::mcp::jcs::to_string(&artifact).unwrap())
+        );
+        let emitter = Arc::new(CapturingEmitter::new());
+        let emitter_trait: Arc<dyn DecisionEmitter> = emitter.clone();
+        let metadata = PolicyMatchMetadata {
+            approval_state: Some("approved".to_string()),
+            approval_artifact: Some(artifact),
+            approval_freshness: Some(ApprovalFreshness::Fresh),
+            ..PolicyMatchMetadata::default()
+        };
+
+        emit_decision(
+            &emitter_trait,
+            "assay://test",
+            "tc_approval_retention",
+            "deploy_service",
+            Decision::Allow,
+            reason_codes::P_POLICY_ALLOW,
+            None,
+            None,
+            &metadata,
+            None,
+        );
+
+        let events = emitter.events.lock().unwrap();
+        let data = &events[0].data;
+        assert_eq!(
+            data.approval_artifact_digest.as_deref(),
+            Some(expected_digest.as_str())
+        );
+        assert_eq!(data.approval_artifact_digest_alg.as_deref(), Some("sha256"));
+        assert_eq!(
+            data.approval_artifact_digest_profile.as_deref(),
+            Some("assay.approval_artifact.structured_meta_jcs.v0")
+        );
+        assert_eq!(
+            data.approval_retained_view.as_deref(),
+            Some("structured_meta_jcs")
+        );
+        assert_eq!(
+            data.approval_retention_non_claims.as_deref(),
+            Some(
+                &[
+                    "not_rendered_ui_view".to_string(),
+                    "not_user_seen_bytes".to_string(),
+                    "not_raw_byte_retention".to_string(),
+                    "not_model_behavior_truth".to_string(),
+                    "not_user_intent_truth".to_string(),
+                ][..]
+            )
+        );
     }
 
     #[test]
