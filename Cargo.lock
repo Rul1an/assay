@@ -260,6 +260,7 @@ dependencies = [
  "ed25519-dalek 3.0.0",
  "env_logger",
  "futures",
+ "getrandom 0.4.2",
  "globset",
  "hex",
  "humantime",
@@ -313,6 +314,7 @@ dependencies = [
  "dirs",
  "ed25519-dalek 3.0.0",
  "flate2",
+ "getrandom 0.4.2",
  "globset",
  "hex",
  "hmac 0.13.0",
@@ -372,6 +374,7 @@ dependencies = [
  "ed25519-dalek 3.0.0",
  "flate2",
  "futures",
+ "getrandom 0.4.2",
  "globset",
  "hex",
  "jsonschema",
@@ -486,6 +489,7 @@ dependencies = [
  "dirs",
  "ecdsa",
  "ed25519-dalek 3.0.0",
+ "getrandom 0.4.2",
  "hex",
  "p256",
  "pkcs8 0.11.0",
@@ -1274,9 +1278,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.18"
+version = "0.9.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+checksum = "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f"
 dependencies = [
  "crossbeam-utils",
 ]
