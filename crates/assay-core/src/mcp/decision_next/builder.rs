@@ -41,6 +41,11 @@ impl DecisionEvent {
                 scope: None,
                 approval_bound_tool: None,
                 approval_bound_resource: None,
+                approval_artifact_digest: None,
+                approval_artifact_digest_alg: None,
+                approval_artifact_digest_profile: None,
+                approval_retained_view: None,
+                approval_retention_non_claims: None,
                 approval_freshness: None,
                 approval_failure_reason: None,
                 scope_type: None,
@@ -245,6 +250,8 @@ impl DecisionEvent {
         self.data.obligations = obligations;
         self.data.obligation_outcomes = obligation_outcomes;
         self.data.approval_state = approval_state;
+        self.data
+            .apply_approval_artifact_retention(approval_artifact.as_ref());
         if let Some(artifact) = approval_artifact {
             self.data.approval_id = Some(artifact.approval_id);
             self.data.approver = Some(artifact.approver);
