@@ -212,6 +212,13 @@ Use these when you want:
 - runtime enforcement that file or resource arguments stay in-bounds
 - redaction of secrets before downstream logging or evidence export
 
+When an `approval_required` obligation is evaluated from a supplied
+`_meta.approval` artifact, the decision event also carries a digest/profile for
+that structured approval artifact. This binds the projected approval summary
+fields to the retained `_meta.approval` basis under
+`assay.approval_artifact.structured_meta_jcs.v0`. It is not a rendered UI view
+claim, not raw byte retention, and not proof of what a user saw or intended.
+
 ## Tool Pins
 
 `tool_pins` protect against tool-definition drift by pinning the expected server, tool name, and hashes:

@@ -19,6 +19,21 @@ pub const POLICY_SNAPSHOT_DIGEST_ALG_SHA256: &str = "sha256";
 pub const POLICY_SNAPSHOT_CANONICALIZATION_JCS_MCP_POLICY: &str = "jcs:mcp_policy";
 /// Bounded schema tag for the supported MCP policy snapshot projection.
 pub const POLICY_SNAPSHOT_SCHEMA_V1: &str = "assay.mcp.policy.snapshot.v1";
+/// Digest algorithm for retained approval-artifact basis.
+pub const APPROVAL_ARTIFACT_DIGEST_ALG_SHA256: &str = "sha256";
+/// Canonicalization/profile for retained structured approval artifacts.
+pub const APPROVAL_ARTIFACT_PROFILE_STRUCTURED_META_JCS_V0: &str =
+    "assay.approval_artifact.structured_meta_jcs.v0";
+/// Retained view class for approval artifacts parsed from `_meta.approval`.
+pub const APPROVAL_RETAINED_VIEW_STRUCTURED_META_JCS: &str = "structured_meta_jcs";
+/// Non-claims carried with structured approval artifact retention.
+pub const APPROVAL_RETENTION_NON_CLAIMS: &[&str] = &[
+    "not_rendered_ui_view",
+    "not_user_seen_bytes",
+    "not_raw_byte_retention",
+    "not_model_behavior_truth",
+    "not_user_intent_truth",
+];
 
 /// Reason codes for tool decisions (SPEC-Mandate-v1.0.4 §7.10).
 pub mod reason_codes {
@@ -245,6 +260,21 @@ pub struct DecisionData {
     /// Approval artifact bound resource
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval_bound_resource: Option<String>,
+    /// Digest of the retained structured approval artifact basis
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_artifact_digest: Option<String>,
+    /// Digest algorithm for `approval_artifact_digest`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_artifact_digest_alg: Option<String>,
+    /// Profile/canonicalization used for `approval_artifact_digest`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_artifact_digest_profile: Option<String>,
+    /// Retained view class for the approval basis
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_retained_view: Option<String>,
+    /// Explicit non-claims for structured approval retention
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_retention_non_claims: Option<Vec<String>>,
     /// Freshness status derived from approval validity window
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval_freshness: Option<ApprovalFreshness>,
@@ -497,5 +527,42 @@ impl DecisionData {
             self.tool_definition_schema = None;
             self.tool_definition_source = None;
         }
+    }
+
+    /// Project the retained structured approval basis into explicit digest
+    /// fields. This is not a UI-view claim: it binds only the parsed
+    /// `_meta.approval` artifact under the named profile.
+    pub(crate) fn apply_approval_artifact_retention(
+        &mut self,
+        artifact: Option<&ApprovalArtifact>,
+    ) {
+        if let Some(artifact) = artifact {
+            if let Ok(canonical) = crate::mcp::jcs::to_string(artifact) {
+                self.approval_artifact_digest = Some(format!(
+                    "{}:{}",
+                    APPROVAL_ARTIFACT_DIGEST_ALG_SHA256,
+                    crate::fingerprint::sha256_hex(&canonical)
+                ));
+                self.approval_artifact_digest_alg =
+                    Some(APPROVAL_ARTIFACT_DIGEST_ALG_SHA256.to_string());
+                self.approval_artifact_digest_profile =
+                    Some(APPROVAL_ARTIFACT_PROFILE_STRUCTURED_META_JCS_V0.to_string());
+                self.approval_retained_view =
+                    Some(APPROVAL_RETAINED_VIEW_STRUCTURED_META_JCS.to_string());
+                self.approval_retention_non_claims = Some(
+                    APPROVAL_RETENTION_NON_CLAIMS
+                        .iter()
+                        .map(|claim| (*claim).to_string())
+                        .collect(),
+                );
+                return;
+            }
+        }
+
+        self.approval_artifact_digest = None;
+        self.approval_artifact_digest_alg = None;
+        self.approval_artifact_digest_profile = None;
+        self.approval_retained_view = None;
+        self.approval_retention_non_claims = None;
     }
 }
