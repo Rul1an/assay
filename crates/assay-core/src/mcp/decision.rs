@@ -241,6 +241,117 @@ mod tests {
     }
 
     #[test]
+    fn test_with_policy_context_projects_approval_artifact_retention_digest() {
+        let artifact = ApprovalArtifact {
+            approval_id: "apr_001".to_string(),
+            approver: "alice@example.com".to_string(),
+            issued_at: "2026-03-11T11:00:00Z".to_string(),
+            expires_at: "2026-03-11T12:00:00Z".to_string(),
+            scope: "tool:deploy".to_string(),
+            bound_tool: "deploy_service".to_string(),
+            bound_resource: "service/prod".to_string(),
+        };
+        let expected_digest = format!(
+            "sha256:{}",
+            crate::fingerprint::sha256_hex(&crate::mcp::jcs::to_string(&artifact).unwrap())
+        );
+
+        let event = DecisionEvent::new(
+            "assay://test".to_string(),
+            "tc_approval_digest".to_string(),
+            "deploy_service".to_string(),
+        )
+        .allow(reason_codes::P_POLICY_ALLOW)
+        .with_policy_context(PolicyDecisionEventContext {
+            approval_state: Some("approved".to_string()),
+            approval_artifact: Some(artifact),
+            approval_freshness: Some(ApprovalFreshness::Fresh),
+            ..PolicyDecisionEventContext::default()
+        });
+
+        let json = serde_json::to_value(&event).unwrap();
+        let data = &json["data"];
+        assert_eq!(
+            data["approval_artifact_digest"],
+            serde_json::json!(expected_digest)
+        );
+        assert_eq!(data["approval_artifact_digest_alg"], "sha256");
+        assert_eq!(
+            data["approval_artifact_digest_profile"],
+            "assay.approval_artifact.structured_meta_jcs.v0"
+        );
+        assert_eq!(data["approval_retained_view"], "structured_meta_jcs");
+        assert_eq!(
+            data["approval_retention_non_claims"],
+            serde_json::json!([
+                "not_rendered_ui_view",
+                "not_user_seen_bytes",
+                "not_raw_byte_retention",
+                "not_model_behavior_truth",
+                "not_user_intent_truth"
+            ])
+        );
+    }
+
+    #[test]
+    fn test_with_policy_context_omits_approval_retention_without_artifact() {
+        let event = DecisionEvent::new(
+            "assay://test".to_string(),
+            "tc_no_approval_digest".to_string(),
+            "deploy_service".to_string(),
+        )
+        .allow(reason_codes::P_POLICY_ALLOW)
+        .with_policy_context(PolicyDecisionEventContext {
+            approval_state: Some("required".to_string()),
+            approval_artifact: None,
+            ..PolicyDecisionEventContext::default()
+        });
+
+        let json = serde_json::to_value(&event).unwrap();
+        let data = json["data"].as_object().unwrap();
+        assert!(!data.contains_key("approval_artifact_digest"));
+        assert!(!data.contains_key("approval_artifact_digest_alg"));
+        assert!(!data.contains_key("approval_artifact_digest_profile"));
+        assert!(!data.contains_key("approval_retained_view"));
+        assert!(!data.contains_key("approval_retention_non_claims"));
+    }
+
+    #[test]
+    fn test_approval_artifact_retention_digest_changes_with_bound_resource() {
+        let base = ApprovalArtifact {
+            approval_id: "apr_001".to_string(),
+            approver: "alice@example.com".to_string(),
+            issued_at: "2026-03-11T11:00:00Z".to_string(),
+            expires_at: "2026-03-11T12:00:00Z".to_string(),
+            scope: "tool:deploy".to_string(),
+            bound_tool: "deploy_service".to_string(),
+            bound_resource: "service/prod".to_string(),
+        };
+        let mut changed = base.clone();
+        changed.bound_resource = "service/staging".to_string();
+
+        let digest_for = |artifact: ApprovalArtifact| {
+            DecisionEvent::new(
+                "assay://test".to_string(),
+                "tc_digest_change".to_string(),
+                "deploy_service".to_string(),
+            )
+            .allow(reason_codes::P_POLICY_ALLOW)
+            .with_policy_context(PolicyDecisionEventContext {
+                approval_state: Some("approved".to_string()),
+                approval_artifact: Some(artifact),
+                approval_freshness: Some(ApprovalFreshness::Fresh),
+                ..PolicyDecisionEventContext::default()
+            })
+            .data
+            .approval_artifact_digest
+            .expect("approval artifact should project a digest")
+        };
+
+        assert_ne!(digest_for(base), digest_for(changed));
+    }
+
+    #[test]
     fn test_with_policy_context_sets_complete_context_contract_fields() {
         let context = PolicyDecisionEventContext {
             lane: Some("lane-prod".to_string()),
