@@ -82,14 +82,14 @@ pub fn verify_identity_offline(
         Ok(c) => c,
         Err(_) => return IdentityOutcome::new(CheckStatus::Failed, "malformed leaf certificate"),
     };
-    let tbs = &cert.tbs_certificate;
+    let tbs = cert.tbs_certificate();
 
     // Fulcio profile: issued certs MUST have an empty subject; the identity lives in the SAN.
-    if !tbs.subject.0.is_empty() {
+    if !tbs.subject().is_empty() {
         return IdentityOutcome::new(CheckStatus::Failed, "certificate has a non-empty subject");
     }
 
-    let extensions = match &tbs.extensions {
+    let extensions = match tbs.extensions() {
         Some(exts) => exts.as_slice(),
         None => {
             return IdentityOutcome::new(CheckStatus::IdentityMismatch, "no certificate extensions")
