@@ -58,7 +58,7 @@ pub fn verify_leaf_ecdsa_signature_over_bytes(
         Ok(c) => c,
         Err(_) => return SignatureOutcome::new(CheckStatus::Failed, "malformed leaf certificate"),
     };
-    let spki_der = match cert.tbs_certificate.subject_public_key_info.to_der() {
+    let spki_der = match cert.tbs_certificate().subject_public_key_info().to_der() {
         Ok(d) => d,
         Err(_) => {
             return SignatureOutcome::new(CheckStatus::Failed, "malformed leaf public key info")
