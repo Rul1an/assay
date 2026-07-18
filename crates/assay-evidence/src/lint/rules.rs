@@ -315,17 +315,24 @@ fn check_retained_view_readability(
     if payload.get("schema").and_then(Value::as_str) != Some("assay.enforcement_decision.v0") {
         return None;
     }
-    let view = non_empty(payload.get("approval_retained_view")?.as_str()?)?;
+    // A retained-view claim is only in scope when the field is present. Absent means the record
+    // makes no such claim, so W005 does not apply.
+    let raw_view = payload.get("approval_retained_view")?;
+
+    // Present but empty or non-string collapses to `None` and fails closed below as an
+    // opaque/unknown view — never silently skipped (integrity is a floor, never a lift).
+    let view = raw_view.as_str().and_then(non_empty);
 
     // The one shipped readable view: a digest-recomputable structured basis. Silent.
-    if view == RETAINED_VIEW_STRUCTURED_META_JCS {
+    if view == Some(RETAINED_VIEW_STRUCTURED_META_JCS) {
         return None;
     }
 
     // Fail-closed reading: an opaque view caps content-review at incomplete even when the
     // bundle verifies (integrity is a floor, never a lift), and the two opaque states differ
-    // in recovery path; an unrecognized view is treated as not readable, never as readable.
-    let message = if view == RETAINED_VIEW_ENCRYPTED {
+    // in recovery path; an unrecognized, empty, or non-string view is treated as not readable,
+    // never as readable.
+    let message = if view == Some(RETAINED_VIEW_ENCRYPTED) {
         if payload
             .get(ENCRYPTED_PLAINTEXT_COMMITMENT_FIELD)
             .and_then(Value::as_str)
@@ -343,11 +350,16 @@ fn check_retained_view_readability(
                 .to_string()
         }
     } else {
-        format!(
-            "Approval basis declares unknown retained view '{}' — fail-closed: content-review \
-             claims cap at incomplete",
-            view
-        )
+        match view {
+            Some(view) => format!(
+                "Approval basis declares unknown retained view '{}' — fail-closed: content-review \
+                 claims cap at incomplete",
+                view
+            ),
+            None => "Approval basis declares an empty or non-string retained view — fail-closed: \
+                     content-review claims cap at incomplete"
+                .to_string(),
+        }
     };
 
     Some(

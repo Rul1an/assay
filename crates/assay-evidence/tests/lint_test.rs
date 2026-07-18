@@ -285,17 +285,24 @@ fn approval_decision_event(
         },
         "decision": "allow"
     });
+    // The producer only emits `approval_plaintext_commitment` alongside an `encrypted` retained
+    // view. Requesting it for any other view (or none) is a test-authoring mistake, not a shape
+    // the emitter can produce, so reject it here rather than let the helper fabricate it.
+    assert!(
+        !with_plaintext_commitment || retained_view == Some("encrypted"),
+        "approval_plaintext_commitment only travels with an `encrypted` retained view",
+    );
     if let Some(view) = retained_view {
         payload["approval_retained_view"] = serde_json::json!(view);
         payload["approval_artifact_digest"] = serde_json::json!(
             "sha256:2b7c1e5f8a3d6b9c2e5f8a1d4b7c0e3f6a9d2c5b8e1f4a7d6d5a1f3b8c9e2d4a"
         );
         payload["approval_artifact_digest_alg"] = serde_json::json!("sha256");
-    }
-    if with_plaintext_commitment {
-        payload["approval_plaintext_commitment"] = serde_json::json!(
-            "sha256:8a3d6b9c2e5f8a1d4b7c0e3f6a9d2c5b8e1f4a7d6d5a1f3b8c9e2d4a2b7c1e5f"
-        );
+        if with_plaintext_commitment {
+            payload["approval_plaintext_commitment"] = serde_json::json!(
+                "sha256:8a3d6b9c2e5f8a1d4b7c0e3f6a9d2c5b8e1f4a7d6d5a1f3b8c9e2d4a2b7c1e5f"
+            );
+        }
     }
     let mut event = EvidenceEvent::new(
         "assay.enforcement_decision",
@@ -349,6 +356,28 @@ fn test_w005_flags_unknown_retained_view_fail_closed() {
     assert_eq!(findings.len(), 1, "expected one ASSAY-W005 finding");
     assert!(findings[0].contains("unknown retained view 'rendered_screenshot'"));
     assert!(findings[0].contains("fail-closed"));
+}
+
+#[test]
+fn test_w005_flags_empty_retained_view_fail_closed() {
+    // A present-but-empty declaration is unusable, not absent: it must fail closed as opaque,
+    // never be silently skipped.
+    let bundle = create_bundle_from_events(vec![approval_decision_event(0, Some(""), false)]);
+    let findings = w005_findings(&bundle);
+    assert_eq!(findings.len(), 1, "expected one ASSAY-W005 finding");
+    assert!(findings[0].contains("empty or non-string retained view"));
+    assert!(findings[0].contains("fail-closed"));
+}
+
+#[test]
+fn test_w005_flags_non_string_retained_view_fail_closed() {
+    // A present-but-non-string declaration is likewise unusable and fails closed.
+    let mut event = approval_decision_event(0, Some("encrypted"), false);
+    event.payload["approval_retained_view"] = serde_json::json!(42);
+    let bundle = create_bundle_from_events(vec![event]);
+    let findings = w005_findings(&bundle);
+    assert_eq!(findings.len(), 1, "expected one ASSAY-W005 finding");
+    assert!(findings[0].contains("empty or non-string retained view"));
 }
 
 #[test]
