@@ -266,6 +266,116 @@ fn test_w004_skips_unbindable_observation_without_target_digest() {
     );
 }
 
+/// Mirrors the shipped approval-retention block on `assay.enforcement_decision.v0`
+/// (assay-core src/mcp/decision_next/event_types.rs). `retained_view` None omits the block
+/// entirely, matching a decision without an approval basis.
+fn approval_decision_event(
+    seq: u64,
+    retained_view: Option<&str>,
+    with_plaintext_commitment: bool,
+) -> EvidenceEvent {
+    let mut payload = serde_json::json!({
+        "schema": "assay.enforcement_decision.v0",
+        "tool": { "name": "fs_write", "action_class": "fs_write" },
+        "action": {
+            "verb": "write",
+            "resource_type": "file",
+            "target": { "path": "/workspace/out/report.md" },
+            "target_digest": "sha256:call-target"
+        },
+        "decision": "allow"
+    });
+    if let Some(view) = retained_view {
+        payload["approval_retained_view"] = serde_json::json!(view);
+        payload["approval_artifact_digest"] = serde_json::json!(
+            "sha256:2b7c1e5f8a3d6b9c2e5f8a1d4b7c0e3f6a9d2c5b8e1f4a7d6d5a1f3b8c9e2d4a"
+        );
+        payload["approval_artifact_digest_alg"] = serde_json::json!("sha256");
+    }
+    if with_plaintext_commitment {
+        payload["approval_plaintext_commitment"] = serde_json::json!(
+            "sha256:8a3d6b9c2e5f8a1d4b7c0e3f6a9d2c5b8e1f4a7d6d5a1f3b8c9e2d4a2b7c1e5f"
+        );
+    }
+    let mut event = EvidenceEvent::new(
+        "assay.enforcement_decision",
+        "urn:assay:test",
+        "run_lint",
+        seq,
+        payload,
+    );
+    event.time = Utc.timestamp_opt(1700000000 + seq as i64, 0).unwrap();
+    event
+}
+
+fn w005_findings(bundle: &[u8]) -> Vec<String> {
+    let report = lint_bundle(Cursor::new(bundle), VerifyLimits::default()).unwrap();
+    report
+        .findings
+        .iter()
+        .filter(|finding| finding.rule_id == "ASSAY-W005")
+        .map(|finding| finding.message.clone())
+        .collect()
+}
+
+#[test]
+fn test_w005_flags_encrypted_retained_view_as_opaque_unbindable() {
+    let bundle =
+        create_bundle_from_events(vec![approval_decision_event(0, Some("encrypted"), false)]);
+    let findings = w005_findings(&bundle);
+    assert_eq!(findings.len(), 1, "expected one ASSAY-W005 finding");
+    assert!(findings[0].contains("opaque_unbindable"));
+    assert!(findings[0].contains("cap at incomplete"));
+}
+
+#[test]
+fn test_w005_flags_encrypted_view_with_commitment_as_opaque_bindable() {
+    let bundle =
+        create_bundle_from_events(vec![approval_decision_event(0, Some("encrypted"), true)]);
+    let findings = w005_findings(&bundle);
+    assert_eq!(findings.len(), 1, "expected one ASSAY-W005 finding");
+    assert!(findings[0].contains("opaque_bindable"));
+    assert!(findings[0].contains("checkable against the commitment"));
+}
+
+#[test]
+fn test_w005_flags_unknown_retained_view_fail_closed() {
+    let bundle = create_bundle_from_events(vec![approval_decision_event(
+        0,
+        Some("rendered_screenshot"),
+        false,
+    )]);
+    let findings = w005_findings(&bundle);
+    assert_eq!(findings.len(), 1, "expected one ASSAY-W005 finding");
+    assert!(findings[0].contains("unknown retained view 'rendered_screenshot'"));
+    assert!(findings[0].contains("fail-closed"));
+}
+
+#[test]
+fn test_w005_silent_on_shipped_structured_meta_jcs_view() {
+    let bundle = create_bundle_from_events(vec![approval_decision_event(
+        0,
+        Some("structured_meta_jcs"),
+        false,
+    )]);
+    assert!(
+        w005_findings(&bundle).is_empty(),
+        "the shipped readable view must not produce an ASSAY-W005 finding"
+    );
+}
+
+#[test]
+fn test_w005_silent_without_approval_retention_block() {
+    let bundle = create_bundle_from_events(vec![
+        approval_decision_event(0, None, false),
+        enforcement_decision_event(1, "fs_write", "sha256:call-target", "deny"),
+    ]);
+    assert!(
+        w005_findings(&bundle).is_empty(),
+        "a decision without a declared retained view is out of W005's scope"
+    );
+}
+
 #[test]
 fn test_secret_in_subject_detected() {
     let bundle = create_bundle_with_secret_subject();
