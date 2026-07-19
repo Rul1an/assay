@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.34.0] - 2026-07-19
+
+### Added
+- Add `ASSAY-W005`, an evidence lint rule that flags approval bases declaring an opaque or
+  unrecognized retained view (`encrypted`, or any value the reviewer cannot read), so content-review
+  claims over them cap at incomplete. A present-but-empty or non-string view fails closed rather than
+  being silently skipped, and integrity verification never lifts the verdict. Reserves the
+  `encrypted` retained-view vocabulary (key holder, salted plaintext commitment, preimage
+  content-type, payload location, opacity reason); no emitter exists yet, the reservation keeps
+  imported or future records on a known shape.
+- Bind the approval-artifact retention digest into `assay.enforcement_decision.v0`, carrying the
+  retained view and its artifact digest alongside the decision.
+- Bind kernel socket events to their originating cgroup in the runner, so network events attribute to
+  the process that made them.
+
+### Fixed
+- Make the GitHub Release publish step idempotent: if a release for the tag already exists (for
+  example a prior partial run left an empty release), attach the assets and refresh metadata instead
+  of failing, so built artifacts and the crates.io/PyPI publish are no longer stranded.
+- Adapt the registry to the `x509-cert` 0.3.0 accessor API.
+
 ## [3.33.0] - 2026-07-05
 
 ### Added
