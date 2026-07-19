@@ -32,6 +32,7 @@ The `health_check.sh` script monitors the runner and auto-recovers from common f
 - Runner online status at GitHub
 - Runner service status in VM
 - Queued jobs waiting for the runner
+- Assay CLI release drift on the runner VM
 
 **What it auto-fixes:**
 - VM clock drift (NTP sync) — most common cause of "token expired"
@@ -39,6 +40,7 @@ The `health_check.sh` script monitors the runner and auto-recovers from common f
 - Deleted runner registrations on GitHub (fresh config + service reinstall)
 - Stopped services (restarts runner service)
 - Stale configuration (full reconfiguration if needed)
+- Stale Assay CLI binary (runs the VM updater before trusting the runner)
 
 **Label contract:**
 - Configure only the custom labels: `bpf-lsm,assay-bpf-runner`
@@ -81,6 +83,29 @@ If the **Kernel Matrix (5.15)** or **(6.6)** job fails with `Error: No space lef
   multipass exec assay-bpf-runner -- sudo bash -c '(crontab -l 2>/dev/null | grep -q free_disk) || (crontab -l 2>/dev/null; echo "0 * * * * /opt/actions-runner/scripts/free_disk.sh >> /var/log/assay-free_disk.log 2>&1") | crontab -'
   ```
 
+## Assay CLI freshness on the VM
+
+The self-hosted runner must test against the current shipped Assay release, not a stale user-local Cargo install. New VMs created with `setup_local_multipass.sh` and cloud VMs provisioned with `setup.sh` install a system updater:
+
+```bash
+/usr/local/sbin/update-assay-latest
+systemctl status assay-update.timer
+```
+
+The updater resolves the latest `Rul1an/assay` GitHub release, downloads the matching Linux release asset, verifies its SHA256 file, installs it at `/usr/local/bin/assay`, and keeps compatibility symlinks for `/home/ubuntu/.cargo/bin/assay` and `/home/github-runner/.cargo/bin/assay` when those directories exist.
+
+For an existing Multipass VM, install or refresh the updater once from the host:
+
+```bash
+multipass exec assay-bpf-runner -- sudo tee /usr/local/sbin/update-assay-latest < infra/bpf-runner/update_assay_latest.sh >/dev/null
+multipass exec assay-bpf-runner -- sudo chmod +x /usr/local/sbin/update-assay-latest
+multipass exec assay-bpf-runner -- sudo tee /etc/systemd/system/assay-update.service < infra/bpf-runner/assay-update.service >/dev/null
+multipass exec assay-bpf-runner -- sudo tee /etc/systemd/system/assay-update.timer < infra/bpf-runner/assay-update.timer >/dev/null
+multipass exec assay-bpf-runner -- sudo systemctl daemon-reload
+multipass exec assay-bpf-runner -- sudo systemctl enable --now assay-update.timer
+multipass exec assay-bpf-runner -- sudo /usr/local/sbin/update-assay-latest
+```
+
 ## Files
 
 | File | Purpose |
@@ -91,3 +116,6 @@ If the **Kernel Matrix (5.15)** or **(6.6)** job fails with `Error: No space lef
 | `register_local.sh` | Register/update runner using a token. |
 | `health_check.sh` | Health monitoring and auto-recovery (install via `--install-cron`). |
 | `free_disk.sh` | Free disk on the runner VM (run when you see "No space left on device"). |
+| `update_assay_latest.sh` | Install/update the VM Assay CLI to the latest verified GitHub release. |
+| `assay-update.service` | systemd oneshot service for the Assay CLI updater. |
+| `assay-update.timer` | Hourly systemd timer that keeps the VM Assay CLI current. |

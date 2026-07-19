@@ -33,6 +33,7 @@ GH_TOKEN_FILE="${GH_TOKEN_FILE:-${GITHUB_TOKEN_FILE:-}}"
 LOG_FILE="${LOG_FILE:-/tmp/runner-health-check.log}"
 MAX_LOG_SIZE=1048576  # 1MB
 RUNNER_FATAL_PATTERNS="${RUNNER_FATAL_PATTERNS:-registration has been deleted from the server|Failed to create a session|token expired|Authentication failed}"
+ASSAY_UPDATE_SCRIPT="${ASSAY_UPDATE_SCRIPT:-/usr/local/sbin/update-assay-latest}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -121,6 +122,46 @@ check_vm_running() {
         fi
         return 1
     fi
+    return 0
+}
+
+latest_assay_tag() {
+    curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | jq -r '.tag_name // empty' 2>/dev/null || true
+}
+
+runner_user_assay_version() {
+    multipass exec "$VM_NAME" -- sudo -u "$RUNNER_USER" bash -lc \
+        'command -v assay >/dev/null 2>&1 && assay --version | awk "{print \$2}"' 2>/dev/null || true
+}
+
+ensure_assay_cli_current() {
+    local latest_tag latest_version current_version
+    latest_tag=$(latest_assay_tag)
+    if [[ -z "$latest_tag" || "$latest_tag" == "null" ]]; then
+        log_error "Could not resolve latest Assay release"
+        return 1
+    fi
+    latest_version="${latest_tag#v}"
+    current_version=$(runner_user_assay_version)
+
+    if [[ "$current_version" == "$latest_version" ]]; then
+        log_ok "Assay CLI is current: $current_version"
+        return 0
+    fi
+
+    log_warn "Assay CLI is stale or missing (current: ${current_version:-missing}, latest: $latest_version); running updater"
+    if ! multipass exec "$VM_NAME" -- sudo "$ASSAY_UPDATE_SCRIPT"; then
+        log_error "Assay CLI updater failed on $VM_NAME"
+        return 1
+    fi
+
+    current_version=$(runner_user_assay_version)
+    if [[ "$current_version" != "$latest_version" ]]; then
+        log_error "Assay CLI still mismatched after update (current: ${current_version:-missing}, latest: $latest_version)"
+        return 1
+    fi
+
+    log_ok "Assay CLI updated to $current_version"
     return 0
 }
 
@@ -593,6 +634,7 @@ health_check() {
     # Pre-flight checks
     check_gh_auth || return 1
     check_vm_running || return 1
+    ensure_assay_cli_current || return 1
 
     # Get current status
     local status
@@ -705,6 +747,18 @@ show_status() {
     else
         echo "Runner Log Health: no fatal registration/session error detected"
     fi
+
+    local latest_assay current_assay assay_health
+    latest_assay=$(latest_assay_tag)
+    current_assay=$(runner_user_assay_version)
+    if [[ -n "$latest_assay" && -n "$current_assay" && "v${current_assay}" == "$latest_assay" ]]; then
+        assay_health="current"
+    else
+        assay_health="stale_or_unknown"
+    fi
+    echo "Latest Release: ${latest_assay:-unknown}"
+    echo "Runner PATH Version: ${current_assay:-unknown}"
+    echo "Assay CLI Health: $assay_health"
 
     echo ""
     echo "=== Job Queue ==="

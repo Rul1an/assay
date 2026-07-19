@@ -234,15 +234,45 @@ runs:
     # E1: Foundation - Platform detection, caching, binary installation
     # =========================================================================
 
-    - name: Check if Assay already in PATH
+    - name: Resolve requested Assay version
       id: check-existing
       shell: bash
+      env:
+        ASSAY_VERSION_INPUT: ${{ inputs.version }}
       run: |
+        set -euo pipefail
+        REPO="Rul1an/assay"
+        VERSION="$ASSAY_VERSION_INPUT"
+        if [ "$VERSION" = "latest" ]; then
+          VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
+          if [ -z "$VERSION" ]; then
+            echo "::error::Failed to fetch latest version"
+            exit 1
+          fi
+        fi
+        case "$VERSION" in
+          v*) ;;
+          *) VERSION="v$VERSION" ;;
+        esac
+        VERSION_PLAIN="${VERSION#v}"
+
+        echo "resolved_version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "resolved_version_plain=$VERSION_PLAIN" >> "$GITHUB_OUTPUT"
+
+        INSTALLED_VERSION=""
         if command -v assay &> /dev/null; then
           echo "Assay already installed: $(assay --version)"
-          echo "skip_install=true" >> $GITHUB_OUTPUT
+          INSTALLED_VERSION="$(assay --version 2>/dev/null | awk '{print $2}' || true)"
+        fi
+
+        echo "installed_version=$INSTALLED_VERSION" >> "$GITHUB_OUTPUT"
+        if [ "$INSTALLED_VERSION" = "$VERSION_PLAIN" ]; then
+          echo "skip_install=true" >> "$GITHUB_OUTPUT"
         else
-          echo "skip_install=false" >> $GITHUB_OUTPUT
+          if [ -n "$INSTALLED_VERSION" ]; then
+            echo "Installed Assay $INSTALLED_VERSION does not match requested $VERSION_PLAIN; installing requested version."
+          fi
+          echo "skip_install=false" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Detect platform
@@ -281,13 +311,13 @@ runs:
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
         path: ~/.assay/bin
-        key: assay-${{ inputs.version }}-${{ steps.platform.outputs.target }}
+        key: assay-${{ steps.check-existing.outputs.resolved_version }}-${{ steps.platform.outputs.target }}
 
     - name: Install Assay CLI
       if: steps.check-existing.outputs.skip_install != 'true' && steps.cache.outputs.cache-hit != 'true'
       shell: bash
       env:
-        ASSAY_VERSION: ${{ inputs.version }}
+        ASSAY_VERSION: ${{ steps.check-existing.outputs.resolved_version }}
         ASSAY_TARGET: ${{ steps.platform.outputs.target }}
       run: |
         set -euo pipefail
@@ -296,15 +326,6 @@ runs:
         VERSION="$ASSAY_VERSION"
         TARGET="$ASSAY_TARGET"
         REPO="Rul1an/assay"
-
-        # Resolve 'latest' to actual version
-        if [ "$VERSION" = "latest" ]; then
-          VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
-          if [ -z "$VERSION" ]; then
-            echo "::error::Failed to fetch latest version"
-            exit 1
-          fi
-        fi
 
         DOWNLOAD_URL="https://github.com/$REPO/releases/download/${VERSION}/assay-${VERSION}-${TARGET}.tar.gz"
         CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
@@ -373,16 +394,23 @@ runs:
       id: verify-install
       if: steps.check-existing.outputs.skip_install != 'true'
       shell: bash
+      env:
+        EXPECTED_VERSION: ${{ steps.check-existing.outputs.resolved_version_plain }}
       run: | # zizmor: ignore[github-env] v2 compatibility exports a literal install dir for later caller steps
         # v2 compatibility: later caller steps may invoke `assay` directly.
         # Keep exporting this literal install directory until a major-version contract change.
         printf '%s\n' "$HOME/.assay/bin" >> "$GITHUB_PATH"
         export PATH="$HOME/.assay/bin:$PATH"
 
-        if ! ~/.assay/bin/assay --version; then
+        if ! INSTALLED_VERSION="$(~/.assay/bin/assay --version 2>/dev/null | awk '{print $2}')"; then
           echo "::error::Assay installation verification failed"
           exit 1
         fi
+        if [ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]; then
+          echo "::error::Installed Assay version $INSTALLED_VERSION does not match expected $EXPECTED_VERSION"
+          exit 1
+        fi
+        ~/.assay/bin/assay --version
 
         echo "installed=true" >> $GITHUB_OUTPUT
 

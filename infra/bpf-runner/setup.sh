@@ -118,6 +118,14 @@ if ! (crontab -l 2>/dev/null | grep -q "free_disk.sh"); then
     echo "   -> Installed hourly cron: $RUNNER_DIR/scripts/free_disk.sh"
 fi
 
+# 5b. Install Assay latest-release updater (keeps global PATH binary current)
+install -m 0755 "$SCRIPT_DIR/update_assay_latest.sh" /usr/local/sbin/update-assay-latest
+install -m 0644 "$SCRIPT_DIR/assay-update.service" /etc/systemd/system/assay-update.service
+install -m 0644 "$SCRIPT_DIR/assay-update.timer" /etc/systemd/system/assay-update.timer
+systemctl daemon-reload
+systemctl enable --now assay-update.timer
+/usr/local/sbin/update-assay-latest
+
 if [ ! -f "$RUNNER_DIR/.runner" ]; then
     echo "   -> Downloading Runner Agent..."
     # Dynamic latest version fetch would be SOTA, but hardcoding known stable for reliability
