@@ -627,17 +627,30 @@ jobs:
             echo "::error::No release assets found in release/."
             exit 1
           fi
-          release_args=(
-            "$VERSION"
-            "${assets[@]}"
-            --title "Assay $VERSION"
-            --target "$GITHUB_SHA"
-            --notes-file release_notes.md
-          )
+          prerelease_flag=()
           if [[ "$VERSION" == *-rc* || "$VERSION" == *-beta* ]]; then
-            release_args+=(--prerelease)
+            prerelease_flag+=(--prerelease)
           fi
-          gh release create "${release_args[@]}"
+          # Idempotent publish. A prior partial run can leave an empty release
+          # for this tag, and `gh release create` then fails with "a release
+          # with the same tag name already exists", stranding the built assets
+          # (this is what happened to v3.33.0). If the release already exists,
+          # attach the assets with --clobber and refresh its notes/title
+          # instead of failing; otherwise create it fresh.
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists; uploading assets (--clobber) and refreshing metadata."
+            gh release upload "$VERSION" "${assets[@]}" --clobber
+            gh release edit "$VERSION" \
+              --title "Assay $VERSION" \
+              --notes-file release_notes.md \
+              "${prerelease_flag[@]}"
+          else
+            gh release create "$VERSION" "${assets[@]}" \
+              --title "Assay $VERSION" \
+              --target "$GITHUB_SHA" \
+              --notes-file release_notes.md \
+              "${prerelease_flag[@]}"
+          fi
 
   # ============================================================
   # Verify LSM Enforcement (Self-Hosted Gate)
