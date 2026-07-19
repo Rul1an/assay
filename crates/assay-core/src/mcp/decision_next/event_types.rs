@@ -35,6 +35,35 @@ pub const APPROVAL_RETENTION_NON_CLAIMS: &[&str] = &[
     "not_user_intent_truth",
 ];
 
+/// RESERVED retained-view class for an encrypted/opaque approval basis. No Assay path retains
+/// ciphertext today, so nothing emits this value; it is reserved so a record that does retain an
+/// encrypted body (imported or future) declares it instead of minting an ad-hoc value. A reader
+/// must treat this view as not readable: content-review claims over the basis cap at
+/// `incomplete` regardless of bundle/chain verification.
+#[allow(dead_code)] // reserved vocabulary: no emitter exists by design
+pub const APPROVAL_RETAINED_VIEW_ENCRYPTED: &str = "encrypted";
+/// Reserved field beside an `encrypted` retained view: the party holding the decryption key.
+/// Opacity is reviewer-relative — without this a reviewer cannot even tell whether the record
+/// is opaque *to them*.
+#[allow(dead_code)] // reserved vocabulary: no emitter exists by design
+pub const APPROVAL_ENCRYPTED_FIELD_KEY_HOLDER: &str = "approval_encryption_key_holder";
+/// Reserved field: SALTED commitment to the plaintext (salt disclosed together with the
+/// plaintext, never retained). Salted rather than a bare digest so low-entropy content is not
+/// dictionary-recoverable from the commitment; a retained commitment makes a later disclosure
+/// checkable without holding the key.
+#[allow(dead_code)] // reserved vocabulary: no emitter exists by design
+pub const APPROVAL_ENCRYPTED_FIELD_PLAINTEXT_COMMITMENT: &str = "approval_plaintext_commitment";
+/// Reserved field: media type of the plaintext the commitment covers.
+#[allow(dead_code)] // reserved vocabulary: no emitter exists by design
+pub const APPROVAL_ENCRYPTED_FIELD_PREIMAGE_CONTENT_TYPE: &str = "approval_preimage_content_type";
+/// Reserved field: hint where the plaintext or ciphertext may be found.
+#[allow(dead_code)] // reserved vocabulary: no emitter exists by design
+pub const APPROVAL_ENCRYPTED_FIELD_PAYLOAD_LOCATION: &str = "approval_payload_location";
+/// Reserved field: optional machine-readable reason the content is opaque
+/// (e.g. PII, trade secret, regulatory confidentiality).
+#[allow(dead_code)] // reserved vocabulary: no emitter exists by design
+pub const APPROVAL_ENCRYPTED_FIELD_OPACITY_REASON: &str = "approval_opacity_reason";
+
 /// Reason codes for tool decisions (SPEC-Mandate-v1.0.4 §7.10).
 pub mod reason_codes {
     // Policy decisions (P_*)
