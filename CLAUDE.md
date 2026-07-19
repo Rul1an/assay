@@ -20,7 +20,6 @@ crates/
   # Evidence + distribution
   assay-evidence/   Evidence bundles (tar.gz with manifest.json + events.ndjson), lint, diff, sanitize
   assay-registry/   Pack Registry client (HTTP, DSSE verification, OIDC auth, local caching, lockfile v2)
-  gateway-evidence-replay/  Deterministic replay verifier for gateway-path evidence bundles (standalone)
 
   # Policy + runtime enforcement
   assay-policy/     Policy compilation (Tier 1: kernel, Tier 2: userspace)
@@ -123,7 +122,7 @@ assay-sim -> assay-core, assay-evidence
 assay-ebpf -> assay-common
 ```
 
-Leaf crates (no internal dependencies): `assay-common`, `assay-canonical`, `assay-policy`, `assay-registry`, `assay-runner-schema`, `assay-runner-linux`, `gateway-evidence-replay`, `assay-xtask`.
+Leaf crates (no internal dependencies): `assay-common`, `assay-canonical`, `assay-policy`, `assay-registry`, `assay-runner-schema`, `assay-runner-linux`, `assay-xtask`.
 
 No circular dependencies. All dependencies flow in one direction.
 

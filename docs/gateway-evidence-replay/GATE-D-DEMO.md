@@ -17,9 +17,13 @@ Opening line:
 
 ## Run
 
+The verifier lives in its own repository, [Rul1an/gateway-evidence-replay](https://github.com/Rul1an/gateway-evidence-replay). It is deliberately not vendored here: a replay verifier is only worth anything if every copy computes the same verdict, and two buildable copies cannot guarantee that.
+
 ```bash
-cargo test -p gateway-evidence-replay --test demo_fixtures --test demo_tamper
-cargo run -p gateway-evidence-replay -- verify crates/gateway-evidence-replay/fixtures/gateway-path-v0/demo/clean-route.json --format gateway-path.v0 --json
+git clone https://github.com/Rul1an/gateway-evidence-replay && cd gateway-evidence-replay
+cargo test --locked --test demo_fixtures --test demo_tamper
+cargo run -- verify fixtures/gateway-path-v0/demo/clean-route.json --format gateway-path.v0 --json
+cargo run -- replay-pack fixtures/gateway-path-v0/demo --json
 ```
 
 The demo is digest-pinned:

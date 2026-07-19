@@ -13,7 +13,6 @@ members = [
   "assay-python-sdk", "crates/assay-policy", "crates/assay-evidence", "crates/assay-sim",
   "crates/assay-registry",
   "crates/assay-canonical",
-  "crates/gateway-evidence-replay",
   "crates/assay-runner-schema",
   "crates/assay-runner-core",
   "crates/assay-runner-linux",

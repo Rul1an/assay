@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+- Remove the vendored `gateway-evidence-replay` workspace crate. It remains available, and is now
+  only available, at [Rul1an/gateway-evidence-replay](https://github.com/Rul1an/gateway-evidence-replay),
+  where it has continued to develop. Nothing in the workspace depended on it as a library and no
+  release job shipped it, so this changes no Assay behaviour. The reason to keep a single home is
+  the tool's own claim: a replay verifier is worth something only if every copy derives the same
+  verdict from the same bytes, and two independently buildable copies had already drifted into
+  disagreeing about whether a demo pack manifest parses. The Gate-D decision records under
+  `docs/gateway-evidence-replay/` stay here and now point at that repository.
+
 ## [3.34.0] - 2026-07-19
 
 ### Added
