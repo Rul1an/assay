@@ -284,9 +284,12 @@ fn generate_golden_vectors_json() {
     // Write to fixture file
     let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/mandate_golden_vectors.json");
+    // Trailing newline keeps the regenerated file byte-identical to the
+    // committed one; without it every test run leaves the fixture dirty and
+    // the end-of-file-fixer pre-commit hook rewrites it mid-commit.
     std::fs::write(
         &fixture_path,
-        serde_json::to_string_pretty(&fixture).unwrap(),
+        format!("{}\n", serde_json::to_string_pretty(&fixture).unwrap()),
     )
     .expect("Failed to write fixture file");
     println!("\n✅ Written to: {}", fixture_path.display());
