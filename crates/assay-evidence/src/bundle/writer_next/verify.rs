@@ -1,5 +1,5 @@
 use crate::crypto::id::{compute_content_hash, compute_run_root};
-use crate::json_strict::validate_json_strict;
+use crate::json_strict::{validate_json_strict_with_depth, StrictJsonError};
 use crate::types::EvidenceEvent;
 use anyhow::Result;
 use flate2::read::GzDecoder;
@@ -30,26 +30,50 @@ pub struct VerifyResult {
 
 /// Verify a bundle's integrity and contract compliance.
 ///
-/// # Checks Performed
+/// # Reported error is the first fault along this order
 ///
-/// 1. **Structure**: manifest.json first, events.ndjson second
-/// 2. **Allowlist**: Only manifest.json and events.ndjson allowed
-/// 3. **Path Safety**: No traversal (..), no absolute paths
-/// 4. **No Duplicates**: Each file appears exactly once
-/// 5. **Hash Integrity**: events.ndjson sha256 matches manifest
-/// 6. **Size Integrity**: events.ndjson size matches manifest
-/// 7. **Content Hash**: Every event has required content_hash
-/// 8. **Hash Verification**: content_hash matches computed value
-/// 9. **ID Contract**: event.id == run_id:seq
-/// 10. **Sequence**: Contiguous 0, 1, 2, ... N-1
-/// 11. **Run ID Consistency**: All events have same run_id as manifest
-/// 12. **Event Count**: Matches manifest.event_count
-/// 13. **Run Root**: Recomputed value matches manifest.run_root
+/// Verification stops at the first fault, so a bundle carrying several at once
+/// reports exactly one code. The order below is normative, not an artefact of
+/// how the checks happen to be written: a second implementation must report the
+/// same code for the same bundle, or the code cannot serve as a conformance
+/// anchor. Anything that reorders these is a wire change.
+///
+/// Per tar entry:
+/// 1. **Path safety** — `SecurityAbsolutePath`, `SecurityPathTraversal`
+/// 2. **Path length** — `LimitPathLength`
+/// 3. **Declared size** — `LimitFileSize`
+/// 4. **Allowlist** — `ContractUnexpectedFile`
+/// 5. **Duplicates** — `ContractDuplicateFile`
+/// 6. **Entry order** — `ContractFileOrder` (manifest.json first)
+/// 7. **Manifest shape** — `ContractInvalidJson`, `ContractSchemaVersion`
+/// 8. **Declared vs actual size** — `IntegrityFileSizeMismatch`
+///
+/// Per NDJSON line:
+/// 9. **Line length** — `LimitLineBytes`
+/// 10. **Event count** — `LimitTotalEvents`
+/// 11. **Encoding and JSON shape** — `ContractInvalidJson`, `LimitJsonDepth`
+/// 12. **Event content hash** — `IntegrityEventHash`
+/// 13. **Sequence** — `ContractSequenceStart`, `ContractSequenceGap`
+/// 14. **Run id** — `ContractRunIdMismatch`
+///
+/// Whole file, after the last line:
+/// 15. **Byte count, then file hash** — `IntegrityFileSizeMismatch`, `IntegrityManifestHash`
+/// 16. **Declared event count** — `ContractSequenceGap`
+/// 17. **Run root** — `IntegrityRunRootMismatch`
+/// 18. **Gzip trailer** — `IntegrityGzip`
+///
+/// Path safety deliberately precedes every resource limit. Both are decided
+/// from the tar header alone, so neither is cheaper to answer, but a limit
+/// answered first would let a tightened configuration report an attack as a
+/// size problem and hide the security classification.
+///
+/// Because limits participate in the order, a conformance vector must pin the
+/// [`VerifyLimits`] it expects along with the expected code. The same bundle
+/// legitimately yields a different code under a different configuration.
 ///
 /// # Errors
 ///
-/// Returns detailed error with hints for common issues.
-/// Default verification using standard limits.
+/// Returns a [`VerifyError`] carrying the class and stable code.
 ///
 /// See `verify_bundle_with_limits` for custom strictness.
 pub fn verify_bundle<R: Read>(reader: R) -> Result<VerifyResult> {
@@ -59,10 +83,14 @@ pub fn verify_bundle<R: Read>(reader: R) -> Result<VerifyResult> {
 /// Verify a bundle with explicit resource limits.
 pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<VerifyResult> {
     let reader = EintrReader::new(reader);
-    let reader = LimitReader::new(reader, limits.max_bundle_bytes, "LimitBundleBytes");
+    let reader = LimitReader::new(reader, limits.max_bundle_bytes, ErrorCode::LimitBundleBytes);
 
     let decoder = GzDecoder::new(reader);
-    let limited_decoder = LimitReader::new(decoder, limits.max_decode_bytes, "LimitDecodeBytes");
+    let limited_decoder = LimitReader::new(
+        decoder,
+        limits.max_decode_bytes,
+        ErrorCode::LimitDecodeBytes,
+    );
     let mut archive = tar::Archive::new(limited_decoder);
 
     let mut manifest: Option<Manifest> = None;
@@ -71,36 +99,51 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
     let mut computed_run_root = String::new();
     let mut actual_event_count = 0;
 
-    let entries = archive.entries().map_err(|e| {
+    // A limit tripped inside the reader arrives already classified by
+    // `From<io::Error>`; anything else at this level is a malformed archive.
+    let as_tar_error = |e: std::io::Error| {
         let mut ve = VerifyError::from(e);
-        if ve.message.contains("LimitBundleBytes") {
-            ve.code = ErrorCode::LimitBundleBytes;
-            ve.class = ErrorClass::Limits;
-        } else if ve.message.contains("LimitDecodeBytes") {
-            ve.code = ErrorCode::LimitDecodeBytes;
-            ve.class = ErrorClass::Limits;
-        } else {
+        if ve.class != ErrorClass::Limits {
             ve.code = ErrorCode::IntegrityTar;
         }
-        ve.with_context("Gzip/Tar stream")
-    })?;
+        ve
+    };
+
+    let entries = archive
+        .entries()
+        .map_err(|e| as_tar_error(e).with_context("Gzip/Tar stream"))?;
 
     for (i, entry) in entries.enumerate() {
-        let entry = entry.map_err(|e| {
-            let mut ve = VerifyError::from(e);
-            if ve.message.contains("LimitBundleBytes") {
-                ve.code = ErrorCode::LimitBundleBytes;
-                ve.class = ErrorClass::Limits;
-            } else if ve.message.contains("LimitDecodeBytes") {
-                ve.code = ErrorCode::LimitDecodeBytes;
-                ve.class = ErrorClass::Limits;
-            } else {
-                ve.code = ErrorCode::IntegrityTar;
-            }
-            ve.with_context(format!("Entry #{}", i))
-        })?;
+        let entry = entry.map_err(|e| as_tar_error(e).with_context(format!("Entry #{}", i)))?;
         let path = entry.path().map_err(VerifyError::from)?.to_path_buf();
         let path_str = path.to_str().unwrap_or("");
+
+        // Path safety is judged before any resource limit. Both are decided from
+        // the header alone and neither needs a further byte, so ordering is free
+        // to choose — and a limit answered first would mask the security finding
+        // it shares an entry with. Tightening a limit must not make an attack
+        // report as a size problem.
+        for component in path.components() {
+            match component {
+                Component::Normal(_) | Component::CurDir => {}
+                Component::RootDir | Component::Prefix(_) => {
+                    return Err(VerifyError::new(
+                        ErrorClass::Security,
+                        ErrorCode::SecurityAbsolutePath,
+                        format!("Absolute path '{}'", path_str),
+                    )
+                    .into())
+                }
+                Component::ParentDir => {
+                    return Err(VerifyError::new(
+                        ErrorClass::Security,
+                        ErrorCode::SecurityPathTraversal,
+                        format!("Parent-directory component in '{}'", path_str),
+                    )
+                    .into())
+                }
+            }
+        }
 
         if path_str.len() > limits.max_path_len {
             return Err(VerifyError::new(
@@ -135,21 +178,6 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
             .into());
         }
 
-        for component in path.components() {
-            match component {
-                Component::Normal(_) => {}
-                Component::CurDir => {}
-                _ => {
-                    return Err(VerifyError::new(
-                        ErrorClass::Security,
-                        ErrorCode::SecurityPathTraversal,
-                        format!("Invalid path component in '{}'", path_str),
-                    )
-                    .into())
-                }
-            }
-        }
-
         if !ALLOWED_FILES.contains(&path_str) {
             return Err(VerifyError::new(
                 ErrorClass::Contract,
@@ -180,15 +208,10 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
 
             let mut content = Vec::new();
             let mut manifest_reader =
-                LimitReader::new(entry, limits.max_manifest_bytes, "LimitFileSize");
-            manifest_reader.read_to_end(&mut content).map_err(|e| {
-                let mut ve = VerifyError::from(e);
-                if ve.message.contains("LimitFileSize") {
-                    ve.code = ErrorCode::LimitFileSize;
-                    ve.class = ErrorClass::Limits;
-                }
-                ve
-            })?;
+                LimitReader::new(entry, limits.max_manifest_bytes, ErrorCode::LimitFileSize);
+            manifest_reader
+                .read_to_end(&mut content)
+                .map_err(VerifyError::from)?;
 
             let m: Manifest = serde_json::from_slice(&content).map_err(|e| {
                 let mut ve = VerifyError::from(e);
@@ -248,14 +271,7 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
             loop {
                 line_buf.clear();
                 let n = read_line_bounded(&mut reader, &mut line_buf, limits.max_line_bytes)
-                    .map_err(|e| {
-                        let mut ve = VerifyError::from(e);
-                        if ve.message.contains("LimitLineBytes") {
-                            ve.code = ErrorCode::LimitLineBytes;
-                            ve.class = ErrorClass::Limits;
-                        }
-                        ve
-                    })?;
+                    .map_err(VerifyError::from)?;
                 if n == 0 {
                     break;
                 }
@@ -305,12 +321,24 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                     )
                 })?;
 
-                validate_json_strict(line_str).map_err(|e| {
-                    VerifyError::new(
-                        ErrorClass::Contract,
-                        ErrorCode::ContractInvalidJson,
-                        format!("Security: {}", e),
-                    )
+                validate_json_strict_with_depth(line_str, limits.max_json_depth).map_err(|e| {
+                    // Nesting depth is a configured ceiling, so it reports as the
+                    // limit it is rather than as generic malformed JSON.
+                    match e {
+                        StrictJsonError::NestingTooDeep { depth } => VerifyError::new(
+                            ErrorClass::Limits,
+                            ErrorCode::LimitJsonDepth,
+                            format!(
+                                "Nesting depth {} exceeds limit {}",
+                                depth, limits.max_json_depth
+                            ),
+                        ),
+                        other => VerifyError::new(
+                            ErrorClass::Contract,
+                            ErrorCode::ContractInvalidJson,
+                            format!("Security: {}", other),
+                        ),
+                    }
                 })?;
 
                 let event: EvidenceEvent = serde_json::from_str(line_str).map_err(|e| {
@@ -456,13 +484,7 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
             Ok(_) => continue,
             Err(e) => {
                 let mut ve = VerifyError::from(e);
-                if ve.message.contains("LimitDecodeBytes") {
-                    ve.code = ErrorCode::LimitDecodeBytes;
-                    ve.class = ErrorClass::Limits;
-                } else if ve.message.contains("LimitBundleBytes") {
-                    ve.code = ErrorCode::LimitBundleBytes;
-                    ve.class = ErrorClass::Limits;
-                } else {
+                if ve.class != ErrorClass::Limits {
                     ve.code = ErrorCode::IntegrityGzip;
                     ve.class = ErrorClass::Integrity;
                 }

@@ -4,6 +4,41 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- `VerifyLimits::max_json_depth` is now honoured. The strict JSON validator compared against a
+  hardcoded ceiling and never saw the configured value, so an operator who lowered the limit to
+  harden a deployment silently kept the default of 64. Exceeding a configured depth now reports
+  `LimitJsonDepth` rather than the generic `ContractInvalidJson`. The default is unchanged at 64, so
+  only deployments that had tightened the knob see different behaviour — and those were not getting
+  what they asked for.
+- Path safety is now judged before any resource limit. A tar entry that both escaped its directory
+  and tripped a limit reported `LimitFileSize` or `LimitPathLength`, so tightening a limit hid the
+  security classification: the stricter the configuration, the less likely an operator was to learn
+  they had been attacked. Both checks are decided from the tar header alone, so neither is cheaper to
+  answer and the ordering was free to correct.
+- Absolute paths report `SecurityAbsolutePath` instead of being folded into `SecurityPathTraversal`.
+  The check already existed; only the reported code was wrong.
+- Resource limits now travel from reader to verifier as a typed marker inside the `io::Error` rather
+  than as a code name formatted into the message and recovered by substring match at six call sites.
+  Renaming a limit code used to degrade silently at runtime into a generic io failure instead of
+  failing the build.
+
+### Changed
+- The order in which verification reports faults is now normative, documented on `verify_bundle` and
+  pinned by `tests/verify_precedence_test.rs`. A bundle carrying several faults reports exactly one
+  code, and two implementations that reject it under different codes have not agreed with each other.
+  Because limits participate in that order, a conformance vector must pin the `VerifyLimits` it
+  expects alongside the expected code; see `docs/spec/EVIDENCE-CONTRACT-v1.md` §8.1.
+
+### Deprecated
+- `ErrorCode::IntegrityZipBomb`, `ContractMissingManifest`, `ContractTimestampRegression` and
+  `ContractInvalidEvent` are never emitted by the verifier and are scheduled for removal in 4.0.0.
+  Each carries a note naming the code emitted in its place. They are deprecated rather than removed
+  because removing a variant from a published enum is a breaking change. The release that removes
+  them should also add `#[non_exhaustive]` to `ErrorCode` and `ErrorClass`, so that later taxonomy
+  work — in particular splitting `ContractInvalidJson`, which currently covers five distinct faults —
+  stops requiring a major version of its own.
+
 ## [3.34.0] - 2026-07-19
 
 ### Added

@@ -1,3 +1,4 @@
+use super::errors::{ErrorCode, LimitExceeded};
 use serde::Deserialize;
 use std::io::Read;
 
@@ -68,16 +69,18 @@ pub(crate) struct LimitReader<R> {
     inner: R,
     limit: u64,
     read: u64,
-    error_tag: &'static str,
+    code: ErrorCode,
 }
 
 impl<R: Read> LimitReader<R> {
-    pub(crate) fn new(inner: R, limit: u64, error_tag: &'static str) -> Self {
+    /// `code` is the limit this reader enforces. It travels with the error so
+    /// the verifier classifies the failure by type rather than by message text.
+    pub(crate) fn new(inner: R, limit: u64, code: ErrorCode) -> Self {
         Self {
             inner,
             limit,
             read: 0,
-            error_tag,
+            code,
         }
     }
 }
@@ -85,10 +88,11 @@ impl<R: Read> LimitReader<R> {
 impl<R: Read> Read for LimitReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if self.read >= self.limit {
-            return Err(std::io::Error::other(format!(
-                "{}: exceeded limit of {} bytes",
-                self.error_tag, self.limit
-            )));
+            return Err(LimitExceeded {
+                code: self.code,
+                limit: self.limit,
+            }
+            .into_io());
         }
 
         let max_to_read = (self.limit - self.read).min(buf.len() as u64) as usize;

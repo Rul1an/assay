@@ -1,4 +1,15 @@
+use super::errors::{ErrorCode, LimitExceeded};
 use std::io::{BufRead, Read};
+
+/// The line-length ceiling was exceeded, as a typed marker the verifier can
+/// classify without matching on message text.
+fn line_limit(max: usize) -> std::io::Error {
+    LimitExceeded {
+        code: ErrorCode::LimitLineBytes,
+        limit: max as u64,
+    }
+    .into_io()
+}
 
 /// Many systems can deliver spurious interrupts during `read()`.
 /// Retry only `Interrupted` for a bounded number of attempts.
@@ -56,7 +67,7 @@ pub(crate) fn read_line_bounded<R: BufRead>(
                 };
 
                 if total_read + line_end > max {
-                    return Err(std::io::Error::other("LimitLineBytes: line exceeded limit"));
+                    return Err(line_limit(max));
                 }
 
                 buf.extend_from_slice(&available[..line_end]);
@@ -69,7 +80,7 @@ pub(crate) fn read_line_bounded<R: BufRead>(
             return Ok(total_read);
         }
         if total_read >= max && !done {
-            return Err(std::io::Error::other("LimitLineBytes: line exceeded limit"));
+            return Err(line_limit(max));
         }
     }
 }

@@ -79,3 +79,14 @@ pub fn from_str_strict<T: DeserializeOwned>(s: &str) -> Result<T, StrictJsonErro
 pub fn validate_json_strict(s: &str) -> Result<(), StrictJsonError> {
     json_strict_internal::run::validate_json_strict_impl(s)
 }
+
+/// Validate JSON string with a caller-supplied nesting ceiling.
+///
+/// Same checks as [`validate_json_strict`], but the depth limit comes from the
+/// caller instead of [`MAX_NESTING_DEPTH`]. A bundle verifier carries its own
+/// configured ceiling, and a limit it cannot lower is a knob that does nothing.
+///
+/// Pass [`MAX_NESTING_DEPTH`] to get the default behaviour.
+pub fn validate_json_strict_with_depth(s: &str, max_depth: usize) -> Result<(), StrictJsonError> {
+    json_strict_internal::run::validate_json_strict_with_depth_impl(s, max_depth)
+}

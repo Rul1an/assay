@@ -167,6 +167,18 @@ Before treating this document as normative, confirm:
 - **Container determinism:** Canonical writer MUST normalize tar/gzip headers; determinism_test pins container hash for that output.
 - **Fixture regen:** Pinned-hash locations are exactly named (see §6: `determinism_test.rs`, test `test_golden_hash`, three `assert_eq!` hex values).
 - **New event types (§4.1):** No new type without registry row + payload contract (concrete section for stable) + conformance test (verify + assaycontenthash content-hash-input invariant). Stable rows no "implied"; experimental/test-only temporary until full bar; promotion in version history.
+- **Rejection reporting (§8.1):** A bundle carrying several faults reports exactly one code, and which one is normative. Path safety outranks every resource limit; a conformance vector pins the limit configuration alongside the expected code.
+
+### 8.1 Rejection reporting
+
+Verification stops at the first fault, so a bundle that violates several rules at once yields exactly one error code. Two implementations that reject the same bundle under different codes have not agreed with each other; they have only both said no. The reported code is therefore part of the contract, not an implementation detail.
+
+The normative order is documented on `verify_bundle` in `crates/assay-evidence/src/bundle/writer_next/verify.rs` and pinned by `crates/assay-evidence/tests/verify_precedence_test.rs`. Two rules govern it:
+
+- **Path safety outranks every resource limit.** Both are decided from the tar header alone, so neither is cheaper to answer first. Ordering limits first would let a hardened configuration report an attack as a size problem, which means the stricter an operator's settings, the less likely they are to learn they were attacked. Absolute paths (`SecurityAbsolutePath`) and parent-directory components (`SecurityPathTraversal`) are distinguished.
+- **A conformance vector MUST pin the limit configuration it expects, not only the expected code.** Because limits participate in the order, the same bundle legitimately yields different codes under different `VerifyLimits`. A vector that names an expected code without naming the configuration is under-specified, and two conforming implementations may disagree on it without either being wrong.
+
+Codes are stable identifiers whose wire form is the variant name. Codes that the verifier no longer emits are deprecated for at least one minor release before removal, per §5.
 
 ## 9. References
 
