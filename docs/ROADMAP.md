@@ -1,17 +1,17 @@
 # Assay Roadmap 2026
 
-> **Status sync (2026-06-06, `v3.18.0` release prep):** the `v3.18.0`
-> release line carries the post-`v3.17.0` interop surfaces for coding-agent
-> governance docs, OTel `execute_tool` JSONL export, in-toto/DSSE evidence
-> bundle manifest attestation, and the `assay-it` Python claim-support scorer
-> for Inspect-oriented consumers. The Cargo workspace/package version in this
-> release-prep branch is **`3.18.0`**.
-> The current execution posture is: keep remaining CLI grouping trigger-gated,
-> keep Assay-Runner repository extraction gated, treat Assay-Harness `v3.13.0`
-> compatibility as verified by its release-binary compatibility CI check
-> ([run 26756652781](https://github.com/Rul1an/Assay-Harness/actions/runs/26756652781)),
-> and use the capability-diff / `assay-action` preview decision as the next
-> product-roadmap checkpoint.
+> **Status sync (2026-07-22, current release `v3.34.0`):** the released line
+> carries the approval-artifact retention digest and retained-view declaration,
+> fail-closed `ASSAY-W005` handling for opaque or unknown retained views, and
+> Runner socket-event attribution by cgroup. It also carries the earlier
+> `v3.32.0`/`v3.33.0` bounded-evidence work: skill supply-chain evidence,
+> gateway replay, caller-visible denied-call observations, and `ASSAY-W004`.
+> Commits on `main` after the tag are dependency maintenance plus a
+> golden-vector newline fix, not a new evidence-contract wave.
+> The current execution posture remains trigger-led: keep Assay-Runner
+> repository extraction and further CLI grouping gated, preserve claim
+> ceilings on every producer and lint rule, and do not turn retained-view or
+> enforcement evidence into a scalar safety, correctness, or trust verdict.
 >
 > **Historical status sync (2026-03-27, K1 formalized):** Q1 DX/refactor convergence is closed on `main` (RFC-001/002/003/004).
 > Evidence-as-a-product (ADR-025), protocol adapters (ADR-026), and MCP governance/enforcement (ADR-032 Wave24-Wave42) are materially implemented on `main`.
@@ -393,6 +393,17 @@ Status on `main`:
 - [ ] **Additional domain packs only after signals exist**: broader compliance surfaces remain downstream of evidence reality
 
 This section is the **`P2` execution surface**: ship small, honest packs first; defer broad compliance theater.
+
+### Route governance priorities (preserved)
+
+These remain the bounded route-governance priorities. They are not permission
+to broaden the active wave without a separate evidence and demand decision.
+
+| Priority | Capability | Why it remains load-bearing | Bounded output |
+|---|---|---|---|
+| **P0** | Tool taxonomy as first-class classes | Raw tool names are brittle across second sinks and tool hopping. | Source/sink/store/exec class map; policies and evidence record the matched class. |
+| **P0** | Session identity + state store contract | Route memory that spans calls needs an explicit, replayable identity boundary. | Session key, state-store interface, TTL/window semantics, and evidence import/export. |
+| **P1** | Coverage/completeness reports | Governance cannot read an unseen or undeclared route as clean. | Informational JSON/SARIF for seen vs declared tools, unknown tools, and route-coverage gaps. |
 
 ### D. Managed Evidence Store (Evaluate)
 
