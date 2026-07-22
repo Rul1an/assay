@@ -1,0 +1,197 @@
+{
+  "rows": [
+    {
+      "claim_class": "correlation",
+      "field": "run identity (run_id)",
+      "join_key": "assay.run.id",
+      "l1_trace": "run_arm_b_20260524T194017Z_2",
+      "l2_archive": "run_fixture_001",
+      "notes": ""
+    },
+    {
+      "claim_class": "provenance",
+      "field": "archive schema",
+      "join_key": "assay.archive.schema",
+      "l1_trace": "absent",
+      "l2_archive": "assay.runner.archive_manifest.v0",
+      "notes": ""
+    },
+    {
+      "claim_class": "tamper-evident binding",
+      "field": "manifest digest binding",
+      "join_key": "trace-attribute-absent",
+      "l1_trace": "absent",
+      "l2_archive": "sha256:c76eb655e4630235ad137a50427a47db4b70ab9dcb40ddf30ad3f3165ee9d1d8",
+      "notes": ""
+    },
+    {
+      "claim_class": "provenance",
+      "field": "GenAI provider",
+      "join_key": "span",
+      "l1_trace": "openai",
+      "l2_archive": "n/a (trace-side concept)",
+      "notes": ""
+    },
+    {
+      "claim_class": "provenance",
+      "field": "GenAI request model",
+      "join_key": "span",
+      "l1_trace": "absent",
+      "l2_archive": "n/a",
+      "notes": ""
+    },
+    {
+      "claim_class": "provenance",
+      "field": "GenAI response model",
+      "join_key": "span",
+      "l1_trace": "absent",
+      "l2_archive": "n/a",
+      "notes": ""
+    },
+    {
+      "claim_class": "cost/context",
+      "field": "GenAI input tokens",
+      "join_key": "span",
+      "l1_trace": "absent",
+      "l2_archive": "n/a (archive does not measure tokens)",
+      "notes": ""
+    },
+    {
+      "claim_class": "cost/context",
+      "field": "GenAI output tokens",
+      "join_key": "span",
+      "l1_trace": "absent",
+      "l2_archive": "n/a",
+      "notes": ""
+    },
+    {
+      "claim_class": "joinable behavior",
+      "field": "tool names",
+      "join_key": "tool name",
+      "l1_trace": "read_file",
+      "l2_archive": "read_file",
+      "notes": ""
+    },
+    {
+      "claim_class": "primary join key",
+      "field": "tool_call_id joinability",
+      "join_key": "joined:tc_runner_policy_001",
+      "l1_trace": "tc_runner_policy_001",
+      "l2_archive": "tc_runner_policy_001",
+      "notes": ""
+    },
+    {
+      "claim_class": "measured effect; bounded negative if health is clean",
+      "field": "filesystem paths",
+      "join_key": "none",
+      "l1_trace": "n/a (not in trace contract)",
+      "l2_archive": "present",
+      "notes": "/tmp/fixture/openai-agents-input.txt"
+    },
+    {
+      "claim_class": "measured effect",
+      "field": "network endpoints",
+      "join_key": "none",
+      "l1_trace": "n/a (not in trace contract)",
+      "l2_archive": "empty",
+      "notes": ""
+    },
+    {
+      "claim_class": "measured effect",
+      "field": "process execs",
+      "join_key": "none",
+      "l1_trace": "n/a",
+      "l2_archive": "present",
+      "notes": ""
+    },
+    {
+      "claim_class": "enforcement",
+      "field": "policy decisions",
+      "join_key": "tool_call_id when present",
+      "l1_trace": "n/a (unless custom)",
+      "l2_archive": "present",
+      "notes": ""
+    },
+    {
+      "claim_class": "measurement integrity",
+      "field": "ringbuf_drops",
+      "join_key": "archive health",
+      "l1_trace": "absent",
+      "l2_archive": "0",
+      "notes": ""
+    },
+    {
+      "claim_class": "measurement integrity",
+      "field": "cgroup correlation status",
+      "join_key": "assay.runner.correlation_status",
+      "l1_trace": "absent",
+      "l2_archive": "clean",
+      "notes": ""
+    }
+  ],
+  "runner_observation": {
+    "capability_surface": {
+      "filesystem_paths": [
+        "/tmp/fixture/openai-agents-input.txt"
+      ],
+      "mcp_tools": [
+        "read_file"
+      ],
+      "network_endpoints": [],
+      "policy_decisions": [
+        "allow:read_file"
+      ],
+      "process_execs": [
+        "/usr/bin/node"
+      ]
+    },
+    "correlation_status": "clean",
+    "manifest_digest": "sha256:c76eb655e4630235ad137a50427a47db4b70ab9dcb40ddf30ad3f3165ee9d1d8",
+    "observation_health": {
+      "cgroup_correlation": "clean",
+      "kernel_layer": "complete",
+      "notes": [],
+      "platform": "linux",
+      "policy_layer": "present",
+      "ringbuf_drops": 0,
+      "run_id": "run_fixture_001",
+      "schema": "assay.runner.observation_health.v0",
+      "sdk_layer": "present"
+    },
+    "run_id": "run_fixture_001",
+    "schema": "assay.runner.archive_manifest.v0",
+    "sdk_event_count": 3,
+    "sdk_tool_call_ids": [
+      "tc_runner_policy_001"
+    ],
+    "sdk_tools": [
+      "read_file"
+    ]
+  },
+  "schema": "assay.experiment.runner_vs_otel.field_matrix.v0",
+  "summary": {
+    "archive_sdk_events": 3,
+    "manifest_digest_binding": "trace-attribute-absent",
+    "tool_call_id_join": "joined:tc_runner_policy_001",
+    "trace_spans": 2
+  },
+  "trace_observation": {
+    "archive_schema": null,
+    "correlation_status": null,
+    "gen_ai_input_tokens": null,
+    "gen_ai_output_tokens": null,
+    "gen_ai_provider": "openai",
+    "gen_ai_request_model": null,
+    "gen_ai_response_model": null,
+    "manifest_digest": null,
+    "ringbuf_drops": null,
+    "run_id": "run_arm_b_20260524T194017Z_2",
+    "span_count": 2,
+    "tool_call_ids": [
+      "tc_runner_policy_001"
+    ],
+    "tool_names": [
+      "read_file"
+    ]
+  }
+}
