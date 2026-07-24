@@ -83,3 +83,64 @@ echo "Each call wrote an assay.enforcement_decision.v0 record (replayable)."
 echo "Non-claims: a deny is fail-closed caution, not a verdict on intent; an allow is the decision to"
 echo "forward, never proof the action happened; the mock performs no real GitHub call; the conformance"
 echo "signal is recorded beside the verdict and never changes or gates it."
+
+# ---- open profile: privileged-mcp-action/v0 (import + verify) ---------------------------------
+# Two of the scenarios above become evidence bundles under the open profile: the enforcement
+# records are imported byte-faithful, then the profile verifier recomputes the claim matrix from
+# the carried bytes alone. The matrix is the product; nothing here changes the verdicts above.
+
+# Locate the assay CLI (evidence import/verify), mirroring the proxy lookup. An installed assay
+# may predate the profile commands, so the chosen binary is validated before use.
+supports_profile() { "$1" evidence verify-privileged-mcp-action --help >/dev/null 2>&1; }
+if [ -x "../../target/debug/assay" ] && supports_profile "../../target/debug/assay"; then
+  ASSAY_CLI="$(cd ../.. && pwd)/target/debug/assay"
+elif command -v assay >/dev/null 2>&1 && supports_profile assay; then
+  ASSAY_CLI="assay"
+else
+  echo "building assay CLI (first run)..." >&2
+  (cd ../.. && cargo build -q -p assay-cli)
+  ASSAY_CLI="$(cd ../.. && pwd)/target/debug/assay"
+fi
+
+# capture <policy> <baseline> <mode> <dec_out> <obs_out>: one scenario, records kept, no output.
+capture() {
+  local policy="$1" baseline="$2" mode="$3" dec="$4" obs="$5"
+  : >"$dec"
+  printf '%s\n%s\n' "$INIT" "$CALL" \
+    | MOCK_MODE="$mode" "$ASSAY" proxy-enforce \
+        --upstream-command "$PY" --upstream-arg -u --upstream-arg "mock_github_mcp.py" \
+        --enforce-policy "$policy" \
+        --declared-mcp-manifest "$baseline" \
+        --enforcement-decision-out "$dec" \
+        --denied-call-observation-out "$obs" \
+        >/dev/null 2>&1 || true
+}
+
+# matrix <label> <bundle>: verify one bundle and print a compact claim-matrix line.
+matrix() {
+  local label="$1" bundle="$2"
+  "$ASSAY_CLI" evidence verify-privileged-mcp-action "$bundle" --format json \
+    | "$PY" -c '
+import json, sys
+label = sys.argv[1]
+report = json.load(sys.stdin)
+cells = " ".join("{}={}".format(name, cell["status"]) for name, cell in report["claims"].items())
+print("  {}: verdict={}  {}".format(label, report["verdict"], cells))
+' "$label"
+}
+
+echo
+echo "Open profile privileged-mcp-action/v0: import the records, recompute the claim matrix."
+capture policies/no-allowance.yaml baseline-approved.json approved "$WORK/pmadeny.ndjson" "$WORK/pmadeny-obs.ndjson"
+capture policies/allow.yaml        baseline-approved.json approved "$WORK/pmaallow.ndjson" "$WORK/pmaallow-obs.ndjson"
+
+"$ASSAY_CLI" evidence import privileged-mcp-action \
+  --decisions "$WORK/pmadeny.ndjson" --denied-observations "$WORK/pmadeny-obs.ndjson" \
+  --bundle-out "$WORK/pmadeny.bundle.tar.gz" 2>/dev/null
+"$ASSAY_CLI" evidence import privileged-mcp-action \
+  --decisions "$WORK/pmaallow.ndjson" \
+  --bundle-out "$WORK/pmaallow.bundle.tar.gz" 2>/dev/null
+
+matrix "denied path bundle " "$WORK/pmadeny.bundle.tar.gz"
+matrix "allowed path bundle" "$WORK/pmaallow.bundle.tar.gz"
+echo "The matrix is recomputed from carried bytes; delivery and side effect stay incomplete by design."

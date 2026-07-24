@@ -41,6 +41,24 @@ worth knowing about; it is evidence, not a denial.
 - observed behaviour is the proxy's classification of the call, not verification of the upstream
   side effect.
 
+## Open profile: claim matrix from the same records
+
+`run.sh` ends by turning two of the scenarios into evidence bundles under the
+`privileged-mcp-action/v0` open profile (spec: `docs/profiles/privileged-mcp-action/v0.md`). The
+enforcement records are imported byte-faithful and the profile verifier recomputes a claim matrix
+from the carried bytes alone:
+
+```bash
+assay evidence import privileged-mcp-action \
+  --decisions decisions.ndjson --denied-observations observations.ndjson \
+  --bundle-out action.bundle.tar.gz
+assay evidence verify-privileged-mcp-action action.bundle.tar.gz --format table
+```
+
+The denied path confirms both the recorded decision and the caller-visible denial; the allowed path
+confirms only the decision. `upstream_delivery` and `external_side_effect` stay incomplete in every
+row: no record here has the vantage to carry them, and the report says so in its non-claims.
+
 ## Wire it into a PR gate
 
 Project the decisions to SARIF and upload them to the GitHub Security tab. A denied privileged
