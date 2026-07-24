@@ -11,6 +11,7 @@ pub mod mcp_execution_records;
 pub mod mcp_supersession;
 pub mod mcp_tunnel_observed;
 pub mod openfeature_details;
+pub mod privileged_mcp_action;
 pub mod project_skill_bom;
 pub mod promptfoo_jsonl;
 pub mod pull;
@@ -149,6 +150,9 @@ pub enum EvidenceImportCmd {
     /// Import Promptfoo CLI JSONL assertion component results
     #[command(name = "promptfoo-jsonl")]
     PromptfooJsonl(promptfoo_jsonl::PromptfooJsonlArgs),
+    /// Import privileged-mcp-action producer NDJSON records (decisions, observations, establish)
+    #[command(name = "privileged-mcp-action")]
+    PrivilegedMcpAction(privileged_mcp_action::PrivilegedMcpActionArgs),
     /// Import an experimental tool-decision-truth carrier as a bound recipe row
     #[command(name = "tool-decision-truth")]
     ToolDecisionTruth(tool_decision_truth::ToolDecisionTruthArgs),
@@ -204,6 +208,9 @@ fn cmd_import(args: EvidenceImportArgs) -> Result<i32> {
         }
         EvidenceImportCmd::LiveKitToolAction(a) => livekit_tool_action::cmd_livekit_tool_action(a),
         EvidenceImportCmd::PromptfooJsonl(a) => promptfoo_jsonl::cmd_promptfoo_jsonl(a),
+        EvidenceImportCmd::PrivilegedMcpAction(a) => {
+            privileged_mcp_action::cmd_privileged_mcp_action(a)
+        }
         EvidenceImportCmd::ToolDecisionTruth(a) => tool_decision_truth::cmd_tool_decision_truth(a),
         EvidenceImportCmd::SkillSupplyChain(a) => skill_supply_chain::cmd_skill_supply_chain(a),
     }
