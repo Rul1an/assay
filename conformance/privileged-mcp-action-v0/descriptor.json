@@ -10,7 +10,10 @@
         "schema": "assay.enforcement_decision.v0",
         "cardinality": "exactly_one",
         "constraints": {
-          "decision": ["allow", "deny"],
+          "decision": [
+            "allow",
+            "deny"
+          ],
           "reason": [
             "unclassified_tool_call",
             "classification_incomplete",
@@ -48,8 +51,14 @@
           "caller_visible_error.origin": "assay-proxy"
         },
         "binding_key": {
-          "observation": ["call.tool_name", "call.target_digest"],
-          "decision": ["tool.name", "action.target_digest"]
+          "observation": [
+            "call.tool_name",
+            "call.target_digest"
+          ],
+          "decision": [
+            "tool.name",
+            "action.target_digest"
+          ]
         }
       },
       {
@@ -77,16 +86,43 @@
     ]
   },
   "stages": [
-    { "n": 1, "name": "bundle_integrity", "byte_pure": true },
-    { "n": 2, "name": "statement_well_formedness", "byte_pure": true },
-    { "n": 3, "name": "binding_validity", "byte_pure": true },
-    { "n": 4, "name": "claim_recompute", "byte_pure": true }
+    {
+      "n": 1,
+      "name": "bundle_integrity",
+      "byte_pure": true
+    },
+    {
+      "n": 2,
+      "name": "statement_well_formedness",
+      "byte_pure": true
+    },
+    {
+      "n": 3,
+      "name": "binding_validity",
+      "byte_pure": true
+    },
+    {
+      "n": 4,
+      "name": "claim_recompute",
+      "byte_pure": true
+    }
   ],
   "trust_relative_tier": "none_in_v0",
   "report": {
     "schema": "assay.privileged_mcp_action.verify.report.v0",
-    "integrity": ["valid", "invalid"],
-    "claim_status": ["confirmed", "incomplete", "refuted"],
+    "bundle_integrity": [
+      "pass",
+      "fail"
+    ],
+    "verdict": [
+      "valid",
+      "invalid"
+    ],
+    "claim_status": [
+      "confirmed",
+      "incomplete",
+      "refuted"
+    ],
     "claims": [
       "policy_decision_recorded",
       "caller_visible_denial",
@@ -115,14 +151,29 @@
   "bundle": {
     "canon": "jcs-rfc8785",
     "hash": "sha256",
-    "content_hash_input": ["specversion", "type", "datacontenttype", "subject?", "data"],
+    "content_hash_input": [
+      "specversion",
+      "type",
+      "datacontenttype",
+      "subject?",
+      "data"
+    ],
     "run_root": "sha256(concat(content_hash + \"\\n\"))",
-    "files": ["manifest.json", "events.ndjson"]
+    "files": [
+      "manifest.json",
+      "events.ndjson"
+    ]
   },
   "corpus": {
     "manifest": "MANIFEST.json",
-    "normative_surface": ["expected.bundle_integrity", "expected.verdict", "expected.claims"],
-    "informative": ["first_failure_informative"],
+    "normative_surface": [
+      "expected.bundle_integrity",
+      "expected.verdict",
+      "expected.claims"
+    ],
+    "informative": [
+      "first_failure_informative"
+    ],
     "maturity": "candidate_until_non_author_reproduction"
   }
 }
