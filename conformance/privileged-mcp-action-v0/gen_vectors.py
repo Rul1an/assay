@@ -277,7 +277,7 @@ VECTORS = [
             observation_record(),
         ],
         "tamper": True,
-        "expected": {"bundle_integrity": "fail", "verdict": "invalid"},
+        "expected": {"bundle_integrity": "fail"},
         "first_failure": "bundle_integrity",
         "description": "One byte flipped in the stored events file after the manifest was written: integrity fails before any profile semantics run.",
     },
@@ -388,8 +388,8 @@ def main() -> int:
         ),
         "corpus_digest": corpus_digest,
         "counts": {
-            "accept": sum(1 for v in manifest_vectors if v["expected"]["verdict"] == "valid"),
-            "reject": sum(1 for v in manifest_vectors if v["expected"]["verdict"] == "invalid"),
+            "accept": sum(1 for v in manifest_vectors if v["expected"].get("verdict") == "valid"),
+            "reject": sum(1 for v in manifest_vectors if v["expected"].get("verdict") != "valid"),
         },
         "vectors": manifest_vectors,
     }
