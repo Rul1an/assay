@@ -178,6 +178,8 @@ nav:
 
   - Configuration:
     - reference/config/index.md
+    - Privileged MCP Action Profile (v0): profiles/privileged-mcp-action/v0.md
+    - Privileged-Action Evidence Index: reference/privileged-action-evidence.md
     - Receipt Families: reference/receipt-families.md
     - Receipt Schema Registry: reference/receipt-schemas/README.md
     - mcp-eval.yaml: reference/config/eval-yaml.md

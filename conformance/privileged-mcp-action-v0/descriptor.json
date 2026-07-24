@@ -1,0 +1,179 @@
+{
+  "descriptor_schema": "assay.profile.descriptor.v0",
+  "profile": "privileged-mcp-action/v0",
+  "status": "experimental-open-profile",
+  "spec": "docs/profiles/privileged-mcp-action/v0.md",
+  "normative_uri": "https://docs.assay.dev/profiles/privileged-mcp-action/v0/",
+  "records": {
+    "required": [
+      {
+        "schema": "assay.enforcement_decision.v0",
+        "cardinality": "exactly_one",
+        "constraints": {
+          "decision": [
+            "allow",
+            "deny"
+          ],
+          "reason": [
+            "unclassified_tool_call",
+            "classification_incomplete",
+            "no_declared_allowance",
+            "credential_scope_unknown",
+            "credential_scope_insufficient",
+            "manifest_baseline_missing",
+            "manifest_observation_ambiguous",
+            "manifest_current_observation_incomplete",
+            "manifest_drifted_since_approval",
+            "allow"
+          ],
+          "drift_state": [
+            "satisfied",
+            "baseline_missing",
+            "current_observation_incomplete",
+            "observation_ambiguous",
+            "drifted",
+            "not_evaluated"
+          ],
+          "tool.name": "non_empty_string",
+          "action.target_digest": "sha256_hex64_required",
+          "fail_closed": "must_equal_decision_is_deny",
+          "non_claims": "must_include_producer_five_verbatim"
+        }
+      }
+    ],
+    "optional": [
+      {
+        "schema": "assay.denied_call_observation.v0",
+        "cardinality": "at_most_one",
+        "marker_triple": {
+          "schema": "assay.denied_call_observation.v0",
+          "caller_visible_error.code": -32042,
+          "caller_visible_error.origin": "assay-proxy"
+        },
+        "binding_key": {
+          "observation": [
+            "call.tool_name",
+            "call.target_digest"
+          ],
+          "decision": [
+            "tool.name",
+            "action.target_digest"
+          ]
+        }
+      },
+      {
+        "schema": "assay.manifest_establish.v0",
+        "cardinality": "at_most_one",
+        "role": "diagnostic_only_never_alters_claims",
+        "constraints": {
+          "establish_path": [
+            "no_establish_needed",
+            "established_then_allowed",
+            "established_then_denied",
+            "immediate_deny"
+          ],
+          "establish_attempted": "must_equal_run_outcome_not_not_performed"
+        }
+      }
+    ],
+    "deferred": [
+      "allow_response_observation",
+      "provider_audit_record",
+      "gateway_or_kernel_observation",
+      "multi_call_retries_concurrency",
+      "correlation_id",
+      "whole_action_verdict"
+    ]
+  },
+  "stages": [
+    {
+      "n": 1,
+      "name": "bundle_integrity",
+      "byte_pure": true
+    },
+    {
+      "n": 2,
+      "name": "statement_well_formedness",
+      "byte_pure": true
+    },
+    {
+      "n": 3,
+      "name": "binding_validity",
+      "byte_pure": true
+    },
+    {
+      "n": 4,
+      "name": "claim_recompute",
+      "byte_pure": true
+    }
+  ],
+  "trust_relative_tier": "none_in_v0",
+  "report": {
+    "schema": "assay.privileged_mcp_action.verify.report.v0",
+    "bundle_integrity": [
+      "pass",
+      "fail"
+    ],
+    "verdict": [
+      "valid",
+      "invalid"
+    ],
+    "claim_status": [
+      "confirmed",
+      "incomplete",
+      "refuted"
+    ],
+    "claims": [
+      "policy_decision_recorded",
+      "caller_visible_denial",
+      "upstream_delivery",
+      "external_side_effect"
+    ],
+    "source_class_vocabulary": {
+      "pinned_to": "gateway-path.v0",
+      "values": [
+        "producer_reported",
+        "issuer_attested",
+        "receiver_receipt",
+        "boundary_observed",
+        "third_party_observed",
+        "unknown"
+      ],
+      "v0_ceiling": "producer_reported"
+    },
+    "non_claims": [
+      "allow does not prove upstream delivery",
+      "deny does not establish maliciousness",
+      "caller-visible denial does not prove external side-effect absence",
+      "bundle integrity does not upgrade source class"
+    ]
+  },
+  "bundle": {
+    "canon": "jcs-rfc8785",
+    "hash": "sha256",
+    "content_hash_input": [
+      "specversion",
+      "type",
+      "datacontenttype",
+      "subject?",
+      "data"
+    ],
+    "run_root": "sha256(concat(content_hash + \"\\n\"))",
+    "files": [
+      "manifest.json",
+      "events.ndjson"
+    ]
+  },
+  "corpus": {
+    "manifest": "MANIFEST.json",
+    "normative_surface": [
+      "expected.bundle_integrity",
+      "expected.verdict",
+      "expected.claims"
+    ],
+    "informative": [
+      "first_failure_informative"
+    ],
+    "maturity": "candidate_until_non_author_reproduction"
+  }
+}
