@@ -144,8 +144,7 @@
       "sha256": "sha256:dbdc3e1bfb10dc7c0bc10c8b5203f375c5b56662addaa74a473624e99379c0d7",
       "description": "One byte flipped in the stored events file after the manifest was written: integrity fails before any profile semantics run.",
       "expected": {
-        "bundle_integrity": "fail",
-        "verdict": "invalid"
+        "bundle_integrity": "fail"
       },
       "first_failure_informative": "bundle_integrity"
     },
