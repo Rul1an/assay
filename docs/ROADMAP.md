@@ -349,6 +349,10 @@ For `T1a` and `T1b`, the roadmap stays explicit about what the MVP does **not** 
 
 ### A. Protocol Adapters (Adapter-First Strategy)
 
+> Positioning note: the shipped adapters are maintained as supporting capabilities around the
+> privileged MCP action evidence line, per [ADR-042](architecture/ADR-042-evidence-first-positioning.md).
+> Any further protocol breadth is a separate maintainer decision, not a committed direction.
+
 Lightweight adapters that map protocol-specific events to Assay's `EvidenceEvent` + policy hooks:
 
 | Adapter | Protocol | Focus |
@@ -374,6 +378,9 @@ Status on `main`:
 **AAIF governance note:** MCP and A2A are now under the Agentic AI Foundation (Linux Foundation, Dec 2025). This reduces protocol fragmentation risk and makes adapter investments more durable.
 
 ### B. Connectors
+
+> The unchecked items below are monitoring candidates, not committed work.
+
 - [ ] **SIEM**: Splunk / Microsoft Sentinel export adapters
 - [x] **CI/CD**: GitHub Actions v2 ([Rul1an/assay-action@v2](https://github.com/marketplace/actions/assay-ai-agent-security)) / GitLab CI integration
 - [ ] **GitHub App**: Native policy drift detection in PRs
@@ -422,6 +429,10 @@ If yes, implement per [ADR-009](./architecture/ADR-009-WORM-Storage.md) and [ADR
 ## Q4 2026: Platform Features
 
 **Objective:** Advanced capabilities for larger deployments.
+
+> Status: everything in this section is exploratory and gated on demand signals; none of it is a
+> committed direction. The committed line stays privileged MCP action evidence
+> ([ADR-042](architecture/ADR-042-evidence-first-positioning.md)).
 
 ### A. Governance Dashboard (If Managed Store Exists)
 - [ ] **Policy Drift**: Trend lines, anomaly detection
