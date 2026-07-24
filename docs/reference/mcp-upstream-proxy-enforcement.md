@@ -1,7 +1,7 @@
 # MCP upstream proxy — enforcing `tools/call` mode (P61e review-spec)
 
 Status: **shipped** (assay v3.24.0, `proxy-enforce`); this review-spec is kept as the P61e design of
-record. A new arc and the heaviest risk class in the proxy line. It extends
+record. This is the heaviest risk class in the proxy line. It extends
 the shipped, opt-in [manifest-observation proxy](mcp-upstream-proxy-mode.md) (P61a–d, assay v3.23.0)
 from observe-only to **enforcing**: it forwards a privileged `tools/call` only after a fail-closed
 policy decision. Tracked as [#1624]. The binding decisions are agreed (§16, "Resolved decisions"); this

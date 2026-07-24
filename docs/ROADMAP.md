@@ -432,12 +432,13 @@ If yes, implement per [ADR-009](./architecture/ADR-009-WORM-Storage.md) and [ADR
 
 > Status: everything in this section is exploratory and gated on demand signals; none of it is a
 > committed direction. The committed line stays privileged MCP action evidence
-> ([ADR-042](architecture/ADR-042-evidence-first-positioning.md)).
+> ([ADR-042](architecture/ADR-042-evidence-first-positioning.md)). Items on ADR-042's stop list
+> (aggregate scores among them) stay refused regardless of demand unless that ADR is superseded.
 
 ### A. Governance Dashboard (If Managed Store Exists)
 - [ ] **Policy Drift**: Trend lines, anomaly detection
-- [ ] **Degradation Reports**: Evidence health score
-- [ ] **Env Strictness Score**: Compliance posture metrics
+- [ ] **Degradation Reports**: per-axis evidence health readouts (never an aggregate score; see ADR-042)
+- [ ] **Env Strictness Posture**: per-control compliance readouts (never an aggregate score; see ADR-042)
 
 ### B. Assurance & Audit Readiness (If Managed Store Exists)
 - [ ] **Policy Exceptions**: Waivers with expiry, owner, rationale; audit trail for compliance exceptions

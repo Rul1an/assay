@@ -11,7 +11,7 @@ observe path. This is additive; neither path migrates to or deprecates the other
 The enforcing path (the opt-in `assay-mcp-server proxy-enforce` mode, shipped in assay v3.24.0)
 decides each privileged `tools/call` before forwarding and records the decision as evidence:
 
-```
+```text
 tools/call under review
   -> pre-call manifest-establish journey      (assay.manifest_establish.v0, establish path only,
                                                never the verdict)

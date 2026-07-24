@@ -219,8 +219,9 @@ P61b  stdio upstream connection manager + initialize/initialized + tools/list fo
 P61c  tools/list pagination tracker + emit assay.mcp_manifest_observed.v0 + proxy observation-health   [SHIPPED v3.23.0]
 P61d  explicit proxy_unsupported behavior for tools/call (and non-allowlisted methods) in
       manifest-observation mode, with tests proving privileged calls are never forwarded               [SHIPPED v3.23.0]
-P61e  LATER, separate arc: enforcing tools/call proxy with a fail-closed policy decision point and the
-      full confused-deputy mitigations — only if/when specified (review-spec first)                    [NOT STARTED]
+P61e  separate arc: enforcing tools/call proxy with a fail-closed policy decision point and the
+      full confused-deputy mitigations, specified in mcp-upstream-proxy-enforcement.md and shipped
+      as the opt-in proxy-enforce mode                                                                 [SHIPPED v3.24.0]
 ```
 
 P61b carries the **negative forwarding invariant test from day one**: a `tools/call` sent in
