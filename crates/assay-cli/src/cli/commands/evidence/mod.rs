@@ -22,6 +22,7 @@ pub mod skill_supply_chain;
 pub mod skill_supply_chain_capture;
 pub mod store_status;
 pub mod tool_decision_truth;
+pub mod verify_privileged_mcp_action;
 pub mod verify_skill_supply_chain;
 pub mod verify_tool_decision_truth;
 
@@ -50,6 +51,9 @@ pub enum EvidenceCmd {
     /// Verify experimental tool-decision-truth recipe rows against their carriers in a bundle
     #[command(name = "verify-tool-decision-truth")]
     VerifyToolDecisionTruth(verify_tool_decision_truth::VerifyToolDecisionTruthArgs),
+    /// Verify a bundle against the privileged-mcp-action/v0 open profile (claim matrix output)
+    #[command(name = "verify-privileged-mcp-action")]
+    VerifyPrivilegedMcpAction(verify_privileged_mcp_action::VerifyPrivilegedMcpActionArgs),
     /// Verify experimental skill supply-chain carriers against the pinned contract in a bundle
     #[command(name = "verify-skill-supply-chain")]
     VerifySkillSupplyChain(verify_skill_supply_chain::VerifySkillSupplyChainArgs),
@@ -172,6 +176,9 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
         }
         EvidenceCmd::VerifyToolDecisionTruth(a) => {
             verify_tool_decision_truth::cmd_verify_tool_decision_truth(a)
+        }
+        EvidenceCmd::VerifyPrivilegedMcpAction(a) => {
+            verify_privileged_mcp_action::cmd_verify_privileged_mcp_action(a)
         }
         EvidenceCmd::VerifySkillSupplyChain(a) => {
             verify_skill_supply_chain::cmd_verify_skill_supply_chain(a)
