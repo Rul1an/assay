@@ -1,8 +1,8 @@
 <p align="center">
   <h1 align="center">Assay</h1>
   <p align="center">
-    <strong>Policy-as-code for MCP agents: enforce what a tool call can do, prove what it did, stay honest about what you can't.</strong><br />
-    <span>A deterministic, fail-closed gate for MCP tool calls — with real kernel-level (eBPF/LSM) enforcement on Linux and offline-verifiable evidence. CI-native, no backend, bounded by design.</span>
+    <strong>The open, recomputable evidence profile for privileged MCP tool actions.</strong><br />
+    <span>Assay records what a privileged tool call decided, what was observed, and what stays unproven, so a reviewer can replay the claim offline instead of trusting the agent's account of itself. Enforcement is deterministic and fail-closed, and the enforcing proxy is the reference producer rather than the contract itself. Kernel-level (eBPF/LSM) observation on Linux is an optional stronger vantage. CI-native, no backend, bounded by design.</span>
   </p>
   <p align="center">
     <a href="https://crates.io/crates/assay-cli"><img src="https://img.shields.io/crates/v/assay-cli.svg" alt="Crates.io"></a>
@@ -22,6 +22,8 @@
 ---
 
 Agents got real tool access through MCP — and tool poisoning, rug pulls, and confused-deputy OAuth came with it. Most tools scan a server or filter a prompt. Assay sits at the tool-call boundary and does three things, in order.
+
+**One golden path:** [examples/privileged-action-gate/](examples/privileged-action-gate/) runs the enforcing proxy against a privileged action, offline, and writes the replayable evidence record a reviewer can check without trusting the agent. Start there.
 
 ### Enforce, prove, stay honest
 
