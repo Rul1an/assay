@@ -106,6 +106,7 @@ fi
 capture() {
   local policy="$1" baseline="$2" mode="$3" dec="$4" obs="$5"
   : >"$dec"
+  : >"$obs"
   printf '%s\n%s\n' "$INIT" "$CALL" \
     | MOCK_MODE="$mode" "$ASSAY" proxy-enforce \
         --upstream-command "$PY" --upstream-arg -u --upstream-arg "mock_github_mcp.py" \
