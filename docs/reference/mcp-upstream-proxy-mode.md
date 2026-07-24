@@ -3,10 +3,10 @@
 Status: **shipped in assay v3.23.0** — manifest-observation v0 (P61a design, P61b forwarding skeleton,
 P61c live `tools/list` observation + `assay.mcp_manifest_observed.v0` emission, P61d denied-method
 hardening). The enforcing `tools/call` proxy (P61e) is a separate arc, specified in
-[mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md) (review-spec, no code) — a heavier
-security boundary (caller authorization, upstream credential use, a policy decision before forwarding,
-confused-deputy prevention, `proxy_denied` semantics, side-effect-evidence interaction) that needs its
-own review-spec before any code. This doc remains the design of record for the shipped manifest-
+[mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md) and shipped as the opt-in
+`proxy-enforce` mode in assay v3.24.0: a heavier security boundary (caller authorization, upstream
+credential use, a policy decision before forwarding, confused-deputy prevention, `proxy_denied`
+semantics, side-effect-evidence interaction) that got its own review-spec before any code. This doc remains the design of record for the shipped manifest-
 observation mode. Related: [mcp-manifest-drift.md](mcp-manifest-drift.md) (the artifact this mode
 feeds) and the [privileged-action evidence](privileged-action-evidence.md) set.
 
