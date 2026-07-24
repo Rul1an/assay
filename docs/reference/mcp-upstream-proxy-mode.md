@@ -3,10 +3,10 @@
 Status: **shipped in assay v3.23.0** — manifest-observation v0 (P61a design, P61b forwarding skeleton,
 P61c live `tools/list` observation + `assay.mcp_manifest_observed.v0` emission, P61d denied-method
 hardening). The enforcing `tools/call` proxy (P61e) is a separate arc, specified in
-[mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md) (review-spec, no code) — a heavier
-security boundary (caller authorization, upstream credential use, a policy decision before forwarding,
-confused-deputy prevention, `proxy_denied` semantics, side-effect-evidence interaction) that needs its
-own review-spec before any code. This doc remains the design of record for the shipped manifest-
+[mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md) and shipped as the opt-in
+`proxy-enforce` mode in assay v3.24.0: a heavier security boundary (caller authorization, upstream
+credential use, a policy decision before forwarding, confused-deputy prevention, `proxy_denied`
+semantics, side-effect-evidence interaction) that got its own review-spec before any code. This doc remains the design of record for the shipped manifest-
 observation mode. Related: [mcp-manifest-drift.md](mcp-manifest-drift.md) (the artifact this mode
 feeds) and the [privileged-action evidence](privileged-action-evidence.md) set.
 
@@ -219,8 +219,9 @@ P61b  stdio upstream connection manager + initialize/initialized + tools/list fo
 P61c  tools/list pagination tracker + emit assay.mcp_manifest_observed.v0 + proxy observation-health   [SHIPPED v3.23.0]
 P61d  explicit proxy_unsupported behavior for tools/call (and non-allowlisted methods) in
       manifest-observation mode, with tests proving privileged calls are never forwarded               [SHIPPED v3.23.0]
-P61e  LATER, separate arc: enforcing tools/call proxy with a fail-closed policy decision point and the
-      full confused-deputy mitigations — only if/when specified (review-spec first)                    [NOT STARTED]
+P61e  separate arc: enforcing tools/call proxy with a fail-closed policy decision point and the
+      full confused-deputy mitigations, specified in mcp-upstream-proxy-enforcement.md and shipped
+      as the opt-in proxy-enforce mode                                                                 [SHIPPED v3.24.0]
 ```
 
 P61b carries the **negative forwarding invariant test from day one**: a `tools/call` sent in

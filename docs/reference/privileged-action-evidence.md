@@ -5,7 +5,21 @@ through MCP tool calls. Kernel and network enforcement see that an agent connect
 not see that, through a tool call, it added a deploy key to a repository or a member to a workspace.
 That is the gap this set of records covers.
 
-The pieces compose into one chain:
+The pieces compose into one chain, fed by two sibling paths that coexist: an enforcing path and an
+observe path. This is additive; neither path migrates to or deprecates the other.
+
+The enforcing path (the opt-in `assay-mcp-server proxy-enforce` mode, shipped in assay v3.24.0)
+decides each privileged `tools/call` before forwarding and records the decision as evidence:
+
+```text
+tools/call under review
+  -> pre-call manifest-establish journey      (assay.manifest_establish.v0, establish path only,
+                                               never the verdict)
+  -> fail-closed allow or deny, with reason   (assay.enforcement_decision.v0)
+  -> caller-visible deny observation          (assay.denied_call_observation.v0, opt-in sibling)
+```
+
+The observe-path carriers record and review what was seen around a call:
 
 ```
 observed tool call
@@ -20,6 +34,9 @@ observed tool call
 
 | Record | What it carries | Reference |
 |--------|-----------------|-----------|
+| `assay.enforcement_decision.v0` | the enforcing proxy's per-call allow or deny: decision, precedence-pinned reason, `fail_closed`, drift state, credential alias (never the token) | [mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md) |
+| `assay.manifest_establish.v0` | the bounded pre-call re-list journey (establish path and run outcome), kept separate from the verdict | [mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md) |
+| `assay.denied_call_observation.v0` | opt-in caller-visible proxy-deny observation, kept separate from `assay.enforcement_decision.v0` verdict records | [mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md) |
 | `assay.tool_decision_surface.v0` | per-call: server, classified action + projected target, decision, response, redaction | [tool-decision-surface.md](tool-decision-surface.md) |
 | `assay.declared_tool_surface.v0` | declared/allowed privileged actions, for observed-vs-declared review | [declared-tool-surface.md](declared-tool-surface.md) |
 | `assay.tool_decision_truth.v0` | experimental declared-vs-observed policy-decision carrier, digest, verdict, and pack-row primitive | [tool-decision-truth.md](tool-decision-truth.md) |
@@ -72,17 +89,23 @@ observed tool definitions and a consumer that reviews a supplied artifact agains
 manifest-digest baseline, resolving a mismatch to `pending_tool_manifest_review`; and (assay v3.23.0)
 the **MCP upstream manifest-observation proxy mode**, which observes a live upstream `tools/list` and
 emits that artifact with honest completeness, while never executing tools through the proxy (see
-[mcp-upstream-proxy-mode.md](mcp-upstream-proxy-mode.md)).
+[mcp-upstream-proxy-mode.md](mcp-upstream-proxy-mode.md)); and (assay v3.24.0, P61e) the **enforcing
+`tools/call` proxy** (`assay-mcp-server proxy-enforce`), an explicit opt-in mode that decides each
+privileged `tools/call` before forwarding through fail-closed caller-allowance, credential-scope, and
+manifest-drift gates and emits the per-call `assay.enforcement_decision.v0` record, joined by the
+`assay.manifest_establish.v0` establish journey (v3.25.0) and the opt-in
+`assay.denied_call_observation.v0` deny observation (v3.33.0); spec:
+[mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md), runnable end to end in
+[examples/privileged-action-gate](../../examples/privileged-action-gate/).
 
 **Experiment-only (characterized, not a shipped feature):** the credential-overbreadth distribution
 (the scope lattice is a static model, not a provider-verified taxonomy); MCP tool lifecycle; the
 tool-decision truth-layer primitives and conformance vectors; and an OTel log-based event
 projection.
 
-**Parked (needs a separate design before any code):** granular per-tool manifest drift; and the
-enforcing `tools/call` proxy (a heavier security boundary — caller authorization, upstream credential
-use, a policy decision before forwarding, confused-deputy prevention — specified as a review-spec in
-[mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md), no code yet).
+**Parked (needs a separate design before any code):** granular per-tool manifest drift. (The
+enforcing `tools/call` proxy previously listed here shipped as `proxy-enforce` in assay v3.24.0; see
+the shipped list above.)
 
 The load-bearing boundary for the manifest line: **live upstream observation was not a small wiring
 step.** `assay-mcp-server` terminates the protocol and serves its own tools, so observing an upstream

@@ -1,6 +1,7 @@
 # MCP upstream proxy — enforcing `tools/call` mode (P61e review-spec)
 
-Status: **review-spec, no code.** A new arc and the heaviest risk class in the proxy line. It extends
+Status: **shipped** (assay v3.24.0, `proxy-enforce`); this review-spec is kept as the P61e design of
+record. This is the heaviest risk class in the proxy line. It extends
 the shipped, opt-in [manifest-observation proxy](mcp-upstream-proxy-mode.md) (P61a–d, assay v3.23.0)
 from observe-only to **enforcing**: it forwards a privileged `tools/call` only after a fail-closed
 policy decision. Tracked as [#1624]. The binding decisions are agreed (§16, "Resolved decisions"); this
@@ -349,7 +350,7 @@ P61e-c  split gate-by-gate, each fail-closed and independently tested, NO forwar
         forward path: a call that clears every gate is forwarded; pdp_gate_unavailable is removed.
         (SHIPPED.)
 P61e-d  the assay.enforcement_decision.v0 record + the side-effect-evidence interaction (asserted),
-        kept separate from the observation artifact; Plimsoll consumes it separately (later). (SHIPPED:
+        kept separate from the observation artifact; a downstream consumer reads it separately. (SHIPPED:
         opt-in --enforcement-decision-out NDJSON, one record per decision, allow+deny, fail-closed on
         an unrecordable allow.)
 ```
