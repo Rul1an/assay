@@ -1,0 +1,230 @@
+{
+  "suite": "privileged-mcp-action-v0-conformance",
+  "profile": "privileged-mcp-action/v0",
+  "spec": "docs/profiles/privileged-mcp-action/v0.md",
+  "generator": "gen_vectors.py (single generator; byte-deterministic)",
+  "normative_surface": "expected.bundle_integrity, expected.verdict and expected.claims are the normative comparison surface; first_failure_informative is this generator's own vocabulary and is informative only",
+  "corpus_digest_method": "sha256 over concat(vector sha256 + \"\\n\") in listed order, mirroring the bundle run_root construction",
+  "corpus_digest": "sha256:a943120f6b142d7e4e45c357dc06cddaeb596c90e935ac0c8e26856425757571",
+  "counts": {
+    "accept": 5,
+    "reject": 8
+  },
+  "vectors": [
+    {
+      "id": "ok-001-deny-bound-observation",
+      "file": "vectors/ok-001-deny-bound-observation.bundle.tar.gz",
+      "sha256": "sha256:424e0b646474e9bf667d640db89f4dd90e22d1aaa410df9f9a58c67bc35c8788",
+      "description": "Deny with a digest-bound caller-visible denial observation: both confirmable claims confirm; delivery and side effect stay incomplete.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "valid",
+        "claims": {
+          "policy_decision_recorded": {
+            "status": "confirmed",
+            "source_class": "producer_reported"
+          },
+          "caller_visible_denial": {
+            "status": "confirmed",
+            "source_class": "producer_reported"
+          },
+          "upstream_delivery": {
+            "status": "incomplete"
+          },
+          "external_side_effect": {
+            "status": "incomplete"
+          }
+        }
+      }
+    },
+    {
+      "id": "ok-002-deny-observation-missing",
+      "file": "vectors/ok-002-deny-observation-missing.bundle.tar.gz",
+      "sha256": "sha256:006f82172b11d9666e76aa448fae3860c3be89d21c165d237eb25ab5fea39ca7",
+      "description": "Deny without an observation (a denied notification produces no caller-visible record): the decision confirms, the caller-visible denial stays incomplete.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "valid",
+        "claims": {
+          "policy_decision_recorded": {
+            "status": "confirmed",
+            "source_class": "producer_reported"
+          },
+          "caller_visible_denial": {
+            "status": "incomplete"
+          },
+          "upstream_delivery": {
+            "status": "incomplete"
+          },
+          "external_side_effect": {
+            "status": "incomplete"
+          }
+        }
+      }
+    },
+    {
+      "id": "ok-003-allow-no-outcome-observation",
+      "file": "vectors/ok-003-allow-no-outcome-observation.bundle.tar.gz",
+      "sha256": "sha256:6419d2f7053c906a05af284cff58069e690ce2412533cd1425031530b8f666a3",
+      "description": "Allow: the decision confirms and nothing else does. An allow is the decision to forward, never delivery or side-effect proof.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "valid",
+        "claims": {
+          "policy_decision_recorded": {
+            "status": "confirmed",
+            "source_class": "producer_reported"
+          },
+          "caller_visible_denial": {
+            "status": "incomplete"
+          },
+          "upstream_delivery": {
+            "status": "incomplete"
+          },
+          "external_side_effect": {
+            "status": "incomplete"
+          }
+        }
+      }
+    },
+    {
+      "id": "ok-004-allow-with-diagnostic-establish",
+      "file": "vectors/ok-004-allow-with-diagnostic-establish.bundle.tar.gz",
+      "sha256": "sha256:d1a80cea3b313807fa3fdd73836e2bc69b6967970bc107045b0f811ce330533a",
+      "description": "The establish record is diagnostic journey only: its presence changes no claim cell.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "valid",
+        "claims": {
+          "policy_decision_recorded": {
+            "status": "confirmed",
+            "source_class": "producer_reported"
+          },
+          "caller_visible_denial": {
+            "status": "incomplete"
+          },
+          "upstream_delivery": {
+            "status": "incomplete"
+          },
+          "external_side_effect": {
+            "status": "incomplete"
+          }
+        }
+      }
+    },
+    {
+      "id": "ok-005-allow-contradicted-by-denial",
+      "file": "vectors/ok-005-allow-contradicted-by-denial.bundle.tar.gz",
+      "sha256": "sha256:06f8630d054c968194f55a7389581c6d4f9b000968fb04a49d3eab0939cd5258",
+      "description": "An allow decision beside a digest-bound denial observation for the same (tool, target): the caller-visible outcome is refuted, and the contradiction is the finding.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "valid",
+        "claims": {
+          "policy_decision_recorded": {
+            "status": "confirmed",
+            "source_class": "producer_reported"
+          },
+          "caller_visible_denial": {
+            "status": "refuted",
+            "source_class": "producer_reported"
+          },
+          "upstream_delivery": {
+            "status": "incomplete"
+          },
+          "external_side_effect": {
+            "status": "incomplete"
+          }
+        }
+      }
+    },
+    {
+      "id": "bad-101-tampered-bundle",
+      "file": "vectors/bad-101-tampered-bundle.bundle.tar.gz",
+      "sha256": "sha256:dbdc3e1bfb10dc7c0bc10c8b5203f375c5b56662addaa74a473624e99379c0d7",
+      "description": "One byte flipped in the stored events file after the manifest was written: integrity fails before any profile semantics run.",
+      "expected": {
+        "bundle_integrity": "fail",
+        "verdict": "invalid"
+      },
+      "first_failure_informative": "bundle_integrity"
+    },
+    {
+      "id": "bad-102-missing-target-digest",
+      "file": "vectors/bad-102-missing-target-digest.bundle.tar.gz",
+      "sha256": "sha256:a64859e51dc3e59f8857441918f513966e4fb79c3472ec897fc3e2d73f1fc35e",
+      "description": "A decision with a null target digest cannot be bound and falls outside the profile: v0 covers classified privileged actions only.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "first_failure_informative": "target_digest_missing"
+    },
+    {
+      "id": "bad-103-two-decisions",
+      "file": "vectors/bad-103-two-decisions.bundle.tar.gz",
+      "sha256": "sha256:c77adc4ebfdb801dd6546cabe4c9cbfefcfda8d4ff471cebe8b5e03f49a04984",
+      "description": "Two decision records in one bundle: v0 is single-call by design (no concurrency-safe correlation id exists yet), so cardinality above one is invalid, never heuristically paired.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "first_failure_informative": "decision_cardinality"
+    },
+    {
+      "id": "bad-104-unknown-schema",
+      "file": "vectors/bad-104-unknown-schema.bundle.tar.gz",
+      "sha256": "sha256:b41d7393c5bb21d4d0c73e0b88b801586b21737c4101d72fc08d576c738e36bb",
+      "description": "An event claiming an unrecognized schema in the profile's namespace fails closed: unknown never degrades to ignored.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "first_failure_informative": "unknown_schema"
+    },
+    {
+      "id": "bad-105-observation-binding-mismatch",
+      "file": "vectors/bad-105-observation-binding-mismatch.bundle.tar.gz",
+      "sha256": "sha256:f51650e548c16d634231b9e996003de910ea08d578899461591afe2b0e46f58d",
+      "description": "The observation's (tool_name, target_digest) does not equal the decision's (tool.name, action.target_digest): the binding is invalid, not ignored.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "first_failure_informative": "observation_binding"
+    },
+    {
+      "id": "bad-106-fail-closed-inconsistent",
+      "file": "vectors/bad-106-fail-closed-inconsistent.bundle.tar.gz",
+      "sha256": "sha256:ad27643fae729345b8ea032584c65a9c216be4aa41f393cf41e366c04de45c51",
+      "description": "fail_closed is derived (true iff deny) in the producer; a record where it diverges is malformed, not a different policy statement.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "first_failure_informative": "fail_closed_derivation"
+    },
+    {
+      "id": "bad-107-unknown-decision-value",
+      "file": "vectors/bad-107-unknown-decision-value.bundle.tar.gz",
+      "sha256": "sha256:77f6ee67633f38344ad1b9de107e05caac1936b6d34f46661917a521f5f77a62",
+      "description": "decision outside the closed {allow, deny} vocabulary fails closed.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "first_failure_informative": "decision_vocabulary"
+    },
+    {
+      "id": "bad-108-observation-without-decision",
+      "file": "vectors/bad-108-observation-without-decision.bundle.tar.gz",
+      "sha256": "sha256:1cda7319299edbdf4cd2f0d4e64d0f90ed4a79f750e8e4e1e09e3ae85ed586f1",
+      "description": "A caller-visible denial marker with no decision record at all: an observed enforcement marker must be backed by a bound decision, so the profile input is invalid.",
+      "expected": {
+        "bundle_integrity": "pass",
+        "verdict": "invalid"
+      },
+      "first_failure_informative": "decision_missing"
+    }
+  ]
+}
