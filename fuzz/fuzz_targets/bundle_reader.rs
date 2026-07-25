@@ -20,8 +20,11 @@ use std::io::Cursor;
 ///
 /// The defaults allow a 100 MB input and 1 GB of expansion, which would let a single case burn the
 /// whole run budget and would mean an OOM told us about the machine rather than the verifier.
-/// Tight ceilings also make "did it respect its own limit" an observable property: libFuzzer's
-/// `-rss_limit_mb` fires if the verifier ever materializes more than it promised.
+///
+/// `-rss_limit_mb` in the lane is an outer process guard, not evidence about these numbers: it
+/// observes whole-process RSS and cannot show that this reader honoured a 1 MiB input or 4 MiB
+/// decode ceiling. The evidence for the ceilings themselves is the exact-limit and classification
+/// assertions in `verifier_fail_closed_properties.rs`.
 fn limits() -> VerifyLimits {
     VerifyLimits {
         max_bundle_bytes: 1 << 20,

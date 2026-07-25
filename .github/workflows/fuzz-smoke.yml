@@ -46,20 +46,43 @@ jobs:
           workspaces: fuzz -> target
 
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        # Version-pinned, not just `--locked`: `--locked` fixes the tool's dependencies but still
+        # installs whatever cargo-fuzz release is current, so the lane could change behaviour
+        # without a commit here.
+        run: cargo install cargo-fuzz --locked --version 0.13.2
 
-      - name: Assert the seed corpus is populated
+      - name: Assert the seed corpus is intact
         shell: bash
         run: |
           set -euo pipefail
           # An empty corpus turns this lane into a build check, which ADR-043 §3 says is not
-          # sufficient. Fail loudly rather than reporting a green run over nothing.
-          seeds="$(find fuzz/corpus/bundle_reader -type f ! -name '.gitkeep' | wc -l)"
-          echo "seeds=${seeds}"
-          if [ "${seeds}" -lt 8 ]; then
-            echo "::error::seed corpus has ${seeds} entries; expected the checked-in seeds"
-            exit 1
-          fi
+          # sufficient. Names rather than a count: a count stays green when a seed is replaced by
+          # an unrelated file, and the expansion seed in particular is the only one that reaches
+          # the decompression path at all.
+          required=(
+            valid-single-event
+            valid-three-events
+            truncated-half
+            truncated-gzip-header
+            payload-mutated
+            digest-mutated
+            run-root-mutated
+            duplicate-member
+            unexpected-member
+            manifest-only
+            wrong-member-order
+            oversize-line
+            expansion-past-decode-ceiling
+          )
+          missing=0
+          for seed in "${required[@]}"; do
+            if [ ! -s "fuzz/corpus/bundle_reader/${seed}" ]; then
+              echo "::error::missing or empty seed: ${seed}"
+              missing=1
+            fi
+          done
+          [ "${missing}" -eq 0 ] || exit 1
+          echo "seeds=${#required[@]} present"
 
       - name: Fuzz smoke
         shell: bash

@@ -21,7 +21,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use sha2::{Digest, Sha256};
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -110,6 +110,15 @@ fn repack(members: &[(&str, &[u8])]) -> Vec<u8> {
         builder.finish().expect("finish tar");
     }
     encoder.finish().expect("finish gzip")
+}
+
+/// Decoded length of a gzip stream, used to assert a seed really does expand.
+fn decoded_len(gzipped: &[u8]) -> usize {
+    let mut sink = Vec::new();
+    GzDecoder::new(Cursor::new(gzipped))
+        .read_to_end(&mut sink)
+        .expect("seed must be valid gzip");
+    sink.len()
 }
 
 fn sha256_prefixed(bytes: &[u8]) -> String {
@@ -292,17 +301,12 @@ fn reordering_the_chain_is_rejected_on_the_sequence_contract() {
         &repack(&[("manifest.json", &resealed), ("events.ndjson", &reordered)]),
         "an out-of-order chain",
     );
+    // Pinned exactly rather than as "one of the sequence codes": swapping 0 and 2 puts `seq=2`
+    // first, so the start-of-sequence check is the one that must fire. An allowance over both
+    // codes would let a change in check order pass unnoticed, which is the regression this is for.
     assert_eq!(
-        class,
-        ErrorClass::Contract,
-        "ordering is a contract violation, not an IO error"
-    );
-    assert!(
-        matches!(
-            code,
-            ErrorCode::ContractSequenceStart | ErrorCode::ContractSequenceGap
-        ),
-        "expected a sequence-contract code, got {code}"
+        (class, code),
+        (ErrorClass::Contract, ErrorCode::ContractSequenceStart)
     );
 }
 
@@ -325,13 +329,16 @@ fn dropping_the_last_event_is_rejected_rather_than_silently_accepted() {
     // Resealed so this is a truncated *chain*, not a corrupted file: the manifest still claims
     // three events, which is the claim the verifier has to catch.
     let resealed = reseal(&manifest, &shortened);
-    let (class, _code) = expect_rejected(
+    let (class, code) = expect_rejected(
         &repack(&[("manifest.json", &resealed), ("events.ndjson", &shortened)]),
         "a chain with its last event removed",
     );
-    assert!(
-        matches!(class, ErrorClass::Contract | ErrorClass::Integrity),
-        "a short chain must fail closed on the contract or the root, not pass"
+    // Pinned exactly for the same reason as the reordering case: the manifest still claims three
+    // events, so the count mismatch is what must catch this. An either-class assertion would stay
+    // green if the chain check stopped running and something else rejected the bundle instead.
+    assert_eq!(
+        (class, code),
+        (ErrorClass::Contract, ErrorCode::ContractSequenceGap)
     );
 }
 
@@ -377,14 +384,16 @@ fn an_unexpected_member_is_refused_by_the_allowlist() {
     );
 }
 
-/// Truncation is swept rather than sampled at one offset, because the interesting failures are at
-/// the boundaries between gzip, tar and NDJSON framing and a single cut can miss all of them.
+/// Truncation is swept at every offset, not sampled, because the interesting failures sit on the
+/// boundaries between gzip, tar and NDJSON framing and a stride can step over all of them. The
+/// fixture is under a kilobyte, so the exhaustive sweep is cheaper than reasoning about which
+/// offsets would have mattered.
 #[test]
 fn truncation_at_every_offset_fails_closed_and_never_panics() {
     let bundle = valid_bundle(3);
     assert!(bundle.len() > 32, "fixture must be long enough to sweep");
 
-    for cut in (1..bundle.len()).step_by(7) {
+    for cut in 1..bundle.len() {
         let truncated = &bundle[..cut];
         match classify(truncated) {
             Ok(()) => panic!("a truncated bundle verified at cut={cut}"),
@@ -510,6 +519,27 @@ fn generate_seed_corpus() {
         v
     };
 
+    // A high-expansion seed. Every other seed here decodes to a few kilobytes, so none of them
+    // gives the fuzzer a starting point on the decompression path at all. This one is a few KB on
+    // disk and decodes to 8 MiB, past the target's 4 MiB decode ceiling.
+    //
+    // What it is not: proof that the verifier streams 8 MiB. It does not — the tar reader trusts
+    // declared entry sizes, so a bundle-shaped archive trips a per-file ceiling long before the
+    // decode ceiling. That ceiling is pinned by `the_decode_ceiling_is_enforced_...` above. The
+    // seed's job is narrower: give libFuzzer compressible material to mutate near that boundary.
+    let expansion_bomb = {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
+        let chunk = vec![0u8; 1 << 20];
+        for _ in 0..8 {
+            encoder.write_all(&chunk).expect("write chunk");
+        }
+        encoder.finish().expect("finish bomb")
+    };
+    assert!(
+        decoded_len(&expansion_bomb) > 4 << 20,
+        "the expansion seed must decode past the fuzz target's decode ceiling"
+    );
+
     let seeds: Vec<(&str, Vec<u8>)> = vec![
         ("valid-single-event", one.clone()),
         ("valid-three-events", three.clone()),
@@ -567,6 +597,7 @@ fn generate_seed_corpus() {
                 ("events.ndjson", &long_line),
             ]),
         ),
+        ("expansion-past-decode-ceiling", expansion_bomb),
     ];
 
     for (name, bytes) in &seeds {
