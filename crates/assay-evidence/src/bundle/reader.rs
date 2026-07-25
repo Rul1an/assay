@@ -19,8 +19,17 @@ use crate::json_strict::validate_json_strict;
 use crate::ndjson::NdjsonEvents;
 use crate::types::EvidenceEvent;
 use anyhow::{Context, Result};
+use assay_common::limits::LimitReader;
 use flate2::read::GzDecoder;
 use std::io::{BufReader, Cursor, Read};
+
+/// Whether a bundle open performs integrity verification. Deliberately not an
+/// `Option<VerifyLimits>`: the limits apply either way.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Verify {
+    Yes,
+    No,
+}
 
 /// Bundle reader for safe event iteration.
 ///
@@ -63,47 +72,74 @@ impl BundleReader {
     ///
     /// Open and verify a bundle, loading it into memory.
     pub fn open<R: Read>(reader: R) -> Result<Self> {
-        Self::open_internal(reader, Some(VerifyLimits::default()))
+        Self::open_internal(reader, Verify::Yes, VerifyLimits::default())
     }
 
     /// Open and verify a bundle with custom verification limits.
     pub fn open_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<Self> {
-        Self::open_internal(reader, Some(limits))
+        Self::open_internal(reader, Verify::Yes, limits)
     }
 
     /// Open a bundle without verification (for debugging/inspection).
+    ///
+    /// Skipping verification does not skip the limits. The whole set still applies to ingest,
+    /// expansion and member reads; only the integrity check is omitted. Peeking at a manifest is
+    /// not a reason to let an untrusted archive decide how much memory to take.
     pub fn open_unverified<R: Read>(reader: R) -> Result<Self> {
-        Self::open_internal(reader, None)
+        Self::open_internal(reader, Verify::No, VerifyLimits::default())
     }
 
-    fn open_internal<R: Read>(reader: R, limits: Option<VerifyLimits>) -> Result<Self> {
-        // First pass: verify integrity and get manifest
+    /// Open a bundle without verification, under an explicit limit set.
+    pub fn open_unverified_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<Self> {
+        Self::open_internal(reader, Verify::No, limits)
+    }
+
+    /// Whether to verify is a separate question from what the limits are. Carrying both in one
+    /// `Option<VerifyLimits>` is what let the unverified paths run unbounded: `None` read as
+    /// "no limits" when it only ever meant "no verification".
+    fn open_internal<R: Read>(reader: R, verify: Verify, limits: VerifyLimits) -> Result<Self> {
+        let max_bundle_bytes = limits.max_bundle_bytes;
+        // ADR-043 §1: the ceiling applies to the stream, before the input is materialized.
+        // Reading first and checking afterwards means an oversized archive has already sized
+        // the allocation, whatever the subsequent verification concludes.
         let mut buffer = Vec::new();
-        let mut reader = reader;
+        let mut reader = LimitReader::new(reader, max_bundle_bytes, "LimitBundleBytes");
         reader.read_to_end(&mut buffer)?;
 
-        let manifest = if let Some(limits) = limits {
-            let result = verify_bundle_with_limits(Cursor::new(&buffer), limits)
-                .context("Bundle verification failed")?;
-            result.manifest
-        } else {
-            // Peek only
-            let info =
-                BundleInfo::peek(Cursor::new(&buffer)).context("Failed to peek bundle manifest")?;
-            info.manifest
+        let manifest = match verify {
+            Verify::Yes => {
+                verify_bundle_with_limits(Cursor::new(&buffer), limits)
+                    .context("Bundle verification failed")?
+                    .manifest
+            }
+            Verify::No => {
+                BundleInfo::peek_with_limits(Cursor::new(&buffer), limits)
+                    .context("Failed to peek bundle manifest")?
+                    .manifest
+            }
         };
 
-        // Second pass: extract events content
+        // Second pass: extract events content.
+        //
+        // ADR-043 §1: a single byte ceiling is not the limit set. The compressed ceiling above
+        // bounds what arrives; it says nothing about what that expands to. Without the decode
+        // ceiling here a bomb well inside `max_bundle_bytes` expands unbounded, and on the peek
+        // path this pass is the only consumption because verification never runs.
         let decoder = GzDecoder::new(Cursor::new(&buffer));
+        let decoder = LimitReader::new(decoder, limits.max_decode_bytes, "LimitDecodeBytes");
         let mut archive = tar::Archive::new(decoder);
 
         let mut events_content = Vec::new();
 
         for entry in archive.entries()? {
-            let mut entry = entry?;
+            let entry = entry?;
             let path = entry.path()?.to_string_lossy().to_string();
 
             if path == "events.ndjson" {
+                // `LimitFileSize` rather than an invented tag: the classification vocabulary is
+                // `ErrorCode`, and a per-member ceiling is what `verify.rs` already reports under
+                // that code. A tag with no matching variant cannot be classified by any caller.
+                let mut entry = LimitReader::new(entry, limits.max_events_bytes, "LimitFileSize");
                 entry.read_to_end(&mut events_content)?;
                 break;
             }
@@ -174,15 +210,33 @@ impl BundleInfo {
     /// Does NOT verify event integrity.
     /// Use `BundleReader::open()` for full verification.
     pub fn peek<R: Read>(reader: R) -> Result<Self> {
-        let decoder = GzDecoder::new(reader);
+        Self::peek_with_limits(reader, VerifyLimits::default())
+    }
+
+    /// Peek at a manifest under an explicit limit set.
+    ///
+    /// Peeking still expands the archive and still materializes a member, so it needs the decode
+    /// and per-file ceilings even though it verifies nothing. Left unbounded, this was the one
+    /// public entrypoint where a bomb met no guard at all.
+    pub fn peek_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<Self> {
+        // Bound the compressed source here as well, not only the expansion. Reached through
+        // `BundleReader` the input has already passed a ceiling, but this is a public entrypoint
+        // in its own right and a direct caller gets no such guarantee.
+        let reader = LimitReader::new(reader, limits.max_bundle_bytes, "LimitBundleBytes");
+        let decoder = LimitReader::new(
+            GzDecoder::new(reader),
+            limits.max_decode_bytes,
+            "LimitDecodeBytes",
+        );
         let mut archive = tar::Archive::new(decoder);
 
         for entry in archive.entries()? {
-            let mut entry = entry?;
+            let entry = entry?;
             let path = entry.path()?.to_string_lossy().to_string();
 
             if path == "manifest.json" {
                 // Read manifest to string for strict validation
+                let mut entry = LimitReader::new(entry, limits.max_manifest_bytes, "LimitFileSize");
                 let mut content = String::new();
                 entry
                     .read_to_string(&mut content)
