@@ -488,3 +488,203 @@ fn validate_entry_path_rejects_non_canonical_prefix() {
         );
     }
 }
+
+mod bounded_ingest {
+    //! ADR-043 §1 for the replay reader.
+    //!
+    //! `read_bundle_tar_gz` had no ceilings at all: an unbounded compressed source, an unbounded
+    //! gzip decoder on top of it, and `read_to_end` per member on top of that. The evidence
+    //! verifier had a limit set and replay had none, so the same archive met two different
+    //! contracts depending on which reader opened it.
+    //!
+    //! Each test pins one dimension and pairs it with an acceptance case built from the same
+    //! bundle, so a ceiling that refused everything would not pass.
+
+    use super::super::{
+        read_bundle_tar_gz_with_limits, write_bundle_tar_gz, BundleEntry, ReplayIngestError,
+        ReplayLimits,
+    };
+    use crate::replay::manifest::ReplayManifest;
+    use assay_common::limits::LimitKind;
+    use std::cell::Cell;
+    use std::io::{Cursor, Read};
+    use std::rc::Rc;
+
+    fn bundle_with(entries: Vec<BundleEntry>) -> Vec<u8> {
+        let manifest = ReplayManifest::minimal("2.15.0".into());
+        let mut buf = Vec::new();
+        write_bundle_tar_gz(&mut buf, &manifest, &entries).expect("write bundle");
+        buf
+    }
+
+    fn small_bundle() -> Vec<u8> {
+        // Deliberately incompressible: a run of identical bytes gzips to almost nothing, which
+        // would leave the compressed fixture smaller than the ceiling under test and make the
+        // assertion vacuous.
+        let data: Vec<u8> = (0..4096u32)
+            .map(|i| (i.wrapping_mul(2654435761) >> 13) as u8)
+            .collect();
+        bundle_with(vec![BundleEntry {
+            path: "files/trace.jsonl".into(),
+            data,
+        }])
+    }
+
+    /// Counts what the reader actually pulled, so a test can tell bounded ingest from a late
+    /// rejection. Asserting only that the call failed would pass against an unbounded reader
+    /// that drained the whole archive first.
+    struct Counting<R> {
+        inner: R,
+        pulled: Rc<Cell<u64>>,
+    }
+
+    impl<R: Read> Read for Counting<R> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let n = self.inner.read(buf)?;
+            self.pulled.set(self.pulled.get() + n as u64);
+            Ok(n)
+        }
+    }
+
+    fn counting(bytes: Vec<u8>) -> (Counting<Cursor<Vec<u8>>>, Rc<Cell<u64>>) {
+        let pulled = Rc::new(Cell::new(0));
+        (
+            Counting {
+                inner: Cursor::new(bytes),
+                pulled: Rc::clone(&pulled),
+            },
+            pulled,
+        )
+    }
+
+    #[test]
+    fn the_compressed_source_stops_being_read_at_the_ceiling() {
+        let bytes = small_bundle();
+        let ceiling = 64u64;
+        assert!((bytes.len() as u64) > ceiling * 4);
+
+        let (source, pulled) = counting(bytes.clone());
+        let limits = ReplayLimits {
+            max_source_bytes: ceiling,
+            ..ReplayLimits::default()
+        };
+        assert!(read_bundle_tar_gz_with_limits(source, limits).is_err());
+        assert!(
+            pulled.get() <= ceiling + 1,
+            "ingest must stop at the ceiling; {} bytes were pulled",
+            pulled.get()
+        );
+
+        read_bundle_tar_gz_with_limits(Cursor::new(bytes), ReplayLimits::default())
+            .expect("the same bundle must read under the default limits");
+    }
+
+    #[test]
+    fn a_member_over_its_ceiling_is_refused_with_a_typed_cause() {
+        let bytes = small_bundle();
+        let limits = ReplayLimits {
+            max_member_bytes: 64,
+            ..ReplayLimits::default()
+        };
+        let err = read_bundle_tar_gz_with_limits(Cursor::new(bytes.clone()), limits)
+            .expect_err("a 4 KiB member must be refused under a 64 byte ceiling");
+        match err.downcast_ref::<ReplayIngestError>() {
+            Some(ReplayIngestError::MemberCeiling { member, kind, .. }) => {
+                assert_eq!(member, "files/trace.jsonl");
+                assert_eq!(*kind, LimitKind::MemberBytes);
+            }
+            other => panic!("expected a typed MemberCeiling, got {other:?}"),
+        }
+
+        read_bundle_tar_gz_with_limits(Cursor::new(bytes), ReplayLimits::default())
+            .expect("the same member must read under the default ceiling");
+    }
+
+    #[test]
+    fn an_entry_path_over_the_ceiling_is_refused_before_it_is_read() {
+        // The tar writer refuses names past the ustar limit without PAX extensions, so the
+        // fixture cannot carry a path long enough to cross the default 256 byte ceiling. Lower
+        // the ceiling under an ordinary path instead: the behaviour under test is the check, not
+        // the size of the number.
+        let path = "files/trace.jsonl";
+        let bytes = bundle_with(vec![BundleEntry {
+            path: path.into(),
+            data: b"[]".to_vec(),
+        }]);
+        let tight = ReplayLimits {
+            max_path_len: path.len() - 1,
+            ..ReplayLimits::default()
+        };
+        let err = read_bundle_tar_gz_with_limits(Cursor::new(bytes.clone()), tight)
+            .expect_err("a path one byte over the ceiling must be refused");
+        match err.downcast_ref::<ReplayIngestError>() {
+            Some(ReplayIngestError::PathTooLong { limit, actual, .. }) => {
+                assert_eq!(*limit, path.len() - 1);
+                assert_eq!(*actual, path.len());
+            }
+            other => panic!("expected a typed PathTooLong, got {other:?}"),
+        }
+
+        let exact = ReplayLimits {
+            max_path_len: path.len(),
+            ..ReplayLimits::default()
+        };
+        read_bundle_tar_gz_with_limits(Cursor::new(bytes), exact)
+            .expect("a path of exactly the ceiling must be accepted");
+    }
+
+    #[test]
+    fn too_many_entries_is_refused_with_a_typed_cause() {
+        let entries: Vec<BundleEntry> = (0..8)
+            .map(|i| BundleEntry {
+                path: format!("files/e{i}.jsonl"),
+                data: b"[]".to_vec(),
+            })
+            .collect();
+        let bytes = bundle_with(entries);
+
+        let limits = ReplayLimits {
+            max_entries: 3,
+            ..ReplayLimits::default()
+        };
+        let err = read_bundle_tar_gz_with_limits(Cursor::new(bytes.clone()), limits)
+            .expect_err("nine members must exceed a ceiling of three");
+        match err.downcast_ref::<ReplayIngestError>() {
+            Some(ReplayIngestError::TooManyEntries { limit }) => assert_eq!(*limit, 3),
+            other => panic!("expected a typed TooManyEntries, got {other:?}"),
+        }
+
+        read_bundle_tar_gz_with_limits(Cursor::new(bytes), ReplayLimits::default())
+            .expect("the same bundle must read under the default entry ceiling");
+    }
+
+    /// A bundle that is small compressed and large expanded. The source ceiling says nothing
+    /// about what the input decompresses to, which is the whole reason the decode ceiling has to
+    /// exist separately.
+    #[test]
+    fn expansion_past_the_decode_ceiling_is_refused() {
+        let bytes = bundle_with(vec![BundleEntry {
+            path: "files/pad.jsonl".into(),
+            data: vec![b'A'; 512 * 1024],
+        }]);
+        let limits = ReplayLimits {
+            max_source_bytes: bytes.len() as u64 * 8,
+            max_decoded_bytes: 4096,
+            ..ReplayLimits::default()
+        };
+        let err = read_bundle_tar_gz_with_limits(Cursor::new(bytes.clone()), limits)
+            .expect_err("expansion past the decode ceiling must be refused");
+        match err.downcast_ref::<ReplayIngestError>() {
+            Some(ReplayIngestError::SourceCeiling { kind, .. }) => {
+                assert_eq!(*kind, LimitKind::DecodedBytes)
+            }
+            Some(ReplayIngestError::MemberCeiling { kind, .. }) => {
+                assert_eq!(*kind, LimitKind::DecodedBytes)
+            }
+            other => panic!("expected a decode ceiling refusal, got {other:?}"),
+        }
+
+        read_bundle_tar_gz_with_limits(Cursor::new(bytes), ReplayLimits::default())
+            .expect("the same bundle must read under the default decode ceiling");
+    }
+}

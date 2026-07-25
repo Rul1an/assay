@@ -5,6 +5,7 @@
 //! No user-facing CLI here (E9c); this is the core library for bundle creation.
 
 mod io;
+mod limits;
 mod manifest;
 pub mod paths;
 mod verify;
@@ -28,7 +29,8 @@ pub struct ReadBundle {
     pub entries: Vec<(String, Vec<u8>)>,
 }
 
-pub use io::{read_bundle_tar_gz, write_bundle_tar_gz};
+pub use io::{read_bundle_tar_gz, read_bundle_tar_gz_with_limits, write_bundle_tar_gz};
+pub use limits::{ReplayIngestError, ReplayLimits};
 pub use manifest::build_file_manifest;
 pub use verify::bundle_digest;
 

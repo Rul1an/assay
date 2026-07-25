@@ -1,6 +1,10 @@
+use super::limits::{
+    classify_member_ceiling, classify_source_ceiling, ReplayIngestError, ReplayLimits,
+};
 use super::{paths, BundleEntry, ReadBundle};
 use crate::replay::manifest::ReplayManifest;
 use anyhow::{Context, Result};
+use assay_common::limits::{LimitKind, LimitReader};
 use flate2::read::GzDecoder;
 use flate2::Compression;
 use flate2::GzBuilder;
@@ -58,32 +62,102 @@ fn normalize_path_and_append<T: Write>(
     write_tar_entry(tar, &normalized, data)
 }
 
-/// Read a replay bundle from .tar.gz: parse manifest and collect all entry (path, data).
-/// Paths normalized to POSIX. Enforces same path policy as writer: only manifest.json or
-/// files/, outputs/, cassettes/ (no empty segment, no . or .., no drive letter). Duplicate
-/// paths in tar -> Error. Missing manifest.json -> Error.
+/// Read a replay bundle under the default [`ReplayLimits`].
+///
+/// Kept for existing callers who did not need to name their own budget. New callers should
+/// prefer [`read_bundle_tar_gz_with_limits`] so the ceiling is visible at the call site.
 pub fn read_bundle_tar_gz<R: Read>(r: R) -> Result<ReadBundle> {
-    let dec = GzDecoder::new(r);
-    let mut ar = Archive::new(dec);
+    read_bundle_tar_gz_with_limits(r, ReplayLimits::default())
+}
+
+/// Read a replay bundle under an explicit resource ceiling.
+///
+/// ADR-043 §1: every dimension applies to the source stream before the input is materialised.
+/// The compressed source, the gzip expansion, the manifest, each entry body, path length and
+/// entry count all have their own ceiling; a ceiling that fails to the caller wrapped in
+/// `anyhow::Error` still carries the typed [`ReplayIngestError`] and can be recovered with
+/// `downcast_ref`. That is the supported way to classify a refusal; matching on the rendered
+/// message is not.
+pub fn read_bundle_tar_gz_with_limits<R: Read>(r: R, limits: ReplayLimits) -> Result<ReadBundle> {
+    // 1. Bound the compressed source before anything downstream sees a byte. Nothing in the
+    //    tar walker or the gzip decoder gets to size its allocation from an untrusted input.
+    let source = LimitReader::new(r, limits.max_source_bytes, LimitKind::SourceBytes);
+    // 2. Bound the gzip expansion. A small compressed input can still decode to gigabytes,
+    //    which is what makes the source ceiling on its own insufficient.
+    let decoder = GzDecoder::new(source);
+    let bounded_decoder =
+        LimitReader::new(decoder, limits.max_decoded_bytes, LimitKind::DecodedBytes);
+    let mut ar = Archive::new(bounded_decoder);
+
     let mut manifest_data: Option<Vec<u8>> = None;
-    let mut seen = BTreeMap::new();
-    for entry in ar.entries().context("list tar entries")? {
-        let mut e = entry.context("read tar entry")?;
+    let mut seen: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    // The manifest counts against the entry ceiling too: it is one member the archive
+    // carries.
+    let mut entry_count: usize = 0;
+
+    let entries = ar.entries().map_err(|e| {
+        classify_source_ceiling(&e)
+            .map(anyhow::Error::from)
+            .unwrap_or_else(|| anyhow::Error::from(e).context("list tar entries"))
+    })?;
+
+    for entry in entries {
+        let mut e = entry.map_err(|err| {
+            classify_source_ceiling(&err)
+                .map(anyhow::Error::from)
+                .unwrap_or_else(|| anyhow::Error::from(err).context("read tar entry"))
+        })?;
+
+        entry_count += 1;
+        if entry_count > limits.max_entries {
+            return Err(anyhow::Error::from(ReplayIngestError::TooManyEntries {
+                limit: limits.max_entries,
+            }));
+        }
+
         let path = e.path().context("entry path")?;
         let path_str = path.to_string_lossy().replace('\\', "/");
+
+        // Bound path length before any other path work: a hostile archive can carry a
+        // multi-kilobyte name that would otherwise be normalised and cloned into a key.
+        if path_str.len() > limits.max_path_len {
+            return Err(anyhow::Error::from(ReplayIngestError::PathTooLong {
+                path: path_str.clone(),
+                actual: path_str.len(),
+                limit: limits.max_path_len,
+            }));
+        }
+
         if path_str == paths::MANIFEST {
             let mut data = Vec::new();
-            e.read_to_end(&mut data).context("read manifest body")?;
+            let mut bounded =
+                LimitReader::new(&mut e, limits.max_manifest_bytes, LimitKind::MemberBytes);
+            bounded.read_to_end(&mut data).map_err(|err| {
+                classify_member_ceiling(&err, paths::MANIFEST)
+                    .map(anyhow::Error::from)
+                    .unwrap_or_else(|| anyhow::Error::from(err).context("read manifest body"))
+            })?;
             manifest_data = Some(data);
             continue;
         }
+
+        // Path validation (segments, prefix) comes after the length check so a hostile
+        // path is refused on size before allocation.
         paths::validate_entry_path(&path_str)?;
+
         let mut data = Vec::new();
-        e.read_to_end(&mut data).context("read entry body")?;
+        let mut bounded = LimitReader::new(&mut e, limits.max_member_bytes, LimitKind::MemberBytes);
+        bounded.read_to_end(&mut data).map_err(|err| {
+            classify_member_ceiling(&err, &path_str)
+                .map(anyhow::Error::from)
+                .unwrap_or_else(|| anyhow::Error::from(err).context("read entry body"))
+        })?;
+
         if seen.insert(path_str.clone(), data).is_some() {
             anyhow::bail!("duplicate path in bundle: {}", path_str);
         }
     }
+
     let manifest_json = manifest_data.context("manifest.json missing in bundle")?;
     let manifest: ReplayManifest =
         serde_json::from_slice(&manifest_json).context("parse manifest.json")?;
