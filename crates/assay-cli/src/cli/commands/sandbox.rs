@@ -3,7 +3,7 @@ use crate::cli::args::SandboxArgs;
 use crate::exit_codes;
 use crate::metrics;
 
-use crate::profile::{events::ProfileEvent, ProfileCollector};
+use crate::profile::events::ProfileEvent;
 
 mod bundle;
 mod child;
@@ -20,7 +20,6 @@ use profile::maybe_profile_begin;
 use tmp::create_scoped_tmp;
 
 pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
-    let mut profiler: Option<ProfileCollector> = None;
     let mut deferred_profile_events: Vec<ProfileEvent> = Vec::new();
     eprintln!("Assay Sandbox v0.1");
     eprintln!("──────────────────");
@@ -134,11 +133,23 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
                 p
             }
             Err(e) => {
-                if let Some(p) = &profiler {
-                    p.note(format!("failed to load policy: {}", e));
-                }
-                eprintln!("WARN: Failed to load policy: {}. Using default.", e);
-                crate::policy::mcp_server_minimal()
+                // ADR-043 §5: a named policy that cannot be loaded is fatal, unconditionally.
+                // `--fail-closed` does not create that obligation, it only makes ignoring it
+                // more obviously wrong. Naming --policy is an instruction; running the child
+                // under a built-in pack instead does not carry it out, and recording the
+                // substitution afterwards does not repair that. Substitution stays legitimate
+                // only on the path below, where no policy was named and a documented default
+                // applies.
+                //
+                // Nothing is recorded into the profiler here, and nothing can be: the run ends
+                // before `maybe_profile_begin()` has created a session, so there is no profile
+                // to record into and no artifact to record it in. The refusal is carried by the
+                // reason code and the metric, which is what a caller can actually observe.
+                eprintln!("ERROR: Failed to load policy {}: {}", path.display(), e);
+                eprintln!("E_POLICY_LOAD_FAILED_UNENFORCEABLE");
+                eprintln!("       the named policy did not load and no substitute was applied");
+                metrics::increment("policy_load_failed");
+                return Ok(exit_codes::POLICY_UNENFORCEABLE);
             }
         }
     } else {
@@ -174,7 +185,11 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     let tmp_dir = create_scoped_tmp()?;
 
     // PR7: Initialize profiler if requested (passing tmp_dir for generalization)
-    profiler = maybe_profile_begin(&args, &cwd, Some(tmp_dir.path()));
+    // Bound here rather than pre-declared as None at the top of `run()`. The old shape left a
+    // long stretch in which `profiler` was in scope but always None, so a `p.note`/`p.record`
+    // written there compiled, read as if it captured the event, and never ran. Binding it at
+    // the point it is created makes that mistake a compile error instead of dead code.
+    let profiler = maybe_profile_begin(&args, &cwd, Some(tmp_dir.path()));
     if let Some(p) = &profiler {
         for event in deferred_profile_events.drain(..) {
             p.record(event);

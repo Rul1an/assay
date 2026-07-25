@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Breaking (`assay sandbox`)**: a `--policy` that is named but cannot be loaded is now fatal.
+  The run exits 2 with `E_POLICY_LOAD_FAILED_UNENFORCEABLE` and executes nothing, where it
+  previously printed a warning and continued under the built-in `mcp-server-minimal` pack.
+  `--fail-closed` does not create this obligation and does not change the outcome; naming a
+  policy does. Substitution remains in place where no `--policy` was given and the documented
+  default applies. An invocation that relied on the old fallback now fails instead of running
+  under containment the operator did not choose.
+- `assay mcp-server` no longer emits `meta.certified` or `meta.partner` in the `initialize`
+  result. Both were unconditional literals returned on every successful handshake, including
+  sessions that failed authentication under the default permissive mode, and neither carried a
+  basis a reviewer could check. `serverInfo.version` is now derived from the crate version
+  instead of the hand-written `0.4.0`, which no build produced.
+
+### Fixed
+- Sandbox policy documentation described a filesystem rule shape the loader has never
+  accepted (`- path:` mappings with `read`/`write` keys, against a schema of plain strings).
+  Copying an example verbatim used to produce a warning and now produces a hard failure, so
+  the reference, the CLI page and the security guide now describe the narrower contract the
+  sandbox runtime actually applies. The documented exit codes 3 and 4 for policy problems are
+  also corrected: no code path emitted them, and both cases are configuration errors, which
+  is 2.
+
 ## [3.34.0] - 2026-07-19
 
 ### Added
