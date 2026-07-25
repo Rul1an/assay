@@ -119,7 +119,7 @@ assay-mcp-server -> assay-core, assay-common, assay-metrics
 assay-monitor -> assay-common, assay-policy
 assay-metrics -> assay-core, assay-common
 assay-core -> assay-adapter-api, assay-common
-assay-evidence -> assay-canonical
+assay-evidence -> assay-canonical, assay-common
 assay-adapter-api -> assay-evidence
 assay-adapter-{a2a,acp,ucp} -> assay-adapter-api, assay-evidence
 assay-runner-core -> assay-common, assay-monitor, assay-runner-schema
@@ -130,6 +130,11 @@ assay-ebpf -> assay-common
 Leaf crates (no internal dependencies): `assay-common`, `assay-canonical`, `assay-policy`, `assay-registry`, `assay-runner-schema`, `assay-runner-linux`, `gateway-evidence-replay`, `assay-xtask`.
 
 No circular dependencies. All dependencies flow in one direction.
+
+`assay-evidence -> assay-common` carries only the bounded-ingest primitive
+(`assay_common::limits::LimitReader`, ADR-043 §1), shared with the replay verifier in
+`assay-core` so both apply one ceiling mechanism. Limit *vocabularies* stay domain-local:
+`VerifyLimits` describes an evidence bundle and does not travel.
 
 ## assay-sim (Attack Simulation)
 
