@@ -392,14 +392,18 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                 // hash, so a forged stream identity survived every other check once the container
                 // was resealed. Ordered after the run_id and seq checks so a mismatch here is
                 // always the id itself and not one of its two inputs.
-                let expected_id = compute_stream_id(&event.run_id, event.seq);
-                if event.id != expected_id {
+                if event.id != compute_stream_id(&event.run_id, event.seq) {
+                    // Value-free: the diagnostic names the field and the position, never the
+                    // offending id or the run_id it embeds. Both are attacker-controlled bundle
+                    // content, and this message reaches CI logs. `seq` is an ordinal the
+                    // neighbouring sequence errors already report, so it adds locality without
+                    // echoing content.
                     return Err(VerifyError::new(
                         ErrorClass::Contract,
                         ErrorCode::ContractInvalidEvent,
                         format!(
-                            "Event id '{}' does not match the run_id:seq contract '{}'",
-                            event.id, expected_id
+                            "Event id does not match the run_id:seq contract at seq={}",
+                            event.seq
                         ),
                     )
                     .into());

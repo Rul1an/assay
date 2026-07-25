@@ -574,6 +574,33 @@ fn generate_seed_corpus() {
         "the seed must at least decompress past the ceiling, even though the tar layer stops first"
     );
 
+    // The shape that does reach the decode ceiling. A PAX extended header is consumed by the tar
+    // reader itself, before any entry is handed to the verifier, so the per-file ceilings never
+    // get a chance to fire on it: `max_manifest_bytes` and `max_events_bytes` are checked against
+    // a member's declared size, and this is not a member. Declaring 5 MiB of extended-header data
+    // therefore forces the decoded stream past `max_decode_bytes` and `LimitDecodeBytes` is the
+    // only thing standing in the way. Compresses to a few kilobytes because the payload is zeros.
+    let pax_decode_bomb = {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
+        {
+            let mut builder = tar::Builder::new(&mut encoder);
+            let mut header = tar::Header::new_ustar();
+            header.set_entry_type(tar::EntryType::XHeader);
+            header
+                .set_path("PaxHeaders.0/manifest.json")
+                .expect("pax path");
+            header.set_size(5 << 20);
+            header.set_mode(0o644);
+            header.set_mtime(0);
+            header.set_cksum();
+            builder
+                .append(&header, std::io::repeat(0u8).take(5 << 20))
+                .expect("append pax header");
+            builder.finish().expect("finish tar");
+        }
+        encoder.finish().expect("finish gzip")
+    };
+
     let seeds: Vec<(&str, Vec<u8>)> = vec![
         ("valid-single-event", one.clone()),
         ("valid-three-events", three.clone()),
@@ -632,6 +659,7 @@ fn generate_seed_corpus() {
             ]),
         ),
         ("high-ratio-gzip", high_ratio_gzip),
+        ("pax-header-past-decode-ceiling", pax_decode_bomb),
     ];
 
     for (name, bytes) in &seeds {
@@ -649,9 +677,8 @@ fn generate_seed_corpus() {
 /// the file ceilings on this path, and `max_decode_bytes` is the backstop pinned separately by
 /// `the_decode_ceiling_is_enforced_independently_of_the_byte_ceiling`.
 ///
-/// Not established: whether some non-bundle tar shape, a GNU long-name entry for instance, can
-/// make the reader consume past the decode ceiling. That is left as an open question rather than
-/// claimed either way.
+/// The shape that does reach it is a PAX extended header, pinned by
+/// `a_pax_extended_header_reaches_the_decode_ceiling` below.
 #[test]
 fn high_ratio_gzip_stops_at_the_tar_layer_not_the_decode_ceiling() {
     let seed = std::fs::read(
@@ -669,6 +696,30 @@ fn high_ratio_gzip_stops_at_the_tar_layer_not_the_decode_ceiling() {
         (class, code),
         (ErrorClass::Contract, ErrorCode::ContractMissingFile),
         "if this changes, the seed's name and the limitation note above both need revisiting"
+    );
+}
+
+/// `max_decode_bytes` is reachable, and this is the shape that reaches it. A PAX extended header is
+/// consumed inside the tar reader before any member is handed to the verifier, so the per-file
+/// ceilings — which are checked against a declared member size — never apply to it. That makes the
+/// decode ceiling the only guard on this path, which is why it needs a seed and a pinned outcome
+/// rather than a note saying the limit is unreachable.
+#[test]
+fn a_pax_extended_header_reaches_the_decode_ceiling() {
+    let seed = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fuzz/corpus/bundle_reader/pax-header-past-decode-ceiling"),
+    )
+    .expect("the checked-in seed must exist");
+
+    assert!(
+        (seed.len() as u64) < small_limits().max_bundle_bytes,
+        "the compressed form must clear the byte ceiling, or this tests the wrong axis"
+    );
+    let (class, code) = expect_rejected(&seed, "a PAX header declaring more than the decode limit");
+    assert_eq!(
+        (class, code),
+        (ErrorClass::Limits, ErrorCode::LimitDecodeBytes)
     );
 }
 

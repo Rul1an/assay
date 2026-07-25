@@ -38,7 +38,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: nightly
+          # Date-pinned, not floating `nightly`. Pinning cargo-fuzz alone does not freeze the
+          # compiler that produced a reported run, and a sanitizer-instrumented build is exactly
+          # the kind of thing that changes between nightlies. This is the toolchain the recorded
+          # local run used; bumping it is a deliberate commit.
+          toolchain: nightly-2026-07-24
 
       - name: Swatinem/rust-cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -73,6 +77,7 @@ jobs:
             wrong-member-order
             oversize-line
             high-ratio-gzip
+            pax-header-past-decode-ceiling
           )
           missing=0
           for seed in "${required[@]}"; do
