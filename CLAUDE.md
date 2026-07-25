@@ -1,8 +1,12 @@
 # Assay - AI Agent Context
 
+> Cross-agent work must first read and follow [AGENTS.md](AGENTS.md). That file is the shared
+> source of truth for branch ownership, ADR-042/043 scope, review quorum, and verification. This
+> file adds Assay-specific technical context and does not override that contract.
+
 ## What is Assay?
 
-Assay is a **Policy-as-Code** engine for Model Context Protocol (MCP) that validates AI agent behavior. It provides deterministic testing (trace replay), runtime security (eBPF/LSM kernel enforcement on Linux), and compliance gates (tool argument/sequence validation).
+Assay is a **Policy-as-Code** engine for Model Context Protocol (MCP) that validates AI agent behavior. It provides deterministic testing (trace replay), runtime security (eBPF/LSM kernel enforcement on Linux), and policy gates (tool argument/sequence validation).
 
 ## Workspace Structure
 

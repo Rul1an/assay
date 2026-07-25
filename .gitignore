@@ -10,7 +10,9 @@ docs/DISTRIBUTION-CHANNELS.md
 # Local / one-off
 .claude/
 .obsidian/
-.cursor/
+!.cursor/
+.cursor/*
+!.cursor/BUGBOT.md
 .mcpregistry_*
 _v.txt
 ai-agent-eval-plugin/

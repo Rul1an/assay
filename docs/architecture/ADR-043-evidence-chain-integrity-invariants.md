@@ -75,22 +75,33 @@ so they can be enforced mechanically rather than remembered.
    target for fuzzing and property testing. Coverage of an adjacent bundle format does not satisfy
    this, and a target that exists but never runs in CI does not either.
 
-4. **Authorization is stated, not grown — and never optional at runtime.** ADR-042 refuses generic
-   agent identity and delegation, so this repository does not build an identity provider. Within
-   that limit four rules hold, and documenting the current behaviour is not one of the options:
-   - With no authentication configured, the server makes no authenticated or certified claim.
-   - With authentication configured, missing or unusable key material fails at startup rather than
-     passing at runtime. A control that refuses an unsafe configuration never thereby disables the
-     enforcement it was protecting.
-   - A failed validation never yields an authorized request, in any mode.
-   - Every privileged method checks the authorization state of the request it is serving, not of a
-     handshake that preceded it. This is also the direction MCP is taking: the
-     [`2026-07-28` release candidate](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/),
-     locked on 2026-05-21 and due to publish on 2026-07-28, removes the `initialize`/`initialized`
-     handshake (SEP-2575) and the protocol-level session (SEP-2567). Read as of this ADR's date that
-     is a candidate rather than a published spec, which affects the timing of the argument and not
-     its direction: per-request state is the durable target either way, and a handshake-anchored
-     gate would be built on a mechanism the protocol is dropping.
+4. **Authorization is transport-bound, not grown inside stdio.** ADR-042 refuses generic agent
+   identity and delegation, and this repository's MCP server exposes only a stdio transport. It
+   therefore does not create a private authentication protocol inside `initialize`:
+   - With no authentication configured, the stdio server makes no authenticated or certified
+     claim.
+   - The non-standard `initialize.params.authorization` and
+     `initialize.params.initializationOptions.authorization` fields are not an authorization
+     boundary. Standalone mode never consumes them as identity or re-emits them on an
+     Assay-originated outbound surface. A transparent proxy may relay the client's `initialize`
+     bytes to its intended upstream, but it neither interprets those fields nor turns relay into an
+     Assay authentication claim. No mode logs their values.
+   - Any `ASSAY_AUTH_*` configuration on a server or proxy mode fails startup before protocol I/O
+     with a value-free unsupported-boundary error that names configured variables, never their
+     contents. It never selects a permissive mode and never silently disables an enforcement path.
+     The offline `enforcement-sarif` projection does not instantiate a server and does not inspect
+     this environment namespace.
+   - ProxyEnforce's explicit policy caller and credential are local enforcement inputs. They do not
+     assert transport authentication and are unchanged by this decision.
+   - Standards-aligned OAuth belongs to a future HTTP-transport ADR, activated by a real workflow
+     requirement. This ADR neither adds that transport nor claims support for it.
+
+   This boundary also avoids investing in a disappearing handshake. The
+   [`2026-07-28` release candidate](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/),
+   locked on 2026-05-21 and due to publish on 2026-07-28, removes
+   `initialize`/`initialized` (SEP-2575) and the protocol-level session (SEP-2567). Read as of this
+   ADR's date it is a candidate rather than a published specification. Assay does not claim support
+   for it by changing a version string; protocol migration remains a separate decision in #1846.
 
 5. **A named policy that cannot be loaded is fatal.** When the operator names a `--policy`, failure
    to load it ends the run, unconditionally. `--fail-closed` does not create that obligation; it
@@ -108,9 +119,10 @@ so they can be enforced mechanically rather than remembered.
 - §2 widens the claims boundary beyond prose. This is the mechanism ADR-042 relies on for "cannot
   erode by accretion", and it currently has a blind spot the size of the product. A closed set of
   wire claims costs a fixture to maintain and buys a guard that cannot be evaded by string building.
-- §4 accepts a smaller auth surface rather than a larger one, and pays for it with four rules that
-  hold at runtime rather than a documented exception. Per-request state, not session state, is the
-  target; work anchored to the handshake is work with a known expiry.
+- §4 accepts a smaller auth surface rather than a proprietary one. Existing public auth types may
+  remain for one compatibility release as deprecated API, but they are disconnected from
+  `Server::run`; configured auth on stdio is an early startup error. A future HTTP/OAuth capability
+  requires its own ADR and does not arrive through this amendment.
 - §5 changes default behaviour: a named policy that fails to load stops the run instead of falling
   back. That trades a convenience for an honest contract, and it is the reason this is an ADR rather
   than a bug fix.
@@ -120,12 +132,15 @@ so they can be enforced mechanically rather than remembered.
   The kernel-observation posture is unchanged: eBPF validation running post-merge rather than on
   pull requests remains consistent with its supporting status.
 
-Four implementation slices follow from the decisions, in this order:
+Five implementation slices follow from the decisions:
 
-1. Bounded ingest across the five entrypoints in §1, with per-axis tests.
-2. Remove the unfounded wire claims and stand up the closed claim set from §2.
-3. Policy-load semantics from §5, including the default-behaviour change.
-4. Runtime authorization from §4, and an evidence-chain fuzz target for §3.
+1. Bounded ingest across the entrypoints in §1, with per-axis tests. Pending.
+2. Remove the unfounded wire claims and stand up the closed claim set from §2. Merged via #1842
+   and strengthened via #1843.
+3. Policy-load semantics from §5, including the default-behaviour change. Merged via #1842.
+4. Remove proprietary stdio authorization semantics and enforce the startup boundary from §4.
+   Pending.
+5. Point fuzz and property testing at the evidence-chain verifier from §3. Pending.
 
 ## Appendix: reproduction
 
