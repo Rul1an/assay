@@ -1,5 +1,6 @@
 use super::limits::{
-    classify_member_ceiling, classify_source_ceiling, ReplayIngestError, ReplayLimits,
+    check_manifest_json_depth, classify_member_ceiling, classify_source_ceiling, ReplayIngestError,
+    ReplayLimits,
 };
 use super::{paths, BundleEntry, ReadBundle};
 use crate::replay::manifest::ReplayManifest;
@@ -115,18 +116,19 @@ pub fn read_bundle_tar_gz_with_limits<R: Read>(r: R, limits: ReplayLimits) -> Re
             }));
         }
 
-        let path = e.path().context("entry path")?;
-        let path_str = path.to_string_lossy().replace('\\', "/");
-
-        // Bound path length before any other path work: a hostile archive can carry a
-        // multi-kilobyte name that would otherwise be normalised and cloned into a key.
-        if path_str.len() > limits.max_path_len {
+        // Bound the path on the bytes the archive actually carries, before any conversion.
+        // `to_string_lossy` replaces invalid UTF-8 with U+FFFD, which is three bytes for every
+        // one it replaces, so a check on the converted string measures something the archive did
+        // not send and can be walked past by a name that is invalid on purpose.
+        let raw_path_len = e.path_bytes().len();
+        if raw_path_len > limits.max_path_len {
             return Err(anyhow::Error::from(ReplayIngestError::PathTooLong {
-                path: path_str.clone(),
-                actual: path_str.len(),
                 limit: limits.max_path_len,
             }));
         }
+
+        let path = e.path().context("entry path")?;
+        let path_str = path.to_string_lossy().replace('\\', "/");
 
         if path_str == paths::MANIFEST {
             let mut data = Vec::new();
@@ -137,6 +139,7 @@ pub fn read_bundle_tar_gz_with_limits<R: Read>(r: R, limits: ReplayLimits) -> Re
                     .map(anyhow::Error::from)
                     .unwrap_or_else(|| anyhow::Error::from(err).context("read manifest body"))
             })?;
+            check_manifest_json_depth(&data, limits.max_manifest_json_depth)?;
             manifest_data = Some(data);
             continue;
         }

@@ -40,6 +40,13 @@ pub struct ReplayLimits {
     pub max_path_len: usize,
     /// Maximum number of entries in the archive (including the manifest).
     pub max_entries: usize,
+    /// Maximum JSON nesting depth accepted in `manifest.json`.
+    ///
+    /// A ceiling on manifest *bytes* says nothing about its shape: a small document can nest
+    /// deeply enough to exhaust the stack in the parser. The evidence side carries the same
+    /// dimension as `max_json_depth`; replay names it locally for the same reason the rest of
+    /// this struct is local.
+    pub max_manifest_json_depth: usize,
 }
 
 impl Default for ReplayLimits {
@@ -51,6 +58,7 @@ impl Default for ReplayLimits {
             max_member_bytes: 500 * 1024 * 1024,   // 500 MiB per file (large cassettes)
             max_path_len: 256,
             max_entries: 100_000,
+            max_manifest_json_depth: 64,
         }
     }
 }
@@ -69,15 +77,17 @@ pub enum ReplayIngestError {
         limit: u64,
     },
 
-    #[error("replay bundle entry path length {actual} exceeds limit {limit} (path: {path})")]
-    PathTooLong {
-        path: String,
-        actual: usize,
-        limit: usize,
-    },
+    /// Deliberately free of the offending value. The path and its length are chosen by the
+    /// archive, and echoing either back gives a reader nothing to act on while handing an
+    /// attacker a channel into the diagnostic.
+    #[error("replay bundle entry path exceeds the configured maximum length of {limit}")]
+    PathTooLong { limit: usize },
 
     #[error("replay bundle entry count exceeds limit {limit}")]
     TooManyEntries { limit: usize },
+
+    #[error("replay bundle manifest JSON nesting exceeds the configured maximum depth of {limit}")]
+    ManifestTooDeep { limit: usize },
 }
 
 /// If `err` was produced by a [`LimitReader`](assay_common::limits::LimitReader) that wraps
@@ -104,6 +114,44 @@ pub(crate) fn classify_member_ceiling(
         kind: cause.kind,
         limit: cause.limit,
     })
+}
+
+/// Refuse a manifest whose JSON nests deeper than the configured ceiling.
+///
+/// Counts structural depth over the raw bytes rather than parsing first: handing an unbounded
+/// document to `serde_json` is the thing the ceiling exists to prevent, so the check cannot
+/// depend on the parse succeeding.
+pub(crate) fn check_manifest_json_depth(
+    data: &[u8],
+    max_depth: usize,
+) -> Result<(), ReplayIngestError> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for &b in data {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'{' | b'[' => {
+                depth += 1;
+                if depth > max_depth {
+                    return Err(ReplayIngestError::ManifestTooDeep { limit: max_depth });
+                }
+            }
+            b'}' | b']' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

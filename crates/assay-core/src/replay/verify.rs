@@ -3,7 +3,7 @@
 //! Validates bundle integrity (hashes) and runs secret scan: hard fail for
 //! cassettes/ and files/, warn for outputs/. See E9-REPLAY-BUNDLE-PLAN §2.5.
 
-use crate::replay::bundle::{paths, read_bundle_tar_gz, ReadBundle};
+use crate::replay::bundle::{paths, read_bundle_tar_gz_with_limits, ReadBundle, ReplayLimits};
 use crate::replay::scrub::contains_forbidden_patterns;
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
@@ -44,7 +44,23 @@ impl VerifyResult {
 /// - **outputs/:** warn only. Outputs can contain user-provided or tool output; we avoid
 ///   false-positive hard fails.
 pub fn verify_bundle<R: Read>(r: R) -> Result<VerifyResult> {
-    let ReadBundle { manifest, entries } = read_bundle_tar_gz(r).context("read bundle")?;
+    verify_bundle_with_limits(r, ReplayLimits::default())
+}
+
+/// Read once under an explicit ceiling and verify what was read.
+pub fn verify_bundle_with_limits<R: Read>(r: R, limits: ReplayLimits) -> Result<VerifyResult> {
+    let read = read_bundle_tar_gz_with_limits(r, limits).context("read bundle")?;
+    verify_read_bundle(&read)
+}
+
+/// Verify an already-read bundle.
+///
+/// Splitting this out is what lets a caller read the archive once and verify exactly the bytes it
+/// is about to use. Verifying from a reader and then reopening the file to consume it means two
+/// full materializations of the same archive and, worse, two different reads: the bytes that
+/// passed verification need not be the bytes that get replayed if the file changes in between.
+pub fn verify_read_bundle(read: &ReadBundle) -> Result<VerifyResult> {
+    let ReadBundle { manifest, entries } = read;
     let mut result = VerifyResult::default();
     let file_manifest = manifest.files.as_ref();
 
@@ -82,7 +98,7 @@ pub fn verify_bundle<R: Read>(r: R) -> Result<VerifyResult> {
         }
     }
 
-    for (path, data) in &entries {
+    for (path, data) in entries.iter() {
         let has_forbidden = contains_forbidden_patterns(data);
         if path.starts_with(paths::CASSETTES_PREFIX) || path.starts_with(paths::FILES_PREFIX) {
             if has_forbidden {

@@ -7,7 +7,8 @@ use super::manifest::{
 use super::provenance::annotate_replay_outputs;
 use super::run_args::replay_run_args;
 use crate::exit_codes::ReasonCode;
-use assay_core::replay::{read_bundle_tar_gz, verify_bundle};
+use assay_core::replay::bundle::{read_bundle_tar_gz_with_limits, ReplayLimits};
+use assay_core::replay::verify_read_bundle;
 
 pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     let bundle_digest = match sha256_file(&args.bundle) {
@@ -37,7 +38,25 @@ pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             );
         }
     };
-    let verify = match verify_bundle(file) {
+    let read = match read_bundle_tar_gz_with_limits(file, ReplayLimits::default()) {
+        Ok(read) => read,
+        Err(err) => {
+            return write_replay_failure(
+                &args,
+                &bundle_digest,
+                replay_mode,
+                None,
+                ReasonCode::ECfgParse,
+                format!("failed to read replay bundle: {}", err),
+                None,
+            );
+        }
+    };
+
+    // Verify exactly the bytes that will be replayed. Verifying a first read and then reopening
+    // the file for a second one materialized the archive twice and, worse, left a window in
+    // which the bytes that passed verification need not be the bytes that get consumed.
+    let verify = match verify_read_bundle(&read) {
         Ok(v) => v,
         Err(err) => {
             return write_replay_failure(
@@ -78,38 +97,6 @@ pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         );
     }
 
-    let file = match std::fs::File::open(&args.bundle) {
-        Ok(file) => file,
-        Err(err) => {
-            return write_replay_failure(
-                &args,
-                &bundle_digest,
-                replay_mode,
-                None,
-                ReasonCode::ECfgParse,
-                format!(
-                    "failed to open verified bundle {}: {}",
-                    args.bundle.display(),
-                    err
-                ),
-                None,
-            );
-        }
-    };
-    let read = match read_bundle_tar_gz(file) {
-        Ok(read) => read,
-        Err(err) => {
-            return write_replay_failure(
-                &args,
-                &bundle_digest,
-                replay_mode,
-                None,
-                ReasonCode::ECfgParse,
-                format!("failed to read replay bundle: {}", err),
-                None,
-            );
-        }
-    };
     let source_run_id = source_run_id_from_bundle(&read.manifest, &read.entries);
 
     if !args.live {

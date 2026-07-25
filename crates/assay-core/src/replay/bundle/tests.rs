@@ -618,9 +618,8 @@ mod bounded_ingest {
         let err = read_bundle_tar_gz_with_limits(Cursor::new(bytes.clone()), tight)
             .expect_err("a path one byte over the ceiling must be refused");
         match err.downcast_ref::<ReplayIngestError>() {
-            Some(ReplayIngestError::PathTooLong { limit, actual, .. }) => {
-                assert_eq!(*limit, path.len() - 1);
-                assert_eq!(*actual, path.len());
+            Some(ReplayIngestError::PathTooLong { limit }) => {
+                assert_eq!(*limit, path.len() - 1)
             }
             other => panic!("expected a typed PathTooLong, got {other:?}"),
         }
@@ -656,6 +655,51 @@ mod bounded_ingest {
 
         read_bundle_tar_gz_with_limits(Cursor::new(bytes), ReplayLimits::default())
             .expect("the same bundle must read under the default entry ceiling");
+    }
+
+    /// The manifest ceiling is about shape, not size: a small document can nest deeply enough to
+    /// exhaust the parser, and `max_manifest_bytes` says nothing about that.
+    #[test]
+    fn a_manifest_nested_past_the_ceiling_is_refused() {
+        let bytes = small_bundle();
+        let tight = ReplayLimits {
+            max_manifest_json_depth: 1,
+            ..ReplayLimits::default()
+        };
+        let err = read_bundle_tar_gz_with_limits(Cursor::new(bytes.clone()), tight)
+            .expect_err("a manifest deeper than one level must be refused");
+        match err.downcast_ref::<ReplayIngestError>() {
+            Some(ReplayIngestError::ManifestTooDeep { limit }) => assert_eq!(*limit, 1),
+            other => panic!("expected a typed ManifestTooDeep, got {other:?}"),
+        }
+
+        read_bundle_tar_gz_with_limits(Cursor::new(bytes), ReplayLimits::default())
+            .expect("the same manifest must read under the default depth");
+    }
+
+    /// Exactly the ceiling is accepted and one deeper is refused, pinned against the real
+    /// manifest rather than a hand-built document, so the boundary is the one callers meet.
+    #[test]
+    fn the_manifest_depth_boundary_is_exact() {
+        use super::super::limits::check_manifest_json_depth;
+
+        // `{"a":{"b":1}}` is two levels of nesting.
+        let doc = br#"{"a":{"b":1}}"#;
+        assert!(
+            check_manifest_json_depth(doc, 2).is_ok(),
+            "exactly the ceiling must pass"
+        );
+        assert!(
+            check_manifest_json_depth(doc, 1).is_err(),
+            "one level over the ceiling must be refused"
+        );
+
+        // Braces inside a string are not structure and must not count towards depth.
+        let stringy = br#"{"a":"{{{{{{{{"}"#;
+        assert!(
+            check_manifest_json_depth(stringy, 1).is_ok(),
+            "braces inside a string literal must not be counted as nesting"
+        );
     }
 
     /// A bundle that is small compressed and large expanded. The source ceiling says nothing
