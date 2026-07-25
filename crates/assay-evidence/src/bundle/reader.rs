@@ -14,7 +14,9 @@
 //! For very large bundles (>1GB), consider tempfile-based streaming
 //! or the `into_events()` consuming pattern in a future version.
 
-use crate::bundle::writer::{classify_reader_io, classify_strict_json};
+use crate::bundle::writer::{
+    check_entry_path_len, check_events_shape, classify_reader_io, classify_strict_json,
+};
 use crate::bundle::writer::{verify_bundle_with_limits, Manifest, VerifyLimits};
 use crate::json_strict::validate_json_strict_with_depth;
 use crate::ndjson::NdjsonEvents;
@@ -137,6 +139,7 @@ impl BundleReader {
         for entry in archive.entries().map_err(classify_reader_io)? {
             let entry = entry.map_err(classify_reader_io)?;
             let path = entry.path()?.to_string_lossy().to_string();
+            check_entry_path_len(&path, limits.max_path_len)?;
 
             if path == "events.ndjson" {
                 // `LimitFileSize` rather than an invented tag: the classification vocabulary is
@@ -147,6 +150,7 @@ impl BundleReader {
                 entry
                     .read_to_end(&mut events_content)
                     .map_err(classify_reader_io)?;
+                check_events_shape(&events_content, limits.max_line_bytes, limits.max_events)?;
                 break;
             }
         }
@@ -239,6 +243,7 @@ impl BundleInfo {
         for entry in archive.entries().map_err(classify_reader_io)? {
             let entry = entry.map_err(classify_reader_io)?;
             let path = entry.path()?.to_string_lossy().to_string();
+            check_entry_path_len(&path, limits.max_path_len)?;
 
             if path == "manifest.json" {
                 // Read manifest to string for strict validation
@@ -250,7 +255,6 @@ impl BundleInfo {
                     .map_err(classify_reader_io)
                     .context("Failed to read manifest.json")?;
 
-                // Security: Validate JSON strictly before parsing
                 // The caller's ceiling, not the module constant: peek validated the manifest but
                 // ignored `max_json_depth`, so an unverified read applied a different budget than
                 // a verified one on the same document.

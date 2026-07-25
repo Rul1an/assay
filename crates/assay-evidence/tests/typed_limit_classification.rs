@@ -272,3 +272,76 @@ fn the_message_names_the_configured_ceiling_and_not_the_constant() {
         ve.message
     );
 }
+
+/// `max_path_len`, `max_line_bytes` and `max_events` were enforced on the verifying path and
+/// nowhere else, so an unverified read applied a different contract to the same bytes. Skipping
+/// verification means skipping the integrity check, not the resource budget.
+#[test]
+fn the_unverified_path_enforces_line_and_event_ceilings() {
+    use assay_evidence::bundle::BundleReader;
+
+    let mut buf = Vec::new();
+    {
+        let mut w = BundleWriter::new(&mut buf);
+        for seq in 0..6 {
+            w.add_event(EvidenceEvent::new(
+                "assay.test",
+                "urn:assay:test",
+                "run_shape",
+                seq,
+                serde_json::json!({ "pad": "A".repeat(256) }),
+            ));
+        }
+        w.finish().expect("write bundle");
+    }
+
+    fn refuse_unverified(bytes: &[u8], limits: VerifyLimits) -> (ErrorClass, ErrorCode) {
+        let err =
+            match BundleReader::open_unverified_with_limits(Cursor::new(bytes.to_vec()), limits) {
+                Ok(_) => panic!("the unverified path must apply this ceiling"),
+                Err(e) => e,
+            };
+        let ve = err
+            .downcast_ref::<VerifyError>()
+            .expect("an unverified ceiling refusal must be typed");
+        (ve.class, ve.code)
+    }
+
+    assert_eq!(
+        refuse_unverified(
+            &buf,
+            VerifyLimits {
+                max_line_bytes: 64,
+                ..VerifyLimits::default()
+            }
+        ),
+        (ErrorClass::Limits, ErrorCode::LimitLineBytes)
+    );
+
+    assert_eq!(
+        refuse_unverified(
+            &buf,
+            VerifyLimits {
+                max_events: 2,
+                ..VerifyLimits::default()
+            }
+        ),
+        (ErrorClass::Limits, ErrorCode::LimitTotalEvents)
+    );
+
+    assert_eq!(
+        refuse_unverified(
+            &buf,
+            VerifyLimits {
+                max_path_len: 4,
+                ..VerifyLimits::default()
+            }
+        ),
+        (ErrorClass::Limits, ErrorCode::LimitPathLength)
+    );
+
+    // Acceptance twin: the same bundle under the defaults, so a reader that refused everything
+    // would not pass.
+    BundleReader::open_unverified_with_limits(Cursor::new(buf), VerifyLimits::default())
+        .expect("the same bundle must open unverified under the default limits");
+}

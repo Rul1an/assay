@@ -30,12 +30,65 @@ use std::io::Read;
 
 pub use writer_next::errors::{ErrorClass, ErrorCode, VerifyError};
 
-/// Turn an io failure from a bounded reader into a typed error.
+/// Apply the structural ceilings that only the verifier used to enforce.
 ///
-/// The reader entrypoints return `anyhow::Result`, so without this a ceiling refusal reaches the
-/// caller as a bare `io::Error` and cannot be told apart from a truncated file. Classifying here
-/// means `BundleReader::open*` and `BundleInfo::peek*` carry the same `VerifyError` the verifier
-/// does, recoverable with `downcast_ref`.
+/// `max_path_len`, `max_line_bytes` and `max_events` were checked on the verifying path and
+/// nowhere else, so an unverified read applied a different contract to the same bytes: an
+/// oversized path or an unbounded line was handed back to the caller, who discovered it only
+/// while iterating, if at all. Skipping verification means skipping the integrity check, not the
+/// resource budget.
+pub(crate) fn check_entry_path_len(path: &str, max_path_len: usize) -> Result<(), VerifyError> {
+    if path.len() > max_path_len {
+        return Err(VerifyError::new(
+            ErrorClass::Limits,
+            ErrorCode::LimitPathLength,
+            format!(
+                "Entry path length {} exceeds limit {}",
+                path.len(),
+                max_path_len
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Scan already-materialized NDJSON against the per-line and total-event ceilings.
+///
+/// The bytes are bounded by `max_events_bytes` before they get here, so this is about the shape
+/// within that budget rather than about the allocation.
+pub(crate) fn check_events_shape(
+    events: &[u8],
+    max_line_bytes: usize,
+    max_events: usize,
+) -> Result<(), VerifyError> {
+    let mut count = 0usize;
+    for line in events.split(|b| *b == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        if line.len() > max_line_bytes {
+            return Err(VerifyError::new(
+                ErrorClass::Limits,
+                ErrorCode::LimitLineBytes,
+                format!(
+                    "Event line length {} exceeds limit {}",
+                    line.len(),
+                    max_line_bytes
+                ),
+            ));
+        }
+        count += 1;
+        if count > max_events {
+            return Err(VerifyError::new(
+                ErrorClass::Limits,
+                ErrorCode::LimitTotalEvents,
+                format!("Event count exceeds limit {}", max_events),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Turn a strict-JSON failure into the same typed error the verifier produces.
 ///
 /// A nesting refusal is a resource ceiling; everything else the strict pass rejects is a contract
@@ -75,6 +128,12 @@ pub(crate) fn classify_strict_json(
     anyhow::Error::new(strict_json_error(err, what, max_depth))
 }
 
+/// Turn an io failure from a bounded reader into a typed error.
+///
+/// The reader entrypoints return `anyhow::Result`, so without this a ceiling refusal reaches the
+/// caller as a bare `io::Error` and cannot be told apart from a truncated file. Classifying here
+/// means `BundleReader::open*` and `BundleInfo::peek*` carry the same `VerifyError` the verifier
+/// does, recoverable with `downcast_ref`.
 pub(crate) fn classify_reader_io(err: std::io::Error) -> anyhow::Error {
     match writer_next::verify::classify_limit(&err) {
         Some(code) => {
