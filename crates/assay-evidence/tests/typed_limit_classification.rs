@@ -77,3 +77,198 @@ fn a_bundle_within_every_ceiling_is_not_refused() {
     verify_bundle_with_limits(Cursor::new(bytes), VerifyLimits::default())
         .expect("a small bundle must verify under the default limits");
 }
+
+/// `max_json_depth` was configurable and had no effect: the validator's depth guard was pinned to
+/// a constant, so the field never reached it. And when the constant did trip, the failure was
+/// reported as `ContractInvalidJson`, which says the document is malformed when it means the
+/// document is deeper than we agreed to parse.
+#[test]
+fn a_nesting_refusal_classifies_as_limit_json_depth() {
+    let mut buf = Vec::new();
+    {
+        let mut w = BundleWriter::new(&mut buf);
+        // Nested well past a small configured ceiling, far under the built-in constant.
+        let mut payload = serde_json::json!({"leaf": 1});
+        for _ in 0..12 {
+            payload = serde_json::json!({ "n": payload });
+        }
+        w.add_event(EvidenceEvent::new(
+            "assay.test",
+            "urn:assay:test",
+            "run_depth",
+            0,
+            payload,
+        ));
+        w.finish().expect("write bundle");
+    }
+
+    let limits = VerifyLimits {
+        max_json_depth: 4,
+        ..VerifyLimits::default()
+    };
+    assert_eq!(
+        classify(buf.clone(), limits),
+        (ErrorClass::Limits, ErrorCode::LimitJsonDepth)
+    );
+
+    // Acceptance twin: the same bundle under a ceiling that accommodates it. Without this, a
+    // validator that rejected all nesting would satisfy the assertion above.
+    verify_bundle_with_limits(Cursor::new(buf), VerifyLimits::default())
+        .expect("the same bundle must verify under the default depth");
+}
+
+/// Object and array nesting are separate code paths in the validator, and only the object one had
+/// been switched to the caller's ceiling. An array-only document therefore kept using the module
+/// constant and ignored a configured depth entirely.
+#[test]
+fn the_ceiling_applies_to_object_array_and_mixed_nesting() {
+    fn bundle_with(payload: serde_json::Value) -> Vec<u8> {
+        let mut buf = Vec::new();
+        {
+            let mut w = BundleWriter::new(&mut buf);
+            w.add_event(EvidenceEvent::new(
+                "assay.test",
+                "urn:assay:test",
+                "run_depth_shape",
+                0,
+                payload,
+            ));
+            w.finish().expect("write bundle");
+        }
+        buf
+    }
+
+    let mut objects = serde_json::json!({"leaf": 1});
+    let mut arrays = serde_json::json!([1]);
+    let mut mixed = serde_json::json!({"leaf": 1});
+    for i in 0..12 {
+        objects = serde_json::json!({ "n": objects });
+        arrays = serde_json::json!([arrays]);
+        mixed = if i % 2 == 0 {
+            serde_json::json!([mixed])
+        } else {
+            serde_json::json!({ "n": mixed })
+        };
+    }
+
+    let tight = VerifyLimits {
+        max_json_depth: 4,
+        ..VerifyLimits::default()
+    };
+    for (shape, payload) in [("objects", objects), ("arrays", arrays), ("mixed", mixed)] {
+        let bytes = bundle_with(payload);
+        assert_eq!(
+            classify(bytes.clone(), tight),
+            (ErrorClass::Limits, ErrorCode::LimitJsonDepth),
+            "{shape} nesting must respect the configured ceiling"
+        );
+        verify_bundle_with_limits(Cursor::new(bytes), VerifyLimits::default())
+            .unwrap_or_else(|e| panic!("{shape} must verify under the default depth: {e:#}"));
+    }
+}
+
+/// The manifest is a document like any other, and it was the one the ceiling never reached. The
+/// verifier handed it straight to `serde_json` with no strict pass at all, and peek validated it
+/// against the module constant, so an unverified read applied a different budget than a verified
+/// one on the same bytes.
+#[test]
+fn the_manifest_respects_the_configured_ceiling_on_both_paths() {
+    use assay_evidence::bundle::BundleReader;
+
+    // A manifest is written by us, so it is not deeply nested. A ceiling of 1 is below even a
+    // flat object, which is what makes this observable without hand-forging a bundle.
+    let mut buf = Vec::new();
+    {
+        let mut w = BundleWriter::new(&mut buf);
+        w.add_event(EvidenceEvent::new(
+            "assay.test",
+            "urn:assay:test",
+            "run_manifest_depth",
+            0,
+            serde_json::json!({"flat": 1}),
+        ));
+        w.finish().expect("write bundle");
+    }
+
+    let tight = VerifyLimits {
+        max_json_depth: 1,
+        ..VerifyLimits::default()
+    };
+
+    assert_eq!(
+        classify(buf.clone(), tight),
+        (ErrorClass::Limits, ErrorCode::LimitJsonDepth),
+        "the verifier must apply the ceiling to manifest.json"
+    );
+
+    let err = match BundleReader::open_unverified_with_limits(Cursor::new(buf.clone()), tight) {
+        Ok(_) => panic!("the unverified path must apply the ceiling to manifest.json too"),
+        Err(e) => e,
+    };
+    let ve = err
+        .downcast_ref::<VerifyError>()
+        .expect("a manifest depth refusal must be typed on the unverified path as well");
+    assert_eq!(ve.class, ErrorClass::Limits);
+    assert_eq!(ve.code, ErrorCode::LimitJsonDepth);
+
+    // Acceptance twin on both paths, so a ceiling that refused every manifest would not pass.
+    verify_bundle_with_limits(Cursor::new(buf.clone()), VerifyLimits::default())
+        .expect("the manifest must verify under the default depth");
+    BundleReader::open_unverified_with_limits(Cursor::new(buf), VerifyLimits::default())
+        .expect("and must open unverified under the default depth");
+}
+
+/// The classification was right while the sentence was wrong. `NestingTooDeep` renders its own
+/// Display, which names the module constant as the maximum and echoes the depth the input chose,
+/// so a refusal under a configured ceiling of four told the operator it had exceeded 64. One
+/// shared classifier now writes the message from the ceiling that actually applied, and does not
+/// repeat an attacker-supplied number back at the reader.
+#[test]
+fn the_message_names_the_configured_ceiling_and_not_the_constant() {
+    let mut buf = Vec::new();
+    {
+        let mut w = BundleWriter::new(&mut buf);
+        let mut payload = serde_json::json!({"leaf": 1});
+        for _ in 0..12 {
+            payload = serde_json::json!({ "n": payload });
+        }
+        w.add_event(EvidenceEvent::new(
+            "assay.test",
+            "urn:assay:test",
+            "run_depth_message",
+            0,
+            payload,
+        ));
+        w.finish().expect("write bundle");
+    }
+
+    let limits = VerifyLimits {
+        max_json_depth: 4,
+        ..VerifyLimits::default()
+    };
+    let err = verify_bundle_with_limits(Cursor::new(buf), limits).expect_err("must be refused");
+    let ve = err.downcast_ref::<VerifyError>().expect("typed");
+
+    assert_eq!(ve.class, ErrorClass::Limits);
+    assert_eq!(ve.code, ErrorCode::LimitJsonDepth);
+    assert!(
+        ve.message.contains("maximum depth of 4"),
+        "the message must name the ceiling that applied: {}",
+        ve.message
+    );
+    assert!(
+        !ve.message.contains("64"),
+        "the module constant must not be presented as the maximum: {}",
+        ve.message
+    );
+    assert!(
+        !ve.message.contains("13"),
+        "the observed depth is attacker-chosen and must not be echoed: {}",
+        ve.message
+    );
+    assert!(
+        !ve.message.contains("Security"),
+        "a budget refusal must not be framed as a security finding: {}",
+        ve.message
+    );
+}

@@ -1,5 +1,6 @@
+use crate::bundle::writer::strict_json_error;
 use crate::crypto::id::{compute_content_hash, compute_run_root, compute_stream_id};
-use crate::json_strict::validate_json_strict;
+use crate::json_strict::validate_json_strict_with_depth;
 use crate::types::EvidenceEvent;
 use anyhow::Result;
 use flate2::read::GzDecoder;
@@ -212,6 +213,19 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                 ve
             })?;
 
+            // The manifest went straight to `serde_json` with no strict pass at all, so the
+            // caller's nesting ceiling applied to events and not to the document that describes
+            // them. Peek already validated it; the verifier did not.
+            let manifest_str = std::str::from_utf8(&content).map_err(|e| {
+                VerifyError::new(
+                    ErrorClass::Contract,
+                    ErrorCode::ContractInvalidJson,
+                    format!("Invalid UTF-8 in manifest.json: {}", e),
+                )
+            })?;
+            validate_json_strict_with_depth(manifest_str, limits.max_json_depth)
+                .map_err(|e| strict_json_error(e, "Manifest", limits.max_json_depth))?;
+
             let m: Manifest = serde_json::from_slice(&content).map_err(|e| {
                 let mut ve = VerifyError::from(e);
                 ve.code = ErrorCode::ContractInvalidJson;
@@ -328,13 +342,8 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                     )
                 })?;
 
-                validate_json_strict(line_str).map_err(|e| {
-                    VerifyError::new(
-                        ErrorClass::Contract,
-                        ErrorCode::ContractInvalidJson,
-                        format!("Security: {}", e),
-                    )
-                })?;
+                validate_json_strict_with_depth(line_str, limits.max_json_depth)
+                    .map_err(|e| strict_json_error(e, "Event", limits.max_json_depth))?;
 
                 let event: EvidenceEvent = serde_json::from_str(line_str).map_err(|e| {
                     let mut ve = VerifyError::from(e);

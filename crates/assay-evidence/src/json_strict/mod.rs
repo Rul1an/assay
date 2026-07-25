@@ -79,3 +79,15 @@ pub fn from_str_strict<T: DeserializeOwned>(s: &str) -> Result<T, StrictJsonErro
 pub fn validate_json_strict(s: &str) -> Result<(), StrictJsonError> {
     json_strict_internal::run::validate_json_strict_impl(s)
 }
+
+/// Validate under an explicit nesting ceiling.
+///
+/// The depth guard was pinned to a constant, so `VerifyLimits::max_json_depth` had no way to
+/// reach it and a caller's configured value was decorative. Crate-internal: the ceiling is a
+/// verification concern and does not need to widen the public surface.
+pub(crate) fn validate_json_strict_with_depth(
+    s: &str,
+    max_depth: usize,
+) -> Result<(), StrictJsonError> {
+    json_strict_internal::run::validate_json_strict_with_depth_impl(s, max_depth)
+}

@@ -36,6 +36,45 @@ pub use writer_next::errors::{ErrorClass, ErrorCode, VerifyError};
 /// caller as a bare `io::Error` and cannot be told apart from a truncated file. Classifying here
 /// means `BundleReader::open*` and `BundleInfo::peek*` carry the same `VerifyError` the verifier
 /// does, recoverable with `downcast_ref`.
+/// Turn a strict-JSON failure into the same typed error the verifier produces.
+///
+/// A nesting refusal is a resource ceiling; everything else the strict pass rejects is a contract
+/// fault. Without this the unverified path reported both as opaque context, so a caller could not
+/// tell "raise the budget" from "the producer is broken".
+pub(crate) fn strict_json_error(
+    err: crate::json_strict::StrictJsonError,
+    what: &str,
+    max_depth: usize,
+) -> VerifyError {
+    use crate::json_strict::StrictJsonError;
+    match err {
+        // The variant's own Display renders the module constant as the maximum and echoes the
+        // observed depth, so under a configured ceiling of 4 it read "exceeds maximum 64" and
+        // quoted a number the input chose. Both are wrong to show an operator: the ceiling that
+        // actually applied is the configured one, and the attacker-supplied depth adds nothing a
+        // reader can act on.
+        StrictJsonError::NestingTooDeep { .. } => VerifyError::new(
+            ErrorClass::Limits,
+            ErrorCode::LimitJsonDepth,
+            format!("{what} JSON nesting exceeds the configured maximum depth of {max_depth}"),
+        ),
+        other => VerifyError::new(
+            ErrorClass::Contract,
+            ErrorCode::ContractInvalidJson,
+            format!("Security: {other}"),
+        ),
+    }
+}
+
+/// `anyhow` wrapper for the reader entrypoints, which do not return `VerifyError` directly.
+pub(crate) fn classify_strict_json(
+    err: crate::json_strict::StrictJsonError,
+    what: &str,
+    max_depth: usize,
+) -> anyhow::Error {
+    anyhow::Error::new(strict_json_error(err, what, max_depth))
+}
+
 pub(crate) fn classify_reader_io(err: std::io::Error) -> anyhow::Error {
     match writer_next::verify::classify_limit(&err) {
         Some(code) => {

@@ -14,9 +14,9 @@
 //! For very large bundles (>1GB), consider tempfile-based streaming
 //! or the `into_events()` consuming pattern in a future version.
 
-use crate::bundle::writer::classify_reader_io;
+use crate::bundle::writer::{classify_reader_io, classify_strict_json};
 use crate::bundle::writer::{verify_bundle_with_limits, Manifest, VerifyLimits};
-use crate::json_strict::validate_json_strict;
+use crate::json_strict::validate_json_strict_with_depth;
 use crate::ndjson::NdjsonEvents;
 use crate::types::EvidenceEvent;
 use anyhow::{Context, Result};
@@ -251,8 +251,11 @@ impl BundleInfo {
                     .context("Failed to read manifest.json")?;
 
                 // Security: Validate JSON strictly before parsing
-                validate_json_strict(&content)
-                    .context("Security: Invalid JSON in manifest.json")?;
+                // The caller's ceiling, not the module constant: peek validated the manifest but
+                // ignored `max_json_depth`, so an unverified read applied a different budget than
+                // a verified one on the same document.
+                validate_json_strict_with_depth(&content, limits.max_json_depth)
+                    .map_err(|e| classify_strict_json(e, "Manifest", limits.max_json_depth))?;
 
                 let manifest: Manifest =
                     serde_json::from_str(&content).context("Failed to parse manifest.json")?;
