@@ -16,6 +16,37 @@ fn next_rid() -> String {
     format!("r-{n:06}")
 }
 
+/// The `initialize` result this server returns on a successful handshake.
+///
+/// Extracted so the claims boundary is testable rather than remembered. ADR-042 refuses
+/// compliance and partnership claims; ADR-043 §2 extends that refusal from prose to what the
+/// binary puts on the wire. This response previously carried a `meta` object asserting
+/// `certified: true` and a `partner`, unconditionally, on every successful handshake including
+/// sessions that had just failed authentication under the default permissive mode. Neither
+/// literal carried a basis a reviewer could check, so neither is emitted.
+///
+/// Server-specific metadata, if it is ever needed, belongs under the protocol's reserved
+/// `_meta` key with a non-reserved prefix such as `dev.assay/`; a bare `meta` object was never
+/// part of the protocol.
+fn initialize_result() -> Value {
+    serde_json::json!({
+        // Stale: the stable revision is 2025-11-25, and the 2026-07-28 candidate removes this
+        // handshake and the protocol-level session outright. Bumping it is a negotiation change
+        // and is deliberately not part of this fix.
+        "protocolVersion": "2024-11-05",
+        "capabilities": {
+            "tools": {}
+        },
+        "serverInfo": {
+            "name": "assay-mcp-server",
+            // Derived from the crate, not written by hand. The previous literal "0.4.0" was
+            // an identity claim no build could substantiate, which is the same defect as the
+            // status claims this function was cleaned up to remove.
+            "version": env!("CARGO_PKG_VERSION")
+        }
+    })
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct JsonRpcRequest {
     jsonrpc: String,
@@ -224,21 +255,7 @@ impl Server {
                             format!("Authentication Failed: {}", e),
                         )
                     } else {
-                        let caps = serde_json::json!({
-                            "protocolVersion": "2024-11-05", // Matches recent spec
-                            "capabilities": {
-                                "tools": {}
-                            },
-                            "serverInfo": {
-                                "name": "assay-mcp-server",
-                                "version": "0.4.0"
-                            },
-                            "meta": {
-                                "certified": true,
-                                "partner": "agent_framework"
-                            }
-                        });
-                        JsonRpcResponse::ok(req.id.clone(), caps)
+                        JsonRpcResponse::ok(req.id.clone(), initialize_result())
                     }
                 }
                 "notifications/initialized" => {
@@ -480,5 +497,160 @@ impl Server {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod claims_boundary_tests {
+    use super::initialize_result;
+
+    /// ADR-042 stop list, ADR-043 §2. The handshake must not assert a status the server
+    /// cannot substantiate. A denylist over the serialized response catches a claim
+    /// reintroduced anywhere in the object under any nesting, but it only knows the words
+    /// it was given, so it is the backstop here and not the primary control. The primary
+    /// control is `initialize_result_pins_every_value`, which pins the leaves.
+    #[test]
+    fn initialize_result_asserts_no_unearned_status() {
+        let wire = serde_json::to_string(&initialize_result()).expect("serializable");
+        for forbidden in [
+            "certified",
+            "certification",
+            "partner",
+            "compliant",
+            "compliance",
+            "approved",
+            "endorsed",
+            "accredited",
+        ] {
+            assert!(
+                !wire.to_ascii_lowercase().contains(forbidden),
+                "initialize result asserts `{forbidden}` without a checkable basis: {wire}"
+            );
+        }
+    }
+
+    /// Pinning paths is not enough, because a claim can live in a *value* on a permitted
+    /// path: `serverInfo.version: "0.4.0 (SOC 2 Type II attested)"` satisfies both the
+    /// allowlist and the denylist, since "attested" is not one of the eight words. The
+    /// response has four leaves, so pin all four. Anything asserted on the wire then has to
+    /// pass through this test, and the denylist is left as a backstop for the case where
+    /// someone updates a pinned value without thinking about what it claims.
+    #[test]
+    fn initialize_result_pins_every_value() {
+        let value = initialize_result();
+        assert_eq!(
+            value.get("protocolVersion").and_then(|v| v.as_str()),
+            Some("2024-11-05")
+        );
+        assert_eq!(
+            value.get("capabilities"),
+            Some(&serde_json::json!({"tools": {}}))
+        );
+        assert_eq!(
+            value
+                .get("serverInfo")
+                .and_then(|s| s.get("name"))
+                .and_then(|v| v.as_str()),
+            Some("assay-mcp-server")
+        );
+        // Derived, not asserted. The literal "0.4.0" was itself an unverifiable identity
+        // claim: the crate has been on 3.x for a long time, so the wire was stating a
+        // version no build ever produced.
+        assert_eq!(
+            value
+                .get("serverInfo")
+                .and_then(|s| s.get("version"))
+                .and_then(|v| v.as_str()),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+    }
+
+    /// The bare `meta` key was never part of the protocol. If server metadata returns it
+    /// belongs under the reserved `_meta` key with a non-reserved prefix.
+    #[test]
+    fn initialize_result_has_no_bare_meta_object() {
+        let value = initialize_result();
+        let obj = value.as_object().expect("result is an object");
+        assert!(!obj.contains_key("meta"), "bare `meta` key reintroduced");
+    }
+
+    /// A denylist alone only catches the words we thought of. The response surface is small
+    /// and closed, so pin it: anything new on the wire has to be added here deliberately,
+    /// which is the point at which someone has to justify its basis.
+    ///
+    /// The walk is recursive on purpose. Pinning only the top level would leave
+    /// `serverInfo.vendorStatus` free to appear, which is the same defect one level down.
+    #[test]
+    fn initialize_result_surface_is_a_closed_set() {
+        const PERMITTED: &[&str] = &[
+            "protocolVersion",
+            "capabilities",
+            "capabilities.tools",
+            "serverInfo",
+            "serverInfo.name",
+            "serverInfo.version",
+        ];
+
+        // Descends through arrays as well as objects. An array element is addressed as
+        // `path[]` rather than `path[0]`, so the allowlist pins shape and not length: a
+        // future `capabilities.tools: [{"newField": true}]` surfaces as
+        // `capabilities.tools[].newField` and fails, instead of hiding inside a node the
+        // walk never entered.
+        fn walk(value: &serde_json::Value, prefix: &str, found: &mut Vec<String>) {
+            match value {
+                serde_json::Value::Object(obj) => {
+                    for (key, child) in obj {
+                        let path = if prefix.is_empty() {
+                            key.clone()
+                        } else {
+                            format!("{prefix}.{key}")
+                        };
+                        found.push(path.clone());
+                        walk(child, &path, found);
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    let path = format!("{prefix}[]");
+                    for child in items {
+                        walk(child, &path, found);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let value = initialize_result();
+        let mut found = Vec::new();
+        walk(&value, "", &mut found);
+
+        for path in &found {
+            assert!(
+                PERMITTED.contains(&path.as_str()),
+                "`{path}` was added to the initialize result without being declared here; \
+                 add it to PERMITTED only once its basis is checkable (ADR-042, ADR-043 §2)"
+            );
+        }
+        // Guard the guard: if the response shrinks, the allowlist must shrink with it, or it
+        // stops describing what actually goes on the wire.
+        for permitted in PERMITTED {
+            assert!(
+                found.iter().any(|p| p == permitted),
+                "`{permitted}` is declared permitted but no longer emitted; prune it"
+            );
+        }
+    }
+
+    #[test]
+    fn initialize_result_still_carries_the_fields_a_client_needs() {
+        let value = initialize_result();
+        assert!(value.get("protocolVersion").is_some());
+        assert!(value.get("capabilities").is_some());
+        assert_eq!(
+            value
+                .get("serverInfo")
+                .and_then(|s| s.get("name"))
+                .and_then(|n| n.as_str()),
+            Some("assay-mcp-server")
+        );
     }
 }

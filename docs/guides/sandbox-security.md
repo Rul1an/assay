@@ -13,7 +13,10 @@ MCP servers and AI agents execute code that may:
 - **Make unauthorized network connections**
 - **Interfere with other processes** via shared /tmp
 
-Assay's sandbox mitigates these risks using Linux Landlock LSM, environment scrubbing, and process isolation.
+Assay's sandbox mitigates filesystem and environment risks using Linux Landlock
+LSM, environment scrubbing, and process isolation. Network enforcement is a
+separate opt-in: `--enforce --enforce-net` accepts explicit TCP destination
+ports on compatible Linux hosts.
 
 ---
 
@@ -23,8 +26,8 @@ Assay's sandbox mitigates these risks using Linux Landlock LSM, environment scru
 # Run an MCP server in a secure sandbox
 assay sandbox -- npx @modelcontextprotocol/server-filesystem
 
-# With maximum security
-assay sandbox --env-strict --fail-closed -- ./untrusted-server
+# Require filesystem enforcement
+assay sandbox --enforce --env-strict --fail-closed -- ./untrusted-server
 ```
 
 ---
@@ -193,35 +196,29 @@ Landlock is a Linux Security Module that restricts filesystem access:
 Process: ./mcp-server
 
 Allowed paths:
-  /home/user/project/**  (read)
-  /tmp/assay-1000-123/** (read+write)
+  /home/user/project      (read+execute baseline)
+  /tmp/assay-1000-123    (full access baseline)
 
 Blocked paths:
-  /home/user/.ssh/**     ← DENIED
-  /var/lib/private-demo/credentials.txt  ← DENIED
-  /                      ← DENIED
+  paths not admitted by the Landlock allowlist
 ```
 
 ### Policy Example
 
 ```yaml
 # my-policy.yaml
-version: "1.0"
-name: "restricted-mcp"
+api_version: "assay/v1"
 
 fs:
-  allow:
-    - path: "${CWD}/**"
-      read: true
-      write: false
-    - path: "${TMPDIR}/**"
-      read: true
-      write: true
+  allow: []
   deny:
-    - path: "${HOME}/.ssh/**"
-    - path: "${HOME}/.aws/**"
-    - path: "${HOME}/.gnupg/**"
+    - "${HOME}/.ssh"
+    - "${HOME}/.aws"
+    - "${HOME}/.gnupg"
 ```
+
+If this file does not parse, `assay sandbox` exits 2 and runs nothing rather than falling
+back to a built-in pack.
 
 ```bash
 assay sandbox --policy my-policy.yaml -- ./mcp-server
@@ -235,9 +232,9 @@ Landlock is **allow-only**. It cannot enforce "deny X inside allowed Y":
 # ❌ This CANNOT be enforced:
 fs:
   allow:
-    - path: "${HOME}/**"      # Allow all of home
+    - "${HOME}"      # Allow all of home
   deny:
-    - path: "${HOME}/.ssh/**" # Deny .ssh (INSIDE allowed path)
+    - "${HOME}/.ssh" # Deny .ssh (INSIDE allowed path)
 ```
 
 **Assay detects this conflict** and:
@@ -246,19 +243,26 @@ fs:
 
 ### Best Practice: Minimal Allow Paths
 
-```yaml
-# ✅ Good: Specific paths
-fs:
-  allow:
-    - path: "${CWD}/src/**"
-    - path: "${CWD}/data/**"
-    - path: "${TMPDIR}/**"
+✅ Good: specific paths.
 
-# ❌ Bad: Overly broad
+```yaml
 fs:
   allow:
-    - path: "${HOME}/**"  # Too permissive!
+    - "${CWD}/src"
+    - "${CWD}/data"
 ```
+
+❌ Bad: overly broad.
+
+```yaml
+fs:
+  allow:
+    - "${HOME}"  # Too permissive!
+```
+
+An explicit `fs.allow` grants the current full-access Landlock permission set
+beneath that path. The sandbox policy format does not yet express separate
+read, write, and execute permissions, and it does not implement `/**` globs.
 
 ---
 
@@ -357,7 +361,7 @@ test:
 | Threat | Why |
 |--------|-----|
 | Kernel exploits | Requires root/CAP_SYS_ADMIN |
-| Network exfiltration | Requires `net: block` policy |
+| Network exfiltration | Requires `--enforce --enforce-net` and an explicit TCP-port allowlist |
 | Side-channel attacks | Out of scope for LSM |
 | Attacks within allowed paths | By design (allow means allow) |
 | Container escape | Use proper containers for that |
@@ -377,6 +381,7 @@ assay sandbox --env-strict -- ./mcp-server
 For **production** with untrusted code:
 ```bash
 assay sandbox \
+  --enforce \
   --env-strict \
   --fail-closed \
   --policy policies/locked.yaml \
@@ -413,8 +418,7 @@ The path isn't in your policy's allow list. Add it:
 ```yaml
 fs:
   allow:
-    - path: "/needed/path/**"
-      read: true
+    - "/needed/path"
 ```
 
 ### Checking Sandbox Capabilities
