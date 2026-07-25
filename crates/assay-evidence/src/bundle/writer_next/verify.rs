@@ -392,6 +392,22 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                 // hash, so a forged stream identity survived every other check once the container
                 // was resealed. Ordered after the run_id and seq checks so a mismatch here is
                 // always the id itself and not one of its two inputs.
+                // The id contract is `run_id:seq`, so it only means something if the split is
+                // unambiguous. The writer refuses a run_id containing a colon for exactly this
+                // reason; without the same rule here the verifier accepts bundles its own writer
+                // cannot produce, and `a:b:0` reads equally well as run_id `a`, seq `b:0`.
+                if event.run_id.contains(':') {
+                    return Err(VerifyError::new(
+                        ErrorClass::Contract,
+                        ErrorCode::ContractInvalidEvent,
+                        format!(
+                            "run_id must not contain a colon; the id contract cannot be split unambiguously (seq={})",
+                            event.seq
+                        ),
+                    )
+                    .into());
+                }
+
                 if event.id != compute_stream_id(&event.run_id, event.seq) {
                     // Value-free: the diagnostic names the field and the position, never the
                     // offending id or the run_id it embeds. Both are attacker-controlled bundle

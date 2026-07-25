@@ -307,6 +307,43 @@ fn a_forged_event_id_is_rejected_by_the_id_contract() {
     );
 }
 
+/// The other half of the ID contract, and the reason the writer bans colons in `run_id`
+/// (`write.rs`, "run_id cannot contain colons"): `id` is `run_id:seq`, so a colon inside `run_id`
+/// makes the split ambiguous. `run:test` with `seq=0` yields `run:test:0`, which reads equally
+/// well as `run_id="run"`, `seq="test:0"`. Without this the verifier accepts a bundle its own
+/// writer refuses to produce, so the two ends of the format disagree about what is valid.
+#[test]
+fn a_run_id_containing_a_colon_is_rejected() {
+    let bundle = valid_bundle(2);
+    let (manifest, events) = unpack(&bundle);
+
+    // Equal length so nothing else can be the reason: one underscore becomes a colon, in the
+    // manifest and in every event, including inside each `id` so the equality check still holds.
+    let swap = |s: &[u8]| -> Vec<u8> {
+        String::from_utf8(s.to_vec())
+            .expect("utf8")
+            .replace("run_verifier_property_0001", "run_verifier_property:0001")
+            .into_bytes()
+    };
+    let events_colon = swap(&events);
+    let manifest_colon = swap(&manifest);
+    assert_eq!(events_colon.len(), events.len(), "must preserve length");
+    assert_ne!(events_colon, events, "fixture must carry the run_id");
+
+    let resealed = reseal(&manifest_colon, &events_colon);
+    let (class, code) = expect_rejected(
+        &repack(&[
+            ("manifest.json", &resealed),
+            ("events.ndjson", &events_colon),
+        ]),
+        "a run_id containing a colon",
+    );
+    assert_eq!(
+        (class, code),
+        (ErrorClass::Contract, ErrorCode::ContractInvalidEvent)
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Chain order
 // ---------------------------------------------------------------------------
