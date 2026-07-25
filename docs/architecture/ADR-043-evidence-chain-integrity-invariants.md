@@ -13,15 +13,18 @@ checkable by someone who does not trust us, and the stop list must not erode by 
 
 A verification pass over the current `main` found that both obligations have gaps at the exact
 places ADR-042 makes load-bearing, while the decision layer it describes holds up well. The measured
-findings, with reproduction steps in the appendix:
+findings follow; the appendix carries the evidence, and reproduction steps for everything except the
+authorization paths that are still open:
 
 - The reference verifier applies its own resource ceiling after it has already materialized the
   input. `assay evidence verify` on a 600 MB file peaks at 622 MB resident while
   `VerifyLimits::max_bundle_bytes` is 100 MB. The ceiling is passed correctly and the `LimitReader`
   is a genuine streaming guard; the defect is that `BundleReader::open_internal` reads the input to
   the end first, so that guard streams from a `Cursor` over a `Vec` that is already complete. At
-  process level it therefore bounds nothing. An independent verifier written from the profile text
-  would apply the ceiling to the source stream and behave differently from the reference.
+  process level it therefore bounds nothing. The profile requires decompression and size limits
+  before any profile parsing without pinning a value, so this is a resource-contract defect in the
+  reference implementation against its own stated security consideration — not a divergence in the
+  verdict an independent verifier would reach.
 - The MCP server emits `"certified": true` and `"partner": "agent_framework"` in every successful
   `initialize` response. Neither carries a basis a reviewer can check, and `meta` is not a protocol
   field at all — the reserved key is `_meta`. The claims-boundary guard that keeps the stop list
@@ -45,70 +48,103 @@ so they can be enforced mechanically rather than remembered.
 
 ## Decision
 
-1. **Bounded ingest is a verifier contract, not an optimization.** Every verifier entry point
-   applies its byte ceiling to the stream before the input is materialized. Reading an untrusted
-   artifact into memory ahead of the limit check is a contract defect regardless of what the
-   subsequent verification concludes. This binds the evidence bundle reader, the lint engine, the
-   evidence push path, the CLI stdin path, and the replay reader, which has no ceiling today. The
+1. **Bounded ingest binds every entrypoint that consumes untrusted evidence.** The obligation is not
+   limited to functions named "verify": it holds for any entrypoint that parses or semantically
+   consumes an untrusted artifact, which today means the bundle reader, the lint engine, the push
+   path in both its verifying and `--no-verify` branches, the CLI stdin path, and the replay reader.
+   Each applies its ceilings to the source stream before the input is materialized. One byte ceiling
+   is not the rule, because it does not cover a decompression bomb: the axes are compressed bytes,
+   decoded bytes, entry and event counts, and individual member sizes. `VerifyLimits` already
+   carries all four, so the defect is where they are applied and not that they are missing. The
    pattern is already in the tree: `assay_evidence::trust_basis::generation` takes
    `max_bundle_bytes + 1` before reading.
 
 2. **The stop list binds emitted artifacts, not only prose.** ADR-042 §3 refuses compliance and
    safe-agent claims. That refusal covers what the software puts on the wire and into evidence, on
    the same terms as what the documentation says. A field asserting certification, partnership, or
-   an equivalent status is removed unless it carries a basis a reviewer can check. The
-   claims-boundary guard's scope extends to emitted literals, so the guard covers the product and
-   not only the description of it.
+   an equivalent status is removed unless it carries a basis a reviewer can check. The mechanism is
+   a closed set of public wire status claims, asserted structurally against generated responses and
+   schema fixtures — not a pattern scan over source literals, which is simultaneously noisy and
+   blind to output composed indirectly.
 
 3. **Verification effort follows the golden path.** The evidence-chain verifier is the primary
    target for fuzzing and property testing. Coverage of an adjacent bundle format does not satisfy
    this, and a target that exists but never runs in CI does not either.
 
-4. **Session authorization is stated, not grown.** ADR-042 refuses generic agent identity and
-   delegation, so this repository does not build an identity provider. It does owe an honest
-   boundary: a handshake-only check is not request authorization, and must not be presented as one.
-   Of the two ways to settle that, documenting the boundary is preferred over building a session
-   gate, because the MCP
-   [`2026-07-28` revision](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
-   removes the `initialize`/`initialized` handshake (SEP-2575) and the protocol-level session
-   (SEP-2567); a gate anchored to the handshake would be built on a mechanism the protocol is
-   dropping. Either way, the default mode of a released binary
-   does not accept a token it failed to validate, and a control that refuses unsafe configuration
-   never thereby disables the enforcement it was protecting.
+4. **Authorization is stated, not grown — and never optional at runtime.** ADR-042 refuses generic
+   agent identity and delegation, so this repository does not build an identity provider. Within
+   that limit four rules hold, and documenting the current behaviour is not one of the options:
+   - With no authentication configured, the server makes no authenticated or certified claim.
+   - With authentication configured, missing or unusable key material fails at startup rather than
+     passing at runtime. A control that refuses an unsafe configuration never thereby disables the
+     enforcement it was protecting.
+   - A failed validation never yields an authorized request, in any mode.
+   - Every privileged method checks the authorization state of the request it is serving, not of a
+     handshake that preceded it. This is also the direction the MCP
+     [`2026-07-28` revision](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
+     takes by removing the `initialize`/`initialized` handshake (SEP-2575) and the protocol-level
+     session (SEP-2567), so per-request state is the durable target and a handshake-anchored gate
+     would be built on a mechanism the protocol is dropping.
 
-5. **A supporting capability records what it enforced, or states nothing about enforcement.** When
-   an enforcement path substitutes a different policy than the operator named, that substitution is
-   either fatal or recorded with the identity of the policy that actually applied. The golden path
-   already binds `declared_policy_digest`; a capability that cannot do the same makes no
-   enforcement statement in evidence.
+5. **A named policy that cannot be loaded is fatal.** When the operator names a `--policy`, failure
+   to load it ends the run, unconditionally. `--fail-closed` does not create that obligation; it
+   only makes ignoring it more obviously wrong. Substituting a built-in pack for a named policy does
+   not honour the CLI contract, and recording the substitution afterwards does not repair it.
+   Substitution is legitimate only where no policy was named and a documented default applies, and
+   there the identity of the policy that actually applied is recorded. The golden path already binds
+   `declared_policy_digest`; a capability that cannot do the same makes no enforcement statement in
+   evidence.
 
 ## Consequences
 
 - The invariants in §1 and §3 are testable, so they can move from review attention into CI: a
-  resource-ceiling test per verifier entry point, and a fuzz target aimed at the evidence chain.
-- §2 widens the claims-boundary guard beyond prose. This is the mechanism ADR-042 relies on for
-  "cannot erode by accretion", and it currently has a blind spot the size of the product.
-- §4 accepts a smaller auth surface rather than a larger one. Making the boundary explicit is
-  cheaper than building session identity, and it is what the stop list already asks for.
-- §5 keeps the supporting capabilities inside the same epistemology as the golden path without
-  promoting them to co-equal product directions.
+  per-axis ceiling test for each entrypoint, and a fuzz target aimed at the evidence chain.
+- §2 widens the claims boundary beyond prose. This is the mechanism ADR-042 relies on for "cannot
+  erode by accretion", and it currently has a blind spot the size of the product. A closed set of
+  wire claims costs a fixture to maintain and buys a guard that cannot be evaded by string building.
+- §4 accepts a smaller auth surface rather than a larger one, and pays for it with four rules that
+  hold at runtime rather than a documented exception. Per-request state, not session state, is the
+  target; work anchored to the handshake is work with a known expiry.
+- §5 changes default behaviour: a named policy that fails to load stops the run instead of falling
+  back. That trades a convenience for an honest contract, and it is the reason this is an ADR rather
+  than a bug fix.
 - This ADR adds nothing to the ADR-042 stop list and removes nothing from it, so it amends rather
   than supersedes. The kernel-observation posture is unchanged: eBPF validation running post-merge
   rather than on pull requests remains consistent with its supporting status.
+
+Four implementation slices follow from the decisions, in this order:
+
+1. Bounded ingest across the five entrypoints in §1, with per-axis tests.
+2. Remove the unfounded wire claims and stand up the closed claim set from §2.
+3. Policy-load semantics from §5, including the default-behaviour change.
+4. Runtime authorization from §4, and an evidence-chain fuzz target for §3.
 
 ## Appendix: reproduction
 
 Measured on `main` at `9fabad8b`, debug binaries, Linux x86_64.
 
+Resource behaviour, reproducible as written:
+
 | Observation | Command | Result |
 |---|---|---|
 | Ingest exceeds the ceiling | counting reader through `BundleReader::open` vs `verify_bundle_with_limits`, 150 MiB input | 157,286,400 bytes read vs 32,768; ceiling is 104,857,600 |
 | Memory tracks input | `assay evidence verify` on 50 / 200 / 600 MB files | 72 / 222 / 622 MB peak resident |
-| Forged token accepted | `initialize` with an `alg:none` token, default mode | session opened, `"certified": true` returned |
-| No token accepted | `initialize` with no token, `ASSAY_AUTH_MODE=strict`, no JWKS | session opened |
-| JWKS scheme flips enforcement | `initialize` with no token, strict mode, `http://` JWKS URI | session opened; the same call with an `https://` URI is refused as `Missing authorization token (Strict mode)` |
-| Call without handshake | `tools/call` with no prior `initialize`, strict mode with JWKS | reached tool dispatch |
 | Policy substitution | `assay sandbox --fail-closed --policy <broken>` | warning, built-in policy applied, child ran, exit 0 |
+
+Authorization behaviour, stated as outcomes. These four were measured the same way, but the
+step-by-step recipes are withheld from this record until the §4 slice lands, then restored here. The
+findings are what the decision needs; the recipes are not:
+
+| Observation | Result |
+|---|---|
+| Permissive mode admits a token the validator rejected | session opened, and the response asserted `certified` |
+| Strict mode without usable key material admits a request carrying no token | session opened |
+| A refused JWKS URI removes the enforcement it was meant to protect | the identical call with an accepted URI is correctly refused; only the scheme differs |
+| A privileged method is dispatched without any prior authorization | reached tool dispatch |
+
+The policy-substitution row stays reproducible because it is an operator self-misconfiguration
+rather than a path a third party can trigger: it needs write access to the policy file the operator
+themselves named, and its effect is a weaker sandbox for that same operator.
 
 Each finding was run against a control so it is not an artifact of the setup. Repacking the
 untouched fixture bundle verifies clean, while changing one field of equal byte length fails with
