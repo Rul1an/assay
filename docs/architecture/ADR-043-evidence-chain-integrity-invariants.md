@@ -75,22 +75,29 @@ so they can be enforced mechanically rather than remembered.
    target for fuzzing and property testing. Coverage of an adjacent bundle format does not satisfy
    this, and a target that exists but never runs in CI does not either.
 
-4. **Authorization is stated, not grown — and never optional at runtime.** ADR-042 refuses generic
-   agent identity and delegation, so this repository does not build an identity provider. Within
-   that limit four rules hold, and documenting the current behaviour is not one of the options:
-   - With no authentication configured, the server makes no authenticated or certified claim.
-   - With authentication configured, missing or unusable key material fails at startup rather than
-     passing at runtime. A control that refuses an unsafe configuration never thereby disables the
-     enforcement it was protecting.
-   - A failed validation never yields an authorized request, in any mode.
-   - Every privileged method checks the authorization state of the request it is serving, not of a
-     handshake that preceded it. This is also the direction MCP is taking: the
-     [`2026-07-28` release candidate](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/),
-     locked on 2026-05-21 and due to publish on 2026-07-28, removes the `initialize`/`initialized`
-     handshake (SEP-2575) and the protocol-level session (SEP-2567). Read as of this ADR's date that
-     is a candidate rather than a published spec, which affects the timing of the argument and not
-     its direction: per-request state is the durable target either way, and a handshake-anchored
-     gate would be built on a mechanism the protocol is dropping.
+4. **Authorization is bounded by the transport, and this transport has none.** ADR-042 refuses
+   generic agent identity and delegation. On a stdio server that refusal has a concrete
+   consequence rather than an abstract one: there is no transport to authenticate, so the honest
+   move is to say so and refuse configuration that pretends otherwise. Approximating an auth layer
+   here is the failure, not the absence of one. Four rules follow, and documenting the current
+   behaviour is not one of the options:
+   - The stdio server performs no transport authentication and makes no authenticated or certified
+     claim on any surface.
+   - The token check on `initialize` is removed rather than repaired. It was a proprietary route
+     that never covered any other method, and no request is authorized by it.
+   - Any `ASSAY_AUTH_*` configuration is a startup failure raised before protocol I/O begins, never
+     a permissive pass. A control that refuses an unsafe configuration must not thereby disable the
+     enforcement it was protecting, which is exactly how the JWKS composition failed open.
+   - Inbound token-shaped values are never logged, never treated as identity, and never forwarded
+     to an upstream.
+
+   Two things stay deliberately outside this decision. Standard OAuth belongs to a future
+   transport ADR, not to a stdio server; the
+   [MCP `2026-07-28` release candidate](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
+   removes the handshake (SEP-2575) and the protocol session (SEP-2567), so that work is a protocol
+   migration with its own decision rather than a patch here. And the enforcing proxy's declared
+   caller and policy identity is local enforcement input, not a transport auth claim; it is
+   unaffected.
 
 5. **A named policy that cannot be loaded is fatal.** When the operator names a `--policy`, failure
    to load it ends the run, unconditionally. `--fail-closed` does not create that obligation; it
@@ -108,9 +115,10 @@ so they can be enforced mechanically rather than remembered.
 - §2 widens the claims boundary beyond prose. This is the mechanism ADR-042 relies on for "cannot
   erode by accretion", and it currently has a blind spot the size of the product. A closed set of
   wire claims costs a fixture to maintain and buys a guard that cannot be evaded by string building.
-- §4 accepts a smaller auth surface rather than a larger one, and pays for it with four rules that
-  hold at runtime rather than a documented exception. Per-request state, not session state, is the
-  target; work anchored to the handshake is work with a known expiry.
+- §4 removes an auth surface rather than growing one. The cost is that an operator who sets
+  `ASSAY_AUTH_*` today gets a startup failure instead of a silent partial check; that is the point,
+  because the partial check was the fail-open. The public `auth` types can stay one release as a
+  deprecated compatibility surface provided they are fully decoupled from the server loop.
 - §5 changes default behaviour: a named policy that fails to load stops the run instead of falling
   back. That trades a convenience for an honest contract, and it is the reason this is an ADR rather
   than a bug fix.
@@ -120,12 +128,13 @@ so they can be enforced mechanically rather than remembered.
   The kernel-observation posture is unchanged: eBPF validation running post-merge rather than on
   pull requests remains consistent with its supporting status.
 
-Four implementation slices follow from the decisions, in this order:
+Five implementation slices follow from the decisions:
 
-1. Bounded ingest across the five entrypoints in §1, with per-axis tests.
+1. Bounded ingest across the entrypoints named in §1, with a test per limit axis.
 2. Remove the unfounded wire claims and stand up the closed claim set from §2.
 3. Policy-load semantics from §5, including the default-behaviour change.
-4. Runtime authorization from §4, and an evidence-chain fuzz target for §3.
+4. The §4 boundary: remove the `initialize` token route, refuse `ASSAY_AUTH_*` at startup.
+5. Point the bundle fuzz target at the evidence-chain verifier and add the properties in §3.
 
 ## Appendix: reproduction
 
