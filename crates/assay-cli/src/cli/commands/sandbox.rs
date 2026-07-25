@@ -19,6 +19,31 @@ use env::build_env_filter;
 use profile::maybe_profile_begin;
 use tmp::create_scoped_tmp;
 
+/// State which requested artifacts were not produced, and why.
+///
+/// `write_enforcement_health_v1` already states the rule for the success path: a requested
+/// artifact that cannot be written is an error, "so the caller does not exit successfully in a
+/// state where the evidence is absent on disk". The refusal paths did not honour the other half
+/// of it. They exit before `maybe_profile_finish`, which is the only place artifacts are
+/// written, so `--profile`, `--bundle`, `--enforcement-health` and `--otel-jsonl` all resolved
+/// to nothing with no statement at all.
+///
+/// A refusal happens before the child runs, so there is genuinely nothing to profile and no
+/// enforcement to describe. Writing an empty artifact would be worse than writing none: it
+/// would look like a measured run. What the caller is owed is the sentence, not the file.
+fn report_unwritten_artifacts(args: &SandboxArgs, reason: &str) {
+    for (flag, path) in [
+        ("--profile", args.profile.as_ref()),
+        ("--bundle", args.bundle.as_ref()),
+        ("--enforcement-health", args.enforcement_health.as_ref()),
+        ("--otel-jsonl", args.otel_jsonl.as_ref()),
+    ] {
+        if let Some(path) = path {
+            eprintln!("NOTE: {flag} {} not written: {reason}", path.display());
+        }
+    }
+}
+
 pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     let mut deferred_profile_events: Vec<ProfileEvent> = Vec::new();
     eprintln!("Assay Sandbox v0.1");
@@ -42,6 +67,7 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
     if args.enforce && !matches!(backend, BackendType::Landlock) {
         if args.fail_closed {
             eprintln!("ERROR: Active enforcement requested (--enforce) but no containment backend available.");
+            report_unwritten_artifacts(&args, "no containment backend, nothing was executed");
             return Ok(exit_codes::POLICY_UNENFORCEABLE);
         }
         deferred_profile_events.push(ProfileEvent::AuditFallback {
@@ -149,6 +175,10 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
                 eprintln!("E_POLICY_LOAD_FAILED_UNENFORCEABLE");
                 eprintln!("       the named policy did not load and no substitute was applied");
                 metrics::increment("policy_load_failed");
+                report_unwritten_artifacts(
+                    &args,
+                    "the named policy did not load, nothing was executed",
+                );
                 return Ok(exit_codes::POLICY_UNENFORCEABLE);
             }
         }
@@ -222,6 +252,10 @@ pub async fn run(args: SandboxArgs) -> anyhow::Result<i32> {
                 compat.conflicts.len()
             );
             metrics::increment("policy_conflict_fail_closed");
+            report_unwritten_artifacts(
+                &args,
+                "policy conflict under --fail-closed, nothing was executed",
+            );
             return Ok(exit_codes::POLICY_UNENFORCEABLE);
         }
 

@@ -158,3 +158,43 @@ fn the_documented_default_still_applies_when_no_policy_is_named() {
         run.stderr
     );
 }
+
+#[test]
+fn a_refusal_states_which_requested_artifacts_were_not_written() {
+    // `write_enforcement_health_v1` calls a requested artifact that cannot be written an
+    // error, "so the caller does not exit successfully in a state where the evidence is
+    // absent on disk". A refusal exits before `maybe_profile_finish`, the only place
+    // artifacts are written, so the file is absent either way. The caller is owed the
+    // sentence rather than an empty path to discover later.
+    let policy = broken_policy();
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let profile = tmp.path().join("prof.yaml");
+    let bundle = tmp.path().join("bundle.tar.gz");
+
+    let out = Command::cargo_bin("assay")
+        .expect("binary")
+        .env("XDG_DATA_HOME", tmp.path())
+        .args(["sandbox", "--policy"])
+        .arg(policy.path())
+        .arg("--profile")
+        .arg(&profile)
+        .arg("--bundle")
+        .arg(&bundle)
+        .args(["--", "echo", MARKER])
+        .assert()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert_eq!(out.status.code(), Some(2), "stderr:\n{stderr}");
+    assert!(
+        !profile.exists() && !bundle.exists(),
+        "a refused run must not leave artifacts that look like a measured run"
+    );
+    for flag in ["--profile", "--bundle"] {
+        assert!(
+            stderr.contains(flag) && stderr.contains("not written"),
+            "refusal must state that {flag} was not written.\nstderr:\n{stderr}"
+        );
+    }
+}
