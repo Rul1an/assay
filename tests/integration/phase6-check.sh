@@ -58,12 +58,9 @@ version: "1.0"
 name: "conflict"
 fs:
   allow:
-     - path: "${HOME}/**"
-       read: true
+     - "${HOME}"
   deny:
-     - path: "${HOME}/.ssh/**"
-net:
-  mode: audit
+     - "${HOME}/.ssh"
 EOF
 
   set +e

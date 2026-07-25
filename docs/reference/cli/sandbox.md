@@ -17,7 +17,7 @@ assay sandbox [OPTIONS] -- <COMMAND> [ARGS...]
 The `assay sandbox` command executes an MCP server or any command inside a security sandbox. It provides:
 
 - **Filesystem isolation** via Linux Landlock LSM
-- **Network control** (audit or block)
+- **Optional TCP destination-port allowlisting** via `--enforce --enforce-net`
 - **Environment scrubbing** (credential leak prevention)
 - **Scoped `/tmp`** (per-run isolation)
 
@@ -33,6 +33,9 @@ This is the recommended way to run untrusted MCP servers in CI/CD or development
 |--------|-------------|
 | `--policy`, `-p` | Path to sandbox policy YAML (default: built-in minimal) |
 | `--fail-closed` | Exit if policy cannot be fully enforced (no degradation) |
+| `--enforce` | Require active Landlock filesystem enforcement |
+| `--enforce-net` | Enforce an explicit TCP destination-port allowlist; requires `--enforce` |
+| `--dry-run` | Audit without active blocking; conflicts with `--enforce` |
 
 ### Environment Control
 
@@ -133,36 +136,34 @@ assay sandbox --env-passthrough -- ./mcp-server
 
 Sandbox policies control filesystem access using Landlock LSM.
 
-### Built-in Policies
+### Implicit baseline
 
-| Policy | Description |
-|--------|-------------|
-| `minimal` | Read-only CWD, write to scoped /tmp only |
-| `development` | Read CWD, write to CWD + /tmp |
-| `mcp-server` | Tailored for typical MCP server needs |
+On a supported Linux host, the sandbox gives the working directory
+read-and-execute access and its scoped temporary directory full access before
+adding explicit policy allows. A custom `fs.allow` grants the current
+full-access Landlock permission set beneath the named path.
 
 ### Custom Policy
 
 ```yaml
 # my-policy.yaml
-version: "1.0"
-name: "my-sandbox"
+api_version: "assay/v1"
 
 fs:
   allow:
-    - path: "${CWD}/**"
-      read: true
-      write: false
-    - path: "${TMPDIR}/**"
-      read: true
-      write: true
+    - "${CWD}/data"
   deny:
-    - path: "${HOME}/.ssh/**"
-    - path: "${HOME}/.aws/**"
+    - "${HOME}/.ssh"
+    - "${HOME}/.aws"
 
 net:
-  mode: audit  # audit | block | allow
+  allow: []
+  deny: []
 ```
+
+If the file named by `--policy` does not parse, `assay sandbox` exits 2 with
+`E_POLICY_LOAD_FAILED_UNENFORCEABLE` and runs nothing. It does not fall back to a built-in
+pack, because that would run the workload under containment you did not choose.
 
 ```bash
 assay sandbox --policy my-policy.yaml -- ./mcp-server
@@ -174,8 +175,11 @@ assay sandbox --policy my-policy.yaml -- ./mcp-server
 |----------|-----------|
 | `${CWD}` | Current working directory |
 | `${HOME}` | User home directory |
-| `${TMPDIR}` | Scoped temp directory |
 | `${USER}` | Current username |
+
+The sandbox policy format does not implement `/**` globs or per-operation
+read/write/execute fields. `${TMPDIR}` is not expanded; Assay's scoped
+temporary directory is already part of the baseline.
 
 ---
 
@@ -188,9 +192,9 @@ Landlock is an **allow-only** LSM. It cannot enforce "deny X inside allowed Y".
 ```yaml
 fs:
   allow:
-    - path: "${HOME}/**"      # Allow all of home
+    - "${HOME}"      # Allow all of home
   deny:
-    - path: "${HOME}/.ssh/**" # Try to deny .ssh
+    - "${HOME}/.ssh" # Try to deny .ssh
 ```
 
 **Problem**: Landlock cannot block `.ssh` because it's inside the allowed `${HOME}`.
@@ -322,9 +326,11 @@ Backend: Landlock (Audit)
 |------|---------|
 | 0 | Command succeeded |
 | 1 | Command failed (pass-through exit code) |
-| 2 | Policy cannot be enforced (`--fail-closed`) |
-| 3 | Policy file not found |
-| 4 | Invalid policy syntax |
+| 2 | Policy cannot be enforced: a named `--policy` that is missing or does not parse, or a conflict under `--fail-closed` |
+
+Codes 3 and 4 were previously documented for a missing policy file and invalid policy
+syntax. No code path emitted them: `exit_codes.rs` reserves 3 for infrastructure failures
+and 4 for would-block, and both policy cases are configuration errors, which is 2.
 
 ---
 
