@@ -345,3 +345,81 @@ fn the_unverified_path_enforces_line_and_event_ceilings() {
     BundleReader::open_unverified_with_limits(Cursor::new(buf), VerifyLimits::default())
         .expect("the same bundle must open unverified under the default limits");
 }
+
+/// The verified and unverified paths shared a name for `max_line_bytes` and disagreed on what it
+/// meant. `read_line_bounded` counted the trailing `\n` inside the ceiling, so a payload of
+/// exactly the limit consumed limit + 1 bytes and was refused; `check_events_shape` split on `\n`
+/// first, so the same payload passed. One budget, two answers. Pinning one interpretation and
+/// requiring the same verdict on both paths is the only way `max_line_bytes` can be a contract.
+#[test]
+fn max_line_bytes_has_one_interpretation_on_both_paths() {
+    use assay_evidence::bundle::BundleReader;
+
+    fn bundle_with_padded_event(pad: usize) -> Vec<u8> {
+        let mut buf = Vec::new();
+        {
+            let mut w = BundleWriter::new(&mut buf);
+            w.add_event(EvidenceEvent::new(
+                "assay.test",
+                "urn:assay:test",
+                "run_line_bytes",
+                0,
+                serde_json::json!({ "pad": "A".repeat(pad) }),
+            ));
+            w.finish().expect("write bundle");
+        }
+        buf
+    }
+
+    // A padded event serializes to a JSON line whose length grows with `pad`. Pick a small
+    // headroom over the padding so we can lock a `max_line_bytes` right at the line length.
+    let pad = 200;
+    let bytes = bundle_with_padded_event(pad);
+    let line_len = {
+        // Peek at the emitted line length through the default verifier, which does not refuse
+        // this bundle under the defaults. We only need the true length to build the ±1 tests.
+        let default_open = BundleReader::open(Cursor::new(bytes.clone()))
+            .expect("default open must accept the fixture");
+        default_open
+            .events_raw()
+            .split(|b| *b == b'\n')
+            .next()
+            .map(<[u8]>::len)
+            .unwrap_or(0)
+    };
+    assert!(
+        line_len > 0,
+        "the fixture must emit at least one non-empty line"
+    );
+
+    let exact = VerifyLimits {
+        max_line_bytes: line_len,
+        ..VerifyLimits::default()
+    };
+    let too_tight = VerifyLimits {
+        max_line_bytes: line_len - 1,
+        ..VerifyLimits::default()
+    };
+
+    // Exact-limit passes on both paths.
+    verify_bundle_with_limits(Cursor::new(bytes.clone()), exact)
+        .expect("verified path must accept a line of exactly max_line_bytes");
+    BundleReader::open_unverified_with_limits(Cursor::new(bytes.clone()), exact)
+        .expect("unverified path must accept the same line");
+
+    // One byte tighter refuses on both, with the same class and code.
+    assert_eq!(
+        classify(bytes.clone(), too_tight),
+        (ErrorClass::Limits, ErrorCode::LimitLineBytes),
+        "verified path must classify the overflow as LimitLineBytes"
+    );
+    let err = match BundleReader::open_unverified_with_limits(Cursor::new(bytes), too_tight) {
+        Ok(_) => panic!("unverified path must refuse the same line under the tighter limit"),
+        Err(e) => e,
+    };
+    let ve = err
+        .downcast_ref::<VerifyError>()
+        .expect("the unverified overflow must surface as a typed VerifyError");
+    assert_eq!(ve.class, ErrorClass::Limits);
+    assert_eq!(ve.code, ErrorCode::LimitLineBytes);
+}
