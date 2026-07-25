@@ -1,0 +1,130 @@
+name: Verifier Fuzz Smoke
+
+# ADR-043 §3: the evidence-chain verifier is the primary fuzz target, and a target that exists but
+# never runs in CI does not satisfy that invariant. This lane is deliberately a smoke test, not a
+# campaign: a fixed run and time budget on a PR, a longer nightly pass on a schedule. The semantic
+# oracle is not here -- it lives in the deterministic property tests, which run in required CI on
+# every PR. This lane answers one narrower question: does the verifier crash, hang, or exceed its
+# own resource ceilings on inputs nobody wrote down.
+
+on:
+  pull_request:
+    paths:
+      - "fuzz/**"
+      - "crates/assay-evidence/**"
+      - ".github/workflows/fuzz-smoke.yml"
+  schedule:
+    # Nightly, longer budget. Off the PR path so a slow campaign never gates a merge.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  # One source of truth for the toolchain: the install step and the run step must not be able to
+  # disagree, which is exactly how a dated pin gets bypassed.
+  FUZZ_TOOLCHAIN: nightly-2026-07-24
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz-smoke:
+    name: bundle_reader (evidence chain)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          # Date-pinned, not floating `nightly`. Pinning cargo-fuzz alone does not freeze the
+          # compiler that produced a reported run, and a sanitizer-instrumented build is exactly
+          # the kind of thing that changes between nightlies. Bumping this is a deliberate commit.
+          #
+          # The run step must select this exact name. `cargo +nightly` asks rustup for the channel
+          # alias, which resolves to the newest nightly and will install one if it is missing --
+          # silently defeating the pin while the log still says the dated toolchain was installed.
+          toolchain: ${{ env.FUZZ_TOOLCHAIN }}
+
+      - name: Swatinem/rust-cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: fuzz -> target
+
+      - name: Install cargo-fuzz
+        # Version-pinned, not just `--locked`: `--locked` fixes the tool's dependencies but still
+        # installs whatever cargo-fuzz release is current, so the lane could change behaviour
+        # without a commit here.
+        run: cargo install cargo-fuzz --locked --version 0.13.2
+
+      - name: Assert the seed corpus is intact
+        shell: bash
+        run: |
+          set -euo pipefail
+          # An empty corpus turns this lane into a build check, which ADR-043 §3 says is not
+          # sufficient. Names rather than a count: a count stays green when a seed is replaced by
+          # an unrelated file, and the expansion seed in particular is the only one that reaches
+          # the decompression path at all.
+          required=(
+            valid-single-event
+            valid-three-events
+            truncated-half
+            truncated-gzip-header
+            payload-mutated
+            digest-mutated
+            run-root-mutated
+            duplicate-member
+            unexpected-member
+            manifest-only
+            wrong-member-order
+            oversize-line
+            high-ratio-gzip
+            pax-header-past-decode-ceiling
+          )
+          missing=0
+          for seed in "${required[@]}"; do
+            if [ ! -s "fuzz/corpus/bundle_reader/${seed}" ]; then
+              echo "::error::missing or empty seed: ${seed}"
+              missing=1
+            fi
+          done
+          [ "${missing}" -eq 0 ] || exit 1
+          echo "seeds=${#required[@]} present"
+
+      - name: Fuzz smoke
+        shell: bash
+        env:
+          # PR budget stays small so the lane is advisory-fast; the nightly run gets the longer one.
+          RUNS: ${{ github.event_name == 'schedule' && '200000' || '20000' }}
+          MAX_TOTAL_TIME: ${{ github.event_name == 'schedule' && '900' || '120' }}
+        run: |
+          set -euo pipefail
+          # The first corpus directory is libFuzzer's *output* corpus and the second is a read-only
+          # input. Pointing the output at a scratch directory keeps generated units out of the
+          # working tree, so a CI run can never quietly grow the checked-in corpus.
+          mkdir -p "${RUNNER_TEMP}/fuzz-out"
+          # Report what actually runs, so the log carries the toolchain rather than an assumption.
+          rustc "+${FUZZ_TOOLCHAIN}" --version --verbose
+          cargo "+${FUZZ_TOOLCHAIN}" fuzz run bundle_reader \
+            "${RUNNER_TEMP}/fuzz-out" fuzz/corpus/bundle_reader \
+            -- \
+            -runs="${RUNS}" \
+            -max_total_time="${MAX_TOTAL_TIME}" \
+            -rss_limit_mb=2048 \
+            -max_len=1048576 \
+            -print_final_stats=1
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: true
+        with:
+          name: fuzz-artifacts-bundle_reader
+          path: fuzz/artifacts/bundle_reader/
+          if-no-files-found: ignore

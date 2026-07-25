@@ -9,6 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 assay-core = { path = "../crates/assay-core" }
+assay-evidence = { path = "../crates/assay-evidence" }
 libfuzzer-sys = "0.4"
 serde_yaml = "0.9"
 

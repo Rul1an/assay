@@ -1,4 +1,4 @@
-use crate::crypto::id::{compute_content_hash, compute_run_root};
+use crate::crypto::id::{compute_content_hash, compute_run_root, compute_stream_id};
 use crate::json_strict::validate_json_strict;
 use crate::types::EvidenceEvent;
 use anyhow::Result;
@@ -383,6 +383,44 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                         ErrorClass::Contract,
                         ErrorCode::ContractRunIdMismatch,
                         "Inconsistent run_id",
+                    )
+                    .into());
+                }
+
+                // Check 9, the ID contract. Documented at the top of this function since the
+                // format was written, but never executed: the id is outside the per-event content
+                // hash, so a forged stream identity survived every other check once the container
+                // was resealed. Ordered after the run_id and seq checks so a mismatch here is
+                // always the id itself and not one of its two inputs.
+                // The id contract is `run_id:seq`, so it only means something if the split is
+                // unambiguous. The writer refuses a run_id containing a colon for exactly this
+                // reason; without the same rule here the verifier accepts bundles its own writer
+                // cannot produce, and `a:b:0` reads equally well as run_id `a`, seq `b:0`.
+                if event.run_id.contains(':') {
+                    return Err(VerifyError::new(
+                        ErrorClass::Contract,
+                        ErrorCode::ContractInvalidEvent,
+                        format!(
+                            "run_id must not contain a colon; the id contract cannot be split unambiguously (seq={})",
+                            event.seq
+                        ),
+                    )
+                    .into());
+                }
+
+                if event.id != compute_stream_id(&event.run_id, event.seq) {
+                    // Value-free: the diagnostic names the field and the position, never the
+                    // offending id or the run_id it embeds. Both are attacker-controlled bundle
+                    // content, and this message reaches CI logs. `seq` is an ordinal the
+                    // neighbouring sequence errors already report, so it adds locality without
+                    // echoing content.
+                    return Err(VerifyError::new(
+                        ErrorClass::Contract,
+                        ErrorCode::ContractInvalidEvent,
+                        format!(
+                            "Event id does not match the run_id:seq contract at seq={}",
+                            event.seq
+                        ),
                     )
                     .into());
                 }
