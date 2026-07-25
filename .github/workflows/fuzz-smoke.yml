@@ -72,7 +72,7 @@ jobs:
             manifest-only
             wrong-member-order
             oversize-line
-            expansion-past-decode-ceiling
+            high-ratio-gzip
           )
           missing=0
           for seed in "${required[@]}"; do

@@ -273,6 +273,40 @@ fn a_mutated_run_root_is_a_run_root_mismatch() {
     );
 }
 
+/// `verify.rs` documents check 9 as "ID Contract: event.id == run_id:seq". The id is outside the
+/// per-event content hash, so nothing else catches a forged one once the manifest is resealed.
+/// A documented check that does not run is the exact failure ADR-043 is about, and it sits on the
+/// golden path.
+#[test]
+fn a_forged_event_id_is_rejected_by_the_id_contract() {
+    let bundle = valid_bundle(3);
+    let (manifest, events) = unpack(&bundle);
+
+    // Equal length so nothing else can be the reason: only the trailing seq digit changes.
+    let forged = String::from_utf8(events.clone())
+        .expect("utf8")
+        .replacen(
+            "\"id\":\"run_verifier_property_0001:0\"",
+            "\"id\":\"run_verifier_property_0001:9\"",
+            1,
+        )
+        .into_bytes();
+    assert_eq!(forged.len(), events.len(), "forgery must preserve length");
+    assert_ne!(forged, events, "fixture must actually carry the id field");
+
+    // Resealed: the container is internally consistent again, so the id contract is the only
+    // remaining thing standing between a forged stream identity and a verified bundle.
+    let resealed = reseal(&manifest, &forged);
+    let (class, code) = expect_rejected(
+        &repack(&[("manifest.json", &resealed), ("events.ndjson", &forged)]),
+        "an event whose id does not match run_id:seq",
+    );
+    assert_eq!(
+        (class, code),
+        (ErrorClass::Contract, ErrorCode::ContractInvalidEvent)
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Chain order
 // ---------------------------------------------------------------------------
@@ -519,25 +553,25 @@ fn generate_seed_corpus() {
         v
     };
 
-    // A high-expansion seed. Every other seed here decodes to a few kilobytes, so none of them
-    // gives the fuzzer a starting point on the decompression path at all. This one is a few KB on
-    // disk and decodes to 8 MiB, past the target's 4 MiB decode ceiling.
+    // A high-ratio gzip: 8 KB on disk, 8 MiB decoded. Every other seed decodes to a few kilobytes,
+    // so without this one the fuzzer has no compressible material to mutate at all.
     //
-    // What it is not: proof that the verifier streams 8 MiB. It does not — the tar reader trusts
-    // declared entry sizes, so a bundle-shaped archive trips a per-file ceiling long before the
-    // decode ceiling. That ceiling is pinned by `the_decode_ceiling_is_enforced_...` above. The
-    // seed's job is narrower: give libFuzzer compressible material to mutate near that boundary.
-    let expansion_bomb = {
+    // Named for what it is, not what it would be nice for it to be. It does NOT drive the verifier
+    // past `max_decode_bytes`: measured through the real target API it returns
+    // `Contract/ContractMissingFile`, because the decoded stream is zero blocks and the tar reader
+    // reads that as an empty archive and stops. `high_ratio_gzip_stops_at_the_tar_layer` below
+    // pins that outcome so this comment cannot quietly go stale.
+    let high_ratio_gzip = {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
         let chunk = vec![0u8; 1 << 20];
         for _ in 0..8 {
             encoder.write_all(&chunk).expect("write chunk");
         }
-        encoder.finish().expect("finish bomb")
+        encoder.finish().expect("finish")
     };
     assert!(
-        decoded_len(&expansion_bomb) > 4 << 20,
-        "the expansion seed must decode past the fuzz target's decode ceiling"
+        decoded_len(&high_ratio_gzip) > 4 << 20,
+        "the seed must at least decompress past the ceiling, even though the tar layer stops first"
     );
 
     let seeds: Vec<(&str, Vec<u8>)> = vec![
@@ -597,7 +631,7 @@ fn generate_seed_corpus() {
                 ("events.ndjson", &long_line),
             ]),
         ),
-        ("expansion-past-decode-ceiling", expansion_bomb),
+        ("high-ratio-gzip", high_ratio_gzip),
     ];
 
     for (name, bytes) in &seeds {
@@ -605,6 +639,37 @@ fn generate_seed_corpus() {
         std::fs::write(dir.join(name), bytes).expect("write seed");
     }
     eprintln!("wrote {} seeds to {}", seeds.len(), dir.display());
+}
+
+/// Pins where the high-ratio seed actually stops, and with it a limitation of this format worth
+/// writing down: for a bundle-shaped archive the orthogonal per-file ceilings fire long before
+/// `max_decode_bytes` can. The manifest is capped at `max_manifest_bytes` and the events member at
+/// `max_events_bytes`, both checked against the declared tar header size before any content is
+/// read, and any third member is refused by the allowlist. So a decompression bomb is stopped by
+/// the file ceilings on this path, and `max_decode_bytes` is the backstop pinned separately by
+/// `the_decode_ceiling_is_enforced_independently_of_the_byte_ceiling`.
+///
+/// Not established: whether some non-bundle tar shape, a GNU long-name entry for instance, can
+/// make the reader consume past the decode ceiling. That is left as an open question rather than
+/// claimed either way.
+#[test]
+fn high_ratio_gzip_stops_at_the_tar_layer_not_the_decode_ceiling() {
+    let seed = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fuzz/corpus/bundle_reader/high-ratio-gzip"),
+    )
+    .expect("the checked-in seed must exist");
+
+    assert!(
+        decoded_len(&seed) > 4 << 20,
+        "seed must still be high-ratio, or it has stopped being useful to the fuzzer"
+    );
+    let (class, code) = expect_rejected(&seed, "a high-ratio gzip of zero blocks");
+    assert_eq!(
+        (class, code),
+        (ErrorClass::Contract, ErrorCode::ContractMissingFile),
+        "if this changes, the seed's name and the limitation note above both need revisiting"
+    );
 }
 
 /// The classification is the contract, so it has to be stable. An unstable code would make every

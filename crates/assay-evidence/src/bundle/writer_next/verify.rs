@@ -1,4 +1,4 @@
-use crate::crypto::id::{compute_content_hash, compute_run_root};
+use crate::crypto::id::{compute_content_hash, compute_run_root, compute_stream_id};
 use crate::json_strict::validate_json_strict;
 use crate::types::EvidenceEvent;
 use anyhow::Result;
@@ -383,6 +383,24 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                         ErrorClass::Contract,
                         ErrorCode::ContractRunIdMismatch,
                         "Inconsistent run_id",
+                    )
+                    .into());
+                }
+
+                // Check 9, the ID contract. Documented at the top of this function since the
+                // format was written, but never executed: the id is outside the per-event content
+                // hash, so a forged stream identity survived every other check once the container
+                // was resealed. Ordered after the run_id and seq checks so a mismatch here is
+                // always the id itself and not one of its two inputs.
+                let expected_id = compute_stream_id(&event.run_id, event.seq);
+                if event.id != expected_id {
+                    return Err(VerifyError::new(
+                        ErrorClass::Contract,
+                        ErrorCode::ContractInvalidEvent,
+                        format!(
+                            "Event id '{}' does not match the run_id:seq contract '{}'",
+                            event.id, expected_id
+                        ),
                     )
                     .into());
                 }
