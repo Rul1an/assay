@@ -60,6 +60,41 @@ fn test_stdio_flow() {
     let resp: Value = serde_json::from_str(&line).expect("Failed to parse init response");
     assert!(resp.get("result").is_some(), "Init failed: {:?}", resp);
 
+    // The unit tests in `server.rs` pin `initialize_result()`, but the original defect was an
+    // inline literal at the call site, so a helper the dispatcher no longer returns would leave
+    // those tests green. This is the same boundary checked where it actually matters: on the
+    // wire, out of a real handshake against a real process.
+    let result = &resp["result"];
+    let wire = serde_json::to_string(result).expect("serializable");
+    for forbidden in [
+        "certified",
+        "certification",
+        "partner",
+        "compliant",
+        "compliance",
+        "approved",
+        "endorsed",
+        "accredited",
+    ] {
+        assert!(
+            !wire.to_ascii_lowercase().contains(forbidden),
+            "initialize asserted `{forbidden}` on the wire without a checkable basis: {wire}"
+        );
+    }
+    assert!(
+        result.get("meta").is_none(),
+        "bare `meta` key returned on the wire: {wire}"
+    );
+    assert_eq!(
+        result["serverInfo"]["name"].as_str(),
+        Some("assay-mcp-server")
+    );
+    assert_eq!(
+        result["serverInfo"]["version"].as_str(),
+        Some(env!("CARGO_PKG_VERSION")),
+        "wire version must be the crate version, not a hand-written literal"
+    );
+
     // 2. List Tools
     let req_list = serde_json::json!({
         "jsonrpc": "2.0",
