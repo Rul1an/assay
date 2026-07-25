@@ -52,17 +52,21 @@ so they can be enforced mechanically rather than remembered.
    limited to functions named "verify": it holds for any entrypoint that parses or semantically
    consumes an untrusted artifact, which today means the bundle reader, the lint engine, the push
    path in both its verifying and `--no-verify` branches, the CLI stdin path, and the replay reader.
-   Each applies its ceilings to the source stream before the input is materialized. One byte ceiling
-   is not the rule, because it does not cover a decompression bomb: the axes are compressed bytes,
-   decoded bytes, entry and event counts, and individual member sizes. `VerifyLimits` already
-   carries all four, so the defect is where they are applied and not that they are missing. The
-   pattern is already in the tree: `assay_evidence::trust_basis::generation` takes
-   `max_bundle_bytes + 1` before reading.
+   Each applies the whole limit set to the source stream before the input is materialized, and a
+   single byte ceiling is not that set. `VerifyLimits` already carries eight dimensions — compressed
+   and decoded bytes, per-file sizes, event and line counts, path length and JSON nesting — so a
+   decompression bomb is already named by `max_decode_bytes` and nothing needs adding to the
+   vocabulary. The defect is the order in which the existing set is applied, plus the replay reader,
+   which carries no limits at all. The pattern is already in the tree:
+   `assay_evidence::generate_trust_basis` takes `max_bundle_bytes + 1` off the reader before
+   reading.
 
-2. **The stop list binds emitted artifacts, not only prose.** ADR-042 §3 refuses compliance and
-   safe-agent claims. That refusal covers what the software puts on the wire and into evidence, on
-   the same terms as what the documentation says. A field asserting certification, partnership, or
-   an equivalent status is removed unless it carries a basis a reviewer can check. The mechanism is
+2. **The stop list binds emitted artifacts, not only prose.** ADR-042 §3 already refuses compliance
+   and safe-agent claims; a field asserting certification or partner status is such a claim, so this
+   is that entry applied to a second surface rather than a new entry. The refusal covers what the
+   software puts on the wire and into evidence, on the same terms as what the documentation says. A
+   field asserting certification, partnership, or an equivalent status is removed unless it
+   carries a basis a reviewer can check. The mechanism is
    a closed set of public wire status claims, asserted structurally against generated responses and
    schema fixtures — not a pattern scan over source literals, which is simultaneously noisy and
    blind to output composed indirectly.
@@ -80,11 +84,13 @@ so they can be enforced mechanically rather than remembered.
      enforcement it was protecting.
    - A failed validation never yields an authorized request, in any mode.
    - Every privileged method checks the authorization state of the request it is serving, not of a
-     handshake that preceded it. This is also the direction the MCP
-     [`2026-07-28` revision](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
-     takes by removing the `initialize`/`initialized` handshake (SEP-2575) and the protocol-level
-     session (SEP-2567), so per-request state is the durable target and a handshake-anchored gate
-     would be built on a mechanism the protocol is dropping.
+     handshake that preceded it. This is also the direction MCP is taking: the
+     [`2026-07-28` release candidate](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/),
+     locked on 2026-05-21 and due to publish on 2026-07-28, removes the `initialize`/`initialized`
+     handshake (SEP-2575) and the protocol-level session (SEP-2567). Read as of this ADR's date that
+     is a candidate rather than a published spec, which affects the timing of the argument and not
+     its direction: per-request state is the durable target either way, and a handshake-anchored
+     gate would be built on a mechanism the protocol is dropping.
 
 5. **A named policy that cannot be loaded is fatal.** When the operator names a `--policy`, failure
    to load it ends the run, unconditionally. `--fail-closed` does not create that obligation; it
@@ -108,9 +114,11 @@ so they can be enforced mechanically rather than remembered.
 - §5 changes default behaviour: a named policy that fails to load stops the run instead of falling
   back. That trades a convenience for an honest contract, and it is the reason this is an ADR rather
   than a bug fix.
-- This ADR adds nothing to the ADR-042 stop list and removes nothing from it, so it amends rather
-  than supersedes. The kernel-observation posture is unchanged: eBPF validation running post-merge
-  rather than on pull requests remains consistent with its supporting status.
+- This ADR adds no entry to the ADR-042 stop list and removes none, so it amends rather than
+  supersedes. Every example it names maps onto an entry that is already there — the wire claims onto
+  the compliance and safe-agent refusal, the claim ceilings onto the whole-action-verdict refusal.
+  The kernel-observation posture is unchanged: eBPF validation running post-merge rather than on
+  pull requests remains consistent with its supporting status.
 
 Four implementation slices follow from the decisions, in this order:
 
@@ -129,7 +137,7 @@ Resource behaviour, reproducible as written:
 |---|---|---|
 | Ingest exceeds the ceiling | counting reader through `BundleReader::open` vs `verify_bundle_with_limits`, 150 MiB input | 157,286,400 bytes read vs 32,768; ceiling is 104,857,600 |
 | Memory tracks input | `assay evidence verify` on 50 / 200 / 600 MB files | 72 / 222 / 622 MB peak resident |
-| Policy substitution | `assay sandbox --fail-closed --policy <broken>` | warning, built-in policy applied, child ran, exit 0 |
+| Policy substitution | `assay sandbox --fail-closed --policy <any file that does not parse as a policy> -- /bin/echo hi` | warning naming the load error, built-in pack applied, child ran, exit 0 |
 
 Authorization behaviour, stated as outcomes. These four were measured the same way, but the
 step-by-step recipes are withheld from this record until the §4 slice lands, then restored here. The
@@ -146,10 +154,11 @@ The policy-substitution row stays reproducible because it is an operator self-mi
 rather than a path a third party can trigger: it needs write access to the policy file the operator
 themselves named, and its effect is a weaker sandbox for that same operator.
 
-Each finding was run against a control so it is not an artifact of the setup. Repacking the
-untouched fixture bundle verifies clean, while changing one field of equal byte length fails with
-`IntegrityManifestHash`; the integrity chain does what the profile says. For the JWKS composition
-the two runs differ only in the URI scheme, which isolates the cause to the refusal path itself.
+Each finding was run against a control so it is not an artifact of the setup. Repacking
+`tests/fixtures/evidence/test-bundle.tar.gz` untouched verifies clean, while changing one field of
+that bundle to a value of equal byte length fails with `IntegrityManifestHash`; the integrity chain
+does what the profile says. For the JWKS composition the two runs differ only in the URI scheme,
+which isolates the cause to the refusal path itself.
 Finding 1 was independently challenged on the grounds that the verifier streams correctly, and
 re-confirmed: it does stream, but only over an already-materialized buffer. The privileged-action
 conformance corpus reproduces all thirteen vectors, and every policy-decision gate has a passing
