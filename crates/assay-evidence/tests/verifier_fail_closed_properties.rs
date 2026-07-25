@@ -725,7 +725,7 @@ fn high_ratio_gzip_stops_at_the_tar_layer_not_the_decode_ceiling() {
     .expect("the checked-in seed must exist");
 
     assert!(
-        decoded_len(&seed) > 4 << 20,
+        decoded_len(&seed) as u64 > small_limits().max_decode_bytes,
         "seed must still be high-ratio, or it has stopped being useful to the fuzzer"
     );
     let (class, code) = expect_rejected(&seed, "a high-ratio gzip of zero blocks");
@@ -752,6 +752,14 @@ fn a_pax_extended_header_reaches_the_decode_ceiling() {
     assert!(
         (seed.len() as u64) < small_limits().max_bundle_bytes,
         "the compressed form must clear the byte ceiling, or this tests the wrong axis"
+    );
+    // Guards this test's own premise. Without it, shrinking the PAX declared size below the
+    // ceiling would leave the test green while it silently exercised a different path -- the
+    // failure mode this whole file exists to catch. Pinned to the named limit rather than a
+    // literal so the guard moves with the ceiling instead of drifting away from it.
+    assert!(
+        decoded_len(&seed) as u64 > small_limits().max_decode_bytes,
+        "seed must still declare more than the decode ceiling, or it tests a different path"
     );
     let (class, code) = expect_rejected(&seed, "a PAX header declaring more than the decode limit");
     assert_eq!(
