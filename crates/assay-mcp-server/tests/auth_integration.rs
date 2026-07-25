@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use assay_mcp_server::auth::{AuthConfig, AuthMode, TokenValidator};
 // We need to run server or simulate logic
 use wiremock::matchers::{method, path};
@@ -5,8 +7,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[tokio::test]
 #[expect(clippy::field_reassign_with_default)]
-async fn test_auth_rejection_e2e_simulation() {
-    // We simulate the auth logic flow here to prove E6 behavior
+async fn test_legacy_validator_rejects_invalid_token() {
+    // Compatibility-only validation primitive. The stdio server does not call this path.
     // 1. Setup JWKS mock
     let mock_server = MockServer::start().await;
 
@@ -18,7 +20,7 @@ async fn test_auth_rejection_e2e_simulation() {
         .mount(&mock_server)
         .await;
 
-    // 2. Config Strict
+    // 2. Configure the standalone compatibility object.
     let mut config = AuthConfig::default();
     config.mode = AuthMode::Strict;
     config.jwks_uri = Some(mock_server.uri().parse().unwrap());

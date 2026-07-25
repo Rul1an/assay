@@ -1,9 +1,9 @@
 //! `assay.token_passthrough_conformance.v0` (MCP01a-3) — credential-boundary conformance.
 //!
 //! The confused-deputy invariant: only a component that **consumes** inbound auth can leak that
-//! consumed credential as a passthrough. This carrier reports, value-free, that the consuming path
-//! (the `server.rs` validator + the outbound tool surface) does not re-emit a consumed inbound
-//! authentication value on its outbound headers, bodies, or spawned env.
+//! consumed credential as a passthrough. The standalone stdio server consumes no authentication
+//! field. This carrier reports that boundary explicitly and retains the value-sentinel checks as
+//! negative evidence against accidental re-emission on Assay-originated outbound surfaces.
 //!
 //! The transparent stdio relay (`proxy::run`) is explicitly OUT of scope: it consumes no inbound
 //! auth, originates no outbound HTTP with it, and injects no child env, so its verbatim JSON-RPC
@@ -20,10 +20,8 @@ pub struct ProbedSource {
     pub source: String,
     /// Always true: a known inbound-credential location the boundary watches.
     pub probed: bool,
-    /// True only where the tested consuming path actually validates this field as authn. On the
-    /// stdio consuming path the `server.rs` validator consumes the initialize-param auth fields; the
-    /// `http.*` headers are the outbound-forbidden denylist (`SENSITIVE_HEADER_NAMES`) and are
-    /// consumed as inbound authn only under an HTTP transport, which this topology does not exercise.
+    /// True only where the tested topology actually validates this field as authentication. The
+    /// standalone stdio server has no transport-authentication mechanism, so every source is false.
     pub consumed: bool,
 }
 
@@ -54,11 +52,11 @@ pub struct TokenPassthroughConformance {
     pub non_claims: Vec<String>,
 }
 
-/// Does the EXACT consumed inbound value appear on a captured outbound surface? Value-exact on
+/// Does the EXACT inbound sentinel value appear on a captured outbound surface? Value-exact on
 /// purpose: an arbitrary credential-shaped payload with a different value is not a leak (the negative
 /// control), so this never becomes a payload sanitizer.
-pub fn value_leaks(consumed_value: &str, outbound_surface: &str) -> bool {
-    !consumed_value.is_empty() && outbound_surface.contains(consumed_value)
+pub fn value_leaks(inbound_value: &str, outbound_surface: &str) -> bool {
+    !inbound_value.is_empty() && outbound_surface.contains(inbound_value)
 }
 
 fn source(s: &str, consumed: bool) -> ProbedSource {
@@ -69,23 +67,26 @@ fn source(s: &str, consumed: bool) -> ProbedSource {
     }
 }
 
-/// The conformance report for the consuming-path topology. `transport_header` and `json_body` are
-/// checked by the value-sentinel e2e; `environment` is `not_applicable` because the consuming path
-/// (the `server.rs` validator) spawns no child — only the out-of-scope transparent relay spawns, and
-/// it injects no inbound auth into the child env.
+/// The conformance report for the standalone stdio topology. `transport_header` and `json_body` are
+/// checked by the value-sentinel e2e; `environment` is `not_applicable` because the standalone server
+/// spawns no child. The out-of-scope transparent relay spawns a child but does not interpret relayed
+/// initialize fields as Assay authentication or identity.
+///
+/// The historical function name remains for source compatibility; the returned topology names the
+/// corrected non-consuming boundary.
 pub fn consuming_path_conformance() -> TokenPassthroughConformance {
     TokenPassthroughConformance {
         schema: SCHEMA.to_string(),
-        topology: "consuming_path".to_string(),
+        topology: "standalone_stdio_non_consuming".to_string(),
         probed_inbound_auth_sources: vec![
-            // http.* are probed (the outbound-forbidden denylist), consumed as inbound authn only
-            // under an HTTP transport, which the stdio consuming path does not exercise.
             source("http.authorization", false),
             source("http.cookie", false),
             source("http.x_api_key", false),
-            // The stdio consuming path's `server.rs` validator consumes these as authn.
-            source("initialize.params.authorization", true),
-            source("initialize.params.initializationOptions.authorization", true),
+            source("initialize.params.authorization", false),
+            source(
+                "initialize.params.initializationOptions.authorization",
+                false,
+            ),
         ],
         outbound_channels: vec![
             OutboundChannel {
@@ -118,9 +119,9 @@ pub fn consuming_path_conformance() -> TokenPassthroughConformance {
                     .to_string(),
         },
         non_claims: vec![
-            "tracks only consumed inbound authentication values".to_string(),
-            "probed http.* header sources are the outbound-forbidden denylist; they are consumed as \
-             inbound authn only under an HTTP transport, not on this stdio consuming path"
+            "standalone stdio does not authenticate initialize fields".to_string(),
+            "probed http.* header sources are an outbound-forbidden denylist, not evidence of an \
+             HTTP transport or inbound authentication mechanism"
                 .to_string(),
             "does not scrub arbitrary credential-shaped user payload".to_string(),
             "transparent relay forwarding is not treated as a confused-deputy leak when the relay \
@@ -152,16 +153,16 @@ mod tests {
 
     #[test]
     fn value_leak_is_exact_not_shape_based() {
-        let consumed = "Bearer INBOUND_TOKEN_NEVER_FORWARD";
-        // The exact consumed value on an outbound surface is a leak.
+        let inbound_sentinel = "Bearer INBOUND_TOKEN_NEVER_FORWARD";
+        // The exact inbound sentinel on an outbound surface is a leak.
         assert!(value_leaks(
-            consumed,
+            inbound_sentinel,
             "x-fwd: Bearer INBOUND_TOKEN_NEVER_FORWARD"
         ));
         // Negative control: a different credential-shaped value is NOT a leak (not a sanitizer).
         assert!(!value_leaks(
-            consumed,
-            r#"{"authorization":"not-the-consumed-sentinel"}"#
+            inbound_sentinel,
+            r#"{"authorization":"not-the-inbound-sentinel"}"#
         ));
         assert!(!value_leaks("", "anything"));
     }
@@ -170,7 +171,7 @@ mod tests {
     fn consuming_path_report_is_clean_and_value_free() {
         let report = consuming_path_conformance();
         assert!(is_clean(&report));
-        // env is not_applicable (consuming path spawns nothing), not a fake pass.
+        // env is not_applicable (standalone stdio spawns nothing), not a fake pass.
         let env = report
             .outbound_channels
             .iter()
@@ -181,22 +182,13 @@ mod tests {
         // value-free: no token values anywhere in the serialized carrier.
         let blob = serde_json::to_string(&report).unwrap();
         assert!(!blob.contains("NEVER_FORWARD") && !blob.contains("Bearer "));
-        // Every source is probed; only the initialize-param fields the server.rs validator actually
-        // consumes are marked consumed (the http.* denylist is not, on this stdio consuming path).
+        assert_eq!(report.topology, "standalone_stdio_non_consuming");
+        // Every source is probed, and none is promoted into authentication or identity.
         assert!(report.probed_inbound_auth_sources.iter().all(|s| s.probed));
-        let consumed: Vec<&str> = report
+        assert!(report
             .probed_inbound_auth_sources
             .iter()
-            .filter(|s| s.consumed)
-            .map(|s| s.source.as_str())
-            .collect();
-        assert_eq!(
-            consumed,
-            vec![
-                "initialize.params.authorization",
-                "initialize.params.initializationOptions.authorization",
-            ]
-        );
+            .all(|source| !source.consumed));
     }
 
     #[test]

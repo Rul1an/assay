@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 pub mod config;
 pub mod jwks;
 pub mod sensitive_headers;

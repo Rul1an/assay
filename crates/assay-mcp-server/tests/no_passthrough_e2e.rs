@@ -1,8 +1,9 @@
 //! E6a.3 no-pass-through E2E test.
 //!
-//! Invariant: inbound auth (e.g. from initialize params) must never appear on any outbound
-//! HTTP request. We send inbound auth, trigger the test-only outbound call, then assert
-//! the mock received no sensitive headers. Run with: cargo test -p assay-mcp-server --features test-outbound no_passthrough
+//! Invariant: credential-shaped initialize fields are not authentication on standalone stdio and
+//! must never appear on any Assay-originated outbound HTTP request. We send a sentinel field,
+//! trigger the test-only outbound call, then assert the mock received no sensitive headers or
+//! sentinel values. Run with: cargo test -p assay-mcp-server --features test-outbound no_passthrough
 
 use assay_mcp_server::auth::SENSITIVE_HEADER_NAMES;
 use std::io::{BufRead, BufReader, Write};
@@ -92,7 +93,8 @@ async fn test_no_passthrough_e2e() {
     let stdout = child.stdout.take().expect("stdout");
     let mut reader = BufReader::new(stdout);
 
-    // 1. Initialize with inbound auth + multiple sensitive params (server must not forward any to downstream)
+    // 1. Initialize with credential-shaped fields. The server must neither interpret them as
+    // authentication nor forward them downstream.
     let req_init = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "initialize",
@@ -153,13 +155,13 @@ async fn test_no_passthrough_e2e() {
         "expected exactly one outbound request (tool must not have skipped; check ASSAY_TEST_OUTBOUND_URL)"
     );
     assert_no_sensitive_headers(&received);
-    // MCP01a-3 value-sentinel: the EXACT consumed inbound auth value must not re-emit on ANY outbound
-    // surface (header values, URL, or body), not just be absent by header name. Every inbound auth
+    // MCP01a-3 value-sentinel: the EXACT inbound value must not re-emit on ANY outbound surface
+    // (header values, URL, or body), not just be absent by header name. Every inbound field
     // value above carries the marker `NEVER_FORWARD`, so its presence anywhere outbound is a leak.
     assert_no_inbound_value_leaked(&received);
 }
 
-/// Value-sentinel proof (MCP01a-3): the consumed inbound credential VALUE never appears on an outbound
+/// Value-sentinel proof (MCP01a-3): the inbound credential-shaped VALUE never appears on an outbound
 /// surface. Checks header values, the URL, and the body, not header names. Value-free failure (the
 /// surface, not the value).
 fn assert_no_inbound_value_leaked(requests: &[wiremock::Request]) {
@@ -172,8 +174,8 @@ fn assert_no_inbound_value_leaked(requests: &[wiremock::Request]) {
         surfaces.push(String::from_utf8_lossy(&req.body).to_string());
         if surfaces.iter().any(|s| s.contains(INBOUND_VALUE_SENTINEL)) {
             panic!(
-                "MCP01a-3 value passthrough violated: request #{} re-emitted a consumed inbound \
-                 authentication value on an outbound surface (header value, URL, or body). \
+                "MCP01a-3 value passthrough violated: request #{} re-emitted an inbound \
+                 credential-shaped value on an outbound surface (header value, URL, or body). \
                  Sentinel marker {INBOUND_VALUE_SENTINEL:?} found; value not logged.",
                 i + 1
             );
