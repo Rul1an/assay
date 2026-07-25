@@ -568,7 +568,15 @@ mod bounded_ingest {
             max_source_bytes: ceiling,
             ..ReplayLimits::default()
         };
-        assert!(read_bundle_tar_gz_with_limits(source, limits).is_err());
+        let err = read_bundle_tar_gz_with_limits(source, limits)
+            .expect_err("a bundle over the source ceiling must be refused");
+        match err.downcast_ref::<ReplayIngestError>() {
+            Some(ReplayIngestError::SourceCeiling { kind, limit }) => {
+                assert_eq!(*kind, LimitKind::SourceBytes);
+                assert_eq!(*limit, ceiling);
+            }
+            other => panic!("expected a typed SourceCeiling, got {other:?}"),
+        }
         assert!(
             pulled.get() <= ceiling + 1,
             "ingest must stop at the ceiling; {} bytes were pulled",
@@ -589,9 +597,9 @@ mod bounded_ingest {
         let err = read_bundle_tar_gz_with_limits(Cursor::new(bytes.clone()), limits)
             .expect_err("a 4 KiB member must be refused under a 64 byte ceiling");
         match err.downcast_ref::<ReplayIngestError>() {
-            Some(ReplayIngestError::MemberCeiling { member, kind, .. }) => {
-                assert_eq!(member, "files/trace.jsonl");
+            Some(ReplayIngestError::MemberCeiling { kind, limit }) => {
                 assert_eq!(*kind, LimitKind::MemberBytes);
+                assert_eq!(*limit, 64);
             }
             other => panic!("expected a typed MemberCeiling, got {other:?}"),
         }
@@ -657,6 +665,30 @@ mod bounded_ingest {
             .expect("the same bundle must read under the default entry ceiling");
     }
 
+    /// `max_manifest_bytes` had no test of its own: the member ceiling covered entry bodies and
+    /// the manifest was assumed to travel with them. It does not, it has its own dimension, and
+    /// its refusal has to be distinguishable.
+    #[test]
+    fn a_manifest_over_its_own_ceiling_is_refused() {
+        let bytes = small_bundle();
+        let tight = ReplayLimits {
+            max_manifest_bytes: 8,
+            ..ReplayLimits::default()
+        };
+        let err = read_bundle_tar_gz_with_limits(Cursor::new(bytes.clone()), tight)
+            .expect_err("a manifest over its own ceiling must be refused");
+        match err.downcast_ref::<ReplayIngestError>() {
+            Some(ReplayIngestError::MemberCeiling { kind, limit }) => {
+                assert_eq!(*kind, LimitKind::MemberBytes);
+                assert_eq!(*limit, 8, "the manifest ceiling must be the one reported");
+            }
+            other => panic!("expected a typed MemberCeiling on the manifest, got {other:?}"),
+        }
+
+        read_bundle_tar_gz_with_limits(Cursor::new(bytes), ReplayLimits::default())
+            .expect("the same manifest must read under the default ceiling");
+    }
+
     /// The manifest ceiling is about shape, not size: a small document can nest deeply enough to
     /// exhaust the parser, and `max_manifest_bytes` says nothing about that.
     #[test]
@@ -677,8 +709,9 @@ mod bounded_ingest {
             .expect("the same manifest must read under the default depth");
     }
 
-    /// Exactly the ceiling is accepted and one deeper is refused, pinned against the real
-    /// manifest rather than a hand-built document, so the boundary is the one callers meet.
+    /// Exactly the ceiling is accepted and one deeper is refused. This exercises the depth
+    /// counter directly on hand-built documents, because a written manifest has a fixed shape and
+    /// cannot express the +/-1 boundary; the end-to-end case above covers the real manifest.
     #[test]
     fn the_manifest_depth_boundary_is_exact() {
         use super::super::limits::check_manifest_json_depth;
@@ -718,14 +751,15 @@ mod bounded_ingest {
         };
         let err = read_bundle_tar_gz_with_limits(Cursor::new(bytes.clone()), limits)
             .expect_err("expansion past the decode ceiling must be refused");
+        // One expected variant, not "either of two". The decoder sits above the tar walker, so
+        // the expansion ceiling trips while the walker is pulling an entry body, which is the
+        // member-scoped classification path.
         match err.downcast_ref::<ReplayIngestError>() {
-            Some(ReplayIngestError::SourceCeiling { kind, .. }) => {
-                assert_eq!(*kind, LimitKind::DecodedBytes)
+            Some(ReplayIngestError::MemberCeiling { kind, limit }) => {
+                assert_eq!(*kind, LimitKind::DecodedBytes);
+                assert_eq!(*limit, 4096);
             }
-            Some(ReplayIngestError::MemberCeiling { kind, .. }) => {
-                assert_eq!(*kind, LimitKind::DecodedBytes)
-            }
-            other => panic!("expected a decode ceiling refusal, got {other:?}"),
+            other => panic!("expected a typed MemberCeiling on DecodedBytes, got {other:?}"),
         }
 
         read_bundle_tar_gz_with_limits(Cursor::new(bytes), ReplayLimits::default())

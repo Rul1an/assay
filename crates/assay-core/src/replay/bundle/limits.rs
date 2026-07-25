@@ -70,12 +70,11 @@ pub enum ReplayIngestError {
     #[error("replay bundle exceeded {kind} limit of {limit}")]
     SourceCeiling { kind: LimitKind, limit: u64 },
 
-    #[error("replay bundle {member} exceeded {kind} limit of {limit}")]
-    MemberCeiling {
-        member: String,
-        kind: LimitKind,
-        limit: u64,
-    },
+    /// Value-free like the others: the member name comes from the archive, so echoing it hands
+    /// an attacker a channel into the diagnostic while telling the reader nothing they can act
+    /// on. The dimension and the ceiling are what distinguishes this from a source refusal.
+    #[error("replay bundle member exceeded {kind} limit of {limit}")]
+    MemberCeiling { kind: LimitKind, limit: u64 },
 
     /// Deliberately free of the offending value. The path and its length are chosen by the
     /// archive, and echoing either back gives a reader nothing to act on while handing an
@@ -102,15 +101,10 @@ pub(crate) fn classify_source_ceiling(err: &std::io::Error) -> Option<ReplayInge
 }
 
 /// Same as [`classify_source_ceiling`] but for reads scoped to a single member (the manifest
-/// or an entry body). The member's identifier is carried through so the diagnostic names
-/// what tripped rather than reporting an anonymous byte count.
-pub(crate) fn classify_member_ceiling(
-    err: &std::io::Error,
-    member: &str,
-) -> Option<ReplayIngestError> {
+/// or an entry body).
+pub(crate) fn classify_member_ceiling(err: &std::io::Error) -> Option<ReplayIngestError> {
     let cause = LimitExceeded::from_io(err)?;
     Some(ReplayIngestError::MemberCeiling {
-        member: member.to_string(),
         kind: cause.kind,
         limit: cause.limit,
     })
@@ -177,27 +171,33 @@ mod tests {
         }
     }
 
+    /// The dimension and the ceiling travel; the member name does not. It is archive-controlled
+    /// and adds nothing a reader can act on.
     #[test]
-    fn member_ceiling_carries_the_member_name() {
+    fn member_ceiling_carries_the_dimension_and_not_the_member_name() {
         let io = make_io(LimitKind::MemberBytes, 42);
-        match classify_member_ceiling(&io, "files/trace.jsonl") {
-            Some(ReplayIngestError::MemberCeiling {
-                member,
-                kind,
-                limit,
-            }) => {
-                assert_eq!(member, "files/trace.jsonl");
+        match classify_member_ceiling(&io) {
+            Some(ReplayIngestError::MemberCeiling { kind, limit }) => {
                 assert_eq!(kind, LimitKind::MemberBytes);
                 assert_eq!(limit, 42);
             }
             other => panic!("expected MemberCeiling, got {other:?}"),
         }
+        let rendered = ReplayIngestError::MemberCeiling {
+            kind: LimitKind::MemberBytes,
+            limit: 42,
+        }
+        .to_string();
+        assert!(
+            !rendered.contains('/'),
+            "no archive path may appear: {rendered}"
+        );
     }
 
     #[test]
     fn a_non_ceiling_io_error_is_not_promoted() {
         let io = std::io::Error::other("something else entirely");
         assert!(classify_source_ceiling(&io).is_none());
-        assert!(classify_member_ceiling(&io, "files/x").is_none());
+        assert!(classify_member_ceiling(&io).is_none());
     }
 }

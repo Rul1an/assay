@@ -135,7 +135,7 @@ pub fn read_bundle_tar_gz_with_limits<R: Read>(r: R, limits: ReplayLimits) -> Re
             let mut bounded =
                 LimitReader::new(&mut e, limits.max_manifest_bytes, LimitKind::MemberBytes);
             bounded.read_to_end(&mut data).map_err(|err| {
-                classify_member_ceiling(&err, paths::MANIFEST)
+                classify_member_ceiling(&err)
                     .map(anyhow::Error::from)
                     .unwrap_or_else(|| anyhow::Error::from(err).context("read manifest body"))
             })?;
@@ -144,14 +144,16 @@ pub fn read_bundle_tar_gz_with_limits<R: Read>(r: R, limits: ReplayLimits) -> Re
             continue;
         }
 
-        // Path validation (segments, prefix) comes after the length check so a hostile
-        // path is refused on size before allocation.
+        // Path validation (segments, prefix) runs after the length check, so an oversized name
+        // is refused before it is normalised and cloned into a map key. It is not a claim about
+        // all allocation: the tar reader has already parsed the header, and a PAX extended name
+        // is materialized by that layer before either check sees it.
         paths::validate_entry_path(&path_str)?;
 
         let mut data = Vec::new();
         let mut bounded = LimitReader::new(&mut e, limits.max_member_bytes, LimitKind::MemberBytes);
         bounded.read_to_end(&mut data).map_err(|err| {
-            classify_member_ceiling(&err, &path_str)
+            classify_member_ceiling(&err)
                 .map(anyhow::Error::from)
                 .unwrap_or_else(|| anyhow::Error::from(err).context("read entry body"))
         })?;

@@ -23,4 +23,6 @@ pub use manifest::{
 };
 pub use scrub::{contains_forbidden_patterns, scrub_content};
 pub use toolchain::capture_toolchain;
-pub use verify::{verify_bundle, verify_bundle_with_limits, verify_read_bundle, VerifyResult};
+pub use verify::{
+    read_verify_bounded, verify_bundle, verify_bundle_with_limits, VerifiedBundle, VerifyResult,
+};

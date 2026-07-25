@@ -6,6 +6,7 @@
 use crate::replay::bundle::{paths, read_bundle_tar_gz_with_limits, ReadBundle, ReplayLimits};
 use crate::replay::scrub::contains_forbidden_patterns;
 use anyhow::{Context, Result};
+use assay_common::limits::{LimitKind, LimitReader};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 
@@ -53,13 +54,51 @@ pub fn verify_bundle_with_limits<R: Read>(r: R, limits: ReplayLimits) -> Result<
     verify_read_bundle(&read)
 }
 
+/// One bounded snapshot of a replay bundle: the bytes, what they parsed to, and the verdict.
+///
+/// `source_digest` is computed over exactly the compressed bytes that produced `read`, which is
+/// the point of returning them together. A caller that digests the path and then opens it again
+/// publishes a digest describing one snapshot while replaying another.
+#[derive(Debug)]
+pub struct VerifiedBundle {
+    /// Parsed bundle, from the same bytes the digest covers.
+    pub read: ReadBundle,
+    /// Verification verdict for exactly that `read`.
+    pub verify: VerifyResult,
+    /// `sha256:<hex>` over the compressed source bytes.
+    pub source_digest: String,
+}
+
+/// Read, digest and verify a replay bundle from a single bounded snapshot.
+///
+/// This is the entrypoint a caller should reach for. It takes one read of the source, bounded by
+/// `limits.max_source_bytes` before anything is materialized, and binds three things that must
+/// agree to that one snapshot: the digest published as provenance, the bundle that is parsed, and
+/// the verdict. Digesting a path and separately opening it leaves a window in which those three
+/// describe different bytes.
+pub fn read_verify_bounded<R: Read>(r: R, limits: ReplayLimits) -> Result<VerifiedBundle> {
+    let mut source = Vec::new();
+    LimitReader::new(r, limits.max_source_bytes, LimitKind::SourceBytes)
+        .read_to_end(&mut source)
+        .context("read bundle source")?;
+
+    let source_digest = format!("sha256:{}", hex::encode(Sha256::digest(&source)));
+    let read = read_bundle_tar_gz_with_limits(std::io::Cursor::new(&source), limits)
+        .context("read bundle")?;
+    let verify = verify_read_bundle(&read)?;
+
+    Ok(VerifiedBundle {
+        read,
+        verify,
+        source_digest,
+    })
+}
+
 /// Verify an already-read bundle.
 ///
-/// Splitting this out is what lets a caller read the archive once and verify exactly the bytes it
-/// is about to use. Verifying from a reader and then reopening the file to consume it means two
-/// full materializations of the same archive and, worse, two different reads: the bytes that
-/// passed verification need not be the bytes that get replayed if the file changes in between.
-pub fn verify_read_bundle(read: &ReadBundle) -> Result<VerifyResult> {
+/// Crate-internal on purpose. Exposed, it invites a caller to verify one `ReadBundle` and act on
+/// another; [`read_verify_bounded`] is the shape that cannot be held that way.
+pub(crate) fn verify_read_bundle(read: &ReadBundle) -> Result<VerifyResult> {
     let ReadBundle { manifest, entries } = read;
     let mut result = VerifyResult::default();
     let file_manifest = manifest.files.as_ref();
