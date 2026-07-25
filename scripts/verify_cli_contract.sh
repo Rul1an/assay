@@ -4,7 +4,9 @@ set -euo pipefail
 # Build debug binary first to ensure freshness
 cargo build --bin assay
 
-ASSAY="./target/debug/assay"
+# Same resolution order as perf_assess.sh and soak_test.sh: explicit override, then
+# CARGO_TARGET_DIR, then the default layout.
+ASSAY="${ASSAY:-${CARGO_TARGET_DIR:-target}/debug/assay}"
 
 run_expect() {
   local name="$1"; shift

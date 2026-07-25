@@ -3,7 +3,10 @@ set -e
 # Phase 6 Refined Integration Check
 # SOTA Patterns, Safe Path, Fail-Closed Marker
 
-BINARY="./target/debug/assay"
+# Resolve like the perf and soak scripts already do: an explicit ASSAY wins, then
+# CARGO_TARGET_DIR, then the default layout. Hardcoding ./target/debug means the script cannot
+# find a binary when run from a git worktree, since cargo puts it in the shared target dir.
+BINARY="${ASSAY:-${CARGO_TARGET_DIR:-target}/debug/assay}"
 if [ ! -f "$BINARY" ]; then
     echo "Binary not found, building..."
     cargo build -p assay-cli
