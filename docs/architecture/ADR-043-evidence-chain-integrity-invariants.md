@@ -17,15 +17,26 @@ findings, with reproduction steps in the appendix:
 
 - The reference verifier applies its own resource ceiling after it has already materialized the
   input. `assay evidence verify` on a 600 MB file peaks at 622 MB resident while
-  `VerifyLimits::max_bundle_bytes` is 100 MB. An independent verifier written from the profile text
-  would apply the ceiling first and behave differently from the reference on the same input.
-- The MCP server emits `"certified": true` in every successful `initialize` response, including a
-  session opened with a forged `alg:none` token. The claims-boundary guard that keeps the stop list
+  `VerifyLimits::max_bundle_bytes` is 100 MB. The ceiling is passed correctly and the `LimitReader`
+  is a genuine streaming guard; the defect is that `BundleReader::open_internal` reads the input to
+  the end first, so that guard streams from a `Cursor` over a `Vec` that is already complete. At
+  process level it therefore bounds nothing. An independent verifier written from the profile text
+  would apply the ceiling to the source stream and behave differently from the reference.
+- The MCP server emits `"certified": true` and `"partner": "agent_framework"` in every successful
+  `initialize` response. Neither carries a basis a reviewer can check, and `meta` is not a protocol
+  field at all — the reserved key is `_meta`. The claims-boundary guard that keeps the stop list
   honest scans prose paths only, so it cannot see anything the binaries assert on the wire.
 - The bundle fuzz target covers `assay_core::replay::verify_bundle`, a different bundle format from
   the evidence chain, and the replay module carries no resource ceiling at all.
 - Token validation runs only in the `initialize` branch. A `tools/call` sent without a handshake
   reaches tool dispatch even with authentication configured in strict mode.
+- The default `AuthMode` is `Permissive`, where a correct rejection is downgraded to a pass. The
+  algorithm allowlist does reject `alg:none` as designed; the surrounding policy then opens the
+  session anyway. The weakness is in the mode, not in the validation.
+- Two individually defensible auth decisions compose into a fail-open. In strict mode a non-HTTPS
+  JWKS URI is refused and the field is set to `None`; the missing-token check then requires
+  `jwks_uri.is_some()` and admits the request. Strict mode with a rejected JWKS URI has no
+  authentication left, and a caller who sends no token fares better than one who sends a bad token.
 - The sandbox substitutes a built-in policy when the file named by `--policy` fails to load, also
   under `--fail-closed`, and records no identity for the policy that actually applied.
 
@@ -56,9 +67,14 @@ so they can be enforced mechanically rather than remembered.
 4. **Session authorization is stated, not grown.** ADR-042 refuses generic agent identity and
    delegation, so this repository does not build an identity provider. It does owe an honest
    boundary: a handshake-only check is not request authorization, and must not be presented as one.
-   Either the privileged method surface refuses an unauthenticated session, or the auth boundary is
-   documented as out of the trust boundary and the default mode of a released binary does not accept
-   a token it failed to validate.
+   Of the two ways to settle that, documenting the boundary is preferred over building a session
+   gate, because the MCP
+   [`2026-07-28` revision](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
+   removes the `initialize`/`initialized` handshake (SEP-2575) and the protocol-level session
+   (SEP-2567); a gate anchored to the handshake would be built on a mechanism the protocol is
+   dropping. Either way, the default mode of a released binary
+   does not accept a token it failed to validate, and a control that refuses unsafe configuration
+   never thereby disables the enforcement it was protecting.
 
 5. **A supporting capability records what it enforced, or states nothing about enforcement.** When
    an enforcement path substitutes a different policy than the operator named, that substitution is
@@ -90,11 +106,15 @@ Measured on `main` at `9fabad8b`, debug binaries, Linux x86_64.
 | Memory tracks input | `assay evidence verify` on 50 / 200 / 600 MB files | 72 / 222 / 622 MB peak resident |
 | Forged token accepted | `initialize` with an `alg:none` token, default mode | session opened, `"certified": true` returned |
 | No token accepted | `initialize` with no token, `ASSAY_AUTH_MODE=strict`, no JWKS | session opened |
+| JWKS scheme flips enforcement | `initialize` with no token, strict mode, `http://` JWKS URI | session opened; the same call with an `https://` URI is refused as `Missing authorization token (Strict mode)` |
 | Call without handshake | `tools/call` with no prior `initialize`, strict mode with JWKS | reached tool dispatch |
 | Policy substitution | `assay sandbox --fail-closed --policy <broken>` | warning, built-in policy applied, child ran, exit 0 |
 
-Two controls were run so the findings are not artifacts of the setup. Repacking the untouched
-fixture bundle verifies clean, while changing one field of equal byte length fails with
-`IntegrityManifestHash`; the integrity chain does what the profile says. The privileged-action
+Each finding was run against a control so it is not an artifact of the setup. Repacking the
+untouched fixture bundle verifies clean, while changing one field of equal byte length fails with
+`IntegrityManifestHash`; the integrity chain does what the profile says. For the JWKS composition
+the two runs differ only in the URI scheme, which isolates the cause to the refusal path itself.
+Finding 1 was independently challenged on the grounds that the verifier streams correctly, and
+re-confirmed: it does stream, but only over an already-materialized buffer. The privileged-action
 conformance corpus reproduces all thirteen vectors, and every policy-decision gate has a passing
 test, including `unknown_required_scope_fails_closed`.
