@@ -5,7 +5,7 @@
 //! No user-facing CLI here (E9c); this is the core library for bundle creation.
 
 mod io;
-mod limits;
+pub(crate) mod limits;
 mod manifest;
 pub mod paths;
 mod verify;

@@ -3,6 +3,7 @@
 //! Validates bundle integrity (hashes) and runs secret scan: hard fail for
 //! cassettes/ and files/, warn for outputs/. See E9-REPLAY-BUNDLE-PLAN §2.5.
 
+use crate::replay::bundle::limits::classify_source_ceiling;
 use crate::replay::bundle::{paths, read_bundle_tar_gz_with_limits, ReadBundle, ReplayLimits};
 use crate::replay::scrub::contains_forbidden_patterns;
 use anyhow::{Context, Result};
@@ -80,7 +81,14 @@ pub fn read_verify_bounded<R: Read>(r: R, limits: ReplayLimits) -> Result<Verifi
     let mut source = Vec::new();
     LimitReader::new(r, limits.max_source_bytes, LimitKind::SourceBytes)
         .read_to_end(&mut source)
-        .context("read bundle source")?;
+        .map_err(|err| {
+            // Classify before wrapping. `.context` on the raw io error would bury the typed cause
+            // under an anyhow layer, so the recommended entrypoint would return a weaker contract
+            // than the reader it is meant to replace.
+            classify_source_ceiling(&err)
+                .map(anyhow::Error::from)
+                .unwrap_or_else(|| anyhow::Error::from(err).context("read bundle source"))
+        })?;
 
     let source_digest = format!("sha256:{}", hex::encode(Sha256::digest(&source)));
     let read = read_bundle_tar_gz_with_limits(std::io::Cursor::new(&source), limits)

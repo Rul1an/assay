@@ -557,6 +557,156 @@ mod bounded_ingest {
         )
     }
 
+    /// The promise of `read_verify_bounded` is that three things describe one snapshot. Nothing
+    /// tested that promise: the digest could have been computed over a different read and every
+    /// other assertion would still have passed.
+    #[test]
+    fn the_bounded_helper_binds_digest_parse_and_verdict_to_one_read() {
+        use crate::replay::read_verify_bounded;
+        use sha2::{Digest, Sha256};
+
+        let bytes = small_bundle();
+        let expected = format!("sha256:{}", hex::encode(Sha256::digest(&bytes)));
+
+        let (source, pulled) = counting(bytes.clone());
+        let snapshot = read_verify_bounded(source, ReplayLimits::default())
+            .expect("a well-formed bundle must read, digest and verify");
+
+        assert_eq!(
+            snapshot.source_digest, expected,
+            "the digest must cover exactly the bytes that were read"
+        );
+        assert_eq!(
+            pulled.get(),
+            bytes.len() as u64,
+            "the source must be consumed once; {} bytes pulled for a {} byte input",
+            pulled.get(),
+            bytes.len()
+        );
+        assert!(
+            snapshot.verify.errors.is_empty(),
+            "the verdict must belong to the same snapshot: {:?}",
+            snapshot.verify.errors
+        );
+        assert!(
+            snapshot
+                .read
+                .entries
+                .iter()
+                .any(|(p, _)| p == "files/trace.jsonl"),
+            "the parsed bundle must come from that same read"
+        );
+    }
+
+    /// The helper is the recommended entrypoint, so it has to carry the same typed contract as
+    /// the reader it wraps.
+    ///
+    /// This is also the only place the source boundary is exactly measurable. The helper does a
+    /// `read_to_end` on the source, so every byte is pulled and `len` versus `len - 1` is a real
+    /// boundary. Through `read_bundle_tar_gz_with_limits` it is not: tar and gzip stop once the
+    /// archive is logically complete, so the last bytes are never requested and a ceiling just
+    /// under the file size is never crossed. A test asserting otherwise there would be asserting
+    /// the fixture, not the ceiling. Wrapping the io error in context first buried the cause and returned
+    /// a weaker refusal than the lower-level call.
+    #[test]
+    fn the_bounded_helper_reports_a_typed_source_ceiling() {
+        use crate::replay::read_verify_bounded;
+
+        let bytes = small_bundle();
+        let ceiling = bytes.len() as u64 - 1;
+        let limits = ReplayLimits {
+            max_source_bytes: ceiling,
+            ..ReplayLimits::default()
+        };
+        let err = read_verify_bounded(Cursor::new(bytes.clone()), limits)
+            .expect_err("one byte over the source ceiling must be refused");
+        match err.downcast_ref::<ReplayIngestError>() {
+            Some(ReplayIngestError::SourceCeiling { kind, limit }) => {
+                assert_eq!(*kind, LimitKind::SourceBytes);
+                assert_eq!(*limit, ceiling);
+            }
+            other => panic!("expected a typed SourceCeiling from the helper, got {other:?}"),
+        }
+
+        let exact = ReplayLimits {
+            max_source_bytes: bytes.len() as u64,
+            ..ReplayLimits::default()
+        };
+        read_verify_bounded(Cursor::new(bytes), exact)
+            .expect("a source of exactly the ceiling must be accepted");
+    }
+
+    #[test]
+    fn the_member_boundary_is_exact() {
+        let payload = vec![b'z'; 4096];
+        let bytes = bundle_with(vec![BundleEntry {
+            path: "files/trace.jsonl".into(),
+            data: payload.clone(),
+        }]);
+        let size = payload.len() as u64;
+
+        read_bundle_tar_gz_with_limits(
+            Cursor::new(bytes.clone()),
+            ReplayLimits {
+                max_member_bytes: size,
+                ..ReplayLimits::default()
+            },
+        )
+        .expect("a member of exactly the ceiling must be accepted");
+
+        let err = read_bundle_tar_gz_with_limits(
+            Cursor::new(bytes),
+            ReplayLimits {
+                max_member_bytes: size - 1,
+                ..ReplayLimits::default()
+            },
+        )
+        .expect_err("one byte over the member ceiling must be refused");
+        match err.downcast_ref::<ReplayIngestError>() {
+            Some(ReplayIngestError::MemberCeiling { kind, limit }) => {
+                assert_eq!(*kind, LimitKind::MemberBytes);
+                assert_eq!(*limit, size - 1);
+            }
+            other => panic!("expected a typed MemberCeiling, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_manifest_boundary_is_exact() {
+        let manifest = ReplayManifest::minimal("2.15.0".into());
+        // The writer serializes the manifest with `serde_json::to_vec`, so the same call gives
+        // the exact member size the ceiling is compared against.
+        let size = serde_json::to_vec(&manifest)
+            .expect("serialize manifest")
+            .len() as u64;
+        let bytes = small_bundle();
+
+        read_bundle_tar_gz_with_limits(
+            Cursor::new(bytes.clone()),
+            ReplayLimits {
+                max_manifest_bytes: size,
+                ..ReplayLimits::default()
+            },
+        )
+        .expect("a manifest of exactly the ceiling must be accepted");
+
+        let err = read_bundle_tar_gz_with_limits(
+            Cursor::new(bytes),
+            ReplayLimits {
+                max_manifest_bytes: size - 1,
+                ..ReplayLimits::default()
+            },
+        )
+        .expect_err("one byte over the manifest ceiling must be refused");
+        match err.downcast_ref::<ReplayIngestError>() {
+            Some(ReplayIngestError::MemberCeiling { kind, limit }) => {
+                assert_eq!(*kind, LimitKind::MemberBytes);
+                assert_eq!(*limit, size - 1);
+            }
+            other => panic!("expected a typed MemberCeiling on the manifest, got {other:?}"),
+        }
+    }
+
     #[test]
     fn the_compressed_source_stops_being_read_at_the_ceiling() {
         let bytes = small_bundle();
