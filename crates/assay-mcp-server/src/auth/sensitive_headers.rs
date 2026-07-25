@@ -1,4 +1,4 @@
-//! No pass-through of inbound auth to downstream (E6a.3).
+//! No pass-through of inbound credential-shaped fields to downstream (E6a.3).
 //!
 //! **Security invariant:** Inbound authentication material MUST NOT be forwarded to any
 //! downstream HTTP call (LLM/judge/proxy). Outbound requests MUST be built from an allowlist

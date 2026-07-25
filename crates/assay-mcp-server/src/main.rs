@@ -124,8 +124,14 @@ fn init_logging(log_level: &str) {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    // Do not use eprintln here, use tracing after init
-    // But config loads from env first.
+
+    // The stdio server and proxies do not implement transport authentication. Reject the entire
+    // reserved namespace before logging, policy loading, child spawning, or protocol I/O. The
+    // offline SARIF projection is not a server and remains independent of this boundary.
+    if !matches!(&args.mode, Some(Mode::EnforcementSarif { .. })) {
+        config::reject_unsupported_stdio_auth_env()?;
+    }
+
     let cfg = config::ServerConfig::from_env();
 
     init_logging(&cfg.log_level);
@@ -244,7 +250,11 @@ async fn main() -> Result<()> {
             tracing::info!(
                 event = "server_start",
                 policy_root = ?args.policy_root,
-                config = ?cfg
+                timeout_ms = cfg.timeout_ms,
+                max_msg_bytes = cfg.max_msg_bytes,
+                max_tool_calls = cfg.max_tool_calls,
+                max_field_bytes = cfg.max_field_bytes,
+                cache_entries = cfg.cache_entries,
             );
             Server::run(args.policy_root, cfg).await
         }

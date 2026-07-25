@@ -6,6 +6,7 @@ use jsonwebtoken::{decode, decode_header, Algorithm, Validation};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
+#[deprecated(note = "stdio authentication is unsupported; this legacy type is compatibility-only")]
 pub struct Claims {
     pub sub: String,
     pub iss: Option<String>,
@@ -16,6 +17,7 @@ pub struct Claims {
     pub resource: Option<serde_json::Value>, // RFC 8707: string or array
 }
 
+#[deprecated(note = "stdio authentication is unsupported; this legacy type is compatibility-only")]
 pub struct TokenValidator {
     jwks: Option<JwksProvider>,
     static_key: Option<std::sync::Arc<jsonwebtoken::DecodingKey>>,

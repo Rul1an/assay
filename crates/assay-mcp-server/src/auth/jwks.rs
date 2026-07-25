@@ -24,6 +24,7 @@ struct JwksResponse {
 }
 
 #[derive(Clone)]
+#[deprecated(note = "stdio authentication is unsupported; this legacy type is compatibility-only")]
 pub struct JwksProvider {
     cache: Cache<String, Arc<DecodingKey>>, // map kid -> key
     client: Client,

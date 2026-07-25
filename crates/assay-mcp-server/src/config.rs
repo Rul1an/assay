@@ -1,5 +1,30 @@
+#![allow(deprecated)]
+
 use crate::auth::config::AuthConfig;
 use std::env;
+
+fn configured_server_auth_variables() -> Vec<String> {
+    let mut names: Vec<String> = env::vars_os()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .filter(|name| name.to_ascii_uppercase().starts_with("ASSAY_AUTH_"))
+        .collect();
+    names.sort();
+    names
+}
+
+/// Reject legacy auth configuration for stdio server and proxy modes.
+///
+/// Only environment-variable names are reported. Values are never read into diagnostics.
+pub fn reject_unsupported_stdio_auth_env() -> anyhow::Result<()> {
+    let auth_variables = configured_server_auth_variables();
+    if !auth_variables.is_empty() {
+        anyhow::bail!(
+            "ASSAY_AUTH_* configuration is unsupported for stdio server modes; unset: {}",
+            auth_variables.join(", ")
+        );
+    }
+    Ok(())
+}
 
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
@@ -9,6 +34,13 @@ pub struct ServerConfig {
     pub max_field_bytes: usize,
     pub cache_entries: u64,
     pub log_level: String,
+    /// Compatibility-only configuration surface.
+    ///
+    /// The stdio server does not consume this field for authentication or identity. Server and
+    /// proxy binaries reject `ASSAY_AUTH_*` configuration before protocol I/O.
+    #[deprecated(
+        note = "stdio authentication is unsupported; this legacy field is compatibility-only"
+    )]
     pub auth: AuthConfig,
 }
 
@@ -57,7 +89,6 @@ impl ServerConfig {
         if let Ok(v) = env::var("ASSAY_LOG") {
             cfg.log_level = v;
         }
-        cfg.auth = AuthConfig::from_env();
         cfg
     }
 }

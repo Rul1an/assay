@@ -6,6 +6,11 @@ use url::Url;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]
+/// Compatibility-only legacy mode.
+///
+/// The stdio server does not use this type for authentication or identity. It remains public for
+/// one compatibility window while transport authentication is deferred to a future HTTP ADR.
+#[deprecated(note = "stdio authentication is unsupported; this legacy type is compatibility-only")]
 pub enum AuthMode {
     /// Log warnings for invalid tokens but allow the request (unless malformed).
     #[default]
@@ -15,6 +20,11 @@ pub enum AuthMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Compatibility-only legacy authentication configuration.
+///
+/// `Server::run` does not consume this configuration. The server and proxy binaries reject the
+/// `ASSAY_AUTH_*` namespace before protocol I/O; standard OAuth belongs to a future HTTP transport.
+#[deprecated(note = "stdio authentication is unsupported; this legacy type is compatibility-only")]
 pub struct AuthConfig {
     pub mode: AuthMode,
     pub jwks_uri: Option<Url>,
@@ -38,6 +48,13 @@ impl Default for AuthConfig {
 }
 
 impl AuthConfig {
+    /// Parse the legacy compatibility surface.
+    ///
+    /// This does not enable authentication in the stdio server and is retained only so downstream
+    /// callers can migrate without an immediate public API removal.
+    #[deprecated(
+        note = "stdio authentication is unsupported; this legacy parser is compatibility-only"
+    )]
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
 
@@ -59,7 +76,7 @@ impl AuthConfig {
                         // This will cause JwksProvider init to fail or skip, preventing startup or auth.
                         cfg.jwks_uri = None;
                     } else {
-                        eprintln!("WARN: JWKS URI '{}' is not HTTPS. This is UNSAFE.", v);
+                        eprintln!("WARN: configured JWKS URI is not HTTPS. This is UNSAFE.");
                         cfg.jwks_uri = Some(u);
                     }
                 } else {
