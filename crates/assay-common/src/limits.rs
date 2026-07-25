@@ -12,21 +12,51 @@
 #[cfg(feature = "std")]
 use std::io::Read;
 
+/// Which ceiling was crossed, named in terms of the stream rather than of any one format.
+///
+/// Exhaustive and domain-neutral on purpose. This crate owns the mechanism, not the vocabulary:
+/// the evidence verifier and the replay verifier call these things by different names and each
+/// maps this enum onto its own error codes. A free-form string would let a caller construct a
+/// value nothing recognises, which can only be handled by guessing.
+///
+/// Deliberately not `#[non_exhaustive]`. Adding a dimension must break every consumer's match at
+/// compile time, because the alternative is a wildcard arm silently mapping a new ceiling onto
+/// the wrong code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimitKind {
+    /// Bytes taken from the source stream, before any decoding.
+    SourceBytes,
+    /// Bytes produced by decompression.
+    DecodedBytes,
+    /// Bytes of a single member within a container.
+    MemberBytes,
+    /// Bytes of a single line.
+    LineBytes,
+}
+
+impl core::fmt::Display for LimitKind {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let name = match self {
+            LimitKind::SourceBytes => "source bytes",
+            LimitKind::DecodedBytes => "decoded bytes",
+            LimitKind::MemberBytes => "member bytes",
+            LimitKind::LineBytes => "line bytes",
+        };
+        f.write_str(name)
+    }
+}
+
 /// A ceiling was crossed. Carried as data rather than as a formatted message, so a caller
 /// classifies by inspecting fields and never by parsing text.
-///
-/// `kind` is opaque here on purpose. This crate owns the mechanism, not the vocabulary: the
-/// evidence verifier and the replay verifier name their ceilings differently and each maps this
-/// back to its own error code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LimitExceeded {
-    pub kind: &'static str,
+    pub kind: LimitKind,
     pub limit: u64,
 }
 
 impl core::fmt::Display for LimitExceeded {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}: exceeded limit of {} bytes", self.kind, self.limit)
+        write!(f, "exceeded {} limit of {}", self.kind, self.limit)
     }
 }
 
@@ -53,26 +83,26 @@ impl LimitExceeded {
 /// to observe EOF, which silently makes the effective ceiling `limit - 1`. At the boundary this
 /// reader therefore probes a single byte: EOF means the input fit, one byte means it did not.
 ///
-/// `error_tag` names the ceiling that was crossed so the failure identifies which limit applied
-/// rather than reporting a generic truncation.
+/// `kind` names which ceiling applied, so a failure identifies the dimension rather than
+/// reporting a generic truncation.
 #[cfg(feature = "std")]
 pub struct LimitReader<R> {
     inner: R,
     limit: u64,
     read: u64,
     tripped: bool,
-    error_tag: &'static str,
+    kind: LimitKind,
 }
 
 #[cfg(feature = "std")]
 impl<R: Read> LimitReader<R> {
-    pub fn new(inner: R, limit: u64, error_tag: &'static str) -> Self {
+    pub fn new(inner: R, limit: u64, kind: LimitKind) -> Self {
         Self {
             inner,
             limit,
             read: 0,
             tripped: false,
-            error_tag,
+            kind,
         }
     }
 
@@ -84,11 +114,10 @@ impl<R: Read> LimitReader<R> {
 }
 
 #[cfg(feature = "std")]
-#[cfg(feature = "std")]
 impl<R> LimitReader<R> {
     fn overflow(&self) -> std::io::Error {
         std::io::Error::other(LimitExceeded {
-            kind: self.error_tag,
+            kind: self.kind,
             limit: self.limit,
         })
     }
@@ -131,14 +160,14 @@ impl<R: Read> Read for LimitReader<R> {
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
-    use super::LimitReader;
+    use super::{LimitKind, LimitReader};
     use std::io::{Cursor, Read};
     use std::string::ToString;
     use std::vec;
     use std::vec::Vec;
 
     fn read_all(len: usize, limit: u64) -> std::io::Result<usize> {
-        let mut r = LimitReader::new(Cursor::new(vec![0u8; len]), limit, "T");
+        let mut r = LimitReader::new(Cursor::new(vec![0u8; len]), limit, LimitKind::SourceBytes);
         let mut out = Vec::new();
         r.read_to_end(&mut out).map(|_| out.len())
     }
@@ -176,11 +205,19 @@ mod tests {
             }
         }
 
-        let mut over = LimitReader::new(OneByteAtATime(Cursor::new(vec![0u8; 101])), 100, "T");
+        let mut over = LimitReader::new(
+            OneByteAtATime(Cursor::new(vec![0u8; 101])),
+            100,
+            LimitKind::SourceBytes,
+        );
         let mut out = Vec::new();
         assert!(over.read_to_end(&mut out).is_err());
 
-        let mut exact = LimitReader::new(OneByteAtATime(Cursor::new(vec![0u8; 100])), 100, "T");
+        let mut exact = LimitReader::new(
+            OneByteAtATime(Cursor::new(vec![0u8; 100])),
+            100,
+            LimitKind::SourceBytes,
+        );
         let mut out = Vec::new();
         assert_eq!(exact.read_to_end(&mut out).unwrap(), 100);
     }
@@ -190,7 +227,7 @@ mod tests {
     #[test]
     fn the_error_names_the_ceiling_that_was_crossed() {
         let err = read_all(101, 100).unwrap_err();
-        assert!(err.to_string().contains('T'), "{err}");
+        assert!(err.to_string().contains("source bytes"), "{err}");
         assert!(err.to_string().contains("100"), "{err}");
     }
 
@@ -199,7 +236,7 @@ mod tests {
     /// input, which presents a truncated archive as a complete one.
     #[test]
     fn the_overflow_is_sticky_and_never_degrades_into_eof() {
-        let mut r = LimitReader::new(Cursor::new(vec![0u8; 101]), 100, "T");
+        let mut r = LimitReader::new(Cursor::new(vec![0u8; 101]), 100, LimitKind::SourceBytes);
         let mut sink = [0u8; 256];
         // Drain to the ceiling, then trip it.
         let mut tripped = false;
@@ -229,7 +266,7 @@ mod tests {
     /// reads a byte, so it must not run for a zero-length request.
     #[test]
     fn an_empty_read_consumes_nothing() {
-        let mut r = LimitReader::new(Cursor::new(vec![0u8; 10]), 4, "T");
+        let mut r = LimitReader::new(Cursor::new(vec![0u8; 10]), 4, LimitKind::SourceBytes);
         assert_eq!(r.read(&mut []).unwrap(), 0);
         assert_eq!(
             r.bytes_read(),
@@ -253,7 +290,7 @@ mod tests {
         let err = read_all(101, 100).unwrap_err();
         let cause =
             super::LimitExceeded::from_io(&err).expect("typed cause must survive the io layer");
-        assert_eq!(cause.kind, "T");
+        assert_eq!(cause.kind, LimitKind::SourceBytes);
         assert_eq!(cause.limit, 100);
     }
 
@@ -265,7 +302,7 @@ mod tests {
 
     #[test]
     fn bytes_read_reports_consumption() {
-        let mut r = LimitReader::new(Cursor::new(vec![0u8; 40]), 100, "T");
+        let mut r = LimitReader::new(Cursor::new(vec![0u8; 40]), 100, LimitKind::SourceBytes);
         let mut out = Vec::new();
         r.read_to_end(&mut out).unwrap();
         assert_eq!(r.bytes_read(), 40);

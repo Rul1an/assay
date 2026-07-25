@@ -13,6 +13,42 @@ use super::events;
 use super::limits::{LimitReader, VerifyLimits};
 use super::manifest::Manifest;
 use super::tar_read::{read_line_bounded, EintrReader};
+use assay_common::limits::{LimitExceeded, LimitKind};
+
+/// Recover the typed ceiling behind an `io::Error` and map it onto this crate's vocabulary.
+///
+/// Returns `None` when the failure was not a ceiling at all, so the caller keeps its own
+/// classification. The lookup goes through the typed cause rather than the rendered message:
+/// message text is a diagnostic, never a contract.
+pub(crate) fn classify_limit(err: &std::io::Error) -> Option<ErrorCode> {
+    let cause = LimitExceeded::from_io(err)?;
+    // Exhaustive, with no wildcard. A new dimension in `LimitKind` must fail to compile here
+    // rather than fall into a catch-all that reports the wrong code.
+    Some(match cause.kind {
+        LimitKind::SourceBytes => ErrorCode::LimitBundleBytes,
+        LimitKind::DecodedBytes => ErrorCode::LimitDecodeBytes,
+        LimitKind::MemberBytes => ErrorCode::LimitFileSize,
+        LimitKind::LineBytes => ErrorCode::LimitLineBytes,
+    })
+}
+
+/// Stamp a `VerifyError` with a ceiling classification, or with `fallback` when the failure was
+/// not a ceiling. Taken as an already-resolved `Option` because the io error is consumed when the
+/// `VerifyError` is built from it.
+pub(crate) fn apply_limit_class(
+    mut ve: VerifyError,
+    limit: Option<ErrorCode>,
+    fallback: ErrorCode,
+) -> VerifyError {
+    match limit {
+        Some(code) => {
+            ve.code = code;
+            ve.class = ErrorClass::Limits;
+        }
+        None => ve.code = fallback,
+    }
+    ve
+}
 
 /// Allowed files in bundle (strict allowlist).
 const ALLOWED_FILES: &[&str] = &["manifest.json", "events.ndjson"];
@@ -59,10 +95,11 @@ pub fn verify_bundle<R: Read>(reader: R) -> Result<VerifyResult> {
 /// Verify a bundle with explicit resource limits.
 pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<VerifyResult> {
     let reader = EintrReader::new(reader);
-    let reader = LimitReader::new(reader, limits.max_bundle_bytes, "LimitBundleBytes");
+    let reader = LimitReader::new(reader, limits.max_bundle_bytes, LimitKind::SourceBytes);
 
     let decoder = GzDecoder::new(reader);
-    let limited_decoder = LimitReader::new(decoder, limits.max_decode_bytes, "LimitDecodeBytes");
+    let limited_decoder =
+        LimitReader::new(decoder, limits.max_decode_bytes, LimitKind::DecodedBytes);
     let mut archive = tar::Archive::new(limited_decoder);
 
     let mut manifest: Option<Manifest> = None;
@@ -72,31 +109,15 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
     let mut actual_event_count = 0;
 
     let entries = archive.entries().map_err(|e| {
-        let mut ve = VerifyError::from(e);
-        if ve.message.contains("LimitBundleBytes") {
-            ve.code = ErrorCode::LimitBundleBytes;
-            ve.class = ErrorClass::Limits;
-        } else if ve.message.contains("LimitDecodeBytes") {
-            ve.code = ErrorCode::LimitDecodeBytes;
-            ve.class = ErrorClass::Limits;
-        } else {
-            ve.code = ErrorCode::IntegrityTar;
-        }
+        let limit = classify_limit(&e);
+        let ve = apply_limit_class(VerifyError::from(e), limit, ErrorCode::IntegrityTar);
         ve.with_context("Gzip/Tar stream")
     })?;
 
     for (i, entry) in entries.enumerate() {
         let entry = entry.map_err(|e| {
-            let mut ve = VerifyError::from(e);
-            if ve.message.contains("LimitBundleBytes") {
-                ve.code = ErrorCode::LimitBundleBytes;
-                ve.class = ErrorClass::Limits;
-            } else if ve.message.contains("LimitDecodeBytes") {
-                ve.code = ErrorCode::LimitDecodeBytes;
-                ve.class = ErrorClass::Limits;
-            } else {
-                ve.code = ErrorCode::IntegrityTar;
-            }
+            let limit = classify_limit(&e);
+            let ve = apply_limit_class(VerifyError::from(e), limit, ErrorCode::IntegrityTar);
             ve.with_context(format!("Entry #{}", i))
         })?;
         let path = entry.path().map_err(VerifyError::from)?.to_path_buf();
@@ -180,11 +201,12 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
 
             let mut content = Vec::new();
             let mut manifest_reader =
-                LimitReader::new(entry, limits.max_manifest_bytes, "LimitFileSize");
+                LimitReader::new(entry, limits.max_manifest_bytes, LimitKind::MemberBytes);
             manifest_reader.read_to_end(&mut content).map_err(|e| {
+                let limit = classify_limit(&e);
                 let mut ve = VerifyError::from(e);
-                if ve.message.contains("LimitFileSize") {
-                    ve.code = ErrorCode::LimitFileSize;
+                if let Some(code) = limit {
+                    ve.code = code;
                     ve.class = ErrorClass::Limits;
                 }
                 ve
@@ -249,9 +271,10 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                 line_buf.clear();
                 let n = read_line_bounded(&mut reader, &mut line_buf, limits.max_line_bytes)
                     .map_err(|e| {
+                        let limit = classify_limit(&e);
                         let mut ve = VerifyError::from(e);
-                        if ve.message.contains("LimitLineBytes") {
-                            ve.code = ErrorCode::LimitLineBytes;
+                        if let Some(code) = limit {
+                            ve.code = code;
                             ve.class = ErrorClass::Limits;
                         }
                         ve
@@ -493,12 +516,10 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
             Ok(0) => break,
             Ok(_) => continue,
             Err(e) => {
+                let limit = classify_limit(&e);
                 let mut ve = VerifyError::from(e);
-                if ve.message.contains("LimitDecodeBytes") {
-                    ve.code = ErrorCode::LimitDecodeBytes;
-                    ve.class = ErrorClass::Limits;
-                } else if ve.message.contains("LimitBundleBytes") {
-                    ve.code = ErrorCode::LimitBundleBytes;
+                if let Some(code) = limit {
+                    ve.code = code;
                     ve.class = ErrorClass::Limits;
                 } else {
                     ve.code = ErrorCode::IntegrityGzip;

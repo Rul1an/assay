@@ -29,6 +29,26 @@ use anyhow::Result;
 use std::io::Read;
 
 pub use writer_next::errors::{ErrorClass, ErrorCode, VerifyError};
+
+/// Turn an io failure from a bounded reader into a typed error.
+///
+/// The reader entrypoints return `anyhow::Result`, so without this a ceiling refusal reaches the
+/// caller as a bare `io::Error` and cannot be told apart from a truncated file. Classifying here
+/// means `BundleReader::open*` and `BundleInfo::peek*` carry the same `VerifyError` the verifier
+/// does, recoverable with `downcast_ref`.
+pub(crate) fn classify_reader_io(err: std::io::Error) -> anyhow::Error {
+    match writer_next::verify::classify_limit(&err) {
+        Some(code) => {
+            let mut ve = VerifyError::from(err);
+            ve.code = code;
+            ve.class = ErrorClass::Limits;
+            anyhow::Error::new(ve)
+        }
+        None => anyhow::Error::new(err),
+    }
+}
+// The ceiling vocabulary, so the reader names its limits with the same constants the verifier
+// classifies them by.
 pub use writer_next::limits::{VerifyLimits, VerifyLimitsOverrides};
 pub use writer_next::manifest::{AlgorithmMeta, FileMeta, Manifest};
 pub use writer_next::verify::VerifyResult;

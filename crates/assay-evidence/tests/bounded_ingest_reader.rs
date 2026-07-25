@@ -15,7 +15,9 @@
 //! Every refusal case is paired with an acceptance case built from the same bundle, so a ceiling
 //! that simply refused everything would not pass.
 
-use assay_evidence::bundle::writer::{BundleWriter, VerifyLimits};
+use assay_evidence::bundle::writer::{
+    BundleWriter, ErrorClass, ErrorCode, VerifyError, VerifyLimits,
+};
 use assay_evidence::bundle::BundleReader;
 use assay_evidence::types::EvidenceEvent;
 use std::cell::Cell;
@@ -100,10 +102,14 @@ fn verified_open_refuses_one_byte_over_the_ceiling() {
         Ok(_) => panic!("a bundle one byte over the ceiling must be refused"),
         Err(e) => e,
     };
-    assert!(
-        format!("{err:#}").contains("LimitBundleBytes"),
-        "the refusal must name the ceiling that was crossed: {err:#}"
-    );
+    // Through the typed cause, not the message. A public reader entrypoint must classify its
+    // ceilings exactly as the verifier does, or a caller cannot tell a refusal from a truncated
+    // file without reading prose.
+    let ve = err
+        .downcast_ref::<VerifyError>()
+        .expect("a reader ceiling refusal must surface as a typed VerifyError");
+    assert_eq!(ve.class, ErrorClass::Limits);
+    assert_eq!(ve.code, ErrorCode::LimitBundleBytes);
 }
 
 /// The invariant itself. An oversized archive must stop being read at the ceiling; a verifier
@@ -293,4 +299,60 @@ fn peek_called_directly_is_bounded_on_the_compressed_input_too() {
         limits_with_bundle_ceiling(bytes.len() as u64),
     )
     .expect("a direct peek must still accept a bundle that fits");
+}
+
+#[test]
+fn the_unverified_path_classifies_its_ceilings_too() {
+    // The path with no downstream verifier is where an unclassified io error would be hardest to
+    // interpret, so it must carry the same typed cause.
+    let bytes = bundle_bytes();
+    let one_short = limits_with_bundle_ceiling(bytes.len() as u64 - 1);
+    let err = match BundleReader::open_unverified_with_limits(Cursor::new(bytes), one_short) {
+        Ok(_) => panic!("must be refused"),
+        Err(e) => e,
+    };
+    let ve = err
+        .downcast_ref::<VerifyError>()
+        .expect("an unverified ceiling refusal must be typed as well");
+    assert_eq!(ve.class, ErrorClass::Limits);
+    assert_eq!(ve.code, ErrorCode::LimitBundleBytes);
+}
+
+#[test]
+fn a_direct_peek_classifies_its_ceilings_too() {
+    // A ceiling of `len - 1` would not do here: peek stops reading once it has the manifest, so
+    // it never reaches the end of the archive and a near-total ceiling is never crossed. The
+    // bound has to be small enough that the partial read itself hits it.
+    let bytes = bundle_bytes();
+    let err = match assay_evidence::bundle::reader::BundleInfo::peek_with_limits(
+        Cursor::new(bytes.clone()),
+        limits_with_bundle_ceiling(64),
+    ) {
+        Ok(_) => panic!("must be refused"),
+        Err(e) => e,
+    };
+    let ve = err
+        .downcast_ref::<VerifyError>()
+        .expect("a peek ceiling refusal must be typed as well");
+    assert_eq!(ve.class, ErrorClass::Limits);
+    assert_eq!(ve.code, ErrorCode::LimitBundleBytes);
+}
+
+#[test]
+fn an_expansion_refusal_classifies_as_decode_not_source() {
+    // The dimension has to survive classification, otherwise every ceiling looks alike to a
+    // caller deciding whether to retry with a larger budget.
+    let bytes = compressible_bundle(400);
+    let limits = VerifyLimits {
+        max_bundle_bytes: bytes.len() as u64 * 8,
+        max_decode_bytes: 4096,
+        ..VerifyLimits::default()
+    };
+    let err = match BundleReader::open_unverified_with_limits(Cursor::new(bytes), limits) {
+        Ok(_) => panic!("must be refused"),
+        Err(e) => e,
+    };
+    let ve = err.downcast_ref::<VerifyError>().expect("typed");
+    assert_eq!(ve.class, ErrorClass::Limits);
+    assert_eq!(ve.code, ErrorCode::LimitDecodeBytes);
 }

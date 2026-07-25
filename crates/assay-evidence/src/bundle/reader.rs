@@ -14,12 +14,13 @@
 //! For very large bundles (>1GB), consider tempfile-based streaming
 //! or the `into_events()` consuming pattern in a future version.
 
+use crate::bundle::writer::classify_reader_io;
 use crate::bundle::writer::{verify_bundle_with_limits, Manifest, VerifyLimits};
 use crate::json_strict::validate_json_strict;
 use crate::ndjson::NdjsonEvents;
 use crate::types::EvidenceEvent;
 use anyhow::{Context, Result};
-use assay_common::limits::LimitReader;
+use assay_common::limits::{LimitKind, LimitReader};
 use flate2::read::GzDecoder;
 use std::io::{BufReader, Cursor, Read};
 
@@ -103,8 +104,10 @@ impl BundleReader {
         // Reading first and checking afterwards means an oversized archive has already sized
         // the allocation, whatever the subsequent verification concludes.
         let mut buffer = Vec::new();
-        let mut reader = LimitReader::new(reader, max_bundle_bytes, "LimitBundleBytes");
-        reader.read_to_end(&mut buffer)?;
+        let mut reader = LimitReader::new(reader, max_bundle_bytes, LimitKind::SourceBytes);
+        reader
+            .read_to_end(&mut buffer)
+            .map_err(classify_reader_io)?;
 
         let manifest = match verify {
             Verify::Yes => {
@@ -126,21 +129,24 @@ impl BundleReader {
         // ceiling here a bomb well inside `max_bundle_bytes` expands unbounded, and on the peek
         // path this pass is the only consumption because verification never runs.
         let decoder = GzDecoder::new(Cursor::new(&buffer));
-        let decoder = LimitReader::new(decoder, limits.max_decode_bytes, "LimitDecodeBytes");
+        let decoder = LimitReader::new(decoder, limits.max_decode_bytes, LimitKind::DecodedBytes);
         let mut archive = tar::Archive::new(decoder);
 
         let mut events_content = Vec::new();
 
-        for entry in archive.entries()? {
-            let entry = entry?;
+        for entry in archive.entries().map_err(classify_reader_io)? {
+            let entry = entry.map_err(classify_reader_io)?;
             let path = entry.path()?.to_string_lossy().to_string();
 
             if path == "events.ndjson" {
                 // `LimitFileSize` rather than an invented tag: the classification vocabulary is
                 // `ErrorCode`, and a per-member ceiling is what `verify.rs` already reports under
                 // that code. A tag with no matching variant cannot be classified by any caller.
-                let mut entry = LimitReader::new(entry, limits.max_events_bytes, "LimitFileSize");
-                entry.read_to_end(&mut events_content)?;
+                let mut entry =
+                    LimitReader::new(entry, limits.max_events_bytes, LimitKind::MemberBytes);
+                entry
+                    .read_to_end(&mut events_content)
+                    .map_err(classify_reader_io)?;
                 break;
             }
         }
@@ -222,24 +228,26 @@ impl BundleInfo {
         // Bound the compressed source here as well, not only the expansion. Reached through
         // `BundleReader` the input has already passed a ceiling, but this is a public entrypoint
         // in its own right and a direct caller gets no such guarantee.
-        let reader = LimitReader::new(reader, limits.max_bundle_bytes, "LimitBundleBytes");
+        let reader = LimitReader::new(reader, limits.max_bundle_bytes, LimitKind::SourceBytes);
         let decoder = LimitReader::new(
             GzDecoder::new(reader),
             limits.max_decode_bytes,
-            "LimitDecodeBytes",
+            LimitKind::DecodedBytes,
         );
         let mut archive = tar::Archive::new(decoder);
 
-        for entry in archive.entries()? {
-            let entry = entry?;
+        for entry in archive.entries().map_err(classify_reader_io)? {
+            let entry = entry.map_err(classify_reader_io)?;
             let path = entry.path()?.to_string_lossy().to_string();
 
             if path == "manifest.json" {
                 // Read manifest to string for strict validation
-                let mut entry = LimitReader::new(entry, limits.max_manifest_bytes, "LimitFileSize");
+                let mut entry =
+                    LimitReader::new(entry, limits.max_manifest_bytes, LimitKind::MemberBytes);
                 let mut content = String::new();
                 entry
                     .read_to_string(&mut content)
+                    .map_err(classify_reader_io)
                     .context("Failed to read manifest.json")?;
 
                 // Security: Validate JSON strictly before parsing
