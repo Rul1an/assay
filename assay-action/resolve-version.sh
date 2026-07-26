@@ -33,10 +33,16 @@ v*) ;;
 *) VERSION="v${VERSION}" ;;
 esac
 
-EXPECTED_VERSION="${VERSION#v}"
-if [[ "$EXPECTED_VERSION" =~ ^[0-9]+[.][0-9]+$ ]]; then
-  EXPECTED_VERSION="${EXPECTED_VERSION}.0"
-fi
+case "$VERSION" in
+v1) EXPECTED_VERSION="1.1.0" ;;
+v2) EXPECTED_VERSION="2.12.0" ;;
+*)
+  EXPECTED_VERSION="${VERSION#v}"
+  if [[ "$EXPECTED_VERSION" =~ ^[0-9]+[.][0-9]+$ ]]; then
+    EXPECTED_VERSION="${EXPECTED_VERSION}.0"
+  fi
+  ;;
+esac
 
 echo "resolved_version=$VERSION" >>"$GITHUB_OUTPUT"
 echo "resolved_version_plain=$EXPECTED_VERSION" >>"$GITHUB_OUTPUT"

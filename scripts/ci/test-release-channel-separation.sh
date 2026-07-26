@@ -104,6 +104,28 @@ require_literal_from_path "$TMP_DIR/action-compat.out" \
   "resolved_version_plain=2.1.0"
 require_literal_from_path "$TMP_DIR/action-compat.out" "skip_install=true"
 
+for COMPAT_CASE in "v1 1.1.0" "v2 2.12.0"; do
+  read -r COMPAT_ALIAS COMPAT_VERSION <<<"$COMPAT_CASE"
+  FAKE_ASSAY_VERSION="$COMPAT_VERSION" \
+    GITHUB_OUTPUT="$TMP_DIR/action-${COMPAT_ALIAS}.out" \
+    PATH="$TMP_DIR/bin:$PATH" \
+    bash "$REPO_ROOT/assay-action/resolve-version.sh" "$COMPAT_ALIAS"
+  require_literal_from_path "$TMP_DIR/action-${COMPAT_ALIAS}.out" \
+    "resolved_version=$COMPAT_ALIAS"
+  require_literal_from_path "$TMP_DIR/action-${COMPAT_ALIAS}.out" \
+    "resolved_version_plain=$COMPAT_VERSION"
+  require_literal_from_path "$TMP_DIR/action-${COMPAT_ALIAS}.out" "skip_install=true"
+
+  : >"$TMP_DIR/action-${COMPAT_ALIAS}-verify.out"
+  : >"$TMP_DIR/action-${COMPAT_ALIAS}-path.out"
+  FAKE_ASSAY_VERSION="$COMPAT_VERSION" \
+    GITHUB_OUTPUT="$TMP_DIR/action-${COMPAT_ALIAS}-verify.out" \
+    GITHUB_PATH="$TMP_DIR/action-${COMPAT_ALIAS}-path.out" \
+    bash "$REPO_ROOT/assay-action/verify-install.sh" \
+    "$TMP_DIR/bin/assay" "$COMPAT_VERSION"
+  require_literal_from_path "$TMP_DIR/action-${COMPAT_ALIAS}-verify.out" "installed=true"
+done
+
 : >"$TMP_DIR/action-verify.out"
 : >"$TMP_DIR/action-path.out"
 FAKE_ASSAY_VERSION="2.1.0" GITHUB_OUTPUT="$TMP_DIR/action-verify.out" \

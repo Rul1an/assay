@@ -41,7 +41,8 @@ All notable changes to this project will be documented in this file.
 - Reject line breaks in explicit embedded Action versions before writing step outputs, preventing
   multi-line input from adding attacker-chosen Action outputs while preserving published tags such
   as `v2.1`. Two-component historical tags now retain their download identity while verifying the
-  installed binary against its three-component version (`v2.1` -> `2.1.0`).
+  installed binary against its three-component version (`v2.1` -> `2.1.0`). The published major
+  aliases retain the same guarantee (`v1` -> `1.1.0`, `v2` -> `2.12.0`).
 - Sandbox policy documentation described a filesystem rule shape the loader has never
   accepted (`- path:` mappings with `read`/`write` keys, against a schema of plain strings).
   Copying an example verbatim used to produce a warning and now produces a hard failure, so
