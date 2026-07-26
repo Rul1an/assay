@@ -76,10 +76,11 @@ fn test_profile_json_output() -> anyhow::Result<()> {
     assert!(out_json.exists());
     assert!(out_evidence.exists());
     let json_content = std::fs::read_to_string(out_json)?;
-    assert!(json_content.contains("\"api_version\": 1"));
+    let policy: serde_json::Value = serde_json::from_str(&json_content)?;
+    assert_eq!(policy["api_version"], 1);
     assert!(
-        !json_content.contains("pack:"),
-        "generated JSON policies must not declare unresolved packs"
+        policy["extends"].as_array().is_some_and(Vec::is_empty),
+        "generated JSON policies must declare an empty extends list"
     );
 
     Ok(())

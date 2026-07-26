@@ -829,6 +829,7 @@ show_status() {
 }
 
 # Main
+main() {
 case "${1:-}" in
     --install-cron)
         install_cron
@@ -912,3 +913,8 @@ case "${1:-}" in
         health_check
         ;;
 esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

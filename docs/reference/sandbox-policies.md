@@ -29,8 +29,8 @@ field but does not yet reject other values.
 
 The schema also deserializes an `extends` list, but the sandbox runtime does
 not resolve or merge those entries. A non-empty list is therefore a fatal
-configuration error. `assay sandbox --profile` emits an empty list until pack
-resolution is implemented.
+configuration error. `assay sandbox --profile` emits an empty list because
+pack resolution is unsupported.
 
 Unknown YAML keys are currently ignored by the loader. Do not use that as an
 extension mechanism: an ignored key has no enforcement effect.

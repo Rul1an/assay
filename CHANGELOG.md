@@ -30,7 +30,7 @@ All notable changes to this project will be documented in this file.
   basis a reviewer could check. `serverInfo.version` is now derived from the crate version
   instead of the hand-written `0.4.0`, which no build produced.
 - **Breaking (`assay sandbox`)**: a named policy with non-empty `extends` is refused before
-  execution. The loader does not yet resolve packs, so accepting those entries previously made
+  execution. Pack resolution is unsupported, so accepting those entries previously made
   declared policy composition disappear silently. `assay sandbox --profile` now emits an empty
   `extends` list instead of references to unresolved packs.
 

@@ -22,7 +22,7 @@ require_literal "$PACK_WORKFLOW" "--latest=false"
 
 for consumer in \
   scripts/install.sh \
-  assay-action/action.yml \
+  assay-action/resolve-version.sh \
   infra/bpf-runner/update_assay_latest.sh \
   infra/bpf-runner/health_check.sh \
   scripts/ci/check-assay-version-line.sh
@@ -34,18 +34,22 @@ done
 mkdir -p "$TMP_DIR/bin"
 cat >"$TMP_DIR/bin/curl" <<EOF
 #!/usr/bin/env bash
-printf '%s\n' '{"tag_name":"$FAKE_TAG"}'
+printf '{"tag_name":"%s"}\n' "\${FAKE_TAG:?}"
 EOF
 cat >"$TMP_DIR/bin/jq" <<EOF
 #!/usr/bin/env bash
 cat >/dev/null
-printf '%s\n' '$FAKE_TAG'
+printf '%s\n' "\${FAKE_TAG:?}"
 EOF
-chmod +x "$TMP_DIR/bin/curl" "$TMP_DIR/bin/jq"
+cat >"$TMP_DIR/bin/assay" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' 'assay 3.35.0'
+EOF
+chmod +x "$TMP_DIR/bin/curl" "$TMP_DIR/bin/jq" "$TMP_DIR/bin/assay"
 
 rejects_fake_latest() {
   local output
-  if output=$(PATH="$TMP_DIR/bin:$PATH" "$@" 2>&1); then
+  if output=$(FAKE_TAG="$FAKE_TAG" PATH="$TMP_DIR/bin:$PATH" "$@" 2>&1); then
     echo "$*: accepted non-software latest tag $FAKE_TAG" >&2
     exit 1
   fi
@@ -60,5 +64,37 @@ rejects_fake_latest bash "$REPO_ROOT/scripts/install.sh"
 rejects_fake_latest bash "$REPO_ROOT/infra/bpf-runner/update_assay_latest.sh"
 rejects_fake_latest env CHECK_VM=0 HARNESS_DIR="$TMP_DIR/missing-harness" \
   bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh"
+rejects_fake_latest env GITHUB_OUTPUT="$TMP_DIR/action-invalid.out" \
+  bash "$REPO_ROOT/assay-action/resolve-version.sh" latest
+# shellcheck disable=SC2016 # $1 expands in the nested shell.
+rejects_fake_latest bash -c \
+  'source "$1"; latest_assay_tag' _ "$REPO_ROOT/infra/bpf-runner/health_check.sh"
+
+VALID_TAG="v3.35.0"
+FAKE_TAG="$VALID_TAG" GITHUB_OUTPUT="$TMP_DIR/action-valid.out" \
+  PATH="$TMP_DIR/bin:$PATH" \
+  bash "$REPO_ROOT/assay-action/resolve-version.sh" latest
+require_literal_from_path() {
+  local file="$1"
+  local literal="$2"
+  if ! grep -Fq -- "$literal" "$file"; then
+    echo "$file must contain: $literal" >&2
+    exit 1
+  fi
+}
+require_literal_from_path "$TMP_DIR/action-valid.out" "resolved_version=$VALID_TAG"
+require_literal_from_path "$TMP_DIR/action-valid.out" "resolved_version_plain=${VALID_TAG#v}"
+require_literal_from_path "$TMP_DIR/action-valid.out" "skip_install=true"
+
+health_tag=$(
+  # shellcheck disable=SC2016 # $1 expands in the nested shell.
+  FAKE_TAG="$VALID_TAG" PATH="$TMP_DIR/bin:$PATH" \
+    bash -c 'source "$1"; latest_assay_tag' _ \
+    "$REPO_ROOT/infra/bpf-runner/health_check.sh"
+)
+if [[ "$health_tag" != "$VALID_TAG" ]]; then
+  echo "health_check.sh rejected stable latest tag $VALID_TAG" >&2
+  exit 1
+fi
 
 echo "release channel separation contract passed"

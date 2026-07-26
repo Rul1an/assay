@@ -48,7 +48,7 @@ impl Policy {
         if !policy.extends.is_empty() {
             anyhow::bail!(
                 "sandbox policy loading does not support non-empty `extends`; \
-                 remove the entries until pack resolution is implemented"
+                 remove the entries because pack resolution is unsupported"
             );
         }
         Ok(policy)
