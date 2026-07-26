@@ -1,9 +1,11 @@
 # Assay Documentation Site
-# docs.assay.dev
+# docs.getassay.dev
 # Built with MkDocs + Material theme
 
 site_name: Assay
-site_url: https://docs.assay.dev
+# Canonical publication surface; docs/CNAME must carry the same host so a
+# `mkdocs gh-deploy --force` cannot drop the custom domain from gh-pages.
+site_url: https://docs.getassay.dev
 site_description: "CI-native evidence compiler and Trust Basis artifacts for agent systems"
 site_author: Assay Team
 exclude_docs: /README.md

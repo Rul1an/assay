@@ -3,7 +3,7 @@
   "profile": "privileged-mcp-action/v0",
   "status": "experimental-open-profile",
   "spec": "docs/profiles/privileged-mcp-action/v0.md",
-  "normative_uri": "https://docs.assay.dev/profiles/privileged-mcp-action/v0/",
+  "normative_uri": "https://docs.getassay.dev/profiles/privileged-mcp-action/v0/",
   "records": {
     "required": [
       {
