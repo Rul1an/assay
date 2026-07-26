@@ -173,10 +173,12 @@ implementation derives the expected outcomes from the specification text alone.
 
 **That reproduction is open, and the invitation is real:
 [#1840](https://github.com/Rul1an/assay/issues/1840).** Any language, any stack. The invitation
-names the exact commit the current digest describes, and the
-[corpus README](conformance/privileged-mcp-action-v0/README.md) says which inputs are in bounds,
-which two implementation surfaces are not, and gives a sparse checkout that materialises only the
-inputs.
+names the exact commit the current digest describes. The
+[clean-room protocol](conformance/privileged-mcp-action-v0/CONFORMANCE-PROTOCOL.md) provides an
+opaque, attested inputs pack, a one-command scoring action, and an implementation-report template
+without supplying verifier logic or expected outcomes. The
+[corpus README](conformance/privileged-mcp-action-v0/README.md) states the authorship boundary and
+the claim ceiling.
 
 ## Contributing
 

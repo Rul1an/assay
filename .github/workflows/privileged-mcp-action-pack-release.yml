@@ -1,0 +1,134 @@
+name: Publish Privileged MCP Action clean-room pack
+
+on:
+  push:
+    tags:
+      - "privileged-mcp-action-v0-candidate.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: privileged-mcp-action-pack-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-pack:
+    runs-on: ubuntu-24.04
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.8"
+
+      - name: Verify tag and build deterministic pack
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF_NAME" in
+            privileged-mcp-action-v0-candidate.*) ;;
+            *) echo "unexpected release tag: $GITHUB_REF_NAME" >&2; exit 2 ;;
+          esac
+          if [[ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != "tag" ]]; then
+            echo "release requires an annotated tag object: $GITHUB_REF_NAME" >&2
+            exit 2
+          fi
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor HEAD origin/main
+          mkdir -p release
+          source_commit="$(git rev-parse HEAD)"
+          builder=conformance/privileged-mcp-action-v0/scripts/build_clean_room_pack.py
+          python3 "$builder" \
+            --repo-root . \
+            --source-commit "$source_commit" \
+            --output release/privileged-mcp-action-v0-clean-room.tar.gz
+          python3 "$builder" \
+            --repo-root . \
+            --source-commit "$source_commit" \
+            --output /tmp/pack-second.tar.gz
+          cmp release/privileged-mcp-action-v0-clean-room.tar.gz /tmp/pack-second.tar.gz
+          (
+            cd release
+            sha256sum privileged-mcp-action-v0-clean-room.tar.gz > SHA256SUMS
+          )
+
+      - name: Run pack contract tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest \
+            conformance/privileged-mcp-action-v0/tests/test_activation_kit.py
+
+      - name: Build the reference verifier for a transformation check
+        run: |
+          cargo test -p assay-cli --test conformance_privileged_mcp_action
+
+      - name: Prove released rendering preserves all normative outcomes
+        uses: ./.github/actions/privileged-mcp-action-conformance
+        with:
+          pack: release/privileged-mcp-action-v0-clean-room.tar.gz
+          entrypoint: ${{ github.workspace }}/target/debug/assay evidence verify-privileged-mcp-action --format json
+          implementation-name: Assay reference verifier (transformation check only)
+          implementation-source: ${{ github.server_url }}/${{ github.repository }}
+          implementation-commit: ${{ github.sha }}
+          reproduction-mode: other_disclosed
+          report: /tmp/reference-transformation-check.json
+
+      - name: Check released transformation summary
+        run: |
+          python3 \
+            conformance/privileged-mcp-action-v0/scripts/validate_run_record.py \
+            /tmp/reference-transformation-check.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("/tmp/reference-transformation-check.json").read_text())
+          expected = {
+              "execution_error": 0,
+              "harness_error": 0,
+              "match": 13,
+              "mismatch": 0,
+              "review_warnings": 0,
+              "total": 13,
+          }
+          if report["summary"] != expected:
+              raise SystemExit(f"unexpected transformation summary: {report['summary']}")
+          PY
+
+      - name: Attest release pack
+        id: attest
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-checksums: release/SHA256SUMS
+          show-summary: true
+
+      - name: Retain attestation bundle
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          test -n "$ATTESTATION_BUNDLE"
+          cp "$ATTESTATION_BUNDLE" release/attestation-bundle.json
+
+      - name: Publish immutable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            release/privileged-mcp-action-v0-clean-room.tar.gz \
+            release/SHA256SUMS \
+            release/attestation-bundle.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Privileged MCP Action v0 clean-room conformance pack" \
+            --notes "Inputs-only pack for implementing privileged-mcp-action/v0 from the tagged profile. The asset omits expected outcomes and Assay implementation code. See the tagged conformance protocol for the claim ceiling."

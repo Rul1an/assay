@@ -23,36 +23,61 @@ outcomes from the specification text alone. The open invitation is
 [#1840](https://github.com/Rul1an/assay/issues/1840), which names the exact commit the current
 digest describes.
 
-What the claim needs is a reimplementation from the spec, so two **implementation surfaces** in this
-repository are deliberately out of bounds for such an attempt:
+### Clean-room path
+
+The release
+[`privileged-mcp-action-v0-candidate.1`](https://github.com/Rul1an/assay/releases/tag/privileged-mcp-action-v0-candidate.1)
+contains a deterministic, attested clean-room pack. It carries `spec.md`, `descriptor.json`, and
+thirteen opaque cases. It omits expected outcomes, semantic case names, the vector generator, and
+Assay's implementation.
+
+```bash
+tag=privileged-mcp-action-v0-candidate.1
+gh release download "$tag" --repo Rul1an/assay \
+  --pattern privileged-mcp-action-v0-clean-room.tar.gz \
+  --pattern SHA256SUMS
+shasum -a 256 -c SHA256SUMS
+gh attestation verify privileged-mcp-action-v0-clean-room.tar.gz \
+  --repo Rul1an/assay \
+  --signer-workflow Rul1an/assay/.github/workflows/privileged-mcp-action-pack-release.yml
+```
+
+Follow [`CONFORMANCE-PROTOCOL.md`](CONFORMANCE-PROTOCOL.md): implement before scoring, preserve the
+first run, disclose the materials read, and publish a machine-readable run record plus the completed
+[`IMPLEMENTATION-REPORT.template.md`](IMPLEMENTATION-REPORT.template.md). The reusable composite
+action at `.github/actions/privileged-mcp-action-conformance` standardizes invocation and scoring;
+it does not provide verifier logic.
+
+What the claim needs is a reimplementation from the spec, so three **answer or implementation
+surfaces** in this repository are deliberately out of bounds until the implementation is frozen:
 
 | Out of bounds | Why |
 |---|---|
 | `gen_vectors.py` (in this directory) | It is the generator. Reading it turns a reimplementation into a port, and the resulting agreement would only show that the code was copied correctly. |
 | `crates/assay-cli` — `assay evidence import privileged-mcp-action` and `assay evidence verify-privileged-mcp-action` | Same reason: our implementation of the same spec. |
+| `MANIFEST.json` and prior scored reports | They carry the expected outcomes. Reading them before implementation turns conformance into an answer-guided repair pass. |
 
-In bounds, and enough on their own: this README, [`../../docs/profiles/privileged-mcp-action/v0.md`](../../docs/profiles/privileged-mcp-action/v0.md),
-`descriptor.json`, `MANIFEST.json`, and the vector bundles. The spec restates the bundle essentials
-on purpose so it can be implemented without reading ours.
+In bounds for authorship, and enough on their own: the clean-room pack's `spec.md`,
+`descriptor.json`, and opaque bundle cases. The spec restates the bundle essentials on purpose so it
+can be implemented without reading ours.
 
-To materialise only those inputs — no generator, no `crates/` — use a sparse checkout at the commit
-the invitation pins:
+Without the release pack, materialize only the specification:
 
 ```bash
 git clone --filter=blob:none --sparse https://github.com/Rul1an/assay.git assay-corpus
 cd assay-corpus
 git checkout <commit named in #1840>
 git sparse-checkout set --no-cone \
-  '/docs/profiles/privileged-mcp-action/v0.md' \
-  '/conformance/privileged-mcp-action-v0/**' \
-  '!/conformance/privileged-mcp-action-v0/gen_vectors.py'
+  '/docs/profiles/privileged-mcp-action/v0.md'
 ```
 
-This does not materialize either out-of-bounds surface in the working tree. A sparse clone still
-carries the repository index and can fetch other blobs later, so it is a convenience for keeping the
-boundary rather than a guarantee of it. Nothing here is enforced and nothing needs to be — it is a
-boundary an attempt keeps for its own result to mean anything, and saying which paths those are
-costs nothing.
+Use `descriptor.json` from the release pack. The canonical descriptor beside the corpus carries a
+`corpus` member and is therefore answer-bearing before implementation freeze; it is deliberately not
+part of this fallback checkout.
+
+After freezing the implementation, fetch the canonical expectations and scorer for reconciliation.
+A sparse clone can fetch other blobs later, so this is a convenience for keeping the boundary rather
+than a guarantee of it. The run report discloses what was actually read.
 
 The normative comparison surface is `expected.bundle_integrity`, `expected.verdict` and
 `expected.claims` per vector, plus the corpus digest. `first_failure_informative` is this

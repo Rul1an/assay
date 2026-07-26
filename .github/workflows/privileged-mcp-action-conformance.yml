@@ -1,0 +1,106 @@
+name: Privileged MCP Action conformance kit
+
+on:
+  pull_request:
+    paths:
+      - "conformance/privileged-mcp-action-v0/**"
+      - ".github/actions/privileged-mcp-action-conformance/**"
+      - ".github/workflows/privileged-mcp-action-conformance.yml"
+      - ".github/workflows/privileged-mcp-action-pack-release.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "conformance/privileged-mcp-action-v0/**"
+      - ".github/actions/privileged-mcp-action-conformance/**"
+      - ".github/workflows/privileged-mcp-action-conformance.yml"
+      - ".github/workflows/privileged-mcp-action-pack-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: privileged-mcp-action-conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  activation-kit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.8"
+
+      - name: Run activation-kit contract tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest \
+            conformance/privileged-mcp-action-v0/tests/test_activation_kit.py
+
+      - name: Validate public JSON documents
+        run: |
+          set -euo pipefail
+          python3 -m json.tool \
+            conformance/privileged-mcp-action-v0/report.schema.json >/dev/null
+          python3 -m json.tool \
+            conformance/privileged-mcp-action-v0/descriptor.json >/dev/null
+
+      - name: Prove deterministic pack build
+        run: |
+          set -euo pipefail
+          source_commit="$(git rev-parse HEAD)"
+          builder=conformance/privileged-mcp-action-v0/scripts/build_clean_room_pack.py
+          python3 "$builder" \
+            --repo-root . \
+            --source-commit "$source_commit" \
+            --output /tmp/pack-a.tar.gz
+          python3 "$builder" \
+            --repo-root . \
+            --source-commit "$source_commit" \
+            --output /tmp/pack-b.tar.gz
+          cmp /tmp/pack-a.tar.gz /tmp/pack-b.tar.gz
+
+      - name: Build the reference verifier for a transformation check
+        run: |
+          cargo test -p assay-cli --test conformance_privileged_mcp_action
+
+      - name: Prove opaque rendering preserves all normative outcomes
+        uses: ./.github/actions/privileged-mcp-action-conformance
+        with:
+          pack: /tmp/pack-a.tar.gz
+          entrypoint: ${{ github.workspace }}/target/debug/assay evidence verify-privileged-mcp-action --format json
+          implementation-name: Assay reference verifier (transformation check only)
+          implementation-source: ${{ github.server_url }}/${{ github.repository }}
+          implementation-commit: ${{ github.sha }}
+          reproduction-mode: other_disclosed
+          report: /tmp/reference-transformation-check.json
+
+      - name: Check transformation summary
+        run: |
+          python3 \
+            conformance/privileged-mcp-action-v0/scripts/validate_run_record.py \
+            /tmp/reference-transformation-check.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("/tmp/reference-transformation-check.json").read_text())
+          expected = {
+              "execution_error": 0,
+              "match": 13,
+              "mismatch": 0,
+              "harness_error": 0,
+              "review_warnings": 0,
+              "total": 13,
+          }
+          if report["summary"] != expected:
+              raise SystemExit(f"unexpected transformation summary: {report['summary']}")
+          PY

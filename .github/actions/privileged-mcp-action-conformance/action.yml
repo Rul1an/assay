@@ -1,0 +1,70 @@
+name: Privileged MCP Action v0 conformance
+
+description: Run a supplied verifier against the pinned opaque corpus and emit a run record.
+
+inputs:
+  entrypoint:
+    description: Command that accepts one bundle path and emits one profile report JSON object.
+    required: true
+  pack:
+    description: Path to the privileged-mcp-action-v0 clean-room pack.
+    required: true
+  implementation-name:
+    description: Human-readable implementation name.
+    required: true
+  reproduction-mode:
+    description: Disclosed authorship mode from the conformance protocol.
+    required: true
+  implementation-version:
+    description: Implementation version.
+    required: false
+    default: ""
+  implementation-source:
+    description: Public implementation source URL.
+    required: true
+  implementation-commit:
+    description: Full implementation source commit.
+    required: true
+  report:
+    description: Output path for the machine-readable run record.
+    required: false
+    default: privileged-mcp-action-conformance.json
+
+outputs:
+  report:
+    description: Path to the machine-readable run record.
+    value: ${{ inputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - name: Score opaque conformance cases
+      shell: bash
+      env:
+        ASSAY_CONFORMANCE_ENTRYPOINT: ${{ inputs.entrypoint }}
+        ASSAY_CONFORMANCE_PACK: ${{ inputs.pack }}
+        ASSAY_CONFORMANCE_IMPLEMENTATION_NAME: ${{ inputs.implementation-name }}
+        ASSAY_CONFORMANCE_REPRODUCTION_MODE: ${{ inputs.reproduction-mode }}
+        ASSAY_CONFORMANCE_IMPLEMENTATION_VERSION: ${{ inputs.implementation-version }}
+        ASSAY_CONFORMANCE_IMPLEMENTATION_SOURCE: ${{ inputs.implementation-source }}
+        ASSAY_CONFORMANCE_IMPLEMENTATION_COMMIT: ${{ inputs.implementation-commit }}
+        ASSAY_CONFORMANCE_REPORT: ${{ inputs.report }}
+      run: |
+        set -euo pipefail
+        repo_root="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)"
+        args=(
+          --pack "$ASSAY_CONFORMANCE_PACK"
+          --manifest "$repo_root/conformance/privileged-mcp-action-v0/MANIFEST.json"
+          --entrypoint "$ASSAY_CONFORMANCE_ENTRYPOINT"
+          --implementation-name "$ASSAY_CONFORMANCE_IMPLEMENTATION_NAME"
+          --implementation-source "$ASSAY_CONFORMANCE_IMPLEMENTATION_SOURCE"
+          --implementation-commit "$ASSAY_CONFORMANCE_IMPLEMENTATION_COMMIT"
+          --reproduction-mode "$ASSAY_CONFORMANCE_REPRODUCTION_MODE"
+          --output "$ASSAY_CONFORMANCE_REPORT"
+        )
+        if [[ -n "$ASSAY_CONFORMANCE_IMPLEMENTATION_VERSION" ]]; then
+          args+=(--implementation-version "$ASSAY_CONFORMANCE_IMPLEMENTATION_VERSION")
+        fi
+        python3 \
+          "$repo_root/conformance/privileged-mcp-action-v0/scripts/score_candidate.py" \
+          "${args[@]}"

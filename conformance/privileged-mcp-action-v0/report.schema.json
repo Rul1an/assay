@@ -1,0 +1,436 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Rul1an/assay/privileged-mcp-action-v0-candidate.1/conformance/privileged-mcp-action-v0/report.schema.json",
+  "title": "Privileged MCP Action v0 conformance run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "profile",
+    "source_corpus_digest",
+    "rendered_set_digest",
+    "pack_sha256",
+    "pack_declared_source_commit",
+    "pack_provenance_verification",
+    "implementation",
+    "summary",
+    "harness_errors",
+    "cases",
+    "non_claims"
+  ],
+  "properties": {
+    "schema": {
+      "const": "assay.privileged_mcp_action.conformance_run.v0"
+    },
+    "profile": {
+      "const": "privileged-mcp-action/v0"
+    },
+    "source_corpus_digest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "rendered_set_digest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "pack_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "pack_declared_source_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "pack_provenance_verification": {
+      "const": "not_performed_by_scorer"
+    },
+    "implementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "source",
+        "commit",
+        "reproduction_mode"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^https?://[^\\s]+$"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "reproduction_mode": {
+          "enum": [
+            "blind_from_spec",
+            "from_spec_then_conformance",
+            "commissioned_clean_room",
+            "other_disclosed"
+          ]
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "match",
+        "mismatch",
+        "execution_error",
+        "harness_error",
+        "review_warnings"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "match": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mismatch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "execution_error": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "harness_error": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "review_warnings": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "harness_errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 13,
+      "maxItems": 13,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/matchCase"
+          },
+          {
+            "$ref": "#/$defs/mismatchCase"
+          },
+          {
+            "$ref": "#/$defs/executionErrorCase"
+          },
+          {
+            "$ref": "#/$defs/harnessErrorCase"
+          }
+        ]
+      }
+    },
+    "non_claims": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "prefixItems": [
+        {
+          "const": "a matching run demonstrates agreement on the pinned corpus only"
+        },
+        {
+          "const": "a matching run does not establish implementation independence"
+        },
+        {
+          "const": "the scorer records but does not verify the pack's declared source commit"
+        },
+        {
+          "const": "the scorer does not assess security, compliance, or provider outcomes"
+        },
+        {
+          "const": "candidate process limits are operational bounds, not a sandbox"
+        }
+      ],
+      "items": false
+    }
+  },
+  "$defs": {
+    "matchCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "input_sha256",
+        "status",
+        "observed",
+        "exit_code",
+        "stderr_present"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^case-[0-9]{3}$"
+        },
+        "input_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "status": {
+          "const": "match"
+        },
+        "observed": {
+          "$ref": "#/$defs/normativeSurface"
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "stderr_present": {
+          "type": "boolean"
+        },
+        "review_warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "mismatchCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "input_sha256",
+        "status",
+        "observed",
+        "exit_code",
+        "stderr_present"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^case-[0-9]{3}$"
+        },
+        "input_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "status": {
+          "const": "mismatch"
+        },
+        "observed": {
+          "$ref": "#/$defs/normativeSurface"
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "stderr_present": {
+          "type": "boolean"
+        },
+        "review_warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "executionErrorCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "input_sha256",
+        "status",
+        "error"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^case-[0-9]{3}$"
+        },
+        "input_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "status": {
+          "const": "execution_error"
+        },
+        "error": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "harnessErrorCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "input_sha256",
+        "status",
+        "error"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^case-[0-9]{3}$"
+        },
+        "input_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "status": {
+          "const": "harness_error"
+        },
+        "error": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "normativeSurface": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/integrityFailSurface"
+        },
+        {
+          "$ref": "#/$defs/invalidSurface"
+        },
+        {
+          "$ref": "#/$defs/validSurface"
+        }
+      ]
+    },
+    "integrityFailSurface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bundle_integrity"
+      ],
+      "properties": {
+        "bundle_integrity": {
+          "const": "fail"
+        }
+      }
+    },
+    "invalidSurface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bundle_integrity",
+        "verdict"
+      ],
+      "properties": {
+        "bundle_integrity": {
+          "const": "pass"
+        },
+        "verdict": {
+          "const": "invalid"
+        }
+      }
+    },
+    "validSurface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bundle_integrity",
+        "verdict",
+        "claims"
+      ],
+      "properties": {
+        "bundle_integrity": {
+          "const": "pass"
+        },
+        "verdict": {
+          "const": "valid"
+        },
+        "claims": {
+          "$ref": "#/$defs/claimMatrix"
+        }
+      }
+    },
+    "claimMatrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_decision_recorded",
+        "caller_visible_denial",
+        "upstream_delivery",
+        "external_side_effect"
+      ],
+      "properties": {
+        "policy_decision_recorded": {
+          "$ref": "#/$defs/claimResult"
+        },
+        "caller_visible_denial": {
+          "$ref": "#/$defs/claimResult"
+        },
+        "upstream_delivery": {
+          "$ref": "#/$defs/claimResult"
+        },
+        "external_side_effect": {
+          "$ref": "#/$defs/claimResult"
+        }
+      }
+    },
+    "claimResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "const": "incomplete"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "source_class"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "confirmed",
+                "refuted"
+              ]
+            },
+            "source_class": {
+              "enum": [
+                "producer_reported",
+                "issuer_attested",
+                "receiver_receipt",
+                "boundary_observed",
+                "third_party_observed",
+                "unknown"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}
