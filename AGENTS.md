@@ -30,8 +30,8 @@ The ADR-042 stop list is normative:
 - no compliance or safe-agent claim;
 - no certification or partnership status without a checkable basis.
 
-ADR-043 remains `Proposed` until its bounded-ingest, honest stdio-auth-boundary, and
-evidence-verifier-fuzz slices are merged and linked from the ADR.
+ADR-043 is `Accepted`. Changes to its boundaries must preserve the implementation-evidence grid,
+including its explicit non-claims, or amend the decision through a new ADR.
 
 ## Branch And Worktree Ownership
 

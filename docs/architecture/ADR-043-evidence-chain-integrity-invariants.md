@@ -1,7 +1,8 @@
 # ADR-043: Evidence-chain integrity invariants
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-25
+- Accepted: 2026-07-26
 - Supersedes: none
 - Amends: ADR-042 (evidence-first positioning and scope freeze)
 
@@ -11,10 +12,10 @@ ADR-042 made the evidence artifact the product and the enforcing proxy its refer
 of its consequences carry obligations that were never written down as testable rules: claims must be
 checkable by someone who does not trust us, and the stop list must not erode by accretion.
 
-A verification pass over the current `main` found that both obligations have gaps at the exact
-places ADR-042 makes load-bearing, while the decision layer it describes holds up well. The measured
-findings follow; the appendix carries the evidence, and reproduction steps for everything except the
-authorization paths that are still open:
+A verification pass over `main` at `9fabad8b` found that both obligations had gaps at the exact
+places ADR-042 makes load-bearing, while the decision layer it describes held up well. The measured
+findings follow; the appendix preserves the pre-decision observations, and the implementation
+evidence below records how each gap was closed:
 
 - The reference verifier applies its own resource ceiling after it has already materialized the
   input. `assay evidence verify` on a 600 MB file peaks at 622 MB resident while
@@ -132,17 +133,49 @@ so they can be enforced mechanically rather than remembered.
   The kernel-observation posture is unchanged: eBPF validation running post-merge rather than on
   pull requests remains consistent with its supporting status.
 
-Five implementation slices follow from the decisions:
+The five implementation slices are complete:
 
-1. Bounded ingest across the entrypoints in §1, with per-axis tests. Pending.
-2. Remove the unfounded wire claims and stand up the closed claim set from §2. Merged via #1842
-   and strengthened via #1843.
-3. Policy-load semantics from §5, including the default-behaviour change. Merged via #1842.
-4. Remove proprietary stdio authorization semantics and enforce the startup boundary from §4.
-   Pending.
-5. Point fuzz and property testing at the evidence-chain verifier from §3. Pending.
+1. Bounded local ingest across the entrypoints in §1 merged via #1852; bounded object-store pull
+   merged via #1854.
+2. Removal of unfounded wire claims and the closed structural claim set from §2 merged via #1842
+   and was strengthened via #1843.
+3. Policy-load semantics from §5, including the default-behaviour change, merged via #1842.
+4. Removal of proprietary stdio authorization semantics and the startup boundary from §4 merged
+   via #1850.
+5. Evidence-chain verifier fuzzing and deterministic fail-closed properties from §3 merged via
+   #1851.
 
-## Appendix: reproduction
+## Implementation evidence
+
+This grid records repository implementation evidence. It does not claim independent external
+reproduction, certification, compliance, or a whole-action verdict.
+
+| Decision | Merged evidence | Tests and guards | Bounded non-claim |
+|---|---|---|---|
+| §1 bounded ingest | #1852 (`27f35db0`), #1854 (`36f24bdd`) | `bounded_ingest_reader`, `bounded_ingest_stdin`, `contract_bounded_ingest_cli`, `push_refuses_before_upload`, replay bundle limit tests, and bounded object-store tests | Bounds retained source, decoded, structural and stream resources at named entrypoints; does not claim an exact network-byte stop or a throughput SLA |
+| §2 emitted claims | #1842 (`b6f8a616`), #1843 (`9f787aa7`) | closed structural assertions in `server.rs` and real stdio handshake assertions in `stdio_e2e` | Removes unsupported status claims; does not establish certification, partnership, compliance, or agent safety |
+| §3 verifier fuzzing | #1851 (`038541be`) | `bundle_reader` fuzz target, bounded PR/nightly fuzz lane, 14 checked-in seeds, and 18 deterministic properties in `verifier_fail_closed_properties` | Exercises rejection and classification under bounded inputs; does not add a score, detector, or new verdict layer |
+| §4 stdio auth boundary | #1850 (`74fe6ec5`) | `stdio_auth_boundary`, `server_run_auth_boundary`, and `no_passthrough_e2e` | Rejects configured stdio auth before protocol I/O; does not provide transport authentication, HTTP, OAuth, or MCP `2026-07-28` support |
+| §5 named policy | #1842 (`b6f8a616`) | `contract_sandbox_policy_load_fail_closed` | Proves named-policy load failure is fatal and the child does not run; it does not prove the policy's real-world outcome |
+
+All implementation PRs completed the repository's required CI on their final head. The ADR-042/043
+multi-agent review quorum introduced by #1849 applied to #1850, #1851, #1852, and #1854. Earlier
+PRs #1842 and #1843 predate that program rule and are cited for their merged tests and CI, not
+retroactively represented as having used the later quorum.
+
+Current verification commands for the authorization boundary are:
+
+```bash
+cargo test -p assay-mcp-server --test stdio_auth_boundary
+cargo test -p assay-mcp-server --test server_run_auth_boundary
+cargo test -p assay-mcp-server --features test-outbound --test no_passthrough_e2e
+```
+
+They establish that every configured `ASSAY_AUTH_*` variable fails before protocol output, that
+initialize credential-shaped fields confer no authority, and that Assay-originated outbound bytes
+do not carry the sentinel credential. They do not establish authentication for stdio.
+
+## Appendix: pre-decision reproduction
 
 Measured on `main` at `9fabad8b`, debug binaries, Linux x86_64.
 
@@ -154,9 +187,8 @@ Resource behaviour, reproducible as written:
 | Memory tracks input | `assay evidence verify` on 50 / 200 / 600 MB files | 72 / 222 / 622 MB peak resident |
 | Policy substitution | `assay sandbox --fail-closed --policy <any file that does not parse as a policy> -- /bin/echo hi` | warning naming the load error, built-in pack applied, child ran, exit 0 |
 
-Authorization behaviour, stated as outcomes. These four were measured the same way, but the
-step-by-step recipes are withheld from this record until the §4 slice lands, then restored here. The
-findings are what the decision needs; the recipes are not:
+Authorization behaviour before #1850, stated as historical outcomes. The current safe verification
+commands are recorded in the implementation-evidence section above:
 
 | Observation | Result |
 |---|---|
