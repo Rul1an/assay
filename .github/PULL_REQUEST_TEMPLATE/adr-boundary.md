@@ -1,10 +1,10 @@
 ## ADR Boundary Slice
 
-- Canonical ledger: #1847
+- Canonical ledger: <!-- the programme ledger named in AGENTS.md -->
 - Slice:
 - Builder:
 - Reviewers:
-- Final head SHA:
+- Final head SHA: <!-- every measurement below is stated against this SHA; note worktree or toolchain where a number depends on one -->
 - ADR invariants affected:
 
 ## Behavior
