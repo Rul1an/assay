@@ -104,7 +104,16 @@ steps:
     run: |
       gh release download privileged-mcp-action-v0-candidate.2 \
         --repo Rul1an/assay \
-        --pattern privileged-mcp-action-v0-clean-room.tar.gz
+        --pattern privileged-mcp-action-v0-clean-room.tar.gz \
+        --pattern SHA256SUMS \
+        --pattern attestation-bundle.json
+      sha256sum -c SHA256SUMS
+      gh attestation verify privileged-mcp-action-v0-clean-room.tar.gz \
+        --repo Rul1an/assay \
+        --bundle attestation-bundle.json \
+        --signer-workflow Rul1an/assay/.github/workflows/privileged-mcp-action-pack-release.yml \
+        --source-digest 975ee0129a421925cad78b84ffc02144aa655679 \
+        --source-ref refs/tags/privileged-mcp-action-v0-candidate.2
 
   - name: Run conformance
     uses: Rul1an/assay/.github/actions/privileged-mcp-action-conformance@975ee0129a421925cad78b84ffc02144aa655679
