@@ -26,20 +26,24 @@ digest describes.
 ### Clean-room path
 
 The release
-[`privileged-mcp-action-v0-candidate.1`](https://github.com/Rul1an/assay/releases/tag/privileged-mcp-action-v0-candidate.1)
+[`privileged-mcp-action-v0-candidate.2`](https://github.com/Rul1an/assay/releases/tag/privileged-mcp-action-v0-candidate.2)
 contains a deterministic, attested clean-room pack. It carries `spec.md`, `descriptor.json`, and
 thirteen opaque cases. It omits expected outcomes, semantic case names, the vector generator, and
 Assay's implementation.
 
 ```bash
-tag=privileged-mcp-action-v0-candidate.1
+tag=privileged-mcp-action-v0-candidate.2
 gh release download "$tag" --repo Rul1an/assay \
   --pattern privileged-mcp-action-v0-clean-room.tar.gz \
-  --pattern SHA256SUMS
+  --pattern SHA256SUMS \
+  --pattern attestation-bundle.json
 shasum -a 256 -c SHA256SUMS
 gh attestation verify privileged-mcp-action-v0-clean-room.tar.gz \
   --repo Rul1an/assay \
-  --signer-workflow Rul1an/assay/.github/workflows/privileged-mcp-action-pack-release.yml
+  --bundle attestation-bundle.json \
+  --signer-workflow Rul1an/assay/.github/workflows/privileged-mcp-action-pack-release.yml \
+  --source-digest 975ee0129a421925cad78b84ffc02144aa655679 \
+  --source-ref refs/tags/privileged-mcp-action-v0-candidate.2
 ```
 
 Follow [`CONFORMANCE-PROTOCOL.md`](CONFORMANCE-PROTOCOL.md): implement before scoring, preserve the
@@ -47,6 +51,10 @@ first run, disclose the materials read, and publish a machine-readable run recor
 [`IMPLEMENTATION-REPORT.template.md`](IMPLEMENTATION-REPORT.template.md). The reusable composite
 action at `.github/actions/privileged-mcp-action-conformance` standardizes invocation and scoring;
 it does not provide verifier logic.
+
+The implementation may be a minimal standalone command in any language. It does not need to
+integrate with Assay or an MCP runtime. A disclosed mismatch is useful evidence too: it identifies a
+profile or corpus boundary that needs reconciliation.
 
 What the claim needs is a reimplementation from the spec, so three **answer or implementation
 surfaces** in this repository are deliberately out of bounds until the implementation is frozen:

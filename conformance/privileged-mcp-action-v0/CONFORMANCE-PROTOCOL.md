@@ -102,12 +102,12 @@ steps:
     env:
       GH_TOKEN: ${{ github.token }}
     run: |
-      gh release download privileged-mcp-action-v0-candidate.1 \
+      gh release download privileged-mcp-action-v0-candidate.2 \
         --repo Rul1an/assay \
         --pattern privileged-mcp-action-v0-clean-room.tar.gz
 
   - name: Run conformance
-    uses: Rul1an/assay/.github/actions/privileged-mcp-action-conformance@privileged-mcp-action-v0-candidate.1
+    uses: Rul1an/assay/.github/actions/privileged-mcp-action-conformance@975ee0129a421925cad78b84ffc02144aa655679
     with:
       pack: privileged-mcp-action-v0-clean-room.tar.gz
       entrypoint: ./target/release/my-verifier
@@ -118,7 +118,8 @@ steps:
       report: privileged-mcp-action-conformance.json
 ```
 
-For a long-lived workflow, resolve the release tag to its full commit and pin the action to that SHA.
+The action above is pinned to the full source commit for `candidate.2`. Keep full-commit pinning when
+updating the release used by a long-lived workflow.
 
 ## Claim ceiling
 
