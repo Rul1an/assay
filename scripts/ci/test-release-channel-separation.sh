@@ -170,11 +170,18 @@ done
 
 : >"$TMP_DIR/action-verify.out"
 : >"$TMP_DIR/action-path.out"
-FAKE_ASSAY_VERSION="2.1.0" GITHUB_OUTPUT="$TMP_DIR/action-verify.out" \
+: >"$TMP_DIR/action-verify-invocations.out"
+FAKE_ASSAY_VERSION="2.1.0" \
+  FAKE_INVOCATION_COUNTER="$TMP_DIR/action-verify-invocations.out" \
+  GITHUB_OUTPUT="$TMP_DIR/action-verify.out" \
   GITHUB_PATH="$TMP_DIR/action-path.out" \
   bash "$REPO_ROOT/assay-action/verify-install.sh" "$TMP_DIR/bin/assay" "2.1.0"
 require_literal_from_path "$TMP_DIR/action-verify.out" "installed=true"
 require_literal_from_path "$TMP_DIR/action-path.out" "$TMP_DIR/bin"
+if [[ "$(wc -l <"$TMP_DIR/action-verify-invocations.out" | tr -d ' ')" != "1" ]]; then
+  echo "successful assay verification invoked the inspected binary more than once" >&2
+  exit 1
+fi
 
 for state_file in output path env state summary; do
   : >"$TMP_DIR/action-verify-mismatch-$state_file.out"
