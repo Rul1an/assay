@@ -38,8 +38,16 @@ jobs:
             privileged-mcp-action-v0-candidate.*) ;;
             *) echo "unexpected release tag: $GITHUB_REF_NAME" >&2; exit 2 ;;
           esac
+          git fetch --force origin \
+            "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           if [[ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != "tag" ]]; then
             echo "release requires an annotated tag object: $GITHUB_REF_NAME" >&2
+            exit 2
+          fi
+          tag_commit="$(git rev-parse "refs/tags/$GITHUB_REF_NAME^{}")"
+          head_commit="$(git rev-parse HEAD)"
+          if [[ "$tag_commit" != "$head_commit" ]]; then
+            echo "release tag $GITHUB_REF_NAME peels to $tag_commit; checked-out HEAD is $head_commit" >&2
             exit 2
           fi
           git fetch --no-tags origin main
