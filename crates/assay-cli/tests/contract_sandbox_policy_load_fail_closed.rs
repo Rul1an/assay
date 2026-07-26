@@ -41,6 +41,17 @@ fn broken_policy() -> tempfile::NamedTempFile {
     f
 }
 
+fn policy_with_unresolved_extends() -> tempfile::NamedTempFile {
+    let mut f = tempfile::NamedTempFile::new().expect("temp policy");
+    writeln!(
+        f,
+        "api_version: assay/v1\nextends:\n  - pack:mcp-server-minimal\nfs:\n  allow: []\n  deny: []\nnet:\n  allow: []\n  deny: []"
+    )
+    .expect("write");
+    f.flush().expect("flush");
+    f
+}
+
 /// Outcome of one sandbox invocation over a child that announces itself on stdout, so "did it
 /// execute?" is an observable fact rather than an inference from the exit code.
 struct Run {
@@ -123,6 +134,34 @@ fn fail_closed_does_not_change_the_outcome_it_only_agrees_with_it() {
     assert_eq!(
         bare.code, flagged.code,
         "the obligation comes from naming --policy, not from --fail-closed"
+    );
+}
+
+#[test]
+fn a_named_policy_with_unresolved_extends_is_fatal_before_execution() {
+    let policy = policy_with_unresolved_extends();
+    let run = run_sandbox(&[], Some(policy.path()));
+
+    assert_eq!(
+        run.code,
+        Some(2),
+        "an unsupported policy composition request must be refused.\nstderr:\n{}",
+        run.stderr
+    );
+    assert!(
+        !run.child_ran,
+        "the child must not run after a declared policy input was ignored.\nstderr:\n{}",
+        run.stderr
+    );
+    assert!(
+        run.stderr.contains("E_POLICY_LOAD_FAILED_UNENFORCEABLE"),
+        "the refusal must use the existing policy-load reason code.\nstderr:\n{}",
+        run.stderr
+    );
+    assert!(
+        run.stderr.contains("does not support non-empty `extends`"),
+        "the operator must receive an actionable, value-free explanation.\nstderr:\n{}",
+        run.stderr
     );
 }
 

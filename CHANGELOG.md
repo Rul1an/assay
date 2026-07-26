@@ -29,8 +29,20 @@ All notable changes to this project will be documented in this file.
   sessions that failed authentication under the default permissive mode, and neither carried a
   basis a reviewer could check. `serverInfo.version` is now derived from the crate version
   instead of the hand-written `0.4.0`, which no build produced.
+- **Breaking (`assay sandbox`)**: a named policy with non-empty `extends` is refused before
+  execution. Pack resolution is unsupported, so accepting those entries previously made
+  declared policy composition disappear silently. `assay sandbox --profile` now emits an empty
+  `extends` list instead of references to unresolved packs.
 
 ### Fixed
+- Publish clean-room conformance packs as prereleases that are explicitly ineligible for GitHub's
+  software `Latest` pointer. Installers, the embedded Action and runner maintenance also reject a
+  non-`vX.Y.Z` latest tag before constructing a CLI asset URL.
+- Reject line breaks in explicit embedded Action versions before writing step outputs, preventing
+  multi-line input from adding attacker-chosen Action outputs while preserving published tags such
+  as `v2.1`. Two-component historical tags now retain their download identity while verifying the
+  installed binary against its three-component version (`v2.1` -> `2.1.0`). The published major
+  aliases retain the same guarantee (`v1` -> `1.1.0`, `v2` -> `2.12.0`).
 - Sandbox policy documentation described a filesystem rule shape the loader has never
   accepted (`- path:` mappings with `read`/`write` keys, against a schema of plain strings).
   Copying an example verbatim used to produce a warning and now produces a hard failure, so

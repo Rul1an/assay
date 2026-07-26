@@ -81,7 +81,7 @@ inputs:
     required: false
     default: 'false'
   version:
-    description: 'Assay CLI version to install'
+    description: 'Assay CLI release tag to install'
     required: false
     default: 'latest'
 
@@ -240,42 +240,7 @@ runs:
       env:
         ASSAY_VERSION_INPUT: ${{ inputs.version }}
       run: |
-        set -euo pipefail
-
-        VERSION="$ASSAY_VERSION_INPUT"
-        REPO="Rul1an/assay"
-
-        if [ "$VERSION" = "latest" ]; then
-          VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
-          if [ -z "$VERSION" ]; then
-            echo "::error::Failed to fetch latest Assay version"
-            exit 1
-          fi
-        fi
-
-        case "$VERSION" in
-          v*) ;;
-          *) VERSION="v${VERSION}" ;;
-        esac
-
-        echo "resolved_version=$VERSION" >> "$GITHUB_OUTPUT"
-        echo "resolved_version_plain=${VERSION#v}" >> "$GITHUB_OUTPUT"
-
-        if ! command -v assay &> /dev/null; then
-          echo "skip_install=false" >> $GITHUB_OUTPUT
-          exit 0
-        fi
-
-        INSTALLED_VERSION="$(assay --version 2>/dev/null | awk '{print $2}' || true)"
-        echo "installed_version=$INSTALLED_VERSION" >> "$GITHUB_OUTPUT"
-        echo "Assay already installed: ${INSTALLED_VERSION:-unknown}"
-
-        if [ "$INSTALLED_VERSION" = "${VERSION#v}" ]; then
-          echo "skip_install=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "::notice::Installed Assay ${INSTALLED_VERSION:-unknown} does not match requested ${VERSION}; reinstalling"
-          echo "skip_install=false" >> "$GITHUB_OUTPUT"
-        fi
+        "$GITHUB_ACTION_PATH/resolve-version.sh" "$ASSAY_VERSION_INPUT"
 
     - name: Detect platform
       id: platform
@@ -398,21 +363,8 @@ runs:
       shell: bash
       env:
         EXPECTED_VERSION: ${{ steps.check-existing.outputs.resolved_version_plain }}
-      run: | # zizmor: ignore[github-env] v2 compatibility exports a literal install dir for later caller steps
-        # v2 compatibility: later caller steps may invoke `assay` directly.
-        # Keep exporting this literal install directory until a major-version contract change.
-        printf '%s\n' "$HOME/.assay/bin" >> "$GITHUB_PATH"
-        export PATH="$HOME/.assay/bin:$PATH"
-
-        INSTALLED_VERSION="$(~/.assay/bin/assay --version | awk '{print $2}')"
-        if [ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]; then
-          echo "::error::Assay installation verification failed: expected ${EXPECTED_VERSION}, got ${INSTALLED_VERSION:-unknown}"
-          echo "::error::Assay installation verification failed"
-          exit 1
-        fi
-        ~/.assay/bin/assay --version
-
-        echo "installed=true" >> $GITHUB_OUTPUT
+      run: | # zizmor: ignore[github-env] v2 compatibility exports the install dir for caller steps
+        "$GITHUB_ACTION_PATH/verify-install.sh" "$HOME/.assay/bin/assay" "$EXPECTED_VERSION"
 
     # =========================================================================
     # E2: Evidence Processing - Discovery, verify, lint

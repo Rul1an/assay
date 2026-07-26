@@ -23,6 +23,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Verify software and conformance release channels stay separate
+        run: bash scripts/ci/test-release-channel-separation.sh
+
       - name: Build CLI once
         run: cargo build --release --workspace --exclude assay-ebpf
 
