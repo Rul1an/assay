@@ -138,5 +138,7 @@ jobs:
             release/attestation-bundle.json \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
+            --prerelease \
+            --latest=false \
             --title "Privileged MCP Action v0 clean-room conformance pack" \
             --notes "Inputs-only pack for implementing privileged-mcp-action/v0 from the tagged profile. The asset omits expected outcomes and Assay implementation code. See the tagged conformance protocol for the claim ceiling."

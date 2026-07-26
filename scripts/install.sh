@@ -82,6 +82,9 @@ main() {
         if [ -z "$VERSION" ]; then
             log_error "Failed to resolve latest version."
         fi
+        if ! printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+[.][0-9]+[.][0-9]+$'; then
+            log_error "latest Assay release is not a stable software tag: $VERSION"
+        fi
     fi
 
     log_info "Target version: $VERSION"

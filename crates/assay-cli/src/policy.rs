@@ -45,6 +45,12 @@ impl Policy {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
         let policy: Policy = serde_yaml::from_str(&content)?;
+        if !policy.extends.is_empty() {
+            anyhow::bail!(
+                "sandbox policy loading does not support non-empty `extends`; \
+                 remove the entries until pack resolution is implemented"
+            );
+        }
         Ok(policy)
     }
 

@@ -35,6 +35,10 @@ fn test_profile_cli_workflow() -> anyhow::Result<()> {
     let yaml_content = std::fs::read_to_string(out_yaml)?;
     assert!(yaml_content.contains("api_version: 1"));
     assert!(yaml_content.contains("extends:"));
+    assert!(
+        !yaml_content.contains("pack:"),
+        "generated policies must not declare unresolved packs"
+    );
 
     let evidence_content = std::fs::read_to_string(out_evidence)?;
     assert!(
@@ -73,6 +77,10 @@ fn test_profile_json_output() -> anyhow::Result<()> {
     assert!(out_evidence.exists());
     let json_content = std::fs::read_to_string(out_json)?;
     assert!(json_content.contains("\"api_version\": 1"));
+    assert!(
+        !json_content.contains("pack:"),
+        "generated JSON policies must not declare unresolved packs"
+    );
 
     Ok(())
 }

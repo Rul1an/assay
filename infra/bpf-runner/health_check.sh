@@ -126,7 +126,14 @@ check_vm_running() {
 }
 
 latest_assay_tag() {
-    curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | jq -r '.tag_name // empty' 2>/dev/null || true
+    local tag
+    tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" |
+        jq -r '.tag_name // empty' 2>/dev/null) || return 1
+    if [[ ! "$tag" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+        echo "latest Assay release is not a stable software tag: $tag" >&2
+        return 1
+    fi
+    printf '%s\n' "$tag"
 }
 
 runner_user_assay_version() {
@@ -137,7 +144,10 @@ runner_user_assay_version() {
 
 ensure_assay_cli_current() {
     local latest_tag latest_version current_version update_output
-    latest_tag=$(latest_assay_tag)
+    if ! latest_tag=$(latest_assay_tag); then
+        log_error "Could not determine a stable latest Assay release for $REPO"
+        return 1
+    fi
 
     if [[ -z "$latest_tag" || "$latest_tag" == "null" ]]; then
         log_error "Could not determine latest Assay release for $REPO"
@@ -756,7 +766,7 @@ show_status() {
     echo ""
     echo "=== Assay CLI ==="
     local latest_tag current_version
-    latest_tag=$(latest_assay_tag)
+    latest_tag=$(latest_assay_tag 2>/dev/null || true)
     current_version=$(runner_user_assay_version)
     echo "Latest Release: ${latest_tag:-unknown}"
     echo "Runner PATH Version: ${current_version:-missing}"

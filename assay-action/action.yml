@@ -251,6 +251,10 @@ runs:
             echo "::error::Failed to fetch latest Assay version"
             exit 1
           fi
+          if [[ ! "$VERSION" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+            echo "::error::latest Assay release is not a stable software tag: $VERSION"
+            exit 1
+          fi
         fi
 
         case "$VERSION" in

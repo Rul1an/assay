@@ -18,9 +18,17 @@ fail() {
 }
 
 latest_tag() {
-  curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" |
-    sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
-    head -n 1
+  local tag
+  tag=$(
+    curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" |
+      sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+      head -n 1
+  )
+  if [[ ! "$tag" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+    echo "latest Assay release is not a stable software tag: $tag" >&2
+    return 1
+  fi
+  printf '%s\n' "$tag"
 }
 
 workspace_version() {
@@ -61,8 +69,10 @@ vm_assay_version() {
     'assay --version 2>/dev/null | awk "{print \$2}"' 2>/dev/null || true
 }
 
-latest="$(latest_tag)"
-if [[ -z "$latest" ]]; then
+latest=""
+if ! latest="$(latest_tag)"; then
+  fail "latest ${REPO} release is not a stable software tag"
+elif [[ -z "$latest" ]]; then
   fail "could not resolve latest ${REPO} release"
 else
   note "latest_release=${latest}"
