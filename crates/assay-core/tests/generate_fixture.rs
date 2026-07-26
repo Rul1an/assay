@@ -1,9 +1,25 @@
+//! The sourceless-SARIF fixture: guarded here, regenerated deliberately.
+//!
+//! This file used to write `.repro_artifacts/sourceless_sarif.json` — a *tracked* path — as a side
+//! effect of `cargo test`. Two things were wrong with that. A plain test run mutated the working
+//! tree, so `git status` was dirty afterwards and the change rode along in whatever was staged
+//! next. And because `write_sarif` emits no trailing newline while the repository's end-of-file
+//! hook adds one on commit, the file flipped back and forth indefinitely: the hook put the byte on,
+//! the next test run took it off.
+//!
+//! Generation now happens in a temporary directory and the result is compared against the
+//! checked-in fixture. That turns a generator into a regression guard: the fixture stops being an
+//! output nobody reads and becomes the pinned shape of a SARIF run for a finding that has no source
+//! location. Regeneration is still available, but only when asked for.
+
 use assay_core::model::{TestResultRow, TestStatus};
 use assay_core::report::sarif;
+use std::path::{Path, PathBuf};
 
-#[test]
-fn test_generate_sourceless_sarif_fixture() {
-    let results = vec![TestResultRow {
+/// The one finding the fixture is about: a failure with no file context, so SARIF has to fall back
+/// to a synthetic location rather than omit one.
+fn sourceless_failure() -> Vec<TestResultRow> {
+    vec![TestResultRow {
         test_id: "sourceless_failure_demo".to_string(),
         status: TestStatus::Fail,
         score: Some(0.0),
@@ -15,22 +31,118 @@ fn test_generate_sourceless_sarif_fixture() {
         skip_reason: None,
         attempts: None,
         error_policy_applied: None,
-    }];
+    }]
+}
 
-    // This file is generated for the Review Pack artifact
-    let file_path = std::path::PathBuf::from(".repro_artifacts/sourceless_sarif.json");
-    // Ensure dir exists
-    if let Some(p) = file_path.parent() {
-        std::fs::create_dir_all(p).unwrap();
+/// Anchored on the crate directory rather than the process working directory, which is what made
+/// the old path depend on how the test happened to be invoked.
+fn fixture_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(".repro_artifacts/sourceless_sarif.json")
+}
+
+/// Drop at most one trailing newline.
+///
+/// Deliberately not `trim_end_matches`, which would also swallow extra blank lines and make a
+/// genuinely different file compare equal. Exactly one byte is in dispute here — the one the
+/// repository's end-of-file hook adds — so exactly one is normalised.
+fn without_one_trailing_newline(s: &str) -> &str {
+    s.strip_suffix('\n').unwrap_or(s)
+}
+
+/// Generate into `dir` and return the generated UTF-8 text, so no test reads its own output out of
+/// a tracked path.
+fn generate_into(dir: &Path) -> String {
+    let out = dir.join("sourceless_sarif.json");
+    sarif::write_sarif("assay", &sourceless_failure(), &out).expect("SARIF generation failed");
+    std::fs::read_to_string(&out).expect("read generated SARIF")
+}
+
+#[test]
+fn the_checked_in_fixture_still_matches_what_the_writer_produces() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let generated = generate_into(tmp.path());
+
+    let golden = std::fs::read_to_string(fixture_path()).expect(
+        "checked-in fixture is missing; regenerate with \
+         `cargo test -p assay-core --test generate_fixture -- --ignored regenerate`",
+    );
+
+    // Line endings are *not* normalised. The fixture is pinned to LF in .gitattributes, the same
+    // way `gateway-evidence-replay`'s fixtures are, so the bytes are identical on every platform
+    // and the comparison can stay strict. Stripping \r here instead would make the guard pass on a
+    // checkout that is silently translating the file, which is the misconfiguration worth seeing.
+    //
+    // One end-of-file byte is normalised away, deliberately. It is owned by the repository's
+    // end-of-file convention and added by a pre-commit hook; it is not something the SARIF writer
+    // produces or promises, and comparing it exactly is what made this file churn. Exactly one is
+    // dropped, so a fixture that gained a blank line still fails. Everything before it is compared
+    // byte for byte.
+    assert_eq!(
+        without_one_trailing_newline(&generated),
+        without_one_trailing_newline(&golden),
+        "the SARIF writer's output no longer matches the checked-in fixture. If the change is \
+         intended, regenerate with \
+         `cargo test -p assay-core --test generate_fixture -- --ignored regenerate`. If the two \
+         differ only by \\r, this checkout predates the `text eol=lf` pin in .gitattributes: \
+         re-check out that one fixture under the current attributes, preserving any intentional \
+         local edits first, with `git restore --source=HEAD --worktree -- \
+         crates/assay-core/.repro_artifacts/sourceless_sarif.json`. Do not regenerate; that would \
+         commit the wrong bytes."
+    );
+}
+
+/// The property the fixture exists to pin, asserted on generated bytes rather than on a file this
+/// test wrote into the repository.
+///
+/// Asserted at the exact location SARIF puts it, not as a substring. `contains(".assay/eval.yaml")`
+/// passes if the string turns up anywhere at all — in a message, in a rule description, in a
+/// different result — so it would keep passing while the artifact location itself moved or
+/// disappeared, which is the only thing this test is about.
+#[test]
+fn a_finding_without_a_source_location_gets_the_fallback_uri() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let generated = generate_into(tmp.path());
+
+    let doc: serde_json::Value =
+        serde_json::from_str(&generated).expect("the writer must emit valid JSON");
+    let uri = doc
+        .pointer("/runs/0/results/0/locations/0/physicalLocation/artifactLocation/uri")
+        .unwrap_or_else(|| {
+            panic!("no artifact location on the first result of the first run: {generated}")
+        });
+
+    assert_eq!(
+        uri, ".assay/eval.yaml",
+        "a finding with no source location must fall back to the config URI"
+    );
+}
+
+/// Rewrite the checked-in fixture. Ignored by default, so it is something a developer asks for
+/// rather than something a test run does to them.
+///
+/// House precedent is `generate_seed_corpus` in `assay-evidence`, which guards the fuzz corpus the
+/// same way. An `xtask` subcommand was the other option, but it would make the build tool depend on
+/// `assay-core` for one fixture, and the ignored-test form is already the pattern a contributor
+/// here will recognise.
+///
+/// Run with:
+/// `cargo test -p assay-core --test generate_fixture -- --ignored regenerate`
+#[test]
+#[ignore = "rewrites the checked-in SARIF fixture; run deliberately"]
+fn regenerate_the_checked_in_fixture() {
+    let path = fixture_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("fixture directory");
     }
 
-    sarif::write_sarif("assay", &results, &file_path).expect("SARIF generation failed");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let generated = generate_into(tmp.path());
 
-    // Verify it matches expectations
-    let content = std::fs::read_to_string(&file_path).unwrap();
-    assert!(
-        content.contains(".assay/eval.yaml"),
-        "Must contain fallback URI"
-    );
-    println!("Generated fixture at {}", file_path.display());
+    // Written with the trailing newline the end-of-file hook would add anyway, so a deliberate
+    // regeneration does not leave a diff that the next commit silently changes again.
+    let mut contents = without_one_trailing_newline(&generated).to_string();
+    contents.push('\n');
+    std::fs::write(&path, contents).expect("write fixture");
+
+    println!("regenerated {}", path.display());
 }
