@@ -23,11 +23,15 @@ if [[ "$VERSION" == "latest" ]]; then
   fi
 fi
 
-if [[ ! "$VERSION" =~ ^v?[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
-  echo "::error::Assay version must be a release tag in vX.Y.Z or vX.Y.Z-prerelease form"
+if [[ "$VERSION" == *$'\n'* || "$VERSION" == *$'\r'* ]]; then
+  echo "::error::Assay version must not contain line breaks"
   exit 1
 fi
-VERSION="v${VERSION#v}"
+
+case "$VERSION" in
+v*) ;;
+*) VERSION="v${VERSION}" ;;
+esac
 
 echo "resolved_version=$VERSION" >>"$GITHUB_OUTPUT"
 echo "resolved_version_plain=${VERSION#v}" >>"$GITHUB_OUTPUT"

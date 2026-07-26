@@ -93,21 +93,29 @@ FAKE_TAG="$VALID_TAG" GITHUB_OUTPUT="$TMP_DIR/action-prerelease.out" \
 require_literal_from_path "$TMP_DIR/action-prerelease.out" \
   "resolved_version=v$PRERELEASE_TAG"
 
-INJECTED_VERSION=$'3.35.0\nskip_install=true'
-: >"$TMP_DIR/action-injected.out"
-if GITHUB_OUTPUT="$TMP_DIR/action-injected.out" PATH="$TMP_DIR/bin:$PATH" \
-  bash "$REPO_ROOT/assay-action/resolve-version.sh" "$INJECTED_VERSION" \
-  >"$TMP_DIR/action-injected.log" 2>&1
-then
-  echo "assay-action accepted a multi-line version input" >&2
-  exit 1
-fi
-if [[ -s "$TMP_DIR/action-injected.out" ]]; then
-  echo "assay-action wrote outputs before rejecting a multi-line version input" >&2
-  exit 1
-fi
-require_literal_from_path "$TMP_DIR/action-injected.log" \
-  "Assay version must be a release tag"
+COMPAT_TAG="v2.1"
+FAKE_TAG="$VALID_TAG" GITHUB_OUTPUT="$TMP_DIR/action-compat.out" \
+  PATH="$TMP_DIR/bin:$PATH" \
+  bash "$REPO_ROOT/assay-action/resolve-version.sh" "$COMPAT_TAG"
+require_literal_from_path "$TMP_DIR/action-compat.out" \
+  "resolved_version=$COMPAT_TAG"
+
+for INJECTED_VERSION in $'3.35.0\nskip_install=true' $'3.35.0\rskip_install=true'; do
+  : >"$TMP_DIR/action-injected.out"
+  if GITHUB_OUTPUT="$TMP_DIR/action-injected.out" PATH="$TMP_DIR/bin:$PATH" \
+    bash "$REPO_ROOT/assay-action/resolve-version.sh" "$INJECTED_VERSION" \
+    >"$TMP_DIR/action-injected.log" 2>&1
+  then
+    echo "assay-action accepted a version input containing a line break" >&2
+    exit 1
+  fi
+  if [[ -s "$TMP_DIR/action-injected.out" ]]; then
+    echo "assay-action wrote outputs before rejecting a version input containing a line break" >&2
+    exit 1
+  fi
+  require_literal_from_path "$TMP_DIR/action-injected.log" \
+    "Assay version must not contain line breaks"
+done
 
 health_tag=$(
   # shellcheck disable=SC2016 # $1 expands in the nested shell.

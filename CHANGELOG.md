@@ -38,8 +38,9 @@ All notable changes to this project will be documented in this file.
 - Publish clean-room conformance packs as prereleases that are explicitly ineligible for GitHub's
   software `Latest` pointer. Installers, the embedded Action and runner maintenance also reject a
   non-`vX.Y.Z` latest tag before constructing a CLI asset URL.
-- Validate explicit embedded Action versions as stable or prerelease semver tags before writing
-  step outputs, preventing multi-line input from adding attacker-chosen Action outputs.
+- Reject line breaks in explicit embedded Action versions before writing step outputs, preventing
+  multi-line input from adding attacker-chosen Action outputs while preserving published tags such
+  as `v2.1`.
 - Sandbox policy documentation described a filesystem rule shape the loader has never
   accepted (`- path:` mappings with `read`/`write` keys, against a schema of plain strings).
   Copying an example verbatim used to produce a warning and now produces a hard failure, so
