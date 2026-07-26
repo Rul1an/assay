@@ -43,6 +43,14 @@ printf '%s\n' "\${FAKE_TAG:?}"
 EOF
 cat >"$TMP_DIR/bin/assay" <<'EOF'
 #!/usr/bin/env bash
+if [[ "${FAKE_MUTATE_ACTION_STATE:-0}" == "1" ]]; then
+  [[ -z "${GITHUB_OUTPUT:-}" ]] ||
+    printf 'resolved_version=v1\nresolved_version_plain=1.1.0\n' >>"$GITHUB_OUTPUT"
+  [[ -z "${GITHUB_PATH:-}" ]] || printf '/tmp/untrusted\n' >>"$GITHUB_PATH"
+  [[ -z "${GITHUB_ENV:-}" ]] || printf 'ASSAY_UNTRUSTED=1\n' >>"$GITHUB_ENV"
+  [[ -z "${GITHUB_STATE:-}" ]] || printf 'assay_untrusted=1\n' >>"$GITHUB_STATE"
+  [[ -z "${GITHUB_STEP_SUMMARY:-}" ]] || printf 'untrusted summary\n' >>"$GITHUB_STEP_SUMMARY"
+fi
 printf 'assay %s\n' "${FAKE_ASSAY_VERSION:-3.35.0}"
 EOF
 chmod +x "$TMP_DIR/bin/curl" "$TMP_DIR/bin/jq" "$TMP_DIR/bin/assay"
@@ -85,6 +93,33 @@ require_literal_from_path() {
 require_literal_from_path "$TMP_DIR/action-valid.out" "resolved_version=$VALID_TAG"
 require_literal_from_path "$TMP_DIR/action-valid.out" "resolved_version_plain=${VALID_TAG#v}"
 require_literal_from_path "$TMP_DIR/action-valid.out" "skip_install=true"
+
+for state_file in output path env state summary; do
+  : >"$TMP_DIR/action-child-$state_file.out"
+done
+FAKE_MUTATE_ACTION_STATE=1 FAKE_ASSAY_VERSION="3.35.0" \
+  GITHUB_OUTPUT="$TMP_DIR/action-child-output.out" \
+  GITHUB_PATH="$TMP_DIR/action-child-path.out" \
+  GITHUB_ENV="$TMP_DIR/action-child-env.out" \
+  GITHUB_STATE="$TMP_DIR/action-child-state.out" \
+  GITHUB_STEP_SUMMARY="$TMP_DIR/action-child-summary.out" \
+  PATH="$TMP_DIR/bin:$PATH" \
+  bash "$REPO_ROOT/assay-action/resolve-version.sh" "$VALID_TAG"
+require_literal_from_path "$TMP_DIR/action-child-output.out" \
+  "resolved_version=$VALID_TAG"
+require_literal_from_path "$TMP_DIR/action-child-output.out" \
+  "resolved_version_plain=${VALID_TAG#v}"
+require_literal_from_path "$TMP_DIR/action-child-output.out" "skip_install=true"
+if grep -Fq -- "resolved_version=v1" "$TMP_DIR/action-child-output.out"; then
+  echo "pre-existing assay binary mutated GITHUB_OUTPUT directly" >&2
+  exit 1
+fi
+for state_file in path env state summary; do
+  if [[ -s "$TMP_DIR/action-child-$state_file.out" ]]; then
+    echo "pre-existing assay binary mutated GitHub Action state: $state_file" >&2
+    exit 1
+  fi
+done
 
 PRERELEASE_TAG="3.36.0-rc.1"
 FAKE_TAG="$VALID_TAG" GITHUB_OUTPUT="$TMP_DIR/action-prerelease.out" \
@@ -134,8 +169,15 @@ FAKE_ASSAY_VERSION="2.1.0" GITHUB_OUTPUT="$TMP_DIR/action-verify.out" \
 require_literal_from_path "$TMP_DIR/action-verify.out" "installed=true"
 require_literal_from_path "$TMP_DIR/action-path.out" "$TMP_DIR/bin"
 
-if FAKE_ASSAY_VERSION="2.1.0" GITHUB_OUTPUT="$TMP_DIR/action-verify-mismatch.out" \
-  GITHUB_PATH="$TMP_DIR/action-path-mismatch.out" \
+for state_file in output path env state summary; do
+  : >"$TMP_DIR/action-verify-mismatch-$state_file.out"
+done
+if FAKE_MUTATE_ACTION_STATE=1 FAKE_ASSAY_VERSION="2.1.0" \
+  GITHUB_OUTPUT="$TMP_DIR/action-verify-mismatch-output.out" \
+  GITHUB_PATH="$TMP_DIR/action-verify-mismatch-path.out" \
+  GITHUB_ENV="$TMP_DIR/action-verify-mismatch-env.out" \
+  GITHUB_STATE="$TMP_DIR/action-verify-mismatch-state.out" \
+  GITHUB_STEP_SUMMARY="$TMP_DIR/action-verify-mismatch-summary.out" \
   bash "$REPO_ROOT/assay-action/verify-install.sh" "$TMP_DIR/bin/assay" "2.1" \
   >"$TMP_DIR/action-verify-mismatch.log" 2>&1
 then
@@ -167,10 +209,12 @@ if grep -Fq -- "resolved_version_plain=1.1.0" "$TMP_DIR/action-malformed-install
 fi
 require_literal_from_path "$TMP_DIR/action-malformed-installed.log" \
   "Assay already installed: unknown"
-if [[ -s "$TMP_DIR/action-path-mismatch.out" ]]; then
-  echo "assay-action exported a rejected binary directory to GITHUB_PATH" >&2
-  exit 1
-fi
+for state_file in output path env state summary; do
+  if [[ -s "$TMP_DIR/action-verify-mismatch-$state_file.out" ]]; then
+    echo "rejected assay binary mutated GitHub Action state: $state_file" >&2
+    exit 1
+  fi
+done
 
 for INJECTED_VERSION in $'3.35.0\nskip_install=true' $'3.35.0\rskip_install=true'; do
   : >"$TMP_DIR/action-injected.out"

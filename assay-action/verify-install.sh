@@ -4,6 +4,13 @@ set -euo pipefail
 BINARY="${1:-}"
 EXPECTED_VERSION="${2:-}"
 
+run_without_github_command_files() {
+  (
+    unset GITHUB_OUTPUT GITHUB_PATH GITHUB_ENV GITHUB_STATE GITHUB_STEP_SUMMARY
+    "$@"
+  )
+}
+
 if [[ ! -x "$BINARY" ]]; then
   echo "::error::Assay installation verification failed"
   exit 1
@@ -13,7 +20,9 @@ if [[ -z "$EXPECTED_VERSION" || "$EXPECTED_VERSION" == *$'\n'* || "$EXPECTED_VER
   exit 1
 fi
 
-INSTALLED_OUTPUT="$("$BINARY" --version 2>/dev/null || true)"
+INSTALLED_OUTPUT="$(
+  run_without_github_command_files "$BINARY" --version 2>/dev/null || true
+)"
 INSTALLED_VERSION=""
 if [[ "$INSTALLED_OUTPUT" != *$'\n'* &&
   "$INSTALLED_OUTPUT" != *$'\r'* &&
@@ -26,5 +35,5 @@ if [[ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]]; then
 fi
 
 printf '%s\n' "$(dirname "$BINARY")" >>"$GITHUB_PATH"
-"$BINARY" --version
+printf '%s\n' "$INSTALLED_OUTPUT"
 echo "installed=true" >>"$GITHUB_OUTPUT"

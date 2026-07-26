@@ -4,6 +4,13 @@ set -euo pipefail
 VERSION="${1:-}"
 REPO="Rul1an/assay"
 
+run_without_github_command_files() {
+  (
+    unset GITHUB_OUTPUT GITHUB_PATH GITHUB_ENV GITHUB_STATE GITHUB_STEP_SUMMARY
+    "$@"
+  )
+}
+
 if [[ -z "$VERSION" ]]; then
   echo "::error::Assay version input is empty"
   exit 1
@@ -47,12 +54,15 @@ esac
 echo "resolved_version=$VERSION" >>"$GITHUB_OUTPUT"
 echo "resolved_version_plain=$EXPECTED_VERSION" >>"$GITHUB_OUTPUT"
 
-if ! command -v assay &>/dev/null; then
+ASSAY_BIN="$(type -P assay || true)"
+if [[ -z "$ASSAY_BIN" || ! -x "$ASSAY_BIN" ]]; then
   echo "skip_install=false" >>"$GITHUB_OUTPUT"
   exit 0
 fi
 
-INSTALLED_OUTPUT="$(assay --version 2>/dev/null || true)"
+INSTALLED_OUTPUT="$(
+  run_without_github_command_files "$ASSAY_BIN" --version 2>/dev/null || true
+)"
 INSTALLED_VERSION=""
 if [[ "$INSTALLED_OUTPUT" != *$'\n'* &&
   "$INSTALLED_OUTPUT" != *$'\r'* &&
