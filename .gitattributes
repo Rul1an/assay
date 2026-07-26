@@ -1,1 +1,2 @@
 crates/gateway-evidence-replay/fixtures/gateway-path-v0/demo/** text eol=lf
+crates/assay-core/.repro_artifacts/** text eol=lf
