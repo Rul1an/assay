@@ -42,10 +42,11 @@ pub fn lint_bundle_with_options<R: Read>(
     limits: VerifyLimits,
     options: LintOptions,
 ) -> Result<LintReportWithPacks> {
-    // One bounded pass. `BundleReader::open_with_limits` streams the source through the whole
-    // ceiling set before materializing, verifies, and holds onto the already-decoded events, so
-    // lint no longer needs an unbounded `read_to_end`, a second decode, or a second tar walk.
-    // Every limit refusal comes back typed from the shared classification path.
+    // `BundleReader::open_with_limits` snapshots the source under the whole ceiling set before
+    // parsing, verifies, and holds the decoded events, so lint no longer does its own unbounded
+    // read or its own decode. It is not a single pass: the reader itself decodes twice, once to
+    // verify and once to extract the events, and both of those are bounded. What this removes is
+    // lint's third, unbounded pass. Every refusal comes back typed from the shared classifier.
     let bundle =
         BundleReader::open_with_limits(reader, limits).context("bundle verification failed")?;
 

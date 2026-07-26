@@ -569,8 +569,10 @@ mod bounded_ingest {
         let expected = format!("sha256:{}", hex::encode(Sha256::digest(&bytes)));
 
         let (source, pulled) = counting(bytes.clone());
-        let snapshot = read_verify_bounded(source, ReplayLimits::default())
-            .expect("a well-formed bundle must read, digest and verify");
+        let snapshot = match read_verify_bounded(source, ReplayLimits::default()) {
+            Ok(s) => s,
+            Err(e) => panic!("a well-formed bundle must read, digest and verify: {e}"),
+        };
 
         assert_eq!(
             snapshot.source_digest, expected,
@@ -601,12 +603,10 @@ mod bounded_ingest {
     /// The helper is the recommended entrypoint, so it has to carry the same typed contract as
     /// the reader it wraps.
     ///
-    /// This is also the only place the source boundary is exactly measurable. The helper does a
-    /// `read_to_end` on the source, so every byte is pulled and `len` versus `len - 1` is a real
-    /// boundary. Through `read_bundle_tar_gz_with_limits` it is not: tar and gzip stop once the
-    /// archive is logically complete, so the last bytes are never requested and a ceiling just
-    /// under the file size is never crossed. A test asserting otherwise there would be asserting
-    /// the fixture, not the ceiling. Wrapping the io error in context first buried the cause and returned
+    /// The source boundary is exact on both entrypoints now. Both snapshot the source to EOF
+    /// under the ceiling before parsing, so every byte counts, including a suffix no parser
+    /// reads. An earlier revision bounded only the prefix tar consumed and could not express this
+    /// boundary at all. Wrapping the io error in context first buried the cause and returned
     /// a weaker refusal than the lower-level call.
     #[test]
     fn the_bounded_helper_reports_a_typed_source_ceiling() {
@@ -620,20 +620,71 @@ mod bounded_ingest {
         };
         let err = read_verify_bounded(Cursor::new(bytes.clone()), limits)
             .expect_err("one byte over the source ceiling must be refused");
-        match err.downcast_ref::<ReplayIngestError>() {
+        match err.ingest_refusal() {
             Some(ReplayIngestError::SourceCeiling { kind, limit }) => {
                 assert_eq!(*kind, LimitKind::SourceBytes);
                 assert_eq!(*limit, ceiling);
             }
             other => panic!("expected a typed SourceCeiling from the helper, got {other:?}"),
         }
+        assert!(
+            err.source_digest.is_none(),
+            "the source itself could not be read, so there is nothing to attest"
+        );
 
         let exact = ReplayLimits {
             max_source_bytes: bytes.len() as u64,
             ..ReplayLimits::default()
         };
-        read_verify_bounded(Cursor::new(bytes), exact)
-            .expect("a source of exactly the ceiling must be accepted");
+        assert!(
+            read_verify_bounded(Cursor::new(bytes), exact).is_ok(),
+            "a source of exactly the ceiling must be accepted"
+        );
+    }
+
+    /// The ceiling has to cover the whole source, not the prefix tar chooses to consume. A valid
+    /// bundle followed by an arbitrary suffix used to pass a ceiling far below the real input
+    /// size, because the trailing bytes were never requested and therefore never counted.
+    #[test]
+    fn a_valid_bundle_with_an_unread_suffix_is_measured_whole() {
+        let valid = small_bundle();
+        let mut with_suffix = valid.clone();
+        with_suffix.extend(std::iter::repeat_n(b'Z', 10_000));
+        let total = with_suffix.len() as u64;
+
+        read_bundle_tar_gz_with_limits(
+            Cursor::new(with_suffix.clone()),
+            ReplayLimits {
+                max_source_bytes: total,
+                ..ReplayLimits::default()
+            },
+        )
+        .expect("exactly the real input size must be accepted, suffix included");
+
+        let err = read_bundle_tar_gz_with_limits(
+            Cursor::new(with_suffix),
+            ReplayLimits {
+                max_source_bytes: total - 1,
+                ..ReplayLimits::default()
+            },
+        )
+        .expect_err("the suffix must count towards the source ceiling");
+        match err.downcast_ref::<ReplayIngestError>() {
+            Some(ReplayIngestError::SourceCeiling { kind, limit }) => {
+                assert_eq!(*kind, LimitKind::SourceBytes);
+                assert_eq!(*limit, total - 1);
+            }
+            other => panic!("expected a typed SourceCeiling, got {other:?}"),
+        }
+
+        read_bundle_tar_gz_with_limits(
+            Cursor::new(valid.clone()),
+            ReplayLimits {
+                max_source_bytes: valid.len() as u64,
+                ..ReplayLimits::default()
+            },
+        )
+        .expect("the bundle alone must still read");
     }
 
     #[test]
@@ -904,12 +955,16 @@ mod bounded_ingest {
         // One expected variant, not "either of two". The decoder sits above the tar walker, so
         // the expansion ceiling trips while the walker is pulling an entry body, which is the
         // member-scoped classification path.
+        // The decoder sits under the tar walker, so the expansion ceiling trips through a member
+        // read. It is still a decode refusal and must not be reported as a member one: a reader
+        // deciding whether to raise `max_member_bytes` or `max_decoded_bytes` needs the right
+        // dimension.
         match err.downcast_ref::<ReplayIngestError>() {
-            Some(ReplayIngestError::MemberCeiling { kind, limit }) => {
+            Some(ReplayIngestError::SourceCeiling { kind, limit }) => {
                 assert_eq!(*kind, LimitKind::DecodedBytes);
                 assert_eq!(*limit, 4096);
             }
-            other => panic!("expected a typed MemberCeiling on DecodedBytes, got {other:?}"),
+            other => panic!("expected a typed DecodedBytes refusal, got {other:?}"),
         }
 
         read_bundle_tar_gz_with_limits(Cursor::new(bytes), ReplayLimits::default())

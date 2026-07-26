@@ -80,12 +80,25 @@ pub fn read_bundle_tar_gz<R: Read>(r: R) -> Result<ReadBundle> {
 /// `downcast_ref`. That is the supported way to classify a refusal; matching on the rendered
 /// message is not.
 pub fn read_bundle_tar_gz_with_limits<R: Read>(r: R, limits: ReplayLimits) -> Result<ReadBundle> {
-    // 1. Bound the compressed source before anything downstream sees a byte. Nothing in the
-    //    tar walker or the gzip decoder gets to size its allocation from an untrusted input.
-    let source = LimitReader::new(r, limits.max_source_bytes, LimitKind::SourceBytes);
+    // 1. Snapshot the whole source under the ceiling before parsing anything.
+    //
+    //    Streaming the ceiling into the tar walker only bounds the prefix gzip and tar choose to
+    //    consume. They stop once the archive is logically complete, so a valid bundle followed by
+    //    an arbitrary suffix passed a ceiling far below the real input size: the trailing bytes
+    //    were never requested and therefore never counted. Reading to EOF through the same
+    //    ceiling counts everything the source actually holds.
+    let mut snapshot = Vec::new();
+    LimitReader::new(r, limits.max_source_bytes, LimitKind::SourceBytes)
+        .read_to_end(&mut snapshot)
+        .map_err(|err| {
+            classify_source_ceiling(&err)
+                .map(anyhow::Error::from)
+                .unwrap_or_else(|| anyhow::Error::from(err).context("read bundle source"))
+        })?;
+
     // 2. Bound the gzip expansion. A small compressed input can still decode to gigabytes,
     //    which is what makes the source ceiling on its own insufficient.
-    let decoder = GzDecoder::new(source);
+    let decoder = GzDecoder::new(std::io::Cursor::new(&snapshot));
     let bounded_decoder =
         LimitReader::new(decoder, limits.max_decoded_bytes, LimitKind::DecodedBytes);
     let mut ar = Archive::new(bounded_decoder);

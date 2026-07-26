@@ -64,3 +64,137 @@ fn replay_run_args_overrides_and_inherits_defaults() {
     assert!(!args.redact_prompts);
     assert!(!args.no_verify);
 }
+
+/// The public shape of a replay ingest refusal.
+///
+/// `E_REPLAY_LIMIT_EXCEEDED` exists so a resource refusal is distinguishable from a parse failure.
+/// A bundle can be perfectly well-formed and merely larger than the configured budget, which is an
+/// operator decision; reporting both as `E_CFG_PARSE` sent a reader off to fix the producer either
+/// way. These tests pin what a consumer of `summary.json` actually sees, which is the contract —
+/// the routing itself is pinned in `assay_core::replay::bundle::tests`.
+mod replay_limit_summary_contract {
+    use crate::cli::commands::run_output::summary_from_outcome;
+    use crate::exit_codes::{ExitCodeVersion, ReasonCode, RunOutcome};
+    use assay_common::limits::LimitKind;
+    use assay_core::replay::bundle::ReplayIngestError;
+
+    /// Reproduce exactly what `write_replay_failure` composes, minus the file IO. That function
+    /// writes to fixed relative paths, so exercising it directly would mean moving the process
+    /// CWD; the value it serializes is the part a consumer depends on.
+    fn summary_for(refusal: &ReplayIngestError, digest: &str) -> serde_json::Value {
+        let reason = ReasonCode::EReplayLimitExceeded;
+        let message = format!("replay bundle refused by an ingest ceiling: {refusal}");
+        let mut outcome = RunOutcome::from_reason(reason, Some(message), None);
+        outcome.exit_code = reason.exit_code_for(ExitCodeVersion::default());
+
+        let summary = summary_from_outcome(&outcome, true)
+            .with_seeds(None, None)
+            .with_replay_provenance(digest.to_string(), "offline", None);
+        serde_json::to_value(&summary).expect("summary serializes")
+    }
+
+    fn every_variant() -> Vec<ReplayIngestError> {
+        vec![
+            ReplayIngestError::SourceCeiling {
+                kind: LimitKind::SourceBytes,
+                limit: 100 * 1024 * 1024,
+            },
+            ReplayIngestError::MemberCeiling {
+                kind: LimitKind::MemberBytes,
+                limit: 500 * 1024 * 1024,
+            },
+            ReplayIngestError::PathTooLong { limit: 256 },
+            ReplayIngestError::TooManyEntries { limit: 100_000 },
+            ReplayIngestError::ManifestTooDeep { limit: 64 },
+        ]
+    }
+
+    /// The wire string, not the Rust identifier. Renaming the variant is free; renaming this
+    /// breaks every consumer that greps a summary.
+    #[test]
+    fn the_reason_code_reaches_the_summary_verbatim() {
+        for refusal in every_variant() {
+            let v = summary_for(&refusal, "sha256:abc");
+            assert_eq!(
+                v["reason_code"], "E_REPLAY_LIMIT_EXCEEDED",
+                "every ingest ceiling reports the same public code: {v}"
+            );
+        }
+    }
+
+    /// A resource refusal is classified at exit code 2 alongside the other operator-fixable
+    /// conditions. It is not an infra failure and not a test failure.
+    #[test]
+    fn a_ceiling_refusal_is_a_config_class_exit() {
+        let v = summary_for(&every_variant()[0], "sha256:abc");
+        assert_eq!(v["exit_code"], 2, "{v}");
+    }
+
+    /// The refusal classifies the resource problem and adds nothing else. The reader never got far
+    /// enough to form a judgement about the bundle's contents, so the summary must not imply one.
+    #[test]
+    fn the_refusal_carries_no_verdict() {
+        let v = summary_for(&every_variant()[0], "sha256:abc");
+        // Not "zero passed" — absent. A count of zero is itself a claim about a run that never
+        // started, and a consumer aggregating summaries would fold it in as a real result.
+        for claim in ["passed", "failed", "total", "verdict", "score", "compliant"] {
+            assert!(
+                v.get(claim).is_none(),
+                "a ceiling refusal must not assert `{claim}`; no test ran: {v}"
+            );
+        }
+    }
+
+    /// Once the source is snapshotted we hold the digest of the exact bytes that failed. Losing it
+    /// to `sha256:unknown` was the defect the typed refusal path fixed, and the digest is what
+    /// makes the refusal reproducible by someone else.
+    #[test]
+    fn the_digest_of_the_failing_bytes_survives() {
+        let v = summary_for(&every_variant()[0], "sha256:deadbeef");
+        let found = v.to_string().contains("sha256:deadbeef");
+        assert!(found, "the source digest must reach the summary: {v}");
+        assert!(
+            !v.to_string().contains("sha256:unknown"),
+            "the digest must not degrade to unknown when we hold it: {v}"
+        );
+    }
+
+    /// Value-free: the operator-facing message names the configured ceiling and the dimension, and
+    /// carries nothing the archive chose. A member name or a recorded length echoed back here is
+    /// attacker-controlled text in an operator's terminal and in every log that ingests it.
+    #[test]
+    fn the_message_reports_the_ceiling_and_nothing_the_archive_chose() {
+        for refusal in every_variant() {
+            let rendered = refusal.to_string();
+            let v = summary_for(&refusal, "sha256:abc");
+            let message = v["message"].as_str().unwrap_or_default();
+
+            assert!(
+                message.contains(&rendered),
+                "the typed refusal must be what is rendered: {message}"
+            );
+            // Each variant's Display is built only from its own fields, and those fields are the
+            // configured limit plus a `LimitKind` tag. Nothing is threaded through from the
+            // archive, so there is no path for archive bytes to reach this string.
+            for archive_controlled in ["../", "\u{1b}", "payload", ".tar", "manifest.json"] {
+                assert!(
+                    !message.contains(archive_controlled),
+                    "archive-controlled text `{archive_controlled}` reached the message: {message}"
+                );
+            }
+        }
+    }
+
+    /// The remedy names the operator's lever. A ceiling refusal is the one failure class where
+    /// "raise the budget" is a legitimate answer, and the next step has to say so rather than
+    /// sending the reader to the producer.
+    #[test]
+    fn the_next_step_points_at_the_budget() {
+        let v = summary_for(&every_variant()[0], "sha256:abc");
+        let next = v["next_step"].as_str().unwrap_or_default();
+        assert!(
+            next.contains("ceiling") || next.contains("smaller bundle"),
+            "next step must name the budget lever: {next}"
+        );
+    }
+}

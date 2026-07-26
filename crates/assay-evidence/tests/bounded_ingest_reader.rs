@@ -40,6 +40,44 @@ fn bundle_bytes() -> Vec<u8> {
     buffer
 }
 
+/// Rebuild a bundle without one member, so an absent-file case is a real archive rather than a
+/// truncated one. Repacking keeps every other member byte-identical.
+fn strip_member(bundle: &[u8], drop_path: &str) -> Vec<u8> {
+    use flate2::read::GzDecoder;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+
+    let mut kept: Vec<(String, Vec<u8>)> = Vec::new();
+    {
+        let mut ar = tar::Archive::new(GzDecoder::new(Cursor::new(bundle.to_vec())));
+        for entry in ar.entries().expect("entries") {
+            let mut e = entry.expect("entry");
+            let path = e.path().expect("path").to_string_lossy().to_string();
+            let mut data = Vec::new();
+            e.read_to_end(&mut data).expect("read member");
+            if path != drop_path {
+                kept.push((path, data));
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    {
+        let enc = GzEncoder::new(&mut out, Compression::default());
+        let mut tar = tar::Builder::new(enc);
+        for (path, data) in kept {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tar.append_data(&mut header, &path, Cursor::new(data))
+                .expect("append");
+        }
+        tar.into_inner().expect("tar").finish().expect("gz");
+    }
+    out
+}
+
 fn limits_with_bundle_ceiling(max_bundle_bytes: u64) -> VerifyLimits {
     VerifyLimits {
         max_bundle_bytes,
@@ -188,23 +226,50 @@ fn short_reads_cannot_walk_past_the_ceiling() {
         .expect("and must still be accepted when it fits");
 }
 
+/// The ceiling counts bytes yielded, not bytes announced.
+///
+/// This was written as a "hostile metadata" case, which overclaimed: `Read` has no size hint, so
+/// a plain reader has no metadata to lie with and the wrapper below announced nothing. The narrow
+/// and true statement is that no source metadata participates in the ceiling at all; it is a
+/// running count of what the reader handed over. A chunked source that delivers in irregular
+/// pieces is the shape that could plausibly desynchronise such a count, so that is what is tested.
 #[test]
-fn a_lying_size_hint_does_not_widen_the_ceiling() {
-    // Hostile metadata: a reader that advertises a tiny size while delivering a large body. The
-    // ceiling has to come from bytes actually yielded, never from what the source claims.
-    struct LiesAboutItsSize(Cursor<Vec<u8>>);
-    impl Read for LiesAboutItsSize {
+fn a_chunked_source_cannot_desynchronise_the_count() {
+    struct Chunked {
+        inner: Cursor<Vec<u8>>,
+        sizes: Vec<usize>,
+        next: usize,
+    }
+    impl Read for Chunked {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            self.0.read(buf)
+            if buf.is_empty() {
+                return Ok(0);
+            }
+            let want = self.sizes[self.next % self.sizes.len()].min(buf.len());
+            self.next += 1;
+            self.inner.read(&mut buf[..want.max(1)])
         }
     }
 
     let bytes = bundle_bytes();
+    let source = Chunked {
+        inner: Cursor::new(bytes.clone()),
+        sizes: vec![1, 7, 3, 64, 2],
+        next: 0,
+    };
     let one_short = limits_with_bundle_ceiling(bytes.len() as u64 - 1);
     assert!(
-        BundleReader::open_with_limits(LiesAboutItsSize(Cursor::new(bytes)), one_short).is_err(),
-        "the ceiling must count delivered bytes, not advertised ones"
+        BundleReader::open_with_limits(source, one_short).is_err(),
+        "irregular chunk sizes must not let the source past the ceiling"
     );
+
+    let source = Chunked {
+        inner: Cursor::new(bytes.clone()),
+        sizes: vec![1, 7, 3, 64, 2],
+        next: 0,
+    };
+    BundleReader::open_with_limits(source, limits_with_bundle_ceiling(bytes.len() as u64))
+        .expect("the same chunked source must be accepted at exactly the ceiling");
 }
 
 /// A bundle whose `events.ndjson` is highly compressible. Compressed it sits far inside
@@ -355,4 +420,206 @@ fn an_expansion_refusal_classifies_as_decode_not_source() {
     let ve = err.downcast_ref::<VerifyError>().expect("typed");
     assert_eq!(ve.class, ErrorClass::Limits);
     assert_eq!(ve.code, ErrorCode::LimitDecodeBytes);
+}
+
+/// The ceiling has to cover the whole source, not the prefix the parser happens to consume.
+///
+/// gzip and tar stop once the archive is logically complete, so a valid bundle followed by an
+/// arbitrary suffix used to pass a ceiling far below the real input size: the trailing bytes were
+/// never requested and therefore never counted. A 10 KiB suffix cleared a 598 byte ceiling.
+#[test]
+fn a_valid_bundle_with_an_unread_suffix_is_measured_whole() {
+    use assay_evidence::bundle::writer::verify_bundle_with_limits;
+
+    let valid = bundle_bytes();
+    let mut with_suffix = valid.clone();
+    with_suffix.extend(std::iter::repeat_n(b'Z', 10_000));
+    let total = with_suffix.len() as u64;
+
+    // Exactly the real input size is accepted, including the suffix nothing parses.
+    verify_bundle_with_limits(
+        Cursor::new(with_suffix.clone()),
+        limits_with_bundle_ceiling(total),
+    )
+    .expect("a source of exactly the ceiling must be accepted, suffix included");
+
+    // One byte under is refused, which is only observable once the suffix is counted.
+    let err = match verify_bundle_with_limits(
+        Cursor::new(with_suffix),
+        limits_with_bundle_ceiling(total - 1),
+    ) {
+        Ok(_) => panic!("the suffix must count towards the source ceiling"),
+        Err(e) => e,
+    };
+    let ve = err.downcast_ref::<VerifyError>().expect("typed");
+    assert_eq!(ve.class, ErrorClass::Limits);
+    assert_eq!(ve.code, ErrorCode::LimitBundleBytes);
+
+    // Control: the bundle without its suffix still verifies under a ceiling that fits it.
+    verify_bundle_with_limits(
+        Cursor::new(valid.clone()),
+        limits_with_bundle_ceiling(valid.len() as u64),
+    )
+    .expect("the bundle alone must still verify");
+}
+
+/// `events.ndjson` on the unverified path used to be read whole under `max_events_bytes` and only
+/// then checked for line length and event count, so the allocation happened before the dimensions
+/// governing it were consulted. `max_json_depth` never reached event lines on this path at all,
+/// and an absent member read as a well-formed bundle with zero events.
+mod unverified_events {
+    use super::*;
+    use assay_evidence::bundle::writer::BundleWriter;
+
+    fn bundle_of(count: u64, pad: usize, depth: usize) -> Vec<u8> {
+        let mut buf = Vec::new();
+        {
+            let mut w = BundleWriter::new(&mut buf);
+            for seq in 0..count {
+                let mut payload = serde_json::json!({ "pad": "A".repeat(pad) });
+                for _ in 0..depth {
+                    payload = serde_json::json!({ "n": payload });
+                }
+                w.add_event(EvidenceEvent::new(
+                    "assay.test",
+                    "urn:assay:test",
+                    "run_unverified",
+                    seq,
+                    payload,
+                ));
+            }
+            w.finish().expect("write bundle");
+        }
+        buf
+    }
+
+    fn refuse(bytes: &[u8], limits: VerifyLimits) -> (ErrorClass, ErrorCode) {
+        let err =
+            match BundleReader::open_unverified_with_limits(Cursor::new(bytes.to_vec()), limits) {
+                Ok(_) => panic!("the unverified path must apply this ceiling"),
+                Err(e) => e,
+            };
+        let ve = err
+            .downcast_ref::<VerifyError>()
+            .expect("an unverified refusal must be typed");
+        (ve.class, ve.code)
+    }
+
+    #[test]
+    fn a_deeply_nested_event_is_refused_at_the_caller_depth() {
+        let bytes = bundle_of(1, 8, 12);
+        assert_eq!(
+            refuse(
+                &bytes,
+                VerifyLimits {
+                    max_json_depth: 4,
+                    ..VerifyLimits::default()
+                }
+            ),
+            (ErrorClass::Limits, ErrorCode::LimitJsonDepth)
+        );
+        BundleReader::open_unverified_with_limits(Cursor::new(bytes), VerifyLimits::default())
+            .expect("the same events must open under the default depth");
+    }
+
+    #[test]
+    fn a_line_over_the_ceiling_is_refused() {
+        let bytes = bundle_of(1, 512, 0);
+        assert_eq!(
+            refuse(
+                &bytes,
+                VerifyLimits {
+                    max_line_bytes: 64,
+                    ..VerifyLimits::default()
+                }
+            ),
+            (ErrorClass::Limits, ErrorCode::LimitLineBytes)
+        );
+        BundleReader::open_unverified_with_limits(Cursor::new(bytes), VerifyLimits::default())
+            .expect("the same line must open under the default ceiling");
+    }
+
+    #[test]
+    fn one_event_over_the_count_ceiling_is_refused() {
+        let bytes = bundle_of(4, 8, 0);
+        assert_eq!(
+            refuse(
+                &bytes,
+                VerifyLimits {
+                    max_events: 3,
+                    ..VerifyLimits::default()
+                }
+            ),
+            (ErrorClass::Limits, ErrorCode::LimitTotalEvents)
+        );
+        // Exactly the ceiling is accepted, so the refusal above is the boundary and not the shape.
+        BundleReader::open_unverified_with_limits(
+            Cursor::new(bytes),
+            VerifyLimits {
+                max_events: 4,
+                ..VerifyLimits::default()
+            },
+        )
+        .expect("exactly the event ceiling must be accepted");
+    }
+
+    /// An absent member is not an empty one. Accepting a stripped archive as a zero-event run is
+    /// the difference between "there were no events" and "the events were removed".
+    #[test]
+    fn a_bundle_without_events_ndjson_is_refused() {
+        let full = bundle_of(1, 8, 0);
+        let stripped = super::strip_member(&full, "events.ndjson");
+
+        let err = match BundleReader::open_unverified_with_limits(
+            Cursor::new(stripped),
+            VerifyLimits::default(),
+        ) {
+            Ok(_) => panic!("a bundle without events.ndjson must not read as an empty run"),
+            Err(e) => e,
+        };
+        let ve = err.downcast_ref::<VerifyError>().expect("typed");
+        assert_eq!(ve.class, ErrorClass::Contract);
+        assert_eq!(ve.code, ErrorCode::ContractMissingFile);
+
+        BundleReader::open_unverified_with_limits(Cursor::new(full), VerifyLimits::default())
+            .expect("the intact bundle must still open");
+    }
+}
+
+/// The existing expansion test goes through `open_unverified_with_limits`, which reaches peek but
+/// also runs the reader's own second pass, so it cannot show which of the two refused. This calls
+/// `BundleInfo::peek_with_limits` directly and pins that peek carries its own decode ceiling.
+///
+/// The ceiling has to sit under what peek actually expands. Peek stops once it has the manifest,
+/// which the writer emits first, so a large trailing member never reaches the decoder however big
+/// it is: a ceiling above the manifest is simply never crossed. The bound is real within the
+/// prefix peek reads, and that is what this pins.
+#[test]
+fn peek_alone_refuses_expansion_past_the_decode_ceiling() {
+    let bytes = compressible_bundle(400);
+    let limits = VerifyLimits {
+        max_bundle_bytes: bytes.len() as u64 * 8,
+        max_decode_bytes: 64,
+        ..VerifyLimits::default()
+    };
+
+    let err = match assay_evidence::bundle::reader::BundleInfo::peek_with_limits(
+        Cursor::new(bytes.clone()),
+        limits,
+    ) {
+        Ok(_) => panic!("peek must refuse expansion past its own decode ceiling"),
+        Err(e) => e,
+    };
+    let ve = err
+        .downcast_ref::<VerifyError>()
+        .expect("a peek expansion refusal must be typed");
+    assert_eq!(ve.class, ErrorClass::Limits);
+    assert_eq!(ve.code, ErrorCode::LimitDecodeBytes);
+
+    // Acceptance twin: the same bundle under a decode ceiling that accommodates it.
+    assay_evidence::bundle::reader::BundleInfo::peek_with_limits(
+        Cursor::new(bytes),
+        VerifyLimits::default(),
+    )
+    .expect("the same bundle must peek under the default decode ceiling");
 }

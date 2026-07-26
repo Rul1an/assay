@@ -37,54 +37,80 @@ pub use writer_next::errors::{ErrorClass, ErrorCode, VerifyError};
 /// oversized path or an unbounded line was handed back to the caller, who discovered it only
 /// while iterating, if at all. Skipping verification means skipping the integrity check, not the
 /// resource budget.
-pub(crate) fn check_entry_path_len(path: &str, max_path_len: usize) -> Result<(), VerifyError> {
-    if path.len() > max_path_len {
+/// `raw_len` is the length in bytes of the path as the archive carries it, taken before any lossy
+/// conversion. `to_string_lossy` emits three bytes for every invalid one and `to_str` yields
+/// nothing at all, so measuring the converted form measures something the archive never sent.
+///
+/// What this ceiling is, stated narrowly: a post-tar bound on the logical path. It is not a bound
+/// on what the tar layer allocates to produce that path. A GNU or PAX long name arrives as its
+/// own member and is materialized by the reader before this check ever runs; that allocation is
+/// bounded by the decode ceiling, not by this one. Closing that gap would mean owning the header
+/// parse, which is a tar rewrite and is deliberately not done here.
+pub(crate) fn check_entry_path_len(raw_len: usize, max_path_len: usize) -> Result<(), VerifyError> {
+    if raw_len > max_path_len {
         return Err(VerifyError::new(
             ErrorClass::Limits,
             ErrorCode::LimitPathLength,
-            format!(
-                "Entry path length {} exceeds limit {}",
-                path.len(),
-                max_path_len
-            ),
+            // Value-free: the length is chosen by the archive. The dimension and the configured
+            // ceiling are what a reader can act on.
+            format!("Entry path exceeds the configured maximum length of {max_path_len}"),
         ));
     }
     Ok(())
 }
 
-/// Scan already-materialized NDJSON against the per-line and total-event ceilings.
+/// Stream `events.ndjson` under the per-line, event-count and JSON-depth ceilings.
 ///
-/// The bytes are bounded by `max_events_bytes` before they get here, so this is about the shape
-/// within that budget rather than about the allocation.
-pub(crate) fn check_events_shape(
-    events: &[u8],
-    max_line_bytes: usize,
-    max_events: usize,
-) -> Result<(), VerifyError> {
+/// The previous shape read the whole member into memory under `max_events_bytes` and only then
+/// checked line length and event count, so the allocation happened before the dimensions that
+/// govern it were consulted, and `max_json_depth` never reached event lines on this path at all.
+/// Reading line by line refuses at the first line that crosses a ceiling.
+pub(crate) fn read_events_bounded<R: std::io::Read>(
+    reader: R,
+    out: &mut Vec<u8>,
+    limits: VerifyLimits,
+) -> anyhow::Result<()> {
+    let mut reader = std::io::BufReader::new(reader);
     let mut count = 0usize;
-    for line in events.split(|b| *b == b'\n') {
-        if line.is_empty() {
+    loop {
+        let mut line = Vec::new();
+        let n =
+            writer_next::tar_read::read_line_bounded(&mut reader, &mut line, limits.max_line_bytes)
+                .map_err(classify_reader_io)?;
+        if n == 0 {
+            break;
+        }
+        let payload = line.strip_suffix(b"\n").unwrap_or(&line);
+        if payload.is_empty() {
+            out.extend_from_slice(&line);
             continue;
         }
-        if line.len() > max_line_bytes {
-            return Err(VerifyError::new(
-                ErrorClass::Limits,
-                ErrorCode::LimitLineBytes,
-                format!(
-                    "Event line length {} exceeds limit {}",
-                    line.len(),
-                    max_line_bytes
-                ),
-            ));
-        }
+
         count += 1;
-        if count > max_events {
-            return Err(VerifyError::new(
+        if count > limits.max_events {
+            return Err(anyhow::Error::new(VerifyError::new(
                 ErrorClass::Limits,
                 ErrorCode::LimitTotalEvents,
-                format!("Event count exceeds limit {}", max_events),
-            ));
+                format!(
+                    "Event count exceeds the configured maximum of {}",
+                    limits.max_events
+                ),
+            )));
         }
+
+        // The caller's nesting ceiling applies to events here too. Verified reads apply it; an
+        // unverified read used to hand the line back unchecked.
+        let text = std::str::from_utf8(payload).map_err(|e| {
+            anyhow::Error::new(VerifyError::new(
+                ErrorClass::Contract,
+                ErrorCode::ContractInvalidJson,
+                format!("Invalid UTF-8 in event: {e}"),
+            ))
+        })?;
+        crate::json_strict::validate_json_strict_with_depth(text, limits.max_json_depth)
+            .map_err(|e| classify_strict_json(e, "Event", limits.max_json_depth))?;
+
+        out.extend_from_slice(&line);
     }
     Ok(())
 }
@@ -250,21 +276,24 @@ mod tests {
             max_events: 0, // Should fail (bundle has 1 event)
             ..VerifyLimits::default()
         };
-        let err = verify_bundle_with_limits(Cursor::new(&buffer), strict_count_limit);
-        assert!(err.is_err());
-        assert!(err
-            .unwrap_err()
-            .to_string()
-            .contains("Event count exceeds limit"));
+        // Assert on the typed code, not on the rendered text. The messages are diagnostics and
+        // are deliberately value-free; pinning them here would make prose a contract again.
+        let err = verify_bundle_with_limits(Cursor::new(&buffer), strict_count_limit)
+            .expect_err("a count ceiling of zero must refuse a one-event bundle");
+        let ve = err.downcast_ref::<VerifyError>().expect("typed");
+        assert_eq!(ve.class, ErrorClass::Limits);
+        assert_eq!(ve.code, ErrorCode::LimitTotalEvents);
 
         // 2. Test File Size Limit
         let strict_size_limit = VerifyLimits {
             max_events_bytes: 10, // Should fail (events are larger)
             ..VerifyLimits::default()
         };
-        let err = verify_bundle_with_limits(Cursor::new(&buffer), strict_size_limit);
-        assert!(err.is_err());
-        assert!(err.unwrap_err().to_string().contains("exceeds limit"));
+        let err = verify_bundle_with_limits(Cursor::new(&buffer), strict_size_limit)
+            .expect_err("an events-size ceiling of ten bytes must refuse this bundle");
+        let ve = err.downcast_ref::<VerifyError>().expect("typed");
+        assert_eq!(ve.class, ErrorClass::Limits);
+        assert_eq!(ve.code, ErrorCode::LimitFileSize);
     }
 
     #[test]

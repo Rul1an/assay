@@ -15,7 +15,8 @@
 //! or the `into_events()` consuming pattern in a future version.
 
 use crate::bundle::writer::{
-    check_entry_path_len, check_events_shape, classify_reader_io, classify_strict_json,
+    check_entry_path_len, classify_reader_io, classify_strict_json, read_events_bounded,
+    ErrorClass, ErrorCode, VerifyError,
 };
 use crate::bundle::writer::{verify_bundle_with_limits, Manifest, VerifyLimits};
 use crate::json_strict::validate_json_strict_with_depth;
@@ -135,24 +136,36 @@ impl BundleReader {
         let mut archive = tar::Archive::new(decoder);
 
         let mut events_content = Vec::new();
+        let mut events_found = false;
 
         for entry in archive.entries().map_err(classify_reader_io)? {
             let entry = entry.map_err(classify_reader_io)?;
+            // Measure the path on the bytes the archive carries, before any conversion.
+            // `to_string_lossy` emits three bytes for every invalid one, so a check on the
+            // converted string measures something the archive never sent.
+            check_entry_path_len(entry.path_bytes().len(), limits.max_path_len)?;
             let path = entry.path()?.to_string_lossy().to_string();
-            check_entry_path_len(&path, limits.max_path_len)?;
 
             if path == "events.ndjson" {
+                events_found = true;
                 // `LimitFileSize` rather than an invented tag: the classification vocabulary is
                 // `ErrorCode`, and a per-member ceiling is what `verify.rs` already reports under
                 // that code. A tag with no matching variant cannot be classified by any caller.
-                let mut entry =
+                let entry =
                     LimitReader::new(entry, limits.max_events_bytes, LimitKind::MemberBytes);
-                entry
-                    .read_to_end(&mut events_content)
-                    .map_err(classify_reader_io)?;
-                check_events_shape(&events_content, limits.max_line_bytes, limits.max_events)?;
+                read_events_bounded(entry, &mut events_content, limits)?;
                 break;
             }
+        }
+
+        // An absent member is not an empty one. Accepting a bundle with no `events.ndjson` as a
+        // bundle with zero events let a stripped archive read as a well-formed empty run.
+        if !events_found {
+            return Err(anyhow::Error::new(VerifyError::new(
+                ErrorClass::Contract,
+                ErrorCode::ContractMissingFile,
+                "events.ndjson missing from bundle".to_string(),
+            )));
         }
 
         Ok(Self {
@@ -242,8 +255,8 @@ impl BundleInfo {
 
         for entry in archive.entries().map_err(classify_reader_io)? {
             let entry = entry.map_err(classify_reader_io)?;
+            check_entry_path_len(entry.path_bytes().len(), limits.max_path_len)?;
             let path = entry.path()?.to_string_lossy().to_string();
-            check_entry_path_len(&path, limits.max_path_len)?;
 
             if path == "manifest.json" {
                 // Read manifest to string for strict validation

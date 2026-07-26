@@ -1,4 +1,4 @@
-use crate::bundle::writer::strict_json_error;
+use crate::bundle::writer::{check_entry_path_len, strict_json_error};
 use crate::crypto::id::{compute_content_hash, compute_run_root, compute_stream_id};
 use crate::json_strict::validate_json_strict_with_depth;
 use crate::types::EvidenceEvent;
@@ -95,8 +95,32 @@ pub fn verify_bundle<R: Read>(reader: R) -> Result<VerifyResult> {
 
 /// Verify a bundle with explicit resource limits.
 pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<VerifyResult> {
-    let reader = EintrReader::new(reader);
-    let reader = LimitReader::new(reader, limits.max_bundle_bytes, LimitKind::SourceBytes);
+    // Snapshot the whole source under the ceiling before parsing anything.
+    //
+    // Streaming the ceiling into the gzip/tar walker only bounds the prefix those layers choose
+    // to consume. They stop once the archive is logically complete, so a valid bundle followed by
+    // an arbitrary suffix passed a ceiling far below the real input size: the trailing bytes were
+    // never requested and therefore never counted. `read_to_end` through the same ceiling counts
+    // everything the source actually holds.
+    let mut source = Vec::new();
+    LimitReader::new(
+        EintrReader::new(reader),
+        limits.max_bundle_bytes,
+        LimitKind::SourceBytes,
+    )
+    .read_to_end(&mut source)
+    .map_err(|e| {
+        let limit = classify_limit(&e);
+        apply_limit_class(VerifyError::from(e), limit, ErrorCode::IntegrityGzip)
+            .with_context("Bundle source")
+    })?;
+
+    verify_bundle_snapshot(&source, limits)
+}
+
+/// Verify a bundle from bytes already bounded and materialized by the caller.
+fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyResult> {
+    let reader = std::io::Cursor::new(source);
 
     let decoder = GzDecoder::new(reader);
     let limited_decoder =
@@ -121,21 +145,13 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
             let ve = apply_limit_class(VerifyError::from(e), limit, ErrorCode::IntegrityTar);
             ve.with_context(format!("Entry #{}", i))
         })?;
+        // Measure the path on the bytes the archive carries, before any conversion. `to_str`
+        // returns None for invalid UTF-8 and the fallback measured an empty string, so a name
+        // that is invalid on purpose skipped the ceiling entirely.
+        check_entry_path_len(entry.path_bytes().len(), limits.max_path_len)?;
+
         let path = entry.path().map_err(VerifyError::from)?.to_path_buf();
         let path_str = path.to_str().unwrap_or("");
-
-        if path_str.len() > limits.max_path_len {
-            return Err(VerifyError::new(
-                ErrorClass::Limits,
-                ErrorCode::LimitPathLength,
-                format!(
-                    "Path length {} exceeds limit {}",
-                    path_str.len(),
-                    limits.max_path_len
-                ),
-            )
-            .into());
-        }
 
         let header_size = entry.header().size().map_err(VerifyError::from)?;
 
@@ -149,9 +165,10 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
             return Err(VerifyError::new(
                 ErrorClass::Limits,
                 ErrorCode::LimitFileSize,
+                // Value-free: the member name and its declared size are archive-controlled.
+                // The dimension and the configured ceiling are what a reader can act on.
                 format!(
-                    "File '{}' declared size {} exceeds limit {}",
-                    path_str, header_size, max_size
+                    "A declared member size exceeds the configured maximum of {max_size} bytes"
                 ),
             )
             .into());
@@ -315,7 +332,10 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                     return Err(VerifyError::new(
                         ErrorClass::Limits,
                         ErrorCode::LimitTotalEvents,
-                        format!("Event count exceeds limit {}", limits.max_events),
+                        format!(
+                            "Event count exceeds the configured maximum of {}",
+                            limits.max_events
+                        ),
                     )
                     .into());
                 }

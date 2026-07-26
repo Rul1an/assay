@@ -102,11 +102,21 @@ pub(crate) fn classify_source_ceiling(err: &std::io::Error) -> Option<ReplayInge
 
 /// Same as [`classify_source_ceiling`] but for reads scoped to a single member (the manifest
 /// or an entry body).
+/// A member read sits on top of the decoder, so an overflow surfacing here is not necessarily a
+/// member overflow: the expansion ceiling trips through the same call. Only `MemberBytes` is a
+/// member refusal; every other dimension keeps its own classification, otherwise a decode ceiling
+/// is reported as if a single file were too large.
 pub(crate) fn classify_member_ceiling(err: &std::io::Error) -> Option<ReplayIngestError> {
     let cause = LimitExceeded::from_io(err)?;
-    Some(ReplayIngestError::MemberCeiling {
-        kind: cause.kind,
-        limit: cause.limit,
+    Some(match cause.kind {
+        LimitKind::MemberBytes => ReplayIngestError::MemberCeiling {
+            kind: cause.kind,
+            limit: cause.limit,
+        },
+        other => ReplayIngestError::SourceCeiling {
+            kind: other,
+            limit: cause.limit,
+        },
     })
 }
 

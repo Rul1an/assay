@@ -77,7 +77,10 @@ pub struct VerifiedBundle {
 /// agree to that one snapshot: the digest published as provenance, the bundle that is parsed, and
 /// the verdict. Digesting a path and separately opening it leaves a window in which those three
 /// describe different bytes.
-pub fn read_verify_bounded<R: Read>(r: R, limits: ReplayLimits) -> Result<VerifiedBundle> {
+pub fn read_verify_bounded<R: Read>(
+    r: R,
+    limits: ReplayLimits,
+) -> Result<VerifiedBundle, SnapshotError> {
     let mut source = Vec::new();
     LimitReader::new(r, limits.max_source_bytes, LimitKind::SourceBytes)
         .read_to_end(&mut source)
@@ -85,21 +88,59 @@ pub fn read_verify_bounded<R: Read>(r: R, limits: ReplayLimits) -> Result<Verifi
             // Classify before wrapping. `.context` on the raw io error would bury the typed cause
             // under an anyhow layer, so the recommended entrypoint would return a weaker contract
             // than the reader it is meant to replace.
-            classify_source_ceiling(&err)
+            let e = classify_source_ceiling(&err)
                 .map(anyhow::Error::from)
-                .unwrap_or_else(|| anyhow::Error::from(err).context("read bundle source"))
+                .unwrap_or_else(|| anyhow::Error::from(err).context("read bundle source"));
+            // No digest: the source itself could not be read, so there is nothing to attest.
+            SnapshotError {
+                source_digest: None,
+                error: e,
+            }
         })?;
 
+    // From here the source is known, so every later failure can still name the bytes it happened
+    // on. Losing the digest to "sha256:unknown" on a parse error discards provenance we already
+    // hold about the exact input that failed.
     let source_digest = format!("sha256:{}", hex::encode(Sha256::digest(&source)));
-    let read = read_bundle_tar_gz_with_limits(std::io::Cursor::new(&source), limits)
-        .context("read bundle")?;
-    let verify = verify_read_bundle(&read)?;
+
+    let read =
+        read_bundle_tar_gz_with_limits(std::io::Cursor::new(&source), limits).map_err(|error| {
+            SnapshotError {
+                source_digest: Some(source_digest.clone()),
+                error,
+            }
+        })?;
+    let verify = verify_read_bundle(&read).map_err(|error| SnapshotError {
+        source_digest: Some(source_digest.clone()),
+        error,
+    })?;
 
     Ok(VerifiedBundle {
         read,
         verify,
         source_digest,
     })
+}
+
+/// A bounded-snapshot failure, carrying the digest when the source was read.
+#[derive(Debug)]
+pub struct SnapshotError {
+    /// `sha256:` over the source, present whenever the source itself was read successfully.
+    pub source_digest: Option<String>,
+    pub error: anyhow::Error,
+}
+
+impl std::fmt::Display for SnapshotError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.error)
+    }
+}
+
+impl SnapshotError {
+    /// The typed ingest refusal behind this failure, if it was one.
+    pub fn ingest_refusal(&self) -> Option<&crate::replay::bundle::ReplayIngestError> {
+        self.error.downcast_ref()
+    }
 }
 
 /// Verify an already-read bundle.

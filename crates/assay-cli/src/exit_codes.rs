@@ -74,6 +74,10 @@ pub enum ReasonCode {
     EPolicyParse,
     /// Replay bundle missing required dependency for offline replay
     EReplayMissingDependency,
+    /// A replay ingest ceiling refused the bundle. Distinct from a parse failure: the bundle may
+    /// be well-formed and simply larger than the configured budget, which is an operator decision
+    /// rather than a producer defect.
+    EReplayLimitExceeded,
     /// Invalid command-line arguments
     EInvalidArgs,
 
@@ -126,6 +130,7 @@ impl ReasonCode {
             | ReasonCode::EMissingConfig
             | ReasonCode::EBaselineInvalid
             | ReasonCode::EPolicyParse
+            | ReasonCode::EReplayLimitExceeded
             | ReasonCode::EReplayMissingDependency
             | ReasonCode::EInvalidArgs => EXIT_CONFIG_ERROR,
 
@@ -176,6 +181,7 @@ impl ReasonCode {
             ReasonCode::EBaselineInvalid => "E_BASELINE_INVALID",
             ReasonCode::EPolicyParse => "E_POLICY_PARSE",
             ReasonCode::EReplayMissingDependency => "E_REPLAY_MISSING_DEPENDENCY",
+            ReasonCode::EReplayLimitExceeded => "E_REPLAY_LIMIT_EXCEEDED",
             ReasonCode::EInvalidArgs => "E_INVALID_ARGS",
             ReasonCode::EJudgeUnavailable => "E_JUDGE_UNAVAILABLE",
             ReasonCode::ERateLimit => "E_RATE_LIMIT",
@@ -205,6 +211,10 @@ impl ReasonCode {
                     "Check trace file exists: {}",
                     context.unwrap_or("<trace.jsonl>")
                 )
+            }
+            ReasonCode::EReplayLimitExceeded => {
+                "Raise the replay ingest ceiling that was named, or supply a smaller bundle"
+                    .to_string()
             }
             ReasonCode::EMissingConfig => "Run: assay init to create a config file".to_string(),
             ReasonCode::EBaselineInvalid => {

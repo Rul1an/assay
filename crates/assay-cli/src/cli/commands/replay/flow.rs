@@ -33,16 +33,26 @@ pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     };
     let snapshot = match read_verify_bounded(file, ReplayLimits::default()) {
         Ok(snapshot) => snapshot,
-        Err(err) => {
-            return write_replay_failure(
-                &args,
-                "sha256:unknown",
-                replay_mode,
-                None,
-                ReasonCode::ECfgParse,
-                format!("failed to read replay bundle: {}", err),
-                None,
-            );
+        Err(failure) => {
+            // Match the typed refusal before rendering. Formatting first and reporting everything
+            // as a parse error told an operator to fix the producer when the answer may be to
+            // raise a budget, and discarded the digest we already held for the exact bytes that
+            // failed.
+            let (reason, detail) = match failure.ingest_refusal() {
+                Some(refusal) => (
+                    ReasonCode::EReplayLimitExceeded,
+                    format!("replay bundle refused by an ingest ceiling: {refusal}"),
+                ),
+                None => (
+                    ReasonCode::ECfgParse,
+                    format!("failed to read replay bundle: {}", failure.error),
+                ),
+            };
+            let digest = failure
+                .source_digest
+                .clone()
+                .unwrap_or_else(|| "sha256:unknown".to_string());
+            return write_replay_failure(&args, &digest, replay_mode, None, reason, detail, None);
         }
     };
     let bundle_digest = snapshot.source_digest.clone();

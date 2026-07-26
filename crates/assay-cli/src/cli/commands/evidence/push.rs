@@ -67,8 +67,11 @@ pub async fn cmd_push(args: PushArgs) -> Result<i32> {
         result.manifest.bundle_id
     };
 
-    // The upload takes ownership of the same buffer that was just checked; cloning it doubled
-    // peak memory for a bundle that may sit right under the ceiling.
+    // The upload takes ownership of the same buffer that was just checked rather than cloning it.
+    // Stated narrowly, because the earlier note overclaimed: this removes one copy, not all of
+    // them. `BundleReader` still materializes its own `Vec` internally, so a bundle near the
+    // ceiling is held more than once regardless. Both copies are bounded; what changed is that
+    // one of them is no longer gratuitous.
     let bytes = Bytes::from(buffer);
 
     // 3. Connect to store
