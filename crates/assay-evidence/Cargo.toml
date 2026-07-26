@@ -58,7 +58,7 @@ getrandom = { version = "0.4", features = ["sys_rng"] }
 jsonschema.workspace = true
 tempfile = "3"
 assert_fs = "1.1"
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
 criterion = "0.8"
 
 [[bench]]
