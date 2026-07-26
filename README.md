@@ -160,6 +160,24 @@ Repositories that compose with Assay's evidence layer:
 - [gateway-evidence-replay](https://github.com/Rul1an/gateway-evidence-replay) — deterministic offline replay verifier for gateway-path evidence bundles.
 - [RGE-Bench](https://github.com/rge-bench/rge-bench) — a neutral, externally reproduced conformance kit for evidence reviewability, maintained separately under its own machine-checked neutrality guard.
 
+## Open profile: privileged-mcp-action/v0
+
+[`privileged-mcp-action/v0`](docs/profiles/privileged-mcp-action/v0.md)
+is a composition and verification contract over evidence records that already exist: what a
+privileged MCP tool call decided, what was observed of its effect, and what stays unproven. It adds
+no new envelope and no aggregate verdict.
+
+It ships with a [13-vector conformance corpus](conformance/privileged-mcp-action-v0)
+(5 accept, 8 reject) whose digest is a **candidate**: it is not called reproduced until a non-author
+implementation derives the expected outcomes from the specification text alone.
+
+**That reproduction is open, and the invitation is real:
+[#1840](https://github.com/Rul1an/assay/issues/1840).** Any language, any stack. The invitation
+names the exact commit the current digest describes, and the
+[corpus README](conformance/privileged-mcp-action-v0/README.md) says which inputs are in bounds,
+which two implementation surfaces are not, and gives a sparse checkout that materialises only the
+inputs.
+
 ## Contributing
 
 ```bash
