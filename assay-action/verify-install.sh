@@ -13,12 +13,18 @@ if [[ -z "$EXPECTED_VERSION" || "$EXPECTED_VERSION" == *$'\n'* || "$EXPECTED_VER
   exit 1
 fi
 
-printf '%s\n' "$(dirname "$BINARY")" >>"$GITHUB_PATH"
-INSTALLED_VERSION="$("$BINARY" --version | awk '{print $2}')"
+INSTALLED_OUTPUT="$("$BINARY" --version 2>/dev/null || true)"
+INSTALLED_VERSION=""
+if [[ "$INSTALLED_OUTPUT" != *$'\n'* &&
+  "$INSTALLED_OUTPUT" != *$'\r'* &&
+  "$INSTALLED_OUTPUT" =~ ^assay[[:space:]]+([0-9A-Za-z.+-]+)$ ]]; then
+  INSTALLED_VERSION="${BASH_REMATCH[1]}"
+fi
 if [[ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]]; then
   echo "::error::Assay installation verification failed: expected ${EXPECTED_VERSION}, got ${INSTALLED_VERSION:-unknown}"
   exit 1
 fi
 
+printf '%s\n' "$(dirname "$BINARY")" >>"$GITHUB_PATH"
 "$BINARY" --version
 echo "installed=true" >>"$GITHUB_OUTPUT"

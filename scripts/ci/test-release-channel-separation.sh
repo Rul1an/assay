@@ -145,6 +145,33 @@ fi
 require_literal_from_path "$TMP_DIR/action-verify-mismatch.log" \
   "expected 2.1, got 2.1.0"
 
+MALFORMED_INSTALLED_VERSION=$'3.35.0\nx resolved_version=v1\nx resolved_version_plain=1.1.0'
+: >"$TMP_DIR/action-malformed-installed.out"
+FAKE_ASSAY_VERSION="$MALFORMED_INSTALLED_VERSION" \
+  GITHUB_OUTPUT="$TMP_DIR/action-malformed-installed.out" \
+  PATH="$TMP_DIR/bin:$PATH" \
+  bash "$REPO_ROOT/assay-action/resolve-version.sh" "$VALID_TAG" \
+  >"$TMP_DIR/action-malformed-installed.log" 2>&1
+require_literal_from_path "$TMP_DIR/action-malformed-installed.out" \
+  "resolved_version=$VALID_TAG"
+require_literal_from_path "$TMP_DIR/action-malformed-installed.out" \
+  "resolved_version_plain=${VALID_TAG#v}"
+require_literal_from_path "$TMP_DIR/action-malformed-installed.out" "skip_install=false"
+if grep -Fq -- "resolved_version=v1" "$TMP_DIR/action-malformed-installed.out"; then
+  echo "assay-action let malformed installed-version output overwrite validated outputs" >&2
+  exit 1
+fi
+if grep -Fq -- "resolved_version_plain=1.1.0" "$TMP_DIR/action-malformed-installed.out"; then
+  echo "assay-action retained injected output from a malformed installed binary" >&2
+  exit 1
+fi
+require_literal_from_path "$TMP_DIR/action-malformed-installed.log" \
+  "Assay already installed: unknown"
+if [[ -s "$TMP_DIR/action-path-mismatch.out" ]]; then
+  echo "assay-action exported a rejected binary directory to GITHUB_PATH" >&2
+  exit 1
+fi
+
 for INJECTED_VERSION in $'3.35.0\nskip_install=true' $'3.35.0\rskip_install=true'; do
   : >"$TMP_DIR/action-injected.out"
   if GITHUB_OUTPUT="$TMP_DIR/action-injected.out" PATH="$TMP_DIR/bin:$PATH" \

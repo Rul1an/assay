@@ -52,8 +52,13 @@ if ! command -v assay &>/dev/null; then
   exit 0
 fi
 
-INSTALLED_VERSION="$(assay --version 2>/dev/null | awk '{print $2}' || true)"
-echo "installed_version=$INSTALLED_VERSION" >>"$GITHUB_OUTPUT"
+INSTALLED_OUTPUT="$(assay --version 2>/dev/null || true)"
+INSTALLED_VERSION=""
+if [[ "$INSTALLED_OUTPUT" != *$'\n'* &&
+  "$INSTALLED_OUTPUT" != *$'\r'* &&
+  "$INSTALLED_OUTPUT" =~ ^assay[[:space:]]+([0-9A-Za-z.+-]+)$ ]]; then
+  INSTALLED_VERSION="${BASH_REMATCH[1]}"
+fi
 echo "Assay already installed: ${INSTALLED_VERSION:-unknown}"
 
 if [[ "$INSTALLED_VERSION" == "$EXPECTED_VERSION" ]]; then
