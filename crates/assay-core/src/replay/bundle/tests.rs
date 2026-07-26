@@ -1099,7 +1099,8 @@ fn two_spellings_of_one_path_are_a_duplicate() {
     );
 }
 
-/// A second manifest is refused before the first is read or replaced.
+/// A second manifest is refused when it is met, before it is read and before it replaces the
+/// first.
 ///
 /// The reader overwrote `manifest_data` on every `manifest.json` it met, so the last one won
 /// silently while non-manifest duplicates were refused. An archive could then present one

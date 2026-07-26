@@ -6,9 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - New reason code `E_REPLAY_LIMIT_EXCEEDED` (exit 2) for a replay bundle refused by an ingest
-  ceiling before it was parsed. Previously such a refusal was reported as `E_CFG_PARSE`, which
-  says the input is malformed and sends a reader off to fix the producer; a bundle over budget
-  may be perfectly well-formed, and raising the ceiling is a legitimate response. Backward
+  ceiling during bounded ingest, before replay execution. Previously such a refusal was reported
+  as `E_CFG_PARSE`, which is a malformed-input finding and sends a reader off to fix the
+  producer. A ceiling establishes only that a configured budget was exceeded; the read stopped
+  there, so whether the bundle is otherwise valid is unresolved, and adjusting the budget or
+  supplying a smaller bundle is a legitimate response. Backward
   compatible: a new registry string under the existing `reason_code_version` 1, registered in
   `docs/architecture/SPEC-PR-Gate-Outputs-v1.md` §5.1, so consumers branching on
   `(reason_code_version, reason_code)` fall back as the spec already requires. The refusal

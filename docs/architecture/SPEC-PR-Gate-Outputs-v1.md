@@ -184,7 +184,7 @@ Reason codes are **stable, machine-readable** strings. CI and scripts MAY branch
 | E_BASELINE_INVALID  | Baseline file invalid or missing. |
 | E_POLICY_PARSE      | Policy file parse error. |
 | E_REPLAY_MISSING_DEPENDENCY | Replay missing required offline dependency (e.g. uncached judge/cassette input). |
-| E_REPLAY_LIMIT_EXCEEDED | Replay bundle refused by an ingest ceiling before it was parsed. The bundle may be well-formed; the configured budget is what it exceeded, so raising the ceiling is a legitimate response. Distinct from `E_CFG_PARSE`, which means the input is malformed. Carries no verdict: no test ran. |
+| E_REPLAY_LIMIT_EXCEEDED | Replay bundle refused by an ingest ceiling during bounded ingest, before replay execution. The source, decode, member, path, entry-count and manifest-depth ceilings apply at different points of the read, so this is not a claim that nothing was parsed. It establishes only that a configured budget was exceeded; whether the bundle is otherwise valid is unresolved, because the read stopped. Adjusting the budget or supplying a smaller bundle is a legitimate response. Distinct from `E_CFG_PARSE`, which is a malformed-input finding. Carries no verdict: no test ran. |
 
 ### 5.2 Infra / Judge Unavailable (exit_code 3)
 

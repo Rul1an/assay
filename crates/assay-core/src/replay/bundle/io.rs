@@ -144,8 +144,9 @@ pub fn read_bundle_tar_gz_with_limits<R: Read>(r: R, limits: ReplayLimits) -> Re
         let path_str = path.to_string_lossy().replace('\\', "/");
 
         if path_str == paths::MANIFEST {
-            // Refuse before reading, so the manifest that is verified is unambiguously the one
-            // the archive declared first. Overwriting on a second entry let an archive show one
+            // Refuse on meeting a second manifest, before its body is read and before it can
+            // replace the first, so the manifest that is verified is unambiguously the one the
+            // archive declared first. Overwriting on a second entry let an archive show one
             // manifest to whoever inspects the head of the stream and a different one to the
             // verifier, while the non-manifest duplicates were caught and this one was not.
             if manifest_data.is_some() {

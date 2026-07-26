@@ -92,10 +92,12 @@ pub enum ReplayIngestError {
 /// A structural contract violation in the bundle, as opposed to a resource refusal.
 ///
 /// Kept out of [`ReplayIngestError`] deliberately. The CLI maps every ingest refusal to
-/// `E_REPLAY_LIMIT_EXCEEDED`, whose whole meaning is "the bundle is fine, your budget is not" —
-/// an operator can respond by raising a ceiling. A duplicate entry is the opposite: the bundle is
-/// malformed and no budget will fix it. Folding these into the same type would tell an operator
-/// to raise a limit against an archive that must instead be rejected.
+/// `E_REPLAY_LIMIT_EXCEEDED`, which says a configured budget was exceeded and nothing more:
+/// adjusting the budget or supplying a smaller bundle is a legitimate response, and it is not a
+/// malformed-input finding. It is also not a clean bill of health — the read stopped at the
+/// ceiling, so whatever lies past it was never examined. A duplicate entry is a different kind of
+/// answer: the archive is malformed and no budget will fix it. Folding these into one type would
+/// tell an operator to raise a limit against an archive that must instead be rejected.
 ///
 /// Value-free like the ingest refusals. The offending path is chosen by the archive, so echoing
 /// it hands an attacker a channel into the operator's terminal and into every log that ingests
@@ -107,7 +109,8 @@ pub enum ReplayContractError {
     #[error("replay bundle contains duplicate entry paths")]
     DuplicatePath,
 
-    /// A second `manifest.json`. Detected before the first is read or replaced, so the manifest
+    /// A second `manifest.json`. Detected when the second is met — after the first has been read,
+    /// but before the second is read and before it can replace the first — so the manifest
     /// that is verified is unambiguously the one the archive declared first.
     #[error("replay bundle contains more than one manifest")]
     DuplicateManifest,
