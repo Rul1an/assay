@@ -12,6 +12,10 @@ This document outlines the canonical checklist for releasing new versions of Ass
 - [ ] **Update Lockfile**: Run `cargo check --workspace` to update `Cargo.lock`.
 - [ ] **Changelog**: Update `CHANGELOG.md` with new features and fixes.
 - [ ] **Lints**: Run `cargo clippy --workspace --all-targets` to ensure no new warnings.
+- [ ] **Release parser toolchain**: Use Ruby `3.3.12` with Psych `5.1.2`.
+  GitHub Actions installs the pinned Ruby before running the release-channel
+  contract; the local version-line preflight fails closed on another parser
+  toolchain so YAML key semantics cannot drift between operator and CI.
 - [ ] **Version-line preflight**: Bind the workspace to the intended stable tag before it exists:
   ```bash
   EXPECTED_RELEASE=vX.Y.Z CHECK_VM=0 \
@@ -28,6 +32,7 @@ This document outlines the canonical checklist for releasing new versions of Ass
 - [ ] **Trusted Publishing**: Ensure GitHub Actions OIDC is enabled for the release tag on every current crates.io crate:
   - `assay-common`
   - `assay-registry`
+  - `assay-canonical`
   - `assay-evidence`
   - `assay-core`
   - `assay-metrics`
@@ -47,13 +52,14 @@ This document outlines the canonical checklist for releasing new versions of Ass
   - `assay-it` (distributed through PyPI wheels, not crates.io)
   - `assay-ebpf`
   - `assay-xtask`
+  - `gateway-evidence-replay`
 - [ ] **Public Crate Policy Check**: Run `bash scripts/ci/check-public-crate-policy.sh`.
 - [ ] **Token Scopes**: If using a token fallback, ensure it has `publish-update` scope.
 
 ### 3. Execution
 - [ ] **Tag**: Create and push the git tag.
   ```bash
-  git tag vX.Y.Z
+  git tag -a vX.Y.Z -m "Assay vX.Y.Z"
   git push origin vX.Y.Z
   ```
 - [ ] **Watch CI**: Monitor the `release.yml` workflow.

@@ -23,6 +23,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Ruby for release contract parser
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.3.12"
+          bundler-cache: false
+
       - name: Verify software and conformance release channels stay separate
         run: bash scripts/ci/test-release-channel-separation.sh
 
