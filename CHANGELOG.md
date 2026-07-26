@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- New reason code `E_REPLAY_LIMIT_EXCEEDED` (exit 2) for a replay bundle refused by an ingest
+  ceiling before it was parsed. Previously such a refusal was reported as `E_CFG_PARSE`, which
+  says the input is malformed and sends a reader off to fix the producer; a bundle over budget
+  may be perfectly well-formed, and raising the ceiling is a legitimate response. Backward
+  compatible: a new registry string under the existing `reason_code_version` 1, registered in
+  `docs/architecture/SPEC-PR-Gate-Outputs-v1.md` §5.1, so consumers branching on
+  `(reason_code_version, reason_code)` fall back as the spec already requires. The refusal
+  carries no verdict, and its message names only the configured ceiling.
+
 ### Changed
 - **Breaking (`assay sandbox`)**: a `--policy` that is named but cannot be loaded is now fatal.
   The run exits 2 with `E_POLICY_LOAD_FAILED_UNENFORCEABLE` and executes nothing, where it

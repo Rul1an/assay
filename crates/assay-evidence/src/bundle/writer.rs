@@ -100,11 +100,14 @@ pub(crate) fn read_events_bounded<R: std::io::Read>(
 
         // The caller's nesting ceiling applies to events here too. Verified reads apply it; an
         // unverified read used to hand the line back unchecked.
-        let text = std::str::from_utf8(payload).map_err(|e| {
+        // `Utf8Error`'s own rendering carries the byte index and the length of the bad sequence,
+        // both chosen by the input. An operator cannot act on either, and echoing them puts
+        // archive-influenced values in the log.
+        let text = std::str::from_utf8(payload).map_err(|_| {
             anyhow::Error::new(VerifyError::new(
                 ErrorClass::Contract,
                 ErrorCode::ContractInvalidJson,
-                format!("Invalid UTF-8 in event: {e}"),
+                "Event is not valid UTF-8".to_string(),
             ))
         })?;
         crate::json_strict::validate_json_strict_with_depth(text, limits.max_json_depth)
@@ -137,10 +140,53 @@ pub(crate) fn strict_json_error(
             ErrorCode::LimitJsonDepth,
             format!("{what} JSON nesting exceeds the configured maximum depth of {max_depth}"),
         ),
-        other => VerifyError::new(
+        // Every remaining variant renders attacker-chosen material through its own `Display`: the
+        // duplicated key and its JSON path, the byte position of a bad escape, the offending
+        // codepoint, serde's parse message with its line, column and token snippet, the observed
+        // key count, the observed string length. That text reaches an operator's terminal and
+        // every log that ingests the message, so it is replaced here with wording built only from
+        // constants. The blanket `Security:` prefix went with it: a duplicate object key is a
+        // producer defect, and framing it as a security event tells a reader the wrong thing about
+        // what happened.
+        //
+        // Class and code are deliberately unchanged. `TooManyKeys` and `StringTooLong` are really
+        // ceilings reported as contract faults, but there is no `ErrorCode` for either, and adding
+        // variants to a publicly exported enum is a wider change than a diagnostics fix.
+        StrictJsonError::DuplicateKey { .. } => VerifyError::new(
             ErrorClass::Contract,
             ErrorCode::ContractInvalidJson,
-            format!("Security: {other}"),
+            format!("{what} JSON contains a duplicate object key"),
+        ),
+        StrictJsonError::InvalidUnicodeEscape { .. } => VerifyError::new(
+            ErrorClass::Contract,
+            ErrorCode::ContractInvalidJson,
+            format!("{what} JSON contains an invalid unicode escape sequence"),
+        ),
+        StrictJsonError::LoneSurrogate { .. } => VerifyError::new(
+            ErrorClass::Contract,
+            ErrorCode::ContractInvalidJson,
+            format!("{what} JSON contains an unpaired surrogate"),
+        ),
+        StrictJsonError::ParseError(_) => VerifyError::new(
+            ErrorClass::Contract,
+            ErrorCode::ContractInvalidJson,
+            format!("{what} JSON is not well-formed"),
+        ),
+        StrictJsonError::TooManyKeys { .. } => VerifyError::new(
+            ErrorClass::Contract,
+            ErrorCode::ContractInvalidJson,
+            format!(
+                "{what} JSON object exceeds the maximum of {} keys",
+                crate::json_strict::MAX_KEYS_PER_OBJECT
+            ),
+        ),
+        StrictJsonError::StringTooLong { .. } => VerifyError::new(
+            ErrorClass::Contract,
+            ErrorCode::ContractInvalidJson,
+            format!(
+                "{what} JSON contains a string longer than the maximum of {} bytes",
+                crate::json_strict::MAX_STRING_LENGTH
+            ),
         ),
     }
 }

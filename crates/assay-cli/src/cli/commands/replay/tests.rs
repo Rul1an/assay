@@ -145,17 +145,50 @@ mod replay_limit_summary_contract {
         }
     }
 
-    /// Once the source is snapshotted we hold the digest of the exact bytes that failed. Losing it
-    /// to `sha256:unknown` was the defect the typed refusal path fixed, and the digest is what
-    /// makes the refusal reproducible by someone else.
+    /// A refusal after the snapshot carries the digest of the exact bytes that failed. Losing it
+    /// to `sha256:unknown` was the defect the one-snapshot path fixed, and the digest is what
+    /// makes the refusal reproducible by whoever receives the summary.
+    ///
+    /// Which refusals reach this state is not a free choice, and the split below is not cosmetic:
+    /// `read_verify_bounded` reports `source_digest: None` for a source overflow and `Some` for
+    /// everything after, so a test that fed a synthetic digest to a `SourceBytes` refusal was
+    /// modelling a state the system cannot produce. The two states are pinned separately here and
+    /// the routing that decides between them is pinned in
+    /// `assay_core::replay::bundle::tests::refusal_provenance`.
     #[test]
-    fn the_digest_of_the_failing_bytes_survives() {
-        let v = summary_for(&every_variant()[0], "sha256:deadbeef");
-        let found = v.to_string().contains("sha256:deadbeef");
-        assert!(found, "the source digest must reach the summary: {v}");
+    fn a_post_snapshot_refusal_publishes_the_digest() {
+        // Every variant except the source ceiling is raised after the snapshot exists.
+        for refusal in every_variant()
+            .into_iter()
+            .filter(|r| !matches!(r, ReplayIngestError::SourceCeiling { .. }))
+        {
+            let v = summary_for(&refusal, "sha256:deadbeef");
+            assert!(
+                v.to_string().contains("sha256:deadbeef"),
+                "the source digest must reach the summary: {v}"
+            );
+            assert!(
+                !v.to_string().contains("sha256:unknown"),
+                "the digest must not degrade to unknown when we hold it: {v}"
+            );
+        }
+    }
+
+    /// A source overflow has no digest, because the bytes were never fully read. `sha256:unknown`
+    /// is the honest value rather than a defect, and the summary must still be well-formed: the
+    /// refusal is reported with its own reason code and no invented provenance.
+    #[test]
+    fn a_source_overflow_publishes_an_unknown_digest() {
+        let refusal = ReplayIngestError::SourceCeiling {
+            kind: LimitKind::SourceBytes,
+            limit: 100 * 1024 * 1024,
+        };
+        // What `flow.rs` substitutes when `SnapshotError::source_digest` is `None`.
+        let v = summary_for(&refusal, "sha256:unknown");
+        assert_eq!(v["reason_code"], "E_REPLAY_LIMIT_EXCEEDED", "{v}");
         assert!(
-            !v.to_string().contains("sha256:unknown"),
-            "the digest must not degrade to unknown when we hold it: {v}"
+            v.to_string().contains("sha256:unknown"),
+            "an unread source must be reported as unknown, not omitted: {v}"
         );
     }
 
@@ -195,6 +228,103 @@ mod replay_limit_summary_contract {
         assert!(
             next.contains("ceiling") || next.contains("smaller bundle"),
             "next step must name the budget lever: {next}"
+        );
+    }
+}
+
+/// Containment of materialized bundle entries.
+///
+/// The reader is the primary guard and normalizes every path, so these tests exercise the second
+/// line: what `write_entries` does if a path that should never exist reaches it anyway. The
+/// property under test is not "the error message is nice" but "nothing is written outside the
+/// workspace", so each case checks the filesystem rather than the return value alone.
+mod workspace_containment {
+    use super::super::fs_ops::write_entries;
+
+    /// `Path::join` returns the argument unchanged when it is absolute, so an absolute entry
+    /// would be written at the filesystem root with the workspace silently discarded. This is the
+    /// exact shape a raw tar entry named `/files/x` produced before the reader was corrected.
+    #[test]
+    fn an_absolute_entry_is_refused_and_writes_nothing() {
+        let ws = tempfile::tempdir().expect("tmp");
+        let outside = tempfile::tempdir().expect("tmp");
+        let escape = outside.path().join("owned.txt");
+        let entries = vec![(escape.to_string_lossy().into_owned(), b"payload".to_vec())];
+
+        let err = write_entries(ws.path(), &entries).expect_err("must refuse an absolute entry");
+        assert!(
+            !escape.exists(),
+            "an absolute entry was materialized outside the workspace at {}",
+            escape.display()
+        );
+        assert!(
+            err.to_string().contains("workspace-relative"),
+            "unexpected refusal: {err}"
+        );
+    }
+
+    #[test]
+    fn a_traversal_entry_is_refused_and_writes_nothing() {
+        let ws = tempfile::tempdir().expect("tmp");
+        let parent = ws.path().parent().expect("workspace has a parent");
+        let escape = parent.join("traversed.txt");
+        let _ = std::fs::remove_file(&escape);
+
+        let entries = vec![("../traversed.txt".to_string(), b"payload".to_vec())];
+        let err = write_entries(ws.path(), &entries).expect_err("must refuse traversal");
+        assert!(
+            !escape.exists(),
+            "a traversal entry escaped to {}",
+            escape.display()
+        );
+        assert!(
+            err.to_string().contains("non-literal path component"),
+            "unexpected refusal: {err}"
+        );
+    }
+
+    /// The acceptance twin. A guard that refused everything would pass the two tests above and be
+    /// useless, so the ordinary case has to keep working from the same fixture shape.
+    #[test]
+    fn ordinary_entries_are_written_under_the_workspace() {
+        let ws = tempfile::tempdir().expect("tmp");
+        let entries = vec![
+            ("files/trace.jsonl".to_string(), b"[]".to_vec()),
+            ("outputs/nested/run.json".to_string(), b"{}".to_vec()),
+        ];
+
+        write_entries(ws.path(), &entries).expect("ordinary entries are written");
+        for (rel, expected) in &entries {
+            let target = ws.path().join(rel);
+            assert!(target.starts_with(ws.path()), "{rel} left the workspace");
+            assert_eq!(
+                &std::fs::read(&target).expect("entry written"),
+                expected,
+                "{rel} round-trips"
+            );
+        }
+    }
+
+    /// Refusal is not partial. An archive that mixes a good entry with an escaping one must not
+    /// leave the good half on disk, because a caller that treats the error as fatal would then be
+    /// cleaning up a workspace it believes was never populated.
+    #[test]
+    fn a_refusal_does_not_leave_earlier_entries_behind() {
+        let ws = tempfile::tempdir().expect("tmp");
+        let entries = vec![
+            ("files/ok.txt".to_string(), b"ok".to_vec()),
+            ("../escape.txt".to_string(), b"no".to_vec()),
+        ];
+
+        let err = write_entries(ws.path(), &entries).expect_err("must refuse");
+        assert!(err.to_string().contains("non-literal"), "{err}");
+        // Documents the current behaviour rather than asserting a rollback that does not exist:
+        // the first entry is already on disk when the second is refused. The workspace is a
+        // freshly created temporary directory that is removed on drop, so this is contained, but
+        // a caller must not read "refused" as "nothing was written".
+        assert!(
+            ws.path().join("files/ok.txt").exists(),
+            "the earlier entry is written before the refusal; this test pins that fact"
         );
     }
 }

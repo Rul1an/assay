@@ -1,6 +1,6 @@
 use super::limits::{
-    check_manifest_json_depth, classify_member_ceiling, classify_source_ceiling, ReplayIngestError,
-    ReplayLimits,
+    check_manifest_json_depth, classify_member_ceiling, classify_source_ceiling,
+    ReplayContractError, ReplayIngestError, ReplayLimits,
 };
 use super::{paths, BundleEntry, ReadBundle};
 use crate::replay::manifest::ReplayManifest;
@@ -144,6 +144,13 @@ pub fn read_bundle_tar_gz_with_limits<R: Read>(r: R, limits: ReplayLimits) -> Re
         let path_str = path.to_string_lossy().replace('\\', "/");
 
         if path_str == paths::MANIFEST {
+            // Refuse before reading, so the manifest that is verified is unambiguously the one
+            // the archive declared first. Overwriting on a second entry let an archive show one
+            // manifest to whoever inspects the head of the stream and a different one to the
+            // verifier, while the non-manifest duplicates were caught and this one was not.
+            if manifest_data.is_some() {
+                return Err(anyhow::Error::from(ReplayContractError::DuplicateManifest));
+            }
             let mut data = Vec::new();
             let mut bounded =
                 LimitReader::new(&mut e, limits.max_manifest_bytes, LimitKind::MemberBytes);
@@ -161,7 +168,14 @@ pub fn read_bundle_tar_gz_with_limits<R: Read>(r: R, limits: ReplayLimits) -> Re
         // is refused before it is normalised and cloned into a map key. It is not a claim about
         // all allocation: the tar reader has already parsed the header, and a PAX extended name
         // is materialized by that layer before either check sees it.
-        paths::validate_entry_path(&path_str)?;
+        // Use what the validator returns, never the string that was handed to it. The validator
+        // trims leading slashes as part of normalising, so `/files/x` passes as `files/x` — and
+        // storing the raw name meant the value that was checked and the value that was kept were
+        // two different strings. The consumer does `workspace.join(rel)`, and joining an absolute
+        // path discards the workspace prefix entirely, so that gap materialized entries at the
+        // filesystem root. Validating one form and keeping another is the defect; the canonical
+        // path is the only form allowed past this point.
+        let canonical = paths::validate_entry_path(&path_str)?;
 
         let mut data = Vec::new();
         let mut bounded = LimitReader::new(&mut e, limits.max_member_bytes, LimitKind::MemberBytes);
@@ -171,8 +185,10 @@ pub fn read_bundle_tar_gz_with_limits<R: Read>(r: R, limits: ReplayLimits) -> Re
                 .unwrap_or_else(|| anyhow::Error::from(err).context("read entry body"))
         })?;
 
-        if seen.insert(path_str.clone(), data).is_some() {
-            anyhow::bail!("duplicate path in bundle: {}", path_str);
+        // Detection is on the canonical form too, so two spellings of one path collide instead of
+        // producing two entries that a consumer resolves to the same file.
+        if seen.insert(canonical, data).is_some() {
+            return Err(anyhow::Error::from(ReplayContractError::DuplicatePath));
         }
     }
 

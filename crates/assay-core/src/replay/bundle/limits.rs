@@ -89,6 +89,30 @@ pub enum ReplayIngestError {
     ManifestTooDeep { limit: usize },
 }
 
+/// A structural contract violation in the bundle, as opposed to a resource refusal.
+///
+/// Kept out of [`ReplayIngestError`] deliberately. The CLI maps every ingest refusal to
+/// `E_REPLAY_LIMIT_EXCEEDED`, whose whole meaning is "the bundle is fine, your budget is not" —
+/// an operator can respond by raising a ceiling. A duplicate entry is the opposite: the bundle is
+/// malformed and no budget will fix it. Folding these into the same type would tell an operator
+/// to raise a limit against an archive that must instead be rejected.
+///
+/// Value-free like the ingest refusals. The offending path is chosen by the archive, so echoing
+/// it hands an attacker a channel into the operator's terminal and into every log that ingests
+/// the message, while telling the reader nothing they can act on.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum ReplayContractError {
+    /// Two entries normalize to the same path. Last-wins is undefined, and silently keeping one
+    /// lets an archive present different bytes to a verifier than to a consumer.
+    #[error("replay bundle contains duplicate entry paths")]
+    DuplicatePath,
+
+    /// A second `manifest.json`. Detected before the first is read or replaced, so the manifest
+    /// that is verified is unambiguously the one the archive declared first.
+    #[error("replay bundle contains more than one manifest")]
+    DuplicateManifest,
+}
+
 /// If `err` was produced by a [`LimitReader`](assay_common::limits::LimitReader) that wraps
 /// the compressed source or gzip stream, promote it to a `ReplayIngestError::SourceCeiling`.
 /// Otherwise return `None` so the caller can keep its own classification.
@@ -108,15 +132,23 @@ pub(crate) fn classify_source_ceiling(err: &std::io::Error) -> Option<ReplayInge
 /// is reported as if a single file were too large.
 pub(crate) fn classify_member_ceiling(err: &std::io::Error) -> Option<ReplayIngestError> {
     let cause = LimitExceeded::from_io(err)?;
+    // Listed exhaustively rather than with a wildcard. `LimitKind` is deliberately not
+    // `#[non_exhaustive]` so that adding a dimension breaks every consumer at compile time; a
+    // catch-all arm here would defeat that by quietly folding a new ceiling into `SourceCeiling`,
+    // which is the one classification the caller cannot tell apart from a genuine source refusal.
     Some(match cause.kind {
         LimitKind::MemberBytes => ReplayIngestError::MemberCeiling {
             kind: cause.kind,
             limit: cause.limit,
         },
-        other => ReplayIngestError::SourceCeiling {
-            kind: other,
-            limit: cause.limit,
-        },
+        // A member read sits under the decoder and the source reader, so either of their ceilings
+        // can surface here. Both are source-side refusals from the caller's point of view.
+        LimitKind::SourceBytes | LimitKind::DecodedBytes | LimitKind::LineBytes => {
+            ReplayIngestError::SourceCeiling {
+                kind: cause.kind,
+                limit: cause.limit,
+            }
+        }
     })
 }
 

@@ -184,6 +184,7 @@ Reason codes are **stable, machine-readable** strings. CI and scripts MAY branch
 | E_BASELINE_INVALID  | Baseline file invalid or missing. |
 | E_POLICY_PARSE      | Policy file parse error. |
 | E_REPLAY_MISSING_DEPENDENCY | Replay missing required offline dependency (e.g. uncached judge/cassette input). |
+| E_REPLAY_LIMIT_EXCEEDED | Replay bundle refused by an ingest ceiling before it was parsed. The bundle may be well-formed; the configured budget is what it exceeded, so raising the ceiling is a legitimate response. Distinct from `E_CFG_PARSE`, which means the input is malformed. Carries no verdict: no test ran. |
 
 ### 5.2 Infra / Judge Unavailable (exit_code 3)
 
@@ -263,6 +264,7 @@ For every non-zero exit, the implementation MUST provide **at least one suggeste
 | 1              | 2026-02  | Clarified/added: Seeds (§3.3.1) + Judge metrics (§3.3.2). Seeds MUST be decimal strings (or null) to avoid JSON precision loss. judge_seed reserved (null) until implemented. |
 | 1              | 2026-02  | E2.3: SARIF truncation metadata (§6.3): properties.assay (truncated, omitted_count) in SARIF run; sarif.omitted in summary.json and run.json when truncated. Deterministic truncation order. |
 | 1              | 2026-02  | E9c alignment draft: replay provenance keys in `provenance` (`replay`, `bundle_digest`, `replay_mode`, `source_run_id`) and `E_REPLAY_MISSING_DEPENDENCY` reason code. |
+| 1              | 2026-07  | Added `E_REPLAY_LIMIT_EXCEEDED` (§5.1). Backward compatible: a new registry string under the existing `reason_code_version` 1, so consumers branching on `(reason_code_version, reason_code)` treat it as an unknown code under a known version and fall back as they already must. No version bump. |
 
 ---
 

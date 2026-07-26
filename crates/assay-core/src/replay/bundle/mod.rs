@@ -30,7 +30,7 @@ pub struct ReadBundle {
 }
 
 pub use io::{read_bundle_tar_gz, read_bundle_tar_gz_with_limits, write_bundle_tar_gz};
-pub use limits::{ReplayIngestError, ReplayLimits};
+pub use limits::{ReplayContractError, ReplayIngestError, ReplayLimits};
 pub use manifest::build_file_manifest;
 pub use verify::bundle_digest;
 

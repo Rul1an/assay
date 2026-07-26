@@ -242,12 +242,19 @@ impl BundleInfo {
     /// and per-file ceilings even though it verifies nothing. Left unbounded, this was the one
     /// public entrypoint where a bomb met no guard at all.
     pub fn peek_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<Self> {
-        // Bound the compressed source here as well, not only the expansion. Reached through
-        // `BundleReader` the input has already passed a ceiling, but this is a public entrypoint
-        // in its own right and a direct caller gets no such guarantee.
-        let reader = LimitReader::new(reader, limits.max_bundle_bytes, LimitKind::SourceBytes);
+        // Snapshot the whole source before parsing, exactly as the verifier does. A `LimitReader`
+        // placed under gzip and tar only ever sees the bytes a decoder asks for, and peek returns
+        // the moment it has read `manifest.json` — so a valid bundle followed by an arbitrarily
+        // large suffix never had its tail requested and passed a ceiling it plainly exceeds. The
+        // ceiling has to bound the artifact, not the prefix a parser happened to consume.
+        let mut source = Vec::new();
+        LimitReader::new(reader, limits.max_bundle_bytes, LimitKind::SourceBytes)
+            .read_to_end(&mut source)
+            .map_err(classify_reader_io)
+            .context("Bundle source")?;
+
         let decoder = LimitReader::new(
-            GzDecoder::new(reader),
+            GzDecoder::new(std::io::Cursor::new(&source)),
             limits.max_decode_bytes,
             LimitKind::DecodedBytes,
         );

@@ -96,7 +96,11 @@ fn read_bundle_fails_duplicate_path() {
     let gz = tar.into_inner().unwrap();
     gz.finish().unwrap();
     let err = read_bundle_tar_gz(std::io::Cursor::new(&buf)).unwrap_err();
-    assert!(err.to_string().contains("duplicate path"), "{}", err);
+    assert_eq!(
+        err.downcast_ref::<ReplayContractError>(),
+        Some(&ReplayContractError::DuplicatePath),
+        "duplicates are a typed contract violation, not a rendered string: {err}"
+    );
 }
 
 #[test]
@@ -969,5 +973,269 @@ mod bounded_ingest {
 
         read_bundle_tar_gz_with_limits(Cursor::new(bytes), ReplayLimits::default())
             .expect("the same bundle must read under the default decode ceiling");
+    }
+}
+
+/// Build a tar whose entry names are written straight into the header blocks, bypassing the
+/// writer's own relative-path rule.
+///
+/// `tar::Builder` refuses to emit an absolute name, so the hostile fixture cannot be produced
+/// through our own writer at all. That is not a defence: an attacker writes the bytes directly.
+/// Each entry is first appended under a same-length placeholder, then the name field is patched
+/// in place and the header checksum recomputed, which keeps every block offset stable.
+fn raw_tar_gz_with_entry_names(names: &[&str]) -> Vec<u8> {
+    let manifest = ReplayManifest::minimal("2.15.0".into());
+    let manifest_json = serde_json::to_vec(&manifest).unwrap();
+
+    // A distinct filler byte per entry, so each placeholder is found at its own header.
+    let placeholders: Vec<String> = names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| ((b'a' + i as u8) as char).to_string().repeat(name.len()))
+        .collect();
+
+    // Uncompressed first, so the header blocks can be patched before they are deflated.
+    let mut tar_bytes = Vec::new();
+    {
+        let mut tar = Builder::new(&mut tar_bytes);
+        let mut h = Header::new_gnu();
+        h.set_path(paths::MANIFEST).unwrap();
+        h.set_size(manifest_json.len() as u64);
+        h.set_mode(0o644);
+        h.set_cksum();
+        tar.append(&h, &manifest_json[..]).unwrap();
+
+        for placeholder in &placeholders {
+            let mut h2 = Header::new_gnu();
+            h2.set_path(placeholder).unwrap();
+            h2.set_size(1);
+            h2.set_mode(0o644);
+            h2.set_cksum();
+            tar.append(&h2, &b"x"[..]).unwrap();
+        }
+        tar.finish().unwrap();
+    }
+
+    for (name, placeholder) in names.iter().zip(&placeholders) {
+        let header_start = tar_bytes
+            .windows(placeholder.len())
+            .position(|w| w == placeholder.as_bytes())
+            .expect("placeholder name present in a header");
+        // The name field sits at offset 0 of the 512-byte block, so the match is the block start.
+        tar_bytes[header_start..header_start + name.len()].copy_from_slice(name.as_bytes());
+
+        // The checksum covers the whole block with its own field read as spaces.
+        let block = &mut tar_bytes[header_start..header_start + 512];
+        block[148..156].copy_from_slice(b"        ");
+        let sum: u32 = block.iter().map(|b| *b as u32).sum();
+        let cksum = format!("{:06o}\0 ", sum);
+        block[148..156].copy_from_slice(cksum.as_bytes());
+    }
+
+    let mut out = Vec::new();
+    {
+        let mut gz = GzBuilder::new()
+            .mtime(0)
+            .write(&mut out, flate2::Compression::default());
+        std::io::Write::write_all(&mut gz, &tar_bytes).unwrap();
+        gz.finish().unwrap();
+    }
+    out
+}
+
+fn raw_tar_gz_with_entry_name(name: &str, _body: &[u8]) -> Vec<u8> {
+    raw_tar_gz_with_entry_names(&[name])
+}
+
+fn raw_tar_gz_with_two_entry_names(a: &str, b: &str) -> Vec<u8> {
+    raw_tar_gz_with_entry_names(&[a, b])
+}
+
+/// An absolute entry name must never survive into the stored key.
+///
+/// `validate_entry_path` trims leading slashes and returns the normalized path, but the reader
+/// discarded that return value and stored the raw name. The CLI then does `workspace.join(rel)`,
+/// and joining an absolute path throws the workspace prefix away entirely: a `/files/x` entry
+/// validates as `files/x` and materializes at the filesystem root. Validating one string and
+/// storing another is the whole defect, so the assertion is on the stored key.
+#[test]
+fn absolute_entry_name_is_stored_normalized() {
+    let buf = raw_tar_gz_with_entry_name("/files/x", b"x");
+    let read = read_bundle_tar_gz(std::io::Cursor::new(&buf))
+        .expect("an absolute name normalizes rather than refusing");
+    let keys: Vec<&str> = read.entries.iter().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(
+        keys,
+        vec!["files/x"],
+        "stored key must be the normalized path"
+    );
+
+    // The property that actually matters: the join stays under the workspace.
+    for (rel, _) in &read.entries {
+        let joined = std::path::Path::new("/tmp/assay-ws").join(rel);
+        assert!(
+            joined.starts_with("/tmp/assay-ws"),
+            "entry {rel:?} escapes the workspace as {}",
+            joined.display()
+        );
+    }
+}
+
+/// Two spellings of one path must collide.
+///
+/// Duplicate detection keyed on the raw name, so `files/x` and `/files/x` were two entries that a
+/// consumer resolves to the same file. Which bytes win then depends on map iteration order rather
+/// than on anything the archive declared. Keying on the canonical form is what makes the pair a
+/// detectable duplicate at all.
+#[test]
+fn two_spellings_of_one_path_are_a_duplicate() {
+    let buf = raw_tar_gz_with_two_entry_names("files/x", "/files/x");
+    let err = read_bundle_tar_gz(std::io::Cursor::new(&buf))
+        .expect_err("two spellings of one path must be refused");
+    assert_eq!(
+        err.downcast_ref::<ReplayContractError>(),
+        Some(&ReplayContractError::DuplicatePath),
+        "{err}"
+    );
+}
+
+/// A second manifest is refused before the first is read or replaced.
+///
+/// The reader overwrote `manifest_data` on every `manifest.json` it met, so the last one won
+/// silently while non-manifest duplicates were refused. An archive could then present one
+/// manifest to a reader that stops at the head of the stream and another to this one.
+#[test]
+fn a_second_manifest_is_refused() {
+    let manifest = ReplayManifest::minimal("2.15.0".into());
+    let manifest_json = serde_json::to_vec(&manifest).unwrap();
+    let mut buf = Vec::new();
+    let gz = GzBuilder::new()
+        .mtime(0)
+        .write(&mut buf, flate2::Compression::default());
+    let mut tar = Builder::new(gz);
+    for _ in 0..2 {
+        let mut h = Header::new_gnu();
+        h.set_path(paths::MANIFEST).unwrap();
+        h.set_size(manifest_json.len() as u64);
+        h.set_mode(0o644);
+        h.set_cksum();
+        tar.append(&h, &manifest_json[..]).unwrap();
+    }
+    let gz = tar.into_inner().unwrap();
+    gz.finish().unwrap();
+
+    let err = read_bundle_tar_gz(std::io::Cursor::new(&buf))
+        .expect_err("a second manifest must be refused");
+    assert_eq!(
+        err.downcast_ref::<ReplayContractError>(),
+        Some(&ReplayContractError::DuplicateManifest),
+        "{err}"
+    );
+}
+
+/// A duplicate is a malformed bundle, not a resource refusal. If it were classified as an ingest
+/// ceiling the CLI would report `E_REPLAY_LIMIT_EXCEEDED` and tell an operator to raise a budget
+/// against an archive that no budget can fix.
+#[test]
+fn a_duplicate_is_not_classified_as_an_ingest_ceiling() {
+    let buf = raw_tar_gz_with_two_entry_names("files/x", "/files/x");
+    let err = read_bundle_tar_gz(std::io::Cursor::new(&buf)).unwrap_err();
+    assert!(
+        err.downcast_ref::<ReplayIngestError>().is_none(),
+        "a structural violation must not be typed as a ceiling: {err}"
+    );
+}
+
+/// Duplicate diagnostics carry nothing the archive chose.
+#[test]
+fn duplicate_refusals_are_value_free() {
+    for (a, b) in [
+        ("files/x", "/files/x"),
+        ("files/secret-name", "files/secret-name"),
+    ] {
+        let buf = raw_tar_gz_with_two_entry_names(a, b);
+        let err = read_bundle_tar_gz(std::io::Cursor::new(&buf)).unwrap_err();
+        let rendered = err.to_string();
+        for archive_chosen in ["files/", "secret-name", "/files/x", "x"] {
+            assert!(
+                !rendered.contains(archive_chosen),
+                "archive-chosen text `{archive_chosen}` reached the diagnostic: {rendered}"
+            );
+        }
+    }
+}
+
+/// What provenance survives a refusal, measured on the real entrypoint.
+///
+/// The digest can only exist once the source has been read, so the two refusal classes are not
+/// symmetric: a source overflow has nothing to attest, while every later refusal happens on bytes
+/// we already hold. A test that models both states as "digest survives" describes a system that
+/// does not exist.
+mod refusal_provenance {
+    use super::*;
+    use crate::replay::bundle::ReplayLimits;
+    use crate::replay::verify::read_verify_bounded;
+    use std::io::Cursor;
+
+    fn valid_bundle() -> Vec<u8> {
+        let manifest = ReplayManifest::minimal("2.15.0".into());
+        let entries = vec![BundleEntry {
+            path: "files/trace.jsonl".into(),
+            data: b"[]".to_vec(),
+        }];
+        let mut buf = Vec::new();
+        write_bundle_tar_gz(&mut buf, &manifest, &entries).unwrap();
+        buf
+    }
+
+    /// A source overflow yields no digest, because the bytes were never fully read. The CLI turns
+    /// this into `sha256:unknown`, which is the honest answer rather than a defect.
+    #[test]
+    fn a_source_overflow_has_no_digest_to_report() {
+        let bytes = valid_bundle();
+        let limits = ReplayLimits {
+            max_source_bytes: (bytes.len() - 1) as u64,
+            ..ReplayLimits::default()
+        };
+        let failure = read_verify_bounded(Cursor::new(&bytes), limits)
+            .expect_err("a source ceiling below the input must refuse");
+        assert!(
+            failure.source_digest.is_none(),
+            "nothing was fully read, so there is nothing to attest"
+        );
+        assert!(
+            failure.ingest_refusal().is_some(),
+            "it is still a typed ingest refusal"
+        );
+    }
+
+    /// Every refusal after the snapshot names the exact bytes it happened on. This is the property
+    /// the one-snapshot design exists for: the digest, the parse and the verdict describe the same
+    /// input, so a refusal is reproducible by whoever receives the summary.
+    #[test]
+    fn a_post_snapshot_refusal_reports_the_exact_digest() {
+        let bytes = valid_bundle();
+        let expected = format!("sha256:{}", hex::encode(<Sha256 as Digest>::digest(&bytes)));
+        // The source fits; a later ceiling is what refuses.
+        let limits = ReplayLimits {
+            max_path_len: 4,
+            ..ReplayLimits::default()
+        };
+        let failure = read_verify_bounded(Cursor::new(&bytes), limits)
+            .expect_err("a path ceiling must refuse this bundle");
+        assert_eq!(
+            failure.source_digest.as_deref(),
+            Some(expected.as_str()),
+            "the digest must be of the exact bytes that failed"
+        );
+    }
+
+    /// The acceptance twin: the same fixture verifies cleanly under default ceilings, so neither
+    /// refusal above is an artefact of a bundle that was broken to begin with.
+    #[test]
+    fn the_same_bundle_verifies_under_default_limits() {
+        let bytes = valid_bundle();
+        read_verify_bounded(Cursor::new(&bytes), ReplayLimits::default())
+            .expect("the fixture is a valid bundle");
     }
 }

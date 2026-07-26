@@ -103,6 +103,14 @@ pub fn read_verify_bounded<R: Read>(
     // hold about the exact input that failed.
     let source_digest = format!("sha256:{}", hex::encode(Sha256::digest(&source)));
 
+    // Known cost, recorded rather than optimised away: `read_bundle_tar_gz_with_limits` applies
+    // the same whole-source rule and snapshots this cursor again, so peak memory here is about
+    // twice `max_source_bytes` rather than once. That is bounded — the ceiling still governs, and
+    // a caller who sets 100 MiB gets a 200 MiB worst case, not an unbounded one. Removing the
+    // second copy means letting the reader take a pre-read snapshot, which is a parser API change
+    // and would give one entrypoint a bypass of the rule the other enforces. Not worth it for a
+    // constant factor on an already-bounded value; revisit if a ceiling is ever raised far enough
+    // that 2x matters.
     let read =
         read_bundle_tar_gz_with_limits(std::io::Cursor::new(&source), limits).map_err(|error| {
             SnapshotError {

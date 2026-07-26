@@ -623,3 +623,175 @@ fn peek_alone_refuses_expansion_past_the_decode_ceiling() {
     )
     .expect("the same bundle must peek under the default decode ceiling");
 }
+
+/// The source ceiling on a direct peek, at the boundary and past it.
+///
+/// The bound was in the right place but under the wrong reader: a `LimitReader` sitting beneath
+/// gzip and tar only ever sees what a decoder asks for, and peek returns as soon as it has read
+/// `manifest.json`. Everything after that member was never requested, so a valid bundle followed
+/// by an arbitrarily large suffix passed a ceiling it plainly exceeded. Snapshotting the source
+/// first is what makes the ceiling a property of the artifact rather than of the prefix a parser
+/// happened to consume.
+mod direct_peek_source_ceiling {
+    use super::*;
+    use assay_evidence::bundle::reader::BundleInfo;
+
+    fn peek_under(bytes: Vec<u8>, ceiling: u64) -> anyhow::Result<BundleInfo> {
+        BundleInfo::peek_with_limits(Cursor::new(bytes), limits_with_bundle_ceiling(ceiling))
+    }
+
+    #[test]
+    fn an_input_of_exactly_the_ceiling_is_accepted() {
+        let bytes = bundle_bytes();
+        let exact = bytes.len() as u64;
+        peek_under(bytes, exact).expect("an input of exactly the ceiling must be accepted");
+    }
+
+    #[test]
+    fn one_byte_over_the_ceiling_is_refused() {
+        let bytes = bundle_bytes();
+        let one_short = bytes.len() as u64 - 1;
+        assert!(
+            peek_under(bytes, one_short).is_err(),
+            "a ceiling one byte below the input must refuse"
+        );
+    }
+
+    /// The case the old placement could not see. The bundle is valid and its manifest is reached
+    /// long before the suffix, so a decoder-driven bound reports success on an input several
+    /// times the size of the ceiling.
+    #[test]
+    fn a_valid_bundle_with_an_unread_suffix_is_refused() {
+        let mut bytes = bundle_bytes();
+        let valid_len = bytes.len();
+        bytes.extend(std::iter::repeat_n(0u8, valid_len * 4));
+
+        let err = match peek_under(bytes.clone(), valid_len as u64) {
+            Err(err) => err,
+            Ok(_) => panic!("a bundle plus a suffix must not pass a ceiling sized for the bundle"),
+        };
+        let verify: &VerifyError = err
+            .downcast_ref()
+            .unwrap_or_else(|| panic!("expected a typed refusal, got: {err}"));
+        assert_eq!(verify.class, ErrorClass::Limits);
+        assert_eq!(verify.code, ErrorCode::LimitBundleBytes);
+
+        // Acceptance twin from the same bytes: raising the ceiling past the whole input accepts
+        // it, so the refusal above is about size and not about the suffix confusing the parser.
+        peek_under(bytes.clone(), bytes.len() as u64)
+            .expect("the same input is accepted once the ceiling covers all of it");
+    }
+}
+
+/// Diagnostics from the strict-JSON pass carry nothing the archive chose.
+///
+/// `StrictJsonError`'s own `Display` renders the duplicated key and its JSON path, the byte
+/// position of a bad escape, the offending codepoint, serde's parse message with line, column and
+/// a token snippet, and observed counts and lengths. The reader forwarded all of it under a
+/// blanket `Security:` prefix. That text lands in an operator's terminal and in every log that
+/// ingests the message, so it is an archive-controlled write into someone else's system; the
+/// prefix was also wrong, since a duplicate object key is a producer defect and not a security
+/// event.
+mod strict_json_diagnostics_are_value_free {
+    use super::*;
+
+    /// Rebuild a bundle with one member's bytes replaced, so hostile JSON reaches the reader
+    /// exactly as an archive would deliver it.
+    fn replace_member(bundle: &[u8], target: &str, replacement: &[u8]) -> Vec<u8> {
+        use flate2::read::GzDecoder;
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+
+        let mut members: Vec<(String, Vec<u8>)> = Vec::new();
+        {
+            let mut ar = tar::Archive::new(GzDecoder::new(Cursor::new(bundle.to_vec())));
+            for entry in ar.entries().expect("entries") {
+                let mut e = entry.expect("entry");
+                let path = e.path().expect("path").to_string_lossy().to_string();
+                let mut data = Vec::new();
+                e.read_to_end(&mut data).expect("read member");
+                if path == target {
+                    data = replacement.to_vec();
+                }
+                members.push((path, data));
+            }
+        }
+
+        let mut out = Vec::new();
+        {
+            let enc = GzEncoder::new(&mut out, Compression::default());
+            let mut tar = tar::Builder::new(enc);
+            for (path, data) in members {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(data.len() as u64);
+                header.set_mode(0o644);
+                header.set_cksum();
+                tar.append_data(&mut header, &path, Cursor::new(data))
+                    .expect("append");
+            }
+            tar.into_inner().expect("tar").finish().expect("gz");
+        }
+        out
+    }
+
+    /// Values an archive picks specifically so they will be echoed back.
+    const HOSTILE_MARKERS: &[&str] = &[
+        "ATTACKER_KEY_MARKER",
+        "ATTACKER_PATH_MARKER",
+        "\u{1b}[31m",
+        "\u{7}",
+    ];
+
+    fn assert_no_hostile_values(rendered: &str) {
+        for marker in HOSTILE_MARKERS {
+            assert!(
+                !rendered.contains(marker),
+                "archive-chosen value {marker:?} reached the diagnostic: {rendered}"
+            );
+        }
+        assert!(
+            !rendered.contains("Security:"),
+            "the blanket Security prefix misframes a producer defect: {rendered}"
+        );
+    }
+
+    #[test]
+    fn a_duplicate_key_does_not_echo_the_key_or_its_path() {
+        let hostile = br#"{"ATTACKER_KEY_MARKER":1,"ATTACKER_KEY_MARKER":2}"#;
+        let bundle = replace_member(&bundle_bytes(), "manifest.json", hostile);
+        let err = match assay_evidence::bundle::reader::BundleInfo::peek_with_limits(
+            Cursor::new(bundle),
+            VerifyLimits::default(),
+        ) {
+            Err(err) => err,
+            Ok(_) => panic!("a duplicate key must be refused"),
+        };
+        assert_no_hostile_values(&format!("{err:#}"));
+    }
+
+    #[test]
+    fn a_malformed_document_does_not_echo_the_parser_detail() {
+        // Terminal escapes inside a string the parser will quote back in its own message.
+        let hostile = b"{\"a\": \"\x1b[31mATTACKER_PATH_MARKER\x07\" ,,}";
+        let bundle = replace_member(&bundle_bytes(), "manifest.json", hostile);
+        let err = match assay_evidence::bundle::reader::BundleInfo::peek_with_limits(
+            Cursor::new(bundle),
+            VerifyLimits::default(),
+        ) {
+            Err(err) => err,
+            Ok(_) => panic!("a malformed manifest must be refused"),
+        };
+        assert_no_hostile_values(&format!("{err:#}"));
+    }
+
+    /// The acceptance twin: an ordinary bundle still peeks cleanly, so the wording change is not
+    /// a guard that refuses everything.
+    #[test]
+    fn an_ordinary_manifest_still_peeks() {
+        assay_evidence::bundle::reader::BundleInfo::peek_with_limits(
+            Cursor::new(bundle_bytes()),
+            VerifyLimits::default(),
+        )
+        .expect("an ordinary bundle peeks");
+    }
+}
