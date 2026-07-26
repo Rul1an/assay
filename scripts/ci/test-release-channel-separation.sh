@@ -51,6 +51,7 @@ if [[ "${FAKE_MUTATE_ACTION_STATE:-0}" == "1" ]]; then
   [[ -z "${GITHUB_STATE:-}" ]] || printf 'assay_untrusted=1\n' >>"$GITHUB_STATE"
   [[ -z "${GITHUB_STEP_SUMMARY:-}" ]] || printf 'untrusted summary\n' >>"$GITHUB_STEP_SUMMARY"
 fi
+[[ -z "${FAKE_INVOCATION_COUNTER:-}" ]] || printf '1\n' >>"$FAKE_INVOCATION_COUNTER"
 printf 'assay %s\n' "${FAKE_ASSAY_VERSION:-3.35.0}"
 EOF
 chmod +x "$TMP_DIR/bin/curl" "$TMP_DIR/bin/jq" "$TMP_DIR/bin/assay"
@@ -97,7 +98,9 @@ require_literal_from_path "$TMP_DIR/action-valid.out" "skip_install=true"
 for state_file in output path env state summary; do
   : >"$TMP_DIR/action-child-$state_file.out"
 done
+: >"$TMP_DIR/action-child-invocations.out"
 FAKE_MUTATE_ACTION_STATE=1 FAKE_ASSAY_VERSION="3.35.0" \
+  FAKE_INVOCATION_COUNTER="$TMP_DIR/action-child-invocations.out" \
   GITHUB_OUTPUT="$TMP_DIR/action-child-output.out" \
   GITHUB_PATH="$TMP_DIR/action-child-path.out" \
   GITHUB_ENV="$TMP_DIR/action-child-env.out" \
@@ -120,6 +123,10 @@ for state_file in path env state summary; do
     exit 1
   fi
 done
+if [[ "$(wc -l <"$TMP_DIR/action-child-invocations.out" | tr -d ' ')" != "1" ]]; then
+  echo "assay resolver invoked the inspected binary more than once" >&2
+  exit 1
+fi
 
 PRERELEASE_TAG="3.36.0-rc.1"
 FAKE_TAG="$VALID_TAG" GITHUB_OUTPUT="$TMP_DIR/action-prerelease.out" \
@@ -172,7 +179,9 @@ require_literal_from_path "$TMP_DIR/action-path.out" "$TMP_DIR/bin"
 for state_file in output path env state summary; do
   : >"$TMP_DIR/action-verify-mismatch-$state_file.out"
 done
+: >"$TMP_DIR/action-verify-mismatch-invocations.out"
 if FAKE_MUTATE_ACTION_STATE=1 FAKE_ASSAY_VERSION="2.1.0" \
+  FAKE_INVOCATION_COUNTER="$TMP_DIR/action-verify-mismatch-invocations.out" \
   GITHUB_OUTPUT="$TMP_DIR/action-verify-mismatch-output.out" \
   GITHUB_PATH="$TMP_DIR/action-verify-mismatch-path.out" \
   GITHUB_ENV="$TMP_DIR/action-verify-mismatch-env.out" \
@@ -215,6 +224,10 @@ for state_file in output path env state summary; do
     exit 1
   fi
 done
+if [[ "$(wc -l <"$TMP_DIR/action-verify-mismatch-invocations.out" | tr -d ' ')" != "1" ]]; then
+  echo "assay verifier invoked the inspected binary more than once" >&2
+  exit 1
+fi
 
 for INJECTED_VERSION in $'3.35.0\nskip_install=true' $'3.35.0\rskip_install=true'; do
   : >"$TMP_DIR/action-injected.out"
