@@ -43,7 +43,7 @@ printf '%s\n' "\${FAKE_TAG:?}"
 EOF
 cat >"$TMP_DIR/bin/assay" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' 'assay 3.35.0'
+printf 'assay %s\n' "${FAKE_ASSAY_VERSION:-3.35.0}"
 EOF
 chmod +x "$TMP_DIR/bin/curl" "$TMP_DIR/bin/jq" "$TMP_DIR/bin/assay"
 
@@ -94,11 +94,34 @@ require_literal_from_path "$TMP_DIR/action-prerelease.out" \
   "resolved_version=v$PRERELEASE_TAG"
 
 COMPAT_TAG="v2.1"
-FAKE_TAG="$VALID_TAG" GITHUB_OUTPUT="$TMP_DIR/action-compat.out" \
+FAKE_TAG="$VALID_TAG" FAKE_ASSAY_VERSION="2.1.0" \
+  GITHUB_OUTPUT="$TMP_DIR/action-compat.out" \
   PATH="$TMP_DIR/bin:$PATH" \
   bash "$REPO_ROOT/assay-action/resolve-version.sh" "$COMPAT_TAG"
 require_literal_from_path "$TMP_DIR/action-compat.out" \
   "resolved_version=$COMPAT_TAG"
+require_literal_from_path "$TMP_DIR/action-compat.out" \
+  "resolved_version_plain=2.1.0"
+require_literal_from_path "$TMP_DIR/action-compat.out" "skip_install=true"
+
+: >"$TMP_DIR/action-verify.out"
+: >"$TMP_DIR/action-path.out"
+FAKE_ASSAY_VERSION="2.1.0" GITHUB_OUTPUT="$TMP_DIR/action-verify.out" \
+  GITHUB_PATH="$TMP_DIR/action-path.out" \
+  bash "$REPO_ROOT/assay-action/verify-install.sh" "$TMP_DIR/bin/assay" "2.1.0"
+require_literal_from_path "$TMP_DIR/action-verify.out" "installed=true"
+require_literal_from_path "$TMP_DIR/action-path.out" "$TMP_DIR/bin"
+
+if FAKE_ASSAY_VERSION="2.1.0" GITHUB_OUTPUT="$TMP_DIR/action-verify-mismatch.out" \
+  GITHUB_PATH="$TMP_DIR/action-path-mismatch.out" \
+  bash "$REPO_ROOT/assay-action/verify-install.sh" "$TMP_DIR/bin/assay" "2.1" \
+  >"$TMP_DIR/action-verify-mismatch.log" 2>&1
+then
+  echo "assay-action accepted a binary version that did not match the expected version" >&2
+  exit 1
+fi
+require_literal_from_path "$TMP_DIR/action-verify-mismatch.log" \
+  "expected 2.1, got 2.1.0"
 
 for INJECTED_VERSION in $'3.35.0\nskip_install=true' $'3.35.0\rskip_install=true'; do
   : >"$TMP_DIR/action-injected.out"

@@ -33,8 +33,13 @@ v*) ;;
 *) VERSION="v${VERSION}" ;;
 esac
 
+EXPECTED_VERSION="${VERSION#v}"
+if [[ "$EXPECTED_VERSION" =~ ^[0-9]+[.][0-9]+$ ]]; then
+  EXPECTED_VERSION="${EXPECTED_VERSION}.0"
+fi
+
 echo "resolved_version=$VERSION" >>"$GITHUB_OUTPUT"
-echo "resolved_version_plain=${VERSION#v}" >>"$GITHUB_OUTPUT"
+echo "resolved_version_plain=$EXPECTED_VERSION" >>"$GITHUB_OUTPUT"
 
 if ! command -v assay &>/dev/null; then
   echo "skip_install=false" >>"$GITHUB_OUTPUT"
@@ -45,7 +50,7 @@ INSTALLED_VERSION="$(assay --version 2>/dev/null | awk '{print $2}' || true)"
 echo "installed_version=$INSTALLED_VERSION" >>"$GITHUB_OUTPUT"
 echo "Assay already installed: ${INSTALLED_VERSION:-unknown}"
 
-if [[ "$INSTALLED_VERSION" == "${VERSION#v}" ]]; then
+if [[ "$INSTALLED_VERSION" == "$EXPECTED_VERSION" ]]; then
   echo "skip_install=true" >>"$GITHUB_OUTPUT"
 else
   echo "::notice::Installed Assay ${INSTALLED_VERSION:-unknown} does not match requested ${VERSION}; reinstalling"

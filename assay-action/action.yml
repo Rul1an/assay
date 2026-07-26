@@ -363,21 +363,8 @@ runs:
       shell: bash
       env:
         EXPECTED_VERSION: ${{ steps.check-existing.outputs.resolved_version_plain }}
-      run: | # zizmor: ignore[github-env] v2 compatibility exports a literal install dir for later caller steps
-        # v2 compatibility: later caller steps may invoke `assay` directly.
-        # Keep exporting this literal install directory until a major-version contract change.
-        printf '%s\n' "$HOME/.assay/bin" >> "$GITHUB_PATH"
-        export PATH="$HOME/.assay/bin:$PATH"
-
-        INSTALLED_VERSION="$(~/.assay/bin/assay --version | awk '{print $2}')"
-        if [ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]; then
-          echo "::error::Assay installation verification failed: expected ${EXPECTED_VERSION}, got ${INSTALLED_VERSION:-unknown}"
-          echo "::error::Assay installation verification failed"
-          exit 1
-        fi
-        ~/.assay/bin/assay --version
-
-        echo "installed=true" >> $GITHUB_OUTPUT
+      run: | # zizmor: ignore[github-env] v2 compatibility exports the install dir for caller steps
+        "$GITHUB_ACTION_PATH/verify-install.sh" "$HOME/.assay/bin/assay" "$EXPECTED_VERSION"
 
     # =========================================================================
     # E2: Evidence Processing - Discovery, verify, lint
