@@ -1,5 +1,8 @@
 use serde::Deserialize;
-use std::io::Read;
+
+/// Re-exported so existing `use super::limits::LimitReader` call sites keep working; the
+/// implementation now lives in `assay-common` beside the replay verifier that shares it.
+pub(crate) use assay_common::limits::LimitReader;
 
 /// Resource limits for bundle verification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,41 +63,5 @@ impl VerifyLimits {
             max_path_len: overrides.max_path_len.unwrap_or(self.max_path_len),
             max_json_depth: overrides.max_json_depth.unwrap_or(self.max_json_depth),
         }
-    }
-}
-
-/// A reader that limits the total number of bytes read and fails explicitly on overflow.
-pub(crate) struct LimitReader<R> {
-    inner: R,
-    limit: u64,
-    read: u64,
-    error_tag: &'static str,
-}
-
-impl<R: Read> LimitReader<R> {
-    pub(crate) fn new(inner: R, limit: u64, error_tag: &'static str) -> Self {
-        Self {
-            inner,
-            limit,
-            read: 0,
-            error_tag,
-        }
-    }
-}
-
-impl<R: Read> Read for LimitReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if self.read >= self.limit {
-            return Err(std::io::Error::other(format!(
-                "{}: exceeded limit of {} bytes",
-                self.error_tag, self.limit
-            )));
-        }
-
-        let max_to_read = (self.limit - self.read).min(buf.len() as u64) as usize;
-        let n = self.inner.read(&mut buf[..max_to_read])?;
-        self.read += n as u64;
-
-        Ok(n)
     }
 }

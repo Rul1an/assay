@@ -7,16 +7,26 @@ pub(crate) struct JsonValidator<'a> {
     key_tracker: ObjectKeyTracker,
     current_path: String,
     depth: usize,
+    max_depth: usize,
     _phantom: std::marker::PhantomData<&'a str>,
 }
 
 impl<'a> JsonValidator<'a> {
     pub(crate) fn new(input: &'a str) -> Self {
+        Self::with_max_depth(input, super::limits::MAX_NESTING_DEPTH)
+    }
+
+    /// Validate under an explicit nesting ceiling.
+    ///
+    /// The depth guard already existed but was pinned to a constant, so a caller carrying its own
+    /// `max_json_depth` could not apply it and the configured value was decorative.
+    pub(crate) fn with_max_depth(input: &'a str, max_depth: usize) -> Self {
         Self {
             chars: input.char_indices().peekable(),
             key_tracker: ObjectKeyTracker::new(),
             current_path: String::new(),
             depth: 0,
+            max_depth,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -50,7 +60,7 @@ impl<'a> JsonValidator<'a> {
         self.skip_whitespace();
 
         self.depth += 1;
-        if self.depth > super::limits::MAX_NESTING_DEPTH {
+        if self.depth > self.max_depth {
             return Err(StrictJsonError::NestingTooDeep { depth: self.depth });
         }
 
@@ -107,7 +117,7 @@ impl<'a> JsonValidator<'a> {
         self.skip_whitespace();
 
         self.depth += 1;
-        if self.depth > super::limits::MAX_NESTING_DEPTH {
+        if self.depth > self.max_depth {
             return Err(StrictJsonError::NestingTooDeep { depth: self.depth });
         }
 

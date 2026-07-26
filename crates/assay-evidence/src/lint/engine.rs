@@ -2,7 +2,8 @@ use super::packs::executor::{PackExecutionMeta, PackExecutor};
 use super::packs::LoadedPack;
 use super::rules::{LintBundleIndex, LintContext, RULES};
 use super::{LintFinding, LintReport, LintSummary, Severity};
-use crate::bundle::writer::{verify_bundle_with_limits, VerifyLimits};
+use crate::bundle::writer::VerifyLimits;
+use crate::bundle::BundleReader;
 use crate::ndjson::NdjsonEvents;
 use crate::types::EvidenceEvent;
 use anyhow::{Context, Result};
@@ -41,22 +42,16 @@ pub fn lint_bundle_with_options<R: Read>(
     limits: VerifyLimits,
     options: LintOptions,
 ) -> Result<LintReportWithPacks> {
-    // Read entire bundle into memory (needed for two passes)
-    let mut data = Vec::new();
-    let mut reader = reader;
-    reader
-        .read_to_end(&mut data)
-        .context("reading bundle data")?;
+    // `BundleReader::open_with_limits` snapshots the source under the whole ceiling set before
+    // parsing, verifies, and holds the decoded events, so lint no longer does its own unbounded
+    // read or its own decode. It is not a single pass: the reader itself decodes twice, once to
+    // verify and once to extract the events, and both of those are bounded. What this removes is
+    // lint's third, unbounded pass. Every refusal comes back typed from the shared classifier.
+    let bundle =
+        BundleReader::open_with_limits(reader, limits).context("bundle verification failed")?;
 
-    // 1. Verify bundle integrity (hard fail)
-    let verify_result = verify_bundle_with_limits(Cursor::new(&data), limits)
-        .context("bundle verification failed")?;
-
-    let manifest = verify_result.manifest.clone();
-
-    // 2. Extract events
-    let events_bytes = extract_events_bytes(&data)?;
-    let events = parse_events(&events_bytes)?;
+    let manifest = bundle.manifest().clone();
+    let events = parse_events(bundle.events_raw())?;
 
     // 3. Run built-in lint rules
     let mut findings = run_builtin_rules(&events);
@@ -145,26 +140,6 @@ fn run_builtin_rules(events: &[EvidenceEvent]) -> Vec<LintFinding> {
     }
 
     findings
-}
-
-fn extract_events_bytes(bundle_data: &[u8]) -> Result<Vec<u8>> {
-    let decoder = flate2::read::GzDecoder::new(Cursor::new(bundle_data));
-    let mut archive = tar::Archive::new(decoder);
-
-    for entry in archive.entries().context("reading tar entries")? {
-        let mut entry = entry.context("reading tar entry")?;
-        let path = entry.path()?.to_string_lossy().to_string();
-
-        if path == "events.ndjson" {
-            let mut content = Vec::new();
-            entry
-                .read_to_end(&mut content)
-                .context("reading events.ndjson")?;
-            return Ok(content);
-        }
-    }
-
-    anyhow::bail!("missing events.ndjson in bundle")
 }
 
 fn compute_summary(findings: &[LintFinding]) -> LintSummary {

@@ -1,34 +1,28 @@
 use super::super::super::args::ReplayArgs;
 use super::failure::{write_missing_dependency, write_replay_failure};
-use super::fs_ops::{apply_seed_override, sha256_file, write_entries, ReplayWorkspace};
+use super::fs_ops::{apply_seed_override, write_entries, ReplayWorkspace};
 use super::manifest::{
     offline_dependency_message, resolve_config_path, resolve_trace_path, source_run_id_from_bundle,
 };
 use super::provenance::annotate_replay_outputs;
 use super::run_args::replay_run_args;
 use crate::exit_codes::ReasonCode;
-use assay_core::replay::{read_bundle_tar_gz, verify_bundle};
+use assay_core::replay::bundle::ReplayLimits;
+use assay_core::replay::read_verify_bounded;
 
 pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
-    let bundle_digest = match sha256_file(&args.bundle) {
-        Ok(d) => d,
-        Err(err) => {
-            eprintln!(
-                "warning: failed to compute bundle digest for {}: {}; using sha256:unknown",
-                args.bundle.display(),
-                err
-            );
-            "sha256:unknown".to_string()
-        }
-    };
     let replay_mode = if args.live { "live" } else { "offline" };
 
+    // One bounded snapshot for all three: the digest published as provenance, the bundle that is
+    // parsed, and the verdict. Digesting the path and then opening it again read the file twice
+    // and left a window in which the published digest could describe different bytes than the
+    // ones actually verified and replayed.
     let file = match std::fs::File::open(&args.bundle) {
         Ok(file) => file,
         Err(err) => {
             return write_replay_failure(
                 &args,
-                &bundle_digest,
+                "sha256:unknown",
                 replay_mode,
                 None,
                 ReasonCode::ECfgParse,
@@ -37,20 +31,33 @@ pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             );
         }
     };
-    let verify = match verify_bundle(file) {
-        Ok(v) => v,
-        Err(err) => {
-            return write_replay_failure(
-                &args,
-                &bundle_digest,
-                replay_mode,
-                None,
-                ReasonCode::ECfgParse,
-                format!("failed to verify bundle: {}", err),
-                None,
-            );
+    let snapshot = match read_verify_bounded(file, ReplayLimits::default()) {
+        Ok(snapshot) => snapshot,
+        Err(failure) => {
+            // Match the typed refusal before rendering. Formatting first and reporting everything
+            // as a parse error told an operator to fix the producer when the answer may be to
+            // raise a budget, and discarded the digest we already held for the exact bytes that
+            // failed.
+            let (reason, detail) = match failure.ingest_refusal() {
+                Some(refusal) => (
+                    ReasonCode::EReplayLimitExceeded,
+                    format!("replay bundle refused by an ingest ceiling: {refusal}"),
+                ),
+                None => (
+                    ReasonCode::ECfgParse,
+                    format!("failed to read replay bundle: {}", failure.error),
+                ),
+            };
+            let digest = failure
+                .source_digest
+                .clone()
+                .unwrap_or_else(|| "sha256:unknown".to_string());
+            return write_replay_failure(&args, &digest, replay_mode, None, reason, detail, None);
         }
     };
+    let bundle_digest = snapshot.source_digest.clone();
+    let read = snapshot.read;
+    let verify = snapshot.verify;
     for warning in &verify.warnings {
         eprintln!("warning: {}", warning);
     }
@@ -78,38 +85,6 @@ pub async fn run(args: ReplayArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         );
     }
 
-    let file = match std::fs::File::open(&args.bundle) {
-        Ok(file) => file,
-        Err(err) => {
-            return write_replay_failure(
-                &args,
-                &bundle_digest,
-                replay_mode,
-                None,
-                ReasonCode::ECfgParse,
-                format!(
-                    "failed to open verified bundle {}: {}",
-                    args.bundle.display(),
-                    err
-                ),
-                None,
-            );
-        }
-    };
-    let read = match read_bundle_tar_gz(file) {
-        Ok(read) => read,
-        Err(err) => {
-            return write_replay_failure(
-                &args,
-                &bundle_digest,
-                replay_mode,
-                None,
-                ReasonCode::ECfgParse,
-                format!("failed to read replay bundle: {}", err),
-                None,
-            );
-        }
-    };
     let source_run_id = source_run_id_from_bundle(&read.manifest, &read.entries);
 
     if !args.live {

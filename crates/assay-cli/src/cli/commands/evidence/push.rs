@@ -1,10 +1,10 @@
 //! `assay evidence push` - Upload an evidence bundle to storage.
 
 use anyhow::{Context, Result};
+use assay_common::limits::{LimitKind, LimitReader};
+use assay_evidence::bundle::writer::VerifyLimits;
 use assay_evidence::store::BundleStore;
-use assay_evidence::{
-    resolve_store_url, verify_bundle, Bytes, ObjectStoreBundleStore, StoreError, StoreSpec,
-};
+use assay_evidence::{resolve_store_url, Bytes, ObjectStoreBundleStore, StoreError, StoreSpec};
 use clap::Args;
 use std::fs::File;
 use std::io::Read;
@@ -42,24 +42,37 @@ pub async fn cmd_push(args: PushArgs) -> Result<i32> {
     let mut file = File::open(&args.bundle)
         .with_context(|| format!("failed to open bundle: {}", args.bundle.display()))?;
 
+    // ADR-043 section 1: the ceiling applies to the stream, before the input is materialized.
+    // The file was read whole with no bound at all, so an oversized archive sized the allocation
+    // regardless of what the verifier concluded afterwards, and `--no-verify` skipped even that
+    // afterthought. Bounding here covers both branches, because whatever is about to be uploaded
+    // has to pass the ceiling first.
+    let limits = VerifyLimits::default();
     let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)
+    LimitReader::new(&mut file, limits.max_bundle_bytes, LimitKind::SourceBytes)
+        .read_to_end(&mut buffer)
         .with_context(|| "failed to read bundle")?;
-
-    let bytes = Bytes::from(buffer.clone());
 
     // 2. Verify bundle (unless --no-verify)
     let bundle_id = if args.no_verify {
         let cursor = std::io::Cursor::new(&buffer);
-        let reader = assay_evidence::BundleReader::open_unverified(cursor)
+        let reader = assay_evidence::BundleReader::open_unverified_with_limits(cursor, limits)
             .context("failed to read bundle manifest")?;
         reader.manifest().bundle_id.clone()
     } else {
         let cursor = std::io::Cursor::new(&buffer);
-        let result = verify_bundle(cursor).context("bundle verification failed")?;
+        let result = assay_evidence::bundle::writer::verify_bundle_with_limits(cursor, limits)
+            .context("bundle verification failed")?;
         eprintln!("✅ Bundle verified: {}", result.manifest.bundle_id);
         result.manifest.bundle_id
     };
+
+    // The upload takes ownership of the same buffer that was just checked rather than cloning it.
+    // Stated narrowly, because the earlier note overclaimed: this removes one copy, not all of
+    // them. `BundleReader` still materializes its own `Vec` internally, so a bundle near the
+    // ceiling is held more than once regardless. Both copies are bounded; what changed is that
+    // one of them is no longer gratuitous.
+    let bytes = Bytes::from(buffer);
 
     // 3. Connect to store
     let url = resolve_store_url(args.store.as_deref(), args.store_config.as_deref())

@@ -1,5 +1,6 @@
+use crate::bundle::writer::{check_entry_path_len, strict_json_error};
 use crate::crypto::id::{compute_content_hash, compute_run_root, compute_stream_id};
-use crate::json_strict::validate_json_strict;
+use crate::json_strict::validate_json_strict_with_depth;
 use crate::types::EvidenceEvent;
 use anyhow::Result;
 use flate2::read::GzDecoder;
@@ -13,6 +14,42 @@ use super::events;
 use super::limits::{LimitReader, VerifyLimits};
 use super::manifest::Manifest;
 use super::tar_read::{read_line_bounded, EintrReader};
+use assay_common::limits::{LimitExceeded, LimitKind};
+
+/// Recover the typed ceiling behind an `io::Error` and map it onto this crate's vocabulary.
+///
+/// Returns `None` when the failure was not a ceiling at all, so the caller keeps its own
+/// classification. The lookup goes through the typed cause rather than the rendered message:
+/// message text is a diagnostic, never a contract.
+pub(crate) fn classify_limit(err: &std::io::Error) -> Option<ErrorCode> {
+    let cause = LimitExceeded::from_io(err)?;
+    // Exhaustive, with no wildcard. A new dimension in `LimitKind` must fail to compile here
+    // rather than fall into a catch-all that reports the wrong code.
+    Some(match cause.kind {
+        LimitKind::SourceBytes => ErrorCode::LimitBundleBytes,
+        LimitKind::DecodedBytes => ErrorCode::LimitDecodeBytes,
+        LimitKind::MemberBytes => ErrorCode::LimitFileSize,
+        LimitKind::LineBytes => ErrorCode::LimitLineBytes,
+    })
+}
+
+/// Stamp a `VerifyError` with a ceiling classification, or with `fallback` when the failure was
+/// not a ceiling. Taken as an already-resolved `Option` because the io error is consumed when the
+/// `VerifyError` is built from it.
+pub(crate) fn apply_limit_class(
+    mut ve: VerifyError,
+    limit: Option<ErrorCode>,
+    fallback: ErrorCode,
+) -> VerifyError {
+    match limit {
+        Some(code) => {
+            ve.code = code;
+            ve.class = ErrorClass::Limits;
+        }
+        None => ve.code = fallback,
+    }
+    ve
+}
 
 /// Allowed files in bundle (strict allowlist).
 const ALLOWED_FILES: &[&str] = &["manifest.json", "events.ndjson"];
@@ -58,11 +95,36 @@ pub fn verify_bundle<R: Read>(reader: R) -> Result<VerifyResult> {
 
 /// Verify a bundle with explicit resource limits.
 pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<VerifyResult> {
-    let reader = EintrReader::new(reader);
-    let reader = LimitReader::new(reader, limits.max_bundle_bytes, "LimitBundleBytes");
+    // Snapshot the whole source under the ceiling before parsing anything.
+    //
+    // Streaming the ceiling into the gzip/tar walker only bounds the prefix those layers choose
+    // to consume. They stop once the archive is logically complete, so a valid bundle followed by
+    // an arbitrary suffix passed a ceiling far below the real input size: the trailing bytes were
+    // never requested and therefore never counted. `read_to_end` through the same ceiling counts
+    // everything the source actually holds.
+    let mut source = Vec::new();
+    LimitReader::new(
+        EintrReader::new(reader),
+        limits.max_bundle_bytes,
+        LimitKind::SourceBytes,
+    )
+    .read_to_end(&mut source)
+    .map_err(|e| {
+        let limit = classify_limit(&e);
+        apply_limit_class(VerifyError::from(e), limit, ErrorCode::IntegrityGzip)
+            .with_context("Bundle source")
+    })?;
+
+    verify_bundle_snapshot(&source, limits)
+}
+
+/// Verify a bundle from bytes already bounded and materialized by the caller.
+fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyResult> {
+    let reader = std::io::Cursor::new(source);
 
     let decoder = GzDecoder::new(reader);
-    let limited_decoder = LimitReader::new(decoder, limits.max_decode_bytes, "LimitDecodeBytes");
+    let limited_decoder =
+        LimitReader::new(decoder, limits.max_decode_bytes, LimitKind::DecodedBytes);
     let mut archive = tar::Archive::new(limited_decoder);
 
     let mut manifest: Option<Manifest> = None;
@@ -72,48 +134,24 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
     let mut actual_event_count = 0;
 
     let entries = archive.entries().map_err(|e| {
-        let mut ve = VerifyError::from(e);
-        if ve.message.contains("LimitBundleBytes") {
-            ve.code = ErrorCode::LimitBundleBytes;
-            ve.class = ErrorClass::Limits;
-        } else if ve.message.contains("LimitDecodeBytes") {
-            ve.code = ErrorCode::LimitDecodeBytes;
-            ve.class = ErrorClass::Limits;
-        } else {
-            ve.code = ErrorCode::IntegrityTar;
-        }
+        let limit = classify_limit(&e);
+        let ve = apply_limit_class(VerifyError::from(e), limit, ErrorCode::IntegrityTar);
         ve.with_context("Gzip/Tar stream")
     })?;
 
     for (i, entry) in entries.enumerate() {
         let entry = entry.map_err(|e| {
-            let mut ve = VerifyError::from(e);
-            if ve.message.contains("LimitBundleBytes") {
-                ve.code = ErrorCode::LimitBundleBytes;
-                ve.class = ErrorClass::Limits;
-            } else if ve.message.contains("LimitDecodeBytes") {
-                ve.code = ErrorCode::LimitDecodeBytes;
-                ve.class = ErrorClass::Limits;
-            } else {
-                ve.code = ErrorCode::IntegrityTar;
-            }
+            let limit = classify_limit(&e);
+            let ve = apply_limit_class(VerifyError::from(e), limit, ErrorCode::IntegrityTar);
             ve.with_context(format!("Entry #{}", i))
         })?;
+        // Measure the path on the bytes the archive carries, before any conversion. `to_str`
+        // returns None for invalid UTF-8 and the fallback measured an empty string, so a name
+        // that is invalid on purpose skipped the ceiling entirely.
+        check_entry_path_len(entry.path_bytes().len(), limits.max_path_len)?;
+
         let path = entry.path().map_err(VerifyError::from)?.to_path_buf();
         let path_str = path.to_str().unwrap_or("");
-
-        if path_str.len() > limits.max_path_len {
-            return Err(VerifyError::new(
-                ErrorClass::Limits,
-                ErrorCode::LimitPathLength,
-                format!(
-                    "Path length {} exceeds limit {}",
-                    path_str.len(),
-                    limits.max_path_len
-                ),
-            )
-            .into());
-        }
 
         let header_size = entry.header().size().map_err(VerifyError::from)?;
 
@@ -127,9 +165,10 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
             return Err(VerifyError::new(
                 ErrorClass::Limits,
                 ErrorCode::LimitFileSize,
+                // Value-free: the member name and its declared size are archive-controlled.
+                // The dimension and the configured ceiling are what a reader can act on.
                 format!(
-                    "File '{}' declared size {} exceeds limit {}",
-                    path_str, header_size, max_size
+                    "A declared member size exceeds the configured maximum of {max_size} bytes"
                 ),
             )
             .into());
@@ -180,15 +219,29 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
 
             let mut content = Vec::new();
             let mut manifest_reader =
-                LimitReader::new(entry, limits.max_manifest_bytes, "LimitFileSize");
+                LimitReader::new(entry, limits.max_manifest_bytes, LimitKind::MemberBytes);
             manifest_reader.read_to_end(&mut content).map_err(|e| {
+                let limit = classify_limit(&e);
                 let mut ve = VerifyError::from(e);
-                if ve.message.contains("LimitFileSize") {
-                    ve.code = ErrorCode::LimitFileSize;
+                if let Some(code) = limit {
+                    ve.code = code;
                     ve.class = ErrorClass::Limits;
                 }
                 ve
             })?;
+
+            // The manifest went straight to `serde_json` with no strict pass at all, so the
+            // caller's nesting ceiling applied to events and not to the document that describes
+            // them. Peek already validated it; the verifier did not.
+            let manifest_str = std::str::from_utf8(&content).map_err(|e| {
+                VerifyError::new(
+                    ErrorClass::Contract,
+                    ErrorCode::ContractInvalidJson,
+                    format!("Invalid UTF-8 in manifest.json: {}", e),
+                )
+            })?;
+            validate_json_strict_with_depth(manifest_str, limits.max_json_depth)
+                .map_err(|e| strict_json_error(e, "Manifest", limits.max_json_depth))?;
 
             let m: Manifest = serde_json::from_slice(&content).map_err(|e| {
                 let mut ve = VerifyError::from(e);
@@ -249,9 +302,10 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                 line_buf.clear();
                 let n = read_line_bounded(&mut reader, &mut line_buf, limits.max_line_bytes)
                     .map_err(|e| {
+                        let limit = classify_limit(&e);
                         let mut ve = VerifyError::from(e);
-                        if ve.message.contains("LimitLineBytes") {
-                            ve.code = ErrorCode::LimitLineBytes;
+                        if let Some(code) = limit {
+                            ve.code = code;
                             ve.class = ErrorClass::Limits;
                         }
                         ve
@@ -278,7 +332,10 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                     return Err(VerifyError::new(
                         ErrorClass::Limits,
                         ErrorCode::LimitTotalEvents,
-                        format!("Event count exceeds limit {}", limits.max_events),
+                        format!(
+                            "Event count exceeds the configured maximum of {}",
+                            limits.max_events
+                        ),
                     )
                     .into());
                 }
@@ -305,13 +362,8 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
                     )
                 })?;
 
-                validate_json_strict(line_str).map_err(|e| {
-                    VerifyError::new(
-                        ErrorClass::Contract,
-                        ErrorCode::ContractInvalidJson,
-                        format!("Security: {}", e),
-                    )
-                })?;
+                validate_json_strict_with_depth(line_str, limits.max_json_depth)
+                    .map_err(|e| strict_json_error(e, "Event", limits.max_json_depth))?;
 
                 let event: EvidenceEvent = serde_json::from_str(line_str).map_err(|e| {
                     let mut ve = VerifyError::from(e);
@@ -493,12 +545,10 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
             Ok(0) => break,
             Ok(_) => continue,
             Err(e) => {
+                let limit = classify_limit(&e);
                 let mut ve = VerifyError::from(e);
-                if ve.message.contains("LimitDecodeBytes") {
-                    ve.code = ErrorCode::LimitDecodeBytes;
-                    ve.class = ErrorClass::Limits;
-                } else if ve.message.contains("LimitBundleBytes") {
-                    ve.code = ErrorCode::LimitBundleBytes;
+                if let Some(code) = limit {
+                    ve.code = code;
                     ve.class = ErrorClass::Limits;
                 } else {
                     ve.code = ErrorCode::IntegrityGzip;

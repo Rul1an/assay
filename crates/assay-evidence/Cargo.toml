@@ -12,6 +12,10 @@ readme.workspace = true
 # Internal: shared canonicalization (JCS + content-id). Same serde_jcs pin, so the bytes (and every
 # content/mandate digest) are unchanged; this is a deduplication, not a behaviour change.
 assay-canonical = { workspace = true }
+# Internal: the bounded-ingest primitive (ADR-043 §1). One mechanism shared with the replay
+# verifier; the limit vocabularies stay domain-local because theirs do not describe an
+# evidence bundle.
+assay-common = { workspace = true, features = ["std"] }
 # Core serialization
 serde = { workspace = true, features = ["derive", "std", "alloc"] }
 serde_json = { workspace = true, features = ["preserve_order", "std", "alloc"] }

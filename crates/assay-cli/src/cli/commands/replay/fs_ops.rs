@@ -1,7 +1,5 @@
 use anyhow::Context;
-use sha2::{Digest, Sha256};
 use std::io::ErrorKind;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 pub(super) fn apply_seed_override(config_path: &Path, seed: u64) -> anyhow::Result<()> {
@@ -101,29 +99,52 @@ fn write_file_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Resolve a bundle entry path against the workspace, refusing anything that could land outside
+/// it.
+///
+/// The reader already normalizes and validates every entry path, so in a correct build nothing
+/// reaches here that this would reject. That is the point: `workspace.join(rel)` silently returns
+/// `rel` when `rel` is absolute, discarding the workspace entirely, so a single reader regression
+/// turns into writes at the filesystem root — and under container or privileged execution that is
+/// the whole host. The cost of checking here is a handful of comparisons per entry; the cost of
+/// not checking is that the containment property depends on a caller two crates away staying
+/// correct forever.
+fn resolve_in_workspace(workspace: &Path, rel: &str) -> anyhow::Result<PathBuf> {
+    use std::path::Component;
+
+    let candidate = Path::new(rel);
+    anyhow::ensure!(
+        candidate.is_relative(),
+        "refusing bundle entry that is not workspace-relative"
+    );
+
+    // Lexical, not `canonicalize`: the target does not exist yet, and resolving what does exist
+    // would follow symlinks we would rather simply not create. Every component must be a plain
+    // name — no traversal, no root, no prefix.
+    for component in candidate.components() {
+        match component {
+            Component::Normal(_) => {}
+            _ => anyhow::bail!("refusing bundle entry with a non-literal path component"),
+        }
+    }
+
+    let target = workspace.join(candidate);
+    anyhow::ensure!(
+        target.starts_with(workspace),
+        "refusing bundle entry that resolves outside the replay workspace"
+    );
+    Ok(target)
+}
+
 pub(super) fn write_entries(workspace: &Path, entries: &[(String, Vec<u8>)]) -> anyhow::Result<()> {
     for (rel, data) in entries {
-        let target = workspace.join(rel);
+        let target = resolve_in_workspace(workspace, rel)?;
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(target, data)?;
     }
     Ok(())
-}
-
-pub(super) fn sha256_file(path: &Path) -> anyhow::Result<String> {
-    let mut f = std::fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buf = [0_u8; 8192];
-    loop {
-        let read = f.read(&mut buf)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buf[..read]);
-    }
-    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
 }
 
 pub(super) struct ReplayWorkspace {

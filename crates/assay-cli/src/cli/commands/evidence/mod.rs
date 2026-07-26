@@ -30,7 +30,7 @@ use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
 use mapping::{DetailLevel, EvidenceMapper};
 use std::fs::File;
-use std::io::{self, Read};
+use std::io;
 
 /// Manage tamper-evident bundles (audit/compliance)
 #[derive(Debug, Subcommand, Clone)]
@@ -256,9 +256,13 @@ fn cmd_export(args: EvidenceExportArgs) -> Result<i32> {
 
 fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
     if args.bundle.to_string_lossy() == "-" {
-        let mut buf = Vec::new();
-        io::stdin().read_to_end(&mut buf)?;
-        assay_evidence::bundle::verify_bundle(io::Cursor::new(buf))
+        // ADR-043 section 1: the ceiling applies to the stream. Reading stdin to the end first
+        // and verifying a `Cursor` over the result meant an untrusted pipe sized the allocation
+        // before any limit was consulted, and stdin is the one source whose length nothing can
+        // be checked against beforehand. `verify_bundle` bounds the reader it is given, so hand
+        // it the pipe rather than a buffer already filled from it.
+        let stdin = io::stdin();
+        assay_evidence::bundle::verify_bundle(stdin.lock())
             .context("bundle verification failed")?;
         eprintln!("Bundle verified (stdin): OK");
         return Ok(0);

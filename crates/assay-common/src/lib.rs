@@ -7,6 +7,9 @@ extern crate std;
 #[cfg(feature = "std")]
 pub mod exports;
 
+/// Bounded ingest primitive (ADR-043 §1). std-only: it is an `io::Read` adapter.
+pub mod limits;
+
 pub const EVENT_OPENAT: u32 = 1;
 pub const EVENT_CONNECT: u32 = 2;
 pub const EVENT_FORK: u32 = 3;

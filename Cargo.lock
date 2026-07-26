@@ -365,6 +365,7 @@ version = "3.34.0"
 dependencies = [
  "anyhow",
  "assay-canonical",
+ "assay-common",
  "assert_fs",
  "async-trait",
  "base64",

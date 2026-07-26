@@ -3,9 +3,11 @@
 //! Validates bundle integrity (hashes) and runs secret scan: hard fail for
 //! cassettes/ and files/, warn for outputs/. See E9-REPLAY-BUNDLE-PLAN §2.5.
 
-use crate::replay::bundle::{paths, read_bundle_tar_gz, ReadBundle};
+use crate::replay::bundle::limits::classify_source_ceiling;
+use crate::replay::bundle::{paths, read_bundle_tar_gz_with_limits, ReadBundle, ReplayLimits};
 use crate::replay::scrub::contains_forbidden_patterns;
 use anyhow::{Context, Result};
+use assay_common::limits::{LimitKind, LimitReader};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 
@@ -44,7 +46,117 @@ impl VerifyResult {
 /// - **outputs/:** warn only. Outputs can contain user-provided or tool output; we avoid
 ///   false-positive hard fails.
 pub fn verify_bundle<R: Read>(r: R) -> Result<VerifyResult> {
-    let ReadBundle { manifest, entries } = read_bundle_tar_gz(r).context("read bundle")?;
+    verify_bundle_with_limits(r, ReplayLimits::default())
+}
+
+/// Read once under an explicit ceiling and verify what was read.
+pub fn verify_bundle_with_limits<R: Read>(r: R, limits: ReplayLimits) -> Result<VerifyResult> {
+    let read = read_bundle_tar_gz_with_limits(r, limits).context("read bundle")?;
+    verify_read_bundle(&read)
+}
+
+/// One bounded snapshot of a replay bundle: the bytes, what they parsed to, and the verdict.
+///
+/// `source_digest` is computed over exactly the compressed bytes that produced `read`, which is
+/// the point of returning them together. A caller that digests the path and then opens it again
+/// publishes a digest describing one snapshot while replaying another.
+#[derive(Debug)]
+pub struct VerifiedBundle {
+    /// Parsed bundle, from the same bytes the digest covers.
+    pub read: ReadBundle,
+    /// Verification verdict for exactly that `read`.
+    pub verify: VerifyResult,
+    /// `sha256:<hex>` over the compressed source bytes.
+    pub source_digest: String,
+}
+
+/// Read, digest and verify a replay bundle from a single bounded snapshot.
+///
+/// This is the entrypoint a caller should reach for. It takes one read of the source, bounded by
+/// `limits.max_source_bytes` before anything is materialized, and binds three things that must
+/// agree to that one snapshot: the digest published as provenance, the bundle that is parsed, and
+/// the verdict. Digesting a path and separately opening it leaves a window in which those three
+/// describe different bytes.
+pub fn read_verify_bounded<R: Read>(
+    r: R,
+    limits: ReplayLimits,
+) -> Result<VerifiedBundle, SnapshotError> {
+    let mut source = Vec::new();
+    LimitReader::new(r, limits.max_source_bytes, LimitKind::SourceBytes)
+        .read_to_end(&mut source)
+        .map_err(|err| {
+            // Classify before wrapping. `.context` on the raw io error would bury the typed cause
+            // under an anyhow layer, so the recommended entrypoint would return a weaker contract
+            // than the reader it is meant to replace.
+            let e = classify_source_ceiling(&err)
+                .map(anyhow::Error::from)
+                .unwrap_or_else(|| anyhow::Error::from(err).context("read bundle source"));
+            // No digest: the source itself could not be read, so there is nothing to attest.
+            SnapshotError {
+                source_digest: None,
+                error: e,
+            }
+        })?;
+
+    // From here the source is known, so every later failure can still name the bytes it happened
+    // on. Losing the digest to "sha256:unknown" on a parse error discards provenance we already
+    // hold about the exact input that failed.
+    let source_digest = format!("sha256:{}", hex::encode(Sha256::digest(&source)));
+
+    // Known cost, recorded rather than optimised away: `read_bundle_tar_gz_with_limits` applies
+    // the same whole-source rule and snapshots this cursor again, so peak memory here is about
+    // twice `max_source_bytes` rather than once. That is bounded — the ceiling still governs, and
+    // a caller who sets 100 MiB gets a 200 MiB worst case, not an unbounded one. Removing the
+    // second copy means letting the reader take a pre-read snapshot, which is a parser API change
+    // and would give one entrypoint a bypass of the rule the other enforces. Not worth it for a
+    // constant factor on an already-bounded value; revisit if a ceiling is ever raised far enough
+    // that 2x matters.
+    let read =
+        read_bundle_tar_gz_with_limits(std::io::Cursor::new(&source), limits).map_err(|error| {
+            SnapshotError {
+                source_digest: Some(source_digest.clone()),
+                error,
+            }
+        })?;
+    let verify = verify_read_bundle(&read).map_err(|error| SnapshotError {
+        source_digest: Some(source_digest.clone()),
+        error,
+    })?;
+
+    Ok(VerifiedBundle {
+        read,
+        verify,
+        source_digest,
+    })
+}
+
+/// A bounded-snapshot failure, carrying the digest when the source was read.
+#[derive(Debug)]
+pub struct SnapshotError {
+    /// `sha256:` over the source, present whenever the source itself was read successfully.
+    pub source_digest: Option<String>,
+    pub error: anyhow::Error,
+}
+
+impl std::fmt::Display for SnapshotError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.error)
+    }
+}
+
+impl SnapshotError {
+    /// The typed ingest refusal behind this failure, if it was one.
+    pub fn ingest_refusal(&self) -> Option<&crate::replay::bundle::ReplayIngestError> {
+        self.error.downcast_ref()
+    }
+}
+
+/// Verify an already-read bundle.
+///
+/// Crate-internal on purpose. Exposed, it invites a caller to verify one `ReadBundle` and act on
+/// another; [`read_verify_bounded`] is the shape that cannot be held that way.
+pub(crate) fn verify_read_bundle(read: &ReadBundle) -> Result<VerifyResult> {
+    let ReadBundle { manifest, entries } = read;
     let mut result = VerifyResult::default();
     let file_manifest = manifest.files.as_ref();
 
@@ -82,7 +194,7 @@ pub fn verify_bundle<R: Read>(r: R) -> Result<VerifyResult> {
         }
     }
 
-    for (path, data) in &entries {
+    for (path, data) in entries.iter() {
         let has_forbidden = contains_forbidden_patterns(data);
         if path.starts_with(paths::CASSETTES_PREFIX) || path.starts_with(paths::FILES_PREFIX) {
             if has_forbidden {
