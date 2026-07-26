@@ -12,6 +12,17 @@ This document outlines the canonical checklist for releasing new versions of Ass
 - [ ] **Update Lockfile**: Run `cargo check --workspace` to update `Cargo.lock`.
 - [ ] **Changelog**: Update `CHANGELOG.md` with new features and fixes.
 - [ ] **Lints**: Run `cargo clippy --workspace --all-targets` to ensure no new warnings.
+- [ ] **Version-line preflight**: Bind the workspace to the intended stable tag before it exists:
+  ```bash
+  EXPECTED_RELEASE=vX.Y.Z CHECK_VM=0 \
+    bash scripts/ci/check-assay-version-line.sh
+  ```
+  This is the workspace-only pre-tag check. On the host that owns the runner
+  VM, repeat it with `CHECK_VM=1` to prove the VM still matches GitHub Latest
+  while the workspace matches the intended release target.
+  The Harness default is an independently proven compatibility pin and may
+  intentionally lag the latest Assay release. The VM remains bound to the
+  current GitHub Latest release until the new tag is published.
 
 ### 2. Permissions Check (Crucial)
 - [ ] **Trusted Publishing**: Ensure GitHub Actions OIDC is enabled for the release tag on every current crates.io crate:

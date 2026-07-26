@@ -5,6 +5,7 @@ REPO="${REPO:-Rul1an/assay}"
 VM_NAME="${VM_NAME:-assay-bpf-runner}"
 HARNESS_DIR="${HARNESS_DIR:-../Assay-Harness}"
 CHECK_VM="${CHECK_VM:-1}"
+EXPECTED_RELEASE="${EXPECTED_RELEASE:-}"
 
 failures=0
 
@@ -31,6 +32,10 @@ latest_tag() {
   printf '%s\n' "$tag"
 }
 
+is_stable_tag() {
+  [[ "$1" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]
+}
+
 workspace_version() {
   awk '
     $0 == "[workspace.package]" { in_workspace_package = 1; next }
@@ -49,13 +54,44 @@ harness_version() {
     return 0
   fi
 
-  awk '
-    $1 == "default:" {
-      value = $2
-      gsub(/"/, "", value)
-      print value
-      exit
-    }
+  # shellcheck disable=SC2016 # Ruby reads the YAML structure, not shell variables.
+  ruby -ryaml -e '
+    def reject_duplicate_keys(node, scanner, path = [])
+      case node
+      when Psych::Nodes::Stream, Psych::Nodes::Document
+        node.children.each { |child| reject_duplicate_keys(child, scanner, path) }
+      when Psych::Nodes::Mapping
+        seen = {}
+        node.children.each_slice(2) do |key_node, value_node|
+          abort("complex YAML mapping keys are unsupported") unless
+            key_node.is_a?(Psych::Nodes::Scalar)
+          abort("explicitly tagged YAML mapping keys are unsupported") if
+            key_node.tag
+          raw_key = key_node.value
+          semantic_key = key_node.plain ? scanner.tokenize(raw_key) : raw_key
+          fingerprint = [semantic_key.class.name, semantic_key]
+          abort("duplicate YAML key at #{(path + [raw_key]).join(".")}") if
+            seen[fingerprint]
+          seen[fingerprint] = true
+          reject_duplicate_keys(value_node, scanner, path + [raw_key])
+        end
+      when Psych::Nodes::Sequence
+        node.children.each_with_index do |child, index|
+          reject_duplicate_keys(child, scanner, path + [index.to_s])
+        end
+      end
+    end
+
+    loader = Psych::ClassLoader::Restricted.new([], [])
+    scanner = Psych::ScalarScanner.new(loader)
+    reject_duplicate_keys(Psych.parse_file(ARGV.fetch(0)), scanner)
+    document = YAML.safe_load_file(ARGV.fetch(0), aliases: false)
+    triggers = document["on"] || document[true]
+    value = triggers
+      &.dig("workflow_dispatch", "inputs", "assay_version", "default")
+    abort("missing workflow_dispatch.inputs.assay_version.default") unless
+      value.is_a?(String) && !value.empty?
+    puts value
   ' "$workflow"
 }
 
@@ -78,6 +114,18 @@ else
   note "latest_release=${latest}"
 fi
 
+release_target="$latest"
+if [[ -n "$EXPECTED_RELEASE" ]]; then
+  if ! is_stable_tag "$EXPECTED_RELEASE"; then
+    fail "expected release is not a stable software tag: ${EXPECTED_RELEASE}"
+  else
+    release_target="$EXPECTED_RELEASE"
+  fi
+fi
+if [[ -n "$release_target" ]]; then
+  note "release_target=${release_target}"
+fi
+
 workspace="$(workspace_version)"
 if [[ -z "$workspace" ]]; then
   fail "could not read workspace.package.version from Cargo.toml"
@@ -89,7 +137,7 @@ harness="$(harness_version)"
 if [[ -z "$harness" ]]; then
   fail "could not read Harness CI assay_version default from ${HARNESS_DIR}"
 else
-  note "harness_assay_version=${harness}"
+  note "harness_compatibility_assay_version=${harness}"
 fi
 
 vm_version=""
@@ -104,12 +152,12 @@ else
   note "vm_assay_version=skipped"
 fi
 
-if [[ -n "$latest" && -n "$workspace" && "v${workspace}" != "$latest" ]]; then
-  fail "workspace version v${workspace} does not match latest release ${latest}"
+if [[ -n "$release_target" && -n "$workspace" && "v${workspace}" != "$release_target" ]]; then
+  fail "workspace version v${workspace} does not match release target ${release_target}"
 fi
 
-if [[ -n "$latest" && -n "$harness" && "$harness" != "$latest" ]]; then
-  fail "Harness compatibility default ${harness} does not match latest release ${latest}"
+if [[ -n "$harness" ]] && ! is_stable_tag "$harness"; then
+  fail "Harness compatibility default is not a stable software tag: ${harness}"
 fi
 
 if [[ "$CHECK_VM" == "1" && -n "$latest" && -n "$vm_version" && "v${vm_version}" != "$latest" ]]; then

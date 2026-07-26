@@ -54,7 +54,15 @@ fi
 [[ -z "${FAKE_INVOCATION_COUNTER:-}" ]] || printf '1\n' >>"$FAKE_INVOCATION_COUNTER"
 printf 'assay %s\n' "${FAKE_ASSAY_VERSION:-3.35.0}"
 EOF
-chmod +x "$TMP_DIR/bin/curl" "$TMP_DIR/bin/jq" "$TMP_DIR/bin/assay"
+cat >"$TMP_DIR/bin/multipass" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "${FAKE_VM_VERSION:?}"
+EOF
+chmod +x \
+  "$TMP_DIR/bin/curl" \
+  "$TMP_DIR/bin/jq" \
+  "$TMP_DIR/bin/assay" \
+  "$TMP_DIR/bin/multipass"
 
 rejects_fake_latest() {
   local output
@@ -263,5 +271,147 @@ if [[ "$health_tag" != "$VALID_TAG" ]]; then
   echo "health_check.sh rejected stable latest tag $VALID_TAG" >&2
   exit 1
 fi
+
+mkdir -p "$TMP_DIR/harness/.github/workflows"
+cat >"$TMP_DIR/harness/.github/workflows/harness-ci.yml" <<'EOF'
+on:
+  workflow_dispatch:
+    inputs:
+      unrelated_version:
+        default: "v9.9.9"
+      assay_version:
+        default: "v3.27.0"
+EOF
+FAKE_TAG="v3.33.0" EXPECTED_RELEASE="v3.34.0" CHECK_VM=0 \
+  HARNESS_DIR="$TMP_DIR/harness" PATH="$TMP_DIR/bin:$PATH" \
+  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh" \
+  >"$TMP_DIR/version-line-release-prep.log"
+require_literal_from_path "$TMP_DIR/version-line-release-prep.log" \
+  "latest_release=v3.33.0"
+require_literal_from_path "$TMP_DIR/version-line-release-prep.log" \
+  "release_target=v3.34.0"
+require_literal_from_path "$TMP_DIR/version-line-release-prep.log" \
+  "harness_compatibility_assay_version=v3.27.0"
+require_literal_from_path "$TMP_DIR/version-line-release-prep.log" \
+  "version_line_status=ok"
+
+FAKE_TAG="v3.33.0" FAKE_VM_VERSION="3.33.0" \
+  EXPECTED_RELEASE="v3.34.0" CHECK_VM=1 \
+  HARNESS_DIR="$TMP_DIR/harness" PATH="$TMP_DIR/bin:$PATH" \
+  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh" \
+  >"$TMP_DIR/version-line-vm-latest.log"
+require_literal_from_path "$TMP_DIR/version-line-vm-latest.log" \
+  "vm_assay_version=3.33.0"
+require_literal_from_path "$TMP_DIR/version-line-vm-latest.log" \
+  "version_line_status=ok"
+
+if FAKE_TAG="v3.33.0" FAKE_VM_VERSION="3.34.0" \
+  EXPECTED_RELEASE="v3.34.0" CHECK_VM=1 \
+  HARNESS_DIR="$TMP_DIR/harness" PATH="$TMP_DIR/bin:$PATH" \
+  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh" \
+  >"$TMP_DIR/version-line-vm-target.log" 2>&1
+then
+  echo "version-line check accepted a VM on the release target instead of Latest" >&2
+  exit 1
+fi
+require_literal_from_path "$TMP_DIR/version-line-vm-target.log" \
+  "VM assay version v3.34.0 does not match latest release v3.33.0"
+
+mkdir -p "$TMP_DIR/harness-lookalike/.github/workflows"
+cat >"$TMP_DIR/harness-lookalike/.github/workflows/harness-ci.yml" <<'EOF'
+on:
+  push:
+jobs:
+  decoy:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          workflow_dispatch:
+            inputs:
+              assay_version:
+                default: "v9.9.9"
+EOF
+if FAKE_TAG="v3.33.0" EXPECTED_RELEASE="v3.34.0" CHECK_VM=0 \
+  HARNESS_DIR="$TMP_DIR/harness-lookalike" PATH="$TMP_DIR/bin:$PATH" \
+  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh" \
+  >"$TMP_DIR/version-line-lookalike.log" 2>&1
+then
+  echo "version-line check accepted workflow YAML from a block scalar" >&2
+  exit 1
+fi
+
+mkdir -p "$TMP_DIR/harness-duplicate/.github/workflows"
+cat >"$TMP_DIR/harness-duplicate/.github/workflows/harness-ci.yml" <<'EOF'
+on:
+  workflow_dispatch:
+    inputs:
+      assay_version:
+        default: "v3.27.0"
+        default: "v9.9.9"
+EOF
+if FAKE_TAG="v3.33.0" EXPECTED_RELEASE="v3.34.0" CHECK_VM=0 \
+  HARNESS_DIR="$TMP_DIR/harness-duplicate" PATH="$TMP_DIR/bin:$PATH" \
+  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh" \
+  >"$TMP_DIR/version-line-duplicate.log" 2>&1
+then
+  echo "version-line check accepted a duplicate Harness version key" >&2
+  exit 1
+fi
+
+mkdir -p "$TMP_DIR/harness-semantic-duplicate/.github/workflows"
+cat >"$TMP_DIR/harness-semantic-duplicate/.github/workflows/harness-ci.yml" <<'EOF'
+on:
+  workflow_dispatch:
+    inputs:
+      assay_version:
+        default: "not-a-tag"
+true:
+  workflow_dispatch:
+    inputs:
+      assay_version:
+        default: "v9.9.9"
+EOF
+if FAKE_TAG="v3.33.0" EXPECTED_RELEASE="v3.34.0" CHECK_VM=0 \
+  HARNESS_DIR="$TMP_DIR/harness-semantic-duplicate" PATH="$TMP_DIR/bin:$PATH" \
+  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh" \
+  >"$TMP_DIR/version-line-semantic-duplicate.log" 2>&1
+then
+  echo "version-line check accepted semantically duplicate YAML keys" >&2
+  exit 1
+fi
+
+mkdir -p "$TMP_DIR/harness-tagged-duplicate/.github/workflows"
+cat >"$TMP_DIR/harness-tagged-duplicate/.github/workflows/harness-ci.yml" <<'EOF'
+!!bool "true":
+  workflow_dispatch:
+    inputs:
+      assay_version:
+        default: "not-a-tag"
+true:
+  workflow_dispatch:
+    inputs:
+      assay_version:
+        default: "v9.9.9"
+EOF
+if FAKE_TAG="v3.33.0" EXPECTED_RELEASE="v3.34.0" CHECK_VM=0 \
+  HARNESS_DIR="$TMP_DIR/harness-tagged-duplicate" PATH="$TMP_DIR/bin:$PATH" \
+  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh" \
+  >"$TMP_DIR/version-line-tagged-duplicate.log" 2>&1
+then
+  echo "version-line check accepted an explicitly tagged YAML key" >&2
+  exit 1
+fi
+
+INVALID_TARGET="$FAKE_TAG"
+if FAKE_TAG="v3.33.0" EXPECTED_RELEASE="$INVALID_TARGET" CHECK_VM=0 \
+  HARNESS_DIR="$TMP_DIR/harness" PATH="$TMP_DIR/bin:$PATH" \
+  bash "$REPO_ROOT/scripts/ci/check-assay-version-line.sh" \
+  >"$TMP_DIR/version-line-invalid-target.log" 2>&1
+then
+  echo "version-line check accepted a non-software release target" >&2
+  exit 1
+fi
+require_literal_from_path "$TMP_DIR/version-line-invalid-target.log" \
+  "expected release is not a stable software tag: $INVALID_TARGET"
 
 echo "release channel separation contract passed"
