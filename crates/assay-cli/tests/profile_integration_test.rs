@@ -33,11 +33,11 @@ fn test_profile_cli_workflow() -> anyhow::Result<()> {
     assert!(out_evidence.exists());
 
     let yaml_content = std::fs::read_to_string(out_yaml)?;
-    assert!(yaml_content.contains("api_version: 1"));
-    assert!(yaml_content.contains("extends:"));
+    let policy: serde_yaml::Value = serde_yaml::from_str(&yaml_content)?;
+    assert_eq!(policy["api_version"], 1);
     assert!(
-        !yaml_content.contains("pack:"),
-        "generated policies must not declare unresolved packs"
+        policy["extends"].as_sequence().is_some_and(Vec::is_empty),
+        "generated YAML policies must declare an empty extends list"
     );
 
     let evidence_content = std::fs::read_to_string(out_evidence)?;

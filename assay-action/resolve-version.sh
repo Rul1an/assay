@@ -23,10 +23,11 @@ if [[ "$VERSION" == "latest" ]]; then
   fi
 fi
 
-case "$VERSION" in
-v*) ;;
-*) VERSION="v${VERSION}" ;;
-esac
+if [[ ! "$VERSION" =~ ^v?[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+  echo "::error::Assay version must be a release tag in vX.Y.Z or vX.Y.Z-prerelease form"
+  exit 1
+fi
+VERSION="v${VERSION#v}"
 
 echo "resolved_version=$VERSION" >>"$GITHUB_OUTPUT"
 echo "resolved_version_plain=${VERSION#v}" >>"$GITHUB_OUTPUT"

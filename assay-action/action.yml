@@ -81,7 +81,7 @@ inputs:
     required: false
     default: 'false'
   version:
-    description: 'Assay CLI version to install'
+    description: 'Assay CLI release tag to install (vX.Y.Z or an explicit semver prerelease)'
     required: false
     default: 'latest'
 

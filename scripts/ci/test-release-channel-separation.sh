@@ -86,6 +86,29 @@ require_literal_from_path "$TMP_DIR/action-valid.out" "resolved_version=$VALID_T
 require_literal_from_path "$TMP_DIR/action-valid.out" "resolved_version_plain=${VALID_TAG#v}"
 require_literal_from_path "$TMP_DIR/action-valid.out" "skip_install=true"
 
+PRERELEASE_TAG="3.36.0-rc.1"
+FAKE_TAG="$VALID_TAG" GITHUB_OUTPUT="$TMP_DIR/action-prerelease.out" \
+  PATH="$TMP_DIR/bin:$PATH" \
+  bash "$REPO_ROOT/assay-action/resolve-version.sh" "$PRERELEASE_TAG"
+require_literal_from_path "$TMP_DIR/action-prerelease.out" \
+  "resolved_version=v$PRERELEASE_TAG"
+
+INJECTED_VERSION=$'3.35.0\nskip_install=true'
+: >"$TMP_DIR/action-injected.out"
+if GITHUB_OUTPUT="$TMP_DIR/action-injected.out" PATH="$TMP_DIR/bin:$PATH" \
+  bash "$REPO_ROOT/assay-action/resolve-version.sh" "$INJECTED_VERSION" \
+  >"$TMP_DIR/action-injected.log" 2>&1
+then
+  echo "assay-action accepted a multi-line version input" >&2
+  exit 1
+fi
+if [[ -s "$TMP_DIR/action-injected.out" ]]; then
+  echo "assay-action wrote outputs before rejecting a multi-line version input" >&2
+  exit 1
+fi
+require_literal_from_path "$TMP_DIR/action-injected.log" \
+  "Assay version must be a release tag"
+
 health_tag=$(
   # shellcheck disable=SC2016 # $1 expands in the nested shell.
   FAKE_TAG="$VALID_TAG" PATH="$TMP_DIR/bin:$PATH" \
