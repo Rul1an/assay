@@ -18,6 +18,7 @@
 //! runs/{run_id}/bundles/{bundle_id}.ref # Run-to-bundle index (for list --run-id)
 //! ```
 
+mod bounded;
 pub mod config;
 pub mod error;
 pub mod naming;
@@ -27,6 +28,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use serde::Serialize;
 
+pub use bounded::{BoundedGetError, StreamCeiling};
 pub use error::{StoreError, StoreResult};
 pub use naming::KeyBuilder;
 pub use object_store_backend::ObjectStoreBundleStore;
