@@ -3,8 +3,9 @@
 - Status: Accepted
 - Date: 2026-07-24
 - Supersedes: none
-- Amended by: [ADR-043](ADR-043-evidence-chain-integrity-invariants.md) (proposed) — states the
-  integrity invariants this decision implies, without changing the scope or the stop list
+- Amended by: [ADR-043](ADR-043-evidence-chain-integrity-invariants.md) (accepted and implemented
+  via #1842, #1843, #1850, #1851, #1852, and #1854) - states the integrity invariants this
+  decision implies, without changing the scope or the stop list
 
 ## Context
 
