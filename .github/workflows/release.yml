@@ -727,10 +727,13 @@ jobs:
 
   record-mcp-registry-result:
     name: Record MCP Registry result
-    needs: [release-contract, publish-mcp-registry]
-    # always(): a failed publication must still be recorded on the release;
-    # skipped (prerelease) publishes record nothing.
-    if: ${{ always() && needs.publish-mcp-registry.result != 'skipped' }}
+    needs: [release-contract, release, publish-mcp-registry]
+    # always(): a failed publication must still be recorded on the release.
+    # Gate on the release job, not the publish result: a prerelease's skipped
+    # publication gets an explicit marker (absence must never read clean),
+    # while a failed release has no release record to annotate and its run is
+    # already red.
+    if: ${{ always() && needs.release.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

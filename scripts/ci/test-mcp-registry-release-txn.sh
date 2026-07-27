@@ -206,7 +206,10 @@ record_case "rerun replaces the previous marker" success \
   "release notes body
 <!-- mcp-registry-status --> MCP Registry publication: failure (https://github.com/Rul1an/assay/actions/runs/99)" true
 record_case "unknown result is refused" bogus "release notes body" false
-record_case "skipped result is refused" skipped "release notes body" false
+# A prerelease's skipped publication must leave an explicit marker: absence
+# on a release record must stay distinguishable from a pre-feature release
+# (AGENTS.md: absence never reads clean).
+record_case "skipped writes an explicit marker" skipped "release notes body" true
 
 echo "ok: record-mcp-registry-result cases"
 
@@ -292,8 +295,11 @@ if "contents: write" in publish:
 
 if "always()" not in record:
     sys.exit("wiring: record job must run on publish failure too")
-if "skipped" not in record:
-    sys.exit("wiring: record job must not fire for skipped prerelease publishes")
+if "needs.release.result == 'success'" not in record:
+    sys.exit(
+        "wiring: record job must run exactly when a release record exists — "
+        "including prerelease skips, excluding failed releases"
+    )
 if "publish-mcp-registry" not in record:
     sys.exit("wiring: record job must depend on the publish job")
 if "contents: write" not in record:
