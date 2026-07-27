@@ -127,11 +127,15 @@ repos:
 
       - id: cargo-audit
         name: cargo audit (RustSec)
-        # Keep the ignore list in lockstep with .github/workflows/ci.yml and deny.toml: these
-        # advisories are triaged as not reachable (rsa Marvin Attack; pyo3 0.24 nth/nth_back and
-        # PyCFunction::new_closure), retired by the pyo3 0.29 migration (#1651). quick-xml
-        # RUSTSEC-2026-0194/0195 is temporarily blocked by object_store 0.14.0 (see deny.toml).
-        entry: bash -lc 'cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0176 --ignore RUSTSEC-2026-0177 --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195'
+        # Keep the ignore list in lockstep with the three peer locations that carry it:
+        # deny.toml, .github/workflows/ci.yml and .cargo/audit.toml. Naming all of them matters —
+        # an incomplete peer list is how this hook drifted in the first place.
+        # Only RUSTSEC-2023-0071 (rsa Marvin Attack, reached via jsonwebtoken) still matches a
+        # crate in the tree and has no fixed release. The pyo3 pair (RUSTSEC-2026-0176/0177) was
+        # retired by the pyo3 0.29 migration (#1651) and the quick-xml pair
+        # (RUSTSEC-2026-0194/0195) by object_store 0.14.1; both were left here after they stopped
+        # matching anything, which is what let the list drift out of lockstep.
+        entry: bash -lc 'cargo audit --ignore RUSTSEC-2023-0071'
         language: system
         pass_filenames: false
         files: ^Cargo\.lock$
