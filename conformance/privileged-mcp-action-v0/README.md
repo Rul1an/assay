@@ -28,7 +28,7 @@ digest describes.
 The release
 [`privileged-mcp-action-v0-candidate.2`](https://github.com/Rul1an/assay/releases/tag/privileged-mcp-action-v0-candidate.2)
 contains a deterministic, attested clean-room pack. It carries `spec.md`, `descriptor.json`, and
-thirteen opaque cases. It omits expected outcomes, semantic case names, the vector generator, and
+fourteen opaque cases. It omits expected outcomes, semantic case names, the vector generator, and
 Assay's implementation.
 
 ```bash
