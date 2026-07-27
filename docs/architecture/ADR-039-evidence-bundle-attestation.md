@@ -43,9 +43,21 @@ shape; it is intentionally not built, to avoid freezing a predicate no one consu
 
 ## Non-claims
 
-- Attestation binds who-said-it and the content; it does not upgrade observed support
-  (proven in the attested-observed work) and provides no trust root or transparency
+- Attestation binds who-said-it and the semantic event chain; it does not upgrade observed
+  support (proven in the attested-observed work) and provides no trust root or transparency
   log.
+- **The subject does not identify the artifact.** `statement_from_manifest` uses
+  `manifest.run_root` as the subject digest, and `run_root` chains the per-event content
+  hashes. Those cover `{specversion, type, datacontenttype, subject?, data}` and deliberately
+  exclude stream identity, `time`, producer metadata and the PII flag, so that a re-export at a
+  different time keeps the same chain. The cost of that property is that a bundle whose
+  `run_id`, event ids, producer, timestamps and PII flags are all rewritten *consistently* has a
+  bit-identical `run_root` and satisfies the same attestation. in-toto assumes the opposite:
+  "Subjects are assumed to be immutable" and subjects are "matched purely by digest". So a
+  consumer who reads a satisfied attestation as proof of *which* bundle they hold is relying on
+  a property this subject does not have. The repair is to separate the two roles, not to widen
+  the digest -- widening it would break the deterministic re-export five documents specify.
+  Tracked as its own ADR on the programme ledger (#1866).
 
 ## References
 
