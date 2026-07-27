@@ -87,6 +87,13 @@ repos:
         pass_filenames: false
         files: ^(scripts/ci/(reconcile-docs-auto-pr|test-reconcile-docs-auto-pr)\.sh|\.github/workflows/(docs-auto-update|ci|assay-runner-lane-check|host-capability-check)\.yml|\.pre-commit-config\.yaml)$
 
+      - id: mcp-registry-release-txn-self-test
+        name: MCP Registry release transaction self-test
+        entry: bash scripts/ci/test-mcp-registry-release-txn.sh
+        language: system
+        pass_filenames: false
+        files: ^(scripts/ci/(resolve-mcp-registry-tag|check-mcp-registry-version|record-mcp-registry-result|test-mcp-registry-release-txn)\.sh|\.github/workflows/(mcp-registry-publish|release)\.yml|\.pre-commit-config\.yaml)$
+
   # shellcheck (bash) — use system binary to avoid SSL/download issues
   - repo: local
     hooks:
