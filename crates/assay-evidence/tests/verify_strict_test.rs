@@ -270,7 +270,10 @@ fn test_verifier_rejects_missing_content_hash_raw_tar() {
     // Build manifest that references the correct hash (but the event in the archive has None)
     let manifest = serde_json::json!({
         "schema_version": 1,
-        "bundle_id": "test-missing-hash",
+        // Equal to run_root, as the profile requires: this fixture is about the missing
+        // content_hash, so every other part of the manifest has to be conformant or the
+        // rejection could be explained by something the test is not claiming to exercise.
+        "bundle_id": correct_hash,
         "producer": {"name": "test", "version": "1.0"},
         "run_id": "run_deterministic_test",
         "event_count": 1,
@@ -510,7 +513,11 @@ fn test_reject_extra_file() {
         // 1. Manifest
         let manifest = serde_json::json!({
             "schema_version": 1,
-            "bundle_id": "test",
+            // Equal to run_root: the extra member is appended after events.ndjson, so the
+            // events block completes before the allowlist sees it. A placeholder here would
+            // reject the bundle on the bundle_id contract and this test would pass while
+            // proving nothing about the extra file it is named for.
+            "bundle_id": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             "producer": {"name": "test", "version": "1.0"},
             "run_id": "run_test",
             "event_count": 0,
