@@ -14,7 +14,12 @@ case "$EVENT_NAME" in
     fi
     tag="$RELEASE_TAG"
     ;;
-  workflow_dispatch)
+  workflow_dispatch|push)
+    # workflow_dispatch: direct recovery dispatch of this workflow.
+    # push: this workflow ran as a workflow_call job inside release.yml on a tag
+    # push; the caller passes the contract-validated version as the call input.
+    # Both paths require an explicit version and fall through to the stable-tag
+    # gate below, so a bare push with no input stays fail-closed.
     tag="$INPUT_VERSION"
     ;;
   *)

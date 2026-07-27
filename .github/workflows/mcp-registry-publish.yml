@@ -3,12 +3,19 @@ name: MCP Registry Publish
 # Publish the rendered release/server.json to the official MCP registry
 # (registry.modelcontextprotocol.io) via GitHub OIDC.
 #
-# release.yml already RENDERS server.json and attaches it as a release asset, but never publishes
-# it, so the registry entry lags the current release (the last manual publish was 3.9.2). This adds
-# the missing publish step. It is a small standalone workflow on purpose: it does not touch the
-# release build pipeline, it auto-publishes stable releases, and it can refresh an existing stable
-# release on demand via workflow_dispatch. GitHub prereleases remain outside the official registry
-# so a newer RC or beta cannot displace the latest stable server version.
+# The primary path is a workflow_call from release.yml: releases created with GITHUB_TOKEN do not
+# emit a release.published event that starts new workflow runs, so a stable release publishes by
+# running this workflow as a dependent job inside the release run itself (issue #1870). The
+# release trigger stays for releases published outside that automation, and workflow_dispatch
+# stays as the idempotent recovery path for an already-built stable release. GitHub prereleases
+# remain outside the official registry so a newer RC or beta cannot displace the latest stable
+# server version.
+#
+# Recovery order after a failed release-run publication: prefer re-running the failed jobs of
+# the release run (`gh run rerun <run-id> --failed`) — the pre-check turns an already-published
+# version into a clean no-op AND the release-record marker is refreshed to the terminal result.
+# A direct workflow_dispatch here also publishes idempotently, but it cannot update the release
+# record, so a stale "failure" marker would remain on the release notes.
 #
 # GitHub OIDC proves the io.github.<owner> namespace belongs to this repository owner, so no stored
 # registry secret is needed.
@@ -16,6 +23,12 @@ name: MCP Registry Publish
 on:
   release:
     types: [published]
+  workflow_call:
+    inputs:
+      version:
+        description: "Contract-validated release tag to publish, e.g. v3.36.0"
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       version:
@@ -23,6 +36,8 @@ on:
         required: true
         type: string
 
+# Standalone runs (release / workflow_dispatch) use this; for workflow_call the
+# caller job in release.yml grants the same two scopes.
 permissions:
   contents: read
   id-token: write # OIDC: proves the io.github.<owner> namespace == repository owner
@@ -31,15 +46,22 @@ env:
   MCP_PUBLISHER_VERSION: "v1.7.9"
   MCP_PUBLISHER_LINUX_AMD64_SHA256: "ab128162b0616090b47cf245afe0a23f3ef08936fdce19074f5ba0a4469281ac"
 
-concurrency:
-  group: mcp-registry-publish
-  cancel-in-progress: false
-
 jobs:
   publish:
     name: Publish to MCP registry
+    # CAUTION: under workflow_call the caller's event is push/workflow_dispatch,
+    # so this condition can never skip the called job. Keep it that way: if a
+    # future edit lets this job skip in call context, the caller job reports
+    # success with no publication (all-skipped reusable workflows read green).
     if: ${{ github.event_name != 'release' || github.event.release.prerelease == false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Job-level on purpose: workflow-level concurrency is not applied when this
+    # workflow runs as a workflow_call job, and the registry publish must stay
+    # serialized across release runs and recovery dispatches.
+    concurrency:
+      group: mcp-registry-publish
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -72,7 +94,19 @@ jobs:
             --dir .
           test -s server.json
 
+      - name: Check whether this version is already published
+        id: existing
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          LOCAL_SERVER_JSON: server.json
+        run: |
+          set -euo pipefail
+          status="$(bash scripts/ci/check-mcp-registry-version.sh)"
+          echo "Registry status for ${TAG}: ${status}"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
       - name: Install mcp-publisher
+        if: ${{ steps.existing.outputs.status == 'absent' }}
         run: |
           set -euo pipefail
           archive=mcp-publisher_linux_amd64.tar.gz
@@ -84,10 +118,39 @@ jobs:
           chmod +x mcp-publisher
 
       - name: Validate server.json
+        if: ${{ steps.existing.outputs.status == 'absent' }}
         run: ./mcp-publisher validate server.json
 
       - name: Login (GitHub OIDC) and publish
+        if: ${{ steps.existing.outputs.status == 'absent' }}
         run: |
           set -euo pipefail
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish server.json
+
+      - name: Confirm the registry serves this version
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          LOCAL_SERVER_JSON: server.json
+        # Terminal result = the registry read back this release's version and
+        # package set, not just a zero exit from the publisher. Bounded retry
+        # absorbs read-after-write lag without weakening the check: only a
+        # clean "published" verdict passes.
+        run: |
+          set -euo pipefail
+          for delay in 5 15 30; do
+            status=""
+            status="$(bash scripts/ci/check-mcp-registry-version.sh)" || true
+            if [[ "$status" == "published" ]]; then
+              echo "Registry publication for ${TAG} confirmed."
+              exit 0
+            fi
+            echo "registry does not serve ${TAG} yet (status: ${status:-error}); retrying in ${delay}s" >&2
+            sleep "$delay"
+          done
+          status="$(bash scripts/ci/check-mcp-registry-version.sh)"
+          if [[ "$status" != "published" ]]; then
+            echo "registry does not serve ${TAG} after publication (status: ${status})" >&2
+            exit 1
+          fi
+          echo "Registry publication for ${TAG} confirmed."
