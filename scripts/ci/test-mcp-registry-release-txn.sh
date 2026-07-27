@@ -300,6 +300,11 @@ if "needs.release.result == 'success'" not in record:
         "wiring: record job must run exactly when a release record exists — "
         "including prerelease skips, excluding failed releases"
     )
+# The if-condition reads needs.release.result, so `release` must stay in the
+# needs list: dropping it makes the expression evaluate empty and the record
+# job silently never runs again.
+if "needs: [release-contract, release, publish-mcp-registry]" not in record:
+    sys.exit("wiring: record job needs must list release-contract, release, publish-mcp-registry")
 if "publish-mcp-registry" not in record:
     sys.exit("wiring: record job must depend on the publish job")
 if "contents: write" not in record:

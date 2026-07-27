@@ -730,9 +730,10 @@ jobs:
     needs: [release-contract, release, publish-mcp-registry]
     # always(): a failed publication must still be recorded on the release.
     # Gate on the release job, not the publish result: a prerelease's skipped
-    # publication gets an explicit marker (absence must never read clean),
-    # while a failed release has no release record to annotate and its run is
-    # already red.
+    # publication gets an explicit marker (absence must never read clean).
+    # A failed release records nothing — its run is already red, at most a
+    # stranded partial release exists, and the recovery re-run re-stamps the
+    # marker after the release step completes.
     if: ${{ always() && needs.release.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
