@@ -29,7 +29,7 @@ case "$RESULT" in
 esac
 
 notes="$(mktemp)"
-trap 'rm -f "$notes"' EXIT
+trap 'rm -f "$notes" "${notes}.next"' EXIT
 
 gh release view "$VERSION" --json body --jq .body > "$notes"
 

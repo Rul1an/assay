@@ -120,18 +120,25 @@ make_server_json "${WORK}/wrong-version.json" "3.34.0" "aaaa1111"
 
 published_body="$(jq -cn '{server: {name: "io.github.Rul1an/assay-mcp-server", version: "3.35.0", packages: [{fileSha256: "aaaa1111"}]}}')"
 
+divergent_packages_body="$(jq -cn '{server: {name: "io.github.Rul1an/assay-mcp-server", version: "3.35.0", packages: [{fileSha256: "aaaa1111", identifier: "https://elsewhere.example/other.mcpb"}]}}')"
+
 check_case "absent version reports absent" 404 '{"error":"not found"}' \
   "${WORK}/server.json" true "absent"
 check_case "published identical version reports published" 200 "$published_body" \
   "${WORK}/server.json" true "published"
 check_case "published version with different content fails closed" 200 "$published_body" \
   "${WORK}/other-sha.json" false
+check_case "same digest but divergent package set fails closed" 200 "$divergent_packages_body" \
+  "${WORK}/server.json" false
 check_case "registry payload version mismatch fails closed" 200 "$published_body" \
   "${WORK}/wrong-version.json" false
 check_case "unexpected registry status fails closed" 500 '{"error":"boom"}' \
   "${WORK}/server.json" false
 check_case "tag and local server.json version must agree" 404 '{}' \
   "${WORK}/wrong-version.json" false
+
+grep -q -- '--max-time' "$CHECK" \
+  || fail "check: registry curl must carry a bounded --max-time"
 
 echo "ok: check-mcp-registry-version cases"
 
@@ -224,10 +231,22 @@ awk '/^jobs:/{injobs=1} injobs && /concurrency:/{found=1} END{exit !found}' "$PU
   || fail "wiring: publish concurrency group must be declared at job level"
 wf_pin "$PUBLISH_WF" 'check-mcp-registry-version\.sh' \
   "publish must consult the registry before and after publishing"
-grep -c 'check-mcp-registry-version\.sh' "$PUBLISH_WF" | grep -qx "2" \
-  || fail "wiring: publish must run the registry check twice (idempotency + terminal confirmation)"
+wf_pin "$PUBLISH_WF" '^[[:space:]]*- name: Check whether this version is already published$' \
+  "publish must pre-check the registry for idempotent retries"
+wf_pin "$PUBLISH_WF" '^[[:space:]]*- name: Confirm the registry serves this version$' \
+  "publish must confirm the terminal result by reading the registry back"
 wf_pin "$PUBLISH_WF" 'MCP_PUBLISHER_LINUX_AMD64_SHA256' \
   "publisher checksum enforcement must remain"
+wf_pin "$PUBLISH_WF" '^[[:space:]]*timeout-minutes:' \
+  "publish job must carry a bounded timeout"
+wf_pin "$PUBLISH_WF" 'retrying in' \
+  "terminal confirmation must retry read-after-write lag before failing"
+# The publish job's if may only reference the release event: under
+# workflow_call the caller's event is push/workflow_dispatch, and any
+# condition that can skip the called job there turns an unpublished release
+# into a green caller job (all-skipped reusable workflows read success).
+grep -Eq "if: \\$\\{\\{ github\\.event_name != 'release' \\|\\| github\\.event\\.release\\.prerelease == false \\}\\}" "$PUBLISH_WF" \
+  || fail "wiring: publish job if-condition must stay release-event-only (all-skipped call reads green)"
 wf_pin "$PUBLISH_WF" 'login github-oidc' \
   "OIDC identity must remain the publication credential"
 wf_pin "$PUBLISH_WF" 'mcp-publisher validate server\.json' \

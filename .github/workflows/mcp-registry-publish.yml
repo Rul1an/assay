@@ -11,6 +11,12 @@ name: MCP Registry Publish
 # remain outside the official registry so a newer RC or beta cannot displace the latest stable
 # server version.
 #
+# Recovery order after a failed release-run publication: prefer re-running the failed jobs of
+# the release run (`gh run rerun <run-id> --failed`) — the pre-check turns an already-published
+# version into a clean no-op AND the release-record marker is refreshed to the terminal result.
+# A direct workflow_dispatch here also publishes idempotently, but it cannot update the release
+# record, so a stale "failure" marker would remain on the release notes.
+#
 # GitHub OIDC proves the io.github.<owner> namespace belongs to this repository owner, so no stored
 # registry secret is needed.
 
@@ -43,8 +49,13 @@ env:
 jobs:
   publish:
     name: Publish to MCP registry
+    # CAUTION: under workflow_call the caller's event is push/workflow_dispatch,
+    # so this condition can never skip the called job. Keep it that way: if a
+    # future edit lets this job skip in call context, the caller job reports
+    # success with no publication (all-skipped reusable workflows read green).
     if: ${{ github.event_name != 'release' || github.event.release.prerelease == false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # Job-level on purpose: workflow-level concurrency is not applied when this
     # workflow runs as a workflow_call job, and the registry publish must stay
     # serialized across release runs and recovery dispatches.
@@ -121,10 +132,22 @@ jobs:
         env:
           TAG: ${{ steps.tag.outputs.tag }}
           LOCAL_SERVER_JSON: server.json
-        # Terminal result = the registry read back the exact content we
-        # published, not just a zero exit from the publisher.
+        # Terminal result = the registry read back this release's version and
+        # package set, not just a zero exit from the publisher. Bounded retry
+        # absorbs read-after-write lag without weakening the check: only a
+        # clean "published" verdict passes.
         run: |
           set -euo pipefail
+          for delay in 5 15 30; do
+            status=""
+            status="$(bash scripts/ci/check-mcp-registry-version.sh)" || true
+            if [[ "$status" == "published" ]]; then
+              echo "Registry publication for ${TAG} confirmed."
+              exit 0
+            fi
+            echo "registry does not serve ${TAG} yet (status: ${status:-error}); retrying in ${delay}s" >&2
+            sleep "$delay"
+          done
           status="$(bash scripts/ci/check-mcp-registry-version.sh)"
           if [[ "$status" != "published" ]]; then
             echo "registry does not serve ${TAG} after publication (status: ${status})" >&2
