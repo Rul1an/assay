@@ -29,7 +29,7 @@ pub(super) fn maybe_profile_finish(
 
     let content = match args.profile_format.as_str() {
         "json" => crate::profile::writer::write_json(&suggestion)?,
-        _ => crate::profile::writer::write_yaml(&suggestion),
+        _ => crate::profile::writer::write_yaml(&suggestion)?,
     };
 
     let out_path = args.profile.as_ref().expect("profiler active");

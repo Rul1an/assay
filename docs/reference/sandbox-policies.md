@@ -28,8 +28,9 @@ missing or cannot be parsed is fatal: `assay sandbox` exits 2 with
 field but does not yet reject other values.
 
 The schema also deserializes an `extends` list, but the sandbox runtime does
-not resolve or merge those entries. Keep `extends` empty until pack resolution
-is implemented.
+not resolve or merge those entries. A non-empty list is therefore a fatal
+configuration error. `assay sandbox --profile` emits an empty list because
+pack resolution is unsupported.
 
 Unknown YAML keys are currently ignored by the loader. Do not use that as an
 extension mechanism: an ignored key has no enforcement effect.
@@ -199,7 +200,7 @@ Exit code 2 covers configuration that cannot be enforced, including:
 
 ## Current limitations
 
-- `extends` is parsed but not resolved.
+- non-empty `extends` is rejected because pack resolution is not implemented;
 - Unknown keys are ignored.
 - Custom filesystem allows do not carry per-operation permissions.
 - Policy globs such as `/**` are not implemented.

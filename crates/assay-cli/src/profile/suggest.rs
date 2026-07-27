@@ -54,10 +54,6 @@ pub fn build_policy_suggestion(report: &ProfileReport, cfg: SuggestConfig) -> Po
         ..PolicySuggestion::default()
     };
 
-    // Default base packs (future: configurable)
-    out.extends.push("pack:deny-all".to_string());
-    out.extends.push("pack:mcp-server-minimal".to_string());
-
     // Counters
     out.meta.counters = report.agg.counters.clone();
 

@@ -210,7 +210,7 @@ mod tests {
         let sugg = report.to_suggestion(crate::profile::suggest::SuggestConfig {
             widen_dirs_to_glob: false,
         });
-        let got = crate::profile::writer::write_yaml(&sugg);
+        let got = crate::profile::writer::write_yaml(&sugg).expect("generated profile is valid");
 
         let expected = include_str!("../../tests/golden/profile_basic.yaml");
         assert_eq!(normalize(&got), normalize(expected));

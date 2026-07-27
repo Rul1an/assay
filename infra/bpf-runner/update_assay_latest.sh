@@ -34,6 +34,10 @@ if [[ -z "$tag" || "$tag" == "null" ]]; then
   echo "could not determine latest release tag for ${REPO}" >&2
   exit 1
 fi
+if [[ ! "$tag" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+  echo "latest Assay release is not a stable software tag: $tag" >&2
+  exit 1
+fi
 
 ensure_compat_symlinks() {
   for link_path in $COMPAT_SYMLINKS; do

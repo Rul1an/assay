@@ -4,7 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.35.0] - 2026-07-27
+
 ### Added
+- Publish the open `privileged-mcp-action/v0` evidence profile, its 13-vector conformance corpus,
+  and typed importer and verifier support for one classified privileged MCP `tools/call`. The
+  profile keeps policy decisions, caller-visible outcomes and optional observations distinct. It
+  does not establish provider-side effects, generic identity, policy correctness, whole-action
+  trust or a scalar score.
+- Aim the evidence-bundle fuzz target at the evidence-chain verifier and add deterministic
+  properties for chain order, truncation, digest mutation and fail-closed error classification.
+  Required CI runs the property suite; a path-triggered and nightly lane runs bounded fuzz smoke
+  with a pinned seed corpus.
 - New reason code `E_REPLAY_LIMIT_EXCEEDED` (exit 2) for a replay bundle refused by an ingest
   ceiling during bounded ingest, before replay execution. Previously such a refusal was reported
   as `E_CFG_PARSE`, which is a malformed-input finding and sends a reader off to fix the
@@ -17,7 +28,17 @@ All notable changes to this project will be documented in this file.
   carries no verdict, and its message names only the configured ceiling.
 
 ### Changed
-- **Breaking (`assay sandbox`)**: a `--policy` that is named but cannot be loaded is now fatal.
+- Apply the complete configured ingest limit set before materialization across verified and
+  unverified evidence reads, manifest peeks, lint, stdin verification, push including
+  `--no-verify`, object-store pull and replay bundles. Exact limits are accepted; limit plus one,
+  decompression expansion, excessive lines, events, paths and JSON depth fail closed with typed
+  limit classifications.
+- Make the stdio MCP authorization boundary explicit. Any configured `ASSAY_AUTH_*` variable now
+  fails startup before protocol I/O, and token-like values in `initialize` grant no authority and
+  are neither logged nor used as identity. This does not add HTTP/OAuth support and does not change
+  ProxyEnforce's explicit local policy caller input.
+- **Fail-closed correction (`assay sandbox`, migration-visible)**: a `--policy` that is named but
+  cannot be loaded is now fatal.
   The run exits 2 with `E_POLICY_LOAD_FAILED_UNENFORCEABLE` and executes nothing, where it
   previously printed a warning and continued under the built-in `mcp-server-minimal` pack.
   `--fail-closed` does not create this obligation and does not change the outcome; naming a
@@ -29,8 +50,31 @@ All notable changes to this project will be documented in this file.
   sessions that failed authentication under the default permissive mode, and neither carried a
   basis a reviewer could check. `serverInfo.version` is now derived from the crate version
   instead of the hand-written `0.4.0`, which no build produced.
+- **Fail-closed correction (`assay sandbox`, migration-visible)**: a named policy with non-empty
+  `extends` is refused before execution. Pack resolution is unsupported, so accepting those entries
+  previously made declared policy composition disappear silently. `assay sandbox --profile` now
+  emits an empty `extends` list instead of references to unresolved packs.
+
+The two sandbox corrections close cases where requested enforcement could not be honored; they do
+not remove a supported enforcement contract. They ship on the `3.x` line as correctness and
+integrity fixes rather than a new major version. Operators that relied on permissive substitution
+must remove the explicit `--policy`, supply a loadable policy without unresolved `extends`, or
+expect exit 2 with no command execution.
 
 ### Fixed
+- Publish clean-room conformance packs as prereleases that are explicitly ineligible for GitHub's
+  software `Latest` pointer. Installers, the embedded Action and runner maintenance also reject a
+  non-`vX.Y.Z` latest tag before constructing a CLI asset URL.
+- Keep Assay RC and beta releases out of the official MCP Registry. GitHub prereleases remain
+  available for testing, but neither their automatic release event nor a manual registry dispatch
+  may publish a prerelease version that would sort above the latest stable server. Registry
+  publication also executes a version- and digest-pinned `mcp-publisher` rather than an unverified
+  binary from the upstream `latest` release.
+- Reject line breaks in explicit embedded Action versions before writing step outputs, preventing
+  multi-line input from adding attacker-chosen Action outputs while preserving published tags such
+  as `v2.1`. Two-component historical tags now retain their download identity while verifying the
+  installed binary against its three-component version (`v2.1` -> `2.1.0`). The published major
+  aliases retain the same guarantee (`v1` -> `1.1.0`, `v2` -> `2.12.0`).
 - Sandbox policy documentation described a filesystem rule shape the loader has never
   accepted (`- path:` mappings with `read`/`write` keys, against a schema of plain strings).
   Copying an example verbatim used to produce a warning and now produces a hard failure, so
