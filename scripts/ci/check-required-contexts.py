@@ -64,7 +64,14 @@ def ruleset_contexts(text: str) -> list[str]:
 
 
 def ci_contract_contexts(text: str) -> list[str]:
-    """The bullet list under the anchor, read until the list ends."""
+    """The bullet list immediately under the anchor.
+
+    "Immediately" is the load-bearing word. Scanning forward until some bullet list turns up
+    means that deleting the list under the anchor silently promotes the next list in the
+    document to being the required set, and the guard reports agreement about the wrong
+    paragraph. So: blank lines may separate the anchor from its list, and the first
+    non-blank line that is not a bullet ends the search -- whether or not anything was found.
+    """
     lines = text.splitlines()
     try:
         start = next(i for i, line in enumerate(lines) if line.strip() == CI_CONTRACT_ANCHOR)
@@ -79,10 +86,14 @@ def ci_contract_contexts(text: str) -> list[str]:
         if match:
             # Names carry a trailing parenthetical gloss in this list; keep the name only.
             found.append(match.group(1).strip())
-        elif found:
+        elif not line.strip() and not found:
+            continue
+        else:
             break
     if not found:
-        raise DriftError(f"{CI_CONTRACT}: the list under the anchor is empty")
+        raise DriftError(
+            f"{CI_CONTRACT}: no bullet list directly under anchor {CI_CONTRACT_ANCHOR!r}"
+        )
     return found
 
 
@@ -123,6 +134,24 @@ def read_repo(path: Path) -> str:
     return (REPO_ROOT / path).read_text(encoding="utf-8")
 
 
+def _drop_list_under_anchor(text: str) -> str:
+    """Remove only the bullets directly under the anchor, keeping the anchor and later lists.
+
+    Later lists have to survive, or the mutation cannot tell the two parsers apart: strip every
+    bullet in the file and even a parser that scans onward finds nothing and reports correctly.
+    The case worth testing is the one where there is still something further down to grab.
+    """
+    lines = text.splitlines(keepends=True)
+    start = next(i for i, line in enumerate(lines) if line.strip() == CI_CONTRACT_ANCHOR)
+    cursor = start + 1
+    while cursor < len(lines) and not lines[cursor].strip():
+        cursor += 1
+    end = cursor
+    while end < len(lines) and BULLET_RE.match(lines[end]):
+        end += 1
+    return "".join(lines[: start + 1] + lines[end:])
+
+
 def self_test() -> int:
     """A guard nobody has seen fail is a guard nobody knows works."""
     baseline = {p: read_repo(p) for p in (RULESET, CI_CONTRACT, RUNBOOK)}
@@ -130,28 +159,60 @@ def self_test() -> int:
         print("self-test: the repository is already drifting; fix that first", file=sys.stderr)
         return 1
 
-    cases = [
+    # Each case names the outcome it requires, because "something went red" is the weakest
+    # assertion available and it is how a guard ends up right by accident. A deleted list
+    # must be reported as a missing list; if it surfaces as a mismatch instead, the parser
+    # walked on and adopted a different paragraph, which is the bug and not the detection.
+    mismatch_cases = [
         (CI_CONTRACT, lambda t: t.replace("- `host-capability-check`", "- `retired-context`", 1)),
         # Inside the array specifically: a name in the runbook's prose is out of scope by
         # design, so a mutation there proves nothing about the guard either way.
         (RUNBOOK, lambda t: t.replace('"CI", "host-capability-check"', '"CI"', 1)),
         (RULESET, lambda t: t.replace('"host-capability-check"', '"retired-context"', 1)),
+    ]
+    unreadable_cases = [
         (CI_CONTRACT, lambda t: t.replace(CI_CONTRACT_ANCHOR, "Contexts, probably:", 1)),
         (RUNBOOK, lambda t: t.replace('"contexts"', '"former_contexts"')),
+        (CI_CONTRACT, _drop_list_under_anchor),
     ]
-    for path, mutate in cases:
+
+    def apply(path: Path, mutate) -> dict | None:
         mutated = dict(baseline)
         mutated[path] = mutate(baseline[path])
         if mutated[path] == baseline[path]:
             print(f"self-test: mutation for {path} did not apply", file=sys.stderr)
+            return None
+        return mutated
+
+    for path, mutate in mismatch_cases:
+        mutated = apply(path, mutate)
+        if mutated is None:
             return 1
         try:
             problems = check(mutated.__getitem__)
-        except DriftError:
-            continue
+        except DriftError as exc:
+            print(f"self-test: drift in {path} was unreadable, expected a mismatch: {exc}",
+                  file=sys.stderr)
+            return 1
         if not problems:
             print(f"self-test: drift in {path} went undetected", file=sys.stderr)
             return 1
+
+    for path, mutate in unreadable_cases:
+        mutated = apply(path, mutate)
+        if mutated is None:
+            return 1
+        try:
+            check(mutated.__getitem__)
+        except DriftError:
+            continue
+        print(
+            f"self-test: an unreadable {path} did not raise; the guard located a set it "
+            "should not have been able to find",
+            file=sys.stderr,
+        )
+        return 1
+
     print("check-required-contexts self-test=passed")
     return 0
 

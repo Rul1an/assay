@@ -53,10 +53,11 @@ Repository state observed on 2026-06-11:
     skips;
   - kernel/eBPF gating that avoids self-hosted runner work unless relevant;
   - delegated runner lane proof for selected runner-sensitive PRs.
-- Live branch protection on `main`, observed through GitHub on 2026-06-11,
-  requires `CI`, `lane-check`, and `host-capability-check` with strict
-  up-to-date status checks enabled. `docs/BRANCH-PROTECTION-SETUP.md` should
-  stay reconciled with that live state.
+- Live branch protection on `main` with strict up-to-date status checks enabled.
+  The required contexts are named once, in section 6 "Required Context Names";
+  this entry deliberately does not repeat them. It used to, and the copy went
+  stale when the set changed -- naming a value twice in one document is the
+  drift, not the cure.
 - Existing public docs and evidence artifacts include guides, references,
   receipt schemas, MCP proxy docs, runner fixtures, experiment reports, JUnit,
   SARIF, Trust Basis output, and compressed evidence examples.

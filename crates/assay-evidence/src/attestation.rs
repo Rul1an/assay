@@ -9,8 +9,11 @@
 //! log on its own.
 //!
 //! It also does not identify the artifact. The subject digest is `manifest.run_root`,
-//! a chain over per-event content hashes that deliberately exclude stream identity,
-//! `time`, producer metadata and the PII flag so a re-export stays stable. A bundle
+//! a chain over per-event content hashes, and those cover exactly
+//! `{specversion, type, datacontenttype, subject?, data}` so a re-export stays stable.
+//! Everything else is outside by construction, including stream identity, `time`,
+//! trace context, producer and policy metadata, and the privacy flags; the enumerated
+//! list lives in `crypto/id.rs`. A bundle
 //! whose run id, event ids, producer, timestamps and PII flags are rewritten
 //! consistently therefore has the same `run_root` and satisfies the same attestation.
 //! in-toto expects the reverse -- subjects are immutable and matched purely by digest

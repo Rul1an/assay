@@ -534,7 +534,12 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
             // other at read time, so the two could disagree and still verify. Ordered after the
             // chain check on purpose: a mutated run_root stays a root mismatch, and this fires
             // only when the chain is sound and its second copy in the manifest is not.
-            if m.bundle_id != m.run_root {
+            //
+            // Compared against the *computed* root rather than `m.run_root`. The two are equal
+            // by the check above, so this is the same comparison today; it stops being the same
+            // comparison the moment someone reorders these checks, and a contract that is only
+            // sound because of what runs before it is one edit away from being decorative.
+            if m.bundle_id != computed_run_root {
                 return Err(VerifyError::new(
                     ErrorClass::Contract,
                     ErrorCode::ContractBundleIdMismatch,

@@ -270,9 +270,11 @@ fn test_verifier_rejects_missing_content_hash_raw_tar() {
     // Build manifest that references the correct hash (but the event in the archive has None)
     let manifest = serde_json::json!({
         "schema_version": 1,
-        // Equal to run_root, as the profile requires: this fixture is about the missing
-        // content_hash, so every other part of the manifest has to be conformant or the
-        // rejection could be explained by something the test is not claiming to exercise.
+        // Equal to run_root, so the bundle_id contract is not what rejects this fixture.
+        // The manifest is not otherwise conformant -- `run_root` below is a single event's
+        // content hash rather than a chain over one, which `compute_run_root` would not
+        // produce -- but verification stops at the missing content_hash long before the
+        // chain check, so that stays out of the way of what this test is about.
         "bundle_id": correct_hash,
         "producer": {"name": "test", "version": "1.0"},
         "run_id": "run_deterministic_test",
@@ -514,9 +516,10 @@ fn test_reject_extra_file() {
         let manifest = serde_json::json!({
             "schema_version": 1,
             // Equal to run_root: the extra member is appended after events.ndjson, so the
-            // events block completes before the allowlist sees it. A placeholder here would
-            // reject the bundle on the bundle_id contract and this test would pass while
-            // proving nothing about the extra file it is named for.
+            // events block completes before the allowlist sees it. With the placeholder that
+            // used to sit here the bundle is rejected on the bundle_id contract, and since
+            // the assertion below matches on "Unexpected file" the test goes red -- failing
+            // for a reason that has nothing to do with the extra file it is named for.
             "bundle_id": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             "producer": {"name": "test", "version": "1.0"},
             "run_id": "run_test",
