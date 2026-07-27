@@ -1,3 +1,5 @@
-# Align with ci.yml and deny.toml: allow RUSTSEC-2023-0071 (rsa, no fix)
+# Align with the three peer locations that carry this list: deny.toml,
+# .github/workflows/ci.yml and the pre-push cargo-audit hook in .pre-commit-config.yaml.
+# Allow RUSTSEC-2023-0071 (rsa Marvin Attack, via jsonwebtoken; no fixed release).
 [advisories]
 ignore = ["RUSTSEC-2023-0071"]

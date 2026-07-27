@@ -127,7 +127,9 @@ repos:
 
       - id: cargo-audit
         name: cargo audit (RustSec)
-        # Keep the ignore list in lockstep with .github/workflows/ci.yml and deny.toml.
+        # Keep the ignore list in lockstep with the three peer locations that carry it:
+        # deny.toml, .github/workflows/ci.yml and .cargo/audit.toml. Naming all of them matters —
+        # an incomplete peer list is how this hook drifted in the first place.
         # Only RUSTSEC-2023-0071 (rsa Marvin Attack, reached via jsonwebtoken) still matches a
         # crate in the tree and has no fixed release. The pyo3 pair (RUSTSEC-2026-0176/0177) was
         # retired by the pyo3 0.29 migration (#1651) and the quick-xml pair
