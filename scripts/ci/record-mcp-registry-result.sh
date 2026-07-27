@@ -6,7 +6,10 @@ set -euo pipefail
 #
 # Inputs (env):
 #   VERSION  release tag, e.g. v3.35.0
-#   RESULT   terminal job result: success | failure | cancelled
+#   RESULT   terminal job result: success | failure | cancelled | skipped
+#            (skipped = the prerelease exclusion; recorded explicitly so a
+#            marker-less release stays distinguishable from one that predates
+#            the release transaction — absence must never read clean)
 #   RUN_URL  URL of the workflow run that carried the publication
 #
 # Idempotent: exactly one marker line survives, so retries and re-runs replace
@@ -21,9 +24,22 @@ MARKER="<!-- mcp-registry-status -->"
 [[ -n "$RUN_URL" ]] || { echo "RUN_URL is required" >&2; exit 1; }
 
 case "$RESULT" in
-  success|failure|cancelled) ;;
+  success|failure|cancelled)
+    label="$RESULT"
+    ;;
+  skipped)
+    # Observe the reason instead of asserting it: this script cannot see WHY
+    # the publish job skipped, but the version itself carries the one
+    # condition the publish gate skips on today. Any other skip cause gets a
+    # bare "skipped" rather than a claimed explanation.
+    if [[ "$VERSION" == *-rc* || "$VERSION" == *-beta* ]]; then
+      label="skipped (prerelease; stable releases only)"
+    else
+      label="skipped"
+    fi
+    ;;
   *)
-    echo "RESULT must be a terminal job result (success|failure|cancelled), got: ${RESULT:-<empty>}" >&2
+    echo "RESULT must be a terminal job result (success|failure|cancelled|skipped), got: ${RESULT:-<empty>}" >&2
     exit 1
     ;;
 esac
@@ -36,6 +52,6 @@ gh release view "$VERSION" --json body --jq .body > "$notes"
 grep -vF "$MARKER" "$notes" > "${notes}.next" || true
 mv "${notes}.next" "$notes"
 
-printf '\n%s MCP Registry publication: %s (%s)\n' "$MARKER" "$RESULT" "$RUN_URL" >> "$notes"
+printf '\n%s MCP Registry publication: %s (%s)\n' "$MARKER" "$label" "$RUN_URL" >> "$notes"
 
 gh release edit "$VERSION" --notes-file "$notes"
