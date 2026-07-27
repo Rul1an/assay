@@ -53,15 +53,16 @@ including its explicit non-claims, or amend the decision through a new ADR.
 - Never turn absence of evidence, failed validation, skipped review, or unavailable infrastructure
   into a clean result.
 - Keep public strings free of private strategy, product-roadmap language, and unearned claims.
-- Stage by explicit pathspec. Never stage by the absence of one: bare `git add -A`, bare `git add .`,
-  `git add -u`, and `git commit -a`/`-am` all commit whatever the tree happens to be carrying at that
-  moment, which is a property of the moment and not of the change under review. A pathspec scopes the
-  command back to the change, so `git add -A demo/output` is fine and `git add -A` is not.
-- Pin a tool version in one place, and have both the install and the invocation read that one value —
-  as `.github/workflows/fuzz-smoke.yml` does with `env: FUZZ_TOOLCHAIN`. Two literals that must agree
-  will eventually disagree. Echo the value in the run so a version claim can be checked against the
-  log, while remembering what that check does not cover: the same workflow records a `cargo +nightly`
-  bypass that leaves the log still naming the pinned toolchain.
+- Stage with a pathspec that names the change. The test is whether the command could pick up a file
+  you did not touch: if it could, it commits a property of the moment rather than the change under
+  review. `git add -A <paths the change touches>` passes; `git add -A`, `git add -A .`, `git add .`,
+  `git add -u` and `git commit -am` all fail it. The list is illustrative and the test is the rule —
+  the set of ways to stage a whole tree is open, so enumerating it would only look complete.
+- Pin a tool version in one place, and have both the install and the invocation read that one value.
+  The defect is two literals that must agree and are free to drift — an install pinning a version that
+  a config file or a second workflow states again. Echo the value in the run so a version claim can be
+  checked against the log, while remembering what that check does not cover: an invocation can select
+  a different toolchain through an alias while the log still names the pinned one.
 
 ## Review Quorum
 
@@ -71,7 +72,14 @@ The builder's self-review does not count. On the final head SHA, require:
 2. if both bots are skipped, rate-limited, or unavailable for 30 minutes after the last push, two
    non-building agent reviews.
 
-`skipped` is not `pass`. A new push invalidates reviews on the prior head.
+`skipped` is not `pass`. A new push invalidates reviews on the prior head, and the head a review was
+measured on is the head it counts for — a merge commit that brings `main` into the branch is a new
+head like any other.
+
+A review record that says it did not review is not a review. A bot that returns `COMMENTED` with
+"unable to review — quota limit", or a check that reports `pass` alongside "review rate limited",
+leaves no findings and no reviewer; it is unavailable infrastructure wearing the shape of a verdict,
+and it satisfies neither route. Read what a record says, not that it exists.
 
 Auto-merge may be enabled only when:
 
@@ -96,20 +104,21 @@ Before pushing:
 - run clippy with `-D warnings` for the affected targets;
 - inspect `git diff --check` and the public-surface strings.
 
+GitHub Actions is the final integration proof. Never weaken, bypass, or relabel a required check to
+make a branch mergeable.
+
 ### Measurement provenance
 
 A measurement carries its provenance, or it is a claim with extra steps. When a number, a count, or a
-pass/fail reaches a PR body, a review, or a programme-ledger entry, it states the exact SHA it was
-measured on — not a branch name, which moves and which is how a stale checkout passes for a current
-one — plus the worktree when more than one is active, and the binary or toolchain when the number
-depends on one.
+pass/fail reaches a PR body, a review, or a programme-ledger entry, it states the exact SHA the
+reported tree was committed as — not a branch name, which moves and which is how a stale checkout
+passes for a current one — plus the worktree when more than one is active, and the binary or toolchain
+when the number depends on one. Measuring before the push is the normal case; commit first and report
+that SHA, rather than reporting a tree no one else can address.
 
 The failure mode this catches is not arithmetic but attribution: the number is right and the tree,
 ref, artifact, or build it describes is not. Name the artifact too when a generated form exists, since
 a correct reading of a generated layer is still the wrong layer.
-
-GitHub Actions is the final integration proof. Never weaken, bypass, or relabel a required check to
-make a branch mergeable.
 
 ## Tool Boundaries
 
