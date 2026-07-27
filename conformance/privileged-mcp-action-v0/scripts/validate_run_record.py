@@ -15,8 +15,9 @@ from urllib.parse import urlparse
 RUN_SCHEMA = "assay.privileged_mcp_action.conformance_run.v0"
 PROFILE = "privileged-mcp-action/v0"
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
-# Kept beside the other corpus-shape constants rather than written into the checks, which is
-# how "13" survived in four separate files after the corpus grew.
+# Kept beside the other corpus-shape constants rather than written into the checks, which is how
+# "13" survived in seven separate files after the corpus grew: two scripts, this one's own checks,
+# a JSON schema, a Rust test, a Python test, two workflows and the profile spec.
 EXPECTED_CASE_COUNT = 14
 SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 STATUSES = {"match", "mismatch", "execution_error", "harness_error"}
