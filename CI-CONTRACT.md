@@ -444,6 +444,8 @@ Currently required live branch-protection contexts:
 - `CI`
 - `host-capability-check`
 - `lane-check/proof` (commit status posted by `scripts/ci/assay_runner_lane_check.py`)
+<!-- required-contexts:end (scripts/ci/check-required-contexts.py reads the entries between
+     the "Currently required" line above and this marker; keep it after the last entry) -->
 
 The bare `lane-check` Actions job still runs and reports, but stopped being required in
 the #1869 migration (PR #1878): the proof status is posted on the exact PR head and
@@ -464,12 +466,11 @@ Observed from the CI baseline implementation PR `#1638`:
 
 - `public-artifact-sanitization`
 
-Proposed required context names for the next branch-protection review:
+Proposed for the next branch-protection review, stated as the delta from the live
+set above rather than as a second copy of it -- a copy is what let the inventory in
+section 0 go stale, and the guard reads only the list above:
 
-- `CI`
-- `host-capability-check`
-- `lane-check/proof`
-- `public-artifact-sanitization` (proposal only; deliberately absent from the
+- add `public-artifact-sanitization` (proposal only; deliberately absent from the
   checked-in ruleset, see below)
 
 Checked-in ruleset activation lives at
