@@ -161,7 +161,7 @@ true:
 | Drop diagnostics | the ring-buffer debug follow-up in
    <https://github.com/Rul1an/assay/issues/1271> is either implemented or
    explicitly accepted as post-extraction operational work |
-| CI enforcement path | the Assay-Runner lane-check required status and
+| CI enforcement path | the Assay-Runner `lane-check/proof` required status and
    reviewer workflow are active; future refinements are tracked separately
    rather than blocking the v0 boundary |
 | Maintainer explainability | a maintainer can explain which crate owns each boundary row above without reading the Phase 1 history |
