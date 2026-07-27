@@ -33,7 +33,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # Crypto (for signature verification)
 sha2 = "0.11"
 hex = "0.4"
-base64 = "0.22"
+base64 = "0.23"
 ed25519-dalek = { version = "3.0", features = ["alloc", "pkcs8", "rand_core"] }
 pkcs8 = { version = "0.11", features = ["pem"] }
 
@@ -66,7 +66,7 @@ dirs = "6"
 rand = "0.8"
 
 [dev-dependencies]
-base64 = "0.22"
+base64 = "0.23"
 getrandom = { version = "0.4", features = ["sys_rng"] }
 # Already a normal dependency; declared here too so integration tests can mutate Rekor v2 vectors cleanly.
 serde_json = { workspace = true, features = ["std"] }

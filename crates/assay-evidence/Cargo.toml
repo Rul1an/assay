@@ -26,7 +26,7 @@ serde_jcs = "=0.2.0"
 # Crypto & IDs
 sha2 = "0.11"
 hex = "0.4"
-base64 = "0.22"
+base64 = "0.23"
 uuid = { version = "1.23", features = ["v7", "serde"] }
 chrono = { version = "0.4", features = ["serde", "clock", "std"], default-features = false }
 ed25519-dalek = { version = "3.0", features = ["alloc", "rand_core", "pkcs8"] }
