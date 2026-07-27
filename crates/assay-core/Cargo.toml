@@ -85,6 +85,6 @@ harness = false
 [dev-dependencies]
 getrandom = { version = "0.4", features = ["sys_rng"] }
 tempfile = "3.27.0"
-serial_test = "3"
+serial_test = "4"
 criterion = "0.8"
 tracing-subscriber = { version = "0.3.23", features = ["json", "fmt", "env-filter"] }

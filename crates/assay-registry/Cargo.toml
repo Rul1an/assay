@@ -77,4 +77,4 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 wiremock = "0.6"
 rand = "0.8"
-serial_test = "3"
+serial_test = "4"
