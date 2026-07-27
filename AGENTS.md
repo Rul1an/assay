@@ -7,8 +7,10 @@ this contract.
 ## Canonical State
 
 - Repository truth is the checked-in code and documentation.
-- The public execution ledger for the ADR-042/043 program is
-  [issue #1847](https://github.com/Rul1an/assay/issues/1847).
+- The public execution ledger for the active programme is
+  [issue #1866](https://github.com/Rul1an/assay/issues/1866). Keep the number to this one line;
+  everywhere else the contract names the role, so the next programme costs one edit here rather than
+  one in every section. Nothing enforces that, so it is an instruction and not a guarantee.
 - Agent chats, local plans, memories, and unpushed branches are not authoritative project state.
 - Every handoff records the branch, PR, exact head SHA, verification, reviews, non-claims, and open
   findings in the ledger.
@@ -40,7 +42,7 @@ including its explicit non-claims, or amend the decision through a new ADR.
 - Use `codex/`, `claude/`, or `cursor/` branch prefixes matching the writer.
 - Do not implement on `main`.
 - Do not share `target/` directories between active worktrees. Use `CARGO_TARGET_DIR`.
-- Remove merged branches and their worktrees only after recording the merge in issue #1847.
+- Remove merged branches and their worktrees only after recording the merge in the programme ledger.
 
 ## Development Discipline
 
@@ -51,6 +53,15 @@ including its explicit non-claims, or amend the decision through a new ADR.
 - Never turn absence of evidence, failed validation, skipped review, or unavailable infrastructure
   into a clean result.
 - Keep public strings free of private strategy, product-roadmap language, and unearned claims.
+- Stage by explicit pathspec. Never stage by the absence of one: bare `git add -A`, bare `git add .`,
+  `git add -u`, and `git commit -a`/`-am` all commit whatever the tree happens to be carrying at that
+  moment, which is a property of the moment and not of the change under review. A pathspec scopes the
+  command back to the change, so `git add -A demo/output` is fine and `git add -A` is not.
+- Pin a tool version in one place, and have both the install and the invocation read that one value —
+  as `.github/workflows/fuzz-smoke.yml` does with `env: FUZZ_TOOLCHAIN`. Two literals that must agree
+  will eventually disagree. Echo the value in the run so a version claim can be checked against the
+  log, while remembering what that check does not cover: the same workflow records a `cargo +nightly`
+  bypass that leaves the log still naming the pinned toolchain.
 
 ## Review Quorum
 
@@ -85,12 +96,24 @@ Before pushing:
 - run clippy with `-D warnings` for the affected targets;
 - inspect `git diff --check` and the public-surface strings.
 
+### Measurement provenance
+
+A measurement carries its provenance, or it is a claim with extra steps. When a number, a count, or a
+pass/fail reaches a PR body, a review, or a programme-ledger entry, it states the exact SHA it was
+measured on — not a branch name, which moves and which is how a stale checkout passes for a current
+one — plus the worktree when more than one is active, and the binary or toolchain when the number
+depends on one.
+
+The failure mode this catches is not arithmetic but attribution: the number is right and the tree,
+ref, artifact, or build it describes is not. Name the artifact too when a generated form exists, since
+a correct reading of a generated layer is still the wrong layer.
+
 GitHub Actions is the final integration proof. Never weaken, bypass, or relabel a required check to
 make a branch mergeable.
 
 ## Tool Boundaries
 
-- Codex owns issue #1847 coordination, CI triage, PR sequencing, and merge-state reconciliation.
+- Codex owns programme-ledger coordination, CI triage, PR sequencing, and merge-state reconciliation.
 - Claude Code may implement a dedicated slice in its own worktree and may review another slice in
   plan/read-only mode.
 - Cursor may implement locally in its own worktree. Cursor Background Agents must not mutate auth
