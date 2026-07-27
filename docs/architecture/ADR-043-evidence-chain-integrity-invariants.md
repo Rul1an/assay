@@ -207,6 +207,7 @@ that bundle to a value of equal byte length fails with `IntegrityManifestHash`; 
 does what the profile says. For the JWKS composition the two runs differ only in the URI scheme,
 which isolates the cause to the refusal path itself.
 Finding 1 was independently challenged on the grounds that the verifier streams correctly, and
-re-confirmed: it does stream, but only over an already-materialized buffer. The privileged-action
-conformance corpus reproduces all thirteen vectors, and every policy-decision gate has a passing
-test, including `unknown_required_scope_fails_closed`.
+re-confirmed: it does stream, but only over an already-materialized buffer. Measured at
+`a867173b`, the privileged-action conformance corpus reproduced all thirteen vectors it carried
+then, and every policy-decision gate had a passing test, including
+`unknown_required_scope_fails_closed`.
