@@ -82,6 +82,7 @@ pub struct VerifyResult {
 /// 11. **Run ID Consistency**: All events have same run_id as manifest
 /// 12. **Event Count**: Matches manifest.event_count
 /// 13. **Run Root**: Recomputed value matches manifest.run_root
+/// 14. **Bundle ID**: manifest.bundle_id equals manifest.run_root
 ///
 /// # Errors
 ///
@@ -440,10 +441,17 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
                 }
 
                 // Check 9, the ID contract. Documented at the top of this function since the
-                // format was written, but never executed: the id is outside the per-event content
-                // hash, so a forged stream identity survived every other check once the container
-                // was resealed. Ordered after the run_id and seq checks so a mismatch here is
-                // always the id itself and not one of its two inputs.
+                // format was written, but never executed until ADR-043: the id is outside the
+                // per-event content hash, so an id that disagrees with its own run_id and seq
+                // survived every other check once the container was resealed. Ordered after the
+                // run_id and seq checks so a mismatch here is always the id itself and not one of
+                // its two inputs.
+                //
+                // What this does not close: the contract is internal, so a *consistent* rewrite
+                // satisfies it. Rewrite the manifest run_id and every event's run_id and id
+                // together and the bundle still verifies, because the chain root is computed over
+                // content hashes that exclude identity by design. Binding a bundle to its identity
+                // needs a second digest, not a stricter version of this check.
                 // The id contract is `run_id:seq`, so it only means something if the split is
                 // unambiguous. The writer refuses a run_id containing a colon for exactly this
                 // reason; without the same rule here the verifier accepts bundles its own writer
@@ -517,6 +525,20 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
                     ErrorClass::Integrity,
                     ErrorCode::IntegrityRunRootMismatch,
                     "Run root mismatch",
+                )
+                .into());
+            }
+
+            // Check 14, the bundle id contract. The profile makes it normative -- "the manifest's
+            // `run_root` and `bundle_id` MUST both equal it" -- but nothing derives one from the
+            // other at read time, so the two could disagree and still verify. Ordered after the
+            // chain check on purpose: a mutated run_root stays a root mismatch, and this fires
+            // only when the chain is sound and its second copy in the manifest is not.
+            if m.bundle_id != m.run_root {
+                return Err(VerifyError::new(
+                    ErrorClass::Contract,
+                    ErrorCode::ContractBundleIdMismatch,
+                    "bundle_id must equal run_root",
                 )
                 .into());
             }

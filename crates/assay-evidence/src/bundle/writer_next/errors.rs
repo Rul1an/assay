@@ -39,6 +39,7 @@ pub enum ErrorCode {
     ContractDuplicateFile,
     ContractUnexpectedFile,
     ContractRunIdMismatch,
+    ContractBundleIdMismatch,
     ContractSequenceGap,
     ContractSequenceStart,
     ContractTimestampRegression,

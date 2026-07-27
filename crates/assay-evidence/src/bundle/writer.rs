@@ -511,9 +511,13 @@ mod tests {
                 },
             );
 
-            // Calculate run_root
+            // Calculate run_root. The profile requires bundle_id to carry the same value, so the
+            // placeholder above has to be replaced here rather than left as "test": this fixture
+            // is hand-built, and a hand-built manifest that skips the contract only tests the
+            // checks that happen to run.
             let content_hash = event.content_hash.as_ref().unwrap();
             manifest.run_root = compute_run_root(std::slice::from_ref(content_hash));
+            manifest.bundle_id = manifest.run_root.clone();
 
             let manifest_json = serde_json::to_vec(&manifest).unwrap();
             let mut manifest_hasher = Sha256::new();
