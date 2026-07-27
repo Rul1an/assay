@@ -12,11 +12,16 @@
 //! chain binds something it does not. Nothing caught it because nothing derived the list from the
 //! type.
 //!
-//! This test derives it. Each field is classified by *observing* whether mutating it moves the
-//! content hash, and the observation is compared against a declaration that a human has to write.
-//! Adding a field to `EvidenceEvent` therefore fails this test until someone states which side it
-//! is on, and naming the wrong side fails it too. That is the property the prose could not carry:
-//! the list cannot silently disagree with the code.
+//! This test derives it, in two layers, because one is not enough. An exhaustive destructure of
+//! `EvidenceEvent` breaks the *build* when a field is added, which is the only mechanism that
+//! reaches a field serde does not emit — seven of these carry `skip_serializing_if`, so a new
+//! optional left `None` in a fixture would otherwise be invisible to every runtime assertion here.
+//! On top of that, each emitted field is classified by *observing* whether mutating it moves the
+//! content hash, and the observation is compared against a declaration a human has to write.
+//!
+//! So: adding a field fails compilation until it is named; naming it without classifying it fails
+//! a test; and classifying it wrongly fails a different test. That is the property the prose could
+//! not carry — the list cannot silently disagree with the code.
 
 use assay_evidence::crypto::id::compute_content_hash;
 use assay_evidence::types::EvidenceEvent;
@@ -100,18 +105,63 @@ fn mutate(key: &str, value: &Value) -> Value {
     }
 }
 
+/// Break the build when a field is added to `EvidenceEvent`.
+///
+/// The behavioural loop below can only see what serde emits, and seven of these fields carry
+/// `skip_serializing_if`. A new optional field left `None` in the fixture — or one marked
+/// `#[serde(skip)]` — would be invisible to every runtime assertion in this file, including the
+/// arity check, because it changes neither side of that equation. So runtime coverage is not
+/// enough and no count can rescue it: the guarantee has to come from the compiler.
+///
+/// This destructure deliberately has no `..`. Adding a field to `EvidenceEvent` stops this test
+/// compiling until someone names it here and classifies it below.
+#[allow(unused_variables)]
+fn field_coverage_is_exhaustive(event: &EvidenceEvent) {
+    let EvidenceEvent {
+        specversion,
+        type_,
+        source,
+        id,
+        time,
+        data_content_type,
+        subject,
+        trace_parent,
+        trace_state,
+        run_id,
+        seq,
+        producer,
+        producer_version,
+        git_sha,
+        policy_id,
+        contains_pii,
+        contains_secrets,
+        content_hash,
+        semantic_digest,
+        digest_profile,
+        payload,
+    } = event;
+}
+
 #[test]
 fn every_event_field_is_classified_and_behaves_as_classified() {
     let event = fully_populated_event();
-    let baseline = compute_content_hash(&event).expect("baseline hash");
+    field_coverage_is_exhaustive(&event);
 
     let serialized = serde_json::to_value(&event).expect("serialize");
     let object = serialized
         .as_object()
         .expect("event serializes to an object");
 
+    // Baseline from the round-tripped event, not the in-memory one. If deserialization normalizes
+    // anything, an in-memory baseline makes every *other* field's verdict wrong rather than
+    // reporting the one field responsible.
+    let round_tripped: EvidenceEvent =
+        serde_json::from_value(serialized.clone()).expect("baseline round-trip");
+    let baseline = compute_content_hash(&round_tripped).expect("baseline hash");
+
     let mut unclassified: Vec<String> = Vec::new();
     let mut wrongly_classified: Vec<String> = Vec::new();
+    let mut inert_mutations: Vec<String> = Vec::new();
 
     for (key, value) in object {
         let mut mutated_object = object.clone();
@@ -120,6 +170,17 @@ fn every_event_field_is_classified_and_behaves_as_classified() {
             .unwrap_or_else(|e| {
                 panic!("mutating {key} produced an event that will not parse: {e}")
             });
+
+        // A mutation that does not survive the round trip would classify its field UNBOUND for the
+        // wrong reason, and the failure message would then instruct someone to record that wrong
+        // answer. Prove the input actually changed before reading anything into the output.
+        if mutated == round_tripped {
+            inert_mutations.push(format!(
+                "{key}: the mutation did not survive deserialization, so this field's \
+                 classification would be an artifact of the probe rather than an observation"
+            ));
+            continue;
+        }
 
         let hash_moved = compute_content_hash(&mutated).expect("mutated hash") != baseline;
 
@@ -155,10 +216,18 @@ fn every_event_field_is_classified_and_behaves_as_classified() {
     }
 
     assert!(
+        inert_mutations.is_empty(),
+        "the probe could not move these fields, so their classification would be measured on an \
+         unchanged event. Teach `mutate()` to produce a genuinely different value for them before \
+         trusting any verdict here:\n  {}",
+        inert_mutations.join("\n  ")
+    );
+    assert!(
         unclassified.is_empty(),
         "EvidenceEvent carries fields this inventory does not classify. Add each to BOUND or \
-         UNBOUND in this file, with the reason, and say so in the attestation boundary docs if it \
-         lands in UNBOUND:\n  {}",
+         UNBOUND in this file with the reason, and if it lands in UNBOUND say so wherever the \
+         attestation boundary is described (ADR-039 and `attestation.rs`), since a signature does \
+         not cover it:\n  {}",
         unclassified.join("\n  ")
     );
     assert!(
@@ -168,21 +237,31 @@ fn every_event_field_is_classified_and_behaves_as_classified() {
     );
 }
 
-/// The inventory only means something if it covers the whole type. A field that serde never emits
-/// cannot be probed above, so pin the count too: `EvidenceEvent` has no skipped fields today, and
-/// adding one would hide it from the classification.
+/// The declared names and the serialized names are the same set.
+///
+/// Set equality rather than a count: a rename plus a stale entry keeps the arity intact, and a
+/// cardinality check would call that agreement. This catches a name that no longer exists and a
+/// name that exists but is unlisted; fields serde never emits are the compiler's job, above.
 #[test]
-fn the_inventory_covers_every_serialized_field() {
+fn the_inventory_names_match_the_serialized_names() {
+    use std::collections::BTreeSet;
+
     let event = fully_populated_event();
     let serialized = serde_json::to_value(&event).expect("serialize");
-    let keys: Vec<&String> = serialized.as_object().expect("object").keys().collect();
+    let emitted: BTreeSet<&str> = serialized
+        .as_object()
+        .expect("object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    let declared: BTreeSet<&str> = BOUND.iter().chain(UNBOUND.iter()).copied().collect();
 
-    assert_eq!(
-        keys.len(),
-        BOUND.len() + UNBOUND.len(),
-        "the inventory lists {} fields but a fully populated event serializes {}: {:?}",
-        BOUND.len() + UNBOUND.len(),
-        keys.len(),
-        keys
+    let missing: Vec<&&str> = emitted.difference(&declared).collect();
+    let stale: Vec<&&str> = declared.difference(&emitted).collect();
+
+    assert!(
+        missing.is_empty() && stale.is_empty(),
+        "inventory and event disagree.\n  serialized but unlisted: {missing:?}\n  \
+         listed but not serialized: {stale:?}"
     );
 }

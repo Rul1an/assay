@@ -19,11 +19,13 @@ use sha2::{Digest, Sha256};
 /// Input struct for content hash computation.
 ///
 /// CRITICAL: This struct defines EXACTLY what goes into the content hash.
-/// It deliberately EXCLUDES:
-/// - `content_hash` (would be self-referential)
-/// - `id` (derived from run_id + seq)
-/// - `time` (allows deterministic re-export)
-/// - Trace context (operational metadata)
+///
+/// The fields it does NOT cover are not listed here. Every such list written by hand has gone
+/// stale — this one omitted `source`, `semantic_digest` and `digest_profile`, and `source` is what
+/// names the system that produced the stream, so a reader would have concluded the chain binds
+/// something it does not. The complete, enforced inventory lives in
+/// `tests/content_hash_field_inventory.rs`, which fails when a field of `EvidenceEvent` is
+/// unclassified or classified against observed behaviour. Read that, not a summary of it.
 ///
 /// It INCLUDES:
 /// - `specversion` (binds hash to format version)
@@ -60,14 +62,13 @@ struct ContentHashInput<'a> {
 ///
 /// # Excluded Fields (by design)
 ///
-/// - `content_hash`: Would be self-referential
-/// - `id`: Derived from run_id + seq
-/// - `time`: Allows deterministic re-export
-/// - `trace_parent/trace_state`: Operational metadata
-/// - `run_id`, `seq`: Stream identity, not content
-/// - `producer*`, `git_sha`: Provenance metadata
-/// - `policy_id`: Context metadata
-/// - `contains_pii/secrets`: Privacy flags
+/// Excluding `time`, stream identity and producer metadata is what makes deterministic re-export
+/// possible: the same events, repackaged later by a different producer, keep the same hash.
+///
+/// The exclusions are NOT enumerated here. This list previously omitted `source`,
+/// `semantic_digest` and `digest_profile` while reading as complete. The enforced inventory is
+/// `tests/content_hash_field_inventory.rs`; it classifies every field of `EvidenceEvent` against
+/// observed behaviour and will not compile once a new field exists.
 ///
 /// # Example
 ///
