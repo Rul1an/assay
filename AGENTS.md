@@ -78,7 +78,8 @@ measured on is the head it counts for — a merge commit that brings `main` into
 head like any other. A review is revalidated for a new head only by a recorded equivalence check
 with two conditions: the new head introduces no change, to any file, that is not already on `main`
 — its tree is what merging `main` into the reviewed head produces without conflicts — and the
-advance touched no file the review covered. The first covers the whole tree, never a file list, so
+advance from the reviewed head to the new head touched no file the review covered, meaning the
+PR's changed files as of the reviewed head. The first covers the whole tree, never a file list, so
 content outside the reviewed files cannot ride the carry; the second exists because an upstream
 change to a reviewed file changes what lands even though it smuggles nothing, and "the branch added
 nothing" is a neighbouring property of "what was reviewed is what merges", not the same one. Put
@@ -90,12 +91,12 @@ A review record that says it did not review is not a review. A bot that returns 
 "unable to review — quota limit", or a check that reports `pass` alongside "review rate limited",
 leaves no findings and no reviewer; it is unavailable infrastructure wearing the shape of a verdict,
 and it satisfies neither route. Read what a record says, not that it exists. A limit-shaped record
-is, however, itself the observation that the reviewer is unavailable, and route 2 opens immediately
-— provided the record declaring the limit is on the head the substitution covers (quotas reset; an
-earlier head's limit record does not carry forward), and the review record documents which reviewer
-was limited, which agent reviewed instead, and on which head. Reviews count as artifacts bound to
-an exact head, not as entries in GitHub's review list; a reviewer whose tooling cannot submit a
-review record counts through a comment bound to the SHA it reviewed.
+is, however, itself the observation that the reviewer is unavailable, and that bot's slot in route
+2 opens immediately — provided the record declaring the limit is on the head the substitution
+covers (quotas reset; an earlier head's limit record does not carry forward), and the review record
+documents which reviewer was limited, which agent reviewed instead, and on which head. Reviews
+count as artifacts bound to an exact head, not as entries in GitHub's review list; a reviewer whose
+tooling cannot submit a review record counts through a comment bound to the SHA it reviewed.
 
 Auto-merge may be enabled only when:
 
