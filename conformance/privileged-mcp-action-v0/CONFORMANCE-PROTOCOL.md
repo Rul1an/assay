@@ -132,6 +132,6 @@ updating the release used by a long-lived workflow.
 
 ## Claim ceiling
 
-A matching run demonstrates agreement on the pinned 13-case corpus. It does not establish
+A matching run demonstrates agreement on the pinned 14-case corpus. It does not establish
 implementation independence, security, compliance, complete profile determinacy, or any provider
 outcome. Those claims require separate evidence.

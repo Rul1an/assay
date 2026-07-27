@@ -35,7 +35,7 @@ MAX_GIT_ERROR_BYTES = 64 * 1024
 README = """\
 # Privileged MCP Action v0 clean-room pack
 
-This pack contains the specification, machine-readable descriptor, and thirteen
+This pack contains the specification, machine-readable descriptor, and fourteen
 opaque evidence-bundle cases. It deliberately omits expected outcomes, semantic
 case names, the vector generator, and Assay's implementation.
 
