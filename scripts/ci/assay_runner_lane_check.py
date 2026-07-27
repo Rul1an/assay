@@ -1487,14 +1487,24 @@ def maybe_status(
         # `lane-check/proof` is the required branch-protection context
         # (issue #1869). A permission refusal is the one tolerated miss: a
         # read-only token (Dependabot/fork contexts) can never post it, the
-        # head stays unproven, and only a privileged dispatch refreshes it.
-        # Everything else must fail the run rather than leave a green job
-        # whose required status silently never landed.
-        if exc.code in (401, 403):
+        # head stays unproven, and only a privileged dispatch from a trusted
+        # ref refreshes it. Everything else must fail the run rather than
+        # leave a green job whose required status silently never landed.
+        # GitHub also answers rate limiting with 403; that is transient for a
+        # write-capable token, so it propagates instead of masquerading as a
+        # permission refusal with the wrong remedy.
+        headers = getattr(exc, "headers", None)
+        rate_limited = headers is not None and (
+            headers.get("Retry-After") is not None
+            or headers.get("X-RateLimit-Remaining") == "0"
+        )
+        if exc.code in (401, 403) and not rate_limited:
             print(
                 "warning: token cannot write commit statuses "
                 f"({exc.code}); the required '{STATUS_CONTEXT}' context stays "
-                "missing until a privileged workflow_dispatch refreshes it",
+                "missing until a privileged workflow_dispatch (run from a "
+                "trusted ref, never from a ref carrying untrusted changes) "
+                "refreshes it",
                 file=sys.stderr,
             )
             return
@@ -2158,6 +2168,35 @@ def _test_required_status_fail_closed() -> None:
     maybe_status(forbidden, "abc123", True, "ok", status=True)
     assert forbidden.calls == [("POST", "/statuses/abc123")]
 
+    # (2b) GitHub also answers rate limiting with 403. That is transient, not
+    #      a permission refusal: a write-capable run must not read green while
+    #      its required status silently never landed, so these propagate.
+    import email.message
+
+    secondary = email.message.Message()
+    secondary["Retry-After"] = "60"
+    rate_limited = _RaisingApi(
+        urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", secondary, None)  # type: ignore[arg-type]
+    )
+    try:
+        maybe_status(rate_limited, "abc123", True, "ok", status=True)
+    except urllib.error.HTTPError:
+        pass
+    else:
+        raise AssertionError("maybe_status must fail closed on secondary rate limits")
+
+    primary = email.message.Message()
+    primary["X-RateLimit-Remaining"] = "0"
+    exhausted = _RaisingApi(
+        urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", primary, None)  # type: ignore[arg-type]
+    )
+    try:
+        maybe_status(exhausted, "abc123", True, "ok", status=True)
+    except urllib.error.HTTPError:
+        pass
+    else:
+        raise AssertionError("maybe_status must fail closed on an exhausted rate limit")
+
     # (3) A 5xx HTTPError is not a permission refusal and must propagate.
     server_error = _RaisingApi(
         urllib.error.HTTPError("https://api.github.com", 502, "Bad Gateway", None, None)  # type: ignore[arg-type]
@@ -2178,10 +2217,12 @@ def _test_required_status_fail_closed() -> None:
 def _test_lane_workflow_contract_pins() -> None:
     """Pin the exact-head and never-read-clean guards of the lane workflow.
 
-    The helper is checked out from the PR base, so this file and the workflow
-    travel together; if a future edit drops one of these guards, the self-test
-    (pre-commit and the base-ref run) goes red before the guard disappears
-    from the enforcement path.
+    Script and workflow are always read from the same checkout, so the pins
+    are self-consistent — but the lane workflow's own run checks out the PR
+    BASE, which still contains the guards when a PR removes them. The
+    head-side tripwire is pre-commit (locally via the lane-check hook, and in
+    CI via the kernel-matrix lint leg, whose trigger paths include the lane
+    workflow file for exactly this reason).
     """
 
     workflow = (
@@ -2207,6 +2248,12 @@ def _test_lane_workflow_contract_pins() -> None:
     # The workflow must actually request the required-context posting.
     assert "args+=(--status)" in text
     assert "statuses: write" in text
+
+    # A privileged dispatch runs with statuses: write, so it must execute the
+    # trusted helper from main — never code from the dispatched ref, which a
+    # PR author controls. (The dispatched ref's own workflow file still runs;
+    # dispatching on a ref carrying untrusted changes stays forbidden.)
+    assert "github.event_name == 'workflow_dispatch' && 'main'" in text
 
 
 def _test_connection_resilience() -> None:

@@ -18,6 +18,10 @@ on:
       - "crates/assay-monitor/**"
       - "scripts/**"
       - ".github/workflows/kernel-matrix.yml"
+      # The lane self-test pins guards inside this workflow file; run the
+      # head-side pre-commit leg when it changes, because the lane workflow
+      # itself checks out the PR base and would validate the base copy.
+      - ".github/workflows/assay-runner-lane-check.yml"
       # Note: Cargo.toml/Cargo.lock removed - check-ebpf-changes job handles skip logic
   push:
     branches: [ "main", "debug/**" ]
