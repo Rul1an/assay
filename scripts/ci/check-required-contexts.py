@@ -38,6 +38,7 @@ CI_CONTRACT = Path("CI-CONTRACT.md")
 RUNBOOK = Path("docs/BRANCH-PROTECTION-SETUP.md")
 
 CI_CONTRACT_ANCHOR = "Currently required live branch-protection contexts:"
+CI_CONTRACT_SENTINEL = "<!-- required-contexts:end"
 BULLET_RE = re.compile(r"^-\s+`([^`]+)`")
 CONTEXTS_ARRAY_RE = re.compile(r'"contexts"\s*:\s*(\[[^\]]*\])')
 
@@ -64,13 +65,18 @@ def ruleset_contexts(text: str) -> list[str]:
 
 
 def ci_contract_contexts(text: str) -> list[str]:
-    """The bullet list immediately under the anchor.
+    """The bullets between the anchor and the end sentinel.
 
-    "Immediately" is the load-bearing word. Scanning forward until some bullet list turns up
-    means that deleting the list under the anchor silently promotes the next list in the
-    document to being the required set, and the guard reports agreement about the wrong
-    paragraph. So: blank lines may separate the anchor from its list, and the first
-    non-blank line that is not a bullet ends the search -- whether or not anything was found.
+    Delimited at both ends rather than inferred from proximity. Proximity cannot express the
+    property this needs: once only whitespace separates the anchor from the next list, nothing
+    in the text distinguishes "my list" from "somebody else's", so any blank-line budget either
+    still adopts the neighbour or rejects the living document. Counting blanks was tried and it
+    bought nothing -- at the one blank line a normal deletion leaves behind, a bounded scan and
+    an unbounded one behave identically.
+
+    With an explicit end marker the region is stated instead of guessed: a deleted list leaves
+    an empty region, a deleted marker leaves no region at all, and neither can reach past the
+    marker to borrow a list that belongs to another paragraph.
     """
     lines = text.splitlines()
     try:
@@ -80,19 +86,24 @@ def ci_contract_contexts(text: str) -> list[str]:
             f"{CI_CONTRACT}: anchor {CI_CONTRACT_ANCHOR!r} is gone; the guard cannot "
             "locate the required set"
         ) from None
-    found: list[str] = []
-    for line in lines[start + 1 :]:
-        match = BULLET_RE.match(line)
-        if match:
-            # Names carry a trailing parenthetical gloss in this list; keep the name only.
-            found.append(match.group(1).strip())
-        elif not line.strip() and not found:
-            continue
-        else:
-            break
+    try:
+        end = next(
+            i
+            for i in range(start + 1, len(lines))
+            if lines[i].lstrip().startswith(CI_CONTRACT_SENTINEL)
+        )
+    except StopIteration:
+        raise DriftError(
+            f"{CI_CONTRACT}: end sentinel {CI_CONTRACT_SENTINEL!r} is missing after the "
+            "anchor; the guard cannot tell where the required set stops"
+        ) from None
+
+    # Names carry a trailing parenthetical gloss in this list; keep the name only.
+    found = [m.group(1).strip() for m in map(BULLET_RE.match, lines[start + 1 : end]) if m]
     if not found:
         raise DriftError(
-            f"{CI_CONTRACT}: no bullet list directly under anchor {CI_CONTRACT_ANCHOR!r}"
+            f"{CI_CONTRACT}: no entries between anchor {CI_CONTRACT_ANCHOR!r} and its "
+            "end sentinel"
         )
     return found
 
@@ -134,22 +145,58 @@ def read_repo(path: Path) -> str:
     return (REPO_ROOT / path).read_text(encoding="utf-8")
 
 
-def _drop_list_under_anchor(text: str) -> str:
-    """Remove only the bullets directly under the anchor, keeping the anchor and later lists.
+def _anchor_index(lines: list[str]) -> int:
+    return next(i for i in range(len(lines)) if lines[i].strip() == CI_CONTRACT_ANCHOR)
 
-    Later lists have to survive, or the mutation cannot tell the two parsers apart: strip every
-    bullet in the file and even a parser that scans onward finds nothing and reports correctly.
-    The case worth testing is the one where there is still something further down to grab.
+
+def _sentinel_index(lines: list[str], start: int) -> int:
+    return next(
+        i
+        for i in range(start + 1, len(lines))
+        if lines[i].lstrip().startswith(CI_CONTRACT_SENTINEL)
+    )
+
+
+def _empty_the_region(text: str) -> str:
+    """Delete the entries, keeping the anchor and the sentinel.
+
+    The region is still well formed and simply says nothing, which has to be reported as an
+    empty region rather than filled in from the neighbourhood.
+
+    This case pins the report; it does not distinguish this design from the proximity scan it
+    replaced, because that one also finds nothing here. Recorded rather than left implied: a
+    mutant list is only as useful as the cases in it that actually diverge, and the two below
+    are the ones that do.
     """
     lines = text.splitlines(keepends=True)
-    start = next(i for i, line in enumerate(lines) if line.strip() == CI_CONTRACT_ANCHOR)
-    cursor = start + 1
-    while cursor < len(lines) and not lines[cursor].strip():
-        cursor += 1
-    end = cursor
-    while end < len(lines) and BULLET_RE.match(lines[end]):
-        end += 1
-    return "".join(lines[: start + 1] + lines[end:])
+    start = _anchor_index(lines)
+    return "".join(lines[: start + 1] + lines[_sentinel_index(lines, start) :])
+
+
+def _strand_anchor_above_a_foreign_list(text: str) -> str:
+    """Delete the entries, the sentinel, and everything up to the next list in the document.
+
+    The shape proximity cannot handle: nothing but whitespace between the anchor and a list
+    that belongs to another paragraph. A scan that infers its region from nearness adopts that
+    list at any blank-line budget a living document also needs, which is why the region is
+    delimited instead. Verified against the reconstructed proximity parser rather than argued.
+    """
+    lines = text.splitlines(keepends=True)
+    start = _anchor_index(lines)
+    after_sentinel = _sentinel_index(lines, start) + 1
+    nxt = next(i for i in range(after_sentinel, len(lines)) if BULLET_RE.match(lines[i]))
+    return "".join(lines[: start + 1] + ["\n"] + lines[nxt:])
+
+
+def _remove_sentinel(text: str) -> str:
+    lines = text.splitlines(keepends=True)
+    start = _anchor_index(lines)
+    end = _sentinel_index(lines, start)
+    # The marker spans two lines; drop the continuation with it so no stray comment text stays.
+    stop = end + 1
+    while stop < len(lines) and "-->" not in lines[stop - 1]:
+        stop += 1
+    return "".join(lines[:end] + lines[stop:])
 
 
 def self_test() -> int:
@@ -173,7 +220,9 @@ def self_test() -> int:
     unreadable_cases = [
         (CI_CONTRACT, lambda t: t.replace(CI_CONTRACT_ANCHOR, "Contexts, probably:", 1)),
         (RUNBOOK, lambda t: t.replace('"contexts"', '"former_contexts"')),
-        (CI_CONTRACT, _drop_list_under_anchor),
+        (CI_CONTRACT, _empty_the_region),
+        (CI_CONTRACT, _strand_anchor_above_a_foreign_list),
+        (CI_CONTRACT, _remove_sentinel),
     ]
 
     def apply(path: Path, mutate) -> dict | None:
