@@ -74,12 +74,21 @@ The builder's self-review does not count. On the final head SHA, require:
 
 `skipped` is not `pass`. A new push invalidates reviews on the prior head, and the head a review was
 measured on is the head it counts for — a merge commit that brings `main` into the branch is a new
-head like any other.
+head like any other. A review is revalidated for a new head only by a recorded equivalence check:
+the diff from the reviewed head to the new head over the files the PR changes is empty, and the new
+head adds only commits already on `main`. Put that check in the review record; without it, the
+review does not carry.
 
 A review record that says it did not review is not a review. A bot that returns `COMMENTED` with
 "unable to review — quota limit", or a check that reports `pass` alongside "review rate limited",
 leaves no findings and no reviewer; it is unavailable infrastructure wearing the shape of a verdict,
-and it satisfies neither route. Read what a record says, not that it exists.
+and it satisfies neither route. Read what a record says, not that it exists. A limit-shaped record
+is, however, itself the observation that the reviewer is unavailable: an independent adversarial
+agent review satisfies that slot immediately — the 30-minute clock in route 2 covers silence, not a
+declared limit — provided the review record documents the substitution: which reviewer was limited,
+which agent reviewed instead, and on which head. Reviews count as artifacts bound to an exact head,
+not as entries in GitHub's review list; a reviewer whose tooling cannot submit a review record
+counts through a comment bound to the SHA it reviewed.
 
 Auto-merge may be enabled only when:
 
