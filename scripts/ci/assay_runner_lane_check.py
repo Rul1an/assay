@@ -1483,8 +1483,22 @@ def maybe_status(
         return
     try:
         post_commit_status(api, sha, passed, description)
-    except TRANSIENT_REQUEST_ERRORS as exc:
-        print(f"warning: could not post commit status: {exc}", file=sys.stderr)
+    except urllib.error.HTTPError as exc:
+        # `lane-check/proof` is the required branch-protection context
+        # (issue #1869). A permission refusal is the one tolerated miss: a
+        # read-only token (Dependabot/fork contexts) can never post it, the
+        # head stays unproven, and only a privileged dispatch refreshes it.
+        # Everything else must fail the run rather than leave a green job
+        # whose required status silently never landed.
+        if exc.code in (401, 403):
+            print(
+                "warning: token cannot write commit statuses "
+                f"({exc.code}); the required '{STATUS_CONTEXT}' context stays "
+                "missing until a privileged workflow_dispatch refreshes it",
+                file=sys.stderr,
+            )
+            return
+        raise
 
 
 def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) -> int:
@@ -1703,6 +1717,8 @@ def self_test() -> None:
 
     _test_connection_resilience()
     _test_artifact_redirect_drops_authorization()
+    _test_required_status_fail_closed()
+    _test_lane_workflow_contract_pins()
 
     # Phase 2D Slice 6B mechanical absence check: assert that assay-cli no
     # longer consumes the assay-runner-spike wrapper. The check is
@@ -2099,6 +2115,98 @@ def _test_event_resolution_and_status_payload() -> None:
             },
         )
     ]
+
+
+def _test_required_status_fail_closed() -> None:
+    """The `lane-check/proof` commit status is the branch-protection contract
+    (issue #1869): it must land on the exact PR head or the run must fail
+    visibly. Only a permission refusal (read-only token, e.g. Dependabot or
+    fork contexts) may degrade to a warning, because those contexts can never
+    post the status themselves and rely on a privileged dispatch instead.
+    """
+
+    # The migration anchor: branch protection requires this exact context.
+    assert STATUS_CONTEXT == "lane-check/proof"
+
+    class _RaisingApi:
+        def __init__(self, exc: Exception) -> None:
+            self.exc = exc
+            self.calls: list[tuple[str, str]] = []
+
+        def request(self, method: str, path: str, payload: object | None = None) -> object:
+            self.calls.append((method, path))
+            raise self.exc
+
+    # (1) A transient failure that survives the request-level retries must
+    #     propagate: a green run whose required status never landed is the
+    #     silent-liveness failure this guards against.
+    flaky = _RaisingApi(urllib.error.URLError("connection reset"))
+    try:
+        maybe_status(flaky, "abc123", True, "ok", status=True)
+    except urllib.error.URLError:
+        pass
+    else:
+        raise AssertionError("maybe_status must fail closed on non-permission errors")
+    assert flaky.calls == [("POST", "/statuses/abc123")]
+
+    # (2) A permission refusal is the documented read-only-token path: warn,
+    #     do not fail the run. The status stays missing, branch protection
+    #     stays blocked, and the privileged dispatch refreshes it.
+    forbidden = _RaisingApi(
+        urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", None, None)  # type: ignore[arg-type]
+    )
+    maybe_status(forbidden, "abc123", True, "ok", status=True)
+    assert forbidden.calls == [("POST", "/statuses/abc123")]
+
+    # (3) A 5xx HTTPError is not a permission refusal and must propagate.
+    server_error = _RaisingApi(
+        urllib.error.HTTPError("https://api.github.com", 502, "Bad Gateway", None, None)  # type: ignore[arg-type]
+    )
+    try:
+        maybe_status(server_error, "abc123", False, "broken", status=True)
+    except urllib.error.HTTPError:
+        pass
+    else:
+        raise AssertionError("maybe_status must fail closed on server errors")
+
+    # (4) Without --status nothing is posted at all.
+    silent = _RaisingApi(urllib.error.URLError("unused"))
+    maybe_status(silent, "abc123", True, "ok", status=False)
+    assert silent.calls == []
+
+
+def _test_lane_workflow_contract_pins() -> None:
+    """Pin the exact-head and never-read-clean guards of the lane workflow.
+
+    The helper is checked out from the PR base, so this file and the workflow
+    travel together; if a future edit drops one of these guards, the self-test
+    (pre-commit and the base-ref run) goes red before the guard disappears
+    from the enforcement path.
+    """
+
+    workflow = (
+        Path(__file__).resolve().parent.parent.parent
+        / ".github"
+        / "workflows"
+        / "assay-runner-lane-check.yml"
+    )
+    text = workflow.read_text(encoding="utf-8")
+
+    # Skipped or unassociated workflow_run events must never read clean:
+    # only completed dispatch-triggered delegated runs enter the job at all,
+    # and a delegated run with no resolvable PR ends in an explicit no-op.
+    assert "github.event.workflow_run.event == 'workflow_dispatch'" in text
+    assert "No associated pull request found" in text
+
+    # Exact-head behavior for privileged refreshes: the dispatched run must
+    # bind itself to the expected head and re-check that the PR still points
+    # at it before any status is posted.
+    assert 'if [[ "$GITHUB_SHA" != "$EXPECTED_HEAD_SHA" ]]' in text
+    assert 'if [[ "$pr_head" != "$EXPECTED_HEAD_SHA" ]]' in text
+
+    # The workflow must actually request the required-context posting.
+    assert "args+=(--status)" in text
+    assert "statuses: write" in text
 
 
 def _test_connection_resilience() -> None:
