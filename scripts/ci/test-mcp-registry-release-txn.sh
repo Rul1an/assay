@@ -148,6 +148,9 @@ echo "ok: check-mcp-registry-version cases"
 
 record_case() {
   local name="$1" result="$2" initial_body="$3" expect_success="$4"
+  local version="${5:-v3.35.0}"
+  local forbid_text="${6:-}"
+  local require_text="${7:-}"
   local temp_dir
   temp_dir="$(mktemp -d)"
   mkdir -p "${temp_dir}/bin"
@@ -182,7 +185,7 @@ EOF
   local rc=0
   PATH="${temp_dir}/bin:${PATH}" \
     FAKE_RELEASE_BODY="${temp_dir}/release-body.md" \
-    VERSION="v3.35.0" \
+    VERSION="$version" \
     RESULT="$result" \
     RUN_URL="https://github.com/Rul1an/assay/actions/runs/123" \
     bash "$RECORD" >/dev/null 2>"${temp_dir}/stderr" || rc=$?
@@ -194,6 +197,14 @@ EOF
       || fail "record: $name must link the registry run"
     grep -q "$result" "${temp_dir}/release-body.md" \
       || fail "record: $name must record the terminal result"
+    if [[ -n "$forbid_text" ]]; then
+      grep -q "$forbid_text" "${temp_dir}/release-body.md" \
+        && fail "record: $name must not claim '$forbid_text'"
+    fi
+    if [[ -n "$require_text" ]]; then
+      grep -q "$require_text" "${temp_dir}/release-body.md" \
+        || fail "record: $name must state '$require_text'"
+    fi
   else
     [[ "$rc" -ne 0 ]] || fail "record: $name unexpectedly succeeded"
   fi
@@ -208,8 +219,15 @@ record_case "rerun replaces the previous marker" success \
 record_case "unknown result is refused" bogus "release notes body" false
 # A prerelease's skipped publication must leave an explicit marker: absence
 # on a release record must stay distinguishable from a pre-feature release
-# (AGENTS.md: absence never reads clean).
-record_case "skipped writes an explicit marker" skipped "release notes body" true
+# (AGENTS.md: absence never reads clean). The reason annotation is observed
+# from the version, never asserted: a skip the mechanism cannot explain gets
+# a bare "skipped", not a claimed cause.
+record_case "skipped on a prerelease names the prerelease reason" skipped \
+  "release notes body" true "v3.36.0-rc.1" "" "prerelease"
+record_case "skipped on a beta names the prerelease reason" skipped \
+  "release notes body" true "v3.36.0-beta.2" "" "prerelease"
+record_case "skipped on a stable version claims no reason" skipped \
+  "release notes body" true "v3.35.0" "prerelease"
 
 echo "ok: record-mcp-registry-result cases"
 
@@ -302,11 +320,15 @@ if "needs.release.result == 'success'" not in record:
     )
 # The if-condition reads needs.release.result, so `release` must stay in the
 # needs list: dropping it makes the expression evaluate empty and the record
-# job silently never runs again.
-if "needs: [release-contract, release, publish-mcp-registry]" not in record:
-    sys.exit("wiring: record job needs must list release-contract, release, publish-mcp-registry")
-if "publish-mcp-registry" not in record:
-    sys.exit("wiring: record job must depend on the publish job")
+# job silently never runs again. Parse the list instead of matching an exact
+# string, so a YAML-identical reorder cannot trip the pin.
+needs_match = re.search(r"needs:\s*\[([^\]]*)\]", record)
+if not needs_match:
+    sys.exit("wiring: record job must declare an inline needs list")
+needs_items = [item.strip() for item in needs_match.group(1).split(",")]
+for needed in ("release", "publish-mcp-registry", "release-contract"):
+    if needed not in needs_items:
+        sys.exit(f"wiring: record job needs must include {needed}")
 if "contents: write" not in record:
     sys.exit("wiring: record job needs contents: write to edit the release")
 PY

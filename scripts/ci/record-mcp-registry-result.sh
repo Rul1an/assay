@@ -28,7 +28,15 @@ case "$RESULT" in
     label="$RESULT"
     ;;
   skipped)
-    label="skipped (prerelease; stable releases only)"
+    # Observe the reason instead of asserting it: this script cannot see WHY
+    # the publish job skipped, but the version itself carries the one
+    # condition the publish gate skips on today. Any other skip cause gets a
+    # bare "skipped" rather than a claimed explanation.
+    if [[ "$VERSION" == *-rc* || "$VERSION" == *-beta* ]]; then
+      label="skipped (prerelease; stable releases only)"
+    else
+      label="skipped"
+    fi
     ;;
   *)
     echo "RESULT must be a terminal job result (success|failure|cancelled|skipped), got: ${RESULT:-<empty>}" >&2
