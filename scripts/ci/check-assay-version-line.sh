@@ -6,6 +6,8 @@ VM_NAME="${VM_NAME:-assay-bpf-runner}"
 HARNESS_DIR="${HARNESS_DIR:-../Assay-Harness}"
 CHECK_VM="${CHECK_VM:-1}"
 EXPECTED_RELEASE="${EXPECTED_RELEASE:-}"
+REQUIRED_RUBY_VERSION="3.3.12"
+REQUIRED_PSYCH_VERSION="5.1.2"
 
 failures=0
 
@@ -17,6 +19,16 @@ fail() {
   failures=$((failures + 1))
   note "FAIL: $*"
 }
+
+if ! command -v ruby >/dev/null 2>&1; then
+  echo "release version-line parser requires Ruby ${REQUIRED_RUBY_VERSION} with Psych ${REQUIRED_PSYCH_VERSION}" >&2
+  exit 1
+fi
+parser_versions="$(ruby -ryaml -e 'print [RUBY_VERSION, Psych::VERSION].join(" ")')"
+if [[ "$parser_versions" != "${REQUIRED_RUBY_VERSION} ${REQUIRED_PSYCH_VERSION}" ]]; then
+  echo "release version-line parser requires Ruby ${REQUIRED_RUBY_VERSION} with Psych ${REQUIRED_PSYCH_VERSION}; found ${parser_versions}" >&2
+  exit 1
+fi
 
 latest_tag() {
   local tag

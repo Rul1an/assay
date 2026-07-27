@@ -1,13 +1,13 @@
 # Assay Roadmap 2026
 
-> **Status sync (2026-07-22, current release `v3.34.0`):** the released line
-> carries the approval-artifact retention digest and retained-view declaration,
-> fail-closed `ASSAY-W005` handling for opaque or unknown retained views, and
-> Runner socket-event attribution by cgroup. It also carries the earlier
-> `v3.32.0`/`v3.33.0` bounded-evidence work: skill supply-chain evidence,
-> gateway replay, caller-visible denied-call observations, and `ASSAY-W004`.
-> Commits on `main` after the tag are dependency maintenance plus a
-> golden-vector newline fix, not a new evidence-contract wave.
+> **Status sync (2026-07-27, `v3.35.0` release line):** this line
+> adds the open `privileged-mcp-action/v0` profile, corpus, importer and verifier,
+> and accepts ADR-043 after bounded ingest, the explicit stdio-auth boundary,
+> and evidence-verifier fuzz/property coverage landed. The same line makes named
+> sandbox policy loading fail before execution when requested composition cannot
+> be enforced. Assay-Runner remains on the shared workspace version but adds no
+> new runtime or eBPF semantics beyond the cgroup attribution shipped in
+> `v3.34.0`.
 > The current execution posture remains trigger-led: keep Assay-Runner
 > repository extraction and further CLI grouping gated, preserve claim
 > ceilings on every producer and lint rule, and do not turn retained-view or

@@ -6,8 +6,9 @@ name: MCP Registry Publish
 # release.yml already RENDERS server.json and attaches it as a release asset, but never publishes
 # it, so the registry entry lags the current release (the last manual publish was 3.9.2). This adds
 # the missing publish step. It is a small standalone workflow on purpose: it does not touch the
-# release build pipeline, it auto-publishes on every release, and it can refresh an existing release
-# on demand via workflow_dispatch.
+# release build pipeline, it auto-publishes stable releases, and it can refresh an existing stable
+# release on demand via workflow_dispatch. GitHub prereleases remain outside the official registry
+# so a newer RC or beta cannot displace the latest stable server version.
 #
 # GitHub OIDC proves the io.github.<owner> namespace belongs to this repository owner, so no stored
 # registry secret is needed.
@@ -26,6 +27,10 @@ permissions:
   contents: read
   id-token: write # OIDC: proves the io.github.<owner> namespace == repository owner
 
+env:
+  MCP_PUBLISHER_VERSION: "v1.7.9"
+  MCP_PUBLISHER_LINUX_AMD64_SHA256: "ab128162b0616090b47cf245afe0a23f3ef08936fdce19074f5ba0a4469281ac"
+
 concurrency:
   group: mcp-registry-publish
   cancel-in-progress: false
@@ -33,8 +38,13 @@ concurrency:
 jobs:
   publish:
     name: Publish to MCP registry
+    if: ${{ github.event_name != 'release' || github.event.release.prerelease == false }}
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
       - name: Resolve release tag
         id: tag
         # Tag/input values reach the shell only via env, never via ${{ }} inside run:
@@ -43,21 +53,11 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "release" ]; then
-            tag="$RELEASE_TAG"
-          else
-            tag="$INPUT_VERSION"
-          fi
-          # [[ =~ ]] anchors on the whole string (grep -E matches per line, which
-          # would let a newline-bearing dispatch input smuggle a second
-          # GITHUB_OUTPUT line past the check).
-          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
-            echo "::error::expected a vX.Y.Z release tag, got '$tag'"
-            exit 1
-          fi
+          tag="$(bash scripts/ci/resolve-mcp-registry-tag.sh)"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Download server.json from the release
@@ -75,10 +75,12 @@ jobs:
       - name: Install mcp-publisher
         run: |
           set -euo pipefail
-          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_${os}_${arch}.tar.gz" \
-            | tar xz mcp-publisher
+          archive=mcp-publisher_linux_amd64.tar.gz
+          curl -fsSL \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/${archive}" \
+            -o "$archive"
+          printf '%s  %s\n' "$MCP_PUBLISHER_LINUX_AMD64_SHA256" "$archive" | sha256sum -c -
+          tar xzf "$archive" mcp-publisher
           chmod +x mcp-publisher
 
       - name: Validate server.json

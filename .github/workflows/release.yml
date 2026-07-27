@@ -39,11 +39,37 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  release-contract:
+    name: Validate release version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Bind requested release to workspace version
+        id: version
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_VERSION_INPUT: ${{ github.event.inputs.version }}
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          version="$(bash scripts/ci/resolve-release-version.sh)"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
   # ============================================================
   # Build matrix for all platforms
   # ============================================================
   build:
     name: Build ${{ matrix.target }}
+    needs: release-contract
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -155,29 +181,11 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} --package assay-cli
 
-      - name: Get version
-        id: version
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          RELEASE_VERSION_INPUT: ${{ github.event.inputs.version }}
-        run: |
-          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
-            V="${RELEASE_VERSION_INPUT}"
-          else
-            V="${GITHUB_REF#refs/tags/}"
-          fi
-          if [[ "$V" == *$'\n'* || "$V" == *$'\r'* ]]; then
-            echo "::error::Release version must be a single-line value."
-            exit 1
-          fi
-          printf 'version=%s\n' "$V" >> "$GITHUB_OUTPUT"
-
       - name: Package (Unix)
         if: matrix.archive == 'tar.gz'
         shell: bash
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.release-contract.outputs.version }}
         run: |
           ARCHIVE_NAME="assay-${VERSION}-${{ matrix.target }}"
           mkdir -p "dist/${ARCHIVE_NAME}"
@@ -191,7 +199,7 @@ jobs:
         if: matrix.archive == 'zip'
         shell: pwsh
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.release-contract.outputs.version }}
         run: |
           $VERSION = $env:VERSION
           $ARCHIVE_NAME = "assay-${VERSION}-${{ matrix.target }}"
@@ -211,6 +219,7 @@ jobs:
 
   build-mcp-server-linux:
     name: Build assay-mcp-server ${{ matrix.target }}
+    needs: release-contract
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -288,28 +297,10 @@ jobs:
       - name: Build assay-mcp-server binary
         run: cargo build --release --target ${{ matrix.target }} --package assay-mcp-server
 
-      - name: Get version
-        id: version
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          RELEASE_VERSION_INPUT: ${{ github.event.inputs.version }}
-        run: |
-          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
-            V="${RELEASE_VERSION_INPUT}"
-          else
-            V="${GITHUB_REF#refs/tags/}"
-          fi
-          if [[ "$V" == *$'\n'* || "$V" == *$'\r'* ]]; then
-            echo "::error::Release version must be a single-line value."
-            exit 1
-          fi
-          printf 'version=%s\n' "$V" >> "$GITHUB_OUTPUT"
-
       - name: Package assay-mcp-server
         shell: bash
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.release-contract.outputs.version }}
         run: |
           ARCHIVE_NAME="assay-mcp-server-${VERSION}-${{ matrix.target }}"
           mkdir -p "dist/${ARCHIVE_NAME}"
@@ -331,7 +322,7 @@ jobs:
   # ============================================================
   release:
     name: Create Release
-    needs: [build, build-mcp-server-linux]
+    needs: [release-contract, build, build-mcp-server-linux]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -349,24 +340,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
-      - name: Get version
-        id: version
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          RELEASE_VERSION_INPUT: ${{ github.event.inputs.version }}
-        run: |
-          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
-            V="${RELEASE_VERSION_INPUT}"
-          else
-            V="${GITHUB_REF#refs/tags/}"
-          fi
-          if [[ "$V" == *$'\n'* || "$V" == *$'\r'* ]]; then
-            echo "::error::Release version must be a single-line value."
-            exit 1
-          fi
-          printf 'version=%s\n' "$V" >> "$GITHUB_OUTPUT"
-
       - name: Install CycloneDX generator
         shell: bash
         run: cargo install cargo-cyclonedx --version 0.5.9 --locked
@@ -374,7 +347,7 @@ jobs:
       - name: Generate CycloneDX SBOM bundle
         shell: bash
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.release-contract.outputs.version }}
         run: |
           set -euo pipefail
 
@@ -408,7 +381,7 @@ jobs:
       - name: Build assay-mcp-server MCPB
         shell: bash
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.release-contract.outputs.version }}
         run: |
           set -euo pipefail
           bash scripts/ci/build_mcpb_bundle.sh \
@@ -420,7 +393,7 @@ jobs:
       - name: Render generated registry metadata
         shell: bash
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.release-contract.outputs.version }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -510,7 +483,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ASSETS_DIR: release
-          OUT_SUMMARY: release/assay-${{ steps.version.outputs.version }}-release-provenance.json
+          OUT_SUMMARY: release/assay-${{ needs.release-contract.outputs.version }}-release-provenance.json
           OUT_RAW_DIR: artifacts/release-provenance/raw
           REPO: ${{ github.repository }}
           SIGNER_WORKFLOW: ${{ github.repository }}/.github/workflows/release.yml
@@ -526,10 +499,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ASSETS_DIR: release
-          PROVENANCE_SUMMARY: release/assay-${{ steps.version.outputs.version }}-release-provenance.json
-          PROVENANCE_SUMMARY_SHA256: release/assay-${{ steps.version.outputs.version }}-release-provenance.json.sha256
-          OUT_ARCHIVE: release/assay-${{ steps.version.outputs.version }}-release-proof-kit.tar.gz
-          VERSION: ${{ steps.version.outputs.version }}
+          PROVENANCE_SUMMARY: release/assay-${{ needs.release-contract.outputs.version }}-release-provenance.json
+          PROVENANCE_SUMMARY_SHA256: release/assay-${{ needs.release-contract.outputs.version }}-release-provenance.json.sha256
+          OUT_ARCHIVE: release/assay-${{ needs.release-contract.outputs.version }}-release-proof-kit.tar.gz
+          VERSION: ${{ needs.release-contract.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -538,7 +511,7 @@ jobs:
 
       - name: Check release asset preflight
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.release-contract.outputs.version }}
           ASSETS_DIR: release
           REPO: ${{ github.repository }}
         shell: bash
@@ -559,7 +532,7 @@ jobs:
         id: notes
         env:
           REPO: ${{ github.repository }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.release-contract.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -607,7 +580,7 @@ jobs:
           text = text.replace("__VERSION__", os.environ["VERSION"])
           text = text.replace(
               "__CHANGELOG_URL__",
-              f"https://github.com/{os.environ['REPO']}/blob/main/CHANGELOG.md",
+              f"https://github.com/{os.environ['REPO']}/blob/{os.environ['VERSION']}/CHANGELOG.md",
           )
           notes.write_text(text)
           PY
@@ -615,7 +588,7 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.release-contract.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -738,6 +711,7 @@ jobs:
   # ============================================================
   wheels:
     name: Build Wheels
+    needs: release-contract
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
