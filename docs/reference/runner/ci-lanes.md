@@ -120,6 +120,21 @@ Ring-buffer drop diagnostics remain a separate follow-up tracked in
 <https://github.com/Rul1an/assay/issues/1271>; that issue must not weaken the
 `ringbuf_drops=0` delegated acceptance rule.
 
+## Required-Context Transition (issue #1869)
+
+Branch protection on `main` requires the commit status `lane-check/proof`,
+pinned to the GitHub Actions app, alongside the legacy `lane-check` check-run
+during a transition window. The status is posted by the lane helper on the
+exact PR head, so a delegated same-head proof refreshes the required context
+without a manual rerun; the legacy check-run cannot be refreshed by a
+`workflow_run` execution and is scheduled for removal from the required set
+once the migration evidence on the tracking issue is complete.
+
+Operational consequence of `strict: true`: the proof binds to one SHA, so
+every branch update after a `main` advance produces a new head that needs a
+fresh delegated proof before the lane context reads clean again. Batch main
+merges around open gated PRs accordingly.
+
 ## Boundary Rule
 
 The delegated lane proves the Linux/eBPF runner boundary, not macOS, Windows,
