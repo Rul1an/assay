@@ -10,6 +10,16 @@ name: Host Capability Check
 
 on:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request number to classify"
+        required: true
+        type: number
+      expected_head_sha:
+        description: "Expected PR head SHA"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -34,5 +44,20 @@ jobs:
       - name: Validate host-capability proof
         shell: bash
         env:
+          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 scripts/ci/assay_host_capability_check.py --pr "${{ github.event.pull_request.number }}"
+          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pr_number || github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$EXPECTED_HEAD_SHA" ]]; then
+            if [[ "$GITHUB_SHA" != "$EXPECTED_HEAD_SHA" ]]; then
+              echo "dispatched host-capability head ${GITHUB_SHA} does not match expected ${EXPECTED_HEAD_SHA}" >&2
+              exit 2
+            fi
+            pr_head="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+            if [[ "$pr_head" != "$EXPECTED_HEAD_SHA" ]]; then
+              echo "PR #${PR_NUMBER} moved from ${EXPECTED_HEAD_SHA} to ${pr_head}" >&2
+              exit 2
+            fi
+          fi
+          python3 scripts/ci/assay_host_capability_check.py --pr "$PR_NUMBER"

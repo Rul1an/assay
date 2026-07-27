@@ -80,6 +80,13 @@ repos:
         pass_filenames: false
         files: ^(scripts/ci/assay_runner_lane_check\.py|scripts/ci/assay_runner_gated_paths\.json|\.github/workflows/assay-runner-lane-check\.yml|\.pre-commit-config\.yaml)$
 
+      - id: docs-auto-update-reconcile-self-test
+        name: Docs auto-update reconciliation self-test
+        entry: bash scripts/ci/test-reconcile-docs-auto-pr.sh
+        language: system
+        pass_filenames: false
+        files: ^(scripts/ci/(reconcile-docs-auto-pr|test-reconcile-docs-auto-pr)\.sh|\.github/workflows/(docs-auto-update|ci|assay-runner-lane-check|host-capability-check)\.yml|\.pre-commit-config\.yaml)$
+
   # shellcheck (bash) — use system binary to avoid SSL/download issues
   - repo: local
     hooks:

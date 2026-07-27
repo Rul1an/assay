@@ -12,6 +12,10 @@ on:
         description: "Pull request number to classify"
         required: true
         type: number
+      expected_head_sha:
+        description: "Expected PR head SHA"
+        required: false
+        type: string
 
 permissions: {}
 
@@ -68,12 +72,24 @@ jobs:
         if: steps.pr.outputs.pr_number != ''
         shell: bash
         env:
+          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
           DELEGATED_WORKFLOW_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || '' }}
         run: |
           set -euo pipefail
+          if [[ -n "$EXPECTED_HEAD_SHA" ]]; then
+            if [[ "$GITHUB_SHA" != "$EXPECTED_HEAD_SHA" ]]; then
+              echo "dispatched lane-check head ${GITHUB_SHA} does not match expected ${EXPECTED_HEAD_SHA}" >&2
+              exit 2
+            fi
+            pr_head="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+            if [[ "$pr_head" != "$EXPECTED_HEAD_SHA" ]]; then
+              echo "PR #${PR_NUMBER} moved from ${EXPECTED_HEAD_SHA} to ${pr_head}" >&2
+              exit 2
+            fi
+          fi
           args=(--comment)
           if python3 scripts/ci/assay_runner_lane_check.py --help | grep -q -- "--status"; then
             args+=(--status)
