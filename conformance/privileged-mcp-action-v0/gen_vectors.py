@@ -295,17 +295,6 @@ VECTORS = [
         "description": "One byte flipped in the stored events file after the manifest was written: integrity fails before any profile semantics run.",
     },
     {
-        "id": "bad-109-bundle-id-mismatch",
-        "payloads": lambda: [
-            decision_record("deny", "no_declared_allowance"),
-            observation_record(reason="no_declared_allowance"),
-        ],
-        "bundle_id_mismatch": True,
-        "expected": {"bundle_integrity": "fail"},
-        "first_failure": "bundle_integrity",
-        "description": "The manifest's bundle_id does not equal the recomputed run_root, while every earlier check passes: the last step of the Section 4 order is the only one that rejects this bundle, so a verifier that stops after the run-root recomputation accepts it.",
-    },
-    {
         "id": "bad-102-missing-target-digest",
         "payloads": lambda: [
             decision_record("deny", "unclassified_tool_call", digest=None)
@@ -370,6 +359,17 @@ VECTORS = [
         "expected": {"bundle_integrity": "pass", "verdict": "invalid"},
         "first_failure": "decision_missing",
         "description": "A caller-visible denial marker with no decision record at all: an observed enforcement marker must be backed by a bound decision, so the profile input is invalid.",
+    },
+    {
+        "id": "bad-109-bundle-id-mismatch",
+        "payloads": lambda: [
+            decision_record("deny", "no_declared_allowance"),
+            observation_record(reason="no_declared_allowance"),
+        ],
+        "bundle_id_mismatch": True,
+        "expected": {"bundle_integrity": "fail"},
+        "first_failure": "bundle_integrity",
+        "description": "The manifest's bundle_id does not equal the recomputed run_root, while every earlier check passes: the last step of the Section 4 order is the only one that rejects this bundle, so a verifier that stops after the run-root recomputation accepts it.",
     },
 ]
 
