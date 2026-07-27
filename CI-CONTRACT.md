@@ -464,12 +464,11 @@ Observed from the CI baseline implementation PR `#1638`:
 
 - `public-artifact-sanitization`
 
-Proposed required context names for the next branch-protection review:
+Proposed for the next branch-protection review, stated as the delta from the live
+set above rather than as a second copy of it -- a copy is what let the inventory in
+section 0 go stale, and the guard reads only the list above:
 
-- `CI`
-- `host-capability-check`
-- `lane-check/proof`
-- `public-artifact-sanitization` (proposal only; deliberately absent from the
+- add `public-artifact-sanitization` (proposal only; deliberately absent from the
   checked-in ruleset, see below)
 
 Checked-in ruleset activation lives at

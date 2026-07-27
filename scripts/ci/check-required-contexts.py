@@ -38,6 +38,7 @@ CI_CONTRACT = Path("CI-CONTRACT.md")
 RUNBOOK = Path("docs/BRANCH-PROTECTION-SETUP.md")
 
 CI_CONTRACT_ANCHOR = "Currently required live branch-protection contexts:"
+MAX_BLANK_LINES_BEFORE_LIST = 1
 BULLET_RE = re.compile(r"^-\s+`([^`]+)`")
 CONTEXTS_ARRAY_RE = re.compile(r'"contexts"\s*:\s*(\[[^\]]*\])')
 
@@ -81,13 +82,18 @@ def ci_contract_contexts(text: str) -> list[str]:
             "locate the required set"
         ) from None
     found: list[str] = []
+    blanks_before_list = 0
     for line in lines[start + 1 :]:
         match = BULLET_RE.match(line)
         if match:
             # Names carry a trailing parenthetical gloss in this list; keep the name only.
             found.append(match.group(1).strip())
-        elif not line.strip() and not found:
-            continue
+        elif not line.strip() and not found and blanks_before_list < MAX_BLANK_LINES_BEFORE_LIST:
+            # One blank line is the markdown convention between a lead-in and its list. Skipping
+            # blanks without a bound reopens the hole the anchor is supposed to close: delete the
+            # list *and* the paragraph after it and the scan walks on to the next list instead of
+            # reporting that its own list is gone.
+            blanks_before_list += 1
         else:
             break
     if not found:
@@ -152,6 +158,20 @@ def _drop_list_under_anchor(text: str) -> str:
     return "".join(lines[: start + 1] + lines[end:])
 
 
+def _strand_anchor_above_a_foreign_list(text: str) -> str:
+    """Leave the anchor followed by blank lines and then somebody else's list.
+
+    The shape a bounded blank-line skip is for: the list under the anchor is gone along with
+    the prose that separated it from the next one, so the only thing an unbounded scan finds
+    is a list about something else. It must report a missing list, not adopt that one.
+    """
+    lines = text.splitlines(keepends=True)
+    start = next(i for i, line in enumerate(lines) if line.strip() == CI_CONTRACT_ANCHOR)
+    nxt = next(i for i in range(start + 1, len(lines)) if BULLET_RE.match(lines[i]))
+    # Two blanks: one is the convention the parser allows, so the mutant needs to exceed it.
+    return "".join(lines[: start + 1] + ["\n", "\n"] + lines[nxt:])
+
+
 def self_test() -> int:
     """A guard nobody has seen fail is a guard nobody knows works."""
     baseline = {p: read_repo(p) for p in (RULESET, CI_CONTRACT, RUNBOOK)}
@@ -174,6 +194,7 @@ def self_test() -> int:
         (CI_CONTRACT, lambda t: t.replace(CI_CONTRACT_ANCHOR, "Contexts, probably:", 1)),
         (RUNBOOK, lambda t: t.replace('"contexts"', '"former_contexts"')),
         (CI_CONTRACT, _drop_list_under_anchor),
+        (CI_CONTRACT, _strand_anchor_above_a_foreign_list),
     ]
 
     def apply(path: Path, mutate) -> dict | None:
