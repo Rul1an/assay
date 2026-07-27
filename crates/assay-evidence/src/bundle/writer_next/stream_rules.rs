@@ -20,13 +20,24 @@ use crate::types::EvidenceEvent;
 
 /// Every condition under which the writer refuses to emit a bundle.
 ///
-/// Adding a variant is a deliberate act: it breaks the exhaustive match in the symmetry test until
-/// a case proves the verifier rejects a bundle violating it.
+/// Deliberately **not** `#[non_exhaustive]`, against this crate's usual posture (compare
+/// `store::bounded`, which documents the closed-public-enum trap and avoids it). The reason is
+/// that exhaustive matching is the point here: a consumer implementing this format from outside
+/// should be able to match every rule and be told by the compiler when the format gains one. That
+/// benefit is the same mechanism the symmetry test relies on, and it cannot be had behind
+/// `#[non_exhaustive]`. The price is real and is accepted with open eyes: a ninth rule is a
+/// breaking change for downstream exhaustive matches, and `cargo semver-checks` runs on this
+/// crate, so rule nine arrives with a major bump.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamRule {
     /// A bundle carries at least one event.
     NonEmpty,
-    /// `seq` runs contiguously from 0 in stored order.
+    /// `seq` runs contiguously from 0.
+    ///
+    /// The writer sorts by `seq` before checking, so it refuses a gap but accepts events handed to
+    /// it out of order; the verifier sees only stored order and refuses that too. The verifier is
+    /// therefore stricter here, which is the safe direction — every bundle the writer emits still
+    /// verifies — but the two ends are not testing the identical condition under this one name.
     SeqContiguousFromZero,
     /// Every event carries the same `run_id`.
     RunIdConsistent,
@@ -43,6 +54,38 @@ pub enum StreamRule {
 }
 
 impl StreamRule {
+    /// Every rule, as the symmetry test iterates them.
+    ///
+    /// The or-pattern is exhaustive, so a ninth variant stops this compiling and the arm that
+    /// fixes it sits on the line above the list it has to join. That is the strongest guarantee
+    /// available without a derive macro, and it is worth being exact about what it is not: it
+    /// forces the author to *edit here*, next to the array, rather than proving the array grew.
+    /// Naming the variant in the pattern and omitting it from the slice would still compile.
+    ///
+    /// Nor does anything oblige a new refusal in `BundleWriter::finish` to become a variant at
+    /// all — see the note there. Both residuals are the same shape: a list held beside a
+    /// behaviour rather than derived from it, which is exactly the defect class these rules
+    /// exist to close, surviving one level up in the mechanism that closes it.
+    pub const ALL: &'static [StreamRule] = match StreamRule::NonEmpty {
+        StreamRule::NonEmpty
+        | StreamRule::SeqContiguousFromZero
+        | StreamRule::RunIdConsistent
+        | StreamRule::SourceConsistent
+        | StreamRule::SourceIsUri
+        | StreamRule::RunIdHasNoColon
+        | StreamRule::ContentHashMatchesEvent
+        | StreamRule::IdIsRunIdColonSeq => &[
+            StreamRule::NonEmpty,
+            StreamRule::SeqContiguousFromZero,
+            StreamRule::RunIdConsistent,
+            StreamRule::SourceConsistent,
+            StreamRule::SourceIsUri,
+            StreamRule::RunIdHasNoColon,
+            StreamRule::ContentHashMatchesEvent,
+            StreamRule::IdIsRunIdColonSeq,
+        ],
+    };
+
     /// Why the writer refuses, phrased for a human who has to fix a bundle.
     pub fn describe(self) -> &'static str {
         match self {

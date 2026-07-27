@@ -7,9 +7,9 @@
 //! found by enumerating the writer's refusals rather than by anyone reporting them, which is the
 //! argument for a property over a set of patches.
 //!
-//! The mechanism is the exhaustive match in [`bundle_violating`]. A ninth [`StreamRule`] will not
-//! compile until it has a case here, and the case is only satisfied by showing both ends reject.
-//! An enum variant is not a test; the pairing is.
+//! The mechanism is `StreamRule::ALL` plus the exhaustive matches here: a ninth variant does not
+//! compile until it is named in three places, and the case is only satisfied by showing both ends
+//! reject. What that does NOT do is oblige a new `bail!` in the writer to become a variant at all;
 
 use assay_evidence::bundle::{
     verify_bundle_with_limits, BundleWriter, ErrorClass, StreamRule, VerifyLimits,
@@ -183,16 +183,12 @@ fn writer_refuses(rule: StreamRule) -> bool {
     w.finish().is_err()
 }
 
-const ALL_RULES: &[StreamRule] = &[
-    StreamRule::NonEmpty,
-    StreamRule::SeqContiguousFromZero,
-    StreamRule::RunIdConsistent,
-    StreamRule::SourceConsistent,
-    StreamRule::SourceIsUri,
-    StreamRule::RunIdHasNoColon,
-    StreamRule::ContentHashMatchesEvent,
-    StreamRule::IdIsRunIdColonSeq,
-];
+/// The rule list comes from the crate, not from a copy maintained here.
+///
+/// A second hand-written list beside the enum was the first version of this file, and review found
+/// what that is worth: a ninth variant with no-op match arms, left out of the local list, compiled
+/// and left all five tests green. The list has to live where the enum lives.
+const ALL_RULES: &[StreamRule] = StreamRule::ALL;
 
 #[test]
 fn the_writer_refuses_every_rule_it_declares() {
