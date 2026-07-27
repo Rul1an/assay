@@ -31,11 +31,17 @@ jobs:
       pull-requests: write
       statuses: write
     steps:
-      - name: Checkout base helper
+      - name: Checkout trusted helper
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+          # pull_request: the PR base, so a PR can never run its own edited
+          #   gatekeeper. workflow_dispatch: main, because the privileged
+          #   refresh holds statuses: write and must never execute helper code
+          #   from the dispatched ref (which a PR author controls); the head
+          #   SHA is data, not code. workflow_run: github.sha is the default
+          #   branch head, already trusted.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || (github.event_name == 'workflow_dispatch' && 'main' || github.sha) }}
 
       - name: Verify lane-check helper exists
         shell: bash

@@ -1483,8 +1483,36 @@ def maybe_status(
         return
     try:
         post_commit_status(api, sha, passed, description)
-    except TRANSIENT_REQUEST_ERRORS as exc:
-        print(f"warning: could not post commit status: {exc}", file=sys.stderr)
+    except urllib.error.HTTPError as exc:
+        # `lane-check/proof` is the required branch-protection context
+        # (issue #1869). A permission refusal is tolerated in exactly one
+        # context: a pull_request event, whose token can be read-only by
+        # design (Dependabot/fork PRs) and can never post the status; the
+        # head stays unproven and only a privileged dispatch from a trusted
+        # ref refreshes it. The privileged refresh contexts themselves
+        # (workflow_dispatch, workflow_run) exist to post this status and
+        # always hold statuses: write — a 403 there is misconfiguration, and
+        # tolerating it would recreate the green-run-with-missing-status
+        # failure inside its own exemption. GitHub also answers rate limiting
+        # with 403; that is transient, so it propagates too instead of
+        # masquerading as a permission refusal with the wrong remedy.
+        headers = getattr(exc, "headers", None)
+        rate_limited = headers is not None and (
+            headers.get("Retry-After") is not None
+            or headers.get("X-RateLimit-Remaining") == "0"
+        )
+        event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+        if exc.code in (401, 403) and not rate_limited and event_name == "pull_request":
+            print(
+                "warning: token cannot write commit statuses "
+                f"({exc.code}); the required '{STATUS_CONTEXT}' context stays "
+                "missing until a privileged workflow_dispatch (run from a "
+                "trusted ref, never from a ref carrying untrusted changes) "
+                "refreshes it",
+                file=sys.stderr,
+            )
+            return
+        raise
 
 
 def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) -> int:
@@ -1703,6 +1731,8 @@ def self_test() -> None:
 
     _test_connection_resilience()
     _test_artifact_redirect_drops_authorization()
+    _test_required_status_fail_closed()
+    _test_lane_workflow_contract_pins()
 
     # Phase 2D Slice 6B mechanical absence check: assert that assay-cli no
     # longer consumes the assay-runner-spike wrapper. The check is
@@ -2099,6 +2129,187 @@ def _test_event_resolution_and_status_payload() -> None:
             },
         )
     ]
+
+
+def _test_required_status_fail_closed() -> None:
+    """The `lane-check/proof` commit status is the branch-protection contract
+    (issue #1869): it must land on the exact PR head or the run must fail
+    visibly. Only a permission refusal (read-only token, e.g. Dependabot or
+    fork contexts) may degrade to a warning, because those contexts can never
+    post the status themselves and rely on a privileged dispatch instead.
+    """
+
+    # The migration anchor: branch protection requires this exact context.
+    assert STATUS_CONTEXT == "lane-check/proof"
+
+    class _RaisingApi:
+        def __init__(self, exc: Exception) -> None:
+            self.exc = exc
+            self.calls: list[tuple[str, str]] = []
+
+        def request(self, method: str, path: str, payload: object | None = None) -> object:
+            self.calls.append((method, path))
+            raise self.exc
+
+    # (1) A transient failure that survives the request-level retries must
+    #     propagate: a green run whose required status never landed is the
+    #     silent-liveness failure this guards against.
+    flaky = _RaisingApi(urllib.error.URLError("connection reset"))
+    try:
+        maybe_status(flaky, "abc123", True, "ok", status=True)
+    except urllib.error.URLError:
+        pass
+    else:
+        raise AssertionError("maybe_status must fail closed on non-permission errors")
+    assert flaky.calls == [("POST", "/statuses/abc123")]
+
+    # (2) A permission refusal on a pull_request event is the documented
+    #     read-only-token path (Dependabot/forks): warn, do not fail the run.
+    #     The status stays missing, branch protection stays blocked, and the
+    #     privileged dispatch refreshes it.
+    old_event = os.environ.get("GITHUB_EVENT_NAME")
+
+    def with_event_name(value: str | None):
+        if value is None:
+            os.environ.pop("GITHUB_EVENT_NAME", None)
+        else:
+            os.environ["GITHUB_EVENT_NAME"] = value
+
+    try:
+        with_event_name("pull_request")
+        forbidden = _RaisingApi(
+            urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", None, None)  # type: ignore[arg-type]
+        )
+        maybe_status(forbidden, "abc123", True, "ok", status=True)
+        assert forbidden.calls == [("POST", "/statuses/abc123")]
+
+        # (2a) The privileged refresh contexts exist to post this status and
+        #      always hold statuses: write: a 403 there is misconfiguration,
+        #      not an expected read-only token, and a green run whose only
+        #      job silently failed is exactly the class this fix removes.
+        for privileged_event in ("workflow_dispatch", "workflow_run"):
+            with_event_name(privileged_event)
+            misconfigured = _RaisingApi(
+                urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", None, None)  # type: ignore[arg-type]
+            )
+            try:
+                maybe_status(misconfigured, "abc123", True, "ok", status=True)
+            except urllib.error.HTTPError:
+                pass
+            else:
+                raise AssertionError(
+                    f"maybe_status must fail closed on 403 under {privileged_event}"
+                )
+
+        # (2b) GitHub also answers rate limiting with 403. That is transient,
+        #      not a permission refusal, so it must propagate even in the one
+        #      context whose permission refusals are tolerated.
+        import email.message
+
+        with_event_name("pull_request")
+        secondary = email.message.Message()
+        secondary["Retry-After"] = "60"
+        rate_limited = _RaisingApi(
+            urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", secondary, None)  # type: ignore[arg-type]
+        )
+        try:
+            maybe_status(rate_limited, "abc123", True, "ok", status=True)
+        except urllib.error.HTTPError:
+            pass
+        else:
+            raise AssertionError("maybe_status must fail closed on secondary rate limits")
+
+        primary = email.message.Message()
+        primary["X-RateLimit-Remaining"] = "0"
+        exhausted = _RaisingApi(
+            urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", primary, None)  # type: ignore[arg-type]
+        )
+        try:
+            maybe_status(exhausted, "abc123", True, "ok", status=True)
+        except urllib.error.HTTPError:
+            pass
+        else:
+            raise AssertionError("maybe_status must fail closed on an exhausted rate limit")
+
+        # (2c) An unknown or absent event context fails closed too.
+        with_event_name(None)
+        unknown = _RaisingApi(
+            urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", None, None)  # type: ignore[arg-type]
+        )
+        try:
+            maybe_status(unknown, "abc123", True, "ok", status=True)
+        except urllib.error.HTTPError:
+            pass
+        else:
+            raise AssertionError("maybe_status must fail closed on 403 in unknown contexts")
+    finally:
+        with_event_name(old_event)
+
+    # (3) A 5xx HTTPError is not a permission refusal and must propagate.
+    server_error = _RaisingApi(
+        urllib.error.HTTPError("https://api.github.com", 502, "Bad Gateway", None, None)  # type: ignore[arg-type]
+    )
+    try:
+        maybe_status(server_error, "abc123", False, "broken", status=True)
+    except urllib.error.HTTPError:
+        pass
+    else:
+        raise AssertionError("maybe_status must fail closed on server errors")
+
+    # (4) Without --status nothing is posted at all.
+    silent = _RaisingApi(urllib.error.URLError("unused"))
+    maybe_status(silent, "abc123", True, "ok", status=False)
+    assert silent.calls == []
+
+
+def _test_lane_workflow_contract_pins() -> None:
+    """Pin the exact-head and never-read-clean guards of the lane workflow.
+
+    Script and workflow are always read from the same checkout, so the pins
+    are self-consistent — but which tree that is depends on the event: the
+    lane workflow's pull_request run checks out the PR BASE (which still
+    contains the guards when a PR removes them), a workflow_dispatch run
+    checks out main, and a workflow_run refresh the default-branch head. The
+    head-side tripwire for a PR editing these files is therefore pre-commit
+    (locally via the lane-check hook, and in CI via the kernel-matrix lint
+    leg, whose trigger paths include the lane workflow file for exactly this
+    reason).
+    """
+
+    workflow = (
+        Path(__file__).resolve().parent.parent.parent
+        / ".github"
+        / "workflows"
+        / "assay-runner-lane-check.yml"
+    )
+    text = workflow.read_text(encoding="utf-8")
+
+    # Skipped or unassociated workflow_run events must never read clean:
+    # only completed dispatch-triggered delegated runs enter the job at all,
+    # and a delegated run with no resolvable PR ends in an explicit no-op.
+    assert "github.event.workflow_run.event == 'workflow_dispatch'" in text
+    assert "No associated pull request found" in text
+
+    # Exact-head behavior for privileged refreshes: the dispatched run must
+    # bind itself to the expected head and re-check that the PR still points
+    # at it before any status is posted.
+    assert 'if [[ "$GITHUB_SHA" != "$EXPECTED_HEAD_SHA" ]]' in text
+    assert 'if [[ "$pr_head" != "$EXPECTED_HEAD_SHA" ]]' in text
+
+    # The workflow must actually request the required-context posting, and
+    # the statuses: write grant must sit on the posting job itself, under a
+    # workflow-level default deny.
+    assert "args+=(--status)" in text
+    assert "\npermissions: {}\n" in text
+    jobs_section = text.split("\njobs:\n", 1)[1]
+    lane_job = jobs_section.split("lane-check:\n", 1)[1]
+    assert "statuses: write" in lane_job
+
+    # A privileged dispatch runs with statuses: write, so it must execute the
+    # trusted helper from main — never code from the dispatched ref, which a
+    # PR author controls. (The dispatched ref's own workflow file still runs;
+    # dispatching on a ref carrying untrusted changes stays forbidden.)
+    assert "github.event_name == 'workflow_dispatch' && 'main'" in text
 
 
 def _test_connection_resilience() -> None:
