@@ -24,7 +24,7 @@ REPO_ROOT = CORPUS_DIR.parents[1]
 BUILD_SCRIPT = CORPUS_DIR / "scripts" / "build_clean_room_pack.py"
 SCORE_SCRIPT = CORPUS_DIR / "scripts" / "score_candidate.py"
 VALIDATE_SCRIPT = CORPUS_DIR / "scripts" / "validate_run_record.py"
-SOURCE_COMMIT = "58b692d3929a876f6ab3af8ab96e8639ba85e758"
+SOURCE_COMMIT = "4e9bdfcc4bef83e6935ab9b916b39adf89d4cd01"
 IMPLEMENTATION_COMMIT = "1" * 40
 
 
@@ -119,7 +119,7 @@ class CleanRoomPackTests(unittest.TestCase):
             cases = json.loads(files["privileged-mcp-action-v0/cases.json"])
             self.assertEqual(
                 cases["source_corpus_digest"],
-                "sha256:22992b5aad22b459c117ac00c31dedbd40a73feee0f922136cbb18e5787210a2",
+                "sha256:cb58ce91863f52e0568742b977f0642158453ec11bbcd25821f9171dccd03342",
             )
             self.assertRegex(cases["rendered_set_digest"], r"^sha256:[0-9a-f]{64}$")
             self.assertEqual(cases["declared_source_commit"], SOURCE_COMMIT)
@@ -471,7 +471,7 @@ class CandidateScorerTests(unittest.TestCase):
         })
         self.assertEqual(
             report["source_corpus_digest"],
-            "sha256:22992b5aad22b459c117ac00c31dedbd40a73feee0f922136cbb18e5787210a2",
+            "sha256:cb58ce91863f52e0568742b977f0642158453ec11bbcd25821f9171dccd03342",
         )
         self.assertRegex(report["rendered_set_digest"], r"^sha256:[0-9a-f]{64}$")
         self.assertEqual(
