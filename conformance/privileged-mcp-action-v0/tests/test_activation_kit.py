@@ -24,7 +24,7 @@ REPO_ROOT = CORPUS_DIR.parents[1]
 BUILD_SCRIPT = CORPUS_DIR / "scripts" / "build_clean_room_pack.py"
 SCORE_SCRIPT = CORPUS_DIR / "scripts" / "score_candidate.py"
 VALIDATE_SCRIPT = CORPUS_DIR / "scripts" / "validate_run_record.py"
-SOURCE_COMMIT = "f709800ee4d3d1f16d99aa3a186e9ce7ca72ac1c"
+SOURCE_COMMIT = "58b692d3929a876f6ab3af8ab96e8639ba85e758"
 IMPLEMENTATION_COMMIT = "1" * 40
 
 
@@ -97,7 +97,7 @@ class CleanRoomPackTests(unittest.TestCase):
                 for name in names
                 if name.startswith("privileged-mcp-action-v0/cases/")
             ]
-            self.assertEqual(len(case_names), 13)
+            self.assertEqual(len(case_names), 14)
             self.assertTrue(
                 all(
                     Path(name).name.startswith("case-")
@@ -119,11 +119,11 @@ class CleanRoomPackTests(unittest.TestCase):
             cases = json.loads(files["privileged-mcp-action-v0/cases.json"])
             self.assertEqual(
                 cases["source_corpus_digest"],
-                "sha256:a943120f6b142d7e4e45c357dc06cddaeb596c90e935ac0c8e26856425757571",
+                "sha256:22992b5aad22b459c117ac00c31dedbd40a73feee0f922136cbb18e5787210a2",
             )
             self.assertRegex(cases["rendered_set_digest"], r"^sha256:[0-9a-f]{64}$")
             self.assertEqual(cases["declared_source_commit"], SOURCE_COMMIT)
-            self.assertEqual(cases["case_count"], 13)
+            self.assertEqual(cases["case_count"], 14)
             self.assertNotIn("expected", json.dumps(cases))
             self.assertNotIn("description", json.dumps(cases))
 
@@ -462,8 +462,8 @@ class CandidateScorerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(output.read_text())
         self.assertEqual(report["summary"], {
-            "total": 13,
-            "match": 13,
+            "total": 14,
+            "match": 14,
             "mismatch": 0,
             "execution_error": 0,
             "harness_error": 0,
@@ -471,12 +471,12 @@ class CandidateScorerTests(unittest.TestCase):
         })
         self.assertEqual(
             report["source_corpus_digest"],
-            "sha256:a943120f6b142d7e4e45c357dc06cddaeb596c90e935ac0c8e26856425757571",
+            "sha256:22992b5aad22b459c117ac00c31dedbd40a73feee0f922136cbb18e5787210a2",
         )
         self.assertRegex(report["rendered_set_digest"], r"^sha256:[0-9a-f]{64}$")
         self.assertEqual(
             {case["case_id"] for case in report["cases"]},
-            {f"case-{index:03d}" for index in range(1, 14)},
+            {f"case-{index:03d}" for index in range(1, 15)},
         )
         self.assertEqual(
             report["implementation"]["reproduction_mode"],
@@ -591,7 +591,7 @@ class CandidateScorerTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 2)
         report = json.loads(output.read_text())
-        self.assertEqual(report["summary"]["match"], 13)
+        self.assertEqual(report["summary"]["match"], 14)
         self.assertEqual(report["summary"]["harness_error"], 0)
         self.assertEqual(len(report["harness_errors"]), 1)
         self.assertEqual(run(str(VALIDATE_SCRIPT), str(output)).returncode, 0)
@@ -838,7 +838,7 @@ class CandidateScorerTests(unittest.TestCase):
             self.assertEqual(score_candidate.main(), 2)
 
         report = json.loads(output.read_text(encoding="utf-8"))
-        self.assertEqual(report["summary"]["harness_error"], 13)
+        self.assertEqual(report["summary"]["harness_error"], 14)
         self.assertEqual(report["summary"]["execution_error"], 0)
         self.assertTrue(
             all(case["status"] == "harness_error" for case in report["cases"])
@@ -849,7 +849,7 @@ class CandidateScorerTests(unittest.TestCase):
         result = self.score(self.candidate("reasonless"), output)
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(output.read_text())
-        self.assertEqual(report["summary"]["match"], 13)
+        self.assertEqual(report["summary"]["match"], 14)
         self.assertGreater(report["summary"]["review_warnings"], 0)
         self.assertTrue(
             any(

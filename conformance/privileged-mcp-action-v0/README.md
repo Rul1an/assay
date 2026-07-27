@@ -1,7 +1,7 @@
 # privileged-mcp-action/v0 conformance corpus
 
 Vectors for the [Privileged MCP Action Evidence Profile v0](../../docs/profiles/privileged-mcp-action/v0.md):
-13 evidence bundles (5 accept, 8 reject) plus a machine-readable profile descriptor.
+14 evidence bundles (5 accept, 9 reject) plus a machine-readable profile descriptor.
 
 - `MANIFEST.json` declares each vector's expected `bundle_integrity`, profile `verdict`, and (for
   accepts) the full expected claim matrix. That triple is the **normative comparison surface**; the

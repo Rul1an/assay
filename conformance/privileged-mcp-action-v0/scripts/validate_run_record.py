@@ -15,6 +15,9 @@ from urllib.parse import urlparse
 RUN_SCHEMA = "assay.privileged_mcp_action.conformance_run.v0"
 PROFILE = "privileged-mcp-action/v0"
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+# Kept beside the other corpus-shape constants rather than written into the checks, which is
+# how "13" survived in four separate files after the corpus grew.
+EXPECTED_CASE_COUNT = 14
 SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 STATUSES = {"match", "mismatch", "execution_error", "harness_error"}
 CLAIM_NAMES = {
@@ -192,9 +195,12 @@ def validate_run_record(report: dict[str, Any]) -> None:
     )
 
     cases = report["cases"]
-    require(isinstance(cases, list) and len(cases) == 13, "run must contain 13 cases")
+    require(
+        isinstance(cases, list) and len(cases) == EXPECTED_CASE_COUNT,
+        f"run must contain {EXPECTED_CASE_COUNT} cases",
+    )
     require(all(isinstance(case, dict) for case in cases), "each case must be an object")
-    expected_ids = [f"case-{index:03d}" for index in range(1, 14)]
+    expected_ids = [f"case-{index:03d}" for index in range(1, EXPECTED_CASE_COUNT + 1)]
     require(
         [case.get("case_id") for case in cases] == expected_ids,
         "case ids must be complete and ordered",

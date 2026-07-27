@@ -127,8 +127,8 @@
     },
     "cases": {
       "type": "array",
-      "minItems": 13,
-      "maxItems": 13,
+      "minItems": 14,
+      "maxItems": 14,
       "items": {
         "oneOf": [
           {
