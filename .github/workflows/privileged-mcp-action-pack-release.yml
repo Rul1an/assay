@@ -100,13 +100,19 @@ jobs:
           from pathlib import Path
 
           report = json.loads(Path("/tmp/reference-transformation-check.json").read_text())
+          # Read from the corpus, not written out here: this job is the candidate-release path,
+          # so a stale literal blocks exactly the release that a corpus change needs.
+          manifest = json.loads(
+              Path("conformance/privileged-mcp-action-v0/MANIFEST.json").read_text()
+          )
+          case_count = len(manifest["vectors"])
           expected = {
               "execution_error": 0,
               "harness_error": 0,
-              "match": 13,
+              "match": case_count,
               "mismatch": 0,
               "review_warnings": 0,
-              "total": 13,
+              "total": case_count,
           }
           if report["summary"] != expected:
               raise SystemExit(f"unexpected transformation summary: {report['summary']}")

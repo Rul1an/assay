@@ -93,13 +93,21 @@ jobs:
           from pathlib import Path
 
           report = json.loads(Path("/tmp/reference-transformation-check.json").read_text())
+          # Case count read from the corpus rather than written out here. A literal in this file
+          # is a copy of a number the manifest already carries, and a copy is one more thing to
+          # remember when the corpus grows -- which is how adding one vector broke sixteen
+          # assertions across seven files.
+          manifest = json.loads(
+              Path("conformance/privileged-mcp-action-v0/MANIFEST.json").read_text()
+          )
+          case_count = len(manifest["vectors"])
           expected = {
               "execution_error": 0,
-              "match": 13,
+              "match": case_count,
               "mismatch": 0,
               "harness_error": 0,
               "review_warnings": 0,
-              "total": 13,
+              "total": case_count,
           }
           if report["summary"] != expected:
               raise SystemExit(f"unexpected transformation summary: {report['summary']}")

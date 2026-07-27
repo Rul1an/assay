@@ -24,8 +24,41 @@ REPO_ROOT = CORPUS_DIR.parents[1]
 BUILD_SCRIPT = CORPUS_DIR / "scripts" / "build_clean_room_pack.py"
 SCORE_SCRIPT = CORPUS_DIR / "scripts" / "score_candidate.py"
 VALIDATE_SCRIPT = CORPUS_DIR / "scripts" / "validate_run_record.py"
-SOURCE_COMMIT = "4e9bdfcc4bef83e6935ab9b916b39adf89d4cd01"
+
+def _head_commit() -> str:
+    """Resolve HEAD, the way the conformance and pack-release workflows already do.
+
+    A literal here cannot work in this repository. Pull requests land as squash merges, so a
+    branch commit is never an ancestor of `main`: the pin resolved only while the branch still
+    existed on the remote, and ordinary branch cleanup would have broken the required
+    activation-kit job on `main` after this merge. It is also structurally unfixable by choosing
+    a better literal -- the corpus changes in the same commit the pin would have to name, so no
+    pre-existing commit can satisfy it.
+
+    Reading HEAD makes the pairing internally consistent: the pack is built from the checkout
+    whose manifest supplies the expectations, which is what these tests are actually about.
+    """
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+SOURCE_COMMIT = _head_commit()
 IMPLEMENTATION_COMMIT = "1" * 40
+
+
+def corpus_digest() -> str:
+    """The corpus digest as the manifest declares it.
+
+    Compared against rather than copied: a literal digest in this file is a second statement of
+    a value the corpus already carries, and keeping two statements true is the failure this
+    branch has hit at every step.
+    """
+    return json.loads((CORPUS_DIR / "MANIFEST.json").read_text())["corpus_digest"]
 
 
 def sha256(data: bytes) -> str:
@@ -119,7 +152,7 @@ class CleanRoomPackTests(unittest.TestCase):
             cases = json.loads(files["privileged-mcp-action-v0/cases.json"])
             self.assertEqual(
                 cases["source_corpus_digest"],
-                "sha256:cb58ce91863f52e0568742b977f0642158453ec11bbcd25821f9171dccd03342",
+                corpus_digest(),
             )
             self.assertRegex(cases["rendered_set_digest"], r"^sha256:[0-9a-f]{64}$")
             self.assertEqual(cases["declared_source_commit"], SOURCE_COMMIT)
@@ -471,7 +504,7 @@ class CandidateScorerTests(unittest.TestCase):
         })
         self.assertEqual(
             report["source_corpus_digest"],
-            "sha256:cb58ce91863f52e0568742b977f0642158453ec11bbcd25821f9171dccd03342",
+            corpus_digest(),
         )
         self.assertRegex(report["rendered_set_digest"], r"^sha256:[0-9a-f]{64}$")
         self.assertEqual(
