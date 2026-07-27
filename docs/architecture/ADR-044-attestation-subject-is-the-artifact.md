@@ -83,9 +83,9 @@ than separating them. The defect is the reuse, not the digest.
 ### What the chain does not carry
 
 The complete inventory is not restated here, because every hand-written copy of it has gone stale.
-It is enforced by `crates/assay-evidence/tests/content_hash_field_inventory.rs`, which **does not
-yet exist on `main`** — it lands with PR #1886, and this ADR takes a hard dependency on that merge.
-Until then the citation names an intended mechanism, not an available one. The load-bearing
+It is enforced by `crates/assay-evidence/tests/content_hash_field_inventory.rs`, on `main` since
+PR #1886: an exhaustive destructure of `EvidenceEvent` fails the build when a field is added, and
+each emitted field is classified by observing whether mutating it moves the hash. The load-bearing
 consequence for this decision: `source` — the CloudEvents field naming the system that produced
 the stream — is outside the chain, alongside `run_id`, `seq`, producer identity and version,
 `git_sha`, `policy_id`, `time`, trace context, and the `contains_pii` / `contains_secrets` flags.
@@ -247,8 +247,9 @@ author alone:
 
 ## Dependencies
 
-- PR #1886 (`content_hash_field_inventory.rs`) must merge before this ADR is Accepted; the "what the
-  chain does not carry" section cites a mechanism that does not exist on `main` until then.
+- PR #1886 (`content_hash_field_inventory.rs`) — **merged**. The "what the chain does not carry"
+  section cites an enforced mechanism rather than an intended one, which was the condition for
+  moving this ADR out of draft.
 
 ## Implementation evidence
 
