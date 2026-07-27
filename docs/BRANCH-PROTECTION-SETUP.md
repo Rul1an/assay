@@ -179,10 +179,10 @@ If a PR shows a required check **CIExpected** that never completes, branch prote
 **Fix:** In **Settings → Branches → Branch protection rule for `main`**, under
 "Require status checks", remove **CIExpected** and add **CI** (from
 `.github/workflows/ci.yml`) plus the current required live contexts
-`lane-check` and `host-capability-check`. Save.
+`host-capability-check` and `lane-check/proof`. Save.
 
 **Via API:** Inspect with `gh api repos/OWNER/REPO/branches/main/protection`.
-Ensure `required_status_checks.contexts` contains `CI`, `lane-check`, and
-`host-capability-check`, and does not contain `CIExpected`. Re-apply using the
-JSON in Option B above with
-`"contexts": ["CI", "lane-check", "host-capability-check"]`.
+Ensure `required_status_checks.contexts` contains `CI`, `host-capability-check`,
+and `lane-check/proof`, and does not contain `CIExpected` or the retired bare
+`lane-check`. Re-apply using the JSON in Option B above with
+`"contexts": ["CI", "host-capability-check", "lane-check/proof"]`.

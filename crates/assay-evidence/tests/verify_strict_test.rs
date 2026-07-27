@@ -270,7 +270,12 @@ fn test_verifier_rejects_missing_content_hash_raw_tar() {
     // Build manifest that references the correct hash (but the event in the archive has None)
     let manifest = serde_json::json!({
         "schema_version": 1,
-        "bundle_id": "test-missing-hash",
+        // Equal to run_root, so the bundle_id contract is not what rejects this fixture.
+        // The manifest is not otherwise conformant -- `run_root` below is a single event's
+        // content hash rather than a chain over one, which `compute_run_root` would not
+        // produce -- but verification stops at the missing content_hash long before the
+        // chain check, so that stays out of the way of what this test is about.
+        "bundle_id": correct_hash,
         "producer": {"name": "test", "version": "1.0"},
         "run_id": "run_deterministic_test",
         "event_count": 1,
@@ -510,7 +515,12 @@ fn test_reject_extra_file() {
         // 1. Manifest
         let manifest = serde_json::json!({
             "schema_version": 1,
-            "bundle_id": "test",
+            // Equal to run_root: the extra member is appended after events.ndjson, so the
+            // events block completes before the allowlist sees it. With the placeholder that
+            // used to sit here the bundle is rejected on the bundle_id contract, and since
+            // the assertion below matches on "Unexpected file" the test goes red -- failing
+            // for a reason that has nothing to do with the extra file it is named for.
+            "bundle_id": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             "producer": {"name": "test", "version": "1.0"},
             "run_id": "run_test",
             "event_count": 0,

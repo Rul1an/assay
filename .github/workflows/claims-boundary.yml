@@ -10,6 +10,8 @@ on:
       - "assay-action/action.yml"
       - "assay-action/action.yaml"
       - "scripts/ci/check-claims-boundary.py"
+      - "scripts/ci/check-required-contexts.py"
+      - ".github/rulesets/**"
       - ".github/workflows/claims-boundary.yml"
   workflow_dispatch:
 
@@ -32,3 +34,9 @@ jobs:
 
       - name: Scan public prose
         run: python3 scripts/ci/check-claims-boundary.py
+
+      - name: Self-test required-contexts guard
+        run: python3 scripts/ci/check-required-contexts.py --self-test
+
+      - name: Check the required-context set agrees across every location
+        run: python3 scripts/ci/check-required-contexts.py

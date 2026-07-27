@@ -4,9 +4,21 @@
 //! envelope, reusing the mandate DSSE primitives (PAE + Ed25519). The anchor
 //! (a transparency log or timestamp) stays pluggable and external.
 //!
-//! Honest boundary: an attestation binds who-said-it and the bundle content. It
-//! does NOT upgrade observed support, and provides no trust root or transparency
+//! Honest boundary: an attestation binds who-said-it and the *semantic event chain*.
+//! It does NOT upgrade observed support, and provides no trust root or transparency
 //! log on its own.
+//!
+//! It also does not identify the artifact. The subject digest is `manifest.run_root`,
+//! a chain over per-event content hashes, and those cover exactly
+//! `{specversion, type, datacontenttype, subject?, data}` so a re-export stays stable.
+//! Everything else is outside by construction, including stream identity, `time`,
+//! trace context, producer and policy metadata, and the privacy flags; the enumerated
+//! list lives in `crypto/id.rs`. A bundle
+//! whose run id, event ids, producer, timestamps and PII flags are rewritten
+//! consistently therefore has the same `run_root` and satisfies the same attestation.
+//! in-toto expects the reverse -- subjects are immutable and matched purely by digest
+//! -- so treating a satisfied envelope as proof of *which* bundle you hold reads a
+//! guarantee into the subject that it does not carry. See ADR-039 "Non-claims".
 
 use crate::bundle::Manifest;
 use crate::crypto::jcs;
@@ -42,7 +54,11 @@ pub struct InTotoStatement {
     pub predicate: serde_json::Value,
 }
 
-/// Build an in-toto v1 Statement whose subject is the bundle's integrity root.
+/// Build an in-toto v1 Statement whose subject digest is the bundle's chain root.
+///
+/// The chain root is an equivalence digest over event *semantics*, not a digest of the
+/// bundle bytes, so this subject does not distinguish two bundles that carry the same
+/// events under a different stream identity. See the module docs for what that costs.
 pub fn statement_from_manifest(
     manifest: &Manifest,
     predicate: serde_json::Value,

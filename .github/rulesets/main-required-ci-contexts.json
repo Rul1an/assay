@@ -22,15 +22,11 @@
             "integration_id": 15368
           },
           {
-            "context": "lane-check",
+            "context": "lane-check/proof",
             "integration_id": 15368
           },
           {
             "context": "host-capability-check",
-            "integration_id": 15368
-          },
-          {
-            "context": "public-artifact-sanitization",
             "integration_id": 15368
           }
         ]

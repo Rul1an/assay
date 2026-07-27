@@ -53,10 +53,11 @@ Repository state observed on 2026-06-11:
     skips;
   - kernel/eBPF gating that avoids self-hosted runner work unless relevant;
   - delegated runner lane proof for selected runner-sensitive PRs.
-- Live branch protection on `main`, observed through GitHub on 2026-06-11,
-  requires `CI`, `lane-check`, and `host-capability-check` with strict
-  up-to-date status checks enabled. `docs/BRANCH-PROTECTION-SETUP.md` should
-  stay reconciled with that live state.
+- Live branch protection on `main` with strict up-to-date status checks enabled.
+  The required contexts are named once, in section 6 "Required Context Names";
+  this entry deliberately does not repeat them. It used to, and the copy went
+  stale when the set changed -- naming a value twice in one document is the
+  drift, not the cure.
 - Existing public docs and evidence artifacts include guides, references,
   receipt schemas, MCP proxy docs, runner fixtures, experiment reports, JUnit,
   SARIF, Trust Basis output, and compressed evidence examples.
@@ -441,8 +442,12 @@ Before making any branch-protection changes:
 Currently required live branch-protection contexts:
 
 - `CI`
-- `lane-check`
 - `host-capability-check`
+- `lane-check/proof` (commit status posted by `scripts/ci/assay_runner_lane_check.py`)
+
+The bare `lane-check` Actions job still runs and reports, but stopped being required in
+the #1869 migration (PR #1878): the proof status is posted on the exact PR head and
+refreshes on a same-head delegated proof, which the check-run cannot.
 
 Context groups that should stay visible and reviewed when relevant:
 
@@ -462,20 +467,29 @@ Observed from the CI baseline implementation PR `#1638`:
 Proposed required context names for the next branch-protection review:
 
 - `CI`
-- `lane-check`
 - `host-capability-check`
-- `public-artifact-sanitization`
+- `lane-check/proof`
+- `public-artifact-sanitization` (proposal only; deliberately absent from the
+  checked-in ruleset, see below)
 
 Checked-in ruleset activation lives at
 `.github/rulesets/main-required-ci-contexts.json`.
 
 Import note: the checked-in ruleset is config-as-code only until imported in
-GitHub settings. It intentionally mirrors the current live branch protection for
-`CI`, `lane-check`, and `host-capability-check`, so importing it does not weaken
-the existing required-check set. Add `bypass_actors` only if the repository
-owner intentionally wants to preserve an admin bypass path; otherwise
+GitHub settings, which makes it an importable description of the required set that
+nothing reconciles against reality. It therefore carries exactly the three contexts
+above that are live, and no proposals: a proposal that ships inside an importable
+artifact gets promoted by whoever imports it, without the review it is waiting for.
+Importing the ruleset as checked in neither weakens nor widens the existing
+required-check set. Add `bypass_actors` only if the repository owner intentionally
+wants to preserve an admin bypass path; otherwise
 `strict_required_status_checks_policy: true` means merges must be rebased-current
 and green.
+
+The three locations that name this set drift apart when one of them is edited alone:
+that is how `lane-check` outlived its retirement here and in the troubleshooting
+section of `docs/BRANCH-PROTECTION-SETUP.md` after PR #1878 removed it everywhere
+else. `scripts/ci/check-required-contexts.py` now fails when they disagree.
 
 Do not make these required in this slice:
 

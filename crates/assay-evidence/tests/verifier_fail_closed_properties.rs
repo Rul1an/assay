@@ -273,6 +273,36 @@ fn a_mutated_run_root_is_a_run_root_mismatch() {
     );
 }
 
+/// The profile makes `bundle_id` normative: "the manifest's `run_root` and `bundle_id` MUST both
+/// equal it" (`docs/profiles/privileged-mcp-action/v0.md:126`). Nothing derives one from the other
+/// at read time, so without this check the two can disagree and the bundle still verifies — a
+/// normative MUST with no mechanism behind it. Ordered after the chain check so a mutated
+/// `run_root` still fails as a root mismatch; this fires only when the chain is sound and the
+/// second copy of it is not.
+#[test]
+fn a_bundle_id_that_disagrees_with_the_chain_root_is_rejected() {
+    let bundle = valid_bundle(2);
+    let (manifest, events) = unpack(&bundle);
+
+    let mut m: serde_json::Value = serde_json::from_slice(&manifest).expect("manifest json");
+    assert_eq!(
+        m["bundle_id"], m["run_root"],
+        "the writer must emit them equal, or this test proves nothing about the verifier"
+    );
+    m["bundle_id"] = serde_json::json!(format!("sha256:{}", "0".repeat(64)));
+    let tampered = serde_json::to_vec(&m).expect("reserialize");
+
+    // No reseal: only the manifest changed, and its recorded events digest still matches.
+    let (class, code) = expect_rejected(
+        &repack(&[("manifest.json", &tampered), ("events.ndjson", &events)]),
+        "a manifest whose bundle_id does not equal its chain root",
+    );
+    assert_eq!(
+        (class, code),
+        (ErrorClass::Contract, ErrorCode::ContractBundleIdMismatch)
+    );
+}
+
 /// `verify.rs` documents check 9 as "ID Contract: event.id == run_id:seq". The id is outside the
 /// per-event content hash, so nothing else catches a forged one once the manifest is resealed.
 /// A documented check that does not run is the exact failure ADR-043 is about, and it sits on the
