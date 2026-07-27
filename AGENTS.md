@@ -69,17 +69,22 @@ including its explicit non-claims, or amend the decision through a new ADR.
 The builder's self-review does not count. On the final head SHA, require:
 
 1. one non-building agent review plus CodeRabbit or Copilot; or
-2. two non-building agent reviews, when both bots are skipped or silent for 30 minutes after the
-   last push — or immediately, when a bot's own record on the current head declares a limit.
+2. two non-building agent reviews, when each bot is skipped, silent for 30 minutes after the last
+   push, or declares a limit in its own record on the current head — a declared limit opens that
+   bot's slot immediately, while a merely silent bot still gets its 30 minutes.
 
 `skipped` is not `pass`. A new push invalidates reviews on the prior head, and the head a review was
 measured on is the head it counts for — a merge commit that brings `main` into the branch is a new
-head like any other. A review is revalidated for a new head only by a recorded equivalence check:
-the new head introduces no change, to any file, that is not already on `main` — its tree is what
-merging `main` into the reviewed head produces without conflicts. The check covers the whole tree,
-never a file list, so content outside the reviewed files cannot ride the carry. Put the check in
-the review record; without it, the review does not carry. Rewritten history (rebase, squash) does
-not carry a review even when the tree is identical: revalidation is for upstream advances only.
+head like any other. A review is revalidated for a new head only by a recorded equivalence check
+with two conditions: the new head introduces no change, to any file, that is not already on `main`
+— its tree is what merging `main` into the reviewed head produces without conflicts — and the
+advance touched no file the review covered. The first covers the whole tree, never a file list, so
+content outside the reviewed files cannot ride the carry; the second exists because an upstream
+change to a reviewed file changes what lands even though it smuggles nothing, and "the branch added
+nothing" is a neighbouring property of "what was reviewed is what merges", not the same one. Put
+both checks in the review record; without them, the review does not carry. Rewritten history
+(rebase, squash) does not carry a review even when the tree is identical: revalidation is for
+upstream advances only.
 
 A review record that says it did not review is not a review. A bot that returns `COMMENTED` with
 "unable to review — quota limit", or a check that reports `pass` alongside "review rate limited",
