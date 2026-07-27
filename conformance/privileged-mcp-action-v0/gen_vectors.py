@@ -143,7 +143,13 @@ def event(run_id: str, seq: int, payload: dict) -> dict:
     }
 
 
-def bundle_bytes(run_id: str, payloads: list, *, tamper: bool = False) -> bytes:
+def bundle_bytes(
+    run_id: str,
+    payloads: list,
+    *,
+    tamper: bool = False,
+    bundle_id_mismatch: bool = False,
+) -> bytes:
     events = [event(run_id, i, p) for i, p in enumerate(payloads)]
     lines = [jcs(e) for e in events]
     events_ndjson = b"\n".join(lines) + b"\n"
@@ -170,6 +176,13 @@ def bundle_bytes(run_id: str, payloads: list, *, tamper: bool = False) -> bytes:
             }
         },
     }
+    if bundle_id_mismatch:
+        # Only bundle_id departs from the chain: the events, their content hashes, the file
+        # digest and run_root all stay sound, so a verifier reaches the last step of the
+        # documented order with everything before it intact. That isolation is the point --
+        # an implementation that stops after the run-root recomputation accepts this bundle.
+        manifest["bundle_id"] = "sha256:" + "0" * 64
+
     manifest_bytes = jcs(manifest)
     if tamper:
         # Flip one byte inside the stored events file AFTER the manifest is
@@ -347,6 +360,17 @@ VECTORS = [
         "first_failure": "decision_missing",
         "description": "A caller-visible denial marker with no decision record at all: an observed enforcement marker must be backed by a bound decision, so the profile input is invalid.",
     },
+    {
+        "id": "bad-109-bundle-id-mismatch",
+        "payloads": lambda: [
+            decision_record("deny", "no_declared_allowance"),
+            observation_record(reason="no_declared_allowance"),
+        ],
+        "bundle_id_mismatch": True,
+        "expected": {"bundle_integrity": "fail"},
+        "first_failure": "bundle_integrity",
+        "description": "The manifest's bundle_id does not equal the recomputed run_root, while every earlier check passes: the last step of the Section 4 order is the only one that rejects this bundle, so a verifier that stops after the run-root recomputation accepts it.",
+    },
 ]
 
 
@@ -355,7 +379,12 @@ def main() -> int:
     manifest_vectors = []
     for vec in VECTORS:
         run_id = f"pmav0-{vec['id']}"
-        blob = bundle_bytes(run_id, vec["payloads"](), tamper=vec.get("tamper", False))
+        blob = bundle_bytes(
+            run_id,
+            vec["payloads"](),
+            tamper=vec.get("tamper", False),
+            bundle_id_mismatch=vec.get("bundle_id_mismatch", False),
+        )
         path = OUT / f"{vec['id']}.bundle.tar.gz"
         path.write_bytes(blob)
         entry = {

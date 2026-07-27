@@ -5,10 +5,10 @@
   "generator": "gen_vectors.py (single generator; byte-deterministic)",
   "normative_surface": "expected.bundle_integrity, expected.verdict and expected.claims are the normative comparison surface; first_failure_informative is this generator's own vocabulary and is informative only",
   "corpus_digest_method": "sha256 over concat(vector sha256 + \"\\n\") in listed order, mirroring the bundle run_root construction",
-  "corpus_digest": "sha256:a943120f6b142d7e4e45c357dc06cddaeb596c90e935ac0c8e26856425757571",
+  "corpus_digest": "sha256:cb58ce91863f52e0568742b977f0642158453ec11bbcd25821f9171dccd03342",
   "counts": {
     "accept": 5,
-    "reject": 8
+    "reject": 9
   },
   "vectors": [
     {
@@ -224,6 +224,16 @@
         "verdict": "invalid"
       },
       "first_failure_informative": "decision_missing"
+    },
+    {
+      "id": "bad-109-bundle-id-mismatch",
+      "file": "vectors/bad-109-bundle-id-mismatch.bundle.tar.gz",
+      "sha256": "sha256:4fb021dc51aa7958281d19118fc8bd554cec7fc38da69fd53cbbb45c580f868d",
+      "description": "The manifest's bundle_id does not equal the recomputed run_root, while every earlier check passes: the last step of the Section 4 order is the only one that rejects this bundle, so a verifier that stops after the run-root recomputation accepts it.",
+      "expected": {
+        "bundle_integrity": "fail"
+      },
+      "first_failure_informative": "bundle_integrity"
     }
   ]
 }

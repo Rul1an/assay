@@ -50,7 +50,7 @@ fn conformance_corpus_reproduces_all_expected_outcomes() {
     .expect("parse MANIFEST.json");
 
     let vectors = manifest["vectors"].as_array().expect("vectors array");
-    assert_eq!(vectors.len(), 13, "the v0 corpus carries 13 vectors");
+    assert_eq!(vectors.len(), 14, "the v0 corpus carries 14 vectors");
 
     for vector in vectors {
         let id = vector["id"].as_str().expect("vector id");

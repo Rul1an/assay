@@ -43,7 +43,11 @@ REPRODUCTION_MODES = (
 )
 MAX_PACK_BYTES = 100 * 1024 * 1024
 MAX_MEMBER_BYTES = 16 * 1024 * 1024
-EXPECTED_PACK_MEMBERS = 17
+EXPECTED_CASE_COUNT = 14
+# spec.md, descriptor.json, cases.json, README.md. Derived rather than written out again:
+# the pack member count and the case count are one fact, and holding them as two numbers is
+# how the corpus grew to fourteen while a constant still said thirteen.
+EXPECTED_PACK_MEMBERS = EXPECTED_CASE_COUNT + 4
 MAX_PACK_ARCHIVE_BYTES = 32 * 1024 * 1024
 MAX_MEMBER_NAME_BYTES = 512
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -128,7 +132,7 @@ def load_pack(pack: Path, destination: Path) -> dict[str, Any]:
     cases = index.get("cases")
     if (
         not isinstance(cases, list)
-        or len(cases) != 13
+        or len(cases) != EXPECTED_CASE_COUNT
         or index.get("case_count") != len(cases)
     ):
         raise ValueError("pack case count is invalid")
