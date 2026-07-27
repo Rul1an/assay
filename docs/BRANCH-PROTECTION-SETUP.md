@@ -12,10 +12,13 @@ that protection in sync (UI or `gh` CLI).
 
 - **Require a pull request** before merging (no direct pushes to main).
 - **Required approvals:** at least 1–2.
-- **Required status checks:** `CI`, `lane-check`, and `host-capability-check`
-  (observed live on 2026-06-11). See "Required checks: when each is needed" for
-  rationale; optional: Smoke Install, assay-action-contract-tests, MCP Security,
-  Kernel Matrix.
+- **Required status checks:** `CI`, `host-capability-check`, and the commit
+  status `lane-check/proof` (pinned to the GitHub Actions app; observed live on
+  2026-07-27, issue #1869 migration). The `lane-check` Actions job still runs
+  and reports, but is informational: the proof status is posted on the exact PR
+  head and refreshes on a same-head delegated proof, which the check-run cannot.
+  See "Required checks: when each is needed" for rationale; optional: Smoke
+  Install, assay-action-contract-tests, MCP Security, Kernel Matrix.
 - **Require branch to be up to date** before merging.
 - **Restrict force-push and branch deletion** (do not allow force-push to main; restrict who can delete the branch).
 
@@ -39,8 +42,8 @@ Ensure `.github/CODEOWNERS` exists and lists the right owners (see repo root).
 4. Enable:
    - Require a pull request before merging.
    - Require approvals (set number, e.g. 1).
-   - Require status checks: add `CI`, `lane-check`, and
-     `host-capability-check` (or the exact job names your workflows expose;
+   - Require status checks: add `CI`, `host-capability-check`, and
+     `lane-check/proof` (or the exact context names your workflows expose;
      check **Settings → Branches → Branch protection** or the Ruleset UI for the
      list of available checks).
    - Require branches to be up to date before merging.
@@ -57,7 +60,8 @@ Ensure `.github/CODEOWNERS` exists and lists the right owners (see repo root).
 | Context | Workflow file |
 |---------|----------------|
 | `CI` | `.github/workflows/ci.yml` |
-| `lane-check` | `.github/workflows/assay-runner-lane-check.yml` |
+| `lane-check/proof` | commit status posted by `scripts/ci/assay_runner_lane_check.py` (runs in `.github/workflows/assay-runner-lane-check.yml`) |
+| `lane-check` | `.github/workflows/assay-runner-lane-check.yml` (informational since the #1869 migration) |
 | `host-capability-check` | `.github/workflows/host-capability-check.yml` |
 | `Smoke Install (E2E)` | `.github/workflows/smoke-install.yml` |
 | `assay-action-contract-tests` | `.github/workflows/action-tests.yml` |
@@ -74,17 +78,17 @@ Use **`CI`** (not `CIExpected` or any other variant). No workflow in this repo r
 | Check | What it does | **Dependabot / deps-only PRs** | **Other PRs (features, workflows, action)** |
 |-------|----------------|---------------------------------|---------------------------------------------|
 | **CI** | Build, test, clippy, cargo-deny, cargo-audit, eBPF smoke | **Essential** — new deps must not break build or tests. | **Essential** — same. |
-| **lane-check** | Confirms runner-sensitive PRs have the delegated proof required by the lane classifier. | Required but normally quick/no-op unless the classifier says proof is needed. | Required; becomes load-bearing for runner/evidence-sensitive changes. |
+| **lane-check/proof** | Commit status confirming runner-sensitive PRs carry the delegated proof for the exact head. | Required but normally quick/no-op unless the classifier says proof is needed. | Required; becomes load-bearing for runner/evidence-sensitive changes. A same-head delegated proof refreshes it without a manual rerun. |
 | **host-capability-check** | Confirms whether the PR requires host-capability proof before privileged runner evidence is trusted. | Required but normally quick/no-op for ordinary dependency updates. | Required; becomes load-bearing for host/kernel/runner capability-sensitive changes. |
 | **Smoke Install (E2E)** | Build from source, run assay, JUnit | Redundant with CI (CI already builds and tests). | Useful — verifies install path. |
 | **assay-action-contract-tests** | Tests GitHub Action in `assay-action/` | Not needed — Cargo.toml/Cargo.lock don't touch the action. | **Essential** if PR touches `assay-action/` or workflows. |
 | **MCP Security (Assay)** | Install assay, run validate with demo config | Redundant with CI for deps-only (CI validates the binary). | Useful — sanity check for security workflow. |
 | **Kernel Matrix CI** | eBPF tests on self-hosted runner | Not needed — kernel-matrix `paths` exclude Cargo.toml/Cargo.lock. | **Essential** if PR touches eBPF/Monitor/evidence. |
 
-**Current recommendation:** Keep **`CI`, `lane-check`, and
+**Current recommendation:** Keep **`CI`, `lane-check/proof`, and
 `host-capability-check`** required. `CI` is the universal build/security gate;
-`lane-check` and `host-capability-check` are quick for ordinary PRs but preserve
-the runner/evidence proof boundary when a PR touches sensitive paths. Smoke
+`lane-check/proof` and `host-capability-check` are quick for ordinary PRs but
+preserve the runner/evidence proof boundary when a PR touches sensitive paths. Smoke
 Install, assay-action-contract-tests, and MCP Security still run and appear on
 the PR; they are not required to merge. If you merge changes to `assay-action/`
 or workflows, ensure contract tests and MCP Security have passed before merging
@@ -107,7 +111,7 @@ gh api repos/OWNER/REPO/branches/main/protection -X PUT \
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["CI", "lane-check", "host-capability-check"]
+    "contexts": ["CI", "host-capability-check", "lane-check/proof"]
   },
   "enforce_admins": false,
   "required_pull_request_reviews": {
@@ -159,8 +163,8 @@ See `docs/REVIEWER-PACK.md` (sectie 3, “Environments & approvals”) and the c
 ## Checklist
 
 - [x] Branch protection or ruleset on `main` with: require PR, approvals, status checks, up to date, no force-push.
-- [x] Required status checks: `CI`, `lane-check`, and
-  `host-capability-check` (see "Required checks: when each is needed" above;
+- [x] Required status checks: `CI`, `host-capability-check`, and
+  `lane-check/proof` (see "Required checks: when each is needed" above;
   add Smoke Install / contract tests / MCP Security / Kernel Matrix only when
   stricter gates are intentionally needed).
 - [x] CODEOWNERS in place; “Require review from Code Owners” enabled.
