@@ -131,7 +131,7 @@ impl<W: Write> BundleWriter<W> {
                 );
             }
 
-            if !event.source.contains(':') || event.source.starts_with(':') {
+            if !super::stream_rules::source_is_uri(&event.source) {
                 bail!(
                     "Invalid source format at seq={}.\n\
                      Value: '{}'\n\
@@ -141,7 +141,7 @@ impl<W: Write> BundleWriter<W> {
                 );
             }
 
-            if event.run_id.contains(':') {
+            if !super::stream_rules::run_id_has_no_colon(&event.run_id) {
                 bail!(
                     "Invalid run_id format at seq={}.\n\
                      Value: '{}'\n\
