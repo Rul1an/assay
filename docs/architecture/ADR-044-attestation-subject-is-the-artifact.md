@@ -69,9 +69,12 @@ The forgery therefore survives not because it matches, but because **nothing is 
 the producer side alone does not establish artifact identity: a correct subject digest that no
 consumer compares is still an unchecked field. The decision below has to cover both ends.
 
-The signature is not weak. It attests "these events, in this order, carry this semantic content" —
-a true and useful statement. A consumer reading `subject.digest` reasonably believes it attests
-"this artifact", and no part of the current path makes that belief checkable.
+The signature is not weak, and describing what it does establish takes the same care as the subject
+correction. It authenticates the Statement and the semantic root *asserted* in it. Only once that
+root has been recomputed from a verified bundle may a consumer conclude that the signer attested
+those ordered content-hash inputs — until then, "these events, in this order" is a claim the
+envelope carries, not one it proves. A consumer reading `subject.digest` reasonably believes the
+attestation names an artifact, and no part of the current path makes that belief checkable either.
 
 Nothing in this analysis says the exclusion list is wrong. Widening `content_hash` would break
 deterministic re-export, break the clean-room conformance pack, and re-merge the two roles rather
@@ -109,9 +112,20 @@ archive is finalised and threaded into statement construction. It is *not* `bund
 
 A correct subject digest that nobody compares is still an unchecked field, and that is the state the
 reproduction above actually documents. `verify_envelope` currently returns the Statement without
-touching `subject`. It MUST, given the archive bytes, recompute their SHA-256 and reject a mismatch
-before returning; a caller that has no bytes to offer MUST get a distinct result meaning
-*signature-verified, artifact-unmatched*, never a plain success.
+touching `subject`.
+
+The obligation is a second, explicit step rather than an overload of the first:
+
+- `verify_envelope(envelope, key)` keeps its present job — payload type, signature, Statement type —
+  and its result is typed as *signature-verified, artifact-unmatched*. That is a state, not an error
+  and not a success.
+- `verify_attestation_for_bundle(envelope, key, bundle_bytes)` recomputes the SHA-256 of those bytes,
+  matches it against the single subject, validates the predicate version, and cross-checks the
+  derivable fields. Only this call can return a fully verified attestation.
+
+Splitting them keeps the weaker outcome nameable in the type system. Folding the byte match into
+`verify_envelope` would make "I verified the attestation" mean two different things depending on
+which argument the caller happened to have, which is the ambiguity this ADR exists to remove.
 
 Producer-side changes alone do not establish artifact identity. Both ends move or neither does.
 
@@ -119,20 +133,42 @@ Producer-side changes alone do not establish artifact identity. Both ends move o
 
 The current builder accepts arbitrary JSON under `evidence-bundle/v0`, so a legacy statement and a
 conforming one are indistinguishable. This decision introduces a new predicate type — a fresh
-version, not a relaxation of the old one — whose required fields are specified rather than
-conventional:
+version, not a relaxation of the old one:
+
+```
+predicateType = https://assay.dev/attestation/evidence-bundle/v1
+```
 
 ```json
-"semantic_equivalence": {
-  "algorithm": "assay-run-root-v1",
-  "value": "sha256:..."
+{
+  "schema_version": 1,
+  "semantic_equivalence": {
+    "algorithm": "assay-run-root-v1",
+    "value": "sha256:<64 lowercase hex>"
+  },
+  "run": {
+    "run_id": "<string>",
+    "event_count": "<non-negative integer>",
+    "producer": { "name": "<string>", "version": "<string>", "git": "<string>" },
+    "time_window": { "start": "<RFC 3339 UTC>", "end": "<RFC 3339 UTC>" }
+  }
 }
 ```
 
-`run_root` lives there and nowhere else. Required provenance fields: `run_id`, producer name and
-version, `git_sha`, `event_count`, and the run's time window. Values derivable from the matched
-bundle MUST be cross-checked against it by the consumer; a predicate that disagrees with the artifact
-it is attached to is a rejection, not a note.
+All fields are required except `run.time_window`, which is **`null` for a zero-event bundle**. The
+verifier accepts a bundle with no events, so that bundle has no earliest and no latest event `time`
+and cannot satisfy a mandatory window; a schema that demanded one would be unsatisfiable for a
+bundle the format permits. `null` is the honest encoding of "the artifact does not carry this", and
+it is not the same as the field being absent, which is a malformed predicate.
+
+`run_root` lives in `semantic_equivalence` and nowhere else. Every field derivable from the archive
+— the semantic root, `run_id`, `event_count`, producer name, version and `git` — MUST be recomputed
+or read from the *verified* bundle and compared exactly; a predicate that disagrees with the artifact
+it is attached to is a rejection, not a note. Where the source events disagree among themselves
+about producer identity, the bundle is rejected before the predicate is consulted.
+
+Unknown fields within a known major version are ignored. An **unknown major version fails closed**:
+a consumer that cannot evaluate the predicate MUST NOT report the attestation as verified.
 
 The named block exists so a consumer cannot read the semantic digest as a second artifact digest.
 That is the same confusion at one remove, and naming is what prevents it.
@@ -183,9 +219,13 @@ addressing it. That is the property #1840 relies on. Under this decision the sam
 produces a bundle with an unchanged semantic digest and a *different* artifact digest — which is
 exactly the distinction the pack exists to demonstrate, now expressible instead of collapsed.
 
-Verifier behaviour does not change. `bundle_id == run_root` remains the enforced manifest
-invariant (check 14, ADR-043 lineage); this ADR governs what the attestation binds, not what the
-verifier accepts.
+Bundle verification remains unchanged: `bundle_id == run_root` is still check 14, on the ADR-043
+lineage, and the set of bundles the verifier accepts is untouched.
+
+Attestation verification changes materially, and the first draft's "verifier behaviour does not
+change" was wrong about which verifier it meant. Attestation verification gains artifact-byte
+matching, a typed signature-only state, predicate-version validation, and bundle-to-predicate
+consistency checks.
 
 ## Resolved during drafting
 
@@ -196,9 +236,11 @@ author alone:
   out of in-toto's artifact-matching namespace instead of relying on readers to know the difference.
 - **Corpus digest wording**: `corpus_digest_method` is to state that the hash is taken over each
   stored `vectors[i].sha256` **string including the literal `sha256:` prefix**, each followed by LF,
-  in manifest order. The implementation already does this; the sentence did not say so, and the
-  bare-hex reading is the more natural one — a procedure two honest implementers read differently is
-  the same defect class as this ADR's, one layer down.
+  in manifest order, and that the **result is stored as the literal `sha256:` followed by 64
+  lowercase hexadecimal characters**. The implementation already does both; the sentence pinned
+  neither, and an unambiguous input with an implicit output is only half a procedure. The bare-hex
+  reading of the input is the more natural one — a procedure two honest implementers read
+  differently is the same defect class as this ADR's, one layer down.
 - **Clean-room pack**: confirmed unaffected. It carries no DSSE attestations at all, and rewritten
   bundles keep `run_root` while their artifact bytes change — which is the distinction this decision
   makes expressible.
