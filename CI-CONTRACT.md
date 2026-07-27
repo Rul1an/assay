@@ -444,6 +444,8 @@ Currently required live branch-protection contexts:
 - `CI`
 - `host-capability-check`
 - `lane-check/proof` (commit status posted by `scripts/ci/assay_runner_lane_check.py`)
+<!-- required-contexts:end (scripts/ci/check-required-contexts.py reads the entries between
+     the "Currently required" line above and this marker; keep it after the last entry) -->
 
 The bare `lane-check` Actions job still runs and reports, but stopped being required in
 the #1869 migration (PR #1878): the proof status is posted on the exact PR head and
