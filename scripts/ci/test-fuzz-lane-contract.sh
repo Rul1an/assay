@@ -108,8 +108,12 @@ ${shell_line:-<none>}"
   # stderr capture while leaving the script itself untouched. The harness below executes the script,
   # so it can never see a preamble the runner would have sourced first. Matched as an active mapping
   # key, one name, no env parsing: a line that is commented out sources nothing and stays green.
+  #    YAML lets a key be plain, single-quoted or double-quoted, and all three are the same key.
+  #    An unquoted-only match called `"BASH_ENV": file` absent while actionlint called it valid, so
+  #    the three forms are spelled out here rather than claimed. Still one name and no parser.
   local bash_env_line
-  bash_env_line="$(grep -nE '^[[:space:]]*BASH_ENV[[:space:]]*:' "$wf" | head -1 || true)"
+  local bash_env_key=$'^[[:space:]]*("BASH_ENV"|\'BASH_ENV\'|BASH_ENV)[[:space:]]*:'
+  bash_env_line="$(grep -nE "$bash_env_key" "$wf" | head -1 || true)"
   [[ -z "$bash_env_line" ]] \
     || fail "this lane must not set \`BASH_ENV\`: bash sources it before the step's own script, so
 a preamble can redirect the step's stderr without appearing in the script at all. Found:\n  \
@@ -333,6 +337,21 @@ if ( check_workflow "$bash_env_mutant" ) >/dev/null 2>&1; then
 which is where the harness starts looking"
 fi
 echo "ok: a step-level \`BASH_ENV\` turns the contract red"
+
+# Negative control: quote the key. `"BASH_ENV": file` is the same mapping key to YAML and to the
+# runner, and actionlint accepts it -- only a match written for the bare word missed it.
+quoted_env_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
+awk '
+  /^          RUNS: / && !done { print "          \"BASH_ENV\": .github/fuzz-preamble.sh"; done=1 }
+  { print }
+' "$WORKFLOW" > "$quoted_env_mutant"
+grep -q '^          "BASH_ENV": ' "$quoted_env_mutant" \
+  || fail "the quoted-key mutation did not apply, so it proves nothing"
+if ( check_workflow "$quoted_env_mutant" ) >/dev/null 2>&1; then
+  fail "a quoted \`\"BASH_ENV\"\` key left the contract green — the check matches one spelling \
+of the key rather than the key"
+fi
+echo "ok: a quoted \`BASH_ENV\` key turns the contract red"
 
 echo "ok: the lock guard reports without diagnosing, keeps Cargo's stderr, and fails closed"
 echo "ok: FUZZ_TOOLCHAIN is dated (${PIN})"
