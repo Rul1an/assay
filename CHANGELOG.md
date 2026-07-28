@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- Declare Rust 1.89 as the MSRV for all public crates and enforce that floor against the locked
+  workspace graph and all Linux-host targets in required CI. The policy becomes part of published
+  crate metadata with the first release after 3.35.0. Repository development remains pinned to
+  Rust 1.96, and the eBPF nightly remains a separate internal build toolchain.
 - **Fail-closed correction (bundle verification, migration-visible).** The verifier now rejects
   every bundle `BundleWriter` refuses to emit. Five shapes previously verified: an empty bundle, an
   inconsistent `source` across events, a `source` that is not a URI, and a blank line in

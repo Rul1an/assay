@@ -21,7 +21,10 @@ Install Assay on your system.
     ```
 
     **Note:** The crate is named `assay-cli`, but the binary is `assay`.
-    Requires Rust 1.70+. Builds from source (~2 minutes).
+    The Rust 1.89 MSRV policy takes effect with the first release after 3.35.0;
+    earlier releases did not declare an MSRV. `--locked` uses the lockfile shipped
+    with the release selected by Cargo. Builds from source (~2 minutes). See
+    [Rust support](../reference/rust-support.md).
 
 === "Homebrew (macOS)"
 

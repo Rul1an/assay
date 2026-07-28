@@ -2,6 +2,7 @@
 name = "assay-monitor"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Userspace monitor for Assay eBPF programs"
 license.workspace = true
 repository.workspace = true
