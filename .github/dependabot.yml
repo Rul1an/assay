@@ -68,8 +68,8 @@ updates:
       # sysinfo 0.38+ has breaking API changes (method signatures changed)
       - dependency-name: "sysinfo"
         update-types: ["version-update:semver-major"]
-      # serial_test 4 requires Rust 1.93.1, above Assay's documented Rust 1.70+ floor.
-      # Revisit only with an explicit MSRV policy change.
+      # 2026-07-28: serial_test 4 requires Rust 1.93.1, above Assay's public Rust 1.89 MSRV.
+      # Revisit at the next explicit MSRV review; do not raise the floor for one dev dependency.
       - dependency-name: "serial_test"
         update-types: ["version-update:semver-major"]
 

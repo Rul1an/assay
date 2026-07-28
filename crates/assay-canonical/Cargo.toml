@@ -2,6 +2,7 @@
 name = "assay-canonical"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Deterministic canonicalization: RFC 8785 (JCS) bytes, sha256 content-addressed IDs, and schema-aware set-path normalization for semantic digests."
 license.workspace = true
 repository.workspace = true

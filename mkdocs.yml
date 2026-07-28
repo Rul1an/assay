@@ -148,6 +148,7 @@ nav:
   - Getting Started:
     - getting-started/index.md
     - Installation: getting-started/installation.md
+    - Rust Support: reference/rust-support.md
     - Quick Start: getting-started/quickstart.md
     - Your First Test: getting-started/first-test.md
     - CI Integration: getting-started/ci-integration.md

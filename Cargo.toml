@@ -46,6 +46,7 @@ missing_errors_doc = "allow"
 [workspace.package]
 version = "3.35.0"
 edition = "2021"
+rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/Rul1an/assay"
 authors = ["Assay"]

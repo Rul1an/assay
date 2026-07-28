@@ -54,6 +54,8 @@ This document outlines the canonical checklist for releasing new versions of Ass
   - `assay-xtask`
   - `gateway-evidence-replay`
 - [ ] **Public Crate Policy Check**: Run `bash scripts/ci/check-public-crate-policy.sh`.
+- [ ] **Public MSRV Check**: Run
+  `ASSAY_PUBLIC_MSRV=1.89.0 scripts/ci/check-msrv-policy.sh`.
 - [ ] **Token Scopes**: If using a token fallback, ensure it has `publish-update` scope.
 
 ### 3. Execution
@@ -74,7 +76,16 @@ This document outlines the canonical checklist for releasing new versions of Ass
   - Step: `Create GitHub Release` (uploads only the preflighted files from `release/`).
 
 ### 4. Verification
-- [ ] **Install Check**: `cargo install assay-cli --version X.Y.Z`
+- [ ] **Published MSRV Install Check**: use a fresh install root so Cargo cannot reuse an existing
+  installation, then execute the resulting binary:
+  ```bash
+  install_root="$(mktemp -d)"
+  trap 'rm -rf "$install_root"' EXIT
+  rustup run 1.89.0 cargo install assay-cli \
+    --locked --version X.Y.Z --root "$install_root"
+  "$install_root/bin/assay" --version
+  ```
+  This exercises the lockfile shipped with the published CLI rather than the workspace lock.
 - [ ] **LSM Smoke Test**: Manually dispatch the `lsm-smoke-test` workflow or run `scripts/verify_lsm_docker.sh --release-tag vX.Y.Z`.
 - [ ] **SBOM Asset Check**: Confirm the GitHub release includes `assay-${VERSION}-sbom-cyclonedx.tar.gz` and `assay-${VERSION}-sbom-cyclonedx.tar.gz.sha256`.
 - [ ] **MCPB Asset Check**: Confirm the GitHub release includes `assay-mcp-server-${VERSION}-linux.mcpb` and `assay-mcp-server-${VERSION}-linux.mcpb.sha256`.

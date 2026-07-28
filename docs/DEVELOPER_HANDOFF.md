@@ -59,7 +59,8 @@ cargo run -p assay-cli -- evidence verify tests/fixtures/evidence/test-bundle.ta
 
 ### Prerequisites
 
-- Rust 1.75+ (2021 edition)
+- Rust 1.96.0 via `rust-toolchain.toml`; published crates retain a
+  [Rust 1.89 MSRV](reference/rust-support.md)
 - Linux for eBPF features (macOS/Windows for core features)
 - Python 3.10+ (for SDK development)
 

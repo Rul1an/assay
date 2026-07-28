@@ -16,7 +16,9 @@ This guide covers:
 
 ## Prerequisites
 
-- **Rust 1.70+** or **Python 3.9+**
+- **Rust 1.96** for repository development, **Rust 1.89+** for public-crate
+  source installs, or **Python 3.9+** for Python SDK use (**Python 3.10+** for
+  SDK development)
 - An MCP session log (or use our example)
 - 5 minutes ☕
 
