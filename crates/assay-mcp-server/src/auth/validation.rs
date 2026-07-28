@@ -124,7 +124,7 @@ impl TokenValidator {
             None
         };
 
-        // If no key found and strict -> fail
+        // Missing verification keys fail closed in every mode.
         let decoding_key = match key {
             Some(k) => k,
             None => {
@@ -133,14 +133,8 @@ impl TokenValidator {
                         "Unable to resolve signing key (kid missing or lookup failed)"
                     ));
                 }
-                // In permissive, or if no JWKS configured (testing), what do we do?
-                // We can use `insecure_disable_signature_validation` FOR TESTING/PERMISSIVE only.
-                // But `jsonwebtoken` validation requires a Key.
-
-                // Fallback for Permissive logging: Try decode without verification to show contents/errors
-                // This is technically unsafe but allowed in Permissive "audit mode" if explicitly desired.
-                // For now, let's treat "Missing Key" as a hard error even in permissive unless we are explicitly "no-auth".
-                // But wait, if JWKS is not configured, `jwks` is None.
+                // No insecure decode fallback is permitted. Even in the legacy
+                // permissive mode, a missing verification key remains a hard error.
                 if config.jwks_uri.is_none() {
                     // No auth configured.
                     return Err(anyhow::anyhow!("Auth not configured (missing JWKS URI)"));
