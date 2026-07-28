@@ -8,18 +8,22 @@
 //! It does NOT upgrade observed support, and provides no trust root or transparency
 //! log on its own.
 //!
-//! It also does not identify the artifact. The subject digest is `manifest.run_root`,
-//! a chain over per-event content hashes, and those cover exactly
-//! `{specversion, type, datacontenttype, subject?, data}` so a re-export stays stable.
-//! Everything else is outside by construction, including stream identity, `time`,
-//! trace context, producer and policy metadata, and the privacy flags; the enumerated
-//! list lives in `crypto/id.rs`. A bundle
-//! whose run id, event ids, producer, timestamps and PII flags are rewritten
-//! consistently therefore has the same `run_root` and satisfies the same attestation.
-//! in-toto expects the reverse -- subjects are immutable and matched purely by digest
-//! -- so treating a satisfied envelope as proof of *which* bundle you hold reads a
-//! guarantee into the subject that it does not carry. See ADR-039 "Non-claims".
+//! The subject identifies the artifact. `subject[0].digest.sha256` is the SHA-256 of the finished
+//! `.tar.gz` — the exact byte sequence a consumer receives, gzip trailer included — and
+//! `subject[0].name` carries `manifest.bundle_id`. in-toto matches subjects purely by digest and
+//! requires them to name an immutable artifact, so this is the only shape a conforming consumer
+//! can act on.
+//!
+//! Before ADR-044 the subject digest was `manifest.run_root`, a chain over per-event content
+//! hashes covering only `{specversion, type, datacontenttype, subject?, data}`. Two bundles with
+//! different `run_id`, producer, timestamps and PII flags share it, so it named no artifact and,
+//! being nobody's archive hash, matched none either. Such statements carry the `v0` predicate type
+//! and are refused rather than reinterpreted: nothing in them says which bytes they described.
+//!
+//! The semantic root still travels, inside the predicate's `semantic_equivalence` block, where
+//! `DigestSet` matching semantics do not reach it. See ADR-044.
 
+use crate::bundle::writer::VerifyLimits;
 use crate::bundle::Manifest;
 use crate::crypto::jcs;
 use crate::mandate::signing::{build_pae, compute_key_id_from_verifying_key};
@@ -27,14 +31,39 @@ use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use ed25519_dalek::{Signature as Ed25519Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
 /// in-toto Statement type URI (v1).
 const STATEMENT_TYPE: &str = "https://in-toto.io/Statement/v1";
 /// DSSE payload type for in-toto statements.
 const IN_TOTO_PAYLOAD_TYPE: &str = "application/vnd.in-toto+json";
-/// Assay evidence-bundle predicate type (v0; not a frozen public spec).
-pub const EVIDENCE_BUNDLE_PREDICATE_TYPE: &str = "https://assay.dev/attestation/evidence-bundle/v0";
+/// The v1 evidence-bundle predicate type.
+///
+/// On `docs.getassay.dev`, where the contract surface actually resolves — the profile URIs under
+/// `docs/profiles/` already point there.
+pub const EVIDENCE_BUNDLE_PREDICATE_TYPE_V1: &str =
+    "https://docs.getassay.dev/attestation/evidence-bundle/v1";
+
+/// The unversioned name published in 3.x, kept at the value it had there.
+///
+/// It held the v0 identifier when downstream code was written against it. Repointing it at v1
+/// would have left that code compiling while silently comparing against a different thing, which
+/// is the one kind of break a compiler cannot report. Every comparison in this module names its
+/// version explicitly instead.
+#[deprecated(
+    since = "3.36.0",
+    note = "ambiguous: use `EVIDENCE_BUNDLE_PREDICATE_TYPE_V0` or `EVIDENCE_BUNDLE_PREDICATE_TYPE_V1`"
+)]
+pub const EVIDENCE_BUNDLE_PREDICATE_TYPE: &str = EVIDENCE_BUNDLE_PREDICATE_TYPE_V0;
+
+/// The predicate this crate emitted before ADR-044.
+///
+/// Kept only so a consumer can name what it is refusing. A v0 statement puts `run_root` in the
+/// subject digest, which identifies no artifact, and carries an unconstrained predicate. It is not
+/// upgradable: nothing in it says which bytes it described.
+pub const EVIDENCE_BUNDLE_PREDICATE_TYPE_V0: &str =
+    "https://assay.dev/attestation/evidence-bundle/v0";
 
 /// in-toto subject: a named artifact plus its content digest(s).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -54,11 +83,90 @@ pub struct InTotoStatement {
     pub predicate: serde_json::Value,
 }
 
+/// Build and sign-ready the in-toto Statement for a bundle, from the bytes a consumer will hold.
+///
+/// Takes bytes and nothing else. The predicate and the subject name are both derived from the
+/// verification of those same bytes inside this function, so there is no argument a caller could
+/// get wrong: the previous shape accepted a caller-constructed predicate alongside the bytes and
+/// trusted that they belonged together, which let the public library mint a statement its own
+/// consumer would reject. Nothing enforced the pairing except the one call site that happened to
+/// do it correctly.
+///
+/// The subject digest is the SHA-256 of the completed archive — gzip trailer included — because
+/// in-toto matches subjects purely by digest and requires them to identify an immutable artifact.
+pub fn statement_for_bundle(bundle_bytes: &[u8]) -> Result<InTotoStatement> {
+    statement_for_bundle_with_limits(bundle_bytes, VerifyLimits::default())
+}
+
+/// [`statement_for_bundle`] under an explicit set of verification ceilings.
+pub fn statement_for_bundle_with_limits(
+    bundle_bytes: &[u8],
+    limits: VerifyLimits,
+) -> Result<InTotoStatement> {
+    let verified = crate::bundle::writer::verify_bundle_verbose_with_limits(bundle_bytes, limits)
+        .context("the bundle to attest does not verify")?;
+    let predicate = predicate_from_verified(&verified)?;
+    Ok(statement_from_parts(
+        bundle_bytes,
+        &verified.result.manifest.bundle_id,
+        &predicate,
+    ))
+}
+
+/// Assemble the statement once every part is known to come from the same verified bytes.
+///
+/// Private on purpose. It is the only place that can pair a subject with a predicate, and the
+/// pairing is the thing a caller must not be able to author.
+fn statement_from_parts(
+    bundle_bytes: &[u8],
+    bundle_id: &str,
+    predicate: &EvidenceBundlePredicate,
+) -> InTotoStatement {
+    let artifact = hex::encode(Sha256::digest(bundle_bytes));
+    let mut digest = BTreeMap::new();
+    // Exactly one entry. `DigestSet`s match when ANY field matches, so a second key — a
+    // `run_root` added to document the semantic root, say — would match a forged bundle through
+    // the very field meant to explain the problem. The semantic root lives in the predicate.
+    digest.insert("sha256".to_string(), artifact);
+    InTotoStatement {
+        type_: STATEMENT_TYPE.to_string(),
+        subject: vec![Subject {
+            // ADR-044: the bundle identifier, not `run_id`. `run_id` was written here and never
+            // read back, so any name at all satisfied the consumer; a name nobody compares is not
+            // an identifier, and this one is now checked against the verified manifest.
+            name: bundle_id.to_string(),
+            digest,
+        }],
+        predicate_type: EVIDENCE_BUNDLE_PREDICATE_TYPE_V1.to_string(),
+        // `to_value` rather than a `json!` literal mirroring the struct. The literal was a second
+        // copy of the shape, maintained by hand beside the `Serialize` derive, and the two could
+        // drift apart in either direction without anything failing.
+        //
+        // The `expect` is an infallibility assertion, not error handling. `to_value` fails only
+        // when a `Serialize` impl returns an error or a map has non-string keys; this type is a
+        // derive over strings and integers, so neither case exists. Returning a `Result` here was
+        // worse: it published a failure no caller could act on and no test could provoke.
+        predicate: serde_json::to_value(predicate)
+            .expect("EvidenceBundlePredicate derives Serialize over strings and integers only"),
+    }
+}
+
 /// Build an in-toto v1 Statement whose subject digest is the bundle's chain root.
 ///
-/// The chain root is an equivalence digest over event *semantics*, not a digest of the
-/// bundle bytes, so this subject does not distinguish two bundles that carry the same
-/// events under a different stream identity. See the module docs for what that costs.
+/// Preserved at its published 3.x signature so downstream code keeps compiling. It is not a way to
+/// produce a usable attestation: the chain root is an equivalence digest over event *semantics*,
+/// so two bundles carrying the same events under a different stream identity share it, and the
+/// subject therefore identifies no artifact and matches none. That is what ADR-044 replaced.
+///
+/// It is pinned to the explicit [`EVIDENCE_BUNDLE_PREDICATE_TYPE_V0`] identifier rather than the
+/// deprecated unversioned alias, so future alias evolution cannot make this compatibility function
+/// mint a newer predicate contract. What it produces stays refused by
+/// [`verify_attestation_for_bundle`], by name and on purpose.
+#[deprecated(
+    since = "3.36.0",
+    note = "produces a v0 statement whose subject identifies no artifact and which \
+            `verify_attestation_for_bundle` refuses; use `statement_for_bundle`"
+)]
 pub fn statement_from_manifest(
     manifest: &Manifest,
     predicate: serde_json::Value,
@@ -76,9 +184,110 @@ pub fn statement_from_manifest(
             name: manifest.bundle_id.clone(),
             digest,
         }],
-        predicate_type: EVIDENCE_BUNDLE_PREDICATE_TYPE.to_string(),
+        predicate_type: EVIDENCE_BUNDLE_PREDICATE_TYPE_V0.to_string(),
         predicate,
     }
+}
+
+/// Derive the v1 predicate from a verified bundle.
+///
+/// Every field comes from the verification result, so the predicate cannot describe a bundle other
+/// than the one that was checked.
+pub(crate) fn predicate_from_verified(
+    verified: &crate::bundle::writer::VerifiedBundle,
+) -> Result<EvidenceBundlePredicate> {
+    // `AutoSi` keeps whatever sub-second precision the events carried and adds none they did not.
+    // `Secs` truncated it, so the predicate claimed a window the bundle never had — and the
+    // consumer's exact comparison then held only because it truncated the same way.
+    let result = &verified.result;
+    let (start, end) = verified.time_window;
+    let start = start.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
+    let end = end.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
+    Ok(EvidenceBundlePredicate {
+        schema_version: 1,
+        semantic_equivalence: SemanticEquivalence {
+            algorithm: "assay-run-root-v1".to_string(),
+            value: result.computed_run_root.clone(),
+        },
+        run: PredicateRun {
+            run_id: result.manifest.run_id.clone(),
+            event_count: result.event_count,
+            producer: PredicateProducer {
+                name: result.manifest.producer.name.clone(),
+                version: result.manifest.producer.version.clone(),
+                git: result.manifest.producer.git.clone().unwrap_or_default(),
+            },
+            time_window: TimeWindow { start, end },
+        },
+    })
+}
+
+/// `run_root` under the algorithm that produced it.
+///
+/// A named block, not a bare field, so a consumer cannot read the semantic digest as a second
+/// artifact digest — ADR-044 decision 3. Matching semantics do not apply inside a predicate, which
+/// is exactly why it belongs here and not in the subject's `DigestSet`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SemanticEquivalence {
+    pub algorithm: String,
+    pub value: String,
+}
+
+/// Who produced the run.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PredicateProducer {
+    pub name: String,
+    pub version: String,
+    pub git: String,
+}
+
+/// Earliest and latest event `time`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TimeWindow {
+    pub start: String,
+    pub end: String,
+}
+
+/// The run this attestation describes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PredicateRun {
+    pub run_id: String,
+    pub event_count: usize,
+    pub producer: PredicateProducer,
+    /// Required, with no null case: ADR-044 dropped that when the verifier stopped accepting a
+    /// zero-event bundle, so there is always a first and a last event time.
+    pub time_window: TimeWindow,
+}
+
+/// The `evidence-bundle/v1` predicate.
+///
+/// Every field is derivable from the bundle the subject names, which is what makes
+/// [`verify_attestation_for_bundle`] able to cross-check rather than trust.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EvidenceBundlePredicate {
+    pub schema_version: u32,
+    pub semantic_equivalence: SemanticEquivalence,
+    pub run: PredicateRun,
+}
+
+/// The outcome of checking a DSSE envelope without any artifact to match it against.
+///
+/// A distinct state rather than a success or an error. `verify_envelope` establishes who signed
+/// what; it cannot establish which artifact, because it never sees one. Returning a plain
+/// `Statement` let a caller read "verified" into a result that had matched nothing — the state
+/// this ADR was written to make nameable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignatureVerified {
+    pub statement: InTotoStatement,
+}
+
+/// A fully verified attestation: signature checked AND subject matched against real bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttestationVerified {
+    pub statement: InTotoStatement,
+    pub predicate: EvidenceBundlePredicate,
+    /// The digest that matched, as hex without the algorithm prefix.
+    pub artifact_sha256: String,
 }
 
 /// A single DSSE signature.
@@ -114,11 +323,35 @@ pub fn sign_statement(statement: &InTotoStatement, key: &SigningKey) -> Result<D
     })
 }
 
-/// Verify a DSSE envelope against a trusted key and return the contained Statement.
-pub fn verify_envelope(
+/// Why a signed payload was refused, without quoting any of it.
+///
+/// The strict parser's own message names the offending key and its path, and both are
+/// attacker-chosen strings bounded only by a 1 MB ceiling. A reason is enough to act on.
+fn strict_reason(err: &crate::json_strict::StrictJsonError) -> &'static str {
+    use crate::json_strict::StrictJsonError as E;
+    match err {
+        E::DuplicateKey { .. } => "it contains a duplicate object member",
+        E::InvalidUnicodeEscape { .. } => "it contains an invalid unicode escape",
+        E::LoneSurrogate { .. } => "it contains a lone surrogate",
+        E::NestingTooDeep { .. } => "it nests deeper than the parser accepts",
+        E::TooManyKeys { .. } => "an object carries more members than the parser accepts",
+        E::StringTooLong { .. } => "it contains a string longer than the parser accepts",
+        E::ParseError(_) => "it is not well-formed JSON",
+    }
+}
+
+/// Check the signature and the Statement shape. Nothing more.
+///
+/// The result is [`SignatureVerified`], a state and not a success: it establishes who signed a
+/// Statement, not which artifact the Statement describes, because no artifact is offered here.
+/// Callers holding the bundle bytes want [`verify_attestation_for_bundle`]; callers that do not
+/// must not report an attestation as verified. ADR-044 decision 2 keeps these two calls apart so
+/// the weaker outcome has a name — folding the byte match in here would make "I verified the
+/// attestation" mean different things depending on which argument the caller happened to have.
+pub fn verify_envelope_signature(
     envelope: &DsseEnvelope,
     trusted_key: &VerifyingKey,
-) -> Result<InTotoStatement> {
+) -> Result<SignatureVerified> {
     // Reject any DSSE payload type other than in-toto BEFORE verifying, so a key
     // that signed the same bytes under a different payload type cannot be accepted
     // as an in-toto attestation (payload-type confusion). The PAE binds the type,
@@ -147,8 +380,21 @@ pub fn verify_envelope(
     trusted_key
         .verify(&pae, &signature)
         .context("dsse signature verification failed")?;
-    let statement: InTotoStatement =
-        serde_json::from_slice(&canonical).context("parse in-toto statement")?;
+
+    // A valid signature over ambiguous bytes is still ambiguous. `serde_json` resolves duplicate
+    // object members last-wins, so a payload carrying `schema_version` twice verified as whichever
+    // value happened to come second, and a second conforming consumer reading first-wins would act
+    // on the other one — from the same envelope, under the same signature. The strict scanner is
+    // the crate's existing answer to that, already applied to manifests and events; the signed
+    // payload was the one JSON document reaching a verdict without it.
+    let payload = std::str::from_utf8(&canonical).context("signed payload is not UTF-8")?;
+    let statement: InTotoStatement = crate::json_strict::from_str_strict(payload).map_err(|e| {
+        anyhow::anyhow!(
+            "signed payload is not unambiguous JSON: {}",
+            strict_reason(&e)
+        )
+    })?;
+
     // Defense in depth: the verified payload must be a v1 in-toto Statement.
     if statement.type_ != STATEMENT_TYPE {
         anyhow::bail!(
@@ -157,61 +403,871 @@ pub fn verify_envelope(
             statement.type_
         );
     }
-    Ok(statement)
+    Ok(SignatureVerified { statement })
+}
+
+/// Check the signature and return the Statement.
+///
+/// Kept at its published 3.x signature. [`verify_envelope_signature`] is the same check returning
+/// the named [`SignatureVerified`] state; changing this function's return type instead would have
+/// broken every downstream build to add a distinction the new name can carry on its own.
+#[deprecated(
+    since = "3.36.0",
+    note = "use `verify_envelope_signature`, which names the weaker outcome: a checked signature \
+            over a Statement is not a verified attestation until an artifact is matched"
+)]
+pub fn verify_envelope(
+    envelope: &DsseEnvelope,
+    trusted_key: &VerifyingKey,
+) -> Result<InTotoStatement> {
+    Ok(verify_envelope_signature(envelope, trusted_key)?.statement)
+}
+
+/// Verify an attestation against the bundle bytes it claims to describe.
+///
+/// This is the only call that can return a fully verified attestation, because it is the only one
+/// that sees an artifact. It recomputes the SHA-256 of `bundle_bytes`, matches it against the
+/// single subject, requires the v1 predicate, and cross-checks every field the bundle can produce.
+///
+/// A correct subject digest nobody compares is still an unchecked field: before ADR-044 the
+/// verifier read `subject` nowhere at all, which is why a forged bundle survived — not because it
+/// matched, but because nothing was matched.
+pub fn verify_attestation_for_bundle(
+    envelope: &DsseEnvelope,
+    trusted_key: &VerifyingKey,
+    bundle_bytes: &[u8],
+) -> Result<AttestationVerified> {
+    verify_attestation_for_bundle_with_limits(
+        envelope,
+        trusted_key,
+        bundle_bytes,
+        VerifyLimits::default(),
+    )
+}
+
+/// [`verify_attestation_for_bundle`] under an explicit set of verification ceilings.
+///
+/// The producer already took limits; the consumer did not, so a caller who had bounded what they
+/// would attest could not bound what they would accept. The bundle is verified a second time here,
+/// by whoever holds it, and that verification is the one that decides — it should answer to the
+/// same ceilings.
+pub fn verify_attestation_for_bundle_with_limits(
+    envelope: &DsseEnvelope,
+    trusted_key: &VerifyingKey,
+    bundle_bytes: &[u8],
+    limits: VerifyLimits,
+) -> Result<AttestationVerified> {
+    let verified = verify_envelope_signature(envelope, trusted_key)?;
+    let statement = verified.statement;
+
+    if statement.predicate_type == EVIDENCE_BUNDLE_PREDICATE_TYPE_V0 {
+        anyhow::bail!(
+            "attestation uses the pre-ADR-044 predicate {EVIDENCE_BUNDLE_PREDICATE_TYPE_V0}, \
+             whose subject digest identifies no artifact; it cannot be matched and must be reissued"
+        );
+    }
+    if statement.predicate_type != EVIDENCE_BUNDLE_PREDICATE_TYPE_V1 {
+        anyhow::bail!(
+            "unknown predicate type: expected {EVIDENCE_BUNDLE_PREDICATE_TYPE_V1}. An unrecognised \
+             major version fails closed rather than being reported as verified"
+        );
+    }
+
+    // Exactly one subject, and it identifies an artifact. Broader than barring `run_root` from the
+    // DigestSet: the spec requires every entry to identify an immutable artifact, so barring one
+    // field would only invite the next.
+    if statement.subject.len() != 1 {
+        anyhow::bail!(
+            "expected exactly one subject, found {}",
+            statement.subject.len()
+        );
+    }
+    let subject = &statement.subject[0];
+    if subject.digest.len() != 1 {
+        anyhow::bail!(
+            "subject carries {} digest entries; DigestSets match on ANY field, so a second entry \
+             would let a different artifact match",
+            subject.digest.len()
+        );
+    }
+    let claimed = subject
+        .digest
+        .get("sha256")
+        .context("subject digest has no sha256 entry")?;
+
+    let predicate: EvidenceBundlePredicate =
+        serde_json::from_value(statement.predicate.clone()).context("parse v1 predicate")?;
+    if predicate.schema_version != 1 {
+        anyhow::bail!(
+            "predicate schema_version {} is not 1",
+            predicate.schema_version
+        );
+    }
+
+    // The caller's ceilings decide before any pass over the offered bytes.
+    //
+    // Ordered ahead of the digest deliberately. Hashing first meant a caller who set a small
+    // `max_bundle_bytes` still paid a full SHA-256 over whatever they were handed, and then heard
+    // "subject digest does not match" — a true statement about the wrong problem. The ceiling was
+    // supplied precisely to stop that work, so it has to be what stops it.
+    //
+    // Everything above this line reads the statement the signature already covered; nothing above
+    // it touches `bundle_bytes`.
+    let verified = crate::bundle::writer::verify_bundle_verbose_with_limits(bundle_bytes, limits)
+        .context("the attested bundle does not verify")?;
+    let result = &verified.result;
+
+    // Value-free: the holder has both the envelope and the bytes, so echoing the two digests adds
+    // nothing they cannot compute and puts an attacker-chosen string into every log that records
+    // the failure.
+    let actual = hex::encode(Sha256::digest(bundle_bytes));
+    if claimed != &actual {
+        anyhow::bail!("the subject digest does not match the sha256 of the bundle offered");
+    }
+
+    // The subject name is `manifest.bundle_id` and is compared, not merely carried. Before this it
+    // was written from `run_id` and read nowhere, so every possible name verified — including a
+    // name naming a different bundle entirely.
+    if subject.name != result.manifest.bundle_id {
+        anyhow::bail!("the subject name is not the attested bundle's bundle_id");
+    }
+
+    // Cross-check against the artifact rather than trusting the predicate. A predicate that
+    // disagrees with the bundle it is attached to is a rejection, not a note.
+    let derived = predicate_from_verified(&verified)?;
+    if derived != predicate {
+        match first_predicate_mismatch(&predicate, &derived) {
+            Some(field) => anyhow::bail!(
+                "predicate field `{field}` disagrees with the bundle it is attached to"
+            ),
+            // Unreachable while the namer stays exhaustive, which a compile-time destructure in
+            // the tests enforces. Reported rather than ignored: a disagreement the namer cannot
+            // place is still a disagreement, and silently accepting it would be the worse failure.
+            None => anyhow::bail!(
+                "the predicate disagrees with the bundle it is attached to in an unnamed field"
+            ),
+        }
+    }
+
+    Ok(AttestationVerified {
+        statement,
+        predicate,
+        artifact_sha256: actual,
+    })
+}
+
+/// Name the first field on which two predicates differ, without quoting either value.
+///
+/// Only ever consulted after an exhaustive `!=`, so it narrows a rejection that has already been
+/// decided; it can never widen one. The tests destructure `EvidenceBundlePredicate` exhaustively,
+/// so adding a field without extending this function fails to compile.
+fn first_predicate_mismatch(
+    attested: &EvidenceBundlePredicate,
+    derived: &EvidenceBundlePredicate,
+) -> Option<&'static str> {
+    if attested.schema_version != derived.schema_version {
+        return Some("schema_version");
+    }
+    if attested.semantic_equivalence.algorithm != derived.semantic_equivalence.algorithm {
+        return Some("semantic_equivalence.algorithm");
+    }
+    if attested.semantic_equivalence.value != derived.semantic_equivalence.value {
+        return Some("semantic_equivalence.value");
+    }
+    if attested.run.run_id != derived.run.run_id {
+        return Some("run.run_id");
+    }
+    if attested.run.event_count != derived.run.event_count {
+        return Some("run.event_count");
+    }
+    if attested.run.producer.name != derived.run.producer.name {
+        return Some("run.producer.name");
+    }
+    if attested.run.producer.version != derived.run.producer.version {
+        return Some("run.producer.version");
+    }
+    if attested.run.producer.git != derived.run.producer.git {
+        return Some("run.producer.git");
+    }
+    if attested.run.time_window.start != derived.run.time_window.start {
+        return Some("run.time_window.start");
+    }
+    if attested.run.time_window.end != derived.run.time_window.end {
+        return Some("run.time_window.end");
+    }
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bundle::writer::VerifyResult;
+    use crate::bundle::BundleWriter;
+    use crate::types::{EvidenceEvent, ProducerMeta};
+    use chrono::{DateTime, Utc};
 
-    fn sample_statement() -> InTotoStatement {
-        let mut digest = BTreeMap::new();
-        digest.insert("sha256".to_string(), "abc123".to_string());
-        InTotoStatement {
-            type_: STATEMENT_TYPE.to_string(),
-            subject: vec![Subject {
-                name: "bundle-1".to_string(),
-                digest,
+    fn producer() -> ProducerMeta {
+        ProducerMeta {
+            name: "assay-cli".into(),
+            version: "test".into(),
+            git: None,
+        }
+    }
+
+    fn bundle_with_times(times: &[DateTime<Utc>]) -> Vec<u8> {
+        let p = producer();
+        let mut out = Vec::new();
+        let mut w = BundleWriter::new(&mut out).with_producer(p.clone());
+        for (i, t) in times.iter().enumerate() {
+            w.add_event(
+                EvidenceEvent::new(
+                    "assay.test.event",
+                    "urn:assay:test",
+                    "attest_run",
+                    i as u64,
+                    serde_json::json!({}),
+                )
+                .with_producer(&p)
+                .with_time(*t),
+            );
+        }
+        w.finish().expect("write bundle");
+        out
+    }
+
+    /// The verification pass plus the window, which is what the predicate is derived from.
+    fn verified(bytes: &[u8]) -> crate::bundle::writer::VerifiedBundle {
+        crate::bundle::writer::verify_bundle_verbose_with_limits(bytes, VerifyLimits::default())
+            .expect("bundle verifies")
+    }
+
+    fn bundle() -> Vec<u8> {
+        bundle_with_times(&["2026-07-28T10:00:00Z".parse().unwrap()])
+    }
+
+    fn key() -> SigningKey {
+        SigningKey::from_bytes(&[7u8; 32])
+    }
+
+    /// Sign exactly these payload bytes.
+    ///
+    /// Every negative case below signs the bytes it wants to test. Mutating an envelope after
+    /// signing only ever tests the signature check, which already has its own case — the question
+    /// here is what a *validly signed* document is allowed to say.
+    fn sign_raw(payload: &str, k: &SigningKey) -> DsseEnvelope {
+        let pae = build_pae(IN_TOTO_PAYLOAD_TYPE, payload.as_bytes());
+        let sig: Ed25519Signature = k.sign(&pae);
+        DsseEnvelope {
+            payload: BASE64.encode(payload.as_bytes()),
+            payload_type: IN_TOTO_PAYLOAD_TYPE.to_string(),
+            signatures: vec![DsseSignature {
+                keyid: compute_key_id_from_verifying_key(&k.verifying_key()).unwrap(),
+                sig: BASE64.encode(sig.to_bytes()),
             }],
-            predicate_type: EVIDENCE_BUNDLE_PREDICATE_TYPE.to_string(),
-            predicate: serde_json::json!({ "event_count": 3, "outcome": "supported" }),
+        }
+    }
+
+    fn sign_value(v: &serde_json::Value, k: &SigningKey) -> DsseEnvelope {
+        sign_raw(&serde_json::to_string(v).unwrap(), k)
+    }
+
+    fn statement_value(bytes: &[u8]) -> serde_json::Value {
+        serde_json::to_value(statement_for_bundle(bytes).expect("build statement")).unwrap()
+    }
+
+    /// Verify a statement built from `bytes` after applying `edit` to its JSON, and return the
+    /// rejection message.
+    fn reject(bytes: &[u8], edit: impl FnOnce(&mut serde_json::Value)) -> String {
+        let k = key();
+        let mut v = statement_value(bytes);
+        edit(&mut v);
+        let envelope = sign_value(&v, &k);
+        verify_attestation_for_bundle(&envelope, &k.verifying_key(), bytes)
+            .expect_err("must be rejected")
+            .to_string()
+    }
+
+    // ── the happy path, and the two states it is made of ────────────────────────────────────
+
+    #[test]
+    fn a_bundle_attests_and_verifies_against_its_own_bytes() {
+        let k = key();
+        let bytes = bundle();
+        let statement = statement_for_bundle(&bytes).expect("statement");
+        let envelope = sign_statement(&statement, &k).expect("sign");
+
+        let signed = verify_envelope_signature(&envelope, &k.verifying_key()).expect("signature");
+        assert_eq!(signed.statement, statement);
+
+        let verified = verify_attestation_for_bundle(&envelope, &k.verifying_key(), &bytes)
+            .expect("attestation");
+        assert_eq!(verified.predicate.run.event_count, 1);
+        assert_eq!(
+            verified.statement.subject[0].name,
+            crate::bundle::verify_bundle(bytes.as_slice())
+                .unwrap()
+                .manifest
+                .bundle_id,
+            "the subject names the bundle, not the run"
+        );
+    }
+
+    #[test]
+    fn signature_tampering_and_the_wrong_key_are_refused() {
+        let k = key();
+        let bytes = bundle();
+        let envelope = sign_statement(&statement_for_bundle(&bytes).unwrap(), &k).unwrap();
+
+        let mut tampered = envelope.clone();
+        let mut raw = BASE64.decode(&tampered.payload).unwrap();
+        raw[0] ^= 0xFF;
+        tampered.payload = BASE64.encode(&raw);
+        assert!(verify_envelope_signature(&tampered, &k.verifying_key()).is_err());
+
+        let other = SigningKey::from_bytes(&[9u8; 32]);
+        assert!(verify_envelope_signature(&envelope, &other.verifying_key()).is_err());
+    }
+
+    #[test]
+    fn a_non_in_toto_payload_type_is_refused() {
+        let k = key();
+        let bytes = bundle();
+        let mut envelope = sign_statement(&statement_for_bundle(&bytes).unwrap(), &k).unwrap();
+        envelope.payload_type = "application/json".to_string();
+        let err = verify_envelope_signature(&envelope, &k.verifying_key()).unwrap_err();
+        assert!(err.to_string().contains("payloadType"), "got: {err}");
+    }
+
+    /// The published 3.x entry point still compiles and still answers.
+    ///
+    /// The point of the case is the call itself: it is what would stop compiling if the return
+    /// type were changed rather than added to.
+    #[test]
+    #[allow(deprecated)]
+    fn the_published_verify_envelope_signature_is_preserved() {
+        let k = key();
+        let bytes = bundle();
+        let envelope = sign_statement(&statement_for_bundle(&bytes).unwrap(), &k).unwrap();
+
+        let statement: InTotoStatement = verify_envelope(&envelope, &k.verifying_key()).unwrap();
+        let typed = verify_envelope_signature(&envelope, &k.verifying_key()).unwrap();
+        assert_eq!(statement, typed.statement, "the shim must not diverge");
+    }
+
+    // ── ambiguous signed JSON, at every level it can occur ──────────────────────────────────
+
+    /// Duplicates are injected into the bytes that get signed, at four nesting levels.
+    ///
+    /// `serde_json` resolves duplicate members last-wins, so each of these verified before: the
+    /// signature was valid and the parser simply picked one of the two claims. Two conforming
+    /// consumers with different duplicate policies would then read different attestations out of
+    /// one envelope.
+    #[test]
+    fn duplicate_members_in_the_signed_payload_are_refused_at_every_level() {
+        let k = key();
+        let bytes = bundle();
+        let json = serde_json::to_string(&statement_for_bundle(&bytes).unwrap()).unwrap();
+
+        let cases: [(&str, String, String); 4] = [
+            (
+                "statement",
+                r#""predicateType":"#.to_string(),
+                r#""predicateType":"https://example.invalid/other","predicateType":"#.to_string(),
+            ),
+            (
+                "subject/digest",
+                r#""sha256":"#.to_string(),
+                r#""sha256":"00","sha256":"#.to_string(),
+            ),
+            (
+                "predicate",
+                r#""schema_version":1"#.to_string(),
+                r#""schema_version":999,"schema_version":1"#.to_string(),
+            ),
+            (
+                "nested predicate",
+                r#""event_count":"#.to_string(),
+                r#""event_count":999,"event_count":"#.to_string(),
+            ),
+        ];
+
+        for (level, needle, replacement) in cases {
+            let ambiguous = json.replacen(&needle, &replacement, 1);
+            assert_ne!(ambiguous, json, "{level}: the injection must apply");
+
+            let envelope = sign_raw(&ambiguous, &k);
+            let err = verify_attestation_for_bundle(&envelope, &k.verifying_key(), &bytes)
+                .expect_err(&format!("{level}: ambiguous payload must be refused"));
+            assert!(
+                err.to_string().contains("duplicate object member"),
+                "{level}: expected a duplicate-member refusal, got: {err}"
+            );
+        }
+    }
+
+    /// Surplus fields are accepted on purpose: ADR-044 says unknown fields within a known major
+    /// are ignored. Pinned so a later `deny_unknown_fields` cannot quietly contradict the decision.
+    #[test]
+    fn surplus_predicate_fields_are_accepted_within_a_known_major() {
+        let k = key();
+        let bytes = bundle();
+        let mut v = statement_value(&bytes);
+        v["predicate"]["a_field_from_a_later_minor"] = serde_json::json!("ignored");
+        let envelope = sign_value(&v, &k);
+        assert!(verify_attestation_for_bundle(&envelope, &k.verifying_key(), &bytes).is_ok());
+    }
+
+    // ── predicate type ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn the_v0_predicate_is_refused_by_name() {
+        let bytes = bundle();
+        let err = reject(&bytes, |v| {
+            v["predicateType"] = serde_json::json!(EVIDENCE_BUNDLE_PREDICATE_TYPE_V0);
+        });
+        assert!(err.contains("pre-ADR-044"), "got: {err}");
+    }
+
+    #[test]
+    fn an_unknown_predicate_major_fails_closed() {
+        let bytes = bundle();
+        let err = reject(&bytes, |v| {
+            v["predicateType"] =
+                serde_json::json!("https://docs.getassay.dev/attestation/evidence-bundle/v2");
+        });
+        assert!(err.contains("unknown predicate type"), "got: {err}");
+    }
+
+    // ── subject shape ──────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn the_subject_array_must_hold_exactly_one_entry() {
+        let bytes = bundle();
+        for (name, edit) in [("zero", 0usize), ("two", 2usize)] {
+            let err = reject(&bytes, |v| {
+                let one = v["subject"][0].clone();
+                v["subject"] = serde_json::Value::Array(vec![one; edit]);
+            });
+            assert!(
+                err.contains("exactly one subject"),
+                "{name} subjects: got: {err}"
+            );
         }
     }
 
     #[test]
-    fn sign_then_verify_roundtrips_and_detects_tamper() {
-        let key = SigningKey::from_bytes(&[7u8; 32]);
-        let statement = sample_statement();
+    fn the_digest_set_must_hold_exactly_one_entry() {
+        let bytes = bundle();
 
-        let envelope = sign_statement(&statement, &key).expect("sign");
-        assert_eq!(envelope.payload_type, IN_TOTO_PAYLOAD_TYPE);
+        let err = reject(&bytes, |v| {
+            v["subject"][0]["digest"] = serde_json::json!({});
+        });
+        assert!(err.contains("digest entries"), "zero digests: got: {err}");
 
-        let recovered = verify_envelope(&envelope, &key.verifying_key()).expect("verify");
-        assert_eq!(recovered, statement);
-
-        // Tampering with the payload must fail verification.
-        let mut tampered = envelope.clone();
-        let mut bytes = BASE64.decode(&tampered.payload).unwrap();
-        bytes[0] ^= 0xFF;
-        tampered.payload = BASE64.encode(&bytes);
-        assert!(verify_envelope(&tampered, &key.verifying_key()).is_err());
-
-        // A different key must fail verification.
-        let other = SigningKey::from_bytes(&[9u8; 32]);
-        assert!(verify_envelope(&envelope, &other.verifying_key()).is_err());
+        // Two entries is the case the rule exists for: a `DigestSet` matches when ANY field
+        // matches, so a second entry offers a second way in.
+        let err = reject(&bytes, |v| {
+            v["subject"][0]["digest"]["sha512"] = serde_json::json!("00");
+        });
+        assert!(err.contains("digest entries"), "two digests: got: {err}");
     }
 
     #[test]
-    fn verify_rejects_non_in_toto_payload_type() {
-        let key = SigningKey::from_bytes(&[7u8; 32]);
-        let statement = sample_statement();
-        let mut envelope = sign_statement(&statement, &key).expect("sign");
+    fn a_digest_under_another_algorithm_is_not_a_sha256() {
+        let bytes = bundle();
+        let err = reject(&bytes, |v| {
+            let d = v["subject"][0]["digest"]["sha256"].clone();
+            v["subject"][0]["digest"] = serde_json::json!({ "sha512": d });
+        });
+        assert!(err.contains("no sha256 entry"), "got: {err}");
+    }
 
-        // Re-label the envelope as a different DSSE payload type. Even with a
-        // genuine signature over the same bytes, an in-toto verifier must reject it.
-        envelope.payload_type = "application/json".to_string();
-        let err = verify_envelope(&envelope, &key.verifying_key())
-            .expect_err("must reject non-in-toto payload type");
-        assert!(err.to_string().contains("payloadType"));
+    #[test]
+    fn a_subject_digest_for_other_bytes_is_refused() {
+        let k = key();
+        let bytes = bundle();
+        let envelope = sign_statement(&statement_for_bundle(&bytes).unwrap(), &k).unwrap();
+
+        let mut other = bytes.clone();
+        other.extend_from_slice(b"trailing");
+        let err = verify_attestation_for_bundle(&envelope, &k.verifying_key(), &other)
+            .expect_err("a different artifact must not match");
+        assert!(err.to_string().contains("does not match"), "got: {err}");
+    }
+
+    #[test]
+    fn a_subject_name_that_is_not_the_bundle_id_is_refused() {
+        let bytes = bundle();
+        let err = reject(&bytes, |v| {
+            v["subject"][0]["name"] = serde_json::json!("some-other-bundle");
+        });
+        assert!(err.contains("subject name"), "got: {err}");
+    }
+
+    // ── predicate fields, one rejection reason each ─────────────────────────────────────────
+
+    /// Every field is mutated on its own, and the rejection must name that field.
+    ///
+    /// A verifier that rejected for an earlier reason would satisfy a bare `is_err()`, which is
+    /// why each case asserts the field name rather than the failure.
+    #[test]
+    fn each_predicate_field_is_cross_checked_and_named() {
+        let bytes = bundle();
+        let cases: [(&str, &str, serde_json::Value); 10] = [
+            (
+                "schema_version",
+                "/predicate/schema_version",
+                serde_json::json!(2),
+            ),
+            (
+                "semantic_equivalence.algorithm",
+                "/predicate/semantic_equivalence/algorithm",
+                serde_json::json!("other"),
+            ),
+            (
+                "semantic_equivalence.value",
+                "/predicate/semantic_equivalence/value",
+                serde_json::json!("00"),
+            ),
+            (
+                "run.run_id",
+                "/predicate/run/run_id",
+                serde_json::json!("other"),
+            ),
+            (
+                "run.event_count",
+                "/predicate/run/event_count",
+                serde_json::json!(99),
+            ),
+            (
+                "run.producer.name",
+                "/predicate/run/producer/name",
+                serde_json::json!("other"),
+            ),
+            (
+                "run.producer.version",
+                "/predicate/run/producer/version",
+                serde_json::json!("other"),
+            ),
+            (
+                "run.producer.git",
+                "/predicate/run/producer/git",
+                serde_json::json!("other"),
+            ),
+            (
+                "run.time_window.start",
+                "/predicate/run/time_window/start",
+                serde_json::json!("2000-01-01T00:00:00Z"),
+            ),
+            (
+                "run.time_window.end",
+                "/predicate/run/time_window/end",
+                serde_json::json!("2099-01-01T00:00:00Z"),
+            ),
+        ];
+
+        for (field, pointer, replacement) in cases {
+            let err = reject(&bytes, |v| {
+                *v.pointer_mut(pointer).expect("pointer resolves") = replacement;
+            });
+            if field == "schema_version" {
+                // Checked before the cross-check, and its own message is the more specific one.
+                assert!(err.contains("schema_version"), "{field}: got: {err}");
+            } else {
+                assert!(
+                    err.contains(&format!("`{field}`")),
+                    "{field}: expected the field to be named, got: {err}"
+                );
+            }
+        }
+    }
+
+    /// The mismatch namer has to stay exhaustive, and this is what makes that a build error.
+    ///
+    /// Adding a predicate field without extending `first_predicate_mismatch` would leave the
+    /// rejection message generic while everything still passed; destructuring here means the
+    /// compiler asks for it instead.
+    #[test]
+    fn the_predicate_has_no_field_the_mismatch_namer_does_not_know() {
+        let bytes = bundle();
+        let p = predicate_from_verified(&verified(&bytes)).unwrap();
+
+        let EvidenceBundlePredicate {
+            schema_version: _,
+            semantic_equivalence:
+                SemanticEquivalence {
+                    algorithm: _,
+                    value: _,
+                },
+            run:
+                PredicateRun {
+                    run_id: _,
+                    event_count: _,
+                    producer:
+                        PredicateProducer {
+                            name: _,
+                            version: _,
+                            git: _,
+                        },
+                    time_window: TimeWindow { start: _, end: _ },
+                },
+        } = p;
+    }
+
+    // ── time window ────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn the_window_keeps_sub_second_precision_and_spans_the_run() {
+        let first: DateTime<Utc> = "2026-07-28T10:00:00.123456Z".parse().unwrap();
+        let last: DateTime<Utc> = "2026-07-28T10:00:02.987654Z".parse().unwrap();
+        // Deliberately out of order on the wire: the window is a min and a max, not the first and
+        // last lines of the file.
+        let bytes = bundle_with_times(&[last, first]);
+
+        let p = predicate_from_verified(&verified(&bytes)).unwrap();
+
+        assert_eq!(p.run.time_window.start, "2026-07-28T10:00:00.123456Z");
+        assert_eq!(p.run.time_window.end, "2026-07-28T10:00:02.987654Z");
+
+        // And the round trip still verifies, so the exact comparison holds on fractional values
+        // rather than only on the truncated ones it used to see.
+        let k = key();
+        let envelope = sign_statement(&statement_for_bundle(&bytes).unwrap(), &k).unwrap();
+        assert!(verify_attestation_for_bundle(&envelope, &k.verifying_key(), &bytes).is_ok());
+    }
+
+    #[test]
+    fn a_verified_bundle_always_has_a_window() {
+        let bytes = bundle();
+        // Not an `Option`: the type is the invariant. This case exists to fail compilation if the
+        // field ever goes back to one.
+        let (start, end) = verified(&bytes).time_window;
+        assert!(start <= end);
+    }
+
+    /// The consumer honours a ceiling too, and the ceiling is threaded rather than accepted.
+    ///
+    /// The two bounds are one byte apart on purpose. A test that merely passes some limit through
+    /// stays green when the argument is dropped and the default used instead; only a limit strict
+    /// enough to change the verdict proves the value reached the verifier.
+    #[test]
+    fn the_consumer_honours_a_stricter_source_ceiling() {
+        let k = key();
+        let bytes = bundle();
+        let envelope = sign_statement(&statement_for_bundle(&bytes).unwrap(), &k).unwrap();
+
+        let fitting = VerifyLimits {
+            max_bundle_bytes: bytes.len() as u64,
+            ..VerifyLimits::default()
+        };
+        assert!(
+            verify_attestation_for_bundle_with_limits(
+                &envelope,
+                &k.verifying_key(),
+                &bytes,
+                fitting
+            )
+            .is_ok(),
+            "a ceiling that exactly fits must accept"
+        );
+
+        let too_small = VerifyLimits {
+            max_bundle_bytes: bytes.len() as u64 - 1,
+            ..VerifyLimits::default()
+        };
+        let err = verify_attestation_for_bundle_with_limits(
+            &envelope,
+            &k.verifying_key(),
+            &bytes,
+            too_small,
+        )
+        .expect_err("one byte under the ceiling must refuse");
+        let chain = format!("{err:#}");
+        assert!(
+            chain.contains("LimitBundleBytes"),
+            "expected the source ceiling to be the reason, got: {chain}"
+        );
+
+        // The default-limits entry point still answers, and answers the same way.
+        assert!(verify_attestation_for_bundle(&envelope, &k.verifying_key(), &bytes).is_ok());
+    }
+
+    /// The ceiling has to decide before the artifact is hashed.
+    ///
+    /// Two things are wrong with the offered bytes at once: they are over the ceiling and they are
+    /// not what the subject names. Whichever check runs first is the one the caller hears about,
+    /// and a caller who set a small ceiling asked for that one — hashing megabytes to then report a
+    /// digest mismatch does the work the ceiling existed to refuse.
+    #[test]
+    fn the_ceiling_decides_before_the_artifact_is_hashed() {
+        let k = key();
+        let bytes = bundle();
+        let envelope = sign_statement(&statement_for_bundle(&bytes).unwrap(), &k).unwrap();
+
+        let mut other = bundle_with_times(&["2026-07-28T11:00:00Z".parse().unwrap()]);
+        other.extend_from_slice(&vec![0u8; 4096]);
+        let tiny = VerifyLimits {
+            max_bundle_bytes: 8,
+            ..VerifyLimits::default()
+        };
+
+        let err =
+            verify_attestation_for_bundle_with_limits(&envelope, &k.verifying_key(), &other, tiny)
+                .expect_err("oversized, mismatched bytes must be refused");
+        let chain = format!("{err:#}");
+        assert!(
+            chain.contains("LimitBundleBytes"),
+            "the supplied ceiling must decide, got: {chain}"
+        );
+        assert!(
+            !chain.contains("does not match"),
+            "the digest comparison must not have run: {chain}"
+        );
+    }
+
+    /// `VerifyResult` keeps the shape it published in 3.35.0.
+    ///
+    /// The destructure is the check. It has no `..`, so a new public field stops this compiling —
+    /// which is exactly what it does to every downstream struct literal and exhaustive match built
+    /// against the published crate.
+    #[test]
+    fn the_published_verify_result_shape_is_unchanged() {
+        let bytes = bundle();
+        let result = crate::bundle::verify_bundle(bytes.as_slice()).unwrap();
+        let VerifyResult {
+            manifest: _,
+            event_count: _,
+            computed_run_root: _,
+        } = result;
+    }
+
+    /// The unversioned constant keeps its 3.x value, and both versions have explicit names.
+    #[test]
+    #[allow(deprecated)]
+    fn the_predicate_constants_are_version_explicit() {
+        assert_eq!(
+            EVIDENCE_BUNDLE_PREDICATE_TYPE, "https://assay.dev/attestation/evidence-bundle/v0",
+            "the published unversioned name must keep the value downstream compiled against"
+        );
+        assert_eq!(
+            EVIDENCE_BUNDLE_PREDICATE_TYPE,
+            EVIDENCE_BUNDLE_PREDICATE_TYPE_V0
+        );
+        assert_eq!(
+            EVIDENCE_BUNDLE_PREDICATE_TYPE_V1,
+            "https://docs.getassay.dev/attestation/evidence-bundle/v1"
+        );
+
+        // And the producer mints v1 under the explicit name.
+        let bytes = bundle();
+        let statement = statement_for_bundle(&bytes).unwrap();
+        assert_eq!(statement.predicate_type, EVIDENCE_BUNDLE_PREDICATE_TYPE_V1);
+    }
+
+    // ── the published v0 producer ──────────────────────────────────────────────────────────
+
+    /// `statement_from_manifest` is published in 3.x and must keep compiling, exactly.
+    ///
+    /// The Wave-0 semver check does not cover this: its baseline `9cc23b4c` predates the function
+    /// while v3.35.0 ships it, so a green run there says nothing about this call. The call below is
+    /// the check — argument types, argument order and return type all have to still hold.
+    #[test]
+    #[allow(deprecated)]
+    fn the_published_v0_producer_is_preserved_and_still_refused() {
+        let bytes = bundle();
+        let result = crate::bundle::verify_bundle(bytes.as_slice()).unwrap();
+
+        let statement: InTotoStatement =
+            statement_from_manifest(&result.manifest, serde_json::json!({ "anything": true }));
+
+        // v0 in every respect it had: the old predicate type, and the semantic root as the subject
+        // digest. Reviving it under the v1 type would mint statements claiming a conformance they
+        // do not have.
+        assert_eq!(statement.predicate_type, EVIDENCE_BUNDLE_PREDICATE_TYPE_V0);
+        assert_eq!(statement.subject[0].name, result.manifest.bundle_id);
+        assert_eq!(
+            statement.subject[0].digest["sha256"],
+            result
+                .manifest
+                .run_root
+                .strip_prefix("sha256:")
+                .unwrap_or(&result.manifest.run_root)
+        );
+        assert_eq!(statement.predicate, serde_json::json!({ "anything": true }));
+
+        // And what it produces stays refused, against the very bytes it describes. Keeping the
+        // function compiling is a source-compatibility promise, not a rehabilitation.
+        let k = key();
+        let envelope = sign_statement(&statement, &k).unwrap();
+        let err = verify_attestation_for_bundle(&envelope, &k.verifying_key(), &bytes)
+            .expect_err("a v0 statement must stay unverifiable");
+        assert!(err.to_string().contains("pre-ADR-044"), "got: {err}");
+    }
+
+    // ── wire shape ─────────────────────────────────────────────────────────────────────────
+
+    /// The predicate on the wire is exactly what the type serializes to.
+    ///
+    /// It was assembled by hand into a `json!` literal that mirrored the struct field by field, so
+    /// the two could drift apart silently — a renamed field would have changed the type and left
+    /// the wire shape untouched, or the reverse. This pins the shape and the equality at once.
+    #[test]
+    fn the_predicate_wire_shape_is_the_serialization_of_the_type() {
+        let bytes = bundle();
+        let predicate = predicate_from_verified(&verified(&bytes)).unwrap();
+        let statement = statement_for_bundle(&bytes).unwrap();
+
+        assert_eq!(
+            statement.predicate,
+            serde_json::to_value(&predicate).unwrap(),
+            "the statement must carry the serialization of the predicate, not a copy of it"
+        );
+
+        // And the shape itself, spelled out, so a rename is visible here rather than only to a
+        // consumer that has already deployed.
+        assert_eq!(
+            statement.predicate,
+            serde_json::json!({
+                "schema_version": 1,
+                "semantic_equivalence": {
+                    "algorithm": predicate.semantic_equivalence.algorithm,
+                    "value": predicate.semantic_equivalence.value,
+                },
+                "run": {
+                    "run_id": predicate.run.run_id,
+                    "event_count": predicate.run.event_count,
+                    "producer": {
+                        "name": predicate.run.producer.name,
+                        "version": predicate.run.producer.version,
+                        "git": predicate.run.producer.git,
+                    },
+                    "time_window": {
+                        "start": predicate.run.time_window.start,
+                        "end": predicate.run.time_window.end,
+                    },
+                },
+            })
+        );
+    }
+
+    // ── limits ─────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn a_custom_source_ceiling_is_honoured_by_the_producer() {
+        let bytes = bundle();
+        let tiny = VerifyLimits {
+            max_bundle_bytes: 8,
+            ..VerifyLimits::default()
+        };
+        let err = statement_for_bundle_with_limits(&bytes, tiny)
+            .expect_err("a bundle over the source ceiling must not be attested");
+        // On the chain, not the top-level context: the outer message says the bundle did not
+        // verify, which every rejection says. The ceiling is the reason, and the reason is what
+        // this case is about.
+        let chain = format!("{err:#}");
+        assert!(
+            chain.contains("LimitBundleBytes"),
+            "expected the source ceiling to be the reason, got: {chain}"
+        );
     }
 }

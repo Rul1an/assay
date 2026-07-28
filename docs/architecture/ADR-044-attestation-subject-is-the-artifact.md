@@ -137,8 +137,13 @@ conforming one are indistinguishable. This decision introduces a new predicate t
 version, not a relaxation of the old one:
 
 ```
-predicateType = https://assay.dev/attestation/evidence-bundle/v1
+predicateType = https://docs.getassay.dev/attestation/evidence-bundle/v1
 ```
+
+The host is `docs.getassay.dev`, where the contract surface actually resolves — the profile URIs
+under `docs/profiles/` already point there. The v0 identifier keeps `assay.dev` because statements
+were minted under it and a refusal has to name the thing it refuses. Minting v1 on a host that no
+longer serves the contract would publish a dangling identifier on the day it is frozen.
 
 ```json
 {

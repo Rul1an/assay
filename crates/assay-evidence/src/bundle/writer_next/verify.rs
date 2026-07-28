@@ -3,6 +3,7 @@ use crate::crypto::id::{compute_content_hash, compute_run_root, compute_stream_i
 use crate::json_strict::validate_json_strict_with_depth;
 use crate::types::EvidenceEvent;
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -66,6 +67,27 @@ pub struct VerifyResult {
     pub computed_run_root: String,
 }
 
+/// Everything the verification pass learned, including what the published result cannot carry.
+///
+/// Crate-internal on purpose. `VerifyResult` is published in 3.x with all fields public and no
+/// `#[non_exhaustive]`, so adding a field to it stops every downstream struct literal and
+/// exhaustive destructure from compiling. The window travels beside the result instead of inside
+/// it, which costs one projection and no source break.
+///
+/// ADR-044's predicate needs the run's time window and the manifest does not carry it. It is
+/// captured here because the verifier already parses every event, so the window is free and costs
+/// no retention — the alternative was for the attestation path to walk the events again through
+/// `BundleReader`, undoing the change that stopped verification holding the stream.
+pub(crate) struct VerifiedBundle {
+    pub(crate) result: VerifyResult,
+    /// Earliest and latest event `time`, in that order.
+    ///
+    /// Not an `Option`: a zero-event bundle is refused, so a `VerifiedBundle` that exists has a
+    /// first and a last event. Typed rather than rendered — the values are compared as instants
+    /// and formatted once, at the edge that needs a string.
+    pub(crate) time_window: (DateTime<Utc>, DateTime<Utc>),
+}
+
 /// Verify a bundle's integrity and contract compliance.
 ///
 /// # Checks Performed
@@ -97,6 +119,14 @@ pub fn verify_bundle<R: Read>(reader: R) -> Result<VerifyResult> {
 
 /// Verify a bundle with explicit resource limits.
 pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<VerifyResult> {
+    Ok(verify_bundle_verbose_with_limits(reader, limits)?.result)
+}
+
+/// The same pass, returning what the published result cannot carry.
+pub(crate) fn verify_bundle_verbose_with_limits<R: Read>(
+    reader: R,
+    limits: VerifyLimits,
+) -> Result<VerifiedBundle> {
     // Snapshot the whole source under the ceiling before parsing anything.
     //
     // Streaming the ceiling into the gzip/tar walker only bounds the prefix those layers choose
@@ -121,7 +151,7 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
 }
 
 /// Verify a bundle from bytes already bounded and materialized by the caller.
-fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyResult> {
+fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifiedBundle> {
     let reader = std::io::Cursor::new(source);
 
     let decoder = GzDecoder::new(reader);
@@ -139,6 +169,12 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
     let mut seen_lines: usize = 0;
     let mut actual_event_count = 0;
     let mut first_event: Option<EvidenceEvent> = None;
+    // Min and max of `time` across events, for ADR-044's predicate. Compared as the instants they
+    // already are: `event.time` is a `DateTime<Utc>`, so ordering it needs no rendering at all.
+    // Rendering first and comparing the text was what discarded sub-second precision, because the
+    // only rendering that made string order safe also truncated to whole seconds.
+    let mut time_lo: Option<DateTime<Utc>> = None;
+    let mut time_hi: Option<DateTime<Utc>> = None;
 
     let entries = archive.entries().map_err(|e| {
         let limit = classify_limit(&e);
@@ -484,6 +520,14 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
                     first_event = Some(event.clone());
                 }
 
+                let event_time = event.time;
+                if time_lo.is_none_or(|lo| event_time < lo) {
+                    time_lo = Some(event_time);
+                }
+                if time_hi.is_none_or(|hi| event_time > hi) {
+                    time_hi = Some(event_time);
+                }
+
                 // Check 9, the ID contract. Documented at the top of this function since the
                 // format was written, but never executed until ADR-043: the id is outside the
                 // per-event content hash, so an id that disagrees with its own run_id and seq
@@ -643,9 +687,23 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
         }
     }
 
-    Ok(VerifyResult {
-        manifest: manifest.unwrap(),
-        event_count: actual_event_count,
-        computed_run_root,
+    // The zero-event refusal above is what makes this pair total. Stated as an error rather than
+    // an `unwrap`, so that if some future path ever reaches here without events it fails in the
+    // verifier's own vocabulary instead of aborting the process.
+    let time_window = time_lo.zip(time_hi).ok_or_else(|| {
+        VerifyError::new(
+            ErrorClass::Contract,
+            ErrorCode::ContractInvalidEvent,
+            StreamRule::NonEmpty.describe(),
+        )
+    })?;
+
+    Ok(VerifiedBundle {
+        result: VerifyResult {
+            manifest: manifest.unwrap(),
+            event_count: actual_event_count,
+            computed_run_root,
+        },
+        time_window,
     })
 }

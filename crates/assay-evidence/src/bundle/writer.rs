@@ -226,6 +226,8 @@ pub(crate) fn classify_reader_io(err: std::io::Error) -> anyhow::Error {
 // classifies them by.
 pub use writer_next::limits::{VerifyLimits, VerifyLimitsOverrides};
 pub use writer_next::manifest::{AlgorithmMeta, FileMeta, Manifest};
+/// Crate-internal: the verification pass plus the time window the published result cannot carry.
+pub(crate) use writer_next::verify::VerifiedBundle;
 pub use writer_next::verify::VerifyResult;
 pub use writer_next::write::BundleWriter;
 
@@ -239,6 +241,17 @@ pub fn verify_bundle<R: Read>(reader: R) -> Result<VerifyResult> {
 /// Verify a bundle with explicit resource limits.
 pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<VerifyResult> {
     writer_next::verify::verify_bundle_with_limits(reader, limits)
+}
+
+/// The same verification, plus what the published `VerifyResult` cannot carry.
+///
+/// Crate-internal: see [`VerifiedBundle`] for why the time window travels
+/// beside the result rather than inside it.
+pub(crate) fn verify_bundle_verbose_with_limits<R: Read>(
+    reader: R,
+    limits: VerifyLimits,
+) -> Result<VerifiedBundle> {
+    writer_next::verify::verify_bundle_verbose_with_limits(reader, limits)
 }
 
 #[cfg(test)]
