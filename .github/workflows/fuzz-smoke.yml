@@ -111,7 +111,12 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/fuzz-out"
           # Report what actually runs, so the log carries the toolchain rather than an assumption.
           rustc "+${FUZZ_TOOLCHAIN}" --version --verbose
-          cargo "+${FUZZ_TOOLCHAIN}" fuzz run bundle_reader \
+          # `--locked`: without it cargo resolves freshly in the runner and rewrites the lock, so
+          # the checked-in `fuzz/Cargo.lock` bound nothing and its staleness was invisible — it
+          # sat at workspace 3.34.0 against a 3.35.0 tree, missing the `assay-evidence ->
+          # assay-common` edge, and nobody could have noticed from a CI run. A lockfile that CI
+          # does not honour cannot reproduce a fuzz finding, which is the only reason to keep one.
+          cargo "+${FUZZ_TOOLCHAIN}" fuzz run --locked bundle_reader \
             "${RUNNER_TEMP}/fuzz-out" fuzz/corpus/bundle_reader \
             -- \
             -runs="${RUNS}" \

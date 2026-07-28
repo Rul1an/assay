@@ -167,6 +167,20 @@ jobs:
           # RUSTSEC-2023-0071 (rsa Marvin Attack): no fixed upgrade; assay-mcp-server JWT (see deny.toml)
           cargo audit --ignore RUSTSEC-2023-0071
 
+      - name: cargo audit (RustSec) — fuzz lockfile
+        run: |
+          # `Cargo.toml` sets `exclude = ["fuzz"]`, so the audit above cannot see this lockfile and
+          # it was covered by nothing: not this job, not the OSV scanner (which rejects Rust locks
+          # by design), not dependabot (scoped to `/`). It accumulated six advisories the root tree
+          # had already moved past. Audited separately because the exclusion is deliberate and the
+          # blind spot it creates is not.
+          #
+          # No ignores: the fuzz tree does not reach `jsonwebtoken`, so the one advisory the root
+          # carries has nothing to match here. If that changes, add it in `deny.toml`,
+          # `.cargo/audit.toml`, the step above and the pre-push hook together — that list is kept
+          # in lockstep by hand and has drifted before.
+          cargo audit --file fuzz/Cargo.lock
+
   clippy:
     name: Clippy (deny warnings)
     needs: [scope]
