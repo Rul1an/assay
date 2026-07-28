@@ -210,6 +210,21 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
 
         let mut compiled = assay_policy::tiers::compile(&t1_policy);
 
+        // The compiler accepts IPv6 CIDRs, but the shipped enforcement target attaches only
+        // connect4 and loads only CIDR_RULES_V4. Refuse before resolving file rules or mutating any
+        // kernel map; warning and continuing would turn an IPv6 policy into an undisclosed IPv4
+        // subset.
+        if let Err(e) = assay_monitor::validate_network_enforcement_support(&compiled) {
+            emit_err!(
+                "FATAL: egress enforcement policy cannot be installed: {} (fail-closed, not \
+                 running a partially enforced policy)",
+                e
+            );
+            let _ =
+                write_enforcement_health(&args, EnforcementHealth::failed(SCOPE_IPV4_TCP_CONNECT));
+            return Ok(crate::exit_codes::EXIT_WOULD_BLOCK);
+        }
+
         let mut inode_rules = Vec::with_capacity(compiled.tier1.file_deny_exact.len());
 
         for rule in &compiled.tier1.file_deny_exact {

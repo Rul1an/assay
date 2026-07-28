@@ -261,6 +261,10 @@ impl LinuxMonitor {
     }
 
     pub fn set_tier1_rules(&mut self, compiled: &CompiledPolicy) -> Result<(), MonitorError> {
+        // Validate before taking the BPF lock or touching any map. A mixed IPv4/IPv6 policy must
+        // not leave a successfully-loaded IPv4 subset behind when the IPv6 half is unsupported.
+        crate::validate_network_enforcement_support(compiled)?;
+
         let mut bpf = self.bpf.lock().unwrap();
 
         // 1. File Path Exact Matches
