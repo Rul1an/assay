@@ -62,6 +62,20 @@ pub struct BundleReader {
 impl BundleReader {
     /// Open and verify a bundle, loading it into memory.
     ///
+    /// # Cost, and when not to use this
+    ///
+    /// The whole decompressed `events.ndjson` is retained so [`Self::events`] can iterate it, and
+    /// the only ceiling on that is `max_events_bytes` — 500 MiB, five times `max_bundle_bytes`.
+    /// A small, highly compressible bundle therefore costs far more resident memory than its size
+    /// suggests: 5.7 MB on disk, events decompressing to about half a gigabyte, measured at 530 MB
+    /// peak against 33 MB for the same bundle through [`crate::bundle::verify_bundle`].
+    ///
+    /// **If you need the answer and not the events, call `verify_bundle` instead.** It runs the
+    /// same checks and returns the manifest in its [`crate::bundle::VerifyResult`], without
+    /// holding the stream. `assay evidence verify`, `evidence diff`'s baseline check and
+    /// `evidence attest` each used this constructor and then took nothing or only the manifest;
+    /// routing them to the streaming verifier is where the 16x came from.
+    ///
     /// # Process
     ///
     /// 1. Verify bundle integrity (all checks from `verify_bundle`)
