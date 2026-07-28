@@ -62,7 +62,7 @@ pub struct TrustBasisAssertArgs {
     #[arg(long, short = 'i', value_name = "TRUST_BASIS")]
     pub input: PathBuf,
 
-    /// Required claim level, formatted as <claim-id>=<level>
+    /// Required claim level, formatted as `<claim-id>=<level>`
     #[arg(long = "require", value_name = "CLAIM=LEVEL", required = true)]
     pub requirements: Vec<String>,
 

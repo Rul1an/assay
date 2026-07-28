@@ -13,7 +13,7 @@ pub enum ProfileEvent {
         scrubbed: bool,
     },
 
-    /// Command execution observed (argv[0])
+    /// Command execution observed (`argv[0]`)
     ExecObserved { argv0: String },
 
     /// Filesystem operation observed

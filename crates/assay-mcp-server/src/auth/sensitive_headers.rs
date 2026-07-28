@@ -7,7 +7,8 @@
 //! **PR packet (review/sign-off):**
 //! 1. **Header set (denylist):** [SENSITIVE_HEADER_NAMES] — comparison is case-insensitive.
 //! 2. **Outbound callsites:** (a) JWKS in [crate::auth::jwks] — no request-derived headers.
-//!    (b) Test-only outbound in [crate::tools::test_outbound] — uses [build_downstream_headers] only.
+//!    (b) Test-only outbound in `crate::tools::test_outbound` (behind feature `test-outbound`, so
+//!    it is not linkable from a default doc build) — uses [build_downstream_headers] only.
 //! 3. **E2E proof:** `tests/no_passthrough_e2e.rs` — inbound auth in initialize, then outbound call;
 //!    assert mock received no sensitive header names (audit-grade failure message on leak).
 

@@ -175,7 +175,7 @@ pub fn stability_smoothed(runs_seen: u32, total_runs: u32, alpha: f64) -> f64 {
 /// z=1.96 gives ~95% confidence; z=1.645 gives ~90%.
 ///
 /// Formula: (p + z²/2n - z√(p(1-p)/n + z²/4n²)) / (1 + z²/n)
-/// Reference: https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Wilson_score_interval
+/// Reference: <https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Wilson_score_interval>
 pub fn stability_wilson_lower(runs_seen: u32, total_runs: u32, z: f64) -> f64 {
     if total_runs == 0 {
         return 0.0;
