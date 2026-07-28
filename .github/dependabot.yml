@@ -14,9 +14,6 @@ updates:
     open-pull-requests-limit: 5
     cooldown:
       default-days: 7
-      semver-major-days: 30
-      semver-minor-days: 7
-      semver-patch-days: 7
     ignore:
       # Major version bumps need manual review (breaking changes)
       - dependency-name: "*"
@@ -70,6 +67,10 @@ updates:
       - dependency-name: "rusqlite"
       # sysinfo 0.38+ has breaking API changes (method signatures changed)
       - dependency-name: "sysinfo"
+        update-types: ["version-update:semver-major"]
+      # serial_test 4 requires Rust 1.93.1, above Assay's documented Rust 1.70+ floor.
+      # Revisit only with an explicit MSRV policy change.
+      - dependency-name: "serial_test"
         update-types: ["version-update:semver-major"]
 
   # Python (assay-python-sdk)
