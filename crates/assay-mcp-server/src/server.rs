@@ -9,6 +9,8 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 static RID: AtomicU64 = AtomicU64::new(1);
+const INVALID_INITIALIZE_PARAMS: &str =
+    "Invalid initialize params: expected the required legacy MCP fields";
 
 fn next_rid() -> String {
     let n = RID.fetch_add(1, Ordering::Relaxed);
@@ -24,13 +26,27 @@ enum LegacyProtocolVersion {
 impl LegacyProtocolVersion {
     const LATEST: Self = Self::V2025_11_25;
 
-    fn negotiate(params: Option<&Value>) -> Option<Self> {
+    fn negotiate(params: Option<&Value>) -> Result<Self, ()> {
+        let params = params.and_then(Value::as_object).ok_or(())?;
         let requested = params
+            .get("protocolVersion")
+            .and_then(Value::as_str)
+            .ok_or(())?;
+        params
+            .get("capabilities")
             .and_then(Value::as_object)
-            .and_then(|params| params.get("protocolVersion"))
-            .and_then(Value::as_str)?;
+            .ok_or(())?;
+        let client_info = params
+            .get("clientInfo")
+            .and_then(Value::as_object)
+            .ok_or(())?;
+        client_info.get("name").and_then(Value::as_str).ok_or(())?;
+        client_info
+            .get("version")
+            .and_then(Value::as_str)
+            .ok_or(())?;
 
-        Some(match requested {
+        Ok(match requested {
             "2024-11-05" => Self::V2024_11_05,
             "2025-11-25" => Self::V2025_11_25,
             _ => Self::LATEST,
@@ -197,13 +213,11 @@ impl Server {
             // Dispatch
             let resp = match req.method.as_str() {
                 "initialize" => match LegacyProtocolVersion::negotiate(req.params.as_ref()) {
-                    Some(version) => {
-                        JsonRpcResponse::ok(req.id.clone(), initialize_result(version))
-                    }
-                    None => JsonRpcResponse::error(
+                    Ok(version) => JsonRpcResponse::ok(req.id.clone(), initialize_result(version)),
+                    Err(()) => JsonRpcResponse::error(
                         req.id.clone(),
                         -32602,
-                        "Invalid initialize params: protocolVersion must be a string".to_string(),
+                        INVALID_INITIALIZE_PARAMS.to_string(),
                     ),
                 },
                 "notifications/initialized" => {

@@ -9,6 +9,11 @@ All notable changes to this project will be documented in this file.
   workspace graph and all Linux-host targets in required CI. The policy becomes part of published
   crate metadata with the first release after 3.35.0. Repository development remains pinned to
   Rust 1.96, and the eBPF nightly remains a separate internal build toolchain.
+- The stdio MCP server now negotiates its two tested legacy handshake revisions. Requests for
+  `2024-11-05` or `2025-11-25` receive that exact revision; other string values receive the
+  latest supported legacy revision, `2025-11-25`. Missing or structurally incomplete initialize
+  parameters fail with JSON-RPC invalid params. This does not claim MCP `2026-07-28` support: the
+  modern `server/discover` and per-request metadata contract remains separate.
 - **Fail-closed correction (bundle verification, migration-visible).** The verifier now rejects
   every bundle `BundleWriter` refuses to emit. Five shapes previously verified: an empty bundle, an
   inconsistent `source` across events, a `source` that is not a URI, and a blank line in
@@ -65,11 +70,6 @@ All notable changes to this project will be documented in this file.
   sessions that failed authentication under the default permissive mode, and neither carried a
   basis a reviewer could check. `serverInfo.version` is now derived from the crate version
   instead of the hand-written `0.4.0`, which no build produced.
-- The stdio MCP server now negotiates its two tested legacy handshake revisions. Requests for
-  `2024-11-05` or `2025-11-25` receive that exact revision; other string values receive the
-  latest supported legacy revision, `2025-11-25`. Missing or non-string `protocolVersion` values
-  fail with JSON-RPC invalid params. This does not claim MCP `2026-07-28` support: the modern
-  `server/discover` and per-request metadata contract remains separate.
 - **Fail-closed correction (`assay sandbox`, migration-visible)**: a named policy with non-empty
   `extends` is refused before execution. Pack resolution is unsupported, so accepting those entries
   previously made declared policy composition disappear silently. `assay sandbox --profile` now

@@ -117,7 +117,75 @@ fn missing_or_non_string_protocol_version_is_value_free_invalid_params() {
         assert_eq!(response["error"]["code"].as_i64(), Some(-32602));
         assert_eq!(
             response["error"]["message"].as_str(),
-            Some("Invalid initialize params: protocolVersion must be a string")
+            Some("Invalid initialize params: expected the required legacy MCP fields")
+        );
+        assert!(response.get("result").is_none());
+    }
+
+    let rendered = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !rendered.contains(secret),
+        "invalid input value leaked into protocol output or logs"
+    );
+}
+
+#[test]
+fn incomplete_initialize_shape_is_value_free_invalid_params() {
+    let secret = "malformed-initialize-value-must-not-be-echoed";
+    let requests = [
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": LATEST_LEGACY_VERSION,
+                "clientInfo": {"name": "contract-test", "version": "1.0"}
+            }
+        }),
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": LATEST_LEGACY_VERSION,
+                "capabilities": [],
+                "clientInfo": {"name": "contract-test", "version": "1.0"}
+            }
+        }),
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": LATEST_LEGACY_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": secret}
+            }
+        }),
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": LATEST_LEGACY_VERSION,
+                "capabilities": {},
+                "clientInfo": secret
+            }
+        }),
+    ];
+
+    let output = run_session(&requests);
+    let parsed = responses(&output);
+    assert_eq!(parsed.len(), requests.len());
+    for response in parsed {
+        assert_eq!(response["error"]["code"].as_i64(), Some(-32602));
+        assert_eq!(
+            response["error"]["message"].as_str(),
+            Some("Invalid initialize params: expected the required legacy MCP fields")
         );
         assert!(response.get("result").is_none());
     }
