@@ -58,10 +58,28 @@ toolchain configuration). Report the failure and let Cargo's stderr say why:\n  
   # 3. Cargo's stderr must stay visible. Only stdout is noise here — the metadata JSON.
   #    Any `2>` form, not an enumeration of them: `2>/dev/null` and `2>&1` were listed, so
   #    `2>cargo-error.log` passed both this test and actionlint while putting the only real
-  #    diagnosis in a file nobody reads. Checked across the whole anchored block, since the
-  #    redirect can sit on the invocation or on its `||` arm.
-  if grep -qE '2>' <<<"$guard_block"; then
-    fail "the guard redirects stderr, which discards the only real diagnosis it has:\n$guard_block"
+  #    diagnosis in a file nobody reads.
+  #
+  #    Scoped to the entire `Fuzz smoke` run block, not to the guard's own two lines. fd2 is step
+  #    state, not line state: `exec 2>cargo-error.log` anywhere above the guard redirects it just
+  #    as effectively, and a two-line window cannot see that. The property being promised is that
+  #    the step's stderr reaches the log, so the check has to cover the step.
+  local run_block
+  run_block="$(awk '
+    /^      - name: Fuzz smoke[[:space:]]*$/ { in_step=1; next }
+    in_step && /^      - / { in_step=0 }
+    in_step && /^        run: \|[[:space:]]*$/ { in_run=1; next }
+    in_run {
+      if ($0 !~ /^          / && $0 !~ /^[[:space:]]*$/) { in_run=0 } else { print }
+    }
+  ' "$wf")"
+  [[ -n "$run_block" ]] || fail "could not read the \`Fuzz smoke\` run block from ${wf##*/}"
+  grep -qF 'metadata --locked' <<<"$run_block" \
+    || fail "the extracted \`Fuzz smoke\` run block does not contain the guard, so scanning it \
+proves nothing"
+  if grep -qE '2>' <<<"$run_block"; then
+    fail "the fuzz step redirects stderr, which discards the only real diagnosis it has:\n\
+$(grep -nE '2>' <<<"$run_block")"
   fi
 
   # 4. The failure must still be a failure — asserted on the guard's own `||` arm, not on the file.
@@ -172,6 +190,21 @@ if ( check_workflow "$comment_mutant" ) >/dev/null 2>&1; then
 file rather than the active \`pull_request.paths\` sequence"
 fi
 echo "ok: commenting out a path entry turns the contract red"
+
+# Negative control: move the redirect off the guard line. `exec 2>` sets fd2 for the rest of the
+# step, so Cargo's diagnosis is gone just the same -- but a check windowed on the guard's own two
+# lines never sees it, and actionlint has no opinion. Same promised property, one scope wider.
+exec_mutant="$(mktemp)"
+trap 'rm -f "$mutant" "$redirect_mutant" "$paths_mutant" "$comment_mutant" "$exec_mutant"' EXIT
+sed 's|^          # Assert the checked-in lock is current before fuzzing.|          exec 2>cargo-error.log\
+&|' "$WORKFLOW" > "$exec_mutant"
+grep -q '^          exec 2>cargo-error.log$' "$exec_mutant" \
+  || fail "the exec-redirect mutation did not apply, so it proves nothing"
+if ( check_workflow "$exec_mutant" ) >/dev/null 2>&1; then
+  fail "an \`exec 2>\` earlier in the step left the contract green — the stderr check is \
+windowed on the guard rather than on the step"
+fi
+echo "ok: an \`exec 2>\` earlier in the step turns the contract red"
 
 echo "ok: the lock guard reports without diagnosing, keeps Cargo's stderr, and fails closed"
 echo "ok: FUZZ_TOOLCHAIN is dated (${PIN})"
