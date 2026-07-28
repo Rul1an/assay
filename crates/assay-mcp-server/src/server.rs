@@ -15,7 +15,37 @@ fn next_rid() -> String {
     format!("r-{n:06}")
 }
 
-/// The `initialize` result this server returns on a successful handshake.
+#[derive(Clone, Copy)]
+enum LegacyProtocolVersion {
+    V2024_11_05,
+    V2025_11_25,
+}
+
+impl LegacyProtocolVersion {
+    const LATEST: Self = Self::V2025_11_25;
+
+    fn negotiate(params: Option<&Value>) -> Option<Self> {
+        let requested = params
+            .and_then(Value::as_object)
+            .and_then(|params| params.get("protocolVersion"))
+            .and_then(Value::as_str)?;
+
+        Some(match requested {
+            "2024-11-05" => Self::V2024_11_05,
+            "2025-11-25" => Self::V2025_11_25,
+            _ => Self::LATEST,
+        })
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::V2024_11_05 => "2024-11-05",
+            Self::V2025_11_25 => "2025-11-25",
+        }
+    }
+}
+
+/// The `initialize` result this server returns on a successful legacy handshake.
 ///
 /// Extracted so the claims boundary is testable rather than remembered. ADR-042 refuses
 /// compliance and partnership claims; ADR-043 §2 extends that refusal from prose to what the
@@ -27,12 +57,11 @@ fn next_rid() -> String {
 /// Server-specific metadata, if it is ever needed, belongs under the protocol's reserved
 /// `_meta` key with a non-reserved prefix such as `dev.assay/`; a bare `meta` object was never
 /// part of the protocol.
-fn initialize_result() -> Value {
+fn initialize_result(protocol_version: LegacyProtocolVersion) -> Value {
     serde_json::json!({
-        // Stale: the stable revision is 2025-11-25, and the 2026-07-28 candidate removes this
-        // handshake and the protocol-level session outright. Bumping it is a negotiation change
-        // and is deliberately not part of this fix.
-        "protocolVersion": "2024-11-05",
+        // MCP 2026-07-28 removed this handshake. Modern support requires server/discover and
+        // per-request metadata; this legacy path deliberately advertises neither.
+        "protocolVersion": protocol_version.as_str(),
         "capabilities": {
             "tools": {}
         },
@@ -167,7 +196,16 @@ impl Server {
 
             // Dispatch
             let resp = match req.method.as_str() {
-                "initialize" => JsonRpcResponse::ok(req.id.clone(), initialize_result()),
+                "initialize" => match LegacyProtocolVersion::negotiate(req.params.as_ref()) {
+                    Some(version) => {
+                        JsonRpcResponse::ok(req.id.clone(), initialize_result(version))
+                    }
+                    None => JsonRpcResponse::error(
+                        req.id.clone(),
+                        -32602,
+                        "Invalid initialize params: protocolVersion must be a string".to_string(),
+                    ),
+                },
                 "notifications/initialized" => {
                     // Notification, no response needed usually, but good to ack log
                     tracing::info!(event="initialized", rid=%rid);
@@ -412,7 +450,7 @@ impl Server {
 
 #[cfg(test)]
 mod claims_boundary_tests {
-    use super::initialize_result;
+    use super::{initialize_result, LegacyProtocolVersion};
 
     /// ADR-042 stop list, ADR-043 §2. The handshake must not assert a status the server
     /// cannot substantiate. A denylist over the serialized response catches a claim
@@ -421,7 +459,8 @@ mod claims_boundary_tests {
     /// control is `initialize_result_pins_every_value`, which pins the leaves.
     #[test]
     fn initialize_result_asserts_no_unearned_status() {
-        let wire = serde_json::to_string(&initialize_result()).expect("serializable");
+        let wire = serde_json::to_string(&initialize_result(LegacyProtocolVersion::LATEST))
+            .expect("serializable");
         for forbidden in [
             "certified",
             "certification",
@@ -447,39 +486,44 @@ mod claims_boundary_tests {
     /// someone updates a pinned value without thinking about what it claims.
     #[test]
     fn initialize_result_pins_every_value() {
-        let value = initialize_result();
-        assert_eq!(
-            value.get("protocolVersion").and_then(|v| v.as_str()),
-            Some("2024-11-05")
-        );
-        assert_eq!(
-            value.get("capabilities"),
-            Some(&serde_json::json!({"tools": {}}))
-        );
-        assert_eq!(
-            value
-                .get("serverInfo")
-                .and_then(|s| s.get("name"))
-                .and_then(|v| v.as_str()),
-            Some("assay-mcp-server")
-        );
-        // Derived, not asserted. The literal "0.4.0" was itself an unverifiable identity
-        // claim: the crate has been on 3.x for a long time, so the wire was stating a
-        // version no build ever produced.
-        assert_eq!(
-            value
-                .get("serverInfo")
-                .and_then(|s| s.get("version"))
-                .and_then(|v| v.as_str()),
-            Some(env!("CARGO_PKG_VERSION"))
-        );
+        for (version, expected) in [
+            (LegacyProtocolVersion::V2024_11_05, "2024-11-05"),
+            (LegacyProtocolVersion::V2025_11_25, "2025-11-25"),
+        ] {
+            let value = initialize_result(version);
+            assert_eq!(
+                value.get("protocolVersion").and_then(|v| v.as_str()),
+                Some(expected)
+            );
+            assert_eq!(
+                value.get("capabilities"),
+                Some(&serde_json::json!({"tools": {}}))
+            );
+            assert_eq!(
+                value
+                    .get("serverInfo")
+                    .and_then(|s| s.get("name"))
+                    .and_then(|v| v.as_str()),
+                Some("assay-mcp-server")
+            );
+            // Derived, not asserted. The literal "0.4.0" was itself an unverifiable identity
+            // claim: the crate has been on 3.x for a long time, so the wire was stating a
+            // version no build ever produced.
+            assert_eq!(
+                value
+                    .get("serverInfo")
+                    .and_then(|s| s.get("version"))
+                    .and_then(|v| v.as_str()),
+                Some(env!("CARGO_PKG_VERSION"))
+            );
+        }
     }
 
     /// The bare `meta` key was never part of the protocol. If server metadata returns it
     /// belongs under the reserved `_meta` key with a non-reserved prefix.
     #[test]
     fn initialize_result_has_no_bare_meta_object() {
-        let value = initialize_result();
+        let value = initialize_result(LegacyProtocolVersion::LATEST);
         let obj = value.as_object().expect("result is an object");
         assert!(!obj.contains_key("meta"), "bare `meta` key reintroduced");
     }
@@ -529,7 +573,7 @@ mod claims_boundary_tests {
             }
         }
 
-        let value = initialize_result();
+        let value = initialize_result(LegacyProtocolVersion::LATEST);
         let mut found = Vec::new();
         walk(&value, "", &mut found);
 
@@ -552,7 +596,7 @@ mod claims_boundary_tests {
 
     #[test]
     fn initialize_result_still_carries_the_fields_a_client_needs() {
-        let value = initialize_result();
+        let value = initialize_result(LegacyProtocolVersion::LATEST);
         assert!(value.get("protocolVersion").is_some());
         assert!(value.get("capabilities").is_some());
         assert_eq!(
