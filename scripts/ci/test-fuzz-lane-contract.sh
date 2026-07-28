@@ -103,6 +103,18 @@ proves nothing"
 script's stderr from outside the script, where nothing in the run block can see it. Got:\n  \
 ${shell_line:-<none>}"
 
+  # `BASH_ENV` names a file bash sources before the script, and `--noprofile --norc` does not
+  # suppress it -- confirmed by running a preamble that does `exec 2>file`, which empties the outer
+  # stderr capture while leaving the script itself untouched. The harness below executes the script,
+  # so it can never see a preamble the runner would have sourced first. Matched as an active mapping
+  # key, one name, no env parsing: a line that is commented out sources nothing and stays green.
+  local bash_env_line
+  bash_env_line="$(grep -nE '^[[:space:]]*BASH_ENV[[:space:]]*:' "$wf" | head -1 || true)"
+  [[ -z "$bash_env_line" ]] \
+    || fail "this lane must not set \`BASH_ENV\`: bash sources it before the step's own script, so
+a preamble can redirect the step's stderr without appearing in the script at all. Found:\n  \
+$bash_env_line"
+
   local sandbox rc=0
   local sentinel="CARGO-STDERR-SENTINEL-4d1f9a"
   sandbox="$(mktemp -d "${SANDBOX_ROOT}/wf.XXXXXX")"
@@ -122,7 +134,18 @@ ${shell_line:-<none>}"
   printf '#!/usr/bin/env bash\necho "rustc 0.0.0-mock"\n' > "$sandbox/bin/rustc"
   chmod +x "$sandbox/bin/cargo" "$sandbox/bin/rustc"
 
-  ( cd "$sandbox" && PATH="$sandbox/bin:$PATH" RUNNER_TEMP="$sandbox/tmp" \
+  # The mocks only mean something if they are the ones that run.
+  local tool resolved
+  for tool in cargo rustc; do
+    resolved="$(PATH="$sandbox/bin:$PATH" command -v "$tool" || true)"
+    [[ "$resolved" == "$sandbox/bin/$tool" ]] \
+      || fail "the sandbox PATH does not win for \`$tool\`: it resolved to ${resolved:-<none>}, so \
+the run below would exercise the real toolchain instead of the mock"
+  done
+
+  # `env -u BASH_ENV`: whatever the caller's environment carries must not decide whether this proof
+  # holds. The workflow is checked for it above; here the harness itself is put beyond its reach.
+  ( cd "$sandbox" && env -u BASH_ENV PATH="$sandbox/bin:$PATH" RUNNER_TEMP="$sandbox/tmp" \
       FUZZ_TOOLCHAIN="nightly-mock" RUNS=1 MAX_TOTAL_TIME=1 \
       bash step.sh ) >"$sandbox/out" 2>"$sandbox/err" || rc=$?
 
@@ -286,7 +309,7 @@ echo "ok: a step-level \`shell:\` redirect turns the contract red"
 # The previous static check matched the text and went red on it, which is a false alarm on a line
 # warning against the very thing the test exists to catch.
 comment_ok="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
-sed 's|^          # Assert the checked-in lock is current before fuzzing.|          # Never add 2>cargo-error.log here\
+sed 's|^          # Assert the checked-in lock is current before fuzzing.|          # Never add 2>cargo-error.log here, and never set BASH_ENV: anything\
 &|' "$WORKFLOW" > "$comment_ok"
 grep -q '# Never add 2>cargo-error.log here' "$comment_ok" \
   || fail "the comment control did not apply, so it proves nothing"
@@ -294,7 +317,22 @@ if ! ( check_workflow "$comment_ok" ) >/dev/null 2>&1; then
   fail "a comment naming a redirect turned the contract red — the check reacts to text rather \
 than to behaviour"
 fi
-echo "ok: a comment naming a redirect leaves the contract green"
+echo "ok: a comment naming a redirect or BASH_ENV leaves the contract green"
+
+# Negative control: set `BASH_ENV` on the step. The script is untouched, so extracting and running
+# it proves nothing -- the runner would have sourced a preamble before the first line ever ran.
+bash_env_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
+awk '
+  /^          RUNS: / && !done { print "          BASH_ENV: .github/fuzz-preamble.sh"; done=1 }
+  { print }
+' "$WORKFLOW" > "$bash_env_mutant"
+grep -q '^          BASH_ENV: ' "$bash_env_mutant" \
+  || fail "the BASH_ENV mutation did not apply, so it proves nothing"
+if ( check_workflow "$bash_env_mutant" ) >/dev/null 2>&1; then
+  fail "a step-level \`BASH_ENV\` left the contract green — bash sources it before the script, \
+which is where the harness starts looking"
+fi
+echo "ok: a step-level \`BASH_ENV\` turns the contract red"
 
 echo "ok: the lock guard reports without diagnosing, keeps Cargo's stderr, and fails closed"
 echo "ok: FUZZ_TOOLCHAIN is dated (${PIN})"
