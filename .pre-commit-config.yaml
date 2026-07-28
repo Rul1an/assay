@@ -92,7 +92,10 @@ repos:
         entry: bash scripts/ci/test-fuzz-lane-contract.sh
         language: system
         pass_filenames: false
-        files: ^(scripts/ci/test-fuzz-lane-contract\.sh|\.github/workflows/fuzz-smoke\.yml|\.pre-commit-config\.yaml)$
+        # `fuzz/Cargo.{toml,lock}` included: the contract derives the lane's required path filter
+        # from the lock, so a change there can invalidate the assertion without touching either
+        # file that used to trigger this hook.
+        files: ^(scripts/ci/test-fuzz-lane-contract\.sh|\.github/workflows/fuzz-smoke\.yml|fuzz/Cargo\.(toml|lock)|\.pre-commit-config\.yaml)$
 
       - id: ci-gate-expectations-self-test
         name: CI gate expectation contract
