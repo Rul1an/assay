@@ -24,6 +24,7 @@
 //! `DigestSet` matching semantics do not reach it. See ADR-044.
 
 use crate::bundle::writer::{VerifyLimits, VerifyResult};
+use crate::bundle::Manifest;
 use crate::crypto::jcs;
 use crate::mandate::signing::{build_pae, compute_key_id_from_verifying_key};
 use anyhow::{Context, Result};
@@ -42,6 +43,12 @@ const IN_TOTO_PAYLOAD_TYPE: &str = "application/vnd.in-toto+json";
 /// On `docs.getassay.dev`, which is where the contract surface actually lives — the profile URIs
 /// under `docs/profiles/` already resolve there. The v0 constant below keeps the old host because
 /// it names statements that were minted under it; a refusal has to spell the thing being refused.
+///
+/// **This name changed meaning.** In 3.35.0 it held the v0 identifier. Downstream code comparing a
+/// statement against this constant still compiles and now matches v1 instead — so a v0 comparison
+/// has to name [`EVIDENCE_BUNDLE_PREDICATE_TYPE_V0`] explicitly. The unversioned name tracks the
+/// current predicate by convention; it is recorded here because a silent change of meaning behind
+/// an unchanged name is the kind of break a compiler cannot report.
 pub const EVIDENCE_BUNDLE_PREDICATE_TYPE: &str =
     "https://docs.getassay.dev/attestation/evidence-bundle/v1";
 
@@ -126,29 +133,54 @@ fn statement_from_parts(
             digest,
         }],
         predicate_type: EVIDENCE_BUNDLE_PREDICATE_TYPE.to_string(),
-        // Infallible: `EvidenceBundlePredicate` is a plain struct of strings and integers, so
-        // `to_value` has no failing case here. It was a `?` returning an error no test could
-        // provoke and no caller could act on.
-        predicate: serde_json::json!({
-            "schema_version": predicate.schema_version,
-            "semantic_equivalence": {
-                "algorithm": predicate.semantic_equivalence.algorithm,
-                "value": predicate.semantic_equivalence.value,
-            },
-            "run": {
-                "run_id": predicate.run.run_id,
-                "event_count": predicate.run.event_count,
-                "producer": {
-                    "name": predicate.run.producer.name,
-                    "version": predicate.run.producer.version,
-                    "git": predicate.run.producer.git,
-                },
-                "time_window": {
-                    "start": predicate.run.time_window.start,
-                    "end": predicate.run.time_window.end,
-                },
-            },
-        }),
+        // `to_value` rather than a `json!` literal mirroring the struct. The literal was a second
+        // copy of the shape, maintained by hand beside the `Serialize` derive, and the two could
+        // drift apart in either direction without anything failing.
+        //
+        // The `expect` is an infallibility assertion, not error handling. `to_value` fails only
+        // when a `Serialize` impl returns an error or a map has non-string keys; this type is a
+        // derive over strings and integers, so neither case exists. Returning a `Result` here was
+        // worse: it published a failure no caller could act on and no test could provoke.
+        predicate: serde_json::to_value(predicate)
+            .expect("EvidenceBundlePredicate derives Serialize over strings and integers only"),
+    }
+}
+
+/// Build an in-toto v1 Statement whose subject digest is the bundle's chain root.
+///
+/// Preserved at its published 3.x signature so downstream code keeps compiling. It is not a way to
+/// produce a usable attestation: the chain root is an equivalence digest over event *semantics*,
+/// so two bundles carrying the same events under a different stream identity share it, and the
+/// subject therefore identifies no artifact and matches none. That is what ADR-044 replaced.
+///
+/// It is pinned to [`EVIDENCE_BUNDLE_PREDICATE_TYPE_V0`] rather than following the constant, whose
+/// value moved to v1 in the same change. Following it would have let this function mint statements
+/// claiming a conformance they do not have, which is a worse outcome than the break it avoids —
+/// and [`verify_attestation_for_bundle`] refuses what it produces, by name and on purpose.
+#[deprecated(
+    since = "3.36.0",
+    note = "produces a v0 statement whose subject identifies no artifact and which \
+            `verify_attestation_for_bundle` refuses; use `statement_for_bundle`"
+)]
+pub fn statement_from_manifest(
+    manifest: &Manifest,
+    predicate: serde_json::Value,
+) -> InTotoStatement {
+    let digest_hex = manifest
+        .run_root
+        .strip_prefix("sha256:")
+        .unwrap_or(&manifest.run_root)
+        .to_string();
+    let mut digest = BTreeMap::new();
+    digest.insert("sha256".to_string(), digest_hex);
+    InTotoStatement {
+        type_: STATEMENT_TYPE.to_string(),
+        subject: vec![Subject {
+            name: manifest.bundle_id.clone(),
+            digest,
+        }],
+        predicate_type: EVIDENCE_BUNDLE_PREDICATE_TYPE_V0.to_string(),
+        predicate,
     }
 }
 
@@ -397,6 +429,26 @@ pub fn verify_attestation_for_bundle(
     trusted_key: &VerifyingKey,
     bundle_bytes: &[u8],
 ) -> Result<AttestationVerified> {
+    verify_attestation_for_bundle_with_limits(
+        envelope,
+        trusted_key,
+        bundle_bytes,
+        VerifyLimits::default(),
+    )
+}
+
+/// [`verify_attestation_for_bundle`] under an explicit set of verification ceilings.
+///
+/// The producer already took limits; the consumer did not, so a caller who had bounded what they
+/// would attest could not bound what they would accept. The bundle is verified a second time here,
+/// by whoever holds it, and that verification is the one that decides — it should answer to the
+/// same ceilings.
+pub fn verify_attestation_for_bundle_with_limits(
+    envelope: &DsseEnvelope,
+    trusted_key: &VerifyingKey,
+    bundle_bytes: &[u8],
+    limits: VerifyLimits,
+) -> Result<AttestationVerified> {
     let verified = verify_envelope_signature(envelope, trusted_key)?;
     let statement = verified.statement;
 
@@ -454,7 +506,7 @@ pub fn verify_attestation_for_bundle(
 
     // Cross-check against the artifact rather than trusting the predicate. A predicate that
     // disagrees with the bundle it is attached to is a rejection, not a note.
-    let result = crate::bundle::verify_bundle(bundle_bytes)
+    let result = crate::bundle::verify_bundle_with_limits(bundle_bytes, limits)
         .context("the attested bundle does not verify")?;
 
     // The subject name is `manifest.bundle_id` and is compared, not merely carried. Before this it
@@ -969,6 +1021,140 @@ mod tests {
         // field ever goes back to one.
         let (start, end) = result.time_window;
         assert!(start <= end);
+    }
+
+    /// The consumer honours a ceiling too, and the ceiling is threaded rather than accepted.
+    ///
+    /// The two bounds are one byte apart on purpose. A test that merely passes some limit through
+    /// stays green when the argument is dropped and the default used instead; only a limit strict
+    /// enough to change the verdict proves the value reached the verifier.
+    #[test]
+    fn the_consumer_honours_a_stricter_source_ceiling() {
+        let k = key();
+        let bytes = bundle();
+        let envelope = sign_statement(&statement_for_bundle(&bytes).unwrap(), &k).unwrap();
+
+        let fitting = VerifyLimits {
+            max_bundle_bytes: bytes.len() as u64,
+            ..VerifyLimits::default()
+        };
+        assert!(
+            verify_attestation_for_bundle_with_limits(
+                &envelope,
+                &k.verifying_key(),
+                &bytes,
+                fitting
+            )
+            .is_ok(),
+            "a ceiling that exactly fits must accept"
+        );
+
+        let too_small = VerifyLimits {
+            max_bundle_bytes: bytes.len() as u64 - 1,
+            ..VerifyLimits::default()
+        };
+        let err = verify_attestation_for_bundle_with_limits(
+            &envelope,
+            &k.verifying_key(),
+            &bytes,
+            too_small,
+        )
+        .expect_err("one byte under the ceiling must refuse");
+        let chain = format!("{err:#}");
+        assert!(
+            chain.contains("LimitBundleBytes"),
+            "expected the source ceiling to be the reason, got: {chain}"
+        );
+
+        // The default-limits entry point still answers, and answers the same way.
+        assert!(verify_attestation_for_bundle(&envelope, &k.verifying_key(), &bytes).is_ok());
+    }
+
+    // ── the published v0 producer ──────────────────────────────────────────────────────────
+
+    /// `statement_from_manifest` is published in 3.x and must keep compiling, exactly.
+    ///
+    /// The Wave-0 semver check does not cover this: its baseline `9cc23b4c` predates the function
+    /// while v3.35.0 ships it, so a green run there says nothing about this call. The call below is
+    /// the check — argument types, argument order and return type all have to still hold.
+    #[test]
+    #[allow(deprecated)]
+    fn the_published_v0_producer_is_preserved_and_still_refused() {
+        let bytes = bundle();
+        let result = crate::bundle::verify_bundle(bytes.as_slice()).unwrap();
+
+        let statement: InTotoStatement =
+            statement_from_manifest(&result.manifest, serde_json::json!({ "anything": true }));
+
+        // v0 in every respect it had: the old predicate type, and the semantic root as the subject
+        // digest. Reviving it under the v1 type would mint statements claiming a conformance they
+        // do not have.
+        assert_eq!(statement.predicate_type, EVIDENCE_BUNDLE_PREDICATE_TYPE_V0);
+        assert_eq!(statement.subject[0].name, result.manifest.bundle_id);
+        assert_eq!(
+            statement.subject[0].digest["sha256"],
+            result
+                .manifest
+                .run_root
+                .strip_prefix("sha256:")
+                .unwrap_or(&result.manifest.run_root)
+        );
+        assert_eq!(statement.predicate, serde_json::json!({ "anything": true }));
+
+        // And what it produces stays refused, against the very bytes it describes. Keeping the
+        // function compiling is a source-compatibility promise, not a rehabilitation.
+        let k = key();
+        let envelope = sign_statement(&statement, &k).unwrap();
+        let err = verify_attestation_for_bundle(&envelope, &k.verifying_key(), &bytes)
+            .expect_err("a v0 statement must stay unverifiable");
+        assert!(err.to_string().contains("pre-ADR-044"), "got: {err}");
+    }
+
+    // ── wire shape ─────────────────────────────────────────────────────────────────────────
+
+    /// The predicate on the wire is exactly what the type serializes to.
+    ///
+    /// It was assembled by hand into a `json!` literal that mirrored the struct field by field, so
+    /// the two could drift apart silently — a renamed field would have changed the type and left
+    /// the wire shape untouched, or the reverse. This pins the shape and the equality at once.
+    #[test]
+    fn the_predicate_wire_shape_is_the_serialization_of_the_type() {
+        let bytes = bundle();
+        let result = crate::bundle::verify_bundle(bytes.as_slice()).unwrap();
+        let predicate = predicate_from_verified(&result).unwrap();
+        let statement = statement_for_bundle(&bytes).unwrap();
+
+        assert_eq!(
+            statement.predicate,
+            serde_json::to_value(&predicate).unwrap(),
+            "the statement must carry the serialization of the predicate, not a copy of it"
+        );
+
+        // And the shape itself, spelled out, so a rename is visible here rather than only to a
+        // consumer that has already deployed.
+        assert_eq!(
+            statement.predicate,
+            serde_json::json!({
+                "schema_version": 1,
+                "semantic_equivalence": {
+                    "algorithm": predicate.semantic_equivalence.algorithm,
+                    "value": predicate.semantic_equivalence.value,
+                },
+                "run": {
+                    "run_id": predicate.run.run_id,
+                    "event_count": predicate.run.event_count,
+                    "producer": {
+                        "name": predicate.run.producer.name,
+                        "version": predicate.run.producer.version,
+                        "git": predicate.run.producer.git,
+                    },
+                    "time_window": {
+                        "start": predicate.run.time_window.start,
+                        "end": predicate.run.time_window.end,
+                    },
+                },
+            })
+        );
     }
 
     // ── limits ─────────────────────────────────────────────────────────────────────────────
