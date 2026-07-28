@@ -28,9 +28,8 @@ fn valid_claims() -> serde_json::Value {
 async fn test_alg_whitelist_enforcement() {
     let mut header = Header::new(Algorithm::HS256);
     header.alg = Algorithm::HS256; // We use HS256 to sign, but Validator expects RS/ES.
-                                   // Actually, `jsonwebtoken` crate doesn't easily let us forge "none" signed tokens that verify() checks
-                                   // without `insecure_disable_signature_validation`.
-                                   // But our Validator explicitly checks `header.alg` whitelist BEFORE verification.
+                                   // The Validator checks `header.alg` against its allowlist
+                                   // before key resolution and cryptographic verification.
 
     // Let's test the whitelist logic.
     let claims = valid_claims();
