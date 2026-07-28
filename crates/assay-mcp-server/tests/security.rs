@@ -5,33 +5,6 @@ use tokio::process::Command;
 
 #[tokio::test]
 async fn test_path_traversal_prevention() -> Result<()> {
-    // 1. Setup Server
-    let status = Command::new("cargo")
-        .args(["build", "-p", "assay-mcp-server"])
-        .status()
-        .await?;
-    assert!(status.success());
-    // Resolve binary path
-    let bin_name = if cfg!(windows) {
-        "assay-mcp-server.exe"
-    } else {
-        "assay-mcp-server"
-    };
-    let mut bin_path = std::env::current_dir()?.join("target/debug").join(bin_name);
-    if !bin_path.exists() {
-        // Try workspace root from crate dir
-        bin_path = std::env::current_dir()?
-            .join("../../target/debug")
-            .join(bin_name);
-    }
-    if !bin_path.exists() {
-        panic!(
-            "Could not find {} binary at {:?} or in ../../target",
-            bin_name,
-            std::env::current_dir()?.join("target/debug").join(bin_name)
-        );
-    }
-
     // Create a temp policy root
     let temp_root = std::env::temp_dir().join(format!(
         "assay_sec_{}",
@@ -50,7 +23,7 @@ async fn test_path_traversal_prevention() -> Result<()> {
     tokio::fs::write(&secret_file, "secret: true").await?;
     let secret_rel_path = "../secret_config.yaml";
 
-    let mut cmd = Command::new(bin_path)
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
         .arg("--policy-root")
         .arg(&temp_root)
         .stdin(Stdio::piped())
