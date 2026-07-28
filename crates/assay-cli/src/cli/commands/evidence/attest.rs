@@ -9,7 +9,6 @@
 
 use anyhow::{Context, Result};
 use assay_evidence::attestation::{sign_statement, statement_from_manifest};
-use assay_evidence::bundle::BundleReader;
 use clap::Args;
 use ed25519_dalek::pkcs8::DecodePrivateKey;
 use ed25519_dalek::SigningKey;
@@ -41,8 +40,11 @@ fn run(args: AttestArgs) -> Result<()> {
     // 1. Open + verify the bundle, take its manifest.
     let file = File::open(&args.bundle)
         .with_context(|| format!("open bundle {}", args.bundle.display()))?;
-    let reader = BundleReader::open(file).context("verify/open bundle")?;
-    let manifest = reader.manifest().clone();
+    // The manifest is all this needs, and `verify_bundle` returns it after the same checks
+    // `BundleReader::open` runs — without holding the events stream the attestation never reads.
+    let manifest = assay_evidence::bundle::verify_bundle(file)
+        .context("verify/open bundle")?
+        .manifest;
 
     // 2. Load the Ed25519 signing key (PKCS#8 PEM).
     let pem = std::fs::read_to_string(&args.key)

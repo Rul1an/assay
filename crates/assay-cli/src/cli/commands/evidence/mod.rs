@@ -271,8 +271,13 @@ fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
     let f = File::open(&args.bundle)
         .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
 
-    // BundleReader::open verifies by default
-    let _ = assay_evidence::bundle::BundleReader::open(f)?;
+    // Same verifier the stdin arm uses, for the same reason it uses it. `BundleReader::open`
+    // verifies too, but it also retains the whole decompressed events stream so a caller can
+    // iterate it — and this caller iterates nothing, it discards the reader. That retention is
+    // bounded by `max_events_bytes` (500 MiB), five times the bundle ceiling, so a small,
+    // compressible bundle made `verify` hold hundreds of megabytes to answer yes or no: 530 MB
+    // against this path's 33 MB on the same 5.7 MB file. Verification never needed the buffer.
+    assay_evidence::bundle::verify_bundle(f).context("bundle verification failed")?;
 
     eprintln!("Bundle verified ({}): OK", args.bundle.display());
     Ok(0)
