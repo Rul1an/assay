@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Fail-closed correction (bundle verification, migration-visible).** The verifier now rejects
+  every bundle `BundleWriter` refuses to emit. Five shapes previously verified: an empty bundle, an
+  inconsistent `source` across events, a `source` that is not a URI, and a blank line in
+  `events.ndjson` — which was counted toward `event_count` while contributing no content hash, so a
+  padded bundle satisfied the count check and the `run_root` chain by having them measure different
+  things. Bundles carrying any of these verified yesterday and do not today. No bundle produced by
+  this repository is affected; all 26 in the tree were checked before the change. Third-party
+  producers targeting the format should compare against `StreamRule`, now public at
+  `assay_evidence::bundle::StreamRule`.
+
 ## [3.35.0] - 2026-07-27
 
 ### Added
