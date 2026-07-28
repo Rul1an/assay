@@ -26,7 +26,8 @@ pub struct AttestArgs {
     /// Path to the Ed25519 private key (PKCS#8 PEM; see `assay mcp tool keygen`).
     #[arg(long)]
     pub key: PathBuf,
-    /// Optional JSON file used as the attestation predicate (default: a minimal summary).
+    /// Not accepted: the evidence-bundle/v1 predicate is derived from the bundle so a consumer
+    /// can cross-check it against the artifact (ADR-044). Passing this flag is an error.
     #[arg(long)]
     pub predicate: Option<PathBuf>,
     /// Write the DSSE envelope here (default: stdout).
@@ -54,7 +55,24 @@ pub fn cmd_attest(args: AttestArgs) -> Result<i32> {
 }
 
 fn run(args: AttestArgs) -> Result<()> {
-    // 1. Read the bundle through the source ceiling, before anything is materialized.
+    // 1. Refuse an unusable invocation before touching anything on disk.
+    //
+    //    `--predicate` is rejected rather than silently ignored: every v1 field is derived from the
+    //    bundle so a consumer can cross-check it against the artifact, and a predicate the caller
+    //    writes by hand cannot offer that.
+    //
+    //    Ordered first because the operator should learn what is wrong with their command, not
+    //    what is wrong with their filesystem. Checked after the reads, a bad path masked the flag
+    //    error entirely, so someone debugging a missing bundle would fix the path and only then
+    //    discover their predicate was never going to be used.
+    if args.predicate.is_some() {
+        anyhow::bail!(
+            "--predicate is not accepted for evidence-bundle/v1: every field is derived from the \
+             bundle so a consumer can cross-check it against the artifact (ADR-044)"
+        );
+    }
+
+    // 2. Read the bundle through the source ceiling, before anything is materialized.
     //
     //    ADR-043 §1: the limit applies to the stream. `std::fs::read` sized the allocation from
     //    the file, so an oversized archive was already in memory by the time `max_bundle_bytes`
@@ -69,20 +87,10 @@ fn run(args: AttestArgs) -> Result<()> {
     let limits = VerifyLimits::default();
     let bundle_bytes = read_bundle_bounded(&args.bundle, limits)?;
 
-    // 2. Load the Ed25519 signing key (PKCS#8 PEM).
+    // 3. Load the Ed25519 signing key (PKCS#8 PEM).
     let pem = std::fs::read_to_string(&args.key)
         .with_context(|| format!("read key {}", args.key.display()))?;
     let key = SigningKey::from_pkcs8_pem(&pem).context("parse Ed25519 PKCS#8 PEM key")?;
-
-    // 3. `--predicate` is refused rather than silently ignored: every v1 field is derived from the
-    //    bundle so a consumer can cross-check it against the artifact, and a predicate the caller
-    //    writes by hand cannot offer that.
-    if args.predicate.is_some() {
-        anyhow::bail!(
-            "--predicate is not accepted for evidence-bundle/v1: every field is derived from the \
-             bundle so a consumer can cross-check it against the artifact (ADR-044)"
-        );
-    }
 
     // 4. Build the statement from the bounded bytes. Verification, predicate derivation and the
     //    subject name all happen inside that one call, against these bytes, so the CLI has no way
@@ -227,6 +235,55 @@ mod tests {
         .expect_err("--predicate must be refused");
         assert!(err.to_string().contains("--predicate"), "got: {err}");
         assert!(!f.out.exists(), "nothing may be signed after a refusal");
+    }
+
+    /// The refusal comes before any file is touched, and the paths prove the order.
+    ///
+    /// Both paths do not exist. If the flag were checked after the bundle read, the command would
+    /// fail on the missing file instead — a different refusal, for a different reason, that a test
+    /// asserting only `is_err()` would happily accept. The operator gets told what is wrong with
+    /// their invocation rather than what is wrong with their filesystem.
+    #[test]
+    fn the_predicate_flag_is_refused_before_any_file_is_touched() {
+        let f = fixture("order");
+        let predicate = f.dir.join("predicate.json");
+        std::fs::write(&predicate, "{}").unwrap();
+
+        let err = run(AttestArgs {
+            bundle: f.dir.join("no-such-bundle.tar.gz"),
+            key: f.dir.join("no-such-key.pem"),
+            predicate: Some(predicate),
+            out: Some(f.out.clone()),
+        })
+        .expect_err("--predicate must be refused");
+
+        assert!(
+            err.to_string().contains("--predicate"),
+            "the refusal must be about the flag, got: {err}"
+        );
+        assert!(
+            !err.to_string().contains("no-such-bundle"),
+            "the bundle must not have been opened, got: {err}"
+        );
+        assert!(!f.out.exists(), "nothing may be written after a refusal");
+    }
+
+    /// The help text must not promise behaviour the command refuses.
+    #[test]
+    fn the_predicate_help_does_not_advertise_a_default() {
+        use clap::Args as _;
+        let help = AttestArgs::augment_args(clap::Command::new("attest"))
+            .render_long_help()
+            .to_string();
+        assert!(
+            !help.contains("default: a minimal summary"),
+            "the help still advertises a default for a flag that is rejected:\n{help}"
+        );
+        // Case-insensitive: the claim is about what the help says, not how it is capitalised.
+        assert!(
+            help.to_lowercase().contains("not accepted"),
+            "the help must say the flag is rejected:\n{help}"
+        );
     }
 
     /// The source ceiling applies to the read itself, before the bundle is materialized.
