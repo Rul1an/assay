@@ -29,6 +29,11 @@ use anyhow::Result;
 use std::io::Read;
 
 pub use writer_next::errors::{ErrorClass, ErrorCode, VerifyError};
+/// The conditions a bundle must satisfy to exist, shared by the writer and the verifier.
+///
+/// Public because the symmetry test is an integration test in its own crate, and because a
+/// consumer building bundles by hand needs the same rules the writer applies.
+pub use writer_next::stream_rules::{self, StreamRule};
 
 /// Apply the structural ceilings that only the verifier used to enforce.
 ///

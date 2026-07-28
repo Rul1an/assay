@@ -13,6 +13,7 @@ use super::errors::{ErrorClass, ErrorCode, VerifyError};
 use super::events;
 use super::limits::{LimitReader, VerifyLimits};
 use super::manifest::Manifest;
+use super::stream_rules::{self, StreamRule};
 use super::tar_read::{read_line_bounded, EintrReader};
 use assay_common::limits::{LimitExceeded, LimitKind};
 
@@ -132,7 +133,12 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
     let mut events_verified = false;
     let mut seen_files: HashSet<String> = HashSet::new();
     let mut computed_run_root = String::new();
+    // Lines bound the work; events are what the manifest counts. Conflating them let a blank line
+    // inflate `event_count` without contributing a content hash, so the chain held three entries
+    // while the manifest claimed eight and both checks passed by measuring different things.
+    let mut seen_lines: usize = 0;
     let mut actual_event_count = 0;
+    let mut first_event: Option<EvidenceEvent> = None;
 
     let entries = archive.entries().map_err(|e| {
         let limit = classify_limit(&e);
@@ -328,8 +334,8 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
 
                 hasher.update(&line_buf);
 
-                actual_event_count += 1;
-                if actual_event_count > limits.max_events {
+                seen_lines += 1;
+                if seen_lines > limits.max_events {
                     return Err(VerifyError::new(
                         ErrorClass::Limits,
                         ErrorCode::LimitTotalEvents,
@@ -352,8 +358,19 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
                 }
 
                 if line_content.is_empty() {
-                    continue;
+                    // The writer emits exactly one event per line and never a blank one, so a
+                    // blank line is a shape it cannot produce. Skipping it silently is what let
+                    // it be counted as an event by the line counter above while contributing no
+                    // content hash below.
+                    return Err(VerifyError::new(
+                        ErrorClass::Contract,
+                        ErrorCode::ContractInvalidEvent,
+                        "Blank line in events.ndjson",
+                    )
+                    .into());
                 }
+
+                actual_event_count += 1;
 
                 let line_str = std::str::from_utf8(line_content).map_err(|e| {
                     VerifyError::new(
@@ -440,6 +457,33 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
                     .into());
                 }
 
+                // The stream rules the writer applies but the verifier did not: a consistent
+                // `source` across events, and a `source` that is a URI. A bundle violating either
+                // is one `BundleWriter::finish` refuses to emit, so accepting it here means the
+                // two ends of the format disagree about what a bundle is. Checked against the
+                // first event rather than the manifest because the manifest records no source.
+                if let Some(first) = &first_event {
+                    if let Some(rule) = stream_rules::violated_by_event(&event, first) {
+                        return Err(VerifyError::new(
+                            ErrorClass::Contract,
+                            ErrorCode::ContractInvalidEvent,
+                            format!("seq={}: {}", event.seq, rule.describe()),
+                        )
+                        .into());
+                    }
+                } else if !stream_rules::source_is_uri(&event.source) {
+                    // First event: nothing to compare against yet, but the format rules still hold.
+                    return Err(VerifyError::new(
+                        ErrorClass::Contract,
+                        ErrorCode::ContractInvalidEvent,
+                        format!("seq={}: {}", event.seq, StreamRule::SourceIsUri.describe()),
+                    )
+                    .into());
+                }
+                if first_event.is_none() {
+                    first_event = Some(event.clone());
+                }
+
                 // Check 9, the ID contract. Documented at the top of this function since the
                 // format was written, but never executed until ADR-043: the id is outside the
                 // per-event content hash, so an id that disagrees with its own run_id and seq
@@ -506,6 +550,19 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
                     ErrorClass::Integrity,
                     ErrorCode::IntegrityManifestHash,
                     "events.ndjson hash mismatch",
+                )
+                .into());
+            }
+
+            // `BundleWriter::finish` bails on an empty event list, so a zero-event bundle is one
+            // the writer cannot emit. Ordered before the count comparison so an empty bundle is
+            // reported as empty rather than as a count that happens to agree with an empty
+            // manifest.
+            if actual_event_count == 0 {
+                return Err(VerifyError::new(
+                    ErrorClass::Contract,
+                    ErrorCode::ContractInvalidEvent,
+                    StreamRule::NonEmpty.describe(),
                 )
                 .into());
             }
