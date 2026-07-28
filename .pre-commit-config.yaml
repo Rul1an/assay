@@ -87,6 +87,13 @@ repos:
         pass_filenames: false
         files: ^(scripts/ci/(reconcile-docs-auto-pr|test-reconcile-docs-auto-pr)\.sh|\.github/workflows/(docs-auto-update|ci|assay-runner-lane-check|host-capability-check)\.yml|\.pre-commit-config\.yaml)$
 
+      - id: ci-gate-expectations-self-test
+        name: CI gate expectation contract
+        entry: bash scripts/ci/test-ci-gate-expectations.sh
+        language: system
+        pass_filenames: false
+        files: ^(scripts/ci/test-ci-gate-expectations\.sh|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+
       - id: mcp-registry-release-txn-self-test
         name: MCP Registry release transaction self-test
         entry: bash scripts/ci/test-mcp-registry-release-txn.sh
