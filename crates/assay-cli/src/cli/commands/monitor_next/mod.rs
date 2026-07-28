@@ -58,9 +58,9 @@ pub(crate) async fn run(args: super::MonitorArgs) -> anyhow::Result<i32> {
 }
 
 #[cfg(any(target_os = "linux", test))]
-fn enforcement_refusal_exit(health_written: bool) -> i32 {
+fn enforcement_failure_exit(health_written: bool, retained_exit: i32) -> i32 {
     if health_written {
-        crate::exit_codes::EXIT_WOULD_BLOCK
+        retained_exit
     } else {
         crate::exit_codes::EXIT_INFRA_ERROR
     }
@@ -143,6 +143,13 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     let compiled_policy = runtime_config
         .as_ref()
         .map(compile_runtime_enforcement_policy);
+    let network_enforcement_requested = compiled_policy
+        .as_ref()
+        .map(|compiled| {
+            !compiled.tier1.network_deny_ports.is_empty()
+                || !compiled.tier1.network_deny_cidrs.is_empty()
+        })
+        .unwrap_or(false);
 
     if let Some(compiled) = compiled_policy.as_ref() {
         // The compiler accepts IPv6 CIDRs, but the shipped enforcement target attaches only
@@ -154,9 +161,7 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                  running a partially enforced policy)",
                 e
             );
-            let health_written =
-                write_enforcement_health(&args, EnforcementHealth::failed(SCOPE_IPV4_TCP_CONNECT));
-            return Ok(enforcement_refusal_exit(health_written));
+            return Ok(failed_enforcement_exit(&args, exit_codes::EXIT_WOULD_BLOCK));
         }
     }
 
@@ -167,14 +172,22 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
 
     if !ebpf_path.exists() {
         emit_err!("Error: eBPF object not found at {}. Build it with 'cargo xtask build-ebpf' or provide --ebpf <path>", ebpf_path.display());
-        return Ok(40);
+        return Ok(startup_failure_exit(
+            &args,
+            network_enforcement_requested,
+            40,
+        ));
     }
 
     let mut monitor = match Monitor::load_file(&ebpf_path) {
         Ok(m) => m,
         Err(e) => {
             emit_err!("Failed to load eBPF: {}", e);
-            return Ok(40);
+            return Ok(startup_failure_exit(
+                &args,
+                network_enforcement_requested,
+                40,
+            ));
         }
     };
 
@@ -227,7 +240,11 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
 
     if let Err(e) = monitor.attach() {
         emit_err!("Failed to attach probes: {}", e);
-        return Ok(40);
+        return Ok(startup_failure_exit(
+            &args,
+            network_enforcement_requested,
+            40,
+        ));
     }
 
     if !args.quiet {
@@ -365,6 +382,14 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         }
 
         if let Err(e) = monitor.set_tier1_rules(&compiled) {
+            if network_enforcement_requested {
+                emit_err!(
+                    "FATAL: failed to install Tier 1 rules for requested egress enforcement: {} \
+                     (fail-closed, not reporting a partially loaded policy as active)",
+                    e
+                );
+                return Ok(failed_enforcement_exit(&args, exit_codes::EXIT_WOULD_BLOCK));
+            }
             emit_err!(
                 "Warning: Failed to load Tier 1 rules (LSM might be unavailable): {}",
                 e
@@ -394,11 +419,7 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                     // like `absent` (not requested), so write the artifact BEFORE the fail-closed exit.
                     // Distinguish enforcement refusal from an infrastructure failure to retain the
                     // requested carrier.
-                    let health_written = write_enforcement_health(
-                        &args,
-                        EnforcementHealth::failed(SCOPE_IPV4_TCP_CONNECT),
-                    );
-                    return Ok(enforcement_refusal_exit(health_written));
+                    return Ok(failed_enforcement_exit(&args, exit_codes::EXIT_WOULD_BLOCK));
                 }
             };
             if let Err(e) = monitor.attach_network_cgroup(&cgroup_file) {
@@ -406,11 +427,7 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                     "FATAL: egress enforcement requested but connect4 attach failed: {} (fail-closed, not running audit-only)",
                     e
                 );
-                let health_written = write_enforcement_health(
-                    &args,
-                    EnforcementHealth::failed(SCOPE_IPV4_TCP_CONNECT),
-                );
-                return Ok(enforcement_refusal_exit(health_written));
+                return Ok(failed_enforcement_exit(&args, exit_codes::EXIT_WOULD_BLOCK));
             }
             enforcement_active = true;
             if !args.quiet {
@@ -496,7 +513,8 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
 
     // enforcement_health.v0 artifact (explicit, never parsed from stdout). active when enforcement
     // attached; absent when it was not requested. The `failed` case is written on the fail-closed abort
-    // path above, before exit, so requested-but-failed never reads as not-requested.
+    // Network-enforcement validation, installation, and attach failures above write `failed`
+    // before their handled nonzero exits.
     if args.enforcement_health.is_some() {
         let health = if enforcement_active {
             EnforcementHealth::active(SCOPE_IPV4_TCP_CONNECT, blocked_count, allowed_count)
@@ -546,5 +564,27 @@ fn write_enforcement_health(
         }
     } else {
         true
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn failed_enforcement_exit(args: &super::MonitorArgs, retained_exit: i32) -> i32 {
+    let health_written = write_enforcement_health(
+        args,
+        enforcement_health::EnforcementHealth::failed(enforcement_health::SCOPE_IPV4_TCP_CONNECT),
+    );
+    enforcement_failure_exit(health_written, retained_exit)
+}
+
+#[cfg(target_os = "linux")]
+fn startup_failure_exit(
+    args: &super::MonitorArgs,
+    network_enforcement_requested: bool,
+    retained_exit: i32,
+) -> i32 {
+    if network_enforcement_requested {
+        failed_enforcement_exit(args, retained_exit)
+    } else {
+        retained_exit
     }
 }

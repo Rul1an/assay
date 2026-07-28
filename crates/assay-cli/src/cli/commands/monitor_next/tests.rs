@@ -6,13 +6,26 @@
 //! See move-map/checklist artifacts in Commit C.
 
 #[test]
-fn enforcement_refusal_exit_distinguishes_artifact_write_failure() {
+fn enforcement_failure_exit_distinguishes_artifact_write_failure() {
     assert_eq!(
-        super::enforcement_refusal_exit(true),
+        super::enforcement_failure_exit(true, crate::exit_codes::EXIT_WOULD_BLOCK),
         crate::exit_codes::EXIT_WOULD_BLOCK
     );
     assert_eq!(
-        super::enforcement_refusal_exit(false),
+        super::enforcement_failure_exit(false, crate::exit_codes::EXIT_WOULD_BLOCK),
         crate::exit_codes::EXIT_INFRA_ERROR
+    );
+}
+
+#[test]
+fn enforcement_failure_exit_preserves_runtime_failure_and_prioritizes_carrier_failure() {
+    assert_eq!(super::enforcement_failure_exit(true, 40), 40);
+    assert_eq!(
+        super::enforcement_failure_exit(false, 40),
+        crate::exit_codes::EXIT_INFRA_ERROR
+    );
+    assert_eq!(
+        super::enforcement_failure_exit(true, crate::exit_codes::EXIT_WOULD_BLOCK),
+        crate::exit_codes::EXIT_WOULD_BLOCK
     );
 }

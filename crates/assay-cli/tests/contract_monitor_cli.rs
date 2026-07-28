@@ -112,6 +112,79 @@ fn ipv6_runtime_policy() -> NamedTempFile {
 }
 
 #[cfg(target_os = "linux")]
+fn ipv4_runtime_policy() -> NamedTempFile {
+    let mut policy = NamedTempFile::new().expect("temp policy");
+    policy
+        .write_all(
+            br#"runtime_monitor:
+  enabled: true
+  provider: "ebpf"
+  rules:
+    - id: "deny-ipv4"
+      type: "net_connect"
+      match:
+        dest_globs: ["198.51.100.0/24"]
+      action: "deny"
+"#,
+        )
+        .expect("write IPv4 policy");
+    policy
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn contract_monitor_missing_ebpf_retains_failed_health_for_requested_enforcement() {
+    let policy = ipv4_runtime_policy();
+    let output_dir = TempDir::new().expect("temp output dir");
+    let health_path = output_dir.path().join("enforcement-health.json");
+
+    let mut cmd = Command::cargo_bin("assay").expect("assay binary");
+    cmd.arg("monitor")
+        .arg("--policy")
+        .arg(policy.path())
+        .arg("--ebpf")
+        .arg("/definitely/missing/assay-ebpf.o")
+        .arg("--enforcement-health")
+        .arg(&health_path)
+        .assert()
+        .code(40);
+
+    let health: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&health_path).expect("read retained enforcement health"),
+    )
+    .expect("parse retained enforcement health");
+    assert_eq!(
+        health["network_enforcement"], "failed",
+        "requested enforcement that cannot start must never read as absent"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn contract_monitor_missing_ebpf_returns_infra_error_when_failed_health_cannot_be_written() {
+    let policy = ipv4_runtime_policy();
+    let unwritable_target = TempDir::new().expect("directory cannot be overwritten as a file");
+
+    let mut cmd = Command::cargo_bin("assay").expect("assay binary");
+    let assert = cmd
+        .arg("monitor")
+        .arg("--policy")
+        .arg(policy.path())
+        .arg("--ebpf")
+        .arg("/definitely/missing/assay-ebpf.o")
+        .arg("--enforcement-health")
+        .arg(unwritable_target.path())
+        .assert()
+        .code(3);
+
+    let stderr = normalize(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("failed to write enforcement_health artifact"),
+        "artifact-write failure diagnostic changed unexpectedly: {stderr}"
+    );
+}
+
+#[cfg(target_os = "linux")]
 #[test]
 fn contract_monitor_ipv6_refusal_precedes_ebpf_load_and_writes_failed_health() {
     let policy = ipv6_runtime_policy();
