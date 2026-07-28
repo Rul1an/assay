@@ -4,7 +4,7 @@ use assert_cmd::Command;
 #[cfg(target_os = "linux")]
 use std::io::Write;
 #[cfg(target_os = "linux")]
-use tempfile::NamedTempFile;
+use tempfile::{NamedTempFile, TempDir};
 
 fn normalize(s: &[u8]) -> String {
     String::from_utf8_lossy(s).replace("\r\n", "\n")
@@ -88,5 +88,88 @@ fn contract_monitor_parse_fail_policy_exit_2() {
             || stderr.contains("line")
             || stderr.contains("column"),
         "parse-fail diagnostic line changed unexpectedly: {stderr}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+fn ipv6_runtime_policy() -> NamedTempFile {
+    let mut policy = NamedTempFile::new().expect("temp policy");
+    policy
+        .write_all(
+            br#"runtime_monitor:
+  enabled: true
+  provider: "ebpf"
+  rules:
+    - id: "deny-ipv6"
+      type: "net_connect"
+      match:
+        dest_globs: ["2001:db8::/32"]
+      action: "deny"
+"#,
+        )
+        .expect("write IPv6 policy");
+    policy
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn contract_monitor_ipv6_refusal_precedes_ebpf_load_and_writes_failed_health() {
+    let policy = ipv6_runtime_policy();
+    let output_dir = TempDir::new().expect("temp output dir");
+    let health_path = output_dir.path().join("enforcement-health.json");
+
+    let mut cmd = Command::cargo_bin("assay").expect("assay binary");
+    let assert = cmd
+        .arg("monitor")
+        .arg("--policy")
+        .arg(policy.path())
+        .arg("--ebpf")
+        .arg("/definitely/missing/assay-ebpf.o")
+        .arg("--enforcement-health")
+        .arg(&health_path)
+        .assert()
+        .code(4);
+
+    let stderr = normalize(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("IPv6 CIDR rules cannot be installed"),
+        "IPv6 refusal diagnostic changed unexpectedly: {stderr}"
+    );
+    assert!(
+        health_path.is_file(),
+        "fail-closed refusal must retain the requested health artifact"
+    );
+    let health: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&health_path).expect("read retained enforcement health"),
+    )
+    .expect("parse retained enforcement health");
+    assert_eq!(
+        health["network_enforcement"], "failed",
+        "unsupported policy must retain failed, never absent"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn contract_monitor_ipv6_refusal_returns_infra_error_when_health_write_fails() {
+    let policy = ipv6_runtime_policy();
+    let unwritable_target = TempDir::new().expect("directory cannot be overwritten as a file");
+
+    let mut cmd = Command::cargo_bin("assay").expect("assay binary");
+    let assert = cmd
+        .arg("monitor")
+        .arg("--policy")
+        .arg(policy.path())
+        .arg("--ebpf")
+        .arg("/definitely/missing/assay-ebpf.o")
+        .arg("--enforcement-health")
+        .arg(unwritable_target.path())
+        .assert()
+        .code(3);
+
+    let stderr = normalize(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("failed to write enforcement_health artifact"),
+        "artifact-write failure diagnostic changed unexpectedly: {stderr}"
     );
 }

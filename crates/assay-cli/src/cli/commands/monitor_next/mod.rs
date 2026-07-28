@@ -57,10 +57,72 @@ pub(crate) async fn run(args: super::MonitorArgs) -> anyhow::Result<i32> {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn enforcement_refusal_exit(health_written: bool) -> i32 {
+    if health_written {
+        crate::exit_codes::EXIT_WOULD_BLOCK
+    } else {
+        crate::exit_codes::EXIT_INFRA_ERROR
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn compile_runtime_enforcement_policy(
+    cfg: &assay_core::mcp::runtime_features::RuntimeMonitorConfig,
+) -> assay_policy::tiers::CompiledPolicy {
+    let mut policy = assay_policy::tiers::Policy::default();
+
+    for rule in &cfg.rules {
+        let is_enforcement = matches!(
+            rule.action,
+            assay_core::mcp::runtime_features::MonitorAction::TriggerKill
+                | assay_core::mcp::runtime_features::MonitorAction::Deny
+        );
+
+        if !is_enforcement {
+            continue;
+        }
+
+        match rule.rule_type {
+            assay_core::mcp::runtime_features::MonitorRuleType::FileOpen => {
+                policy
+                    .files
+                    .deny
+                    .extend(rule.match_config.path_globs.iter().cloned());
+                if let Some(not) = &rule.match_config.not {
+                    policy.files.allow.extend(not.path_globs.iter().cloned());
+                }
+            }
+            assay_core::mcp::runtime_features::MonitorRuleType::NetConnect => {
+                for dest in &rule.match_config.dest_globs {
+                    let is_cidr = if let Some((ip_part, prefix_part)) = dest.split_once('/') {
+                        ip_part.parse::<std::net::IpAddr>().is_ok()
+                            && prefix_part.parse::<u8>().is_ok()
+                    } else {
+                        false
+                    };
+
+                    if is_cidr {
+                        policy.network.deny_cidrs.push(dest.clone());
+                    } else if let Ok(port) = dest.parse::<u16>() {
+                        policy.network.deny_ports.push(port);
+                    } else {
+                        policy.network.deny_destinations.push(dest.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    assay_policy::tiers::compile(&policy)
+}
+
 #[cfg(target_os = "linux")]
 async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     use assay_common::{get_inode_generation, strict_open};
     use assay_monitor::Monitor;
+    use enforcement_health::{EnforcementHealth, SCOPE_IPV4_TCP_CONNECT};
 
     let mut runtime_config = None;
     let mut kill_config = None;
@@ -76,6 +138,26 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
             runtime_config = Some(rm);
         }
         kill_config = p.kill_switch;
+    }
+
+    let compiled_policy = runtime_config
+        .as_ref()
+        .map(compile_runtime_enforcement_policy);
+
+    if let Some(compiled) = compiled_policy.as_ref() {
+        // The compiler accepts IPv6 CIDRs, but the shipped enforcement target attaches only
+        // connect4 and loads only CIDR_RULES_V4. Refuse before loading or attaching eBPF; warning
+        // and continuing would turn an IPv6 policy into an undisclosed IPv4 subset.
+        if let Err(e) = assay_monitor::validate_network_enforcement_support(compiled) {
+            emit_err!(
+                "FATAL: egress enforcement policy cannot be installed: {} (fail-closed, not \
+                 running a partially enforced policy)",
+                e
+            );
+            let health_written =
+                write_enforcement_health(&args, EnforcementHealth::failed(SCOPE_IPV4_TCP_CONNECT));
+            return Ok(enforcement_refusal_exit(health_written));
+        }
     }
 
     let ebpf_path = match args.ebpf.as_ref() {
@@ -158,73 +240,9 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     let rules = rules::compile_active_rules(runtime_config.as_ref());
 
     // Enforcement truth for the enforcement_health.v0 artifact: did egress enforcement actually attach?
-    use enforcement_health::{EnforcementHealth, SCOPE_IPV4_TCP_CONNECT};
     let mut enforcement_active = false;
 
-    if let Some(cfg) = &runtime_config {
-        let mut t1_policy = assay_policy::tiers::Policy::default();
-
-        for r in &cfg.rules {
-            let is_enforcement = matches!(
-                r.action,
-                assay_core::mcp::runtime_features::MonitorAction::TriggerKill
-                    | assay_core::mcp::runtime_features::MonitorAction::Deny
-            );
-
-            if !is_enforcement {
-                continue;
-            }
-
-            match r.rule_type {
-                assay_core::mcp::runtime_features::MonitorRuleType::FileOpen => {
-                    for glob in &r.match_config.path_globs {
-                        t1_policy.files.deny.push(glob.clone());
-                    }
-                    if let Some(not) = &r.match_config.not {
-                        for glob in &not.path_globs {
-                            t1_policy.files.allow.push(glob.clone());
-                        }
-                    }
-                }
-                assay_core::mcp::runtime_features::MonitorRuleType::NetConnect => {
-                    for dest in &r.match_config.dest_globs {
-                        let is_cidr = if let Some((ip_part, prefix_part)) = dest.split_once('/') {
-                            ip_part.parse::<std::net::IpAddr>().is_ok()
-                                && prefix_part.parse::<u8>().is_ok()
-                        } else {
-                            false
-                        };
-
-                        if is_cidr {
-                            t1_policy.network.deny_cidrs.push(dest.clone());
-                        } else if let Ok(port) = dest.parse::<u16>() {
-                            t1_policy.network.deny_ports.push(port);
-                        } else {
-                            t1_policy.network.deny_destinations.push(dest.clone());
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        let mut compiled = assay_policy::tiers::compile(&t1_policy);
-
-        // The compiler accepts IPv6 CIDRs, but the shipped enforcement target attaches only
-        // connect4 and loads only CIDR_RULES_V4. Refuse before resolving file rules or mutating any
-        // kernel map; warning and continuing would turn an IPv6 policy into an undisclosed IPv4
-        // subset.
-        if let Err(e) = assay_monitor::validate_network_enforcement_support(&compiled) {
-            emit_err!(
-                "FATAL: egress enforcement policy cannot be installed: {} (fail-closed, not \
-                 running a partially enforced policy)",
-                e
-            );
-            let _ =
-                write_enforcement_health(&args, EnforcementHealth::failed(SCOPE_IPV4_TCP_CONNECT));
-            return Ok(crate::exit_codes::EXIT_WOULD_BLOCK);
-        }
-
+    if let Some(mut compiled) = compiled_policy {
         let mut inode_rules = Vec::with_capacity(compiled.tier1.file_deny_exact.len());
 
         for rule in &compiled.tier1.file_deny_exact {
@@ -374,12 +392,13 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                     );
                     // Honesty: a requested-but-failed enforcement must record `failed`, never look
                     // like `absent` (not requested), so write the artifact BEFORE the fail-closed exit.
-                    // A write failure here is already covered by the non-zero exit below.
-                    let _ = write_enforcement_health(
+                    // Distinguish enforcement refusal from an infrastructure failure to retain the
+                    // requested carrier.
+                    let health_written = write_enforcement_health(
                         &args,
                         EnforcementHealth::failed(SCOPE_IPV4_TCP_CONNECT),
                     );
-                    return Ok(crate::exit_codes::EXIT_WOULD_BLOCK);
+                    return Ok(enforcement_refusal_exit(health_written));
                 }
             };
             if let Err(e) = monitor.attach_network_cgroup(&cgroup_file) {
@@ -387,11 +406,11 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                     "FATAL: egress enforcement requested but connect4 attach failed: {} (fail-closed, not running audit-only)",
                     e
                 );
-                let _ = write_enforcement_health(
+                let health_written = write_enforcement_health(
                     &args,
                     EnforcementHealth::failed(SCOPE_IPV4_TCP_CONNECT),
                 );
-                return Ok(crate::exit_codes::EXIT_WOULD_BLOCK);
+                return Ok(enforcement_refusal_exit(health_written));
             }
             enforcement_active = true;
             if !args.quiet {
