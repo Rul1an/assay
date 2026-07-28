@@ -111,12 +111,16 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/fuzz-out"
           # Report what actually runs, so the log carries the toolchain rather than an assumption.
           rustc "+${FUZZ_TOOLCHAIN}" --version --verbose
-          # `--locked`: without it cargo resolves freshly in the runner and rewrites the lock, so
-          # the checked-in `fuzz/Cargo.lock` bound nothing and its staleness was invisible — it
-          # sat at workspace 3.34.0 against a 3.35.0 tree, missing the `assay-evidence ->
-          # assay-common` edge, and nobody could have noticed from a CI run. A lockfile that CI
+          # Assert the checked-in lock is current before fuzzing. `cargo fuzz run` has no
+          # `--locked` — its BuildOptions carry only profile and feature flags — so the guarantee
+          # has to be stated separately rather than passed through. Without it cargo resolves
+          # freshly in the runner and rewrites the lock, so `fuzz/Cargo.lock` bound nothing and its
+          # staleness was invisible: it sat at workspace 3.34.0 against a 3.35.0 tree, missing the
+          # `assay-evidence -> assay-common` edge, and no CI run could have said so. A lockfile CI
           # does not honour cannot reproduce a fuzz finding, which is the only reason to keep one.
-          cargo "+${FUZZ_TOOLCHAIN}" fuzz run --locked bundle_reader \
+          ( cd fuzz && cargo "+${FUZZ_TOOLCHAIN}" metadata --locked --format-version 1 >/dev/null ) \
+            || { echo "::error::fuzz/Cargo.lock is stale; run 'cargo update' in fuzz/ and commit it"; exit 1; }
+          cargo "+${FUZZ_TOOLCHAIN}" fuzz run bundle_reader \
             "${RUNNER_TEMP}/fuzz-out" fuzz/corpus/bundle_reader \
             -- \
             -runs="${RUNS}" \
