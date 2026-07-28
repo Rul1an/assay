@@ -158,10 +158,10 @@ fn statement_from_parts(
 /// so two bundles carrying the same events under a different stream identity share it, and the
 /// subject therefore identifies no artifact and matches none. That is what ADR-044 replaced.
 ///
-/// It is pinned to [`EVIDENCE_BUNDLE_PREDICATE_TYPE_V0`] rather than following the constant, whose
-/// value moved to v1 in the same change. Following it would have let this function mint statements
-/// claiming a conformance they do not have, which is a worse outcome than the break it avoids —
-/// and [`verify_attestation_for_bundle`] refuses what it produces, by name and on purpose.
+/// It is pinned to the explicit [`EVIDENCE_BUNDLE_PREDICATE_TYPE_V0`] identifier rather than the
+/// deprecated unversioned alias, so future alias evolution cannot make this compatibility function
+/// mint a newer predicate contract. What it produces stays refused by
+/// [`verify_attestation_for_bundle`], by name and on purpose.
 #[deprecated(
     since = "3.36.0",
     note = "produces a v0 statement whose subject identifies no artifact and which \
