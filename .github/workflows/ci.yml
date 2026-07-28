@@ -168,8 +168,10 @@ jobs:
           cargo audit --ignore RUSTSEC-2023-0071
 
       - name: cargo audit (RustSec) — fuzz lockfile
-        # `always()`: coverage should not drop out exactly when the tree is already unhealthy.
-        if: always()
+        # Runs when the root audit above fails, so coverage does not drop out exactly when the tree
+        # is already unhealthy. `!cancelled()` rather than `always()`: a cancelled run should stop,
+        # and `always()` would keep this step going after someone hit cancel or a timeout fired.
+        if: ${{ !cancelled() }}
         run: |
           # `Cargo.toml` sets `exclude = ["fuzz"]`, so the audit above cannot see this lockfile and
           # it was covered by nothing: not this job, not the OSV scanner (which rejects Rust locks

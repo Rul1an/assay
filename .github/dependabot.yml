@@ -99,7 +99,8 @@ updates:
   # lock is kept rather than deleted — cargo-fuzz's own generated `.gitignore` covers
   # `target/corpus/artifacts/coverage` and not `Cargo.lock`, and this is a `publish = false` binary
   # crate, for which committing the lock is the Cargo convention — so it needs an updater to match
-  # the `--locked` the fuzz lane now passes.
+  # the staleness assertion the fuzz lane now runs. That assertion is a separate
+  # `cargo metadata --locked` step, not a flag on the fuzz run: `cargo fuzz run` has no `--locked`.
   - package-ecosystem: "cargo"
     directory: "/fuzz"
     schedule:
