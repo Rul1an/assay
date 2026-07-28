@@ -134,8 +134,15 @@ jobs:
           # staleness was invisible: it sat at workspace 3.34.0 against a 3.35.0 tree, missing the
           # `assay-evidence -> assay-common` edge, and no CI run could have said so. A lockfile CI
           # does not honour cannot reproduce a fuzz finding, which is the only reason to keep one.
+          #
+          # The wrapper adds an exit code and nothing else. `--locked` also fails on an unparsable
+          # manifest, an unavailable dependency, a registry or network fault, or a broken toolchain,
+          # so a message naming one cause is a diagnosis this step never made — and the remedy it
+          # used to print, `cargo update --workspace`, is actively wrong during a registry outage.
+          # Only stdout is redirected, since that is the metadata JSON; Cargo's stderr stays the
+          # diagnosis. Pinned by `scripts/ci/test-fuzz-lane-contract.sh`.
           ( cd fuzz && cargo "+${FUZZ_TOOLCHAIN}" metadata --locked --format-version 1 >/dev/null ) \
-            || { echo "::error::fuzz/Cargo.lock is stale; run 'cargo update --workspace' in fuzz/ and commit it"; exit 1; }
+            || { echo "::error::locked fuzz metadata validation failed; inspect the Cargo error above"; exit 1; }
           cargo "+${FUZZ_TOOLCHAIN}" fuzz run bundle_reader \
             "${RUNNER_TEMP}/fuzz-out" fuzz/corpus/bundle_reader \
             -- \
