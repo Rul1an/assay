@@ -63,3 +63,72 @@ fn tier1_enforcement_detection_includes_file_only_policies() {
         });
     assert!(super::tier1_enforcement_requested(&compiled));
 }
+
+fn monitor_args_with_health(
+    path: std::path::PathBuf,
+) -> crate::cli::commands::monitor::MonitorArgs {
+    crate::cli::commands::monitor::MonitorArgs {
+        pid: Vec::new(),
+        ebpf: None,
+        print: false,
+        quiet: true,
+        duration: None,
+        policy: None,
+        monitor_all: false,
+        enforcement_health: Some(path),
+    }
+}
+
+fn file_only_tier1_policy() -> assay_policy::tiers::CompiledPolicy {
+    let mut compiled = assay_policy::tiers::CompiledPolicy {
+        tier1: assay_policy::tiers::Tier1Rules::default(),
+        tier2: assay_policy::tiers::Tier2Rules::default(),
+        stats: assay_policy::tiers::CompilationStats::default(),
+    };
+    compiled
+        .tier1
+        .file_deny_prefix
+        .push(assay_policy::tiers::PathRule {
+            rule_id: 1,
+            path: "/sensitive".to_string(),
+            hash: 0,
+        });
+    compiled
+}
+
+#[test]
+fn file_only_tier1_install_failure_refuses_and_retains_absent_network_health() {
+    let output_dir = tempfile::TempDir::new().expect("temp output dir");
+    let health_path = output_dir.path().join("enforcement-health.json");
+    let args = monitor_args_with_health(health_path.clone());
+
+    assert_eq!(
+        super::tier1_install_failure_exit(
+            &args,
+            &file_only_tier1_policy(),
+            crate::exit_codes::EXIT_WOULD_BLOCK,
+        ),
+        Some(crate::exit_codes::EXIT_WOULD_BLOCK)
+    );
+
+    let health: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(health_path).expect("read retained enforcement health"),
+    )
+    .expect("parse retained enforcement health");
+    assert_eq!(health["network_enforcement"], "absent");
+}
+
+#[test]
+fn file_only_tier1_install_failure_prioritizes_carrier_write_failure() {
+    let unwritable_target = tempfile::TempDir::new().expect("directory is not a file");
+    let args = monitor_args_with_health(unwritable_target.path().to_path_buf());
+
+    assert_eq!(
+        super::tier1_install_failure_exit(
+            &args,
+            &file_only_tier1_policy(),
+            crate::exit_codes::EXIT_WOULD_BLOCK,
+        ),
+        Some(crate::exit_codes::EXIT_INFRA_ERROR)
+    );
+}

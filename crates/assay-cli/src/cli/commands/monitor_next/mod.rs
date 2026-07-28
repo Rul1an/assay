@@ -79,6 +79,11 @@ fn tier1_enforcement_requested(compiled: &assay_policy::tiers::CompiledPolicy) -
 }
 
 #[cfg(any(target_os = "linux", test))]
+fn network_enforcement_requested(compiled: &assay_policy::tiers::CompiledPolicy) -> bool {
+    !compiled.tier1.network_deny_ports.is_empty() || !compiled.tier1.network_deny_cidrs.is_empty()
+}
+
+#[cfg(any(target_os = "linux", test))]
 fn startup_failure_health(
     network_enforcement_requested: bool,
 ) -> enforcement_health::EnforcementHealth {
@@ -168,14 +173,7 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         .map(compile_runtime_enforcement_policy);
     let network_enforcement_requested = compiled_policy
         .as_ref()
-        .map(|compiled| {
-            !compiled.tier1.network_deny_ports.is_empty()
-                || !compiled.tier1.network_deny_cidrs.is_empty()
-        })
-        .unwrap_or(false);
-    let tier1_enforcement_requested = compiled_policy
-        .as_ref()
-        .map(tier1_enforcement_requested)
+        .map(network_enforcement_requested)
         .unwrap_or(false);
 
     if let Some(compiled) = compiled_policy.as_ref() {
@@ -434,17 +432,15 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         }
 
         if let Err(e) = monitor.set_tier1_rules(&compiled) {
-            if tier1_enforcement_requested {
+            if let Some(exit_code) =
+                tier1_install_failure_exit(&args, &compiled, exit_codes::EXIT_WOULD_BLOCK)
+            {
                 emit_err!(
                     "FATAL: failed to install requested Tier 1 enforcement rules: {} \
                      (fail-closed, not reporting a partially loaded policy as active)",
                     e
                 );
-                return Ok(startup_failure_exit(
-                    &args,
-                    network_enforcement_requested,
-                    exit_codes::EXIT_WOULD_BLOCK,
-                ));
+                return Ok(exit_code);
             }
             emit_err!(
                 "Warning: Failed to load Tier 1 rules (LSM might be unavailable): {}",
@@ -604,7 +600,7 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
 /// Write the enforcement_health.v0 artifact to `--enforcement-health <path>` if set. No-op otherwise.
 /// Returns `false` only when the artifact was requested but could not be written; on the fail-closed
 /// abort paths the caller already exits non-zero, on the success path the caller must not exit 0.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 fn write_enforcement_health(
     args: &super::MonitorArgs,
     health: enforcement_health::EnforcementHealth,
@@ -642,7 +638,7 @@ fn failed_enforcement_exit(args: &super::MonitorArgs, retained_exit: i32) -> i32
     enforcement_failure_exit(health_written, retained_exit)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 fn startup_failure_exit(
     args: &super::MonitorArgs,
     network_enforcement_requested: bool,
@@ -651,4 +647,14 @@ fn startup_failure_exit(
     let health_written =
         write_enforcement_health(args, startup_failure_health(network_enforcement_requested));
     enforcement_failure_exit(health_written, retained_exit)
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn tier1_install_failure_exit(
+    args: &super::MonitorArgs,
+    compiled: &assay_policy::tiers::CompiledPolicy,
+    retained_exit: i32,
+) -> Option<i32> {
+    tier1_enforcement_requested(compiled)
+        .then(|| startup_failure_exit(args, network_enforcement_requested(compiled), retained_exit))
 }
