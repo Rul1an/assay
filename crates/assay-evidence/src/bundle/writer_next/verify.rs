@@ -3,6 +3,7 @@ use crate::crypto::id::{compute_content_hash, compute_run_root, compute_stream_i
 use crate::json_strict::validate_json_strict_with_depth;
 use crate::types::EvidenceEvent;
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -70,9 +71,16 @@ pub struct VerifyResult {
     /// Captured here because the verifier already parses every event, so the window is free and
     /// costs no retention — the alternative was for the attestation path to iterate events again
     /// through `BundleReader`, which would undo the change that stopped verification holding the
-    /// stream. Always `Some` for a bundle that verifies: an empty event list is refused by both
-    /// ends of the format, so there is always a first and a last event.
-    pub time_window: Option<(String, String)>,
+    /// stream.
+    ///
+    /// Not an `Option`: a zero-event bundle is refused above, so a `VerifyResult` that exists has
+    /// a first and a last event. Publishing `Option` here would have handed every consumer an
+    /// invariant this function already established, and each would have to re-prove it or unwrap.
+    ///
+    /// Typed rather than rendered. The values are compared as instants and formatted once, at the
+    /// edge that needs a string; keeping them as pre-truncated text made the truncation permanent
+    /// and invisible.
+    pub time_window: (DateTime<Utc>, DateTime<Utc>),
 }
 
 /// Verify a bundle's integrity and contract compliance.
@@ -148,12 +156,12 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
     let mut seen_lines: usize = 0;
     let mut actual_event_count = 0;
     let mut first_event: Option<EvidenceEvent> = None;
-    // Min and max of `time` across events, for ADR-044's predicate. Compared as RFC 3339 strings
-    // rather than parsed: the format pins UTC with a `Z` suffix and a fixed field order, so
-    // lexicographic order is chronological order, and a parse here would add a failure mode to a
-    // value the verifier does not otherwise depend on.
-    let mut time_lo: Option<String> = None;
-    let mut time_hi: Option<String> = None;
+    // Min and max of `time` across events, for ADR-044's predicate. Compared as the instants they
+    // already are: `event.time` is a `DateTime<Utc>`, so ordering it needs no rendering at all.
+    // Rendering first and comparing the text was what discarded sub-second precision, because the
+    // only rendering that made string order safe also truncated to whole seconds.
+    let mut time_lo: Option<DateTime<Utc>> = None;
+    let mut time_hi: Option<DateTime<Utc>> = None;
 
     let entries = archive.entries().map_err(|e| {
         let limit = classify_limit(&e);
@@ -499,13 +507,11 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
                     first_event = Some(event.clone());
                 }
 
-                let event_time = event
-                    .time
-                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-                if time_lo.as_ref().is_none_or(|lo| &event_time < lo) {
-                    time_lo = Some(event_time.clone());
+                let event_time = event.time;
+                if time_lo.is_none_or(|lo| event_time < lo) {
+                    time_lo = Some(event_time);
                 }
-                if time_hi.as_ref().is_none_or(|hi| &event_time > hi) {
+                if time_hi.is_none_or(|hi| event_time > hi) {
                     time_hi = Some(event_time);
                 }
 
@@ -668,10 +674,21 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
         }
     }
 
+    // The zero-event refusal above is what makes this pair total. Stated as an error rather than
+    // an `unwrap`, so that if some future path ever reaches here without events it fails in the
+    // verifier's own vocabulary instead of aborting the process.
+    let time_window = time_lo.zip(time_hi).ok_or_else(|| {
+        VerifyError::new(
+            ErrorClass::Contract,
+            ErrorCode::ContractInvalidEvent,
+            StreamRule::NonEmpty.describe(),
+        )
+    })?;
+
     Ok(VerifyResult {
         manifest: manifest.unwrap(),
         event_count: actual_event_count,
         computed_run_root,
-        time_window: time_lo.zip(time_hi),
+        time_window,
     })
 }
