@@ -729,33 +729,81 @@ jobs:
           TEST_RESULT: ${{ needs.test.result }}
           EBPF_SMOKE_REQUIRED: ${{ needs.scope.outputs.ebpf_smoke_required }}
           EBPF_SMOKE_UBUNTU_RESULT: ${{ needs.ebpf-smoke-ubuntu.result }}
+          MCP_REGISTRY_TOUCHED: ${{ needs.scope.outputs.mcp_registry_touched }}
         shell: bash
         run: |
           set -euo pipefail
 
-          for pair in \
-            "scope:${SCOPE_RESULT}" \
-            "deps-security:${DEPS_SECURITY_RESULT}" \
-            "clippy:${CLIPPY_RESULT}" \
-            "distribution-boundary:${DISTRIBUTION_BOUNDARY_RESULT}" \
-            "vendored-packs:${VENDORED_PACKS_RESULT}" \
-            "mcp-registry-foundation:${MCP_REGISTRY_FOUNDATION_RESULT}" \
-            "perf:${PERF_RESULT}" \
-            "test:${TEST_RESULT}" \
-            "ebpf-smoke-ubuntu:${EBPF_SMOKE_UBUNTU_RESULT}"
+          # `skipped` used to be accepted unconditionally, and the two scope outputs the gate
+          # imported were only echoed. A gate that never asks WHY a job was skipped cannot tell
+          # "the classifier said this PR does not need it" from "the job's own `if:` broke and it
+          # will never run again": both arrive as `skipped` and both read green. The sharpest
+          # instance is `ebpf-smoke-ubuntu`, whose condition is the `== 'true'` form, so a typo in
+          # the output name evaluates to `'' == 'true'` and disarms it silently and permanently.
+          #
+          # So each job is now paired with the condition under which it was expected to run, taken
+          # from that job's own `if:`. Expected-to-run means `success`; only a job whose condition
+          # was false may be `skipped`. `mcp_registry_touched` is imported for the first time here:
+          # the gate needed three scope outputs to answer this question and had two.
+          if [[ "${LIGHTWEIGHT_ONLY}" == "true" ]]; then
+            code_gated_expectation="optional"
+          else
+            code_gated_expectation="required"
+          fi
+          if [[ "${EBPF_SMOKE_REQUIRED}" == "true" ]]; then
+            ebpf_expectation="required"
+          else
+            ebpf_expectation="optional"
+          fi
+          if [[ "${MCP_REGISTRY_TOUCHED}" == "true" ]]; then
+            registry_expectation="required"
+          else
+            registry_expectation="optional"
+          fi
+
+          failures=0
+          for triple in \
+            "scope|${SCOPE_RESULT}|required" \
+            "deps-security|${DEPS_SECURITY_RESULT}|${code_gated_expectation}" \
+            "clippy|${CLIPPY_RESULT}|${code_gated_expectation}" \
+            "distribution-boundary|${DISTRIBUTION_BOUNDARY_RESULT}|required" \
+            "vendored-packs|${VENDORED_PACKS_RESULT}|required" \
+            "mcp-registry-foundation|${MCP_REGISTRY_FOUNDATION_RESULT}|${registry_expectation}" \
+            "perf|${PERF_RESULT}|${code_gated_expectation}" \
+            "test|${TEST_RESULT}|${code_gated_expectation}" \
+            "ebpf-smoke-ubuntu|${EBPF_SMOKE_UBUNTU_RESULT}|${ebpf_expectation}"
           do
-            name="${pair%%:*}"
-            result="${pair#*:}"
+            name="${triple%%|*}"
+            rest="${triple#*|}"
+            result="${rest%%|*}"
+            expectation="${rest##*|}"
+
             case "${result}" in
-              success|skipped)
+              success)
+                ;;
+              skipped)
+                if [[ "${expectation}" == "required" ]]; then
+                  echo "::error::${name} was skipped, but this run required it to execute." \
+                       "lightweight_only=${LIGHTWEIGHT_ONLY}" \
+                       "ebpf_smoke_required=${EBPF_SMOKE_REQUIRED}" \
+                       "mcp_registry_touched=${MCP_REGISTRY_TOUCHED}." \
+                       "A job that never runs reports the same result as one deliberately not run;" \
+                       "check that job's \`if:\` against the scope output it reads."
+                  failures=$((failures + 1))
+                fi
                 ;;
               *)
-                echo "Required CI dependency ${name} ended with ${result}"
-                exit 1
+                echo "::error::Required CI dependency ${name} ended with ${result}"
+                failures=$((failures + 1))
                 ;;
             esac
           done
 
           echo "lightweight_only=${LIGHTWEIGHT_ONLY}"
           echo "ebpf_smoke_required=${EBPF_SMOKE_REQUIRED}"
-          echo "All required CI jobs passed or were intentionally skipped."
+          echo "mcp_registry_touched=${MCP_REGISTRY_TOUCHED}"
+          if (( failures > 0 )); then
+            echo "${failures} required CI dependenc(ies) did not satisfy the gate."
+            exit 1
+          fi
+          echo "All required CI jobs ran and passed; skipped jobs were scoped out."
