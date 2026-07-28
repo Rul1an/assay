@@ -77,9 +77,15 @@ toolchain configuration). Report the failure and let Cargo's stderr say why:\n  
   grep -qF 'metadata --locked' <<<"$run_block" \
     || fail "the extracted \`Fuzz smoke\` run block does not contain the guard, so scanning it \
 proves nothing"
-  if grep -qE '2>' <<<"$run_block"; then
+  #    Matched as an operator class, not as one spelling. `2>` alone missed `exec 2<>file`, which
+  #    opens fd2 read/write on the file and hides Cargo's stderr exactly as well -- confirmed by
+  #    writing a sentinel to stderr under it and finding it in the file, not on the terminal.
+  #    `&>`/`&>>` and `|&` carry stderr away too, so the class covers those rather than waiting for
+  #    each to be found separately.
+  local hide_fd2='2[<>]|&>|\|&'
+  if grep -qE "$hide_fd2" <<<"$run_block"; then
     fail "the fuzz step redirects stderr, which discards the only real diagnosis it has:\n\
-$(grep -nE '2>' <<<"$run_block")"
+$(grep -nE "$hide_fd2" <<<"$run_block")"
   fi
 
   # 4. The failure must still be a failure — asserted on the guard's own `||` arm, not on the file.
@@ -205,6 +211,21 @@ if ( check_workflow "$exec_mutant" ) >/dev/null 2>&1; then
 windowed on the guard rather than on the step"
 fi
 echo "ok: an \`exec 2>\` earlier in the step turns the contract red"
+
+# Negative control: `2<>` opens fd2 read/write on a file. It is a different operator, not a
+# different target, so a check spelled `2>` never saw it -- and the step's stderr is just as gone.
+readwrite_mutant="$(mktemp)"
+trap 'rm -f "$mutant" "$redirect_mutant" "$paths_mutant" "$comment_mutant" "$exec_mutant" \
+  "$readwrite_mutant"' EXIT
+sed 's|^          # Assert the checked-in lock is current before fuzzing.|          exec 2<>cargo-error.log\
+&|' "$WORKFLOW" > "$readwrite_mutant"
+grep -q '^          exec 2<>cargo-error.log$' "$readwrite_mutant" \
+  || fail "the read/write redirect mutation did not apply, so it proves nothing"
+if ( check_workflow "$readwrite_mutant" ) >/dev/null 2>&1; then
+  fail "an \`exec 2<>\` left the contract green — the stderr check matches one spelling rather \
+than the redirection operators that hide fd2"
+fi
+echo "ok: an \`exec 2<>\` turns the contract red"
 
 echo "ok: the lock guard reports without diagnosing, keeps Cargo's stderr, and fails closed"
 echo "ok: FUZZ_TOOLCHAIN is dated (${PIN})"
