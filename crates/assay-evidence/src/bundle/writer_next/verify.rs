@@ -64,6 +64,15 @@ pub struct VerifyResult {
     pub event_count: usize,
     /// Recomputed run_root
     pub computed_run_root: String,
+    /// Earliest and latest event `time`, in that order.
+    ///
+    /// ADR-044's predicate requires the run's time window, and the manifest does not carry it.
+    /// Captured here because the verifier already parses every event, so the window is free and
+    /// costs no retention — the alternative was for the attestation path to iterate events again
+    /// through `BundleReader`, which would undo the change that stopped verification holding the
+    /// stream. Always `Some` for a bundle that verifies: an empty event list is refused by both
+    /// ends of the format, so there is always a first and a last event.
+    pub time_window: Option<(String, String)>,
 }
 
 /// Verify a bundle's integrity and contract compliance.
@@ -139,6 +148,12 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
     let mut seen_lines: usize = 0;
     let mut actual_event_count = 0;
     let mut first_event: Option<EvidenceEvent> = None;
+    // Min and max of `time` across events, for ADR-044's predicate. Compared as RFC 3339 strings
+    // rather than parsed: the format pins UTC with a `Z` suffix and a fixed field order, so
+    // lexicographic order is chronological order, and a parse here would add a failure mode to a
+    // value the verifier does not otherwise depend on.
+    let mut time_lo: Option<String> = None;
+    let mut time_hi: Option<String> = None;
 
     let entries = archive.entries().map_err(|e| {
         let limit = classify_limit(&e);
@@ -484,6 +499,16 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
                     first_event = Some(event.clone());
                 }
 
+                let event_time = event
+                    .time
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                if time_lo.as_ref().is_none_or(|lo| &event_time < lo) {
+                    time_lo = Some(event_time.clone());
+                }
+                if time_hi.as_ref().is_none_or(|hi| &event_time > hi) {
+                    time_hi = Some(event_time);
+                }
+
                 // Check 9, the ID contract. Documented at the top of this function since the
                 // format was written, but never executed until ADR-043: the id is outside the
                 // per-event content hash, so an id that disagrees with its own run_id and seq
@@ -647,5 +672,6 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
         manifest: manifest.unwrap(),
         event_count: actual_event_count,
         computed_run_root,
+        time_window: time_lo.zip(time_hi),
     })
 }
