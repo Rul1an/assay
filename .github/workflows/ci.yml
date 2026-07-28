@@ -168,6 +168,8 @@ jobs:
           cargo audit --ignore RUSTSEC-2023-0071
 
       - name: cargo audit (RustSec) — fuzz lockfile
+        # `always()`: coverage should not drop out exactly when the tree is already unhealthy.
+        if: always()
         run: |
           # `Cargo.toml` sets `exclude = ["fuzz"]`, so the audit above cannot see this lockfile and
           # it was covered by nothing: not this job, not the OSV scanner (which rejects Rust locks
@@ -175,11 +177,13 @@ jobs:
           # had already moved past. Audited separately because the exclusion is deliberate and the
           # blind spot it creates is not.
           #
-          # No ignores: the fuzz tree does not reach `jsonwebtoken`, so the one advisory the root
-          # carries has nothing to match here. If that changes, add it in `deny.toml`,
-          # `.cargo/audit.toml`, the step above and the pre-push hook together — that list is kept
-          # in lockstep by hand and has drifted before.
-          cargo audit --file fuzz/Cargo.lock
+          # Run from a directory with no `.cargo/audit.toml`. cargo-audit reads that config from the
+          # cwd, so invoking this from the repo root would silently inherit the root's ignore list —
+          # measured: RUSTSEC-2023-0071 is suppressed from the root and reported from elsewhere. That
+          # would defeat the reason this step exists. An advisory that matches only the fuzz tree is
+          # then a deliberate decision, not a silent pass; there is nowhere for it to be quietly
+          # excused, which is the point.
+          ( cd "${RUNNER_TEMP}" && cargo audit --file "${GITHUB_WORKSPACE}/fuzz/Cargo.lock" )
 
   clippy:
     name: Clippy (deny warnings)

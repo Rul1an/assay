@@ -12,6 +12,13 @@ on:
     paths:
       - "fuzz/**"
       - "crates/assay-evidence/**"
+      # `assay-core` is a direct fuzz dependency, and the root manifest carries the workspace
+      # version every path dep inherits. Without these two, a release bump touches neither
+      # `fuzz/**` nor `crates/assay-evidence/**`, so the lock silently goes stale exactly the way
+      # it did before -- and the staleness assertion then fails on whatever unrelated PR next
+      # touches this lane, misattributing the break to whoever happened to be passing.
+      - "crates/assay-core/**"
+      - "Cargo.toml"
       - ".github/workflows/fuzz-smoke.yml"
   schedule:
     # Nightly, longer budget. Off the PR path so a slow campaign never gates a merge.
@@ -119,7 +126,7 @@ jobs:
           # `assay-evidence -> assay-common` edge, and no CI run could have said so. A lockfile CI
           # does not honour cannot reproduce a fuzz finding, which is the only reason to keep one.
           ( cd fuzz && cargo "+${FUZZ_TOOLCHAIN}" metadata --locked --format-version 1 >/dev/null ) \
-            || { echo "::error::fuzz/Cargo.lock is stale; run 'cargo update' in fuzz/ and commit it"; exit 1; }
+            || { echo "::error::fuzz/Cargo.lock is stale; run 'cargo update --workspace' in fuzz/ and commit it"; exit 1; }
           cargo "+${FUZZ_TOOLCHAIN}" fuzz run bundle_reader \
             "${RUNNER_TEMP}/fuzz-out" fuzz/corpus/bundle_reader \
             -- \
