@@ -65,22 +65,27 @@ pub struct VerifyResult {
     pub event_count: usize,
     /// Recomputed run_root
     pub computed_run_root: String,
+}
+
+/// Everything the verification pass learned, including what the published result cannot carry.
+///
+/// Crate-internal on purpose. `VerifyResult` is published in 3.x with all fields public and no
+/// `#[non_exhaustive]`, so adding a field to it stops every downstream struct literal and
+/// exhaustive destructure from compiling. The window travels beside the result instead of inside
+/// it, which costs one projection and no source break.
+///
+/// ADR-044's predicate needs the run's time window and the manifest does not carry it. It is
+/// captured here because the verifier already parses every event, so the window is free and costs
+/// no retention — the alternative was for the attestation path to walk the events again through
+/// `BundleReader`, undoing the change that stopped verification holding the stream.
+pub(crate) struct VerifiedBundle {
+    pub(crate) result: VerifyResult,
     /// Earliest and latest event `time`, in that order.
     ///
-    /// ADR-044's predicate requires the run's time window, and the manifest does not carry it.
-    /// Captured here because the verifier already parses every event, so the window is free and
-    /// costs no retention — the alternative was for the attestation path to iterate events again
-    /// through `BundleReader`, which would undo the change that stopped verification holding the
-    /// stream.
-    ///
-    /// Not an `Option`: a zero-event bundle is refused above, so a `VerifyResult` that exists has
-    /// a first and a last event. Publishing `Option` here would have handed every consumer an
-    /// invariant this function already established, and each would have to re-prove it or unwrap.
-    ///
-    /// Typed rather than rendered. The values are compared as instants and formatted once, at the
-    /// edge that needs a string; keeping them as pre-truncated text made the truncation permanent
-    /// and invisible.
-    pub time_window: (DateTime<Utc>, DateTime<Utc>),
+    /// Not an `Option`: a zero-event bundle is refused, so a `VerifiedBundle` that exists has a
+    /// first and a last event. Typed rather than rendered — the values are compared as instants
+    /// and formatted once, at the edge that needs a string.
+    pub(crate) time_window: (DateTime<Utc>, DateTime<Utc>),
 }
 
 /// Verify a bundle's integrity and contract compliance.
@@ -114,6 +119,14 @@ pub fn verify_bundle<R: Read>(reader: R) -> Result<VerifyResult> {
 
 /// Verify a bundle with explicit resource limits.
 pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Result<VerifyResult> {
+    Ok(verify_bundle_verbose_with_limits(reader, limits)?.result)
+}
+
+/// The same pass, returning what the published result cannot carry.
+pub(crate) fn verify_bundle_verbose_with_limits<R: Read>(
+    reader: R,
+    limits: VerifyLimits,
+) -> Result<VerifiedBundle> {
     // Snapshot the whole source under the ceiling before parsing anything.
     //
     // Streaming the ceiling into the gzip/tar walker only bounds the prefix those layers choose
@@ -138,7 +151,7 @@ pub fn verify_bundle_with_limits<R: Read>(reader: R, limits: VerifyLimits) -> Re
 }
 
 /// Verify a bundle from bytes already bounded and materialized by the caller.
-fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyResult> {
+fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifiedBundle> {
     let reader = std::io::Cursor::new(source);
 
     let decoder = GzDecoder::new(reader);
@@ -685,10 +698,12 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<VerifyR
         )
     })?;
 
-    Ok(VerifyResult {
-        manifest: manifest.unwrap(),
-        event_count: actual_event_count,
-        computed_run_root,
+    Ok(VerifiedBundle {
+        result: VerifyResult {
+            manifest: manifest.unwrap(),
+            event_count: actual_event_count,
+            computed_run_root,
+        },
         time_window,
     })
 }
