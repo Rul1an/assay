@@ -86,7 +86,22 @@ toolchain configuration). Report the failure and let Cargo's stderr say why:\n  
   #    `assay-core` and `assay-evidence` were named -- a change in any of the three could alter
   #    code, manifest or lock without this lane ever running, which is the staleness this whole
   #    branch exists to stop. Offline and cheap: no cargo invocation.
-  local locals missing=""
+  #    Read from the `on.pull_request.paths` sequence itself, not from the file. A crate name
+  #    appears in this workflow's own prose too, so a whole-file grep answered "covered" for
+  #    `# - "crates/assay-common/**"` -- a commented-out entry that triggers nothing, and that
+  #    actionlint passes as valid YAML. The extractor takes only `- ` items inside that one block.
+  local paths_active locals missing=""
+  paths_active="$(awk '
+    /^  pull_request:[[:space:]]*$/ { in_pr=1; next }
+    /^  [^[:space:]]/              { in_pr=0; in_paths=0 }
+    in_pr && /^    paths:[[:space:]]*$/ { in_paths=1; next }
+    in_pr && /^    [^[:space:]]/  { in_paths=0 }
+    in_paths && /^      -[[:space:]]/ { print }
+  ' "$wf")"
+  [[ -n "$paths_active" ]] \
+    || fail "could not read the \`on.pull_request.paths\` sequence from ${wf##*/}"
+
+  local locals
   locals="$(awk '/^\[\[package\]\]/{name="";src=0} /^name = /{gsub(/[",]/,"",$3); name=$3} \
                  /^source = /{src=1} /^$/{if(name!="" && !src) print name} \
                  END{if(name!="" && !src) print name}' \
@@ -94,7 +109,7 @@ toolchain configuration). Report the failure and let Cargo's stderr say why:\n  
   [[ -n "$locals" ]] || fail "could not derive local path dependencies from fuzz/Cargo.lock"
   while read -r crate; do
     [[ -n "$crate" ]] || continue
-    grep -qF "\"crates/${crate}/**\"" "$wf" || missing="${missing} ${crate}"
+    grep -qF "\"crates/${crate}/**\"" <<<"$paths_active" || missing="${missing} ${crate}"
   done <<<"$locals"
   [[ -z "$missing" ]] || fail "the fuzz lane resolves these local crates but does not trigger on \
 them, so a change there can go untested:${missing}"
@@ -142,6 +157,21 @@ if ( check_workflow "$paths_mutant" ) >/dev/null 2>&1; then
 assertion is not bound to the lockfile"
 fi
 echo "ok: dropping a local crate from the path filter turns the contract red"
+
+# Negative control: comment the entry out instead of deleting it. The line is still in the file and
+# still says the crate's name, so a whole-file grep called it covered — while `pull_request.paths`
+# no longer carries it and actionlint sees nothing wrong.
+comment_mutant="$(mktemp)"
+trap 'rm -f "$mutant" "$redirect_mutant" "$paths_mutant" "$comment_mutant"' EXIT
+sed 's|^      - "crates/assay-common/\*\*"|      # - "crates/assay-common/**"|' \
+  "$WORKFLOW" > "$comment_mutant"
+grep -q '^      # - "crates/assay-common/\*\*"' "$comment_mutant" \
+  || fail "the comment mutation did not apply, so it proves nothing"
+if ( check_workflow "$comment_mutant" ) >/dev/null 2>&1; then
+  fail "commenting out a path entry left the contract green — the coverage assertion reads the \
+file rather than the active \`pull_request.paths\` sequence"
+fi
+echo "ok: commenting out a path entry turns the contract red"
 
 echo "ok: the lock guard reports without diagnosing, keeps Cargo's stderr, and fails closed"
 echo "ok: FUZZ_TOOLCHAIN is dated (${PIN})"
