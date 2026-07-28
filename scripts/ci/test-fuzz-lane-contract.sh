@@ -24,6 +24,14 @@ fail() {
 
 [[ -f "$WORKFLOW" ]] || fail "missing ${WORKFLOW#"$ROOT"/}"
 
+# One root for every temporary the test builds -- mutant workflows and behavioural sandboxes alike.
+# Each mutant run aborts partway through check_workflow by design, so a cleanup line placed after
+# the assertions is never reached. A single trap owns this: `trap ... EXIT` *replaces* the previous
+# handler rather than adding to it, so a chain of re-traps quietly drops whatever the earlier ones
+# covered -- which is how the sandboxes were leaking one per failed mutant.
+SANDBOX_ROOT="$(mktemp -d)"
+trap 'rm -rf "$SANDBOX_ROOT"' EXIT
+
 # Every assertion takes the workflow path, so the same logic can be run against a deliberately
 # broken copy below. A control that lives only in someone's shell history is not a control.
 check_workflow() {
@@ -77,16 +85,54 @@ toolchain configuration). Report the failure and let Cargo's stderr say why:\n  
   grep -qF 'metadata --locked' <<<"$run_block" \
     || fail "the extracted \`Fuzz smoke\` run block does not contain the guard, so scanning it \
 proves nothing"
-  #    Matched as an operator class, not as one spelling. `2>` alone missed `exec 2<>file`, which
-  #    opens fd2 read/write on the file and hides Cargo's stderr exactly as well -- confirmed by
-  #    writing a sentinel to stderr under it and finding it in the file, not on the terminal.
-  #    `&>`/`&>>` and `|&` carry stderr away too, so the class covers those rather than waiting for
-  #    each to be found separately.
-  local hide_fd2='2[<>]|&>|\|&'
-  if grep -qE "$hide_fd2" <<<"$run_block"; then
-    fail "the fuzz step redirects stderr, which discards the only real diagnosis it has:\n\
-$(grep -nE "$hide_fd2" <<<"$run_block")"
-  fi
+  #    Proved by running the step rather than by pattern-matching it. Matching text was wrong in
+  #    both directions at once: a step-level `shell: bash {0} 2>cargo-error.log` redirects the whole
+  #    script from outside the block a regex can see, and a comment saying `2>cargo-error.log`
+  #    turned the check red while changing nothing. Each new operator spelling only moved the line.
+  #
+  #    So: pin the shell, then execute the extracted script against a `cargo` that fails the way
+  #    `--locked` fails, and require the diagnosis to arrive on the step's own stderr.
+  local shell_line
+  shell_line="$(awk '
+    /^      - name: Fuzz smoke[[:space:]]*$/ { in_step=1; next }
+    in_step && /^      - / { in_step=0 }
+    in_step && /^        shell:/ { print; exit }
+  ' "$wf")"
+  [[ "$shell_line" == "        shell: bash" ]] \
+    || fail "the fuzz step needs a plain \`shell: bash\`; a custom shell line redirects the whole \
+script's stderr from outside the script, where nothing in the run block can see it. Got:\n  \
+${shell_line:-<none>}"
+
+  local sandbox rc=0
+  local sentinel="CARGO-STDERR-SENTINEL-4d1f9a"
+  sandbox="$(mktemp -d "${SANDBOX_ROOT}/wf.XXXXXX")"
+  mkdir -p "$sandbox/bin" "$sandbox/fuzz" "$sandbox/tmp"
+  awk '{ sub(/^          /, ""); print }' <<<"$run_block" > "$sandbox/step.sh"
+
+  # `cargo` fails only for the guard, the way a `--locked` violation does: a message on stderr and
+  # a nonzero exit. Everything else succeeds, so a green run means the guard did its job.
+  {
+    echo '#!/usr/bin/env bash'
+    echo 'if [[ "$*" == *"metadata --locked"* ]]; then'
+    echo "  echo \"error: the lock file needs to be updated -- ${sentinel}\" >&2"
+    echo '  exit 1'
+    echo 'fi'
+    echo 'exit 0'
+  } > "$sandbox/bin/cargo"
+  printf '#!/usr/bin/env bash\necho "rustc 0.0.0-mock"\n' > "$sandbox/bin/rustc"
+  chmod +x "$sandbox/bin/cargo" "$sandbox/bin/rustc"
+
+  ( cd "$sandbox" && PATH="$sandbox/bin:$PATH" RUNNER_TEMP="$sandbox/tmp" \
+      FUZZ_TOOLCHAIN="nightly-mock" RUNS=1 MAX_TOTAL_TIME=1 \
+      bash step.sh ) >"$sandbox/out" 2>"$sandbox/err" || rc=$?
+
+  [[ "$rc" -ne 0 ]] \
+    || fail "the fuzz step exited 0 even though \`cargo metadata --locked\` failed"
+  grep -q '::error::locked fuzz metadata validation failed' "$sandbox/out" \
+    || fail "the guard's wrapper message never printed:\n$(cat "$sandbox/out")"
+  grep -q "$sentinel" "$sandbox/err" \
+    || fail "Cargo's stderr did not reach the step's stderr, so the only real diagnosis is \
+invisible to a reviewer. Step stderr was:\n$(cat "$sandbox/err")"
 
   # 4. The failure must still be a failure — asserted on the guard's own `||` arm, not on the file.
   #    Searching the whole workflow passed on the seed-corpus check's unrelated `exit 1`, so
@@ -143,8 +189,7 @@ check_workflow "$WORKFLOW"
 
 # Negative control: strip the guard's exit and nothing else. The seed-corpus check keeps its own
 # `exit 1`, which is exactly the state that used to pass.
-mutant="$(mktemp)"
-trap 'rm -f "$mutant"' EXIT
+mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 sed 's|\(inspect the Cargo error above"\); exit 1; }|\1; }|' "$WORKFLOW" > "$mutant"
 if ! grep -q 'exit 1' "$mutant"; then
   fail "the mutation removed every exit, so it does not isolate the guard"
@@ -158,8 +203,7 @@ echo "ok: removing only the guard's exit turns the contract red"
 # Negative control: send stderr to a file. It is not `/dev/null` and not `2>&1`, so the enumerated
 # form of this check passed it -- and actionlint passes it too, since the shell is valid. The
 # diagnosis simply lands somewhere no reviewer looks.
-redirect_mutant="$(mktemp)"
-trap 'rm -f "$mutant" "$redirect_mutant"' EXIT
+redirect_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 sed 's|--format-version 1 >/dev/null )|--format-version 1 >/dev/null 2>cargo-error.log )|' \
   "$WORKFLOW" > "$redirect_mutant"
 grep -q '2>cargo-error.log' "$redirect_mutant" \
@@ -173,8 +217,7 @@ echo "ok: redirecting Cargo's stderr to a file turns the contract red"
 # Negative control: drop one crate from the path filter. This is the state the branch shipped in --
 # three of the five local crates were simply absent -- so the assertion that catches it has to be
 # shown catching it.
-paths_mutant="$(mktemp)"
-trap 'rm -f "$mutant" "$redirect_mutant" "$paths_mutant"' EXIT
+paths_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 grep -v '"crates/assay-common/\*\*"' "$WORKFLOW" > "$paths_mutant"
 if ( check_workflow "$paths_mutant" ) >/dev/null 2>&1; then
   fail "dropping a local crate from the path filter left the contract green — the coverage \
@@ -185,8 +228,7 @@ echo "ok: dropping a local crate from the path filter turns the contract red"
 # Negative control: comment the entry out instead of deleting it. The line is still in the file and
 # still says the crate's name, so a whole-file grep called it covered — while `pull_request.paths`
 # no longer carries it and actionlint sees nothing wrong.
-comment_mutant="$(mktemp)"
-trap 'rm -f "$mutant" "$redirect_mutant" "$paths_mutant" "$comment_mutant"' EXIT
+comment_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 sed 's|^      - "crates/assay-common/\*\*"|      # - "crates/assay-common/**"|' \
   "$WORKFLOW" > "$comment_mutant"
 grep -q '^      # - "crates/assay-common/\*\*"' "$comment_mutant" \
@@ -200,8 +242,7 @@ echo "ok: commenting out a path entry turns the contract red"
 # Negative control: move the redirect off the guard line. `exec 2>` sets fd2 for the rest of the
 # step, so Cargo's diagnosis is gone just the same -- but a check windowed on the guard's own two
 # lines never sees it, and actionlint has no opinion. Same promised property, one scope wider.
-exec_mutant="$(mktemp)"
-trap 'rm -f "$mutant" "$redirect_mutant" "$paths_mutant" "$comment_mutant" "$exec_mutant"' EXIT
+exec_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 sed 's|^          # Assert the checked-in lock is current before fuzzing.|          exec 2>cargo-error.log\
 &|' "$WORKFLOW" > "$exec_mutant"
 grep -q '^          exec 2>cargo-error.log$' "$exec_mutant" \
@@ -214,9 +255,7 @@ echo "ok: an \`exec 2>\` earlier in the step turns the contract red"
 
 # Negative control: `2<>` opens fd2 read/write on a file. It is a different operator, not a
 # different target, so a check spelled `2>` never saw it -- and the step's stderr is just as gone.
-readwrite_mutant="$(mktemp)"
-trap 'rm -f "$mutant" "$redirect_mutant" "$paths_mutant" "$comment_mutant" "$exec_mutant" \
-  "$readwrite_mutant"' EXIT
+readwrite_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
 sed 's|^          # Assert the checked-in lock is current before fuzzing.|          exec 2<>cargo-error.log\
 &|' "$WORKFLOW" > "$readwrite_mutant"
 grep -q '^          exec 2<>cargo-error.log$' "$readwrite_mutant" \
@@ -226,6 +265,36 @@ if ( check_workflow "$readwrite_mutant" ) >/dev/null 2>&1; then
 than the redirection operators that hide fd2"
 fi
 echo "ok: an \`exec 2<>\` turns the contract red"
+
+# Negative control: redirect from the step's `shell:` line. It is outside the run block entirely,
+# so no amount of scanning the script can see it -- only pinning the shell can.
+shell_mutant="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
+awk '
+  /^      - name: Fuzz smoke[[:space:]]*$/ { in_step=1 }
+  in_step && /^        shell: bash$/ { print "        shell: bash {0} 2>cargo-error.log"; in_step=0; next }
+  { print }
+' "$WORKFLOW" > "$shell_mutant"
+grep -q 'shell: bash {0} 2>cargo-error.log' "$shell_mutant" \
+  || fail "the custom-shell mutation did not apply, so it proves nothing"
+if ( check_workflow "$shell_mutant" ) >/dev/null 2>&1; then
+  fail "a step-level \`shell:\` redirect left the contract green — the stderr proof does not \
+cover how the script is invoked"
+fi
+echo "ok: a step-level \`shell:\` redirect turns the contract red"
+
+# Positive control: a comment that merely names a redirect changes nothing and must stay green.
+# The previous static check matched the text and went red on it, which is a false alarm on a line
+# warning against the very thing the test exists to catch.
+comment_ok="$(mktemp "${SANDBOX_ROOT}/mut.XXXXXX")"
+sed 's|^          # Assert the checked-in lock is current before fuzzing.|          # Never add 2>cargo-error.log here\
+&|' "$WORKFLOW" > "$comment_ok"
+grep -q '# Never add 2>cargo-error.log here' "$comment_ok" \
+  || fail "the comment control did not apply, so it proves nothing"
+if ! ( check_workflow "$comment_ok" ) >/dev/null 2>&1; then
+  fail "a comment naming a redirect turned the contract red — the check reacts to text rather \
+than to behaviour"
+fi
+echo "ok: a comment naming a redirect leaves the contract green"
 
 echo "ok: the lock guard reports without diagnosing, keeps Cargo's stderr, and fails closed"
 echo "ok: FUZZ_TOOLCHAIN is dated (${PIN})"
