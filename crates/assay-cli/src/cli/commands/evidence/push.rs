@@ -56,6 +56,13 @@ pub async fn cmd_push(args: PushArgs) -> Result<i32> {
     // 2. Verify bundle (unless --no-verify)
     let bundle_id = if args.no_verify {
         let cursor = std::io::Cursor::new(&buffer);
+        // Deliberately `open_unverified_with_limits` and not `BundleInfo::peek_with_limits`, even
+        // though only `bundle_id` is read from the result. This looks like the same waste the
+        // verification-only callers had, and it is not: with `--no-verify` the reader's events
+        // pass is the *only* consumption of `events.ndjson`, so it is what applies
+        // `max_line_bytes`, `max_events`, UTF-8 validity and JSON depth. Switching to peek drops
+        // those ceilings — `contract_bounded_ingest_cli` catches it immediately, which is how this
+        // comment came to exist. Retention here is load-bearing.
         let reader = assay_evidence::BundleReader::open_unverified_with_limits(cursor, limits)
             .context("failed to read bundle manifest")?;
         reader.manifest().bundle_id.clone()
