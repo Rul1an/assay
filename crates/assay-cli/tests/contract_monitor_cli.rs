@@ -132,7 +132,7 @@ fn contract_monitor_ipv6_refusal_precedes_ebpf_load_and_writes_failed_health() {
 
     let stderr = normalize(&assert.get_output().stderr);
     assert!(
-        stderr.contains("IPv6 CIDR rules cannot be installed"),
+        stderr.contains("current enforcement target supports IPv4/TCP only"),
         "IPv6 refusal diagnostic changed unexpectedly: {stderr}"
     );
     assert!(
