@@ -90,3 +90,30 @@ updates:
       semver-major-days: 30
       semver-minor-days: 7
       semver-patch-days: 7
+
+  # Cargo - the fuzz crate carries its own lockfile.
+  #
+  # `Cargo.toml` sets `exclude = ["fuzz"]`, so the root cargo entry above never sees this tree and
+  # `fuzz/Cargo.lock` had no updater at all: it sat at workspace 3.34.0 against a 3.35.0 tree,
+  # missing a dependency edge, holding six advisories the root lock had already moved past. The
+  # lock is kept rather than deleted — cargo-fuzz's own generated `.gitignore` covers
+  # `target/corpus/artifacts/coverage` and not `Cargo.lock`, and this is a `publish = false` binary
+  # crate, for which committing the lock is the Cargo convention — so it needs an updater to match
+  # the staleness assertion the fuzz lane now runs. That assertion is a separate
+  # `cargo metadata --locked` step, not a flag on the fuzz run: `cargo fuzz run` has no `--locked`.
+  - package-ecosystem: "cargo"
+    directory: "/fuzz"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "rust"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 7

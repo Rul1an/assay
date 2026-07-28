@@ -167,6 +167,26 @@ jobs:
           # RUSTSEC-2023-0071 (rsa Marvin Attack): no fixed upgrade; assay-mcp-server JWT (see deny.toml)
           cargo audit --ignore RUSTSEC-2023-0071
 
+      - name: cargo audit (RustSec) — fuzz lockfile
+        # Runs when the root audit above fails, so coverage does not drop out exactly when the tree
+        # is already unhealthy. `!cancelled()` rather than `always()`: a cancelled run should stop,
+        # and `always()` would keep this step going after someone hit cancel or a timeout fired.
+        if: ${{ !cancelled() }}
+        run: |
+          # `Cargo.toml` sets `exclude = ["fuzz"]`, so the audit above cannot see this lockfile and
+          # it was covered by nothing: not this job, not the OSV scanner (which rejects Rust locks
+          # by design), not dependabot (scoped to `/`). It accumulated six advisories the root tree
+          # had already moved past. Audited separately because the exclusion is deliberate and the
+          # blind spot it creates is not.
+          #
+          # Run from a directory with no `.cargo/audit.toml`. cargo-audit reads that config from the
+          # cwd, so invoking this from the repo root would silently inherit the root's ignore list —
+          # measured: RUSTSEC-2023-0071 is suppressed from the root and reported from elsewhere. That
+          # would defeat the reason this step exists. An advisory that matches only the fuzz tree is
+          # then a deliberate decision, not a silent pass; there is nowhere for it to be quietly
+          # excused, which is the point.
+          ( cd "${RUNNER_TEMP}" && cargo audit --file "${GITHUB_WORKSPACE}/fuzz/Cargo.lock" )
+
   clippy:
     name: Clippy (deny warnings)
     needs: [scope]

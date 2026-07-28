@@ -87,6 +87,16 @@ repos:
         pass_filenames: false
         files: ^(scripts/ci/(reconcile-docs-auto-pr|test-reconcile-docs-auto-pr)\.sh|\.github/workflows/(docs-auto-update|ci|assay-runner-lane-check|host-capability-check)\.yml|\.pre-commit-config\.yaml)$
 
+      - id: fuzz-lane-contract-self-test
+        name: Fuzz lane contract
+        entry: bash scripts/ci/test-fuzz-lane-contract.sh
+        language: system
+        pass_filenames: false
+        # `fuzz/Cargo.{toml,lock}` included: the contract derives the lane's required path filter
+        # from the lock, so a change there can invalidate the assertion without touching either
+        # file that used to trigger this hook.
+        files: ^(scripts/ci/test-fuzz-lane-contract\.sh|\.github/workflows/fuzz-smoke\.yml|fuzz/Cargo\.(toml|lock)|\.pre-commit-config\.yaml)$
+
       - id: ci-gate-expectations-self-test
         name: CI gate expectation contract
         entry: bash scripts/ci/test-ci-gate-expectations.sh

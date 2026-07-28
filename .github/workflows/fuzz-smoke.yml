@@ -12,6 +12,20 @@ on:
     paths:
       - "fuzz/**"
       - "crates/assay-evidence/**"
+      # `assay-core` is a direct fuzz dependency, and the root manifest carries the workspace
+      # version every path dep inherits. Without these two, a release bump touches neither
+      # `fuzz/**` nor `crates/assay-evidence/**`, so the lock silently goes stale exactly the way
+      # it did before -- and the staleness assertion then fails on whatever unrelated PR next
+      # touches this lane, misattributing the break to whoever happened to be passing.
+      - "crates/assay-core/**"
+      # The rest of the local graph `cargo metadata --locked` resolves in `fuzz/`. Naming only the
+      # two obvious crates left three uncovered, so a change in any of them could alter code,
+      # manifest or lock without this lane running. `scripts/ci/test-fuzz-lane-contract.sh` derives
+      # this set from `fuzz/Cargo.lock` and fails when it drifts, rather than trusting this list.
+      - "crates/assay-adapter-api/**"
+      - "crates/assay-canonical/**"
+      - "crates/assay-common/**"
+      - "Cargo.toml"
       - ".github/workflows/fuzz-smoke.yml"
   schedule:
     # Nightly, longer budget. Off the PR path so a slow campaign never gates a merge.
@@ -23,7 +37,16 @@ permissions: {}
 env:
   # One source of truth for the toolchain: the install step and the run step must not be able to
   # disagree, which is exactly how a dated pin gets bypassed.
-  FUZZ_TOOLCHAIN: nightly-2026-07-24
+  # Bumped from nightly-2026-07-24, which ICEs building tokio 1.53.1 under cargo-fuzz's sanitizer
+  # flags: `rustc_codegen_ssa/src/mir/operand.rs:291: not immediate: OperandRef(Uninit ...)`.
+  # Reproduced locally on aarch64-apple-darwin with the same rustc commit, so it is the toolchain
+  # and not the runner. `cargo check` cannot see it — no sanitizer instrumentation — which is why
+  # the pin is only moved after a real `cargo fuzz run` on the candidate.
+  #
+  # Verified on this exact combination before pinning: `cargo check --locked --all-targets` in
+  # `fuzz/`, and `cargo fuzz run bundle_reader` with the CI parameters (20000 runs, 14s, 776 new
+  # units, peak RSS 412 MB, no crash).
+  FUZZ_TOOLCHAIN: nightly-2026-07-28
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -111,6 +134,22 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/fuzz-out"
           # Report what actually runs, so the log carries the toolchain rather than an assumption.
           rustc "+${FUZZ_TOOLCHAIN}" --version --verbose
+          # Assert the checked-in lock is current before fuzzing. `cargo fuzz run` has no
+          # `--locked` — its BuildOptions carry only profile and feature flags — so the guarantee
+          # has to be stated separately rather than passed through. Without it cargo resolves
+          # freshly in the runner and rewrites the lock, so `fuzz/Cargo.lock` bound nothing and its
+          # staleness was invisible: it sat at workspace 3.34.0 against a 3.35.0 tree, missing the
+          # `assay-evidence -> assay-common` edge, and no CI run could have said so. A lockfile CI
+          # does not honour cannot reproduce a fuzz finding, which is the only reason to keep one.
+          #
+          # The wrapper adds an exit code and nothing else. `--locked` also fails on an unparsable
+          # manifest, an unavailable dependency, a registry or network fault, or a broken toolchain,
+          # so a message naming one cause is a diagnosis this step never made — and the remedy it
+          # used to print, `cargo update --workspace`, is actively wrong during a registry outage.
+          # Only stdout is redirected, since that is the metadata JSON; Cargo's stderr stays the
+          # diagnosis. Pinned by `scripts/ci/test-fuzz-lane-contract.sh`.
+          ( cd fuzz && cargo "+${FUZZ_TOOLCHAIN}" metadata --locked --format-version 1 >/dev/null ) \
+            || { echo "::error::locked fuzz metadata validation failed; inspect the Cargo error above"; exit 1; }
           cargo "+${FUZZ_TOOLCHAIN}" fuzz run bundle_reader \
             "${RUNNER_TEMP}/fuzz-out" fuzz/corpus/bundle_reader \
             -- \
