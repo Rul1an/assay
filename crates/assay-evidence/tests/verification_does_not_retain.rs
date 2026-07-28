@@ -67,7 +67,11 @@ unsafe impl GlobalAlloc for Counting {
                     - layout.size();
                 PEAK.fetch_max(live, Ordering::Relaxed);
             } else {
-                LIVE.fetch_sub(layout.size() - new_size, Ordering::Relaxed);
+                // Saturating for the same reason `dealloc` is: an invariant enforced in one of
+                // two places is one refactor away from the usize::MAX peak the comment warns of.
+                let _ = LIVE.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                    Some(v.saturating_sub(layout.size() - new_size))
+                });
             }
         }
         p
@@ -98,58 +102,60 @@ fn compressible_bundle(events: u64) -> Vec<u8> {
     out
 }
 
+/// Both halves in one test, deliberately.
+///
+/// They were two, and review found the consequence: `#[global_allocator]` observes every thread,
+/// libtest runs tests concurrently, and each half reset the shared high-water mark with a store
+/// that *lowers* it. That produced a ~60% failure rate on the very commit whose message reported
+/// the suite green — and the same shared state reads the other way too, so the guard could pass
+/// while the defect it exists to catch was present. A measurement that can be clobbered by another
+/// thread is not a measurement, and locking would only work if both windows held the lock for
+/// their whole body, which is one test wearing two names.
 #[test]
-fn verification_peak_stays_far_below_the_decompressed_events() {
-    // 20k events x ~5 KB is about 100 MB decompressed, enough that retaining it is unmistakable
-    // in the measurement while keeping the test quick.
-    let bundle = compressible_bundle(20_000);
+fn verification_streams_where_the_reader_retains() {
+    // 4k events x ~5 KB is about 20 MB decompressed. The assertion is a ratio, so this is exactly
+    // as decisive as 20k was and costs a fifth of the wall time; the earlier size made this file
+    // 95% of the crate's test duration.
+    let bundle = compressible_bundle(4_000);
     let on_disk = bundle.len();
 
-    // Measure the rise above whatever is already live, not from zero: the bundle itself is held
-    // by this test and would otherwise count against the verifier.
+    // Verification: peak must stay far below the decompressed events.
     let baseline = LIVE.load(Ordering::Relaxed);
     PEAK.store(baseline, Ordering::Relaxed);
 
     let result = verify_bundle_with_limits(bundle.as_slice(), VerifyLimits::default())
         .expect("the bundle must verify");
-    assert_eq!(result.event_count, 20_000);
+    assert_eq!(result.event_count, 4_000);
 
-    let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
+    let verify_peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
     let decompressed = result.manifest.files["events.ndjson"].bytes as usize;
 
-    // The ceiling is generous on purpose: this pins "does not hold the stream", not a byte budget
-    // that a harmless refactor would have to chase. Retaining the events would put the peak at or
-    // above `decompressed`; streaming keeps it near the input plus a line buffer.
+    // Generous on purpose: this pins "does not hold the stream", not a byte budget a harmless
+    // refactor would have to chase. Retaining would put the peak at or above `decompressed`.
     let ceiling = decompressed / 4;
     assert!(
-        peak < ceiling,
-        "verification held {peak} bytes at peak for a bundle whose events decompress to \
-         {decompressed} bytes ({on_disk} on disk). Anything at or near the decompressed size means \
-         the events stream is being retained — check whether a caller was routed through \
+        verify_peak < ceiling,
+        "verification held {verify_peak} bytes at peak for a bundle whose events decompress to \
+         {decompressed} bytes ({on_disk} on disk). Anything near the decompressed size means the \
+         events stream is being retained — check whether a caller was routed through \
          `BundleReader::open`, which retains by design, where `verify_bundle` would do."
     );
-}
 
-/// The reader is allowed to retain — that is what it is for — so the property above is about
-/// verification, not about memory in general. Pinning both sides keeps the first assertion from
-/// being read as "nothing may allocate", which would be false and would invite someone to weaken
-/// the reader instead of routing around it.
-#[test]
-fn the_reader_does_retain_and_that_is_its_contract() {
-    let bundle = compressible_bundle(20_000);
-
+    // The reader is *allowed* to retain — that is what it is for. Pinning both sides in sequence
+    // keeps the assertion above from being read as "nothing may allocate", which would invite
+    // someone to weaken the reader instead of routing around it.
     let baseline = LIVE.load(Ordering::Relaxed);
     PEAK.store(baseline, Ordering::Relaxed);
 
     let reader = assay_evidence::bundle::BundleReader::open(std::io::Cursor::new(bundle))
         .expect("the bundle must open");
     let retained = reader.events_raw().len();
-    let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
+    let reader_peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
 
     assert!(
-        peak >= retained,
-        "the reader is documented to load events into memory; if this no longer holds, the \
-         retention ceiling question in the audit has been answered by streaming and the first \
-         test's rationale needs rewriting rather than deleting"
+        reader_peak >= retained,
+        "the reader is documented to load events into memory ({retained} bytes here) but peaked at \
+         {reader_peak}. If it has become streaming, the retention question is answered and this \
+         test's rationale needs rewriting rather than deleting."
     );
 }
