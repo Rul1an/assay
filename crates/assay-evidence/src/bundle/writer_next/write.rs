@@ -82,6 +82,14 @@ impl<W: Write> BundleWriter<W> {
     /// - Empty bundle (no events)
     /// - IO errors
     /// - Serialization errors
+    /// # Adding a refusal here
+    ///
+    /// Every `bail!` below is a condition the verifier must also reject, or the two ends of the
+    /// format disagree about what a bundle is and a foreign producer's output verifies where ours
+    /// would not. Nothing enforces that mechanically in this direction: adding a `bail!` here
+    /// without adding a [`super::stream_rules::StreamRule`] variant leaves the symmetry test green
+    /// and the asymmetry live. Four of the five asymmetries this rule set closed had exactly that
+    /// history. So: a new refusal here gets a variant there, in the same change.
     pub fn finish(mut self) -> Result<()> {
         if self.events.is_empty() {
             bail!("Bundle is empty: at least one event required");
@@ -131,7 +139,7 @@ impl<W: Write> BundleWriter<W> {
                 );
             }
 
-            if !event.source.contains(':') || event.source.starts_with(':') {
+            if !super::stream_rules::source_is_uri(&event.source) {
                 bail!(
                     "Invalid source format at seq={}.\n\
                      Value: '{}'\n\
@@ -141,7 +149,7 @@ impl<W: Write> BundleWriter<W> {
                 );
             }
 
-            if event.run_id.contains(':') {
+            if !super::stream_rules::run_id_has_no_colon(&event.run_id) {
                 bail!(
                     "Invalid run_id format at seq={}.\n\
                      Value: '{}'\n\

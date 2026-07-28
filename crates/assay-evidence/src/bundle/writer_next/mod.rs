@@ -11,6 +11,7 @@
 //! - `tar_write.rs`: deterministic tar.gz write path only
 //! - `tar_read.rs`: tar/gzip read/iterate helpers only
 //! - `limits.rs`: single source of truth for verification limits
+//! - `stream_rules.rs`: the conditions a bundle must satisfy to exist, read by BOTH ends
 //! - `errors.rs`: typed error helpers
 //! - `tests.rs`: relocation placeholder
 
@@ -18,6 +19,7 @@ pub(crate) mod errors;
 pub(crate) mod events;
 pub(crate) mod limits;
 pub(crate) mod manifest;
+pub mod stream_rules;
 pub(crate) mod tar_read;
 pub(crate) mod tar_write;
 pub(crate) mod tests;
