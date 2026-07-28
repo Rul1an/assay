@@ -18,6 +18,13 @@ on:
       # it did before -- and the staleness assertion then fails on whatever unrelated PR next
       # touches this lane, misattributing the break to whoever happened to be passing.
       - "crates/assay-core/**"
+      # The rest of the local graph `cargo metadata --locked` resolves in `fuzz/`. Naming only the
+      # two obvious crates left three uncovered, so a change in any of them could alter code,
+      # manifest or lock without this lane running. `scripts/ci/test-fuzz-lane-contract.sh` derives
+      # this set from `fuzz/Cargo.lock` and fails when it drifts, rather than trusting this list.
+      - "crates/assay-adapter-api/**"
+      - "crates/assay-canonical/**"
+      - "crates/assay-common/**"
       - "Cargo.toml"
       - ".github/workflows/fuzz-smoke.yml"
   schedule:

@@ -29,10 +29,16 @@ fail() {
 check_workflow() {
   local wf="$1"
 
-  # The guard is the `||` arm attached to the `cargo metadata --locked` invocation, so anchor on
-  # that rather than on any line mentioning a lock — the seed-corpus check also emits `::error::`.
-  local guard_line guard_msg guard_cmd pin
-  guard_line="$(grep -n -A1 'metadata --locked' "$wf" | grep '::error::' | head -1 || true)"
+  # The guard is the `||` arm attached to the `cargo metadata --locked` invocation. Anchor on the
+  # invocation *line number*, not on any line mentioning a lock: the seed-corpus check also emits
+  # `::error::`, and the workflow's own comments name the command in prose — a plain grep picked a
+  # comment block and every assertion below then reported on the wrong two lines.
+  local guard_ln guard_block guard_line guard_msg pin
+  guard_ln="$(grep -nE '^[^#]*cargo[^#]*metadata --locked' "$wf" | head -1 | cut -d: -f1)"
+  [[ -n "$guard_ln" ]] || fail "no \`cargo metadata --locked\` invocation found"
+  guard_block="$(sed -n "${guard_ln},$((guard_ln + 1))p" "$wf")"
+
+  guard_line="$(grep '::error::' <<<"$guard_block" | head -1 || true)"
   [[ -n "$guard_line" ]] || fail "no error message attached to the \`cargo metadata --locked\` guard"
   guard_msg="${guard_line#*::error::}"
 
@@ -50,10 +56,12 @@ toolchain configuration). Report the failure and let Cargo's stderr say why:\n  
     || fail "the lock-guard message should send the reader to Cargo's own error, got:\n  $guard_msg"
 
   # 3. Cargo's stderr must stay visible. Only stdout is noise here — the metadata JSON.
-  guard_cmd="$(grep -n 'metadata --locked' "$wf" | head -1 | cut -d: -f2-)"
-  [[ -n "$guard_cmd" ]] || fail "no \`cargo metadata --locked\` invocation found"
-  if grep -qE '2>[&]?[/ ]?(dev/null|1)' <<<"$guard_cmd"; then
-    fail "the guard redirects stderr, which discards the only real diagnosis it has:\n  $guard_cmd"
+  #    Any `2>` form, not an enumeration of them: `2>/dev/null` and `2>&1` were listed, so
+  #    `2>cargo-error.log` passed both this test and actionlint while putting the only real
+  #    diagnosis in a file nobody reads. Checked across the whole anchored block, since the
+  #    redirect can sit on the invocation or on its `||` arm.
+  if grep -qE '2>' <<<"$guard_block"; then
+    fail "the guard redirects stderr, which discards the only real diagnosis it has:\n$guard_block"
   fi
 
   # 4. The failure must still be a failure — asserted on the guard's own `||` arm, not on the file.
@@ -69,6 +77,27 @@ toolchain configuration). Report the failure and let Cargo's stderr say why:\n  
   [[ "$pin" =~ ^nightly-[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
     || fail "FUZZ_TOOLCHAIN must be a dated nightly, got: ${pin:-<empty>}"
   PIN="$pin"
+
+  # 6. Every local crate the fuzz graph resolves must trigger this lane.
+  #
+  #    Derived from `fuzz/Cargo.lock` rather than listed: a package with no `source` is a path
+  #    dependency, so the set comes from the same file the lane pins. Listing them by hand is what
+  #    left `assay-adapter-api`, `assay-canonical` and `assay-common` uncovered while
+  #    `assay-core` and `assay-evidence` were named -- a change in any of the three could alter
+  #    code, manifest or lock without this lane ever running, which is the staleness this whole
+  #    branch exists to stop. Offline and cheap: no cargo invocation.
+  local locals missing=""
+  locals="$(awk '/^\[\[package\]\]/{name="";src=0} /^name = /{gsub(/[",]/,"",$3); name=$3} \
+                 /^source = /{src=1} /^$/{if(name!="" && !src) print name} \
+                 END{if(name!="" && !src) print name}' \
+            "${ROOT}/fuzz/Cargo.lock" | grep -v '^assay-fuzz$' | sort -u)"
+  [[ -n "$locals" ]] || fail "could not derive local path dependencies from fuzz/Cargo.lock"
+  while read -r crate; do
+    [[ -n "$crate" ]] || continue
+    grep -qF "\"crates/${crate}/**\"" "$wf" || missing="${missing} ${crate}"
+  done <<<"$locals"
+  [[ -z "$missing" ]] || fail "the fuzz lane resolves these local crates but does not trigger on \
+them, so a change there can go untested:${missing}"
 }
 
 check_workflow "$WORKFLOW"
@@ -86,6 +115,33 @@ if ( check_workflow "$mutant" ) >/dev/null 2>&1; then
 bound to the guard"
 fi
 echo "ok: removing only the guard's exit turns the contract red"
+
+# Negative control: send stderr to a file. It is not `/dev/null` and not `2>&1`, so the enumerated
+# form of this check passed it -- and actionlint passes it too, since the shell is valid. The
+# diagnosis simply lands somewhere no reviewer looks.
+redirect_mutant="$(mktemp)"
+trap 'rm -f "$mutant" "$redirect_mutant"' EXIT
+sed 's|--format-version 1 >/dev/null )|--format-version 1 >/dev/null 2>cargo-error.log )|' \
+  "$WORKFLOW" > "$redirect_mutant"
+grep -q '2>cargo-error.log' "$redirect_mutant" \
+  || fail "the redirect mutation did not apply, so it proves nothing"
+if ( check_workflow "$redirect_mutant" ) >/dev/null 2>&1; then
+  fail "sending Cargo's stderr to a file left the contract green — the check enumerates redirect \
+forms instead of rejecting them"
+fi
+echo "ok: redirecting Cargo's stderr to a file turns the contract red"
+
+# Negative control: drop one crate from the path filter. This is the state the branch shipped in --
+# three of the five local crates were simply absent -- so the assertion that catches it has to be
+# shown catching it.
+paths_mutant="$(mktemp)"
+trap 'rm -f "$mutant" "$redirect_mutant" "$paths_mutant"' EXIT
+grep -v '"crates/assay-common/\*\*"' "$WORKFLOW" > "$paths_mutant"
+if ( check_workflow "$paths_mutant" ) >/dev/null 2>&1; then
+  fail "dropping a local crate from the path filter left the contract green — the coverage \
+assertion is not bound to the lockfile"
+fi
+echo "ok: dropping a local crate from the path filter turns the contract red"
 
 echo "ok: the lock guard reports without diagnosing, keeps Cargo's stderr, and fails closed"
 echo "ok: FUZZ_TOOLCHAIN is dated (${PIN})"
