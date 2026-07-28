@@ -186,6 +186,53 @@ fn contract_monitor_missing_ebpf_returns_infra_error_when_failed_health_cannot_b
 
 #[cfg(target_os = "linux")]
 #[test]
+fn contract_monitor_missing_ebpf_retains_absent_health_without_network_enforcement() {
+    let output_dir = TempDir::new().expect("temp output dir");
+    let health_path = output_dir.path().join("enforcement-health.json");
+
+    let mut cmd = Command::cargo_bin("assay").expect("assay binary");
+    cmd.arg("monitor")
+        .arg("--ebpf")
+        .arg("/definitely/missing/assay-ebpf.o")
+        .arg("--enforcement-health")
+        .arg(&health_path)
+        .assert()
+        .code(40);
+
+    let health: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&health_path).expect("read retained enforcement health"),
+    )
+    .expect("parse retained enforcement health");
+    assert_eq!(
+        health["network_enforcement"], "absent",
+        "a startup failure without requested network enforcement must not claim failure"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn contract_monitor_missing_ebpf_returns_infra_error_when_absent_health_cannot_be_written() {
+    let unwritable_target = TempDir::new().expect("directory cannot be overwritten as a file");
+
+    let mut cmd = Command::cargo_bin("assay").expect("assay binary");
+    let assert = cmd
+        .arg("monitor")
+        .arg("--ebpf")
+        .arg("/definitely/missing/assay-ebpf.o")
+        .arg("--enforcement-health")
+        .arg(unwritable_target.path())
+        .assert()
+        .code(3);
+
+    let stderr = normalize(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("failed to write enforcement_health artifact"),
+        "artifact-write failure diagnostic changed unexpectedly: {stderr}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn contract_monitor_ipv6_refusal_precedes_ebpf_load_and_writes_failed_health() {
     let policy = ipv6_runtime_policy();
     let output_dir = TempDir::new().expect("temp output dir");

@@ -66,6 +66,29 @@ fn enforcement_failure_exit(health_written: bool, retained_exit: i32) -> i32 {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn tier1_enforcement_requested(compiled: &assay_policy::tiers::CompiledPolicy) -> bool {
+    let tier1 = &compiled.tier1;
+    !tier1.file_deny_exact.is_empty()
+        || !tier1.file_deny_prefix.is_empty()
+        || !tier1.inode_deny_exact.is_empty()
+        || !tier1.network_allow_cidrs.is_empty()
+        || !tier1.network_deny_cidrs.is_empty()
+        || !tier1.network_deny_ports.is_empty()
+        || !tier1.network_allow_ports.is_empty()
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn startup_failure_health(
+    network_enforcement_requested: bool,
+) -> enforcement_health::EnforcementHealth {
+    if network_enforcement_requested {
+        enforcement_health::EnforcementHealth::failed(enforcement_health::SCOPE_IPV4_TCP_CONNECT)
+    } else {
+        enforcement_health::EnforcementHealth::absent(enforcement_health::SCOPE_IPV4_TCP_CONNECT)
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn compile_runtime_enforcement_policy(
     cfg: &assay_core::mcp::runtime_features::RuntimeMonitorConfig,
@@ -150,6 +173,10 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                 || !compiled.tier1.network_deny_cidrs.is_empty()
         })
         .unwrap_or(false);
+    let tier1_enforcement_requested = compiled_policy
+        .as_ref()
+        .map(tier1_enforcement_requested)
+        .unwrap_or(false);
 
     if let Some(compiled) = compiled_policy.as_ref() {
         // The compiler accepts IPv6 CIDRs, but the shipped enforcement target attaches only
@@ -195,9 +222,26 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         if !args.quiet {
             emit_out!("⚠️  MONITOR_ALL enabled: Bypassing Cgroup filtering.");
         }
-        monitor.set_monitor_all(true)?;
+        if let Err(e) = monitor.set_monitor_all(true) {
+            emit_err!("Failed to enable MONITOR_ALL: {}", e);
+            return Ok(startup_failure_exit(
+                &args,
+                network_enforcement_requested,
+                40,
+            ));
+        }
 
-        let v = monitor.get_config_u32(assay_common::KEY_MONITOR_ALL)?;
+        let v = match monitor.get_config_u32(assay_common::KEY_MONITOR_ALL) {
+            Ok(value) => value,
+            Err(e) => {
+                emit_err!("Failed to verify MONITOR_ALL: {}", e);
+                return Ok(startup_failure_exit(
+                    &args,
+                    network_enforcement_requested,
+                    40,
+                ));
+            }
+        };
         emit_out!(
             "DEBUG: CONFIG[{}]={} confirmed",
             assay_common::KEY_MONITOR_ALL,
@@ -208,7 +252,11 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                 "❌ Failed to enable MONITOR_ALL (CONFIG[{}] != 1)",
                 assay_common::KEY_MONITOR_ALL
             );
-            return Ok(40);
+            return Ok(startup_failure_exit(
+                &args,
+                network_enforcement_requested,
+                40,
+            ));
         }
     }
 
@@ -228,7 +276,11 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         if !cgroups.is_empty() {
             if let Err(e) = monitor.set_monitored_cgroups(&cgroups) {
                 emit_err!("Error: Failed to populate Cgroup map: {}", e);
-                return Ok(40);
+                return Ok(startup_failure_exit(
+                    &args,
+                    network_enforcement_requested,
+                    40,
+                ));
             }
             if !args.quiet {
                 emit_err!("Monitored Cgroups: {:?}", cgroups);
@@ -382,13 +434,17 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         }
 
         if let Err(e) = monitor.set_tier1_rules(&compiled) {
-            if network_enforcement_requested {
+            if tier1_enforcement_requested {
                 emit_err!(
-                    "FATAL: failed to install Tier 1 rules for requested egress enforcement: {} \
+                    "FATAL: failed to install requested Tier 1 enforcement rules: {} \
                      (fail-closed, not reporting a partially loaded policy as active)",
                     e
                 );
-                return Ok(failed_enforcement_exit(&args, exit_codes::EXIT_WOULD_BLOCK));
+                return Ok(startup_failure_exit(
+                    &args,
+                    network_enforcement_requested,
+                    exit_codes::EXIT_WOULD_BLOCK,
+                ));
             }
             emit_err!(
                 "Warning: Failed to load Tier 1 rules (LSM might be unavailable): {}",
@@ -440,7 +496,17 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
-    let mut stream = monitor.listen().map_err(|e| anyhow::anyhow!(e))?;
+    let mut stream = match monitor.listen() {
+        Ok(stream) => stream,
+        Err(e) => {
+            emit_err!("Failed to start monitor event stream: {}", e);
+            return Ok(startup_failure_exit(
+                &args,
+                network_enforcement_requested,
+                40,
+            ));
+        }
+    };
 
     let mut timeout = match args.duration {
         Some(d) => tokio::time::sleep(d.into()).boxed(),
@@ -582,9 +648,7 @@ fn startup_failure_exit(
     network_enforcement_requested: bool,
     retained_exit: i32,
 ) -> i32 {
-    if network_enforcement_requested {
-        failed_enforcement_exit(args, retained_exit)
-    } else {
-        retained_exit
-    }
+    let health_written =
+        write_enforcement_health(args, startup_failure_health(network_enforcement_requested));
+    enforcement_failure_exit(health_written, retained_exit)
 }
