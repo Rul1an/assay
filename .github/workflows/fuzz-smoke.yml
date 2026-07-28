@@ -30,7 +30,16 @@ permissions: {}
 env:
   # One source of truth for the toolchain: the install step and the run step must not be able to
   # disagree, which is exactly how a dated pin gets bypassed.
-  FUZZ_TOOLCHAIN: nightly-2026-07-24
+  # Bumped from nightly-2026-07-24, which ICEs building tokio 1.53.1 under cargo-fuzz's sanitizer
+  # flags: `rustc_codegen_ssa/src/mir/operand.rs:291: not immediate: OperandRef(Uninit ...)`.
+  # Reproduced locally on aarch64-apple-darwin with the same rustc commit, so it is the toolchain
+  # and not the runner. `cargo check` cannot see it — no sanitizer instrumentation — which is why
+  # the pin is only moved after a real `cargo fuzz run` on the candidate.
+  #
+  # Verified on this exact combination before pinning: `cargo check --locked --all-targets` in
+  # `fuzz/`, and `cargo fuzz run bundle_reader` with the CI parameters (20000 runs, 14s, 776 new
+  # units, peak RSS 412 MB, no crash).
+  FUZZ_TOOLCHAIN: nightly-2026-07-28
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
