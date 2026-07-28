@@ -57,10 +57,100 @@ pub(crate) async fn run(args: super::MonitorArgs) -> anyhow::Result<i32> {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn enforcement_failure_exit(health_written: bool, retained_exit: i32) -> i32 {
+    if health_written {
+        retained_exit
+    } else {
+        crate::exit_codes::EXIT_INFRA_ERROR
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn tier1_enforcement_requested(compiled: &assay_policy::tiers::CompiledPolicy) -> bool {
+    let tier1 = &compiled.tier1;
+    !tier1.file_deny_exact.is_empty()
+        || !tier1.file_deny_prefix.is_empty()
+        || !tier1.inode_deny_exact.is_empty()
+        || !tier1.network_allow_cidrs.is_empty()
+        || !tier1.network_deny_cidrs.is_empty()
+        || !tier1.network_deny_ports.is_empty()
+        || !tier1.network_allow_ports.is_empty()
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn network_enforcement_requested(compiled: &assay_policy::tiers::CompiledPolicy) -> bool {
+    !compiled.tier1.network_deny_ports.is_empty() || !compiled.tier1.network_deny_cidrs.is_empty()
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn startup_failure_health(
+    network_enforcement_requested: bool,
+) -> enforcement_health::EnforcementHealth {
+    if network_enforcement_requested {
+        enforcement_health::EnforcementHealth::failed(enforcement_health::SCOPE_IPV4_TCP_CONNECT)
+    } else {
+        enforcement_health::EnforcementHealth::absent(enforcement_health::SCOPE_IPV4_TCP_CONNECT)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn compile_runtime_enforcement_policy(
+    cfg: &assay_core::mcp::runtime_features::RuntimeMonitorConfig,
+) -> assay_policy::tiers::CompiledPolicy {
+    let mut policy = assay_policy::tiers::Policy::default();
+
+    for rule in &cfg.rules {
+        let is_enforcement = matches!(
+            rule.action,
+            assay_core::mcp::runtime_features::MonitorAction::TriggerKill
+                | assay_core::mcp::runtime_features::MonitorAction::Deny
+        );
+
+        if !is_enforcement {
+            continue;
+        }
+
+        match rule.rule_type {
+            assay_core::mcp::runtime_features::MonitorRuleType::FileOpen => {
+                policy
+                    .files
+                    .deny
+                    .extend(rule.match_config.path_globs.iter().cloned());
+                if let Some(not) = &rule.match_config.not {
+                    policy.files.allow.extend(not.path_globs.iter().cloned());
+                }
+            }
+            assay_core::mcp::runtime_features::MonitorRuleType::NetConnect => {
+                for dest in &rule.match_config.dest_globs {
+                    let is_cidr = if let Some((ip_part, prefix_part)) = dest.split_once('/') {
+                        ip_part.parse::<std::net::IpAddr>().is_ok()
+                            && prefix_part.parse::<u8>().is_ok()
+                    } else {
+                        false
+                    };
+
+                    if is_cidr {
+                        policy.network.deny_cidrs.push(dest.clone());
+                    } else if let Ok(port) = dest.parse::<u16>() {
+                        policy.network.deny_ports.push(port);
+                    } else {
+                        policy.network.deny_destinations.push(dest.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    assay_policy::tiers::compile(&policy)
+}
+
 #[cfg(target_os = "linux")]
 async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     use assay_common::{get_inode_generation, strict_open};
     use assay_monitor::Monitor;
+    use enforcement_health::{EnforcementHealth, SCOPE_IPV4_TCP_CONNECT};
 
     let mut runtime_config = None;
     let mut kill_config = None;
@@ -78,6 +168,28 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         kill_config = p.kill_switch;
     }
 
+    let compiled_policy = runtime_config
+        .as_ref()
+        .map(compile_runtime_enforcement_policy);
+    let network_enforcement_requested = compiled_policy
+        .as_ref()
+        .map(network_enforcement_requested)
+        .unwrap_or(false);
+
+    if let Some(compiled) = compiled_policy.as_ref() {
+        // The compiler accepts IPv6 CIDRs, but the shipped enforcement target attaches only
+        // connect4 and loads only CIDR_RULES_V4. Refuse before loading or attaching eBPF; warning
+        // and continuing would turn an IPv6 policy into an undisclosed IPv4 subset.
+        if let Err(e) = assay_monitor::validate_network_enforcement_support(compiled) {
+            emit_err!(
+                "FATAL: egress enforcement policy cannot be installed: {} (fail-closed, not \
+                 running a partially enforced policy)",
+                e
+            );
+            return Ok(failed_enforcement_exit(&args, exit_codes::EXIT_WOULD_BLOCK));
+        }
+    }
+
     let ebpf_path = match args.ebpf.as_ref() {
         Some(p) => p.clone(),
         None => std::path::PathBuf::from("target/assay-ebpf.o"),
@@ -85,14 +197,22 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
 
     if !ebpf_path.exists() {
         emit_err!("Error: eBPF object not found at {}. Build it with 'cargo xtask build-ebpf' or provide --ebpf <path>", ebpf_path.display());
-        return Ok(40);
+        return Ok(startup_failure_exit(
+            &args,
+            network_enforcement_requested,
+            40,
+        ));
     }
 
     let mut monitor = match Monitor::load_file(&ebpf_path) {
         Ok(m) => m,
         Err(e) => {
             emit_err!("Failed to load eBPF: {}", e);
-            return Ok(40);
+            return Ok(startup_failure_exit(
+                &args,
+                network_enforcement_requested,
+                40,
+            ));
         }
     };
 
@@ -100,9 +220,26 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         if !args.quiet {
             emit_out!("⚠️  MONITOR_ALL enabled: Bypassing Cgroup filtering.");
         }
-        monitor.set_monitor_all(true)?;
+        if let Err(e) = monitor.set_monitor_all(true) {
+            emit_err!("Failed to enable MONITOR_ALL: {}", e);
+            return Ok(startup_failure_exit(
+                &args,
+                network_enforcement_requested,
+                40,
+            ));
+        }
 
-        let v = monitor.get_config_u32(assay_common::KEY_MONITOR_ALL)?;
+        let v = match monitor.get_config_u32(assay_common::KEY_MONITOR_ALL) {
+            Ok(value) => value,
+            Err(e) => {
+                emit_err!("Failed to verify MONITOR_ALL: {}", e);
+                return Ok(startup_failure_exit(
+                    &args,
+                    network_enforcement_requested,
+                    40,
+                ));
+            }
+        };
         emit_out!(
             "DEBUG: CONFIG[{}]={} confirmed",
             assay_common::KEY_MONITOR_ALL,
@@ -113,7 +250,11 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                 "❌ Failed to enable MONITOR_ALL (CONFIG[{}] != 1)",
                 assay_common::KEY_MONITOR_ALL
             );
-            return Ok(40);
+            return Ok(startup_failure_exit(
+                &args,
+                network_enforcement_requested,
+                40,
+            ));
         }
     }
 
@@ -133,7 +274,11 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         if !cgroups.is_empty() {
             if let Err(e) = monitor.set_monitored_cgroups(&cgroups) {
                 emit_err!("Error: Failed to populate Cgroup map: {}", e);
-                return Ok(40);
+                return Ok(startup_failure_exit(
+                    &args,
+                    network_enforcement_requested,
+                    40,
+                ));
             }
             if !args.quiet {
                 emit_err!("Monitored Cgroups: {:?}", cgroups);
@@ -145,7 +290,11 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
 
     if let Err(e) = monitor.attach() {
         emit_err!("Failed to attach probes: {}", e);
-        return Ok(40);
+        return Ok(startup_failure_exit(
+            &args,
+            network_enforcement_requested,
+            40,
+        ));
     }
 
     if !args.quiet {
@@ -158,58 +307,9 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     let rules = rules::compile_active_rules(runtime_config.as_ref());
 
     // Enforcement truth for the enforcement_health.v0 artifact: did egress enforcement actually attach?
-    use enforcement_health::{EnforcementHealth, SCOPE_IPV4_TCP_CONNECT};
     let mut enforcement_active = false;
 
-    if let Some(cfg) = &runtime_config {
-        let mut t1_policy = assay_policy::tiers::Policy::default();
-
-        for r in &cfg.rules {
-            let is_enforcement = matches!(
-                r.action,
-                assay_core::mcp::runtime_features::MonitorAction::TriggerKill
-                    | assay_core::mcp::runtime_features::MonitorAction::Deny
-            );
-
-            if !is_enforcement {
-                continue;
-            }
-
-            match r.rule_type {
-                assay_core::mcp::runtime_features::MonitorRuleType::FileOpen => {
-                    for glob in &r.match_config.path_globs {
-                        t1_policy.files.deny.push(glob.clone());
-                    }
-                    if let Some(not) = &r.match_config.not {
-                        for glob in &not.path_globs {
-                            t1_policy.files.allow.push(glob.clone());
-                        }
-                    }
-                }
-                assay_core::mcp::runtime_features::MonitorRuleType::NetConnect => {
-                    for dest in &r.match_config.dest_globs {
-                        let is_cidr = if let Some((ip_part, prefix_part)) = dest.split_once('/') {
-                            ip_part.parse::<std::net::IpAddr>().is_ok()
-                                && prefix_part.parse::<u8>().is_ok()
-                        } else {
-                            false
-                        };
-
-                        if is_cidr {
-                            t1_policy.network.deny_cidrs.push(dest.clone());
-                        } else if let Ok(port) = dest.parse::<u16>() {
-                            t1_policy.network.deny_ports.push(port);
-                        } else {
-                            t1_policy.network.deny_destinations.push(dest.clone());
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        let mut compiled = assay_policy::tiers::compile(&t1_policy);
-
+    if let Some(mut compiled) = compiled_policy {
         let mut inode_rules = Vec::with_capacity(compiled.tier1.file_deny_exact.len());
 
         for rule in &compiled.tier1.file_deny_exact {
@@ -332,6 +432,16 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         }
 
         if let Err(e) = monitor.set_tier1_rules(&compiled) {
+            if let Some(exit_code) =
+                tier1_install_failure_exit(&args, &compiled, exit_codes::EXIT_WOULD_BLOCK)
+            {
+                emit_err!(
+                    "FATAL: failed to install requested Tier 1 enforcement rules: {} \
+                     (fail-closed, not reporting a partially loaded policy as active)",
+                    e
+                );
+                return Ok(exit_code);
+            }
             emit_err!(
                 "Warning: Failed to load Tier 1 rules (LSM might be unavailable): {}",
                 e
@@ -359,12 +469,9 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                     );
                     // Honesty: a requested-but-failed enforcement must record `failed`, never look
                     // like `absent` (not requested), so write the artifact BEFORE the fail-closed exit.
-                    // A write failure here is already covered by the non-zero exit below.
-                    let _ = write_enforcement_health(
-                        &args,
-                        EnforcementHealth::failed(SCOPE_IPV4_TCP_CONNECT),
-                    );
-                    return Ok(crate::exit_codes::EXIT_WOULD_BLOCK);
+                    // Distinguish enforcement refusal from an infrastructure failure to retain the
+                    // requested carrier.
+                    return Ok(failed_enforcement_exit(&args, exit_codes::EXIT_WOULD_BLOCK));
                 }
             };
             if let Err(e) = monitor.attach_network_cgroup(&cgroup_file) {
@@ -372,11 +479,7 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                     "FATAL: egress enforcement requested but connect4 attach failed: {} (fail-closed, not running audit-only)",
                     e
                 );
-                let _ = write_enforcement_health(
-                    &args,
-                    EnforcementHealth::failed(SCOPE_IPV4_TCP_CONNECT),
-                );
-                return Ok(crate::exit_codes::EXIT_WOULD_BLOCK);
+                return Ok(failed_enforcement_exit(&args, exit_codes::EXIT_WOULD_BLOCK));
             }
             enforcement_active = true;
             if !args.quiet {
@@ -389,7 +492,17 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         }
     }
 
-    let mut stream = monitor.listen().map_err(|e| anyhow::anyhow!(e))?;
+    let mut stream = match monitor.listen() {
+        Ok(stream) => stream,
+        Err(e) => {
+            emit_err!("Failed to start monitor event stream: {}", e);
+            return Ok(startup_failure_exit(
+                &args,
+                network_enforcement_requested,
+                40,
+            ));
+        }
+    };
 
     let mut timeout = match args.duration {
         Some(d) => tokio::time::sleep(d.into()).boxed(),
@@ -462,7 +575,8 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
 
     // enforcement_health.v0 artifact (explicit, never parsed from stdout). active when enforcement
     // attached; absent when it was not requested. The `failed` case is written on the fail-closed abort
-    // path above, before exit, so requested-but-failed never reads as not-requested.
+    // Network-enforcement validation, installation, and attach failures above write `failed`
+    // before their handled nonzero exits.
     if args.enforcement_health.is_some() {
         let health = if enforcement_active {
             EnforcementHealth::active(SCOPE_IPV4_TCP_CONNECT, blocked_count, allowed_count)
@@ -486,7 +600,7 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
 /// Write the enforcement_health.v0 artifact to `--enforcement-health <path>` if set. No-op otherwise.
 /// Returns `false` only when the artifact was requested but could not be written; on the fail-closed
 /// abort paths the caller already exits non-zero, on the success path the caller must not exit 0.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 fn write_enforcement_health(
     args: &super::MonitorArgs,
     health: enforcement_health::EnforcementHealth,
@@ -513,4 +627,34 @@ fn write_enforcement_health(
     } else {
         true
     }
+}
+
+#[cfg(target_os = "linux")]
+fn failed_enforcement_exit(args: &super::MonitorArgs, retained_exit: i32) -> i32 {
+    let health_written = write_enforcement_health(
+        args,
+        enforcement_health::EnforcementHealth::failed(enforcement_health::SCOPE_IPV4_TCP_CONNECT),
+    );
+    enforcement_failure_exit(health_written, retained_exit)
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn startup_failure_exit(
+    args: &super::MonitorArgs,
+    network_enforcement_requested: bool,
+    retained_exit: i32,
+) -> i32 {
+    let health_written =
+        write_enforcement_health(args, startup_failure_health(network_enforcement_requested));
+    enforcement_failure_exit(health_written, retained_exit)
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn tier1_install_failure_exit(
+    args: &super::MonitorArgs,
+    compiled: &assay_policy::tiers::CompiledPolicy,
+    retained_exit: i32,
+) -> Option<i32> {
+    tier1_enforcement_requested(compiled)
+        .then(|| startup_failure_exit(args, network_enforcement_requested(compiled), retained_exit))
 }

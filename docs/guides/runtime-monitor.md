@@ -37,9 +37,15 @@ Assay hooks the `file_open` LSM gate. It allows or denies access based on:
 - **Cgroup Scoping**: Automatically monitors only the processes within the target MCP sandbox.
 
 ### Network Egress Control
-Uses Cgroup `connect4` and `connect6` hooks to enforce:
+Uses the Cgroup `connect4` hook to enforce IPv4/TCP `connect()` rules:
 - **Port Blocklists**: Block SSH, Telnet, or internal databases.
-- **CIDR Allowlists**: Restrict outbound traffic to known safe endpoints (e.g., API gateways).
+- **IPv4 CIDR deny rules**: Block matching destination ranges.
+- **IPv4 CIDR allow exceptions**: Exempt more-specific ranges from a broader deny; an allow CIDR
+  alone does not restrict unmatched traffic.
+
+IPv6 CIDR policies are refused before any rule map is changed; they are not silently reduced to
+their IPv4 subset. IPv6, UDP/QUIC, DNS resolution, already-open sockets, raw sockets, and
+proxy/tunnel identity remain outside the enforcement claim tracked in issue #1576.
 
 ## 3. Developer Workflow
 

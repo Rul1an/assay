@@ -67,6 +67,37 @@ pub struct Monitor {
     _stub: (),
 }
 
+/// Validate network rules against the enforcement target shipped by `assay-monitor`.
+///
+/// The policy compiler accepts both address families, while the userspace loader currently
+/// populates only `CIDR_RULES_V4` and attaches only `connect4_hook`. Refuse IPv6 here so a valid
+/// policy can never be partially projected into IPv4 maps and then reported as enforced.
+pub fn validate_network_enforcement_support(
+    compiled: &assay_policy::tiers::CompiledPolicy,
+) -> Result<(), MonitorError> {
+    let ipv6_allow = compiled
+        .tier1
+        .network_allow_cidrs
+        .iter()
+        .filter(|rule| rule.parsed.addr().is_ipv6())
+        .count();
+    let ipv6_deny = compiled
+        .tier1
+        .network_deny_cidrs
+        .iter()
+        .filter(|rule| rule.parsed.addr().is_ipv6())
+        .count();
+
+    if ipv6_allow != 0 || ipv6_deny != 0 {
+        return Err(MonitorError::EnforcementUnavailable(format!(
+            "the current enforcement target supports IPv4/TCP only; policy contains {ipv6_allow} \
+             IPv6 allow CIDR rule(s) and {ipv6_deny} IPv6 deny CIDR rule(s)"
+        )));
+    }
+
+    Ok(())
+}
+
 impl Monitor {
     /// Load eBPF object bytes from file (Linux). Non-Linux returns NotSupported.
     pub fn load_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, MonitorError> {
@@ -133,6 +164,8 @@ impl Monitor {
         &mut self,
         compiled: &assay_policy::tiers::CompiledPolicy,
     ) -> Result<(), MonitorError> {
+        validate_network_enforcement_support(compiled)?;
+
         #[cfg(target_os = "linux")]
         return self.inner.set_tier1_rules(compiled);
 
@@ -230,7 +263,23 @@ impl Monitor {
 
 #[cfg(test)]
 mod tests {
-    use super::MonitorStatsSnapshot;
+    use super::{validate_network_enforcement_support, MonitorStatsSnapshot};
+    use assay_policy::tiers::{compile, FilePolicy, NetworkPolicy, Policy, ProcessPolicy};
+
+    fn compiled_network_policy(
+        allow_cidrs: &[&str],
+        deny_cidrs: &[&str],
+    ) -> assay_policy::tiers::CompiledPolicy {
+        compile(&Policy {
+            files: FilePolicy::default(),
+            network: NetworkPolicy {
+                allow_cidrs: allow_cidrs.iter().map(|cidr| (*cidr).to_string()).collect(),
+                deny_cidrs: deny_cidrs.iter().map(|cidr| (*cidr).to_string()).collect(),
+                ..Default::default()
+            },
+            processes: ProcessPolicy::default(),
+        })
+    }
 
     #[test]
     fn monitor_stats_snapshot_reports_ringbuf_pressure() {
@@ -243,5 +292,58 @@ mod tests {
 
         assert!(stats.has_ringbuf_pressure());
         assert_eq!(stats.total_ringbuf_dropped(), 6);
+    }
+
+    #[test]
+    fn ipv4_only_network_rules_are_supported() {
+        let compiled = compiled_network_policy(&["10.0.0.0/8"], &["203.0.113.0/24"]);
+
+        validate_network_enforcement_support(&compiled)
+            .expect("the current target supports IPv4 CIDR rules");
+    }
+
+    #[test]
+    fn ipv6_allow_rules_fail_closed_with_a_stable_reason() {
+        let compiled = compiled_network_policy(&["2001:db8::/32"], &[]);
+
+        let err = validate_network_enforcement_support(&compiled)
+            .expect_err("an IPv6 allow rule must not be silently dropped");
+
+        assert_eq!(
+            err.to_string(),
+            "network enforcement unavailable: the current enforcement target supports IPv4/TCP \
+             only; policy contains 1 IPv6 allow CIDR rule(s) and 0 IPv6 deny CIDR rule(s)"
+        );
+    }
+
+    #[test]
+    fn ipv6_deny_rules_fail_closed_with_a_stable_reason() {
+        let compiled = compiled_network_policy(&[], &["2001:db8:1::/48"]);
+
+        let err = validate_network_enforcement_support(&compiled)
+            .expect_err("an IPv6 deny rule must not be silently dropped");
+
+        assert_eq!(
+            err.to_string(),
+            "network enforcement unavailable: the current enforcement target supports IPv4/TCP \
+             only; policy contains 0 IPv6 allow CIDR rule(s) and 1 IPv6 deny CIDR rule(s)"
+        );
+    }
+
+    #[test]
+    fn mixed_ipv4_and_ipv6_rules_do_not_partially_apply() {
+        let compiled = compiled_network_policy(
+            &["10.0.0.0/8", "2001:db8::/32"],
+            &["203.0.113.0/24", "2001:db8:1::/48"],
+        );
+
+        let err = validate_network_enforcement_support(&compiled)
+            .expect_err("a mixed policy must be refused before its IPv4 subset can be applied");
+
+        assert!(
+            err.to_string()
+                .contains("1 IPv6 allow CIDR rule(s) and 1 IPv6 deny CIDR rule(s)"),
+            "the refusal must account for both unsupported rule classes: {err}"
+        );
     }
 }
