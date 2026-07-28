@@ -512,25 +512,49 @@ fn test_reject_extra_file() {
         let encoder = GzBuilder::new().write(&mut buffer, Compression::default());
         let mut tar = Builder::new(encoder);
 
+        // The extra member is appended AFTER events.ndjson, so the whole events block --
+        // including every stream rule -- completes before the allowlist ever sees it. That makes
+        // this fixture fragile in one specific way: any event-level rule it violates rejects the
+        // bundle first, the assertion below still matches on "Unexpected file", and the test goes
+        // red for a reason that has nothing to do with the extra file it is named for. It has been
+        // caught twice this way -- by the bundle_id contract, then by the non-empty rule when the
+        // events were a zero-length file. It now carries one real event and a manifest sealed
+        // around it, so the only thing left for the verifier to object to is the extra member.
+        let event = EvidenceEvent::new(
+            "assay.test.extra_file",
+            "urn:assay:test",
+            "run_test",
+            0,
+            serde_json::json!({"probe": "extra-file"}),
+        );
+        let content_hash = assay_evidence::crypto::id::compute_content_hash(&event).unwrap();
+        let mut event = event;
+        event.content_hash = Some(content_hash.clone());
+        let events_bytes_owned = {
+            let mut line = serde_json::to_vec(&event).unwrap();
+            line.push(b'\n');
+            line
+        };
+        let run_root = assay_evidence::crypto::id::compute_run_root(&[content_hash]);
+        let events_sha = format!(
+            "sha256:{}",
+            hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&events_bytes_owned))
+        );
+
         // 1. Manifest
         let manifest = serde_json::json!({
             "schema_version": 1,
-            // Equal to run_root: the extra member is appended after events.ndjson, so the
-            // events block completes before the allowlist sees it. With the placeholder that
-            // used to sit here the bundle is rejected on the bundle_id contract, and since
-            // the assertion below matches on "Unexpected file" the test goes red -- failing
-            // for a reason that has nothing to do with the extra file it is named for.
-            "bundle_id": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bundle_id": run_root,
             "producer": {"name": "test", "version": "1.0"},
             "run_id": "run_test",
-            "event_count": 0,
-            "run_root": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "event_count": 1,
+            "run_root": run_root,
             "algorithms": {"canon": "jcs", "hash": "sha256", "root": "chain"},
             "files": {
                 "events.ndjson": {
                     "path": "events.ndjson",
-                    "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", // Empty hash
-                    "bytes": 0
+                    "sha256": events_sha,
+                    "bytes": events_bytes_owned.len()
                 }
             }
         });
@@ -542,12 +566,11 @@ fn test_reject_extra_file() {
         tar.append(&header, manifest_bytes.as_slice()).unwrap();
 
         // 2. Events
-        let events_bytes = b"";
         let mut header = Header::new_gnu();
         header.set_path("events.ndjson").unwrap();
-        header.set_size(0);
+        header.set_size(events_bytes_owned.len() as u64);
         header.set_cksum();
-        tar.append(&header, &events_bytes[..]).unwrap();
+        tar.append(&header, events_bytes_owned.as_slice()).unwrap();
 
         // 3. EXTRA FILE (Should trigger rejection)
         let extra = b"malicious content";
