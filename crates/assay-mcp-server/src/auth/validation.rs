@@ -124,7 +124,7 @@ impl TokenValidator {
             None
         };
 
-        // If no key found and strict -> fail
+        // Missing verification keys fail closed in every mode.
         let decoding_key = match key {
             Some(k) => k,
             None => {
