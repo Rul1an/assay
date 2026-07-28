@@ -163,6 +163,45 @@ out="$(run_gate fail "empty lightweight_only with skipped code jobs" \
   EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false)"
 grep -qi "was skipped, but this run required it" <<<"$out" \
   || fail "an empty lightweight_only must be treated as not-lightweight, got: $out"
-echo "ok: an empty scope output is treated as the strict case, not the permissive one"
+echo "ok: an empty lightweight_only is treated as the strict case, not the permissive one"
+
+# The same discipline for the two outputs whose jobs use the `== 'true'` form. Those are the ones
+# a typo disarms silently, so empty must not read as "not required" — the first version of this
+# gate only got `lightweight_only` right and left both of these failing open, which is the defect
+# it was written to close, surviving in the fix.
+out="$(run_gate fail "empty ebpf_smoke_required with the job skipped" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED= EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false)"
+grep -q "ebpf-smoke-ubuntu was skipped" <<<"$out" \
+  || fail "an empty ebpf_smoke_required must be strict, got: $out"
+
+out="$(run_gate fail "empty mcp_registry_touched with the job skipped" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=)"
+grep -q "mcp-registry-foundation was skipped" <<<"$out" \
+  || fail "an empty mcp_registry_touched must be strict, got: $out"
+
+# A wrong-case value is the same class as empty: GitHub compares these outputs as strings, so
+# `TRUE` is not `true` and the job silently never runs.
+out="$(run_gate fail "wrong-case ebpf_smoke_required" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=TRUE EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false)"
+grep -q "ebpf-smoke-ubuntu was skipped" <<<"$out" \
+  || fail "a wrong-case ebpf_smoke_required must be strict, got: $out"
+echo "ok: empty or wrong-case == 'true' outputs are strict, so a disarmed job cannot read green"
+
+# And the legitimate relaxations still work: an explicit false scopes the job out.
+run_gate pass "explicit false relaxes both" \
+  SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok \
+  DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+  MCP_REGISTRY_FOUNDATION_RESULT=skipped PERF_RESULT=$ok TEST_RESULT=$ok \
+  EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false >/dev/null
+echo "ok: an explicit false still scopes its job out"
 
 echo "PASS: CI gate expectation contract"
