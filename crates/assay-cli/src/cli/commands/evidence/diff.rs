@@ -120,7 +120,9 @@ fn cmd_write_baseline(args: &DiffArgs) -> Result<i32> {
     // Verify the candidate bundle before writing it as a baseline
     let candidate_file = File::open(candidate_path)
         .with_context(|| format!("failed to open candidate {}", candidate_path.display()))?;
-    let _ = assay_evidence::bundle::BundleReader::open(candidate_file)
+    // Verification only: the bytes are copied from the path afterwards, so nothing here reads
+    // events and retaining them would be waste bounded at five times the bundle ceiling.
+    assay_evidence::bundle::verify_bundle(candidate_file)
         .context("candidate bundle verification failed — refusing to write as baseline")?;
 
     // Atomic write: copy to temp file in same dir, then rename
