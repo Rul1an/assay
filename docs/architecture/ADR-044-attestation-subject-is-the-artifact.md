@@ -1,7 +1,8 @@
 # ADR-044: The attestation subject is the artifact, not the semantic chain
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-27
+- Accepted: 2026-07-28
 - Supersedes: none
 - Amends: ADR-039 (evidence bundle attestation)
 
@@ -155,11 +156,18 @@ predicateType = https://assay.dev/attestation/evidence-bundle/v1
 }
 ```
 
-All fields are required except `run.time_window`, which is **`null` for a zero-event bundle**. The
-verifier accepts a bundle with no events, so that bundle has no earliest and no latest event `time`
-and cannot satisfy a mandatory window; a schema that demanded one would be unsatisfiable for a
-bundle the format permits. `null` is the honest encoding of "the artifact does not carry this", and
-it is not the same as the field being absent, which is a malformed predicate.
+**All fields are required, `run.time_window` included.**
+
+The draft made that field nullable for a zero-event bundle, because the verifier accepted one and a
+mandatory window would have been unsatisfiable for a shape the format permitted. That is no longer
+true: `450b80e3` (PR #1889) made the verifier reject every bundle `BundleWriter` refuses to emit,
+and an empty event list is the first thing the writer refuses. A zero-event bundle cannot verify, so
+it cannot reach an attestation, so a predicate field accommodating it would regulate a case that
+cannot occur.
+
+The nullable clause is removed rather than kept as harmless slack. Dead contract text is what this
+ADR objects to elsewhere — a rule nobody can trigger reads as a rule someone once needed, and the
+next reader has no way to tell which.
 
 `run_root` lives in `semantic_equivalence` and nowhere else. Every field derivable from the archive
 — the semantic root, `run_id`, `event_count`, producer name, version and `git` — MUST be recomputed
@@ -250,6 +258,10 @@ author alone:
 - PR #1886 (`content_hash_field_inventory.rs`) — **merged**. The "what the chain does not carry"
   section cites an enforced mechanism rather than an intended one, which was the condition for
   moving this ADR out of draft.
+- PR #1889 (`450b80e3`, writer/verifier symmetry) — **merged**, and it changed this decision rather
+  than merely unblocking it: `run.time_window` is required because a zero-event bundle no longer
+  verifies. Recorded here because a decision that quietly follows a change in another slice is one
+  nobody can re-derive later.
 
 ## Implementation evidence
 
