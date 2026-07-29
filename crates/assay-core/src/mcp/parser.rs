@@ -2,6 +2,7 @@ use crate::mcp::era::{
     classify_message, fold_envelope, observe_header, observe_request_metadata, observe_result,
     resolve_era, EnvelopeObservation, McpEraContext, MessageKind, ParsedMcpEvent, RequestMetadata,
 };
+use crate::mcp::era::{EraResolution, UniqueValue};
 use crate::mcp::types::*;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -29,7 +30,7 @@ pub(crate) fn parse_mcp_transcript_detailed(
 ) -> Result<Vec<ParsedMcpEvent>> {
     let (events, envelopes) = parse_events_with_envelopes(text, format)?;
     let framed = is_framed(format);
-    Ok(events
+    let parsed: Vec<ParsedMcpEvent> = events
         .into_iter()
         .map(|event| {
             // Observations are taken by reference before the event moves, so no payload is cloned.
@@ -79,7 +80,45 @@ pub(crate) fn parse_mcp_transcript_detailed(
                 },
             }
         })
-        .collect())
+        .collect();
+    Ok(correlate_calls(parsed))
+}
+
+/// Give a response the era its own call resolved to.
+///
+/// The era resolves from two signals that both live on a request: the transport header and
+/// `params._meta`. A response carries neither, so it fell back to the header alone. A request whose
+/// header and body disagree is `Conflicting`, while its response resolved to `Known` from the header
+/// and a missing `resultType` under a legacy era is `Terminal` — so a contradicted call could still
+/// conclude that the action completed. The contradiction has to travel to the result.
+///
+/// Correlation is by JSON-RPC id within one transcript, which the parser already establishes and
+/// validates for duplicates. A response with no matching request keeps the era it resolved on its
+/// own, so this adds authority rather than removing it. Multi-hop calls spread across separate
+/// records stay out of scope: that needs a call-scoped identity this slice does not define.
+fn correlate_calls(mut parsed: Vec<ParsedMcpEvent>) -> Vec<ParsedMcpEvent> {
+    let request_eras: std::collections::HashMap<String, EraResolution> = parsed
+        .iter()
+        .filter(|p| p.context.request_metadata.is_some())
+        .filter_map(|p| {
+            p.event
+                .jsonrpc_id
+                .clone()
+                .map(|id| (id, p.context.era.clone()))
+        })
+        .collect();
+    for p in &mut parsed {
+        if p.context.result_observation.is_none() {
+            continue;
+        }
+        let Some(id) = p.event.jsonrpc_id.as_ref() else {
+            continue;
+        };
+        if let Some(era) = request_eras.get(id) {
+            p.context.era = era.clone();
+        }
+    }
+    parsed
 }
 
 /// Read the header slot inside a `transport_context` as an observation.
@@ -105,11 +144,11 @@ fn observe_transport_context(ctx: Option<&serde_json::Value>) -> Option<Envelope
 /// slots that difference is exactly the finding: a container that was written and cannot be read
 /// is a malformed envelope, a container that was never written is silence. `default` still covers
 /// the missing key, so only a key that is actually in the document reaches this.
-fn present_slot<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
+fn present_slot<'de, D>(deserializer: D) -> Result<Option<UniqueValue>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    serde_json::Value::deserialize(deserializer).map(Some)
+    UniqueValue::deserialize(deserializer).map(Some)
 }
 
 /// Which formats carry transport framing at all. `Inspector` reads an events array straight into
@@ -163,7 +202,7 @@ fn parse_jsonrpc_jsonl(text: &str) -> Result<Vec<McpEvent>> {
             continue;
         }
 
-        let v: serde_json::Value = serde_json::from_str(line)
+        let UniqueValue(v) = serde_json::from_str::<UniqueValue>(line)
             .with_context(|| format!("invalid JSON on line {}", lineno + 1))?;
 
         let event = parse_jsonrpc_message(
@@ -179,7 +218,8 @@ fn parse_jsonrpc_jsonl(text: &str) -> Result<Vec<McpEvent>> {
 }
 
 fn parse_inspector_best_effort(text: &str) -> Result<Vec<McpEvent>> {
-    let v: serde_json::Value = serde_json::from_str(text).context("invalid inspector JSON")?;
+    let UniqueValue(v) =
+        serde_json::from_str::<UniqueValue>(text).context("invalid inspector JSON")?;
 
     // Handle Inspector export variations:
     // 1. Array of events
@@ -231,10 +271,11 @@ fn parse_transport_transcript_detailed(
     }
 
     let mut transcript_slots = Vec::new();
-    if let Some(o) = observe_transport_context(transcript.transport_context.as_ref()) {
+    if let Some(o) = observe_transport_context(transcript.transport_context.as_ref().map(|u| &u.0))
+    {
         transcript_slots.push(o);
     }
-    if let Some(o) = observe_header(transcript.headers.as_ref()) {
+    if let Some(o) = observe_header(transcript.headers.as_ref().map(|u| &u.0)) {
         transcript_slots.push(o);
     }
 
@@ -242,10 +283,10 @@ fn parse_transport_transcript_detailed(
     let mut out = Vec::new();
     for (idx, entry) in transcript.entries.into_iter().enumerate() {
         let mut slots = transcript_slots.clone();
-        if let Some(o) = observe_transport_context(entry.transport_context.as_ref()) {
+        if let Some(o) = observe_transport_context(entry.transport_context.as_ref().map(|u| &u.0)) {
             slots.push(o);
         }
-        if let Some(o) = observe_header(entry.headers.as_ref()) {
+        if let Some(o) = observe_header(entry.headers.as_ref().map(|u| &u.0)) {
             slots.push(o);
         }
         envelopes.push(fold_envelope(slots, true));
@@ -262,7 +303,7 @@ fn parse_transport_transcript_detailed(
             );
         }
 
-        if let Some(request) = entry.request {
+        if let Some(UniqueValue(request)) = entry.request {
             out.push(parse_jsonrpc_message(
                 request,
                 source_line,
@@ -274,7 +315,7 @@ fn parse_transport_transcript_detailed(
 
         let auth_discovery = parse_transport_auth_discovery(&entry);
 
-        if let Some(response) = entry.response {
+        if let Some(UniqueValue(response)) = entry.response {
             out.push(parse_jsonrpc_message(
                 response,
                 source_line,
@@ -397,12 +438,12 @@ fn parse_transport_auth_discovery(entry: &TransportTranscriptEntry) -> McpAuthor
     let header_value = entry
         .transport_context
         .as_ref()
-        .and_then(|value| find_header_case_insensitive(value, "www-authenticate"))
+        .and_then(|value| find_header_case_insensitive(&value.0, "www-authenticate"))
         .or_else(|| {
             entry
                 .headers
                 .as_ref()
-                .and_then(|value| find_header_case_insensitive(value, "www-authenticate"))
+                .and_then(|value| find_header_case_insensitive(&value.0, "www-authenticate"))
         });
 
     let Some(www_authenticate) = header_value else {
@@ -429,12 +470,12 @@ fn extract_http_status(entry: &TransportTranscriptEntry) -> Option<u16> {
     entry
         .transport_context
         .as_ref()
-        .and_then(extract_http_status_from_value)
+        .and_then(|v| extract_http_status_from_value(&v.0))
         .or_else(|| {
             entry
                 .headers
                 .as_ref()
-                .and_then(extract_http_status_from_value)
+                .and_then(|v| extract_http_status_from_value(&v.0))
         })
 }
 
@@ -637,10 +678,10 @@ struct TransportTranscript {
     transport: Option<String>,
     #[allow(dead_code)]
     #[serde(default, deserialize_with = "present_slot")]
-    transport_context: Option<serde_json::Value>,
+    transport_context: Option<UniqueValue>,
     #[allow(dead_code)]
     #[serde(default, deserialize_with = "present_slot")]
-    headers: Option<serde_json::Value>,
+    headers: Option<UniqueValue>,
     #[serde(default)]
     entries: Vec<TransportTranscriptEntry>,
 }
@@ -651,14 +692,14 @@ struct TransportTranscriptEntry {
     timestamp_ms: Option<u64>,
     #[allow(dead_code)]
     #[serde(default, deserialize_with = "present_slot")]
-    transport_context: Option<serde_json::Value>,
+    transport_context: Option<UniqueValue>,
     #[allow(dead_code)]
     #[serde(default, deserialize_with = "present_slot")]
-    headers: Option<serde_json::Value>,
+    headers: Option<UniqueValue>,
     #[serde(default)]
-    request: Option<serde_json::Value>,
+    request: Option<UniqueValue>,
     #[serde(default)]
-    response: Option<serde_json::Value>,
+    response: Option<UniqueValue>,
     #[serde(default)]
     sse: Option<TransportSseEnvelope>,
 }

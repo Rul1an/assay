@@ -35,6 +35,94 @@ pub(crate) enum EnvelopeObservation {
     Malformed,
 }
 
+/// A `serde_json::Value` that refuses duplicate object members as it is built.
+///
+/// `serde_json` collapses duplicate members last-value-wins, so by the time any guard reads the tree
+/// the evidence that two were sent is already gone. A post-collapse check cannot recover it and a
+/// second full deserialization would double what a hostile input costs, so the refusal belongs in the
+/// one pass that builds the tree.
+///
+/// The rule is every duplicate rather than a list of security-significant names. A name list goes
+/// stale the moment a significant key is added, and this file has already been through several
+/// enumerations that missed a member. RFC 8259 says names SHOULD be unique and RFC 7493 requires it,
+/// so refusing outright cannot go stale. Value-free: the diagnostic names neither the key nor either
+/// value.
+#[derive(Debug, Clone)]
+pub(crate) struct UniqueValue(pub(crate) serde_json::Value);
+
+impl<'de> serde::Deserialize<'de> for UniqueValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = UniqueValue;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("any JSON value with unique object members")
+            }
+
+            fn visit_unit<E>(self) -> Result<UniqueValue, E> {
+                Ok(UniqueValue(serde_json::Value::Null))
+            }
+            fn visit_none<E>(self) -> Result<UniqueValue, E> {
+                Ok(UniqueValue(serde_json::Value::Null))
+            }
+            fn visit_some<D: serde::Deserializer<'de>>(
+                self,
+                d: D,
+            ) -> Result<UniqueValue, D::Error> {
+                <UniqueValue as serde::Deserialize>::deserialize(d)
+            }
+            fn visit_bool<E>(self, v: bool) -> Result<UniqueValue, E> {
+                Ok(UniqueValue(v.into()))
+            }
+            fn visit_i64<E>(self, v: i64) -> Result<UniqueValue, E> {
+                Ok(UniqueValue(v.into()))
+            }
+            fn visit_u64<E>(self, v: u64) -> Result<UniqueValue, E> {
+                Ok(UniqueValue(v.into()))
+            }
+            fn visit_f64<E>(self, v: f64) -> Result<UniqueValue, E> {
+                Ok(UniqueValue(
+                    serde_json::Number::from_f64(v).map_or(serde_json::Value::Null, Into::into),
+                ))
+            }
+            fn visit_str<E>(self, v: &str) -> Result<UniqueValue, E> {
+                Ok(UniqueValue(v.into()))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<UniqueValue, A::Error> {
+                let mut out = Vec::new();
+                while let Some(UniqueValue(v)) = seq.next_element()? {
+                    out.push(v);
+                }
+                Ok(UniqueValue(serde_json::Value::Array(out)))
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<UniqueValue, A::Error> {
+                let mut out = serde_json::Map::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    let UniqueValue(value) = map.next_value()?;
+                    if out.insert(key, value).is_some() {
+                        return Err(serde::de::Error::custom(
+                            "JSON object contains a duplicate member",
+                        ));
+                    }
+                }
+                Ok(UniqueValue(serde_json::Value::Object(out)))
+            }
+        }
+
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
 /// Which JSON-RPC message shape this is, carrying the method so that nothing has to read it a
 /// second time.
 ///
@@ -422,8 +510,10 @@ pub(crate) fn conclude_request(
 /// The `_meta` key the protocol version travels under on a request.
 pub(crate) const PROTOCOL_VERSION_META_KEY: &str = "io.modelcontextprotocol/protocolVersion";
 
-/// The transport header carrying the same value.
-pub(crate) const PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
+/// The transport header carrying the same value. Compared with `eq_ignore_ascii_case`, so the
+/// casing here is documentation rather than a value the comparison depends on, and no allocation is
+/// made per key of an attacker-supplied header map.
+pub(crate) const PROTOCOL_VERSION_HEADER: &str = "MCP-Protocol-Version";
 
 /// Read one header slot as an observation rather than as an `Option`.
 ///
@@ -441,7 +531,7 @@ pub(crate) fn observe_header(headers: Option<&serde_json::Value>) -> Option<Enve
     let mut any = false;
     for (_, value) in map
         .iter()
-        .filter(|(k, _)| k.to_ascii_lowercase() == PROTOCOL_VERSION_HEADER)
+        .filter(|(k, _)| k.eq_ignore_ascii_case(PROTOCOL_VERSION_HEADER))
     {
         any = true;
         match value.as_str() {

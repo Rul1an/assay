@@ -920,3 +920,127 @@ fn the_sidecar_axes_follow_the_shared_classifier() {
         }
     }
 }
+
+// --- Call correlation: a response inherits its call's era ---------------------------------------
+
+/// The gap this closes. The era resolves from signals that live on a request, so a response carries
+/// none of its own and falls back to the transcript header. A request whose header and body
+/// disagree is `Conflicting`, but its response resolved to `Known(2025)` from the header alone, and
+/// a missing `resultType` at 2025 is `Terminal`. So a contradicted call could still conclude that
+/// the action completed. The request's era must reach the correlated response.
+#[test]
+fn a_response_inherits_the_conflicting_era_of_its_call() {
+    let request = json!({"jsonrpc": "2.0", "id": "call-1", "method": "tools/call",
+                         "params": {"name": "Calculator", "arguments": {},
+                                    "_meta": meta(json!(V2026))}});
+    let response = json!({"jsonrpc": "2.0", "id": "call-1", "result": {"content": []}});
+    let doc = json!({
+        "transport": "streamable-http",
+        "transport_context": {"headers": {"MCP-Protocol-Version": V2025}},
+        "entries": [
+            {"timestamp_ms": 1000, "request": request},
+            {"timestamp_ms": 1001, "response": response}
+        ]
+    });
+    let events = detailed(&doc.to_string(), McpInputFormat::StreamableHttp);
+    let req_event = &events[0];
+    let resp_event = &events[1];
+    assert_eq!(
+        req_event.context.era,
+        EraResolution::Conflicting {
+            header: V2025.into(),
+            body: V2026.into()
+        },
+        "the request itself is contradicted"
+    );
+    assert_eq!(
+        resp_event.context.era,
+        EraResolution::Conflicting {
+            header: V2025.into(),
+            body: V2026.into()
+        },
+        "the response must inherit its call's era"
+    );
+    let observed = resp_event
+        .context
+        .result_observation
+        .as_ref()
+        .expect("a response reports a result");
+    assert_eq!(observed, &ResultObservation::Missing);
+    assert_eq!(
+        conclude(&resp_event.context.era, observed),
+        ResultConclusion::Invalid(InvalidReason::EraConflicting {
+            header: V2025.into(),
+            body: V2026.into()
+        }),
+        "a contradicted call cannot conclude that the action completed"
+    );
+}
+
+/// A response with no matching request keeps the era it resolved on its own, so correlation adds
+/// authority rather than removing it.
+#[test]
+fn an_uncorrelated_response_keeps_its_own_era() {
+    let response = json!({"jsonrpc": "2.0", "id": "orphan", "result": {"content": []}});
+    let input = framed(Some(headers(json!(V2025))), None, response);
+    assert_eq!(
+        detailed(&input, McpInputFormat::StreamableHttp)[0]
+            .context
+            .era,
+        EraResolution::Known(V2025.into())
+    );
+}
+
+// --- Duplicate members ---------------------------------------------------------------------------
+
+/// `serde_json` collapses duplicate members last-value-wins, so by the time any guard reads the
+/// tree the evidence that two were sent is gone. Refused at the boundary instead, value-free.
+#[test]
+fn duplicate_members_are_refused_at_the_boundary() {
+    let cases = [
+        (
+            "resultType",
+            r#"{"transport":"streamable-http","entries":[{"response":{"jsonrpc":"2.0","id":"c","result":{"content":[],"resultType":"complete","resultType":"input_required"}}}]}"#,
+        ),
+        (
+            "params._meta protocolVersion",
+            r#"{"transport":"streamable-http","entries":[{"request":{"jsonrpc":"2.0","id":"c","method":"tools/call","params":{"name":"C","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-06-18","io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}}]}"#,
+        ),
+        (
+            "MCP-Protocol-Version header",
+            r#"{"transport":"streamable-http","transport_context":{"headers":{"MCP-Protocol-Version":"2025-06-18","MCP-Protocol-Version":"2026-07-28"}},"entries":[{"request":{"jsonrpc":"2.0","id":"c","method":"tools/call","params":{"name":"C","arguments":{}}}}]}"#,
+        ),
+    ];
+    for (label, raw) in cases {
+        let err = parse_mcp_transcript(raw, McpInputFormat::StreamableHttp)
+            .expect_err(&format!("must refuse a duplicate {label}"));
+        // The whole chain, because `main` prints `{e:?}` and that is what an operator sees. The
+        // outermost context names the input; the cause names why.
+        let rendered = format!("{err:?}");
+        assert!(
+            rendered.contains("duplicate member"),
+            "unexpected message for {label}: {rendered}"
+        );
+        assert!(
+            !rendered.contains("2026-07-28") && !rendered.contains("input_required"),
+            "refusal echoed an input value for {label}: {rendered}"
+        );
+    }
+}
+
+/// A duplicate on a bare JSON-RPC line is refused on the same basis.
+#[test]
+fn a_duplicate_member_on_a_jsonrpc_line_is_refused() {
+    let line =
+        r#"{"jsonrpc":"2.0","id":"c","method":"tools/call","method":"tools/list","params":{}}"#;
+    let err = parse_mcp_transcript(line, McpInputFormat::JsonRpc).expect_err("must refuse");
+    assert!(format!("{err:?}").contains("duplicate member"), "{err:?}");
+}
+
+/// Distinct members that merely look alike are not duplicates, so the rule does not become a ban on
+/// similar keys.
+#[test]
+fn distinct_members_are_not_duplicates() {
+    let raw = r#"{"transport":"streamable-http","transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28","X-Other":"2025-06-18"}},"entries":[{"request":{"jsonrpc":"2.0","id":"c","method":"tools/call","params":{"name":"C","arguments":{}}}}]}"#;
+    assert!(parse_mcp_transcript(raw, McpInputFormat::StreamableHttp).is_ok());
+}
