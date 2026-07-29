@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.Rul1an%2Fassay-mcp-server.svg)](https://mcptoplist.com/server/io.github.Rul1an%2Fassay-mcp-server)
+
 <p align="center">
   <h1 align="center">Assay</h1>
   <p align="center">
