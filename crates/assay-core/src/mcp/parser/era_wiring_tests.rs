@@ -722,8 +722,17 @@ fn composite_a_deviant_params_at_2026_is_invalid_for_the_container_not_the_era()
     let message = json!({"jsonrpc": "2.0", "id": "call-1", "method": "tools/call", "params": []});
     let input = framed(Some(headers(json!(V2026))), None, message);
     let event = &detailed(&input, McpInputFormat::StreamableHttp)[0];
+    // Read from the context rather than handed in: feeding `Malformed` here would keep the
+    // assertion green after the guard that produces it was removed, which is the whole thing this
+    // composite exists to catch.
+    let observed = event
+        .context
+        .request_metadata
+        .as_ref()
+        .expect("a request reports metadata");
+    assert_eq!(observed, &RequestMetadata::Malformed);
     assert_eq!(
-        conclude_request(&event.context.era, &RequestMetadata::Malformed),
+        conclude_request(&event.context.era, observed),
         RequestAssessment::Invalid(InvalidReason::MalformedRequestMetadata)
     );
 }
@@ -743,5 +752,54 @@ fn an_explicit_null_entry_headers_slot_does_not_inherit_the_transcript_default()
             .context
             .envelope,
         EnvelopeObservation::Malformed
+    );
+}
+
+/// A real notification under 2026 with no `_meta`. `NotificationParams._meta` is optional and is a
+/// different type that does not carry the protocol version, so the request requirement does not
+/// apply and reporting it would invent a fault.
+#[test]
+fn a_notification_is_not_held_to_the_request_metadata_requirement() {
+    let notification = json!({"jsonrpc": "2.0", "method": "notifications/progress",
+                              "params": {"progressToken": "t", "progress": 1}});
+    let input = framed(Some(headers(json!(V2026))), None, notification);
+    let event = &detailed(&input, McpInputFormat::StreamableHttp)[0];
+    assert_eq!(event.context.era, EraResolution::Known(V2026.into()));
+    assert_eq!(
+        event.context.request_metadata, None,
+        "a notification has no request-metadata axis"
+    );
+    assert_eq!(event.context.result_observation, None);
+}
+
+/// An explicit `"id": null` is not a usable request id, so it is a notification rather than a
+/// request with a broken one.
+#[test]
+fn an_explicit_null_id_is_a_notification() {
+    let message = json!({"jsonrpc": "2.0", "id": null, "method": "notifications/progress",
+                         "params": {}});
+    let input = framed(Some(headers(json!(V2026))), None, message);
+    assert_eq!(
+        detailed(&input, McpInputFormat::StreamableHttp)[0]
+            .context
+            .request_metadata,
+        None
+    );
+}
+
+/// The positive control: a request still reports the axis, so the notification rule did not turn it
+/// off for everything with a `method`.
+#[test]
+fn a_request_still_reports_the_metadata_axis() {
+    let input = framed(
+        Some(headers(json!(V2026))),
+        None,
+        req(Some(meta(json!(V2026)))),
+    );
+    assert_eq!(
+        detailed(&input, McpInputFormat::StreamableHttp)[0]
+            .context
+            .request_metadata,
+        Some(Present(V2026.into()))
     );
 }

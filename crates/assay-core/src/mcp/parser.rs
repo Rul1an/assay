@@ -1,6 +1,6 @@
 use crate::mcp::era::{
-    fold_envelope, observe_header, observe_request_metadata, observe_result, resolve_era,
-    EnvelopeObservation, McpEraContext, ParsedMcpEvent, RequestMetadata,
+    classify_message, fold_envelope, observe_header, observe_request_metadata, observe_result,
+    resolve_era, EnvelopeObservation, McpEraContext, MessageKind, ParsedMcpEvent, RequestMetadata,
 };
 use crate::mcp::types::*;
 use anyhow::{bail, Context, Result};
@@ -41,11 +41,15 @@ pub(crate) fn parse_mcp_transcript_detailed(
             // called a request. A request has no result to observe, and that is now structural:
             // the two axes are produced by one match, so neither can be reached from the other's
             // arm.
+            // One classification decides both axes, so neither can be reached from the other's
+            // arm. A notification carries `method` like a request but its `_meta` is optional and a
+            // different type, so holding it to the request requirement invents a fault.
             let (request_metadata, result_observation) = match payload_raw(&event.payload) {
-                Some(raw) if request_method(raw).is_some() => {
-                    (Some(observe_request_metadata(raw)), None)
-                }
-                Some(raw) => (None, observe_result(raw)),
+                Some(raw) => match classify_message(raw) {
+                    MessageKind::Request => (Some(observe_request_metadata(raw)), None),
+                    MessageKind::Notification => (None, None),
+                    MessageKind::Response => (None, observe_result(raw)),
+                },
                 None => (None, None),
             };
             // Unframed formats have one whole-input observation and no entries to index. A framed

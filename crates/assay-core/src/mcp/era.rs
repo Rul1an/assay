@@ -35,6 +35,33 @@ pub(crate) enum EnvelopeObservation {
     Malformed,
 }
 
+/// Which JSON-RPC message shape this is.
+///
+/// The distinction is load-bearing rather than tidy. `RequestParams._meta` is required and carries
+/// the protocol version; `NotificationParams._meta` is optional and is a different type that does
+/// not carry it. Treating a notification as a request therefore invents a fault: a
+/// `notifications/progress` under 2026 with no `_meta` is correct, and would be reported as missing
+/// required metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MessageKind {
+    Request,
+    Notification,
+    Response,
+}
+
+/// Classify by the two fields JSON-RPC uses: a notification is a request shape without an `id`.
+///
+/// An explicit `"id": null` counts as a notification. It is not a usable request id, and the
+/// alternative is to hold a message with no addressable identity to a requirement whose whole
+/// purpose is to describe an addressed request.
+pub(crate) fn classify_message(v: &serde_json::Value) -> MessageKind {
+    match v.get("method").and_then(|m| m.as_str()) {
+        Some(_) if v.get("id").is_some_and(|id| !id.is_null()) => MessageKind::Request,
+        Some(_) => MessageKind::Notification,
+        None => MessageKind::Response,
+    }
+}
+
 /// What a request carried in `params._meta`. Typed rather than `Option<String>` so that a missing
 /// field and an unreadable one stay different findings: one is silence, the other is a malformed
 /// signal, and they have different remediations.
