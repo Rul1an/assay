@@ -397,21 +397,104 @@ fn a_non_object_meta_is_malformed() {
     }
 }
 
-/// A malformed hybrid: a valid string `method` alongside a `result`. The parser calls this a
-/// request, so the metadata observation has to follow the same rule. Keying on the absence of
-/// `result` would drop the observation for exactly the shape worth observing.
+/// The invariant stated once over every shape that reaches the parser:
+/// the two axes are mutually exclusive because one discriminant produces both. A message is a
+/// request or a response, never a request for the payload and a response for the sidecar.
 #[test]
-fn a_hybrid_with_method_and_result_still_reports_request_metadata() {
-    let hybrid = json!({
+fn no_event_ever_carries_both_axes() {
+    let hybrid_result = json!({
         "jsonrpc": "2.0", "id": "call-1", "method": "tools/call",
         "params": {"name": "Calculator", "arguments": {}, "_meta": meta(json!(V2026))},
-        "result": {"content": []}
+        "result": {"content": [], "resultType": "complete"}
     });
+    let hybrid_error = json!({
+        "jsonrpc": "2.0", "id": "call-2", "method": "tools/list",
+        "error": {"code": -32000, "message": "boom"}
+    });
+    let hybrid_unreadable_result = json!({
+        "jsonrpc": "2.0", "id": "call-3", "method": "notifications/initialized",
+        "result": null
+    });
+    for message in [
+        req(Some(meta(json!(V2026)))),
+        response(Some(json!("complete"))),
+        hybrid_result,
+        hybrid_error,
+        hybrid_unreadable_result,
+    ] {
+        let parsed = detailed(&message.to_string(), McpInputFormat::JsonRpc);
+        let context = &parsed[0].context;
+        assert!(
+            context.request_metadata.is_none() || context.result_observation.is_none(),
+            "both axes populated for {message}: {context:?}"
+        );
+        // A message with a string `method` is a request on both axes, whatever else it carries.
+        assert_eq!(
+            context.request_metadata.is_some(),
+            message.get("method").and_then(Value::as_str).is_some(),
+            "the request axis must follow the payload discriminant for {message}"
+        );
+    }
+}
+
+/// A `transport_context` that is present and not an object is a signal that arrived and failed.
+/// `Value::get` answered `None` for it, which is the same answer as no container at all, so the
+/// whole transcript read as `Absent` on the evidence that its framing was deviant.
+#[test]
+fn a_non_object_transport_context_is_malformed_not_absent() {
+    for bad in [json!(7), json!("2026-07-28"), json!([]), json!(null)] {
+        let input = framed(Some(bad.clone()), None, req(None));
+        assert_eq!(
+            detailed(&input, McpInputFormat::StreamableHttp)[0]
+                .context
+                .envelope,
+            EnvelopeObservation::Malformed,
+            "{bad}"
+        );
+    }
+}
+
+/// The same shape one level down, where dropping the slot is worse: the entry silently inherits a
+/// valid transcript default and its own broken signal disappears.
+#[test]
+fn a_non_object_entry_transport_context_does_not_inherit_the_transcript_default() {
+    for bad in [json!(7), json!("2026-07-28"), json!([]), json!(null)] {
+        let input = framed(Some(headers(json!(V2026))), Some(bad.clone()), req(None));
+        assert_eq!(
+            detailed(&input, McpInputFormat::StreamableHttp)[0]
+                .context
+                .envelope,
+            EnvelopeObservation::Malformed,
+            "{bad}"
+        );
+    }
+}
+
+/// The distinction the fix rests on, from the other side: a container that is readable and simply
+/// carries no header slot is silence, not a defect. Folding it to `Malformed` would report a
+/// finding on every transcript whose `transport_context` holds anything else.
+#[test]
+fn a_readable_transport_context_without_headers_stays_absent() {
+    let input = framed(Some(json!({"status": 200})), None, req(None));
     assert_eq!(
-        detailed(&hybrid.to_string(), McpInputFormat::JsonRpc)[0]
+        detailed(&input, McpInputFormat::StreamableHttp)[0]
             .context
-            .request_metadata,
-        Some(Present(V2026.into()))
+            .envelope,
+        EnvelopeObservation::Absent
+    );
+}
+
+/// An explicit `null` in a slot is a key that was written, not a key that was omitted. `Option<T>`
+/// folds both onto `None`, so the slots are deserialized to keep the difference.
+#[test]
+fn an_explicit_null_headers_slot_is_malformed_not_absent() {
+    let doc = json!({"transport": "streamable-http", "headers": null,
+                     "entries": [{"timestamp_ms": 1000, "request": req(None)}]});
+    assert_eq!(
+        detailed(&doc.to_string(), McpInputFormat::StreamableHttp)[0]
+            .context
+            .envelope,
+        EnvelopeObservation::Malformed
     );
 }
 
@@ -573,4 +656,20 @@ fn composite_an_unknown_token_is_incomplete_and_value_free() {
         !format!("{conclusion:?}").contains("banana"),
         "the token must not travel: {conclusion:?}"
     );
+}
+
+/// The hybrid fixture, both axes on one message. A valid string `method` makes this a request, so
+/// the metadata observation follows that discriminant and no result observation is taken: keying
+/// the metadata on the absence of `result` would drop it for exactly the shape worth observing,
+/// and reading the `result` anyway would hand slice 2 a result conclusion about a request.
+#[test]
+fn a_hybrid_reports_request_metadata_and_no_result_observation() {
+    let hybrid = json!({
+        "jsonrpc": "2.0", "id": "call-1", "method": "tools/call",
+        "params": {"name": "Calculator", "arguments": {}, "_meta": meta(json!(V2026))},
+        "result": {"content": []}
+    });
+    let event = &detailed(&hybrid.to_string(), McpInputFormat::JsonRpc)[0];
+    assert_eq!(event.context.request_metadata, Some(Present(V2026.into())));
+    assert_eq!(event.context.result_observation, None);
 }

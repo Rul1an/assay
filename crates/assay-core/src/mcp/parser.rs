@@ -33,11 +33,21 @@ pub(crate) fn parse_mcp_transcript_detailed(
         .into_iter()
         .map(|event| {
             // Observations are taken by reference before the event moves, so no payload is cloned.
-            let raw = payload_raw(&event.payload);
-            let request_metadata = raw
-                .filter(|r| r.get("method").and_then(|m| m.as_str()).is_some())
-                .map(observe_request_metadata);
-            let result_observation = raw.and_then(observe_result);
+            //
+            // One discriminant decides both axes, and it is the same one `parse_jsonrpc_message`
+            // classified the payload with. Reading `result` unconditionally gave a hybrid message
+            // — a valid string `method` alongside a `result` — both request metadata and a result
+            // observation, which is a result conclusion about an event the parser had already
+            // called a request. A request has no result to observe, and that is now structural:
+            // the two axes are produced by one match, so neither can be reached from the other's
+            // arm.
+            let (request_metadata, result_observation) = match payload_raw(&event.payload) {
+                Some(raw) if request_method(raw).is_some() => {
+                    (Some(observe_request_metadata(raw)), None)
+                }
+                Some(raw) => (None, observe_result(raw)),
+                None => (None, None),
+            };
             // Unframed formats have one whole-input observation and no entries to index. A framed
             // input that does not resolve to an entry is a mapping the parser cannot vouch for,
             // and a plausible-but-wrong attribution is worse than an unusable one.
@@ -68,9 +78,43 @@ pub(crate) fn parse_mcp_transcript_detailed(
         .collect())
 }
 
-/// The headers map inside a `transport_context` value.
-fn header_map(ctx: &serde_json::Value) -> Option<&serde_json::Value> {
-    ctx.get("headers")
+/// The JSON-RPC `method` of a message, if it has one.
+///
+/// The single discriminant between a request and a response. `parse_jsonrpc_message` branches on
+/// it to build the payload and the era observations follow the same answer, so one message cannot
+/// be a request on one axis and a response on the other.
+fn request_method(v: &serde_json::Value) -> Option<&str> {
+    v.get("method").and_then(|m| m.as_str())
+}
+
+/// Read the header slot inside a `transport_context` as an observation.
+///
+/// A container that is present and not an object is a signal that arrived and failed, not silence.
+/// `Value::get` answers `None` for a scalar, an array or a null, which made a deviant container
+/// indistinguishable from no container at all: at transcript level the whole transcript read as
+/// `Absent`, and at entry level the entry silently inherited whatever valid default the transcript
+/// had set. Both are a fold toward "nothing was wrong" on the evidence that something was.
+fn observe_transport_context(ctx: Option<&serde_json::Value>) -> Option<EnvelopeObservation> {
+    let ctx = ctx?;
+    let Some(map) = ctx.as_object() else {
+        return Some(EnvelopeObservation::Malformed);
+    };
+    // A readable container with no `headers` key is silence rather than a defect: it arrived, it
+    // was legible, and it carried no header slot. Only an unreadable one is a finding.
+    observe_header(map.get("headers"))
+}
+
+/// Deserialize an optional free-form slot so that an explicit `null` stays *present*.
+///
+/// `Option<Value>` maps JSON `null` onto `None`, the same answer as a missing key, and for these
+/// slots that difference is exactly the finding: a container that was written and cannot be read
+/// is a malformed envelope, a container that was never written is silence. `default` still covers
+/// the missing key, so only a key that is actually in the document reaches this.
+fn present_slot<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    serde_json::Value::deserialize(deserializer).map(Some)
 }
 
 /// Which formats carry transport framing at all. `Inspector` reads an events array straight into
@@ -192,7 +236,7 @@ fn parse_transport_transcript_detailed(
     }
 
     let mut transcript_slots = Vec::new();
-    if let Some(o) = observe_header(transcript.transport_context.as_ref().and_then(header_map)) {
+    if let Some(o) = observe_transport_context(transcript.transport_context.as_ref()) {
         transcript_slots.push(o);
     }
     if let Some(o) = observe_header(transcript.headers.as_ref()) {
@@ -203,7 +247,7 @@ fn parse_transport_transcript_detailed(
     let mut out = Vec::new();
     for (idx, entry) in transcript.entries.into_iter().enumerate() {
         let mut slots = transcript_slots.clone();
-        if let Some(o) = observe_header(entry.transport_context.as_ref().and_then(header_map)) {
+        if let Some(o) = observe_transport_context(entry.transport_context.as_ref()) {
             slots.push(o);
         }
         if let Some(o) = observe_header(entry.headers.as_ref()) {
@@ -278,14 +322,10 @@ fn parse_jsonrpc_message(
     // JSON-RPC ID extraction
     let id_str = normalize_jsonrpc_id(v.get("id"), source_line)?;
 
-    // Check for JSON-RPC Request (has method)
-    let method = v
-        .get("method")
-        .and_then(|m| m.as_str())
-        .map(|s| s.to_string());
-
-    let payload = if let Some(method) = method {
-        match method.as_str() {
+    // Check for JSON-RPC Request (has method). The era observations read the same discriminant,
+    // so a message classified as a request here is a request on both axes.
+    let payload = if let Some(method) = request_method(&v) {
+        match method {
             "tools/list" => McpPayload::ToolsListRequest { raw: v.clone() },
             "tools/call" => {
                 let params = v.get("params").cloned().unwrap_or(serde_json::Value::Null);
@@ -596,10 +636,10 @@ fn parse_tools_list_result(v: &serde_json::Value) -> Result<Vec<McpToolDef>> {
 struct TransportTranscript {
     transport: Option<String>,
     #[allow(dead_code)]
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present_slot")]
     transport_context: Option<serde_json::Value>,
     #[allow(dead_code)]
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present_slot")]
     headers: Option<serde_json::Value>,
     #[serde(default)]
     entries: Vec<TransportTranscriptEntry>,
@@ -610,10 +650,10 @@ struct TransportTranscriptEntry {
     #[serde(default)]
     timestamp_ms: Option<u64>,
     #[allow(dead_code)]
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present_slot")]
     transport_context: Option<serde_json::Value>,
     #[allow(dead_code)]
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present_slot")]
     headers: Option<serde_json::Value>,
     #[serde(default)]
     request: Option<serde_json::Value>,
