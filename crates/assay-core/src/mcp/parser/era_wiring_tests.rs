@@ -831,16 +831,25 @@ fn a_non_string_method_is_refused_at_parse_time() {
         let input = framed(Some(headers(json!(V2026))), None, message);
         let err = parse_mcp_transcript(&input, McpInputFormat::StreamableHttp)
             .expect_err(&format!("must refuse method {bad}"));
+        // Split the located prefix from the diagnostic and assert each half for what it is.
+        // Searching the whole string for the offending value cannot work: `!contains("7")` also
+        // matches a source line numbered 7, and for `{}`, `[]`, `null` the search has nothing to
+        // find, so it passes while proving nothing. Pinning the diagnostic to one exact constant is
+        // the value-free property itself, since a constant cannot carry an input-chosen value.
         let rendered = err.to_string();
+        let (prefix, diagnostic) = rendered
+            .split_once(": ")
+            .unwrap_or_else(|| panic!("expected a located diagnostic for {bad}: {rendered}"));
+        let line = prefix
+            .strip_prefix("MCP event at source line ")
+            .unwrap_or_else(|| panic!("unexpected prefix for {bad}: {prefix}"));
         assert!(
-            rendered.contains("method must be a string"),
-            "unexpected message for {bad}: {rendered}"
+            !line.is_empty() && line.bytes().all(|c| c.is_ascii_digit()),
+            "source line is not a number for {bad}: {line}"
         );
-        // Value-free: the offending value is input-chosen and naming its type is all a reader can
-        // act on.
-        assert!(
-            !rendered.contains("7") && !rendered.contains("true"),
-            "refusal echoed the value: {rendered}"
+        assert_eq!(
+            diagnostic, "JSON-RPC method must be a string",
+            "the diagnostic must be exactly this constant, for {bad}"
         );
     }
 }
