@@ -49,14 +49,17 @@ pub(crate) enum MessageKind {
     Response,
 }
 
-/// Classify by the two fields JSON-RPC uses: a notification is a request shape without an `id`.
+/// Classify by the two fields JSON-RPC uses. A notification is a request object *without* an `id`
+/// member, so absence is the discriminant and nothing about the value is.
 ///
-/// An explicit `"id": null` counts as a notification. It is not a usable request id, and the
-/// alternative is to hold a message with no addressable identity to a requirement whose whole
-/// purpose is to describe an addressed request.
+/// An explicit `"id": null` is therefore a request, not a notification. `RequestId` is `string |
+/// number`, so a null id is an invalid request id rather than an absent one, and treating it as a
+/// notification drops the required 2026 request metadata for any message that writes one. That is a
+/// fail-open reachable by a single token. The invalid id is a JSON-RPC validity question this slice
+/// does not own; what it owns is that the metadata requirement still applies.
 pub(crate) fn classify_message(v: &serde_json::Value) -> MessageKind {
     match v.get("method").and_then(|m| m.as_str()) {
-        Some(_) if v.get("id").is_some_and(|id| !id.is_null()) => MessageKind::Request,
+        Some(_) if v.get("id").is_some() => MessageKind::Request,
         Some(_) => MessageKind::Notification,
         None => MessageKind::Response,
     }

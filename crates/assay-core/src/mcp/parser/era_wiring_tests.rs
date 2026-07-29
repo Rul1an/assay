@@ -710,8 +710,14 @@ fn composite_a_deviant_params_under_a_legacy_era_is_invalid() {
         event.context.era,
         EraResolution::Unknown(UnknownReason::MalformedSignal)
     );
+    let observed = event
+        .context
+        .request_metadata
+        .as_ref()
+        .expect("a request reports metadata");
+    assert_eq!(observed, &RequestMetadata::Malformed);
     assert_eq!(
-        conclude_request(&event.context.era, &RequestMetadata::Malformed),
+        conclude_request(&event.context.era, observed),
         RequestAssessment::Invalid(InvalidReason::MalformedRequestMetadata)
     );
 }
@@ -772,18 +778,24 @@ fn a_notification_is_not_held_to_the_request_metadata_requirement() {
     assert_eq!(event.context.result_observation, None);
 }
 
-/// An explicit `"id": null` is not a usable request id, so it is a notification rather than a
-/// request with a broken one.
+/// A notification is a request object *without* an `id` member, so absence is the discriminant and
+/// the value is not. An explicit `"id": null` is a request with an invalid id, and calling it a
+/// notification drops the required 2026 metadata for any message that writes one token.
 #[test]
-fn an_explicit_null_id_is_a_notification() {
-    let message = json!({"jsonrpc": "2.0", "id": null, "method": "notifications/progress",
-                         "params": {}});
+fn an_explicit_null_id_is_a_request_not_a_notification() {
+    let message = json!({"jsonrpc": "2.0", "id": null, "method": "tools/call",
+                         "params": {"name": "Calculator", "arguments": {}}});
     let input = framed(Some(headers(json!(V2026))), None, message);
+    let event = &detailed(&input, McpInputFormat::StreamableHttp)[0];
     assert_eq!(
-        detailed(&input, McpInputFormat::StreamableHttp)[0]
-            .context
-            .request_metadata,
-        None
+        event.context.request_metadata,
+        Some(Absent),
+        "the metadata axis still applies"
+    );
+    let observed = event.context.request_metadata.as_ref().unwrap();
+    assert_eq!(
+        conclude_request(&event.context.era, observed),
+        RequestAssessment::Invalid(InvalidReason::MissingRequestMetadata)
     );
 }
 
