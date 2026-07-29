@@ -128,6 +128,36 @@ impl<'de> serde::Deserialize<'de> for UniqueValue {
     }
 }
 
+/// A correlation key that keeps the id's JSON type.
+///
+/// `McpEvent::jsonrpc_id` is a `String` on a public, published struct, and it renders JSON number
+/// `1` and JSON string `"1"` identically. Those are different JSON-RPC ids, so keying correlation on
+/// that rendering paired a response with a call it did not answer: it consumed the wrong outstanding
+/// request, took its era, and a missing `resultType` under a borrowed legacy era could read
+/// `Terminal`.
+///
+/// The number is kept as its canonical text rather than parsed, because JSON-RPC does not constrain
+/// an id to an integer and two spellings of one number are the same id. The variant, not the text,
+/// carries the type distinction. Crate-private: the public field is unchanged, byte and API
+/// compatible.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum CorrelationId {
+    Str(String),
+    Num(String),
+}
+
+/// Read the correlation key from a message's raw JSON.
+///
+/// `None` for an absent or unusable id. `normalize_jsonrpc_id` already refuses booleans, arrays and
+/// objects at the parser boundary, so only the two valid shapes reach this.
+pub(crate) fn correlation_id(v: &serde_json::Value) -> Option<CorrelationId> {
+    match v.get("id") {
+        Some(serde_json::Value::String(s)) => Some(CorrelationId::Str(s.clone())),
+        Some(serde_json::Value::Number(n)) => Some(CorrelationId::Num(n.to_string())),
+        _ => None,
+    }
+}
+
 /// Which JSON-RPC message shape this is, carrying the method so that nothing has to read it a
 /// second time.
 ///

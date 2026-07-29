@@ -1289,3 +1289,109 @@ fn valid_success_and_error_responses_still_correlate() {
         );
     }
 }
+
+// --- Correlation keys preserve the id's JSON type ------------------------------------------------
+
+/// Per-entry headers, so each message resolves its own era and the one a response ends up with says
+/// which call it was paired to.
+fn two_entry_doc(first: (Value, &str), second: (Value, &str)) -> String {
+    let entry = |m: Value, v: &str, ts: u64| {
+        let key = if m.get("method").is_some() {
+            "request"
+        } else {
+            "response"
+        };
+        json!({"timestamp_ms": ts, "transport_context": headers(json!(v)), key: m})
+    };
+    json!({
+        "transport": "streamable-http",
+        "entries": [entry(first.0, first.1, 1000), entry(second.0, second.1, 1001)]
+    })
+    .to_string()
+}
+
+/// `normalize_jsonrpc_id` renders JSON number `1` and JSON string `"1"` as the same Rust `String`,
+/// so correlation paired them. The response consumed a call it did not answer and took its era, and
+/// a missing `resultType` under that borrowed legacy era could read `Terminal`.
+#[test]
+fn a_numeric_id_does_not_correlate_with_a_string_id() {
+    let request = json!({"jsonrpc": "2.0", "id": 1, "method": "notifications/x", "params": {}});
+    let response = json!({"jsonrpc": "2.0", "id": "1", "result": {"content": []}});
+    let events = detailed(
+        &two_entry_doc((request, V2025), (response, V2026)),
+        McpInputFormat::StreamableHttp,
+    );
+    assert_eq!(
+        events[1].context.era,
+        EraResolution::Known(V2026.into()),
+        "the response must stay orphaned and keep its own era"
+    );
+    let observed = events[1]
+        .context
+        .result_observation
+        .as_ref()
+        .expect("a response reports a result");
+    assert_eq!(
+        conclude(&events[1].context.era, observed),
+        ResultConclusion::Invalid(InvalidReason::MissingResultType)
+    );
+}
+
+/// The other direction, so the rule is symmetric rather than an accident of which side renders.
+#[test]
+fn a_string_id_does_not_correlate_with_a_numeric_id() {
+    let request = json!({"jsonrpc": "2.0", "id": "1", "method": "notifications/x", "params": {}});
+    let response = json!({"jsonrpc": "2.0", "id": 1, "result": {"content": []}});
+    let events = detailed(
+        &two_entry_doc((request, V2025), (response, V2026)),
+        McpInputFormat::StreamableHttp,
+    );
+    assert_eq!(events[1].context.era, EraResolution::Known(V2026.into()));
+}
+
+/// The positive controls. Same type and same value still correlate, so type-preservation did not
+/// turn correlation off.
+#[test]
+fn same_typed_ids_still_correlate() {
+    for id in [json!(1), json!("1")] {
+        let request = json!({"jsonrpc": "2.0", "id": id, "method": "notifications/x",
+                             "params": {}});
+        let response = json!({"jsonrpc": "2.0", "id": id, "result": {"content": []}});
+        let events = detailed(
+            &two_entry_doc((request, V2025), (response, V2026)),
+            McpInputFormat::StreamableHttp,
+        );
+        assert_eq!(
+            events[1].context.era,
+            EraResolution::Known(V2025.into()),
+            "id {id} must correlate to its own call"
+        );
+    }
+}
+
+/// Outstanding tracking is per typed key. A numeric `1` and a string `"1"` are different calls and
+/// may both be in flight; two numeric `1`s are the ambiguous case the refusal exists for.
+#[test]
+fn outstanding_ids_are_tracked_per_typed_key() {
+    let numeric = json!({"jsonrpc": "2.0", "id": 1, "method": "notifications/x", "params": {}});
+    let stringy = json!({"jsonrpc": "2.0", "id": "1", "method": "notifications/x", "params": {}});
+    assert!(
+        parse_mcp_transcript(
+            &two_entry_doc((numeric.clone(), V2025), (stringy, V2025)),
+            McpInputFormat::StreamableHttp
+        )
+        .is_ok(),
+        "a numeric and a string id are different calls"
+    );
+    let err = parse_mcp_transcript(
+        &two_entry_doc((numeric.clone(), V2025), (numeric, V2025)),
+        McpInputFormat::StreamableHttp,
+    )
+    .expect_err("two numeric 1s are one id twice");
+    let rendered = format!("{err:?}");
+    assert!(rendered.contains("outstanding"), "unexpected: {rendered}");
+    assert!(
+        !rendered.contains("notifications/x"),
+        "refusal echoed input: {rendered}"
+    );
+}

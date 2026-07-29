@@ -1,8 +1,9 @@
 use crate::mcp::era::{
-    classify_message, fold_envelope, observe_header, observe_request_metadata, observe_result,
-    resolve_era, EnvelopeObservation, McpEraContext, MessageKind, ParsedMcpEvent, RequestMetadata,
+    classify_message, correlation_id, fold_envelope, observe_header, observe_request_metadata,
+    observe_result, resolve_era, EnvelopeObservation, McpEraContext, MessageKind, ParsedMcpEvent,
+    RequestMetadata,
 };
-use crate::mcp::era::{EraResolution, UniqueValue};
+use crate::mcp::era::{CorrelationId, EraResolution, UniqueValue};
 use crate::mcp::types::*;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -101,10 +102,15 @@ fn correlate_calls(mut parsed: Vec<ParsedMcpEvent>) -> Result<Vec<ParsedMcpEvent
     // the era of a request that had not happened yet: with an id reused after the response, the
     // contradiction on the call being answered was replaced by the clean era of the next call.
     // Requests are outstanding until a response consumes them.
-    let mut outstanding: std::collections::HashMap<String, EraResolution> =
+    let mut outstanding: std::collections::HashMap<CorrelationId, EraResolution> =
         std::collections::HashMap::new();
     for p in &mut parsed {
-        let Some(id) = p.event.jsonrpc_id.clone() else {
+        // The typed key, not the public `String` rendering: that renders JSON `1` and `"1"`
+        // identically, and they are different ids.
+        let Some(raw) = payload_raw(&p.event.payload) else {
+            continue;
+        };
+        let Some(id) = correlation_id(raw) else {
             continue;
         };
         // The shared classifier is the authority, not the presence of an observation. An error
@@ -112,9 +118,7 @@ fn correlate_calls(mut parsed: Vec<ParsedMcpEvent>) -> Result<Vec<ParsedMcpEvent
         // about `result`, so keying off that observation made an error response invisible here: it
         // inherited nothing and consumed nothing, and a legal sequential reuse of its id then
         // tripped the two-outstanding refusal.
-        let kind = payload_raw(&p.event.payload)
-            .map(classify_message)
-            .and_then(Result::ok);
+        let kind = classify_message(raw).ok();
         match kind {
             Some(MessageKind::Request { .. }) => {
                 // Two calls outstanding on one id makes the correlation ambiguous, and choosing
