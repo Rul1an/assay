@@ -92,7 +92,7 @@ pub(crate) fn classify_message(
     })
 }
 
-/// What a request carried in `params._meta`./// What a request carried in `params._meta`. Typed rather than `Option<String>` so that a missing
+/// What a request carried in `params._meta`. Typed rather than `Option<String>` so that a missing
 /// field and an unreadable one stay different findings: one is silence, the other is a malformed
 /// signal, and they have different remediations.
 #[derive(Debug, Clone, PartialEq, Eq)]

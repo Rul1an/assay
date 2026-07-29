@@ -34,16 +34,12 @@ pub(crate) fn parse_mcp_transcript_detailed(
         .map(|event| {
             // Observations are taken by reference before the event moves, so no payload is cloned.
             //
-            // One discriminant decides both axes, and it is the same one `parse_jsonrpc_message`
-            // classified the payload with. Reading `result` unconditionally gave a hybrid message
-            // — a valid string `method` alongside a `result` — both request metadata and a result
-            // observation, which is a result conclusion about an event the parser had already
-            // called a request. A request has no result to observe, and that is now structural:
-            // the two axes are produced by one match, so neither can be reached from the other's
-            // arm.
             // One classification decides both axes, so neither can be reached from the other's
-            // arm. A notification carries `method` like a request but its `_meta` is optional and a
-            // different type, so holding it to the request requirement invents a fault.
+            // arm. Reading `result` unconditionally gave a hybrid message, a valid string `method`
+            // alongside a `result`, both request metadata and a result observation: a result
+            // conclusion about an event the parser had already called a request. And a notification
+            // carries `method` like a request while its `_meta` is optional and a different type,
+            // so holding it to the request requirement invents a fault in the other direction.
             let (request_metadata, result_observation) = match payload_raw(&event.payload) {
                 // The same classifier the parser used. A shape it rejects never reaches here,
                 // because `parse_events_with_envelopes` runs first and refuses it, so the error arm
@@ -86,8 +82,6 @@ pub(crate) fn parse_mcp_transcript_detailed(
         .collect())
 }
 
-/// The JSON-RPC `method` of a message, if it has one.
-///
 /// Read the header slot inside a `transport_context` as an observation.
 ///
 /// A container that is present and not an object is a signal that arrived and failed, not silence.
