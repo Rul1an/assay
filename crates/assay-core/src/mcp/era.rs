@@ -179,8 +179,8 @@ pub(crate) const SUPPORTED_VERSIONS: &[&str] = &[
 /// Ordering against [`RESULT_TYPE_SINCE`] is lexicographic, and lexicographic ordering is date
 /// ordering only once the value is a date. Ten bytes and two dashes is not enough: `2026-99-99`
 /// would pass a shape-only check and be reported as a version this build merely does not support,
-/// which blames the reader for a record that is wrong. Validated as a real calendar date, leap
-/// years included, so `2026-02-31` is malformed rather than unsupported.
+/// which blames the reader for a record that is wrong. The value is validated as a real calendar
+/// date, leap years included, so `2026-02-31` is malformed rather than unsupported.
 fn is_version_shaped(v: &str) -> bool {
     let b = v.as_bytes();
     if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
