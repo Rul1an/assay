@@ -78,7 +78,7 @@ codegen-units = 1
 # Internal crates
 assay-core = { path = "crates/assay-core", version = "3.36.0" }
 assay-common = { path = "crates/assay-common", version = "3.36.0", default-features = false }
-assay-monitor = { path = "crates/assay-monitor", version = "3.19.1" }
+assay-monitor = { path = "crates/assay-monitor", version = "3.36.0" }
 assay-metrics = { path = "crates/assay-metrics", version = "3.19.1" }
 assay-policy = { path = "crates/assay-policy", version = "3.19.1" }
 assay-mcp-server = { path = "crates/assay-mcp-server", version = "3.19.1" }

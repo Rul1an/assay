@@ -8,13 +8,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - Bind new `evidence-bundle/v1` attestations to the SHA-256 digest of the exact bundle archive.
-  Signature verification now returns an explicitly artifact-unmatched state; only
+  The new `verify_envelope_signature` API returns an explicitly artifact-unmatched state; the
+  deprecated `verify_envelope` compatibility shim keeps its published 3.x signature. Only
   `verify_attestation_for_bundle` can establish that the signed subject and predicate match a
-  verified bundle. The legacy v0 predicate identifier remains available for compatibility, while
-  new attestations use the separately versioned v1 contract.
-- Publish `privileged-mcp-action-v0-candidate.3`, a deterministic 14-case clean-room conformance
-  pack with checksums and GitHub artifact attestation. This improves the independent-reproduction
-  surface; it does not itself satisfy the non-author reproduction gate.
+  verified bundle. Existing v0 attestations must be re-issued, and `assay evidence attest` now
+  refuses caller-supplied `--predicate` data because every v1 predicate field is derived from the
+  verified archive.
+- Separately publish `privileged-mcp-action-v0-candidate.3` as a conformance prerelease: a
+  deterministic 14-case clean-room pack with checksums and GitHub artifact attestation. This
+  improves the independent-reproduction surface; it does not itself satisfy the non-author
+  reproduction gate.
 
 ### Changed
 - Declare Rust 1.89 as the MSRV for all public crates and enforce that floor against the locked
@@ -25,8 +28,9 @@ All notable changes to this project will be documented in this file.
   latest supported legacy revision, `2025-11-25`. Missing or structurally incomplete initialize
   parameters fail with JSON-RPC invalid params. This does not claim MCP `2026-07-28` support: the
   modern `server/discover` and per-request metadata contract remains separate.
-- Evidence verification no longer retains the decompressed event stream after it has been
-  validated, reducing peak memory without changing the verified result.
+- Verify-only bundle paths no longer retain the decompressed event stream after validating it,
+  reducing peak memory without changing the verified result. Reader APIs that expose events still
+  retain that content for their callers.
 
 ### Fixed
 - **Fail-closed correction (bundle verification, migration-visible).** The verifier now rejects
