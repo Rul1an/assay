@@ -24,6 +24,13 @@ REPO_ROOT = CORPUS_DIR.parents[1]
 BUILD_SCRIPT = CORPUS_DIR / "scripts" / "build_clean_room_pack.py"
 SCORE_SCRIPT = CORPUS_DIR / "scripts" / "score_candidate.py"
 VALIDATE_SCRIPT = CORPUS_DIR / "scripts" / "validate_run_record.py"
+VALIDATE_CANDIDATE_RELEASE = (
+    CORPUS_DIR / "scripts" / "validate_candidate_release.py"
+)
+CANDIDATE_RELEASE = CORPUS_DIR / "candidate-release.json"
+RELEASE_WORKFLOW = (
+    REPO_ROOT / ".github/workflows/privileged-mcp-action-pack-release.yml"
+)
 
 def _head_commit() -> str:
     """Resolve HEAD, the way the conformance and pack-release workflows already do.
@@ -161,6 +168,18 @@ class CleanRoomPackTests(unittest.TestCase):
             self.assertNotIn("description", json.dumps(cases))
 
             manifest = json.loads((CORPUS_DIR / "MANIFEST.json").read_text())
+            packed_spec = files["privileged-mcp-action-v0/spec.md"].decode()
+            for forbidden in (
+                "## Changelog",
+                "MANIFEST.json",
+                "gen_vectors.py",
+                "#1840",
+                "13-vector",
+                "14 vectors",
+            ):
+                self.assertNotIn(forbidden, packed_spec)
+            for vector in manifest["vectors"]:
+                self.assertNotIn(vector["id"], packed_spec)
             source_hashes = {vector["sha256"] for vector in manifest["vectors"]}
             packed_hashes = {
                 sha256(files[f"privileged-mcp-action-v0/{case['file']}"])
@@ -194,6 +213,86 @@ class CleanRoomPackTests(unittest.TestCase):
                 b"bad-108",
             ):
                 self.assertNotIn(forbidden, public_inputs)
+
+    def test_candidate_release_is_bound_to_the_current_corpus(self) -> None:
+        candidate = json.loads(CANDIDATE_RELEASE.read_text())
+        manifest = json.loads((CORPUS_DIR / "MANIFEST.json").read_text())
+        readme = (CORPUS_DIR / "README.md").read_text()
+        protocol = (CORPUS_DIR / "CONFORMANCE-PROTOCOL.md").read_text()
+        workflow = RELEASE_WORKFLOW.read_text()
+
+        self.assertEqual(
+            candidate["schema"],
+            "assay.privileged_mcp_action.candidate_release.v0",
+        )
+        self.assertRegex(
+            candidate["tag"],
+            r"^privileged-mcp-action-v0-candidate\.[1-9][0-9]*$",
+        )
+        self.assertEqual(candidate["case_count"], len(manifest["vectors"]))
+        self.assertEqual(candidate["corpus_digest"], manifest["corpus_digest"])
+        self.assertIn(candidate["tag"], readme)
+        self.assertIn(candidate["tag"], protocol)
+
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertNotIn('tags:\n      - "privileged-mcp-action-v0-candidate.*"', workflow)
+        self.assertIn("ref: ${{ github.sha }}", workflow)
+        self.assertNotIn("ref: main", workflow)
+        self.assertIn(
+            "conformance/privileged-mcp-action-v0/candidate-release.json",
+            workflow,
+        )
+        self.assertIn("--source-ref refs/heads/main", readme)
+        self.assertIn("--source-ref refs/heads/main", protocol)
+
+    def test_candidate_release_validator_rejects_stale_corpus_bindings(self) -> None:
+        candidate = json.loads(CANDIDATE_RELEASE.read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidate-release.json"
+            for key, stale_value in (
+                ("case_count", candidate["case_count"] - 1),
+                ("corpus_digest", "sha256:" + "0" * 64),
+            ):
+                stale = dict(candidate)
+                stale[key] = stale_value
+                path.write_text(json.dumps(stale))
+                result = run(
+                    str(VALIDATE_CANDIDATE_RELEASE),
+                    "--candidate",
+                    str(path),
+                    "--manifest",
+                    str(CORPUS_DIR / "MANIFEST.json"),
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(
+                    f"candidate {'case count' if key == 'case_count' else 'corpus digest'} "
+                    "does not match manifest",
+                    result.stderr,
+                )
+
+    def test_candidate_release_validator_recomputes_manifest_digest(self) -> None:
+        manifest = json.loads((CORPUS_DIR / "MANIFEST.json").read_text())
+        manifest["vectors"][0]["sha256"] = "sha256:" + "0" * 64
+        with tempfile.TemporaryDirectory() as tmp:
+            candidate_path = Path(tmp) / "candidate-release.json"
+            manifest_path = Path(tmp) / "MANIFEST.json"
+            candidate_path.write_text(CANDIDATE_RELEASE.read_text())
+            manifest_path.write_text(json.dumps(manifest))
+            result = run(
+                str(VALIDATE_CANDIDATE_RELEASE),
+                "--candidate",
+                str(candidate_path),
+                "--manifest",
+                str(manifest_path),
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            "manifest corpus digest does not match ordered vector digests",
+            result.stderr,
+        )
 
     def test_archive_metadata_is_normalized(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

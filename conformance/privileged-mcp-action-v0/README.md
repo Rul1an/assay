@@ -20,19 +20,23 @@ Vectors for the [Privileged MCP Action Evidence Profile v0](../../docs/profiles/
 
 The corpus digest stays a **candidate** until a non-author implementation reproduces the expected
 outcomes from the specification text alone. The open invitation is
-[#1840](https://github.com/Rul1an/assay/issues/1840), which names the exact commit the current
-digest describes.
+[#1840](https://github.com/Rul1an/assay/issues/1840), which names the exact released snapshot
+available to an external implementer. When the corpus advances,
+[`candidate-release.json`](candidate-release.json) binds the next release before that issue is
+repinned to verified release bytes.
 
 ### Clean-room path
 
-The release
-[`privileged-mcp-action-v0-candidate.2`](https://github.com/Rul1an/assay/releases/tag/privileged-mcp-action-v0-candidate.2)
-contains a deterministic, attested clean-room pack. It carries `spec.md`, `descriptor.json`, and
-fourteen opaque cases. It omits expected outcomes, semantic case names, the vector generator, and
-Assay's implementation.
+The active release target is `privileged-mcp-action-v0-candidate.3`. Once its GitHub
+[Releases](https://github.com/Rul1an/assay/releases) entry is published, it contains a
+deterministic, attested clean-room pack with `spec.md`, `descriptor.json`, and fourteen opaque
+cases. It omits expected outcomes, semantic case names, the vector generator, and Assay's
+implementation. `candidate.2` remains unchanged historical input for the superseded 13-case
+digest; do not use it for a new attempt against the current corpus.
 
 ```bash
-tag=privileged-mcp-action-v0-candidate.2
+tag=privileged-mcp-action-v0-candidate.3
+source_digest="$(gh api "repos/Rul1an/assay/commits/$tag" --jq .sha)"
 gh release download "$tag" --repo Rul1an/assay \
   --pattern privileged-mcp-action-v0-clean-room.tar.gz \
   --pattern SHA256SUMS \
@@ -42,9 +46,14 @@ gh attestation verify privileged-mcp-action-v0-clean-room.tar.gz \
   --repo Rul1an/assay \
   --bundle attestation-bundle.json \
   --signer-workflow Rul1an/assay/.github/workflows/privileged-mcp-action-pack-release.yml \
-  --source-digest 975ee0129a421925cad78b84ffc02144aa655679 \
-  --source-ref refs/tags/privileged-mcp-action-v0-candidate.2
+  --source-digest "$source_digest" \
+  --source-ref refs/heads/main
 ```
+
+The release controller runs only from `main`, validates
+[`candidate-release.json`](candidate-release.json) against the checked-out manifest, and creates
+the annotated tag after the pack, transformation check, and attestation succeed. Resolving the tag
+above independently confirms that the published release still names that attested source commit.
 
 Follow [`CONFORMANCE-PROTOCOL.md`](CONFORMANCE-PROTOCOL.md): implement before scoring, preserve the
 first run, disclose the materials read, and publish a machine-readable run record plus the completed
