@@ -899,7 +899,8 @@ fn the_sidecar_axes_follow_the_shared_classifier() {
         json!({"jsonrpc": "2.0", "id": "call-1", "method": "", "params": {}}),
         json!({"jsonrpc": "2.0", "id": "call-1", "result": {"content": [], "resultType": "complete"}}),
         json!({"jsonrpc": "2.0", "id": "call-1", "error": {"code": -1, "message": "x"}}),
-        json!({"jsonrpc": "2.0", "params": {}}),
+        // A no-method object with neither `result` nor `error` is refused as a message shape now,
+        // so it is not a classifiable input and belongs in the refusal test instead.
     ];
     for shape in shapes {
         let expected = classify_message(&shape).expect("a classifiable shape");
@@ -1211,4 +1212,80 @@ fn an_error_response_frees_the_id_for_sequential_reuse() {
         parse_mcp_transcript(&doc.to_string(), McpInputFormat::StreamableHttp).is_ok(),
         "an error response must consume the outstanding id"
     );
+}
+
+// --- A response is exactly one of result or error ------------------------------------------------
+
+/// Both at once is protocol-invalid, and it licensed completion: `observe_result` reads `result`,
+/// sees `complete`, and a 2026 era concludes `Terminal`. The shape has to be refused before any
+/// axis reads it.
+#[test]
+fn a_response_carrying_both_result_and_error_is_refused() {
+    let both = json!({"jsonrpc": "2.0", "id": "c",
+                      "result": {"content": [], "resultType": "complete"},
+                      "error": {"code": -32000, "message": "boom"}});
+    let input = framed(Some(headers(json!(V2026))), None, both);
+    let err = parse_mcp_transcript(&input, McpInputFormat::StreamableHttp)
+        .expect_err("must refuse both result and error");
+    let rendered = format!("{err:?}");
+    assert!(
+        rendered.contains("exactly one of result or error"),
+        "unexpected message: {rendered}"
+    );
+    assert!(
+        !rendered.contains("complete") && !rendered.contains("boom"),
+        "refusal echoed an input value: {rendered}"
+    );
+}
+
+/// Neither, with an id, was correlated as a response: it consumed the outstanding id and then let a
+/// sequential reuse through. `notifications/x` keeps the pre-existing `tools/call` duplicate-id gate
+/// from masking the subject.
+#[test]
+fn a_no_method_object_with_neither_result_nor_error_is_refused() {
+    let request = json!({"jsonrpc": "2.0", "id": "n", "method": "notifications/x", "params": {}});
+    let neither = json!({"jsonrpc": "2.0", "id": "n"});
+    let doc = json!({
+        "transport": "streamable-http",
+        "entries": [
+            {"timestamp_ms": 1000, "request": request},
+            {"timestamp_ms": 1001, "response": neither}
+        ]
+    });
+    let err = parse_mcp_transcript(&doc.to_string(), McpInputFormat::StreamableHttp)
+        .expect_err("must refuse a response that is neither");
+    assert!(
+        format!("{err:?}").contains("exactly one of result or error"),
+        "unexpected message: {err:?}"
+    );
+}
+
+/// The controls. A valid success response and a valid error response both still correlate, so the
+/// rule refuses the two invalid shapes and nothing else.
+#[test]
+fn valid_success_and_error_responses_still_correlate() {
+    for response in [
+        json!({"jsonrpc": "2.0", "id": "ok", "result": {"content": [], "resultType": "complete"}}),
+        json!({"jsonrpc": "2.0", "id": "ok", "error": {"code": -1, "message": "x"}}),
+    ] {
+        let request = json!({"jsonrpc": "2.0", "id": "ok", "method": "notifications/x",
+                             "params": {"_meta": meta(json!(V2026))}});
+        let doc = json!({
+            "transport": "streamable-http",
+            "transport_context": {"headers": {"MCP-Protocol-Version": V2025}},
+            "entries": [
+                {"timestamp_ms": 1000, "request": request},
+                {"timestamp_ms": 1001, "response": response.clone()}
+            ]
+        });
+        let events = detailed(&doc.to_string(), McpInputFormat::StreamableHttp);
+        assert_eq!(
+            events[1].context.era,
+            EraResolution::Conflicting {
+                header: V2025.into(),
+                body: V2026.into()
+            },
+            "must still inherit for {response}"
+        );
+    }
 }

@@ -155,6 +155,12 @@ pub(crate) enum MessageKind<'a> {
 pub(crate) enum MessageShapeError {
     #[error("JSON-RPC method must be a string")]
     NonStringMethod,
+    /// A no-method object is a response, and a response carries a result or an error, never both and
+    /// never neither. Both licensed completion: the result axis read `result`, saw `complete`, and a
+    /// 2026 era concluded `Terminal` on a protocol-invalid message. Neither was correlated as a
+    /// response, so it consumed an outstanding id and freed it for reuse without answering anything.
+    #[error("a JSON-RPC response must carry exactly one of result or error")]
+    NotExactlyOneResponseBody,
 }
 
 /// Classify by the two fields JSON-RPC uses.
@@ -173,6 +179,14 @@ pub(crate) fn classify_message(
     v: &serde_json::Value,
 ) -> Result<MessageKind<'_>, MessageShapeError> {
     let Some(method) = v.get("method") else {
+        // Exactly one of the two, checked here so no axis ever reads a shape that is not a response.
+        // The `method` branch below is untouched: a hybrid carrying `method` and `result` stays a
+        // request, which is a separate rule with its own tests.
+        let has_result = v.get("result").is_some();
+        let has_error = v.get("error").is_some();
+        if has_result == has_error {
+            return Err(MessageShapeError::NotExactlyOneResponseBody);
+        }
         return Ok(MessageKind::Response);
     };
     let Some(method) = method.as_str() else {
