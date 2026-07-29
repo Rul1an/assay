@@ -1044,3 +1044,114 @@ fn distinct_members_are_not_duplicates() {
     let raw = r#"{"transport":"streamable-http","transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28","X-Other":"2025-06-18"}},"entries":[{"request":{"jsonrpc":"2.0","id":"c","method":"tools/call","params":{"name":"C","arguments":{}}}}]}"#;
     assert!(parse_mcp_transcript(raw, McpInputFormat::StreamableHttp).is_ok());
 }
+
+// --- SSE data goes through the same boundary ----------------------------------------------------
+
+/// `TransportSseEnvelope.data` was a plain `Value`, so an SSE frame bypassed the duplicate-aware
+/// boundary entirely: both the structured form and the JSON-string form kept only the last member.
+#[test]
+fn duplicate_members_in_sse_data_are_refused() {
+    let structured = r#"{"transport":"http-sse","entries":[{"sse":{"event":"message","data":{"jsonrpc":"2.0","id":"c","result":{"content":[],"resultType":"complete","resultType":"input_required"}}}}]}"#;
+    let as_string = r#"{"transport":"http-sse","entries":[{"sse":{"event":"message","data":"{\"jsonrpc\":\"2.0\",\"id\":\"c\",\"result\":{\"content\":[],\"resultType\":\"complete\",\"resultType\":\"input_required\"}}"}}]}"#;
+    for (label, raw) in [("structured", structured), ("json string", as_string)] {
+        let err = parse_mcp_transcript(raw, McpInputFormat::HttpSse)
+            .expect_err(&format!("must refuse a duplicate in {label} SSE data"));
+        assert!(
+            format!("{err:?}").contains("duplicate member"),
+            "unexpected message for {label}: {err:?}"
+        );
+    }
+}
+
+// --- Correlation runs in source order ------------------------------------------------------------
+
+/// The global map was last-wins, so a response could inherit the era of a *later* request. Here the
+/// first request is contradicted, its response has no `resultType`, and a second request reuses the
+/// id with a clean era. The response must keep the contradiction of the call it answered.
+#[test]
+fn a_response_takes_the_era_of_the_request_that_preceded_it() {
+    let conflicted = json!({"jsonrpc": "2.0", "id": "reused", "method": "notifications/x",
+                            "params": {"_meta": meta(json!(V2026))}});
+    let response = json!({"jsonrpc": "2.0", "id": "reused", "result": {"content": []}});
+    let clean = json!({"jsonrpc": "2.0", "id": "reused", "method": "notifications/x",
+                       "params": {"_meta": meta(json!(V2025))}});
+    let doc = json!({
+        "transport": "streamable-http",
+        "transport_context": {"headers": {"MCP-Protocol-Version": V2025}},
+        "entries": [
+            {"timestamp_ms": 1000, "request": conflicted},
+            {"timestamp_ms": 1001, "response": response},
+            {"timestamp_ms": 1002, "request": clean}
+        ]
+    });
+    let events = detailed(&doc.to_string(), McpInputFormat::StreamableHttp);
+    assert_eq!(
+        events[1].context.era,
+        EraResolution::Conflicting {
+            header: V2025.into(),
+            body: V2026.into()
+        },
+        "the response must not inherit a later request's era"
+    );
+}
+
+/// A response arriving before any request keeps the era it resolved on its own.
+#[test]
+fn a_response_before_any_request_stays_self_resolved() {
+    let response = json!({"jsonrpc": "2.0", "id": "early", "result": {"content": []}});
+    let request = json!({"jsonrpc": "2.0", "id": "early", "method": "notifications/x",
+                         "params": {"_meta": meta(json!(V2026))}});
+    let doc = json!({
+        "transport": "streamable-http",
+        "transport_context": {"headers": {"MCP-Protocol-Version": V2025}},
+        "entries": [
+            {"timestamp_ms": 1000, "response": response},
+            {"timestamp_ms": 1001, "request": request}
+        ]
+    });
+    let events = detailed(&doc.to_string(), McpInputFormat::StreamableHttp);
+    assert_eq!(events[0].context.era, EraResolution::Known(V2025.into()));
+}
+
+/// Two requests outstanding on one id makes the correlation ambiguous, and choosing either is a
+/// silent choice between two calls. Refused on the same basis as a duplicate member.
+#[test]
+fn two_outstanding_requests_on_one_id_are_refused() {
+    let first = json!({"jsonrpc": "2.0", "id": "dup", "method": "notifications/x", "params": {}});
+    let second = json!({"jsonrpc": "2.0", "id": "dup", "method": "notifications/x", "params": {}});
+    let doc = json!({
+        "transport": "streamable-http",
+        "entries": [
+            {"timestamp_ms": 1000, "request": first},
+            {"timestamp_ms": 1001, "request": second}
+        ]
+    });
+    let err = parse_mcp_transcript(&doc.to_string(), McpInputFormat::StreamableHttp)
+        .expect_err("must refuse two outstanding requests on one id");
+    assert!(
+        format!("{err:?}").contains("outstanding"),
+        "unexpected message: {err:?}"
+    );
+}
+
+/// Reusing an id *after* its response has been seen is legal, so the refusal must not become a ban
+/// on reuse.
+#[test]
+fn sequential_id_reuse_after_a_response_is_allowed() {
+    let mk_req = || {
+        json!({"jsonrpc": "2.0", "id": "seq", "method": "notifications/x",
+                           "params": {}})
+    };
+    let mk_resp = || json!({"jsonrpc": "2.0", "id": "seq", "result": {"content": []}});
+    let doc = json!({
+        "transport": "streamable-http",
+        "transport_context": {"headers": {"MCP-Protocol-Version": V2025}},
+        "entries": [
+            {"timestamp_ms": 1000, "request": mk_req()},
+            {"timestamp_ms": 1001, "response": mk_resp()},
+            {"timestamp_ms": 1002, "request": mk_req()},
+            {"timestamp_ms": 1003, "response": mk_resp()}
+        ]
+    });
+    assert!(parse_mcp_transcript(&doc.to_string(), McpInputFormat::StreamableHttp).is_ok());
+}

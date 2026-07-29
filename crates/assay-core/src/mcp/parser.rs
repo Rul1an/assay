@@ -81,7 +81,7 @@ pub(crate) fn parse_mcp_transcript_detailed(
             }
         })
         .collect();
-    Ok(correlate_calls(parsed))
+    correlate_calls(parsed)
 }
 
 /// Give a response the era its own call resolved to.
@@ -96,29 +96,39 @@ pub(crate) fn parse_mcp_transcript_detailed(
 /// validates for duplicates. A response with no matching request keeps the era it resolved on its
 /// own, so this adds authority rather than removing it. Multi-hop calls spread across separate
 /// records stay out of scope: that needs a call-scoped identity this slice does not define.
-fn correlate_calls(mut parsed: Vec<ParsedMcpEvent>) -> Vec<ParsedMcpEvent> {
-    let request_eras: std::collections::HashMap<String, EraResolution> = parsed
-        .iter()
-        .filter(|p| p.context.request_metadata.is_some())
-        .filter_map(|p| {
-            p.event
-                .jsonrpc_id
-                .clone()
-                .map(|id| (id, p.context.era.clone()))
-        })
-        .collect();
+fn correlate_calls(mut parsed: Vec<ParsedMcpEvent>) -> Result<Vec<ParsedMcpEvent>> {
+    // Source order, not a map built up front. A global map is last-wins, so a response could take
+    // the era of a request that had not happened yet: with an id reused after the response, the
+    // contradiction on the call being answered was replaced by the clean era of the next call.
+    // Requests are outstanding until a response consumes them.
+    let mut outstanding: std::collections::HashMap<String, EraResolution> =
+        std::collections::HashMap::new();
     for p in &mut parsed {
-        if p.context.result_observation.is_none() {
-            continue;
-        }
-        let Some(id) = p.event.jsonrpc_id.as_ref() else {
+        let Some(id) = p.event.jsonrpc_id.clone() else {
             continue;
         };
-        if let Some(era) = request_eras.get(id) {
-            p.context.era = era.clone();
+        if p.context.request_metadata.is_some() {
+            // Two calls outstanding on one id makes the correlation ambiguous, and choosing either
+            // is a silent choice between two calls. Reuse *after* a response is legal and is what
+            // the removal below permits.
+            if outstanding
+                .insert(id.clone(), p.context.era.clone())
+                .is_some()
+            {
+                bail!(
+                    "two outstanding JSON-RPC requests share an id at source line {}",
+                    p.event.source_line
+                );
+            }
+        } else if p.context.result_observation.is_some() {
+            // An orphan response keeps the era it resolved on its own, so correlation adds
+            // authority rather than removing it.
+            if let Some(era) = outstanding.remove(&id) {
+                p.context.era = era;
+            }
         }
     }
-    parsed
+    Ok(parsed)
 }
 
 /// Read the header slot inside a `transport_context` as an observation.
@@ -326,7 +336,7 @@ fn parse_transport_transcript_detailed(
         }
 
         if let Some(sse) = entry.sse {
-            if let Some(jsonrpc) = extract_jsonrpc_from_sse(&sse, allow_endpoint_event) {
+            if let Some(jsonrpc) = extract_jsonrpc_from_sse(&sse, allow_endpoint_event)? {
                 out.push(parse_jsonrpc_message(
                     jsonrpc,
                     source_line,
@@ -590,20 +600,27 @@ fn validate_mcp_events(events: &[McpEvent]) -> Result<()> {
 fn extract_jsonrpc_from_sse(
     sse: &TransportSseEnvelope,
     allow_endpoint_event: bool,
-) -> Option<serde_json::Value> {
+) -> Result<Option<serde_json::Value>> {
     let event_name = sse.event.as_deref().unwrap_or("message");
     if event_name == "endpoint" && allow_endpoint_event {
-        return None;
+        return Ok(None);
     }
 
     if event_name != "message" {
-        return None;
+        return Ok(None);
     }
 
-    extract_jsonrpc_like_value(&sse.data)
+    extract_jsonrpc_like_value(&sse.data.0)
 }
 
-fn extract_jsonrpc_like_value(value: &serde_json::Value) -> Option<serde_json::Value> {
+/// Pull a JSON-RPC-looking value out of an SSE `data` payload.
+///
+/// `Ok(None)` means the payload is not JSON-RPC-shaped, which is tolerated: an SSE stream carries
+/// keepalives and endpoint frames alongside messages. An `Err` means the payload *is* JSON and
+/// carries a duplicate member, which is refused. The two are told apart by
+/// `serde_json::error::Category`, not by reading the message: a visitor's `Error::custom` classifies
+/// as `Data` while malformed bytes classify as `Syntax`, so the distinction is typed.
+fn extract_jsonrpc_like_value(value: &serde_json::Value) -> Result<Option<serde_json::Value>> {
     match value {
         serde_json::Value::Object(map)
             if map.contains_key("method")
@@ -611,12 +628,20 @@ fn extract_jsonrpc_like_value(value: &serde_json::Value) -> Option<serde_json::V
                 || map.contains_key("error")
                 || map.contains_key("jsonrpc") =>
         {
-            Some(value.clone())
+            Ok(Some(value.clone()))
         }
-        serde_json::Value::String(text) => serde_json::from_str::<serde_json::Value>(text)
-            .ok()
-            .and_then(|parsed| extract_jsonrpc_like_value(&parsed)),
-        _ => None,
+        // The embedded string is a *different* input from the transcript, not a second pass over the
+        // same one, so it goes through the same duplicate-aware boundary rather than a plain
+        // `Value`. Without this an SSE frame carrying its payload as a string was the one path that
+        // kept a duplicate member.
+        serde_json::Value::String(text) => match serde_json::from_str::<UniqueValue>(text) {
+            Ok(UniqueValue(parsed)) => extract_jsonrpc_like_value(&parsed),
+            Err(e) if e.classify() == serde_json::error::Category::Data => {
+                Err(anyhow::Error::new(e).context("invalid SSE data payload"))
+            }
+            Err(_) => Ok(None),
+        },
+        _ => Ok(None),
     }
 }
 
@@ -711,7 +736,7 @@ struct TransportSseEnvelope {
     #[allow(dead_code)]
     #[serde(default)]
     id: Option<String>,
-    data: serde_json::Value,
+    data: UniqueValue,
 }
 
 #[cfg(test)]

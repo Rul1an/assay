@@ -108,12 +108,17 @@ impl<'de> serde::Deserialize<'de> for UniqueValue {
             ) -> Result<UniqueValue, A::Error> {
                 let mut out = serde_json::Map::new();
                 while let Some(key) = map.next_key::<String>()? {
-                    let UniqueValue(value) = map.next_value()?;
-                    if out.insert(key, value).is_some() {
+                    // Membership is checked on the key alone, before `next_value` materializes
+                    // whatever the duplicate carries. Reading it first means a hostile input pays
+                    // for a value that is only going to be refused, and the value may be an
+                    // arbitrarily large subtree.
+                    if out.contains_key(&key) {
                         return Err(serde::de::Error::custom(
                             "JSON object contains a duplicate member",
                         ));
                     }
+                    let UniqueValue(value) = map.next_value()?;
+                    out.insert(key, value);
                 }
                 Ok(UniqueValue(serde_json::Value::Object(out)))
             }
