@@ -179,9 +179,8 @@ pub(crate) const SUPPORTED_VERSIONS: &[&str] = &[
 /// Ordering against [`RESULT_TYPE_SINCE`] is lexicographic, and lexicographic ordering is date
 /// ordering only once the value is a date. Ten bytes and two dashes is not enough: `2026-99-99`
 /// would pass a shape-only check and be reported as a version this build merely does not support,
-/// which blames the reader for a record that is wrong. Day-of-month is bounded at 31 rather than
-/// Validated as a real calendar date, leap years included, so `2026-02-31` is malformed rather
-/// than a version this build merely does not support.
+/// which blames the reader for a record that is wrong. Validated as a real calendar date, leap
+/// years included, so `2026-02-31` is malformed rather than unsupported.
 fn is_version_shaped(v: &str) -> bool {
     let b = v.as_bytes();
     if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
@@ -365,7 +364,12 @@ pub(crate) const PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
 /// a string, which reports silence where a signal arrived and failed. That difference is the whole
 /// reason `Malformed` exists, so this reads the slot itself.
 pub(crate) fn observe_header(headers: Option<&serde_json::Value>) -> Option<EnvelopeObservation> {
-    let map = headers?.as_object()?;
+    let headers = headers?;
+    // A headers node that is not an object is a signal that arrived and failed. `as_object`
+    // answering `None` would drop the slot entirely and report silence instead.
+    let Some(map) = headers.as_object() else {
+        return Some(EnvelopeObservation::Malformed);
+    };
     let mut found: Option<&str> = None;
     let mut any = false;
     for (_, value) in map
@@ -374,9 +378,16 @@ pub(crate) fn observe_header(headers: Option<&serde_json::Value>) -> Option<Enve
     {
         any = true;
         match value.as_str() {
+            // Shape is checked here rather than downstream so that `Present` can only ever hold a
+            // value already accepted as a version. A rejected one is reported as `Malformed` and
+            // its bytes are not retained, which is what stops an oversized header from being
+            // cloned into every entry's sidecar.
+            //
             // Two spellings carrying the same value agree, and agreement is not a choice. Only a
             // disagreement is: `find` would have silently taken whichever came first in map order.
-            Some(v) if !v.is_empty() && found.is_none_or(|prev| prev == v) => found = Some(v),
+            Some(v) if is_version_shaped(v) && found.is_none_or(|prev| prev == v) => {
+                found = Some(v)
+            }
             _ => return Some(EnvelopeObservation::Malformed),
         }
     }
@@ -432,7 +443,8 @@ pub(crate) fn observe_request_metadata(raw: &serde_json::Value) -> RequestMetada
     match meta.get(PROTOCOL_VERSION_META_KEY) {
         None => RequestMetadata::Absent,
         Some(v) => match v.as_str() {
-            Some(s) if !s.is_empty() => RequestMetadata::Present(s.to_string()),
+            // Same bound as the header: only an accepted version is retained.
+            Some(s) if is_version_shaped(s) => RequestMetadata::Present(s.to_string()),
             _ => RequestMetadata::Malformed,
         },
     }

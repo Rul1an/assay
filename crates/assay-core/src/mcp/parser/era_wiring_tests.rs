@@ -433,3 +433,63 @@ fn duplicate_case_variants_agreeing_are_present() {
         EnvelopeObservation::Present(V2026.into())
     );
 }
+
+/// An oversized header value must not be retained, let alone once per entry. An observation only
+/// ever holds a value it has already accepted as a version, so a rejected one costs the enum
+/// discriminant and nothing more, however large the input was.
+#[test]
+fn an_oversized_header_is_not_retained_per_entry() {
+    let huge = "x".repeat(1024 * 1024);
+    let doc = json!({
+        "transport": "streamable-http",
+        "transport_context": {"headers": {"MCP-Protocol-Version": huge}},
+        "entries": [
+            {"timestamp_ms": 1000, "request": req(None)},
+            {"timestamp_ms": 1001,
+             "request": {"jsonrpc": "2.0", "id": "call-2", "method": "tools/call",
+                         "params": {"name": "Calculator", "arguments": {}}}}
+        ]
+    });
+    let parsed = detailed(&doc.to_string(), McpInputFormat::StreamableHttp);
+    assert_eq!(parsed.len(), 2);
+    for (i, event) in parsed.iter().enumerate() {
+        assert_eq!(
+            event.context.envelope,
+            EnvelopeObservation::Malformed,
+            "entry {i} must not carry the value"
+        );
+    }
+}
+
+/// The same bound on the body signal.
+#[test]
+fn an_oversized_metadata_version_is_not_retained() {
+    let huge = "x".repeat(1024 * 1024);
+    let input = req(Some(meta(json!(huge)))).to_string();
+    assert_eq!(
+        detailed(&input, McpInputFormat::JsonRpc)[0]
+            .context
+            .request_metadata,
+        Some(RequestMetadata::Malformed)
+    );
+}
+
+/// A `headers` node that is not an object is a signal that arrived and failed. `as_object`
+/// answering `None` would have dropped the slot and reported silence.
+#[test]
+fn a_non_object_headers_node_is_malformed_not_absent() {
+    for doc in [
+        json!({"transport": "streamable-http", "headers": 7,
+               "entries": [{"timestamp_ms": 1000, "request": req(None)}]}),
+        json!({"transport": "streamable-http", "transport_context": {"headers": 7},
+               "entries": [{"timestamp_ms": 1000, "request": req(None)}]}),
+    ] {
+        assert_eq!(
+            detailed(&doc.to_string(), McpInputFormat::StreamableHttp)[0]
+                .context
+                .envelope,
+            EnvelopeObservation::Malformed,
+            "{doc}"
+        );
+    }
+}
