@@ -62,6 +62,44 @@ grep -q "PUBLIC_MSRV_RESULT" <<<"$GATE" \
   || fail "the gate does not inspect the public-msrv result"
 grep -q "RUSTDOC_RESULT" <<<"$GATE" \
   || fail "the gate does not inspect the rustdoc result"
+python3 - "$WORKFLOW" <<'PY' \
+  || fail "the rustdoc lane does not actively cover assay-registry's public OIDC feature"
+import sys
+
+required = "cargo doc -p assay-registry --features oidc --no-deps"
+lines = open(sys.argv[1]).read().splitlines()
+
+
+def rustdoc_commands(source):
+    start = source.index("  rustdoc:")
+    end = next(
+        (
+            index
+            for index in range(start + 1, len(source))
+            if source[index].startswith("  ")
+            and not source[index].startswith("    ")
+            and source[index].endswith(":")
+        ),
+        len(source),
+    )
+    return {
+        line.strip()
+        for line in source[start:end]
+        if line.startswith("          ") and not line.lstrip().startswith("#")
+    }
+
+
+if required not in rustdoc_commands(lines):
+    sys.exit(1)
+
+# Pin the failure mode: a commented command is documentation, not an executed gate.
+mutated = [
+    line.replace(required, f"# {required}", 1) if line.strip() == required else line
+    for line in lines
+]
+if required in rustdoc_commands(mutated):
+    sys.exit(1)
+PY
 if sed -n '/^run_gate()/,/^}/p' "$0" | grep -qE '(PUBLIC_MSRV|RUSTDOC)_RESULT=success'; then
   fail "run_gate must not inject a successful MSRV or rustdoc result into every scenario"
 fi

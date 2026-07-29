@@ -123,7 +123,7 @@ impl OidcProvider {
     /// - `ACTIONS_ID_TOKEN_REQUEST_TOKEN`: Token to authenticate request
     ///
     /// Optional:
-    /// - `ASSAY_REGISTRY_URL`: Custom registry URL (default: https://registry.getassay.dev/v1)
+    /// - `ASSAY_REGISTRY_URL`: Custom registry URL (default: <https://registry.getassay.dev/v1>)
     pub fn from_github_actions() -> RegistryResult<Self> {
         auth_next::oidc::from_github_actions()
     }
