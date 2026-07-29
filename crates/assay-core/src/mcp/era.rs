@@ -442,7 +442,18 @@ pub(crate) fn fold_envelope(
 
 /// Read `params._meta` as an observation.
 pub(crate) fn observe_request_metadata(raw: &serde_json::Value) -> RequestMetadata {
-    let Some(meta) = raw.get("params").and_then(|p| p.get("_meta")) else {
+    let Some(params) = raw.get("params") else {
+        return RequestMetadata::Absent;
+    };
+    // The fourth container, and the one this rule was still not applied to. `params` is an object
+    // by schema, and reaching through a scalar or array with `Value::get` answers `None`, which
+    // reads a container that arrived and failed as silence. Under a legacy era that difference
+    // decides the verdict: `Absent` is only a fault from 2026 on, so a deviant `params` came back
+    // `Valid`, while `Malformed` is a fault whatever the era turned out to be.
+    if !params.is_object() {
+        return RequestMetadata::Malformed;
+    }
+    let Some(meta) = params.get("_meta") else {
         return RequestMetadata::Absent;
     };
     // `_meta` is an object by schema, so a scalar or array is a signal that arrived and failed.

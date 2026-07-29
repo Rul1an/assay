@@ -7,6 +7,7 @@ use crate::mcp::era::{
     conclude, EnvelopeObservation, EraResolution, IncompleteReason, InvalidReason, ParsedMcpEvent,
     RequestMetadata, RequestMetadata::*, ResultConclusion, ResultObservation,
 };
+use crate::mcp::era::{conclude_request, RequestAssessment, UnknownReason};
 use serde_json::{json, Value};
 
 const V2026: &str = "2026-07-28";
@@ -437,9 +438,9 @@ fn no_event_ever_carries_both_axes() {
     }
 }
 
-/// A `transport_context` that is present and not an object is a signal that arrived and failed.
-/// `Value::get` answered `None` for it, which is the same answer as no container at all, so the
-/// whole transcript read as `Absent` on the evidence that its framing was deviant.
+/// A present non-object `transport_context` was naively read as `Absent`, because `Value::get`
+/// returned `None` for it, which is the same answer as no container at all. The fixed path reports
+/// `Malformed`, preserving the evidence that framing was present but unreadable.
 #[test]
 fn a_non_object_transport_context_is_malformed_not_absent() {
     for bad in [json!(7), json!("2026-07-28"), json!([]), json!(null)] {
@@ -672,4 +673,75 @@ fn a_hybrid_reports_request_metadata_and_no_result_observation() {
     let event = &detailed(&hybrid.to_string(), McpInputFormat::JsonRpc)[0];
     assert_eq!(event.context.request_metadata, Some(Present(V2026.into())));
     assert_eq!(event.context.result_observation, None);
+}
+
+/// The fourth container. `params` is an object by schema, and reaching through a scalar with
+/// `Value::get` answers `None`, which reads a container that arrived and failed as silence.
+#[test]
+fn a_non_object_params_is_malformed_not_absent() {
+    for bad in [
+        json!(7),
+        json!("x"),
+        json!([]),
+        json!(null),
+        json!([{"_meta": {}}]),
+    ] {
+        let message = json!({"jsonrpc": "2.0", "id": "call-1", "method": "tools/call",
+                             "params": bad});
+        assert_eq!(
+            detailed(&message.to_string(), McpInputFormat::JsonRpc)[0]
+                .context
+                .request_metadata,
+            Some(RequestMetadata::Malformed),
+            "{bad}"
+        );
+    }
+}
+
+/// The whole chain under a legacy era, which is where the difference decides the verdict. `Absent`
+/// is only a fault from 2026 on, so a deviant container came back `Valid`: no objection recorded
+/// against a request whose parameters could not be read.
+#[test]
+fn composite_a_deviant_params_under_a_legacy_era_is_invalid() {
+    let message = json!({"jsonrpc": "2.0", "id": "call-1", "method": "tools/call", "params": 7});
+    let input = framed(Some(headers(json!(V2025))), None, message);
+    let event = &detailed(&input, McpInputFormat::StreamableHttp)[0];
+    assert_eq!(
+        event.context.era,
+        EraResolution::Unknown(UnknownReason::MalformedSignal)
+    );
+    assert_eq!(
+        conclude_request(&event.context.era, &RequestMetadata::Malformed),
+        RequestAssessment::Invalid(InvalidReason::MalformedRequestMetadata)
+    );
+}
+
+/// The same chain at 2026, so the rule is not satisfied by the era alone.
+#[test]
+fn composite_a_deviant_params_at_2026_is_invalid_for_the_container_not_the_era() {
+    let message = json!({"jsonrpc": "2.0", "id": "call-1", "method": "tools/call", "params": []});
+    let input = framed(Some(headers(json!(V2026))), None, message);
+    let event = &detailed(&input, McpInputFormat::StreamableHttp)[0];
+    assert_eq!(
+        conclude_request(&event.context.era, &RequestMetadata::Malformed),
+        RequestAssessment::Invalid(InvalidReason::MalformedRequestMetadata)
+    );
+}
+
+/// An entry that writes its own `headers` slot as an explicit `null` must not inherit the valid
+/// transcript default. Mutation showed this was the one of the four `present_slot` sites no test
+/// pinned, and it is the site where dropping the slot silently borrows another entry's evidence.
+#[test]
+fn an_explicit_null_entry_headers_slot_does_not_inherit_the_transcript_default() {
+    let doc = json!({
+        "transport": "streamable-http",
+        "transport_context": {"headers": {"MCP-Protocol-Version": V2026}},
+        "entries": [{"timestamp_ms": 1000, "headers": null, "request": req(None)}]
+    });
+    assert_eq!(
+        detailed(&doc.to_string(), McpInputFormat::StreamableHttp)[0]
+            .context
+            .envelope,
+        EnvelopeObservation::Malformed
+    );
 }

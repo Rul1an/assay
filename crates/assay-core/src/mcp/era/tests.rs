@@ -464,3 +464,21 @@ fn a_malformed_result_survives_an_unknown_era() {
         );
     }
 }
+
+/// The ASCII-digit half of the shape check, which no test reached: `"not-a-date"` dies on the
+/// dash anchors and `"9999-not-a-date"` on the length, both before the digits are looked at.
+/// Without it these are retained as `UnsupportedVersion`, which blames the reader and keeps
+/// attacker-chosen bytes in the sidecar.
+#[test]
+fn a_non_numeric_date_shape_is_malformed_not_unsupported() {
+    for bad in ["abcd-01-01", "20ab-01-01", "+123-01-01", "  12-01-01"] {
+        assert_eq!(
+            resolve_era(
+                &EnvelopeObservation::Present(bad.into()),
+                &RequestMetadata::Absent
+            ),
+            EraResolution::Unknown(UnknownReason::MalformedSignal),
+            "{bad}"
+        );
+    }
+}
