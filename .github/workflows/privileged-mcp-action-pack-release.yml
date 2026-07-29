@@ -1,15 +1,13 @@
 name: Publish Privileged MCP Action clean-room pack
 
 on:
-  push:
-    tags:
-      - "privileged-mcp-action-v0-candidate.*"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: privileged-mcp-action-pack-${{ github.ref }}
+  group: privileged-mcp-action-pack
   cancel-in-progress: false
 
 jobs:
@@ -20,38 +18,41 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - name: Check out tagged source
+      - name: Check out current main
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
           persist-credentials: false
+          # Re-runs retain the original workflow SHA. Pinning the checkout to it keeps a
+          # partially published candidate recoverable after main advances.
+          ref: ${{ github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13.8"
 
-      - name: Verify tag and build deterministic pack
+      - name: Validate candidate release contract
+        id: candidate
         run: |
           set -euo pipefail
-          case "$GITHUB_REF_NAME" in
-            privileged-mcp-action-v0-candidate.*) ;;
-            *) echo "unexpected release tag: $GITHUB_REF_NAME" >&2; exit 2 ;;
-          esac
-          git fetch --force origin \
-            "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
-          if [[ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != "tag" ]]; then
-            echo "release requires an annotated tag object: $GITHUB_REF_NAME" >&2
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "release controller must be dispatched from main, got $GITHUB_REF" >&2
             exit 2
           fi
-          tag_commit="$(git rev-parse "refs/tags/$GITHUB_REF_NAME^{}")"
-          head_commit="$(git rev-parse HEAD)"
-          if [[ "$tag_commit" != "$head_commit" ]]; then
-            echo "release tag $GITHUB_REF_NAME peels to $tag_commit; checked-out HEAD is $head_commit" >&2
+          if [[ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]]; then
+            echo "checked-out main does not match the workflow source commit" >&2
             exit 2
           fi
-          git fetch --no-tags origin main
-          git merge-base --is-ancestor HEAD origin/main
+          python3 \
+            conformance/privileged-mcp-action-v0/scripts/validate_candidate_release.py \
+            --candidate conformance/privileged-mcp-action-v0/candidate-release.json \
+            --manifest conformance/privileged-mcp-action-v0/MANIFEST.json \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Build deterministic pack
+        run: |
+          set -euo pipefail
           mkdir -p release
           source_commit="$(git rev-parse HEAD)"
           builder=conformance/privileged-mcp-action-v0/scripts/build_clean_room_pack.py
@@ -133,12 +134,41 @@ jobs:
           test -n "$ATTESTATION_BUNDLE"
           cp "$ATTESTATION_BUNDLE" release/attestation-bundle.json
 
-      - name: Publish immutable release assets
+      - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          TAG: ${{ steps.candidate.outputs.tag }}
         run: |
           set -euo pipefail
-          gh release create "$GITHUB_REF_NAME" \
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release already exists: $TAG" >&2
+            exit 2
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+            if [[ "$(git cat-file -t "refs/tags/$TAG")" != "tag" ]]; then
+              echo "existing release tag is not annotated: $TAG" >&2
+              exit 2
+            fi
+            if [[ "$(git rev-parse "refs/tags/$TAG^{}")" != "$SOURCE_COMMIT" ]]; then
+              echo "existing release tag does not name $SOURCE_COMMIT: $TAG" >&2
+              exit 2
+            fi
+          else
+            tag_object="$(
+              gh api --method POST "repos/$GITHUB_REPOSITORY/git/tags" \
+                -f tag="$TAG" \
+                -f message="Privileged MCP Action v0 clean-room conformance candidate ${TAG##*.}" \
+                -f object="$SOURCE_COMMIT" \
+                -f type=commit \
+                --jq .sha
+            )"
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$TAG" \
+              -f sha="$tag_object"
+          fi
+          gh release create "$TAG" \
             release/privileged-mcp-action-v0-clean-room.tar.gz \
             release/SHA256SUMS \
             release/attestation-bundle.json \
@@ -147,4 +177,4 @@ jobs:
             --prerelease \
             --latest=false \
             --title "Privileged MCP Action v0 clean-room conformance pack" \
-            --notes "Inputs-only pack for implementing privileged-mcp-action/v0 from the tagged profile. The asset omits expected outcomes and Assay implementation code. See the tagged conformance protocol for the claim ceiling."
+            --notes "Inputs-only pack for implementing privileged-mcp-action/v0 from the pinned profile commit. The asset omits expected outcomes and Assay implementation code. See the conformance protocol at the release tag for the claim ceiling."

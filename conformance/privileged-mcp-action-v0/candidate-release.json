@@ -1,0 +1,6 @@
+{
+  "schema": "assay.privileged_mcp_action.candidate_release.v0",
+  "tag": "privileged-mcp-action-v0-candidate.3",
+  "case_count": 14,
+  "corpus_digest": "sha256:cb58ce91863f52e0568742b977f0642158453ec11bbcd25821f9171dccd03342"
+}

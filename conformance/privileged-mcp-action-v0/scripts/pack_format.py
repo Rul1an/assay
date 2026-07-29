@@ -178,23 +178,42 @@ def rewrite_bundle_stream_identity(bundle: bytes, opaque_run_id: str) -> bytes:
 
 def clean_room_spec(spec: bytes) -> bytes:
     text = spec.decode("utf-8")
+    metadata_start = "- Conformance corpus:"
+    normative_start = "The key words MUST, MUST NOT, SHOULD, and MAY"
     start_heading = "## 8. Conformance corpus"
     end_heading = "## 9. Versioning and maturity"
+    changelog_heading = "## Changelog"
+    metadata = text.find(metadata_start)
+    normative = text.find(normative_start)
     start = text.find(start_heading)
     end = text.find(end_heading)
-    if start < 0 or end < 0 or end <= start:
+    changelog = text.find(changelog_heading)
+    if (
+        metadata < 0
+        or normative < 0
+        or normative <= metadata
+        or start < 0
+        or end < 0
+        or end <= start
+        or changelog < 0
+        or changelog <= end
+    ):
         raise ValueError(
-            "canonical spec must contain ordered sections "
-            f"{start_heading!r} and {end_heading!r}"
+            "canonical spec must contain the ordered metadata and section anchors"
         )
+    text = text[:metadata] + text[normative:]
+    start = text.find(start_heading)
+    end = text.find(end_heading)
+    changelog = text.find(changelog_heading)
     replacement = """\
 ## 8. Clean-room rendering note
 
-The canonical document's informative conformance-corpus section is omitted from this pack because it
-names answer-bearing corpus surfaces. Sections 1 through 7 and 9 onward are unchanged.
+The canonical document's corpus pointers, informative conformance-corpus section, and changelog are
+omitted from this pack because they name answer-bearing corpus surfaces. Normative Sections 1 through
+7, 9, and 10 are unchanged.
 
 """
-    return (text[:start] + replacement + text[end:]).encode()
+    return (text[:start] + replacement + text[end:changelog]).encode()
 
 
 def clean_room_descriptor(descriptor: bytes) -> bytes:

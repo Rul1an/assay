@@ -102,7 +102,9 @@ steps:
     env:
       GH_TOKEN: ${{ github.token }}
     run: |
-      gh release download privileged-mcp-action-v0-candidate.2 \
+      tag=privileged-mcp-action-v0-candidate.3
+      source_digest="$(gh api "repos/Rul1an/assay/commits/$tag" --jq .sha)"
+      gh release download "$tag" \
         --repo Rul1an/assay \
         --pattern privileged-mcp-action-v0-clean-room.tar.gz \
         --pattern SHA256SUMS \
@@ -112,11 +114,11 @@ steps:
         --repo Rul1an/assay \
         --bundle attestation-bundle.json \
         --signer-workflow Rul1an/assay/.github/workflows/privileged-mcp-action-pack-release.yml \
-        --source-digest 975ee0129a421925cad78b84ffc02144aa655679 \
-        --source-ref refs/tags/privileged-mcp-action-v0-candidate.2
+        --source-digest "$source_digest" \
+        --source-ref refs/heads/main
 
   - name: Run conformance
-    uses: Rul1an/assay/.github/actions/privileged-mcp-action-conformance@975ee0129a421925cad78b84ffc02144aa655679
+    uses: Rul1an/assay/.github/actions/privileged-mcp-action-conformance@16ea2b84e472412e3e5c4d9dcabff61b7fac72f8
     with:
       pack: privileged-mcp-action-v0-clean-room.tar.gz
       entrypoint: ./target/release/my-verifier
@@ -127,8 +129,12 @@ steps:
       report: privileged-mcp-action-conformance.json
 ```
 
-The action above is pinned to the full source commit for `candidate.2`. Keep full-commit pinning when
-updating the release used by a long-lived workflow.
+The release controller runs only from `main`, validates `candidate-release.json` against the
+checked-out corpus, and creates the annotated tag after the pack, transformation check, and
+attestation succeed. Pack verification resolves that tag to the attested source commit. The
+composite action is pinned separately to the full commit carrying the action implementation; the
+`candidate.3` release-preparation change does not alter the invoked scoring path. Keep full-commit
+pinning when updating the action used by a long-lived workflow.
 
 ## Claim ceiling
 
