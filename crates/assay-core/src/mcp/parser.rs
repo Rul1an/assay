@@ -27,38 +27,27 @@ pub(crate) fn parse_mcp_transcript_detailed(
     text: &str,
     format: McpInputFormat,
 ) -> Result<Vec<ParsedMcpEvent>> {
-    let events = parse_events(text, format)?;
+    let (events, envelopes) = parse_events_with_envelopes(text, format)?;
     let framed = is_framed(format);
-    let envelopes = observe_envelopes(text, format);
     Ok(events
         .into_iter()
         .map(|event| {
-            let raw = payload_raw(&event.payload).cloned();
-            let raw = raw.as_ref();
-            // A response carries no request metadata, so it gets no observation rather than an
-            // "absent" one, which would be a claim about a field that does not apply to it.
-            // The same discriminant `parse_jsonrpc_message` uses: a valid string `method`. Keying
-            // on the absence of `result`/`error` instead would drop the observation for a
-            // malformed hybrid that carries both, which is exactly the shape worth observing.
+            // Observations are taken by reference before the event moves, so no payload is cloned.
+            let raw = payload_raw(&event.payload);
             let request_metadata = raw
                 .filter(|r| r.get("method").and_then(|m| m.as_str()).is_some())
                 .map(observe_request_metadata);
-            // Transport entries number from one; every other format has a single whole-input
-            // observation, so index 0 serves them all.
-            // Unframed formats have one whole-input observation and no entries to index, so
-            // index 0 is their answer. A framed input that does not resolve to an entry is a
-            // mapping the parser cannot vouch for, and a plausible-but-wrong attribution is worse
-            // than an unusable one, so it fails closed rather than borrowing another entry's.
+            let result_observation = raw.and_then(observe_result);
+            // Unframed formats have one whole-input observation and no entries to index. A framed
+            // input that does not resolve to an entry is a mapping the parser cannot vouch for,
+            // and a plausible-but-wrong attribution is worse than an unusable one.
             let envelope = if framed {
                 envelopes
                     .get(event.source_line.saturating_sub(1) as usize)
                     .cloned()
                     .unwrap_or(EnvelopeObservation::Malformed)
             } else {
-                envelopes
-                    .first()
-                    .cloned()
-                    .unwrap_or(EnvelopeObservation::NotApplicable)
+                EnvelopeObservation::NotApplicable
             };
             let era = resolve_era(
                 &envelope,
@@ -72,11 +61,25 @@ pub(crate) fn parse_mcp_transcript_detailed(
                     envelope,
                     era,
                     request_metadata,
-                    result_observation: raw.and_then(observe_result),
+                    result_observation,
                 },
             }
         })
         .collect())
+}
+
+/// The headers map inside a `transport_context` value.
+fn header_map(ctx: &serde_json::Value) -> Option<&serde_json::Value> {
+    ctx.get("headers")
+}
+
+/// Which formats carry transport framing at all. `Inspector` reads an events array straight into
+/// `parse_jsonrpc_message` and never reaches `parse_transport_transcript`, so it has no envelope.
+fn is_framed(format: McpInputFormat) -> bool {
+    matches!(
+        format,
+        McpInputFormat::StreamableHttp | McpInputFormat::HttpSse
+    )
 }
 
 fn payload_raw(payload: &McpPayload) -> Option<&serde_json::Value> {
@@ -91,68 +94,25 @@ fn payload_raw(payload: &McpPayload) -> Option<&serde_json::Value> {
     }
 }
 
-/// Every header slot one object carries: the nested `transport_context.headers` and the direct
-/// `headers` field that both the transcript and each entry also have.
-fn header_slots(node: Option<&serde_json::Value>, into: &mut Vec<EnvelopeObservation>) {
-    let Some(node) = node else { return };
-    for headers in [
-        node.get("transport_context").and_then(|c| c.get("headers")),
-        node.get("headers"),
-    ] {
-        if let Some(o) = observe_header(headers) {
-            into.push(o);
+fn parse_events_with_envelopes(
+    text: &str,
+    format: McpInputFormat,
+) -> Result<(Vec<McpEvent>, Vec<EnvelopeObservation>)> {
+    let (events, envelopes) = match format {
+        McpInputFormat::JsonRpc => (parse_jsonrpc_jsonl(text)?, Vec::new()),
+        McpInputFormat::Inspector => (parse_inspector_best_effort(text)?, Vec::new()),
+        McpInputFormat::StreamableHttp => parse_transport_transcript_detailed(
+            text,
+            "streamable-http",
+            "streamable-http transcript",
+            false,
+        )?,
+        McpInputFormat::HttpSse => {
+            parse_transport_transcript_detailed(text, "http-sse", "http-sse transcript", true)?
         }
-    }
-}
-
-/// One envelope observation per entry, so a later deviant entry cannot retroactively contaminate
-/// an earlier correct one. The transcript-level slots are the default each entry starts from.
-/// Which formats carry transport framing at all. `Inspector` reads an events array straight into
-/// `parse_jsonrpc_message` and never reaches `parse_transport_transcript`, so it has no envelope.
-fn is_framed(format: McpInputFormat) -> bool {
-    matches!(
-        format,
-        McpInputFormat::StreamableHttp | McpInputFormat::HttpSse
-    )
-}
-
-fn observe_envelopes(text: &str, format: McpInputFormat) -> Vec<EnvelopeObservation> {
-    let framed = is_framed(format);
-    if !framed {
-        return vec![EnvelopeObservation::NotApplicable];
-    }
-    let Ok(doc) = serde_json::from_str::<serde_json::Value>(text) else {
-        return vec![EnvelopeObservation::Absent];
     };
-    let mut transcript_slots = Vec::new();
-    header_slots(Some(&doc), &mut transcript_slots);
-    let entries = doc
-        .get("entries")
-        .and_then(|e| e.as_array())
-        .cloned()
-        .unwrap_or_default();
-    if entries.is_empty() {
-        return vec![fold_envelope(transcript_slots, framed)];
-    }
-    entries
-        .iter()
-        .map(|entry| {
-            let mut slots = transcript_slots.clone();
-            header_slots(Some(entry), &mut slots);
-            fold_envelope(slots, framed)
-        })
-        .collect()
-}
-
-fn parse_events(text: &str, format: McpInputFormat) -> Result<Vec<McpEvent>> {
-    let events = match format {
-        McpInputFormat::JsonRpc => parse_jsonrpc_jsonl(text),
-        McpInputFormat::Inspector => parse_inspector_best_effort(text),
-        McpInputFormat::StreamableHttp => parse_streamable_http_transcript(text),
-        McpInputFormat::HttpSse => parse_http_sse_transcript(text),
-    }?;
     validate_mcp_events(&events)?;
-    Ok(events)
+    Ok((events, envelopes))
 }
 
 fn parse_jsonrpc_jsonl(text: &str) -> Result<Vec<McpEvent>> {
@@ -207,20 +167,17 @@ fn parse_inspector_best_effort(text: &str) -> Result<Vec<McpEvent>> {
     Ok(out)
 }
 
-fn parse_streamable_http_transcript(text: &str) -> Result<Vec<McpEvent>> {
-    parse_transport_transcript(text, "streamable-http", "streamable-http transcript", false)
-}
-
-fn parse_http_sse_transcript(text: &str) -> Result<Vec<McpEvent>> {
-    parse_transport_transcript(text, "http-sse", "http-sse transcript", true)
-}
-
-fn parse_transport_transcript(
+/// The transport parse, returning the per-entry envelope observations it already had in hand.
+///
+/// Deserializing the text a second time to read the headers would double the peak memory a hostile
+/// transcript can cost, on the one path that exists to read untrusted input, so the observations
+/// are taken from the same `TransportTranscript` the events come from.
+fn parse_transport_transcript_detailed(
     text: &str,
     expected_transport: &str,
     source_label: &str,
     allow_endpoint_event: bool,
-) -> Result<Vec<McpEvent>> {
+) -> Result<(Vec<McpEvent>, Vec<EnvelopeObservation>)> {
     let transcript: TransportTranscript =
         serde_json::from_str(text).with_context(|| format!("invalid {}", source_label))?;
 
@@ -234,8 +191,25 @@ fn parse_transport_transcript(
         );
     }
 
+    let mut transcript_slots = Vec::new();
+    if let Some(o) = observe_header(transcript.transport_context.as_ref().and_then(header_map)) {
+        transcript_slots.push(o);
+    }
+    if let Some(o) = observe_header(transcript.headers.as_ref()) {
+        transcript_slots.push(o);
+    }
+
+    let mut envelopes = Vec::new();
     let mut out = Vec::new();
     for (idx, entry) in transcript.entries.into_iter().enumerate() {
+        let mut slots = transcript_slots.clone();
+        if let Some(o) = observe_header(entry.transport_context.as_ref().and_then(header_map)) {
+            slots.push(o);
+        }
+        if let Some(o) = observe_header(entry.headers.as_ref()) {
+            slots.push(o);
+        }
+        envelopes.push(fold_envelope(slots, true));
         let source_line = (idx + 1) as u64;
         let present = usize::from(entry.request.is_some())
             + usize::from(entry.response.is_some())
@@ -283,7 +257,7 @@ fn parse_transport_transcript(
         }
     }
 
-    Ok(out)
+    Ok((out, envelopes))
 }
 
 fn parse_jsonrpc_message(

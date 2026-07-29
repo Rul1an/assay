@@ -366,18 +366,26 @@ pub(crate) const PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
 /// reason `Malformed` exists, so this reads the slot itself.
 pub(crate) fn observe_header(headers: Option<&serde_json::Value>) -> Option<EnvelopeObservation> {
     let map = headers?.as_object()?;
-    let mut matches = map
+    let mut found: Option<&str> = None;
+    let mut any = false;
+    for (_, value) in map
         .iter()
-        .filter(|(k, _)| k.to_ascii_lowercase() == PROTOCOL_VERSION_HEADER);
-    let (_, value) = matches.next()?;
-    // Two spellings of one header is not a value to pick from. `find` would have taken whichever
-    // came first in map order, which is a silent choice between two disagreeing signals.
-    if matches.next().is_some() {
-        return Some(EnvelopeObservation::Malformed);
+        .filter(|(k, _)| k.to_ascii_lowercase() == PROTOCOL_VERSION_HEADER)
+    {
+        any = true;
+        match value.as_str() {
+            // Two spellings carrying the same value agree, and agreement is not a choice. Only a
+            // disagreement is: `find` would have silently taken whichever came first in map order.
+            Some(v) if !v.is_empty() && found.is_none_or(|prev| prev == v) => found = Some(v),
+            _ => return Some(EnvelopeObservation::Malformed),
+        }
     }
-    Some(match value.as_str() {
-        Some(v) if !v.is_empty() => EnvelopeObservation::Present(v.to_string()),
-        _ => EnvelopeObservation::Malformed,
+    if !any {
+        return None;
+    }
+    Some(match found {
+        Some(v) => EnvelopeObservation::Present(v.to_string()),
+        None => EnvelopeObservation::Malformed,
     })
 }
 

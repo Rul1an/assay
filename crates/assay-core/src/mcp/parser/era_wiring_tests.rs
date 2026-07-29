@@ -413,3 +413,23 @@ fn a_hybrid_with_method_and_result_still_reports_request_metadata() {
         Some(Present(V2026.into()))
     );
 }
+
+/// Two spellings of the header carrying the same value agree, and agreement is not a choice. An
+/// earlier version failed closed on the duplicate itself rather than on a disagreement.
+#[test]
+fn duplicate_case_variants_agreeing_are_present() {
+    let doc = json!({
+        "transport": "streamable-http",
+        "transport_context": {"headers": {
+            "MCP-Protocol-Version": V2026,
+            "mcp-protocol-version": V2026
+        }},
+        "entries": [{"timestamp_ms": 1000, "request": req(None)}]
+    });
+    assert_eq!(
+        detailed(&doc.to_string(), McpInputFormat::StreamableHttp)[0]
+            .context
+            .envelope,
+        EnvelopeObservation::Present(V2026.into())
+    );
+}
