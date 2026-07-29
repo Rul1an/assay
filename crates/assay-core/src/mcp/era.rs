@@ -271,6 +271,12 @@ fn requires_result_type(version: &str) -> bool {
 // so the lint does not fire and `expect` itself errors. Removed by the slice-2 conclusion layer.
 #[allow(dead_code)]
 pub(crate) fn conclude(era: &EraResolution, observed: &ResultObservation) -> ResultConclusion {
+    // Checked before the era, for the same reason `conclude_request` checks its metadata first: an
+    // unreadable field is a fault whatever the era turned out to be, and reading the era first
+    // downgrades it to whatever the era's own gap was.
+    if matches!(observed, ResultObservation::Malformed) {
+        return ResultConclusion::Invalid(InvalidReason::MalformedResultType);
+    }
     let version = match era {
         EraResolution::Known(v) => v,
         EraResolution::Unknown(UnknownReason::MalformedSignal) => {
@@ -353,6 +359,25 @@ pub(crate) fn conclude_request(
 }
 
 /// The `_meta` key the protocol version travels under on a request.
+/// How much of an unrecognized token is kept. The two defined tokens are 8 and 14 bytes, so this
+/// is generous for anything a future revision might name while still bounding what one record can
+/// cost.
+pub(crate) const MAX_TOKEN_BYTES: usize = 64;
+
+/// Truncate on a character boundary, since cutting a UTF-8 string at a byte index panics.
+fn bounded_token(token: &str) -> String {
+    if token.len() <= MAX_TOKEN_BYTES {
+        return token.to_string();
+    }
+    let cut = token
+        .char_indices()
+        .map(|(i, _)| i)
+        .take_while(|i| *i <= MAX_TOKEN_BYTES)
+        .last()
+        .unwrap_or(0);
+    token[..cut].to_string()
+}
+
 pub(crate) const PROTOCOL_VERSION_META_KEY: &str = "io.modelcontextprotocol/protocolVersion";
 
 /// The transport header carrying the same value.
@@ -454,13 +479,21 @@ pub(crate) fn observe_request_metadata(raw: &serde_json::Value) -> RequestMetada
 /// than absent, so it can never reach the rule that reads absence as completion.
 pub(crate) fn observe_result(raw: &serde_json::Value) -> Option<ResultObservation> {
     let result = raw.get("result")?;
+    // A `result` that is not an object cannot be missing a field. `Value::get` answers `None` on a
+    // scalar, array or null, which reported it as `Missing` and let the backward-compatibility rule
+    // read it as a completed action.
+    if !result.is_object() {
+        return Some(ResultObservation::Malformed);
+    }
     Some(match result.get("resultType") {
         None => ResultObservation::Missing,
         Some(v) => match v.as_str() {
             Some("complete") => ResultObservation::Complete,
             Some("input_required") => ResultObservation::InputRequired,
-            Some(other) if !other.is_empty() => ResultObservation::Unrecognized(other.to_string()),
-            _ => ResultObservation::Malformed,
+            // `ResultType` is an open string union, so any string is syntactically a token. An
+            // empty one is unrecognized rather than unreadable; only a non-string is malformed.
+            Some(other) => ResultObservation::Unrecognized(bounded_token(other)),
+            None => ResultObservation::Malformed,
         },
     })
 }

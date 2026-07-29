@@ -244,7 +244,7 @@ fn every_result_type_shape_reaches_the_axis() {
 /// field inherit the absent-means-complete rule.
 #[test]
 fn a_non_string_result_type_is_malformed() {
-    for bad in [json!(1), json!({}), json!([]), json!(null), json!("")] {
+    for bad in [json!(1), json!({}), json!([]), json!(null)] {
         assert_eq!(
             observed(Some(bad.clone())),
             ResultObservation::Malformed,
@@ -491,5 +491,56 @@ fn a_non_object_headers_node_is_malformed_not_absent() {
             EnvelopeObservation::Malformed,
             "{doc}"
         );
+    }
+}
+
+/// A `result` that is not an object cannot be missing a field. Reading it as `Missing` let the
+/// backward-compatibility rule turn `"result": null` into a completed action under a legacy era.
+#[test]
+fn a_non_object_result_is_malformed_not_missing() {
+    for bad in [json!(null), json!(7), json!([]), json!("done")] {
+        let message = json!({"jsonrpc": "2.0", "id": "call-1", "result": bad});
+        let input = framed(Some(headers(json!(V2025))), None, message);
+        let observed = detailed(&input, McpInputFormat::StreamableHttp)
+            .into_iter()
+            .find_map(|e| e.context.result_observation)
+            .expect("a response event");
+        assert_eq!(observed, ResultObservation::Malformed, "{bad}");
+    }
+}
+
+/// `ResultType` is an open string union, so an empty string is syntactically a token. Unrecognized
+/// rather than unreadable, which is a different finding with a different conclusion.
+#[test]
+fn an_empty_result_type_is_unrecognized_not_malformed() {
+    let input = framed(Some(headers(json!(V2026))), None, response(Some(json!(""))));
+    let observed = detailed(&input, McpInputFormat::StreamableHttp)
+        .into_iter()
+        .find_map(|e| e.context.result_observation)
+        .expect("a response event");
+    assert_eq!(observed, ResultObservation::Unrecognized(String::new()));
+}
+
+/// An attacker-chosen token was retained in full, once per event. The third retention site, after
+/// the header and the request metadata.
+#[test]
+fn an_oversized_result_token_is_bounded() {
+    let huge = "z".repeat(1024 * 1024);
+    let input = framed(
+        Some(headers(json!(V2026))),
+        None,
+        response(Some(json!(huge))),
+    );
+    let observed = detailed(&input, McpInputFormat::StreamableHttp)
+        .into_iter()
+        .find_map(|e| e.context.result_observation)
+        .expect("a response event");
+    match observed {
+        ResultObservation::Unrecognized(token) => assert!(
+            token.len() <= 64,
+            "retained {} bytes of an attacker-chosen token",
+            token.len()
+        ),
+        other => panic!("expected an unrecognized token, got {other:?}"),
     }
 }
