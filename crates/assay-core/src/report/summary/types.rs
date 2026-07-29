@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Serde helpers: serialize Option<u64> as JSON string or null to avoid precision loss (u64 > 2^53 in JS).
+/// Serde helpers: serialize `Option<u64>` as JSON string or null to avoid precision loss (u64 > 2^53 in JS).
 mod serde_seed {
     use serde::{Deserialize, Deserializer, Serializer};
 

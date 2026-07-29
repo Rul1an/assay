@@ -188,7 +188,7 @@ impl Authorizer {
         authorizer_internal::run::authorize_and_consume_impl(self, mandate, tool_call)
     }
 
-    /// Like [`authorize_and_consume`] but with an explicit `now` timestamp.
+    /// Like [`Self::authorize_and_consume`] but with an explicit `now` timestamp.
     /// Use this in tests to avoid flaky clock-dependent assertions.
     pub fn authorize_at(
         &self,

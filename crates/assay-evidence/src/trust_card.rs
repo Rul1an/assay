@@ -1,4 +1,4 @@
-//! Trust Card (T1b): deterministic render layer over [`TrustBasis`](crate::TrustBasis).
+//! Trust Card (T1b): deterministic render layer over [`TrustBasis`].
 //!
 //! Semantics come only from `generate_trust_basis`; this module maps and serializes.
 

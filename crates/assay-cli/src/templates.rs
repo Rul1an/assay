@@ -60,7 +60,7 @@ pub const HELLO_TRACES_JSONL: &str = r#"{"schema_version": 1, "type": "assay.tra
 /// This template uses `assay-action` to install the CLI, then runs `assay ci`
 /// directly for the eval-based gate, and finally uploads SARIF results to GitHub Code Scanning.
 /// Canonical marketplace slug: `Rul1an/assay-action@v2`.
-/// See: https://github.com/Rul1an/assay-action
+/// See: <https://github.com/Rul1an/assay-action>
 pub const CI_WORKFLOW_YML: &str = r#"name: Assay Gate
 on:
   push:

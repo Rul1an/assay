@@ -30,7 +30,7 @@ pub struct TrustPolicy {
 /// A trusted key with metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrustedKey {
-    /// SHA-256 of SPKI bytes: sha256:<hex>
+    /// SHA-256 of SPKI bytes: `sha256:<hex>`
     pub key_id: String,
 
     /// Path to public key file (SPKI PEM).
