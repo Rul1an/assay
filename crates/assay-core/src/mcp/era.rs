@@ -35,37 +35,64 @@ pub(crate) enum EnvelopeObservation {
     Malformed,
 }
 
-/// Which JSON-RPC message shape this is.
+/// Which JSON-RPC message shape this is, carrying the method so that nothing has to read it a
+/// second time.
 ///
 /// The distinction is load-bearing rather than tidy. `RequestParams._meta` is required and carries
 /// the protocol version; `NotificationParams._meta` is optional and is a different type that does
 /// not carry it. Treating a notification as a request therefore invents a fault: a
 /// `notifications/progress` under 2026 with no `_meta` is correct, and would be reported as missing
 /// required metadata.
+///
+/// The method travels inside the variant on purpose. Two callers each reaching for `method` with
+/// their own `as_str()` is how the discriminants drifted apart before: the parser read one thing and
+/// the era axes another, and a shape only one of them rejected fell through the gap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MessageKind {
-    Request,
-    Notification,
+pub(crate) enum MessageKind<'a> {
+    Request { method: &'a str },
+    Notification { method: &'a str },
     Response,
 }
 
-/// Classify by the two fields JSON-RPC uses. A notification is a request object *without* an `id`
-/// member, so absence is the discriminant and nothing about the value is.
+/// A message shape that cannot be classified at all.
 ///
-/// An explicit `"id": null` is therefore a request, not a notification. `RequestId` is `string |
-/// number`, so a null id is an invalid request id rather than an absent one, and treating it as a
-/// notification drops the required 2026 request metadata for any message that writes one. That is a
-/// fail-open reachable by a single token. The invalid id is a JSON-RPC validity question this slice
-/// does not own; what it owns is that the metadata requirement still applies.
-pub(crate) fn classify_message(v: &serde_json::Value) -> MessageKind {
-    match v.get("method").and_then(|m| m.as_str()) {
-        Some(_) if v.get("id").is_some() => MessageKind::Request,
-        Some(_) => MessageKind::Notification,
-        None => MessageKind::Response,
-    }
+/// Value-free: the offending value is chosen by the input, and naming its type is all a reader can
+/// act on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum MessageShapeError {
+    #[error("JSON-RPC method must be a string")]
+    NonStringMethod,
 }
 
-/// What a request carried in `params._meta`. Typed rather than `Option<String>` so that a missing
+/// Classify by the two fields JSON-RPC uses.
+///
+/// A notification is a request object *without* an `id` member, so absence is the discriminant and
+/// nothing about the value is. An explicit `"id": null` is therefore a request, not a notification:
+/// `RequestId` is `string | number`, which makes a null id an invalid request id rather than an
+/// absent one, and calling it a notification drops the required 2026 request metadata for any
+/// message that writes that one token.
+///
+/// A present `method` that is not a string is a malformed message shape rather than a message of
+/// some other kind. Answering `Response` for it, which is what folding through `as_str()` does,
+/// silently drops the request-metadata requirement the same way. The id vocabulary is settled
+/// separately by `normalize_jsonrpc_id`, which refuses booleans, arrays and objects.
+pub(crate) fn classify_message(
+    v: &serde_json::Value,
+) -> Result<MessageKind<'_>, MessageShapeError> {
+    let Some(method) = v.get("method") else {
+        return Ok(MessageKind::Response);
+    };
+    let Some(method) = method.as_str() else {
+        return Err(MessageShapeError::NonStringMethod);
+    };
+    Ok(if v.get("id").is_some() {
+        MessageKind::Request { method }
+    } else {
+        MessageKind::Notification { method }
+    })
+}
+
+/// What a request carried in `params._meta`./// What a request carried in `params._meta`. Typed rather than `Option<String>` so that a missing
 /// field and an unreadable one stay different findings: one is silence, the other is a malformed
 /// signal, and they have different remediations.
 #[derive(Debug, Clone, PartialEq, Eq)]

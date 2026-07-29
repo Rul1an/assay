@@ -3,11 +3,11 @@
 //! unit-green implementation can still get wrong.
 
 use super::*;
+use crate::mcp::era::{classify_message, conclude_request, RequestAssessment, UnknownReason};
 use crate::mcp::era::{
     conclude, EnvelopeObservation, EraResolution, IncompleteReason, InvalidReason, ParsedMcpEvent,
     RequestMetadata, RequestMetadata::*, ResultConclusion, ResultObservation,
 };
-use crate::mcp::era::{conclude_request, RequestAssessment, UnknownReason};
 use serde_json::{json, Value};
 
 const V2026: &str = "2026-07-28";
@@ -814,4 +814,100 @@ fn a_request_still_reports_the_metadata_axis() {
             .request_metadata,
         Some(Present(V2026.into()))
     );
+}
+
+// --- Message shape: one classifier, and the shapes it refuses ----------------------------------
+
+/// A present non-string `method` is a malformed message shape, not a message of another kind.
+/// Folding it through `as_str()` answered `Response`, which dropped the required 2026
+/// request-metadata check for anything that writes one wrong-typed field. The refusal is a JSON-RPC
+/// shape refusal rather than an era-state refusal, so it does not weaken the rule that every era
+/// observation parses.
+#[test]
+fn a_non_string_method_is_refused_at_parse_time() {
+    for bad in [json!(7), json!({}), json!([]), json!(null), json!(true)] {
+        let message = json!({"jsonrpc": "2.0", "id": "call-1", "method": bad,
+                             "params": {"name": "Calculator", "arguments": {}}});
+        let input = framed(Some(headers(json!(V2026))), None, message);
+        let err = parse_mcp_transcript(&input, McpInputFormat::StreamableHttp)
+            .expect_err(&format!("must refuse method {bad}"));
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("method must be a string"),
+            "unexpected message for {bad}: {rendered}"
+        );
+        // Value-free: the offending value is input-chosen and naming its type is all a reader can
+        // act on.
+        assert!(
+            !rendered.contains("7") && !rendered.contains("true"),
+            "refusal echoed the value: {rendered}"
+        );
+    }
+}
+
+/// The controls, so the refusal did not become a blanket rule. Each valid shape parses and lands on
+/// exactly the axes its kind licenses.
+#[test]
+fn each_valid_shape_lands_on_its_own_axes() {
+    let request = json!({"jsonrpc": "2.0", "id": "call-1", "method": "tools/call",
+                         "params": {"name": "Calculator", "arguments": {}}});
+    let notification = json!({"jsonrpc": "2.0", "method": "notifications/progress",
+                              "params": {"progressToken": "t", "progress": 1}});
+    let response = json!({"jsonrpc": "2.0", "id": "call-1",
+                          "result": {"content": [], "resultType": "complete"}});
+    for (label, message, meta_axis, result_axis) in [
+        ("request", request, true, false),
+        ("notification", notification, false, false),
+        ("response", response, false, true),
+    ] {
+        let input = framed(Some(headers(json!(V2026))), None, message);
+        let event = &detailed(&input, McpInputFormat::StreamableHttp)[0];
+        assert_eq!(
+            event.context.request_metadata.is_some(),
+            meta_axis,
+            "{label} metadata axis"
+        );
+        assert_eq!(
+            event.context.result_observation.is_some(),
+            result_axis,
+            "{label} result axis"
+        );
+    }
+}
+
+/// The parser and the sidecar must not merely agree today, they must be reading the same answer.
+/// Two callers each reaching for `method` with their own `as_str()` is how the discriminants drifted
+/// apart before, so this asserts the axis assignment against `classify_message` itself rather than
+/// against a second copy of the rule.
+#[test]
+fn the_sidecar_axes_follow_the_shared_classifier() {
+    let shapes = [
+        json!({"jsonrpc": "2.0", "id": "call-1", "method": "tools/call",
+               "params": {"name": "Calculator", "arguments": {}}}),
+        json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {}}),
+        json!({"jsonrpc": "2.0", "id": null, "method": "tools/call",
+               "params": {"name": "Calculator", "arguments": {}}}),
+        json!({"jsonrpc": "2.0", "id": "call-1", "method": "", "params": {}}),
+        json!({"jsonrpc": "2.0", "id": "call-1", "result": {"content": [], "resultType": "complete"}}),
+        json!({"jsonrpc": "2.0", "id": "call-1", "error": {"code": -1, "message": "x"}}),
+        json!({"jsonrpc": "2.0", "params": {}}),
+    ];
+    for shape in shapes {
+        let expected = classify_message(&shape).expect("a classifiable shape");
+        let input = framed(Some(headers(json!(V2026))), None, shape.clone());
+        let event = &detailed(&input, McpInputFormat::StreamableHttp)[0];
+        let (meta, result) = (
+            event.context.request_metadata.is_some(),
+            event.context.result_observation.is_some(),
+        );
+        match expected {
+            MessageKind::Request { .. } => assert_eq!((meta, result), (true, false), "{shape}"),
+            MessageKind::Notification { .. } => {
+                assert_eq!((meta, result), (false, false), "{shape}")
+            }
+            // An error response has no `result` to observe, so the result axis is licensed but
+            // empty; what matters is that the metadata axis stays off.
+            MessageKind::Response => assert!(!meta, "{shape}"),
+        }
+    }
 }

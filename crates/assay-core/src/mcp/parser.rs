@@ -45,10 +45,14 @@ pub(crate) fn parse_mcp_transcript_detailed(
             // arm. A notification carries `method` like a request but its `_meta` is optional and a
             // different type, so holding it to the request requirement invents a fault.
             let (request_metadata, result_observation) = match payload_raw(&event.payload) {
+                // The same classifier the parser used. A shape it rejects never reaches here,
+                // because `parse_events_with_envelopes` runs first and refuses it, so the error arm
+                // is a state this pass cannot observe rather than one it tolerates.
                 Some(raw) => match classify_message(raw) {
-                    MessageKind::Request => (Some(observe_request_metadata(raw)), None),
-                    MessageKind::Notification => (None, None),
-                    MessageKind::Response => (None, observe_result(raw)),
+                    Ok(MessageKind::Request { .. }) => (Some(observe_request_metadata(raw)), None),
+                    Ok(MessageKind::Notification { .. }) => (None, None),
+                    Ok(MessageKind::Response) => (None, observe_result(raw)),
+                    Err(_) => (None, None),
                 },
                 None => (None, None),
             };
@@ -84,13 +88,6 @@ pub(crate) fn parse_mcp_transcript_detailed(
 
 /// The JSON-RPC `method` of a message, if it has one.
 ///
-/// The single discriminant between a request and a response. `parse_jsonrpc_message` branches on
-/// it to build the payload and the era observations follow the same answer, so one message cannot
-/// be a request on one axis and a response on the other.
-fn request_method(v: &serde_json::Value) -> Option<&str> {
-    v.get("method").and_then(|m| m.as_str())
-}
-
 /// Read the header slot inside a `transport_context` as an observation.
 ///
 /// A container that is present and not an object is a signal that arrived and failed, not silence.
@@ -326,59 +323,64 @@ fn parse_jsonrpc_message(
     // JSON-RPC ID extraction
     let id_str = normalize_jsonrpc_id(v.get("id"), source_line)?;
 
-    // Check for JSON-RPC Request (has method). The era observations read the same discriminant,
-    // so a message classified as a request here is a request on both axes.
-    let payload = if let Some(method) = request_method(&v) {
-        match method {
-            "tools/list" => McpPayload::ToolsListRequest { raw: v.clone() },
-            "tools/call" => {
-                let params = v.get("params").cloned().unwrap_or(serde_json::Value::Null);
-                let name = params
-                    .get("name")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or("unknown_tool")
-                    .to_string();
-                let arguments = params
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null);
-                McpPayload::ToolCallRequest {
-                    name,
-                    arguments,
-                    raw: v.clone(),
+    // One classification for the whole crate. A present non-string `method` is a malformed message
+    // shape, not a message of another kind, and it is refused here: that is a JSON-RPC shape
+    // refusal rather than an era-state refusal, so it does not weaken the rule that every era
+    // observation parses. The message is value-free.
+    let kind = classify_message(&v)
+        .map_err(|e| anyhow::anyhow!("MCP event at source line {}: {}", source_line, e))?;
+    let payload =
+        if let MessageKind::Request { method } | MessageKind::Notification { method } = kind {
+            match method {
+                "tools/list" => McpPayload::ToolsListRequest { raw: v.clone() },
+                "tools/call" => {
+                    let params = v.get("params").cloned().unwrap_or(serde_json::Value::Null);
+                    let name = params
+                        .get("name")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("unknown_tool")
+                        .to_string();
+                    let arguments = params
+                        .get("arguments")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    McpPayload::ToolCallRequest {
+                        name,
+                        arguments,
+                        raw: v.clone(),
+                    }
                 }
+                // Add other standard MCP methods mapping here if needed
+                _ => McpPayload::Other { raw: v.clone() },
             }
-            // Add other standard MCP methods mapping here if needed
-            _ => McpPayload::Other { raw: v.clone() },
-        }
-    } else {
-        // Response (result or error)
-        if v.get("result").is_some() {
-            if looks_like_tools_list_result(&v) {
-                let tools = parse_tools_list_result(&v)?;
-                McpPayload::ToolsListResponse {
-                    tools,
+        } else {
+            // Response (result or error)
+            if v.get("result").is_some() {
+                if looks_like_tools_list_result(&v) {
+                    let tools = parse_tools_list_result(&v)?;
+                    McpPayload::ToolsListResponse {
+                        tools,
+                        raw: v.clone(),
+                    }
+                } else {
+                    McpPayload::ToolCallResponse {
+                        result: v.get("result").cloned().unwrap_or(serde_json::Value::Null),
+                        is_error: false,
+                        raw: v.clone(),
+                    }
+                }
+            } else if v.get("error").is_some() {
+                McpPayload::ToolCallResponse {
+                    result: v.get("error").cloned().unwrap_or(serde_json::Value::Null),
+                    is_error: true,
                     raw: v.clone(),
                 }
             } else {
-                McpPayload::ToolCallResponse {
-                    result: v.get("result").cloned().unwrap_or(serde_json::Value::Null),
-                    is_error: false,
-                    raw: v.clone(),
-                }
+                // Maybe it's not JSON-RPC, or it's a notification/special event
+                // Check for known "Session" markers if any (ad-hoc)
+                McpPayload::Other { raw: v.clone() }
             }
-        } else if v.get("error").is_some() {
-            McpPayload::ToolCallResponse {
-                result: v.get("error").cloned().unwrap_or(serde_json::Value::Null),
-                is_error: true,
-                raw: v.clone(),
-            }
-        } else {
-            // Maybe it's not JSON-RPC, or it's a notification/special event
-            // Check for known "Session" markers if any (ad-hoc)
-            McpPayload::Other { raw: v.clone() }
-        }
-    };
+        };
 
     Ok(McpEvent {
         source_line,
