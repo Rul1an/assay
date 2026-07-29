@@ -107,25 +107,37 @@ fn correlate_calls(mut parsed: Vec<ParsedMcpEvent>) -> Result<Vec<ParsedMcpEvent
         let Some(id) = p.event.jsonrpc_id.clone() else {
             continue;
         };
-        if p.context.request_metadata.is_some() {
-            // Two calls outstanding on one id makes the correlation ambiguous, and choosing either
-            // is a silent choice between two calls. Reuse *after* a response is legal and is what
-            // the removal below permits.
-            if outstanding
-                .insert(id.clone(), p.context.era.clone())
-                .is_some()
-            {
-                bail!(
-                    "two outstanding JSON-RPC requests share an id at source line {}",
-                    p.event.source_line
-                );
+        // The shared classifier is the authority, not the presence of an observation. An error
+        // response deliberately has no result observation, since the `resultType` requirement is
+        // about `result`, so keying off that observation made an error response invisible here: it
+        // inherited nothing and consumed nothing, and a legal sequential reuse of its id then
+        // tripped the two-outstanding refusal.
+        let kind = payload_raw(&p.event.payload)
+            .map(classify_message)
+            .and_then(Result::ok);
+        match kind {
+            Some(MessageKind::Request { .. }) => {
+                // Two calls outstanding on one id makes the correlation ambiguous, and choosing
+                // either is a silent choice between two calls. Reuse after a response is legal and
+                // is what the removal below permits.
+                if outstanding
+                    .insert(id.clone(), p.context.era.clone())
+                    .is_some()
+                {
+                    bail!(
+                        "two outstanding JSON-RPC requests share an id at source line {}",
+                        p.event.source_line
+                    );
+                }
             }
-        } else if p.context.result_observation.is_some() {
-            // An orphan response keeps the era it resolved on its own, so correlation adds
-            // authority rather than removing it.
-            if let Some(era) = outstanding.remove(&id) {
-                p.context.era = era;
+            Some(MessageKind::Response) => {
+                // An orphan response keeps the era it resolved on its own, so correlation adds
+                // authority rather than removing it.
+                if let Some(era) = outstanding.remove(&id) {
+                    p.context.era = era;
+                }
             }
+            Some(MessageKind::Notification { .. }) | None => {}
         }
     }
     Ok(parsed)

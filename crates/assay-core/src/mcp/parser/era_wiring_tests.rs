@@ -1155,3 +1155,60 @@ fn sequential_id_reuse_after_a_response_is_allowed() {
     });
     assert!(parse_mcp_transcript(&doc.to_string(), McpInputFormat::StreamableHttp).is_ok());
 }
+
+/// An error response is a response. It deliberately has no result observation, since the
+/// `resultType` requirement is about `result`, so keying correlation off that observation made it
+/// invisible: it inherited nothing and consumed nothing.
+#[test]
+fn an_error_response_inherits_the_era_of_its_call() {
+    let request = json!({"jsonrpc": "2.0", "id": "err", "method": "notifications/x",
+                         "params": {"_meta": meta(json!(V2026))}});
+    let error = json!({"jsonrpc": "2.0", "id": "err",
+                       "error": {"code": -32000, "message": "boom"}});
+    let doc = json!({
+        "transport": "streamable-http",
+        "transport_context": {"headers": {"MCP-Protocol-Version": V2025}},
+        "entries": [
+            {"timestamp_ms": 1000, "request": request},
+            {"timestamp_ms": 1001, "response": error}
+        ]
+    });
+    let events = detailed(&doc.to_string(), McpInputFormat::StreamableHttp);
+    assert_eq!(
+        events[1].context.era,
+        EraResolution::Conflicting {
+            header: V2025.into(),
+            body: V2026.into()
+        },
+        "an error response must inherit its call's era"
+    );
+    assert_eq!(
+        events[1].context.result_observation, None,
+        "and still reports no result observation, since it carries no result"
+    );
+}
+
+/// Consuming the outstanding id is the other half. Without it the id stayed outstanding and a legal
+/// sequential reuse tripped the two-outstanding refusal.
+#[test]
+fn an_error_response_frees_the_id_for_sequential_reuse() {
+    let mk_req = || {
+        json!({"jsonrpc": "2.0", "id": "err", "method": "notifications/x",
+                           "params": {}})
+    };
+    let error = json!({"jsonrpc": "2.0", "id": "err",
+                       "error": {"code": -32000, "message": "boom"}});
+    let doc = json!({
+        "transport": "streamable-http",
+        "transport_context": {"headers": {"MCP-Protocol-Version": V2025}},
+        "entries": [
+            {"timestamp_ms": 1000, "request": mk_req()},
+            {"timestamp_ms": 1001, "response": error},
+            {"timestamp_ms": 1002, "request": mk_req()}
+        ]
+    });
+    assert!(
+        parse_mcp_transcript(&doc.to_string(), McpInputFormat::StreamableHttp).is_ok(),
+        "an error response must consume the outstanding id"
+    );
+}
