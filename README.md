@@ -167,8 +167,8 @@ is a composition and verification contract over evidence records that already ex
 privileged MCP tool call decided, what was observed of its effect, and what stays unproven. It adds
 no new envelope and no aggregate verdict.
 
-It ships with a [13-vector conformance corpus](conformance/privileged-mcp-action-v0)
-(5 accept, 8 reject) whose digest is a **candidate**: it is not called reproduced until a non-author
+It ships with a [14-vector conformance corpus](conformance/privileged-mcp-action-v0)
+(5 accept, 9 reject) whose digest is a **candidate**: it is not called reproduced until a non-author
 implementation derives the expected outcomes from the specification text alone.
 
 **That reproduction is open, and the invitation is real:
