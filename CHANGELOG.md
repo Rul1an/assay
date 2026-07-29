@@ -4,16 +4,35 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.36.0] - 2026-07-29
+
+### Added
+- Bind new `evidence-bundle/v1` attestations to the SHA-256 digest of the exact bundle archive.
+  The new `verify_envelope_signature` API returns an explicitly artifact-unmatched state; the
+  deprecated `verify_envelope` compatibility shim keeps its published 3.x signature. Only
+  `verify_attestation_for_bundle` can establish that the signed subject and predicate match a
+  verified bundle. Existing v0 attestations must be re-issued, and `assay evidence attest` now
+  refuses caller-supplied `--predicate` data because every v1 predicate field is derived from the
+  verified archive.
+- Separately publish `privileged-mcp-action-v0-candidate.3` as a conformance prerelease: a
+  deterministic 14-case clean-room pack with checksums and GitHub artifact attestation. This
+  improves the independent-reproduction surface; it does not itself satisfy the non-author
+  reproduction gate.
+
 ### Changed
 - Declare Rust 1.89 as the MSRV for all public crates and enforce that floor against the locked
-  workspace graph and all Linux-host targets in required CI. The policy becomes part of published
-  crate metadata with the first release after 3.35.0. Repository development remains pinned to
-  Rust 1.96, and the eBPF nightly remains a separate internal build toolchain.
+  workspace graph and all Linux-host targets in required CI. Repository development remains pinned
+  to Rust 1.96, and the eBPF nightly remains a separate internal build toolchain.
 - The stdio MCP server now negotiates its two tested legacy handshake revisions. Requests for
   `2024-11-05` or `2025-11-25` receive that exact revision; other string values receive the
   latest supported legacy revision, `2025-11-25`. Missing or structurally incomplete initialize
   parameters fail with JSON-RPC invalid params. This does not claim MCP `2026-07-28` support: the
   modern `server/discover` and per-request metadata contract remains separate.
+- Verify-only bundle paths no longer retain the decompressed event stream after validating it,
+  reducing peak memory without changing the verified result. Reader APIs that expose events still
+  retain that content for their callers.
+
+### Fixed
 - **Fail-closed correction (bundle verification, migration-visible).** The verifier now rejects
   every bundle `BundleWriter` refuses to emit. Five shapes previously verified: an empty bundle, an
   inconsistent `source` across events, a `source` that is not a URI, and a blank line in
@@ -23,6 +42,10 @@ All notable changes to this project will be documented in this file.
   this repository is affected; all 26 in the tree were checked before the change. Third-party
   producers targeting the format should compare against `StreamRule`, now public at
   `assay_evidence::bundle::StreamRule`.
+- Refuse IPv6 CIDR policy rules before monitor attachment instead of silently applying only the
+  supported IPv4 subset.
+- Pin, audit and consume the evidence fuzz lockfile through its own CI lifecycle, and require
+  warning-free public rustdoc including the stable `assay-registry/oidc` feature surface.
 
 ## [3.35.0] - 2026-07-27
 

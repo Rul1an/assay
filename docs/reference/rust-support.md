@@ -7,8 +7,8 @@ toolchain used to develop the full workspace.
 
 The public crate set defined by `scripts/ci/check-public-crate-policy.sh` supports Rust **1.89.0**
 in the checked-in source tree. Each public package exposes `rust-version = "1.89"` through Cargo
-metadata. This becomes a published-crate guarantee with the first release after 3.35.0; published
-releases through 3.35.0 did not declare an MSRV.
+metadata. Releases starting with 3.36.0 carry that published-crate guarantee; releases through
+3.35.0 did not declare an MSRV.
 
 CI checks every public workspace package, its default feature set, and all targets available on
 the Linux CI host with Rust 1.89.0 against the workspace `Cargo.lock`. That build is the

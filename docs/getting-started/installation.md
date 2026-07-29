@@ -21,7 +21,7 @@ Install Assay on your system.
     ```
 
     **Note:** The crate is named `assay-cli`, but the binary is `assay`.
-    The Rust 1.89 MSRV policy takes effect with the first release after 3.35.0;
+    Releases starting with 3.36.0 declare Rust 1.89 as their MSRV;
     earlier releases did not declare an MSRV. `--locked` uses the lockfile shipped
     with the release selected by Cargo. Builds from source (~2 minutes). See
     [Rust support](../reference/rust-support.md).
@@ -52,7 +52,7 @@ assay --version
 
 Expected output:
 ```
-assay 3.4.0
+assay 3.36.0
 ```
 
 ---

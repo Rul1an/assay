@@ -1,11 +1,11 @@
 # Assay Roadmap 2026
 
-> **Status sync (2026-07-27, `v3.35.0` release line):** this line
-> adds the open `privileged-mcp-action/v0` profile, corpus, importer and verifier,
-> and accepts ADR-043 after bounded ingest, the explicit stdio-auth boundary,
-> and evidence-verifier fuzz/property coverage landed. The same line makes named
-> sandbox policy loading fail before execution when requested composition cannot
-> be enforced. Assay-Runner remains on the shared workspace version but adds no
+> **Status sync (2026-07-29, `v3.36.0` release line):** this line
+> binds new evidence attestations to exact archive bytes, separates signature
+> verification from artifact matching, aligns verifier acceptance with the
+> writer contract, negotiates the two tested legacy MCP revisions, refuses
+> unsupported IPv6 CIDR monitor policies, and publishes Rust 1.89 as the public
+> crate MSRV. Assay-Runner remains on the shared workspace version but adds no
 > new runtime or eBPF semantics beyond the cgroup attribution shipped in
 > `v3.34.0`.
 > The current execution posture remains trigger-led: keep Assay-Runner
