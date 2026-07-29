@@ -272,10 +272,47 @@ fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
         .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
 
     // BundleReader::open verifies by default
-    let _ = assay_evidence::bundle::BundleReader::open(f)?;
+    let reader = assay_evidence::bundle::BundleReader::open(f)?;
 
     eprintln!("Bundle verified ({}): OK", args.bundle.display());
+    report_liveness(&reader);
     Ok(0)
+}
+
+/// Report what the bundle says about its own extent, beside the integrity result.
+///
+/// Integrity and extent are different questions and this keeps them visibly separate. A verified
+/// bundle can still be a truncated one: cut the tail and every hash in the remainder still checks
+/// out, so "OK" on its own has never meant "all of it". Where a run declared a cadence, that second
+/// question now has an answer instead of being left to the reader's assumption.
+///
+/// This never changes the exit code. A bundle that predates liveness declares nothing, and turning
+/// silence into a failure would break every existing caller for a property those bundles never
+/// claimed. An outcome worth acting on is reported and left to the operator.
+fn report_liveness(reader: &assay_evidence::bundle::BundleReader) {
+    use assay_evidence::liveness::{verify_liveness, LivenessOutcome};
+
+    let Ok(events) = reader.events_vec() else {
+        // The bundle already verified, so a read failure here is this report's problem and not a
+        // finding about the artifact. Staying quiet is right: inventing a liveness verdict from a
+        // failed read would be exactly the guess this module exists to avoid.
+        return;
+    };
+    match verify_liveness(&events) {
+        LivenessOutcome::NotDeclared => {}
+        LivenessOutcome::Complete => {
+            eprintln!("Liveness: complete (opened, cadence held, closed with a matching count)");
+        }
+        LivenessOutcome::Open => {
+            eprintln!(
+                "Liveness: OPEN - no close record. Still running, ended abnormally, or truncated; \
+                 the bundle alone cannot tell these apart."
+            );
+        }
+        LivenessOutcome::Broken(break_) => {
+            eprintln!("Liveness: BROKEN - {break_:?}");
+        }
+    }
 }
 
 fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {

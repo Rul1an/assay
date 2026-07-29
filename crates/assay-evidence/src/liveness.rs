@@ -239,5 +239,8 @@ pub fn verify_liveness(events: &[EvidenceEvent]) -> LivenessOutcome {
     LivenessOutcome::Complete
 }
 
+pub mod writer;
+pub use writer::LivenessWriter;
+
 #[cfg(test)]
 mod tests;
