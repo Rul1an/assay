@@ -193,7 +193,6 @@ jobs:
           cp README.md LICENSE "dist/${ARCHIVE_NAME}/" 2>/dev/null || true
           cd dist
           tar -czvf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
-          shasum -a 256 "${ARCHIVE_NAME}.tar.gz" > "${ARCHIVE_NAME}.tar.gz.sha256"
 
       - name: Package (Windows)
         if: matrix.archive == 'zip'
@@ -207,8 +206,15 @@ jobs:
           Copy-Item "target\${{ matrix.target }}\release\${{ matrix.artifact }}" "dist\${ARCHIVE_NAME}\"
           Copy-Item README.md, LICENSE "dist\${ARCHIVE_NAME}\" -ErrorAction SilentlyContinue
           Compress-Archive -Path "dist\${ARCHIVE_NAME}" -DestinationPath "dist\${ARCHIVE_NAME}.zip"
-          $hash = (Get-FileHash "dist\${ARCHIVE_NAME}.zip" -Algorithm SHA256).Hash.ToLower()
-          "${hash}  ${ARCHIVE_NAME}.zip" | Out-File -Encoding ASCII "dist\${ARCHIVE_NAME}.zip.sha256"
+
+      - name: Write archive checksum
+        shell: bash
+        env:
+          VERSION: ${{ needs.release-contract.outputs.version }}
+        run: |
+          set -euo pipefail
+          ARCHIVE_NAME="assay-${VERSION}-${{ matrix.target }}"
+          bash scripts/ci/write_sha256_sidecar.sh "dist/${ARCHIVE_NAME}.${{ matrix.archive }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -308,7 +314,7 @@ jobs:
           cp README.md LICENSE "dist/${ARCHIVE_NAME}/" 2>/dev/null || true
           cd dist
           tar -czvf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
-          shasum -a 256 "${ARCHIVE_NAME}.tar.gz" > "${ARCHIVE_NAME}.tar.gz.sha256"
+          bash "${GITHUB_WORKSPACE}/scripts/ci/write_sha256_sidecar.sh" "${ARCHIVE_NAME}.tar.gz"
 
       - name: Upload assay-mcp-server artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -364,7 +370,7 @@ jobs:
           done < <(find . -name 'assay-sbom.json' -print)
 
           tar -czf "release/assay-${VERSION}-sbom-cyclonedx.tar.gz" -C release/sbom .
-          shasum -a 256 "release/assay-${VERSION}-sbom-cyclonedx.tar.gz" > "release/assay-${VERSION}-sbom-cyclonedx.tar.gz.sha256"
+          bash scripts/ci/write_sha256_sidecar.sh "release/assay-${VERSION}-sbom-cyclonedx.tar.gz"
           rm -rf release/sbom
 
       - name: Download all artifacts
@@ -493,7 +499,7 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/ci/release_attestation_enforce.sh
-          shasum -a 256 "${OUT_SUMMARY}" > "${OUT_SUMMARY}.sha256"
+          bash scripts/ci/write_sha256_sidecar.sh "${OUT_SUMMARY}"
 
       - name: Build release proof kit
         env:
@@ -507,7 +513,7 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/ci/release_proof_kit_build.sh
-          shasum -a 256 "${OUT_ARCHIVE}" > "${OUT_ARCHIVE}.sha256"
+          bash scripts/ci/write_sha256_sidecar.sh "${OUT_ARCHIVE}"
 
       - name: Check release asset preflight
         env:

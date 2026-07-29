@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CHECK_SCRIPT="${REPO_ROOT}/scripts/ci/check-release-assets.sh"
+CHECKSUM_WRITER="${REPO_ROOT}/scripts/ci/write_sha256_sidecar.sh"
 VERSION="v9.9.9"
 SEMVER="${VERSION#v}"
 
@@ -20,7 +21,7 @@ write_asset() {
   local assets_dir="$1"
   local name="$2"
   printf 'fixture payload for %s\n' "$name" >"${assets_dir}/${name}"
-  printf '%s  %s\n' "$(compute_sha256 "${assets_dir}/${name}")" "$name" >"${assets_dir}/${name}.sha256"
+  bash "$CHECKSUM_WRITER" "${assets_dir}/${name}"
 }
 
 write_server_json() {
@@ -104,7 +105,7 @@ crlf_target="assay-${VERSION}-x86_64-pc-windows-msvc.zip"
 printf '%s  %s\r\n' \
   "$(compute_sha256 "${crlf_checksum_dir}/${crlf_target}")" \
   "$crlf_target" >"${crlf_checksum_dir}/${crlf_target}.sha256"
-expect_pass "$crlf_checksum_dir"
+expect_fail "crlf checksum" "$crlf_checksum_dir"
 
 embedded_cr_target_dir="${tmp_root}/embedded-cr-target"
 cp -R "$valid_dir" "$embedded_cr_target_dir"
@@ -113,6 +114,39 @@ printf '%s  %s\r%s\n' \
   "assay-${VERSION}-x86_64-pc-windows-msvc" \
   ".zip" >"${embedded_cr_target_dir}/${crlf_target}.sha256"
 expect_fail "embedded carriage return in checksum target" "$embedded_cr_target_dir"
+
+prefixed_target_dir="${tmp_root}/prefixed-target"
+cp -R "$valid_dir" "$prefixed_target_dir"
+printf '%s  release/%s\n' \
+  "$(compute_sha256 "${prefixed_target_dir}/${crlf_target}")" \
+  "$crlf_target" >"${prefixed_target_dir}/${crlf_target}.sha256"
+expect_fail "release-prefixed checksum target" "$prefixed_target_dir"
+
+absolute_target_dir="${tmp_root}/absolute-target"
+cp -R "$valid_dir" "$absolute_target_dir"
+printf '%s  /tmp/%s\n' \
+  "$(compute_sha256 "${absolute_target_dir}/${crlf_target}")" \
+  "$crlf_target" >"${absolute_target_dir}/${crlf_target}.sha256"
+expect_fail "absolute checksum target" "$absolute_target_dir"
+
+tab_separator_dir="${tmp_root}/tab-separator"
+cp -R "$valid_dir" "$tab_separator_dir"
+printf '%s\t%s\n' \
+  "$(compute_sha256 "${tab_separator_dir}/${crlf_target}")" \
+  "$crlf_target" >"${tab_separator_dir}/${crlf_target}.sha256"
+expect_fail "tab-separated checksum target" "$tab_separator_dir"
+
+missing_final_lf_dir="${tmp_root}/missing-final-lf"
+cp -R "$valid_dir" "$missing_final_lf_dir"
+printf '%s  %s' \
+  "$(compute_sha256 "${missing_final_lf_dir}/${crlf_target}")" \
+  "$crlf_target" >"${missing_final_lf_dir}/${crlf_target}.sha256"
+expect_fail "checksum without final lf" "$missing_final_lf_dir"
+
+extra_line_dir="${tmp_root}/extra-line"
+cp -R "$valid_dir" "$extra_line_dir"
+printf '\n' >>"${extra_line_dir}/${crlf_target}.sha256"
+expect_fail "checksum with extra line" "$extra_line_dir"
 
 missing_checksum_dir="${tmp_root}/missing-checksum"
 cp -R "$valid_dir" "$missing_checksum_dir"

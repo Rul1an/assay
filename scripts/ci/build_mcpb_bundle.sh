@@ -113,4 +113,4 @@ npx --yes "${MCPB_CLI_PACKAGE}" validate "$STAGE_DIR/manifest.json"
 
 mkdir -p "$(dirname "$OUTPUT")"
 npx --yes "${MCPB_CLI_PACKAGE}" pack "$STAGE_DIR" "$OUTPUT"
-shasum -a 256 "$OUTPUT" > "${OUTPUT}.sha256"
+bash "${SCRIPT_DIR}/write_sha256_sidecar.sh" "$OUTPUT"

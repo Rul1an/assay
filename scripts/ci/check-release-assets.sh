@@ -23,15 +23,6 @@ compute_sha256() {
   fi
 }
 
-basename_from_checksum_line() {
-  local line="$1"
-  line="${line#* }"
-  line="${line#"${line%%[![:space:]]*}"}"
-  line="${line#\\*}"
-  line="${line%$'\r'}"
-  basename "$line"
-}
-
 require_bin "$JQ_BIN"
 
 if [[ ! "$VERSION" =~ ^v[0-9]+[.][0-9]+[.][0-9]+([-.+][0-9A-Za-z.-]+)?$ ]]; then
@@ -104,13 +95,29 @@ for asset in "${checksum_targets[@]}"; do
     exit 1
   fi
 
-  checksum_line="$(head -n 1 "$checksum_path")"
-  expected_hash="$(awk '{print $1}' <<<"$checksum_line")"
-  checksum_target="$(basename_from_checksum_line "$checksum_line")"
+  if [[ "$(wc -l <"$checksum_path" | tr -d ' ')" != "1" ]] ||
+    [[ "$(tail -c 1 "$checksum_path" | od -An -tu1 | tr -d ' ')" != "10" ]] ||
+    LC_ALL=C grep -q $'\r' "$checksum_path"; then
+    echo "release checksum must contain exactly one LF-terminated line: $(basename "$checksum_path")" >&2
+    exit 1
+  fi
+
+  IFS= read -r checksum_line <"$checksum_path"
+  expected_hash="${checksum_line:0:64}"
+  separator="${checksum_line:64:2}"
+  checksum_target="${checksum_line:66}"
   actual_hash="$(compute_sha256 "$asset_path")"
 
   if [[ ! "$expected_hash" =~ ^[0-9a-f]{64}$ ]]; then
     echo "release checksum has invalid sha256 format: $(basename "$checksum_path")" >&2
+    exit 1
+  fi
+  if [[ "$separator" != "  " ]] ||
+    [[ -z "$checksum_target" ]] ||
+    [[ "$checksum_target" == *"/"* ]] ||
+    [[ "$checksum_target" == *"\\"* ]] ||
+    [[ "$checksum_target" =~ [[:cntrl:]] ]]; then
+    echo "release checksum must use two spaces and a basename-only target: $(basename "$checksum_path")" >&2
     exit 1
   fi
   if [[ "$checksum_target" != "$asset" ]]; then
@@ -121,6 +128,15 @@ for asset in "${checksum_targets[@]}"; do
     echo "release checksum mismatch for $asset" >&2
     exit 1
   fi
+
+  (
+    cd "$ASSETS_DIR"
+    if command -v sha256sum >/dev/null 2>&1; then
+      sha256sum -c "$(basename "$checksum_path")" >/dev/null
+    else
+      shasum -a 256 -c "$(basename "$checksum_path")" >/dev/null
+    fi
+  )
 done
 
 mcpb_asset="assay-mcp-server-${VERSION}-linux.mcpb"
