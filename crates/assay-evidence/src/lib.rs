@@ -6,6 +6,7 @@ pub mod diff;
 pub mod g3_authorization_context;
 pub mod json_strict;
 pub mod lint;
+pub mod liveness;
 pub mod mandate;
 pub mod ndjson;
 pub mod sanitize;
