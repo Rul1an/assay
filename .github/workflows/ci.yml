@@ -257,15 +257,18 @@ jobs:
       # nothing failed while a crate's documentation quietly stopped building. `assay-evidence`
       # carried a `redundant explicit link target` that survived exactly this way.
       #
-      # Deliberately default features, not `--all-features`: this mirrors the doc surface a
-      # consumer gets, and it keeps the lane from depending on optional features whose deps
-      # (tui, ebpf, test-outbound) are not what this job exists to check. A doc link that only
-      # resolves under a feature therefore must not be written as a link — see
-      # `crates/assay-mcp-server/src/auth/sensitive_headers.rs`.
+      # The workspace pass covers every default documentation surface. `--all-features` is too
+      # broad here because it also enables platform-specific, experimental, and test-only
+      # surfaces. Stable public opt-in features still need explicit coverage: assay-registry's
+      # OIDC API is absent from its default feature set, so document that supported surface in a
+      # second pass. A doc link that only resolves under a test feature must still be written as
+      # code text — see `crates/assay-mcp-server/src/auth/sensitive_headers.rs`.
       #
       # `--no-deps` keeps the failure surface to this workspace; a warning in a third-party crate
       # is not ours to fix and must not be able to redden this gate.
-      - run: cargo doc --workspace --no-deps
+      - run: |
+          cargo doc --workspace --no-deps
+          cargo doc -p assay-registry --features oidc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
 
