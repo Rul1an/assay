@@ -159,6 +159,12 @@ fn initialize_credential_fields_are_ignored_as_authority_and_never_logged() {
         "id": 1,
         "method": "initialize",
         "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {
+                "name": "auth-boundary-test",
+                "version": "1.0"
+            },
             "authorization": secret,
             "initializationOptions": {
                 "authorization": secret
