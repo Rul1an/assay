@@ -106,7 +106,7 @@ jobs:
               lightweight_only=true
             fi
 
-            if grep -E '^(crates/assay-mcp-server/|packaging/mcpb/|packaging/mcp-registry/|scripts/ci/build_mcpb_bundle\.sh$|scripts/ci/render_registry_server_json\.sh$|scripts/publish-mcpcentral\.sh$|\.github/workflows/release\.yml$)' "$changed_file" >/dev/null; then
+            if grep -E '^(crates/assay-mcp-server/|packaging/mcpb/|packaging/mcp-registry/|scripts/ci/(build_mcpb_bundle|write_sha256_sidecar)\.sh$|scripts/ci/render_registry_server_json\.sh$|scripts/publish-mcpcentral\.sh$|\.github/workflows/release\.yml$)' "$changed_file" >/dev/null; then
               mcp_registry_touched=true
             else
               mcp_registry_touched=false
@@ -378,6 +378,28 @@ jobs:
           persist-credentials: false
       - name: Check vendored pack files are in sync
         run: ./scripts/check-vendored-packs.sh
+
+  release-asset-contract:
+    name: Release asset contract (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Verify portable checksum production and flat download layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/test-write-sha256-sidecar.sh
+          bash scripts/ci/test-release-assets.sh
 
   mcp-registry-foundation:
     name: MCP Registry foundation smoke
@@ -823,7 +845,7 @@ jobs:
     name: CI
     runs-on: ubuntu-latest
     if: always()
-    needs: [scope, deps-security, clippy, rustdoc, public-msrv, distribution-boundary, vendored-packs, mcp-registry-foundation, perf, test, ebpf-smoke-ubuntu]
+    needs: [scope, deps-security, clippy, rustdoc, public-msrv, distribution-boundary, vendored-packs, release-asset-contract, mcp-registry-foundation, perf, test, ebpf-smoke-ubuntu]
     steps:
       - name: Evaluate required job results
         env:
@@ -835,6 +857,7 @@ jobs:
           PUBLIC_MSRV_RESULT: ${{ needs.public-msrv.result }}
           DISTRIBUTION_BOUNDARY_RESULT: ${{ needs.distribution-boundary.result }}
           VENDORED_PACKS_RESULT: ${{ needs.vendored-packs.result }}
+          RELEASE_ASSET_CONTRACT_RESULT: ${{ needs.release-asset-contract.result }}
           MCP_REGISTRY_FOUNDATION_RESULT: ${{ needs.mcp-registry-foundation.result }}
           PERF_RESULT: ${{ needs.perf.result }}
           TEST_RESULT: ${{ needs.test.result }}
@@ -890,6 +913,7 @@ jobs:
             "public-msrv|${PUBLIC_MSRV_RESULT}|${code_gated_expectation}" \
             "distribution-boundary|${DISTRIBUTION_BOUNDARY_RESULT}|required" \
             "vendored-packs|${VENDORED_PACKS_RESULT}|required" \
+            "release-asset-contract|${RELEASE_ASSET_CONTRACT_RESULT}|required" \
             "mcp-registry-foundation|${MCP_REGISTRY_FOUNDATION_RESULT}|${registry_expectation}" \
             "perf|${PERF_RESULT}|${code_gated_expectation}" \
             "test|${TEST_RESULT}|${code_gated_expectation}" \

@@ -62,6 +62,10 @@ grep -q "PUBLIC_MSRV_RESULT" <<<"$GATE" \
   || fail "the gate does not inspect the public-msrv result"
 grep -q "RUSTDOC_RESULT" <<<"$GATE" \
   || fail "the gate does not inspect the rustdoc result"
+grep -q "RELEASE_ASSET_CONTRACT_RESULT" <<<"$GATE" \
+  || fail "the gate does not inspect the release-asset-contract result"
+grep -q "write_sha256_sidecar" "$WORKFLOW" \
+  || fail "checksum helper changes do not activate the MCP Registry foundation smoke"
 python3 - "$WORKFLOW" <<'PY' \
   || fail "the rustdoc lane does not actively cover assay-registry's public OIDC feature"
 import sys
@@ -100,6 +104,78 @@ mutated = [
 if required in rustdoc_commands(mutated):
     sys.exit(1)
 PY
+python3 - "$WORKFLOW" <<'PY' \
+  || fail "the release asset contract job does not actively run both contract tests"
+import sys
+
+lines = open(sys.argv[1]).read().splitlines()
+
+
+def job_section(source, name):
+    start = source.index(f"  {name}:")
+    end = next(
+        (
+            index
+            for index in range(start + 1, len(source))
+            if source[index].startswith("  ")
+            and not source[index].startswith("    ")
+            and source[index].endswith(":")
+        ),
+        len(source),
+    )
+    return source[start:end]
+
+
+def active_commands(source):
+    return {
+        line.strip()
+        for line in job_section(source, "release-asset-contract")
+        if line.startswith("          ") and not line.lstrip().startswith("#")
+    }
+
+
+def validate_release_contract(source):
+    section = job_section(source, "release-asset-contract")
+    commands = active_commands(source)
+    if any(command not in commands for command in required):
+        raise ValueError("release asset contract command is not active")
+    for line in section:
+        key = line.strip().split(":", 1)[0]
+        if key in {"if", "continue-on-error"}:
+            raise ValueError(f"release asset contract may not use {key}")
+
+
+required = (
+    "bash scripts/ci/test-write-sha256-sidecar.sh",
+    "bash scripts/ci/test-release-assets.sh",
+)
+validate_release_contract(lines)
+
+# Pin the no-op failure mode: a commented command is documentation, not an
+# executed contract. The independent gate self-test must notice even though
+# the release-asset-contract job would still exit successfully.
+commented = [
+    line.replace(command, f"# {command}", 1) if line.strip() == command else line
+    for line in lines
+    for command in (required[0],)
+]
+mutations = [commented]
+
+# A present command can still be skipped or made non-blocking by step/job
+# controls. Both are fail-open for a required contract and must be rejected.
+step_at = lines.index(
+    "      - name: Verify portable checksum production and flat download layout"
+)
+for control in ("        if: false", "        continue-on-error: true"):
+    mutations.append(lines[: step_at + 1] + [control] + lines[step_at + 1 :])
+
+for mutated in mutations:
+    try:
+        validate_release_contract(mutated)
+    except ValueError:
+        continue
+    raise SystemExit("release asset contract bypass mutation passed")
+PY
 if sed -n '/^run_gate()/,/^}/p' "$0" | grep -qE '(PUBLIC_MSRV|RUSTDOC)_RESULT=success'; then
   fail "run_gate must not inject a successful MSRV or rustdoc result into every scenario"
 fi
@@ -109,7 +185,7 @@ import sys
 # A lane wired only into `needs:` still gates; a lane wired only into the triples does not exist to
 # the rollup at all. Both halves are checked: this one asserts the `needs:` membership, and the
 # `*_RESULT` greps above assert the gate actually reads the result.
-REQUIRED = ("public-msrv", "rustdoc")
+REQUIRED = ("public-msrv", "rustdoc", "release-asset-contract")
 
 lines = open(sys.argv[1]).read().splitlines()
 for index, line in enumerate(lines):
@@ -128,7 +204,7 @@ run_gate() {
   local expected="$1" name="$2"
   shift 2
   local out rc=0
-  out="$(env "$@" bash -c "$GATE" 2>&1)" || rc=$?
+  out="$(env RELEASE_ASSET_CONTRACT_RESULT=success "$@" bash -c "$GATE" 2>&1)" || rc=$?
   if [[ "$expected" == "pass" && $rc -ne 0 ]]; then
     echo "$out" >&2
     fail "$name: expected the gate to pass, it exited $rc"
@@ -198,7 +274,7 @@ grep -q "mcp-registry-foundation was skipped" <<<"$out" \
 echo "ok: mcp-registry-foundation skipped while touched fails the gate"
 
 # Unconditional jobs may never be skipped, whatever the scope says.
-for job in DISTRIBUTION_BOUNDARY VENDORED_PACKS; do
+for job in DISTRIBUTION_BOUNDARY VENDORED_PACKS RELEASE_ASSET_CONTRACT; do
   out="$(run_gate fail "unconditional $job skipped" \
     SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=true DEPS_SECURITY_RESULT=skipped CLIPPY_RESULT=skipped RUSTDOC_RESULT=skipped \
     PUBLIC_MSRV_RESULT=skipped \
