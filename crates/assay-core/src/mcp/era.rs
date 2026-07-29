@@ -77,8 +77,12 @@ pub(crate) enum ResultObservation {
     InputRequired,
     /// `ResultType` is an open union and the handling rule is a SHOULD, so conforming verifiers
     /// may legitimately differ here.
-    Unrecognized(String),
-    /// The field is present and is not a token at all: a number, an object, an empty string.
+    ///
+    /// Value-free by design. The token is attacker-chosen, so echoing it hands a channel into
+    /// every log that ingests the finding while telling a reader nothing they can act on: the
+    /// actionable fact is that this build has no rule for it, not which bytes it was.
+    Unrecognized,
+    /// The field is present and is not a token at all: a number, an object, an array.
     /// Distinct from `Missing`, and the distinction is load-bearing on the legacy arm, where an
     /// absent field MUST be read as `"complete"` and an unreadable one must not inherit that.
     Malformed,
@@ -91,7 +95,7 @@ pub(crate) enum ResultObservation {
 #[allow(dead_code)]
 pub(crate) enum IncompleteReason {
     EraUnknown(UnknownReason),
-    UnrecognizedResultType(String),
+    UnrecognizedResultType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,8 +299,8 @@ pub(crate) fn conclude(era: &EraResolution, observed: &ResultObservation) -> Res
     match observed {
         ResultObservation::Complete => ResultConclusion::Terminal,
         ResultObservation::InputRequired => ResultConclusion::NonTerminal,
-        ResultObservation::Unrecognized(token) => {
-            ResultConclusion::Incomplete(IncompleteReason::UnrecognizedResultType(token.clone()))
+        ResultObservation::Unrecognized => {
+            ResultConclusion::Incomplete(IncompleteReason::UnrecognizedResultType)
         }
         // Checked before the era, because an unreadable field is not an absent one and must not
         // reach the backward-compatibility rule that reads absence as completion.
@@ -359,25 +363,6 @@ pub(crate) fn conclude_request(
 }
 
 /// The `_meta` key the protocol version travels under on a request.
-/// How much of an unrecognized token is kept. The two defined tokens are 8 and 14 bytes, so this
-/// is generous for anything a future revision might name while still bounding what one record can
-/// cost.
-pub(crate) const MAX_TOKEN_BYTES: usize = 64;
-
-/// Truncate on a character boundary, since cutting a UTF-8 string at a byte index panics.
-fn bounded_token(token: &str) -> String {
-    if token.len() <= MAX_TOKEN_BYTES {
-        return token.to_string();
-    }
-    let cut = token
-        .char_indices()
-        .map(|(i, _)| i)
-        .take_while(|i| *i <= MAX_TOKEN_BYTES)
-        .last()
-        .unwrap_or(0);
-    token[..cut].to_string()
-}
-
 pub(crate) const PROTOCOL_VERSION_META_KEY: &str = "io.modelcontextprotocol/protocolVersion";
 
 /// The transport header carrying the same value.
@@ -460,8 +445,9 @@ pub(crate) fn observe_request_metadata(raw: &serde_json::Value) -> RequestMetada
     let Some(meta) = raw.get("params").and_then(|p| p.get("_meta")) else {
         return RequestMetadata::Absent;
     };
-    // `_meta` is an object by schema. A scalar or array here is a signal that arrived and failed,
-    // and `Value::get` on a non-object answers `None`, which would report it as silence.
+    // `_meta` is an object by schema, so a scalar or array is a signal that arrived and failed.
+    // The guard is explicit because `Value::get` on a non-object answers `None`, which the arm
+    // below would have read as the version simply being absent.
     if !meta.is_object() {
         return RequestMetadata::Malformed;
     }
@@ -490,9 +476,10 @@ pub(crate) fn observe_result(raw: &serde_json::Value) -> Option<ResultObservatio
         Some(v) => match v.as_str() {
             Some("complete") => ResultObservation::Complete,
             Some("input_required") => ResultObservation::InputRequired,
-            // `ResultType` is an open string union, so any string is syntactically a token. An
-            // empty one is unrecognized rather than unreadable; only a non-string is malformed.
-            Some(other) => ResultObservation::Unrecognized(bounded_token(other)),
+            // `ResultType` is an open string union, so any string is syntactically a token,
+            // including an empty one. Unrecognized is a statement about this build's rules, so it
+            // carries no value; only a non-string is unreadable.
+            Some(_) => ResultObservation::Unrecognized,
             None => ResultObservation::Malformed,
         },
     })

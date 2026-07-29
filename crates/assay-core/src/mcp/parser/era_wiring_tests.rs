@@ -4,7 +4,8 @@
 
 use super::*;
 use crate::mcp::era::{
-    EnvelopeObservation, ParsedMcpEvent, RequestMetadata, RequestMetadata::*, ResultObservation,
+    conclude, EnvelopeObservation, EraResolution, IncompleteReason, InvalidReason, ParsedMcpEvent,
+    RequestMetadata, RequestMetadata::*, ResultConclusion, ResultObservation,
 };
 use serde_json::{json, Value};
 
@@ -236,7 +237,7 @@ fn every_result_type_shape_reaches_the_axis() {
     );
     assert_eq!(
         observed(Some(json!("banana"))),
-        ResultObservation::Unrecognized("banana".into())
+        ResultObservation::Unrecognized
     );
 }
 
@@ -518,29 +519,58 @@ fn an_empty_result_type_is_unrecognized_not_malformed() {
         .into_iter()
         .find_map(|e| e.context.result_observation)
         .expect("a response event");
-    assert_eq!(observed, ResultObservation::Unrecognized(String::new()));
+    assert_eq!(observed, ResultObservation::Unrecognized);
 }
 
-/// An attacker-chosen token was retained in full, once per event. The third retention site, after
-/// the header and the request metadata.
+/// The whole chain on the shape that was silently completing: a legacy-era transcript whose
+/// response carries `"result": null`. Parser observation through to conclusion, permanently, so
+/// this cannot regress through either half alone.
 #[test]
-fn an_oversized_result_token_is_bounded() {
-    let huge = "z".repeat(1024 * 1024);
+fn composite_a_null_result_under_a_legacy_era_is_invalid() {
+    let message = json!({"jsonrpc": "2.0", "id": "call-1", "result": null});
+    let input = framed(Some(headers(json!(V2025))), None, message);
+    let parsed = detailed(&input, McpInputFormat::StreamableHttp);
+    let event = parsed
+        .iter()
+        .find(|e| e.context.result_observation.is_some())
+        .expect("a response event");
+    assert_eq!(event.context.era, EraResolution::Known(V2025.into()));
+    assert_eq!(
+        event.context.result_observation,
+        Some(ResultObservation::Malformed)
+    );
+    assert_eq!(
+        conclude(
+            &event.context.era,
+            event.context.result_observation.as_ref().unwrap()
+        ),
+        ResultConclusion::Invalid(InvalidReason::MalformedResultType)
+    );
+}
+
+/// An unrecognized token reaches the conclusion without carrying the token.
+#[test]
+fn composite_an_unknown_token_is_incomplete_and_value_free() {
     let input = framed(
         Some(headers(json!(V2026))),
         None,
-        response(Some(json!(huge))),
+        response(Some(json!("banana"))),
     );
-    let observed = detailed(&input, McpInputFormat::StreamableHttp)
-        .into_iter()
-        .find_map(|e| e.context.result_observation)
+    let parsed = detailed(&input, McpInputFormat::StreamableHttp);
+    let event = parsed
+        .iter()
+        .find(|e| e.context.result_observation.is_some())
         .expect("a response event");
-    match observed {
-        ResultObservation::Unrecognized(token) => assert!(
-            token.len() <= 64,
-            "retained {} bytes of an attacker-chosen token",
-            token.len()
-        ),
-        other => panic!("expected an unrecognized token, got {other:?}"),
-    }
+    let conclusion = conclude(
+        &event.context.era,
+        event.context.result_observation.as_ref().unwrap(),
+    );
+    assert_eq!(
+        conclusion,
+        ResultConclusion::Incomplete(IncompleteReason::UnrecognizedResultType)
+    );
+    assert!(
+        !format!("{conclusion:?}").contains("banana"),
+        "the token must not travel: {conclusion:?}"
+    );
 }

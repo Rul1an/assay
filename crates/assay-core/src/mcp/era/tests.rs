@@ -128,9 +128,9 @@ fn an_unrecognized_token_is_incomplete_not_invalid() {
     assert_eq!(
         conclude(
             &EraResolution::Known(V2026.into()),
-            &ResultObservation::Unrecognized("banana".into())
+            &ResultObservation::Unrecognized
         ),
-        ResultConclusion::Incomplete(IncompleteReason::UnrecognizedResultType("banana".into()))
+        ResultConclusion::Incomplete(IncompleteReason::UnrecognizedResultType)
     );
 }
 
@@ -463,19 +463,4 @@ fn a_malformed_result_survives_an_unknown_era() {
             ResultConclusion::Invalid(InvalidReason::MalformedResultType)
         );
     }
-}
-
-/// A token longer than the bound keeps only its prefix, so the retained value is a diagnostic and
-/// not a faithful record. Stated here so the truncation is a decision rather than a surprise.
-#[test]
-fn an_over_long_token_is_truncated_on_a_character_boundary() {
-    let token = "é".repeat(200);
-    let ResultObservation::Unrecognized(kept) = observe_result(&serde_json::json!({
-        "result": {"resultType": token}
-    }))
-    .expect("a result") else {
-        panic!("expected an unrecognized token")
-    };
-    assert!(kept.len() <= MAX_TOKEN_BYTES);
-    assert!(token.starts_with(&kept), "the prefix is kept intact");
 }
