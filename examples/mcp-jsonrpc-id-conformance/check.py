@@ -25,6 +25,8 @@ HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 MAX_PACK_FILE_BYTES = 1 << 20
 MAX_SUBJECT_BYTES = 2 << 20
 MAX_CHECKSUM_BYTES = 64 << 10
+MAX_PACK_ENTRIES = 256
+MAX_PACK_DEPTH = 8
 
 
 class PackError(ValueError):
@@ -45,6 +47,43 @@ class _TextExtractor(html.parser.HTMLParser):
 
     def text(self) -> str:
         return " ".join(" ".join(self.parts).split())
+
+
+class _DefinitionExtractor(html.parser.HTMLParser):
+    """Collect normalized HTML definition-list term/description pairs."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._capture: str | None = None
+        self._parts: list[str] = []
+        self._term: str | None = None
+        self.definitions: list[tuple[str, str]] = []
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        del attrs
+        if tag in {"dt", "dd"}:
+            self._capture = tag
+            self._parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._capture is not None:
+            self._parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag != self._capture:
+            return
+        text = " ".join(" ".join(self._parts).split())
+        if tag == "dt":
+            self._term = text
+        elif self._term is not None:
+            self.definitions.append((self._term, text))
+            self._term = None
+        self._capture = None
+        self._parts = []
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -109,18 +148,33 @@ def _load_json(path: Path) -> Any:
 
 def _public_pack_files(root: Path) -> set[str]:
     files: set[str] = set()
-    for path in root.rglob("*"):
-        relative = path.relative_to(root)
-        if (
-            not path.is_file()
-            or path.name == "SHA256SUMS"
-            or "__pycache__" in relative.parts
-            or path.suffix in {".pyc", ".pyo"}
-        ):
-            continue
-        if path.is_symlink():
-            raise PackError("public pack must not contain symbolic links")
-        files.add(relative.as_posix())
+    directories = [root]
+    entries = 0
+    while directories:
+        directory = directories.pop()
+        try:
+            children = directory.iterdir()
+            for path in children:
+                entries += 1
+                if entries > MAX_PACK_ENTRIES:
+                    raise PackError("public pack exceeds entry limit")
+                relative = path.relative_to(root)
+                if len(relative.parts) > MAX_PACK_DEPTH:
+                    raise PackError("public pack exceeds depth limit")
+                if path.is_symlink():
+                    raise PackError("public pack must not contain symbolic links")
+                if "__pycache__" in relative.parts:
+                    continue
+                if path.is_dir():
+                    directories.append(path)
+                    continue
+                if not path.is_file():
+                    raise PackError("public pack contains an unsupported file type")
+                if path.name == "SHA256SUMS" or path.suffix in {".pyc", ".pyo"}:
+                    continue
+                files.add(relative.as_posix())
+        except OSError as exc:
+            raise PackError("cannot enumerate public pack") from exc
     return files
 
 
@@ -337,19 +391,24 @@ def _extract_jsonrpc_constraints(subject: bytes) -> dict[str, bool]:
         document = subject.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise SubjectError("JSON-RPC subject is not UTF-8") from exc
-    parser = _TextExtractor()
+    parser = _DefinitionExtractor()
     parser.feed(document)
-    text = parser.text().casefold()
-    required = "id this member is required." in text
-    unknown_must_be_null = (
-        "if there was an error in detecting the id in the request object" in text
-        and "it must be null." in text
+    parser.close()
+    expected = (
+        "this member is required. "
+        "it must be the same as the value of the id member in the request object. "
+        "if there was an error in detecting the id in the request object "
+        "(e.g. parse error/invalid request), it must be null."
     )
-    if not required or not unknown_must_be_null:
+    response_id_clause = any(
+        term.casefold() == "id" and description.casefold() == expected
+        for term, description in parser.definitions
+    )
+    if not response_id_clause:
         raise SubjectError("JSON-RPC subject lacks the expected response-id clauses")
     return {
-        "jsonrpc_response_id_required": required,
-        "jsonrpc_unknown_id_must_be_null": unknown_must_be_null,
+        "jsonrpc_response_id_required": True,
+        "jsonrpc_unknown_id_must_be_null": True,
     }
 
 

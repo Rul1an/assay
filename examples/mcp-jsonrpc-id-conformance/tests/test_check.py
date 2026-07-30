@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -61,10 +62,14 @@ export interface JSONRPCErrorResponse {{
 JSONRPC_SUBJECT = b"""
 <html><body>
 <h2>Response object</h2>
-<p>id</p>
-<p>This member is REQUIRED.</p>
-<p>If there was an error in detecting the id in the Request object,
-it MUST be Null.</p>
+<dl>
+<dt>id</dt>
+<dd>This member is REQUIRED.<br>
+It MUST be the same as the value of the id member in the Request Object.<br>
+If there was an error in detecting the id in the Request object
+(e.g. Parse error/Invalid Request),
+it MUST be Null.</dd>
+</dl>
 </body></html>
 """
 
@@ -130,6 +135,57 @@ class McpJsonRpcIdConformanceTest(unittest.TestCase):
             with self.assertRaisesRegex(self.m.PackError, "file set"):
                 self.m.validate_checksums(copied)
 
+    def test_pack_inventory_rejects_too_many_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            copied = Path(tmp) / "pack"
+            shutil.copytree(ROOT, copied)
+            extras = copied / "extras"
+            extras.mkdir()
+            for index in range(self.m.MAX_PACK_ENTRIES + 1):
+                (extras / f"{index:04}.txt").touch()
+            with self.assertRaisesRegex(self.m.PackError, "entry limit"):
+                self.m.validate_checksums(copied)
+
+    def test_pack_inventory_rejects_excessive_depth(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            copied = Path(tmp) / "pack"
+            shutil.copytree(ROOT, copied)
+            nested = copied
+            for index in range(self.m.MAX_PACK_DEPTH + 1):
+                nested /= f"d{index}"
+                nested.mkdir()
+            with self.assertRaisesRegex(self.m.PackError, "depth limit"):
+                self.m.validate_checksums(copied)
+
+    def test_pack_inventory_rejects_broken_and_directory_symlinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            copied = Path(tmp) / "pack"
+            shutil.copytree(ROOT, copied)
+            target = copied / "target"
+            target.mkdir()
+            try:
+                os.symlink(copied / "missing", copied / "broken-link")
+                os.symlink(target, copied / "directory-link")
+            except OSError as exc:
+                self.skipTest(f"symlink creation is unavailable: {exc}")
+            with self.assertRaisesRegex(self.m.PackError, "symbolic links"):
+                self.m.validate_checksums(copied)
+
+    def test_pack_inventory_rejects_symlinked_checksum_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            copied = Path(tmp) / "pack"
+            shutil.copytree(ROOT, copied)
+            checksum = copied / "SHA256SUMS"
+            external = Path(tmp) / "external-sha256sums"
+            external.write_bytes(checksum.read_bytes())
+            checksum.unlink()
+            try:
+                os.symlink(external, checksum)
+            except OSError as exc:
+                self.skipTest(f"symlink creation is unavailable: {exc}")
+            with self.assertRaisesRegex(self.m.PackError, "symbolic links"):
+                self.m.validate_checksums(copied)
+
     def test_reassessment_extracts_the_pinned_contradiction_from_subjects(self):
         report = self.m.reassess_subjects(
             _mcp_typescript(),
@@ -152,6 +208,27 @@ class McpJsonRpcIdConformanceTest(unittest.TestCase):
             JSONRPC_SUBJECT,
         )
         self.assertEqual(report["status"], "not_reproduced")
+
+    def test_jsonrpc_response_id_clauses_must_share_the_id_definition(self):
+        subject = b"""
+        <html><body>
+        <dl><dt>id</dt><dd>
+        This member is no longer REQUIRED. An unknown request id may be omitted.
+        </dd></dl>
+        <p>Historical wording: id This member is REQUIRED.</p>
+        <dl><dt>unrelated</dt><dd>
+        If there was an error in detecting the id in the Request object,
+        it MUST be Null.
+        </dd></dl>
+        </body></html>
+        """
+        with self.assertRaisesRegex(self.m.SubjectError, "response-id clauses"):
+            self.m.reassess_subjects(
+                _mcp_typescript(),
+                _mcp_schema(),
+                MCP_OVERVIEW_SUBJECT,
+                subject,
+            )
 
     def test_source_digest_binding_rejects_changed_bytes(self):
         subjects = {
