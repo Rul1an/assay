@@ -1,9 +1,9 @@
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import shutil
-import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +11,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 MODULE_PATH = ROOT / "check.py"
+MAX_CLI_OUTPUT_BYTES = 64 << 10
+
+
+class _BoundedTextBuffer(io.StringIO):
+    def __init__(self) -> None:
+        super().__init__()
+        self._bytes_written = 0
+
+    def write(self, text: str) -> int:
+        encoded_bytes = len(text.encode("utf-8"))
+        if self._bytes_written + encoded_bytes > MAX_CLI_OUTPUT_BYTES:
+            raise AssertionError("CLI output exceeds test limit")
+        written = super().write(text)
+        self._bytes_written += encoded_bytes
+        return written
 
 
 def _load_module():
@@ -104,14 +119,19 @@ class McpJsonRpcIdConformanceTest(unittest.TestCase):
             "mcp-error-with-omitted-id": (True, False),
             "jsonrpc-error-with-null-id": (False, True),
         }
-        for vector_path in sorted((ROOT / "vectors").glob("*.json")):
-            vector = json.loads(vector_path.read_text(encoding="utf-8"))
+        self.m.validate_checksums(ROOT)
+        provenance = self.m._validate_provenance(ROOT)
+        observed_ids = []
+        for relative in sorted(provenance["vectors"]):
+            vector = self.m._load_json(ROOT / relative)
+            observed_ids.append(vector["id"])
             observed = self.m.evaluate_message(vector["message"])
             self.assertEqual(
                 (observed["mcp"], observed["jsonrpc"]),
                 expected[vector["id"]],
                 vector["id"],
             )
+        self.assertCountEqual(observed_ids, expected)
 
     def test_vector_digest_mutation_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -163,11 +183,8 @@ class McpJsonRpcIdConformanceTest(unittest.TestCase):
             shutil.copytree(ROOT, copied)
             target = copied / "target"
             target.mkdir()
-            try:
-                os.symlink(copied / "missing", copied / "broken-link")
-                os.symlink(target, copied / "directory-link")
-            except OSError as exc:
-                self.skipTest(f"symlink creation is unavailable: {exc}")
+            os.symlink(copied / "missing", copied / "broken-link")
+            os.symlink(target, copied / "directory-link")
             with self.assertRaisesRegex(self.m.PackError, "symbolic links"):
                 self.m.validate_checksums(copied)
 
@@ -179,10 +196,7 @@ class McpJsonRpcIdConformanceTest(unittest.TestCase):
             external = Path(tmp) / "external-sha256sums"
             external.write_bytes(checksum.read_bytes())
             checksum.unlink()
-            try:
-                os.symlink(external, checksum)
-            except OSError as exc:
-                self.skipTest(f"symlink creation is unavailable: {exc}")
+            os.symlink(external, checksum)
             with self.assertRaisesRegex(self.m.PackError, "symbolic links"):
                 self.m.validate_checksums(copied)
 
@@ -310,15 +324,12 @@ class McpJsonRpcIdConformanceTest(unittest.TestCase):
             )
 
     def test_cli_reproduce_is_machine_readable(self):
-        proc = subprocess.run(
-            [sys.executable, str(MODULE_PATH), "reproduce", "--root", str(ROOT)],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(json.loads(proc.stdout)["status"], "contradiction")
+        stdout = _BoundedTextBuffer()
+        stderr = _BoundedTextBuffer()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            returncode = self.m.main(["reproduce", "--root", str(ROOT)])
+        self.assertEqual(returncode, 0, stderr.getvalue())
+        self.assertEqual(json.loads(stdout.getvalue())["status"], "contradiction")
 
 
 if __name__ == "__main__":
