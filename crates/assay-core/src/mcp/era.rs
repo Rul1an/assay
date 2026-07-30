@@ -47,7 +47,7 @@ pub(crate) enum EnvelopeObservation {
 /// enumerations that missed a member. RFC 8259 says names SHOULD be unique and RFC 7493 requires it,
 /// so refusing outright cannot go stale. Value-free: the diagnostic names neither the key nor either
 /// value.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct UniqueValue(pub(crate) serde_json::Value);
 
 impl<'de> serde::Deserialize<'de> for UniqueValue {
@@ -135,17 +135,84 @@ impl<'de> serde::Deserialize<'de> for UniqueValue {
 /// unknown member passed while the claim said every duplicate is refused. A manual `visit_map` that
 /// runs this on every key closes it inside the same pass, with no second read of the input.
 #[derive(Default)]
-pub(crate) struct SeenMembers(Vec<String>);
+pub(crate) struct SeenMembers(std::collections::HashSet<String>);
 
 impl SeenMembers {
+    /// Set membership rather than a linear scan. Keys are attacker-chosen and need not repeat, so a
+    /// scan is quadratic in the number of *unique* members, which is the cheap shape for an input to
+    /// have. The existing input ceiling is the outer budget; this keeps the inner cost linear.
     pub(crate) fn insert<E: serde::de::Error>(&mut self, key: &str) -> Result<(), E> {
-        if self.0.iter().any(|k| k == key) {
+        if !self.0.insert(key.to_string()) {
             return Err(serde::de::Error::custom(
                 "JSON object contains a duplicate member",
             ));
         }
-        self.0.push(key.to_string());
         Ok(())
+    }
+}
+
+/// Walk a value for duplicate members without building it.
+///
+/// `IgnoredAny` skips a subtree entirely, so a duplicate inside an unknown member escaped the rule
+/// while the claim said every duplicate is refused. This visits the same ground and keeps nothing,
+/// so an ignored subtree is still read for duplicates and still costs no tree.
+pub(crate) struct DuplicateAwareSink;
+
+impl<'de> serde::Deserialize<'de> for DuplicateAwareSink {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = DuplicateAwareSink;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("any JSON value with unique object members")
+            }
+            fn visit_unit<E>(self) -> Result<DuplicateAwareSink, E> {
+                Ok(DuplicateAwareSink)
+            }
+            fn visit_none<E>(self) -> Result<DuplicateAwareSink, E> {
+                Ok(DuplicateAwareSink)
+            }
+            fn visit_some<D: serde::Deserializer<'de>>(
+                self,
+                d: D,
+            ) -> Result<DuplicateAwareSink, D::Error> {
+                <DuplicateAwareSink as serde::Deserialize>::deserialize(d)
+            }
+            fn visit_bool<E>(self, _: bool) -> Result<DuplicateAwareSink, E> {
+                Ok(DuplicateAwareSink)
+            }
+            fn visit_i64<E>(self, _: i64) -> Result<DuplicateAwareSink, E> {
+                Ok(DuplicateAwareSink)
+            }
+            fn visit_u64<E>(self, _: u64) -> Result<DuplicateAwareSink, E> {
+                Ok(DuplicateAwareSink)
+            }
+            fn visit_f64<E>(self, _: f64) -> Result<DuplicateAwareSink, E> {
+                Ok(DuplicateAwareSink)
+            }
+            fn visit_str<E>(self, _: &str) -> Result<DuplicateAwareSink, E> {
+                Ok(DuplicateAwareSink)
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<DuplicateAwareSink, A::Error> {
+                while seq.next_element::<DuplicateAwareSink>()?.is_some() {}
+                Ok(DuplicateAwareSink)
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<DuplicateAwareSink, A::Error> {
+                let mut seen = SeenMembers::default();
+                while let Some(key) = map.next_key::<String>()? {
+                    seen.insert::<A::Error>(&key)?;
+                    map.next_value::<DuplicateAwareSink>()?;
+                }
+                Ok(DuplicateAwareSink)
+            }
+        }
+        deserializer.deserialize_any(V)
     }
 }
 
@@ -157,8 +224,8 @@ impl SeenMembers {
 /// request, took its era, and a missing `resultType` under a borrowed legacy era could read
 /// `Terminal`.
 ///
-/// The number is kept as its canonical text rather than parsed, so two spellings of one number
-/// become one key. The variant, not the text, carries the type distinction.
+/// A number key is the exact text of an integer this build could represent without loss. The variant,
+/// not the text, carries the type distinction, so a string is never a number however it is spelled.
 /// Crate-private: the public field is unchanged, byte and API compatible.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum CorrelationId {
@@ -166,32 +233,48 @@ pub(crate) enum CorrelationId {
     Num(String),
 }
 
+/// Whether an id is usable at all, which is a different question from whether it can correlate.
+///
+/// MCP restricts `RequestId` to a string or a number, so those are the shapes a request or a success
+/// response may carry. Nothing here decides correlation: see [`correlation_id`].
+pub(crate) fn id_is_acceptable(v: &serde_json::Value) -> bool {
+    matches!(
+        v,
+        serde_json::Value::String(_) | serde_json::Value::Number(_)
+    )
+}
+
 /// Read the correlation key from a message's raw JSON.
 ///
-/// `None` for an absent or unusable id. [`accept_id`] owns the vocabulary; the parser's shape
+/// `None` for an absent or unusable id. This function owns the correlation vocabulary; the parser's shape
 /// diagnostics for booleans, arrays and objects are more specific messages for a subset of the same
 /// refusal.
 pub(crate) fn correlation_id(v: &serde_json::Value) -> Option<CorrelationId> {
-    v.get("id").and_then(accept_id)
+    v.get("id").and_then(correlation_key)
 }
 
 /// The one place that decides whether an id is usable, and what key it becomes.
 ///
-/// The pinned 2026 schema says `RequestId = string | number`, and this function is the only place
-/// that decides it. An earlier head read "integer" out of a prose overview and refused fractional
-/// and exponent-spelled ids as protocol-invalid. They are not: JSON-RPC says fractional ids SHOULD
-/// NOT be used, which is advice to a sender rather than a rule a receiver may enforce as invalidity.
+/// The correlation key for an id, or `None` when this build cannot key on it safely.
 ///
-/// Two numeric ids are the same id when they are the same number, so the key is the canonical text
-/// serde renders: `1e0` and `1.0` both become `1.0` and correlate, while `1` stays `1`. That last
-/// pair is a bounded non-claim rather than a decision — `1` and `1.0` are numerically equal and
-/// JSON-RPC does not say whether they name one call — and this build treats them as distinct keys.
+/// A string keys on itself, exactly. A number keys on its exact text only when it is representable as
+/// an `i64` or a `u64`; every other JSON number is ingestible and simply does not correlate.
 ///
-/// `CorrelationId::Num` therefore only ever comes from an accepted integer.
-pub(crate) fn accept_id(v: &serde_json::Value) -> Option<CorrelationId> {
+/// That asymmetry is the point. Upstream does not define whether `1`, `1.0` and `1e0` name one call,
+/// and its own prose and schema disagree about whether an id may be fractional at all. Meanwhile
+/// serde_json parses any non-integer number through `f64`, so `9007199254740993.0` has already become
+/// `9007199254740992.0` before a key could be built, and two different ids would land on one call.
+///
+/// Correlating on a value that may be wrong is worse than not correlating: a false pairing hands a
+/// response the era of a call it did not answer, which can license a terminal reading. Declining to
+/// key leaves the response with the era its own envelope resolved, which is incomplete and true. A
+/// later sidecar that keeps the raw lexeme can widen the subset; nothing here forecloses that.
+pub(crate) fn correlation_key(v: &serde_json::Value) -> Option<CorrelationId> {
     match v {
         serde_json::Value::String(s) => Some(CorrelationId::Str(s.clone())),
-        serde_json::Value::Number(n) => Some(CorrelationId::Num(n.to_string())),
+        serde_json::Value::Number(n) if n.is_i64() || n.is_u64() => {
+            Some(CorrelationId::Num(n.to_string()))
+        }
         _ => None,
     }
 }
@@ -285,7 +368,7 @@ pub(crate) enum MessageShapeError {
 /// [`REQUEST_ONLY_METHODS`] classifies as requests whatever their id member does, so a request-only
 /// method cannot shed the requirement by omitting one.
 ///
-/// The id vocabulary is not settled here. [`accept_id`] owns it; the parser adds more specific shape
+/// The id vocabulary is not settled here. [`correlation_id`] owns it; the parser adds more specific shape
 /// diagnostics for booleans, arrays and objects, which are a subset of the same refusal.
 pub(crate) fn classify_message(
     v: &serde_json::Value,

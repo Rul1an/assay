@@ -89,7 +89,7 @@ fn contract_null_id_on_an_error_response_remains_ingestible() {
 #[test]
 fn contract_request_only_method_without_an_id_fails_hard() {
     // This transcript used to be accepted and normalized as a tool call. `tools/call` is
-    // `CallToolRequest` and a request MUST carry a string or integer id, so treating a method-bearing
+    // `CallToolRequest` and a request MUST carry an id, so treating a method-bearing
     // object without an `id` member as a notification let a request-only method shed the id
     // requirement — and with it the required 2026 `RequestParams._meta`, since notification metadata
     // is optional.
@@ -163,7 +163,10 @@ fn contract_mismatch_ids_leave_response_orphan_and_request_pending() {
 }
 
 #[test]
-fn contract_duplicate_request_ids_fail_hard() {
+fn contract_two_outstanding_request_ids_fail_hard() {
+    // Still fail-hard, and now from the authority that owns call lifetime rather than from a global
+    // gate that ran before correlation. The diagnostic no longer echoes the id: it is input-chosen,
+    // and naming it told a reader nothing they could act on.
     let err = parse_mcp_transcript(
         r#"
 {"timestamp_ms":1000,"jsonrpc":"2.0","id":"dup-1","method":"tools/call","params":{"name":"First","arguments":{"x":1}}}
@@ -173,11 +176,43 @@ fn contract_duplicate_request_ids_fail_hard() {
     )
     .unwrap_err();
 
+    let rendered = format!("{err:?}");
     assert!(
-        err.to_string()
-            .contains("duplicate tools/call request id \"dup-1\""),
-        "unexpected error: {err}"
+        rendered.contains("outstanding"),
+        "unexpected error: {rendered}"
     );
+    assert!(
+        !rendered.contains("dup-1"),
+        "refusal echoed the id: {rendered}"
+    );
+}
+
+#[test]
+fn contract_a_request_id_may_be_reused_after_its_response() {
+    // The old gate refused this. An id names a call in flight, and once the call is answered the id
+    // is free; JSON-RPC has no rule against reuse and long transcripts rely on it.
+    parse_mcp_transcript(
+        r#"
+{"timestamp_ms":1000,"jsonrpc":"2.0","id":"reused","method":"tools/call","params":{"name":"First","arguments":{"x":1}}}
+{"timestamp_ms":1001,"jsonrpc":"2.0","id":"reused","result":{"ok":true}}
+{"timestamp_ms":1002,"jsonrpc":"2.0","id":"reused","method":"tools/call","params":{"name":"Second","arguments":{"x":2}}}
+"#,
+        McpInputFormat::JsonRpc,
+    )
+    .expect("an id is free once its call has been answered");
+}
+
+#[test]
+fn contract_a_numeric_and_a_string_id_are_different_calls() {
+    // The old gate keyed on the public `String` rendering, which made these one id.
+    parse_mcp_transcript(
+        r#"
+{"timestamp_ms":1000,"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"Numeric","arguments":{}}}
+{"timestamp_ms":1001,"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"Stringy","arguments":{}}}
+"#,
+        McpInputFormat::JsonRpc,
+    )
+    .expect("number 1 and string \"1\" are different ids");
 }
 
 #[test]
@@ -314,4 +349,69 @@ fn assert_no_jsonrpc_id_literal_null(trace: &[TraceEvent]) {
             );
         }
     }
+}
+
+/// Pairs observed in the emitted trace, as `(tool_name, result)`.
+fn tool_call_pairs(input: &str) -> Vec<(String, String)> {
+    let events = parse_mcp_transcript(input, McpInputFormat::JsonRpc).expect("parse");
+    mcp_events_to_v2_trace(events, "typed-ids".into(), None, None)
+        .into_iter()
+        .filter_map(|e| match e {
+            TraceEvent::ToolCall(c) => Some((
+                c.tool_name,
+                c.result.map(|r| r.to_string()).unwrap_or_default(),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The parser tells a JSON number `1` from a JSON string `"1"`, but the trace mapper keyed on the
+/// public `String` rendering, so the second request overwrote the first and a numeric response was
+/// attached to the string request.
+#[test]
+fn contract_typed_ids_stay_distinct_through_the_trace_mapper() {
+    let pairs = tool_call_pairs(
+        r#"
+{"timestamp_ms":1000,"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"Stringy","arguments":{"owner":"string"}}}
+{"timestamp_ms":1001,"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"Numeric","arguments":{"owner":"numeric"}}}
+{"timestamp_ms":1002,"jsonrpc":"2.0","id":1,"result":{"owner":"numeric-response"}}
+"#,
+    );
+    let numeric = pairs
+        .iter()
+        .find(|(name, _)| name == "Numeric")
+        .expect("the numeric call");
+    assert!(
+        numeric.1.contains("numeric-response"),
+        "the numeric response belongs to the numeric call: {pairs:?}"
+    );
+    let stringy = pairs
+        .iter()
+        .find(|(name, _)| name == "Stringy")
+        .expect("the string call");
+    assert!(
+        !stringy.1.contains("numeric-response"),
+        "the string call must not receive the numeric response: {pairs:?}"
+    );
+}
+
+/// A number the correlator declines to key must not be paired through the public string rendering
+/// either. Both sides render as `1.5`, so a rendering-keyed map would pair them.
+#[test]
+fn contract_a_non_correlatable_numeric_id_is_never_paired() {
+    let pairs = tool_call_pairs(
+        r#"
+{"timestamp_ms":1000,"jsonrpc":"2.0","id":1.5,"method":"tools/call","params":{"name":"Fractional","arguments":{"owner":"req"}}}
+{"timestamp_ms":1001,"jsonrpc":"2.0","id":1.5,"result":{"owner":"resp"}}
+"#,
+    );
+    let call = pairs
+        .iter()
+        .find(|(name, _)| name == "Fractional")
+        .expect("the fractional call");
+    assert!(
+        !call.1.contains("resp"),
+        "an id the correlator will not key must not pair: {pairs:?}"
+    );
 }

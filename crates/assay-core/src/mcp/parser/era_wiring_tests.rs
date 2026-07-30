@@ -1242,8 +1242,8 @@ fn a_response_carrying_both_result_and_error_is_refused() {
 }
 
 /// Neither, with an id, was correlated as a response: it consumed the outstanding id and then let a
-/// sequential reuse through. `notifications/x` keeps the pre-existing `tools/call` duplicate-id gate
-/// from masking the subject.
+/// sequential reuse through. The transcript-wide gate that once shadowed this is gone, so the
+/// outstanding map is what these observe.
 #[test]
 fn a_no_method_object_with_neither_result_nor_error_is_refused() {
     let request = json!({"jsonrpc": "2.0", "id": "n", "method": "notifications/x", "params": {}});
@@ -1569,83 +1569,7 @@ fn an_acceptable_integer_id_does_license_terminal_under_a_legacy_era() {
 
 // --- RequestId is string or number, per the pinned schema ---------------------------------------
 
-/// The pinned 2026 schema says `RequestId = string | number`, and #1866 names that schema the source
-/// of truth. An earlier head read "integer" from a prose overview and refused fractional and
-/// exponent-spelled ids as protocol-invalid. They are not: JSON-RPC says fractional ids SHOULD NOT be
-/// used, which is advice to senders and not a rule a receiver may enforce as invalidity.
-#[test]
-fn a_fractional_request_id_is_accepted_and_correlates() {
-    let raw = r#"{"transport":"streamable-http","entries":[
-        {"transport_context":{"headers":{"MCP-Protocol-Version":"2025-06-18"}},
-         "request":{"jsonrpc":"2.0","id":1.5,"method":"notifications/x","params":{}}},
-        {"transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28"}},
-         "response":{"jsonrpc":"2.0","id":1.5,"result":{"content":[]}}}]}"#;
-    let events = detailed(raw, McpInputFormat::StreamableHttp);
-    assert_eq!(
-        events[1].context.era,
-        EraResolution::Known(V2025.into()),
-        "a fractional id correlates to its own call"
-    );
-}
-
-/// The exponent spelling reaches the parser only as text, and it is the same number as `1.0`, so it
-/// must correlate with it rather than be refused.
-#[test]
-fn an_exponent_spelled_id_correlates_with_its_decimal_form() {
-    let raw = r#"{"transport":"streamable-http","entries":[
-        {"transport_context":{"headers":{"MCP-Protocol-Version":"2025-06-18"}},
-         "request":{"jsonrpc":"2.0","id":1e0,"method":"notifications/x","params":{}}},
-        {"transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28"}},
-         "response":{"jsonrpc":"2.0","id":1.0,"result":{"content":[]}}}]}"#;
-    assert!(raw.contains("1e0"), "the fixture must carry the spelling");
-    let events = detailed(raw, McpInputFormat::StreamableHttp);
-    assert_eq!(events[1].context.era, EraResolution::Known(V2025.into()));
-}
-
 // --- Every known request method, not just the two with payloads ---------------------------------
-
-/// The set must cover the request methods of every revision this build recognizes, not only the two
-/// the parser gives payloads to. A `prompts/get` without an id was a notification, and shed the
-/// required 2026 request metadata exactly as `tools/call` did.
-#[test]
-fn known_non_tool_requests_without_an_id_are_refused() {
-    for method in [
-        "server/discover",
-        "completion/complete",
-        "prompts/get",
-        "resources/read",
-        "subscriptions/listen",
-        "initialize",
-        "ping",
-        "sampling/createMessage",
-        "tasks/get",
-        "roots/list",
-    ] {
-        let message = json!({"jsonrpc": "2.0", "method": method, "params": {}});
-        let input = framed(Some(headers(json!(V2026))), None, message);
-        assert!(
-            parse_mcp_transcript(&input, McpInputFormat::StreamableHttp).is_err(),
-            "{method} without an id must be refused"
-        );
-    }
-}
-
-/// The control that keeps the set from swallowing notifications and extensions.
-#[test]
-fn notifications_and_extensions_remain_id_less() {
-    for method in [
-        "notifications/progress",
-        "notifications/cancelled",
-        "x-vendor/telemetry",
-    ] {
-        let message = json!({"jsonrpc": "2.0", "method": method, "params": {}});
-        let input = framed(Some(headers(json!(V2026))), None, message);
-        assert!(
-            parse_mcp_transcript(&input, McpInputFormat::StreamableHttp).is_ok(),
-            "{method} must remain ingestible without an id"
-        );
-    }
-}
 
 // --- The duplicate boundary reaches the derived structs too -------------------------------------
 
@@ -1666,4 +1590,281 @@ fn duplicate_members_on_an_entry_are_refused() {
     let err = parse_mcp_transcript(raw, McpInputFormat::StreamableHttp)
         .expect_err("a duplicate on an entry is refused");
     assert!(format!("{err:?}").contains("duplicate member"), "{err:?}");
+}
+
+// --- Numeric ids correlate on value, not on spelling --------------------------------------------
+
+fn raw_pair(req_id: &str, req_ver: &str, resp_id: &str, resp_ver: &str) -> String {
+    format!(
+        r#"{{"transport":"streamable-http","entries":[
+        {{"transport_context":{{"headers":{{"MCP-Protocol-Version":"{req_ver}"}}}},
+         "request":{{"jsonrpc":"2.0","id":{req_id},"method":"notifications/x","params":{{}}}}}},
+        {{"transport_context":{{"headers":{{"MCP-Protocol-Version":"{resp_ver}"}}}},
+         "response":{{"jsonrpc":"2.0","id":{resp_id},"result":{{"content":[]}}}}}}]}}"#
+    )
+}
+
+/// Only ids this build can key on without loss correlate. A string keys on itself; a number keys on
+/// its exact text when it is an `i64` or `u64`. Every other JSON number stays ingestible and does not
+/// correlate, because serde has already put it through `f64` and two different ids can land on one
+/// value. A false pairing hands a response the era of a call it did not answer; declining to key
+/// leaves it with its own envelope's era, which is incomplete and true.
+#[test]
+fn exactly_representable_integer_ids_correlate() {
+    for id in ["1", "0", "-1", "9007199254740993"] {
+        let events = detailed(
+            &raw_pair(id, V2025, id, V2026),
+            McpInputFormat::StreamableHttp,
+        );
+        assert_eq!(
+            events[1].context.era,
+            EraResolution::Known(V2025.into()),
+            "id {id} must correlate to its own call"
+        );
+    }
+}
+
+/// A number that cannot be keyed without loss keeps its own era rather than borrowing one.
+#[test]
+fn a_non_representable_number_id_does_not_correlate() {
+    for id in ["1.0", "1e0", "1.5", "-0.0"] {
+        let events = detailed(
+            &raw_pair(id, V2025, id, V2026),
+            McpInputFormat::StreamableHttp,
+        );
+        assert_eq!(
+            events[1].context.era,
+            EraResolution::Known(V2026.into()),
+            "id {id} must not correlate, and keeps its own envelope era"
+        );
+    }
+}
+
+/// The two decimal spellings either side of 2^53 both parse to the same double, so keying on them
+/// would put two different ids on one call. Neither correlates, so neither can.
+#[test]
+fn decimal_ids_beyond_two_to_the_53_never_land_on_one_call() {
+    let events = detailed(
+        &raw_pair("9007199254740992.0", V2025, "9007199254740993.0", V2026),
+        McpInputFormat::StreamableHttp,
+    );
+    assert_eq!(events[1].context.era, EraResolution::Known(V2026.into()));
+}
+
+/// A string is not a number however it is spelled.
+#[test]
+fn a_string_id_never_correlates_with_a_numeric_one() {
+    let events = detailed(
+        &raw_pair("1", V2025, "\"1\"", V2026),
+        McpInputFormat::StreamableHttp,
+    );
+    assert_eq!(events[1].context.era, EraResolution::Known(V2026.into()));
+}
+
+/// The two integers either side of 2^53 are different ids. An `f64` key collapses them, which would
+/// let one call answer another's response.
+#[test]
+fn integers_beyond_two_to_the_53_never_collide() {
+    let events = detailed(
+        &raw_pair("9007199254740992", V2025, "9007199254740993", V2026),
+        McpInputFormat::StreamableHttp,
+    );
+    assert_eq!(
+        events[1].context.era,
+        EraResolution::Known(V2026.into()),
+        "9007199254740992 and ...93 are different ids"
+    );
+}
+
+// --- Lifetime is owned by the typed outstanding map, on real request payloads ------------------
+
+fn tools_call(id: &str) -> String {
+    format!(
+        r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"C","arguments":{{}}}}}}"#
+    )
+}
+
+fn jsonrpc_lines(lines: &[String]) -> String {
+    lines.join("\n")
+}
+
+/// A number `1` and a string `"1"` are different ids, so both may be in flight. The old global gate
+/// keyed on the public `String` rendering and refused this.
+#[test]
+fn a_numeric_and_a_string_tools_call_id_may_both_be_outstanding() {
+    let input = jsonrpc_lines(&[tools_call("1"), tools_call("\"1\"")]);
+    assert!(
+        parse_mcp_transcript(&input, McpInputFormat::JsonRpc).is_ok(),
+        "number 1 and string \"1\" are different calls"
+    );
+}
+
+/// Reuse after the response is legal. The old gate refused any reuse anywhere in the transcript.
+#[test]
+fn a_tools_call_id_may_be_reused_after_its_response() {
+    let response = r#"{"jsonrpc":"2.0","id":1,"result":{"content":[]}}"#.to_string();
+    let input = jsonrpc_lines(&[tools_call("1"), response, tools_call("1")]);
+    assert!(
+        parse_mcp_transcript(&input, McpInputFormat::JsonRpc).is_ok(),
+        "an id is free once its call has been answered"
+    );
+}
+
+/// And the case the refusal exists for still refuses, value-free.
+#[test]
+fn two_outstanding_tools_calls_on_one_id_are_refused() {
+    let input = jsonrpc_lines(&[tools_call("1"), tools_call("1")]);
+    let err = parse_mcp_transcript(&input, McpInputFormat::JsonRpc)
+        .expect_err("one id, two calls in flight");
+    let rendered = format!("{err:?}");
+    assert!(rendered.contains("outstanding"), "unexpected: {rendered}");
+    assert!(
+        !rendered.contains("\"C\""),
+        "refusal echoed input: {rendered}"
+    );
+}
+
+// --- The duplicate claim must reach every subtree ------------------------------------------------
+
+#[test]
+fn a_duplicate_inside_an_unknown_transcript_subtree_is_refused() {
+    let raw = r#"{"transport":"streamable-http","junk":{"a":1,"a":2},"entries":[{"request":{"jsonrpc":"2.0","id":"c","method":"tools/call","params":{"name":"C","arguments":{}}}}]}"#;
+    assert!(
+        format!(
+            "{:?}",
+            parse_mcp_transcript(raw, McpInputFormat::StreamableHttp).unwrap_err()
+        )
+        .contains("duplicate member"),
+        "a duplicate inside an ignored subtree must still be refused"
+    );
+}
+
+#[test]
+fn a_duplicate_inside_an_unknown_entry_subtree_is_refused() {
+    let raw = r#"{"transport":"streamable-http","entries":[{"junk":{"b":1,"b":2},"request":{"jsonrpc":"2.0","id":"c","method":"tools/call","params":{"name":"C","arguments":{}}}}]}"#;
+    assert!(
+        format!(
+            "{:?}",
+            parse_mcp_transcript(raw, McpInputFormat::StreamableHttp).unwrap_err()
+        )
+        .contains("duplicate member"),
+        "an ignored entry subtree must still be duplicate-aware"
+    );
+}
+
+#[test]
+fn duplicate_members_on_the_sse_envelope_are_refused() {
+    for raw in [
+        r#"{"transport":"http-sse","entries":[{"sse":{"event":"message","event":"other","data":{}}}]}"#,
+        r#"{"transport":"http-sse","entries":[{"sse":{"event":"message","junk":{"c":1,"c":2},"data":{}}}]}"#,
+    ] {
+        assert!(
+            format!(
+                "{:?}",
+                parse_mcp_transcript(raw, McpInputFormat::HttpSse).unwrap_err()
+            )
+            .contains("duplicate member"),
+            "SSE envelope must be duplicate-aware: {raw}"
+        );
+    }
+}
+
+/// `sse` written as an explicit null is a slot that arrived and failed, like `headers` and
+/// `transport_context`. Folding it to absent lets it disappear silently beside a valid request.
+#[test]
+fn an_explicit_null_sse_slot_is_malformed_not_absent() {
+    for raw in [
+        r#"{"transport":"http-sse","entries":[{"sse":null}]}"#,
+        r#"{"transport":"http-sse","entries":[{"request":{"jsonrpc":"2.0","id":"c","method":"tools/call","params":{"name":"C","arguments":{}}},"sse":null}]}"#,
+    ] {
+        let err = parse_mcp_transcript(raw, McpInputFormat::HttpSse).expect_err(&format!(
+            "an explicit null sse slot must not fold to absent: {raw}"
+        ));
+        // Asserting only `is_err()` proved nothing: mutation showed that removing the null handling
+        // still refuses, because deserializing `null` into the envelope fails on its own. The reason
+        // is what distinguishes a slot that arrived and failed from a shape that would not parse.
+        assert!(
+            format!("{err:?}").contains("sse slot is present and null"),
+            "refused for the wrong reason: {err:?}"
+        );
+    }
+}
+
+/// The whole set, not a sample. Every request method of every revision this build recognizes must be
+/// refused without an id, because each one is a request and a request MUST carry one. A sample would
+/// leave the untested members free to regress silently, which is how the set came to hold two names.
+///
+/// Collected from the `Request` interfaces of
+/// `schema/{2024-11-05,2025-03-26,2025-06-18,2025-11-25,2026-07-28}` at spec commit `5f5440bb`.
+#[test]
+fn every_known_request_method_requires_an_id() {
+    let expected = [
+        "completion/complete",
+        "elicitation/create",
+        "initialize",
+        "logging/setLevel",
+        "ping",
+        "prompts/get",
+        "prompts/list",
+        "resources/list",
+        "resources/read",
+        "resources/subscribe",
+        "resources/templates/list",
+        "resources/unsubscribe",
+        "roots/list",
+        "sampling/createMessage",
+        "server/discover",
+        "subscriptions/listen",
+        "tasks/cancel",
+        "tasks/get",
+        "tasks/list",
+        "tasks/result",
+        "tools/call",
+        "tools/list",
+    ];
+    // The table and the constant must be the same set, so adding one without the other fails here
+    // rather than in a transcript.
+    let mut declared: Vec<&str> = crate::mcp::era::REQUEST_ONLY_METHODS.to_vec();
+    let mut listed: Vec<&str> = expected.to_vec();
+    declared.sort_unstable();
+    listed.sort_unstable();
+    assert_eq!(declared, listed, "the table and the constant have drifted");
+
+    for method in expected {
+        let message = json!({"jsonrpc": "2.0", "method": method, "params": {}});
+        let input = framed(Some(headers(json!(V2026))), None, message);
+        assert!(
+            parse_mcp_transcript(&input, McpInputFormat::StreamableHttp).is_err(),
+            "{method} without an id must be refused"
+        );
+    }
+}
+
+/// And a name in none of the five revisions stays a notification, so the set does not swallow
+/// extensions.
+#[test]
+fn an_unknown_extension_method_stays_a_notification() {
+    for method in ["x-vendor/telemetry", "experimental/whatever", "vendor.ping"] {
+        let message = json!({"jsonrpc": "2.0", "method": method, "params": {}});
+        let input = framed(Some(headers(json!(V2026))), None, message);
+        assert!(
+            parse_mcp_transcript(&input, McpInputFormat::StreamableHttp).is_ok(),
+            "{method} must remain ingestible without an id"
+        );
+    }
+}
+
+/// `data` is what an SSE frame carries. The derive made it required; the manual visitor I wrote to
+/// make the envelope duplicate-aware initialized from `Default` and never checked, so a frame with
+/// no `data` produced zero events instead of a refusal. A malformed frame disappearing silently is
+/// the failure mode this whole slice is built against.
+#[test]
+fn an_sse_frame_without_data_is_refused() {
+    let raw = r#"{"transport":"http-sse","entries":[{"sse":{"event":"message"}}]}"#;
+    let err = parse_mcp_transcript(raw, McpInputFormat::HttpSse)
+        .expect_err("an SSE frame with no data must be refused");
+    assert!(
+        format!("{err:?}").contains("data"),
+        "refused for the wrong reason: {err:?}"
+    );
 }

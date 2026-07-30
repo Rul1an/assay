@@ -1,13 +1,12 @@
 use crate::mcp::era::{
-    accept_id, classify_message, correlation_id, fold_envelope, observe_header,
+    classify_message, correlation_id, fold_envelope, id_is_acceptable, observe_header,
     observe_request_metadata, observe_result, resolve_era, EnvelopeObservation, McpEraContext,
     MessageKind, ParsedMcpEvent, RequestMetadata,
 };
-use crate::mcp::era::{CorrelationId, EraResolution, SeenMembers, UniqueValue};
+use crate::mcp::era::{CorrelationId, DuplicateAwareSink, EraResolution, SeenMembers, UniqueValue};
 use crate::mcp::types::*;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
-use std::collections::HashSet;
 
 /// Parse MCP transcript file contents into normalized McpEvents.
 /// Public surface, unchanged. Projects the events out of the detailed parse and drops the era
@@ -202,7 +201,11 @@ fn parse_events_with_envelopes(
             parse_transport_transcript_detailed(text, "http-sse", "http-sse transcript", true)?
         }
     };
-    validate_mcp_events(&events)?;
+    // No global id gate here. The old one keyed on the public `String` rendering, so a number `1`
+    // and a string `"1"` collided; it refused any reuse anywhere in the transcript, so a legal reuse
+    // after a response was rejected; and it only saw `ToolCallRequest`. It also ran before
+    // correlation, which made it the de facto lifetime authority without owning the typed key.
+    // `correlate_calls` is that authority now, on the typed outstanding map.
     Ok((events, envelopes))
 }
 
@@ -572,18 +575,17 @@ fn auth_param_visible(header_value: &str, param_name: &str) -> bool {
 /// The existing type diagnostics for booleans, arrays and objects are kept: they are more specific
 /// than "not a string or a number" and downstream tests pin them.
 fn require_acceptable_id(raw_id: Option<&serde_json::Value>, source_line: u64) -> Result<String> {
-    // One match, one clone. The previous shape cloned the id inside `normalize_jsonrpc_id`, dropped
-    // that copy, cloned again into a `CorrelationId`, and cloned a third time into the public text —
-    // three transient copies of an attacker-controlled string on the hostile-input path, for a value
-    // that in the refusing case is discarded immediately.
+    // Acceptance and correlation are different questions, so this asks only the first. One clone,
+    // on the accepting path; the refusing path copies nothing.
     reject_unusable_id_shape(raw_id, source_line)?;
-    // Through `accept_id`, not a second copy of its rule. Re-deciding the vocabulary here is what
-    // made the mutation on `accept_id` stop biting: two readers of one rule, which is the drift that
-    // already produced the method discriminant and the correlation key defects on this branch. One
-    // clone still, since `accept_id` builds the key and destructuring moves the string out of it.
-    match raw_id.and_then(accept_id) {
-        Some(CorrelationId::Str(id) | CorrelationId::Num(id)) => Ok(id),
-        None => bail!(
+    // Acceptance is broader than correlation and is decided here: the schema allows a string or any
+    // number, so any of those is an acceptable id even when `correlation_id` declines to key it.
+    // Re-deciding the *correlation* rule here is what once made its mutation stop biting, so this
+    // asks only about acceptance and leaves keying to the one function that owns it.
+    match raw_id.filter(|v| id_is_acceptable(v)) {
+        Some(serde_json::Value::String(id)) => Ok(id.clone()),
+        Some(serde_json::Value::Number(id)) => Ok(id.to_string()),
+        _ => bail!(
             "JSON-RPC id on source line {} must be a string or a number",
             source_line
         ),
@@ -618,26 +620,6 @@ fn reject_unusable_id_shape(raw_id: Option<&serde_json::Value>, source_line: u64
             )
         }
     }
-}
-
-fn validate_mcp_events(events: &[McpEvent]) -> Result<()> {
-    let mut seen_tool_call_request_ids = HashSet::new();
-
-    for event in events {
-        if matches!(&event.payload, McpPayload::ToolCallRequest { .. }) {
-            if let Some(id) = &event.jsonrpc_id {
-                if !seen_tool_call_request_ids.insert(id.clone()) {
-                    bail!(
-                        "duplicate tools/call request id {:?} at source line {}",
-                        id,
-                        event.source_line
-                    );
-                }
-            }
-        }
-    }
-
-    Ok(())
 }
 
 fn extract_jsonrpc_from_sse(
@@ -777,7 +759,7 @@ impl<'de> Deserialize<'de> for TransportTranscript {
                         "headers" => out.headers = Some(map.next_value()?),
                         "entries" => out.entries = map.next_value()?,
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<DuplicateAwareSink>()?;
                         }
                     }
                 }
@@ -823,9 +805,19 @@ impl<'de> Deserialize<'de> for TransportTranscriptEntry {
                         "headers" => out.headers = Some(map.next_value()?),
                         "request" => out.request = Some(map.next_value()?),
                         "response" => out.response = Some(map.next_value()?),
-                        "sse" => out.sse = map.next_value()?,
+                        // Symmetric with the other slots: an explicitly written null is a slot
+                        // that arrived and failed, not an absent one. Folding it to absent let it
+                        // vanish silently beside a valid request.
+                        "sse" => match map.next_value::<Option<TransportSseEnvelope>>()? {
+                            Some(envelope) => out.sse = Some(envelope),
+                            None => {
+                                return Err(serde::de::Error::custom(
+                                    "sse slot is present and null",
+                                ))
+                            }
+                        },
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<DuplicateAwareSink>()?;
                         }
                     }
                 }
@@ -836,14 +828,57 @@ impl<'de> Deserialize<'de> for TransportTranscriptEntry {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default)]
 struct TransportSseEnvelope {
-    #[serde(default)]
     event: Option<String>,
     #[allow(dead_code)]
-    #[serde(default)]
     id: Option<String>,
     data: UniqueValue,
+}
+
+/// Duplicate-aware like the transcript and the entry. The derive would have let a repeated unknown
+/// member through, and `data` is where an SSE frame carries its whole JSON-RPC message.
+impl<'de> Deserialize<'de> for TransportSseEnvelope {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = TransportSseEnvelope;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("an SSE envelope with unique members")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<TransportSseEnvelope, A::Error> {
+                let mut out = TransportSseEnvelope::default();
+                let mut seen = SeenMembers::default();
+                // A hand-written `Deserialize` inherits none of the derive's field obligations. The
+                // derive made `data` required; initializing from `Default` and never checking let a
+                // frame with no data produce zero events instead of a refusal, which is a malformed
+                // frame disappearing silently.
+                let mut saw_data = false;
+                while let Some(key) = map.next_key::<String>()? {
+                    seen.insert::<A::Error>(&key)?;
+                    match key.as_str() {
+                        "event" => out.event = map.next_value()?,
+                        "id" => out.id = map.next_value()?,
+                        "data" => {
+                            out.data = map.next_value()?;
+                            saw_data = true;
+                        }
+                        _ => {
+                            map.next_value::<DuplicateAwareSink>()?;
+                        }
+                    }
+                }
+                if !saw_data {
+                    return Err(serde::de::Error::missing_field("data"));
+                }
+                Ok(out)
+            }
+        }
+        d.deserialize_map(V)
+    }
 }
 
 #[cfg(test)]
