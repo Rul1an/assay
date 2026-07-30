@@ -1313,9 +1313,11 @@ fn two_entry_doc(first: (Value, &str), second: (Value, &str)) -> String {
     .to_string()
 }
 
-/// `normalize_jsonrpc_id` renders JSON number `1` and JSON string `"1"` as the same Rust `String`,
-/// so correlation paired them. The response consumed a call it did not answer and took its era, and
-/// a missing `resultType` under that borrowed legacy era could read `Terminal`.
+/// `McpEvent::jsonrpc_id` renders JSON number `1` and JSON string `"1"` as the same `String`, and
+/// correlation once keyed on that rendering, so it paired them. The response consumed a call it did
+/// not answer and took its era, and a missing `resultType` under that borrowed legacy era could read
+/// `Terminal`. The helper that produced the rendering has since been replaced; the public field it
+/// fed has not, which is why the key is derived from the raw JSON instead.
 #[test]
 fn a_numeric_id_does_not_correlate_with_a_string_id() {
     let request = json!({"jsonrpc": "2.0", "id": 1, "method": "notifications/x", "params": {}});
