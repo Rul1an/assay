@@ -113,7 +113,9 @@ class McpJsonRpcIdConformanceTest(unittest.TestCase):
             copied = Path(tmp) / "pack"
             shutil.copytree(ROOT, copied)
             vector = copied / "vectors" / "shared-string-id-control.json"
-            vector.write_text(vector.read_text() + "\n", encoding="utf-8")
+            vector.write_text(
+                vector.read_text(encoding="utf-8") + "\n", encoding="utf-8"
+            )
             with self.assertRaisesRegex(self.m.PackError, "digest"):
                 self.m.reproduce(copied)
 

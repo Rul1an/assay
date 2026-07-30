@@ -175,7 +175,7 @@ def _validate_provenance(root: Path) -> dict[str, Any]:
         "mcp_schema_typescript",
         "jsonrpc_spec",
     }:
-        raise PackError("provenance must name exactly the three upstream subjects")
+        raise PackError("provenance must name exactly the four upstream subjects")
     for source in sources.values():
         if not isinstance(source, dict):
             raise PackError("source provenance must be an object")
