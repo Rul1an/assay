@@ -59,8 +59,16 @@ fn contract_import_rejects_duplicate_tool_call_request_ids() {
         .failure();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    // The semantic phrase only. The old message named the offending id, which is input-chosen data
+    // the parser no longer echoes, and the full diagnostic also carries a source line that moves
+    // whenever a fixture gains a line. Pinning either would make this test fail on changes that are
+    // not about the refusal.
     assert!(
-        stderr.contains("duplicate tools/call request id"),
-        "missing duplicate-id diagnostic: {stderr}"
+        stderr.contains("two outstanding JSON-RPC requests share an id"),
+        "missing outstanding-id diagnostic: {stderr}"
+    );
+    assert!(
+        !stderr.contains("dup-1"),
+        "the refusal must not echo the id: {stderr}"
     );
 }
