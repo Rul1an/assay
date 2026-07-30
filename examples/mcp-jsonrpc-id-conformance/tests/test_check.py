@@ -230,6 +230,30 @@ class McpJsonRpcIdConformanceTest(unittest.TestCase):
                 subject,
             )
 
+    def test_jsonrpc_response_id_clauses_must_be_in_the_response_section(self):
+        subject = b"""
+        <html><body>
+        <h2>Historical wording, not normative</h2>
+        <dl><dt>id</dt><dd>
+        This member is REQUIRED.
+        It MUST be the same as the value of the id member in the Request Object.
+        If there was an error in detecting the id in the Request object
+        (e.g. Parse error/Invalid Request), it MUST be Null.
+        </dd></dl>
+        <h2>5 Response object</h2>
+        <dl><dt>id</dt><dd>
+        This member is optional. An unknown request id may be omitted.
+        </dd></dl>
+        </body></html>
+        """
+        with self.assertRaisesRegex(self.m.SubjectError, "response-id clauses"):
+            self.m.reassess_subjects(
+                _mcp_typescript(),
+                _mcp_schema(),
+                MCP_OVERVIEW_SUBJECT,
+                subject,
+            )
+
     def test_source_digest_binding_rejects_changed_bytes(self):
         subjects = {
             "mcp_schema_typescript": _mcp_typescript(),

@@ -57,7 +57,10 @@ class _DefinitionExtractor(html.parser.HTMLParser):
         self._capture: str | None = None
         self._parts: list[str] = []
         self._term: str | None = None
-        self.definitions: list[tuple[str, str]] = []
+        self._heading_tag: str | None = None
+        self._heading_parts: list[str] = []
+        self._section: str | None = None
+        self.definitions: list[tuple[str | None, str, str]] = []
 
     def handle_starttag(
         self,
@@ -65,22 +68,31 @@ class _DefinitionExtractor(html.parser.HTMLParser):
         attrs: list[tuple[str, str | None]],
     ) -> None:
         del attrs
+        if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            self._heading_tag = tag
+            self._heading_parts = []
         if tag in {"dt", "dd"}:
             self._capture = tag
             self._parts = []
 
     def handle_data(self, data: str) -> None:
+        if self._heading_tag is not None:
+            self._heading_parts.append(data)
         if self._capture is not None:
             self._parts.append(data)
 
     def handle_endtag(self, tag: str) -> None:
+        if tag == self._heading_tag:
+            self._section = " ".join(" ".join(self._heading_parts).split())
+            self._heading_tag = None
+            self._heading_parts = []
         if tag != self._capture:
             return
         text = " ".join(" ".join(self._parts).split())
         if tag == "dt":
             self._term = text
         elif self._term is not None:
-            self.definitions.append((self._term, text))
+            self.definitions.append((self._section, self._term, text))
             self._term = None
         self._capture = None
         self._parts = []
@@ -401,8 +413,14 @@ def _extract_jsonrpc_constraints(subject: bytes) -> dict[str, bool]:
         "(e.g. parse error/invalid request), it must be null."
     )
     response_id_clause = any(
-        term.casefold() == "id" and description.casefold() == expected
-        for term, description in parser.definitions
+        section is not None
+        and re.fullmatch(
+            r"(?:\d+(?:\.\d+)*\s+)?response object",
+            section.casefold(),
+        )
+        and term.casefold() == "id"
+        and description.casefold() == expected
+        for section, term, description in parser.definitions
     )
     if not response_id_clause:
         raise SubjectError("JSON-RPC subject lacks the expected response-id clauses")
