@@ -1,0 +1,15 @@
+{
+  "id": "jsonrpc-error-with-null-id",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": null,
+    "error": {
+      "code": -32700,
+      "message": "Parse error"
+    }
+  },
+  "expected": {
+    "mcp": false,
+    "jsonrpc": true
+  }
+}

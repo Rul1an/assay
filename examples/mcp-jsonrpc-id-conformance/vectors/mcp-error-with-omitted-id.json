@@ -1,0 +1,14 @@
+{
+  "id": "mcp-error-with-omitted-id",
+  "message": {
+    "jsonrpc": "2.0",
+    "error": {
+      "code": -32700,
+      "message": "Parse error"
+    }
+  },
+  "expected": {
+    "mcp": true,
+    "jsonrpc": false
+  }
+}
