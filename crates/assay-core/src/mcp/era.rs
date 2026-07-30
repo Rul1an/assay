@@ -151,10 +151,32 @@ pub(crate) enum CorrelationId {
 /// `None` for an absent or unusable id. `normalize_jsonrpc_id` already refuses booleans, arrays and
 /// objects at the parser boundary, so only the two valid shapes reach this.
 pub(crate) fn correlation_id(v: &serde_json::Value) -> Option<CorrelationId> {
-    match v.get("id") {
-        Some(serde_json::Value::String(s)) => Some(CorrelationId::Str(s.clone())),
-        Some(serde_json::Value::Number(n)) => Some(CorrelationId::Num(n.to_string())),
+    v.get("id").and_then(accept_id)
+}
+
+/// The one place that decides whether an id is usable, and what key it becomes.
+///
+/// MCP restricts `RequestId` to a string or an integer. A fractional number is not an id, and
+/// neither is one spelled with an exponent: `1.0` and `1e0` both parse as floats, so neither is an
+/// integer even though the second equals one. Accepting them would give two spellings of one call
+/// two different keys, or one key to two different calls, depending on which side rendered.
+///
+/// `CorrelationId::Num` therefore only ever comes from an accepted integer.
+pub(crate) fn accept_id(v: &serde_json::Value) -> Option<CorrelationId> {
+    match v {
+        serde_json::Value::String(s) => Some(CorrelationId::Str(s.clone())),
+        serde_json::Value::Number(n) if n.is_i64() || n.is_u64() => {
+            Some(CorrelationId::Num(n.to_string()))
+        }
         _ => None,
+    }
+}
+
+/// The text an accepted id renders to for the public `McpEvent::jsonrpc_id` field.
+pub(crate) fn accepted_id_text(id: &CorrelationId) -> String {
+    match id {
+        CorrelationId::Str(s) => s.clone(),
+        CorrelationId::Num(n) => n.clone(),
     }
 }
 

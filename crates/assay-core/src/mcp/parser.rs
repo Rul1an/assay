@@ -1,7 +1,7 @@
 use crate::mcp::era::{
-    classify_message, correlation_id, fold_envelope, observe_header, observe_request_metadata,
-    observe_result, resolve_era, EnvelopeObservation, McpEraContext, MessageKind, ParsedMcpEvent,
-    RequestMetadata,
+    accept_id, accepted_id_text, classify_message, correlation_id, fold_envelope, observe_header,
+    observe_request_metadata, observe_result, resolve_era, EnvelopeObservation, McpEraContext,
+    MessageKind, ParsedMcpEvent, RequestMetadata,
 };
 use crate::mcp::era::{CorrelationId, EraResolution, UniqueValue};
 use crate::mcp::types::*;
@@ -381,15 +381,31 @@ fn parse_jsonrpc_message(
 
     let ts_ms = timestamp_ms_override.or_else(|| extract_ts_ms(&v));
 
-    // JSON-RPC ID extraction
-    let id_str = normalize_jsonrpc_id(v.get("id"), source_line)?;
-
     // One classification for the whole crate. A present non-string `method` is a malformed message
     // shape, not a message of another kind, and it is refused here: that is a JSON-RPC shape
     // refusal rather than an era-state refusal, so it does not weaken the rule that every era
     // observation parses. The message is value-free.
     let kind = classify_message(&v)
         .map_err(|e| anyhow::anyhow!("MCP event at source line {}: {}", source_line, e))?;
+
+    // Classification first, then the id its kind requires. The shapes differ: a notification has
+    // no id by definition, a request and a success response must name the call they are part of,
+    // and an error response is how a peer reports a request it could not parse, so it may have no
+    // usable id at all and simply correlates with nothing. Normalizing before classifying cannot
+    // apply any of that, because it does not yet know what it is looking at.
+    let raw_id = v.get("id");
+    let id_str = match kind {
+        MessageKind::Notification { .. } => None,
+        MessageKind::Request { .. } => Some(require_acceptable_id(raw_id, source_line)?),
+        MessageKind::Response => {
+            let is_error = v.get("error").is_some();
+            match raw_id {
+                // An invalid-request error response may carry no usable id.
+                None | Some(serde_json::Value::Null) if is_error => None,
+                _ => Some(require_acceptable_id(raw_id, source_line)?),
+            }
+        }
+    };
     let payload =
         if let MessageKind::Request { method } | MessageKind::Notification { method } = kind {
             match method {
@@ -562,6 +578,21 @@ fn auth_param_visible(header_value: &str, param_name: &str) -> bool {
     lower
         .match_indices(&needle)
         .any(|(idx, _)| idx == 0 || matches!(lower.as_bytes()[idx - 1], b' ' | b',' | b'\t'))
+}
+
+/// Accept the id a request or a success response must carry, or refuse value-free.
+///
+/// The existing type diagnostics for booleans, arrays and objects are kept: they are more specific
+/// than "not a string or an integer" and downstream tests pin them.
+fn require_acceptable_id(raw_id: Option<&serde_json::Value>, source_line: u64) -> Result<String> {
+    normalize_jsonrpc_id(raw_id, source_line)?;
+    match raw_id.and_then(accept_id) {
+        Some(id) => Ok(accepted_id_text(&id)),
+        None => bail!(
+            "JSON-RPC id on source line {} must be a string or an integer",
+            source_line
+        ),
+    }
 }
 
 fn normalize_jsonrpc_id(

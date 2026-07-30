@@ -44,22 +44,46 @@ fn contract_numeric_id_canonicalizes_and_correlates() {
 }
 
 #[test]
-fn contract_null_id_normalizes_to_none_and_does_not_correlate() {
-    let events = parse_mcp_transcript(
+fn contract_null_id_on_a_request_fails_hard() {
+    // MCP restricts `RequestId` to a string or an integer, and a request has to name the call it
+    // belongs to. This transcript used to parse with both ids normalized to `None`, which meant a
+    // request with no usable identity was ingested and silently correlated with nothing.
+    let err = parse_mcp_transcript(
         r#"
 {"timestamp_ms":1000,"jsonrpc":"2.0","id":null,"method":"tools/call","params":{"name":"NullId","arguments":{"x":1}}}
-{"timestamp_ms":1001,"jsonrpc":"2.0","id":null,"result":{"ok":true}}
 "#,
         McpInputFormat::JsonRpc,
     )
-    .unwrap();
+    .expect_err("a request with a null id is refused");
+    let rendered = format!("{err:?}");
+    assert!(
+        rendered.contains("must be a string or an integer"),
+        "{rendered}"
+    );
+    assert!(
+        !rendered.contains("NullId"),
+        "refusal echoed input: {rendered}"
+    );
+}
 
+#[test]
+fn contract_null_id_on_an_error_response_remains_ingestible() {
+    // The control that keeps the rule from becoming a blanket ban on `null`. An error response is
+    // how a peer reports a request it could not parse, so it may have no usable id at all. It stays
+    // ingestible and correlates with nothing.
+    let events = parse_mcp_transcript(
+        r#"
+{"timestamp_ms":1000,"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Invalid Request"}}
+"#,
+        McpInputFormat::JsonRpc,
+    )
+    .expect("an invalid-request error response is ingestible");
+
+    assert_eq!(events.len(), 1);
     assert_eq!(events[0].jsonrpc_id, None);
-    assert_eq!(events[1].jsonrpc_id, None);
 
-    let trace = mcp_events_to_v2_trace(events, "null-id".into(), None, None);
+    let trace = mcp_events_to_v2_trace(events, "null-id-error".into(), None, None);
     assert_no_jsonrpc_id_literal_null(&trace);
-    assert_tool_call(&trace, "NullId", json!({"x": 1}), None, None);
 }
 
 #[test]
@@ -78,23 +102,21 @@ fn contract_missing_request_id_does_not_correlate() {
 }
 
 #[test]
-fn contract_missing_response_id_remains_unmatched() {
-    let events = parse_mcp_transcript(
+fn contract_missing_success_response_id_fails_hard() {
+    // A success response answers a call, so it must say which one. This used to be ingested and
+    // reported as `timeout/no_response` against the pending request, which reads as evidence about
+    // the call rather than as a defect in the record.
+    let err = parse_mcp_transcript(
         r#"
 {"timestamp_ms":1000,"jsonrpc":"2.0","id":"req-1","method":"tools/call","params":{"name":"MissingResponseId","arguments":{"x":1}}}
 {"timestamp_ms":1001,"jsonrpc":"2.0","result":{"ok":true}}
 "#,
         McpInputFormat::JsonRpc,
     )
-    .unwrap();
-
-    let trace = mcp_events_to_v2_trace(events, "missing-response-id".into(), None, None);
-    assert_tool_call(
-        &trace,
-        "MissingResponseId",
-        json!({"x": 1}),
-        None,
-        Some("timeout/no_response"),
+    .expect_err("a success response with no id is refused");
+    assert!(
+        format!("{err:?}").contains("must be a string or an integer"),
+        "{err:?}"
     );
 }
 

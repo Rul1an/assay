@@ -779,24 +779,29 @@ fn a_notification_is_not_held_to_the_request_metadata_requirement() {
 }
 
 /// A notification is a request object *without* an `id` member, so absence is the discriminant and
-/// the value is not. An explicit `"id": null` is a request with an invalid id, and calling it a
-/// notification drops the required 2026 metadata for any message that writes one token.
+/// the value is not. An explicit `"id": null` is therefore a request shape, and because a request
+/// must name the call it belongs to, an unusable id is refused rather than quietly downgraded to a
+/// notification. Downgrading would have dropped the required 2026 metadata check for any message
+/// that writes one token.
 #[test]
-fn an_explicit_null_id_is_a_request_not_a_notification() {
+fn an_explicit_null_id_is_a_refused_request_not_a_notification() {
     let message = json!({"jsonrpc": "2.0", "id": null, "method": "tools/call",
                          "params": {"name": "Calculator", "arguments": {}}});
     let input = framed(Some(headers(json!(V2026))), None, message);
-    let event = &detailed(&input, McpInputFormat::StreamableHttp)[0];
-    assert_eq!(
-        event.context.request_metadata,
-        Some(Absent),
-        "the metadata axis still applies"
+    let err = parse_mcp_transcript(&input, McpInputFormat::StreamableHttp)
+        .expect_err("a request with a null id is refused");
+    assert!(
+        format!("{err:?}").contains("must be a string or an integer"),
+        "{err:?}"
     );
-    let observed = event.context.request_metadata.as_ref().unwrap();
-    assert_eq!(
-        conclude_request(&event.context.era, observed),
-        RequestAssessment::Invalid(InvalidReason::MissingRequestMetadata)
-    );
+    // The same token on a notification is not a refusal, which is what makes this a statement about
+    // request shape rather than about `null`.
+    let notification = json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {}});
+    assert!(parse_mcp_transcript(
+        &framed(Some(headers(json!(V2026))), None, notification),
+        McpInputFormat::StreamableHttp
+    )
+    .is_ok());
 }
 
 /// The positive control: a request still reports the axis, so the notification rule did not turn it
@@ -894,8 +899,6 @@ fn the_sidecar_axes_follow_the_shared_classifier() {
         json!({"jsonrpc": "2.0", "id": "call-1", "method": "tools/call",
                "params": {"name": "Calculator", "arguments": {}}}),
         json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {}}),
-        json!({"jsonrpc": "2.0", "id": null, "method": "tools/call",
-               "params": {"name": "Calculator", "arguments": {}}}),
         json!({"jsonrpc": "2.0", "id": "call-1", "method": "", "params": {}}),
         json!({"jsonrpc": "2.0", "id": "call-1", "result": {"content": [], "resultType": "complete"}}),
         json!({"jsonrpc": "2.0", "id": "call-1", "error": {"code": -1, "message": "x"}}),
@@ -1393,5 +1396,108 @@ fn outstanding_ids_are_tracked_per_typed_key() {
     assert!(
         !rendered.contains("notifications/x"),
         "refusal echoed input: {rendered}"
+    );
+}
+
+// --- RequestId shape: classify first, then accept the id its kind requires ----------------------
+
+/// MCP restricts `RequestId` to string or integer. A request must carry one, and `1.0` and the
+/// lexically-float `1e0` are not integers even though one of them equals an integer.
+#[test]
+fn a_request_id_must_be_a_string_or_an_integer() {
+    for bad in [json!(1.0), json!(1e0), json!(null)] {
+        let message = json!({"jsonrpc": "2.0", "id": bad, "method": "tools/call",
+                             "params": {"name": "Calculator", "arguments": {}}});
+        let input = framed(Some(headers(json!(V2026))), None, message);
+        let err = parse_mcp_transcript(&input, McpInputFormat::StreamableHttp)
+            .expect_err(&format!("must refuse request id {bad}"));
+        let rendered = format!("{err:?}");
+        assert!(
+            rendered.contains("must be a string or an integer"),
+            "unexpected for {bad}: {rendered}"
+        );
+        assert!(
+            !rendered.contains("1.0") && !rendered.contains("Calculator"),
+            "refusal echoed input for {bad}: {rendered}"
+        );
+    }
+}
+
+/// A request with no `id` member at all is a notification, which is a different shape and not a
+/// refusal. The absent case is only a fault for something that classified as a request.
+#[test]
+fn a_notification_may_have_no_id() {
+    let message = json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {}});
+    let input = framed(Some(headers(json!(V2026))), None, message);
+    assert!(parse_mcp_transcript(&input, McpInputFormat::StreamableHttp).is_ok());
+}
+
+/// A success response answers a call, so it must name which one.
+#[test]
+fn a_success_response_must_carry_an_acceptable_id() {
+    for bad in [Some(json!(null)), Some(json!(2.5)), None] {
+        let mut message = json!({"jsonrpc": "2.0", "result": {"content": [],
+                                                              "resultType": "complete"}});
+        if let Some(id) = &bad {
+            message["id"] = id.clone();
+        }
+        let input = framed(Some(headers(json!(V2026))), None, message);
+        assert!(
+            parse_mcp_transcript(&input, McpInputFormat::StreamableHttp).is_err(),
+            "must refuse a success response with id {bad:?}"
+        );
+    }
+}
+
+/// An error response is how a peer reports a request it could not even parse, so it may have no
+/// usable id. It stays ingestible and simply correlates with nothing.
+#[test]
+fn an_invalid_request_error_response_may_have_no_usable_id() {
+    for id in [Some(json!(null)), None] {
+        let mut message = json!({"jsonrpc": "2.0",
+                                 "error": {"code": -32600, "message": "Invalid Request"}});
+        if let Some(id) = &id {
+            message["id"] = id.clone();
+        }
+        let input = framed(Some(headers(json!(V2025))), None, message);
+        let events = detailed(&input, McpInputFormat::StreamableHttp);
+        assert_eq!(events.len(), 1, "must remain ingestible for id {id:?}");
+        assert_eq!(
+            events[0].context.era,
+            EraResolution::Known(V2025.into()),
+            "and stay uncorrelated, keeping its own era"
+        );
+    }
+}
+
+/// Negative and large integers are integers.
+#[test]
+fn negative_and_large_integers_are_accepted_ids() {
+    for id in [json!(-1), json!(i64::MIN), json!(u64::MAX)] {
+        let request = json!({"jsonrpc": "2.0", "id": id, "method": "notifications/x",
+                             "params": {}});
+        let response = json!({"jsonrpc": "2.0", "id": id, "result": {"content": []}});
+        let events = detailed(
+            &two_entry_doc((request, V2025), (response, V2026)),
+            McpInputFormat::StreamableHttp,
+        );
+        assert_eq!(
+            events[1].context.era,
+            EraResolution::Known(V2025.into()),
+            "id {id} must be accepted and correlate"
+        );
+    }
+}
+
+/// The end-to-end property the whole contract exists for: an id this build will not accept must
+/// never let a response borrow a legacy era and read `Terminal`.
+#[test]
+fn an_unacceptable_response_id_can_never_license_terminal() {
+    let request = json!({"jsonrpc": "2.0", "id": 1, "method": "notifications/x", "params": {}});
+    let response = json!({"jsonrpc": "2.0", "id": 1.0, "result": {"content": []}});
+    let doc = two_entry_doc((request, V2025), (response, V2025));
+    assert!(
+        parse_mcp_transcript(&doc, McpInputFormat::StreamableHttp).is_err(),
+        "a float response id is refused rather than silently correlated"
     );
 }
