@@ -31,11 +31,13 @@ fn meta(version: Value) -> Value {
 
 /// `transport_context` is a free-form `Value`, so every shape below is a real transcript.
 fn framed(ctx: Option<Value>, entry_ctx: Option<Value>, message: Value) -> String {
-    // The same discriminant `classify_message` uses: a message with a string `method` is a request
-    // or a notification, anything else is a response. Keying on `result` alone put an error-only
-    // response in the request slot, and the parser classified it as a response regardless because it
-    // carries no `method`, so the harness was wrong without any assertion noticing.
-    let key = if message.get("method").and_then(Value::as_str).is_some() {
+    // Which wrapper slot the message belongs in, keyed on the presence of a `method` member and
+    // nothing about its value. This is the wrapper's own question, not the classifier's: a present
+    // but non-string `method` is a malformed message shape that `classify_message` refuses, and the
+    // refusal has to happen on a message the transcript placed as a request. Keying on `as_str` sent
+    // exactly that fixture into the response slot, so the malformed-method test was exercising a path
+    // its own comment did not describe. `two_entry_doc` keys the same way.
+    let key = if message.get("method").is_some() {
         "request"
     } else {
         "response"
@@ -1913,6 +1915,16 @@ fn the_framed_helper_places_messages_by_their_kind() {
         (
             "notification",
             json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {}}),
+            "request",
+        ),
+        // A present but non-string `method` is a malformed message shape, and the wrapper has no
+        // business deciding that: it belongs in the request slot, where `classify_message` refuses
+        // it. Keying the wrapper on `as_str` put exactly this fixture in the response slot, so the
+        // existing malformed-method test was exercising a path its own comment did not describe.
+        (
+            "non-string method",
+            json!({"jsonrpc": "2.0", "id": "c", "method": 7,
+                   "params": {"name": "C", "arguments": {}}}),
             "request",
         ),
     ];
