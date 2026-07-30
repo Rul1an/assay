@@ -128,6 +128,27 @@ impl<'de> serde::Deserialize<'de> for UniqueValue {
     }
 }
 
+/// Track the member names of one object and refuse a repeat.
+///
+/// `UniqueValue` covers free-form values, but a struct deserialized by serde's derive is a different
+/// path: it detects a repeated *known* field and ignores unknown ones entirely, so a duplicate
+/// unknown member passed while the claim said every duplicate is refused. A manual `visit_map` that
+/// runs this on every key closes it inside the same pass, with no second read of the input.
+#[derive(Default)]
+pub(crate) struct SeenMembers(Vec<String>);
+
+impl SeenMembers {
+    pub(crate) fn insert<E: serde::de::Error>(&mut self, key: &str) -> Result<(), E> {
+        if self.0.iter().any(|k| k == key) {
+            return Err(serde::de::Error::custom(
+                "JSON object contains a duplicate member",
+            ));
+        }
+        self.0.push(key.to_string());
+        Ok(())
+    }
+}
+
 /// A correlation key that keeps the id's JSON type.
 ///
 /// `McpEvent::jsonrpc_id` is a `String` on a public, published struct, and it renders JSON number
@@ -136,9 +157,8 @@ impl<'de> serde::Deserialize<'de> for UniqueValue {
 /// request, took its era, and a missing `resultType` under a borrowed legacy era could read
 /// `Terminal`.
 ///
-/// The number is kept as its canonical text rather than parsed. MCP restricts `RequestId` to a
-/// string or an integer, so an accepted number is already an integer by the time it becomes a key,
-/// and the text is its canonical rendering. The variant, not the text, carries the type distinction.
+/// The number is kept as its canonical text rather than parsed, so two spellings of one number
+/// become one key. The variant, not the text, carries the type distinction.
 /// Crate-private: the public field is unchanged, byte and API compatible.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum CorrelationId {
@@ -157,32 +177,64 @@ pub(crate) fn correlation_id(v: &serde_json::Value) -> Option<CorrelationId> {
 
 /// The one place that decides whether an id is usable, and what key it becomes.
 ///
-/// MCP restricts `RequestId` to a string or an integer, and this function is the only place that
-/// decides it. A fractional number is not an id, and neither is one spelled with an exponent: `1.0`
-/// and `1e0` both parse as floats, so neither is an integer even though the second equals one.
-/// Accepting them would give two spellings of one call two different keys, or one key to two
-/// different calls, depending on which side rendered.
+/// The pinned 2026 schema says `RequestId = string | number`, and this function is the only place
+/// that decides it. An earlier head read "integer" out of a prose overview and refused fractional
+/// and exponent-spelled ids as protocol-invalid. They are not: JSON-RPC says fractional ids SHOULD
+/// NOT be used, which is advice to a sender rather than a rule a receiver may enforce as invalidity.
+///
+/// Two numeric ids are the same id when they are the same number, so the key is the canonical text
+/// serde renders: `1e0` and `1.0` both become `1.0` and correlate, while `1` stays `1`. That last
+/// pair is a bounded non-claim rather than a decision — `1` and `1.0` are numerically equal and
+/// JSON-RPC does not say whether they name one call — and this build treats them as distinct keys.
 ///
 /// `CorrelationId::Num` therefore only ever comes from an accepted integer.
 pub(crate) fn accept_id(v: &serde_json::Value) -> Option<CorrelationId> {
     match v {
         serde_json::Value::String(s) => Some(CorrelationId::Str(s.clone())),
-        serde_json::Value::Number(n) if n.is_i64() || n.is_u64() => {
-            Some(CorrelationId::Num(n.to_string()))
-        }
+        serde_json::Value::Number(n) => Some(CorrelationId::Num(n.to_string())),
         _ => None,
     }
 }
 
 /// Methods this build gives request semantics to.
 ///
-/// `tools/call` is `CallToolRequest` and `tools/list` is `ListToolsRequest`, and a request MUST carry
-/// an id. Without this, a request-only method could shed the id requirement simply by omitting the
-/// member, and with it the required 2026 `RequestParams._meta`, because notification metadata is
-/// optional. The list is deliberately the methods the parser already gives request payloads to
-/// rather than every method in the specification: an extension method with an unknown name stays a
-/// notification, so this refuses what is known to be a request instead of guessing about the rest.
-pub(crate) const REQUEST_ONLY_METHODS: &[&str] = &["tools/call", "tools/list"];
+/// A request MUST carry an id, so without this a request method could shed the requirement simply by
+/// omitting the member, and with it the required 2026 `RequestParams._meta`, because notification
+/// metadata is optional.
+///
+/// The set is the request methods of every revision this build recognizes, not only the two the
+/// parser gives payloads to. An earlier head listed those two, which left `prompts/get` and the rest
+/// evading the rule for exactly the same reason `tools/call` had. Collected from the `Request`
+/// interfaces of `schema/{2024-11-05,2025-03-26,2025-06-18,2025-11-25,2026-07-28}` at spec commit
+/// `5f5440bb`, which is what the ledger names as the source of truth.
+///
+/// Methods that left the protocol stay in: a transcript from an older revision is still a transcript,
+/// and a request in it is still a request. A name that is in none of them stays a notification, so an
+/// unknown extension is unaffected.
+pub(crate) const REQUEST_ONLY_METHODS: &[&str] = &[
+    "completion/complete",
+    "elicitation/create",
+    "initialize",
+    "logging/setLevel",
+    "ping",
+    "prompts/get",
+    "prompts/list",
+    "resources/list",
+    "resources/read",
+    "resources/subscribe",
+    "resources/templates/list",
+    "resources/unsubscribe",
+    "roots/list",
+    "sampling/createMessage",
+    "server/discover",
+    "subscriptions/listen",
+    "tasks/cancel",
+    "tasks/get",
+    "tasks/list",
+    "tasks/result",
+    "tools/call",
+    "tools/list",
+];
 
 /// Which JSON-RPC message shape this is, carrying the method so that nothing has to read it a
 /// second time.
@@ -223,7 +275,7 @@ pub(crate) enum MessageShapeError {
 ///
 /// A notification is a request object *without* an `id` member, so absence is the discriminant and
 /// nothing about the value is. An explicit `"id": null` is therefore a request, not a notification:
-/// MCP restricts `RequestId` to a string or an integer, which makes a null id an invalid request id
+/// MCP restricts `RequestId` to a string or a number, which makes a null id an invalid request id
 /// rather than an absent one, and calling it a notification drops the required 2026 request metadata
 /// for any message that writes that one token.
 ///

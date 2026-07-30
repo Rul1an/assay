@@ -45,7 +45,7 @@ fn contract_numeric_id_canonicalizes_and_correlates() {
 
 #[test]
 fn contract_null_id_on_a_request_fails_hard() {
-    // MCP restricts `RequestId` to a string or an integer, and a request has to name the call it
+    // MCP restricts `RequestId` to a string or a number, and a request has to name the call it
     // belongs to. This transcript used to parse with both ids normalized to `None`, which meant a
     // request with no usable identity was ingested and silently correlated with nothing.
     let err = parse_mcp_transcript(
@@ -57,7 +57,7 @@ fn contract_null_id_on_a_request_fails_hard() {
     .expect_err("a request with a null id is refused");
     let rendered = format!("{err:?}");
     assert!(
-        rendered.contains("must be a string or an integer"),
+        rendered.contains("must be a string or a number"),
         "{rendered}"
     );
     assert!(
@@ -101,7 +101,7 @@ fn contract_request_only_method_without_an_id_fails_hard() {
     )
     .expect_err("a request-only method without an id is refused");
     assert!(
-        format!("{err:?}").contains("must be a string or an integer"),
+        format!("{err:?}").contains("must be a string or a number"),
         "{err:?}"
     );
 }
@@ -136,7 +136,7 @@ fn contract_missing_success_response_id_fails_hard() {
     )
     .expect_err("a success response with no id is refused");
     assert!(
-        format!("{err:?}").contains("must be a string or an integer"),
+        format!("{err:?}").contains("must be a string or a number"),
         "{err:?}"
     );
 }

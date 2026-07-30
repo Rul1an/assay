@@ -3,7 +3,7 @@ use crate::mcp::era::{
     observe_request_metadata, observe_result, resolve_era, EnvelopeObservation, McpEraContext,
     MessageKind, ParsedMcpEvent, RequestMetadata,
 };
-use crate::mcp::era::{CorrelationId, EraResolution, UniqueValue};
+use crate::mcp::era::{CorrelationId, EraResolution, SeenMembers, UniqueValue};
 use crate::mcp::types::*;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -162,19 +162,6 @@ fn observe_transport_context(ctx: Option<&serde_json::Value>) -> Option<Envelope
     // A readable container with no `headers` key is silence rather than a defect: it arrived, it
     // was legible, and it carried no header slot. Only an unreadable one is a finding.
     observe_header(map.get("headers"))
-}
-
-/// Deserialize an optional free-form slot so that an explicit `null` stays *present*.
-///
-/// `Option<Value>` maps JSON `null` onto `None`, the same answer as a missing key, and for these
-/// slots that difference is exactly the finding: a container that was written and cannot be read
-/// is a malformed envelope, a container that was never written is silence. `default` still covers
-/// the missing key, so only a key that is actually in the document reaches this.
-fn present_slot<'de, D>(deserializer: D) -> Result<Option<UniqueValue>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    UniqueValue::deserialize(deserializer).map(Some)
 }
 
 /// Which formats carry transport framing at all. `Inspector` reads an events array straight into
@@ -583,7 +570,7 @@ fn auth_param_visible(header_value: &str, param_name: &str) -> bool {
 /// Accept the id a request or a success response must carry, or refuse value-free.
 ///
 /// The existing type diagnostics for booleans, arrays and objects are kept: they are more specific
-/// than "not a string or an integer" and downstream tests pin them.
+/// than "not a string or a number" and downstream tests pin them.
 fn require_acceptable_id(raw_id: Option<&serde_json::Value>, source_line: u64) -> Result<String> {
     // One match, one clone. The previous shape cloned the id inside `normalize_jsonrpc_id`, dropped
     // that copy, cloned again into a `CorrelationId`, and cloned a third time into the public text —
@@ -597,7 +584,7 @@ fn require_acceptable_id(raw_id: Option<&serde_json::Value>, source_line: u64) -
     match raw_id.and_then(accept_id) {
         Some(CorrelationId::Str(id) | CorrelationId::Num(id)) => Ok(id),
         None => bail!(
-            "JSON-RPC id on source line {} must be a string or an integer",
+            "JSON-RPC id on source line {} must be a string or a number",
             source_line
         ),
     }
@@ -754,35 +741,99 @@ fn parse_tools_list_result(v: &serde_json::Value) -> Result<Vec<McpToolDef>> {
     Ok(out)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default)]
 struct TransportTranscript {
     transport: Option<String>,
     #[allow(dead_code)]
-    #[serde(default, deserialize_with = "present_slot")]
     transport_context: Option<UniqueValue>,
     #[allow(dead_code)]
-    #[serde(default, deserialize_with = "present_slot")]
     headers: Option<UniqueValue>,
-    #[serde(default)]
     entries: Vec<TransportTranscriptEntry>,
 }
 
-#[derive(Debug, Deserialize)]
+/// Hand-written so every member name passes through [`SeenMembers`], including the unknown ones the
+/// derive discards without looking at. Assigning `Some(..)` on each arm keeps the property the
+/// deleted `present_slot` helper carried: an explicitly written `null` stays present rather than
+/// folding to absent, which is what let a broken entry inherit a valid transcript default.
+impl<'de> Deserialize<'de> for TransportTranscript {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = TransportTranscript;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a transport transcript with unique members")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<TransportTranscript, A::Error> {
+                let mut out = TransportTranscript::default();
+                let mut seen = SeenMembers::default();
+                while let Some(key) = map.next_key::<String>()? {
+                    seen.insert::<A::Error>(&key)?;
+                    match key.as_str() {
+                        "transport" => out.transport = map.next_value()?,
+                        "transport_context" => out.transport_context = Some(map.next_value()?),
+                        "headers" => out.headers = Some(map.next_value()?),
+                        "entries" => out.entries = map.next_value()?,
+                        _ => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                Ok(out)
+            }
+        }
+        d.deserialize_map(V)
+    }
+}
+
+#[derive(Debug, Default)]
 struct TransportTranscriptEntry {
-    #[serde(default)]
     timestamp_ms: Option<u64>,
     #[allow(dead_code)]
-    #[serde(default, deserialize_with = "present_slot")]
     transport_context: Option<UniqueValue>,
     #[allow(dead_code)]
-    #[serde(default, deserialize_with = "present_slot")]
     headers: Option<UniqueValue>,
-    #[serde(default)]
     request: Option<UniqueValue>,
-    #[serde(default)]
     response: Option<UniqueValue>,
-    #[serde(default)]
     sse: Option<TransportSseEnvelope>,
+}
+
+/// Same reason as the transcript above.
+impl<'de> Deserialize<'de> for TransportTranscriptEntry {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = TransportTranscriptEntry;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a transport transcript entry with unique members")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<TransportTranscriptEntry, A::Error> {
+                let mut out = TransportTranscriptEntry::default();
+                let mut seen = SeenMembers::default();
+                while let Some(key) = map.next_key::<String>()? {
+                    seen.insert::<A::Error>(&key)?;
+                    match key.as_str() {
+                        "timestamp_ms" => out.timestamp_ms = map.next_value()?,
+                        "transport_context" => out.transport_context = Some(map.next_value()?),
+                        "headers" => out.headers = Some(map.next_value()?),
+                        "request" => out.request = Some(map.next_value()?),
+                        "response" => out.response = Some(map.next_value()?),
+                        "sse" => out.sse = map.next_value()?,
+                        _ => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                Ok(out)
+            }
+        }
+        d.deserialize_map(V)
+    }
 }
 
 #[derive(Debug, Deserialize)]

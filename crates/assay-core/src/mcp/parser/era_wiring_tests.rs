@@ -791,7 +791,7 @@ fn an_explicit_null_id_is_a_refused_request_not_a_notification() {
     let err = parse_mcp_transcript(&input, McpInputFormat::StreamableHttp)
         .expect_err("a request with a null id is refused");
     assert!(
-        format!("{err:?}").contains("must be a string or an integer"),
+        format!("{err:?}").contains("must be a string or a number"),
         "{err:?}"
     );
     // The same token on a notification is not a refusal, which is what makes this a statement about
@@ -1401,30 +1401,25 @@ fn outstanding_ids_are_tracked_per_typed_key() {
 
 // --- RequestId shape: classify first, then accept the id its kind requires ----------------------
 
-/// MCP restricts `RequestId` to a string or an integer. A request must carry one, and neither a
-/// fractional number nor a null is one.
-///
-/// `1e0` is not in this loop: `json!` evaluates it to the same `f64` as `json!(1.0)`, so including it
-/// would test one case twice. The exponent spelling only survives as text, and
-/// `a_lexically_exponent_id_is_refused_from_raw_text` owns it.
+/// The pinned schema says `RequestId = string | number`, so a fractional id is valid and only a null
+/// is not. An earlier head refused `1.0` here on an integer-only reading taken from prose rather than
+/// from the schema the ledger names as the source of truth.
 #[test]
-fn a_request_id_must_be_a_string_or_an_integer() {
-    for bad in [json!(1.0), json!(null)] {
-        let message = json!({"jsonrpc": "2.0", "id": bad, "method": "tools/call",
-                             "params": {"name": "Calculator", "arguments": {}}});
-        let input = framed(Some(headers(json!(V2026))), None, message);
-        let err = parse_mcp_transcript(&input, McpInputFormat::StreamableHttp)
-            .expect_err(&format!("must refuse request id {bad}"));
-        let rendered = format!("{err:?}");
-        assert!(
-            rendered.contains("must be a string or an integer"),
-            "unexpected for {bad}: {rendered}"
-        );
-        assert!(
-            !rendered.contains("1.0") && !rendered.contains("Calculator"),
-            "refusal echoed input for {bad}: {rendered}"
-        );
-    }
+fn a_null_request_id_is_refused() {
+    let message = json!({"jsonrpc": "2.0", "id": null, "method": "tools/call",
+                         "params": {"name": "Calculator", "arguments": {}}});
+    let input = framed(Some(headers(json!(V2026))), None, message);
+    let err = parse_mcp_transcript(&input, McpInputFormat::StreamableHttp)
+        .expect_err("must refuse a null request id");
+    let rendered = format!("{err:?}");
+    assert!(
+        rendered.contains("must be a string or a number"),
+        "unexpected: {rendered}"
+    );
+    assert!(
+        !rendered.contains("Calculator"),
+        "refusal echoed input: {rendered}"
+    );
 }
 
 /// A request with no `id` member at all is a notification, which is a different shape and not a
@@ -1436,10 +1431,11 @@ fn a_notification_may_have_no_id() {
     assert!(parse_mcp_transcript(&input, McpInputFormat::StreamableHttp).is_ok());
 }
 
-/// A success response answers a call, so it must name which one.
+/// A success response answers a call, so it must name which one. A fractional id names one, so only
+/// an absent or null id is a fault here.
 #[test]
 fn a_success_response_must_carry_an_acceptable_id() {
-    for bad in [Some(json!(null)), Some(json!(2.5)), None] {
+    for bad in [Some(json!(null)), None] {
         let mut message = json!({"jsonrpc": "2.0", "result": {"content": [],
                                                               "resultType": "complete"}});
         if let Some(id) = &bad {
@@ -1494,15 +1490,16 @@ fn negative_and_large_integers_are_accepted_ids() {
 }
 
 /// The end-to-end property the whole contract exists for: an id this build will not accept must
-/// never let a response borrow a legacy era and read `Terminal`.
+/// never let a response borrow a legacy era and read `Terminal`. A null id is the unacceptable case
+/// now that the number domain is whole.
 #[test]
 fn an_unacceptable_response_id_can_never_license_terminal() {
     let request = json!({"jsonrpc": "2.0", "id": 1, "method": "notifications/x", "params": {}});
-    let response = json!({"jsonrpc": "2.0", "id": 1.0, "result": {"content": []}});
+    let response = json!({"jsonrpc": "2.0", "id": null, "result": {"content": []}});
     let doc = two_entry_doc((request, V2025), (response, V2025));
     assert!(
         parse_mcp_transcript(&doc, McpInputFormat::StreamableHttp).is_err(),
-        "a float response id is refused rather than silently correlated"
+        "a null response id is refused rather than silently correlated"
     );
 }
 
@@ -1522,7 +1519,7 @@ fn a_request_only_method_without_an_id_is_refused() {
             .expect_err(&format!("{method} without an id must be refused"));
         let rendered = format!("{err:?}");
         assert!(
-            rendered.contains("must be a string or an integer"),
+            rendered.contains("must be a string or a number"),
             "unexpected for {method}: {rendered}"
         );
         assert!(
@@ -1547,23 +1544,6 @@ fn real_and_extension_notifications_still_need_no_id() {
     }
 }
 
-/// The exponent form has to arrive as text: `json!(1e0)` builds the same `f64` as `json!(1.0)`, so a
-/// macro-built loop tests one case twice and proves nothing about the spelling.
-#[test]
-fn a_lexically_exponent_id_is_refused_from_raw_text() {
-    let raw = r#"{"transport":"streamable-http","transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28"}},"entries":[{"request":{"jsonrpc":"2.0","id":1e0,"method":"tools/call","params":{"name":"C","arguments":{}}}}]}"#;
-    assert!(
-        raw.contains("1e0"),
-        "the fixture must carry the exponent spelling"
-    );
-    let err = parse_mcp_transcript(raw, McpInputFormat::StreamableHttp)
-        .expect_err("an exponent-spelled id is not an integer");
-    assert!(
-        format!("{err:?}").contains("must be a string or an integer"),
-        "{err:?}"
-    );
-}
-
 /// The positive half of the security claim. Without it an implementation that refuses every id
 /// satisfies "an unacceptable id can never license Terminal" trivially.
 #[test]
@@ -1585,4 +1565,105 @@ fn an_acceptable_integer_id_does_license_terminal_under_a_legacy_era() {
         ResultConclusion::Terminal,
         "a legacy era with an absent resultType is Terminal, which is the state the refusal protects"
     );
+}
+
+// --- RequestId is string or number, per the pinned schema ---------------------------------------
+
+/// The pinned 2026 schema says `RequestId = string | number`, and #1866 names that schema the source
+/// of truth. An earlier head read "integer" from a prose overview and refused fractional and
+/// exponent-spelled ids as protocol-invalid. They are not: JSON-RPC says fractional ids SHOULD NOT be
+/// used, which is advice to senders and not a rule a receiver may enforce as invalidity.
+#[test]
+fn a_fractional_request_id_is_accepted_and_correlates() {
+    let raw = r#"{"transport":"streamable-http","entries":[
+        {"transport_context":{"headers":{"MCP-Protocol-Version":"2025-06-18"}},
+         "request":{"jsonrpc":"2.0","id":1.5,"method":"notifications/x","params":{}}},
+        {"transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28"}},
+         "response":{"jsonrpc":"2.0","id":1.5,"result":{"content":[]}}}]}"#;
+    let events = detailed(raw, McpInputFormat::StreamableHttp);
+    assert_eq!(
+        events[1].context.era,
+        EraResolution::Known(V2025.into()),
+        "a fractional id correlates to its own call"
+    );
+}
+
+/// The exponent spelling reaches the parser only as text, and it is the same number as `1.0`, so it
+/// must correlate with it rather than be refused.
+#[test]
+fn an_exponent_spelled_id_correlates_with_its_decimal_form() {
+    let raw = r#"{"transport":"streamable-http","entries":[
+        {"transport_context":{"headers":{"MCP-Protocol-Version":"2025-06-18"}},
+         "request":{"jsonrpc":"2.0","id":1e0,"method":"notifications/x","params":{}}},
+        {"transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28"}},
+         "response":{"jsonrpc":"2.0","id":1.0,"result":{"content":[]}}}]}"#;
+    assert!(raw.contains("1e0"), "the fixture must carry the spelling");
+    let events = detailed(raw, McpInputFormat::StreamableHttp);
+    assert_eq!(events[1].context.era, EraResolution::Known(V2025.into()));
+}
+
+// --- Every known request method, not just the two with payloads ---------------------------------
+
+/// The set must cover the request methods of every revision this build recognizes, not only the two
+/// the parser gives payloads to. A `prompts/get` without an id was a notification, and shed the
+/// required 2026 request metadata exactly as `tools/call` did.
+#[test]
+fn known_non_tool_requests_without_an_id_are_refused() {
+    for method in [
+        "server/discover",
+        "completion/complete",
+        "prompts/get",
+        "resources/read",
+        "subscriptions/listen",
+        "initialize",
+        "ping",
+        "sampling/createMessage",
+        "tasks/get",
+        "roots/list",
+    ] {
+        let message = json!({"jsonrpc": "2.0", "method": method, "params": {}});
+        let input = framed(Some(headers(json!(V2026))), None, message);
+        assert!(
+            parse_mcp_transcript(&input, McpInputFormat::StreamableHttp).is_err(),
+            "{method} without an id must be refused"
+        );
+    }
+}
+
+/// The control that keeps the set from swallowing notifications and extensions.
+#[test]
+fn notifications_and_extensions_remain_id_less() {
+    for method in [
+        "notifications/progress",
+        "notifications/cancelled",
+        "x-vendor/telemetry",
+    ] {
+        let message = json!({"jsonrpc": "2.0", "method": method, "params": {}});
+        let input = framed(Some(headers(json!(V2026))), None, message);
+        assert!(
+            parse_mcp_transcript(&input, McpInputFormat::StreamableHttp).is_ok(),
+            "{method} must remain ingestible without an id"
+        );
+    }
+}
+
+// --- The duplicate boundary reaches the derived structs too -------------------------------------
+
+/// `UniqueValue` covers the free-form slots, but the transcript and entry themselves are derived
+/// structs, and serde's derive ignores unknown keys entirely — so a duplicate unknown member at
+/// either level passed while the claim said every duplicate is refused.
+#[test]
+fn duplicate_members_on_the_transcript_wrapper_are_refused() {
+    let raw = r#"{"transport":"streamable-http","x":1,"x":2,"entries":[{"request":{"jsonrpc":"2.0","id":"c","method":"tools/call","params":{"name":"C","arguments":{}}}}]}"#;
+    let err = parse_mcp_transcript(raw, McpInputFormat::StreamableHttp)
+        .expect_err("a duplicate on the transcript wrapper is refused");
+    assert!(format!("{err:?}").contains("duplicate member"), "{err:?}");
+}
+
+#[test]
+fn duplicate_members_on_an_entry_are_refused() {
+    let raw = r#"{"transport":"streamable-http","entries":[{"y":1,"y":2,"request":{"jsonrpc":"2.0","id":"c","method":"tools/call","params":{"name":"C","arguments":{}}}}]}"#;
+    let err = parse_mcp_transcript(raw, McpInputFormat::StreamableHttp)
+        .expect_err("a duplicate on an entry is refused");
+    assert!(format!("{err:?}").contains("duplicate member"), "{err:?}");
 }
