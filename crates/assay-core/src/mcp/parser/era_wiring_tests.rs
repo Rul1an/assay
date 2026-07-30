@@ -31,10 +31,14 @@ fn meta(version: Value) -> Value {
 
 /// `transport_context` is a free-form `Value`, so every shape below is a real transcript.
 fn framed(ctx: Option<Value>, entry_ctx: Option<Value>, message: Value) -> String {
-    let key = if message.get("result").is_some() {
-        "response"
-    } else {
+    // The same discriminant `classify_message` uses: a message with a string `method` is a request
+    // or a notification, anything else is a response. Keying on `result` alone put an error-only
+    // response in the request slot, and the parser classified it as a response regardless because it
+    // carries no `method`, so the harness was wrong without any assertion noticing.
+    let key = if message.get("method").and_then(Value::as_str).is_some() {
         "request"
+    } else {
+        "response"
     };
     let mut entry = json!({"timestamp_ms": 1000, key: message});
     if let Some(c) = entry_ctx {
@@ -416,12 +420,20 @@ fn no_event_ever_carries_both_axes() {
         "jsonrpc": "2.0", "id": "call-3", "method": "notifications/initialized",
         "result": null
     });
+    // A real notification: a string `method` and no `id`, and not a request-only name. Without it
+    // the matrix could not tell "is a request" from "has a method", so the invariant below was
+    // satisfied by a rule that is not the one the parser follows.
+    let notification = json!({
+        "jsonrpc": "2.0", "method": "notifications/progress",
+        "params": {"progressToken": "t", "progress": 1}
+    });
     for message in [
         req(Some(meta(json!(V2026)))),
         response(Some(json!("complete"))),
         hybrid_result,
         hybrid_error,
         hybrid_unreadable_result,
+        notification,
     ] {
         let parsed = detailed(&message.to_string(), McpInputFormat::JsonRpc);
         let context = &parsed[0].context;
@@ -429,10 +441,14 @@ fn no_event_ever_carries_both_axes() {
             context.request_metadata.is_none() || context.result_observation.is_none(),
             "both axes populated for {message}: {context:?}"
         );
-        // A message with a string `method` is a request on both axes, whatever else it carries.
+        // The expectation comes from the shared classifier, not from a second reading of the shape.
+        // "Has a string method" is not the rule: a method with no `id` is a notification unless the
+        // name is request-only, and a notification carries no request-metadata axis at all.
+        let expects_request_axis =
+            matches!(classify_message(&message), Ok(MessageKind::Request { .. }));
         assert_eq!(
             context.request_metadata.is_some(),
-            message.get("method").and_then(Value::as_str).is_some(),
+            expects_request_axis,
             "the request axis must follow the payload discriminant for {message}"
         );
     }
@@ -1869,4 +1885,44 @@ fn an_sse_frame_without_data_is_refused() {
         format!("{err:?}").contains("data"),
         "refused for the wrong reason: {err:?}"
     );
+}
+
+/// The fixture helper must place a message in the slot its kind belongs to. Keying on `result`
+/// alone put an error-only response under `request`, which the parser then classified as a response
+/// anyway because it carries no `method` — so the harness was wrong without any assertion falling
+/// over. A helper that lies quietly is the kind of thing later tests build on.
+#[test]
+fn the_framed_helper_places_messages_by_their_kind() {
+    let cases = [
+        (
+            "error-only response",
+            json!({"jsonrpc": "2.0", "id": "c", "error": {"code": -1, "message": "x"}}),
+            "response",
+        ),
+        (
+            "success response",
+            json!({"jsonrpc": "2.0", "id": "c", "result": {"content": []}}),
+            "response",
+        ),
+        (
+            "request",
+            json!({"jsonrpc": "2.0", "id": "c", "method": "tools/call",
+                   "params": {"name": "C", "arguments": {}}}),
+            "request",
+        ),
+        (
+            "notification",
+            json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {}}),
+            "request",
+        ),
+    ];
+    for (label, message, slot) in cases {
+        let doc: Value =
+            serde_json::from_str(&framed(None, None, message)).expect("the helper emits JSON");
+        let entry = &doc["entries"][0];
+        assert!(
+            entry.get(slot).is_some(),
+            "{label} belongs in the {slot} slot: {entry}"
+        );
+    }
 }
