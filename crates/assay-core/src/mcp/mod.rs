@@ -1,5 +1,6 @@
 pub mod audit;
 pub mod decision;
+pub(crate) mod era;
 pub mod g3_auth_context;
 
 pub use g3_auth_context::AuthContextProjection;

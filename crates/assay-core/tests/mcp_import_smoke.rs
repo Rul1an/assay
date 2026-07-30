@@ -37,10 +37,16 @@ fn test_mcp_correlation_and_prompt() {
 #[test]
 fn test_determinism_line_fallback() {
     // P0.3: No timestamps, rely on line order.
+    //
+    // Each request carries a unique id because `tools/list` and `tools/call` are requests and MCP
+    // requires a string or integer id on one. The fixture previously omitted them, which is what let
+    // a request-only method be read as a notification and shed both the id requirement and the
+    // required 2026 request metadata. This test is about deterministic line fallback, not about
+    // ingesting protocol-invalid requests, and the ids change nothing it asserts.
     let input = r#"
-{"jsonrpc":"2.0", "method":"tools/list"}
-{"jsonrpc":"2.0", "method":"tools/call", "params":{"name":"A", "arguments":{}}}
-{"jsonrpc":"2.0", "method":"tools/call", "params":{"name":"B", "arguments":{}}}
+{"jsonrpc":"2.0", "id":"list-1", "method":"tools/list"}
+{"jsonrpc":"2.0", "id":"call-a", "method":"tools/call", "params":{"name":"A", "arguments":{}}}
+{"jsonrpc":"2.0", "id":"call-b", "method":"tools/call", "params":{"name":"B", "arguments":{}}}
 "#;
 
     let events = parse_mcp_transcript(input, McpInputFormat::JsonRpc).unwrap();

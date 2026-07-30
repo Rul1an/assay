@@ -1,7 +1,26 @@
+use crate::mcp::era::{correlation_id, CorrelationId};
 use crate::mcp::types::*;
 use crate::trace::schema::{EpisodeEnd, EpisodeStart, StepEntry, ToolCallEntry, TraceEvent};
 use serde_json::json;
 use std::collections::HashMap;
+
+/// The correlation key for one event, read from its retained raw JSON.
+///
+/// `McpEvent::jsonrpc_id` is a public `String` and cannot distinguish a JSON number from a JSON
+/// string, so the mapper derives the same typed key the parser uses rather than a second rendering
+/// of it. Two readers of one identity is how this drifted apart in the first place.
+fn payload_correlation_id(payload: &McpPayload) -> Option<CorrelationId> {
+    let raw = match payload {
+        McpPayload::SessionStart { raw }
+        | McpPayload::ToolsListRequest { raw }
+        | McpPayload::ToolsListResponse { raw, .. }
+        | McpPayload::ToolCallRequest { raw, .. }
+        | McpPayload::ToolCallResponse { raw, .. }
+        | McpPayload::SessionEnd { raw, .. }
+        | McpPayload::Other { raw, .. } => raw,
+    };
+    correlation_id(raw)
+}
 
 /// Map normalized MCP events to Assay V2 trace events (JSONL).
 pub fn mcp_events_to_v2_trace(
@@ -82,7 +101,12 @@ pub fn mcp_events_to_v2_trace(
     // The `ToolCallEntry` needs the `args` from the Request.
 
     // Map: id -> (StepId, ToolName, Args, Timestamp)
-    let mut pending_calls: HashMap<String, (String, String, serde_json::Value, u64)> =
+    // The same crate-private typed key the parser correlates on. Keying on the public
+    // `McpEvent::jsonrpc_id` rendered JSON number `1` and JSON string `"1"` identically, so the
+    // second request overwrote the first and a numeric response was attached to the string call.
+    // A number the correlator declines to key does not pair here either, rather than pairing on a
+    // rendering that cannot tell two ids apart.
+    let mut pending_calls: HashMap<CorrelationId, (String, String, serde_json::Value, u64)> =
         HashMap::new();
 
     let mut idx: i64 = 0;
@@ -93,6 +117,9 @@ pub fn mcp_events_to_v2_trace(
         if let Some(ts) = e.timestamp_ms {
             last_ts = last_ts.max(ts);
         }
+
+        // Read before the match, which consumes the payload.
+        let correlation = payload_correlation_id(&e.payload);
 
         match e.payload {
             McpPayload::ToolsListRequest { .. } => {
@@ -144,8 +171,8 @@ pub fn mcp_events_to_v2_trace(
                     meta: json!({ "jsonrpc_id": e.jsonrpc_id }),
                 }));
 
-                // Buffer for correlation if ID present
-                if let Some(id) = e.jsonrpc_id {
+                // Buffer for correlation if the id can be keyed
+                if let Some(id) = correlation.clone() {
                     pending_calls.insert(
                         id,
                         (step_id.clone(), name.clone(), arguments.clone(), last_ts),
@@ -174,7 +201,7 @@ pub fn mcp_events_to_v2_trace(
                 result, is_error, ..
             } => {
                 // Try to find matching Request
-                if let Some(id) = e.jsonrpc_id.clone() {
+                if let Some(id) = correlation {
                     if let Some((step_id, name, args, _req_ts)) = pending_calls.remove(&id) {
                         // Found match! Emit complete ToolCall
                         out.push(TraceEvent::ToolCall(ToolCallEntry {
