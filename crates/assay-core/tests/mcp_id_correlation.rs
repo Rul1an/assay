@@ -87,18 +87,39 @@ fn contract_null_id_on_an_error_response_remains_ingestible() {
 }
 
 #[test]
-fn contract_missing_request_id_does_not_correlate() {
-    let events = parse_mcp_transcript(
+fn contract_request_only_method_without_an_id_fails_hard() {
+    // This transcript used to be accepted and normalized as a tool call. `tools/call` is
+    // `CallToolRequest` and a request MUST carry a string or integer id, so treating a method-bearing
+    // object without an `id` member as a notification let a request-only method shed the id
+    // requirement — and with it the required 2026 `RequestParams._meta`, since notification metadata
+    // is optional.
+    let err = parse_mcp_transcript(
         r#"
 {"timestamp_ms":1000,"jsonrpc":"2.0","method":"tools/call","params":{"name":"MissingRequestId","arguments":{"x":1}}}
+"#,
+        McpInputFormat::JsonRpc,
+    )
+    .expect_err("a request-only method without an id is refused");
+    assert!(
+        format!("{err:?}").contains("must be a string or an integer"),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn contract_an_orphan_response_does_not_correlate() {
+    // The property the previous test was really about, without needing a malformed request to
+    // demonstrate it: a well-formed response whose call is simply not in the transcript.
+    let events = parse_mcp_transcript(
+        r#"
 {"timestamp_ms":1001,"jsonrpc":"2.0","id":"ghost","result":{"ok":true}}
 "#,
         McpInputFormat::JsonRpc,
     )
-    .unwrap();
+    .expect("an orphan response is ingestible");
 
-    let trace = mcp_events_to_v2_trace(events, "missing-request-id".into(), None, None);
-    assert_tool_call(&trace, "MissingRequestId", json!({"x": 1}), None, None);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].jsonrpc_id.as_deref(), Some("ghost"));
 }
 
 #[test]

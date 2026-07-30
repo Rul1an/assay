@@ -136,10 +136,10 @@ impl<'de> serde::Deserialize<'de> for UniqueValue {
 /// request, took its era, and a missing `resultType` under a borrowed legacy era could read
 /// `Terminal`.
 ///
-/// The number is kept as its canonical text rather than parsed, because JSON-RPC does not constrain
-/// an id to an integer and two spellings of one number are the same id. The variant, not the text,
-/// carries the type distinction. Crate-private: the public field is unchanged, byte and API
-/// compatible.
+/// The number is kept as its canonical text rather than parsed. MCP restricts `RequestId` to a
+/// string or an integer, so an accepted number is already an integer by the time it becomes a key,
+/// and the text is its canonical rendering. The variant, not the text, carries the type distinction.
+/// Crate-private: the public field is unchanged, byte and API compatible.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum CorrelationId {
     Str(String),
@@ -148,18 +148,20 @@ pub(crate) enum CorrelationId {
 
 /// Read the correlation key from a message's raw JSON.
 ///
-/// `None` for an absent or unusable id. `normalize_jsonrpc_id` already refuses booleans, arrays and
-/// objects at the parser boundary, so only the two valid shapes reach this.
+/// `None` for an absent or unusable id. [`accept_id`] owns the vocabulary; the parser's shape
+/// diagnostics for booleans, arrays and objects are more specific messages for a subset of the same
+/// refusal.
 pub(crate) fn correlation_id(v: &serde_json::Value) -> Option<CorrelationId> {
     v.get("id").and_then(accept_id)
 }
 
 /// The one place that decides whether an id is usable, and what key it becomes.
 ///
-/// MCP restricts `RequestId` to a string or an integer. A fractional number is not an id, and
-/// neither is one spelled with an exponent: `1.0` and `1e0` both parse as floats, so neither is an
-/// integer even though the second equals one. Accepting them would give two spellings of one call
-/// two different keys, or one key to two different calls, depending on which side rendered.
+/// MCP restricts `RequestId` to a string or an integer, and this function is the only place that
+/// decides it. A fractional number is not an id, and neither is one spelled with an exponent: `1.0`
+/// and `1e0` both parse as floats, so neither is an integer even though the second equals one.
+/// Accepting them would give two spellings of one call two different keys, or one key to two
+/// different calls, depending on which side rendered.
 ///
 /// `CorrelationId::Num` therefore only ever comes from an accepted integer.
 pub(crate) fn accept_id(v: &serde_json::Value) -> Option<CorrelationId> {
@@ -172,13 +174,15 @@ pub(crate) fn accept_id(v: &serde_json::Value) -> Option<CorrelationId> {
     }
 }
 
-/// The text an accepted id renders to for the public `McpEvent::jsonrpc_id` field.
-pub(crate) fn accepted_id_text(id: &CorrelationId) -> String {
-    match id {
-        CorrelationId::Str(s) => s.clone(),
-        CorrelationId::Num(n) => n.clone(),
-    }
-}
+/// Methods this build gives request semantics to.
+///
+/// `tools/call` is `CallToolRequest` and `tools/list` is `ListToolsRequest`, and a request MUST carry
+/// an id. Without this, a request-only method could shed the id requirement simply by omitting the
+/// member, and with it the required 2026 `RequestParams._meta`, because notification metadata is
+/// optional. The list is deliberately the methods the parser already gives request payloads to
+/// rather than every method in the specification: an extension method with an unknown name stays a
+/// notification, so this refuses what is known to be a request instead of guessing about the rest.
+pub(crate) const REQUEST_ONLY_METHODS: &[&str] = &["tools/call", "tools/list"];
 
 /// Which JSON-RPC message shape this is, carrying the method so that nothing has to read it a
 /// second time.
@@ -219,14 +223,18 @@ pub(crate) enum MessageShapeError {
 ///
 /// A notification is a request object *without* an `id` member, so absence is the discriminant and
 /// nothing about the value is. An explicit `"id": null` is therefore a request, not a notification:
-/// `RequestId` is `string | number`, which makes a null id an invalid request id rather than an
-/// absent one, and calling it a notification drops the required 2026 request metadata for any
-/// message that writes that one token.
+/// MCP restricts `RequestId` to a string or an integer, which makes a null id an invalid request id
+/// rather than an absent one, and calling it a notification drops the required 2026 request metadata
+/// for any message that writes that one token.
 ///
 /// A present `method` that is not a string is a malformed message shape rather than a message of
 /// some other kind. Answering `Response` for it, which is what folding through `as_str()` does,
-/// silently drops the request-metadata requirement the same way. The id vocabulary is settled
-/// separately by `normalize_jsonrpc_id`, which refuses booleans, arrays and objects.
+/// silently drops the request-metadata requirement the same way. Absence is not the only way in:
+/// [`REQUEST_ONLY_METHODS`] classifies as requests whatever their id member does, so a request-only
+/// method cannot shed the requirement by omitting one.
+///
+/// The id vocabulary is not settled here. [`accept_id`] owns it; the parser adds more specific shape
+/// diagnostics for booleans, arrays and objects, which are a subset of the same refusal.
 pub(crate) fn classify_message(
     v: &serde_json::Value,
 ) -> Result<MessageKind<'_>, MessageShapeError> {
@@ -244,11 +252,13 @@ pub(crate) fn classify_message(
     let Some(method) = method.as_str() else {
         return Err(MessageShapeError::NonStringMethod);
     };
-    Ok(if v.get("id").is_some() {
-        MessageKind::Request { method }
-    } else {
-        MessageKind::Notification { method }
-    })
+    Ok(
+        if v.get("id").is_some() || REQUEST_ONLY_METHODS.contains(&method) {
+            MessageKind::Request { method }
+        } else {
+            MessageKind::Notification { method }
+        },
+    )
 }
 
 /// What a request carried in `params._meta`. Typed rather than `Option<String>` so that a missing

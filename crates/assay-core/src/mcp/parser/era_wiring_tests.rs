@@ -1401,11 +1401,15 @@ fn outstanding_ids_are_tracked_per_typed_key() {
 
 // --- RequestId shape: classify first, then accept the id its kind requires ----------------------
 
-/// MCP restricts `RequestId` to string or integer. A request must carry one, and `1.0` and the
-/// lexically-float `1e0` are not integers even though one of them equals an integer.
+/// MCP restricts `RequestId` to a string or an integer. A request must carry one, and neither a
+/// fractional number nor a null is one.
+///
+/// `1e0` is not in this loop: `json!` evaluates it to the same `f64` as `json!(1.0)`, so including it
+/// would test one case twice. The exponent spelling only survives as text, and
+/// `a_lexically_exponent_id_is_refused_from_raw_text` owns it.
 #[test]
 fn a_request_id_must_be_a_string_or_an_integer() {
-    for bad in [json!(1.0), json!(1e0), json!(null)] {
+    for bad in [json!(1.0), json!(null)] {
         let message = json!({"jsonrpc": "2.0", "id": bad, "method": "tools/call",
                              "params": {"name": "Calculator", "arguments": {}}});
         let input = framed(Some(headers(json!(V2026))), None, message);
@@ -1499,5 +1503,86 @@ fn an_unacceptable_response_id_can_never_license_terminal() {
     assert!(
         parse_mcp_transcript(&doc, McpInputFormat::StreamableHttp).is_err(),
         "a float response id is refused rather than silently correlated"
+    );
+}
+
+// --- Request-only methods cannot become notifications by omitting an id -------------------------
+
+/// `tools/call` is `CallToolRequest`. Treating every method-bearing object without an `id` as a
+/// notification let a request-only method shed the id requirement, and with it the required 2026
+/// `RequestParams._meta`, since notification metadata is optional. End to end under 2026 with no
+/// `_meta` at all.
+#[test]
+fn a_request_only_method_without_an_id_is_refused() {
+    for method in ["tools/call", "tools/list"] {
+        let message = json!({"jsonrpc": "2.0", "method": method,
+                             "params": {"name": "Calculator", "arguments": {}}});
+        let input = framed(Some(headers(json!(V2026))), None, message);
+        let err = parse_mcp_transcript(&input, McpInputFormat::StreamableHttp)
+            .expect_err(&format!("{method} without an id must be refused"));
+        let rendered = format!("{err:?}");
+        assert!(
+            rendered.contains("must be a string or an integer"),
+            "unexpected for {method}: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Calculator"),
+            "refusal echoed input: {rendered}"
+        );
+    }
+}
+
+/// The positive control that keeps this from becoming a ban on notifications. A real notification,
+/// and an extension method that is not one of the known request-only names, both stay ingestible
+/// without an id.
+#[test]
+fn real_and_extension_notifications_still_need_no_id() {
+    for method in ["notifications/progress", "x-vendor/telemetry"] {
+        let message = json!({"jsonrpc": "2.0", "method": method, "params": {}});
+        let input = framed(Some(headers(json!(V2026))), None, message);
+        assert!(
+            parse_mcp_transcript(&input, McpInputFormat::StreamableHttp).is_ok(),
+            "{method} must remain ingestible without an id"
+        );
+    }
+}
+
+/// The exponent form has to arrive as text: `json!(1e0)` builds the same `f64` as `json!(1.0)`, so a
+/// macro-built loop tests one case twice and proves nothing about the spelling.
+#[test]
+fn a_lexically_exponent_id_is_refused_from_raw_text() {
+    let raw = r#"{"transport":"streamable-http","transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28"}},"entries":[{"request":{"jsonrpc":"2.0","id":1e0,"method":"tools/call","params":{"name":"C","arguments":{}}}}]}"#;
+    assert!(
+        raw.contains("1e0"),
+        "the fixture must carry the exponent spelling"
+    );
+    let err = parse_mcp_transcript(raw, McpInputFormat::StreamableHttp)
+        .expect_err("an exponent-spelled id is not an integer");
+    assert!(
+        format!("{err:?}").contains("must be a string or an integer"),
+        "{err:?}"
+    );
+}
+
+/// The positive half of the security claim. Without it an implementation that refuses every id
+/// satisfies "an unacceptable id can never license Terminal" trivially.
+#[test]
+fn an_acceptable_integer_id_does_license_terminal_under_a_legacy_era() {
+    let request = json!({"jsonrpc": "2.0", "id": 1, "method": "notifications/x", "params": {}});
+    let response = json!({"jsonrpc": "2.0", "id": 1, "result": {"content": []}});
+    let events = detailed(
+        &two_entry_doc((request, V2025), (response, V2025)),
+        McpInputFormat::StreamableHttp,
+    );
+    let observed = events[1]
+        .context
+        .result_observation
+        .as_ref()
+        .expect("a response reports a result");
+    assert_eq!(observed, &ResultObservation::Missing);
+    assert_eq!(
+        conclude(&events[1].context.era, observed),
+        ResultConclusion::Terminal,
+        "a legacy era with an absent resultType is Terminal, which is the state the refusal protects"
     );
 }

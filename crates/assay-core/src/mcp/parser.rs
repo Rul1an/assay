@@ -1,5 +1,5 @@
 use crate::mcp::era::{
-    accept_id, accepted_id_text, classify_message, correlation_id, fold_envelope, observe_header,
+    accept_id, classify_message, correlation_id, fold_envelope, observe_header,
     observe_request_metadata, observe_result, resolve_era, EnvelopeObservation, McpEraContext,
     MessageKind, ParsedMcpEvent, RequestMetadata,
 };
@@ -585,9 +585,17 @@ fn auth_param_visible(header_value: &str, param_name: &str) -> bool {
 /// The existing type diagnostics for booleans, arrays and objects are kept: they are more specific
 /// than "not a string or an integer" and downstream tests pin them.
 fn require_acceptable_id(raw_id: Option<&serde_json::Value>, source_line: u64) -> Result<String> {
-    normalize_jsonrpc_id(raw_id, source_line)?;
+    // One match, one clone. The previous shape cloned the id inside `normalize_jsonrpc_id`, dropped
+    // that copy, cloned again into a `CorrelationId`, and cloned a third time into the public text —
+    // three transient copies of an attacker-controlled string on the hostile-input path, for a value
+    // that in the refusing case is discarded immediately.
+    reject_unusable_id_shape(raw_id, source_line)?;
+    // Through `accept_id`, not a second copy of its rule. Re-deciding the vocabulary here is what
+    // made the mutation on `accept_id` stop biting: two readers of one rule, which is the drift that
+    // already produced the method discriminant and the correlation key defects on this branch. One
+    // clone still, since `accept_id` builds the key and destructuring moves the string out of it.
     match raw_id.and_then(accept_id) {
-        Some(id) => Ok(accepted_id_text(&id)),
+        Some(CorrelationId::Str(id) | CorrelationId::Num(id)) => Ok(id),
         None => bail!(
             "JSON-RPC id on source line {} must be a string or an integer",
             source_line
@@ -595,14 +603,15 @@ fn require_acceptable_id(raw_id: Option<&serde_json::Value>, source_line: u64) -
     }
 }
 
-fn normalize_jsonrpc_id(
-    raw_id: Option<&serde_json::Value>,
-    source_line: u64,
-) -> Result<Option<String>> {
+/// The more specific type diagnostics, kept because they name the fault better than "not a string or
+/// an integer" and downstream tests pin them. Returns nothing: the accepted value is produced by the
+/// single match in [`require_acceptable_id`], so this no longer clones one to throw it away.
+fn reject_unusable_id_shape(raw_id: Option<&serde_json::Value>, source_line: u64) -> Result<()> {
     match raw_id {
-        None | Some(serde_json::Value::Null) => Ok(None),
-        Some(serde_json::Value::String(id)) => Ok(Some(id.clone())),
-        Some(serde_json::Value::Number(id)) => Ok(Some(id.to_string())),
+        None
+        | Some(serde_json::Value::Null)
+        | Some(serde_json::Value::String(_))
+        | Some(serde_json::Value::Number(_)) => Ok(()),
         Some(serde_json::Value::Bool(_)) => {
             bail!(
                 "JSON-RPC id on source line {} must not be a boolean",
