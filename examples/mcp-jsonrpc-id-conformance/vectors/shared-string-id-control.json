@@ -1,0 +1,15 @@
+{
+  "id": "shared-string-id-control",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": "call-1",
+    "error": {
+      "code": -32603,
+      "message": "Internal error"
+    }
+  },
+  "expected": {
+    "mcp": true,
+    "jsonrpc": true
+  }
+}

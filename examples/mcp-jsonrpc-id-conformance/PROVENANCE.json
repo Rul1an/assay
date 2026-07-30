@@ -1,0 +1,37 @@
+{
+  "schema": "assay.mcp-jsonrpc-id-conformance.provenance.v1",
+  "finding": {
+    "mcp_requires_jsonrpc_2": true,
+    "mcp_error_id_required": false,
+    "mcp_error_id_allows_null": false,
+    "jsonrpc_response_id_required": true,
+    "jsonrpc_unknown_id_must_be_null": true
+  },
+  "sources": {
+    "mcp_overview": {
+      "url": "https://modelcontextprotocol.io/specification/2026-07-28/basic/index",
+      "retrieved_at": "2026-07-30T10:32:06Z",
+      "sha256": "20f0180e475791cf6b9f7bddf6b7dc7dc5d0179f8464c2531c3fff5b3f0f84be"
+    },
+    "mcp_schema_typescript": {
+      "url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2026-07-28/schema.ts",
+      "commit": "5f5440bb26a62e2cf3440b92da5a667efa03b267",
+      "sha256": "742750af0bb8c716e7030c4977c992b55d1adc4407e9e66997db5846baedc2cd"
+    },
+    "mcp_schema_json": {
+      "url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2026-07-28/schema.json",
+      "commit": "5f5440bb26a62e2cf3440b92da5a667efa03b267",
+      "sha256": "ef70b61f99b6d2e5e3b46863822eab08dff6a45bedc7a08914e0e5b133f40203"
+    },
+    "jsonrpc_spec": {
+      "url": "https://www.jsonrpc.org/specification",
+      "retrieved_at": "2026-07-30T10:32:06Z",
+      "sha256": "8fe1edfdca511d309e712e47447457ea5159b728ec02071a84593aed692aefeb"
+    }
+  },
+  "vectors": {
+    "vectors/jsonrpc-error-with-null-id.json": "a70faadfa342931b6b7009906d09bc95fc24edbaa0d057961e5c618b06cf5647",
+    "vectors/mcp-error-with-omitted-id.json": "78eb51ce88d88b5821dbd9e7a01b333b97037400fa6252c718a26d1934614a97",
+    "vectors/shared-string-id-control.json": "ec005a27635a6ba52a5787fe83aeb421b7f6e2b6dbf6c36e19eb6a085705d309"
+  }
+}
