@@ -1,0 +1,18 @@
+{
+  "spec_repo": "modelcontextprotocol/modelcontextprotocol",
+  "spec_commit": "5f5440bb26a62e2cf3440b92da5a667efa03b267",
+  "schemas": [
+    { "era": "2026-07-28", "path": "schema/2026-07-28/schema.json",
+      "vendored_as": "schema-2026-07-28.json",
+      "sha256": "ef70b61f99b6d2e5e3b46863822eab08dff6a45bedc7a08914e0e5b133f40203" },
+    { "era": "2025-06-18", "path": "schema/2025-06-18/schema.json",
+      "vendored_as": "schema-2025-06-18.json",
+      "sha256": "af845e7e5b9d27107d1690f0936022546177a1403e63ffb11470135b296a2e01" }
+  ],
+  "schema_note": "One artifact per era a vector actually declares. The legacy vector carries 2025-06-18, so that is the artifact it is validated against; validating it against a different revision would answer a question no vector asks. In 2025-06-18 CallToolResult requires only content, which is why an absent resultType is valid there rather than merely tolerated.",
+  "profile_baseline": {
+    "manifest": "conformance/privileged-mcp-action-v0/MANIFEST.json",
+    "row": "ok-003-allow-no-outcome-observation",
+    "why": "A baseline supplied by the surrounding producer-reported policy evidence, not a profile these bytes establish. A wire transcript cannot confirm policy_decision_recorded: that cell rests on Assay's own decision record, which is not in the fixture. What the transcript can do is fail to move the other three, and the row states them all incomplete for exactly that reason."
+  }
+}

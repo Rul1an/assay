@@ -1,6 +1,8 @@
 pub mod audit;
 pub mod decision;
 pub(crate) mod era;
+#[cfg(test)]
+mod era_parity_tests;
 pub mod g3_auth_context;
 
 pub use g3_auth_context::AuthContextProjection;

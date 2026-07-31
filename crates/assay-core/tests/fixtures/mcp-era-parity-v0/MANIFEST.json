@@ -1,0 +1,489 @@
+{
+  "corpus": "mcp-era-parity-v0",
+  "maturity": "exploratory",
+  "maturity_note": "Lower than conformance/privileged-mcp-action-v0. No reproduction request, no frozen digest, and no claim here inherits that corpus's standing.",
+  "pin": "PIN.json",
+  "layers": [
+    "schema is per message and per era: request_message is the whole JSON-RPC request, result_payload is the result object only, and every hop is validated",
+    "observation is what the transcript carried",
+    "conclusion is what the observation licenses under the resolved era",
+    "profile is not restated here; every vector references the frozen baseline row named in PIN.json"
+  ],
+  "profile_note": "The referenced row is a baseline supplied by the surrounding producer-reported policy evidence, not a profile derived from these bytes. A wire transcript cannot confirm policy_decision_recorded: that cell rests on Assay's own decision record, which is not in the fixture, and caller_visible_denial is not inferable from a transcript either. What these vectors can do is fail to move upstream_delivery and external_side_effect, and the row keeps all three incomplete for exactly that reason.",
+  "vectors": [
+    {
+      "id": "legacy-missing-result-type",
+      "file": "vectors/legacy-missing-result-type.json",
+      "why": "schema.ts:230-232 makes an absent field a MUST-read of \"complete\" for earlier versions, so this is terminal by rule and not by inference.",
+      "schema": {
+        "era": "2025-06-18",
+        "why": "The vector declares 2025-06-18, so that is the artifact it is validated against. There CallToolResult requires only content, so an absent resultType is valid by definition rather than tolerated.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "valid"
+        },
+        "result_payload": {
+          "definition": "CallToolResult",
+          "expect": "valid"
+        }
+      },
+      "observation": {
+        "era": "known:2025-06-18",
+        "result": "missing"
+      },
+      "conclusion": "terminal",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "modern-complete",
+      "file": "vectors/modern-complete.json",
+      "why": "The 2026 arm of the equivalence pair.",
+      "schema": {
+        "era": "2026-07-28",
+        "why": "Ordinary 2026 call. RequestMetaObject requires both clientCapabilities and protocolVersion, and this request carries both.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "valid"
+        },
+        "result_payload": {
+          "definition": "CallToolResult",
+          "expect": "valid"
+        }
+      },
+      "observation": {
+        "era": "known:2026-07-28",
+        "result": "complete"
+      },
+      "conclusion": "terminal",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "modern-input-required",
+      "file": "vectors/modern-input-required.json",
+      "why": "Valid and unfinished. Neither delivery cell may leave incomplete.",
+      "schema": {
+        "era": "2026-07-28",
+        "why": "The single-hop interim shape, validated against its own definition. multi-hop-input-required uses the same definition for its two rounds.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "valid"
+        },
+        "result_payload": {
+          "definition": "InputRequiredResult",
+          "expect": "valid"
+        }
+      },
+      "observation": {
+        "era": "known:2026-07-28",
+        "result": "input_required"
+      },
+      "conclusion": "non_terminal",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "modern-missing-result-type",
+      "file": "vectors/modern-missing-result-type.json",
+      "why": "schema.ts:229 makes the field required from this version, so absence is a violation only once the era is determined as 2026. Absence alone is not.",
+      "schema": {
+        "era": "2026-07-28",
+        "why": "The response omits a required member, so the schema refuses it. This is the one class where schema and conclusion happen to agree, which is why it cannot stand in for the others.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "valid"
+        },
+        "result_payload": {
+          "definition": "CallToolResult",
+          "expect": "invalid"
+        }
+      },
+      "observation": {
+        "era": "known:2026-07-28",
+        "result": "missing"
+      },
+      "conclusion": "invalid:missing_result_type",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "modern-unrecognized-token",
+      "file": "vectors/modern-unrecognized-token.json",
+      "why": "The result-token axis: the handling rule is a SHOULD (2322-MRTR.mdx:341), so conforming verifiers may differ and Assay cannot know the action completed. An ordinary conforming 2026 request, so its capability set is present and empty; the row declares that rather than leaving it implied. It carries its own token, because two vectors with identical bytes cannot be exercising two different things.",
+      "schema": {
+        "era": "2026-07-28",
+        "why": "ResultType is an open string, so an unknown token is accepted. Accepted and unreadable at once, which is the gap between the layers.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "valid"
+        },
+        "result_payload": {
+          "definition": "CallToolResult",
+          "expect": "valid"
+        }
+      },
+      "observation": {
+        "era": "known:2026-07-28",
+        "capabilities": "core_only",
+        "result": "unrecognized"
+      },
+      "conclusion": "incomplete:unrecognized_result_type",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "complete-with-input-requests",
+      "file": "vectors/complete-with-input-requests.json",
+      "why": "THE LOAD-BEARING EDGE. ResultType is {\"type\":\"string\"} with no enum, and CallToolResult does not set additionalProperties:false, so the published schema accepts a result claiming completion while carrying input requests. Accepted by the schema and contradictory in meaning: Assay must not conclude terminal.",
+      "schema": {
+        "era": "2026-07-28",
+        "why": "Result-schema acceptance only. That the CallToolResult definition accepts these bytes is not a statement about the transcript as a whole, and still less about whether the action completed.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "valid"
+        },
+        "result_payload": {
+          "definition": "CallToolResult",
+          "expect": "valid"
+        }
+      },
+      "observation": {
+        "era": "known:2026-07-28",
+        "result": "complete_with_continuation"
+      },
+      "conclusion": "incomplete:contradictory_result",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "complete-with-request-state",
+      "file": "vectors/complete-with-request-state.json",
+      "why": "THE SAME LOAD-BEARING EDGE, IN ITS OTHER FORM. InputRequiredResult requires at least one of inputRequests or requestState, so both carry a call forward and a completion claim beside either is the same contradiction. A rule that reads only inputRequests leaves a transcript able to state this in a way Assay cannot see, which is why the twin is a vector and not a footnote on the first one.",
+      "schema": {
+        "era": "2026-07-28",
+        "why": "CallToolResult sets no additionalProperties:false and does not list requestState, so this is schema-legal for the same structural reason the inputRequests form is. Accepted by the artifact, contradictory in meaning.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "valid"
+        },
+        "result_payload": {
+          "definition": "CallToolResult",
+          "expect": "valid"
+        }
+      },
+      "observation": {
+        "era": "known:2026-07-28",
+        "result": "complete_with_continuation"
+      },
+      "conclusion": "incomplete:contradictory_result",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "input-required-without-continuation",
+      "why": "THE LOAD-BEARING EDGE ON THE INTERIM ARM. InputRequiredResult says in prose that at least one of inputRequests or requestState MUST be present, and its JSON Schema does not encode that: required lists only resultType. A result asking for input while naming no request and offering no continuation token therefore passes the published definition and cannot be answered. Reading it as an ordinary interim result would report a call as validly unfinished when nothing can finish it.",
+      "file": "vectors/input-required-without-continuation.json",
+      "schema": {
+        "era": "2026-07-28",
+        "why": "Validated against InputRequiredResult on purpose: the definition that carries the prose requirement is the one that accepts a result violating it. That gap between prose and encoding is the finding, and a schema verdict cannot state it.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "valid"
+        },
+        "result_payload": {
+          "definition": "InputRequiredResult",
+          "expect": "valid"
+        }
+      },
+      "observation": {
+        "era": "known:2026-07-28",
+        "result": "input_required_without_continuation"
+      },
+      "conclusion": "invalid:uncontinuable_input_required",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "input-required-null-continuation",
+      "why": "The explicit-null twin. An absent member and a member present as null are the same silence, and the continuation read says so on both arms: null does not make a completion claim contradictory, and it does not make an interim result continuable either. Without this vector a rule could count presence rather than content and still pass.",
+      "file": "vectors/input-required-null-continuation.json",
+      "schema": {
+        "era": "2026-07-28",
+        "why": "Validated against CallToolResult, which is the accepting definition here: it lists neither member and sets no additionalProperties:false, so a null is legal. Under InputRequiredResult the same bytes are refused, because there the members are typed. Naming the accepting definition keeps the row honest about which question was asked.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "valid"
+        },
+        "result_payload": {
+          "definition": "CallToolResult",
+          "expect": "valid"
+        }
+      },
+      "observation": {
+        "era": "known:2026-07-28",
+        "result": "input_required_without_continuation"
+      },
+      "conclusion": "invalid:uncontinuable_input_required",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "correlation-id-type-collision",
+      "file": "vectors/correlation-id-type-collision.json",
+      "why": "Numeric 1 and string \"1\" are two calls, and the public McpEvent.jsonrpc_id renders them identically. The corpus keys on the typed CorrelationId the parser correlates on, so a harness that flattened either side would score one response twice and leave the other unread while reporting full coverage. The two calls advertise different capability sets, so a mispairing also changes a conclusion rather than only a label.",
+      "schema": {
+        "era": "2026-07-28",
+        "why": "Both requests carry the required metadata and ResultType is an open string, so all four messages validate. The identity question is invisible to the schema, which is why it is the conclusion layer's to answer.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "valid"
+        },
+        "result_payload": {
+          "definition": "CallToolResult",
+          "expect": "valid"
+        }
+      },
+      "observation": {
+        "era": "known:2026-07-28",
+        "result": "unrecognized",
+        "hops": 2,
+        "inferred_pairing": false
+      },
+      "per_call": [
+        {
+          "jsonrpc_id": 1,
+          "capabilities": "core_only",
+          "conclusion": "incomplete:unrecognized_result_type",
+          "why": "The numeric call states a core-only set, so the token is definitively unrecognized."
+        },
+        {
+          "jsonrpc_id": "1",
+          "capabilities": "extension_not_understood",
+          "conclusion": "incomplete:recognition_undeterminable",
+          "why": "The string call advertises an extension this build does not read, so recognition cannot be decided. A flattened key would hand this answer to both."
+        }
+      ],
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "conflicting-era-signals",
+      "file": "vectors/conflicting-era-signals.json",
+      "why": "Header says 2025, request _meta says 2026. The spec makes the mismatch a defined fault, so this refuses rather than resolving toward either side, and the refusal is distinct from unknown.",
+      "schema": {
+        "era": "ambiguous",
+        "why": "No single artifact applies, and the disagreement is narrower than it looks. The request validates under both: 2025-06-18 does not forbid the extra _meta members, and the request carries exactly what 2026-07-28 requires. Only the result flips, because the legacy CallToolResult requires only content while the modern one also requires resultType. Reporting one boolean would be choosing a side the transcript does not license, which is the fault the vector exists to catch. the_conflicting_vector_flips_only_on_the_result pins all four outcomes.",
+        "request_message": {
+          "definition": null,
+          "expect": "not_applicable"
+        },
+        "result_payload": {
+          "definition": null,
+          "expect": "not_applicable"
+        }
+      },
+      "observation": {
+        "era": "conflicting:2025-06-18/2026-07-28",
+        "result": "missing"
+      },
+      "conclusion": "invalid:era_conflicting",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "unknown-era",
+      "file": "vectors/unknown-era.json",
+      "why": "No header and no _meta. An absent resultType is then either a MUST-mandated complete or a MUST violation, and the transcript cannot distinguish them. Distinct from conflicting: unknown may become conclusive with more evidence.",
+      "schema": {
+        "era": "ambiguous",
+        "why": "Which artifact applies is exactly what is unknown. A schema verdict here would be manufactured, and the honest record is that the question cannot be asked.",
+        "request_message": {
+          "definition": null,
+          "expect": "not_applicable"
+        },
+        "result_payload": {
+          "definition": null,
+          "expect": "not_applicable"
+        }
+      },
+      "observation": {
+        "era": "unknown:no_signal",
+        "result": "missing"
+      },
+      "conclusion": "incomplete:era_unknown",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "capabilities-core-only-noncore-token",
+      "file": "vectors/capabilities-core-only-noncore-token.json",
+      "why": "The capability set is present and advertises no extensions, so a non-core token is known to be unrecognized. Incomplete because this build cannot say the action completed, not because recognition was undeterminable.",
+      "schema": {
+        "era": "2026-07-28",
+        "why": "clientCapabilities is present and empty, which is a complete statement that nothing beyond core is advertised.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "valid"
+        },
+        "result_payload": {
+          "definition": "CallToolResult",
+          "expect": "valid"
+        }
+      },
+      "observation": {
+        "era": "known:2026-07-28",
+        "capabilities": "core_only",
+        "result": "unrecognized"
+      },
+      "conclusion": "incomplete:unrecognized_result_type",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "capabilities-absent-noncore-token",
+      "file": "vectors/capabilities-absent-noncore-token.json",
+      "why": "Same token, no capability set. Recognition is capability-relative (2322-MRTR.mdx:339), so this is undeterminable rather than known-unrecognized. Same cells, different reason, and the reason must survive.",
+      "schema": {
+        "era": "2026-07-28",
+        "why": "Schema-invalid by design: RequestMetaObject requires clientCapabilities and this request omits it. The vector exists because a transcript can be malformed in exactly this way, and the conclusion layer must still say something honest about it.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "invalid"
+        },
+        "result_payload": {
+          "definition": "CallToolResult",
+          "expect": "valid"
+        }
+      },
+      "observation": {
+        "era": "known:2026-07-28",
+        "capabilities": "absent",
+        "result": "unrecognized"
+      },
+      "conclusion": "incomplete:recognition_undeterminable",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "capabilities-unknown-extension",
+      "file": "vectors/capabilities-unknown-extension.json",
+      "why": "An extension is advertised that this build does not understand. Assay must not invent a mapping from extension name to result token: it stays incomplete because the advertised vocabulary is not one it reads.",
+      "schema": {
+        "era": "2026-07-28",
+        "why": "An advertised extension is schema-legal. Being legal and being understood are different questions, which is the whole point of the vector.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "valid"
+        },
+        "result_payload": {
+          "definition": "CallToolResult",
+          "expect": "valid"
+        }
+      },
+      "observation": {
+        "era": "known:2026-07-28",
+        "capabilities": "extension_not_understood",
+        "result": "unrecognized"
+      },
+      "conclusion": "incomplete:recognition_undeterminable",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "traceparent-present",
+      "file": "vectors/traceparent-present.json",
+      "why": "Identical to modern-complete except for a traceparent in request _meta. SEP-414 is a propagation convention, so this is a correlation hint and never evidence.",
+      "schema": {
+        "era": "2026-07-28",
+        "why": "RequestMetaObject permits additional members, so a traceparent is schema-legal.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "valid"
+        },
+        "result_payload": {
+          "definition": "CallToolResult",
+          "expect": "valid"
+        }
+      },
+      "observation": {
+        "era": "known:2026-07-28",
+        "result": "complete"
+      },
+      "conclusion": "terminal",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "multi-hop-input-required",
+      "file": "vectors/multi-hop-input-required.json",
+      "why": "Two input_required rounds on distinct ids carrying requestState. Each hop is its own record and no pairing is inferred: requestState is an opaque continuation token the client echoes, not an identity Assay may join on.",
+      "schema": {
+        "era": "2026-07-28",
+        "why": "InputRequiredResult requires at least one of inputRequests or requestState; these hops carry requestState.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "valid"
+        },
+        "result_payload": {
+          "definition": "InputRequiredResult",
+          "expect": "valid"
+        }
+      },
+      "observation": {
+        "era": "known:2026-07-28",
+        "result": "input_required",
+        "hops": 2,
+        "inferred_pairing": false
+      },
+      "conclusion": "non_terminal",
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    },
+    {
+      "id": "per-request-capabilities-interleaved",
+      "file": "vectors/per-request-capabilities-interleaved.json",
+      "why": "Capabilities are stated per request and MUST NOT be inferred from a prior one. Two calls on distinct ids advertise different capability sets and their responses arrive in reverse order, both carrying the same unrecognized token. The token is identical on purpose: the only thing that can separate the two conclusions is which request each response belongs to. The token also equals the advertised extension name, which tempts the inference the corpus forbids — no mapping from an extension name to a result token may be invented.",
+      "schema": {
+        "era": "2026-07-28",
+        "why": "Both requests carry RequestMetaObject with clientCapabilities and protocolVersion, so both validate. An advertised extension is schema-legal, and ResultType is an open string, so both responses validate too.",
+        "request_message": {
+          "definition": "CallToolRequest",
+          "expect": "valid"
+        },
+        "result_payload": {
+          "definition": "CallToolResult",
+          "expect": "valid"
+        }
+      },
+      "observation": {
+        "era": "known:2026-07-28",
+        "result": "unrecognized",
+        "hops": 2,
+        "inferred_pairing": false
+      },
+      "per_call": [
+        {
+          "jsonrpc_id": 1,
+          "capabilities": "core_only",
+          "conclusion": "incomplete:unrecognized_result_type",
+          "why": "Its own request advertises a present and empty capability set, which is a complete statement that nothing beyond core is offered. The token is therefore definitively unrecognized."
+        },
+        {
+          "jsonrpc_id": 2,
+          "capabilities": "extension_not_understood",
+          "conclusion": "incomplete:recognition_undeterminable",
+          "why": "Its own request advertises an extension this build does not read, so whether the token is covered cannot be decided. Last-seen state would give this answer to both responses and transcript-global state would give one answer to both; the pair of exact expectations rules out each."
+        }
+      ],
+      "profile_baseline": "ok-003-allow-no-outcome-observation"
+    }
+  ],
+  "equivalence_pairs": [
+    {
+      "pair": [
+        "legacy-missing-result-type",
+        "modern-complete"
+      ],
+      "why": "Equivalent calls across eras. Same conclusion and same profile row, which is the parity claim itself."
+    },
+    {
+      "pair": [
+        "modern-complete",
+        "traceparent-present"
+      ],
+      "why": "Correlation metadata must not change the conclusion or the referenced row."
+    }
+  ],
+  "non_claims": [
+    "A schema verdict is per message and per era. It says the pinned artifact accepts those bytes and nothing about whether the action completed.",
+    "Two vectors state no schema verdict at all, because which artifact applies is exactly what they leave undetermined.",
+    "No vector restates the four-cell matrix; each references the frozen ok-003 baseline so the two cannot drift.",
+    "The referenced row is a baseline from surrounding producer-reported evidence. These transcripts carry wire messages, so they cannot confirm policy_decision_recorded or infer caller_visible_denial, and nothing here can upgrade a delivery cell.",
+    "No vector introduces a profile term, a generic verdict, a scalar score, or a conformance claim.",
+    "requestState is an opaque continuation token, not a correlation identity."
+  ]
+}
