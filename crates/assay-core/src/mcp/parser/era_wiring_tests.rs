@@ -231,6 +231,17 @@ fn observed(result_type: Option<Value>) -> ResultObservation {
         .expect("a response event")
 }
 
+/// As `observed`, for a result that also carries a continuation member.
+fn observed_with_continuation(result_type: Value) -> ResultObservation {
+    let mut msg = response(Some(result_type));
+    msg["result"]["requestState"] = json!("s1");
+    let input = framed(Some(headers(json!(V2026))), None, msg);
+    detailed(&input, McpInputFormat::StreamableHttp)
+        .into_iter()
+        .find_map(|e| e.context.result_observation)
+        .expect("a response event")
+}
+
 #[test]
 fn every_result_type_shape_reaches_the_axis() {
     assert_eq!(observed(None), ResultObservation::Missing);
@@ -238,8 +249,16 @@ fn every_result_type_shape_reaches_the_axis() {
         observed(Some(json!("complete"))),
         ResultObservation::Complete
     );
+    // `input_required` reaches two points, not one, and which one depends on whether the result
+    // carries a way to continue. `response` builds a bare result, so the bare token is the
+    // uncontinuable shape: `InputRequiredResult` requires at least one of `inputRequests` or
+    // `requestState` in prose and encodes neither, so this is the shape the schema lets through.
     assert_eq!(
         observed(Some(json!("input_required"))),
+        ResultObservation::InputRequiredWithoutContinuation
+    );
+    assert_eq!(
+        observed_with_continuation(json!("input_required")),
         ResultObservation::InputRequired
     );
     assert_eq!(
@@ -644,7 +663,8 @@ fn composite_a_null_result_under_a_legacy_era_is_invalid() {
     assert_eq!(
         conclude(
             &event.context.era,
-            event.context.result_observation.as_ref().unwrap()
+            event.context.result_observation.as_ref().unwrap(),
+            None
         ),
         ResultConclusion::Invalid(InvalidReason::MalformedResultType)
     );
@@ -666,10 +686,15 @@ fn composite_an_unknown_token_is_incomplete_and_value_free() {
     let conclusion = conclude(
         &event.context.era,
         event.context.result_observation.as_ref().unwrap(),
+        None,
     );
+    // No request is framed here, so the parser leaves `capability_observation: None`. Under a
+    // revision that defines the capability set, that cannot reach the closed answer: nothing was
+    // ever advertised to this build, so "nothing advertised covers it" has no ground.
+    assert_eq!(event.context.capability_observation, None);
     assert_eq!(
         conclusion,
-        ResultConclusion::Incomplete(IncompleteReason::UnrecognizedResultType)
+        ResultConclusion::Incomplete(IncompleteReason::RecognitionUndeterminable)
     );
     assert!(
         !format!("{conclusion:?}").contains("banana"),
@@ -735,7 +760,11 @@ fn composite_a_deviant_params_under_a_legacy_era_is_invalid() {
         .expect("a request reports metadata");
     assert_eq!(observed, &RequestMetadata::Malformed);
     assert_eq!(
-        conclude_request(&event.context.era, observed),
+        conclude_request(
+            &event.context.era,
+            observed,
+            Some(&CapabilityObservation::CoreOnly)
+        ),
         RequestAssessment::Invalid(InvalidReason::MalformedRequestMetadata)
     );
 }
@@ -756,7 +785,11 @@ fn composite_a_deviant_params_at_2026_is_invalid_for_the_container_not_the_era()
         .expect("a request reports metadata");
     assert_eq!(observed, &RequestMetadata::Malformed);
     assert_eq!(
-        conclude_request(&event.context.era, observed),
+        conclude_request(
+            &event.context.era,
+            observed,
+            Some(&CapabilityObservation::CoreOnly)
+        ),
         RequestAssessment::Invalid(InvalidReason::MalformedRequestMetadata)
     );
 }
@@ -990,7 +1023,7 @@ fn a_response_inherits_the_conflicting_era_of_its_call() {
         .expect("a response reports a result");
     assert_eq!(observed, &ResultObservation::Missing);
     assert_eq!(
-        conclude(&resp_event.context.era, observed),
+        conclude(&resp_event.context.era, observed, None),
         ResultConclusion::Invalid(InvalidReason::EraConflicting {
             header: V2025.into(),
             body: V2026.into()
@@ -1355,7 +1388,7 @@ fn a_numeric_id_does_not_correlate_with_a_string_id() {
         .as_ref()
         .expect("a response reports a result");
     assert_eq!(
-        conclude(&events[1].context.era, observed),
+        conclude(&events[1].context.era, observed, None),
         ResultConclusion::Invalid(InvalidReason::MissingResultType)
     );
 }
@@ -1581,7 +1614,7 @@ fn an_acceptable_integer_id_does_license_terminal_under_a_legacy_era() {
         .expect("a response reports a result");
     assert_eq!(observed, &ResultObservation::Missing);
     assert_eq!(
-        conclude(&events[1].context.era, observed),
+        conclude(&events[1].context.era, observed, None),
         ResultConclusion::Terminal,
         "a legacy era with an absent resultType is Terminal, which is the state the refusal protects"
     );

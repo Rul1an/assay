@@ -23,11 +23,24 @@ repos:
         # exactly so the manifest sha256 digest committed in matrix.json
         # is reproducible from the committed files. Adding a trailing
         # newline silently breaks the tamper-evident binding contract.
+        #
+        # Same rule, same reason, for the vendored MCP schema artifacts: they
+        # are verbatim copies from a pinned spec commit and PIN.json records a
+        # sha256 over the committed bytes. A trailing newline changes the
+        # digest, so the pin would either fail or have to be re-recorded
+        # against bytes that no longer match upstream — which is exactly the
+        # property the pin exists to prove.
         exclude: |
-          (?x)^docs/experiments/.+/archive-contents/.+$
+          (?x)^(
+            docs/experiments/.+/archive-contents/.+
+            |crates/assay-core/tests/fixtures/mcp-era-parity-v0/schema-.+\.json
+          )$
       - id: trailing-whitespace
         exclude: |
-          (?x)^docs/experiments/.+/archive-contents/.+$
+          (?x)^(
+            docs/experiments/.+/archive-contents/.+
+            |crates/assay-core/tests/fixtures/mcp-era-parity-v0/schema-.+\.json
+          )$
 
   # GitGuardian secrets detection (manual/local opt-in; requires GITGUARDIAN_API_KEY)
   - repo: https://github.com/gitguardian/ggshield

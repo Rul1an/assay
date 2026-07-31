@@ -105,7 +105,8 @@ fn complete_at_2026_is_terminal() {
     assert_eq!(
         conclude(
             &EraResolution::Known(V2026.into()),
-            &ResultObservation::Complete
+            &ResultObservation::Complete,
+            None
         ),
         ResultConclusion::Terminal
     );
@@ -117,18 +118,23 @@ fn input_required_is_valid_but_not_terminal() {
     assert_eq!(
         conclude(
             &EraResolution::Known(V2026.into()),
-            &ResultObservation::InputRequired
+            &ResultObservation::InputRequired,
+            None
         ),
         ResultConclusion::NonTerminal
     );
 }
 
+/// The closed answer, which is now the capability-relative one. `CoreOnly` is what this assertion
+/// always meant: a set was stated and nothing in it could cover the token. Passing no observation
+/// here would assert a different thing, because an unseen set cannot settle the question.
 #[test]
 fn an_unrecognized_token_is_incomplete_not_invalid() {
     assert_eq!(
         conclude(
             &EraResolution::Known(V2026.into()),
-            &ResultObservation::Unrecognized
+            &ResultObservation::Unrecognized,
+            Some(&CapabilityObservation::CoreOnly)
         ),
         ResultConclusion::Incomplete(IncompleteReason::UnrecognizedResultType)
     );
@@ -139,7 +145,8 @@ fn missing_result_type_at_2026_is_invalid() {
     assert_eq!(
         conclude(
             &EraResolution::Known(V2026.into()),
-            &ResultObservation::Missing
+            &ResultObservation::Missing,
+            None
         ),
         ResultConclusion::Invalid(InvalidReason::MissingResultType)
     );
@@ -151,7 +158,8 @@ fn missing_result_type_before_2026_is_terminal() {
     assert_eq!(
         conclude(
             &EraResolution::Known(V2025.into()),
-            &ResultObservation::Missing
+            &ResultObservation::Missing,
+            None
         ),
         ResultConclusion::Terminal
     );
@@ -162,7 +170,8 @@ fn an_unknown_era_blocks_as_incomplete() {
     assert_eq!(
         conclude(
             &EraResolution::Unknown(UnknownReason::NoSignal),
-            &ResultObservation::Complete
+            &ResultObservation::Complete,
+            None
         ),
         ResultConclusion::Incomplete(IncompleteReason::EraUnknown(UnknownReason::NoSignal))
     );
@@ -177,7 +186,8 @@ fn a_conflicting_era_blocks_as_invalid() {
                 header: V2025.into(),
                 body: V2026.into()
             },
-            &ResultObservation::Complete
+            &ResultObservation::Complete,
+            None
         ),
         ResultConclusion::Invalid(InvalidReason::EraConflicting {
             header: V2025.into(),
@@ -195,7 +205,8 @@ fn a_2026_request_without_metadata_is_invalid() {
     assert_eq!(
         conclude_request(
             &EraResolution::Known(V2026.into()),
-            &RequestMetadata::Absent
+            &RequestMetadata::Absent,
+            Some(&CapabilityObservation::CoreOnly),
         ),
         RequestAssessment::Invalid(InvalidReason::MissingRequestMetadata)
     );
@@ -207,7 +218,8 @@ fn a_2026_request_with_malformed_metadata_is_invalid_for_a_different_reason() {
     assert_eq!(
         conclude_request(
             &EraResolution::Known(V2026.into()),
-            &RequestMetadata::Malformed
+            &RequestMetadata::Malformed,
+            Some(&CapabilityObservation::CoreOnly),
         ),
         RequestAssessment::Invalid(InvalidReason::MalformedRequestMetadata)
     );
@@ -219,7 +231,8 @@ fn a_legacy_request_without_metadata_is_not_invalid() {
     assert_eq!(
         conclude_request(
             &EraResolution::Known(V2025.into()),
-            &RequestMetadata::Absent
+            &RequestMetadata::Absent,
+            Some(&CapabilityObservation::CoreOnly),
         ),
         RequestAssessment::Valid
     );
@@ -230,7 +243,8 @@ fn a_2026_request_carrying_metadata_is_not_invalid() {
     assert_eq!(
         conclude_request(
             &EraResolution::Known(V2026.into()),
-            &RequestMetadata::Present(V2026.into())
+            &RequestMetadata::Present(V2026.into()),
+            Some(&CapabilityObservation::CoreOnly),
         ),
         RequestAssessment::Valid
     );
@@ -280,7 +294,7 @@ fn composite_malformed_metadata_under_a_2026_header_is_invalid() {
     let metadata = RequestMetadata::Malformed;
     let era = resolve_era(&envelope, &metadata);
     assert_eq!(
-        conclude_request(&era, &metadata),
+        conclude_request(&era, &metadata, Some(&CapabilityObservation::CoreOnly)),
         RequestAssessment::Invalid(InvalidReason::MalformedRequestMetadata)
     );
 }
@@ -294,7 +308,7 @@ fn composite_a_conflicting_request_without_a_response_is_invalid() {
     let metadata = RequestMetadata::Present(V2026.into());
     let era = resolve_era(&envelope, &metadata);
     assert_eq!(
-        conclude_request(&era, &metadata),
+        conclude_request(&era, &metadata, Some(&CapabilityObservation::CoreOnly)),
         RequestAssessment::Invalid(InvalidReason::EraConflicting {
             header: V2025.into(),
             body: V2026.into()
@@ -373,7 +387,7 @@ fn composite_a_malformed_header_makes_the_request_invalid() {
     let era = resolve_era(&envelope, &metadata);
     assert_eq!(era, EraResolution::Unknown(UnknownReason::MalformedSignal));
     assert_eq!(
-        conclude_request(&era, &metadata),
+        conclude_request(&era, &metadata, Some(&CapabilityObservation::CoreOnly)),
         RequestAssessment::Invalid(InvalidReason::MalformedEraSignal)
     );
 }
@@ -387,7 +401,7 @@ fn composite_a_malformed_signal_makes_the_result_invalid() {
         &RequestMetadata::Absent,
     );
     assert_eq!(
-        conclude(&era, &ResultObservation::Complete),
+        conclude(&era, &ResultObservation::Complete, None),
         ResultConclusion::Invalid(InvalidReason::MalformedEraSignal)
     );
 }
@@ -428,7 +442,7 @@ fn composite_a_malformed_result_type_at_2026_is_invalid() {
         &RequestMetadata::Present(V2026.into()),
     );
     assert_eq!(
-        conclude(&era, &ResultObservation::Malformed),
+        conclude(&era, &ResultObservation::Malformed, None),
         ResultConclusion::Invalid(InvalidReason::MalformedResultType)
     );
 }
@@ -444,7 +458,7 @@ fn composite_a_malformed_result_type_before_2026_is_not_complete() {
     );
     assert_eq!(era, EraResolution::Known(V2025.into()));
     assert_eq!(
-        conclude(&era, &ResultObservation::Malformed),
+        conclude(&era, &ResultObservation::Malformed, None),
         ResultConclusion::Invalid(InvalidReason::MalformedResultType)
     );
 }
@@ -459,7 +473,7 @@ fn a_malformed_result_survives_an_unknown_era() {
         EraResolution::Unknown(UnknownReason::UnsupportedVersion("2031-01-01".into())),
     ] {
         assert_eq!(
-            conclude(&era, &ResultObservation::Malformed),
+            conclude(&era, &ResultObservation::Malformed, None),
             ResultConclusion::Invalid(InvalidReason::MalformedResultType)
         );
     }

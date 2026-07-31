@@ -1,0 +1,3 @@
+{"transport":"streamable-http","transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28"}},
+ "entries":[{"timestamp_ms":1000,"request":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"Calc","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}},
+  {"timestamp_ms":1001,"response":{"jsonrpc":"2.0","id":1,"result":{"resultType":"input_required","content":[]}}}]}

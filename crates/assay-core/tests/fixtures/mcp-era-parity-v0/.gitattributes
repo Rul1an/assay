@@ -1,0 +1,16 @@
+# The vendored schema artifacts are byte-exact copies of a pinned spec commit,
+# and PIN.json records a sha256 over those bytes which the corpus checks before
+# using either one. Git's end-of-line translation would rewrite them on
+# checkout — on Windows the LF blobs come back as CRLF — so the digest fails
+# and the pin reports tampering where there was none. `-text` turns that
+# translation off and nothing else.
+#
+# Scoped to this directory on purpose. The repository-root .gitattributes is a
+# trigger path for the MCP 2026 JSON-RPC id conformance lane, which is unrelated
+# to this corpus; a nested file carries the same rule without pulling that lane
+# into every change here.
+#
+# Deliberately not `-whitespace`. These files end with a blank line, exactly as
+# upstream publishes them, and `git diff --check` reporting that is a fact worth
+# keeping visible rather than a warning worth suppressing.
+schema-*.json -text

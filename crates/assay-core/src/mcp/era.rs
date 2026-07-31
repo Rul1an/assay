@@ -443,9 +443,72 @@ pub(crate) enum ResultObservation {
     /// every log that ingests the finding while telling a reader nothing they can act on: the
     /// actionable fact is that this build has no rule for it, not which bytes it was.
     Unrecognized,
+    /// The result claims completion and carries a continuation member in the same object.
+    ///
+    /// Either form counts. `InputRequiredResult` requires at least one of `inputRequests` or
+    /// `requestState`, so both carry a call forward, and a completion claim beside either one is
+    /// the same disagreement about whether the action finished. Naming only the first form would
+    /// leave a transcript able to state the contradiction in a way this build cannot see.
+    ///
+    /// Kept apart from `Complete` because folding them would hand the more convenient answer to a
+    /// result that contradicts itself. `CallToolResult` sets no `additionalProperties: false` and
+    /// lists neither member, so both shapes are schema-legal: this is a fault only the semantic
+    /// layer can state.
+    CompleteWithContinuation,
+    /// The result asks for input and states a continuation member in a shape that cannot carry
+    /// one: a `requestState` that is not a string, an `inputRequests` that is not an object.
+    ///
+    /// Kept apart from `InputRequiredWithoutContinuation` because silence and a broken statement
+    /// are different findings with different remediations, and kept apart from `InputRequired`
+    /// because a member that cannot be read is not a way to continue. Value-free: neither the
+    /// member's value nor which member it was leaves here.
+    InputRequiredWithMalformedContinuation,
+    /// The result asks for input and carries no way to supply it: neither `inputRequests` nor
+    /// `requestState`.
+    ///
+    /// `InputRequiredResult` says in prose that at least one of the two MUST be present, and its
+    /// JSON Schema does not encode that — `required` lists only `resultType`. So this shape passes
+    /// the published definition while being unusable: a request for input that names no request and
+    /// offers no continuation token cannot be answered, and reading it as an ordinary interim
+    /// result would report a call as validly unfinished when nothing can finish it.
+    InputRequiredWithoutContinuation,
     /// The field is present and is not a token at all: a number, an object, an array.
     /// Distinct from `Missing`, and the distinction is load-bearing on the legacy arm, where an
     /// absent field MUST be read as `"complete"` and an unreadable one must not inherit that.
+    Malformed,
+}
+
+/// What one request said about its own capabilities.
+///
+/// Value-free by design, like `ResultObservation::Unrecognized`: the advertised names are
+/// attacker-chosen and retaining them hands a channel into every log that ingests a finding. The
+/// actionable fact is whether this build could decide the question, not which strings it was told.
+///
+/// Capabilities are per request and MUST NOT be inferred from a prior one, so this is bound to a
+/// single call through the outstanding map rather than kept per transcript.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CapabilityObservation {
+    /// Advertised, with nothing beyond core. A present and empty set is a complete statement, not
+    /// silence, which is why it can make an unreadable token *definitively* unrecognized.
+    CoreOnly,
+    /// Advertised, including at least one extension this build has no rule for. Being advertised
+    /// and being understood are different questions.
+    ExtensionNotUnderstood,
+    /// The `_meta` container was readable and carried no capability member.
+    ///
+    /// Only that, and deliberately not "absent from a request that should have carried it": the
+    /// observer reads a namespaced key without knowing which revision the request was written
+    /// against, and an ordinary request from a revision that does not define the member is silent
+    /// here for a reason that is not a gap. Whether this silence is a missing statement or simply
+    /// nothing to state is decided later, against the resolved era.
+    Absent,
+    /// The capability member was present and could not be read.
+    ///
+    /// A fault only under a revision where this capability contract applies, and there on the same
+    /// rule the era signal follows: more evidence does not make an unreadable value readable. The
+    /// observer cannot make that judgement itself, because it reads a namespaced key without
+    /// knowing which revision the request was written against — a value that is malformed by the
+    /// later rules says nothing about a call from a revision that never defined the member.
     Malformed,
 }
 
@@ -456,7 +519,30 @@ pub(crate) enum ResultObservation {
 #[allow(dead_code)]
 pub(crate) enum IncompleteReason {
     EraUnknown(UnknownReason),
+    /// The token is unreadable to this build, and nothing is outstanding that could still cover it.
+    ///
+    /// Two revisions reach this by different routes, and both are closed answers rather than gaps.
+    /// Under a revision that predates the capability contract there is no set that could have
+    /// advertised anything, so the question was never open. Under a revision that defines it, a
+    /// stated set naming nothing this build cannot evaluate settles the question outright.
     UnrecognizedResultType,
+    /// The token is unreadable and whether anything covers it cannot be decided.
+    ///
+    /// Reached under a revision that defines the capability contract, whenever the set that would
+    /// decide the question did not: it was stated and carried something this build has no rule for,
+    /// it was not stated at all, or no observation is available because no request was correlated
+    /// to the record. Distinct from `UnrecognizedResultType`: that one is a closed answer, this one
+    /// is an open question, and they have different remediations.
+    RecognitionUndeterminable,
+    /// The result claims completion while carrying a continuation member. Either form counts:
+    /// `InputRequiredResult` requires at least one of `inputRequests` or `requestState`, so both
+    /// carry a call forward and a completion claim beside either is the same disagreement.
+    ///
+    /// Incomplete rather than invalid: the bytes are well-formed and schema-legal, so what is
+    /// missing is a statement about which of the two the server meant, not a readable value.
+    /// Value-free, like every reason here — which member was seen, and what it held, do not
+    /// travel.
+    ContradictoryResult,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -477,6 +563,30 @@ pub(crate) enum InvalidReason {
     MalformedEraSignal,
     /// `resultType` is present and unreadable. Never folded into the absent-means-complete rule.
     MalformedResultType,
+    /// The capability set arrived and could not be read. Invalid on the same rule as the era
+    /// signal, and deliberately not folded into `Absent`: silence and a broken statement are
+    /// different findings.
+    MalformedCapabilities,
+    /// A modern request that states no capability set.
+    ///
+    /// `RequestMetaObject.required` names both `protocolVersion` and `clientCapabilities`, so from
+    /// the revision that defines them a request carrying only the version is incomplete on the
+    /// wire. Distinct from `MissingRequestMetadata`, which is the container being absent: here the
+    /// container arrived and one required member did not.
+    MissingCapabilities,
+    /// A result asking for input whose continuation member arrived and could not be read.
+    ///
+    /// Invalid on the same rule the era signal and the capability set follow: more evidence does
+    /// not make an unreadable value readable. Separate from `UncontinuableInputRequired`, which is
+    /// about a member that was never stated.
+    MalformedContinuation,
+    /// A result asking for input that carries no continuation member.
+    ///
+    /// Invalid rather than incomplete, and the distinction is the whole point: incomplete means a
+    /// verdict is still open and more evidence could settle it, while nothing that arrives later
+    /// can make this exchange continuable. The bytes are self-defeating, not merely unfinished.
+    /// Value-free, like every reason here.
+    UncontinuableInputRequired,
 }
 
 /// What a request is worth on its own terms. A request has no result, so `NonTerminal` would be a
@@ -515,6 +625,25 @@ pub(crate) struct McpEraContext {
     pub(crate) era: EraResolution,
     pub(crate) request_metadata: Option<RequestMetadata>,
     pub(crate) result_observation: Option<ResultObservation>,
+    /// The typed correlation key for this message, or `None` when this build declines to key on
+    /// the id it carried.
+    ///
+    /// The public `McpEvent.jsonrpc_id` is a `String`, which renders JSON `1` and `"1"` identically
+    /// and so cannot tell two different calls apart. The typed key is the one the parser actually
+    /// correlates on, and it travels in the sidecar so consumers can reason about the same identity
+    /// the parser used, with the public shape unchanged.
+    pub(crate) correlation: Option<CorrelationId>,
+    /// The capability set of *this call*, carried from the request that opened it.
+    ///
+    /// `None` means no capability-bearing metadata was readable here, which covers more than one
+    /// route: no request was correlated to this record, the record is not a call at all, or the
+    /// request carried no `params` or no `_meta` to look in. What they share is that nothing was
+    /// observed, which is the only thing this field then reports.
+    ///
+    /// It never means "nothing was advertised". That is `Some(Absent)`, and it is reached only when
+    /// the metadata *was* readable and the capability member was not in it. Conflating the two
+    /// would let silence about the question read as an answer to it.
+    pub(crate) capability_observation: Option<CapabilityObservation>,
 }
 
 /// One event and what was observed about its era, kept apart so the public event shape is
@@ -635,7 +764,11 @@ fn requires_result_type(version: &str) -> bool {
 // `expect` would be stricter but is unfulfilled here: the tests use these under `--all-targets`,
 // so the lint does not fire and `expect` itself errors. Removed by the slice-2 conclusion layer.
 #[allow(dead_code)]
-pub(crate) fn conclude(era: &EraResolution, observed: &ResultObservation) -> ResultConclusion {
+pub(crate) fn conclude(
+    era: &EraResolution,
+    observed: &ResultObservation,
+    capability: Option<&CapabilityObservation>,
+) -> ResultConclusion {
     // Checked before the era, for the same reason `conclude_request` checks its metadata first: an
     // unreadable field is a fault whatever the era turned out to be, and reading the era first
     // downgrades it to whatever the era's own gap was.
@@ -657,19 +790,79 @@ pub(crate) fn conclude(era: &EraResolution, observed: &ResultObservation) -> Res
             })
         }
     };
+    // Whether the capability contract exists at all under the resolved revision.
+    //
+    // The observer reads a namespaced `_meta` key with no idea which revision the request was
+    // written against, so everything it reports about that key is only a statement under a revision
+    // that defines it. Applying the axis to a legacy call would invent a contract the client was
+    // never held to: an ordinary 2025 request has no reason to carry the key, and reading its
+    // absence as an open question turns conformance into a finding.
+    let modern = requires_result_type(version);
+    // An unreadable capability set is a fault on the same rule as the era signal, but only where
+    // the contract applies. Deliberately after the era resolution: a value that is malformed by
+    // 2026 rules says nothing about a 2025 call, and checking it first let a future field decide a
+    // legacy verdict.
+    if modern && matches!(capability, Some(CapabilityObservation::Malformed)) {
+        return ResultConclusion::Invalid(InvalidReason::MalformedCapabilities);
+    }
     match observed {
         ResultObservation::Complete => ResultConclusion::Terminal,
         ResultObservation::InputRequired => ResultConclusion::NonTerminal,
-        ResultObservation::Unrecognized => {
+        // Terminal is the one answer this must never be: the result asks for input in the same
+        // breath as it claims to be done, and picking the completion half is picking the reading
+        // that closes the record.
+        ResultObservation::CompleteWithContinuation => {
+            ResultConclusion::Incomplete(IncompleteReason::ContradictoryResult)
+        }
+        // Not `NonTerminal`: that answer says "valid but unfinished", and this exchange cannot be
+        // finished at all. Reporting it as an ordinary interim result would hand a dead call the
+        // vocabulary of a live one.
+        ResultObservation::InputRequiredWithoutContinuation => {
+            ResultConclusion::Invalid(InvalidReason::UncontinuableInputRequired)
+        }
+        // Never `NonTerminal`. The runtime conclusion path does not validate against the vendored
+        // schema, so nothing downstream would catch a `requestState` that is a number: if this
+        // arm licensed a valid interim result, a call that cannot be continued would travel as one
+        // that can.
+        ResultObservation::InputRequiredWithMalformedContinuation => {
+            ResultConclusion::Invalid(InvalidReason::MalformedContinuation)
+        }
+        // Recognition is capability-relative only where the capability contract exists. Under a
+        // revision with no such member there was nothing that could have been advertised, so the
+        // question was never open and the answer this build gave before the axis existed stands,
+        // whatever the future key happens to contain.
+        ResultObservation::Unrecognized if !modern => {
             ResultConclusion::Incomplete(IncompleteReason::UnrecognizedResultType)
         }
+        // Where the contract does exist, the set decides. A present one naming nothing beyond core
+        // settles the question: nothing covers this token. An absent one, or one advertising an
+        // extension with no rule here, leaves it open — and no mapping from an extension name to a
+        // result token may be invented to close it.
+        ResultObservation::Unrecognized => match capability {
+            // The only closed answer. A stated set that names nothing this build cannot evaluate
+            // settles the question: nothing advertised covers this token.
+            Some(CapabilityObservation::CoreOnly) => {
+                ResultConclusion::Incomplete(IncompleteReason::UnrecognizedResultType)
+            }
+            // Stated and unevaluable, or required and not stated: either way the set that would
+            // decide the question did not decide it.
+            Some(CapabilityObservation::Absent | CapabilityObservation::ExtensionNotUnderstood) => {
+                ResultConclusion::Incomplete(IncompleteReason::RecognitionUndeterminable)
+            }
+            // No observation at all: no request was correlated to this record. That cannot reach
+            // the closed answer either — an orphan response gives no ground to say nothing
+            // advertised covers the token, and claiming otherwise reads absence of evidence as
+            // evidence.
+            None => ResultConclusion::Incomplete(IncompleteReason::RecognitionUndeterminable),
+            Some(CapabilityObservation::Malformed) => unreachable!("handled above"),
+        },
         // Checked before the era, because an unreadable field is not an absent one and must not
         // reach the backward-compatibility rule that reads absence as completion.
         ResultObservation::Malformed => {
             ResultConclusion::Invalid(InvalidReason::MalformedResultType)
         }
         ResultObservation::Missing => {
-            if requires_result_type(version) {
+            if modern {
                 ResultConclusion::Invalid(InvalidReason::MissingResultType)
             } else {
                 ResultConclusion::Terminal
@@ -692,6 +885,7 @@ pub(crate) fn conclude(era: &EraResolution, observed: &ResultObservation) -> Res
 pub(crate) fn conclude_request(
     era: &EraResolution,
     metadata: &RequestMetadata,
+    capability: Option<&CapabilityObservation>,
 ) -> RequestAssessment {
     if matches!(metadata, RequestMetadata::Malformed) {
         return RequestAssessment::Invalid(InvalidReason::MalformedRequestMetadata);
@@ -712,9 +906,27 @@ pub(crate) fn conclude_request(
         EraResolution::Unknown(reason) => {
             RequestAssessment::Incomplete(IncompleteReason::EraUnknown(reason.clone()))
         }
+        // The capability contract belongs to the revision that defines it. A legacy request could
+        // not have carried the member, so judging it by that rule would manufacture a fault out of
+        // conformance.
         EraResolution::Known(version) if !requires_result_type(version) => RequestAssessment::Valid,
         EraResolution::Known(_) => match metadata {
-            RequestMetadata::Present(_) => RequestAssessment::Valid,
+            // `RequestMetaObject.required` names `protocolVersion` and `clientCapabilities` both,
+            // so a version alone does not make the metadata complete. This is read here rather than
+            // left to the response side: a refused or abandoned call has no response, and that is
+            // exactly the case where the request is the only record there will ever be.
+            RequestMetadata::Present(_) => match capability {
+                Some(CapabilityObservation::CoreOnly)
+                | Some(CapabilityObservation::ExtensionNotUnderstood) => RequestAssessment::Valid,
+                Some(CapabilityObservation::Malformed) => {
+                    RequestAssessment::Invalid(InvalidReason::MalformedCapabilities)
+                }
+                // `None` reaches here only when the metadata container was readable enough to
+                // yield a version, so there was somewhere to look and the member was not in it.
+                Some(CapabilityObservation::Absent) | None => {
+                    RequestAssessment::Invalid(InvalidReason::MissingCapabilities)
+                }
+            },
             RequestMetadata::Absent => {
                 RequestAssessment::Invalid(InvalidReason::MissingRequestMetadata)
             }
@@ -725,6 +937,20 @@ pub(crate) fn conclude_request(
 
 /// The `_meta` key the protocol version travels under on a request.
 pub(crate) const PROTOCOL_VERSION_META_KEY: &str = "io.modelcontextprotocol/protocolVersion";
+
+/// The `_meta` key the client's capability set travels under on a request.
+pub(crate) const CLIENT_CAPABILITIES_META_KEY: &str = "io.modelcontextprotocol/clientCapabilities";
+
+/// The members `ClientCapabilities` defines. The definition does not set
+/// `additionalProperties: false`, so this list is what *this build* has rules for, not what the
+/// object may contain — which is why an unrecognised member is a legal statement this build cannot
+/// evaluate rather than a fault.
+const CAPABILITY_ELICITATION_KEY: &str = "elicitation";
+const CAPABILITY_ROOTS_KEY: &str = "roots";
+const CAPABILITY_SAMPLING_KEY: &str = "sampling";
+/// The two open maps inside that set: non-standard capabilities and optional MCP extensions.
+const CAPABILITY_EXPERIMENTAL_KEY: &str = "experimental";
+const CAPABILITY_EXTENSIONS_KEY: &str = "extensions";
 
 /// The transport header carrying the same value. Compared with `eq_ignore_ascii_case`, so the
 /// casing here is documentation rather than a value the comparison depends on, and no allocation is
@@ -835,6 +1061,125 @@ pub(crate) fn observe_request_metadata(raw: &serde_json::Value) -> RequestMetada
     }
 }
 
+/// Read `params._meta`'s capability set as an observation, for the request that carries it.
+///
+/// Nothing about the advertised names is retained. The only questions asked are whether the set was
+/// stated, whether it was readable, and whether it named anything outside core; the answer to the
+/// last one is a boolean, so no attacker-supplied string survives the read.
+///
+/// `None` when there is no request-shaped metadata container to look in at all. That is the same
+/// silence `RequestMetadata::Absent` reports and is not a capability answer.
+pub(crate) fn observe_client_capabilities(
+    raw: &serde_json::Value,
+) -> Option<CapabilityObservation> {
+    let params = raw.get("params")?;
+    if !params.is_object() {
+        return Some(CapabilityObservation::Malformed);
+    }
+    let meta = params.get("_meta")?;
+    if !meta.is_object() {
+        return Some(CapabilityObservation::Malformed);
+    }
+    Some(match meta.get(CLIENT_CAPABILITIES_META_KEY) {
+        None => CapabilityObservation::Absent,
+        Some(caps) => {
+            let Some(caps) = caps.as_object() else {
+                return Some(CapabilityObservation::Malformed);
+            };
+            let mut beyond_core = false;
+            for (name, value) in caps {
+                match name.as_str() {
+                    // The core members this build has rules for. Their contents are not read: what
+                    // matters is that the client named a capability this build understands.
+                    CAPABILITY_ELICITATION_KEY | CAPABILITY_ROOTS_KEY | CAPABILITY_SAMPLING_KEY => {
+                        // Known by name and unreadable by shape is a broken statement, not silence.
+                        if !value.is_object() {
+                            return Some(CapabilityObservation::Malformed);
+                        }
+                    }
+                    // Two open maps, read the same way. Empty is a complete statement that none is
+                    // offered; inhabited means at least one entry this build has no rule for. Only
+                    // whether the map is inhabited is read, so no advertised name leaves here.
+                    CAPABILITY_EXPERIMENTAL_KEY | CAPABILITY_EXTENSIONS_KEY => {
+                        let Some(map) = value.as_object() else {
+                            return Some(CapabilityObservation::Malformed);
+                        };
+                        beyond_core |= !map.is_empty();
+                    }
+                    // `ClientCapabilities` does not set `additionalProperties: false`, so an
+                    // unrecognised member is legal rather than a fault — and it is exactly a
+                    // capability this build cannot evaluate. Reading it as core would turn unknown
+                    // vocabulary into a closed answer, which is the fold this whole axis exists to
+                    // prevent. The name is not retained, only the fact that one was there.
+                    _ => beyond_core = true,
+                }
+            }
+            if beyond_core {
+                CapabilityObservation::ExtensionNotUnderstood
+            } else {
+                CapabilityObservation::CoreOnly
+            }
+        }
+    })
+}
+
+/// What a result's continuation members amount to.
+///
+/// `InputRequiredResult` requires at least one of `inputRequests` or `requestState`, so neither is
+/// the continuation on its own: they are two forms of the same thing, and a rule reading one and
+/// not the other leaves half the shape unobserved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ContinuationShape {
+    /// Neither member is stated. Absent and explicitly null are the same silence.
+    Absent,
+    /// At least one member is stated in a shape that could carry a call forward.
+    Present,
+    /// A member is stated in a shape that cannot: a `requestState` that is not a string, an
+    /// `inputRequests` that is not an object. Distinct from `Absent`, on the rule this module
+    /// applies everywhere else — silence and a broken statement are different findings.
+    Malformed,
+}
+
+/// Read both continuation members as one shape.
+///
+/// Only the top-level type of each member is checked, deliberately. Re-deriving `InputRequest`
+/// here would duplicate a published definition into this file and go stale against it; what the
+/// conclusion layer needs is whether the member could carry a call forward at all, and a number or
+/// an array answers that without any deeper reading. Nothing about the values is retained.
+///
+/// Presence rather than content decides `Present`: an empty request map or an empty continuation
+/// token is still a statement, and treating it as silence would let a contradiction be hidden by
+/// emptying the value.
+///
+/// `Malformed` wins over `Present`. One member arriving broken is a fault whatever the other one
+/// says, and letting a well-formed sibling cover for it would report a result as usable on the
+/// strength of the half that happened to parse.
+fn continuation_shape(result: &serde_json::Value) -> ContinuationShape {
+    let mut present = false;
+    // `requestState` is an opaque continuation token: `{"type": "string"}`.
+    match result.get(CONTINUATION_REQUEST_STATE_KEY) {
+        None => {}
+        Some(v) if v.is_null() => {}
+        Some(v) if v.is_string() => present = true,
+        Some(_) => return ContinuationShape::Malformed,
+    }
+    // `inputRequests` is a map of server-initiated requests: `{"type": "object"}`.
+    match result.get(CONTINUATION_INPUT_REQUESTS_KEY) {
+        None => {}
+        Some(v) if v.is_null() => {}
+        Some(v) if v.is_object() => present = true,
+        Some(_) => return ContinuationShape::Malformed,
+    }
+    if present {
+        ContinuationShape::Present
+    } else {
+        ContinuationShape::Absent
+    }
+}
+
+const CONTINUATION_INPUT_REQUESTS_KEY: &str = "inputRequests";
+const CONTINUATION_REQUEST_STATE_KEY: &str = "requestState";
+
 /// Read `result.resultType` as an observation. A present, non-string value is `Malformed` rather
 /// than absent, so it can never reach the rule that reads absence as completion.
 pub(crate) fn observe_result(raw: &serde_json::Value) -> Option<ResultObservation> {
@@ -848,8 +1193,33 @@ pub(crate) fn observe_result(raw: &serde_json::Value) -> Option<ResultObservatio
     Some(match result.get("resultType") {
         None => ResultObservation::Missing,
         Some(v) => match v.as_str() {
-            Some("complete") => ResultObservation::Complete,
-            Some("input_required") => ResultObservation::InputRequired,
+            // A claim of completion is read together with any continuation member beside it,
+            // `inputRequests` or `requestState`, because a result carrying both a completion claim
+            // and a way to continue is not the same observation as one carrying neither. Presence
+            // is the test, not content: an empty continuation value alongside a completion claim is
+            // still a result disagreeing with itself, and treating it as clean would let the
+            // contradiction be hidden by emptying the value. An explicit null is silence rather
+            // than a statement, so it does not count.
+            // A broken continuation member folds into the contradiction here rather than getting
+            // its own state, and that is fail-closed on purpose: whatever the member was meant to
+            // say, a completion claim carrying it must not reach `Terminal`. The interim arm below
+            // cannot make the same fold, because there the fold would land on *valid*.
+            Some("complete") => match continuation_shape(result) {
+                ContinuationShape::Absent => ResultObservation::Complete,
+                ContinuationShape::Present | ContinuationShape::Malformed => {
+                    ResultObservation::CompleteWithContinuation
+                }
+            },
+            // The same continuation read as the completion arm above, and deliberately the same
+            // helper: a claim of completion beside a continuation member and a request for input
+            // without one are the two ways this pair can disagree, and they must not drift apart.
+            Some("input_required") => match continuation_shape(result) {
+                ContinuationShape::Present => ResultObservation::InputRequired,
+                ContinuationShape::Absent => ResultObservation::InputRequiredWithoutContinuation,
+                ContinuationShape::Malformed => {
+                    ResultObservation::InputRequiredWithMalformedContinuation
+                }
+            },
             // `ResultType` is an open string union, so any string is syntactically a token,
             // including an empty one. Unrecognized is a statement about this build's rules, so it
             // carries no value; only a non-string is unreadable.

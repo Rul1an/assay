@@ -1,7 +1,7 @@
 use crate::mcp::era::{
-    classify_message, correlation_id, fold_envelope, id_is_acceptable, observe_header,
-    observe_request_metadata, observe_result, resolve_era, EnvelopeObservation, McpEraContext,
-    MessageKind, ParsedMcpEvent, RequestMetadata,
+    classify_message, correlation_id, fold_envelope, id_is_acceptable, observe_client_capabilities,
+    observe_header, observe_request_metadata, observe_result, resolve_era, CapabilityObservation,
+    EnvelopeObservation, McpEraContext, MessageKind, ParsedMcpEvent, RequestMetadata,
 };
 use crate::mcp::era::{CorrelationId, DuplicateAwareSink, EraResolution, SeenMembers, UniqueValue};
 use crate::mcp::types::*;
@@ -41,18 +41,27 @@ pub(crate) fn parse_mcp_transcript_detailed(
             // conclusion about an event the parser had already called a request. And a notification
             // carries `method` like a request while its `_meta` is optional and a different type,
             // so holding it to the request requirement invents a fault in the other direction.
-            let (request_metadata, result_observation) = match payload_raw(&event.payload) {
-                // The same classifier the parser used. A shape it rejects never reaches here,
-                // because `parse_events_with_envelopes` runs first and refuses it, so the error arm
-                // is a state this pass cannot observe rather than one it tolerates.
-                Some(raw) => match classify_message(raw) {
-                    Ok(MessageKind::Request { .. }) => (Some(observe_request_metadata(raw)), None),
-                    Ok(MessageKind::Notification { .. }) => (None, None),
-                    Ok(MessageKind::Response) => (None, observe_result(raw)),
-                    Err(_) => (None, None),
-                },
-                None => (None, None),
-            };
+            //
+            // The capability set travels on the same arm as the request metadata and for the same
+            // reason: it is stated by a request and nowhere else. A response gets it by correlation
+            // below, never by reading its own bytes.
+            let (request_metadata, result_observation, capability_observation) =
+                match payload_raw(&event.payload) {
+                    // The same classifier the parser used. A shape it rejects never reaches here,
+                    // because `parse_events_with_envelopes` runs first and refuses it, so the error
+                    // arm is a state this pass cannot observe rather than one it tolerates.
+                    Some(raw) => match classify_message(raw) {
+                        Ok(MessageKind::Request { .. }) => (
+                            Some(observe_request_metadata(raw)),
+                            None,
+                            observe_client_capabilities(raw),
+                        ),
+                        Ok(MessageKind::Notification { .. }) => (None, None, None),
+                        Ok(MessageKind::Response) => (None, observe_result(raw), None),
+                        Err(_) => (None, None, None),
+                    },
+                    None => (None, None, None),
+                };
             // Unframed formats have one whole-input observation and no entries to index. A framed
             // input that does not resolve to an entry is a mapping the parser cannot vouch for,
             // and a plausible-but-wrong attribution is worse than an unusable one.
@@ -70,13 +79,18 @@ pub(crate) fn parse_mcp_transcript_detailed(
                     .as_ref()
                     .unwrap_or(&RequestMetadata::Absent),
             );
+            // The typed key, taken from the same reader `correlate_calls` keys on, so the sidecar
+            // and the correlation cannot disagree about which call this is.
+            let correlation = payload_raw(&event.payload).and_then(correlation_id);
             ParsedMcpEvent {
                 event,
                 context: McpEraContext {
                     envelope,
                     era,
+                    correlation,
                     request_metadata,
                     result_observation,
+                    capability_observation,
                 },
             }
         })
@@ -84,13 +98,23 @@ pub(crate) fn parse_mcp_transcript_detailed(
     correlate_calls(parsed)
 }
 
-/// Give a response the era its own call resolved to.
+/// What one outstanding call carries forward to its own response.
+struct CallSignals {
+    era: EraResolution,
+    capability: Option<CapabilityObservation>,
+}
+
+/// Give a response the era and capability set its own call resolved to.
 ///
 /// The era resolves from two signals that both live on a request: the transport header and
 /// `params._meta`. A response carries neither, so it fell back to the header alone. A request whose
 /// header and body disagree is `Conflicting`, while its response resolved to `Known` from the header
 /// and a missing `resultType` under a legacy era is `Terminal` — so a contradicted call could still
 /// conclude that the action completed. The contradiction has to travel to the result.
+///
+/// The capability set travels the same way and for a sharper reason: it is stated per request and
+/// MUST NOT be inferred from a prior one, so reading it off anything but this call's own request
+/// would be the inference the revision forbids.
 ///
 /// Correlation is by JSON-RPC id within one transcript, which the parser already establishes and
 /// validates for duplicates. A response with no matching request keeps the era it resolved on its
@@ -101,7 +125,11 @@ fn correlate_calls(mut parsed: Vec<ParsedMcpEvent>) -> Result<Vec<ParsedMcpEvent
     // the era of a request that had not happened yet: with an id reused after the response, the
     // contradiction on the call being answered was replaced by the clean era of the next call.
     // Requests are outstanding until a response consumes them.
-    let mut outstanding: std::collections::HashMap<CorrelationId, EraResolution> =
+    //
+    // Era and capability travel together on one entry rather than in two maps. They are two facts
+    // about the same call, and two maps could be removed at different moments and give a response
+    // one call's era with another call's capabilities.
+    let mut outstanding: std::collections::HashMap<CorrelationId, CallSignals> =
         std::collections::HashMap::new();
     for p in &mut parsed {
         // The typed key, not the public `String` rendering: that renders JSON `1` and `"1"`
@@ -123,10 +151,11 @@ fn correlate_calls(mut parsed: Vec<ParsedMcpEvent>) -> Result<Vec<ParsedMcpEvent
                 // Two calls outstanding on one id makes the correlation ambiguous, and choosing
                 // either is a silent choice between two calls. Reuse after a response is legal and
                 // is what the removal below permits.
-                if outstanding
-                    .insert(id.clone(), p.context.era.clone())
-                    .is_some()
-                {
+                let signals = CallSignals {
+                    era: p.context.era.clone(),
+                    capability: p.context.capability_observation.clone(),
+                };
+                if outstanding.insert(id.clone(), signals).is_some() {
                     bail!(
                         "two outstanding JSON-RPC requests share an id at source line {}",
                         p.event.source_line
@@ -135,9 +164,12 @@ fn correlate_calls(mut parsed: Vec<ParsedMcpEvent>) -> Result<Vec<ParsedMcpEvent
             }
             Some(MessageKind::Response) => {
                 // An orphan response keeps the era it resolved on its own, so correlation adds
-                // authority rather than removing it.
-                if let Some(era) = outstanding.remove(&id) {
-                    p.context.era = era;
+                // authority rather than removing it. Its capability observation stays `None`: no
+                // request was seen, and borrowing a neighbouring call's set is exactly the
+                // inference the revision forbids.
+                if let Some(signals) = outstanding.remove(&id) {
+                    p.context.era = signals.era;
+                    p.context.capability_observation = signals.capability;
                 }
             }
             Some(MessageKind::Notification { .. }) | None => {}

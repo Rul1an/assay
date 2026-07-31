@@ -1,0 +1,5 @@
+{"transport":"streamable-http","transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28"}},
+ "entries":[{"timestamp_ms":1000,"request":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"Calc","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}},
+  {"timestamp_ms":1001,"request":{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"Calc","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{"extensions":{"io.vendor/partial-results":{}}}}}}},
+  {"timestamp_ms":1002,"response":{"jsonrpc":"2.0","id":2,"result":{"resultType":"io.vendor/partial-results","content":[]}}},
+  {"timestamp_ms":1003,"response":{"jsonrpc":"2.0","id":1,"result":{"resultType":"io.vendor/partial-results","content":[]}}}]}
