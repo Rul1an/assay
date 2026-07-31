@@ -387,6 +387,89 @@ mod tests {
     }
 
     #[test]
+    fn every_cli_transcript_format_reaches_its_parser_and_preserves_the_profile() {
+        use super::super::verify_privileged_mcp_action::verify_bundle_report;
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "github.add_deploy_key",
+                "arguments": {},
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientCapabilities": {}
+                }
+            }
+        });
+        let response = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {"content": [], "resultType": "complete"}
+        });
+        let header = json!({"MCP-Protocol-Version": "2026-07-28"});
+        let vectors = [
+            (
+                "inspector",
+                json!({"events": [request.clone(), response.clone()]}).to_string(),
+                PrivilegedMcpTranscriptFormat::Inspector,
+            ),
+            (
+                "jsonrpc",
+                format!("{request}\n{response}\n"),
+                PrivilegedMcpTranscriptFormat::Jsonrpc,
+            ),
+            (
+                "streamable-http",
+                json!({
+                    "transport": "streamable-http",
+                    "transport_context": {"headers": header.clone()},
+                    "entries": [
+                        {"request": request.clone()},
+                        {"response": response.clone()}
+                    ]
+                })
+                .to_string(),
+                PrivilegedMcpTranscriptFormat::StreamableHttp,
+            ),
+            (
+                "http-sse",
+                json!({
+                    "transport": "http-sse",
+                    "transport_context": {"headers": header},
+                    "entries": [
+                        {"sse": {"event": "message", "data": request}},
+                        {"sse": {"event": "message", "data": response}}
+                    ]
+                })
+                .to_string(),
+                PrivilegedMcpTranscriptFormat::HttpSse,
+            ),
+        ];
+
+        for (name, transcript, format) in vectors {
+            let dir = tempfile::tempdir().unwrap();
+            let decisions = write_ndjson(dir.path(), "dec.ndjson", &[profile_allow_decision()]);
+            let mut import = args(dir.path(), decisions);
+            import.mcp_transcript = Some(write_transcript(
+                dir.path(),
+                &format!("{name}.json"),
+                &transcript,
+            ));
+            import.mcp_format = Some(format);
+            cmd_privileged_mcp_action(import.clone())
+                .unwrap_or_else(|error| panic!("{name}: {error:#}"));
+            let report = verify_bundle_report(&import.bundle_out).unwrap();
+            assert_eq!(
+                serde_json::to_value(report).unwrap(),
+                expected_allow_report(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn malformed_wire_input_is_refused_before_a_bundle_is_written() {
         let dir = tempfile::tempdir().unwrap();
         let decisions = write_ndjson(dir.path(), "dec.ndjson", &[profile_allow_decision()]);
