@@ -111,6 +111,15 @@ pub struct EvidenceVerifyArgs {
     /// Bundle path, or "-" for stdin
     #[arg(value_name = "BUNDLE", default_value = "-")]
     pub bundle: std::path::PathBuf,
+
+    /// Refuse a bundle that does not declare and complete its own extent.
+    ///
+    /// Integrity and admission are different questions. Without this flag the answer is unchanged:
+    /// the integrity result stands alone and extent is reported where it was declared. With it, the
+    /// caller is stating that it will not rely on a bundle whose extent is unknown, and anything
+    /// short of a completed declaration exits `EXIT_WOULD_BLOCK` while integrity still passes.
+    #[arg(long)]
+    pub require_extent: bool,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -265,6 +274,17 @@ fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
         assay_evidence::bundle::verify_bundle(stdin.lock())
             .context("bundle verification failed")?;
         eprintln!("Bundle verified (stdin): OK");
+        if args.require_extent {
+            // The streaming verifier bounds its ingest and does not retain the events, so extent
+            // cannot be read back on this path. A policy question that cannot be evaluated must not
+            // be answered "admitted": that is the one failure mode this flag exists to prevent.
+            eprintln!(
+                "Admission REFUSED (--require-extent): extent cannot be evaluated from a streamed \
+                 bundle, because the bounded verifier does not retain the events. Integrity itself \
+                 passed. Re-run against the bundle as a file to ask this question."
+            );
+            return Ok(crate::exit_codes::EXIT_WOULD_BLOCK);
+        }
         return Ok(0);
     }
 
@@ -275,8 +295,59 @@ fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
     let reader = assay_evidence::bundle::BundleReader::open(f)?;
 
     eprintln!("Bundle verified ({}): OK", args.bundle.display());
-    report_liveness(&reader);
+    let outcome = liveness_outcome(&reader);
+    if let Some(outcome) = &outcome {
+        report_liveness(outcome);
+    }
+    if args.require_extent {
+        return Ok(admit_on_extent(outcome.as_ref()));
+    }
     Ok(0)
+}
+
+/// Decide whether a bundle is admissible under a caller that requires declared extent.
+///
+/// This is the whole point of keeping admission separate from integrity. A verifier answers a
+/// question about the bytes it was handed; it cannot answer a question about bytes it was not
+/// handed, and no amount of signed material inside the artifact changes that, because a producer
+/// that wants to omit something can decline to carry the declaration too. So the property is never
+/// "this bundle is complete". It is "this bundle declared its extent and is consistent with the
+/// declaration", and the teeth belong to the consumer who refuses the undeclared.
+///
+/// Every arm other than a completed declaration refuses, including the read failure, because a
+/// policy question that could not be evaluated must never come back as a pass.
+fn admit_on_extent(outcome: Option<&assay_evidence::liveness::LivenessOutcome>) -> i32 {
+    use assay_evidence::liveness::LivenessOutcome;
+
+    let reason = match outcome {
+        Some(LivenessOutcome::Complete) => return crate::exit_codes::EXIT_SUCCESS,
+        Some(LivenessOutcome::NotDeclared) => {
+            "the bundle declares no extent, so \"verified\" covers the integrity of what is present \
+             and not that all of it is present"
+        }
+        Some(LivenessOutcome::Open) => {
+            "the run never closed, so the bundle may be shorter than the run that produced it"
+        }
+        Some(LivenessOutcome::Broken(_)) => "the run broke its own extent declaration",
+        None => "the events could not be read back, so extent could not be evaluated",
+    };
+    eprintln!("Admission REFUSED (--require-extent): {reason}. Integrity itself passed.");
+    crate::exit_codes::EXIT_WOULD_BLOCK
+}
+
+/// Read what the bundle says about its own extent.
+///
+/// Split from reporting because one outcome answers two different questions: an operator reading a
+/// verification wants it as a note, and a caller that passed `--require-extent` wants it as a
+/// decision. Computing it once keeps the note and the decision from drifting apart.
+fn liveness_outcome(
+    reader: &assay_evidence::bundle::BundleReader,
+) -> Option<assay_evidence::liveness::LivenessOutcome> {
+    // The bundle already verified, so a read failure here is this caller's problem and not a
+    // finding about the artifact. Inventing a liveness verdict from a failed read would be exactly
+    // the guess this module exists to avoid, so the absence is passed on as an absence.
+    let events = reader.events_vec().ok()?;
+    Some(assay_evidence::liveness::verify_liveness(&events))
 }
 
 /// Report what the bundle says about its own extent, beside the integrity result.
@@ -289,16 +360,10 @@ fn cmd_verify(args: EvidenceVerifyArgs) -> Result<i32> {
 /// This never changes the exit code. A bundle that predates liveness declares nothing, and turning
 /// silence into a failure would break every existing caller for a property those bundles never
 /// claimed. An outcome worth acting on is reported and left to the operator.
-fn report_liveness(reader: &assay_evidence::bundle::BundleReader) {
-    use assay_evidence::liveness::{verify_liveness, LivenessOutcome};
+fn report_liveness(outcome: &assay_evidence::liveness::LivenessOutcome) {
+    use assay_evidence::liveness::LivenessOutcome;
 
-    let Ok(events) = reader.events_vec() else {
-        // The bundle already verified, so a read failure here is this report's problem and not a
-        // finding about the artifact. Staying quiet is right: inventing a liveness verdict from a
-        // failed read would be exactly the guess this module exists to avoid.
-        return;
-    };
-    match verify_liveness(&events) {
+    match outcome {
         LivenessOutcome::NotDeclared => {}
         LivenessOutcome::Complete => {
             eprintln!("Liveness: complete (opened, cadence held, closed with a matching count)");
