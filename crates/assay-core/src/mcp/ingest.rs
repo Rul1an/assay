@@ -52,9 +52,6 @@ pub enum McpTranscriptIngestError {
 }
 
 /// Read and parse one transcript under explicit limits.
-///
-/// The initial implementation is intentionally incomplete so the limit tests below fail before
-/// the production guards are added.
 pub fn parse_mcp_transcript_bounded<R: Read>(
     reader: R,
     format: McpInputFormat,
@@ -93,6 +90,13 @@ fn check_json_depth(bytes: &[u8], max_json_depth: usize) -> Result<(), McpTransc
     let mut in_string = false;
     let mut escaped = false;
     for &byte in bytes {
+        if byte == b'\n' {
+            // Raw newlines cannot occur inside JSON strings. Recover here so malformed JSONL on
+            // one row cannot hide structural depth on later rows from the resource guard.
+            in_string = false;
+            escaped = false;
+            continue;
+        }
         if in_string {
             if escaped {
                 escaped = false;
@@ -566,6 +570,20 @@ mod tests {
             bounded,
         )
         .is_ok());
+    }
+
+    #[test]
+    fn unterminated_jsonl_string_cannot_mask_depth_on_the_next_line() {
+        let transcript = "{\"text\":\"unterminated\n[[[]]]";
+        let mut bounded = limits();
+        bounded.max_json_depth = 2;
+        let error =
+            parse_mcp_transcript_bounded(Cursor::new(transcript), McpInputFormat::JsonRpc, bounded)
+                .unwrap_err();
+        assert!(matches!(
+            error,
+            McpTranscriptIngestError::JsonDepth { limit: 2 }
+        ));
     }
 
     #[test]
