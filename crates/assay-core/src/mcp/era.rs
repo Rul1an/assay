@@ -637,6 +637,11 @@ pub(crate) struct ParsedMcpEvent {
     pub(crate) event: McpEvent,
     /// Read by the bounded conclusion layer before the public event projection drops it.
     pub(crate) context: McpEraContext,
+    /// A valid JSON-RPC error response has no result whose terminality can be concluded.
+    ///
+    /// Kept as an observation on the internal sidecar so the bounded ingest gate can refuse the
+    /// incomplete reading without treating a protocol-valid error response as malformed.
+    pub(crate) is_error_response: bool,
 }
 
 /// The protocol versions this build has era rules for, newest last. This is a statement about

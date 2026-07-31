@@ -2,7 +2,8 @@
 //!
 //! This layer owns the cost of reaching the existing MCP parser and refuses typed conclusion states
 //! that cannot support a clean reading. It does not derive a policy decision or change the public
-//! [`McpEvent`] shape.
+//! [`McpEvent`] shape. When a caller supplies the transcript as an optional companion input, a
+//! refusal can veto that import but can never author or alter the producer's evidence.
 
 use super::era::{conclude, conclude_request, RequestAssessment, ResultConclusion};
 use super::parser::parse_mcp_transcript_detailed;
@@ -80,7 +81,7 @@ pub fn parse_mcp_transcript_bounded<R: Read>(
         }
         return Err(McpTranscriptIngestError::ReadFailed);
     }
-    check_json_depth(&bytes, limits.max_json_depth)?;
+    check_json_depth(&bytes, format, limits.max_json_depth)?;
     if format == McpInputFormat::JsonRpc {
         check_jsonl_lines(&bytes, limits.max_line_bytes)?;
     }
@@ -119,6 +120,9 @@ pub fn parse_mcp_transcript_bounded<R: Read>(
                 }
             }
         }
+        if entry.is_error_response {
+            return Err(McpTranscriptIngestError::ConclusionIncomplete);
+        }
     }
     Ok(parsed.into_iter().map(|entry| entry.event).collect())
 }
@@ -134,7 +138,11 @@ fn check_jsonl_lines(bytes: &[u8], max_line_bytes: u64) -> Result<(), McpTranscr
     Ok(())
 }
 
-fn check_json_depth(bytes: &[u8], max_json_depth: usize) -> Result<(), McpTranscriptIngestError> {
+fn check_json_depth(
+    bytes: &[u8],
+    format: McpInputFormat,
+    max_json_depth: usize,
+) -> Result<(), McpTranscriptIngestError> {
     let mut depth = 0usize;
     let mut in_string = false;
     let mut escaped = false;
@@ -144,6 +152,9 @@ fn check_json_depth(bytes: &[u8], max_json_depth: usize) -> Result<(), McpTransc
             // one row cannot hide structural depth on later rows from the resource guard.
             in_string = false;
             escaped = false;
+            if format == McpInputFormat::JsonRpc {
+                depth = 0;
+            }
             continue;
         }
         if in_string {
@@ -405,6 +416,10 @@ mod tests {
         )
     }
 
+    fn modern_transport_error() -> String {
+        r#"{"transport":"streamable-http","transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28"}},"entries":[{"request":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"example.tool","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}},{"response":{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"ATTACKER_SENTINEL"}}}]}"#.to_string()
+    }
+
     fn limits() -> McpTranscriptLimits {
         McpTranscriptLimits {
             max_source_bytes: 4096,
@@ -642,6 +657,17 @@ mod tests {
     }
 
     #[test]
+    fn unbalanced_jsonl_depth_does_not_carry_into_the_next_line() {
+        let transcript = format!("{{\"open\":{{\n{NOTIFICATION}");
+        let mut bounded = limits();
+        bounded.max_json_depth = 2;
+        let error =
+            parse_mcp_transcript_bounded(Cursor::new(transcript), McpInputFormat::JsonRpc, bounded)
+                .unwrap_err();
+        assert!(matches!(error, McpTranscriptIngestError::InvalidTranscript));
+    }
+
+    #[test]
     fn diagnostics_do_not_echo_attacker_controlled_input() {
         let input = br#"{"ATTACKER_SENTINEL":"#;
         let error =
@@ -687,7 +713,19 @@ mod tests {
     }
 
     #[test]
-    fn modern_input_required_with_continuation_remains_accepted_and_nonterminal() {
+    fn modern_error_response_cannot_bypass_the_conclusion_gate() {
+        let error = parse_mcp_transcript_bounded(
+            Cursor::new(modern_transport_error()),
+            McpInputFormat::StreamableHttp,
+            limits(),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "MCP transcript conclusion is incomplete");
+        assert!(!format!("{error:?}").contains("ATTACKER_SENTINEL"));
+    }
+
+    #[test]
+    fn valid_modern_input_required_with_continuation_is_accepted() {
         let transcript =
             modern_transport(r#"{"resultType":"input_required","requestState":"opaque"}"#);
         assert!(parse_mcp_transcript_bounded(

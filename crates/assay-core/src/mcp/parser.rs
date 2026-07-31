@@ -45,7 +45,7 @@ pub(crate) fn parse_mcp_transcript_detailed(
             // The capability set travels on the same arm as the request metadata and for the same
             // reason: it is stated by a request and nowhere else. A response gets it by correlation
             // below, never by reading its own bytes.
-            let (request_metadata, result_observation, capability_observation) =
+            let (request_metadata, result_observation, capability_observation, is_error_response) =
                 match payload_raw(&event.payload) {
                     // The same classifier the parser used. A shape it rejects never reaches here,
                     // because `parse_events_with_envelopes` runs first and refuses it, so the error
@@ -55,12 +55,15 @@ pub(crate) fn parse_mcp_transcript_detailed(
                             Some(observe_request_metadata(raw)),
                             None,
                             observe_client_capabilities(raw),
+                            false,
                         ),
-                        Ok(MessageKind::Notification { .. }) => (None, None, None),
-                        Ok(MessageKind::Response) => (None, observe_result(raw), None),
-                        Err(_) => (None, None, None),
+                        Ok(MessageKind::Notification { .. }) => (None, None, None, false),
+                        Ok(MessageKind::Response) => {
+                            (None, observe_result(raw), None, raw.get("error").is_some())
+                        }
+                        Err(_) => (None, None, None, false),
                     },
-                    None => (None, None, None),
+                    None => (None, None, None, false),
                 };
             // Unframed formats have one whole-input observation and no entries to index. A framed
             // input that does not resolve to an entry is a mapping the parser cannot vouch for,
@@ -92,6 +95,7 @@ pub(crate) fn parse_mcp_transcript_detailed(
                     result_observation,
                     capability_observation,
                 },
+                is_error_response,
             }
         })
         .collect();
