@@ -10,10 +10,12 @@
 
 use crate::exit_codes;
 use anyhow::{bail, Context, Result};
+use assay_core::mcp::ingest::{parse_mcp_transcript_bounded, McpTranscriptLimits};
+use assay_core::mcp::McpInputFormat;
 use assay_evidence::bundle::BundleWriter;
 use assay_evidence::types::{EvidenceEvent, ProducerMeta};
 use chrono::{DateTime, Utc};
-use clap::Args;
+use clap::{Args, ValueEnum};
 use serde_json::Value;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -36,6 +38,14 @@ pub struct PrivilegedMcpActionArgs {
     #[arg(long, value_name = "PATH")]
     pub manifest_establish: Option<PathBuf>,
 
+    /// Optional MCP transcript to validate beside the producer-authored profile carriers
+    #[arg(long, value_name = "PATH", requires = "mcp_format")]
+    pub mcp_transcript: Option<PathBuf>,
+
+    /// Input format of --mcp-transcript
+    #[arg(long, value_enum, requires = "mcp_transcript")]
+    pub mcp_format: Option<PrivilegedMcpTranscriptFormat>,
+
     /// Output Assay evidence bundle path (.tar.gz)
     #[arg(long, alias = "out", value_name = "PATH")]
     pub bundle_out: PathBuf,
@@ -49,10 +59,19 @@ pub struct PrivilegedMcpActionArgs {
     pub import_time: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum PrivilegedMcpTranscriptFormat {
+    Inspector,
+    Jsonrpc,
+    StreamableHttp,
+    HttpSse,
+}
+
 pub fn cmd_privileged_mcp_action(args: PrivilegedMcpActionArgs) -> Result<i32> {
     if args.run_id.contains(':') {
         bail!("run_id cannot contain ':' because event ids use run_id:seq");
     }
+    validate_optional_mcp_transcript(&args)?;
     let import_time = parse_import_time(args.import_time.as_deref())?;
     let producer = ProducerMeta {
         name: "assay-cli".to_string(),
@@ -94,6 +113,26 @@ pub fn cmd_privileged_mcp_action(args: PrivilegedMcpActionArgs) -> Result<i32> {
         args.bundle_out.display()
     );
     Ok(exit_codes::OK)
+}
+
+fn validate_optional_mcp_transcript(args: &PrivilegedMcpActionArgs) -> Result<()> {
+    let (path, format) = match (&args.mcp_transcript, args.mcp_format) {
+        (None, None) => return Ok(()),
+        (Some(_), None) => bail!("--mcp-transcript requires --mcp-format"),
+        (None, Some(_)) => bail!("--mcp-format requires --mcp-transcript"),
+        (Some(path), Some(format)) => (path, format),
+    };
+    let file = File::open(path)
+        .with_context(|| format!("failed to open MCP transcript {}", path.display()))?;
+    let format = match format {
+        PrivilegedMcpTranscriptFormat::Inspector => McpInputFormat::Inspector,
+        PrivilegedMcpTranscriptFormat::Jsonrpc => McpInputFormat::JsonRpc,
+        PrivilegedMcpTranscriptFormat::StreamableHttp => McpInputFormat::StreamableHttp,
+        PrivilegedMcpTranscriptFormat::HttpSse => McpInputFormat::HttpSse,
+    };
+    parse_mcp_transcript_bounded(file, format, McpTranscriptLimits::default())
+        .map_err(|error| anyhow::anyhow!("MCP transcript validation failed: {error}"))?;
+    Ok(())
 }
 
 /// Read one NDJSON file into `(schema, payload)` pairs, byte-faithful.
@@ -142,6 +181,8 @@ mod tests {
     use assay_evidence::bundle::BundleReader;
     use serde_json::json;
 
+    const NOTIFICATION: &str = r#"{"jsonrpc":"2.0","method":"notifications/progress","params":{}}"#;
+
     fn decision(decision: &str) -> Value {
         json!({
             "schema": "assay.enforcement_decision.v0",
@@ -173,6 +214,8 @@ mod tests {
             decisions,
             denied_observations: None,
             manifest_establish: None,
+            mcp_transcript: None,
+            mcp_format: None,
             bundle_out: dir.join("out.bundle.tar.gz"),
             run_id: DEFAULT_RUN_ID.to_string(),
             import_time: Some("2026-07-24T00:00:00Z".to_string()),
@@ -240,5 +283,146 @@ mod tests {
         let decisions = write_ndjson(dir.path(), "dec.ndjson", &[]);
         let err = cmd_privileged_mcp_action(args(dir.path(), decisions)).unwrap_err();
         assert!(err.to_string().contains("nothing to import"));
+    }
+
+    fn profile_allow_decision() -> Value {
+        json!({
+            "schema": "assay.enforcement_decision.v0",
+            "caller": {"id": "ci-agent"},
+            "tool": {
+                "name": "github.add_deploy_key",
+                "action_class": "github_deploy_key"
+            },
+            "action": {
+                "verb": "create",
+                "resource_type": "github_deploy_key",
+                "target": {
+                    "provider": "github",
+                    "owner": "acme",
+                    "repo": "prod-app"
+                },
+                "target_digest": "sha256:c3ff823d7fb2ee33b9f1a3f7be6eaf849acb980b6ec960731506436b56384dfc"
+            },
+            "decision": "allow",
+            "reason": "allow",
+            "fail_closed": false,
+            "drift_state": "satisfied",
+            "credential_alias": "gh-deploy",
+            "non_claims": [
+                "policy decision only; does not assert or verify the upstream side effect (stays asserted, E9 ladder)",
+                "an allow is the decision to forward; it does not assert the call reached or was performed by the upstream (a transport failure surfaces as proxy_failed, not here)",
+                "credential referenced by alias only, never the token or declared scopes",
+                "deny is fail-closed caution and allow is a policy decision — neither is a maliciousness verdict",
+                "not the observation artifact (assay.mcp_manifest_observed.v0) and not the mechanism artifact (assay.enforcement_health.v0)"
+            ]
+        })
+    }
+
+    fn expected_allow_report() -> Value {
+        json!({
+            "schema": "assay.privileged_mcp_action.verify.report.v0",
+            "profile": "privileged-mcp-action/v0",
+            "bundle_integrity": "pass",
+            "verdict": "valid",
+            "claims": {
+                "policy_decision_recorded": {
+                    "status": "confirmed",
+                    "source_class": "producer_reported"
+                },
+                "caller_visible_denial": {"status": "incomplete"},
+                "upstream_delivery": {"status": "incomplete"},
+                "external_side_effect": {"status": "incomplete"}
+            },
+            "findings": [],
+            "non_claims": [
+                "allow does not prove upstream delivery",
+                "deny does not establish maliciousness",
+                "caller-visible denial does not prove external side-effect absence",
+                "bundle integrity does not upgrade source class"
+            ]
+        })
+    }
+
+    fn write_transcript(dir: &Path, name: &str, text: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, text).unwrap();
+        path
+    }
+
+    #[test]
+    fn wire_era_forms_round_trip_to_the_same_frozen_profile_report() {
+        use super::super::verify_privileged_mcp_action::verify_bundle_report;
+
+        let vectors = [
+            (
+                "legacy-missing",
+                r#"{"transport":"streamable-http","transport_context":{"headers":{"MCP-Protocol-Version":"2025-06-18"}},"entries":[{"request":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"github.add_deploy_key","arguments":{}}}},{"response":{"jsonrpc":"2.0","id":1,"result":{"content":[]}}}]}"#,
+            ),
+            (
+                "modern-complete",
+                r#"{"transport":"streamable-http","transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28"}},"entries":[{"request":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"github.add_deploy_key","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}},{"response":{"jsonrpc":"2.0","id":1,"result":{"content":[],"resultType":"complete"}}}]}"#,
+            ),
+            (
+                "modern-input-required",
+                r#"{"transport":"streamable-http","transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28"}},"entries":[{"request":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"github.add_deploy_key","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}},{"response":{"jsonrpc":"2.0","id":1,"result":{"resultType":"input_required","inputRequests":{"elicitation":{"method":"elicitation/create","params":{"message":"m","requestedSchema":{"type":"object","properties":{}}}}}}}}]}"#,
+            ),
+        ];
+
+        for (name, transcript) in vectors {
+            let dir = tempfile::tempdir().unwrap();
+            let decisions = write_ndjson(dir.path(), "dec.ndjson", &[profile_allow_decision()]);
+            let mut import = args(dir.path(), decisions);
+            import.mcp_transcript =
+                Some(write_transcript(dir.path(), "transcript.json", transcript));
+            import.mcp_format = Some(PrivilegedMcpTranscriptFormat::StreamableHttp);
+            cmd_privileged_mcp_action(import.clone())
+                .unwrap_or_else(|error| panic!("{name}: {error:#}"));
+            let report = verify_bundle_report(&import.bundle_out).unwrap();
+            assert_eq!(
+                serde_json::to_value(report).unwrap(),
+                expected_allow_report(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_wire_input_is_refused_before_a_bundle_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let decisions = write_ndjson(dir.path(), "dec.ndjson", &[profile_allow_decision()]);
+        let mut import = args(dir.path(), decisions);
+        import.mcp_transcript = Some(write_transcript(
+            dir.path(),
+            "transcript.json",
+            r#"{"ATTACKER_SENTINEL":"#,
+        ));
+        import.mcp_format = Some(PrivilegedMcpTranscriptFormat::StreamableHttp);
+        let error = cmd_privileged_mcp_action(import.clone()).unwrap_err();
+        assert!(error.to_string().contains("MCP transcript is invalid"));
+        assert!(!format!("{error:?}").contains("ATTACKER_SENTINEL"));
+        assert!(!import.bundle_out.exists());
+    }
+
+    #[test]
+    fn transcript_and_format_must_be_supplied_together() {
+        let dir = tempfile::tempdir().unwrap();
+        let decisions = write_ndjson(dir.path(), "dec.ndjson", &[profile_allow_decision()]);
+        let mut transcript_only = args(dir.path(), decisions.clone());
+        transcript_only.mcp_transcript = Some(write_transcript(
+            dir.path(),
+            "transcript.json",
+            NOTIFICATION,
+        ));
+        assert!(cmd_privileged_mcp_action(transcript_only)
+            .unwrap_err()
+            .to_string()
+            .contains("--mcp-format"));
+
+        let mut format_only = args(dir.path(), decisions);
+        format_only.mcp_format = Some(PrivilegedMcpTranscriptFormat::Jsonrpc);
+        assert!(cmd_privileged_mcp_action(format_only)
+            .unwrap_err()
+            .to_string()
+            .contains("--mcp-transcript"));
     }
 }
