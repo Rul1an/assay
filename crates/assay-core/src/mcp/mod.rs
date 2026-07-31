@@ -7,6 +7,7 @@ pub mod g3_auth_context;
 
 pub use g3_auth_context::AuthContextProjection;
 pub mod identity;
+pub mod ingest;
 pub mod jcs;
 pub mod jsonrpc;
 pub mod lifecycle;
