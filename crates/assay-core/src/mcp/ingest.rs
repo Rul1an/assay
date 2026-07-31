@@ -8,7 +8,7 @@
 //! alter the producer's evidence.
 
 use super::era::{conclude, conclude_request, RequestAssessment, ResultConclusion};
-use super::parser::parse_mcp_transcript_detailed;
+use super::parser::{parse_mcp_transcript_detailed_with_depth, EmbeddedJsonDepthExceeded};
 use super::{McpEvent, McpInputFormat};
 use assay_common::limits::{LimitExceeded, LimitKind, LimitReader};
 use serde::de::{DeserializeSeed, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
@@ -90,8 +90,16 @@ pub fn parse_mcp_transcript_bounded<R: Read>(
     }
     let text = String::from_utf8(bytes).map_err(|_| McpTranscriptIngestError::InvalidUtf8)?;
     check_event_count(text.as_bytes(), format, limits.max_events)?;
-    let parsed = parse_mcp_transcript_detailed(&text, format)
-        .map_err(|_| McpTranscriptIngestError::InvalidTranscript)?;
+    let parsed = parse_mcp_transcript_detailed_with_depth(&text, format, limits.max_json_depth)
+        .map_err(|error| {
+            if error.downcast_ref::<EmbeddedJsonDepthExceeded>().is_some() {
+                McpTranscriptIngestError::JsonDepth {
+                    limit: limits.max_json_depth,
+                }
+            } else {
+                McpTranscriptIngestError::InvalidTranscript
+            }
+        })?;
     for entry in &parsed {
         if entry.is_error_response {
             // The parser has already established a valid JSON-RPC error-response shape. It carries
@@ -149,43 +157,10 @@ fn check_json_depth(
     format: McpInputFormat,
     max_json_depth: usize,
 ) -> Result<(), McpTranscriptIngestError> {
-    let mut depth = 0usize;
-    let mut in_string = false;
-    let mut escaped = false;
-    for &byte in bytes {
-        if byte == b'\n' {
-            // Raw newlines cannot occur inside JSON strings. Recover here so malformed JSONL on
-            // one row cannot hide structural depth on later rows from the resource guard.
-            in_string = false;
-            escaped = false;
-            if format == McpInputFormat::JsonRpc {
-                depth = 0;
-            }
-            continue;
-        }
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if byte == b'\\' {
-                escaped = true;
-            } else if byte == b'"' {
-                in_string = false;
-            }
-            continue;
-        }
-        match byte {
-            b'"' => in_string = true,
-            b'{' | b'[' => {
-                depth += 1;
-                if depth > max_json_depth {
-                    return Err(McpTranscriptIngestError::JsonDepth {
-                        limit: max_json_depth,
-                    });
-                }
-            }
-            b'}' | b']' => depth = depth.saturating_sub(1),
-            _ => {}
-        }
+    if super::json_depth::exceeds_limit(bytes, max_json_depth, format == McpInputFormat::JsonRpc) {
+        return Err(McpTranscriptIngestError::JsonDepth {
+            limit: max_json_depth,
+        });
     }
     Ok(())
 }
@@ -412,6 +387,7 @@ fn drain_map<'de, A: MapAccess<'de>>(mut map: A) -> Result<(), A::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::parser::parse_mcp_transcript_detailed;
     use std::io::{Cursor, Read};
 
     const NOTIFICATION: &str = r#"{"jsonrpc":"2.0","method":"notifications/progress","params":{}}"#;
@@ -638,6 +614,182 @@ mod tests {
             error,
             McpTranscriptIngestError::JsonDepth { limit: 2 }
         ));
+    }
+
+    #[test]
+    fn sse_string_payload_obeys_the_same_json_depth_limit() {
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "example.tool",
+                "arguments": {"one": {"two": {"three": true}}},
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientCapabilities": {}
+                }
+            }
+        });
+        let response = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {"content": [], "resultType": "complete"}
+        });
+        let transcript = serde_json::json!({
+            "transport": "http-sse",
+            "transport_context": {
+                "headers": {"MCP-Protocol-Version": "2026-07-28"}
+            },
+            "entries": [
+                {"sse": {"event": "message", "data": request.to_string()}},
+                {"sse": {"event": "message", "data": response.to_string()}}
+            ]
+        })
+        .to_string();
+        let mut exact = limits();
+        exact.max_json_depth = 5;
+        assert!(parse_mcp_transcript_bounded(
+            Cursor::new(transcript.as_bytes()),
+            McpInputFormat::HttpSse,
+            exact,
+        )
+        .is_ok());
+
+        let mut over = exact;
+        over.max_json_depth = 4;
+
+        let error =
+            parse_mcp_transcript_bounded(Cursor::new(transcript), McpInputFormat::HttpSse, over)
+                .unwrap_err();
+        assert!(matches!(
+            error,
+            McpTranscriptIngestError::JsonDepth { limit: 4 }
+        ));
+    }
+
+    #[test]
+    fn framed_json_depth_accumulates_across_newlines() {
+        let transcript = r#"{
+  "transport": "streamable-http",
+  "transport_context": {
+    "headers": {
+      "MCP-Protocol-Version": "2026-07-28"
+    }
+  },
+  "entries": [
+    {
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+          "name": "example.tool",
+          "arguments": {},
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientCapabilities": {}
+          }
+        }
+      }
+    }
+  ]
+}"#;
+        let mut bounded = limits();
+        bounded.max_json_depth = 1;
+
+        let error = parse_mcp_transcript_bounded(
+            Cursor::new(transcript),
+            McpInputFormat::StreamableHttp,
+            bounded,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            McpTranscriptIngestError::JsonDepth { limit: 1 }
+        ));
+    }
+
+    #[test]
+    fn every_jsonrpc_message_shape_requires_the_2_0_marker() {
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "example.tool",
+                "arguments": {},
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientCapabilities": {}
+                }
+            }
+        });
+        let shapes = [
+            ("request", request.clone(), false),
+            (
+                "notification",
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": "notifications/progress",
+                    "params": {}
+                }),
+                false,
+            ),
+            (
+                "success response",
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {"content": [], "resultType": "complete"}
+                }),
+                true,
+            ),
+            (
+                "error response",
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "error": {"code": -32603, "message": "refused"}
+                }),
+                true,
+            ),
+        ];
+        let markers = [
+            ("missing", None),
+            ("non-string", Some(serde_json::json!(7))),
+            ("wrong", Some(serde_json::json!("1.0"))),
+        ];
+
+        for (shape_name, shape, needs_request) in shapes {
+            for (marker_name, marker) in &markers {
+                let mut malformed = shape.clone();
+                let object = malformed.as_object_mut().unwrap();
+                match marker {
+                    Some(value) => {
+                        object.insert("jsonrpc".to_string(), value.clone());
+                    }
+                    None => {
+                        object.remove("jsonrpc");
+                    }
+                }
+                let transcript = if needs_request {
+                    format!("{request}\n{malformed}\n")
+                } else {
+                    format!("{malformed}\n")
+                };
+                let error = parse_mcp_transcript_bounded(
+                    Cursor::new(transcript),
+                    McpInputFormat::JsonRpc,
+                    limits(),
+                )
+                .unwrap_err();
+                assert!(
+                    matches!(error, McpTranscriptIngestError::InvalidTranscript),
+                    "{shape_name} with {marker_name} marker returned {error:?}"
+                );
+            }
+        }
     }
 
     #[test]

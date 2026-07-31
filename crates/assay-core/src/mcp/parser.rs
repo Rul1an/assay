@@ -4,6 +4,7 @@ use crate::mcp::era::{
     EnvelopeObservation, McpEraContext, MessageKind, ParsedMcpEvent, RequestMetadata,
 };
 use crate::mcp::era::{CorrelationId, DuplicateAwareSink, EraResolution, SeenMembers, UniqueValue};
+use crate::mcp::json_depth;
 use crate::mcp::types::*;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -28,7 +29,26 @@ pub(crate) fn parse_mcp_transcript_detailed(
     text: &str,
     format: McpInputFormat,
 ) -> Result<Vec<ParsedMcpEvent>> {
-    let (events, envelopes) = parse_events_with_envelopes(text, format)?;
+    parse_mcp_transcript_detailed_internal(text, format, None)
+}
+
+/// Bounded internal parse. The outer transcript has already passed its depth scan; this limit is
+/// carried to JSON stored inside SSE `data` strings, which is a separate document whose structure
+/// is invisible to the outer scan.
+pub(crate) fn parse_mcp_transcript_detailed_with_depth(
+    text: &str,
+    format: McpInputFormat,
+    max_json_depth: usize,
+) -> Result<Vec<ParsedMcpEvent>> {
+    parse_mcp_transcript_detailed_internal(text, format, Some(max_json_depth))
+}
+
+fn parse_mcp_transcript_detailed_internal(
+    text: &str,
+    format: McpInputFormat,
+    max_embedded_json_depth: Option<usize>,
+) -> Result<Vec<ParsedMcpEvent>> {
+    let (events, envelopes) = parse_events_with_envelopes(text, format, max_embedded_json_depth)?;
     let framed = is_framed(format);
     let parsed: Vec<ParsedMcpEvent> = events
         .into_iter()
@@ -223,6 +243,7 @@ fn payload_raw(payload: &McpPayload) -> Option<&serde_json::Value> {
 fn parse_events_with_envelopes(
     text: &str,
     format: McpInputFormat,
+    max_embedded_json_depth: Option<usize>,
 ) -> Result<(Vec<McpEvent>, Vec<EnvelopeObservation>)> {
     let (events, envelopes) = match format {
         McpInputFormat::JsonRpc => (parse_jsonrpc_jsonl(text)?, Vec::new()),
@@ -232,10 +253,15 @@ fn parse_events_with_envelopes(
             "streamable-http",
             "streamable-http transcript",
             false,
+            max_embedded_json_depth,
         )?,
-        McpInputFormat::HttpSse => {
-            parse_transport_transcript_detailed(text, "http-sse", "http-sse transcript", true)?
-        }
+        McpInputFormat::HttpSse => parse_transport_transcript_detailed(
+            text,
+            "http-sse",
+            "http-sse transcript",
+            true,
+            max_embedded_json_depth,
+        )?,
     };
     // No global id gate here. The old one keyed on the public `String` rendering, so a number `1`
     // and a string `"1"` collided; it refused any reuse anywhere in the transcript, so a legal reuse
@@ -308,6 +334,7 @@ fn parse_transport_transcript_detailed(
     expected_transport: &str,
     source_label: &str,
     allow_endpoint_event: bool,
+    max_embedded_json_depth: Option<usize>,
 ) -> Result<(Vec<McpEvent>, Vec<EnvelopeObservation>)> {
     let transcript: TransportTranscript =
         serde_json::from_str(text).with_context(|| format!("invalid {}", source_label))?;
@@ -378,7 +405,9 @@ fn parse_transport_transcript_detailed(
         }
 
         if let Some(sse) = entry.sse {
-            if let Some(jsonrpc) = extract_jsonrpc_from_sse(&sse, allow_endpoint_event)? {
+            if let Some(jsonrpc) =
+                extract_jsonrpc_from_sse(&sse, allow_endpoint_event, max_embedded_json_depth)?
+            {
                 out.push(parse_jsonrpc_message(
                     jsonrpc,
                     source_line,
@@ -401,6 +430,13 @@ fn parse_jsonrpc_message(
     if !v.is_object() {
         bail!(
             "MCP event at source line {} must be a JSON object",
+            source_line
+        );
+    }
+
+    if v.get("jsonrpc").and_then(serde_json::Value::as_str) != Some("2.0") {
+        bail!(
+            "MCP event at source line {} must carry JSON-RPC version 2.0",
             source_line
         );
     }
@@ -661,6 +697,7 @@ fn reject_unusable_id_shape(raw_id: Option<&serde_json::Value>, source_line: u64
 fn extract_jsonrpc_from_sse(
     sse: &TransportSseEnvelope,
     allow_endpoint_event: bool,
+    max_embedded_json_depth: Option<usize>,
 ) -> Result<Option<serde_json::Value>> {
     let event_name = sse.event.as_deref().unwrap_or("message");
     if event_name == "endpoint" && allow_endpoint_event {
@@ -671,8 +708,12 @@ fn extract_jsonrpc_from_sse(
         return Ok(None);
     }
 
-    extract_jsonrpc_like_value(&sse.data.0)
+    extract_jsonrpc_like_value(&sse.data.0, max_embedded_json_depth)
 }
+
+#[derive(Debug, thiserror::Error)]
+#[error("embedded SSE JSON exceeds its depth limit")]
+pub(crate) struct EmbeddedJsonDepthExceeded;
 
 /// Pull a JSON-RPC-looking value out of an SSE `data` payload.
 ///
@@ -681,7 +722,10 @@ fn extract_jsonrpc_from_sse(
 /// carries a duplicate member, which is refused. The two are told apart by
 /// `serde_json::error::Category`, not by reading the message: a visitor's `Error::custom` classifies
 /// as `Data` while malformed bytes classify as `Syntax`, so the distinction is typed.
-fn extract_jsonrpc_like_value(value: &serde_json::Value) -> Result<Option<serde_json::Value>> {
+fn extract_jsonrpc_like_value(
+    value: &serde_json::Value,
+    max_embedded_json_depth: Option<usize>,
+) -> Result<Option<serde_json::Value>> {
     match value {
         serde_json::Value::Object(map)
             if map.contains_key("method")
@@ -695,13 +739,22 @@ fn extract_jsonrpc_like_value(value: &serde_json::Value) -> Result<Option<serde_
         // same one, so it goes through the same duplicate-aware boundary rather than a plain
         // `Value`. Without this an SSE frame carrying its payload as a string was the one path that
         // kept a duplicate member.
-        serde_json::Value::String(text) => match serde_json::from_str::<UniqueValue>(text) {
-            Ok(UniqueValue(parsed)) => extract_jsonrpc_like_value(&parsed),
-            Err(e) if e.classify() == serde_json::error::Category::Data => {
-                Err(anyhow::Error::new(e).context("invalid SSE data payload"))
+        serde_json::Value::String(text) => {
+            if max_embedded_json_depth
+                .is_some_and(|limit| json_depth::exceeds_limit(text.as_bytes(), limit, false))
+            {
+                return Err(EmbeddedJsonDepthExceeded.into());
             }
-            Err(_) => Ok(None),
-        },
+            match serde_json::from_str::<UniqueValue>(text) {
+                Ok(UniqueValue(parsed)) => {
+                    extract_jsonrpc_like_value(&parsed, max_embedded_json_depth)
+                }
+                Err(e) if e.classify() == serde_json::error::Category::Data => {
+                    Err(anyhow::Error::new(e).context("invalid SSE data payload"))
+                }
+                Err(_) => Ok(None),
+            }
+        }
         _ => Ok(None),
     }
 }
