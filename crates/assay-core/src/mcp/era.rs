@@ -352,6 +352,11 @@ pub(crate) enum MessageShapeError {
     /// response, so it consumed an outstanding id and freed it for reuse without answering anything.
     #[error("a JSON-RPC response must carry exactly one of result or error")]
     NotExactlyOneResponseBody,
+    /// `error` is not merely a discriminator. Accepting a null, scalar, or object without the two
+    /// required members would let the bounded gate treat an unreadable body as a valid error
+    /// response and skip result conclusion.
+    #[error("a JSON-RPC error response must carry an integer code and string message")]
+    MalformedErrorBody,
 }
 
 /// Classify by the two fields JSON-RPC uses.
@@ -381,6 +386,26 @@ pub(crate) fn classify_message(
         let has_error = v.get("error").is_some();
         if has_result == has_error {
             return Err(MessageShapeError::NotExactlyOneResponseBody);
+        }
+        if has_error {
+            let Some(error) = v.get("error").and_then(serde_json::Value::as_object) else {
+                return Err(MessageShapeError::MalformedErrorBody);
+            };
+            let integer_code = error
+                .get("code")
+                .and_then(serde_json::Value::as_i64)
+                .is_some()
+                || error
+                    .get("code")
+                    .and_then(serde_json::Value::as_u64)
+                    .is_some();
+            let string_message = error
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .is_some();
+            if !integer_code || !string_message {
+                return Err(MessageShapeError::MalformedErrorBody);
+            }
         }
         return Ok(MessageKind::Response);
     };
@@ -513,10 +538,6 @@ pub(crate) enum CapabilityObservation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-// Targeted rather than module-wide, so a future dead item in this file is still reported.
-// `expect` would be stricter but is unfulfilled here: the tests use these under `--all-targets`,
-// so the lint does not fire and `expect` itself errors. Removed by the slice-2 conclusion layer.
-#[allow(dead_code)]
 pub(crate) enum IncompleteReason {
     EraUnknown(UnknownReason),
     /// The token is unreadable to this build, and nothing is outstanding that could still cover it.
@@ -546,10 +567,6 @@ pub(crate) enum IncompleteReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-// Targeted rather than module-wide, so a future dead item in this file is still reported.
-// `expect` would be stricter but is unfulfilled here: the tests use these under `--all-targets`,
-// so the lint does not fire and `expect` itself errors. Removed by the slice-2 conclusion layer.
-#[allow(dead_code)]
 pub(crate) enum InvalidReason {
     EraConflicting {
         header: String,
@@ -593,10 +610,6 @@ pub(crate) enum InvalidReason {
 /// category error here: "no objection" and "valid but unfinished" are different answers and only
 /// the second belongs to a result.
 #[derive(Debug, Clone, PartialEq, Eq)]
-// Targeted rather than module-wide, so a future dead item in this file is still reported.
-// `expect` would be stricter but is unfulfilled here: the tests use these under `--all-targets`,
-// so the lint does not fire and `expect` itself errors. Removed by the slice-2 conclusion layer.
-#[allow(dead_code)]
 pub(crate) enum RequestAssessment {
     Valid,
     Incomplete(IncompleteReason),
@@ -607,10 +620,6 @@ pub(crate) enum RequestAssessment {
 /// contradicted, and a missing required field are three different findings, and `input_required`
 /// is valid while not being terminal.
 #[derive(Debug, Clone, PartialEq, Eq)]
-// Targeted rather than module-wide, so a future dead item in this file is still reported.
-// `expect` would be stricter but is unfulfilled here: the tests use these under `--all-targets`,
-// so the lint does not fire and `expect` itself errors. Removed by the slice-2 conclusion layer.
-#[allow(dead_code)]
 pub(crate) enum ResultConclusion {
     Terminal,
     NonTerminal,
@@ -651,9 +660,13 @@ pub(crate) struct McpEraContext {
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedMcpEvent {
     pub(crate) event: McpEvent,
-    /// Read by tests and by the slice-2 conclusion layer; nothing in production consumes it yet.
-    #[allow(dead_code)]
+    /// Read by the bounded conclusion layer before the public event projection drops it.
     pub(crate) context: McpEraContext,
+    /// A valid JSON-RPC error response has no result whose terminality can be concluded.
+    ///
+    /// Kept as an observation on the internal sidecar so bounded ingest can distinguish it from
+    /// silent absence and accept it without inventing a result conclusion or producer decision.
+    pub(crate) is_error_response: bool,
 }
 
 /// The protocol versions this build has era rules for, newest last. This is a statement about
@@ -760,10 +773,6 @@ fn requires_result_type(version: &str) -> bool {
 /// The two MUSTs sit next to each other in the schema: a server implementing this version MUST
 /// include `resultType`, and a client receiving a result from an earlier-version server MUST treat
 /// the absent field as `"complete"`. Same observation, opposite conclusions.
-// Targeted rather than module-wide, so a future dead item in this file is still reported.
-// `expect` would be stricter but is unfulfilled here: the tests use these under `--all-targets`,
-// so the lint does not fire and `expect` itself errors. Removed by the slice-2 conclusion layer.
-#[allow(dead_code)]
 pub(crate) fn conclude(
     era: &EraResolution,
     observed: &ResultObservation,
@@ -878,10 +887,6 @@ pub(crate) fn conclude(
 /// the metadata arm and left the header arm, so a malformed header still resolved to an unknown
 /// era and then to "no objection". Both now land on `Invalid`, because more evidence does not make
 /// an unreadable value readable.
-// Targeted rather than module-wide, so a future dead item in this file is still reported.
-// `expect` would be stricter but is unfulfilled here: the tests use these under `--all-targets`,
-// so the lint does not fire and `expect` itself errors. Removed by the slice-2 conclusion layer.
-#[allow(dead_code)]
 pub(crate) fn conclude_request(
     era: &EraResolution,
     metadata: &RequestMetadata,

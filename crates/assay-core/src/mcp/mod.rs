@@ -7,7 +7,9 @@ pub mod g3_auth_context;
 
 pub use g3_auth_context::AuthContextProjection;
 pub mod identity;
+pub mod ingest;
 pub mod jcs;
+pub(crate) mod json_depth;
 pub mod jsonrpc;
 pub mod lifecycle;
 pub mod mapper_v2;
