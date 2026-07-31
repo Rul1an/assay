@@ -513,10 +513,6 @@ pub(crate) enum CapabilityObservation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-// Targeted rather than module-wide, so a future dead item in this file is still reported.
-// `expect` would be stricter but is unfulfilled here: the tests use these under `--all-targets`,
-// so the lint does not fire and `expect` itself errors. Removed by the slice-2 conclusion layer.
-#[allow(dead_code)]
 pub(crate) enum IncompleteReason {
     EraUnknown(UnknownReason),
     /// The token is unreadable to this build, and nothing is outstanding that could still cover it.
@@ -546,10 +542,6 @@ pub(crate) enum IncompleteReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-// Targeted rather than module-wide, so a future dead item in this file is still reported.
-// `expect` would be stricter but is unfulfilled here: the tests use these under `--all-targets`,
-// so the lint does not fire and `expect` itself errors. Removed by the slice-2 conclusion layer.
-#[allow(dead_code)]
 pub(crate) enum InvalidReason {
     EraConflicting {
         header: String,
@@ -593,10 +585,6 @@ pub(crate) enum InvalidReason {
 /// category error here: "no objection" and "valid but unfinished" are different answers and only
 /// the second belongs to a result.
 #[derive(Debug, Clone, PartialEq, Eq)]
-// Targeted rather than module-wide, so a future dead item in this file is still reported.
-// `expect` would be stricter but is unfulfilled here: the tests use these under `--all-targets`,
-// so the lint does not fire and `expect` itself errors. Removed by the slice-2 conclusion layer.
-#[allow(dead_code)]
 pub(crate) enum RequestAssessment {
     Valid,
     Incomplete(IncompleteReason),
@@ -607,10 +595,6 @@ pub(crate) enum RequestAssessment {
 /// contradicted, and a missing required field are three different findings, and `input_required`
 /// is valid while not being terminal.
 #[derive(Debug, Clone, PartialEq, Eq)]
-// Targeted rather than module-wide, so a future dead item in this file is still reported.
-// `expect` would be stricter but is unfulfilled here: the tests use these under `--all-targets`,
-// so the lint does not fire and `expect` itself errors. Removed by the slice-2 conclusion layer.
-#[allow(dead_code)]
 pub(crate) enum ResultConclusion {
     Terminal,
     NonTerminal,
@@ -651,8 +635,7 @@ pub(crate) struct McpEraContext {
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedMcpEvent {
     pub(crate) event: McpEvent,
-    /// Read by tests and by the slice-2 conclusion layer; nothing in production consumes it yet.
-    #[allow(dead_code)]
+    /// Read by the bounded conclusion layer before the public event projection drops it.
     pub(crate) context: McpEraContext,
 }
 
@@ -760,10 +743,6 @@ fn requires_result_type(version: &str) -> bool {
 /// The two MUSTs sit next to each other in the schema: a server implementing this version MUST
 /// include `resultType`, and a client receiving a result from an earlier-version server MUST treat
 /// the absent field as `"complete"`. Same observation, opposite conclusions.
-// Targeted rather than module-wide, so a future dead item in this file is still reported.
-// `expect` would be stricter but is unfulfilled here: the tests use these under `--all-targets`,
-// so the lint does not fire and `expect` itself errors. Removed by the slice-2 conclusion layer.
-#[allow(dead_code)]
 pub(crate) fn conclude(
     era: &EraResolution,
     observed: &ResultObservation,
@@ -878,10 +857,6 @@ pub(crate) fn conclude(
 /// the metadata arm and left the header arm, so a malformed header still resolved to an unknown
 /// era and then to "no objection". Both now land on `Invalid`, because more evidence does not make
 /// an unreadable value readable.
-// Targeted rather than module-wide, so a future dead item in this file is still reported.
-// `expect` would be stricter but is unfulfilled here: the tests use these under `--all-targets`,
-// so the lint does not fire and `expect` itself errors. Removed by the slice-2 conclusion layer.
-#[allow(dead_code)]
 pub(crate) fn conclude_request(
     era: &EraResolution,
     metadata: &RequestMetadata,

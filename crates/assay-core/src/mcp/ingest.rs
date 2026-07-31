@@ -1,9 +1,12 @@
 //! Resource-bounded ingest for untrusted MCP transcript bytes.
 //!
-//! This layer owns only the cost of reaching the existing MCP parser. It does not reinterpret
-//! protocol observations, derive a policy decision, or change the public [`McpEvent`] shape.
+//! This layer owns the cost of reaching the existing MCP parser and refuses typed conclusion states
+//! that cannot support a clean reading. It does not derive a policy decision or change the public
+//! [`McpEvent`] shape.
 
-use super::{parse_mcp_transcript, McpEvent, McpInputFormat};
+use super::era::{conclude, conclude_request, RequestAssessment, ResultConclusion};
+use super::parser::parse_mcp_transcript_detailed;
+use super::{McpEvent, McpInputFormat};
 use assay_common::limits::{LimitExceeded, LimitKind, LimitReader};
 use serde::de::{DeserializeSeed, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use std::io::Read;
@@ -51,9 +54,19 @@ pub enum McpTranscriptIngestError {
     ReadFailed,
     #[error("MCP transcript is invalid")]
     InvalidTranscript,
+    /// At least one request or result needs evidence this transcript does not provide.
+    #[error("MCP transcript conclusion is incomplete")]
+    ConclusionIncomplete,
+    /// At least one request or result carries a protocol-invalid observation.
+    #[error("MCP transcript conclusion is invalid")]
+    ConclusionInvalid,
 }
 
-/// Read and parse one transcript under explicit limits.
+/// Read and parse one transcript under explicit limits, refusing unusable conclusion states.
+///
+/// `Terminal` and `NonTerminal` results are both accepted. `Incomplete` and `Invalid` request or
+/// result states are mapped to value-free ingest errors; no policy decision or profile carrier is
+/// derived from them.
 pub fn parse_mcp_transcript_bounded<R: Read>(
     reader: R,
     format: McpInputFormat,
@@ -73,7 +86,41 @@ pub fn parse_mcp_transcript_bounded<R: Read>(
     }
     let text = String::from_utf8(bytes).map_err(|_| McpTranscriptIngestError::InvalidUtf8)?;
     check_event_count(text.as_bytes(), format, limits.max_events)?;
-    parse_mcp_transcript(&text, format).map_err(|_| McpTranscriptIngestError::InvalidTranscript)
+    let parsed = parse_mcp_transcript_detailed(&text, format)
+        .map_err(|_| McpTranscriptIngestError::InvalidTranscript)?;
+    for entry in &parsed {
+        if let Some(metadata) = &entry.context.request_metadata {
+            match conclude_request(
+                &entry.context.era,
+                metadata,
+                entry.context.capability_observation.as_ref(),
+            ) {
+                RequestAssessment::Valid => {}
+                RequestAssessment::Incomplete(_) => {
+                    return Err(McpTranscriptIngestError::ConclusionIncomplete)
+                }
+                RequestAssessment::Invalid(_) => {
+                    return Err(McpTranscriptIngestError::ConclusionInvalid)
+                }
+            }
+        }
+        if let Some(result) = &entry.context.result_observation {
+            match conclude(
+                &entry.context.era,
+                result,
+                entry.context.capability_observation.as_ref(),
+            ) {
+                ResultConclusion::Terminal | ResultConclusion::NonTerminal => {}
+                ResultConclusion::Incomplete(_) => {
+                    return Err(McpTranscriptIngestError::ConclusionIncomplete)
+                }
+                ResultConclusion::Invalid(_) => {
+                    return Err(McpTranscriptIngestError::ConclusionInvalid)
+                }
+            }
+        }
+    }
+    Ok(parsed.into_iter().map(|entry| entry.event).collect())
 }
 
 fn check_jsonl_lines(bytes: &[u8], max_line_bytes: u64) -> Result<(), McpTranscriptIngestError> {
@@ -352,6 +399,12 @@ mod tests {
 
     const NOTIFICATION: &str = r#"{"jsonrpc":"2.0","method":"notifications/progress","params":{}}"#;
 
+    fn modern_transport(result: &str) -> String {
+        format!(
+            r#"{{"transport":"streamable-http","transport_context":{{"headers":{{"MCP-Protocol-Version":"2026-07-28"}}}},"entries":[{{"request":{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"example.tool","arguments":{{}},"_meta":{{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{{}}}}}}}}}},{{"response":{{"jsonrpc":"2.0","id":1,"result":{result}}}}}]}}"#
+        )
+    }
+
     fn limits() -> McpTranscriptLimits {
         McpTranscriptLimits {
             max_source_bytes: 4096,
@@ -597,5 +650,51 @@ mod tests {
         assert!(matches!(error, McpTranscriptIngestError::InvalidTranscript));
         assert!(!error.to_string().contains("ATTACKER_SENTINEL"));
         assert!(!format!("{error:?}").contains("ATTACKER_SENTINEL"));
+    }
+
+    #[test]
+    fn unresolved_request_era_is_refused_after_bounded_parsing() {
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"example.tool","arguments":{}}}"#;
+        let error =
+            parse_mcp_transcript_bounded(Cursor::new(request), McpInputFormat::JsonRpc, limits())
+                .unwrap_err();
+        assert_eq!(error.to_string(), "MCP transcript conclusion is incomplete");
+    }
+
+    #[test]
+    fn modern_result_without_result_type_is_refused_after_bounded_parsing() {
+        let transcript = modern_transport(r#"{"content":[]}"#);
+        let error = parse_mcp_transcript_bounded(
+            Cursor::new(transcript),
+            McpInputFormat::StreamableHttp,
+            limits(),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "MCP transcript conclusion is invalid");
+    }
+
+    #[test]
+    fn unrecognized_modern_result_is_not_promoted_to_a_clean_reading() {
+        let transcript = modern_transport(r#"{"content":[],"resultType":"future-state"}"#);
+        let error = parse_mcp_transcript_bounded(
+            Cursor::new(transcript),
+            McpInputFormat::StreamableHttp,
+            limits(),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "MCP transcript conclusion is incomplete");
+        assert!(!format!("{error:?}").contains("future-state"));
+    }
+
+    #[test]
+    fn modern_input_required_with_continuation_remains_accepted_and_nonterminal() {
+        let transcript =
+            modern_transport(r#"{"resultType":"input_required","requestState":"opaque"}"#);
+        assert!(parse_mcp_transcript_bounded(
+            Cursor::new(transcript),
+            McpInputFormat::StreamableHttp,
+            limits(),
+        )
+        .is_ok());
     }
 }
