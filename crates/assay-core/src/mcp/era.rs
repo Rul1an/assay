@@ -352,6 +352,11 @@ pub(crate) enum MessageShapeError {
     /// response, so it consumed an outstanding id and freed it for reuse without answering anything.
     #[error("a JSON-RPC response must carry exactly one of result or error")]
     NotExactlyOneResponseBody,
+    /// `error` is not merely a discriminator. Accepting a null, scalar, or object without the two
+    /// required members would let the bounded gate treat an unreadable body as a valid error
+    /// response and skip result conclusion.
+    #[error("a JSON-RPC error response must carry an integer code and string message")]
+    MalformedErrorBody,
 }
 
 /// Classify by the two fields JSON-RPC uses.
@@ -381,6 +386,26 @@ pub(crate) fn classify_message(
         let has_error = v.get("error").is_some();
         if has_result == has_error {
             return Err(MessageShapeError::NotExactlyOneResponseBody);
+        }
+        if has_error {
+            let Some(error) = v.get("error").and_then(serde_json::Value::as_object) else {
+                return Err(MessageShapeError::MalformedErrorBody);
+            };
+            let integer_code = error
+                .get("code")
+                .and_then(serde_json::Value::as_i64)
+                .is_some()
+                || error
+                    .get("code")
+                    .and_then(serde_json::Value::as_u64)
+                    .is_some();
+            let string_message = error
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .is_some();
+            if !integer_code || !string_message {
+                return Err(MessageShapeError::MalformedErrorBody);
+            }
         }
         return Ok(MessageKind::Response);
     };

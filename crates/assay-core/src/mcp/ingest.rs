@@ -422,8 +422,14 @@ mod tests {
         )
     }
 
+    fn modern_transport_with_error(error: &str) -> String {
+        format!(
+            r#"{{"transport":"streamable-http","transport_context":{{"headers":{{"MCP-Protocol-Version":"2026-07-28"}}}},"entries":[{{"request":{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"example.tool","arguments":{{}},"_meta":{{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{{}}}}}}}}}},{{"response":{{"jsonrpc":"2.0","id":1,"error":{error}}}}}]}}"#
+        )
+    }
+
     fn modern_transport_error() -> String {
-        r#"{"transport":"streamable-http","transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28"}},"entries":[{"request":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"example.tool","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}},{"response":{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"ATTACKER_SENTINEL"}}}]}"#.to_string()
+        modern_transport_with_error(r#"{"code":-32603,"message":"ATTACKER_SENTINEL"}"#)
     }
 
     fn limits() -> McpTranscriptLimits {
@@ -723,9 +729,13 @@ mod tests {
         let transcript = modern_transport_error();
         let parsed =
             parse_mcp_transcript_detailed(&transcript, McpInputFormat::StreamableHttp).unwrap();
+        let error_entry = parsed
+            .iter()
+            .find(|entry| entry.is_error_response)
+            .expect("the parser must observe the JSON-RPC error response");
         assert!(
-            parsed.iter().any(|entry| entry.is_error_response),
-            "the bounded gate must not accept an error response by failing to observe it"
+            error_entry.context.result_observation.is_none(),
+            "an error response must not acquire an MCP result conclusion"
         );
         assert!(parse_mcp_transcript_bounded(
             Cursor::new(transcript),
@@ -733,6 +743,31 @@ mod tests {
             limits(),
         )
         .is_ok());
+    }
+
+    #[test]
+    fn malformed_error_members_are_refused_before_error_acceptance() {
+        for malformed in [
+            "null",
+            "7",
+            r#""denied""#,
+            r#"{"message":"missing code"}"#,
+            r#"{"code":-32603}"#,
+            r#"{"code":1.0,"message":"decimal code"}"#,
+            r#"{"code":1.5,"message":"float code"}"#,
+            r#"{"code":-32603,"message":7}"#,
+        ] {
+            let error = parse_mcp_transcript_bounded(
+                Cursor::new(modern_transport_with_error(malformed)),
+                McpInputFormat::StreamableHttp,
+                limits(),
+            )
+            .unwrap_err();
+            assert!(
+                matches!(error, McpTranscriptIngestError::InvalidTranscript),
+                "malformed error member must be a transcript refusal, got {error:?}"
+            );
+        }
     }
 
     #[test]
