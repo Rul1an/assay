@@ -639,8 +639,8 @@ pub(crate) struct ParsedMcpEvent {
     pub(crate) context: McpEraContext,
     /// A valid JSON-RPC error response has no result whose terminality can be concluded.
     ///
-    /// Kept as an observation on the internal sidecar so the bounded ingest gate can refuse the
-    /// incomplete reading without treating a protocol-valid error response as malformed.
+    /// Kept as an observation on the internal sidecar so bounded ingest can distinguish it from
+    /// silent absence and accept it without inventing a result conclusion or producer decision.
     pub(crate) is_error_response: bool,
 }
 
