@@ -38,7 +38,7 @@ pub struct PrivilegedMcpActionArgs {
     #[arg(long, value_name = "PATH")]
     pub manifest_establish: Option<PathBuf>,
 
-    /// Optional MCP transcript to validate beside the producer-authored profile carriers
+    /// Optional MCP transcript to inspect beside the producer-authored profile carriers
     #[arg(long, value_name = "PATH", requires = "mcp_format")]
     pub mcp_transcript: Option<PathBuf>,
 
@@ -71,7 +71,7 @@ pub fn cmd_privileged_mcp_action(args: PrivilegedMcpActionArgs) -> Result<i32> {
     if args.run_id.contains(':') {
         bail!("run_id cannot contain ':' because event ids use run_id:seq");
     }
-    validate_optional_mcp_transcript(&args)?;
+    inspect_optional_mcp_transcript(&args)?;
     let import_time = parse_import_time(args.import_time.as_deref())?;
     let producer = ProducerMeta {
         name: "assay-cli".to_string(),
@@ -115,7 +115,7 @@ pub fn cmd_privileged_mcp_action(args: PrivilegedMcpActionArgs) -> Result<i32> {
     Ok(exit_codes::OK)
 }
 
-fn validate_optional_mcp_transcript(args: &PrivilegedMcpActionArgs) -> Result<()> {
+fn inspect_optional_mcp_transcript(args: &PrivilegedMcpActionArgs) -> Result<()> {
     let (path, format) = match (&args.mcp_transcript, args.mcp_format) {
         (None, None) => return Ok(()),
         (Some(_), None) => bail!("--mcp-transcript requires --mcp-format"),
@@ -131,7 +131,7 @@ fn validate_optional_mcp_transcript(args: &PrivilegedMcpActionArgs) -> Result<()
         PrivilegedMcpTranscriptFormat::HttpSse => McpInputFormat::HttpSse,
     };
     parse_mcp_transcript_bounded(file, format, McpTranscriptLimits::default())
-        .map_err(|error| anyhow::anyhow!("MCP transcript validation failed: {error}"))?;
+        .map_err(|error| anyhow::anyhow!("MCP transcript ingest failed: {error}"))?;
     Ok(())
 }
 
@@ -398,6 +398,12 @@ mod tests {
         ));
         import.mcp_format = Some(PrivilegedMcpTranscriptFormat::StreamableHttp);
         let error = cmd_privileged_mcp_action(import.clone()).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .starts_with("MCP transcript ingest failed:"),
+            "{error:#}"
+        );
         assert!(error.to_string().contains("MCP transcript is invalid"));
         assert!(!format!("{error:?}").contains("ATTACKER_SENTINEL"));
         assert!(!import.bundle_out.exists());
