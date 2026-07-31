@@ -10,6 +10,7 @@ use std::io::Read;
 
 /// Domain-local ceilings for one MCP transcript.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct McpTranscriptLimits {
     /// Maximum bytes read from the source before UTF-8 materialization.
     pub max_source_bytes: u64,
@@ -34,6 +35,7 @@ impl Default for McpTranscriptLimits {
 
 /// A typed, value-free refusal at the MCP transcript boundary.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum McpTranscriptIngestError {
     #[error("MCP transcript exceeded source-byte limit of {limit}")]
     SourceBytes { limit: u64 },
