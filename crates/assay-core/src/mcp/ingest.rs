@@ -1,9 +1,11 @@
 //! Resource-bounded ingest for untrusted MCP transcript bytes.
 //!
 //! This layer owns the cost of reaching the existing MCP parser and refuses typed conclusion states
-//! that cannot support a clean reading. It does not derive a policy decision or change the public
-//! [`McpEvent`] shape. When a caller supplies the transcript as an optional companion input, a
-//! refusal can veto that import but can never author or alter the producer's evidence.
+//! that cannot support a clean reading. A valid JSON-RPC error response is accepted as an observed
+//! protocol outcome, but never treated as a result or as terminality evidence. This layer does not
+//! derive a policy decision or change the public [`McpEvent`] shape. When a caller supplies the
+//! transcript as an optional companion input, a refusal can veto that import but can never author or
+//! alter the producer's evidence.
 
 use super::era::{conclude, conclude_request, RequestAssessment, ResultConclusion};
 use super::parser::parse_mcp_transcript_detailed;
@@ -65,9 +67,10 @@ pub enum McpTranscriptIngestError {
 
 /// Read and parse one transcript under explicit limits, refusing unusable conclusion states.
 ///
-/// `Terminal` and `NonTerminal` results are both accepted. `Incomplete` and `Invalid` request or
-/// result states are mapped to value-free ingest errors; no policy decision or profile carrier is
-/// derived from them.
+/// `Terminal` and `NonTerminal` results are both accepted. A valid JSON-RPC error response has no
+/// result conclusion and is accepted without being promoted to one. `Incomplete` and `Invalid`
+/// request or result states are mapped to value-free ingest errors; no policy decision or profile
+/// carrier is derived from them.
 pub fn parse_mcp_transcript_bounded<R: Read>(
     reader: R,
     format: McpInputFormat,
@@ -90,6 +93,12 @@ pub fn parse_mcp_transcript_bounded<R: Read>(
     let parsed = parse_mcp_transcript_detailed(&text, format)
         .map_err(|_| McpTranscriptIngestError::InvalidTranscript)?;
     for entry in &parsed {
+        if entry.is_error_response {
+            // The parser has already established a valid JSON-RPC error-response shape. It carries
+            // no MCP result whose terminality can be read. Keep that distinction explicit:
+            // accepting it must not synthesize a result conclusion or a producer decision.
+            continue;
+        }
         if let Some(metadata) = &entry.context.request_metadata {
             match conclude_request(
                 &entry.context.era,
@@ -119,9 +128,6 @@ pub fn parse_mcp_transcript_bounded<R: Read>(
                     return Err(McpTranscriptIngestError::ConclusionInvalid)
                 }
             }
-        }
-        if entry.is_error_response {
-            return Err(McpTranscriptIngestError::ConclusionIncomplete);
         }
     }
     Ok(parsed.into_iter().map(|entry| entry.event).collect())
@@ -713,15 +719,20 @@ mod tests {
     }
 
     #[test]
-    fn modern_error_response_cannot_bypass_the_conclusion_gate() {
-        let error = parse_mcp_transcript_bounded(
-            Cursor::new(modern_transport_error()),
+    fn modern_error_response_is_observed_without_becoming_a_result_conclusion() {
+        let transcript = modern_transport_error();
+        let parsed =
+            parse_mcp_transcript_detailed(&transcript, McpInputFormat::StreamableHttp).unwrap();
+        assert!(
+            parsed.iter().any(|entry| entry.is_error_response),
+            "the bounded gate must not accept an error response by failing to observe it"
+        );
+        assert!(parse_mcp_transcript_bounded(
+            Cursor::new(transcript),
             McpInputFormat::StreamableHttp,
             limits(),
         )
-        .unwrap_err();
-        assert_eq!(error.to_string(), "MCP transcript conclusion is incomplete");
-        assert!(!format!("{error:?}").contains("ATTACKER_SENTINEL"));
+        .is_ok());
     }
 
     #[test]

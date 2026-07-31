@@ -410,6 +410,35 @@ mod tests {
     }
 
     #[test]
+    fn deny_import_accepts_an_observed_jsonrpc_error_without_deriving_from_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let decisions = write_ndjson(dir.path(), "dec.ndjson", &[decision("deny")]);
+        let transcript = r#"{"transport":"streamable-http","transport_context":{"headers":{"MCP-Protocol-Version":"2026-07-28"}},"entries":[{"request":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"github.add_deploy_key","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}},{"response":{"jsonrpc":"2.0","id":1,"error":{"code":-32042,"message":"ATTACKER_SENTINEL"}}}]}"#;
+        let mut import = args(dir.path(), decisions);
+        import.mcp_transcript = Some(write_transcript(
+            dir.path(),
+            "deny-transcript.json",
+            transcript,
+        ));
+        import.mcp_format = Some(PrivilegedMcpTranscriptFormat::StreamableHttp);
+
+        assert_eq!(
+            cmd_privileged_mcp_action(import.clone()).unwrap(),
+            exit_codes::OK
+        );
+        let reader = BundleReader::open(File::open(&import.bundle_out).unwrap()).unwrap();
+        let events = reader.events_vec().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].payload, decision("deny"));
+        assert!(
+            !serde_json::to_string(&events)
+                .unwrap()
+                .contains("ATTACKER_SENTINEL"),
+            "the optional wire observation must not become producer evidence"
+        );
+    }
+
+    #[test]
     fn transcript_and_format_must_be_supplied_together() {
         let dir = tempfile::tempdir().unwrap();
         let decisions = write_ndjson(dir.path(), "dec.ndjson", &[profile_allow_decision()]);
