@@ -176,6 +176,7 @@ nav:
     - mcp/index.md
     - Quick Start: mcp/quickstart.md
     - Import Formats: mcp/import-formats.md
+    - Protocol-Era Parity: mcp/protocol-era-parity.md
     - Assay MCP Server: mcp/server.md
     - Self-Correcting Agents: mcp/self-correction.md
 
