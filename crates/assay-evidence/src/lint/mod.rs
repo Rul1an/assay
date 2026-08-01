@@ -118,6 +118,16 @@ pub struct LintReport {
     pub verified: bool,
     pub findings: Vec<LintFinding>,
     pub summary: LintSummary,
+    /// Whether `max_results` dropped findings this run.
+    ///
+    /// This lives on the report rather than only in the pack metadata because truncation applies to
+    /// every run, and pack metadata is absent whenever no packs are configured. Carried there alone,
+    /// a default-path run could drop findings and present as if it had none to drop, which is the
+    /// one thing a lint report must never do quietly. `summary` is computed after truncation, so it
+    /// describes what survived and this flag is what says so.
+    pub truncated: bool,
+    /// How many findings were dropped. Zero when `truncated` is false.
+    pub truncated_count: usize,
 }
 
 impl LintReport {
