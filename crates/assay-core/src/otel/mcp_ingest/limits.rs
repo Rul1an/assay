@@ -26,6 +26,11 @@ pub(crate) struct OtlpIngestLimits {
     pub(crate) max_decoded_bytes: u64,
     /// Deepest permitted container nesting. Every JSON object or array entered counts one level,
     /// including the root and skipped unknown subtrees.
+    ///
+    /// Supported range: at most [`MAX_SUPPORTED_NESTING_DEPTH`]. The decoder refuses a larger
+    /// configuration with a typed [`OtlpIngestError::UnsupportedLimitConfiguration`] before
+    /// reading any input, because beyond that range the JSON parser's own recursion ceiling
+    /// would reject first and misclassify the input as malformed.
     pub(crate) max_nesting_depth: u64,
     /// Spans across all `resourceSpans[].scopeSpans[].spans[]` lists combined.
     pub(crate) max_span_count: u64,
@@ -37,6 +42,16 @@ pub(crate) struct OtlpIngestLimits {
     /// charge model as `max_decoded_bytes`.
     pub(crate) max_attribute_value_bytes: u64,
 }
+
+/// The largest honorable `max_nesting_depth`.
+///
+/// The pinned `serde_json` rejects the 128th nested container on its recursive visitor path
+/// (measured; its iterative ignore path is not the one these seeds use). Classifying an input at
+/// `limit + 1` as [`OtlpIngestError::LimitExceeded`] requires the visitor to actually reach the
+/// container at `limit + 1`, so the parser's ceiling must sit strictly above `limit + 1`:
+/// `126 + 1 = 127` is the deepest container the parser still hands to the visitor. A test pins
+/// that margin against `serde_json` upgrades.
+pub(crate) const MAX_SUPPORTED_NESTING_DEPTH: u64 = 126;
 
 impl OtlpIngestLimits {
     /// Defaults sized for the pinned `otel-mcp-ingest-v0` corpus: every benign fixture fits with
@@ -157,4 +172,13 @@ pub(crate) enum OtlpIngestError {
     /// The source reader failed for a reason other than a configured ceiling.
     #[error("source read failed")]
     Io,
+    /// The configured ceiling cannot be honored by this build, so decoding is refused before a
+    /// single source byte is read. Refusing is the honest contract: accepting the configuration
+    /// would let the underlying JSON parser reject first and misreport an over-limit input as
+    /// `MalformedJson` instead of the documented inclusive limit classification.
+    #[error("unsupported {dimension:?} configuration; supported maximum is {supported_max}")]
+    UnsupportedLimitConfiguration {
+        dimension: OtlpLimitDimension,
+        supported_max: u64,
+    },
 }

@@ -24,7 +24,7 @@ use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use super::attr::AttributeListSeed;
 use super::limits::{
     OtlpIngestError, OtlpIngestLimits, OtlpLimitDimension, RecognizedAttribute, ShapeSite,
-    SpanField,
+    SpanField, MAX_SUPPORTED_NESTING_DEPTH,
 };
 use super::observation::{
     ErrorTypeObservation, InstrumentationScopeObservation, McpResourceSpansObservation,
@@ -38,10 +38,21 @@ use crate::mcp::era::{is_version_shaped, SUPPORTED_VERSIONS};
 /// Source bytes are bounded by [`LimitReader`] (the one dimension with stream semantics); every
 /// other ceiling is enforced inside the visitor. On rejection the returned error is typed and
 /// value-free.
+///
+/// A `max_nesting_depth` above [`MAX_SUPPORTED_NESTING_DEPTH`] is refused before any input is
+/// read: past that range the JSON parser's own recursion ceiling would reject the input before
+/// the visitor could classify it, turning the documented inclusive limit contract into a silent
+/// `MalformedJson`. Refusal is the honest alternative to a contract this build cannot keep.
 pub(crate) fn decode_mcp_resource_spans<R: Read>(
     source: R,
     limits: &OtlpIngestLimits,
 ) -> Result<McpResourceSpansObservation, OtlpIngestError> {
+    if limits.max_nesting_depth > MAX_SUPPORTED_NESTING_DEPTH {
+        return Err(OtlpIngestError::UnsupportedLimitConfiguration {
+            dimension: OtlpLimitDimension::NestingDepth,
+            supported_max: MAX_SUPPORTED_NESTING_DEPTH,
+        });
+    }
     let state = RefCell::new(DecodeState {
         limits: limits.clone(),
         decoded_bytes: 0,

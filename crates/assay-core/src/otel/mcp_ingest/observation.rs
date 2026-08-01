@@ -115,7 +115,11 @@ pub(crate) enum OperationObservation {
     OtherOperation,
 }
 
-/// What `jsonrpc.request.id` said, preserving the upstream value type instead of coercing.
+/// What `jsonrpc.request.id` said. Pinned string-only: the fixture corpus reports the id as a
+/// string, and a non-string id is the typed
+/// `RecognizedAttributeWrongType(RecognizedAttribute::RequestId)` rejection at the attribute
+/// boundary rather than a coerced value. The single-variant enum keeps the door open for a
+/// future pinned integer form without changing the observation's type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RequestIdObservation {
     String(String),

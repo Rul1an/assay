@@ -11,7 +11,7 @@ use std::sync::Arc;
 use super::decode::decode_mcp_resource_spans;
 use super::limits::{
     OtlpIngestError, OtlpIngestLimits, OtlpLimitDimension, RecognizedAttribute, ShapeSite,
-    SpanField,
+    SpanField, MAX_SUPPORTED_NESTING_DEPTH,
 };
 use super::observation::{
     ErrorTypeObservation, InstrumentationScopeObservation, McpResourceSpansObservation,
@@ -1738,4 +1738,76 @@ fn attribute_count_precedes_shape_validation_for_every_list_element() {
         OtlpLimitDimension::AttributeCount,
         1,
     );
+}
+
+// --- Nesting configurations the JSON parser cannot let us honor -----------------------------
+
+/// A document of exactly `total` nested containers: the root object plus `total - 1` arrays
+/// inside an unknown member, so the depth sits on the charged skip path.
+fn doc_with_total_depth(total: u64) -> String {
+    let n = (total - 1) as usize;
+    format!(
+        r#"{{"resourceSpans":[],"x":{}{}}}"#,
+        "[".repeat(n),
+        "]".repeat(n)
+    )
+}
+
+#[test]
+fn nesting_configuration_beyond_supported_range_is_refused_typed() {
+    // At `max_nesting_depth = 128` the parser's own recursion ceiling rejects the 128th
+    // container before the visitor sees it, so an input inside the configured inclusive limit
+    // would surface as `MalformedJson`. The decoder must refuse the configuration up front,
+    // before reading any input, instead of silently reclassifying.
+    let mut limits = corpus_limits();
+    limits.max_nesting_depth = MAX_SUPPORTED_NESTING_DEPTH + 2; // 128: at the parser boundary
+    assert_eq!(
+        decode_str(&doc_with_total_depth(128), &limits)
+            .expect_err("an unhonorable configuration must be refused"),
+        OtlpIngestError::UnsupportedLimitConfiguration {
+            dimension: OtlpLimitDimension::NestingDepth,
+            supported_max: MAX_SUPPORTED_NESTING_DEPTH,
+        }
+    );
+    // The refusal must not depend on the input: a shallow benign document under the same
+    // configuration is refused identically, proving the check runs before any decode.
+    assert_eq!(
+        decode_str(&doc_with_spans(&[]), &limits).expect_err("refusal must precede reading input"),
+        OtlpIngestError::UnsupportedLimitConfiguration {
+            dimension: OtlpLimitDimension::NestingDepth,
+            supported_max: MAX_SUPPORTED_NESTING_DEPTH,
+        }
+    );
+}
+
+#[test]
+fn supported_range_top_keeps_exact_and_plus_one_classification() {
+    // At the very top of the supported range the inclusive contract still holds on both sides:
+    // depth 126 is accepted, depth 127 is the module's own typed limit rejection — never the
+    // parser's.
+    let mut limits = corpus_limits();
+    limits.max_nesting_depth = MAX_SUPPORTED_NESTING_DEPTH;
+    decode_str(&doc_with_total_depth(MAX_SUPPORTED_NESTING_DEPTH), &limits)
+        .expect("exactly at the supported ceiling");
+    assert_limit(
+        decode_str(
+            &doc_with_total_depth(MAX_SUPPORTED_NESTING_DEPTH + 1),
+            &limits,
+        ),
+        OtlpLimitDimension::NestingDepth,
+        MAX_SUPPORTED_NESTING_DEPTH,
+    );
+}
+
+#[test]
+fn parser_recursion_ceiling_sits_strictly_above_supported_range() {
+    // Drift guard for the measured margin behind `MAX_SUPPORTED_NESTING_DEPTH`: the pinned
+    // `serde_json` must still hand the container at `supported_max + 1` to a recursive visitor,
+    // or the limit+1 classification above would silently become the parser's. If a
+    // `serde_json` upgrade lowers its recursion ceiling, this goes red and the constant must
+    // shrink with it.
+    let depth = (MAX_SUPPORTED_NESTING_DEPTH + 1) as usize;
+    let doc = format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+    serde_json::from_str::<serde_json::Value>(&doc)
+        .expect("parser must reach one container past the supported ceiling");
 }
