@@ -176,6 +176,7 @@ impl<'de> Visitor<'de> for AttributeEntrySeed<'_, '_> {
                         st: self.st,
                         depth: self.depth + 1,
                         budget: &mut budget,
+                        allow_null: true,
                     })?);
                 }
                 _ => map.next_value_seed(SkipSeed {
@@ -286,6 +287,7 @@ struct AnyValueSeed<'a, 'b> {
     st: St<'a>,
     depth: u64,
     budget: &'b mut u64,
+    allow_null: bool,
 }
 
 impl<'de> DeserializeSeed<'de> for AnyValueSeed<'_, '_> {
@@ -347,7 +349,14 @@ impl<'de> Visitor<'de> for AnyValueSeed<'_, '_> {
     fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
         self.st.borrow_mut().charge(1)?;
         charge_value(self.st, self.budget, 1)?;
-        Ok(DecodedValue::Other)
+        if self.allow_null {
+            Ok(DecodedValue::Other)
+        } else {
+            Err(self
+                .st
+                .borrow_mut()
+                .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
+        }
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
@@ -765,6 +774,51 @@ fn parse_decimal_i64(value: &str) -> Option<i64> {
     }
 }
 
+/// Return whether `value` follows JSON's decimal-number grammar. ProtoJSON permits quoted
+/// floating-point numbers, but it does not widen that grammar to Rust's additional spellings.
+fn is_json_number(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut index = usize::from(bytes.first() == Some(&b'-'));
+    if index == bytes.len() {
+        return false;
+    }
+
+    match bytes[index] {
+        b'0' => index += 1,
+        b'1'..=b'9' => {
+            index += 1;
+            while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+                index += 1;
+            }
+        }
+        _ => return false,
+    }
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        let fraction_start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == fraction_start {
+            return false;
+        }
+    }
+    if matches!(bytes.get(index), Some(b'e' | b'E')) {
+        index += 1;
+        if matches!(bytes.get(index), Some(b'+' | b'-')) {
+            index += 1;
+        }
+        let exponent_start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == exponent_start {
+            return false;
+        }
+    }
+    index == bytes.len()
+}
+
 enum ScalarKind {
     /// `doubleValue`: a JSON number.
     Number,
@@ -835,7 +889,8 @@ impl<'de> Visitor<'de> for ValueScalarSeed<'_, '_> {
         charge_value(self.st, self.budget, s.len() as u64)?;
         let valid = match self.kind {
             ScalarKind::Number => {
-                matches!(s, "NaN" | "Infinity" | "-Infinity") || s.parse::<f64>().is_ok()
+                matches!(s, "NaN" | "Infinity" | "-Infinity")
+                    || (is_json_number(s) && s.parse::<f64>().is_ok_and(|value| value.is_finite()))
             }
             ScalarKind::Base64 => valid_base64(s),
             ScalarKind::Bool => false,
@@ -989,6 +1044,7 @@ impl<'de> Visitor<'de> for ValueElementsSeed<'_, '_> {
                         st: self.st,
                         depth: self.depth + 1,
                         budget: self.budget,
+                        allow_null: false,
                     })?
                     .is_some()
                 {}
@@ -1049,6 +1105,7 @@ impl<'de> Visitor<'de> for KvEntrySeed<'_, '_> {
                         st: self.st,
                         depth: self.depth + 1,
                         budget: self.budget,
+                        allow_null: true,
                     })?;
                 }
                 _ => {

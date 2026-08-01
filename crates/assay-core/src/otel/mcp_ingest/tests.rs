@@ -6,6 +6,7 @@
 
 use std::cell::Cell;
 use std::io::Read;
+use std::sync::Arc;
 
 use super::decode::decode_mcp_resource_spans;
 use super::limits::{
@@ -133,10 +134,10 @@ fn client_fixture_decodes_and_extracts_explicit_fields() {
     assert_eq!(span.status, StatusObservation::Ok);
     assert_eq!(
         span.instrumentation_scope,
-        Some(InstrumentationScopeObservation {
+        Some(Arc::new(InstrumentationScopeObservation {
             name: Some("mcp-fixture-generator".into()),
             version: Some("1.0.0".into()),
-        })
+        }))
     );
     assert_eq!(span.error_type, ErrorTypeObservation::Absent);
     assert_eq!(
@@ -163,11 +164,31 @@ fn parent_span_and_instrumentation_scope_are_retained_when_present() {
     );
     assert_eq!(
         obs.spans[0].instrumentation_scope,
-        Some(InstrumentationScopeObservation {
+        Some(Arc::new(InstrumentationScopeObservation {
             name: Some("fixture-scope".into()),
             version: Some("1.2.3".into()),
-        })
+        }))
     );
+}
+
+#[test]
+fn instrumentation_scope_storage_is_shared_across_its_spans() {
+    let first = span_with_attrs(&[attr_str("mcp.method.name", "tools/call")]);
+    let second = first.replace(SPAN_ID, "b7ad6b7169203332");
+    let doc = format!(
+        r#"{{"resourceSpans":[{{"scopeSpans":[{{"scope":{{"name":"shared-scope","version":"1.0.0"}},"spans":[{first},{second}]}}]}}]}}"#
+    );
+    let obs = decode_str(&doc, &corpus_limits()).expect("shared instrumentation scope");
+    assert_eq!(obs.spans.len(), 2);
+    let first_scope = obs.spans[0]
+        .instrumentation_scope
+        .as_ref()
+        .expect("first span scope");
+    let second_scope = obs.spans[1]
+        .instrumentation_scope
+        .as_ref()
+        .expect("second span scope");
+    assert!(Arc::ptr_eq(first_scope, second_scope));
 }
 
 #[test]
@@ -1116,6 +1137,21 @@ fn protojson_null_leaves_repeated_and_message_fields_unset() {
 }
 
 #[test]
+fn protojson_null_is_rejected_inside_repeated_anyvalue_elements() {
+    for value in [
+        r#"{"arrayValue":{"values":[null]}}"#,
+        r#"{"kvlistValue":{"values":[null]}}"#,
+    ] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{value}}}"#);
+        assert_eq!(
+            decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+                .expect_err("ProtoJSON repeated elements cannot be null"),
+            OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)
+        );
+    }
+}
+
+#[test]
 fn protojson_null_does_not_create_a_oneof_conflict() {
     for value in [
         r#"{"stringValue":"kept","intValue":null}"#,
@@ -1264,10 +1300,36 @@ fn malformed_anyvalue_scalars_are_charged_at_every_nested_layer() {
 
 #[test]
 fn protojson_double_accepts_numeric_strings_and_named_values() {
-    for double_value in [r#""1e2""#, r#""NaN""#, r#""Infinity""#, r#""-Infinity""#] {
+    for double_value in [
+        r#""1e2""#,
+        r#""-1.25e+2""#,
+        r#""0""#,
+        r#""NaN""#,
+        r#""Infinity""#,
+        r#""-Infinity""#,
+    ] {
         let entry = format!(r#"{{"key":"unrecognized","value":{{"doubleValue":{double_value}}}}}"#);
         decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
             .unwrap_or_else(|err| panic!("valid ProtoJSON double form {double_value}: {err:?}"));
+    }
+
+    for double_value in [
+        r#""inf""#,
+        r#""+infinity""#,
+        r#""nan""#,
+        r#"".5""#,
+        r#""5.""#,
+        r#""01""#,
+        r#""+1""#,
+        r#""1e999""#,
+    ] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{{"doubleValue":{double_value}}}}}"#);
+        assert_eq!(
+            decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+                .expect_err("non-ProtoJSON double spelling must reject"),
+            OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue),
+            "accepted {double_value}"
+        );
     }
 }
 

@@ -10,6 +10,8 @@
 //! the transport-level `EraResolution` contract: [`SpanProtocolVersion`] has no conflict state,
 //! because a span cannot manufacture the MCP-defined header/body conflict.
 
+use std::sync::Arc;
+
 /// The pinned semconv revision that defines the recognized attribute names. Matches the
 /// `semconv` entry in `tests/fixtures/otel-mcp-ingest-v0/upstream.lock.json`.
 pub(crate) const SEMCONV_PIN: &str =
@@ -163,7 +165,7 @@ pub(crate) struct McpSpanObservation {
     pub(crate) span_id: String,
     /// Optional 16-char parent span id, normalized to lowercase when present.
     pub(crate) parent_span_id: Option<String>,
-    pub(crate) instrumentation_scope: Option<InstrumentationScopeObservation>,
+    pub(crate) instrumentation_scope: Option<Arc<InstrumentationScopeObservation>>,
     pub(crate) kind: SpanKind,
     pub(crate) method: MethodObservation,
     pub(crate) operation: OperationObservation,

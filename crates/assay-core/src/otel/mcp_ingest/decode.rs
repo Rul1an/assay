@@ -16,6 +16,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::io::{BufReader, Read};
+use std::sync::Arc;
 
 use assay_common::limits::{LimitExceeded, LimitKind, LimitReader};
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
@@ -647,8 +648,9 @@ impl<'de> Visitor<'de> for ScopeSpansEntrySeed<'_, '_> {
             }
         }
         if let Some(scope) = scope {
+            let scope = Arc::new(scope);
             for span in &mut self.spans[first_span..] {
-                span.instrumentation_scope = Some(scope.clone());
+                span.instrumentation_scope = Some(Arc::clone(&scope));
             }
         }
         Ok(())
