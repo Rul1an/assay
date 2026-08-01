@@ -89,8 +89,6 @@ pub mod codes {
     // Errors (Exit 2)
     pub const E_CFG_PARSE: &str = "E_CFG_PARSE";
     pub const E_CFG_SCHEMA: &str = "E_CFG_SCHEMA";
-    /// A test whose `expected:` asserts nothing and therefore always passes.
-    pub const E_CFG_VACUOUS_EXPECTED: &str = "E_CFG_VACUOUS_EXPECTED";
     pub const E_PATH_NOT_FOUND: &str = "E_PATH_NOT_FOUND";
     pub const E_TRACE_MISS: &str = "E_TRACE_MISS";
     pub const E_TRACE_INVALID: &str = "E_TRACE_INVALID";
@@ -100,6 +98,10 @@ pub mod codes {
     pub const E_POLICY_VIOLATION: &str = "E_POLICY_VIOLATION";
 
     // Warnings (Exit 0)
+    /// A test that asserts nothing: no `expected:` block and no `assertions:`, so it
+    /// passes for any response. An `expected:` block written out as empty is rejected
+    /// at parse time as `E_CFG_PARSE` instead.
+    pub const W_CFG_VACUOUS_EXPECTED: &str = "W_CFG_VACUOUS_EXPECTED";
     pub const W_BASE_FINGERPRINT: &str = "W_BASE_FINGERPRINT";
     pub const W_CACHE_CONFUSION: &str = "W_CACHE_CONFUSION";
 }

@@ -4,9 +4,12 @@ model: "dummy"
 
 
 
-# Minimal stub so validate can load config; no traces required for policy validation.
+# Minimal smoke test so validate can load the config; no traces required for policy
+# validation. It asserts against the dummy model's fixed response so it is a real check
+# rather than an always-green placeholder.
 tests:
   - id: "placeholder-smoke"
     input: "ignore"
     expected:
-      must_contain: []
+      type: must_contain
+      must_contain: ["passed"]

@@ -107,9 +107,126 @@ fn test_unrecognized_expected_list_entry_is_hard_error() {
     );
 }
 
-/// A block that opts into the tagged form gets the underlying serde error, not the
-/// generic "unrecognized keys" message. Here `pattern` is misspelled, so the field
-/// is missing as far as serde is concerned.
+/// A tagged block whose VALUE shape is legacy must still parse. The strict parse
+/// fails (a scalar is not a list), but the legacy heuristics understand it, and
+/// rejecting it would turn working suites into config errors.
+#[test]
+fn test_tagged_block_with_legacy_scalar_value_still_parses() {
+    let yaml = r#"
+            id: tagged_scalar
+            input: "test"
+            expected:
+              - type: must_contain
+                must_contain: "hello"
+        "#;
+    let tc: TestCase = serde_yaml::from_str(yaml).expect("tagged block with scalar must parse");
+    match tc.expected {
+        Expected::MustContain { must_contain } => assert_eq!(must_contain, vec!["hello"]),
+        other => panic!("Expected MustContain, got {:?}", other),
+    }
+}
+
+/// `type: sequence` is not an `Expected` variant (the variant is `sequence_valid`),
+/// but it is the shape documented in the migration guide, and the legacy `sequence`
+/// key resolves it. It must keep working.
+#[test]
+fn test_legacy_type_sequence_still_parses() {
+    let yaml = r#"
+            id: legacy_seq
+            input: "test"
+            expected:
+              - type: sequence
+                sequence: ["Search", "Create"]
+        "#;
+    let tc: TestCase = serde_yaml::from_str(yaml).expect("legacy type: sequence must parse");
+    match tc.expected {
+        Expected::SequenceValid { sequence, .. } => {
+            assert_eq!(
+                sequence,
+                Some(vec!["Search".to_string(), "Create".to_string()])
+            );
+        }
+        other => panic!("Expected SequenceValid, got {:?}", other),
+    }
+}
+
+/// An unparsable `sequence` value used to become `sequence: None` via `.ok()`, and
+/// `sequence_valid` passes unconditionally with neither sequence nor rules — an
+/// always-green test that no validate rule caught.
+#[test]
+fn test_unparsable_sequence_value_is_hard_error() {
+    let yaml = r#"
+            id: bad_seq
+            input: "test"
+            expected:
+              sequence: 42
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml).expect_err("bad sequence must not parse");
+    assert!(
+        err.to_string().contains("`sequence` must be a list"),
+        "{}",
+        err
+    );
+}
+
+/// An unparsable `must_contain` value used to collapse to an empty vec via
+/// `unwrap_or_default()`, which passes for any response.
+#[test]
+fn test_unparsable_must_contain_value_is_hard_error() {
+    let yaml = r#"
+            id: bad_mc
+            input: "test"
+            expected:
+              must_contain: {oops: 1}
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml).expect_err("bad must_contain must not parse");
+    assert!(
+        err.to_string().contains("`must_contain` must be a string"),
+        "{}",
+        err
+    );
+}
+
+/// An assertion written out as empty passes for any response. Rejecting it at parse
+/// time means every command that loads a config catches it, including `run` and `ci`.
+#[test]
+fn test_explicit_empty_must_contain_is_hard_error() {
+    let yaml = r#"
+            id: vacuous
+            input: "test"
+            expected:
+              type: must_contain
+              must_contain: []
+        "#;
+    let err =
+        serde_yaml::from_str::<TestCase>(yaml).expect_err("empty must_contain must not parse");
+    assert!(
+        err.to_string().contains("would pass for any response"),
+        "{}",
+        err
+    );
+}
+
+#[test]
+fn test_explicit_empty_must_not_contain_is_hard_error() {
+    let yaml = r#"
+            id: vacuous
+            input: "test"
+            expected:
+              type: must_not_contain
+              must_not_contain: []
+        "#;
+    let err =
+        serde_yaml::from_str::<TestCase>(yaml).expect_err("empty must_not_contain must not parse");
+    assert!(
+        err.to_string().contains("would pass for any response"),
+        "{}",
+        err
+    );
+}
+
+/// A block that opts into the tagged form and matches NO legacy key gets the
+/// underlying serde error, not the generic "unrecognized keys" message.
 #[test]
 fn test_tagged_expected_reports_underlying_error() {
     let yaml = r#"
@@ -144,6 +261,34 @@ fn test_untagged_single_object_uses_legacy_heuristics() {
         Expected::MustContain { must_contain } => assert_eq!(must_contain, vec!["Paris"]),
         other => panic!("Expected MustContain, got {:?}", other),
     }
+}
+
+/// Writers must not emit a config the parser rejects.
+///
+/// A test that omits `expected:` holds the vacuous default. Serializing it verbatim
+/// would write `must_contain: []`, which is now a hard parse error — so `assay migrate`
+/// would produce files that no longer load. `skip_serializing_if` prevents that; this
+/// test pins the round-trip.
+#[test]
+fn test_omitted_expected_round_trips_through_serialization() {
+    let yaml = r#"
+            id: assertions_only
+            input: "test"
+            assertions:
+              - type: trace_must_call_tool
+                tool: Search
+        "#;
+    let tc: TestCase = serde_yaml::from_str(yaml).expect("failed to parse");
+
+    let written = serde_yaml::to_string(&tc).expect("serialize");
+    assert!(
+        !written.contains("must_contain"),
+        "vacuous default must not be materialised into config: {}",
+        written
+    );
+
+    let reparsed: TestCase = serde_yaml::from_str(&written).expect("writer output must load again");
+    assert_eq!(reparsed.id, "assertions_only");
 }
 
 /// (d) A missing `expected:` key stays permissive: `assertions:` may carry the

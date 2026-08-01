@@ -65,6 +65,9 @@ pub struct ThresholdingSettings {
 pub struct TestCase {
     pub id: String,
     pub input: TestInput,
+    /// Skipped on serialize when vacuous: writers such as `assay migrate` must not
+    /// materialise an empty `must_contain` that the parser would then reject.
+    #[serde(skip_serializing_if = "crate::model::validation::is_vacuous_expected")]
     pub expected: Expected,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assertions: Option<Vec<crate::agent_assertions::model::TraceAssertion>>,
@@ -212,7 +215,7 @@ impl Default for Expected {
     /// It must never be used as a parse fallback: an `expected:` block that fails
     /// to parse is a hard config error (see `model::serde`), and a test that ends
     /// up holding this value with no assertions is reported by the
-    /// `E_CFG_VACUOUS_EXPECTED` rule in `assay validate`.
+    /// `W_CFG_VACUOUS_EXPECTED` rule in `assay validate`.
     fn default() -> Self {
         Expected::MustContain {
             must_contain: vec![],

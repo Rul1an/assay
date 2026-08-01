@@ -65,7 +65,7 @@ pub async fn validate(
         return Ok(ValidateReport { diagnostics: diags });
     }
 
-    // 1b. Vacuous assertions (E_CFG_VACUOUS_EXPECTED)
+    // 1b. Vacuous assertions (W_CFG_VACUOUS_EXPECTED)
     diags.extend(check_vacuous_expected(cfg));
 
     // 2. Load Trace & Baseline for deeper checks
@@ -279,15 +279,21 @@ pub async fn validate(
     Ok(ValidateReport { diagnostics: diags })
 }
 
-/// Flag tests whose `expected:` block asserts nothing and therefore always passes.
+/// Warn about tests that assert nothing and therefore always pass.
 ///
-/// An empty `must_contain` / `must_not_contain` gives the metric no substring to look
-/// for, so it returns `pass(1.0)` for any response whatsoever. The same shape is what a
-/// test with no `expected:` key at all resolves to, via `Expected::default()`.
+/// By the time a config has loaded, an empty `must_contain` / `must_not_contain` can
+/// only have come from an OMITTED `expected:` key resolving to `Expected::default()`.
+/// An assertion the author actually wrote out as empty is rejected at parse time (see
+/// `model::serde::reject_vacuous`), which is a hard error and reaches every command
+/// that loads a config, including `assay run` and `assay ci`.
 ///
-/// Tests that carry `assertions:` are exempt: for those, omitting `expected:` is the
-/// documented way to let trace assertions do the checking, and the empty default is
-/// then a placeholder rather than a claim.
+/// That split is deliberate. Omitting `expected:` is a documented, legitimate shape —
+/// a test may carry its checks in `assertions:` — so making it an error here would
+/// contradict the permissive parse and break configs the tool itself writes. It is
+/// still worth reporting when such a test has no assertions either, because then it
+/// really does assert nothing; hence a warning rather than an error.
+///
+/// Tests that carry `assertions:` are exempt.
 ///
 /// This check reads only the config, so `assay validate` can sweep a suite for
 /// always-green tests without running it.
@@ -310,20 +316,20 @@ fn check_vacuous_expected(cfg: &EvalConfig) -> Vec<Diagnostic> {
 
         diags.push(
             Diagnostic::new(
-                codes::E_CFG_VACUOUS_EXPECTED,
+                codes::W_CFG_VACUOUS_EXPECTED,
                 format!(
-                    "Test '{}' asserts nothing: `{}` is empty, so this test passes for any response",
-                    tc.id, field
+                    "Test '{}' asserts nothing: it has no `expected:` block and no `assertions:`, so it passes for any response",
+                    tc.id
                 ),
             )
+            .with_severity("warn")
             .with_source("config")
             .with_context(serde_json::json!({
                 "test_id": tc.id,
                 "field": field,
             }))
-            .with_fix_step(format!("Give `{}` at least one entry", field))
-            .with_fix_step("Or replace the expected block with a metric that checks something")
-            .with_fix_step("Or move the test's checks to `assertions:`"),
+            .with_fix_step("Add an `expected:` block that checks something")
+            .with_fix_step("Or give the test `assertions:`"),
         );
     }
 
@@ -456,8 +462,11 @@ mod vacuous_expected_tests {
         );
         let diags = check_vacuous_expected(&cfg);
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].code, codes::E_CFG_VACUOUS_EXPECTED);
-        assert_eq!(diags[0].severity, "error");
+        assert_eq!(diags[0].code, codes::W_CFG_VACUOUS_EXPECTED);
+        // Warning, not error: by this point the shape can only have come from an
+        // omitted `expected:` key, which the parser deliberately permits. An
+        // explicitly-written empty assertion never gets this far.
+        assert_eq!(diags[0].severity, "warn");
         assert!(diags[0].message.contains("t1"), "{}", diags[0].message);
     }
 
@@ -525,6 +534,6 @@ mod vacuous_expected_tests {
 
         let report = validate(&cfg, &opts, &resolver).await.expect("validate");
         assert_eq!(report.diagnostics.len(), 1);
-        assert_eq!(report.diagnostics[0].code, codes::E_CFG_VACUOUS_EXPECTED);
+        assert_eq!(report.diagnostics[0].code, codes::W_CFG_VACUOUS_EXPECTED);
     }
 }

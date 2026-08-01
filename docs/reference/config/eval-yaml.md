@@ -39,8 +39,8 @@ Each test in the `tests` list defines a scenario and its validation rules.
   input:
     prompt: "..."
   expected:
-    type: json_match
-    # ...
+    type: must_contain
+    must_contain: ["..."]
   assertions: []
 ```
 
@@ -60,9 +60,14 @@ Defines the **output** validation (the final answer).
 | Type | Description |
 |---|---|
 | `must_contain` | List of substrings that must appear in the response. |
+| `must_not_contain` | List of substrings that must NOT appear in the response. |
 | `regex_match` | Regex pattern the response must match. |
-| `json_match` | Validates response against a JSON schema. |
-| `exact_match` | Full string equality check. |
+| `json_schema` | Validates the response against a JSON schema. |
+| `semantic_similarity_to` | Embedding similarity against a reference answer. |
+
+An `expected:` block must assert something. An empty `must_contain`/`must_not_contain`
+passes for any response, so it is rejected as a config error. A test may omit
+`expected:` entirely when its checks live in `assertions:`.
 
 ### `assertions`
 

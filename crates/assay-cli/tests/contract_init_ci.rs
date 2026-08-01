@@ -73,6 +73,37 @@ fn test_init_ci_contract() {
     );
 }
 
+/// The generated scaffold must actually LOAD, not merely contain the right substrings.
+///
+/// Regression guard: `CI_EVAL_YAML` once emitted `type: json_schema` without the
+/// required `json_schema` field. The old parser silently degraded that to a vacuous
+/// always-passing test, so every text assertion above still held while
+/// `assay run --config ci-eval.yaml` was broken. Grepping the template cannot catch
+/// that class of defect; parsing it can.
+#[test]
+fn contract_init_ci_scaffold_is_loadable() {
+    let temp = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("init")
+        .arg("--ci")
+        .assert()
+        .success();
+
+    // `validate` exercises the same loader as `run`/`ci`, and reports a diagnostic
+    // instead of the bare exit code those commands emit on a config error.
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(temp.path())
+        .arg("validate")
+        .arg("--config")
+        .arg("ci-eval.yaml")
+        .assert()
+        .success();
+}
+
 #[test]
 fn test_init_preset_and_pack_alias_contract() {
     let temp = tempdir().unwrap();
