@@ -185,9 +185,9 @@ impl<'de> Visitor<'de> for AttributeEntrySeed<'_, '_> {
                 })?,
             }
         }
-        match (key, value) {
-            (Some(key), Some(value)) => Ok((key, value)),
-            _ => Err(self
+        match key {
+            Some(key) => Ok((key, value.unwrap_or(DecodedValue::Other))),
+            None => Err(self
                 .st
                 .borrow_mut()
                 .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry))),

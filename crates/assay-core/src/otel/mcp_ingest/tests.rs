@@ -213,6 +213,26 @@ fn absent_null_and_empty_parent_or_scope_identity_remain_absent() {
 }
 
 #[test]
+fn either_scope_identity_field_is_retained_independently() {
+    for (scope, expected_name, expected_version) in [
+        (r#"{"name":"scope-only"}"#, Some("scope-only"), None),
+        (r#"{"version":"2.0.0"}"#, None, Some("2.0.0")),
+    ] {
+        let span = span_with_attrs(&[attr_str("mcp.method.name", "tools/call")]);
+        let doc = format!(
+            r#"{{"resourceSpans":[{{"scopeSpans":[{{"scope":{scope},"spans":[{span}]}}]}}]}}"#
+        );
+        let obs = decode_str(&doc, &corpus_limits()).expect("partial scope identity");
+        let observed = obs.spans[0]
+            .instrumentation_scope
+            .as_ref()
+            .expect("either scope field retains the scope");
+        assert_eq!(observed.name.as_deref(), expected_name);
+        assert_eq!(observed.version.as_deref(), expected_version);
+    }
+}
+
+#[test]
 fn server_fixture_decodes_as_server_kind() {
     let bytes = fixture_bytes("mcp_server_tools_call.json");
     let obs = decode_mcp_resource_spans(&bytes[..], &corpus_limits()).expect("benign corpus");
@@ -1110,6 +1130,17 @@ fn protojson_null_leaves_anyvalue_member_unset() {
     let unset_value = r#"{"key":"unrecognized","value":null}"#.to_string();
     decode_str(&doc_with_attrs(&[unset_value]), &corpus_limits())
         .expect("a null message field leaves the AnyValue unset");
+
+    let omitted_value = r#"{"key":"unrecognized"}"#.to_string();
+    decode_str(&doc_with_attrs(&[omitted_value]), &corpus_limits())
+        .expect("an omitted message field carries the same proto default");
+
+    let omitted_recognized = r#"{"key":"mcp.method.name"}"#.to_string();
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[omitted_recognized]), &corpus_limits())
+            .expect_err("an unset recognized value is not a valid method"),
+        OtlpIngestError::RecognizedAttributeWrongType(RecognizedAttribute::MethodName)
+    );
 }
 
 #[test]

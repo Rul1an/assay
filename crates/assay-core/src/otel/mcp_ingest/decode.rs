@@ -864,7 +864,8 @@ impl<'de> Visitor<'de> for SpansSeed<'_, '_> {
 
 /// Bounded raw values for attributes that may participate in the MCP projection. Type validation
 /// is deferred until the full list establishes whether the span is MCP-shaped; otherwise generic
-/// OTLP attributes on unrelated spans could manufacture MCP projection failures.
+/// OTLP attributes on unrelated spans could manufacture MCP projection failures. Resource URI and
+/// session ID act as identity markers here: their type is validated, then their value is dropped.
 #[derive(Default)]
 pub(super) struct SpanAttrs {
     mcp_marker_seen: bool,
