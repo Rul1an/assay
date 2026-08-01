@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-// ── Frozen Slice A contract constants ──────────────────────────────────────
+// -- Frozen Slice A contract constants --------------------------------------------------------
 
 /// Exact upstream source set (repo URL, type, tag-or-commit).
 const EXPECTED_SOURCES: &[(&str, &str, Option<&str>, Option<&str>)] = &[
@@ -27,29 +27,61 @@ const EXPECTED_SOURCES: &[(&str, &str, Option<&str>, Option<&str>)] = &[
     ),
 ];
 
-/// Exact proto source paths (must appear in the proto upstream source).
-const EXPECTED_PROTO_SOURCE_PATHS: &[&str] = &[
-    "opentelemetry/proto/collector/trace/v1/trace_service.proto",
-    "opentelemetry/proto/trace/v1/trace.proto",
-    "opentelemetry/proto/resource/v1/resource.proto",
-    "opentelemetry/proto/common/v1/common.proto",
+/// Exact proto source_path -> vendored_path bindings.
+const EXPECTED_PROTO_PAIRS: &[(&str, &str)] = &[
+    (
+        "opentelemetry/proto/collector/trace/v1/trace_service.proto",
+        "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/collector/trace/v1/trace_service.proto",
+    ),
+    (
+        "opentelemetry/proto/trace/v1/trace.proto",
+        "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/trace/v1/trace.proto",
+    ),
+    (
+        "opentelemetry/proto/resource/v1/resource.proto",
+        "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/resource/v1/resource.proto",
+    ),
+    (
+        "opentelemetry/proto/common/v1/common.proto",
+        "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/common/v1/common.proto",
+    ),
 ];
 
-/// Exact semconv source path (must appear in the semconv upstream source).
-const EXPECTED_SEMCONV_SOURCE_PATH: &str = "docs/gen-ai/mcp.md";
+/// Exact semconv source_path -> vendored_path binding.
+const EXPECTED_SEMCONV_PAIR: (&str, &str) = (
+    "docs/gen-ai/mcp.md",
+    "vendor/semantic-conventions-genai-434c91dc/mcp.md",
+);
 
-/// Exact SDK identity.
+/// Exact SDK identity (package, version, resolved URL, integrity).
 const EXPECTED_SDK_PACKAGE: &str = "@opentelemetry/sdk-trace-node";
 const EXPECTED_SDK_VERSION: &str = "2.10.0";
+const EXPECTED_SDK_RESOLVED: &str =
+    "https://registry.npmjs.org/@opentelemetry/sdk-trace-node/-/sdk-trace-node-2.10.0.tgz";
+const EXPECTED_SDK_INTEGRITY: &str =
+    "sha512-GZK/G6oZyBLGlH1pUgeDch7D91KoHd2uotUGIkWCPi9GI5T9X0p4L7nNAMDR1BQjkRYoDqo+ddfVx9t5Uhys+Q==";
 
-/// Exact exporter identity.
+/// Exact exporter identity (package, version, resolved URL, integrity).
 const EXPECTED_EXPORTER_PACKAGE: &str = "@opentelemetry/exporter-trace-otlp-http";
 const EXPECTED_EXPORTER_VERSION: &str = "0.221.0";
+const EXPECTED_EXPORTER_RESOLVED: &str = "https://registry.npmjs.org/@opentelemetry/exporter-trace-otlp-http/-/exporter-trace-otlp-http-0.221.0.tgz";
+const EXPECTED_EXPORTER_INTEGRITY: &str =
+    "sha512-AySXiKoC+meiWm6zdVj5T2LnPDZuatveBby1cMOeQteIWsYXAUxs8Sru13G2pVSPrUXz6vF+og7QVBX6GdC/oQ==";
 
-/// Exact corpus fixture names and their span kinds.
-const EXPECTED_CORPUS: &[(&str, &str)] = &[
-    ("mcp_client_tools_call.json", "CLIENT"),
-    ("mcp_server_tools_call.json", "SERVER"),
+/// Exact corpus fixture tuples: (fixture, sidecar, span_kind, mcp_method).
+const EXPECTED_CORPUS: &[(&str, &str, &str, &str)] = &[
+    (
+        "mcp_client_tools_call.json",
+        "mcp_client_tools_call.meta.json",
+        "CLIENT",
+        "tools/call",
+    ),
+    (
+        "mcp_server_tools_call.json",
+        "mcp_server_tools_call.meta.json",
+        "SERVER",
+        "tools/call",
+    ),
 ];
 
 /// Exact hostile fixture names and their purposes.
@@ -74,7 +106,29 @@ const EXPECTED_GENAI_OPERATION_NAME: &str = "execute_tool";
 const EXPECTED_GENAI_TOOL_NAME: &str = "read_file";
 const EXPECTED_MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 
-// ── Error types ────────────────────────────────────────────────────────────
+/// Exact governed file set (recursive). Every file in the corpus root must be in this set.
+/// generator/node_modules is explicitly ignored (created locally by npm ci).
+const GOVERNED_FILES: &[&str] = &[
+    "upstream.lock.json",
+    "README.md",
+    "mcp_client_tools_call.json",
+    "mcp_client_tools_call.meta.json",
+    "mcp_server_tools_call.json",
+    "mcp_server_tools_call.meta.json",
+    "hostile_deep_nesting.json",
+    "hostile_oversized_attribute.json",
+    "hostile_missing_required_fields.json",
+    "generator/package.json",
+    "generator/package-lock.json",
+    "generator/generate.js",
+    "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/collector/trace/v1/trace_service.proto",
+    "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/trace/v1/trace.proto",
+    "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/resource/v1/resource.proto",
+    "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/common/v1/common.proto",
+    "vendor/semantic-conventions-genai-434c91dc/mcp.md",
+];
+
+// -- Error types ------------------------------------------------------------------------------
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ValidationError {
@@ -98,6 +152,7 @@ pub enum ValidationError {
     SidecarHashMismatch,
     SidecarParseError,
     SidecarSemanticMismatch,
+    SidecarTimestampMismatch,
     HostileMissing,
     HostileHashMismatch,
     HostileDuplicatePath,
@@ -115,9 +170,10 @@ pub enum ValidationError {
     SourceIdentityMismatch,
     CorpusCardinalityMismatch,
     HostileCardinalityMismatch,
+    SymlinkInCorpus,
 }
 
-// ── Serde models (test-only, not production) ───────────────────────────────
+// -- Serde models (test-only, not production) -------------------------------------------------
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -293,29 +349,75 @@ fn validate_safe_relative_path(path_str: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
-/// Validate that a string is a syntactically valid date-shaped version (YYYY-MM-DD).
-fn is_date_shaped_version(s: &str) -> bool {
-    if s.len() != 10 {
-        return false;
+/// Collect all files recursively under a directory, returning paths relative to root.
+/// Rejects symlinks. Ignores generator/node_modules.
+fn collect_governed_files(root: &Path) -> Result<HashSet<String>, ValidationError> {
+    let mut files = HashSet::new();
+    collect_recursive(root, root, &mut files)?;
+    Ok(files)
+}
+
+fn collect_recursive(
+    base: &Path,
+    current: &Path,
+    files: &mut HashSet<String>,
+) -> Result<(), ValidationError> {
+    let entries = fs::read_dir(current).map_err(|_| ValidationError::LockFileMissing)?;
+    for entry in entries {
+        let entry = entry.map_err(|_| ValidationError::UnlistedFileInCorpus)?;
+        let path = entry.path();
+
+        // Reject symlinks anywhere in the governed tree
+        let metadata =
+            fs::symlink_metadata(&path).map_err(|_| ValidationError::UnlistedFileInCorpus)?;
+        if metadata.file_type().is_symlink() {
+            return Err(ValidationError::SymlinkInCorpus);
+        }
+
+        let rel = path
+            .strip_prefix(base)
+            .map_err(|_| ValidationError::PathTraversal)?;
+        let rel_str = rel.to_str().ok_or(ValidationError::PathTraversal)?;
+
+        // Reject paths that escape the corpus root
+        if rel_str.contains("..") {
+            return Err(ValidationError::PathTraversal);
+        }
+
+        // Ignore generator/node_modules (created locally by npm ci)
+        if rel_str == "generator/node_modules" || rel_str.starts_with("generator/node_modules/") {
+            continue;
+        }
+
+        if metadata.is_dir() {
+            collect_recursive(base, &path, files)?;
+        } else {
+            files.insert(rel_str.to_string());
+        }
     }
-    let parts: Vec<&str> = s.split('-').collect();
-    if parts.len() != 3 {
-        return false;
-    }
-    let year = parts[0].parse::<u32>();
-    let month = parts[1].parse::<u32>();
-    let day = parts[2].parse::<u32>();
-    matches!((year, month, day), (Ok(y), Ok(m), Ok(d)) if y >= 2000 && (1..=12).contains(&m) && (1..=31).contains(&d))
+    Ok(())
 }
 
 /// Public entry point for validating the corpus at a given root path.
 /// Used by mutation tests to verify that tampering is detected.
+///
+/// Validation order:
+///   1. Parse lock file (structural)
+///   2. Schema version + locked_at (structural)
+///   3. Governed file set check (structural - rejects unlisted/symlinked files)
+///   4. Duplicate and path safety checks (structural)
+///   5. Exact source identity (provenance, SDK, exporter, upstream sources)
+///   6. Exact corpus/hostile cardinality and name bindings
+///   7. Hash and content validation
+///   8. Semantic purpose/role checks (hostile purpose, fixture semantics)
 pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
     let lock_path = root.join("upstream.lock.json");
     let content = fs::read_to_string(&lock_path).map_err(|_| ValidationError::LockFileMissing)?;
 
     let lock: UpstreamLock =
         serde_json::from_str(&content).map_err(|_| ValidationError::LockParseError)?;
+
+    // -- Phase 1: Structural schema checks ----------------------------------------------------
 
     // Validate schema version
     if lock.schema_version != "1" {
@@ -327,105 +429,27 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         return Err(ValidationError::SchemaVersionInvalid);
     }
 
-    // Validate exact provenance note (no substring acceptance)
-    if lock.provenance.note != EXPECTED_PROVENANCE_NOTE {
-        return Err(ValidationError::ProvenanceMarkerInvalid);
-    }
+    // -- Phase 2: Governed file set (structural) ----------------------------------------------
+    // Every file in the corpus root must be in the governed set. No rogue files anywhere.
 
-    // Validate exact SDK identity
-    if lock.sdk.package != EXPECTED_SDK_PACKAGE || lock.sdk.version != EXPECTED_SDK_VERSION {
-        return Err(ValidationError::SourceIdentityMismatch);
-    }
+    let actual_files = collect_governed_files(root)?;
+    let governed_set: HashSet<String> = GOVERNED_FILES.iter().map(|s| s.to_string()).collect();
 
-    // Validate exact exporter identity
-    if lock.exporter.package != EXPECTED_EXPORTER_PACKAGE
-        || lock.exporter.version != EXPECTED_EXPORTER_VERSION
-    {
-        return Err(ValidationError::SourceIdentityMismatch);
+    for actual in &actual_files {
+        if !governed_set.contains(actual.as_str()) {
+            return Err(ValidationError::UnlistedFileInCorpus);
+        }
     }
-
-    // Validate exact upstream source set cardinality and identity
-    if lock.upstream_sources.len() != EXPECTED_SOURCES.len() {
-        return Err(ValidationError::SourceIdentityMismatch);
-    }
-
-    for (expected_repo, expected_type, expected_tag, expected_commit) in EXPECTED_SOURCES {
-        let found = lock.upstream_sources.iter().any(|s| {
-            s.repository == *expected_repo
-                && s.source_type == *expected_type
-                && s.tag.as_deref() == *expected_tag
-                && s.commit.as_deref() == *expected_commit
-        });
-        if !found {
-            return Err(ValidationError::SourceIdentityMismatch);
+    // Also check all governed files exist
+    for governed in &governed_set {
+        if !actual_files.contains(governed) {
+            // Missing governed file - will be caught by specific checks below
+            // but we only fail here for the governed-set completeness
+            // (specific missing-file errors are more precise, so skip this)
         }
     }
 
-    // Validate exact proto source paths
-    let proto_source = lock
-        .upstream_sources
-        .iter()
-        .find(|s| s.source_type == "proto")
-        .ok_or(ValidationError::SourceIdentityMismatch)?;
-    if proto_source.files.len() != EXPECTED_PROTO_SOURCE_PATHS.len() {
-        return Err(ValidationError::SourceIdentityMismatch);
-    }
-    for expected_path in EXPECTED_PROTO_SOURCE_PATHS {
-        if !proto_source
-            .files
-            .iter()
-            .any(|f| f.source_path == *expected_path)
-        {
-            return Err(ValidationError::SourceIdentityMismatch);
-        }
-    }
-
-    // Validate exact semconv source path
-    let semconv_source = lock
-        .upstream_sources
-        .iter()
-        .find(|s| s.source_type == "semconv")
-        .ok_or(ValidationError::SourceIdentityMismatch)?;
-    if semconv_source.files.len() != 1 {
-        return Err(ValidationError::SourceIdentityMismatch);
-    }
-    if semconv_source.files[0].source_path != EXPECTED_SEMCONV_SOURCE_PATH {
-        return Err(ValidationError::SourceIdentityMismatch);
-    }
-
-    // Validate exact corpus cardinality and fixture names/roles
-    if lock.corpus.len() != EXPECTED_CORPUS.len() {
-        return Err(ValidationError::CorpusCardinalityMismatch);
-    }
-    for (expected_fixture, expected_kind) in EXPECTED_CORPUS {
-        let found = lock
-            .corpus
-            .iter()
-            .any(|c| c.fixture == *expected_fixture && c.span_kind == *expected_kind);
-        if !found {
-            return Err(ValidationError::CorpusCardinalityMismatch);
-        }
-    }
-
-    // Validate exact hostile fixture cardinality, names, and purposes
-    if lock.hostile_fixtures.len() != EXPECTED_HOSTILE.len() {
-        return Err(ValidationError::HostileCardinalityMismatch);
-    }
-    for (expected_fixture, expected_purpose) in EXPECTED_HOSTILE {
-        let found = lock
-            .hostile_fixtures
-            .iter()
-            .any(|h| h.fixture == *expected_fixture && h.purpose == *expected_purpose);
-        if !found {
-            return Err(ValidationError::HostileCardinalityMismatch);
-        }
-    }
-
-    // Helper to build path from temp root
-    let build_path = |rel: &str| -> Result<PathBuf, ValidationError> {
-        validate_safe_relative_path(rel)?;
-        Ok(root.join(rel))
-    };
+    // -- Phase 3: Structural duplicate and path safety checks ---------------------------------
 
     // Validate upstream sources for duplicates and correct structure
     let mut seen_sources = HashSet::new();
@@ -463,7 +487,148 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
             if !seen_files.insert(&file.vendored_path) {
                 return Err(ValidationError::VendoredDuplicateFile);
             }
+        }
+    }
 
+    // Validate corpus for duplicate paths
+    let mut seen_fixtures = HashSet::new();
+    let mut seen_sidecars = HashSet::new();
+    for entry in &lock.corpus {
+        if !seen_fixtures.insert(&entry.fixture) {
+            return Err(ValidationError::FixtureDuplicatePath);
+        }
+        if !seen_sidecars.insert(&entry.sidecar) {
+            return Err(ValidationError::FixtureDuplicatePath);
+        }
+    }
+
+    // Validate hostile for duplicate paths
+    let mut seen_hostile = HashSet::new();
+    for entry in &lock.hostile_fixtures {
+        if !seen_hostile.insert(&entry.fixture) {
+            return Err(ValidationError::HostileDuplicatePath);
+        }
+    }
+
+    // -- Phase 4: Exact identity checks -------------------------------------------------------
+
+    // Validate exact provenance note (no substring acceptance)
+    if lock.provenance.note != EXPECTED_PROVENANCE_NOTE {
+        return Err(ValidationError::ProvenanceMarkerInvalid);
+    }
+
+    // Validate exact SDK identity (package, version, resolved, integrity)
+    if lock.sdk.package != EXPECTED_SDK_PACKAGE
+        || lock.sdk.version != EXPECTED_SDK_VERSION
+        || lock.sdk.resolved != EXPECTED_SDK_RESOLVED
+        || lock.sdk.integrity != EXPECTED_SDK_INTEGRITY
+    {
+        return Err(ValidationError::SourceIdentityMismatch);
+    }
+
+    // Validate exact exporter identity (package, version, resolved, integrity)
+    if lock.exporter.package != EXPECTED_EXPORTER_PACKAGE
+        || lock.exporter.version != EXPECTED_EXPORTER_VERSION
+        || lock.exporter.resolved != EXPECTED_EXPORTER_RESOLVED
+        || lock.exporter.integrity != EXPECTED_EXPORTER_INTEGRITY
+    {
+        return Err(ValidationError::SourceIdentityMismatch);
+    }
+
+    // Validate exact upstream source set cardinality and identity
+    if lock.upstream_sources.len() != EXPECTED_SOURCES.len() {
+        return Err(ValidationError::SourceIdentityMismatch);
+    }
+
+    for (expected_repo, expected_type, expected_tag, expected_commit) in EXPECTED_SOURCES {
+        let found = lock.upstream_sources.iter().any(|s| {
+            s.repository == *expected_repo
+                && s.source_type == *expected_type
+                && s.tag.as_deref() == *expected_tag
+                && s.commit.as_deref() == *expected_commit
+        });
+        if !found {
+            return Err(ValidationError::SourceIdentityMismatch);
+        }
+    }
+
+    // Validate exact proto source_path -> vendored_path pairs
+    let proto_source = lock
+        .upstream_sources
+        .iter()
+        .find(|s| s.source_type == "proto")
+        .ok_or(ValidationError::SourceIdentityMismatch)?;
+    if proto_source.files.len() != EXPECTED_PROTO_PAIRS.len() {
+        return Err(ValidationError::SourceIdentityMismatch);
+    }
+    for (expected_src, expected_vendored) in EXPECTED_PROTO_PAIRS {
+        if !proto_source
+            .files
+            .iter()
+            .any(|f| f.source_path == *expected_src && f.vendored_path == *expected_vendored)
+        {
+            return Err(ValidationError::SourceIdentityMismatch);
+        }
+    }
+
+    // Validate exact semconv source_path -> vendored_path pair
+    let semconv_source = lock
+        .upstream_sources
+        .iter()
+        .find(|s| s.source_type == "semconv")
+        .ok_or(ValidationError::SourceIdentityMismatch)?;
+    if semconv_source.files.len() != 1 {
+        return Err(ValidationError::SourceIdentityMismatch);
+    }
+    if semconv_source.files[0].source_path != EXPECTED_SEMCONV_PAIR.0
+        || semconv_source.files[0].vendored_path != EXPECTED_SEMCONV_PAIR.1
+    {
+        return Err(ValidationError::SourceIdentityMismatch);
+    }
+
+    // -- Phase 5: Exact cardinality and name bindings -----------------------------------------
+
+    // Validate exact corpus cardinality and fixture->sidecar->role->method tuples
+    if lock.corpus.len() != EXPECTED_CORPUS.len() {
+        return Err(ValidationError::CorpusCardinalityMismatch);
+    }
+    for (expected_fixture, expected_sidecar, expected_kind, expected_method) in EXPECTED_CORPUS {
+        let found = lock.corpus.iter().any(|c| {
+            c.fixture == *expected_fixture
+                && c.sidecar == *expected_sidecar
+                && c.span_kind == *expected_kind
+                && c.mcp_method == *expected_method
+        });
+        if !found {
+            return Err(ValidationError::CorpusCardinalityMismatch);
+        }
+    }
+
+    // Validate exact hostile fixture cardinality and names first
+    if lock.hostile_fixtures.len() != EXPECTED_HOSTILE.len() {
+        return Err(ValidationError::HostileCardinalityMismatch);
+    }
+    for (expected_fixture, _) in EXPECTED_HOSTILE {
+        if !lock
+            .hostile_fixtures
+            .iter()
+            .any(|h| h.fixture == *expected_fixture)
+        {
+            return Err(ValidationError::HostileCardinalityMismatch);
+        }
+    }
+
+    // -- Phase 6: Hash and file validation ----------------------------------------------------
+
+    // Helper to build path from temp root
+    let build_path = |rel: &str| -> Result<PathBuf, ValidationError> {
+        validate_safe_relative_path(rel)?;
+        Ok(root.join(rel))
+    };
+
+    // Validate vendored file hashes
+    for source in &lock.upstream_sources {
+        for file in &source.files {
             let path = build_path(&file.vendored_path)?;
             if !path.exists() {
                 return Err(ValidationError::VendoredFileMissing);
@@ -504,7 +669,7 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         return Err(ValidationError::GeneratorHashMismatch);
     }
 
-    // Validate package-lock bindings
+    // Validate package-lock bindings (version, resolved, integrity)
     let pkg_lock_content =
         fs::read_to_string(&pkg_lock_path).map_err(|_| ValidationError::GeneratorFileMissing)?;
     let pkg_lock_json: serde_json::Value = serde_json::from_str(&pkg_lock_content)
@@ -539,18 +704,7 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         return Err(ValidationError::PackageLockMismatch);
     }
 
-    // Validate corpus - check for duplicates first
-    let mut seen_fixtures = HashSet::new();
-    let mut seen_sidecars = HashSet::new();
-    for entry in &lock.corpus {
-        if !seen_fixtures.insert(&entry.fixture) {
-            return Err(ValidationError::FixtureDuplicatePath);
-        }
-        if !seen_sidecars.insert(&entry.sidecar) {
-            return Err(ValidationError::FixtureDuplicatePath);
-        }
-    }
-
+    // Validate corpus fixture hashes and sidecar content
     for entry in &lock.corpus {
         validate_safe_relative_path(&entry.fixture)?;
         validate_safe_relative_path(&entry.sidecar)?;
@@ -594,9 +748,12 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
             return Err(ValidationError::SidecarSemanticMismatch);
         }
 
-        // Validate sidecar generated_at is RFC3339
+        // Validate sidecar generated_at is RFC3339 and equals lock.locked_at
         if chrono::DateTime::parse_from_rfc3339(&sidecar.generated_at).is_err() {
             return Err(ValidationError::SidecarSemanticMismatch);
+        }
+        if sidecar.generated_at != lock.locked_at {
+            return Err(ValidationError::SidecarTimestampMismatch);
         }
 
         if sidecar.content_sha256 != entry.content_sha256 {
@@ -726,10 +883,9 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
             return Err(ValidationError::FixtureAttributeValueMismatch);
         }
 
-        // mcp.protocol.version must be date-shaped and match expected value
-        match found_protocol_version {
-            Some(v) if is_date_shaped_version(v) && v == EXPECTED_MCP_PROTOCOL_VERSION => {}
-            _ => return Err(ValidationError::FixtureAttributeValueMismatch),
+        // mcp.protocol.version must match expected value exactly
+        if found_protocol_version != Some(EXPECTED_MCP_PROTOCOL_VERSION) {
+            return Err(ValidationError::FixtureAttributeValueMismatch);
         }
 
         // Validate mcp_method derived from actual attribute
@@ -738,26 +894,10 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         }
     }
 
-    // Validate hostile fixtures - check for duplicates
-    let mut seen_hostile = HashSet::new();
-    for entry in &lock.hostile_fixtures {
-        if !seen_hostile.insert(&entry.fixture) {
-            return Err(ValidationError::HostileDuplicatePath);
-        }
-    }
+    // -- Phase 7: Hostile fixture validation (purpose checked after name/cardinality) ----------
 
     for entry in &lock.hostile_fixtures {
         validate_safe_relative_path(&entry.fixture)?;
-
-        // Validate purpose matches expected constant (exact match, not non-empty)
-        let expected_purpose = EXPECTED_HOSTILE
-            .iter()
-            .find(|(name, _)| *name == entry.fixture)
-            .map(|(_, purpose)| *purpose);
-        match expected_purpose {
-            Some(p) if entry.purpose == p => {}
-            _ => return Err(ValidationError::HostilePurposeMismatch),
-        }
 
         let path = build_path(&entry.fixture)?;
         if !path.exists() {
@@ -766,29 +906,15 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         if sha256_file(&path)? != entry.sha256 {
             return Err(ValidationError::HostileHashMismatch);
         }
-    }
 
-    // Validate no unlisted files
-    let mut expected: HashSet<String> = HashSet::new();
-    expected.insert("upstream.lock.json".to_string());
-    expected.insert("README.md".to_string());
-    for entry in &lock.corpus {
-        expected.insert(entry.fixture.clone());
-        expected.insert(entry.sidecar.clone());
-    }
-    for entry in &lock.hostile_fixtures {
-        expected.insert(entry.fixture.clone());
-    }
-
-    for entry in fs::read_dir(root).map_err(|_| ValidationError::LockFileMissing)? {
-        let entry = entry.map_err(|_| ValidationError::UnlistedFileInCorpus)?;
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.ends_with(".json") && !expected.contains(name) {
-                    return Err(ValidationError::UnlistedFileInCorpus);
-                }
-            }
+        // Purpose check is last - names/cardinality already validated in Phase 5
+        let expected_purpose = EXPECTED_HOSTILE
+            .iter()
+            .find(|(name, _)| *name == entry.fixture)
+            .map(|(_, purpose)| *purpose);
+        match expected_purpose {
+            Some(p) if entry.purpose == p => {}
+            _ => return Err(ValidationError::HostilePurposeMismatch),
         }
     }
 

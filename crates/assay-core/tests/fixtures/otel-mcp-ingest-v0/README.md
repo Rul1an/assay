@@ -1,7 +1,7 @@
 # OTLP MCP Ingest Fixtures v0
 
 Locally generated OpenTelemetry test fixtures using the official SDK and OTLP HTTP exporter.
-These are **not external deployment evidence**—they exist solely for internal MCP semantic
+These are **not external deployment evidence** -- they exist solely for internal MCP semantic
 convention testing in Assay.
 
 ## Purpose
@@ -29,7 +29,7 @@ Each fixture has a `.meta.json` sidecar with:
 - `hostile_oversized_attribute.json`: Size limit test
 - `hostile_missing_required_fields.json`: Schema validation test
 
-Hostile fixtures are **locked inputs only**—Slice B will define rejection semantics.
+Hostile fixtures are **locked inputs only** -- Slice B will define rejection semantics.
 
 ## Lock File
 
@@ -56,7 +56,7 @@ npm ci
 npm run generate
 ```
 
-Verify hashes match lock. CI never runs the generator—it only validates the locked corpus.
+Verify hashes match lock. CI never runs the generator -- it only validates the locked corpus.
 
 ## Vendor
 
@@ -74,5 +74,7 @@ Integration tests (`crates/assay-core/tests/otel_*.rs`) use a hermetic validator
 6. Fails with typed errors (no user values in messages) if any check fails
 7. Provides mutation tests for the locked contract surface (byte flip, duplicate fields/paths, absolute paths, exact identity/cardinality/purpose/attribute-value checks)
 
-Every retained field is semantically validated. Test-only parser validates fixture structure without
-introducing unbounded production parsers into `assay-core`.
+Retained fields checked: span name, span kind, mcp.method.name, gen_ai.operation.name,
+gen_ai.tool.name, jsonrpc.request.id, mcp.protocol.version, sidecar provenance, timestamps,
+and file hashes. Test-only parser validates fixture structure without introducing unbounded
+production parsers into `assay-core`.

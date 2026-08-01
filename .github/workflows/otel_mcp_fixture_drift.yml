@@ -2,7 +2,8 @@ name: OTLP MCP Fixture Drift Report
 
 # Non-required scheduled workflow that monitors the upstream OpenTelemetry SDK,
 # OTLP proto definitions, MCP semconv, and generator for version drift.
-# Reports to GITHUB_STEP_SUMMARY only (does not fail or block CI).
+# Drift findings are summary-only and non-required; they do not block required CI.
+# Operational failure (network, missing lock file) may fail this informational run.
 
 on:
   schedule:
@@ -28,7 +29,7 @@ jobs:
           set -euo pipefail
           LOCK_PATH="crates/assay-core/tests/fixtures/otel-mcp-ingest-v0/upstream.lock.json"
           if [ ! -f "$LOCK_PATH" ]; then
-            echo "::error::Lock file not found at $LOCK_PATH"
+            echo "Lock file not found at $LOCK_PATH"
             exit 1
           fi
           LOCKED_SDK=$(jq -r '.sdk.version' "$LOCK_PATH")
@@ -222,5 +223,6 @@ jobs:
             # Overall
             echo "## Status"
             echo ""
-            echo "This workflow is **non-required** and does not block CI."
+            echo "Drift findings are summary-only and non-required. They do not block required CI."
+            echo "Operational failure (network, API) may fail this informational run."
           } >> "$GITHUB_STEP_SUMMARY"

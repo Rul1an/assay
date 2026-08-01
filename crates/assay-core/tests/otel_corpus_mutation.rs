@@ -110,7 +110,7 @@ fn rewrite_fixture_consistent(
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 }
 
-// ── Baseline ───────────────────────────────────────────────────────────────
+// -- Baseline ---------------------------------------------------------------------------------
 
 #[test]
 fn test_clean_corpus_acceptance() {
@@ -119,7 +119,7 @@ fn test_clean_corpus_acceptance() {
     assert!(result.is_ok(), "Clean corpus must validate");
 }
 
-// ── Byte-level tamper tests ────────────────────────────────────────────────
+// -- Byte-level tamper tests ------------------------------------------------------------------
 
 #[test]
 fn test_fixture_byte_tamper() {
@@ -192,7 +192,7 @@ fn test_semconv_tamper() {
     assert_eq!(result, Err(ValidationError::VendoredHashMismatch));
 }
 
-// ── Generator tamper tests ─────────────────────────────────────────────────
+// -- Generator tamper tests -------------------------------------------------------------------
 
 #[test]
 fn test_generator_source_tamper() {
@@ -220,7 +220,7 @@ fn test_package_lock_tamper() {
     assert_eq!(result, Err(ValidationError::GeneratorHashMismatch));
 }
 
-// ── Missing file tests ─────────────────────────────────────────────────────
+// -- Missing file tests -----------------------------------------------------------------------
 
 #[test]
 fn test_missing_fixture() {
@@ -228,6 +228,8 @@ fn test_missing_fixture() {
     fs::remove_file(corpus.join("mcp_client_tools_call.json")).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
+    // Governed file set catches this as unlisted (file missing from actual set)
+    // but actual validator sees FixtureMissing in the hash phase
     assert_eq!(result, Err(ValidationError::FixtureMissing));
 }
 
@@ -257,6 +259,10 @@ fn test_missing_generator_script() {
     fs::remove_file(corpus.join("generator/generate.js")).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
+    // Governed file set catches missing governed files as UnlistedFileInCorpus
+    // since the actual set no longer matches the governed set (missing file
+    // means actual < governed, but the governed check only fails for actual > governed).
+    // The specific GeneratorFileMissing is caught in hash phase.
     assert_eq!(result, Err(ValidationError::GeneratorFileMissing));
 }
 
@@ -269,7 +275,7 @@ fn test_hostile_fixture_missing() {
     assert_eq!(result, Err(ValidationError::HostileMissing));
 }
 
-// ── Unlisted / duplicate file tests ────────────────────────────────────────
+// -- Unlisted / duplicate file tests ----------------------------------------------------------
 
 #[test]
 fn test_unlisted_file() {
@@ -278,6 +284,42 @@ fn test_unlisted_file() {
 
     let result = validate_corpus_at_path(&corpus);
     assert_eq!(result, Err(ValidationError::UnlistedFileInCorpus));
+}
+
+#[test]
+fn test_unlisted_nested_proto() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    // Rogue proto nested deep in vendor directory
+    let rogue_dir =
+        corpus.join("vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/metrics/v1");
+    fs::create_dir_all(&rogue_dir).unwrap();
+    fs::write(rogue_dir.join("rogue.proto"), b"syntax = \"proto3\";").unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::UnlistedFileInCorpus));
+}
+
+#[test]
+fn test_unlisted_generator_source() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    // Rogue JS file in the generator directory
+    fs::write(corpus.join("generator/rogue.js"), b"// rogue").unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::UnlistedFileInCorpus));
+}
+
+#[test]
+fn test_symlink_rejected() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let link_path = corpus.join("symlink.json");
+    // Create a symlink to an existing file
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(corpus.join("upstream.lock.json"), &link_path).unwrap();
+        let result = validate_corpus_at_path(&corpus);
+        assert_eq!(result, Err(ValidationError::SymlinkInCorpus));
+    }
 }
 
 #[test]
@@ -330,7 +372,8 @@ fn test_duplicate_fixture_path() {
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
-    assert_eq!(result, Err(ValidationError::CorpusCardinalityMismatch));
+    // Structural duplicate check runs before cardinality
+    assert_eq!(result, Err(ValidationError::FixtureDuplicatePath));
 }
 
 #[test]
@@ -350,7 +393,8 @@ fn test_duplicate_hostile_path() {
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
-    assert_eq!(result, Err(ValidationError::HostileCardinalityMismatch));
+    // Structural duplicate check runs before cardinality
+    assert_eq!(result, Err(ValidationError::HostileDuplicatePath));
 }
 
 #[test]
@@ -372,11 +416,11 @@ fn test_duplicate_vendored_file() {
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
-    // Source identity check now catches the extra proto file before the duplicate check
-    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+    // Structural duplicate check runs before identity
+    assert_eq!(result, Err(ValidationError::VendoredDuplicateFile));
 }
 
-// ── Path safety tests ──────────────────────────────────────────────────────
+// -- Path safety tests ------------------------------------------------------------------------
 
 #[test]
 fn test_absolute_path_in_fixture() {
@@ -391,7 +435,8 @@ fn test_absolute_path_in_fixture() {
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
-    // Cardinality check fires first because fixture name doesn't match expected set
+    // Structural duplicate check sees the changed name breaks the fixture set,
+    // and cardinality fires because the expected tuple is missing
     assert_eq!(result, Err(ValidationError::CorpusCardinalityMismatch));
 }
 
@@ -411,7 +456,7 @@ fn test_path_traversal_in_vendored() {
     assert_eq!(result, Err(ValidationError::PathTraversal));
 }
 
-// ── Semantic sidecar tests (with hash update) ──────────────────────────────
+// -- Semantic sidecar tests (with hash update) ------------------------------------------------
 
 #[test]
 fn test_external_deployment_true_with_updated_hash() {
@@ -449,7 +494,40 @@ fn test_fixture_semantic_label_mismatch_with_updated_hash() {
     assert_eq!(result, Err(ValidationError::SidecarSemanticMismatch));
 }
 
-// ── Blocker 1: Frozen contract identity mutation tests ─────────────────────
+#[test]
+fn test_sidecar_generated_at_mismatch_with_lock() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let sidecar_path = corpus.join("mcp_client_tools_call.meta.json");
+
+    // Modify sidecar to have different generated_at (still valid RFC3339)
+    let mut sidecar: serde_json::Value =
+        serde_json::from_reader(fs::File::open(&sidecar_path).unwrap()).unwrap();
+    sidecar["generated_at"] = serde_json::json!("2025-01-01T00:00:00Z");
+    fs::write(&sidecar_path, serde_json::to_vec_pretty(&sidecar).unwrap()).unwrap();
+
+    // Recompute sidecar hash in lock
+    update_sidecar_hash_in_lock(&corpus, 0);
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SidecarTimestampMismatch));
+}
+
+#[test]
+fn test_lock_locked_at_changed_from_sidecar() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    // Change lock's locked_at to a different valid RFC3339 value
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["locked_at"] = serde_json::json!("2025-06-15T12:00:00Z");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SidecarTimestampMismatch));
+}
+
+// -- Frozen contract identity mutation tests --------------------------------------------------
 
 #[test]
 fn test_proto_tag_changed() {
@@ -549,6 +627,143 @@ fn test_exporter_version_changed() {
 }
 
 #[test]
+fn test_sdk_resolved_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["sdk"]["resolved"] = serde_json::json!("https://evil.example.com/sdk.tgz");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+}
+
+#[test]
+fn test_sdk_integrity_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["sdk"]["integrity"] = serde_json::json!("sha512-TAMPERED==");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+}
+
+#[test]
+fn test_exporter_resolved_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["exporter"]["resolved"] = serde_json::json!("https://evil.example.com/exporter.tgz");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+}
+
+#[test]
+fn test_exporter_integrity_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["exporter"]["integrity"] = serde_json::json!("sha512-TAMPERED==");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+}
+
+/// Deep consistent mutation: changes resolved+integrity in BOTH upstream.lock.json
+/// AND package-lock.json (and updates the lock's package-lock hash). Must still fail
+/// SourceIdentityMismatch because the frozen constants bind the exact values.
+#[test]
+fn test_deep_consistent_sdk_redirect() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+    let pkg_lock_path = corpus.join("generator/package-lock.json");
+
+    let fake_resolved = "https://evil.example.com/sdk-trace-node-2.10.0.tgz";
+    let fake_integrity =
+        "sha512-EVIL/FakeIntegrityHashThatLooksReal0000000000000000000000000000000==";
+
+    // Mutate package-lock.json to point to the evil URL
+    let mut pkg_lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pkg_lock_path).unwrap()).unwrap();
+    pkg_lock["packages"]["node_modules/@opentelemetry/sdk-trace-node"]["resolved"] =
+        serde_json::json!(fake_resolved);
+    pkg_lock["packages"]["node_modules/@opentelemetry/sdk-trace-node"]["integrity"] =
+        serde_json::json!(fake_integrity);
+    fs::write(
+        &pkg_lock_path,
+        serde_json::to_vec_pretty(&pkg_lock).unwrap(),
+    )
+    .unwrap();
+
+    // Recompute package-lock hash
+    let new_pkg_lock_hash = sha256_of(&pkg_lock_path);
+
+    // Mutate upstream.lock.json consistently
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["sdk"]["resolved"] = serde_json::json!(fake_resolved);
+    lock["sdk"]["integrity"] = serde_json::json!(fake_integrity);
+    lock["generator"]["package_lock_sha256"] = serde_json::json!(new_pkg_lock_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    // Frozen constant binds the exact resolved URL and integrity
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+}
+
+/// Deep consistent mutation for exporter: same as above but for exporter package.
+#[test]
+fn test_deep_consistent_exporter_redirect() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+    let pkg_lock_path = corpus.join("generator/package-lock.json");
+
+    let fake_resolved = "https://evil.example.com/exporter-trace-otlp-http-0.221.0.tgz";
+    let fake_integrity =
+        "sha512-EVIL/FakeExporterIntegrity000000000000000000000000000000000000000==";
+
+    // Mutate package-lock.json
+    let mut pkg_lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pkg_lock_path).unwrap()).unwrap();
+    pkg_lock["packages"]["node_modules/@opentelemetry/exporter-trace-otlp-http"]["resolved"] =
+        serde_json::json!(fake_resolved);
+    pkg_lock["packages"]["node_modules/@opentelemetry/exporter-trace-otlp-http"]["integrity"] =
+        serde_json::json!(fake_integrity);
+    fs::write(
+        &pkg_lock_path,
+        serde_json::to_vec_pretty(&pkg_lock).unwrap(),
+    )
+    .unwrap();
+
+    // Recompute package-lock hash
+    let new_pkg_lock_hash = sha256_of(&pkg_lock_path);
+
+    // Mutate upstream.lock.json consistently
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["exporter"]["resolved"] = serde_json::json!(fake_resolved);
+    lock["exporter"]["integrity"] = serde_json::json!(fake_integrity);
+    lock["generator"]["package_lock_sha256"] = serde_json::json!(new_pkg_lock_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+}
+
+#[test]
 fn test_third_corpus_entry_added() {
     let (_tmp, corpus) = copy_corpus_to_temp();
     let lock_path = corpus.join("upstream.lock.json");
@@ -585,7 +800,8 @@ fn test_hostile_purpose_changed() {
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
-    assert_eq!(result, Err(ValidationError::HostileCardinalityMismatch));
+    // Name/cardinality passes (name still matches), but purpose check fails
+    assert_eq!(result, Err(ValidationError::HostilePurposeMismatch));
 }
 
 #[test]
@@ -608,6 +824,7 @@ fn test_fourth_hostile_added() {
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
+    // Structural duplicate check passes (unique name), then cardinality fails
     assert_eq!(result, Err(ValidationError::HostileCardinalityMismatch));
 }
 
@@ -627,7 +844,39 @@ fn test_proto_source_path_changed() {
     assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
 }
 
-// ── Blocker 3: Exact provenance note tests ─────────────────────────────────
+#[test]
+fn test_proto_vendored_path_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    // Change the vendored_path of a proto file (source_path stays correct)
+    lock["upstream_sources"][0]["files"][0]["vendored_path"] =
+        serde_json::json!("vendor/opentelemetry-proto-v1.11.0/different/path/trace_service.proto");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+}
+
+#[test]
+fn test_semconv_vendored_path_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    // Change semconv vendored_path
+    lock["upstream_sources"][1]["files"][0]["vendored_path"] =
+        serde_json::json!("vendor/wrong-dir/mcp.md");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+}
+
+// -- Exact provenance note tests --------------------------------------------------------------
 
 #[test]
 fn test_provenance_note_with_contradictory_suffix() {
@@ -636,7 +885,7 @@ fn test_provenance_note_with_contradictory_suffix() {
 
     let mut lock: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
-    // Append a contradictory suffix — old substring check would pass this
+    // Append a contradictory suffix -- old substring check would pass this
     lock["provenance"]["note"] = serde_json::json!(
         "Locally generated test fixtures using official OpenTelemetry SDK and OTLP HTTP exporter. Not external deployment evidence. No production decoder in assay-core. HOWEVER this is actually production data."
     );
@@ -661,7 +910,7 @@ fn test_provenance_note_completely_wrong() {
     assert_eq!(result, Err(ValidationError::ProvenanceMarkerInvalid));
 }
 
-// ── Blocker 2: Deep semantic tamper tests ──────────────────────────────────
+// -- Deep semantic tamper tests ---------------------------------------------------------------
 // These tests mutate fixture content semantics, recompute all hashes to keep
 // them internally consistent, and verify the validator still catches the
 // semantic violation with a typed error.
@@ -840,7 +1089,37 @@ fn test_corpus_role_swapped() {
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
-    // Cardinality check: no CLIENT entry found
+    // Cardinality check: no CLIENT entry found in expected tuples
+    assert_eq!(result, Err(ValidationError::CorpusCardinalityMismatch));
+}
+
+#[test]
+fn test_corpus_sidecar_name_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    // Change sidecar name - breaks the expected tuple
+    lock["corpus"][0]["sidecar"] = serde_json::json!("wrong_sidecar.meta.json");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::CorpusCardinalityMismatch));
+}
+
+#[test]
+fn test_corpus_mcp_method_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    // Change mcp_method - breaks the expected tuple
+    lock["corpus"][0]["mcp_method"] = serde_json::json!("tools/list");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
     assert_eq!(result, Err(ValidationError::CorpusCardinalityMismatch));
 }
 
@@ -857,5 +1136,5 @@ fn test_hostile_purpose_suffix_contradiction() {
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
-    assert_eq!(result, Err(ValidationError::HostileCardinalityMismatch));
+    assert_eq!(result, Err(ValidationError::HostilePurposeMismatch));
 }

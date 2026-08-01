@@ -15,7 +15,7 @@
 //! - No unbounded Deserialize models for OTLP structures in production code
 //! - No live receiver, decoder, or reducer (Slice B concern)
 //! - No CLI subcommand or public API surface
-//! - No assay.dev schema URL (no live schema exists)
+//! - No public schema contract (no live schema exists)
 //!
 //! ## Provenance
 //!
@@ -49,7 +49,8 @@
 //! - All 4 proto files (against opentelemetry-proto v1.11.0 tag)
 //! - MCP semconv (against semantic-conventions-genai commit 434c91dc)
 //!
-//! Reports to `GITHUB_STEP_SUMMARY` only (does not fail or block CI).
+//! Drift findings are summary-only and non-required; they do not block required CI.
+//! Operational failure (network, API) may fail this informational run.
 //!
 //! ## Generator
 //!
@@ -66,7 +67,7 @@
 //! npm run generate
 //! ```
 //!
-//! Verify hashes match lock. CI never runs the generator—it only validates the locked corpus.
+//! Verify hashes match lock. CI never runs the generator -- it only validates the locked corpus.
 //!
 //! ## Vendor
 //!
@@ -100,5 +101,5 @@
 //! - Hostile fixture rejection semantics (depth limits, size limits, schema validation)
 //! - Optional CLI integration (`assay evidence inspect-otel-mcp`) if requirements emerge
 //!
-//! This file intentionally contains no types, functions, or serde models—it is
+//! This file intentionally contains no types, functions, or serde models -- it is
 //! documentation only.
