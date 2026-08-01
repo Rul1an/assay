@@ -1,6 +1,7 @@
 use crate::model::TestResultRow;
 
 pub mod genai;
+pub(crate) mod mcp_ingest;
 pub mod metrics;
 pub mod projection;
 pub mod redaction;
