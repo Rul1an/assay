@@ -40,10 +40,10 @@ The fixed corpus exercises these boundaries:
 |---|---|
 | Equivalent 2025 and 2026 calls | Same referenced profile baseline and equivalent result conclusion |
 | 2025 result without `resultType` | Terminal under the legacy compatibility rule |
-| 2026 `complete` result without a continuation member | Terminal |
-| 2026 `complete` result with `inputRequests` or `requestState` | Incomplete because completion contradicts the continuation |
-| 2026 `input_required` result with a well-shaped continuation member | Valid but non-terminal |
-| 2026 `input_required` result without a well-shaped continuation member | Invalid rather than an ordinary unfinished call |
+| 2026 `complete` result without a non-null `inputRequests` or `requestState` | Terminal |
+| 2026 `complete` result with any non-null `inputRequests` or `requestState` | Incomplete because completion contradicts the continuation |
+| 2026 `input_required` with a string `requestState` or object `inputRequests`, and no malformed sibling | Valid but non-terminal |
+| 2026 `input_required` with neither such member, or with another top-level JSON type | Invalid rather than an ordinary unfinished call |
 | 2026 result without `resultType` | Invalid once the era is known |
 | Present but unrecognized result token | Always incomplete; capabilities distinguish unrecognized from recognition-undeterminable |
 | Unknown protocol era | No terminal conclusion |
