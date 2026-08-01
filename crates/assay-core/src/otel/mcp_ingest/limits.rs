@@ -84,6 +84,9 @@ pub(crate) enum ShapeSite {
     AttributeEntry,
     AttributeValue,
     Status,
+    /// An unknown container being skipped without retention. Duplicate members fail closed
+    /// there too: skipping is not a license to accept a document a traversed path would refuse.
+    SkippedContainer,
 }
 
 /// A structurally required span field, named from the pinned OTLP schema rather than from input.

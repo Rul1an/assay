@@ -1,9 +1,10 @@
 //! Typed observations extracted from MCP-shaped OTLP/JSON spans.
 //!
-//! Only the explicit MCP observation fields named in issue #1931 are represented. Every
-//! observation preserves its upstream field provenance ([`UpstreamField`]) and the whole decode
-//! result carries the semconv pin, so a consumer always knows which Development-status
-//! convention revision named these fields.
+//! Only the explicit MCP observation fields named in issue #1931 are represented. Upstream
+//! provenance is a static pinned mapping — [`UpstreamField`] names the exact upstream field
+//! each observation kind is extracted from, rather than being carried per observation — and the
+//! whole decode result carries the semconv pin, so a consumer always knows which
+//! Development-status convention revision named these fields.
 //!
 //! `mcp.protocol.version` is producer-self-reported telemetry, kept deliberately separate from
 //! the transport-level `EraResolution` contract: [`SpanProtocolVersion`] has no conflict state,
@@ -135,9 +136,9 @@ pub(crate) enum SpanProtocolVersion {
 /// One decoded MCP-shaped span, carrying only the explicit observation fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct McpSpanObservation {
-    /// Validated 32-char lowercase-hex trace id.
+    /// 32-char hex trace id, validated case-insensitively and normalized to lowercase.
     pub(crate) trace_id: String,
-    /// Validated 16-char lowercase-hex span id.
+    /// 16-char hex span id, validated case-insensitively and normalized to lowercase.
     pub(crate) span_id: String,
     pub(crate) kind: SpanKind,
     pub(crate) method: MethodObservation,

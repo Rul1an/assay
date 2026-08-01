@@ -121,17 +121,7 @@ impl<'de> Visitor<'de> for AttributeEntrySeed<'_, '_> {
         while let Some(member) = map.next_key_seed(KeySeed { st: self.st })? {
             members.admit(self.st, &member)?;
             match member.as_str() {
-                "key" => {
-                    let k = map.next_value_seed(KeySeed { st: self.st })?;
-                    let max = self.st.borrow().limits.max_attribute_key_bytes;
-                    if k.len() as u64 > max {
-                        return Err(self
-                            .st
-                            .borrow_mut()
-                            .limit(OtlpLimitDimension::AttributeKeyBytes, max));
-                    }
-                    key = Some(k);
-                }
+                "key" => key = Some(map.next_value_seed(AttrKeySeed { st: self.st })?),
                 "value" => {
                     value = Some(map.next_value_seed(AnyValueSeed {
                         st: self.st,
@@ -152,6 +142,82 @@ impl<'de> Visitor<'de> for AttributeEntrySeed<'_, '_> {
                 .borrow_mut()
                 .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry))),
         }
+    }
+}
+
+/// The `key` member of an attribute entry: the one string with its own dedicated byte ceiling,
+/// checked against the borrowed slice **before** the key is allocated, so an oversized key is
+/// never retained even transiently. Any non-string shape is a typed entry fault.
+struct AttrKeySeed<'a> {
+    st: St<'a>,
+}
+
+impl<'de> DeserializeSeed<'de> for AttrKeySeed<'_> {
+    type Value = String;
+    fn deserialize<D: de::Deserializer<'de>>(self, de: D) -> Result<String, D::Error> {
+        de.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for AttrKeySeed<'_> {
+    type Value = String;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("an attribute key string")
+    }
+
+    fn visit_str<E: de::Error>(self, s: &str) -> Result<String, E> {
+        let mut state = self.st.borrow_mut();
+        state.charge(s.len() as u64)?;
+        let max = state.limits.max_attribute_key_bytes;
+        if s.len() as u64 > max {
+            return Err(state.limit(OtlpLimitDimension::AttributeKeyBytes, max));
+        }
+        drop(state);
+        Ok(s.to_owned())
+    }
+
+    fn visit_bool<E: de::Error>(self, _: bool) -> Result<String, E> {
+        Err(self
+            .st
+            .borrow_mut()
+            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry)))
+    }
+    fn visit_i64<E: de::Error>(self, _: i64) -> Result<String, E> {
+        Err(self
+            .st
+            .borrow_mut()
+            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry)))
+    }
+    fn visit_u64<E: de::Error>(self, _: u64) -> Result<String, E> {
+        Err(self
+            .st
+            .borrow_mut()
+            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry)))
+    }
+    fn visit_f64<E: de::Error>(self, _: f64) -> Result<String, E> {
+        Err(self
+            .st
+            .borrow_mut()
+            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry)))
+    }
+    fn visit_unit<E: de::Error>(self) -> Result<String, E> {
+        Err(self
+            .st
+            .borrow_mut()
+            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry)))
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, _: A) -> Result<String, A::Error> {
+        Err(self
+            .st
+            .borrow_mut()
+            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry)))
+    }
+    fn visit_map<A: MapAccess<'de>>(self, _: A) -> Result<String, A::Error> {
+        Err(self
+            .st
+            .borrow_mut()
+            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry)))
     }
 }
 
@@ -356,8 +422,10 @@ impl<'de> Visitor<'de> for ValueIntSeed<'_, '_> {
     }
 
     fn visit_str<E: de::Error>(self, s: &str) -> Result<i64, E> {
-        self.st.borrow_mut().charge(8)?;
-        charge_value(self.st, self.budget, 8)?;
+        // A string-encoded int64 is a JSON string: it charges its observed UTF-8 length under
+        // the shared charge model, never a fixed numeric width, and is charged before parsing.
+        self.st.borrow_mut().charge(s.len() as u64)?;
+        charge_value(self.st, self.budget, s.len() as u64)?;
         s.parse::<i64>().map_err(|_| {
             self.st
                 .borrow_mut()

@@ -275,7 +275,12 @@ impl<'de> Visitor<'de> for SkipSeed<'_> {
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
         self.st.borrow_mut().enter(self.depth)?;
-        while map.next_key_seed(KeySeed { st: self.st })?.is_some() {
+        // Duplicate members fail closed in skipped containers too: skipping is not a license to
+        // accept a document a traversed path would refuse. The member names are already charged
+        // to the decoded-byte ceiling, so this transient set is bounded.
+        let mut members = Members::new(ShapeSite::SkippedContainer);
+        while let Some(key) = map.next_key_seed(KeySeed { st: self.st })? {
+            members.admit(self.st, &key)?;
             map.next_value_seed(SkipSeed {
                 st: self.st,
                 depth: self.depth + 1,
@@ -834,8 +839,10 @@ impl<'de> Visitor<'de> for SpanSeed<'_> {
     }
 }
 
-/// A fixed-length hex identifier. The value is validated before retention; anything else is a
-/// typed malformed-field fault that never carries the offending bytes.
+/// A fixed-length hex identifier. OTLP/JSON hex ids are case-insensitive, so both cases are
+/// accepted and the retained id is normalized to lowercase — one span must never split into
+/// two identities by case. Anything else is a typed malformed-field fault that never carries
+/// the offending bytes.
 struct IdSeed<'a> {
     st: St<'a>,
     hex_len: usize,
@@ -864,7 +871,7 @@ impl<'de> Visitor<'de> for IdSeed<'_> {
                 .borrow_mut()
                 .fail(OtlpIngestError::MalformedSpanField(self.field)));
         }
-        Ok(s.to_owned())
+        Ok(s.to_ascii_lowercase())
     }
 
     fn visit_bool<E: de::Error>(self, _: bool) -> Result<String, E> {

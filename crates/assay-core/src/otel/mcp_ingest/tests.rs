@@ -833,3 +833,84 @@ fn legacy_otel_ingest_api_remains_compatible() {
     let events = crate::trace::otel_ingest::convert_spans_to_episodes(vec![span]);
     assert!(!events.is_empty());
 }
+
+// --- Exact-head review fixes (PR #1944) -----------------------------------------------------
+
+#[test]
+fn int_value_string_charges_its_observed_length() {
+    // A string-encoded int64 is a JSON string: it charges its UTF-8 length (19 here), never a
+    // fixed numeric width.
+    let big = "9223372036854775807";
+    let entry = format!(r#"{{"key":"k","value":{{"intValue":"{big}"}}}}"#);
+    let mut limits = corpus_limits();
+    limits.max_attribute_value_bytes = big.len() as u64;
+    decode_str(&doc_with_attrs(std::slice::from_ref(&entry)), &limits)
+        .expect("exactly at value ceiling");
+    limits.max_attribute_value_bytes = big.len() as u64 - 1;
+    assert_limit(
+        decode_str(&doc_with_attrs(&[entry]), &limits),
+        OtlpLimitDimension::AttributeValueBytes,
+        big.len() as u64 - 1,
+    );
+}
+
+#[test]
+fn duplicate_member_in_skipped_container_rejects() {
+    assert_eq!(
+        decode_str(
+            r#"{"resourceSpans":[],"unknown":{"same":1,"same":2}}"#,
+            &corpus_limits()
+        )
+        .expect_err("duplicate member inside a skipped map"),
+        OtlpIngestError::DuplicateField(ShapeSite::SkippedContainer)
+    );
+    // The same rule applies arbitrarily deep inside skipped content.
+    let span = format!(r#"{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}","x":[{{"d":1,"d":2}}]}}"#);
+    assert_eq!(
+        decode_str(&doc_with_spans(&[span]), &corpus_limits())
+            .expect_err("nested duplicate inside skipped content"),
+        OtlpIngestError::DuplicateField(ShapeSite::SkippedContainer)
+    );
+}
+
+#[test]
+fn non_string_attribute_key_is_a_typed_entry_shape_fault() {
+    let entry = r#"{"key":5,"value":{"stringValue":"v"}}"#.to_string();
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[entry]), &corpus_limits()).expect_err("non-string key"),
+        OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry)
+    );
+}
+
+#[test]
+fn uppercase_hex_ids_are_accepted_and_normalized_to_lowercase() {
+    // OTLP JSON hex ids are case-insensitive; retained ids normalize to lowercase so one span
+    // never splits into two identities by case.
+    let span = format!(
+        r#"{{"traceId":"{}","spanId":"{}"}}"#,
+        TRACE_ID.to_uppercase(),
+        SPAN_ID.to_uppercase()
+    );
+    let obs = decode_str(&doc_with_spans(&[span]), &corpus_limits()).expect("uppercase hex");
+    assert_eq!(obs.spans[0].trace_id, TRACE_ID);
+    assert_eq!(obs.spans[0].span_id, SPAN_ID);
+}
+
+#[test]
+fn attribute_count_ceiling_is_per_list() {
+    let mut limits = corpus_limits();
+    limits.max_attribute_count = 2;
+    // Two spans, each exactly at the ceiling; a shared counter would reject the second list.
+    let first = span_with_attrs(&[attr_str("a", "v"), attr_str("b", "v")]);
+    let second = span_with_attrs(&[attr_str("c", "v"), attr_str("d", "v")]);
+    decode_str(&doc_with_spans(&[first, second]), &limits)
+        .expect("each span list is counted on its own");
+    // The resource list and a span list are independent as well.
+    let doc = format!(
+        r#"{{"resourceSpans":[{{"resource":{{"attributes":[{},{}]}},"scopeSpans":[{{"spans":[{}]}}]}}]}}"#,
+        attr_str("e", "v"),
+        attr_str("f", "v"),
+        span_with_attrs(&[attr_str("g", "v"), attr_str("h", "v")]),
+    );
+    decode_str(&doc, &limits).expect("resource and span lists are counted independently");
+}

@@ -30,7 +30,8 @@
 //! ## Non-Goals
 //!
 //! - No unbounded Deserialize models for OTLP structures in production code
-//! - No live receiver, decoder, or reducer (Slice B concern)
+//! - No live receiver, reducer, or CLI (the bounded decoder itself is delivered by Slice B,
+//!   described at the top of this module; the reducer remains Slice C scope)
 //! - No CLI subcommand or public API surface
 //! - No public schema contract (no live schema exists)
 //!
