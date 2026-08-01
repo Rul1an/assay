@@ -108,10 +108,12 @@ const EXPECTED_MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 
 /// Exact generator identity: directory must be 'generator', script must be 'generate.js',
 /// and .node-version must be the governed version file with an exact Node version.
+/// npm_version governs the exact npm in the pair; package.json packageManager must match.
 const EXPECTED_GENERATOR_DIRECTORY: &str = "generator";
 const EXPECTED_GENERATOR_SCRIPT: &str = "generate.js";
 const EXPECTED_NODE_VERSION_FILE: &str = ".node-version";
 const EXPECTED_NODE_VERSION: &str = "22.16.0";
+const EXPECTED_NPM_VERSION: &str = "10.9.2";
 
 /// Independently frozen expected digests for vendored content files.
 /// These are NOT read from upstream.lock.json; they are compiled into the
@@ -153,6 +155,7 @@ const GOVERNED_FILES: &[&str] = &[
     "hostile_oversized_attribute.json",
     "hostile_missing_required_fields.json",
     "generator/.node-version",
+    "generator/check-runtime.cjs",
     "generator/package.json",
     "generator/package-lock.json",
     "generator/generate.js",
@@ -213,6 +216,7 @@ pub enum ValidationError {
     GeneratorIdentityMismatch,
     DirectoryReadError,
     PackageLockNodeVersionMismatch,
+    PackageJsonPackageManagerMismatch,
 }
 
 // -- Serde models (test-only, not production) -------------------------------------------------
@@ -275,10 +279,12 @@ struct GeneratorInfo {
     script: String,
     node_version_file: String,
     node_version: String,
+    npm_version: String,
     package_json_sha256: String,
     package_lock_sha256: String,
     script_sha256: String,
     node_version_sha256: String,
+    check_runtime_sha256: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -569,6 +575,7 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         || lock.generator.script != EXPECTED_GENERATOR_SCRIPT
         || lock.generator.node_version_file != EXPECTED_NODE_VERSION_FILE
         || lock.generator.node_version != EXPECTED_NODE_VERSION
+        || lock.generator.npm_version != EXPECTED_NPM_VERSION
     {
         return Err(ValidationError::GeneratorIdentityMismatch);
     }
@@ -796,6 +803,33 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         .map_err(|_| ValidationError::GeneratorFileMissing)?;
     if nv_content.trim() != lock.generator.node_version {
         return Err(ValidationError::GeneratorIdentityMismatch);
+    }
+
+    // Validate check-runtime.cjs hash
+    let check_runtime_path = gen_root.join("check-runtime.cjs");
+    if !check_runtime_path.exists() {
+        return Err(ValidationError::GeneratorFileMissing);
+    }
+    if sha256_file(&check_runtime_path, ValidationError::GeneratorFileMissing)?
+        != lock.generator.check_runtime_sha256
+    {
+        return Err(ValidationError::GeneratorHashMismatch);
+    }
+
+    // Validate package.json packageManager field matches governed npm version exactly.
+    // npm itself does not reject a mismatched packageManager field, so this is the
+    // only enforcement point. Missing or wrong values are rejected (fail-closed).
+    let pkg_json_content =
+        fs::read_to_string(&pkg_path).map_err(|_| ValidationError::GeneratorFileMissing)?;
+    let pkg_json: serde_json::Value = serde_json::from_str(&pkg_json_content)
+        .map_err(|_| ValidationError::GeneratorHashMismatch)?;
+    {
+        let expected_pm = format!("npm@{}", lock.generator.npm_version);
+        let actual_pm = pkg_json.get("packageManager").and_then(|v| v.as_str());
+        match actual_pm {
+            Some(v) if v == expected_pm => {} // exact match
+            _ => return Err(ValidationError::PackageJsonPackageManagerMismatch),
+        }
     }
 
     // Validate package-lock bindings (version, resolved, integrity)

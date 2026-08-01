@@ -1677,6 +1677,123 @@ fn test_sidecar_provenance_sdk_version_mismatch() {
 // branch is unreachable through normal lock mutation (CorpusCardinalityMismatch
 // fires first). It remains as defense-in-depth against future contract changes.
 
+// -- Exact npm governance mutation tests (packageManager enforcement) --------------------------
+
+/// Proves the validator rejects a package.json whose packageManager field is missing.
+/// This is the gap that was previously undetected: npm itself does not reject a
+/// mismatched or missing packageManager field, so the validator must enforce it.
+#[test]
+fn test_package_json_package_manager_missing() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+    let pkg_path = corpus.join("generator/package.json");
+
+    // Remove the packageManager field from package.json
+    let mut pkg: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pkg_path).unwrap()).unwrap();
+    pkg.as_object_mut().unwrap().remove("packageManager");
+    fs::write(&pkg_path, serde_json::to_vec_pretty(&pkg).unwrap()).unwrap();
+
+    // Update package_json_sha256 in upstream.lock.json to keep hashes consistent
+    let new_hash = sha256_of(&pkg_path);
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["generator"]["package_json_sha256"] = serde_json::json!(new_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(
+        result,
+        Err(ValidationError::PackageJsonPackageManagerMismatch)
+    );
+}
+
+/// Proves the validator rejects a package.json whose packageManager field names a
+/// different npm version than the governed one (e.g., npm@9.0.0 instead of npm@10.9.2).
+#[test]
+fn test_package_json_package_manager_wrong_version() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+    let pkg_path = corpus.join("generator/package.json");
+
+    // Set packageManager to a wrong npm version
+    let mut pkg: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pkg_path).unwrap()).unwrap();
+    pkg["packageManager"] = serde_json::json!("npm@9.0.0");
+    fs::write(&pkg_path, serde_json::to_vec_pretty(&pkg).unwrap()).unwrap();
+
+    // Update package_json_sha256 in upstream.lock.json to keep hashes consistent
+    let new_hash = sha256_of(&pkg_path);
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["generator"]["package_json_sha256"] = serde_json::json!(new_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(
+        result,
+        Err(ValidationError::PackageJsonPackageManagerMismatch)
+    );
+}
+
+/// Proves the validator rejects a package.json whose packageManager field names
+/// a different tool entirely (e.g., yarn instead of npm).
+#[test]
+fn test_package_json_package_manager_wrong_tool() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+    let pkg_path = corpus.join("generator/package.json");
+
+    // Set packageManager to yarn
+    let mut pkg: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pkg_path).unwrap()).unwrap();
+    pkg["packageManager"] = serde_json::json!("yarn@4.0.0");
+    fs::write(&pkg_path, serde_json::to_vec_pretty(&pkg).unwrap()).unwrap();
+
+    // Update package_json_sha256 in upstream.lock.json to keep hashes consistent
+    let new_hash = sha256_of(&pkg_path);
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["generator"]["package_json_sha256"] = serde_json::json!(new_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(
+        result,
+        Err(ValidationError::PackageJsonPackageManagerMismatch)
+    );
+}
+
+/// Proves the validator rejects when the lock file's npm_version does not match
+/// the governed constant (catch an attempt to downgrade/upgrade npm in the lock).
+#[test]
+fn test_lock_npm_version_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["generator"]["npm_version"] = serde_json::json!("11.0.0");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::GeneratorIdentityMismatch));
+}
+
+/// Proves the validator rejects when check-runtime.cjs is tampered.
+#[test]
+fn test_check_runtime_script_tamper() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let script_path = corpus.join("generator/check-runtime.cjs");
+
+    let mut content = fs::read_to_string(&script_path).unwrap();
+    content.push_str("// tampered\n");
+    fs::write(&script_path, content.as_bytes()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::GeneratorHashMismatch));
+}
+
 /// Proves the copy_dir_all helper skips generator/node_modules while still
 /// rejecting a node_modules symlink before the skip decision.
 #[cfg(unix)]
