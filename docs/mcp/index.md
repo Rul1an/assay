@@ -161,6 +161,14 @@ MCP standardizes **how** agents communicate. Assay validates **what** they commu
 
     [:octicons-arrow-right-24: Quick Start](quickstart.md)
 
+-   :material-compare-horizontal:{ .lg .middle } __MCP 2025/2026 Protocol-Era Parity__
+
+    ---
+
+    Reproduce the pinned `resultType` and interim-result compatibility corpus.
+
+    [:octicons-arrow-right-24: Protocol-Era Parity](protocol-era-parity.md)
+
 -   :material-server:{ .lg .middle } __Assay MCP Wrapper__
 
     ---
