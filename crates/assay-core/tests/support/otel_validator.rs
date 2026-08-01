@@ -178,6 +178,7 @@ pub enum ValidationError {
     VendoredDuplicateFile,
     GeneratorFileMissing,
     GeneratorHashMismatch,
+    GeneratorParseError,
     FixtureMissing,
     FixtureHashMismatch,
     FixtureDuplicatePath,
@@ -865,7 +866,7 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
     let pkg_json_content =
         fs::read_to_string(&pkg_path).map_err(|_| ValidationError::GeneratorFileMissing)?;
     let pkg_json: serde_json::Value = serde_json::from_str(&pkg_json_content)
-        .map_err(|_| ValidationError::GeneratorHashMismatch)?;
+        .map_err(|_| ValidationError::GeneratorParseError)?;
     {
         let expected_pm = format!("npm@{}", lock.generator.npm_version);
         let actual_pm = pkg_json.get("packageManager").and_then(|v| v.as_str());
@@ -879,7 +880,7 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
     let pkg_lock_content =
         fs::read_to_string(&pkg_lock_path).map_err(|_| ValidationError::GeneratorFileMissing)?;
     let pkg_lock_json: serde_json::Value = serde_json::from_str(&pkg_lock_content)
-        .map_err(|_| ValidationError::GeneratorHashMismatch)?;
+        .map_err(|_| ValidationError::GeneratorParseError)?;
 
     if let Some(packages) = pkg_lock_json.get("packages").and_then(|p| p.as_object()) {
         let sdk_key = format!("node_modules/{}", lock.sdk.package);

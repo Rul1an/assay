@@ -1789,6 +1789,48 @@ fn test_package_json_package_manager_wrong_tool() {
     );
 }
 
+/// Proves malformed generator/package.json is a typed parse error, not a hash
+/// mismatch: the governed hash in the lock is updated to match the malformed
+/// bytes, so validation passes the hash check and must fail at parsing with
+/// the value-free GeneratorParseError (never a false GeneratorHashMismatch).
+#[test]
+fn test_package_json_malformed_is_parse_error() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+    let pkg_path = corpus.join("generator/package.json");
+
+    fs::write(&pkg_path, b"{ \"packageManager\": ").unwrap();
+
+    let new_hash = sha256_of(&pkg_path);
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["generator"]["package_json_sha256"] = serde_json::json!(new_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::GeneratorParseError));
+}
+
+/// Proves malformed generator/package-lock.json is a typed parse error, not a
+/// hash mismatch: same construction as above via package_lock_sha256.
+#[test]
+fn test_package_lock_malformed_is_parse_error() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+    let pkg_lock_path = corpus.join("generator/package-lock.json");
+
+    fs::write(&pkg_lock_path, b"{ \"packages\": [ oops").unwrap();
+
+    let new_hash = sha256_of(&pkg_lock_path);
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["generator"]["package_lock_sha256"] = serde_json::json!(new_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::GeneratorParseError));
+}
+
 /// Proves the validator rejects when the lock file's npm_version does not match
 /// the governed constant (catch an attempt to downgrade/upgrade npm in the lock).
 #[test]

@@ -3,7 +3,6 @@
 // Does not echo attacker-controlled values; only prints governed constants on mismatch.
 'use strict';
 
-const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
