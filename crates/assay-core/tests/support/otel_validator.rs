@@ -406,7 +406,10 @@ fn validate_safe_relative_path(path_str: &str) -> Result<(), ValidationError> {
 /// against the slash-separated `GOVERNED_FILES` constants.
 ///
 /// Non-UTF-8 components fail-closed with `PathTraversal`.
-fn path_to_posix(rel: &Path) -> Result<String, ValidationError> {
+///
+/// Visible to sibling test modules (e.g. the mutation tests' copy helper) so
+/// every slash-governed comparison uses this single component-based mechanism.
+pub fn path_to_posix(rel: &Path) -> Result<String, ValidationError> {
     let mut parts: Vec<&str> = Vec::new();
     for component in rel.components() {
         match component {
@@ -423,6 +426,18 @@ fn path_to_posix(rel: &Path) -> Result<String, ValidationError> {
         return Err(ValidationError::PathTraversal);
     }
     Ok(parts.join("/"))
+}
+
+/// Look up the compiled-in frozen digest for a vendored path. Absence is
+/// fail-closed: every governed vendored file must carry an independent frozen
+/// digest, so a missing mapping is a `VendoredHashMismatch`, never a skip.
+/// Visible to sibling test modules for direct negative coverage.
+pub fn frozen_vendored_digest(vendored_path: &str) -> Result<&'static str, ValidationError> {
+    EXPECTED_VENDORED_DIGESTS
+        .iter()
+        .find(|(p, _)| *p == vendored_path)
+        .map(|(_, digest)| *digest)
+        .ok_or(ValidationError::VendoredHashMismatch)
 }
 
 /// Collect all files recursively under a directory, returning paths relative to root.
@@ -776,14 +791,11 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
             }
             // Independent frozen digest check: vendored_path must exist in
             // EXPECTED_VENDORED_DIGESTS and the actual hash must match the
-            // compiled-in constant (not derived from the lock file).
-            if let Some((_, expected_digest)) = EXPECTED_VENDORED_DIGESTS
-                .iter()
-                .find(|(p, _)| *p == file.vendored_path)
-            {
-                if actual_hash != *expected_digest {
-                    return Err(ValidationError::VendoredHashMismatch);
-                }
+            // compiled-in constant (not derived from the lock file). Absence
+            // of a mapping is fail-closed, never a skip.
+            let expected_digest = frozen_vendored_digest(&file.vendored_path)?;
+            if actual_hash != expected_digest {
+                return Err(ValidationError::VendoredHashMismatch);
             }
         }
     }
@@ -1223,5 +1235,25 @@ mod tests {
                 "roundtrip mismatch for governed file {governed:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_frozen_vendored_digest_mapping_is_total() {
+        // The independent frozen digest mapping must be exactly the governed
+        // vendored path set (proto pairs plus semconv pair), in both
+        // directions. A pair added without a frozen digest would silently
+        // drop the coordinated-tamper defence; a frozen digest without a
+        // governed pair is a stale constant. Both directions must fail here.
+        use std::collections::BTreeSet;
+        let governed: BTreeSet<&str> = EXPECTED_PROTO_PAIRS
+            .iter()
+            .map(|(_, vendored)| *vendored)
+            .chain(std::iter::once(EXPECTED_SEMCONV_PAIR.1))
+            .collect();
+        let frozen: BTreeSet<&str> = EXPECTED_VENDORED_DIGESTS.iter().map(|(p, _)| *p).collect();
+        assert_eq!(
+            governed, frozen,
+            "EXPECTED_VENDORED_DIGESTS must map exactly the governed vendored paths"
+        );
     }
 }

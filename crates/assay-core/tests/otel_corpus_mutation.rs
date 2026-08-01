@@ -5,7 +5,9 @@
 //! precise typed errors (no value leakage).
 
 mod support;
-use support::otel_validator::{validate_corpus_at_path, ValidationError};
+use support::otel_validator::{
+    frozen_vendored_digest, path_to_posix, validate_corpus_at_path, ValidationError,
+};
 
 use std::fs;
 use std::path::PathBuf;
@@ -35,11 +37,14 @@ fn copy_dir_all_inner(root: &std::path::Path, current: &std::path::Path, dst: &s
         if meta.file_type().is_symlink() {
             panic!("symlink found in fixture source tree (refusing to copy)");
         }
-        // Skip generator/node_modules after proving it is not a symlink
+        // Skip generator/node_modules after proving it is not a symlink.
+        // Component-based normalisation via path_to_posix: on Windows,
+        // strip_prefix yields backslash-separated relative paths, so a raw
+        // to_str() comparison against the slash literal would miss the skip.
         if let Ok(rel) = src_path.strip_prefix(root) {
-            if let Some(rel_str) = rel.to_str() {
-                if rel_str == "generator/node_modules"
-                    || rel_str.starts_with("generator/node_modules/")
+            if let Ok(rel_posix) = path_to_posix(rel) {
+                if rel_posix == "generator/node_modules"
+                    || rel_posix.starts_with("generator/node_modules/")
                 {
                     continue;
                 }
@@ -928,6 +933,26 @@ fn test_coordinated_vendored_and_lock_tamper() {
     let result = validate_corpus_at_path(&corpus);
     // Independent frozen digest catches the coordinated tamper
     assert_eq!(result, Err(ValidationError::VendoredHashMismatch));
+}
+
+/// Proves the independent frozen digest lookup is fail-closed: a vendored path
+/// with no entry in the compiled-in EXPECTED_VENDORED_DIGESTS mapping is a
+/// typed VendoredHashMismatch, never a silent skip of the independent check.
+/// (Phase 4 pins the exact vendored path set, so this branch is defence in
+/// depth against future divergence between the pair constants and the frozen
+/// digest mapping; the totality of the current mapping is proven separately in
+/// the support module's unit tests.)
+#[test]
+fn test_frozen_vendored_digest_absent_path_fails_closed() {
+    assert_eq!(
+        frozen_vendored_digest("vendor/unmapped-source/unmapped.proto"),
+        Err(ValidationError::VendoredHashMismatch)
+    );
+    // A governed path still resolves to its compiled-in digest.
+    assert!(frozen_vendored_digest(
+        "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/trace/v1/trace.proto"
+    )
+    .is_ok());
 }
 
 /// Deep consistent mutation for exporter: same as above but for exporter package.
@@ -1845,6 +1870,45 @@ fn test_check_runtime_malformed_package_json_no_content_leak() {
     assert!(
         !stderr.contains("SyntaxError"),
         "must not expose a raw SyntaxError"
+    );
+}
+
+/// Portable proof that copy_dir_all excludes a real generator/node_modules
+/// directory on every platform. The skip comparison is component-based
+/// (path_to_posix), so Windows backslash-relative paths cannot dodge the
+/// exclusion; a sentinel file inside node_modules must never reach the copy.
+#[test]
+fn test_copy_excludes_real_node_modules_sentinel() {
+    let src_dir = TempDir::new().unwrap();
+    let src = src_dir.path();
+    fs::create_dir_all(src.join("generator/node_modules/some-pkg")).unwrap();
+    fs::write(src.join("generator/package.json"), b"{}").unwrap();
+    fs::write(
+        src.join("generator/node_modules/sentinel.txt"),
+        b"must-not-copy",
+    )
+    .unwrap();
+    fs::write(
+        src.join("generator/node_modules/some-pkg/index.js"),
+        b"must-not-copy",
+    )
+    .unwrap();
+
+    let dst_dir = TempDir::new().unwrap();
+    let dst = dst_dir.path().join("out");
+    copy_dir_all(src, &dst);
+
+    assert!(
+        dst.join("generator/package.json").exists(),
+        "governed generator file must be copied"
+    );
+    assert!(
+        !dst.join("generator/node_modules").exists(),
+        "node_modules must be excluded from the copy"
+    );
+    assert!(
+        !dst.join("generator/node_modules/sentinel.txt").exists(),
+        "sentinel inside node_modules must never reach the copy"
     );
 }
 
