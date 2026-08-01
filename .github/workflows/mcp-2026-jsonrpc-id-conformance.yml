@@ -6,6 +6,8 @@ on:
       - ".gitattributes"
       - "examples/mcp-jsonrpc-id-conformance/**"
       - ".github/workflows/mcp-2026-jsonrpc-id-conformance.yml"
+      - ".github/workflows/mcp-2026-jsonrpc-id-drift.yml"
+      - "scripts/ci/test_mcp_jsonrpc_id_workflow.py"
   push:
     branches:
       - main
@@ -13,6 +15,8 @@ on:
       - ".gitattributes"
       - "examples/mcp-jsonrpc-id-conformance/**"
       - ".github/workflows/mcp-2026-jsonrpc-id-conformance.yml"
+      - ".github/workflows/mcp-2026-jsonrpc-id-drift.yml"
+      - "scripts/ci/test_mcp_jsonrpc_id_workflow.py"
   workflow_dispatch:
 
 permissions:
@@ -20,7 +24,6 @@ permissions:
 
 env:
   PYTHON_VERSION: "3.13.8"
-  SUBJECT_MAX_BYTES: "2097152"
 
 concurrency:
   group: mcp-2026-jsonrpc-id-conformance-${{ github.ref }}
@@ -53,11 +56,12 @@ jobs:
       - name: Show Python version
         run: python3 --version
 
-      - name: Run pack tests
+      - name: Run pack and workflow contract tests
         run: |
           set -euo pipefail
           python3 -m unittest \
             examples/mcp-jsonrpc-id-conformance/tests/test_check.py
+          python3 scripts/ci/test_mcp_jsonrpc_id_workflow.py
 
       - name: Reproduce committed finding
         run: |
@@ -66,50 +70,9 @@ jobs:
             > "$RUNNER_TEMP/reproduce.json"
           python3 -m json.tool "$RUNNER_TEMP/reproduce.json" >/dev/null
 
-  pinned-subjects:
-    name: pinned upstream subjects
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check out source
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          persist-credentials: false
-
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Show Python version
-        run: python3 --version
-
-      - name: Download pinned upstream subjects
+      - name: Reassess committed subject extracts
         run: |
           set -euo pipefail
-          curl --proto '=https' --tlsv1.2 --fail --location --max-time 30 \
-            --max-filesize "$SUBJECT_MAX_BYTES" \
-            'https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2026-07-28/schema.ts' \
-            --output "$RUNNER_TEMP/mcp-schema.ts"
-          curl --proto '=https' --tlsv1.2 --fail --location --max-time 30 \
-            --max-filesize "$SUBJECT_MAX_BYTES" \
-            'https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2026-07-28/schema.json' \
-            --output "$RUNNER_TEMP/mcp-schema.json"
-          curl --proto '=https' --tlsv1.2 --fail --location --max-time 30 \
-            --max-filesize "$SUBJECT_MAX_BYTES" \
-            'https://modelcontextprotocol.io/specification/2026-07-28/basic/index' \
-            --output "$RUNNER_TEMP/mcp-overview.html"
-          curl --proto '=https' --tlsv1.2 --fail --location --max-time 30 \
-            --max-filesize "$SUBJECT_MAX_BYTES" \
-            'https://www.jsonrpc.org/specification' \
-            --output "$RUNNER_TEMP/jsonrpc-spec.html"
-
-      - name: Verify and reassess pinned upstream subjects
-        run: |
-          set -euo pipefail
-          python3 examples/mcp-jsonrpc-id-conformance/check.py verify-pinned \
-            --mcp-typescript "$RUNNER_TEMP/mcp-schema.ts" \
-            --mcp-schema "$RUNNER_TEMP/mcp-schema.json" \
-            --mcp-overview "$RUNNER_TEMP/mcp-overview.html" \
-            --jsonrpc-spec "$RUNNER_TEMP/jsonrpc-spec.html" \
-            > "$RUNNER_TEMP/reassess.json"
-          python3 -m json.tool "$RUNNER_TEMP/reassess.json" >/dev/null
+          python3 examples/mcp-jsonrpc-id-conformance/check.py verify-committed \
+            > "$RUNNER_TEMP/verify-committed.json"
+          python3 -m json.tool "$RUNNER_TEMP/verify-committed.json" >/dev/null
