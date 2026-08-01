@@ -1,0 +1,114 @@
+name: MCP 2026 JSON-RPC subject drift
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.13.8"
+  SUBJECT_MAX_BYTES: "2097152"
+
+concurrency:
+  group: mcp-2026-jsonrpc-id-drift
+  cancel-in-progress: true
+
+jobs:
+  observe:
+    name: Observe mutable upstream subjects
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Run workflow contract tests
+        run: python3 scripts/ci/test_mcp_jsonrpc_id_workflow.py
+
+      - name: Fetch bounded live subjects
+        shell: bash
+        run: |
+          set -u
+          subjects="$RUNNER_TEMP/mcp-jsonrpc-live-subjects"
+          mkdir -p "$subjects"
+
+          fetch_subject() {
+            name="$1"
+            url="$2"
+            partial="$subjects/$name.partial"
+            final="$subjects/$name"
+            if curl --proto '=https' --tlsv1.2 --fail --location \
+              --max-time 30 --max-filesize "$SUBJECT_MAX_BYTES" \
+              "$url" --output "$partial"; then
+              mv "$partial" "$final"
+            else
+              rm -f "$partial"
+            fi
+          }
+
+          # The schemas are immutable context for the examined 2026-07-28
+          # revision. Only the documentation URLs below are mutable; a newer
+          # protocol revision requires a new provenance subject set.
+          fetch_subject mcp-schema.ts \
+            'https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2026-07-28/schema.ts'
+          fetch_subject mcp-schema.json \
+            'https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2026-07-28/schema.json'
+          fetch_subject mcp-overview.html \
+            'https://modelcontextprotocol.io/specification/2026-07-28/basic/index'
+          fetch_subject jsonrpc-spec.html \
+            'https://www.jsonrpc.org/specification'
+
+      - name: Classify operational, content, and semantic state
+        shell: bash
+        run: |
+          set -euo pipefail
+          subjects="$RUNNER_TEMP/mcp-jsonrpc-live-subjects"
+          python3 examples/mcp-jsonrpc-id-conformance/check.py live-drift \
+            --mcp-typescript "$subjects/mcp-schema.ts" \
+            --mcp-schema "$subjects/mcp-schema.json" \
+            --mcp-overview "$subjects/mcp-overview.html" \
+            --jsonrpc-spec "$subjects/jsonrpc-spec.html" \
+            > "$RUNNER_TEMP/mcp-jsonrpc-live-drift.json"
+          python3 -m json.tool "$RUNNER_TEMP/mcp-jsonrpc-live-drift.json" >/dev/null
+
+      - name: Report typed drift outcome
+        if: always()
+        shell: bash
+        run: |
+          report="$RUNNER_TEMP/mcp-jsonrpc-live-drift.json"
+          if [ ! -s "$report" ]; then
+            {
+              echo "## MCP / JSON-RPC live subject drift"
+              echo
+              echo "- operational: workflow error"
+              echo "- content: unknown"
+              echo "- semantic: unknown"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "## MCP / JSON-RPC live subject drift"
+            echo
+            echo "- operational: $(jq -r '.operational.status' "$report")"
+            echo "- content: $(jq -r '.content.status' "$report")"
+            echo "- semantic: $(jq -r '.semantic.status' "$report")"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload drift report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mcp-jsonrpc-live-drift
+          path: ${{ runner.temp }}/mcp-jsonrpc-live-drift.json
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,5 +1,5 @@
 {
-  "schema": "assay.mcp-jsonrpc-id-conformance.provenance.v1",
+  "schema": "assay.mcp-jsonrpc-id-conformance.provenance.v2",
   "finding": {
     "mcp_requires_jsonrpc_2": true,
     "mcp_error_id_required": false,
@@ -11,22 +11,42 @@
     "mcp_overview": {
       "url": "https://modelcontextprotocol.io/specification/2026-07-28/basic/index",
       "retrieved_at": "2026-07-30T10:32:06Z",
-      "sha256": "20f0180e475791cf6b9f7bddf6b7dc7dc5d0179f8464c2531c3fff5b3f0f84be"
+      "upstream_sha256": "20f0180e475791cf6b9f7bddf6b7dc7dc5d0179f8464c2531c3fff5b3f0f84be",
+      "subject": {
+        "path": "subjects/mcp-overview.html",
+        "sha256": "0f7ab8a567ebaad6013f79e40c80f2d9477cd49dc252f690a03a5d08c7de0289",
+        "scope": "normalized-constraint-extract"
+      }
     },
     "mcp_schema_typescript": {
       "url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2026-07-28/schema.ts",
       "commit": "5f5440bb26a62e2cf3440b92da5a667efa03b267",
-      "sha256": "742750af0bb8c716e7030c4977c992b55d1adc4407e9e66997db5846baedc2cd"
+      "upstream_sha256": "742750af0bb8c716e7030c4977c992b55d1adc4407e9e66997db5846baedc2cd",
+      "subject": {
+        "path": "subjects/mcp-schema.ts",
+        "sha256": "dbeca78c47d76ad0969dd5e4246cfdea7707a9e134fe29633712a504e3cb23c6",
+        "scope": "normalized-constraint-extract"
+      }
     },
     "mcp_schema_json": {
       "url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2026-07-28/schema.json",
       "commit": "5f5440bb26a62e2cf3440b92da5a667efa03b267",
-      "sha256": "ef70b61f99b6d2e5e3b46863822eab08dff6a45bedc7a08914e0e5b133f40203"
+      "upstream_sha256": "ef70b61f99b6d2e5e3b46863822eab08dff6a45bedc7a08914e0e5b133f40203",
+      "subject": {
+        "path": "subjects/mcp-schema.json",
+        "sha256": "0defe2fb10fdd78c5799dbf1296566d69121913d7838ce0fecd8f7a449302f2a",
+        "scope": "normalized-constraint-extract"
+      }
     },
     "jsonrpc_spec": {
       "url": "https://www.jsonrpc.org/specification",
       "retrieved_at": "2026-07-30T10:32:06Z",
-      "sha256": "8fe1edfdca511d309e712e47447457ea5159b728ec02071a84593aed692aefeb"
+      "upstream_sha256": "8fe1edfdca511d309e712e47447457ea5159b728ec02071a84593aed692aefeb",
+      "subject": {
+        "path": "subjects/jsonrpc-spec.html",
+        "sha256": "95c152fd6aacabe84a6d42716b1f8c476598fe5fd18a2cf1dd9682e378f22c66",
+        "scope": "normalized-constraint-extract"
+      }
     }
   },
   "vectors": {

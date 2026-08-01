@@ -1,0 +1,16 @@
+{
+  "$defs": {
+    "RequestId": {
+      "type": ["string", "integer"]
+    },
+    "JSONRPCErrorResponse": {
+      "properties": {
+        "error": {"$ref": "#/$defs/Error"},
+        "id": {"$ref": "#/$defs/RequestId"},
+        "jsonrpc": {"const": "2.0"}
+      },
+      "required": ["error", "jsonrpc"],
+      "type": "object"
+    }
+  }
+}

@@ -23,7 +23,7 @@ not be read:
 The third vector uses a string ID and is accepted by both bounded validators.
 It prevents an always-rejecting checker from reproducing the finding.
 
-## Reproduce the committed record
+## Reproduce the committed record and subjects
 
 The default mode is offline and uses only Python's standard library:
 
@@ -35,9 +35,23 @@ It verifies `SHA256SUMS`, the per-vector digests in `PROVENANCE.json`, every
 declared outcome, and the presence of both incompatible arms plus the shared
 positive control.
 
-This mode reproduces the committed claim record. It does not re-read upstream
-specifications. The immutable source pins cannot tell us whether a later
-revision repaired the boundary.
+The exact constraint extracts used for the source-level finding are committed
+under `subjects/` and bound by both `SHA256SUMS` and `PROVENANCE.json`. Reassess
+them without network access:
+
+```bash
+python3 examples/mcp-jsonrpc-id-conformance/check.py verify-committed
+```
+
+These files are deliberately named normalized constraint extracts. They retain
+only the declarations and clauses consumed by the checker; they are not copies
+of the complete upstream documents. Provenance separately retains the digest
+of each complete upstream response from which the extract was recorded.
+
+These modes reproduce the committed claim record and reassess the committed
+extracts. They do not reproduce the extraction process from the complete
+upstream responses or re-read upstream specifications. The immutable record
+cannot tell us whether a later revision repaired the boundary.
 
 ## Reassess upstream source bytes
 
@@ -73,20 +87,28 @@ python3 examples/mcp-jsonrpc-id-conformance/check.py reassess \
   --jsonrpc-spec "$tmp/jsonrpc-spec.html"
 ```
 
-The committed workflow runs the same inputs through `verify-pinned`, which
-reads the source digests from `PROVENANCE.json` before extracting any
-constraint. The workflow carries no second copy of those digests. For a later
-MCP revision, use `reassess` with that revision's TypeScript and generated JSON
-schema together, then record a new subject set. Do not overwrite the historical
-record.
+The pull-request workflow never fetches these URLs. A separate scheduled/manual
+drift workflow downloads each source with time and byte ceilings, then reports
+three independent states: operational availability, byte drift, and semantic
+extraction. Network failure is `operational=unavailable`, never a clean result;
+changed presentation bytes can coexist with `semantic=contradiction`.
+
+`verify-pinned` remains available for an archived set of complete upstream
+responses. It binds those bytes to the complete-response digests in provenance
+before extracting any constraint. For a later MCP revision, use `reassess` with
+that revision's TypeScript and generated JSON schema together, then record a new
+subject set. Do not overwrite the historical record.
 
 Exit codes:
 
 | Code | Meaning |
 | --- | --- |
-| `0` | `reassess` finds at least one arm, or `reproduce` verifies both committed arms and the control |
+| `0` | `reassess` finds at least one arm, `reproduce` verifies the committed pack, or `live-drift` emits typed upstream state (including unavailable or unrecognized) |
 | `2` | recognized subjects no longer reproduce either arm |
-| `3` | the pack or supplied subjects are malformed, unrecognized, or inconsistent |
+| `3` | the local pack is invalid, or a non-drift command receives malformed, unrecognized, or inconsistent subjects |
+
+An unexpected checker failure remains a non-zero process failure. The
+scheduled workflow does not convert it into a typed upstream observation.
 
 ## Sources
 
@@ -118,5 +140,6 @@ response requirement recorded here.
 | `PROVENANCE.json` | source pins, source digests, bounded finding, and vector digests |
 | `SHA256SUMS` | complete public-pack file binding |
 | `check.py` | stdlib-only reproduce and reassess commands |
+| `subjects/` | checksummed normalized extracts used by offline source reassessment |
 | `vectors/` | two incompatibility arms and one shared positive control |
 | `tests/test_check.py` | positive, negative, provenance, and source-drift tests |

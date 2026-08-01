@@ -6,6 +6,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -112,6 +113,171 @@ class McpJsonRpcIdConformanceTest(unittest.TestCase):
                 "neither_valid": 0,
             },
         )
+
+    def test_committed_subjects_reproduce_the_pinned_constraints_offline(self):
+        report = self.m.verify_committed_subjects(ROOT)
+
+        self.assertEqual(report["mode"], "verify-committed")
+        self.assertEqual(report["status"], "contradiction")
+        self.assertEqual(report["constraints"], self.m.PINNED_CONSTRAINTS)
+
+    def test_committed_subject_digest_is_independent_of_pack_checksums(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            copied = Path(tmp) / "pack"
+            shutil.copytree(ROOT, copied)
+            relative = "subjects/mcp-overview.html"
+            subject = copied / relative
+            subject.write_bytes(subject.read_bytes() + b"\n")
+            sums = copied / "SHA256SUMS"
+            lines = sums.read_text(encoding="utf-8").splitlines()
+            updated = [
+                f"{self.m.sha256_bytes(subject.read_bytes())}  {relative}"
+                if line.endswith(f"  {relative}")
+                else line
+                for line in lines
+            ]
+            sums.write_text("\n".join(updated) + "\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(self.m.SubjectError, "digest"):
+                self.m.verify_committed_subjects(copied)
+
+    def test_live_drift_reports_missing_input_as_operationally_unavailable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {
+                name: Path(tmp) / name
+                for name in (
+                    "mcp_schema_typescript",
+                    "mcp_schema_json",
+                    "mcp_overview",
+                    "jsonrpc_spec",
+                )
+            }
+
+            report = self.m.observe_live_subject_paths(ROOT, paths)
+
+        self.assertEqual(report["operational"]["status"], "unavailable")
+        self.assertEqual(report["content"]["status"], "unknown")
+        self.assertEqual(report["semantic"]["status"], "unknown")
+        self.assertCountEqual(report["operational"]["unavailable"], paths)
+
+    def test_live_byte_drift_is_distinct_from_semantic_drift(self):
+        subjects = {
+            "mcp_schema_typescript": _mcp_typescript(),
+            "mcp_schema_json": _mcp_schema(),
+            "mcp_overview": MCP_OVERVIEW_SUBJECT,
+            "jsonrpc_spec": JSONRPC_SUBJECT,
+        }
+        records = {
+            name: {"upstream_sha256": self.m.sha256_bytes(subject)}
+            for name, subject in subjects.items()
+        }
+        subjects["mcp_overview"] = MCP_OVERVIEW_SUBJECT.replace(
+            b"<p>", b"<p>\n"
+        )
+
+        report = self.m.classify_live_subjects(records, subjects)
+
+        self.assertEqual(report["operational"]["status"], "available")
+        self.assertEqual(report["content"]["status"], "changed")
+        self.assertEqual(report["content"]["changed"], ["mcp_overview"])
+        self.assertEqual(report["semantic"]["status"], "contradiction")
+
+    def test_live_semantic_drift_is_reported_without_failing_open(self):
+        baseline = {
+            "mcp_schema_typescript": _mcp_typescript(),
+            "mcp_schema_json": _mcp_schema(),
+            "mcp_overview": MCP_OVERVIEW_SUBJECT,
+            "jsonrpc_spec": JSONRPC_SUBJECT,
+        }
+        records = {
+            name: {"upstream_sha256": self.m.sha256_bytes(subject)}
+            for name, subject in baseline.items()
+        }
+        changed = dict(baseline)
+        changed["mcp_schema_typescript"] = _mcp_typescript(
+            require_id=True, allow_null=True
+        )
+        changed["mcp_schema_json"] = _mcp_schema(
+            require_id=True, allow_null=True
+        )
+
+        report = self.m.classify_live_subjects(records, changed)
+
+        self.assertEqual(report["operational"]["status"], "available")
+        self.assertEqual(report["content"]["status"], "changed")
+        self.assertEqual(report["semantic"]["status"], "not_reproduced")
+
+    def test_live_oversize_is_an_operational_refusal_not_semantic_cleanliness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            paths = {
+                "mcp_schema_typescript": directory / "mcp-schema.ts",
+                "mcp_schema_json": directory / "mcp-schema.json",
+                "mcp_overview": directory / "mcp-overview.html",
+                "jsonrpc_spec": directory / "jsonrpc-spec.html",
+            }
+            paths["mcp_schema_typescript"].write_bytes(_mcp_typescript())
+            paths["mcp_schema_json"].write_bytes(_mcp_schema())
+            paths["mcp_overview"].write_bytes(MCP_OVERVIEW_SUBJECT)
+            paths["jsonrpc_spec"].write_bytes(
+                b"x" * (self.m.MAX_SUBJECT_BYTES + 1)
+            )
+
+            report = self.m.observe_live_subject_paths(ROOT, paths)
+
+        self.assertEqual(report["operational"]["status"], "unavailable")
+        self.assertEqual(report["operational"]["unavailable"], ["jsonrpc_spec"])
+        self.assertEqual(report["content"]["status"], "unknown")
+        self.assertEqual(report["semantic"]["status"], "unknown")
+
+    def test_live_drift_does_not_hide_an_invalid_local_pack(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            copied = Path(tmp) / "pack"
+            shutil.copytree(ROOT, copied)
+            (copied / "README.md").write_text("tampered", encoding="utf-8")
+            subjects = copied / "subjects"
+            stdout = _BoundedTextBuffer()
+
+            with contextlib.redirect_stdout(stdout):
+                returncode = self.m.main(
+                    [
+                        "live-drift",
+                        "--root",
+                        str(copied),
+                        "--mcp-typescript",
+                        str(subjects / "mcp-schema.ts"),
+                        "--mcp-schema",
+                        str(subjects / "mcp-schema.json"),
+                        "--mcp-overview",
+                        str(subjects / "mcp-overview.html"),
+                        "--jsonrpc-spec",
+                        str(subjects / "jsonrpc-spec.html"),
+                    ]
+                )
+
+        self.assertEqual(returncode, 3)
+        self.assertEqual(json.loads(stdout.getvalue())["error"], "PackError")
+
+    def test_live_drift_does_not_catch_an_unexpected_checker_failure(self):
+        with mock.patch.object(
+            self.m,
+            "observe_live_subject_paths",
+            side_effect=RuntimeError("checker defect"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "checker defect"):
+                self.m.main(
+                    [
+                        "live-drift",
+                        "--mcp-typescript",
+                        "unused",
+                        "--mcp-schema",
+                        "unused",
+                        "--mcp-overview",
+                        "unused",
+                        "--jsonrpc-spec",
+                        "unused",
+                    ]
+                )
 
     def test_each_vector_has_the_declared_classification(self):
         expected = {
@@ -276,13 +442,27 @@ class McpJsonRpcIdConformanceTest(unittest.TestCase):
             "jsonrpc_spec": JSONRPC_SUBJECT,
         }
         records = {
-            name: {"sha256": self.m.sha256_bytes(subject)}
+            name: {"upstream_sha256": self.m.sha256_bytes(subject)}
             for name, subject in subjects.items()
         }
         self.m.verify_source_digests(records, subjects)
         subjects["jsonrpc_spec"] += b"\n"
         with self.assertRaisesRegex(self.m.SubjectError, "digest"):
             self.m.verify_source_digests(records, subjects)
+
+    def test_committed_subject_paths_must_be_unique(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            copied = Path(tmp) / "pack"
+            shutil.copytree(ROOT, copied)
+            provenance_path = copied / "PROVENANCE.json"
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+            provenance["sources"]["jsonrpc_spec"]["subject"] = dict(
+                provenance["sources"]["mcp_overview"]["subject"]
+            )
+            provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+
+            with self.assertRaisesRegex(self.m.PackError, "unique"):
+                self.m._validate_provenance(copied)
 
     def test_bounded_reader_accepts_exact_limit_and_rejects_limit_plus_one(self):
         with tempfile.TemporaryDirectory() as tmp:

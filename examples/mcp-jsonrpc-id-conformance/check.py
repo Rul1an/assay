@@ -229,7 +229,7 @@ def _validate_provenance(root: Path) -> dict[str, Any]:
     provenance = _load_json(root / "PROVENANCE.json")
     if not isinstance(provenance, dict):
         raise PackError("provenance must be an object")
-    if provenance.get("schema") != "assay.mcp-jsonrpc-id-conformance.provenance.v1":
+    if provenance.get("schema") != "assay.mcp-jsonrpc-id-conformance.provenance.v2":
         raise PackError("unsupported provenance schema")
     if provenance.get("finding") != PINNED_CONSTRAINTS:
         raise PackError("provenance finding does not match the pinned contract")
@@ -242,6 +242,7 @@ def _validate_provenance(root: Path) -> dict[str, Any]:
         "jsonrpc_spec",
     }:
         raise PackError("provenance must name exactly the four upstream subjects")
+    subject_paths: set[str] = set()
     for source in sources.values():
         if not isinstance(source, dict):
             raise PackError("source provenance must be an object")
@@ -249,10 +250,29 @@ def _validate_provenance(root: Path) -> dict[str, Any]:
             "https://"
         ):
             raise PackError("source URL must use HTTPS")
-        if not isinstance(source.get("sha256"), str) or not HEX_64.fullmatch(
-            source["sha256"]
+        if not isinstance(source.get("upstream_sha256"), str) or not HEX_64.fullmatch(
+            source["upstream_sha256"]
         ):
-            raise PackError("source digest must be lowercase SHA-256")
+            raise PackError("upstream source digest must be lowercase SHA-256")
+        subject = source.get("subject")
+        if not isinstance(subject, dict):
+            raise PackError("committed subject provenance must be an object")
+        relative = subject.get("path")
+        digest = subject.get("sha256")
+        if (
+            not isinstance(relative, str)
+            or Path(relative).is_absolute()
+            or ".." in Path(relative).parts
+            or not relative.startswith("subjects/")
+        ):
+            raise PackError("committed subject path must stay under subjects/")
+        if not isinstance(digest, str) or not HEX_64.fullmatch(digest):
+            raise PackError("committed subject digest must be lowercase SHA-256")
+        if subject.get("scope") != "normalized-constraint-extract":
+            raise PackError("committed subject scope must be explicit")
+        if relative in subject_paths:
+            raise PackError("committed subject paths must be unique")
+        subject_paths.add(relative)
     for name in ("mcp_schema_json", "mcp_schema_typescript"):
         commit = sources[name].get("commit")
         if not isinstance(commit, str) or not HEX_40.fullmatch(commit):
@@ -290,15 +310,22 @@ def _validate_provenance(root: Path) -> dict[str, Any]:
 def verify_source_digests(
     records: dict[str, Any],
     subjects: dict[str, bytes],
+    *,
+    committed: bool = False,
 ) -> None:
     """Bind caller-supplied subject bytes to one provenance source set."""
     if set(records) != set(subjects):
         raise SubjectError("source record and subject sets differ")
     for name, subject in subjects.items():
         record = records[name]
-        if not isinstance(record, dict) or not isinstance(record.get("sha256"), str):
+        digest = (
+            record.get("subject", {}).get("sha256")
+            if committed and isinstance(record, dict)
+            else record.get("upstream_sha256") if isinstance(record, dict) else None
+        )
+        if not isinstance(digest, str):
             raise SubjectError("source record lacks a digest")
-        if sha256_bytes(subject) != record["sha256"]:
+        if sha256_bytes(subject) != digest:
             raise SubjectError(f"source digest mismatch for {name}")
 
 
@@ -527,6 +554,110 @@ def verify_pinned_subjects(
     return report
 
 
+def _committed_subject_paths(
+    root: Path, records: dict[str, Any]
+) -> dict[str, Path]:
+    return {
+        name: root / record["subject"]["path"]
+        for name, record in records.items()
+    }
+
+
+def verify_committed_subjects(root: Path) -> dict[str, Any]:
+    """Reassess the finding from checksummed, committed subject extracts."""
+    validate_checksums(root)
+    provenance = _validate_provenance(root)
+    records = provenance["sources"]
+    subjects = {
+        name: read_bounded(path, MAX_SUBJECT_BYTES, SubjectError)
+        for name, path in _committed_subject_paths(root, records).items()
+    }
+    verify_source_digests(records, subjects, committed=True)
+    report = reassess_subjects(
+        subjects["mcp_schema_typescript"],
+        subjects["mcp_schema_json"],
+        subjects["mcp_overview"],
+        subjects["jsonrpc_spec"],
+    )
+    if report["constraints"] != provenance["finding"]:
+        raise SubjectError("committed extraction differs from the pinned finding")
+    report["mode"] = "verify-committed"
+    return report
+
+
+def _live_report(
+    operational_status: str,
+    content_status: str,
+    semantic_status: str,
+    *,
+    unavailable: list[str] | None = None,
+    changed: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema": "assay.mcp-jsonrpc-id-conformance.drift.v1",
+        "mode": "live-drift",
+        "operational": {
+            "status": operational_status,
+            "unavailable": sorted(unavailable or []),
+        },
+        "content": {
+            "status": content_status,
+            "changed": sorted(changed or []),
+        },
+        "semantic": {"status": semantic_status},
+    }
+
+
+def classify_live_subjects(
+    records: dict[str, Any], subjects: dict[str, bytes]
+) -> dict[str, Any]:
+    """Classify byte drift separately from the current semantic extraction."""
+    if set(records) != set(subjects):
+        raise SubjectError("source record and subject sets differ")
+    changed = sorted(
+        name
+        for name, subject in subjects.items()
+        if sha256_bytes(subject) != records[name].get("upstream_sha256")
+    )
+    try:
+        semantic = reassess_subjects(
+            subjects["mcp_schema_typescript"],
+            subjects["mcp_schema_json"],
+            subjects["mcp_overview"],
+            subjects["jsonrpc_spec"],
+        )["status"]
+    except SubjectError:
+        semantic = "unrecognized"
+    return _live_report(
+        "available",
+        "changed" if changed else "unchanged",
+        semantic,
+        changed=changed,
+    )
+
+
+def observe_live_subject_paths(
+    root: Path, paths: dict[str, Path]
+) -> dict[str, Any]:
+    """Read bounded downloads and preserve unavailable as an operational state."""
+    validate_checksums(root)
+    records = _validate_provenance(root)["sources"]
+    if set(records) != set(paths):
+        raise SubjectError("source record and path sets differ")
+    subjects: dict[str, bytes] = {}
+    unavailable: list[str] = []
+    for name, path in paths.items():
+        try:
+            subjects[name] = read_bounded(path, MAX_SUBJECT_BYTES, SubjectError)
+        except SubjectError:
+            unavailable.append(name)
+    if unavailable:
+        return _live_report(
+            "unavailable", "unknown", "unknown", unavailable=unavailable
+        )
+    return classify_live_subjects(records, subjects)
+
+
 def _add_subject_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--mcp-typescript", type=Path, required=True)
     parser.add_argument("--mcp-schema", type=Path, required=True)
@@ -555,6 +686,21 @@ def _parser() -> argparse.ArgumentParser:
         "--root", type=Path, default=Path(__file__).resolve().parent
     )
     _add_subject_arguments(pinned_parser)
+    committed_parser = commands.add_parser(
+        "verify-committed",
+        help="reassess checksummed subject extracts without network access",
+    )
+    committed_parser.add_argument(
+        "--root", type=Path, default=Path(__file__).resolve().parent
+    )
+    live_parser = commands.add_parser(
+        "live-drift",
+        help="classify live fetch availability, byte drift, and semantic drift",
+    )
+    live_parser.add_argument(
+        "--root", type=Path, default=Path(__file__).resolve().parent
+    )
+    _add_subject_arguments(live_parser)
     return parser
 
 
@@ -563,6 +709,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "reproduce":
             report = reproduce(args.root.resolve())
+        elif args.command == "verify-committed":
+            report = verify_committed_subjects(args.root.resolve())
         elif args.command == "verify-pinned":
             report = verify_pinned_subjects(
                 args.root.resolve(),
@@ -571,12 +719,22 @@ def main(argv: list[str] | None = None) -> int:
                 read_bounded(args.mcp_overview, MAX_SUBJECT_BYTES, SubjectError),
                 read_bounded(args.jsonrpc_spec, MAX_SUBJECT_BYTES, SubjectError),
             )
-        else:
+        elif args.command == "reassess":
             report = reassess_subjects(
                 read_bounded(args.mcp_typescript, MAX_SUBJECT_BYTES, SubjectError),
                 read_bounded(args.mcp_schema, MAX_SUBJECT_BYTES, SubjectError),
                 read_bounded(args.mcp_overview, MAX_SUBJECT_BYTES, SubjectError),
                 read_bounded(args.jsonrpc_spec, MAX_SUBJECT_BYTES, SubjectError),
+            )
+        else:
+            report = observe_live_subject_paths(
+                args.root.resolve(),
+                {
+                    "mcp_schema_typescript": args.mcp_typescript,
+                    "mcp_schema_json": args.mcp_schema,
+                    "mcp_overview": args.mcp_overview,
+                    "jsonrpc_spec": args.jsonrpc_spec,
+                },
             )
     except (OSError, PackError, SubjectError) as exc:
         print(
@@ -591,6 +749,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 3
     print(json.dumps(report, indent=2, sort_keys=True))
+    if report["mode"] == "live-drift":
+        return 0
     return 0 if report["status"] == "contradiction" else 2
 
 
