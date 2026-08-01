@@ -1130,7 +1130,9 @@ impl<'de> Visitor<'de> for KvEntryValueKeySeed<'_, '_> {
         reject_value_scalar(self.st, self.budget, 8)
     }
     fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
-        reject_value_scalar(self.st, self.budget, 1)
+        self.st.borrow_mut().charge(1)?;
+        charge_value(self.st, self.budget, 1)?;
+        Ok(String::new())
     }
     reject_container_at!(seq, ShapeSite::AttributeValue);
     reject_container_at!(map, ShapeSite::AttributeValue);

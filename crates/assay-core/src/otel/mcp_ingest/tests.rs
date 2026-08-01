@@ -548,6 +548,24 @@ fn duplicate_nested_kvlist_keys_are_rejected() {
 }
 
 #[test]
+fn null_omitted_and_empty_nested_keys_share_the_proto_default() {
+    for key in [r#""key":null,"#, "", r#""key":"","#] {
+        let entry = format!(
+            r#"{{"key":"x","value":{{"kvlistValue":{{"values":[{{{key}"value":{{}}}}]}}}}}}"#
+        );
+        decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+            .unwrap_or_else(|err| panic!("default-valued nested key must be accepted: {err:?}"));
+    }
+
+    let duplicates = r#"{"key":"x","value":{"kvlistValue":{"values":[{"key":null,"value":{}},{"value":{}},{"key":"","value":{}}]}}}"#;
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[duplicates.to_string()]), &corpus_limits())
+            .expect_err("all three forms are the same empty default key"),
+        OtlpIngestError::DuplicateField(ShapeSite::AttributeValue)
+    );
+}
+
+#[test]
 fn malformed_kvlist_keys_charge_value_budget_before_typed_shape_refusal() {
     let entry = r#"{"key":"x","value":{"kvlistValue":{"values":[{"key":true,"value":{}}]}}}"#;
 
