@@ -1,0 +1,44 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "kvlistValue": {
+                "values": [
+                  {
+                    "key": "nested",
+                    "value": {
+                      "kvlistValue": {
+                        "values": [
+                          {
+                            "key": "deeply",
+                            "value": {
+                              "kvlistValue": {
+                                "values": [
+                                  {
+                                    "key": "hostile",
+                                    "value": {
+                                      "stringValue": "attack"
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "scopeSpans": []
+    }
+  ]
+}

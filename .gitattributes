@@ -1,3 +1,4 @@
 crates/gateway-evidence-replay/fixtures/gateway-path-v0/demo/** text eol=lf
 crates/assay-core/.repro_artifacts/** text eol=lf
+crates/assay-core/tests/fixtures/otel-mcp-ingest-v0/** text eol=lf
 examples/mcp-jsonrpc-id-conformance/** text eol=lf
