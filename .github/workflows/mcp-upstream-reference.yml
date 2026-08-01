@@ -7,8 +7,10 @@ name: MCP upstream reference
 on:
   pull_request:
     paths:
+      - ".gitattributes"
       - ".github/workflows/mcp-upstream-reference.yml"
       - "scripts/ci/test-mcp-upstream-reference-contract.sh"
+      - "scripts/ci/test-mcp-upstream-reference-contract-mutations.sh"
       - "scripts/ci/test_verify_mcp_upstream_reference.py"
       - "scripts/ci/verify-mcp-upstream-reference.py"
       - "scripts/ci/fixtures/mcp-upstream-reference/**"
@@ -16,8 +18,10 @@ on:
     branches:
       - main
     paths:
+      - ".gitattributes"
       - ".github/workflows/mcp-upstream-reference.yml"
       - "scripts/ci/test-mcp-upstream-reference-contract.sh"
+      - "scripts/ci/test-mcp-upstream-reference-contract-mutations.sh"
       - "scripts/ci/test_verify_mcp_upstream_reference.py"
       - "scripts/ci/verify-mcp-upstream-reference.py"
       - "scripts/ci/fixtures/mcp-upstream-reference/**"
