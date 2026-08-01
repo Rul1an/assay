@@ -318,15 +318,19 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
     }
 
     // Build run.properties
+    //
+    // Truncation is read off the report rather than the pack metadata. Both carry it and both are
+    // set from the same values, but pack metadata is absent whenever no packs are configured, so
+    // keying on it meant a default-path run disclosed nothing here at all.
     let mut run_props = serde_json::Map::new();
     if let Some(ref meta) = options.pack_meta {
         if let Some(ref disclaimer) = meta.disclaimer {
             run_props.insert("disclaimer".into(), json!(disclaimer));
         }
-        if meta.truncated {
-            run_props.insert("truncated".into(), json!(true));
-            run_props.insert("truncatedCount".into(), json!(meta.truncated_count));
-        }
+    }
+    if report.truncated {
+        run_props.insert("truncated".into(), json!(true));
+        run_props.insert("truncatedCount".into(), json!(report.truncated_count));
     }
 
     let automation_id = format!(
@@ -338,18 +342,28 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
     // Note: workingDirectory is intentionally omitted to avoid leaking local paths
     // (e.g., /Users/... or /home/...). GitHub Code Scanning doesn't require it.
     //
-    // `executionSuccessful` stays true on a truncated run, and that is the spec reading rather than
-    // a convenience. SARIF 2.1.0 section 3.20.14 defines it as the tool having "run to completion
-    // without encountering fatal errors that prevented it from analyzing the full set of specified
-    // targets". Truncation caps what is *reported*, not what was analyzed, so flipping this would
-    // tell a consumer the analysis was cut short when it was not.
+    // `executionSuccessful` stays true on a truncated run. SARIF 2.1.0 section 3.20.14 defines it
+    // as true "if the engineering system that started the process knows that the analysis tool
+    // succeeded", and its own example pairs `executionSuccessful: true` with a non-zero exit code.
+    // A capped run succeeded; it reported less than it found. Flipping this would assert a failure
+    // that did not happen.
     //
-    // The condition still has to reach a consumer somewhere it will look. Appendix I, "Detecting
-    // incomplete result sets", names exactly two places a consumer examines, and the other one is
-    // `toolExecutionNotifications`: conditions to weigh when judging whether the result set is
-    // complete. Truncation is that, so it goes there. Carrying it only in `run.properties`, as this
-    // producer did before, meant the notice existed but sat somewhere no generic consumer reads,
-    // which for a tool that argues a partial scan must not read as a clean one was the wrong place.
+    // Where the cap should be disclosed is genuinely unsettled in SARIF, and the honest answer is
+    // that the format has no home for it. Appendix I ("Detecting incomplete result sets",
+    // informative) lists three conditions, and all three describe a tool that failed to *analyse*:
+    // `executionSuccessful` false, an `error`-level notification meaning the tool "was unable to
+    // execute every analysis rule on every analysis target", or `results` being null. A reporting
+    // cap is none of those. It is a serialisation policy chosen before the run, and the tool did
+    // analyse everything.
+    //
+    // So this emits in both places and claims neither as normative. `run.properties` is the honest
+    // machine-readable home, because a property bag is what the format leaves for conditions it
+    // does not model. The notification is a human-readable aid at `warning`, which deliberately
+    // does not meet Appendix I's `error` gate: raising it to `error` would be worse than silence,
+    // since section 3.20.21 makes an error-level notification mean the run itself failed, which
+    // would contradict the `executionSuccessful: true` directly above and overstate a cap into a
+    // failure. A consumer keying strictly on Appendix I will therefore not see this, and that is a
+    // gap in the format rather than something this producer can close on its own.
     let mut invocation = json!({
         "executionSuccessful": true
     });

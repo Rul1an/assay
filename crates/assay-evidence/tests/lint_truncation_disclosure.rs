@@ -5,10 +5,14 @@
 //! findings and present as though it had none to drop. For a tool whose own position is that a
 //! partial scan must not read as a clean one, that was the wrong silence to keep.
 //!
-//! The SARIF half is about placement rather than presence. `run.properties.truncated` is a vendor
-//! extension; SARIF 2.1.0 Appendix I, "Detecting incomplete result sets", names the two places a
-//! consumer actually examines, and `invocations[].toolExecutionNotifications` is the one that
-//! carries conditions bearing on completeness.
+//! The SARIF half is about reach, and about not overclaiming what the format supports. SARIF 2.1.0
+//! has no construct for a reporting cap: Appendix I ("Detecting incomplete result sets",
+//! informative) lists three conditions and every one describes a tool that failed to *analyse*, not
+//! one that reported less than it found. So the cap is disclosed twice and neither is claimed as
+//! normative. `run.properties` is the machine-readable home, now emitted on every path rather than
+//! only when packs are configured. The notification is a human-readable aid at `warning`, which
+//! deliberately misses Appendix I's `error` gate, because per 3.20.21 an error-level notification
+//! means the run failed and a cap is not a failure.
 
 use assay_evidence::bundle::BundleWriter;
 use assay_evidence::lint::engine::{lint_bundle_with_options, LintOptions};
@@ -80,10 +84,12 @@ fn an_untruncated_run_reports_no_truncation() {
     assert_eq!(report.truncated_count, 0);
 }
 
-/// Placement, not presence. A generic consumer reads Appendix I's two indicators, so the notice has
-/// to be one of them rather than a vendor property it has no reason to know about.
+/// The notification exists and carries the count. This does NOT claim Appendix I coverage: at
+/// `warning` it sits below that appendix's `error` gate, deliberately, since `error` would mean the
+/// run failed. What it pins is that the notice is emitted and is legible to a consumer that reads
+/// notifications rather than only Appendix I's three conditions.
 #[test]
-fn truncation_reaches_sarif_where_a_consumer_examines_completeness() {
+fn truncation_is_announced_in_a_tool_execution_notification() {
     let bundle = bundle_with_many_findings(10);
     let report = lint_capped(&bundle, Some(3));
     let sarif = to_sarif(&report);
@@ -109,9 +115,9 @@ fn truncation_reaches_sarif_where_a_consumer_examines_completeness() {
 }
 
 /// The spec reading, pinned so it cannot be "fixed" into a plausible mistake later. SARIF 2.1.0
-/// 3.20.14 ties `executionSuccessful` to whether the tool analyzed the full set of specified
-/// targets. Truncation caps what is reported, not what was analyzed, so this stays true and the
-/// completeness signal travels in the notification instead.
+/// 3.20.14 makes `executionSuccessful` true when the engineering system knows the tool succeeded,
+/// and its own example pairs true with a non-zero exit code. A capped run succeeded; it reported
+/// less than it found.
 #[test]
 fn truncation_does_not_claim_the_analysis_failed() {
     let bundle = bundle_with_many_findings(10);
@@ -135,5 +141,38 @@ fn an_untruncated_run_carries_no_notification() {
             .get("toolExecutionNotifications")
             .is_none(),
         "a complete run must not carry an incompleteness notice, or the notice means nothing"
+    );
+}
+
+/// The machine-readable half, which was the actual regression: `run.properties` used to be gated on
+/// pack metadata, so a default-path run disclosed nothing there.
+#[test]
+fn truncation_reaches_run_properties_without_packs() {
+    let bundle = bundle_with_many_findings(10);
+    let report = lint_capped(&bundle, Some(3));
+    let sarif = to_sarif(&report);
+
+    let props = &sarif["runs"][0]["properties"];
+    assert_eq!(
+        props["truncated"], true,
+        "no packs were configured: {props}"
+    );
+    assert_eq!(props["truncatedCount"], report.truncated_count);
+}
+
+/// Appendix I's notification condition gates on `level == "error"`, and 3.20.21 makes that mean the
+/// run failed. A cap is not a failure, so this must stay below that gate. Pinned because raising it
+/// looks like a fix and would contradict `executionSuccessful` three lines away.
+#[test]
+fn the_truncation_notice_does_not_assert_a_failed_run() {
+    let bundle = bundle_with_many_findings(10);
+    let report = lint_capped(&bundle, Some(3));
+    let sarif = to_sarif(&report);
+
+    let level = &sarif["runs"][0]["invocations"][0]["toolExecutionNotifications"][0]["level"];
+    assert_eq!(level, "warning");
+    assert_ne!(
+        level, "error",
+        "error would declare the run failed (3.20.21)"
     );
 }
