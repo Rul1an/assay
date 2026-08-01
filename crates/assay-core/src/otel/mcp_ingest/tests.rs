@@ -1251,12 +1251,28 @@ fn protojson_int64_accepts_integral_number_and_exponent_forms() {
 }
 
 #[test]
+fn protojson_bare_int64_uses_binary64_interpretation() {
+    let rejected = format!(r#"{{"key":"x","value":{{"intValue":{}}}}}"#, i64::MAX);
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[rejected]), &corpus_limits())
+            .expect_err("bare i64::MAX rounds to the exclusive binary64 boundary"),
+        OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)
+    );
+
+    let accepted = format!(r#"{{"key":"x","value":{{"intValue":{}}}}}"#, i64::MIN);
+    decode_str(&doc_with_attrs(&[accepted]), &corpus_limits())
+        .expect("bare i64::MIN is exactly representable as binary64");
+}
+
+#[test]
 fn protojson_int64_string_conversion_is_exact() {
     for int_value in [
         r#""-9223372036854775809""#,
         r#""9223372036854775808""#,
         r#""9007199254740992.5""#,
         r#""-9.223372036854775809e18""#,
+        r#""01""#,
+        r#""-01""#,
     ] {
         let entry = format!(r#"{{"key":"x","value":{{"intValue":{int_value}}}}}"#);
         assert_eq!(

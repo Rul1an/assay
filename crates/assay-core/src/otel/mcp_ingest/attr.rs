@@ -636,13 +636,17 @@ impl<'de> Visitor<'de> for ValueIntSeed<'_, '_> {
     fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
         self.st.borrow_mut().charge(8)?;
         charge_value(self.st, self.budget, 8)?;
-        Ok(Some(v))
+        integral_i64(v as f64).map(Some).ok_or_else(|| {
+            self.st
+                .borrow_mut()
+                .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue))
+        })
     }
 
     fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
         self.st.borrow_mut().charge(8)?;
         charge_value(self.st, self.budget, 8)?;
-        i64::try_from(v).map(Some).map_err(|_| {
+        integral_i64(v as f64).map(Some).ok_or_else(|| {
             self.st
                 .borrow_mut()
                 .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue))
@@ -694,6 +698,9 @@ fn integral_i64(value: f64) -> Option<i64> {
 /// Parse ProtoJSON's quoted decimal/exponent form without routing through binary64. Floating-point
 /// conversion can round a fractional or out-of-range decimal onto an integral boundary.
 fn parse_decimal_i64(value: &str) -> Option<i64> {
+    if !is_json_number(value) {
+        return None;
+    }
     let (negative, unsigned) = match value.as_bytes().first() {
         Some(b'-') => (true, &value[1..]),
         Some(b'+') | None => return None,
