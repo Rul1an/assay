@@ -22,11 +22,22 @@ fn copy_corpus_to_temp() -> (TempDir, PathBuf) {
         fs::create_dir_all(dst).unwrap();
         for entry in fs::read_dir(src).unwrap() {
             let entry = entry.unwrap();
-            let ty = entry.file_type().unwrap();
-            if ty.is_dir() {
-                copy_dir_all(&entry.path(), &dst.join(entry.file_name()));
+            let src_path = entry.path();
+            // Use symlink_metadata (lstat) to inspect the entry without following
+            // symlinks. This rejects symlinks before any dereference, closing the
+            // TOCTOU gap where fs::copy would silently follow a symlink-to-file.
+            let meta =
+                fs::symlink_metadata(&src_path).expect("symlink_metadata failed on source entry");
+            if meta.file_type().is_symlink() {
+                panic!(
+                    "symlink found in fixture source tree (refusing to copy): {}",
+                    src_path.display()
+                );
+            }
+            if meta.is_dir() {
+                copy_dir_all(&src_path, &dst.join(entry.file_name()));
             } else {
-                fs::copy(entry.path(), dst.join(entry.file_name())).unwrap();
+                fs::copy(&src_path, dst.join(entry.file_name())).unwrap();
             }
         }
     }
@@ -317,6 +328,51 @@ fn test_symlink_rejected() {
     std::os::unix::fs::symlink(corpus.join("upstream.lock.json"), &link_path).unwrap();
     let result = validate_corpus_at_path(&corpus);
     assert_eq!(result, Err(ValidationError::SymlinkInCorpus));
+}
+
+/// Proves copy_corpus_to_temp rejects symlinks in the source fixture tree
+/// rather than silently dereferencing them via fs::copy.
+#[cfg(unix)]
+#[test]
+fn test_copy_rejects_symlink_in_source() {
+    // Create a fake source tree with a symlink
+    let src_dir = TempDir::new().unwrap();
+    let src = src_dir.path();
+    fs::write(src.join("real.json"), b"{}").unwrap();
+    std::os::unix::fs::symlink(src.join("real.json"), src.join("link.json")).unwrap();
+
+    let dst_dir = TempDir::new().unwrap();
+    let dst = dst_dir.path().join("out");
+
+    // The inner copy_dir_all must panic on the symlink
+    fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) {
+        fs::create_dir_all(dst).unwrap();
+        for entry in fs::read_dir(src).unwrap() {
+            let entry = entry.unwrap();
+            let src_path = entry.path();
+            let meta =
+                fs::symlink_metadata(&src_path).expect("symlink_metadata failed on source entry");
+            if meta.file_type().is_symlink() {
+                panic!(
+                    "symlink found in fixture source tree (refusing to copy): {}",
+                    src_path.display()
+                );
+            }
+            if meta.is_dir() {
+                copy_dir_all(&src_path, &dst.join(entry.file_name()));
+            } else {
+                fs::copy(&src_path, dst.join(entry.file_name())).unwrap();
+            }
+        }
+    }
+
+    let result = std::panic::catch_unwind(|| {
+        copy_dir_all(src, &dst);
+    });
+    assert!(
+        result.is_err(),
+        "copy_dir_all must panic on symlink in source tree"
+    );
 }
 
 #[test]
