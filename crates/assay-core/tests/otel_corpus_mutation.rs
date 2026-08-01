@@ -13,34 +13,32 @@ use tempfile::TempDir;
 
 const FIXTURE_ROOT: &str = "tests/fixtures/otel-mcp-ingest-v0";
 
+/// Recursively copy a directory tree, rejecting symlinks before dereference.
+/// Uses symlink_metadata (lstat) to inspect each entry without following symlinks,
+/// closing the TOCTOU gap where fs::copy would silently follow a symlink-to-file.
+/// Panics with a static message if a symlink is found anywhere in the tree.
+fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) {
+    fs::create_dir_all(dst).unwrap();
+    for entry in fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let src_path = entry.path();
+        let meta =
+            fs::symlink_metadata(&src_path).expect("symlink_metadata failed on source entry");
+        if meta.file_type().is_symlink() {
+            panic!("symlink found in fixture source tree (refusing to copy)");
+        }
+        if meta.is_dir() {
+            copy_dir_all(&src_path, &dst.join(entry.file_name()));
+        } else {
+            fs::copy(&src_path, dst.join(entry.file_name())).unwrap();
+        }
+    }
+}
+
 fn copy_corpus_to_temp() -> (TempDir, PathBuf) {
     let tmp = TempDir::new().unwrap();
     let src = PathBuf::from(FIXTURE_ROOT);
     let dst = tmp.path().join("corpus");
-
-    fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) {
-        fs::create_dir_all(dst).unwrap();
-        for entry in fs::read_dir(src).unwrap() {
-            let entry = entry.unwrap();
-            let src_path = entry.path();
-            // Use symlink_metadata (lstat) to inspect the entry without following
-            // symlinks. This rejects symlinks before any dereference, closing the
-            // TOCTOU gap where fs::copy would silently follow a symlink-to-file.
-            let meta =
-                fs::symlink_metadata(&src_path).expect("symlink_metadata failed on source entry");
-            if meta.file_type().is_symlink() {
-                panic!(
-                    "symlink found in fixture source tree (refusing to copy): {}",
-                    src_path.display()
-                );
-            }
-            if meta.is_dir() {
-                copy_dir_all(&src_path, &dst.join(entry.file_name()));
-            } else {
-                fs::copy(&src_path, dst.join(entry.file_name())).unwrap();
-            }
-        }
-    }
 
     copy_dir_all(&src, &dst);
     let corpus_path = dst.clone();
@@ -330,8 +328,9 @@ fn test_symlink_rejected() {
     assert_eq!(result, Err(ValidationError::SymlinkInCorpus));
 }
 
-/// Proves copy_corpus_to_temp rejects symlinks in the source fixture tree
-/// rather than silently dereferencing them via fs::copy.
+/// Proves the module-level copy_dir_all rejects symlinks in the source tree
+/// rather than silently dereferencing them via fs::copy. This test calls the
+/// real helper so that a regression in the production guard is caught.
 #[cfg(unix)]
 #[test]
 fn test_copy_rejects_symlink_in_source() {
@@ -344,28 +343,7 @@ fn test_copy_rejects_symlink_in_source() {
     let dst_dir = TempDir::new().unwrap();
     let dst = dst_dir.path().join("out");
 
-    // The inner copy_dir_all must panic on the symlink
-    fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) {
-        fs::create_dir_all(dst).unwrap();
-        for entry in fs::read_dir(src).unwrap() {
-            let entry = entry.unwrap();
-            let src_path = entry.path();
-            let meta =
-                fs::symlink_metadata(&src_path).expect("symlink_metadata failed on source entry");
-            if meta.file_type().is_symlink() {
-                panic!(
-                    "symlink found in fixture source tree (refusing to copy): {}",
-                    src_path.display()
-                );
-            }
-            if meta.is_dir() {
-                copy_dir_all(&src_path, &dst.join(entry.file_name()));
-            } else {
-                fs::copy(&src_path, dst.join(entry.file_name())).unwrap();
-            }
-        }
-    }
-
+    // Call the real module-level copy_dir_all; it must panic on the symlink.
     let result = std::panic::catch_unwind(|| {
         copy_dir_all(src, &dst);
     });

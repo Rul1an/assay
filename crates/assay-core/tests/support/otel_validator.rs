@@ -373,13 +373,10 @@ fn collect_recursive(
         let entry = entry.map_err(|_| ValidationError::UnlistedFileInCorpus)?;
         let path = entry.path();
 
-        // Reject symlinks anywhere in the governed tree
-        let metadata =
-            fs::symlink_metadata(&path).map_err(|_| ValidationError::UnlistedFileInCorpus)?;
-        if metadata.file_type().is_symlink() {
-            return Err(ValidationError::SymlinkInCorpus);
-        }
-
+        // Containment check: verify path stays within the corpus root before
+        // any I/O on the entry. strip_prefix succeeds only when `path` is a
+        // child of `base`, so no entry outside the governed tree can reach
+        // symlink_metadata or subsequent reads.
         let rel = path
             .strip_prefix(base)
             .map_err(|_| ValidationError::PathTraversal)?;
@@ -388,6 +385,13 @@ fn collect_recursive(
         // Reject paths that escape the corpus root
         if rel_str.contains("..") {
             return Err(ValidationError::PathTraversal);
+        }
+
+        // Reject symlinks anywhere in the governed tree (after containment is proved)
+        let metadata =
+            fs::symlink_metadata(&path).map_err(|_| ValidationError::UnlistedFileInCorpus)?;
+        if metadata.file_type().is_symlink() {
+            return Err(ValidationError::SymlinkInCorpus);
         }
 
         // Ignore generator/node_modules (created locally by npm ci)
