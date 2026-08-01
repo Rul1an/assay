@@ -874,10 +874,10 @@ impl<'de> Visitor<'de> for ValueScalarSeed<'_, '_> {
 fn valid_base64(value: &str) -> bool {
     use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD};
 
-    STANDARD.decode(value).is_ok()
-        || STANDARD_NO_PAD.decode(value).is_ok()
-        || URL_SAFE.decode(value).is_ok()
-        || URL_SAFE_NO_PAD.decode(value).is_ok()
+    let mut scratch = vec![0; base64::decoded_len_estimate(value.len())];
+    [&STANDARD, &STANDARD_NO_PAD, &URL_SAFE, &URL_SAFE_NO_PAD]
+        .into_iter()
+        .any(|engine| engine.decode_slice(value, &mut scratch).is_ok())
 }
 
 enum ListKind {
