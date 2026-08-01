@@ -10,6 +10,8 @@
 //! the transport-level `EraResolution` contract: [`SpanProtocolVersion`] has no conflict state,
 //! because a span cannot manufacture the MCP-defined header/body conflict.
 
+use std::sync::Arc;
+
 /// The pinned semconv revision that defines the recognized attribute names. Matches the
 /// `semconv` entry in `tests/fixtures/otel-mcp-ingest-v0/upstream.lock.json`.
 pub(crate) const SEMCONV_PIN: &str =
@@ -22,6 +24,12 @@ pub(crate) enum UpstreamField {
     TraceId,
     /// OTLP span `spanId`.
     SpanId,
+    /// OTLP span `parentSpanId`.
+    ParentSpanId,
+    /// OTLP instrumentation scope `name`.
+    InstrumentationScopeName,
+    /// OTLP instrumentation scope `version`.
+    InstrumentationScopeVersion,
     /// OTLP span `kind`.
     SpanKind,
     /// OTLP span `status.code`.
@@ -38,6 +46,8 @@ pub(crate) enum UpstreamField {
     McpProtocolVersion,
     /// Stable general attribute `error.type` (used by the Development MCP document).
     ErrorType,
+    /// Semconv attribute `rpc.response.status_code`.
+    RpcResponseStatusCode,
 }
 
 impl UpstreamField {
@@ -46,6 +56,9 @@ impl UpstreamField {
         match self {
             UpstreamField::TraceId => "traceId",
             UpstreamField::SpanId => "spanId",
+            UpstreamField::ParentSpanId => "parentSpanId",
+            UpstreamField::InstrumentationScopeName => "scope.name",
+            UpstreamField::InstrumentationScopeVersion => "scope.version",
             UpstreamField::SpanKind => "kind",
             UpstreamField::StatusCode => "status.code",
             UpstreamField::McpMethodName => "mcp.method.name",
@@ -54,11 +67,13 @@ impl UpstreamField {
             UpstreamField::JsonRpcRequestId => "jsonrpc.request.id",
             UpstreamField::McpProtocolVersion => "mcp.protocol.version",
             UpstreamField::ErrorType => "error.type",
+            UpstreamField::RpcResponseStatusCode => "rpc.response.status_code",
         }
     }
 }
 
-/// OTLP span kind, from the pinned `trace.proto` enum. Values outside 0..=5 are malformed.
+/// OTLP span kind, from the pinned `trace.proto` enum. Proto3 enums are open, so a future numeric
+/// value is retained only as the value-free `Unknown` state rather than mislabeled malformed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SpanKind {
     Unspecified,
@@ -67,16 +82,18 @@ pub(crate) enum SpanKind {
     Client,
     Producer,
     Consumer,
+    Unknown,
 }
 
-/// OTLP span status code, from the pinned `trace.proto` enum. Values outside 0..=2 are
-/// malformed. Absent status is the proto default and therefore ordinary.
+/// OTLP span status code, from the pinned `trace.proto` enum. Proto3 enums are open; values outside
+/// the pinned vocabulary become `Unknown`. Absent status is the proto default and ordinary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StatusObservation {
     Absent,
     Unset,
     Ok,
     Error,
+    Unknown,
 }
 
 /// What `mcp.method.name` said. Only the explicit tool-call method is recognized; any other
@@ -102,13 +119,21 @@ pub(crate) enum OperationObservation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RequestIdObservation {
     String(String),
-    Integer(i64),
 }
 
 /// What `error.type` said. Present values are bounded by the attribute-value ceiling before
 /// retention.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) enum ErrorTypeObservation {
+    #[default]
+    Absent,
+    Present(String),
+}
+
+/// What `rpc.response.status_code` said. The pinned semconv declares a string value; absence is
+/// ordinary when no JSON-RPC error code was reported.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum RpcResponseStatusObservation {
     #[default]
     Absent,
     Present(String),
@@ -133,6 +158,13 @@ pub(crate) enum SpanProtocolVersion {
     PresentUnsupported(String),
 }
 
+/// Bounded identity reported by the enclosing OTLP instrumentation scope.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct InstrumentationScopeObservation {
+    pub(crate) name: Option<String>,
+    pub(crate) version: Option<String>,
+}
+
 /// One decoded MCP-shaped span, carrying only the explicit observation fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct McpSpanObservation {
@@ -140,6 +172,9 @@ pub(crate) struct McpSpanObservation {
     pub(crate) trace_id: String,
     /// 16-char hex span id, validated case-insensitively and normalized to lowercase.
     pub(crate) span_id: String,
+    /// Optional 16-char parent span id, normalized to lowercase when present.
+    pub(crate) parent_span_id: Option<String>,
+    pub(crate) instrumentation_scope: Option<Arc<InstrumentationScopeObservation>>,
     pub(crate) kind: SpanKind,
     pub(crate) method: MethodObservation,
     pub(crate) operation: OperationObservation,
@@ -149,6 +184,7 @@ pub(crate) struct McpSpanObservation {
     pub(crate) protocol_version: SpanProtocolVersion,
     pub(crate) status: StatusObservation,
     pub(crate) error_type: ErrorTypeObservation,
+    pub(crate) rpc_response_status: RpcResponseStatusObservation,
 }
 
 /// The decode result for one OTLP/JSON document: extracted spans plus the semconv pin they were

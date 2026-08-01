@@ -9,11 +9,13 @@
 //! Every limit is inclusive: an input at exactly the limit is accepted, an input one past it is
 //! rejected. That boundary is load-bearing and each dimension has a test proving both sides.
 
-/// Ceilings applied before any untrusted content is retained.
+/// Independent ceilings for parser input and decoded observation retention.
 ///
 /// Dimensions are independent on purpose: a document can be small in source bytes while hostile
 /// in nesting depth, and declared metadata (`droppedAttributesCount` and friends) never
-/// substitutes for the observed counts these ceilings govern.
+/// substitutes for the observed counts these ceilings govern. `max_source_bytes` bounds the
+/// serde parser's transient token scratch; traversal limits are charged before content is copied
+/// into the domain observation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OtlpIngestLimits {
     /// Bytes taken from the source stream, before JSON decoding.
@@ -78,6 +80,7 @@ pub(crate) enum ShapeSite {
     Resource,
     ScopeSpans,
     ScopeSpansEntry,
+    InstrumentationScope,
     Spans,
     Span,
     AttributeList,
@@ -94,6 +97,7 @@ pub(crate) enum ShapeSite {
 pub(crate) enum SpanField {
     TraceId,
     SpanId,
+    ParentSpanId,
     Kind,
     StatusCode,
 }
@@ -102,10 +106,13 @@ pub(crate) enum SpanField {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RecognizedAttribute {
     MethodName,
+    ResourceUri,
+    SessionId,
     OperationName,
     ToolName,
     RequestId,
     ErrorType,
+    RpcResponseStatusCode,
 }
 
 /// Typed, value-free rejection. No variant carries attacker-controlled bytes: limits carry the
@@ -139,6 +146,9 @@ pub(crate) enum OtlpIngestError {
     ConflictingAttributeValue,
     #[error("missing required span field {0:?}")]
     MissingRequiredSpanField(SpanField),
+    /// A required MCP semantic-convention attribute was absent from an otherwise MCP-shaped span.
+    #[error("missing required recognized attribute {0:?}")]
+    MissingRequiredAttribute(RecognizedAttribute),
     #[error("malformed span field {0:?}")]
     MalformedSpanField(SpanField),
     /// A recognized MCP attribute carried a value type the pinned semconv does not define for it.

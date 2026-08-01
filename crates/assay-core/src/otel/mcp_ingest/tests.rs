@@ -4,7 +4,9 @@
 //! limit+1 rejected), every hostile fixture locked in `upstream.lock.json` is rejected for its
 //! locked purpose, and every rejection path is swept for attacker-content echo.
 
+use std::cell::Cell;
 use std::io::Read;
+use std::sync::Arc;
 
 use super::decode::decode_mcp_resource_spans;
 use super::limits::{
@@ -12,9 +14,9 @@ use super::limits::{
     SpanField,
 };
 use super::observation::{
-    ErrorTypeObservation, McpResourceSpansObservation, MethodObservation, OperationObservation,
-    RequestIdObservation, SpanKind, SpanProtocolVersion, StatusObservation, UpstreamField,
-    SEMCONV_PIN,
+    ErrorTypeObservation, InstrumentationScopeObservation, McpResourceSpansObservation,
+    MethodObservation, OperationObservation, RequestIdObservation, RpcResponseStatusObservation,
+    SpanKind, SpanProtocolVersion, StatusObservation, UpstreamField, SEMCONV_PIN,
 };
 
 const FIXTURE_DIR: &str = concat!(
@@ -64,6 +66,12 @@ fn doc_with_attrs(attrs: &[String]) -> String {
     doc_with_spans(&[span_with_attrs(attrs)])
 }
 
+fn mcp_doc_with_attrs(attrs: &[String]) -> String {
+    let mut all = vec![attr_str("mcp.method.name", "tools/call")];
+    all.extend_from_slice(attrs);
+    doc_with_attrs(&all)
+}
+
 fn assert_limit(
     result: Result<McpResourceSpansObservation, OtlpIngestError>,
     dimension: OtlpLimitDimension,
@@ -73,6 +81,31 @@ fn assert_limit(
         result.expect_err("input past the ceiling must be rejected"),
         OtlpIngestError::LimitExceeded { dimension, limit }
     );
+}
+
+struct CountingReader<'a> {
+    bytes: &'a [u8],
+    reads: &'a Cell<usize>,
+}
+
+impl Read for CountingReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.reads.set(self.reads.get() + 1);
+        self.bytes.read(buf)
+    }
+}
+
+struct ByteCountingReader<'a> {
+    bytes: &'a [u8],
+    yielded: &'a Cell<usize>,
+}
+
+impl Read for ByteCountingReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.bytes.read(buf)?;
+        self.yielded.set(self.yielded.get() + n);
+        Ok(n)
+    }
 }
 
 // --- Corpus acceptance and extraction -------------------------------------------------------
@@ -99,7 +132,123 @@ fn client_fixture_decodes_and_extracts_explicit_fields() {
         SpanProtocolVersion::PresentSupported("2024-11-05".into())
     );
     assert_eq!(span.status, StatusObservation::Ok);
+    assert_eq!(
+        span.instrumentation_scope,
+        Some(Arc::new(InstrumentationScopeObservation {
+            name: Some("mcp-fixture-generator".into()),
+            version: Some("1.0.0".into()),
+        }))
+    );
     assert_eq!(span.error_type, ErrorTypeObservation::Absent);
+    assert_eq!(
+        span.rpc_response_status,
+        RpcResponseStatusObservation::Absent
+    );
+}
+
+#[test]
+fn parent_span_and_instrumentation_scope_are_retained_when_present() {
+    let parent = "A7AD6B7169203331";
+    let span = format!(
+        r#"{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}","parentSpanId":"{parent}","attributes":[{}]}}"#,
+        attr_str("mcp.method.name", "tools/call")
+    );
+    let doc = format!(
+        r#"{{"resourceSpans":[{{"scopeSpans":[{{"spans":[{span}],"scope":{{"version":"1.2.3","name":"fixture-scope"}}}}]}}]}}"#
+    );
+    let obs = decode_str(&doc, &corpus_limits()).expect("bounded parent and scope identity");
+    assert_eq!(obs.spans.len(), 1);
+    assert_eq!(
+        obs.spans[0].parent_span_id.as_deref(),
+        Some("a7ad6b7169203331")
+    );
+    assert_eq!(
+        obs.spans[0].instrumentation_scope,
+        Some(Arc::new(InstrumentationScopeObservation {
+            name: Some("fixture-scope".into()),
+            version: Some("1.2.3".into()),
+        }))
+    );
+}
+
+#[test]
+fn instrumentation_scope_storage_is_shared_across_its_spans() {
+    let first = span_with_attrs(&[attr_str("mcp.method.name", "tools/call")]);
+    let second = first.replace(SPAN_ID, "b7ad6b7169203332");
+    let doc = format!(
+        r#"{{"resourceSpans":[{{"scopeSpans":[{{"scope":{{"name":"shared-scope","version":"1.0.0"}},"spans":[{first},{second}]}}]}}]}}"#
+    );
+    let obs = decode_str(&doc, &corpus_limits()).expect("shared instrumentation scope");
+    assert_eq!(obs.spans.len(), 2);
+    let first_scope = obs.spans[0]
+        .instrumentation_scope
+        .as_ref()
+        .expect("first span scope");
+    let second_scope = obs.spans[1]
+        .instrumentation_scope
+        .as_ref()
+        .expect("second span scope");
+    assert!(Arc::ptr_eq(first_scope, second_scope));
+}
+
+#[test]
+fn string_instrumentation_scope_is_typed_and_charged_before_shape_refusal() {
+    let oversized = "x".repeat(128);
+    let doc = format!(r#"{{"resourceSpans":[{{"scopeSpans":[{{"scope":"{oversized}"}}]}}]}}"#);
+
+    let mut bounded = corpus_limits();
+    bounded.max_decoded_bytes = 64;
+    assert_limit(
+        decode_str(&doc, &bounded),
+        OtlpLimitDimension::DecodedBytes,
+        64,
+    );
+
+    assert_eq!(
+        decode_str(&doc, &corpus_limits()).expect_err("scope must be an object"),
+        OtlpIngestError::UnexpectedShape(ShapeSite::InstrumentationScope)
+    );
+}
+
+#[test]
+fn absent_null_and_empty_parent_or_scope_identity_remain_absent() {
+    for parent in ["", "null"] {
+        let parent_field = if parent == "null" {
+            r#""parentSpanId":null,"#.to_string()
+        } else {
+            r#""parentSpanId":"","#.to_string()
+        };
+        let span = format!(
+            r#"{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}",{parent_field}"attributes":[{}]}}"#,
+            attr_str("mcp.method.name", "tools/call")
+        );
+        let doc = format!(
+            r#"{{"resourceSpans":[{{"scopeSpans":[{{"scope":{{"name":"","version":""}},"spans":[{span}]}}]}}]}}"#
+        );
+        let obs = decode_str(&doc, &corpus_limits()).expect("default-valued identities are absent");
+        assert_eq!(obs.spans[0].parent_span_id, None);
+        assert_eq!(obs.spans[0].instrumentation_scope, None);
+    }
+}
+
+#[test]
+fn either_scope_identity_field_is_retained_independently() {
+    for (scope, expected_name, expected_version) in [
+        (r#"{"name":"scope-only"}"#, Some("scope-only"), None),
+        (r#"{"version":"2.0.0"}"#, None, Some("2.0.0")),
+    ] {
+        let span = span_with_attrs(&[attr_str("mcp.method.name", "tools/call")]);
+        let doc = format!(
+            r#"{{"resourceSpans":[{{"scopeSpans":[{{"scope":{scope},"spans":[{span}]}}]}}]}}"#
+        );
+        let obs = decode_str(&doc, &corpus_limits()).expect("partial scope identity");
+        let observed = obs.spans[0]
+            .instrumentation_scope
+            .as_ref()
+            .expect("either scope field retains the scope");
+        assert_eq!(observed.name.as_deref(), expected_name);
+        assert_eq!(observed.version.as_deref(), expected_version);
+    }
 }
 
 #[test]
@@ -120,6 +269,9 @@ fn provenance_mapping_is_pinned() {
     let expected = [
         (UpstreamField::TraceId, "traceId"),
         (UpstreamField::SpanId, "spanId"),
+        (UpstreamField::ParentSpanId, "parentSpanId"),
+        (UpstreamField::InstrumentationScopeName, "scope.name"),
+        (UpstreamField::InstrumentationScopeVersion, "scope.version"),
         (UpstreamField::SpanKind, "kind"),
         (UpstreamField::StatusCode, "status.code"),
         (UpstreamField::McpMethodName, "mcp.method.name"),
@@ -128,6 +280,10 @@ fn provenance_mapping_is_pinned() {
         (UpstreamField::JsonRpcRequestId, "jsonrpc.request.id"),
         (UpstreamField::McpProtocolVersion, "mcp.protocol.version"),
         (UpstreamField::ErrorType, "error.type"),
+        (
+            UpstreamField::RpcResponseStatusCode,
+            "rpc.response.status_code",
+        ),
     ];
     for (field, name) in expected {
         assert_eq!(field.upstream_name(), name);
@@ -183,6 +339,28 @@ fn source_bytes_exact_accepted_one_more_rejected() {
 }
 
 #[test]
+fn buffering_never_prefetches_beyond_the_source_ceiling_probe() {
+    let doc = format!(r#"{{"resourceSpans":[],"padding":"{}"}}"#, "x".repeat(4096));
+    let yielded = Cell::new(0);
+    let mut limits = corpus_limits();
+    limits.max_source_bytes = 64;
+    let reader = ByteCountingReader {
+        bytes: doc.as_bytes(),
+        yielded: &yielded,
+    };
+    assert_limit(
+        decode_mcp_resource_spans(reader, &limits),
+        OtlpLimitDimension::SourceBytes,
+        64,
+    );
+    assert!(
+        yielded.get() <= limits.max_source_bytes as usize + 1,
+        "buffering below the limiter prefetched {} source bytes",
+        yielded.get()
+    );
+}
+
+#[test]
 fn decoded_bytes_exact_accepted_one_more_rejected() {
     // Charge model: member-name strings charge their UTF-8 length; the empty string value
     // charges 0. `{"resourceSpans":[],"a":""}` charges 13 + 1 = 14 decoded bytes.
@@ -230,6 +408,26 @@ fn span_count_exact_accepted_one_more_rejected() {
 }
 
 #[test]
+fn span_count_precedes_shape_validation_for_every_list_element() {
+    let mut limits = corpus_limits();
+    limits.max_span_count = 1;
+    let doc = doc_with_spans(&[span_with_attrs(&[]), "0".into()]);
+    assert_limit(decode_str(&doc, &limits), OtlpLimitDimension::SpanCount, 1);
+}
+
+#[test]
+fn span_count_is_global_and_precedes_decoding_across_resource_groups() {
+    let mut limits = corpus_limits();
+    limits.max_span_count = 1;
+    let first = span_with_attrs(&[attr_str("mcp.method.name", "tools/call")]);
+    let malformed_second = r#"{"kind":{"deeply":"wrong"}}"#;
+    let doc = format!(
+        r#"{{"resourceSpans":[{{"scopeSpans":[{{"spans":[{first}]}}]}},{{"scopeSpans":[{{"spans":[{malformed_second}]}}]}}]}}"#
+    );
+    assert_limit(decode_str(&doc, &limits), OtlpLimitDimension::SpanCount, 1);
+}
+
+#[test]
 fn attribute_count_exact_accepted_one_more_rejected() {
     let mut limits = corpus_limits();
     limits.max_attribute_count = 3;
@@ -240,6 +438,23 @@ fn attribute_count_exact_accepted_one_more_rejected() {
         decode_str(&doc_with_attrs(&four), &limits),
         OtlpLimitDimension::AttributeCount,
         3,
+    );
+}
+
+#[test]
+fn attribute_count_precedes_entry_content_decoding() {
+    let mut limits = corpus_limits();
+    limits.max_attribute_count = 1;
+    let first = attr_str("mcp.method.name", "tools/call");
+    let malformed_second =
+        r#"{"key":{"not":"a string"},"value":{"arrayValue":{"values":[[[[]]]]}}}"#;
+    assert_limit(
+        decode_str(
+            &doc_with_attrs(&[first, malformed_second.to_string()]),
+            &limits,
+        ),
+        OtlpLimitDimension::AttributeCount,
+        1,
     );
 }
 
@@ -297,6 +512,75 @@ fn attribute_value_bytes_aggregate_across_nested_value() {
         decode_str(&doc_with_attrs(&[over.to_string()]), &limits),
         OtlpLimitDimension::AttributeValueBytes,
         8,
+    );
+}
+
+#[test]
+fn kvlist_keys_and_values_share_one_per_attribute_budget() {
+    let mut limits = corpus_limits();
+    limits.max_attribute_value_bytes = 6;
+    let exact = r#"{"key":"k","value":{"kvlistValue":{"values":[{"key":"aa","value":{"stringValue":"bbbb"}}]}}}"#;
+    decode_str(&doc_with_attrs(&[exact.to_string()]), &limits)
+        .expect("nested key and leaf value exactly at their shared ceiling");
+
+    let over = r#"{"key":"k","value":{"kvlistValue":{"values":[{"key":"aa","value":{"stringValue":"bbbbb"}}]}}}"#;
+    assert_limit(
+        decode_str(&doc_with_attrs(&[over.to_string()]), &limits),
+        OtlpLimitDimension::AttributeValueBytes,
+        6,
+    );
+
+    decode_str(
+        &doc_with_attrs(&[exact.to_string(), exact.replacen("\"k\"", "\"j\"", 1)]),
+        &limits,
+    )
+    .expect("per-value budget resets between separate attributes");
+}
+
+#[test]
+fn duplicate_nested_kvlist_keys_are_rejected() {
+    let entry = r#"{"key":"x","value":{"kvlistValue":{"values":[{"key":"same","value":{}},{"key":"same","value":{}}]}}}"#;
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[entry.to_string()]), &corpus_limits())
+            .expect_err("nested KeyValueList keys must be unique"),
+        OtlpIngestError::DuplicateField(ShapeSite::AttributeValue)
+    );
+}
+
+#[test]
+fn null_omitted_and_empty_nested_keys_share_the_proto_default() {
+    for key in [r#""key":null,"#, "", r#""key":"","#] {
+        let entry = format!(
+            r#"{{"key":"x","value":{{"kvlistValue":{{"values":[{{{key}"value":{{}}}}]}}}}}}"#
+        );
+        decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+            .unwrap_or_else(|err| panic!("default-valued nested key must be accepted: {err:?}"));
+    }
+
+    let duplicates = r#"{"key":"x","value":{"kvlistValue":{"values":[{"key":null,"value":{}},{"value":{}},{"key":"","value":{}}]}}}"#;
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[duplicates.to_string()]), &corpus_limits())
+            .expect_err("all three forms are the same empty default key"),
+        OtlpIngestError::DuplicateField(ShapeSite::AttributeValue)
+    );
+}
+
+#[test]
+fn malformed_kvlist_keys_charge_value_budget_before_typed_shape_refusal() {
+    let entry = r#"{"key":"x","value":{"kvlistValue":{"values":[{"key":true,"value":{}}]}}}"#;
+
+    let mut bounded = corpus_limits();
+    bounded.max_attribute_value_bytes = 0;
+    assert_limit(
+        decode_str(&doc_with_attrs(&[entry.to_string()]), &bounded),
+        OtlpLimitDimension::AttributeValueBytes,
+        0,
+    );
+
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[entry.to_string()]), &corpus_limits())
+            .expect_err("nested key must be a string"),
+        OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)
     );
 }
 
@@ -574,7 +858,7 @@ fn any_value_with_conflicting_members_rejects() {
     assert_eq!(
         decode_str(&doc_with_attrs(&[duplicate_variant]), &corpus_limits())
             .expect_err("duplicate value member"),
-        OtlpIngestError::ConflictingAttributeValue
+        OtlpIngestError::DuplicateField(ShapeSite::AttributeValue)
     );
 }
 
@@ -610,33 +894,70 @@ fn missing_and_malformed_ids_are_typed() {
 }
 
 #[test]
-fn out_of_range_kind_and_status_are_typed() {
-    let bad_kind = format!(r#"{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}","kind":6}}"#);
-    assert_eq!(
-        decode_str(&doc_with_spans(&[bad_kind]), &corpus_limits()).expect_err("kind 6"),
-        OtlpIngestError::MalformedSpanField(SpanField::Kind)
+fn all_zero_trace_and_span_ids_are_invalid() {
+    for (span, field) in [
+        (
+            format!(r#"{{"traceId":"{}","spanId":"{SPAN_ID}"}}"#, "0".repeat(32)),
+            SpanField::TraceId,
+        ),
+        (
+            format!(
+                r#"{{"traceId":"{TRACE_ID}","spanId":"{}"}}"#,
+                "0".repeat(16)
+            ),
+            SpanField::SpanId,
+        ),
+    ] {
+        assert_eq!(
+            decode_str(&doc_with_spans(&[span]), &corpus_limits())
+                .expect_err("the pinned OTLP proto forbids all-zero ids"),
+            OtlpIngestError::MalformedSpanField(field)
+        );
+    }
+}
+
+#[test]
+fn future_kind_and_status_numbers_are_value_free_unknown_states() {
+    for (kind, status) in [(6, 3), (-1, -1)] {
+        let span = format!(
+            r#"{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}","kind":{kind},"attributes":[{}],"status":{{"code":{status}}}}}"#,
+            attr_str("mcp.method.name", "tools/call")
+        );
+        let obs = decode_str(&doc_with_spans(&[span]), &corpus_limits())
+            .expect("proto3 enum numbers are open within int32");
+        assert_eq!(obs.spans[0].kind, SpanKind::Unknown);
+        assert_eq!(obs.spans[0].status, StatusObservation::Unknown);
+    }
+
+    let too_large = format!(
+        r#"{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}","kind":2147483648,"attributes":[{}]}}"#,
+        attr_str("mcp.method.name", "tools/call")
     );
-    let bad_status =
-        format!(r#"{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}","status":{{"code":3}}}}"#);
     assert_eq!(
-        decode_str(&doc_with_spans(&[bad_status]), &corpus_limits()).expect_err("status 3"),
-        OtlpIngestError::MalformedSpanField(SpanField::StatusCode)
+        decode_str(&doc_with_spans(&[too_large]), &corpus_limits())
+            .expect_err("enum numbers remain int32"),
+        OtlpIngestError::MalformedSpanField(SpanField::Kind)
     );
 }
 
 #[test]
-fn span_without_attributes_or_status_is_ordinary() {
+fn span_without_required_mcp_method_is_filtered_as_unrelated() {
     let span = format!(r#"{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}"}}"#);
     let obs = decode_str(&doc_with_spans(&[span]), &corpus_limits()).expect("bare span");
-    let span = &obs.spans[0];
-    assert_eq!(span.kind, SpanKind::Unspecified);
-    assert_eq!(span.method, MethodObservation::Absent);
-    assert_eq!(span.operation, OperationObservation::Absent);
-    assert_eq!(span.tool_name, None);
-    assert_eq!(span.request_id, None);
-    assert_eq!(span.protocol_version, SpanProtocolVersion::Absent);
-    assert_eq!(span.status, StatusObservation::Absent);
-    assert_eq!(span.error_type, ErrorTypeObservation::Absent);
+    assert!(
+        obs.spans.is_empty(),
+        "an unrelated OTLP span must not become an MCP observation"
+    );
+}
+
+#[test]
+fn mixed_otlp_input_retains_only_mcp_identified_spans() {
+    let unrelated = format!(r#"{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}"}}"#);
+    let mcp = span_with_attrs(&[attr_str("mcp.method.name", "tools/call")]);
+    let obs =
+        decode_str(&doc_with_spans(&[unrelated, mcp]), &corpus_limits()).expect("mixed OTLP input");
+    assert_eq!(obs.spans.len(), 1);
+    assert_eq!(obs.spans[0].method, MethodObservation::ToolsCall);
 }
 
 #[test]
@@ -673,6 +994,16 @@ fn recognized_attribute_wrong_value_type_rejects_typed() {
             RecognizedAttribute::MethodName,
         ),
         (
+            "mcp.resource.uri",
+            r#"{"boolValue":true}"#,
+            RecognizedAttribute::ResourceUri,
+        ),
+        (
+            "mcp.session.id",
+            r#"{"intValue":"7"}"#,
+            RecognizedAttribute::SessionId,
+        ),
+        (
             "gen_ai.operation.name",
             r#"{"boolValue":true}"#,
             RecognizedAttribute::OperationName,
@@ -692,11 +1023,21 @@ fn recognized_attribute_wrong_value_type_rejects_typed() {
             r#"{"boolValue":false}"#,
             RecognizedAttribute::ErrorType,
         ),
+        (
+            "rpc.response.status_code",
+            r#"{"intValue":"500"}"#,
+            RecognizedAttribute::RpcResponseStatusCode,
+        ),
     ];
     for (key, value, attribute) in cases {
         let entry = format!(r#"{{"key":"{key}","value":{value}}}"#);
+        let doc = if *key == "mcp.method.name" {
+            doc_with_attrs(&[entry])
+        } else {
+            mcp_doc_with_attrs(&[entry])
+        };
         assert_eq!(
-            decode_str(&doc_with_attrs(&[entry]), &corpus_limits()).expect_err("wrong type"),
+            decode_str(&doc, &corpus_limits()).expect_err("wrong type on an MCP span"),
             OtlpIngestError::RecognizedAttributeWrongType(*attribute),
             "attribute {attribute:?}"
         );
@@ -704,26 +1045,472 @@ fn recognized_attribute_wrong_value_type_rejects_typed() {
 }
 
 #[test]
-fn integer_request_id_preserves_upstream_type() {
-    let entry = r#"{"key":"jsonrpc.request.id","value":{"intValue":"42"}}"#.to_string();
-    let obs = decode_str(&doc_with_attrs(&[entry]), &corpus_limits()).expect("int request id");
+fn unrelated_spans_do_not_apply_mcp_projection_type_rules() {
+    let entries = [
+        r#"{"key":"gen_ai.operation.name","value":{"boolValue":true}}"#.to_string(),
+        r#"{"key":"gen_ai.tool.name","value":{"intValue":"7"}}"#.to_string(),
+        r#"{"key":"jsonrpc.request.id","value":{"doubleValue":1.5}}"#.to_string(),
+        r#"{"key":"error.type","value":{"boolValue":false}}"#.to_string(),
+        r#"{"key":"rpc.response.status_code","value":{"intValue":"500"}}"#.to_string(),
+    ];
+    let obs = decode_str(&doc_with_attrs(&entries), &corpus_limits())
+        .expect("generic attributes on an unrelated span are not MCP projection faults");
+    assert!(obs.spans.is_empty());
+}
+
+#[test]
+fn mcp_projection_is_independent_of_attribute_order() {
+    let attrs = [
+        attr_str("gen_ai.tool.name", "read_file"),
+        attr_str("jsonrpc.request.id", "17"),
+        attr_str("mcp.method.name", "tools/call"),
+    ];
+    let obs = decode_str(&doc_with_attrs(&attrs), &corpus_limits())
+        .expect("candidate observations before the MCP marker are retained until classification");
+    assert_eq!(obs.spans.len(), 1);
+    assert_eq!(obs.spans[0].tool_name.as_deref(), Some("read_file"));
     assert_eq!(
         obs.spans[0].request_id,
-        Some(RequestIdObservation::Integer(42))
+        Some(RequestIdObservation::String("17".into()))
+    );
+
+    let wrong_before_marker = [
+        r#"{"key":"gen_ai.tool.name","value":{"intValue":"7"}}"#.to_string(),
+        attr_str("mcp.method.name", "tools/call"),
+    ];
+    assert_eq!(
+        decode_str(&doc_with_attrs(&wrong_before_marker), &corpus_limits())
+            .expect_err("order must not hide a wrong-typed recognized observation"),
+        OtlpIngestError::RecognizedAttributeWrongType(RecognizedAttribute::ToolName)
     );
 }
 
 #[test]
-fn error_status_and_error_type_are_extracted() {
+fn unknown_mcp_prefixed_attribute_does_not_establish_identity() {
+    let attrs = [attr_str("mcp.future.extension", "value")];
+    let obs = decode_str(&doc_with_attrs(&attrs), &corpus_limits())
+        .expect("only exact pinned MCP markers establish identity");
+    assert!(obs.spans.is_empty());
+}
+
+#[test]
+fn wrong_typed_observation_error_is_value_free_after_mcp_identity_is_known() {
+    const MARKER: &str = "ZZ_ATTACKER_MARKER_ZZ";
+    let attrs = [
+        attr_str("x", MARKER),
+        r#"{"key":"gen_ai.tool.name","value":{"intValue":"1"}}"#.to_string(),
+        attr_str("mcp.method.name", "tools/call"),
+    ];
+    let err = decode_str(&doc_with_attrs(&attrs), &corpus_limits())
+        .expect_err("wrong-typed candidate remains a fault even when it precedes the marker");
+    assert_eq!(
+        err,
+        OtlpIngestError::RecognizedAttributeWrongType(RecognizedAttribute::ToolName)
+    );
+    assert!(!err.to_string().contains(MARKER));
+    assert!(!format!("{err:?}").contains(MARKER));
+}
+
+#[test]
+fn integer_request_id_is_wrong_typed_for_the_pinned_semconv() {
+    let entry = r#"{"key":"jsonrpc.request.id","value":{"intValue":"42"}}"#.to_string();
+    assert_eq!(
+        decode_str(&mcp_doc_with_attrs(&[entry]), &corpus_limits())
+            .expect_err("the pinned semconv defines request id as string"),
+        OtlpIngestError::RecognizedAttributeWrongType(RecognizedAttribute::RequestId)
+    );
+}
+
+#[test]
+fn empty_and_unknown_anyvalue_members_are_forward_compatible() {
+    for value in [
+        r#"{}"#,
+        r#"{"stringValueStrindex":1}"#,
+        r#"{"futureValue":"ignored"}"#,
+    ] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{value}}}"#);
+        decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+            .expect("OTLP permits empty AnyValue and ignores unknown protobuf JSON fields");
+    }
+
+    let recognized = r#"{"key":"mcp.method.name","value":{"stringValueStrindex":1}}"#;
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[recognized.to_string()]), &corpus_limits())
+            .expect_err("profile-only AnyValue is not a string MCP method"),
+        OtlpIngestError::RecognizedAttributeWrongType(RecognizedAttribute::MethodName)
+    );
+}
+
+#[test]
+fn unknown_anyvalue_content_remains_bounded_and_duplicate_strict() {
+    let mut limits = corpus_limits();
+    limits.max_attribute_value_bytes = 8;
+    let oversized = r#"{"key":"x","value":{"u":"123456789"}}"#.to_string();
+    assert_limit(
+        decode_str(&doc_with_attrs(&[oversized]), &limits),
+        OtlpLimitDimension::AttributeValueBytes,
+        8,
+    );
+
+    let duplicate = r#"{"key":"x","value":{"futureValue":1,"futureValue":2}}"#.to_string();
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[duplicate]), &corpus_limits())
+            .expect_err("duplicate unknown AnyValue member"),
+        OtlpIngestError::DuplicateField(ShapeSite::AttributeValue)
+    );
+}
+
+#[test]
+fn unknown_duplicate_key_is_charged_before_duplicate_rejection() {
+    let mut limits = corpus_limits();
+    limits.max_attribute_value_bytes = 2;
+    let entry = r#"{"key":"x","value":{"u":null,"u":null}}"#.to_string();
+    assert_limit(
+        decode_str(&doc_with_attrs(&[entry]), &limits),
+        OtlpLimitDimension::AttributeValueBytes,
+        2,
+    );
+}
+
+#[test]
+fn protojson_null_leaves_anyvalue_member_unset() {
+    for value in [
+        r#"{"stringValue":null}"#,
+        r#"{"intValue":null}"#,
+        r#"{"doubleValue":null}"#,
+        r#"{"boolValue":null}"#,
+        r#"{"bytesValue":null}"#,
+        r#"{"arrayValue":null}"#,
+        r#"{"kvlistValue":null}"#,
+        r#"{"stringValue":null,"intValue":"1"}"#,
+    ] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{value}}}"#);
+        decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+            .unwrap_or_else(|err| panic!("ProtoJSON null must leave the member unset: {err:?}"));
+    }
+
+    let recognized = r#"{"key":"mcp.method.name","value":{"stringValue":null}}"#.to_string();
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[recognized]), &corpus_limits())
+            .expect_err("an unset AnyValue is not a string method"),
+        OtlpIngestError::RecognizedAttributeWrongType(RecognizedAttribute::MethodName)
+    );
+
+    let unset_value = r#"{"key":"unrecognized","value":null}"#.to_string();
+    decode_str(&doc_with_attrs(&[unset_value]), &corpus_limits())
+        .expect("a null message field leaves the AnyValue unset");
+
+    let omitted_value = r#"{"key":"unrecognized"}"#.to_string();
+    decode_str(&doc_with_attrs(&[omitted_value]), &corpus_limits())
+        .expect("an omitted message field carries the same proto default");
+
+    let omitted_recognized = r#"{"key":"mcp.method.name"}"#.to_string();
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[omitted_recognized]), &corpus_limits())
+            .expect_err("an unset recognized value is not a valid method"),
+        OtlpIngestError::RecognizedAttributeWrongType(RecognizedAttribute::MethodName)
+    );
+}
+
+#[test]
+fn protojson_null_leaves_repeated_and_message_fields_unset() {
+    for doc in [
+        r#"{"resourceSpans":null}"#.to_string(),
+        r#"{"resourceSpans":[{"resource":null,"scopeSpans":null}]}"#.to_string(),
+        format!(
+            r#"{{"resourceSpans":[{{"scopeSpans":[{{"scope":null,"spans":[{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}","attributes":[{}],"status":null}}]}}]}}]}}"#,
+            attr_str("mcp.method.name", "tools/call")
+        ),
+    ] {
+        decode_str(&doc, &corpus_limits())
+            .unwrap_or_else(|err| panic!("ProtoJSON null field must remain unset: {err:?}"));
+    }
+
+    for value in [
+        r#"{"arrayValue":{"values":null}}"#,
+        r#"{"kvlistValue":{"values":null}}"#,
+    ] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{value}}}"#);
+        decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+            .unwrap_or_else(|err| panic!("ProtoJSON null repeated field must be empty: {err:?}"));
+    }
+}
+
+#[test]
+fn protojson_null_is_rejected_inside_repeated_anyvalue_elements() {
+    for value in [
+        r#"{"arrayValue":{"values":[null]}}"#,
+        r#"{"kvlistValue":{"values":[null]}}"#,
+    ] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{value}}}"#);
+        assert_eq!(
+            decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+                .expect_err("ProtoJSON repeated elements cannot be null"),
+            OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)
+        );
+    }
+}
+
+#[test]
+fn protojson_null_does_not_create_a_oneof_conflict() {
+    for value in [
+        r#"{"stringValue":"kept","intValue":null}"#,
+        r#"{"intValue":null,"stringValue":"kept"}"#,
+    ] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{value}}}"#);
+        decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+            .unwrap_or_else(|err| panic!("a null oneof member remains unset: {err:?}"));
+    }
+}
+
+#[test]
+fn duplicate_anyvalue_member_precedes_oneof_conflict() {
+    let duplicate = r#"{"key":"x","value":{"stringValue":"a","stringValue":"b"}}"#.to_string();
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[duplicate]), &corpus_limits())
+            .expect_err("the same AnyValue member is duplicated"),
+        OtlpIngestError::DuplicateField(ShapeSite::AttributeValue)
+    );
+
+    let conflict = r#"{"key":"x","value":{"stringValue":"a","intValue":"1"}}"#.to_string();
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[conflict]), &corpus_limits())
+            .expect_err("two populated oneof members conflict"),
+        OtlpIngestError::ConflictingAttributeValue
+    );
+}
+
+#[test]
+fn nested_protojson_unknown_fields_are_ignored_but_bounded() {
+    for value in [
+        r#"{"arrayValue":{"future":null,"values":[]}}"#,
+        r#"{"kvlistValue":{"future":null,"values":[]}}"#,
+        r#"{"kvlistValue":{"values":[{"key":"k","keyStrindex":1,"value":{}}]}}"#,
+    ] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{value}}}"#);
+        decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+            .unwrap_or_else(|err| panic!("OTLP nested unknown field must be ignored: {err:?}"));
+    }
+
+    let mut limits = corpus_limits();
+    limits.max_attribute_value_bytes = 3;
+    let entry = r#"{"key":"x","value":{"arrayValue":{"u":"abc","values":[]}}}"#.to_string();
+    assert_limit(
+        decode_str(&doc_with_attrs(&[entry]), &limits),
+        OtlpLimitDimension::AttributeValueBytes,
+        3,
+    );
+}
+
+#[test]
+fn protojson_int64_accepts_integral_number_and_exponent_forms() {
+    for int_value in [r#""1e2""#, "1e2", "1.0"] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{{"intValue":{int_value}}}}}"#);
+        decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+            .unwrap_or_else(|err| panic!("valid ProtoJSON int64 form {int_value}: {err:?}"));
+    }
+    for int_value in ["1.5", r#""1.5""#, r#""1e100""#] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{{"intValue":{int_value}}}}}"#);
+        assert_eq!(
+            decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+                .expect_err("non-integral or out-of-range int64 must reject"),
+            OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)
+        );
+    }
+}
+
+#[test]
+fn protojson_bare_int64_uses_binary64_interpretation() {
+    let rejected = format!(r#"{{"key":"x","value":{{"intValue":{}}}}}"#, i64::MAX);
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[rejected]), &corpus_limits())
+            .expect_err("bare i64::MAX rounds to the exclusive binary64 boundary"),
+        OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)
+    );
+
+    let accepted = format!(r#"{{"key":"x","value":{{"intValue":{}}}}}"#, i64::MIN);
+    decode_str(&doc_with_attrs(&[accepted]), &corpus_limits())
+        .expect("bare i64::MIN is exactly representable as binary64");
+}
+
+#[test]
+fn protojson_int64_string_conversion_is_exact() {
+    for int_value in [
+        r#""-9223372036854775809""#,
+        r#""9223372036854775808""#,
+        r#""9007199254740992.5""#,
+        r#""-9.223372036854775809e18""#,
+        r#""01""#,
+        r#""-01""#,
+    ] {
+        let entry = format!(r#"{{"key":"x","value":{{"intValue":{int_value}}}}}"#);
+        assert_eq!(
+            decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+                .expect_err("fractional or out-of-range decimal must not round into int64"),
+            OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue),
+            "accepted {int_value}"
+        );
+    }
+
+    for int_value in [
+        r#""-9223372036854775808""#,
+        r#""9223372036854775807""#,
+        r#""-9.223372036854775808e18""#,
+        r#""0e-9223372036854775809""#,
+        r#""0.0e-9223372036854775808""#,
+    ] {
+        let entry = format!(r#"{{"key":"x","value":{{"intValue":{int_value}}}}}"#);
+        decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+            .unwrap_or_else(|err| panic!("exact in-range int64 {int_value}: {err:?}"));
+    }
+}
+
+#[test]
+fn malformed_shapes_still_cross_their_resource_ceiling_first() {
+    let mut decoded = corpus_limits();
+    decoded.max_decoded_bytes = "resourceSpans".len() as u64 + 1;
+    assert_limit(
+        decode_str(r#"{"resourceSpans":"xx"}"#, &decoded),
+        OtlpLimitDimension::DecodedBytes,
+        decoded.max_decoded_bytes,
+    );
+
+    let mut value = corpus_limits();
+    value.max_attribute_value_bytes = 0;
+    let wrong_value = r#"{"key":"mcp.method.name","value":true}"#.to_string();
+    assert_limit(
+        decode_str(&doc_with_attrs(&[wrong_value]), &value),
+        OtlpLimitDimension::AttributeValueBytes,
+        0,
+    );
+
+    let mut depth = corpus_limits();
+    depth.max_nesting_depth = 1;
+    assert_limit(
+        decode_str(r#"{"resourceSpans":{}}"#, &depth),
+        OtlpLimitDimension::NestingDepth,
+        1,
+    );
+}
+
+#[test]
+fn malformed_anyvalue_scalars_are_charged_at_every_nested_layer() {
+    let values = [
+        r#"true"#,
+        r#"{"stringValue":true}"#,
+        r#"{"intValue":true}"#,
+        r#"{"doubleValue":true}"#,
+        r#"{"arrayValue":true}"#,
+        r#"{"arrayValue":{"values":true}}"#,
+        r#"{"kvlistValue":{"values":[true]}}"#,
+    ];
+    for value in values {
+        let mut limits = corpus_limits();
+        limits.max_attribute_value_bytes = 0;
+        let entry = format!(r#"{{"key":"x","value":{value}}}"#);
+        assert_limit(
+            decode_str(&doc_with_attrs(&[entry]), &limits),
+            OtlpLimitDimension::AttributeValueBytes,
+            0,
+        );
+    }
+}
+
+#[test]
+fn protojson_double_accepts_numeric_strings_and_named_values() {
+    for double_value in [
+        r#""1e2""#,
+        r#""-1.25e+2""#,
+        r#""0""#,
+        r#""NaN""#,
+        r#""Infinity""#,
+        r#""-Infinity""#,
+    ] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{{"doubleValue":{double_value}}}}}"#);
+        decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+            .unwrap_or_else(|err| panic!("valid ProtoJSON double form {double_value}: {err:?}"));
+    }
+
+    for double_value in [
+        r#""inf""#,
+        r#""+infinity""#,
+        r#""nan""#,
+        r#"".5""#,
+        r#""5.""#,
+        r#""01""#,
+        r#""+1""#,
+        r#""1e999""#,
+    ] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{{"doubleValue":{double_value}}}}}"#);
+        assert_eq!(
+            decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+                .expect_err("non-ProtoJSON double spelling must reject"),
+            OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue),
+            "accepted {double_value}"
+        );
+    }
+}
+
+#[test]
+fn protojson_bytes_require_valid_standard_or_url_safe_base64() {
+    for bytes_value in ["YWJj", "YWI=", "YWI", "-_8=", "-_8"] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{{"bytesValue":"{bytes_value}"}}}}"#);
+        decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+            .unwrap_or_else(|err| panic!("valid ProtoJSON base64 {bytes_value}: {err:?}"));
+    }
+    for bytes_value in ["not base64", "a", "ab===", "YWJj$"] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{{"bytesValue":"{bytes_value}"}}}}"#);
+        assert_eq!(
+            decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+                .expect_err("invalid ProtoJSON base64 must reject"),
+            OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)
+        );
+    }
+}
+
+#[test]
+fn protojson_null_enum_uses_the_default_zero_value() {
     let span = format!(
-        r#"{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}","attributes":[{}],"status":{{"code":2}}}}"#,
+        r#"{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}","kind":null,"attributes":[{}],"status":{{"code":null}}}}"#,
+        attr_str("mcp.method.name", "tools/call")
+    );
+    let obs = decode_str(&doc_with_spans(&[span]), &corpus_limits()).expect("enum null defaults");
+    assert_eq!(obs.spans[0].kind, SpanKind::Unspecified);
+    assert_eq!(obs.spans[0].status, StatusObservation::Unset);
+}
+
+#[test]
+fn source_reader_is_buffered_without_weakening_the_source_ceiling() {
+    let doc = doc_with_spans(&[]);
+    let reads = Cell::new(0);
+    let reader = CountingReader {
+        bytes: doc.as_bytes(),
+        reads: &reads,
+    };
+    decode_mcp_resource_spans(reader, &corpus_limits()).expect("small valid document");
+    assert!(
+        reads.get() <= 3,
+        "a small document should not require one underlying read per byte"
+    );
+}
+
+#[test]
+fn error_status_error_type_and_rpc_status_are_extracted() {
+    let span = format!(
+        r#"{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}","attributes":[{},{},{}],"status":{{"code":2}}}}"#,
+        attr_str("mcp.method.name", "tools/call"),
         attr_str("error.type", "timeout"),
+        attr_str("rpc.response.status_code", "-32602"),
     );
     let obs = decode_str(&doc_with_spans(&[span]), &corpus_limits()).expect("error span");
     assert_eq!(obs.spans[0].status, StatusObservation::Error);
     assert_eq!(
         obs.spans[0].error_type,
         ErrorTypeObservation::Present("timeout".into())
+    );
+    assert_eq!(
+        obs.spans[0].rpc_response_status,
+        RpcResponseStatusObservation::Present("-32602".into())
     );
 }
 
@@ -744,7 +1531,7 @@ fn protocol_version_states_are_typed_observations_not_failures() {
         ("2026-02-31", SpanProtocolVersion::Malformed),
     ];
     for (value, expected) in cases {
-        let doc = doc_with_attrs(&[attr_str("mcp.protocol.version", value)]);
+        let doc = mcp_doc_with_attrs(&[attr_str("mcp.protocol.version", value)]);
         let obs = decode_str(&doc, &corpus_limits()).expect("version states never fail decode");
         assert_eq!(&obs.spans[0].protocol_version, expected, "value {value:?}");
     }
@@ -753,11 +1540,38 @@ fn protocol_version_states_are_typed_observations_not_failures() {
 #[test]
 fn non_string_protocol_version_is_the_malformed_state() {
     let entry = r#"{"key":"mcp.protocol.version","value":{"intValue":"5"}}"#.to_string();
-    let obs = decode_str(&doc_with_attrs(&[entry]), &corpus_limits()).expect("typed state");
+    let obs = decode_str(&mcp_doc_with_attrs(&[entry]), &corpus_limits()).expect("typed state");
     assert_eq!(
         obs.spans[0].protocol_version,
         SpanProtocolVersion::Malformed
     );
+}
+
+#[test]
+fn protocol_version_without_required_mcp_method_fails_closed() {
+    assert_eq!(
+        decode_str(
+            &doc_with_attrs(&[attr_str("mcp.protocol.version", "2025-06-18")]),
+            &corpus_limits(),
+        )
+        .expect_err("an MCP-specific span without its required method"),
+        OtlpIngestError::MissingRequiredAttribute(RecognizedAttribute::MethodName)
+    );
+}
+
+#[test]
+fn any_pinned_mcp_marker_requires_the_semconv_method() {
+    for key in ["mcp.resource.uri", "mcp.session.id"] {
+        assert_eq!(
+            decode_str(
+                &doc_with_attrs(&[attr_str(key, "producer-reported")]),
+                &corpus_limits(),
+            )
+            .expect_err("an MCP-shaped span cannot disappear as unrelated"),
+            OtlpIngestError::MissingRequiredAttribute(RecognizedAttribute::MethodName),
+            "marker {key}"
+        );
+    }
 }
 
 #[test]
@@ -789,11 +1603,6 @@ fn rejection_errors_never_echo_attacker_content() {
         doc_with_attrs(&[
             attr_str(&format!("a{MARKER}"), "v"),
             attr_str(&format!("a{MARKER}"), "v"),
-        ]),
-        // Wrong-typed recognized attribute whose sibling carries the marker.
-        doc_with_attrs(&[
-            attr_str("x", MARKER),
-            r#"{"key":"gen_ai.tool.name","value":{"intValue":"1"}}"#.to_string(),
         ]),
         // Malformed id carrying the marker.
         doc_with_spans(&[format!(r#"{{"traceId":"{MARKER}","spanId":"{SPAN_ID}"}}"#)]),
@@ -887,9 +1696,10 @@ fn uppercase_hex_ids_are_accepted_and_normalized_to_lowercase() {
     // OTLP JSON hex ids are case-insensitive; retained ids normalize to lowercase so one span
     // never splits into two identities by case.
     let span = format!(
-        r#"{{"traceId":"{}","spanId":"{}"}}"#,
+        r#"{{"traceId":"{}","spanId":"{}","attributes":[{}]}}"#,
         TRACE_ID.to_uppercase(),
-        SPAN_ID.to_uppercase()
+        SPAN_ID.to_uppercase(),
+        attr_str("mcp.method.name", "tools/call")
     );
     let obs = decode_str(&doc_with_spans(&[span]), &corpus_limits()).expect("uppercase hex");
     assert_eq!(obs.spans[0].trace_id, TRACE_ID);
@@ -913,4 +1723,19 @@ fn attribute_count_ceiling_is_per_list() {
         span_with_attrs(&[attr_str("g", "v"), attr_str("h", "v")]),
     );
     decode_str(&doc, &limits).expect("resource and span lists are counted independently");
+}
+
+#[test]
+fn attribute_count_precedes_shape_validation_for_every_list_element() {
+    let mut limits = corpus_limits();
+    limits.max_attribute_count = 1;
+    let span = format!(
+        r#"{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}","attributes":[{},0]}}"#,
+        attr_str("a", "v")
+    );
+    assert_limit(
+        decode_str(&doc_with_spans(&[span]), &limits),
+        OtlpLimitDimension::AttributeCount,
+        1,
+    );
 }

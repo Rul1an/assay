@@ -4,9 +4,8 @@
 //! source/decode reader and a selective structured serde visitor over that pinned corpus:
 //!
 //! - [`decode::decode_mcp_resource_spans`] decodes an OTLP/JSON `resourceSpans` document under
-//!   the independent pre-retention ceilings in [`limits::OtlpIngestLimits`] (source bytes,
-//!   decoded bytes, nesting depth, span count, attribute count, attribute-key bytes,
-//!   attribute-value bytes).
+//!   independent ceilings in [`limits::OtlpIngestLimits`]. The source ceiling bounds bytes and
+//!   serde parser scratch; traversal ceilings apply before decoded content enters an observation.
 //! - Extraction is limited to the explicit MCP observation fields named in issue #1931, each
 //!   preserving upstream field provenance and the semconv pin
 //!   ([`observation::SEMCONV_PIN`]).
