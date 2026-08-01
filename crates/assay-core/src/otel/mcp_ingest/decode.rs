@@ -2,9 +2,10 @@
 //! OTLP/JSON corpus.
 //!
 //! Untrusted bytes are decoded through `serde::de::DeserializeSeed` implementations rather than
-//! materialized into `serde_json::Value`: only the recognized structure is traversed, every
-//! ceiling in [`OtlpIngestLimits`] is charged before retention, and unknown subtrees are skipped
-//! under the same depth and decoded-byte ceilings without being kept.
+//! materialized into `serde_json::Value`: only the recognized structure is traversed. The source
+//! ceiling bounds serde's transient token scratch; traversal ceilings are charged before content
+//! enters the domain observation, and unknown subtrees are skipped under the same depth and
+//! decoded-byte ceilings without being kept.
 //!
 //! Typed errors cross the serde boundary by being stashed in shared [`DecodeState`] before a
 //! value-free placeholder `serde` error is raised; the entry point recovers the stashed error, so
@@ -14,7 +15,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::io::Read;
+use std::io::{BufReader, Read};
 
 use assay_common::limits::{LimitExceeded, LimitKind, LimitReader};
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
@@ -26,8 +27,8 @@ use super::limits::{
 };
 use super::observation::{
     ErrorTypeObservation, McpResourceSpansObservation, McpSpanObservation, MethodObservation,
-    OperationObservation, RequestIdObservation, SpanKind, SpanProtocolVersion, StatusObservation,
-    SEMCONV_PIN,
+    OperationObservation, RequestIdObservation, RpcResponseStatusObservation, SpanKind,
+    SpanProtocolVersion, StatusObservation, SEMCONV_PIN,
 };
 use crate::mcp::era::{is_version_shaped, SUPPORTED_VERSIONS};
 
@@ -46,8 +47,14 @@ pub(crate) fn decode_mcp_resource_spans<R: Read>(
         span_count: 0,
         typed: None,
     });
+    // Buffer inside the source limiter: serde_json requests bytes one at a time, while the
+    // BufReader batches underlying reads without prefetching past the configured source ceiling.
     let reader = TrackingReader {
-        inner: LimitReader::new(source, limits.max_source_bytes, LimitKind::SourceBytes),
+        inner: BufReader::new(LimitReader::new(
+            source,
+            limits.max_source_bytes,
+            LimitKind::SourceBytes,
+        )),
         state: &state,
     };
     let mut de = serde_json::Deserializer::from_reader(reader);
@@ -124,11 +131,11 @@ impl DecodeState {
 
 pub(super) type St<'a> = &'a RefCell<DecodeState>;
 
-/// Wraps the source-byte [`LimitReader`] so that read failures are stashed as typed errors
+/// Wraps the buffered source-byte [`LimitReader`] so read failures are stashed as typed errors
 /// before `serde_json` swallows the `io::Error`, whose typed cause is otherwise unreachable
-/// through the serde error chain.
+/// through the serde error chain. Genericity keeps buffering inside the limiter.
 struct TrackingReader<'a, R> {
-    inner: LimitReader<R>,
+    inner: R,
     state: St<'a>,
 }
 
@@ -632,7 +639,9 @@ impl<'de> Visitor<'de> for SpansSeed<'_, '_> {
             st: self.st,
             depth: self.depth + 1,
         })? {
-            self.spans.push(span);
+            if let Some(span) = span {
+                self.spans.push(span);
+            }
         }
         Ok(())
     }
@@ -640,85 +649,148 @@ impl<'de> Visitor<'de> for SpansSeed<'_, '_> {
 
 // --- Span decoding --------------------------------------------------------------------------
 
-/// Recognized MCP attribute values, accumulated while one span's attribute list is traversed.
+/// Bounded raw values for attributes that may participate in the MCP projection. Type validation
+/// is deferred until the full list establishes whether the span is MCP-shaped; otherwise generic
+/// OTLP attributes on unrelated spans could manufacture MCP projection failures.
 #[derive(Default)]
 pub(super) struct SpanAttrs {
+    mcp_marker_seen: bool,
+    method: Option<DecodedValue>,
+    operation: Option<DecodedValue>,
+    tool_name: Option<DecodedValue>,
+    request_id: Option<DecodedValue>,
+    protocol_version: Option<DecodedValue>,
+    resource_uri: Option<DecodedValue>,
+    session_id: Option<DecodedValue>,
+    error_type: Option<DecodedValue>,
+    rpc_response_status: Option<DecodedValue>,
+}
+
+impl SpanAttrs {
+    /// Retain one bounded candidate value. Duplicate keys were already rejected by the caller, so
+    /// each slot is set at most once.
+    pub(super) fn apply<E: de::Error>(
+        &mut self,
+        _st: St<'_>,
+        key: &str,
+        value: DecodedValue,
+    ) -> Result<(), E> {
+        match key {
+            "mcp.method.name" => {
+                self.mcp_marker_seen = true;
+                self.method = Some(value);
+            }
+            "mcp.protocol.version" => {
+                self.mcp_marker_seen = true;
+                self.protocol_version = Some(value);
+            }
+            "mcp.resource.uri" => {
+                self.mcp_marker_seen = true;
+                self.resource_uri = Some(value);
+            }
+            "mcp.session.id" => {
+                self.mcp_marker_seen = true;
+                self.session_id = Some(value);
+            }
+            "gen_ai.operation.name" => self.operation = Some(value),
+            "gen_ai.tool.name" => self.tool_name = Some(value),
+            "jsonrpc.request.id" => self.request_id = Some(value),
+            "error.type" => self.error_type = Some(value),
+            "rpc.response.status_code" => self.rpc_response_status = Some(value),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn project<E: de::Error>(self, st: St<'_>) -> Result<Option<ProjectedSpanAttrs>, E> {
+        let wrong = |which: RecognizedAttribute| -> E {
+            st.borrow_mut()
+                .fail(OtlpIngestError::RecognizedAttributeWrongType(which))
+        };
+        let Some(method_value) = self.method else {
+            if self.mcp_marker_seen {
+                return Err(st
+                    .borrow_mut()
+                    .fail(OtlpIngestError::MissingRequiredAttribute(
+                        RecognizedAttribute::MethodName,
+                    )));
+            }
+            return Ok(None);
+        };
+        let method = match method_value {
+            DecodedValue::Str(s) if s == "tools/call" => MethodObservation::ToolsCall,
+            DecodedValue::Str(_) => MethodObservation::OtherMethod,
+            DecodedValue::Other => return Err(wrong(RecognizedAttribute::MethodName)),
+        };
+        for (value, field) in [
+            (self.resource_uri, RecognizedAttribute::ResourceUri),
+            (self.session_id, RecognizedAttribute::SessionId),
+        ] {
+            if matches!(value, Some(DecodedValue::Other)) {
+                return Err(wrong(field));
+            }
+        }
+        let operation = match self.operation {
+            Some(DecodedValue::Str(s)) if s == "execute_tool" => OperationObservation::ExecuteTool,
+            Some(DecodedValue::Str(_)) => OperationObservation::OtherOperation,
+            Some(DecodedValue::Other) => return Err(wrong(RecognizedAttribute::OperationName)),
+            None => OperationObservation::Absent,
+        };
+        let tool_name = match self.tool_name {
+            Some(DecodedValue::Str(s)) => Some(s),
+            Some(DecodedValue::Other) => return Err(wrong(RecognizedAttribute::ToolName)),
+            None => None,
+        };
+        let request_id = match self.request_id {
+            Some(DecodedValue::Str(s)) => Some(RequestIdObservation::String(s)),
+            Some(DecodedValue::Other) => return Err(wrong(RecognizedAttribute::RequestId)),
+            None => None,
+        };
+        // Malformed is an observation state, not a decode failure: this is producer-self-reported
+        // telemetry and never substitutes for MCP transport evidence.
+        let protocol_version = match self.protocol_version {
+            Some(DecodedValue::Str(s)) if is_version_shaped(&s) => {
+                if SUPPORTED_VERSIONS.contains(&s.as_str()) {
+                    SpanProtocolVersion::PresentSupported(s)
+                } else {
+                    SpanProtocolVersion::PresentUnsupported(s)
+                }
+            }
+            Some(_) => SpanProtocolVersion::Malformed,
+            None => SpanProtocolVersion::Absent,
+        };
+        let error_type = match self.error_type {
+            Some(DecodedValue::Str(s)) => ErrorTypeObservation::Present(s),
+            Some(DecodedValue::Other) => return Err(wrong(RecognizedAttribute::ErrorType)),
+            None => ErrorTypeObservation::Absent,
+        };
+        let rpc_response_status = match self.rpc_response_status {
+            Some(DecodedValue::Str(s)) => RpcResponseStatusObservation::Present(s),
+            Some(DecodedValue::Other) => {
+                return Err(wrong(RecognizedAttribute::RpcResponseStatusCode))
+            }
+            None => RpcResponseStatusObservation::Absent,
+        };
+        Ok(Some(ProjectedSpanAttrs {
+            method,
+            operation,
+            tool_name,
+            request_id,
+            protocol_version,
+            error_type,
+            rpc_response_status,
+        }))
+    }
+}
+
+struct ProjectedSpanAttrs {
     method: MethodObservation,
     operation: OperationObservation,
     tool_name: Option<String>,
     request_id: Option<RequestIdObservation>,
     protocol_version: SpanProtocolVersion,
     error_type: ErrorTypeObservation,
-}
-
-impl SpanAttrs {
-    /// Apply one recognized attribute. Duplicate keys were already rejected by the caller, so
-    /// each field is set at most once.
-    pub(super) fn apply<E: de::Error>(
-        &mut self,
-        st: St<'_>,
-        key: &str,
-        value: DecodedValue,
-    ) -> Result<(), E> {
-        let wrong = |st: St<'_>, which: RecognizedAttribute| -> E {
-            st.borrow_mut()
-                .fail(OtlpIngestError::RecognizedAttributeWrongType(which))
-        };
-        match key {
-            "mcp.method.name" => {
-                self.method = match value {
-                    DecodedValue::Str(s) if s == "tools/call" => MethodObservation::ToolsCall,
-                    DecodedValue::Str(_) => MethodObservation::OtherMethod,
-                    _ => return Err(wrong(st, RecognizedAttribute::MethodName)),
-                };
-            }
-            "gen_ai.operation.name" => {
-                self.operation = match value {
-                    DecodedValue::Str(s) if s == "execute_tool" => {
-                        OperationObservation::ExecuteTool
-                    }
-                    DecodedValue::Str(_) => OperationObservation::OtherOperation,
-                    _ => return Err(wrong(st, RecognizedAttribute::OperationName)),
-                };
-            }
-            "gen_ai.tool.name" => {
-                self.tool_name = match value {
-                    DecodedValue::Str(s) => Some(s),
-                    _ => return Err(wrong(st, RecognizedAttribute::ToolName)),
-                };
-            }
-            "jsonrpc.request.id" => {
-                self.request_id = match value {
-                    DecodedValue::Str(s) => Some(RequestIdObservation::String(s)),
-                    DecodedValue::Int(i) => Some(RequestIdObservation::Integer(i)),
-                    _ => return Err(wrong(st, RecognizedAttribute::RequestId)),
-                };
-            }
-            "mcp.protocol.version" => {
-                // Malformed is a typed observation state, not a decode failure: the attribute is
-                // producer-self-reported, and an unreadable version is a fact to record, never a
-                // defect that suppresses the rest of the document.
-                self.protocol_version = match value {
-                    DecodedValue::Str(s) if is_version_shaped(&s) => {
-                        if SUPPORTED_VERSIONS.contains(&s.as_str()) {
-                            SpanProtocolVersion::PresentSupported(s)
-                        } else {
-                            SpanProtocolVersion::PresentUnsupported(s)
-                        }
-                    }
-                    _ => SpanProtocolVersion::Malformed,
-                };
-            }
-            "error.type" => {
-                self.error_type = match value {
-                    DecodedValue::Str(s) => ErrorTypeObservation::Present(s),
-                    _ => return Err(wrong(st, RecognizedAttribute::ErrorType)),
-                };
-            }
-            _ => {}
-        }
-        Ok(())
-    }
+    rpc_response_status: RpcResponseStatusObservation,
 }
 
 /// The value of one attribute after bounded decoding. Only the shapes the recognized MCP
@@ -726,7 +798,6 @@ impl SpanAttrs {
 /// retention.
 pub(super) enum DecodedValue {
     Str(String),
-    Int(i64),
     Other,
 }
 
@@ -737,14 +808,21 @@ struct SpanSeed<'a> {
 }
 
 impl<'de> DeserializeSeed<'de> for SpanSeed<'_> {
-    type Value = McpSpanObservation;
+    type Value = Option<McpSpanObservation>;
     fn deserialize<D: de::Deserializer<'de>>(self, de: D) -> Result<Self::Value, D::Error> {
+        let mut st = self.st.borrow_mut();
+        st.span_count += 1;
+        if st.span_count > st.limits.max_span_count {
+            let max = st.limits.max_span_count;
+            return Err(st.limit(OtlpLimitDimension::SpanCount, max));
+        }
+        drop(st);
         de.deserialize_any(self)
     }
 }
 
 impl<'de> Visitor<'de> for SpanSeed<'_> {
-    type Value = McpSpanObservation;
+    type Value = Option<McpSpanObservation>;
 
     fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("a span object")
@@ -754,15 +832,7 @@ impl<'de> Visitor<'de> for SpanSeed<'_> {
     reject_container_at!(seq, ShapeSite::Span);
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        {
-            let mut st = self.st.borrow_mut();
-            st.span_count += 1;
-            if st.span_count > st.limits.max_span_count {
-                let max = st.limits.max_span_count;
-                return Err(st.limit(OtlpLimitDimension::SpanCount, max));
-            }
-            st.enter(self.depth)?;
-        }
+        self.st.borrow_mut().enter(self.depth)?;
         let mut members = Members::new(ShapeSite::Span);
         let mut trace_id: Option<String> = None;
         let mut span_id: Option<String> = None;
@@ -824,7 +894,12 @@ impl<'de> Visitor<'de> for SpanSeed<'_> {
                 .borrow_mut()
                 .fail(OtlpIngestError::MissingRequiredSpanField(SpanField::SpanId))
         })?;
-        Ok(McpSpanObservation {
+        let Some(attrs) = attrs.project(self.st)? else {
+            // Mixed exports contain unrelated spans. Generic GenAI/RPC/error attributes alone do
+            // not establish MCP identity, so their projection rules do not apply here.
+            return Ok(None);
+        };
+        Ok(Some(McpSpanObservation {
             trace_id,
             span_id,
             kind,
@@ -835,7 +910,8 @@ impl<'de> Visitor<'de> for SpanSeed<'_> {
             protocol_version: attrs.protocol_version,
             status,
             error_type: attrs.error_type,
-        })
+            rpc_response_status: attrs.rpc_response_status,
+        }))
     }
 }
 
@@ -865,7 +941,10 @@ impl<'de> Visitor<'de> for IdSeed<'_> {
 
     fn visit_str<E: de::Error>(self, s: &str) -> Result<String, E> {
         self.st.borrow_mut().charge(s.len() as u64)?;
-        if s.len() != self.hex_len || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        if s.len() != self.hex_len
+            || !s.bytes().all(|b| b.is_ascii_hexdigit())
+            || s.bytes().all(|b| b == b'0')
+        {
             return Err(self
                 .st
                 .borrow_mut()
@@ -918,33 +997,33 @@ impl<'de> Visitor<'de> for IdSeed<'_> {
     }
 }
 
-fn decode_span_kind(v: u64) -> Option<SpanKind> {
+fn decode_span_kind(v: i32) -> SpanKind {
     match v {
-        0 => Some(SpanKind::Unspecified),
-        1 => Some(SpanKind::Internal),
-        2 => Some(SpanKind::Server),
-        3 => Some(SpanKind::Client),
-        4 => Some(SpanKind::Producer),
-        5 => Some(SpanKind::Consumer),
-        _ => None,
+        0 => SpanKind::Unspecified,
+        1 => SpanKind::Internal,
+        2 => SpanKind::Server,
+        3 => SpanKind::Client,
+        4 => SpanKind::Producer,
+        5 => SpanKind::Consumer,
+        _ => SpanKind::Unknown,
     }
 }
 
-fn decode_status_code(v: u64) -> Option<StatusObservation> {
+fn decode_status_code(v: i32) -> StatusObservation {
     match v {
-        0 => Some(StatusObservation::Unset),
-        1 => Some(StatusObservation::Ok),
-        2 => Some(StatusObservation::Error),
-        _ => None,
+        0 => StatusObservation::Unset,
+        1 => StatusObservation::Ok,
+        2 => StatusObservation::Error,
+        _ => StatusObservation::Unknown,
     }
 }
 
-/// A closed proto enum encoded as a non-negative integer. Any other token, and any integer the
-/// pinned proto does not define, is a typed malformed-field fault.
+/// An open proto3 enum encoded as an `int32`. Future numbers, including negative values, map to
+/// the decoder's value-free unknown state; out-of-range numbers and wrong JSON types are malformed.
 struct EnumSeed<'a, T> {
     st: St<'a>,
     field: SpanField,
-    decode: fn(u64) -> Option<T>,
+    decode: fn(i32) -> T,
 }
 
 impl<'de, T> DeserializeSeed<'de> for EnumSeed<'_, T> {
@@ -963,16 +1042,19 @@ impl<'de, T> Visitor<'de> for EnumSeed<'_, T> {
 
     fn visit_u64<E: de::Error>(self, v: u64) -> Result<T, E> {
         self.st.borrow_mut().charge(8)?;
-        (self.decode)(v).ok_or_else(|| {
-            self.st
+        match i32::try_from(v) {
+            Ok(v) => Ok((self.decode)(v)),
+            Err(_) => Err(self
+                .st
                 .borrow_mut()
-                .fail(OtlpIngestError::MalformedSpanField(self.field))
-        })
+                .fail(OtlpIngestError::MalformedSpanField(self.field))),
+        }
     }
 
     fn visit_i64<E: de::Error>(self, v: i64) -> Result<T, E> {
-        match u64::try_from(v) {
-            Ok(v) => self.visit_u64(v),
+        self.st.borrow_mut().charge(8)?;
+        match i32::try_from(v) {
+            Ok(v) => Ok((self.decode)(v)),
             Err(_) => Err(self
                 .st
                 .borrow_mut()
@@ -999,10 +1081,8 @@ impl<'de, T> Visitor<'de> for EnumSeed<'_, T> {
             .fail(OtlpIngestError::MalformedSpanField(self.field)))
     }
     fn visit_unit<E: de::Error>(self) -> Result<T, E> {
-        Err(self
-            .st
-            .borrow_mut()
-            .fail(OtlpIngestError::MalformedSpanField(self.field)))
+        self.st.borrow_mut().charge(1)?;
+        Ok((self.decode)(0))
     }
     fn visit_seq<A: SeqAccess<'de>>(self, _: A) -> Result<T, A::Error> {
         Err(self
