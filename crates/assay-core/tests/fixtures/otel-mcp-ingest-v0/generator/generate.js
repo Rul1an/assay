@@ -13,23 +13,6 @@
  * - Byte-identical: Reproducible output across runs
  */
 
-// -- Node runtime version check -----------------------------------------------
-// Byte-identical generation requires a minimum Node version that matches the
-// OpenTelemetry SDK's own engine requirement (^18.19.0 || >=20.6.0).
-// This check runs before any imports so a mismatch fails immediately.
-const MIN_MAJOR = 18;
-const MIN_MINOR = 19;
-const [major, minor] = process.versions.node.split('.').map(Number);
-if (major < MIN_MAJOR || (major === MIN_MAJOR && minor < MIN_MINOR)) {
-  console.error(
-    `ERROR: Node ${process.versions.node} does not meet minimum ` +
-    `${MIN_MAJOR}.${MIN_MINOR}.0 for byte-identical generation. ` +
-    `Selected runtime: ${process.execPath}`
-  );
-  process.exit(1);
-}
-console.log(`Node runtime: ${process.versions.node} (${process.execPath})`);
-
 import * as resources from '@opentelemetry/resources';
 const { resourceFromAttributes, defaultResource } = resources;
 import * as semconv from '@opentelemetry/semantic-conventions';
@@ -45,11 +28,27 @@ const { SpanKind, SpanStatusCode, context } = api;
 import * as http from 'http';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// -- Node exact runtime check --------------------------------------------------
+// Byte-identical generation requires the exact Node version recorded in
+// .node-version.  A range (>=) is not a pin and does not guarantee cross-
+// runtime identity.  This check reads the single governed version file and
+// fails immediately on any mismatch.
+const EXPECTED_NODE = readFileSync(path.join(__dirname, '.node-version'), 'utf8').trim();
+if (process.versions.node !== EXPECTED_NODE) {
+  console.error(
+    `ERROR: Node ${process.versions.node} does not match .node-version ` +
+    `${EXPECTED_NODE}. Selected runtime: ${process.execPath}`
+  );
+  process.exit(1);
+}
+console.log(`Node runtime: ${process.versions.node} (exact, from .node-version) (${process.execPath})`);
 
 /**
  * Deterministic ID generator for reproducible fixtures

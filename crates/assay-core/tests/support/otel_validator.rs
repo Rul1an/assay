@@ -106,9 +106,12 @@ const EXPECTED_GENAI_OPERATION_NAME: &str = "execute_tool";
 const EXPECTED_GENAI_TOOL_NAME: &str = "read_file";
 const EXPECTED_MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 
-/// Exact generator identity: directory must be 'generator' and script must be 'generate.js'.
+/// Exact generator identity: directory must be 'generator', script must be 'generate.js',
+/// and .node-version must be the governed version file with an exact Node version.
 const EXPECTED_GENERATOR_DIRECTORY: &str = "generator";
 const EXPECTED_GENERATOR_SCRIPT: &str = "generate.js";
+const EXPECTED_NODE_VERSION_FILE: &str = ".node-version";
+const EXPECTED_NODE_VERSION: &str = "20.16.0";
 
 /// Independently frozen expected digests for vendored content files.
 /// These are NOT read from upstream.lock.json; they are compiled into the
@@ -149,6 +152,7 @@ const GOVERNED_FILES: &[&str] = &[
     "hostile_deep_nesting.json",
     "hostile_oversized_attribute.json",
     "hostile_missing_required_fields.json",
+    "generator/.node-version",
     "generator/package.json",
     "generator/package-lock.json",
     "generator/generate.js",
@@ -268,9 +272,12 @@ struct VendoredFile {
 struct GeneratorInfo {
     directory: String,
     script: String,
+    node_version_file: String,
+    node_version: String,
     package_json_sha256: String,
     package_lock_sha256: String,
     script_sha256: String,
+    node_version_sha256: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -559,6 +566,8 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
     // Validate generator identity before anything else uses those paths
     if lock.generator.directory != EXPECTED_GENERATOR_DIRECTORY
         || lock.generator.script != EXPECTED_GENERATOR_SCRIPT
+        || lock.generator.node_version_file != EXPECTED_NODE_VERSION_FILE
+        || lock.generator.node_version != EXPECTED_NODE_VERSION
     {
         return Err(ValidationError::GeneratorIdentityMismatch);
     }
@@ -770,6 +779,22 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         != lock.generator.script_sha256
     {
         return Err(ValidationError::GeneratorHashMismatch);
+    }
+
+    let node_version_path = gen_root.join(&lock.generator.node_version_file);
+    if !node_version_path.exists() {
+        return Err(ValidationError::GeneratorFileMissing);
+    }
+    if sha256_file(&node_version_path, ValidationError::GeneratorFileMissing)?
+        != lock.generator.node_version_sha256
+    {
+        return Err(ValidationError::GeneratorHashMismatch);
+    }
+    // Validate .node-version content matches the lock's node_version field
+    let nv_content = fs::read_to_string(&node_version_path)
+        .map_err(|_| ValidationError::GeneratorFileMissing)?;
+    if nv_content.trim() != lock.generator.node_version {
+        return Err(ValidationError::GeneratorIdentityMismatch);
     }
 
     // Validate package-lock bindings (version, resolved, integrity)

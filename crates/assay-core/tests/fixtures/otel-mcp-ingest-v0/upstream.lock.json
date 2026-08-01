@@ -59,9 +59,12 @@
   "generator": {
     "directory": "generator",
     "script": "generate.js",
-    "package_json_sha256": "c576083ccbc839d174d6b102dcf141a46af5a53eaf161944f95ef482fffb4301",
-    "package_lock_sha256": "5c068d08c1ae82d574a01883e034dd810c31d1c49c4b73094da344e4a018cdf7",
-    "script_sha256": "89716d063b70eed3cd853a420a0f02af8ecb1f1ba152a504da769b1e3caf1f48"
+    "node_version_file": ".node-version",
+    "node_version": "20.16.0",
+    "package_json_sha256": "9d9820f731ecd26ba3bbd262261ca8393f630996befa650b0f79de46e3292e80",
+    "package_lock_sha256": "68efd14131ebaf4e335d476f07d111009b5343744c909603eb07e21917edf7dc",
+    "script_sha256": "1adeae7b44933292dce8c608326bc5477d341c81b19995f18cea54accd498372",
+    "node_version_sha256": "e304b56d49eb88f177afe8fa58e9941f373a94f46de22fe198686b86c7092363"
   },
   "corpus": [
     {

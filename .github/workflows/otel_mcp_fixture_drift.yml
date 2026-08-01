@@ -7,8 +7,8 @@ name: OTLP MCP Fixture Drift Report
 # All pinned versions, tags, commits, and paths are read from upstream.lock.json
 # (single source of truth). No pins are duplicated in this workflow.
 #
-# Network/npm fetch failure is treated as an unknown operational failure
-# (exit 1), never as detected drift.
+# Operational failures (network, npm) are reported as "unknown" in the summary,
+# never as drift. No ::error command annotations are emitted.
 
 on:
   schedule:
@@ -71,19 +71,24 @@ jobs:
           SDK_PKG="${{ steps.lock.outputs.locked_sdk_pkg }}"
           EXPORTER_PKG="${{ steps.lock.outputs.locked_exporter_pkg }}"
 
-          # Fetch latest versions from npm; fail the step on network error
-          # (operational failure, not drift)
-          SDK_LATEST=$(npm view --silent "$SDK_PKG" version) || {
-            echo "::error::npm fetch failed for $SDK_PKG (operational failure, not drift)"
-            exit 1
-          }
-          EXPORTER_LATEST=$(npm view --silent "$EXPORTER_PKG" version) || {
-            echo "::error::npm fetch failed for $EXPORTER_PKG (operational failure, not drift)"
-            exit 1
-          }
-          echo "sdk=$SDK_LATEST" >> "$GITHUB_OUTPUT"
-          echo "exporter=$EXPORTER_LATEST" >> "$GITHUB_OUTPUT"
-          echo "Latest SDK: $SDK_LATEST, Exporter: $EXPORTER_LATEST"
+          SDK_LATEST=$(npm view --silent "$SDK_PKG" version 2>/dev/null) || SDK_LATEST=""
+          EXPORTER_LATEST=$(npm view --silent "$EXPORTER_PKG" version 2>/dev/null) || EXPORTER_LATEST=""
+
+          if [ -z "$SDK_LATEST" ] || [ -z "$EXPORTER_LATEST" ]; then
+            {
+              echo "ok=false"
+              echo "sdk="
+              echo "exporter="
+            } >> "$GITHUB_OUTPUT"
+            echo "npm fetch failed for one or more packages (operational failure)"
+          else
+            {
+              echo "ok=true"
+              echo "sdk=$SDK_LATEST"
+              echo "exporter=$EXPORTER_LATEST"
+            } >> "$GITHUB_OUTPUT"
+            echo "Latest SDK: $SDK_LATEST, Exporter: $EXPORTER_LATEST"
+          fi
 
       - name: Check Proto Pin Integrity
         id: proto_pin
@@ -95,6 +100,7 @@ jobs:
           PROTO_RAW_BASE="https://raw.githubusercontent.com/open-telemetry/opentelemetry-proto/${PROTO_TAG}"
 
           DRIFT=false
+          FETCH_OK=true
 
           # Iterate locked proto files from upstream.lock.json
           FILE_COUNT=$(jq -r '.upstream_sources[] | select(.type=="proto") | .files | length' "$LOCK_PATH")
@@ -109,9 +115,10 @@ jobs:
             echo "  Checking $SOURCE_PATH..."
 
             if [ -f "$FILE" ]; then
-              UPSTREAM=$(curl --fail --retry 3 -sS "$UPSTREAM_URL" | shasum -a 256 | awk '{print $1}') || {
-                echo "::error::curl failed for $UPSTREAM_URL (operational failure, not drift)"
-                exit 1
+              UPSTREAM=$(curl --fail --retry 3 -sS "$UPSTREAM_URL" 2>/dev/null | shasum -a 256 | awk '{print $1}') || {
+                FETCH_OK=false
+                echo "curl failed for $UPSTREAM_URL (operational failure)"
+                continue
               }
               VENDORED=$(shasum -a 256 < "$FILE" | awk '{print $1}')
               if [ "$UPSTREAM" != "$VENDORED" ]; then DRIFT=true; fi
@@ -121,17 +128,22 @@ jobs:
           done
 
           echo "drift=$DRIFT" >> "$GITHUB_OUTPUT"
+          echo "ok=$FETCH_OK" >> "$GITHUB_OUTPUT"
 
       - name: Check Proto Latest Release
         id: proto_latest
         run: |
           set -euo pipefail
-          LATEST=$(curl --fail --retry 3 -sS https://api.github.com/repos/open-telemetry/opentelemetry-proto/releases/latest | jq -r '.tag_name') || {
-            echo "::error::GitHub API fetch failed (operational failure, not drift)"
-            exit 1
-          }
-          echo "tag=$LATEST" >> "$GITHUB_OUTPUT"
-          echo "Latest opentelemetry-proto: $LATEST"
+          LATEST=$(curl --fail --retry 3 -sS https://api.github.com/repos/open-telemetry/opentelemetry-proto/releases/latest 2>/dev/null | jq -r '.tag_name') || LATEST=""
+          if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "GitHub API fetch failed (operational failure)"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$LATEST" >> "$GITHUB_OUTPUT"
+            echo "Latest opentelemetry-proto: $LATEST"
+          fi
 
       - name: Check Semconv Pin Integrity
         id: semconv_pin
@@ -149,12 +161,15 @@ jobs:
 
           if [ ! -f "$SEMCONV_FILE" ]; then
             echo "drift=true" >> "$GITHUB_OUTPUT"
+            echo "ok=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          UPSTREAM=$(curl --fail --retry 3 -sS "$UPSTREAM_URL" | shasum -a 256 | awk '{print $1}') || {
-            echo "::error::curl failed for semconv upstream (operational failure, not drift)"
-            exit 1
+          UPSTREAM=$(curl --fail --retry 3 -sS "$UPSTREAM_URL" 2>/dev/null | shasum -a 256 | awk '{print $1}') || {
+            echo "drift=" >> "$GITHUB_OUTPUT"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "curl failed for semconv upstream (operational failure)"
+            exit 0
           }
           VENDORED=$(shasum -a 256 < "$SEMCONV_FILE" | awk '{print $1}')
 
@@ -163,32 +178,46 @@ jobs:
           else
             echo "drift=false" >> "$GITHUB_OUTPUT"
           fi
+          echo "ok=true" >> "$GITHUB_OUTPUT"
 
       - name: Check Semconv Latest Commit
         id: semconv_latest
         run: |
           set -euo pipefail
-          LATEST=$(curl --fail --retry 3 -sS https://api.github.com/repos/open-telemetry/semantic-conventions-genai/commits/main | jq -r '.sha') || {
-            echo "::error::GitHub API fetch failed (operational failure, not drift)"
-            exit 1
-          }
-          echo "commit=$LATEST" >> "$GITHUB_OUTPUT"
-          echo "Latest semantic-conventions-genai commit: $LATEST"
+          LATEST=$(curl --fail --retry 3 -sS https://api.github.com/repos/open-telemetry/semantic-conventions-genai/commits/main 2>/dev/null | jq -r '.sha') || LATEST=""
+          if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "commit=" >> "$GITHUB_OUTPUT"
+            echo "GitHub API fetch failed (operational failure)"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "commit=$LATEST" >> "$GITHUB_OUTPUT"
+            echo "Latest semantic-conventions-genai commit: $LATEST"
+          fi
 
       - name: Report to Summary
+        if: always()
+        id: summary
         env:
           LOCKED_SDK: ${{ steps.lock.outputs.locked_sdk }}
           LOCKED_EXPORTER: ${{ steps.lock.outputs.locked_exporter }}
+          LATEST_OK: ${{ steps.latest.outputs.ok }}
           LATEST_SDK: ${{ steps.latest.outputs.sdk }}
           LATEST_EXPORTER: ${{ steps.latest.outputs.exporter }}
+          PROTO_PIN_OK: ${{ steps.proto_pin.outputs.ok }}
           PROTO_DRIFT: ${{ steps.proto_pin.outputs.drift }}
           PROTO_TAG: ${{ steps.lock.outputs.proto_tag }}
+          PROTO_LATEST_OK: ${{ steps.proto_latest.outputs.ok }}
           PROTO_LATEST_TAG: ${{ steps.proto_latest.outputs.tag }}
+          SEMCONV_PIN_OK: ${{ steps.semconv_pin.outputs.ok }}
           SEMCONV_DRIFT: ${{ steps.semconv_pin.outputs.drift }}
           SEMCONV_COMMIT: ${{ steps.lock.outputs.semconv_commit }}
+          SEMCONV_LATEST_OK: ${{ steps.semconv_latest.outputs.ok }}
           SEMCONV_LATEST_COMMIT: ${{ steps.semconv_latest.outputs.commit }}
         run: |
           set -euo pipefail
+          HAD_OP_FAILURE=false
+
           {
             echo "# OTLP MCP Fixture Drift Report"
             echo ""
@@ -196,7 +225,13 @@ jobs:
             echo ""
 
             # SDK
-            if [ "$LOCKED_SDK" != "$LATEST_SDK" ]; then
+            if [ "$LATEST_OK" != "true" ]; then
+              HAD_OP_FAILURE=true
+              echo "## SDK: Unknown (operational failure)"
+              echo ""
+              echo "npm fetch failed. This is not drift."
+              echo ""
+            elif [ "$LOCKED_SDK" != "$LATEST_SDK" ]; then
               echo "## SDK Drift Detected"
               echo ""
               echo "- Locked: \`$LOCKED_SDK\`"
@@ -208,7 +243,13 @@ jobs:
             fi
 
             # Exporter
-            if [ "$LOCKED_EXPORTER" != "$LATEST_EXPORTER" ]; then
+            if [ "$LATEST_OK" != "true" ]; then
+              # Already flagged above
+              echo "## Exporter: Unknown (operational failure)"
+              echo ""
+              echo "npm fetch failed. This is not drift."
+              echo ""
+            elif [ "$LOCKED_EXPORTER" != "$LATEST_EXPORTER" ]; then
               echo "## Exporter Drift Detected"
               echo ""
               echo "- Locked: \`$LOCKED_EXPORTER\`"
@@ -220,7 +261,13 @@ jobs:
             fi
 
             # Proto Pin Integrity
-            if [ "$PROTO_DRIFT" = "true" ]; then
+            if [ "$PROTO_PIN_OK" != "true" ]; then
+              HAD_OP_FAILURE=true
+              echo "## Proto Pin Integrity: Unknown (operational failure)"
+              echo ""
+              echo "One or more upstream fetches failed. This is not drift."
+              echo ""
+            elif [ "$PROTO_DRIFT" = "true" ]; then
               echo "## Proto Pin Integrity: DRIFT DETECTED"
               echo ""
               echo "One or more proto files differ from pinned $PROTO_TAG."
@@ -231,14 +278,28 @@ jobs:
             fi
 
             # Proto Latest Release
-            echo "## Proto Latest Release"
-            echo ""
-            echo "- Pinned: \`$PROTO_TAG\`"
-            echo "- Latest: \`$PROTO_LATEST_TAG\`"
-            echo ""
+            if [ "$PROTO_LATEST_OK" != "true" ]; then
+              HAD_OP_FAILURE=true
+              echo "## Proto Latest Release: Unknown (operational failure)"
+              echo ""
+              echo "GitHub API fetch failed. This is not drift."
+              echo ""
+            else
+              echo "## Proto Latest Release"
+              echo ""
+              echo "- Pinned: \`$PROTO_TAG\`"
+              echo "- Latest: \`$PROTO_LATEST_TAG\`"
+              echo ""
+            fi
 
             # Semconv Pin Integrity
-            if [ "$SEMCONV_DRIFT" = "true" ]; then
+            if [ "$SEMCONV_PIN_OK" != "true" ]; then
+              HAD_OP_FAILURE=true
+              echo "## Semconv Pin Integrity: Unknown (operational failure)"
+              echo ""
+              echo "Upstream fetch failed. This is not drift."
+              echo ""
+            elif [ "$SEMCONV_DRIFT" = "true" ]; then
               echo "## Semconv Pin Integrity: DRIFT DETECTED"
               echo ""
               echo "Vendored MCP semconv differs from pinned commit ${SEMCONV_COMMIT:0:8}."
@@ -249,15 +310,36 @@ jobs:
             fi
 
             # Semconv Latest Commit
-            echo "## Semconv Latest Commit"
-            echo ""
-            echo "- Pinned: \`$SEMCONV_COMMIT\`"
-            echo "- Latest: \`$SEMCONV_LATEST_COMMIT\`"
-            echo ""
+            if [ "$SEMCONV_LATEST_OK" != "true" ]; then
+              HAD_OP_FAILURE=true
+              echo "## Semconv Latest Commit: Unknown (operational failure)"
+              echo ""
+              echo "GitHub API fetch failed. This is not drift."
+              echo ""
+            else
+              echo "## Semconv Latest Commit"
+              echo ""
+              echo "- Pinned: \`$SEMCONV_COMMIT\`"
+              echo "- Latest: \`$SEMCONV_LATEST_COMMIT\`"
+              echo ""
+            fi
 
             # Overall
             echo "## Status"
             echo ""
             echo "Drift findings are summary-only and non-required. They do not block required CI."
-            echo "Network/npm fetch failures fail as operational errors, never as drift."
+            echo "Network/npm fetch failures are operational errors reported as unknown, never as drift."
+            if [ "$HAD_OP_FAILURE" = "true" ]; then
+              echo ""
+              echo "**One or more checks could not complete due to operational failures (network/npm).**"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "had_op_failure=$HAD_OP_FAILURE" >> "$GITHUB_OUTPUT"
+
+      - name: Fail on Operational Error
+        if: always() && steps.summary.outputs.had_op_failure == 'true'
+        run: |
+          echo "One or more upstream fetches failed (operational failure, not drift)."
+          echo "The summary has been written. Failing the informational job."
+          exit 1

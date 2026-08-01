@@ -44,14 +44,16 @@ Hostile fixtures are **locked inputs only** -- Slice B will define rejection sem
 ## Generator
 
 Located in `generator/`:
-- Standard `package.json` with exact pinned dependencies
-- `generate.js` uses official OTLP HTTP exporter and deterministic IDs
+- `.node-version` governs the exact Node runtime (`20.16.0`)
+- `package.json` with exact `engines`, `packageManager`, and preinstall guard
+- `generate.js` reads `.node-version` and refuses to run on a different Node version
 - Captures official exporter output via ephemeral HTTP server
-- **Byte-identical** output across runs (fixed timestamps, trace/span IDs)
+- **Byte-identical** output across runs on the exact governed runtime (fixed timestamps, trace/span IDs)
 
 Regenerate:
 ```bash
 cd generator
+node --version  # must match .node-version exactly
 npm ci
 npm run generate
 ```
