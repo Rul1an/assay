@@ -400,6 +400,31 @@ fn validate_safe_relative_path(path_str: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
+/// Convert a relative `Path` to a canonical POSIX slash-separated string using
+/// `Path::components()`. This avoids OS-dependent separator behaviour (Windows
+/// backslashes vs POSIX forward slashes) so the result can be compared directly
+/// against the slash-separated `GOVERNED_FILES` constants.
+///
+/// Non-UTF-8 components fail-closed with `PathTraversal`.
+fn path_to_posix(rel: &Path) -> Result<String, ValidationError> {
+    let mut parts: Vec<&str> = Vec::new();
+    for component in rel.components() {
+        match component {
+            Component::Normal(os) => {
+                let s = os.to_str().ok_or(ValidationError::PathTraversal)?;
+                parts.push(s);
+            }
+            // ParentDir / RootDir / Prefix / CurDir are rejected: the caller
+            // must have already run containment checks, but fail-closed here too.
+            _ => return Err(ValidationError::PathTraversal),
+        }
+    }
+    if parts.is_empty() {
+        return Err(ValidationError::PathTraversal);
+    }
+    Ok(parts.join("/"))
+}
+
 /// Collect all files recursively under a directory, returning paths relative to root.
 /// Rejects symlinks. Ignores generator/node_modules.
 fn collect_governed_files(root: &Path) -> Result<HashSet<String>, ValidationError> {
@@ -435,7 +460,10 @@ fn collect_recursive(
             }
         }
 
-        let rel_str = rel.to_str().ok_or(ValidationError::PathTraversal)?;
+        // Platform-neutral POSIX representation built from path components.
+        // On Windows, rel.to_str() would produce backslashes which would not
+        // match the slash-separated GOVERNED_FILES constants.
+        let rel_posix = path_to_posix(rel)?;
 
         // Reject symlinks anywhere in the governed tree (after containment is proved)
         let metadata =
@@ -444,15 +472,18 @@ fn collect_recursive(
             return Err(ValidationError::SymlinkInCorpus);
         }
 
-        // Ignore generator/node_modules (created locally by npm ci)
-        if rel_str == "generator/node_modules" || rel_str.starts_with("generator/node_modules/") {
+        // Ignore generator/node_modules (created locally by npm ci).
+        // Compared against the canonical POSIX representation so the
+        // exclusion works identically on Windows and POSIX hosts.
+        if rel_posix == "generator/node_modules" || rel_posix.starts_with("generator/node_modules/")
+        {
             continue;
         }
 
         if metadata.is_dir() {
             collect_recursive(base, &path, files)?;
         } else {
-            files.insert(rel_str.to_string());
+            files.insert(rel_posix);
         }
     }
     Ok(())
@@ -1097,4 +1128,100 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
     }
 
     Ok(())
+}
+
+// -- Unit tests for path_to_posix (platform-neutral, no filesystem access) --------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn test_path_to_posix_single_component() {
+        let p = Path::new("file.txt");
+        assert_eq!(path_to_posix(p).unwrap(), "file.txt");
+    }
+
+    #[test]
+    fn test_path_to_posix_nested_via_join() {
+        // PathBuf::join uses the platform separator internally, so on Windows
+        // this would produce "generator\.node-version". path_to_posix must
+        // normalise to forward slashes via components on every platform.
+        let p = PathBuf::from("generator").join(".node-version");
+        assert_eq!(path_to_posix(&p).unwrap(), "generator/.node-version");
+    }
+
+    #[test]
+    fn test_path_to_posix_deep_nesting() {
+        let p = PathBuf::from("vendor")
+            .join("opentelemetry-proto-v1.11.0")
+            .join("opentelemetry")
+            .join("proto")
+            .join("collector")
+            .join("trace")
+            .join("v1")
+            .join("trace_service.proto");
+        assert_eq!(
+            path_to_posix(&p).unwrap(),
+            "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/collector/trace/v1/trace_service.proto"
+        );
+    }
+
+    #[test]
+    fn test_path_to_posix_node_modules_exclusion_prefix() {
+        // Verify that a path built via join produces the exact string that
+        // the node_modules exclusion check expects.
+        let p = PathBuf::from("generator").join("node_modules");
+        let posix = path_to_posix(&p).unwrap();
+        assert_eq!(posix, "generator/node_modules");
+
+        let nested = PathBuf::from("generator")
+            .join("node_modules")
+            .join("some-pkg")
+            .join("index.js");
+        let nested_posix = path_to_posix(&nested).unwrap();
+        assert!(nested_posix.starts_with("generator/node_modules/"));
+    }
+
+    #[test]
+    fn test_path_to_posix_rejects_parent_dir() {
+        let p = Path::new("generator/../etc/passwd");
+        assert_eq!(path_to_posix(p), Err(ValidationError::PathTraversal));
+    }
+
+    #[test]
+    fn test_path_to_posix_rejects_empty() {
+        let p = Path::new("");
+        assert_eq!(path_to_posix(p), Err(ValidationError::PathTraversal));
+    }
+
+    #[test]
+    fn test_path_to_posix_rejects_absolute() {
+        let p = Path::new("/etc/passwd");
+        assert_eq!(path_to_posix(p), Err(ValidationError::PathTraversal));
+    }
+
+    #[test]
+    fn test_path_to_posix_rejects_curdir() {
+        let p = Path::new("./file.txt");
+        assert_eq!(path_to_posix(p), Err(ValidationError::PathTraversal));
+    }
+
+    #[test]
+    fn test_all_governed_files_match_path_to_posix_roundtrip() {
+        // Every entry in GOVERNED_FILES, when parsed as a Path and converted
+        // back through path_to_posix, must produce the original string.
+        // This proves the constant set is consistent with the normalisation.
+        for &governed in GOVERNED_FILES {
+            let p = Path::new(governed);
+            let result = path_to_posix(p).unwrap_or_else(|e| {
+                panic!("path_to_posix failed for governed file {governed:?}: {e:?}")
+            });
+            assert_eq!(
+                result, governed,
+                "roundtrip mismatch for governed file {governed:?}"
+            );
+        }
+    }
 }
