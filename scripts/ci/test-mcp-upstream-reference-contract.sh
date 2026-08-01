@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKFLOW="${ROOT}/.github/workflows/mcp-upstream-reference.yml"
 VALIDATOR="${ROOT}/scripts/ci/verify-mcp-upstream-reference.py"
 VALIDATOR_TEST="${ROOT}/scripts/ci/test_verify_mcp_upstream_reference.py"
+SDK_LOCK_FIXTURE="${ROOT}/scripts/ci/fixtures/mcp-upstream-reference/rust-sdk-3240b6e7828ed4146041d32dd0ce4ced7c04e411.Cargo.lock"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -14,6 +15,7 @@ fail() {
 [[ -f "$WORKFLOW" ]] || fail "missing upstream reference workflow"
 [[ -f "$VALIDATOR" ]] || fail "missing upstream result validator"
 [[ -f "$VALIDATOR_TEST" ]] || fail "missing validator regression tests"
+[[ -f "$SDK_LOCK_FIXTURE" ]] || fail "missing reviewed Rust SDK dependency lock"
 
 pin() {
   local needle="$1" message="$2"
@@ -30,8 +32,10 @@ pin "3240b6e7828ed4146041d32dd0ce4ced7c04e411" \
   "workflow must pin the Rust SDK reference"
 pin "4ce506ce729ad4ed2b28de6bad157eda83247a2d298924c7590c0fc938e4351c" \
   "workflow must verify the Rust SDK source archive"
-pin "f4b9fd48cb9598f9658f00a9cc6f176739e97e45045e90b34e8bb4563937bc48" \
+pin "ff0bab171e7e812b41c8c653cd33ac07c948f594cc2beedf6e34ac5711ecc031" \
   "workflow must verify the Rust SDK dependency lock"
+pin 'RUST_SDK_LOCKFILE: "scripts/ci/fixtures/mcp-upstream-reference/rust-sdk-3240b6e7828ed4146041d32dd0ce4ced7c04e411.Cargo.lock"' \
+  "workflow must name the reviewed Rust SDK dependency lock"
 pin 'NODE_VERSION: "24.18.0"' "workflow must pin the Node runtime"
 pin "node-version: \"\${{ env.NODE_VERSION }}\"" \
   "workflow must install the pinned Node version"
@@ -55,10 +59,12 @@ pin "fetch --depth=1 origin \"\$RUST_SDK_COMMIT\"" \
   "workflow must fetch the pinned Rust SDK commit"
 pin "test \"\$actual_sdk_archive\" = \"\$RUST_SDK_ARCHIVE_SHA256\"" \
   "workflow must verify the Rust SDK archive pin"
-pin 'cargo generate-lockfile' \
-  "workflow must materialize the reviewed Rust SDK lock"
+pin "cp \"\$GITHUB_WORKSPACE/\$RUST_SDK_LOCKFILE\" \"\$sdk_dir/Cargo.lock\"" \
+  "workflow must install the reviewed Rust SDK lock"
 pin "test \"\$actual_sdk_lock\" = \"\$RUST_SDK_LOCK_SHA256\"" \
   "workflow must verify the Rust SDK lock pin"
+pin 'scripts/ci/fixtures/mcp-upstream-reference/**' \
+  "workflow must run when the reviewed Rust SDK lock changes"
 pin "--path \"\$sdk_dir\"" \
   "workflow must execute the verified Rust SDK checkout"
 pin '--build-cmd "cargo build --locked -p mcp-conformance"' \
@@ -74,6 +80,14 @@ grep -Eq 'uses: actions/upload-artifact@[0-9a-f]{40}' "$WORKFLOW" \
 if grep -Eq 'continue-on-error:[[:space:]]*true' "$WORKFLOW"; then
   fail "the reference run must not turn a failed check into success"
 fi
+
+if grep -F 'cargo generate-lockfile' "$WORKFLOW" >/dev/null; then
+  fail "the reference run must not resolve a fresh Rust SDK dependency graph"
+fi
+
+actual_sdk_lock="$(shasum -a 256 "$SDK_LOCK_FIXTURE" | awk '{print $1}')"
+[[ "$actual_sdk_lock" == "ff0bab171e7e812b41c8c653cd33ac07c948f594cc2beedf6e34ac5711ecc031" ]] \
+  || fail "reviewed Rust SDK dependency lock digest drifted"
 
 python3 -m unittest "$VALIDATOR_TEST"
 
