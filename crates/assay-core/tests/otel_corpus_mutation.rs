@@ -1794,6 +1794,65 @@ fn test_check_runtime_script_tamper() {
     assert_eq!(result, Err(ValidationError::GeneratorHashMismatch));
 }
 
+/// Proves check-runtime.cjs itself fails closed on a malformed package.json:
+/// nonzero exit with only the controlled "FAIL: cannot read or parse package.json"
+/// diagnostic. Node >= 20 embeds a snippet of the malformed source in the
+/// JSON.parse SyntaxError message, so an escaping raw error would echo
+/// attacker-controlled file content, violating the value-free diagnostic contract.
+/// (Runs the script directly rather than validate_corpus_at_path, since the
+/// contract under test is the script's own stderr behavior.)
+#[test]
+fn test_check_runtime_malformed_package_json_no_content_leak() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let generator = corpus.join("generator");
+    let marker = "MALFORMED-CONTENT-MARKER";
+    fs::write(
+        generator.join("package.json"),
+        format!("{{ \"{marker}\": oops"),
+    )
+    .unwrap();
+
+    let output = match std::process::Command::new("node")
+        .arg("check-runtime.cjs")
+        .current_dir(&generator)
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("skipping test_check_runtime_malformed_package_json_no_content_leak: node not on PATH");
+            return;
+        }
+        Err(e) => panic!("failed to spawn node: {e}"),
+    };
+
+    assert!(
+        !output.status.success(),
+        "malformed package.json must exit nonzero"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.is_empty(), "stdout must be empty, got: {stdout}");
+    // Exact equality after removing exactly one platform line ending: any extra
+    // stderr byte (including extra blank lines) is a leak candidate and must fail.
+    let stderr_line = stderr
+        .strip_suffix("\r\n")
+        .or_else(|| stderr.strip_suffix('\n'))
+        .unwrap_or(&stderr);
+    assert_eq!(
+        stderr_line, "FAIL: cannot read or parse package.json",
+        "stderr must be exactly the controlled diagnostic"
+    );
+    // Redundant with the exact match above; kept to document the attack surface.
+    assert!(
+        !stderr.contains(marker),
+        "must not echo malformed package.json content"
+    );
+    assert!(
+        !stderr.contains("SyntaxError"),
+        "must not expose a raw SyntaxError"
+    );
+}
+
 /// Proves the copy_dir_all helper skips generator/node_modules while still
 /// rejecting a node_modules symlink before the skip decision.
 #[cfg(unix)]

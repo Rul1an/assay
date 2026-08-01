@@ -23,29 +23,28 @@ if (!/^\d+\.\d+\.\d+$/.test(governedNode)) {
   process.exit(1);
 }
 
-// Read governed npm version from package.json packageManager field
-let governedNpm;
+// Read governed npm version from package.json packageManager field.
+// Only read+parse lives in the try: every read/parse exception takes the
+// controlled path below, because since Node 20 a raw JSON.parse SyntaxError
+// embeds a snippet of the malformed source and must never escape.
+let pkg;
 try {
-  const pkg = JSON.parse(fs.readFileSync(pkgJsonFile, 'utf8'));
-  const pm = pkg.packageManager;
-  if (typeof pm !== 'string') {
-    console.error('FAIL: package.json packageManager is missing or not a string');
-    process.exit(1);
-  }
-  const match = /^npm@(\d+\.\d+\.\d+)$/.exec(pm);
-  if (!match) {
-    console.error('FAIL: package.json packageManager is not in npm@x.y.z format');
-    process.exit(1);
-  }
-  governedNpm = match[1];
-} catch (e) {
-  if (e.code) {
-    // fs/parse error, not our explicit exit
-    console.error('FAIL: cannot read or parse package.json');
-    process.exit(1);
-  }
-  throw e; // re-throw our explicit process.exit calls
+  pkg = JSON.parse(fs.readFileSync(pkgJsonFile, 'utf8'));
+} catch {
+  console.error('FAIL: cannot read or parse package.json');
+  process.exit(1);
 }
+const pm = pkg === null || typeof pkg !== 'object' ? undefined : pkg.packageManager;
+if (typeof pm !== 'string') {
+  console.error('FAIL: package.json packageManager is missing or not a string');
+  process.exit(1);
+}
+const pmMatch = /^npm@(\d+\.\d+\.\d+)$/.exec(pm);
+if (!pmMatch) {
+  console.error('FAIL: package.json packageManager is not in npm@x.y.z format');
+  process.exit(1);
+}
+const governedNpm = pmMatch[1];
 
 // Check Node version (process.versions.node, not attacker-controlled)
 const actualNode = process.versions.node;
