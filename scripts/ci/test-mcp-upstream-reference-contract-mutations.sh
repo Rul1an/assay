@@ -42,6 +42,11 @@ mutations = {
         '            sha256sum "$GITHUB_WORKSPACE/$RUST_SDK_LOCKFILE" | cut -d\' \' -f1\n'
         '            # sha256sum "$RUNNER_TEMP/mcp-rust-sdk/Cargo.lock" | cut -d\' \' -f1\n',
     ),
+    "working-tree-lock-hidden-by-comment": (
+        '          git show "HEAD:$RUST_SDK_LOCKFILE" > "$reviewed_sdk_lock"\n',
+        '          cp "$GITHUB_WORKSPACE/$RUST_SDK_LOCKFILE" "$reviewed_sdk_lock"\n'
+        '          # git show "HEAD:$RUST_SDK_LOCKFILE" > "$reviewed_sdk_lock"\n',
+    ),
 }
 old, new = mutations[name]
 if text.count(old) != 1:
@@ -60,5 +65,6 @@ expect_rejected unlocked-build-hidden-by-comment
 expect_rejected wrong-reviewed-lock-comparison
 expect_rejected wrong-installed-lock-comparison
 expect_rejected post-check-hidden-by-comment
+expect_rejected working-tree-lock-hidden-by-comment
 
 echo "ok: MCP upstream reference workflow contract rejects inert substitutes"

@@ -7,7 +7,6 @@ name: MCP upstream reference
 on:
   pull_request:
     paths:
-      - ".gitattributes"
       - ".github/workflows/mcp-upstream-reference.yml"
       - "scripts/ci/test-mcp-upstream-reference-contract.sh"
       - "scripts/ci/test-mcp-upstream-reference-contract-mutations.sh"
@@ -18,7 +17,6 @@ on:
     branches:
       - main
     paths:
-      - ".gitattributes"
       - ".github/workflows/mcp-upstream-reference.yml"
       - "scripts/ci/test-mcp-upstream-reference-contract.sh"
       - "scripts/ci/test-mcp-upstream-reference-contract-mutations.sh"
@@ -92,10 +90,11 @@ jobs:
             git -C "$sdk_dir" archive --format=tar HEAD | sha256sum | cut -d' ' -f1
           )"
           test "$actual_sdk_archive" = "$RUST_SDK_ARCHIVE_SHA256"
-          reviewed_sdk_lock="$GITHUB_WORKSPACE/$RUST_SDK_LOCKFILE"
+          reviewed_sdk_lock="$RUNNER_TEMP/reviewed-rust-sdk.Cargo.lock"
+          git show "HEAD:$RUST_SDK_LOCKFILE" > "$reviewed_sdk_lock"
           actual_reviewed_sdk_lock="$(sha256sum "$reviewed_sdk_lock" | cut -d' ' -f1)"
           test "$actual_reviewed_sdk_lock" = "$RUST_SDK_LOCK_SHA256"
-          cp "$GITHUB_WORKSPACE/$RUST_SDK_LOCKFILE" "$sdk_dir/Cargo.lock"
+          cp "$reviewed_sdk_lock" "$sdk_dir/Cargo.lock"
           actual_sdk_lock="$(sha256sum "$sdk_dir/Cargo.lock" | cut -d' ' -f1)"
           test "$actual_sdk_lock" = "$RUST_SDK_LOCK_SHA256"
 
