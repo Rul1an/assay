@@ -3,15 +3,15 @@
   "locked_at": "2026-08-01T00:00:00Z",
   "sdk": {
     "package": "@opentelemetry/sdk-trace-node",
-    "version": "1.28.0",
-    "integrity": "sha512-N0sYfYXvHpP0FNIyc+UfhLnLSTOuZLytV0qQVrDWIlABeD/DWJIGttS7nYeR14gQLXch0M1DW8zm3VeN6Opwtg==",
-    "resolved": "https://registry.npmjs.org/@opentelemetry/sdk-trace-node/-/sdk-trace-node-1.28.0.tgz"
+    "version": "2.10.0",
+    "integrity": "sha512-GZK/G6oZyBLGlH1pUgeDch7D91KoHd2uotUGIkWCPi9GI5T9X0p4L7nNAMDR1BQjkRYoDqo+ddfVx9t5Uhys+Q==",
+    "resolved": "https://registry.npmjs.org/@opentelemetry/sdk-trace-node/-/sdk-trace-node-2.10.0.tgz"
   },
   "exporter": {
     "package": "@opentelemetry/exporter-trace-otlp-http",
-    "version": "0.56.0",
-    "integrity": "sha512-vqVuJvcwameA0r0cNrRzrZqPLB0otS+95g0XkZdiKOXUo81wYdY6r4kyrwz4nSChqTBEFm0lqi/H2OWGboOa6g==",
-    "resolved": "https://registry.npmjs.org/@opentelemetry/exporter-trace-otlp-http/-/exporter-trace-otlp-http-0.56.0.tgz"
+    "version": "0.221.0",
+    "integrity": "sha512-AySXiKoC+meiWm6zdVj5T2LnPDZuatveBby1cMOeQteIWsYXAUxs8Sru13G2pVSPrUXz6vF+og7QVBX6GdC/oQ==",
+    "resolved": "https://registry.npmjs.org/@opentelemetry/exporter-trace-otlp-http/-/exporter-trace-otlp-http-0.221.0.tgz"
   },
   "upstream_sources": [
     {
@@ -59,24 +59,26 @@
   "generator": {
     "directory": "generator",
     "script": "generate.js",
-    "package_json_sha256": "e0cdf7c911544a663db7283b39dbb1eb1bcd01e8a8cbad0d80ec9385be038eb8",
-    "package_lock_sha256": "6e7b9ca24bf57b718bdfbc58a4c8c50420f4b15b9401f0ac78c4375f85cb8565",
-    "script_sha256": "a525266d23af8516604b365b118ed6727208bf916e11293665d87bb454356aaf"
+    "package_json_sha256": "127daf8143ba946da2c58fcf6507ebd0256a97f369873f87ba7178f458c4f49c",
+    "package_lock_sha256": "21247585c8ff7a84468864ac557b81b3bd6e225ce9c0a098eda31468d632189e",
+    "script_sha256": "feafebd36950993a7b45a28dc2d8c80b3e26e03a7c6e9b5f1cf473faaad1054a"
   },
   "corpus": [
     {
       "fixture": "mcp_client_tools_call.json",
       "sidecar": "mcp_client_tools_call.meta.json",
-      "content_sha256": "43e2218a8116a9e84fb0d011f12e57e332f609c845da654f991daf76dc6950ff",
-      "byte_count": 2631,
+      "sidecar_sha256": "50278a18dcf796d07eb5d624cc02e16d80b2214892848bd267387da33f838d28",
+      "content_sha256": "47606f7ed0b2b0e1bdf3443677ed9e3772c08b5e014a0fcc774f86c1f153fac8",
+      "byte_count": 2010,
       "span_kind": "CLIENT",
       "mcp_method": "tools/call"
     },
     {
       "fixture": "mcp_server_tools_call.json",
       "sidecar": "mcp_server_tools_call.meta.json",
-      "content_sha256": "b714d2284c77adda89c7f4b28a6fa07c679ac346bc07ed31b3e88c08f07df233",
-      "byte_count": 2631,
+      "sidecar_sha256": "8d23f74d8bc48e6e7540efcadf98a5e4da5ddd3319821b6c58acd1c38ccf2e7f",
+      "content_sha256": "dce61679e71c40107026503930ee87145d90e7167a95b3e3d0429de78ab64fa8",
+      "byte_count": 2010,
       "span_kind": "SERVER",
       "mcp_method": "tools/call"
     }
@@ -84,14 +86,17 @@
   "hostile_fixtures": [
     {
       "fixture": "hostile_deep_nesting.json",
+      "sha256": "487723e74c243bba7116d9cb886c5014ccaff5e1328e289b9bcee3450e60e224",
       "purpose": "test_parser_depth_limits"
     },
     {
       "fixture": "hostile_oversized_attribute.json",
+      "sha256": "0a33e5215a2733cb2032ac28025a9332996344827e76615b76bf51ebc94b5d45",
       "purpose": "test_size_limits"
     },
     {
       "fixture": "hostile_missing_required_fields.json",
+      "sha256": "8f2e001b59b4ff81f9f68ad9a493b5baca7ed9d9108baf0ea4721bd66c2a21bc",
       "purpose": "test_schema_validation"
     }
   ],

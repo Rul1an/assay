@@ -8,24 +8,6 @@
             "value": {
               "stringValue": "mcp-test-service"
             }
-          },
-          {
-            "key": "telemetry.sdk.language",
-            "value": {
-              "stringValue": "nodejs"
-            }
-          },
-          {
-            "key": "telemetry.sdk.name",
-            "value": {
-              "stringValue": "opentelemetry"
-            }
-          },
-          {
-            "key": "telemetry.sdk.version",
-            "value": {
-              "stringValue": "1.28.0"
-            }
           }
         ],
         "droppedAttributesCount": 0
@@ -38,9 +20,9 @@
           },
           "spans": [
             {
-              "traceId": "24a2c36f2cf0953689940c3dbad734b6",
-              "spanId": "ad2cac103aaaf598",
-              "name": "mcp.server.tools.call",
+              "traceId": "435cf05aec2200ec45146f118d82a2bd",
+              "spanId": "61b840ab7a229146",
+              "name": "tools/call read_file",
               "kind": 2,
               "startTimeUnixNano": "1722518400100000000",
               "endTimeUnixNano": "1722518400400000000",
@@ -52,33 +34,27 @@
                   }
                 },
                 {
-                  "key": "mcp.tool.name",
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
                   "value": {
                     "stringValue": "read_file"
                   }
                 },
                 {
-                  "key": "mcp.server.version",
+                  "key": "jsonrpc.request.id",
                   "value": {
-                    "stringValue": "1.0.0"
+                    "stringValue": "2"
                   }
                 },
                 {
                   "key": "mcp.protocol.version",
                   "value": {
                     "stringValue": "2024-11-05"
-                  }
-                },
-                {
-                  "key": "mcp.tool.args",
-                  "value": {
-                    "stringValue": "{\"path\":\"/etc/hosts\"}"
-                  }
-                },
-                {
-                  "key": "mcp.tool.result",
-                  "value": {
-                    "stringValue": "{\"content\":\"127.0.0.1 localhost\"}"
                   }
                 }
               ],
@@ -89,7 +65,8 @@
                 "code": 1
               },
               "links": [],
-              "droppedLinksCount": 0
+              "droppedLinksCount": 0,
+              "flags": 257
             }
           ]
         }

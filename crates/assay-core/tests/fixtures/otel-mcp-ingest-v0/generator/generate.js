@@ -13,12 +13,18 @@
  * - Byte-identical: Reproducible output across runs
  */
 
-import { Resource } from '@opentelemetry/resources';
-import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
-import { NodeTracerProvider, InMemorySpanExporter } from '@opentelemetry/sdk-trace-node';
-import { BatchSpanProcessor, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { SpanKind, SpanStatusCode, context } from '@opentelemetry/api';
+import * as resources from '@opentelemetry/resources';
+const { resourceFromAttributes, defaultResource } = resources;
+import * as semconv from '@opentelemetry/semantic-conventions';
+const { ATTR_SERVICE_NAME } = semconv;
+import * as sdk from '@opentelemetry/sdk-trace-node';
+const { NodeTracerProvider, InMemorySpanExporter } = sdk;
+import * as base from '@opentelemetry/sdk-trace-base';
+const { BatchSpanProcessor, SimpleSpanProcessor } = base;
+import * as exporter from '@opentelemetry/exporter-trace-otlp-http';
+const { OTLPTraceExporter } = exporter;
+import * as api from '@opentelemetry/api';
+const { SpanKind, SpanStatusCode, context } = api;
 import * as http from 'http';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -116,15 +122,8 @@ class OTLPCaptureServer {
  * Create tracer provider with deterministic ID generation
  */
 function createTracerProvider(idGenerator, exporterUrl) {
-  const resource = Resource.default().merge(
-    new Resource({
-      [ATTR_SERVICE_NAME]: 'mcp-test-service',
-    })
-  );
-
-  const provider = new NodeTracerProvider({
-    resource,
-    idGenerator,
+  const resource = resourceFromAttributes({
+    [ATTR_SERVICE_NAME]: 'mcp-test-service',
   });
 
   const exporter = new OTLPTraceExporter({
@@ -133,8 +132,13 @@ function createTracerProvider(idGenerator, exporterUrl) {
     concurrencyLimit: 1,
   });
 
-  // Use SimpleSpanProcessor for immediate, deterministic export
-  provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
+  const processor = new SimpleSpanProcessor(exporter);
+
+  const provider = new NodeTracerProvider({
+    resource,
+    idGenerator,
+    spanProcessors: [processor],
+  });
 
   return provider;
 }
@@ -142,9 +146,9 @@ function createTracerProvider(idGenerator, exporterUrl) {
 /**
  * Generate MCP client tools/call span (CLIENT)
  */
-function generateMcpClientToolsCall(tracer, traceId, spanId, parentSpanId) {
+function generateMcpClientToolsCall(tracer) {
   const span = tracer.startSpan(
-    'mcp.client.tools.call',
+    'tools/call read_file',
     {
       kind: SpanKind.CLIENT,
       startTime: 1722518400000, // 2024-08-01T12:00:00Z in ms
@@ -152,22 +156,14 @@ function generateMcpClientToolsCall(tracer, traceId, spanId, parentSpanId) {
     context.active()
   );
 
-  // Override IDs for determinism (internal SDK hack for testing)
-  span._spanContext.traceId = traceId;
-  span._spanContext.spanId = spanId;
-  if (parentSpanId) {
-    span._spanContext.parentSpanId = parentSpanId;
-  }
-
-  // MCP semantic conventions (from semantic-conventions-genai)
+  // MCP semantic conventions per semantic-conventions-genai
   span.setAttribute('mcp.method.name', 'tools/call');
-  span.setAttribute('mcp.tool.name', 'read_file');
-  span.setAttribute('mcp.client.version', '1.0.0');
+  span.setAttribute('gen_ai.operation.name', 'execute_tool');
+  span.setAttribute('gen_ai.tool.name', 'read_file');
+  span.setAttribute('jsonrpc.request.id', '1');
   span.setAttribute('mcp.protocol.version', '2024-11-05');
 
-  // Arguments and result
-  span.setAttribute('mcp.tool.args', JSON.stringify({ path: '/etc/hosts' }));
-  span.setAttribute('mcp.tool.result', JSON.stringify({ content: '127.0.0.1 localhost' }));
+  // Omit sensitive arguments/results for benign test fixture
 
   span.setStatus({ code: SpanStatusCode.OK });
   span.end(1722518400500); // 500ms duration
@@ -178,9 +174,9 @@ function generateMcpClientToolsCall(tracer, traceId, spanId, parentSpanId) {
 /**
  * Generate MCP server tools/call span (SERVER)
  */
-function generateMcpServerToolsCall(tracer, traceId, spanId, parentSpanId) {
+function generateMcpServerToolsCall(tracer) {
   const span = tracer.startSpan(
-    'mcp.server.tools.call',
+    'tools/call read_file',
     {
       kind: SpanKind.SERVER,
       startTime: 1722518400100, // 100ms after client start
@@ -188,21 +184,14 @@ function generateMcpServerToolsCall(tracer, traceId, spanId, parentSpanId) {
     context.active()
   );
 
-  // Override IDs
-  span._spanContext.traceId = traceId;
-  span._spanContext.spanId = spanId;
-  if (parentSpanId) {
-    span._spanContext.parentSpanId = parentSpanId;
-  }
-
-  // MCP server-side attributes
+  // MCP server-side attributes per semantic-conventions-genai
   span.setAttribute('mcp.method.name', 'tools/call');
-  span.setAttribute('mcp.tool.name', 'read_file');
-  span.setAttribute('mcp.server.version', '1.0.0');
+  span.setAttribute('gen_ai.operation.name', 'execute_tool');
+  span.setAttribute('gen_ai.tool.name', 'read_file');
+  span.setAttribute('jsonrpc.request.id', '2');
   span.setAttribute('mcp.protocol.version', '2024-11-05');
 
-  span.setAttribute('mcp.tool.args', JSON.stringify({ path: '/etc/hosts' }));
-  span.setAttribute('mcp.tool.result', JSON.stringify({ content: '127.0.0.1 localhost' }));
+  // Omit sensitive arguments/results for benign test fixture
 
   span.setStatus({ code: SpanStatusCode.OK });
   span.end(1722518400400); // 300ms duration
@@ -230,8 +219,8 @@ async function writeFixture(name, data, outputDir) {
     provenance: {
       generator: 'locally_generated_official_sdk',
       external_deployment: false,
-      sdk_version: '1.28.0',
-      exporter_version: '0.56.0',
+      sdk_version: '2.10.0',
+      exporter_version: '0.221.0',
     },
     content_sha256: hash,
     byte_count: Buffer.byteLength(content, 'utf-8'),
@@ -262,9 +251,7 @@ async function main() {
     const tracer = provider.getTracer('mcp-fixture-generator', '1.0.0');
 
     // Generate mcp_client_tools_call
-    const clientTraceId = idGen.generateTraceId();
-    const clientSpanId = idGen.generateSpanId();
-    generateMcpClientToolsCall(tracer, clientTraceId, clientSpanId, null);
+    generateMcpClientToolsCall(tracer);
 
     await provider.forceFlush();
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -279,9 +266,7 @@ async function main() {
     const provider2 = createTracerProvider(idGen2, server.getUrl());
     const tracer2 = provider2.getTracer('mcp-fixture-generator', '1.0.0');
 
-    const serverTraceId = idGen2.generateTraceId();
-    const serverSpanId = idGen2.generateSpanId();
-    generateMcpServerToolsCall(tracer2, serverTraceId, serverSpanId, null);
+    generateMcpServerToolsCall(tracer2);
 
     await provider2.forceFlush();
     await new Promise(resolve => setTimeout(resolve, 100));

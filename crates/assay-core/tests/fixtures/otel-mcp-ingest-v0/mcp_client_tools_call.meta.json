@@ -4,10 +4,10 @@
   "provenance": {
     "generator": "locally_generated_official_sdk",
     "external_deployment": false,
-    "sdk_version": "1.28.0",
-    "exporter_version": "0.56.0"
+    "sdk_version": "2.10.0",
+    "exporter_version": "0.221.0"
   },
-  "content_sha256": "43e2218a8116a9e84fb0d011f12e57e332f609c845da654f991daf76dc6950ff",
-  "byte_count": 2631,
+  "content_sha256": "47606f7ed0b2b0e1bdf3443677ed9e3772c08b5e014a0fcc774f86c1f153fac8",
+  "byte_count": 2010,
   "generated_at": "2026-08-01T00:00:00Z"
 }
