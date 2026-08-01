@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
+# Literal workflow commands below must retain their dollar signs and backslashes.
+# shellcheck disable=SC1003,SC2016
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-WORKFLOW="${ROOT}/.github/workflows/mcp-upstream-reference.yml"
+WORKFLOW="${WORKFLOW:-${ROOT}/.github/workflows/mcp-upstream-reference.yml}"
 VALIDATOR="${ROOT}/scripts/ci/verify-mcp-upstream-reference.py"
 VALIDATOR_TEST="${ROOT}/scripts/ci/test_verify_mcp_upstream_reference.py"
+SDK_LOCK_FIXTURE="${ROOT}/scripts/ci/fixtures/mcp-upstream-reference/rust-sdk-3240b6e7828ed4146041d32dd0ce4ced7c04e411.Cargo.lock"
+SDK_LOCK_RELATIVE="scripts/ci/fixtures/mcp-upstream-reference/rust-sdk-3240b6e7828ed4146041d32dd0ce4ced7c04e411.Cargo.lock"
+MUTATION_TEST="${ROOT}/scripts/ci/test-mcp-upstream-reference-contract-mutations.sh"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -14,10 +19,70 @@ fail() {
 [[ -f "$WORKFLOW" ]] || fail "missing upstream reference workflow"
 [[ -f "$VALIDATOR" ]] || fail "missing upstream result validator"
 [[ -f "$VALIDATOR_TEST" ]] || fail "missing validator regression tests"
+[[ -f "$SDK_LOCK_FIXTURE" ]] || fail "missing reviewed Rust SDK dependency lock"
+[[ -f "$MUTATION_TEST" ]] || fail "missing workflow contract mutation tests"
 
 pin() {
   local needle="$1" message="$2"
   grep -F -- "$needle" "$WORKFLOW" >/dev/null || fail "$message"
+}
+
+event_path_count() {
+  local event="$1" needle="$2"
+  awk -v event="$event" -v needle="$needle" '
+    function indent(line) {
+      match(line, /^ */)
+      return RLENGTH
+    }
+    function trim(line) {
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      return line
+    }
+    trim($0) == event ":" && indent($0) == 2 {
+      in_event = 1
+      event_indent = indent($0)
+      next
+    }
+    in_event && trim($0) != "" && $0 !~ /^[[:space:]]*#/ \
+      && indent($0) <= event_indent { exit }
+    in_event && trim($0) == "paths:" {
+      in_paths = 1
+      paths_indent = indent($0)
+      next
+    }
+    in_paths && trim($0) != "" && $0 !~ /^[[:space:]]*#/ \
+      && indent($0) <= paths_indent { in_paths = 0 }
+    in_paths {
+      item = trim($0)
+      if (substr(item, 1, 2) != "- ") next
+      item = substr(item, 3)
+      if (item ~ /^".*"$/ || item ~ /^'"'"'.*'"'"'$/) {
+        item = substr(item, 2, length(item) - 2)
+      }
+      if (item == needle) count++
+    }
+    END { print count + 0 }
+  ' "$WORKFLOW"
+}
+
+step_line() {
+  local step="$1" needle="$2" message="$3"
+  awk -v step="$step" -v needle="$needle" '
+    $0 == "      - name: " step { in_step = 1; next }
+    in_step && $0 ~ /^      - name:/ { exit }
+    in_step {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (substr(line, length(line), 1) == "\\") {
+        line = substr(line, 1, length(line) - 1)
+        sub(/[[:space:]]+$/, "", line)
+      }
+      if (line == needle) found = 1
+    }
+    END { exit found ? 0 : 1 }
+  ' "$WORKFLOW" || fail "$message"
 }
 
 pin "49103de6ed70804e940637bf3e9e29e4a3f54e64" \
@@ -30,8 +95,10 @@ pin "3240b6e7828ed4146041d32dd0ce4ced7c04e411" \
   "workflow must pin the Rust SDK reference"
 pin "4ce506ce729ad4ed2b28de6bad157eda83247a2d298924c7590c0fc938e4351c" \
   "workflow must verify the Rust SDK source archive"
-pin "f4b9fd48cb9598f9658f00a9cc6f176739e97e45045e90b34e8bb4563937bc48" \
+pin "ff0bab171e7e812b41c8c653cd33ac07c948f594cc2beedf6e34ac5711ecc031" \
   "workflow must verify the Rust SDK dependency lock"
+pin 'RUST_SDK_LOCKFILE: "scripts/ci/fixtures/mcp-upstream-reference/rust-sdk-3240b6e7828ed4146041d32dd0ce4ced7c04e411.Cargo.lock"' \
+  "workflow must name the reviewed Rust SDK dependency lock"
 pin 'NODE_VERSION: "24.18.0"' "workflow must pin the Node runtime"
 pin "node-version: \"\${{ env.NODE_VERSION }}\"" \
   "workflow must install the pinned Node version"
@@ -55,13 +122,40 @@ pin "fetch --depth=1 origin \"\$RUST_SDK_COMMIT\"" \
   "workflow must fetch the pinned Rust SDK commit"
 pin "test \"\$actual_sdk_archive\" = \"\$RUST_SDK_ARCHIVE_SHA256\"" \
   "workflow must verify the Rust SDK archive pin"
-pin 'cargo generate-lockfile' \
-  "workflow must materialize the reviewed Rust SDK lock"
+pin "cp \"\$reviewed_sdk_lock\" \"\$sdk_dir/Cargo.lock\"" \
+  "workflow must install the reviewed Rust SDK lock"
 pin "test \"\$actual_sdk_lock\" = \"\$RUST_SDK_LOCK_SHA256\"" \
   "workflow must verify the Rust SDK lock pin"
+pin "Verify the installed Rust SDK lock remained unchanged" \
+  "workflow must verify the Rust SDK lock after the scenarios"
+step_line "Fetch the official Rust SDK source and install its reviewed lock" \
+  'reviewed_sdk_lock="$RUNNER_TEMP/reviewed-rust-sdk.Cargo.lock"' \
+  "workflow must allocate a path for the reviewed Git blob"
+step_line "Fetch the official Rust SDK source and install its reviewed lock" \
+  'git show "HEAD:$RUST_SDK_LOCKFILE" > "$reviewed_sdk_lock"' \
+  "workflow must materialize the reviewed lock from its canonical Git blob"
+step_line "Fetch the official Rust SDK source and install its reviewed lock" \
+  'actual_reviewed_sdk_lock="$(sha256sum "$reviewed_sdk_lock" | cut -d'"'"' '"'"' -f1)"' \
+  "workflow must hash the reviewed Rust SDK lock before installation"
+step_line "Fetch the official Rust SDK source and install its reviewed lock" \
+  'test "$actual_reviewed_sdk_lock" = "$RUST_SDK_LOCK_SHA256"' \
+  "workflow must compare the reviewed Rust SDK lock with its pinned digest"
+step_line "Fetch the official Rust SDK source and install its reviewed lock" \
+  'actual_sdk_lock="$(sha256sum "$sdk_dir/Cargo.lock" | cut -d'"'"' '"'"' -f1)"' \
+  "workflow must hash the installed Rust SDK lock"
+step_line "Fetch the official Rust SDK source and install its reviewed lock" \
+  'test "$actual_sdk_lock" = "$RUST_SDK_LOCK_SHA256"' \
+  "workflow must compare the installed Rust SDK lock with its pinned digest"
+step_line "Verify the installed Rust SDK lock remained unchanged" \
+  'sha256sum "$RUNNER_TEMP/mcp-rust-sdk/Cargo.lock" | cut -d'"'"' '"'"' -f1' \
+  "workflow must hash the installed Rust SDK lock after the scenarios"
+step_line "Verify the installed Rust SDK lock remained unchanged" \
+  'test "$actual_sdk_lock" = "$RUST_SDK_LOCK_SHA256"' \
+  "workflow must compare the post-scenario SDK lock with the reviewed digest"
 pin "--path \"\$sdk_dir\"" \
   "workflow must execute the verified Rust SDK checkout"
-pin '--build-cmd "cargo build --locked -p mcp-conformance"' \
+step_line "Run the focused official reference scenarios" \
+  '--build-cmd "cargo build --locked -p mcp-conformance"' \
   "workflow must build the Rust SDK with its verified lock"
 
 grep -Eq 'uses: actions/checkout@[0-9a-f]{40}' "$WORKFLOW" \
@@ -75,6 +169,34 @@ if grep -Eq 'continue-on-error:[[:space:]]*true' "$WORKFLOW"; then
   fail "the reference run must not turn a failed check into success"
 fi
 
+if grep -F 'cargo generate-lockfile' "$WORKFLOW" >/dev/null; then
+  fail "the reference run must not resolve a fresh Rust SDK dependency graph"
+fi
+
+if grep -F 'cargo update' "$WORKFLOW" >/dev/null; then
+  fail "the reference run must not update the reviewed Rust SDK dependency graph"
+fi
+
+fixture_path='scripts/ci/fixtures/mcp-upstream-reference/**'
+[[ "$(event_path_count pull_request "$fixture_path")" == "1" ]] \
+  || fail "pull_request must run exactly once for reviewed Rust SDK lock changes"
+[[ "$(event_path_count push "$fixture_path")" == "1" ]] \
+  || fail "push must run exactly once for reviewed Rust SDK lock changes"
+mutation_test_path='scripts/ci/test-mcp-upstream-reference-contract-mutations.sh'
+[[ "$(event_path_count pull_request "$mutation_test_path")" == "1" ]] \
+  || fail "pull_request must run exactly once for contract mutation changes"
+[[ "$(event_path_count push "$mutation_test_path")" == "1" ]] \
+  || fail "push must run exactly once for contract mutation changes"
+actual_sdk_lock="$(
+  git -C "$ROOT" show ":$SDK_LOCK_RELATIVE" | shasum -a 256 | awk '{print $1}'
+)"
+[[ "$actual_sdk_lock" == "ff0bab171e7e812b41c8c653cd33ac07c948f594cc2beedf6e34ac5711ecc031" ]] \
+  || fail "reviewed Rust SDK dependency lock Git blob digest drifted"
+
 python3 -m unittest "$VALIDATOR_TEST"
+
+if [[ "${ASSAY_CONTRACT_MUTATION:-0}" != "1" ]]; then
+  bash "$MUTATION_TEST"
+fi
 
 echo "ok: MCP upstream reference workflow contract"

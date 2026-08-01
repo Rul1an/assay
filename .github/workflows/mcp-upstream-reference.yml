@@ -9,16 +9,20 @@ on:
     paths:
       - ".github/workflows/mcp-upstream-reference.yml"
       - "scripts/ci/test-mcp-upstream-reference-contract.sh"
+      - "scripts/ci/test-mcp-upstream-reference-contract-mutations.sh"
       - "scripts/ci/test_verify_mcp_upstream_reference.py"
       - "scripts/ci/verify-mcp-upstream-reference.py"
+      - "scripts/ci/fixtures/mcp-upstream-reference/**"
   push:
     branches:
       - main
     paths:
       - ".github/workflows/mcp-upstream-reference.yml"
       - "scripts/ci/test-mcp-upstream-reference-contract.sh"
+      - "scripts/ci/test-mcp-upstream-reference-contract-mutations.sh"
       - "scripts/ci/test_verify_mcp_upstream_reference.py"
       - "scripts/ci/verify-mcp-upstream-reference.py"
+      - "scripts/ci/fixtures/mcp-upstream-reference/**"
   workflow_dispatch:
 
 permissions:
@@ -34,7 +38,8 @@ env:
   CONFORMANCE_LOCK_SHA256: "161aef794720d2393a6a3db64e9751f2d52730b49f662e84b23363df5c1196e1"
   RUST_SDK_COMMIT: "3240b6e7828ed4146041d32dd0ce4ced7c04e411"
   RUST_SDK_ARCHIVE_SHA256: "4ce506ce729ad4ed2b28de6bad157eda83247a2d298924c7590c0fc938e4351c"
-  RUST_SDK_LOCK_SHA256: "f4b9fd48cb9598f9658f00a9cc6f176739e97e45045e90b34e8bb4563937bc48"
+  RUST_SDK_LOCKFILE: "scripts/ci/fixtures/mcp-upstream-reference/rust-sdk-3240b6e7828ed4146041d32dd0ce4ced7c04e411.Cargo.lock"
+  RUST_SDK_LOCK_SHA256: "ff0bab171e7e812b41c8c653cd33ac07c948f594cc2beedf6e34ac5711ecc031"
   MCP_SPEC_VERSION: "2026-07-28"
   NODE_VERSION: "24.18.0"
 
@@ -70,7 +75,7 @@ jobs:
           test "$actual_archive" = "$CONFORMANCE_ARCHIVE_SHA256"
           test "$actual_lock" = "$CONFORMANCE_LOCK_SHA256"
 
-      - name: Fetch and lock the official Rust SDK source
+      - name: Fetch the official Rust SDK source and install its reviewed lock
         shell: bash
         run: |
           set -euo pipefail
@@ -85,7 +90,11 @@ jobs:
             git -C "$sdk_dir" archive --format=tar HEAD | sha256sum | cut -d' ' -f1
           )"
           test "$actual_sdk_archive" = "$RUST_SDK_ARCHIVE_SHA256"
-          cargo generate-lockfile --manifest-path "$sdk_dir/Cargo.toml"
+          reviewed_sdk_lock="$RUNNER_TEMP/reviewed-rust-sdk.Cargo.lock"
+          git show "HEAD:$RUST_SDK_LOCKFILE" > "$reviewed_sdk_lock"
+          actual_reviewed_sdk_lock="$(sha256sum "$reviewed_sdk_lock" | cut -d' ' -f1)"
+          test "$actual_reviewed_sdk_lock" = "$RUST_SDK_LOCK_SHA256"
+          cp "$reviewed_sdk_lock" "$sdk_dir/Cargo.lock"
           actual_sdk_lock="$(sha256sum "$sdk_dir/Cargo.lock" | cut -d' ' -f1)"
           test "$actual_sdk_lock" = "$RUST_SDK_LOCK_SHA256"
 
@@ -130,6 +139,15 @@ jobs:
             --spec-version "$MCP_SPEC_VERSION" \
             --skip-build \
             --output "$results"
+
+      - name: Verify the installed Rust SDK lock remained unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sdk_lock="$(
+            sha256sum "$RUNNER_TEMP/mcp-rust-sdk/Cargo.lock" | cut -d' ' -f1
+          )"
+          test "$actual_sdk_lock" = "$RUST_SDK_LOCK_SHA256"
 
       - name: Verify named check records
         run: |
