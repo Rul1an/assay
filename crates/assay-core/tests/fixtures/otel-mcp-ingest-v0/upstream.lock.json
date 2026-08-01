@@ -106,6 +106,6 @@
     }
   ],
   "provenance": {
-    "note": "Locally generated test fixtures using official OpenTelemetry SDK and OTLP HTTP exporter. Not external deployment evidence. No production decoder in assay-core."
+    "note": "Locally generated test fixtures using official OpenTelemetry SDK and OTLP HTTP exporter. Not external deployment evidence. Slice A adds no production decoder for this MCP-shaped OTLP/JSON corpus."
   }
 }

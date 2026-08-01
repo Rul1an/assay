@@ -7,7 +7,7 @@ convention testing in Assay.
 ## Purpose
 
 - **Test-only input corpus**: Locked reference fixtures for future OTLP/JSON MCP ingest work
-- **No production decoder**: `assay-core` contains no serde models or parsers for OTLP (Slice A scope)
+- **No production decoder for this corpus**: Slice A adds no production decoder for this MCP-shaped OTLP/JSON corpus (pre-existing `trace::otel_ingest` models are out of this corpus's scope and unchanged)
 - **Hermetic validator**: Integration tests use a typed, test-only validator with strict lock checking
 - **Future work**: Slice B+ will add `assay evidence inspect-otel-mcp` for semantic validation
 
@@ -38,7 +38,7 @@ Hostile fixtures are **locked inputs only** -- Slice B will define rejection sem
 - Exporter: `@opentelemetry/exporter-trace-otlp-http@0.221.0`
 - Proto files: 4 vendored `.proto` files from `opentelemetry-proto v1.11.0` with SHA-256
 - MCP semconv: `semantic-conventions-genai` commit 434c91dc, `docs/gen-ai/mcp.md` with SHA-256
-- Generator: `package.json`, `package-lock.json`, `generate.js`, `check-runtime.cjs` with SHA-256
+- Generator: `package.json`, `package-lock.json`, `generate.js`, `check-runtime.cjs`, `.node-version` with SHA-256
 - Runtime pair: `node_version` (22.16.0) and `npm_version` (10.9.2) in lock
 - Corpus: Every fixture with sidecar, hash, byte count, span kind, MCP method
 

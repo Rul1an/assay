@@ -95,7 +95,7 @@ const EXPECTED_HOSTILE: &[(&str, &str)] = &[
 ];
 
 /// Exact provenance note (no substring acceptance).
-const EXPECTED_PROVENANCE_NOTE: &str = "Locally generated test fixtures using official OpenTelemetry SDK and OTLP HTTP exporter. Not external deployment evidence. No production decoder in assay-core.";
+const EXPECTED_PROVENANCE_NOTE: &str = "Locally generated test fixtures using official OpenTelemetry SDK and OTLP HTTP exporter. Not external deployment evidence. Slice A adds no production decoder for this MCP-shaped OTLP/JSON corpus.";
 
 /// Exact span name for all benign fixtures.
 const EXPECTED_SPAN_NAME: &str = "tools/call read_file";
