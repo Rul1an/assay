@@ -1,0 +1,21 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": []
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "hostile-scope"
+          },
+          "spans": [
+            {
+              "name": "incomplete-span"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

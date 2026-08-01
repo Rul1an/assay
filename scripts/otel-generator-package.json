@@ -1,0 +1,16 @@
+{
+  "name": "otel-generator",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@opentelemetry/exporter-trace-otlp-http": "0.56.0",
+    "@opentelemetry/sdk-trace-node": "1.28.0"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://assay.dev/schemas/upstream-lock-v1.json",
+  "version": "1",
+  "locked": "2026-08-01T00:00:00Z",
+  "sdk": {
+    "name": "@opentelemetry/sdk-trace-node",
+    "version": "1.28.0",
+    "integrity": "sha512-N0sYfYXvHpP0FNIyc+UfhLnLSTOuZLytV0qQVrDWIlABeD/DWJIGttS7nYeR14gQLXch0M1DW8zm3VeN6Opwtg==",
+    "resolved": "https://registry.npmjs.org/@opentelemetry/sdk-trace-node/-/sdk-trace-node-1.28.0.tgz"
+  },
+  "dependencies": {
+    "@opentelemetry/api": {
+      "version": "1.9.0",
+      "integrity": "sha512-1Lm3R8BK54R+c4BDM/YNyQ9DHQB7hSYqHREhPgGjD2VjkdlxUNDbzLqRjCk6ue+DpTb9KPKh3hC+Kfq3f7nJIA==",
+      "resolved": "https://registry.npmjs.org/@opentelemetry/api/-/api-1.9.0.tgz"
+    },
+    "@opentelemetry/core": {
+      "version": "1.28.0",
+      "integrity": "sha512-5KqPe3zW8IkNLqhwgCq9HqsJLdNYbHkXOl3WGGaNBjQrqjlPPr2TsYPzVVwPLqnIB3pSYGR6wVKq2gCWnHNyZg==",
+      "resolved": "https://registry.npmjs.org/@opentelemetry/core/-/core-1.28.0.tgz"
+    },
+    "@opentelemetry/resources": {
+      "version": "1.28.0",
+      "integrity": "sha512-F5EL8kQ3XPbqmL7SBKsD8vSKe6VrWqGfHKWGKKvR3UjhqwGZqmMJmqJl2VqLJ6BXkQELz/0+6qLdBpZNLmXUKQ==",
+      "resolved": "https://registry.npmjs.org/@opentelemetry/resources/-/resources-1.28.0.tgz"
+    },
+    "@opentelemetry/semantic-conventions": {
+      "version": "1.28.0",
+      "integrity": "sha512-L0qTlAKQNJH0lKQ/Jq8TYp+f9W3R8LVPZZYMqJHvLHWNQ5hOL3LsNQnKAR1Zqc3e+rQCqYVYJPwPKQNGj2VdHQ==",
+      "resolved": "https://registry.npmjs.org/@opentelemetry/semantic-conventions/-/semantic-conventions-1.28.0.tgz"
+    }
+  },
+  "upstream_references": {
+    "otlp_proto": {
+      "version": "1.11.0",
+      "repository": "https://github.com/open-telemetry/opentelemetry-proto",
+      "note": "OTLP protocol buffer definitions for trace/JSON mapping",
+      "vendored_files": [
+        {
+          "path": "vendor/otlp-proto-v1.11.0/trace.proto",
+          "sha256": "c3fb1385c90b8bc08a2a462e28b5d0c422c7b524a839f75f75e3cd9f64f36956"
+        }
+      ]
+    },
+    "mcp_dev_semconv": {
+      "note": "Placeholder for future MCP-specific semantic conventions. Currently using OTel GenAI semconv 1.28.0 from @opentelemetry/semantic-conventions.",
+      "vendored_files": [
+        {
+          "path": "vendor/mcp-dev-placeholder/README.md",
+          "sha256": "42d1e11706425dcc14adbf5488262df4a9c25afdf4c18a542394f2cbd7246076"
+        }
+      ]
+    }
+  },
+  "generator_lockfile": {
+    "path": "scripts/otel-generator-package-lock.json",
+    "sha256": "dcd030a0438053fd7d1c8c8fefce095d35c1a8639d279286e0dcc087c7be52f7"
+  },
+  "provenance": {
+    "generator": "scripts/generate_otel_mcp_fixtures.js",
+    "honest": true,
+    "note": "Locally generated using official pinned SDK (@opentelemetry/sdk-trace-node@1.28.0), not external deployment evidence"
+  }
+}

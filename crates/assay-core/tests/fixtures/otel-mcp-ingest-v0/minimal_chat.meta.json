@@ -1,0 +1,9 @@
+{
+  "name": "minimal_chat",
+  "generator": "scripts/generate_otel_mcp_fixtures.js",
+  "sdk": "@opentelemetry/sdk-trace-node@1.28.0",
+  "semconv": "1.28.0",
+  "honest_provenance": true,
+  "sha256": "5b90d8225191010f51378f0d5f5fb61b887e874275d9b82816f51acd3b61f53e",
+  "generated": "2021-01-01T18:43:39.170Z"
+}
