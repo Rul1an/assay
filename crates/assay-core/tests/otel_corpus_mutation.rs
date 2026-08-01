@@ -1429,6 +1429,36 @@ fn test_package_lock_mismatch_sdk_version() {
     assert_eq!(result, Err(ValidationError::PackageLockMismatch));
 }
 
+/// Proves the validator rejects a package-lock.json whose root packages[""].engines.node
+/// disagrees with the governed node_version. This is the exact bug where package-lock.json
+/// carried the stale EOL version (20.16.0) after upgrading .node-version to 22.16.0.
+#[test]
+fn test_package_lock_root_engines_node_mismatch() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+    let pkg_lock_path = corpus.join("generator/package-lock.json");
+
+    // Mutate only packages[""].engines.node to a stale version
+    let mut pkg_lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pkg_lock_path).unwrap()).unwrap();
+    pkg_lock["packages"][""]["engines"]["node"] = serde_json::json!("20.16.0");
+    fs::write(
+        &pkg_lock_path,
+        serde_json::to_vec_pretty(&pkg_lock).unwrap(),
+    )
+    .unwrap();
+
+    // Update lock's package_lock_sha256 to match modified package-lock (keep hashes consistent)
+    let new_hash = sha256_of(&pkg_lock_path);
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["generator"]["package_lock_sha256"] = serde_json::json!(new_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::PackageLockNodeVersionMismatch));
+}
+
 #[test]
 fn test_fixture_duplicate_attribute() {
     let (_tmp, corpus) = copy_corpus_to_temp();

@@ -212,6 +212,7 @@ pub enum ValidationError {
     GovernedFileMissing,
     GeneratorIdentityMismatch,
     DirectoryReadError,
+    PackageLockNodeVersionMismatch,
 }
 
 // -- Serde models (test-only, not production) -------------------------------------------------
@@ -830,6 +831,21 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         }
     } else {
         return Err(ValidationError::PackageLockMismatch);
+    }
+
+    // Validate package-lock root packages[""].engines.node matches governed node_version.
+    // This catches the exact bug where package-lock.json carried the stale EOL Node version
+    // (e.g. 20.16.0) after upgrading .node-version to 22.16.0.
+    if let Some(root_pkg) = pkg_lock_json.get("packages").and_then(|p| p.get("")) {
+        if let Some(engines_node) = root_pkg
+            .get("engines")
+            .and_then(|e| e.get("node"))
+            .and_then(|n| n.as_str())
+        {
+            if engines_node != lock.generator.node_version {
+                return Err(ValidationError::PackageLockNodeVersionMismatch);
+            }
+        }
     }
 
     // Validate corpus fixture hashes and sidecar content (path safety already checked in Phase 3)
