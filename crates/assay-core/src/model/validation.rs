@@ -18,6 +18,20 @@ pub(crate) fn is_default_settings(s: &Settings) -> bool {
     s == &Settings::default()
 }
 
+/// True when `expected` asserts nothing (an empty `must_contain`/`must_not_contain`).
+///
+/// Used to skip serializing the vacuous default. Without this, a writer such as
+/// `assay migrate` would materialise `expected: {type: must_contain, must_contain: []}`
+/// into the config for every test that legitimately omitted the key — a shape the
+/// parser now rejects, so the tool's own output would no longer load.
+pub(crate) fn is_vacuous_expected(e: &Expected) -> bool {
+    match e {
+        Expected::MustContain { must_contain } => must_contain.is_empty(),
+        Expected::MustNotContain { must_not_contain } => must_not_contain.is_empty(),
+        _ => false,
+    }
+}
+
 pub(crate) fn default_one() -> u32 {
     1
 }

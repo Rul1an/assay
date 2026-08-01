@@ -41,7 +41,7 @@ fn value_kind(v: &serde_json::Value) -> &'static str {
 fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
     // 1. Strict V1 (tagged).
     let strict_err = match serde_json::from_value::<Expected>(item.clone()) {
-        Ok(exp) => return Ok(exp),
+        Ok(exp) => return reject_vacuous(exp),
         Err(e) => e,
     };
 
@@ -52,29 +52,42 @@ fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
         ));
     };
 
-    // A block that carries `type:` is asking for the tagged form; report why the
-    // tagged parse failed rather than the generic "unrecognized keys" message.
-    if obj.contains_key("type") {
-        return Err(format!("invalid `expected:` block: {}", strict_err));
-    }
-
     // 2. Legacy heuristics.
+    //
+    // These run even when the block carries a `type:` key. A tagged block whose
+    // VALUE shape is legacy — `{type: must_contain, must_contain: "hello"}`, where
+    // the scalar string is the legacy spelling of a one-element list — fails the
+    // strict parse but is a perfectly good assertion, and rejecting it would turn
+    // working suites into config errors. Only when no legacy key matches at all do
+    // we fall back to reporting why the strict parse failed.
     let mut parsed = None;
     let mut matched_keys = Vec::new();
 
     if let Some(r) = obj.get("$ref") {
+        let path = r
+            .as_str()
+            .ok_or_else(|| format!("`$ref` must be a string, found {}", value_kind(r)))?;
         parsed = Some(Expected::Reference {
-            path: r.as_str().unwrap_or("").to_string(),
+            path: path.to_string(),
         });
         matched_keys.push("$ref");
     }
 
     // Don't chain else-ifs, check all to detect ambiguity
     if let Some(mc) = obj.get("must_contain") {
-        let val = if mc.is_string() {
-            vec![mc.as_str().unwrap().to_string()]
+        // No `unwrap_or_default()` here: an unparsable value used to collapse to an
+        // empty vec, i.e. an assertion that passes for any response — the very bug
+        // this module exists to prevent.
+        let val: Vec<String> = if let Some(s) = mc.as_str() {
+            vec![s.to_string()]
         } else {
-            serde_json::from_value(mc.clone()).unwrap_or_default()
+            serde_json::from_value(mc.clone()).map_err(|e| {
+                format!(
+                    "`must_contain` must be a string or a list of strings, found {}: {}",
+                    value_kind(mc),
+                    e
+                )
+            })?
         };
         // Last match wins for parsed, but we warn below
         if parsed.is_none() {
@@ -83,11 +96,21 @@ fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
         matched_keys.push("must_contain");
     }
 
-    if obj.get("sequence").is_some() {
+    if let Some(seq) = obj.get("sequence") {
         if parsed.is_none() {
+            // Previously `.ok()`, which turned a bad value into `sequence: None`.
+            // `sequence_valid` passes unconditionally when it has neither a sequence
+            // nor rules, so that silently produced an always-green test.
+            let sequence: Vec<String> = serde_json::from_value(seq.clone()).map_err(|e| {
+                format!(
+                    "`sequence` must be a list of strings, found {}: {}",
+                    value_kind(seq),
+                    e
+                )
+            })?;
             parsed = Some(Expected::SequenceValid {
                 policy: None,
-                sequence: serde_json::from_value(obj.get("sequence").unwrap().clone()).ok(),
+                sequence: Some(sequence),
                 rules: None,
             });
         }
@@ -111,15 +134,51 @@ fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
         );
     }
 
-    parsed.ok_or_else(|| {
-        let found: Vec<&str> = obj.keys().map(String::as_str).collect();
-        format!(
-            "unrecognized `expected:` block, found key(s) {:?}. Use the tagged form \
-             (e.g. `type: must_contain` with `must_contain: [...]`) or one of the legacy \
-             keys {:?}",
-            found, LEGACY_EXPECTED_KEYS
-        )
-    })
+    if let Some(p) = parsed {
+        return reject_vacuous(p);
+    }
+
+    // 3. Nothing matched. A block that carries `type:` was asking for the tagged
+    // form, so report why that parse failed rather than listing legacy keys it
+    // never wanted.
+    if obj.contains_key("type") {
+        return Err(format!("invalid `expected:` block: {}", strict_err));
+    }
+
+    let found: Vec<&str> = obj.keys().map(String::as_str).collect();
+    Err(format!(
+        "unrecognized `expected:` block, found key(s) {:?}. Use the tagged form \
+         (e.g. `type: must_contain` with `must_contain: [...]`) or one of the legacy \
+         keys {:?}",
+        found, LEGACY_EXPECTED_KEYS
+    ))
+}
+
+/// Reject an `expected:` block that was written out in full but asserts nothing.
+///
+/// An empty `must_contain` / `must_not_contain` gives the metric no substring to
+/// look for, so it passes for any response. Catching it here rather than only in
+/// `assay validate` matters: this path runs for every command that loads a config,
+/// including `assay run` and `assay ci`, which are the gates that decide outcomes.
+///
+/// This applies only to an assertion the author actually wrote. Omitting `expected:`
+/// altogether stays permissive — see the note in the `TestCase` deserializer — and
+/// is reported as a warning by the `W_CFG_VACUOUS_EXPECTED` rule instead.
+fn reject_vacuous(exp: Expected) -> Result<Expected, String> {
+    let field = match &exp {
+        Expected::MustContain { must_contain } if must_contain.is_empty() => "must_contain",
+        Expected::MustNotContain { must_not_contain } if must_not_contain.is_empty() => {
+            "must_not_contain"
+        }
+        _ => return Ok(exp),
+    };
+
+    Err(format!(
+        "`{}` is empty, so this test would pass for any response. \
+         Give it at least one entry, or remove the `expected:` block and put the \
+         test's checks in `assertions:`.",
+        field
+    ))
 }
 
 /// Parse the whole `expected:` value (scalar or list form) for one test case.
@@ -178,7 +237,7 @@ impl<'de> Deserialize<'de> for TestCase {
 
         // A missing `expected:` key stays permissive: a test may carry its checks in
         // `assertions:` instead. It resolves to the vacuous default, which the
-        // `E_CFG_VACUOUS_EXPECTED` rule in `assay validate` reports when the test has
+        // `W_CFG_VACUOUS_EXPECTED` rule in `assay validate` reports when the test has
         // no assertions either. A present-but-unparsable key is a different matter and
         // is a hard error below.
         let expected_main = match &raw.expected {

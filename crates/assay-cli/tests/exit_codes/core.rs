@@ -474,9 +474,10 @@ tests:
     assert_eq!(run["reason_code"], "E_CFG_PARSE");
 }
 
-/// `assay validate` sweeps a suite for always-green tests without running it.
+/// An explicitly-written empty assertion is a HARD ERROR, and it must be caught on
+/// the paths that decide outcomes — `run` and `ci`, not just `validate`.
 #[test]
-fn contract_validate_flags_vacuous_expected() {
+fn contract_run_rejects_explicitly_empty_assertion() {
     let dir = tempdir().unwrap();
     fs::write(
         dir.path().join("assay.yaml"),
@@ -492,6 +493,37 @@ tests:
     )
     .unwrap();
 
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+}
+
+/// A test that omits `expected:` AND has no `assertions:` asserts nothing, but the
+/// omission itself is a documented, legitimate shape — so `assay validate` sweeps for
+/// it as a WARNING (exit 0), not an error.
+#[test]
+fn contract_validate_warns_on_test_with_no_assertion() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"suite: vacuous
+model: dummy
+tests:
+  - id: always_green
+    input: hello
+"#,
+    )
+    .unwrap();
+
     let out = Command::cargo_bin("assay")
         .unwrap()
         .current_dir(dir.path())
@@ -501,20 +533,21 @@ tests:
         .arg("--format")
         .arg("json")
         .assert()
-        .code(2)
+        .code(0)
         .get_output()
         .clone();
 
     let report: Value = serde_json::from_slice(&out.stdout).expect("validate json");
-    let codes: Vec<&str> = report["diagnostics"]
-        .as_array()
-        .expect("diagnostics array")
+    let diags = report["diagnostics"].as_array().expect("diagnostics array");
+    let vacuous: Vec<&Value> = diags
         .iter()
-        .filter_map(|d| d["code"].as_str())
+        .filter(|d| d["code"] == "W_CFG_VACUOUS_EXPECTED")
         .collect();
-    assert!(
-        codes.contains(&"E_CFG_VACUOUS_EXPECTED"),
-        "expected E_CFG_VACUOUS_EXPECTED, got {:?}",
-        codes
+    assert_eq!(
+        vacuous.len(),
+        1,
+        "expected one vacuous warning, got {:?}",
+        diags
     );
+    assert_eq!(vacuous[0]["severity"], "warn");
 }

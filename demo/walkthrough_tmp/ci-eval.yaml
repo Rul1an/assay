@@ -14,6 +14,7 @@ tests:
       prompt: "ci_schema"
     expected:
       type: json_schema
+      json_schema: "{}"
       schema_file: "schemas/ci_answer.schema.json"
   - id: "ci_smoke_semantic"
     input:
