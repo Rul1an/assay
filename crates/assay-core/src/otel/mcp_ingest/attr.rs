@@ -706,16 +706,15 @@ fn parse_decimal_i64(value: &str) -> Option<i64> {
         Some(b'+') | None => return None,
         _ => (false, value),
     };
-    let (mantissa, exponent) = match unsigned.find(['e', 'E']) {
+    let (mantissa, exponent_text) = match unsigned.find(['e', 'E']) {
         Some(index) => {
             let exponent_text = &unsigned[index + 1..];
             if exponent_text.is_empty() || unsigned[index + 1..].contains(['e', 'E']) {
                 return None;
             }
-            let exponent = exponent_text.parse::<i64>().ok()?;
-            (&unsigned[..index], exponent)
+            (&unsigned[..index], Some(exponent_text))
         }
-        None => (unsigned, 0),
+        None => (unsigned, None),
     };
     let (integer, fraction) = match mantissa.split_once('.') {
         Some((integer, fraction)) if !integer.is_empty() && !fraction.is_empty() => {
@@ -733,6 +732,10 @@ fn parse_decimal_i64(value: &str) -> Option<i64> {
     let mut digits = Vec::with_capacity(integer.len().saturating_add(fraction.len()));
     digits.extend(integer.bytes());
     digits.extend(fraction.bytes());
+    if digits.iter().all(|digit| *digit == b'0') {
+        return Some(0);
+    }
+    let exponent = exponent_text.map_or(Some(0), |text| text.parse::<i64>().ok())?;
     let scale = exponent.checked_sub(i64::try_from(fraction.len()).ok()?)?;
     if scale < 0 {
         let remove = usize::try_from(scale.unsigned_abs()).ok()?;
@@ -1057,14 +1060,19 @@ impl<'de> Visitor<'de> for ValueElementsSeed<'_, '_> {
                 {}
             }
             ListKind::Kv => {
-                while seq
-                    .next_element_seed(KvEntrySeed {
-                        st: self.st,
-                        depth: self.depth + 1,
-                        budget: self.budget,
-                    })?
-                    .is_some()
-                {}
+                let mut keys = std::collections::HashSet::new();
+                while let Some(key) = seq.next_element_seed(KvEntrySeed {
+                    st: self.st,
+                    depth: self.depth + 1,
+                    budget: self.budget,
+                })? {
+                    if !keys.insert(key) {
+                        return Err(self
+                            .st
+                            .borrow_mut()
+                            .fail(OtlpIngestError::DuplicateField(ShapeSite::AttributeValue)));
+                    }
+                }
             }
         }
         Ok(())
@@ -1079,15 +1087,64 @@ struct KvEntrySeed<'a, 'b> {
     budget: &'b mut u64,
 }
 
+/// The nested `KeyValue.key` string. Unlike an object member name, this is attacker content in
+/// the enclosing AnyValue, so both byte ceilings are checked before the list-local uniqueness
+/// set retains a bounded copy.
+struct KvEntryValueKeySeed<'a, 'b> {
+    st: St<'a>,
+    depth: u64,
+    budget: &'b mut u64,
+}
+
+impl<'de> DeserializeSeed<'de> for KvEntryValueKeySeed<'_, '_> {
+    type Value = String;
+
+    fn deserialize<D: de::Deserializer<'de>>(self, de: D) -> Result<Self::Value, D::Error> {
+        de.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for KvEntryValueKeySeed<'_, '_> {
+    type Value = String;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a nested KeyValue key string")
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<String, E> {
+        self.st.borrow_mut().charge(value.len() as u64)?;
+        charge_value(self.st, self.budget, value.len() as u64)?;
+        Ok(value.to_owned())
+    }
+
+    fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+        reject_value_scalar(self.st, self.budget, 1)
+    }
+    fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+        reject_value_scalar(self.st, self.budget, 8)
+    }
+    fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+        reject_value_scalar(self.st, self.budget, 8)
+    }
+    fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+        reject_value_scalar(self.st, self.budget, 8)
+    }
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        reject_value_scalar(self.st, self.budget, 1)
+    }
+    reject_container_at!(seq, ShapeSite::AttributeValue);
+    reject_container_at!(map, ShapeSite::AttributeValue);
+}
+
 impl<'de> DeserializeSeed<'de> for KvEntrySeed<'_, '_> {
-    type Value = ();
-    fn deserialize<D: de::Deserializer<'de>>(self, de: D) -> Result<(), D::Error> {
+    type Value = String;
+    fn deserialize<D: de::Deserializer<'de>>(self, de: D) -> Result<String, D::Error> {
         de.deserialize_any(self)
     }
 }
 
 impl<'de> Visitor<'de> for KvEntrySeed<'_, '_> {
-    type Value = ();
+    type Value = String;
 
     fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("a kvlist entry object")
@@ -1096,15 +1153,19 @@ impl<'de> Visitor<'de> for KvEntrySeed<'_, '_> {
     reject_value_scalars!();
     reject_container_at!(seq, ShapeSite::AttributeValue);
 
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<String, A::Error> {
         self.st.borrow_mut().enter(self.depth)?;
         let mut members = Members::new(ShapeSite::AttributeValue);
+        let mut key = None;
         while let Some(member) = map.next_key_seed(KeySeed { st: self.st })? {
             match member.as_str() {
                 "key" => {
                     members.admit(self.st, &member)?;
-                    let k = map.next_value_seed(KeySeed { st: self.st })?;
-                    charge_value(self.st, self.budget, k.len() as u64)?;
+                    key = Some(map.next_value_seed(KvEntryValueKeySeed {
+                        st: self.st,
+                        depth: self.depth + 1,
+                        budget: self.budget,
+                    })?);
                 }
                 "value" => {
                     members.admit(self.st, &member)?;
@@ -1126,6 +1187,6 @@ impl<'de> Visitor<'de> for KvEntrySeed<'_, '_> {
                 }
             }
         }
-        Ok(())
+        Ok(key.unwrap_or_default())
     }
 }

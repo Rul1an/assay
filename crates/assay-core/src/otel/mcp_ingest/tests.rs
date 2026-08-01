@@ -192,6 +192,25 @@ fn instrumentation_scope_storage_is_shared_across_its_spans() {
 }
 
 #[test]
+fn string_instrumentation_scope_is_typed_and_charged_before_shape_refusal() {
+    let oversized = "x".repeat(128);
+    let doc = format!(r#"{{"resourceSpans":[{{"scopeSpans":[{{"scope":"{oversized}"}}]}}]}}"#);
+
+    let mut bounded = corpus_limits();
+    bounded.max_decoded_bytes = 64;
+    assert_limit(
+        decode_str(&doc, &bounded),
+        OtlpLimitDimension::DecodedBytes,
+        64,
+    );
+
+    assert_eq!(
+        decode_str(&doc, &corpus_limits()).expect_err("scope must be an object"),
+        OtlpIngestError::UnexpectedShape(ShapeSite::InstrumentationScope)
+    );
+}
+
+#[test]
 fn absent_null_and_empty_parent_or_scope_identity_remain_absent() {
     for parent in ["", "null"] {
         let parent_field = if parent == "null" {
@@ -250,6 +269,9 @@ fn provenance_mapping_is_pinned() {
     let expected = [
         (UpstreamField::TraceId, "traceId"),
         (UpstreamField::SpanId, "spanId"),
+        (UpstreamField::ParentSpanId, "parentSpanId"),
+        (UpstreamField::InstrumentationScopeName, "scope.name"),
+        (UpstreamField::InstrumentationScopeVersion, "scope.version"),
         (UpstreamField::SpanKind, "kind"),
         (UpstreamField::StatusCode, "status.code"),
         (UpstreamField::McpMethodName, "mcp.method.name"),
@@ -513,6 +535,35 @@ fn kvlist_keys_and_values_share_one_per_attribute_budget() {
         &limits,
     )
     .expect("per-value budget resets between separate attributes");
+}
+
+#[test]
+fn duplicate_nested_kvlist_keys_are_rejected() {
+    let entry = r#"{"key":"x","value":{"kvlistValue":{"values":[{"key":"same","value":{}},{"key":"same","value":{}}]}}}"#;
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[entry.to_string()]), &corpus_limits())
+            .expect_err("nested KeyValueList keys must be unique"),
+        OtlpIngestError::DuplicateField(ShapeSite::AttributeValue)
+    );
+}
+
+#[test]
+fn malformed_kvlist_keys_charge_value_budget_before_typed_shape_refusal() {
+    let entry = r#"{"key":"x","value":{"kvlistValue":{"values":[{"key":true,"value":{}}]}}}"#;
+
+    let mut bounded = corpus_limits();
+    bounded.max_attribute_value_bytes = 0;
+    assert_limit(
+        decode_str(&doc_with_attrs(&[entry.to_string()]), &bounded),
+        OtlpLimitDimension::AttributeValueBytes,
+        0,
+    );
+
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[entry.to_string()]), &corpus_limits())
+            .expect_err("nested key must be a string"),
+        OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)
+    );
 }
 
 // --- Short reads and source truncation ------------------------------------------------------
@@ -1287,6 +1338,8 @@ fn protojson_int64_string_conversion_is_exact() {
         r#""-9223372036854775808""#,
         r#""9223372036854775807""#,
         r#""-9.223372036854775808e18""#,
+        r#""0e-9223372036854775809""#,
+        r#""0.0e-9223372036854775808""#,
     ] {
         let entry = format!(r#"{{"key":"x","value":{{"intValue":{int_value}}}}}"#);
         decode_str(&doc_with_attrs(&[entry]), &corpus_limits())

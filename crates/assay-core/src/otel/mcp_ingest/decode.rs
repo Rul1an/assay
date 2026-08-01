@@ -700,6 +700,12 @@ impl<'de> Visitor<'de> for InstrumentationScopeSeed<'_> {
             ShapeSite::InstrumentationScope,
         )))
     }
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(value.len() as u64)?;
+        Err(self.st.borrow_mut().fail(OtlpIngestError::UnexpectedShape(
+            ShapeSite::InstrumentationScope,
+        )))
+    }
     reject_container_at!(seq, ShapeSite::InstrumentationScope);
 
     fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {

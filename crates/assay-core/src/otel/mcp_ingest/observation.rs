@@ -24,6 +24,12 @@ pub(crate) enum UpstreamField {
     TraceId,
     /// OTLP span `spanId`.
     SpanId,
+    /// OTLP span `parentSpanId`.
+    ParentSpanId,
+    /// OTLP instrumentation scope `name`.
+    InstrumentationScopeName,
+    /// OTLP instrumentation scope `version`.
+    InstrumentationScopeVersion,
     /// OTLP span `kind`.
     SpanKind,
     /// OTLP span `status.code`.
@@ -50,6 +56,9 @@ impl UpstreamField {
         match self {
             UpstreamField::TraceId => "traceId",
             UpstreamField::SpanId => "spanId",
+            UpstreamField::ParentSpanId => "parentSpanId",
+            UpstreamField::InstrumentationScopeName => "scope.name",
+            UpstreamField::InstrumentationScopeVersion => "scope.version",
             UpstreamField::SpanKind => "kind",
             UpstreamField::StatusCode => "status.code",
             UpstreamField::McpMethodName => "mcp.method.name",
