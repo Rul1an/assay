@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block extrahead %}
+  {{ super() }}
   {% if page and page.meta and page.meta.description %}
     <meta property="og:type" content="article">
     <meta property="og:title" content="{{ page.meta.title or page.title }} - {{ config.site_name }}">
