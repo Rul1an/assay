@@ -204,6 +204,15 @@ pub struct PinnedTool {
 }
 
 impl Default for Expected {
+    /// NOTE: this default is **vacuous** — an empty `must_contain` makes the
+    /// `must_contain` metric pass unconditionally, because it has no substring to
+    /// look for. It exists only so `TestCase` can derive `Default` and so a test
+    /// whose checks live in `assertions:` can omit `expected:` entirely.
+    ///
+    /// It must never be used as a parse fallback: an `expected:` block that fails
+    /// to parse is a hard config error (see `model::serde`), and a test that ends
+    /// up holding this value with no assertions is reported by the
+    /// `E_CFG_VACUOUS_EXPECTED` rule in `assay validate`.
     fn default() -> Self {
         Expected::MustContain {
             must_contain: vec![],

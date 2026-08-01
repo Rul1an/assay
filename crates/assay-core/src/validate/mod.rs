@@ -58,10 +58,15 @@ pub async fn validate(
         }
     }
 
-    // Return early if basic files missing to avoid noise
+    // Return early if basic files missing to avoid noise. The vacuous-expected scan is
+    // still reported: it is a pure config check that needs neither trace nor baseline.
     if !diags.is_empty() {
+        diags.extend(check_vacuous_expected(cfg));
         return Ok(ValidateReport { diagnostics: diags });
     }
+
+    // 1b. Vacuous assertions (E_CFG_VACUOUS_EXPECTED)
+    diags.extend(check_vacuous_expected(cfg));
 
     // 2. Load Trace & Baseline for deeper checks
     let trace_client = if let Some(path) = &opts.trace_file {
@@ -274,6 +279,57 @@ pub async fn validate(
     Ok(ValidateReport { diagnostics: diags })
 }
 
+/// Flag tests whose `expected:` block asserts nothing and therefore always passes.
+///
+/// An empty `must_contain` / `must_not_contain` gives the metric no substring to look
+/// for, so it returns `pass(1.0)` for any response whatsoever. The same shape is what a
+/// test with no `expected:` key at all resolves to, via `Expected::default()`.
+///
+/// Tests that carry `assertions:` are exempt: for those, omitting `expected:` is the
+/// documented way to let trace assertions do the checking, and the empty default is
+/// then a placeholder rather than a claim.
+///
+/// This check reads only the config, so `assay validate` can sweep a suite for
+/// always-green tests without running it.
+fn check_vacuous_expected(cfg: &EvalConfig) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+
+    for tc in &cfg.tests {
+        let has_assertions = tc.assertions.as_ref().is_some_and(|a| !a.is_empty());
+        if has_assertions {
+            continue;
+        }
+
+        let field = match &tc.expected {
+            Expected::MustContain { must_contain } if must_contain.is_empty() => "must_contain",
+            Expected::MustNotContain { must_not_contain } if must_not_contain.is_empty() => {
+                "must_not_contain"
+            }
+            _ => continue,
+        };
+
+        diags.push(
+            Diagnostic::new(
+                codes::E_CFG_VACUOUS_EXPECTED,
+                format!(
+                    "Test '{}' asserts nothing: `{}` is empty, so this test passes for any response",
+                    tc.id, field
+                ),
+            )
+            .with_source("config")
+            .with_context(serde_json::json!({
+                "test_id": tc.id,
+                "field": field,
+            }))
+            .with_fix_step(format!("Give `{}` at least one entry", field))
+            .with_fix_step("Or replace the expected block with a metric that checks something")
+            .with_fix_step("Or move the test's checks to `assertions:`"),
+        );
+    }
+
+    diags
+}
+
 fn validate_strict_requirements(
     tc: &crate::model::TestCase,
     resp: &crate::model::LlmResponse,
@@ -359,5 +415,116 @@ fn check_embedding_dims(
                 );
             }
         }
+    }
+}
+#[cfg(test)]
+mod vacuous_expected_tests {
+    use super::*;
+    use crate::agent_assertions::model::TraceAssertion;
+    use crate::model::{Settings, TestCase, TestInput};
+
+    fn cfg_with(expected: Expected, assertions: Option<Vec<TraceAssertion>>) -> EvalConfig {
+        EvalConfig {
+            version: 1,
+            suite: "s".into(),
+            model: "dummy".into(),
+            settings: Settings::default(),
+            thresholds: Default::default(),
+            otel: Default::default(),
+            tests: vec![TestCase {
+                id: "t1".into(),
+                input: TestInput {
+                    prompt: "hi".into(),
+                    context: None,
+                },
+                expected,
+                assertions,
+                on_error: None,
+                tags: vec![],
+                metadata: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn flags_empty_must_contain() {
+        let cfg = cfg_with(
+            Expected::MustContain {
+                must_contain: vec![],
+            },
+            None,
+        );
+        let diags = check_vacuous_expected(&cfg);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].code, codes::E_CFG_VACUOUS_EXPECTED);
+        assert_eq!(diags[0].severity, "error");
+        assert!(diags[0].message.contains("t1"), "{}", diags[0].message);
+    }
+
+    #[test]
+    fn flags_empty_must_not_contain() {
+        let cfg = cfg_with(
+            Expected::MustNotContain {
+                must_not_contain: vec![],
+            },
+            None,
+        );
+        let diags = check_vacuous_expected(&cfg);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].context["field"], "must_not_contain");
+    }
+
+    /// A missing `expected:` key resolves to the vacuous default, so the same rule
+    /// covers it — this is what keeps the permissive parse honest.
+    #[test]
+    fn flags_default_expected_from_missing_key() {
+        let cfg = cfg_with(Expected::default(), None);
+        assert_eq!(check_vacuous_expected(&cfg).len(), 1);
+    }
+
+    #[test]
+    fn does_not_flag_populated_must_contain() {
+        let cfg = cfg_with(
+            Expected::MustContain {
+                must_contain: vec!["Paris".into()],
+            },
+            None,
+        );
+        assert!(check_vacuous_expected(&cfg).is_empty());
+    }
+
+    /// Assertion-carrying tests legitimately omit `expected:`.
+    #[test]
+    fn does_not_flag_when_assertions_present() {
+        let cfg = cfg_with(
+            Expected::default(),
+            Some(vec![TraceAssertion::TraceMustCallTool {
+                tool: "search".into(),
+                min_calls: None,
+            }]),
+        );
+        assert!(check_vacuous_expected(&cfg).is_empty());
+    }
+
+    /// The sweep must work with no trace file and no baseline — that is the point of
+    /// being able to check a suite without running it.
+    #[tokio::test]
+    async fn validate_reports_vacuous_without_trace_file() {
+        let cfg = cfg_with(
+            Expected::MustContain {
+                must_contain: vec![],
+            },
+            None,
+        );
+        let opts = ValidateOptions {
+            trace_file: None,
+            baseline_file: None,
+            replay_strict: false,
+        };
+        let resolver = PathResolver::new(Path::new("eval.yaml"));
+
+        let report = validate(&cfg, &opts, &resolver).await.expect("validate");
+        assert_eq!(report.diagnostics.len(), 1);
+        assert_eq!(report.diagnostics[0].code, codes::E_CFG_VACUOUS_EXPECTED);
     }
 }
