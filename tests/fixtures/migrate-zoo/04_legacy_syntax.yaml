@@ -1,4 +1,8 @@
 # Test: Legacy sequence syntax (list of strings instead of list of objects)
+#
+# A single-entry legacy list is still accepted. Multi-entry `expected:` lists are
+# rejected: only the first entry was ever evaluated, so the rest were dropped in
+# silence. Checks that used to share one list now live in separate tests.
 configVersion: 1
 suite: legacy_test
 model: dummy
@@ -9,4 +13,10 @@ tests:
        prompt: "Do things"
     expected:
        - must_contain: "Paris"
-       - must_not_contain: "London"
+  # `must_not_contain` has no legacy heuristic, so it uses the tagged form.
+  - id: legacy_sequence_negative
+    input:
+       prompt: "Do things"
+    expected:
+       type: must_not_contain
+       must_not_contain: ["London"]

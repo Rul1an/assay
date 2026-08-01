@@ -374,3 +374,147 @@ fn contract_run_default_text_keeps_stdout_clean() {
         String::from_utf8_lossy(&out.stdout)
     );
 }
+
+// ---------------------------------------------------------------------------
+// Vacuous / unparsable `expected:` blocks
+//
+// A YAML typo in `expected:` used to fall back to `Expected::default()` — an
+// empty `must_contain`, which passes for any response. These pin the three
+// silent paths to the default as config errors (exit 2), end to end.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn contract_run_rejects_unparsable_expected_object() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"suite: typo
+model: dummy
+tests:
+  - id: t1
+    input: hello
+    expected:
+      must_contains: ["hello"]
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+}
+
+#[test]
+fn contract_run_rejects_unrecognized_expected_list_entry() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"suite: typo
+model: dummy
+tests:
+  - id: t1
+    input: hello
+    expected:
+      - must_contains: ["hello"]
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+}
+
+#[test]
+fn contract_run_rejects_multi_element_expected_list() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"suite: multi
+model: dummy
+tests:
+  - id: t1
+    input: hello
+    expected:
+      - must_contain: "hello"
+      - must_contain: "world"
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+}
+
+/// `assay validate` sweeps a suite for always-green tests without running it.
+#[test]
+fn contract_validate_flags_vacuous_expected() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"suite: vacuous
+model: dummy
+tests:
+  - id: always_green
+    input: hello
+    expected:
+      type: must_contain
+      must_contain: []
+"#,
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .arg("validate")
+        .arg("--config")
+        .arg("assay.yaml")
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .code(2)
+        .get_output()
+        .clone();
+
+    let report: Value = serde_json::from_slice(&out.stdout).expect("validate json");
+    let codes: Vec<&str> = report["diagnostics"]
+        .as_array()
+        .expect("diagnostics array")
+        .iter()
+        .filter_map(|d| d["code"].as_str())
+        .collect();
+    assert!(
+        codes.contains(&"E_CFG_VACUOUS_EXPECTED"),
+        "expected E_CFG_VACUOUS_EXPECTED, got {:?}",
+        codes
+    );
+}

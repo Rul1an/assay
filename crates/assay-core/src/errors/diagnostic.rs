@@ -89,6 +89,8 @@ pub mod codes {
     // Errors (Exit 2)
     pub const E_CFG_PARSE: &str = "E_CFG_PARSE";
     pub const E_CFG_SCHEMA: &str = "E_CFG_SCHEMA";
+    /// A test whose `expected:` asserts nothing and therefore always passes.
+    pub const E_CFG_VACUOUS_EXPECTED: &str = "E_CFG_VACUOUS_EXPECTED";
     pub const E_PATH_NOT_FOUND: &str = "E_PATH_NOT_FOUND";
     pub const E_TRACE_MISS: &str = "E_TRACE_MISS";
     pub const E_TRACE_INVALID: &str = "E_TRACE_INVALID";
