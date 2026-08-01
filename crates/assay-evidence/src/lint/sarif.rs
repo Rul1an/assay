@@ -337,9 +337,40 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
     // Build invocations
     // Note: workingDirectory is intentionally omitted to avoid leaking local paths
     // (e.g., /Users/... or /home/...). GitHub Code Scanning doesn't require it.
-    let invocation = json!({
+    //
+    // `executionSuccessful` stays true on a truncated run, and that is the spec reading rather than
+    // a convenience. SARIF 2.1.0 section 3.20.14 defines it as the tool having "run to completion
+    // without encountering fatal errors that prevented it from analyzing the full set of specified
+    // targets". Truncation caps what is *reported*, not what was analyzed, so flipping this would
+    // tell a consumer the analysis was cut short when it was not.
+    //
+    // The condition still has to reach a consumer somewhere it will look. Appendix I, "Detecting
+    // incomplete result sets", names exactly two places a consumer examines, and the other one is
+    // `toolExecutionNotifications`: conditions to weigh when judging whether the result set is
+    // complete. Truncation is that, so it goes there. Carrying it only in `run.properties`, as this
+    // producer did before, meant the notice existed but sat somewhere no generic consumer reads,
+    // which for a tool that argues a partial scan must not read as a clean one was the wrong place.
+    let mut invocation = json!({
         "executionSuccessful": true
     });
+    if report.truncated {
+        invocation.as_object_mut().unwrap().insert(
+            "toolExecutionNotifications".into(),
+            json!([{
+                "descriptor": { "id": "ASSAY-LINT-TRUNCATED" },
+                "level": "warning",
+                "message": {
+                    "text": format!(
+                        "Result set is incomplete: {} finding(s) were dropped by the max_results \
+                         cap. The findings reported here are the highest severity that survived \
+                         the cap; absence of a lower-severity finding does not mean it was absent \
+                         from the bundle.",
+                        report.truncated_count
+                    )
+                }
+            }]),
+        );
+    }
 
     // Build tool.driver
     let mut driver = json!({

@@ -103,6 +103,8 @@ pub fn lint_bundle_with_options<R: Read>(
             verified: true,
             findings,
             summary,
+            truncated,
+            truncated_count,
         },
         pack_meta,
     })
