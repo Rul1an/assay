@@ -688,7 +688,7 @@ pub(crate) const SUPPORTED_VERSIONS: &[&str] = &[
 /// would pass a shape-only check and be reported as a version this build merely does not support,
 /// which blames the reader for a record that is wrong. The value is validated as a real calendar
 /// date, leap years included, so `2026-02-31` is malformed rather than unsupported.
-fn is_version_shaped(v: &str) -> bool {
+pub(crate) fn is_version_shaped(v: &str) -> bool {
     let b = v.as_bytes();
     if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
         return false;

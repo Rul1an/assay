@@ -1,7 +1,24 @@
-//! MCP-shaped OTLP/JSON ingest scaffold (documentation only, pub(crate))
+//! Bounded MCP-shaped OTLP/JSON ingest (pub(crate))
 //!
-//! This module exists as a **contract marker** only. It contains no production decoder,
-//! no serde models for OTLP payloads, and no runtime ingestion logic.
+//! Slice A froze the fixture/corpus contract described below. Slice B adds the bounded
+//! source/decode reader and a selective structured serde visitor over that pinned corpus:
+//!
+//! - [`decode::decode_mcp_resource_spans`] decodes an OTLP/JSON `resourceSpans` document under
+//!   the independent pre-retention ceilings in [`limits::OtlpIngestLimits`] (source bytes,
+//!   decoded bytes, nesting depth, span count, attribute count, attribute-key bytes,
+//!   attribute-value bytes).
+//! - Extraction is limited to the explicit MCP observation fields named in issue #1931, each
+//!   preserving upstream field provenance and the semconv pin
+//!   ([`observation::SEMCONV_PIN`]).
+//! - The span-reported `mcp.protocol.version` stays a separate provenance-bearing observation
+//!   ([`observation::SpanProtocolVersion`]); it never enters the transport `EraResolution`
+//!   contract and cannot manufacture a header/body conflict.
+//! - Rejections are typed and value-free ([`limits::OtlpIngestError`]): no attacker-controlled
+//!   bytes are retained in or echoed by any error.
+//!
+//! There is still no reducer, no adequacy result, no CLI, no live receiver, no gzip expansion,
+//! no policy inference, and no decision carrier. The legacy `trace::otel_ingest` path is
+//! unchanged.
 //!
 //! ## Scope (ADR-042 Slice A)
 //!
@@ -98,11 +115,23 @@
 //! - `hostile_oversized_attribute.json`: Size limit test
 //! - `hostile_missing_required_fields.json`: Schema validation test
 //!
-//! ## Future Work (Slice B and beyond)
+//! ## Future Work (Slice C and beyond)
 //!
-//! - Test-only or internal bounded OTLP parser for projection to `TraceEvent`
-//! - Hostile fixture rejection semantics (depth limits, size limits, schema validation)
+//! - Reducer/adequacy result over decoded observations (tool call observed, operation error
+//!   observed, policy decision evidence absent, unsupported decision carrier)
 //! - Optional CLI integration (`assay evidence inspect-otel-mcp`) if requirements emerge
-//!
-//! This file intentionally contains no types, functions, or serde models -- it is
-//! documentation only.
+
+// Slice B ships the bounded decoder without a production consumer on purpose: the reducer,
+// adequacy result, and any CLI wiring are Slice C scope. Until that consumer lands, the decode
+// surface is exercised only by this module's tests, so the non-test build sees it as dead code.
+#[cfg_attr(not(test), allow(dead_code))]
+mod attr;
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod decode;
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod limits;
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod observation;
+
+#[cfg(test)]
+mod tests;
