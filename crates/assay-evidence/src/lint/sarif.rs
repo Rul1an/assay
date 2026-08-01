@@ -348,22 +348,21 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
     // A capped run succeeded; it reported less than it found. Flipping this would assert a failure
     // that did not happen.
     //
-    // Where the cap should be disclosed is genuinely unsettled in SARIF, and the honest answer is
-    // that the format has no home for it. Appendix I ("Detecting incomplete result sets",
-    // informative) lists three conditions, and all three describe a tool that failed to *analyse*:
-    // `executionSuccessful` false, an `error`-level notification meaning the tool "was unable to
-    // execute every analysis rule on every analysis target", or `results` being null. A reporting
-    // cap is none of those. It is a serialisation policy chosen before the run, and the tool did
-    // analyse everything.
+    // The cap itself is the deeper problem, and it is worth stating here rather than only in a
+    // commit message. Section 3.14.23 is normative: outside the failed-to-start cases, `results`
+    // "SHALL be present and SHALL contain all results detected by the tool". A configured
+    // `max_results` therefore puts this producer out of conformance whenever it fires. The cap
+    // exists because downstream consumers impose upload limits, so this is a real tension and not
+    // an oversight, but it is a tension the format resolves against us. An earlier version of this
+    // comment claimed SARIF had no home for a reporting cap; that was wrong, and the correction is
+    // that SARIF has a position instead of a gap.
     //
-    // So this emits in both places and claims neither as normative. `run.properties` is the honest
-    // machine-readable home, because a property bag is what the format leaves for conditions it
-    // does not model. The notification is a human-readable aid at `warning`, which deliberately
-    // does not meet Appendix I's `error` gate: raising it to `error` would be worse than silence,
-    // since section 3.20.21 makes an error-level notification mean the run itself failed, which
-    // would contradict the `executionSuccessful: true` directly above and overstate a cap into a
-    // failure. A consumer keying strictly on Appendix I will therefore not see this, and that is a
-    // gap in the format rather than something this producer can close on its own.
+    // Until the cap goes, disclose it in both available places and claim neither as a blessing.
+    // `run.properties` is the machine-readable carrier. The notification is a human-readable aid at
+    // `warning`, which 3.58.6 defines as covering the case where "the analysis might be incomplete
+    // but the results that were generated are probably valid". It stays below Appendix I's `error`
+    // gate deliberately: 3.20.21 makes an error-level notification mean the run failed, and a cap
+    // is not a failed run.
     let mut invocation = json!({
         "executionSuccessful": true
     });
