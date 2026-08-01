@@ -1,0 +1,20 @@
+{
+  "name": "otel-mcp-fixture-generator",
+  "version": "1.0.0",
+  "description": "Deterministic OTLP/JSON fixture generator using official OpenTelemetry SDK",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node generate.js"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "1.9.0",
+    "@opentelemetry/sdk-trace-node": "1.28.0",
+    "@opentelemetry/exporter-trace-otlp-http": "0.56.0",
+    "@opentelemetry/resources": "1.28.0",
+    "@opentelemetry/semantic-conventions": "1.28.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,8 +1,8 @@
 name: OTLP MCP Fixture Drift Report
 
 # Non-required scheduled workflow that monitors the upstream OpenTelemetry SDK,
-# protobuf definitions, and generator lockfile for version drift. Reports to
-# GITHUB_STEP_SUMMARY but does not fail or block.
+# OTLP proto definitions, MCP semconv, and generator for version drift.
+# Reports to GITHUB_STEP_SUMMARY only (does not fail or block CI).
 
 on:
   schedule:
@@ -17,6 +17,7 @@ jobs:
   check-drift:
     name: Check Upstream Drift
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -24,117 +25,165 @@ jobs:
       - name: Read Lock
         id: lock
         run: |
+          set -euo pipefail
           LOCK_PATH="crates/assay-core/tests/fixtures/otel-mcp-ingest-v0/upstream.lock.json"
-          LOCKED_VERSION=$(jq -r '.sdk.version' "$LOCK_PATH")
-          echo "locked_version=$LOCKED_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Locked SDK version: $LOCKED_VERSION"
+          if [ ! -f "$LOCK_PATH" ]; then
+            echo "::error::Lock file not found at $LOCK_PATH"
+            exit 1
+          fi
+          LOCKED_SDK=$(jq -r '.sdk.version' "$LOCK_PATH")
+          LOCKED_EXPORTER=$(jq -r '.exporter.version' "$LOCK_PATH")
+          echo "locked_sdk=$LOCKED_SDK" >> "$GITHUB_OUTPUT"
+          echo "locked_exporter=$LOCKED_EXPORTER" >> "$GITHUB_OUTPUT"
+          echo "Locked SDK: $LOCKED_SDK, Exporter: $LOCKED_EXPORTER"
 
-      - name: Fetch Latest SDK Version
-        id: latest_sdk
+      - name: Fetch Latest Versions
+        id: latest
         run: |
-          PACKAGE="@opentelemetry/sdk-trace-node"
-          LATEST=$(npm view "$PACKAGE" version)
-          echo "latest_version=$LATEST" >> "$GITHUB_OUTPUT"
-          echo "Latest SDK version: $LATEST"
+          set -euo pipefail
+          SDK_LATEST=$(npm view --silent @opentelemetry/sdk-trace-node version || echo "fetch_failed")
+          EXPORTER_LATEST=$(npm view --silent @opentelemetry/exporter-trace-otlp-http version || echo "fetch_failed")
+          echo "sdk=$SDK_LATEST" >> "$GITHUB_OUTPUT"
+          echo "exporter=$EXPORTER_LATEST" >> "$GITHUB_OUTPUT"
+          echo "Latest SDK: $SDK_LATEST, Exporter: $EXPORTER_LATEST"
 
-      - name: Check Proto Drift
-        id: proto_drift
+      - name: Check Proto Drift (All 4 Files)
+        id: proto
         run: |
-          PROTO_URL="https://raw.githubusercontent.com/open-telemetry/opentelemetry-proto/main/opentelemetry/proto/trace/v1/trace.proto"
-          VENDORED_PATH="crates/assay-core/tests/fixtures/otel-mcp-ingest-v0/vendor/opentelemetry/proto/trace/v1/trace.proto"
+          set -euo pipefail
+          BASE="vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto"
+          CORPUS_ROOT="crates/assay-core/tests/fixtures/otel-mcp-ingest-v0"
+          PROTO_BASE_URL="https://raw.githubusercontent.com/open-telemetry/opentelemetry-proto/v1.11.0/opentelemetry/proto"
 
-          UPSTREAM_HASH=$(curl -s "$PROTO_URL" | sha256sum | awk '{print $1}')
-          VENDORED_HASH=$(sha256sum "$VENDORED_PATH" | awk '{print $1}')
+          DRIFT=false
 
-          echo "upstream_hash=$UPSTREAM_HASH" >> "$GITHUB_OUTPUT"
-          echo "vendored_hash=$VENDORED_HASH" >> "$GITHUB_OUTPUT"
-
-          if [ "$UPSTREAM_HASH" != "$VENDORED_HASH" ]; then
-            echo "proto_drift=true" >> "$GITHUB_OUTPUT"
-            echo "Proto drift detected"
+          # Check trace_service.proto
+          FILE="$CORPUS_ROOT/$BASE/collector/trace/v1/trace_service.proto"
+          UPSTREAM_URL="$PROTO_BASE_URL/collector/trace/v1/trace_service.proto"
+          if [ -f "$FILE" ]; then
+            UPSTREAM=$(curl --fail --retry 3 -sS "$UPSTREAM_URL" | shasum -a 256 | awk '{print $1}')
+            VENDORED=$(shasum -a 256 < "$FILE" | awk '{print $1}')
+            if [ "$UPSTREAM" != "$VENDORED" ]; then DRIFT=true; fi
           else
-            echo "proto_drift=false" >> "$GITHUB_OUTPUT"
-            echo "No proto drift"
+            echo "::warning::$FILE missing"
+            DRIFT=true
           fi
 
-      - name: Check Generator Lock Drift
-        id: gen_drift
-        run: |
-          GEN_LOCK_PATH="crates/assay-core/tests/fixtures/otel-mcp-ingest-v0/upstream.lock.json"
-
-          # Check if generator lockfile has changed by comparing integrity hashes
-          SDK_INTEGRITY=$(jq -r '.sdk.integrity' "$GEN_LOCK_PATH")
-          echo "sdk_integrity=$SDK_INTEGRITY" >> "$GITHUB_OUTPUT"
-
-          # For now, we just record it. Future: fetch from npm and compare
-          echo "Generator lock SDK integrity: $SDK_INTEGRITY"
-
-      - name: Compare SDK Versions
-        id: compare
-        run: |
-          LOCKED="${{ steps.lock.outputs.locked_version }}"
-          LATEST="${{ steps.latest_sdk.outputs.latest_version }}"
-
-          if [ "$LOCKED" != "$LATEST" ]; then
-            echo "sdk_drift=true" >> "$GITHUB_OUTPUT"
-            echo "SDK drift detected: $LOCKED (locked) vs $LATEST (latest)"
+          # Check trace.proto
+          FILE="$CORPUS_ROOT/$BASE/trace/v1/trace.proto"
+          UPSTREAM_URL="$PROTO_BASE_URL/trace/v1/trace.proto"
+          if [ -f "$FILE" ]; then
+            UPSTREAM=$(curl --fail --retry 3 -sS "$UPSTREAM_URL" | shasum -a 256 | awk '{print $1}')
+            VENDORED=$(shasum -a 256 < "$FILE" | awk '{print $1}')
+            if [ "$UPSTREAM" != "$VENDORED" ]; then DRIFT=true; fi
           else
-            echo "sdk_drift=false" >> "$GITHUB_OUTPUT"
-            echo "No SDK drift: $LOCKED == $LATEST"
+            DRIFT=true
+          fi
+
+          # Check resource.proto
+          FILE="$CORPUS_ROOT/$BASE/resource/v1/resource.proto"
+          UPSTREAM_URL="$PROTO_BASE_URL/resource/v1/resource.proto"
+          if [ -f "$FILE" ]; then
+            UPSTREAM=$(curl --fail --retry 3 -sS "$UPSTREAM_URL" | shasum -a 256 | awk '{print $1}')
+            VENDORED=$(shasum -a 256 < "$FILE" | awk '{print $1}')
+            if [ "$UPSTREAM" != "$VENDORED" ]; then DRIFT=true; fi
+          else
+            DRIFT=true
+          fi
+
+          # Check common.proto
+          FILE="$CORPUS_ROOT/$BASE/common/v1/common.proto"
+          UPSTREAM_URL="$PROTO_BASE_URL/common/v1/common.proto"
+          if [ -f "$FILE" ]; then
+            UPSTREAM=$(curl --fail --retry 3 -sS "$UPSTREAM_URL" | shasum -a 256 | awk '{print $1}')
+            VENDORED=$(shasum -a 256 < "$FILE" | awk '{print $1}')
+            if [ "$UPSTREAM" != "$VENDORED" ]; then DRIFT=true; fi
+          else
+            DRIFT=true
+          fi
+
+          echo "drift=$DRIFT" >> "$GITHUB_OUTPUT"
+
+      - name: Check MCP Semconv Drift
+        id: semconv
+        run: |
+          set -euo pipefail
+          SEMCONV_FILE="crates/assay-core/tests/fixtures/otel-mcp-ingest-v0/vendor/semantic-conventions-genai-434c91dc/mcp.md"
+          COMMIT="434c91dcc34ed038e3048c07720ddfed2c6bddfc"
+          UPSTREAM_URL="https://raw.githubusercontent.com/open-telemetry/semantic-conventions-genai/$COMMIT/docs/gen-ai/mcp.md"
+
+          if [ ! -f "$SEMCONV_FILE" ]; then
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::MCP semconv file missing"
+            exit 0
+          fi
+
+          UPSTREAM=$(curl --fail --retry 3 -sS "$UPSTREAM_URL" | shasum -a 256 | awk '{print $1}')
+          VENDORED=$(shasum -a 256 < "$SEMCONV_FILE" | awk '{print $1}')
+
+          if [ "$UPSTREAM" != "$VENDORED" ]; then
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "drift=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Report to Summary
         run: |
-          echo "# OTLP MCP Fixture Drift Report" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Run Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          set -euo pipefail
+          {
+            echo "# OTLP MCP Fixture Drift Report"
+            echo ""
+            echo "**Run Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+            echo ""
 
-          # SDK Drift
-          if [ "${{ steps.compare.outputs.sdk_drift }}" = "true" ]; then
-            echo "## SDK Drift Detected" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "- **Locked:** \`${{ steps.lock.outputs.locked_version }}\`" >> $GITHUB_STEP_SUMMARY
-            echo "- **Latest:** \`${{ steps.latest_sdk.outputs.latest_version }}\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Action Required:** Review [changelog](https://github.com/open-telemetry/opentelemetry-js/releases) and regenerate fixtures if upgrading." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "## SDK: No Drift" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "SDK version \`${{ steps.lock.outputs.locked_version }}\` is up to date." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
+            # SDK
+            if [ "${{ steps.lock.outputs.locked_sdk }}" != "${{ steps.latest.outputs.sdk }}" ]; then
+              echo "## SDK Drift Detected"
+              echo ""
+              echo "- Locked: \`${{ steps.lock.outputs.locked_sdk }}\`"
+              echo "- Latest: \`${{ steps.latest.outputs.sdk }}\`"
+              echo ""
+            else
+              echo "## SDK: No Drift (\`${{ steps.lock.outputs.locked_sdk }}\`)"
+              echo ""
+            fi
 
-          # Proto Drift
-          if [ "${{ steps.proto_drift.outputs.proto_drift }}" = "true" ]; then
-            echo "## Proto Drift Detected" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "- **Upstream Hash:** \`${{ steps.proto_drift.outputs.upstream_hash }}\`" >> $GITHUB_STEP_SUMMARY
-            echo "- **Vendored Hash:** \`${{ steps.proto_drift.outputs.vendored_hash }}\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Action Required:** Update vendored proto file and regenerate fixtures." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "## Proto: No Drift" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Vendored proto is up to date with upstream." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
+            # Exporter
+            if [ "${{ steps.lock.outputs.locked_exporter }}" != "${{ steps.latest.outputs.exporter }}" ]; then
+              echo "## Exporter Drift Detected"
+              echo ""
+              echo "- Locked: \`${{ steps.lock.outputs.locked_exporter }}\`"
+              echo "- Latest: \`${{ steps.latest.outputs.exporter }}\`"
+              echo ""
+            else
+              echo "## Exporter: No Drift (\`${{ steps.lock.outputs.locked_exporter }}\`)"
+              echo ""
+            fi
 
-          # Generator Lock
-          echo "## Generator Lock" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **SDK Integrity:** \`${{ steps.gen_drift.outputs.sdk_integrity }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+            # Proto
+            if [ "${{ steps.proto.outputs.drift }}" = "true" ]; then
+              echo "## Proto Drift Detected"
+              echo ""
+              echo "One or more proto files differ from v1.11.0 upstream."
+              echo ""
+            else
+              echo "## Proto: No Drift (v1.11.0)"
+              echo ""
+            fi
 
-          # Overall Status
-          if [ "${{ steps.compare.outputs.sdk_drift }}" = "true" ] || [ "${{ steps.proto_drift.outputs.proto_drift }}" = "true" ]; then
-            echo "## Overall Status: Drift Detected" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "This is a **non-required** report and does not block CI." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "## Overall Status: No Drift" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "All components are up to date." >> $GITHUB_STEP_SUMMARY
-          fi
+            # MCP Semconv
+            if [ "${{ steps.semconv.outputs.drift }}" = "true" ]; then
+              echo "## MCP Semconv Drift Detected"
+              echo ""
+              echo "Vendored MCP semconv differs from commit 434c91dc."
+              echo ""
+            else
+              echo "## MCP Semconv: No Drift (434c91dc)"
+              echo ""
+            fi
+
+            # Overall
+            echo "## Status"
+            echo ""
+            echo "This workflow is **non-required** and does not block CI."
+          } >> "$GITHUB_STEP_SUMMARY"

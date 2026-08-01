@@ -1,64 +1,101 @@
 {
-  "$schema": "https://assay.dev/schemas/upstream-lock-v1.json",
-  "version": "1",
-  "locked": "2026-08-01T00:00:00Z",
+  "schema_version": "1",
+  "locked_at": "2026-08-01T00:00:00Z",
   "sdk": {
-    "name": "@opentelemetry/sdk-trace-node",
+    "package": "@opentelemetry/sdk-trace-node",
     "version": "1.28.0",
     "integrity": "sha512-N0sYfYXvHpP0FNIyc+UfhLnLSTOuZLytV0qQVrDWIlABeD/DWJIGttS7nYeR14gQLXch0M1DW8zm3VeN6Opwtg==",
     "resolved": "https://registry.npmjs.org/@opentelemetry/sdk-trace-node/-/sdk-trace-node-1.28.0.tgz"
   },
-  "dependencies": {
-    "@opentelemetry/api": {
-      "version": "1.9.0",
-      "integrity": "sha512-1Lm3R8BK54R+c4BDM/YNyQ9DHQB7hSYqHREhPgGjD2VjkdlxUNDbzLqRjCk6ue+DpTb9KPKh3hC+Kfq3f7nJIA==",
-      "resolved": "https://registry.npmjs.org/@opentelemetry/api/-/api-1.9.0.tgz"
-    },
-    "@opentelemetry/core": {
-      "version": "1.28.0",
-      "integrity": "sha512-5KqPe3zW8IkNLqhwgCq9HqsJLdNYbHkXOl3WGGaNBjQrqjlPPr2TsYPzVVwPLqnIB3pSYGR6wVKq2gCWnHNyZg==",
-      "resolved": "https://registry.npmjs.org/@opentelemetry/core/-/core-1.28.0.tgz"
-    },
-    "@opentelemetry/resources": {
-      "version": "1.28.0",
-      "integrity": "sha512-F5EL8kQ3XPbqmL7SBKsD8vSKe6VrWqGfHKWGKKvR3UjhqwGZqmMJmqJl2VqLJ6BXkQELz/0+6qLdBpZNLmXUKQ==",
-      "resolved": "https://registry.npmjs.org/@opentelemetry/resources/-/resources-1.28.0.tgz"
-    },
-    "@opentelemetry/semantic-conventions": {
-      "version": "1.28.0",
-      "integrity": "sha512-L0qTlAKQNJH0lKQ/Jq8TYp+f9W3R8LVPZZYMqJHvLHWNQ5hOL3LsNQnKAR1Zqc3e+rQCqYVYJPwPKQNGj2VdHQ==",
-      "resolved": "https://registry.npmjs.org/@opentelemetry/semantic-conventions/-/semantic-conventions-1.28.0.tgz"
-    }
+  "exporter": {
+    "package": "@opentelemetry/exporter-trace-otlp-http",
+    "version": "0.56.0",
+    "integrity": "sha512-vqVuJvcwameA0r0cNrRzrZqPLB0otS+95g0XkZdiKOXUo81wYdY6r4kyrwz4nSChqTBEFm0lqi/H2OWGboOa6g==",
+    "resolved": "https://registry.npmjs.org/@opentelemetry/exporter-trace-otlp-http/-/exporter-trace-otlp-http-0.56.0.tgz"
   },
-  "upstream_references": {
-    "otlp_proto": {
-      "version": "1.11.0",
+  "upstream_sources": [
+    {
+      "type": "proto",
       "repository": "https://github.com/open-telemetry/opentelemetry-proto",
-      "note": "OTLP protocol buffer definitions for trace/JSON mapping",
-      "vendored_files": [
+      "tag": "v1.11.0",
+      "commit": null,
+      "files": [
         {
-          "path": "vendor/otlp-proto-v1.11.0/trace.proto",
-          "sha256": "c3fb1385c90b8bc08a2a462e28b5d0c422c7b524a839f75f75e3cd9f64f36956"
+          "source_path": "opentelemetry/proto/collector/trace/v1/trace_service.proto",
+          "vendored_path": "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/collector/trace/v1/trace_service.proto",
+          "sha256": "03c8cc4e3e101087d884392d6eda32152ad5cd696e6344f50deaa59804a75c7a"
+        },
+        {
+          "source_path": "opentelemetry/proto/trace/v1/trace.proto",
+          "vendored_path": "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/trace/v1/trace.proto",
+          "sha256": "677a3db890a63b97bd70ff2be2143a135207e618a4e0be74402e335a5c099c92"
+        },
+        {
+          "source_path": "opentelemetry/proto/resource/v1/resource.proto",
+          "vendored_path": "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/resource/v1/resource.proto",
+          "sha256": "e0a7cdc0ffcfeffaa2606e8611839735ebffaa2d6acdf33e9356f2c48ae692d3"
+        },
+        {
+          "source_path": "opentelemetry/proto/common/v1/common.proto",
+          "vendored_path": "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/common/v1/common.proto",
+          "sha256": "b4430178a6693cd4b5c6d4d3674b060cd92f834f64fc2fc474dc9e2a59d89ff7"
         }
       ]
     },
-    "mcp_dev_semconv": {
-      "note": "Placeholder for future MCP-specific semantic conventions. Currently using OTel GenAI semconv 1.28.0 from @opentelemetry/semantic-conventions.",
-      "vendored_files": [
+    {
+      "type": "semconv",
+      "repository": "https://github.com/open-telemetry/semantic-conventions-genai",
+      "tag": null,
+      "commit": "434c91dcc34ed038e3048c07720ddfed2c6bddfc",
+      "files": [
         {
-          "path": "vendor/mcp-dev-placeholder/README.md",
-          "sha256": "42d1e11706425dcc14adbf5488262df4a9c25afdf4c18a542394f2cbd7246076"
+          "source_path": "docs/gen-ai/mcp.md",
+          "vendored_path": "vendor/semantic-conventions-genai-434c91dc/mcp.md",
+          "sha256": "741d3d58000f1c2d678235a27b1c39dc79b01ef3bcc8c4f43218814adc7795de"
         }
       ]
     }
+  ],
+  "generator": {
+    "directory": "generator",
+    "script": "generate.js",
+    "package_json_sha256": "e0cdf7c911544a663db7283b39dbb1eb1bcd01e8a8cbad0d80ec9385be038eb8",
+    "package_lock_sha256": "6e7b9ca24bf57b718bdfbc58a4c8c50420f4b15b9401f0ac78c4375f85cb8565",
+    "script_sha256": "a525266d23af8516604b365b118ed6727208bf916e11293665d87bb454356aaf"
   },
-  "generator_lockfile": {
-    "path": "scripts/otel-generator-package-lock.json",
-    "sha256": "dcd030a0438053fd7d1c8c8fefce095d35c1a8639d279286e0dcc087c7be52f7"
-  },
+  "corpus": [
+    {
+      "fixture": "mcp_client_tools_call.json",
+      "sidecar": "mcp_client_tools_call.meta.json",
+      "content_sha256": "43e2218a8116a9e84fb0d011f12e57e332f609c845da654f991daf76dc6950ff",
+      "byte_count": 2631,
+      "span_kind": "CLIENT",
+      "mcp_method": "tools/call"
+    },
+    {
+      "fixture": "mcp_server_tools_call.json",
+      "sidecar": "mcp_server_tools_call.meta.json",
+      "content_sha256": "b714d2284c77adda89c7f4b28a6fa07c679ac346bc07ed31b3e88c08f07df233",
+      "byte_count": 2631,
+      "span_kind": "SERVER",
+      "mcp_method": "tools/call"
+    }
+  ],
+  "hostile_fixtures": [
+    {
+      "fixture": "hostile_deep_nesting.json",
+      "purpose": "test_parser_depth_limits"
+    },
+    {
+      "fixture": "hostile_oversized_attribute.json",
+      "purpose": "test_size_limits"
+    },
+    {
+      "fixture": "hostile_missing_required_fields.json",
+      "purpose": "test_schema_validation"
+    }
+  ],
   "provenance": {
-    "generator": "scripts/generate_otel_mcp_fixtures.js",
-    "honest": true,
-    "note": "Locally generated using official pinned SDK (@opentelemetry/sdk-trace-node@1.28.0), not external deployment evidence"
+    "note": "Locally generated test fixtures using official OpenTelemetry SDK and OTLP HTTP exporter. Not external deployment evidence. No production decoder in assay-core."
   }
 }

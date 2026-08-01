@@ -1,0 +1,13 @@
+{
+  "schema_version": "1",
+  "fixture_name": "mcp_client_tools_call",
+  "provenance": {
+    "generator": "locally_generated_official_sdk",
+    "external_deployment": false,
+    "sdk_version": "1.28.0",
+    "exporter_version": "0.56.0"
+  },
+  "content_sha256": "43e2218a8116a9e84fb0d011f12e57e332f609c845da654f991daf76dc6950ff",
+  "byte_count": 2631,
+  "generated_at": "2026-08-01T00:00:00Z"
+}

@@ -1,9 +1,0 @@
-{
-  "name": "tool_execution",
-  "generator": "scripts/generate_otel_mcp_fixtures.js",
-  "sdk": "@opentelemetry/sdk-trace-node@1.28.0",
-  "semconv": "1.28.0",
-  "honest_provenance": true,
-  "sha256": "25d54ad532edce2e03fb05c9b70dbd4eaced3ded55f7ca79f19dbd4e89f32397",
-  "generated": "2021-01-01T08:18:55.317Z"
-}
