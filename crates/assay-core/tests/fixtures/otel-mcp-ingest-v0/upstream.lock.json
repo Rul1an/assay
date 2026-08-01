@@ -59,9 +59,9 @@
   "generator": {
     "directory": "generator",
     "script": "generate.js",
-    "package_json_sha256": "127daf8143ba946da2c58fcf6507ebd0256a97f369873f87ba7178f458c4f49c",
-    "package_lock_sha256": "21247585c8ff7a84468864ac557b81b3bd6e225ce9c0a098eda31468d632189e",
-    "script_sha256": "feafebd36950993a7b45a28dc2d8c80b3e26e03a7c6e9b5f1cf473faaad1054a"
+    "package_json_sha256": "c576083ccbc839d174d6b102dcf141a46af5a53eaf161944f95ef482fffb4301",
+    "package_lock_sha256": "5c068d08c1ae82d574a01883e034dd810c31d1c49c4b73094da344e4a018cdf7",
+    "script_sha256": "89716d063b70eed3cd853a420a0f02af8ecb1f1ba152a504da769b1e3caf1f48"
   },
   "corpus": [
     {

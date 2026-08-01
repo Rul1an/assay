@@ -110,6 +110,33 @@ const EXPECTED_MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 const EXPECTED_GENERATOR_DIRECTORY: &str = "generator";
 const EXPECTED_GENERATOR_SCRIPT: &str = "generate.js";
 
+/// Independently frozen expected digests for vendored content files.
+/// These are NOT read from upstream.lock.json; they are compiled into the
+/// validator binary. A coordinated tamper of both vendored files and the
+/// lock file's sha256 fields is caught because these constants disagree.
+const EXPECTED_VENDORED_DIGESTS: &[(&str, &str)] = &[
+    (
+        "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/collector/trace/v1/trace_service.proto",
+        "03c8cc4e3e101087d884392d6eda32152ad5cd696e6344f50deaa59804a75c7a",
+    ),
+    (
+        "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/trace/v1/trace.proto",
+        "677a3db890a63b97bd70ff2be2143a135207e618a4e0be74402e335a5c099c92",
+    ),
+    (
+        "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/resource/v1/resource.proto",
+        "e0a7cdc0ffcfeffaa2606e8611839735ebffaa2d6acdf33e9356f2c48ae692d3",
+    ),
+    (
+        "vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto/common/v1/common.proto",
+        "b4430178a6693cd4b5c6d4d3674b060cd92f834f64fc2fc474dc9e2a59d89ff7",
+    ),
+    (
+        "vendor/semantic-conventions-genai-434c91dc/mcp.md",
+        "741d3d58000f1c2d678235a27b1c39dc79b01ef3bcc8c4f43218814adc7795de",
+    ),
+];
+
 /// Exact governed file set (recursive). Every file in the corpus root must be in this set.
 /// generator/node_modules is explicitly ignored (created locally by npm ci).
 const GOVERNED_FILES: &[&str] = &[
@@ -138,6 +165,7 @@ const GOVERNED_FILES: &[&str] = &[
 pub enum ValidationError {
     LockFileMissing,
     LockParseError,
+    LockedAtInvalid,
     VendoredFileMissing,
     VendoredHashMismatch,
     VendoredDuplicateFile,
@@ -157,6 +185,8 @@ pub enum ValidationError {
     SidecarParseError,
     SidecarSemanticMismatch,
     SidecarTimestampMismatch,
+    SidecarByteCountMismatch,
+    SidecarProvenanceMismatch,
     HostileMissing,
     HostileHashMismatch,
     HostileDuplicatePath,
@@ -177,6 +207,7 @@ pub enum ValidationError {
     SymlinkInCorpus,
     GovernedFileMissing,
     GeneratorIdentityMismatch,
+    DirectoryReadError,
 }
 
 // -- Serde models (test-only, not production) -------------------------------------------------
@@ -324,9 +355,9 @@ struct AttributeValue {
     string_value: Option<String>,
 }
 
-fn sha256_file(path: &Path) -> Result<String, ValidationError> {
+fn sha256_file(path: &Path, missing_err: ValidationError) -> Result<String, ValidationError> {
     use sha2::{Digest, Sha256};
-    let bytes = fs::read(path).map_err(|_| ValidationError::VendoredFileMissing)?;
+    let bytes = fs::read(path).map_err(|_| missing_err)?;
     let hash = Sha256::digest(&bytes);
     Ok(hex::encode(hash))
 }
@@ -368,9 +399,9 @@ fn collect_recursive(
     current: &Path,
     files: &mut HashSet<String>,
 ) -> Result<(), ValidationError> {
-    let entries = fs::read_dir(current).map_err(|_| ValidationError::LockFileMissing)?;
+    let entries = fs::read_dir(current).map_err(|_| ValidationError::DirectoryReadError)?;
     for entry in entries {
-        let entry = entry.map_err(|_| ValidationError::UnlistedFileInCorpus)?;
+        let entry = entry.map_err(|_| ValidationError::DirectoryReadError)?;
         let path = entry.path();
 
         // Containment check: verify path stays within the corpus root before
@@ -380,16 +411,21 @@ fn collect_recursive(
         let rel = path
             .strip_prefix(base)
             .map_err(|_| ValidationError::PathTraversal)?;
-        let rel_str = rel.to_str().ok_or(ValidationError::PathTraversal)?;
 
-        // Reject paths that escape the corpus root
-        if rel_str.contains("..") {
-            return Err(ValidationError::PathTraversal);
+        // Component-correct traversal check: reject ParentDir (..) components.
+        // strip_prefix already establishes containment, but this provides
+        // defense-in-depth using path components rather than string matching.
+        for component in rel.components() {
+            if matches!(component, Component::ParentDir) {
+                return Err(ValidationError::PathTraversal);
+            }
         }
+
+        let rel_str = rel.to_str().ok_or(ValidationError::PathTraversal)?;
 
         // Reject symlinks anywhere in the governed tree (after containment is proved)
         let metadata =
-            fs::symlink_metadata(&path).map_err(|_| ValidationError::UnlistedFileInCorpus)?;
+            fs::symlink_metadata(&path).map_err(|_| ValidationError::DirectoryReadError)?;
         if metadata.file_type().is_symlink() {
             return Err(ValidationError::SymlinkInCorpus);
         }
@@ -436,7 +472,7 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
 
     // Validate locked_at is RFC3339
     if chrono::DateTime::parse_from_rfc3339(&lock.locked_at).is_err() {
-        return Err(ValidationError::SchemaVersionInvalid);
+        return Err(ValidationError::LockedAtInvalid);
     }
 
     // -- Phase 2: Governed file set (structural) ----------------------------------------------
@@ -450,33 +486,28 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
             return Err(ValidationError::UnlistedFileInCorpus);
         }
     }
-    // Also check all governed files exist, classifying missing files by domain
-    for governed in &governed_set {
-        if !actual_files.contains(governed) {
+    // Check all governed files exist, iterating GOVERNED_FILES in declaration order
+    // (deterministic) rather than a HashSet (non-deterministic iteration order).
+    for governed in GOVERNED_FILES {
+        if !actual_files.contains(*governed) {
             // Classify by file domain for precise typed errors
-            if governed == "README.md" {
+            if *governed == "README.md" {
                 return Err(ValidationError::GovernedFileMissing);
             } else if governed.starts_with("vendor/") {
                 return Err(ValidationError::VendoredFileMissing);
             } else if governed.starts_with("generator/") {
                 return Err(ValidationError::GeneratorFileMissing);
-            } else if governed == "upstream.lock.json" {
+            } else if *governed == "upstream.lock.json" {
                 // Lock file absence is already caught before we reach here
                 return Err(ValidationError::LockFileMissing);
-            } else if EXPECTED_HOSTILE
-                .iter()
-                .any(|(name, _)| *name == governed.as_str())
-            {
+            } else if EXPECTED_HOSTILE.iter().any(|(name, _)| *name == *governed) {
                 return Err(ValidationError::HostileMissing);
             } else if EXPECTED_CORPUS
                 .iter()
-                .any(|(fix, _, _, _)| *fix == governed.as_str())
+                .any(|(fix, _, _, _)| *fix == *governed)
             {
                 return Err(ValidationError::FixtureMissing);
-            } else if EXPECTED_CORPUS
-                .iter()
-                .any(|(_, sc, _, _)| *sc == governed.as_str())
-            {
+            } else if EXPECTED_CORPUS.iter().any(|(_, sc, _, _)| *sc == *governed) {
                 return Err(ValidationError::SidecarMissing);
             } else {
                 return Err(ValidationError::GovernedFileMissing);
@@ -683,16 +714,28 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         Ok(root.join(rel))
     };
 
-    // Validate vendored file hashes
+    // Validate vendored file hashes against BOTH lock file and independent frozen digests.
+    // The independent check catches coordinated tamper of vendored files + lock hashes.
     for source in &lock.upstream_sources {
         for file in &source.files {
             let path = build_path(&file.vendored_path)?;
             if !path.exists() {
                 return Err(ValidationError::VendoredFileMissing);
             }
-            let actual_hash = sha256_file(&path)?;
+            let actual_hash = sha256_file(&path, ValidationError::VendoredFileMissing)?;
             if actual_hash != file.sha256 {
                 return Err(ValidationError::VendoredHashMismatch);
+            }
+            // Independent frozen digest check: vendored_path must exist in
+            // EXPECTED_VENDORED_DIGESTS and the actual hash must match the
+            // compiled-in constant (not derived from the lock file).
+            if let Some((_, expected_digest)) = EXPECTED_VENDORED_DIGESTS
+                .iter()
+                .find(|(p, _)| *p == file.vendored_path)
+            {
+                if actual_hash != *expected_digest {
+                    return Err(ValidationError::VendoredHashMismatch);
+                }
             }
         }
     }
@@ -703,7 +746,9 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
     if !pkg_path.exists() {
         return Err(ValidationError::GeneratorFileMissing);
     }
-    if sha256_file(&pkg_path)? != lock.generator.package_json_sha256 {
+    if sha256_file(&pkg_path, ValidationError::GeneratorFileMissing)?
+        != lock.generator.package_json_sha256
+    {
         return Err(ValidationError::GeneratorHashMismatch);
     }
 
@@ -711,7 +756,9 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
     if !pkg_lock_path.exists() {
         return Err(ValidationError::GeneratorFileMissing);
     }
-    if sha256_file(&pkg_lock_path)? != lock.generator.package_lock_sha256 {
+    if sha256_file(&pkg_lock_path, ValidationError::GeneratorFileMissing)?
+        != lock.generator.package_lock_sha256
+    {
         return Err(ValidationError::GeneratorHashMismatch);
     }
 
@@ -719,7 +766,9 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
     if !script_path.exists() {
         return Err(ValidationError::GeneratorFileMissing);
     }
-    if sha256_file(&script_path)? != lock.generator.script_sha256 {
+    if sha256_file(&script_path, ValidationError::GeneratorFileMissing)?
+        != lock.generator.script_sha256
+    {
         return Err(ValidationError::GeneratorHashMismatch);
     }
 
@@ -764,7 +813,7 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         if !fixture_path.exists() {
             return Err(ValidationError::FixtureMissing);
         }
-        if sha256_file(&fixture_path)? != entry.content_sha256 {
+        if sha256_file(&fixture_path, ValidationError::FixtureMissing)? != entry.content_sha256 {
             return Err(ValidationError::FixtureHashMismatch);
         }
 
@@ -774,7 +823,7 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         }
 
         // Validate sidecar hash FIRST before parsing content
-        if sha256_file(&sidecar_path)? != entry.sidecar_sha256 {
+        if sha256_file(&sidecar_path, ValidationError::SidecarMissing)? != entry.sidecar_sha256 {
             return Err(ValidationError::SidecarHashMismatch);
         }
 
@@ -815,7 +864,7 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
             .map_err(|_| ValidationError::FixtureMissing)?
             .len() as usize;
         if actual_bytes != entry.byte_count || sidecar.byte_count != entry.byte_count {
-            return Err(ValidationError::FixtureHashMismatch);
+            return Err(ValidationError::SidecarByteCountMismatch);
         }
 
         if sidecar.provenance.external_deployment {
@@ -824,7 +873,7 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         if sidecar.provenance.sdk_version != lock.sdk.version
             || sidecar.provenance.exporter_version != lock.exporter.version
         {
-            return Err(ValidationError::SidecarHashMismatch);
+            return Err(ValidationError::SidecarProvenanceMismatch);
         }
 
         // Validate benign fixture content semantics (test-only, small parser)
@@ -885,7 +934,9 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
                 return Err(ValidationError::FixtureSemanticMismatch);
             }
 
-            // Reject sensitive attributes
+            // Reject sensitive attributes: exact key denial for the two Opt-In
+            // attributes defined in the pinned semconv (434c91dc). Not broadened
+            // to gen_ai.tool.call.* because the semconv only defines these two.
             if attr.key == "gen_ai.tool.call.arguments" || attr.key == "gen_ai.tool.call.result" {
                 return Err(ValidationError::FixtureSemanticMismatch);
             }
@@ -953,7 +1004,7 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         if !path.exists() {
             return Err(ValidationError::HostileMissing);
         }
-        if sha256_file(&path)? != entry.sha256 {
+        if sha256_file(&path, ValidationError::HostileMissing)? != entry.sha256 {
             return Err(ValidationError::HostileHashMismatch);
         }
 
