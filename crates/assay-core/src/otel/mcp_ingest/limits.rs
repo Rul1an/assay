@@ -80,6 +80,7 @@ pub(crate) enum ShapeSite {
     Resource,
     ScopeSpans,
     ScopeSpansEntry,
+    InstrumentationScope,
     Spans,
     Span,
     AttributeList,
@@ -96,6 +97,7 @@ pub(crate) enum ShapeSite {
 pub(crate) enum SpanField {
     TraceId,
     SpanId,
+    ParentSpanId,
     Kind,
     StatusCode,
 }

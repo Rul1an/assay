@@ -12,7 +12,8 @@ use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use base64::Engine as _;
 
 use super::decode::{
-    reject_container_at, reject_scalars_at, DecodedValue, KeySeed, Members, SkipSeed, SpanAttrs, St,
+    reject_container_at, reject_non_null_scalars_at, reject_scalars_at, DecodedValue, KeySeed,
+    Members, SkipSeed, SpanAttrs, St,
 };
 use super::limits::{OtlpIngestError, OtlpLimitDimension, ShapeSite};
 
@@ -28,6 +29,43 @@ fn charge_value<E: de::Error>(st: St<'_>, budget: &mut u64, bytes: u64) -> Resul
         return Err(state.limit(OtlpLimitDimension::AttributeValueBytes, max));
     }
     Ok(())
+}
+
+fn reject_value_scalar<E: de::Error, T>(st: St<'_>, budget: &mut u64, bytes: u64) -> Result<T, E> {
+    st.borrow_mut().charge(bytes)?;
+    charge_value(st, budget, bytes)?;
+    Err(st
+        .borrow_mut()
+        .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
+}
+
+macro_rules! reject_value_non_null_scalars {
+    () => {
+        fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+            reject_value_scalar(self.st, self.budget, 1)
+        }
+        fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+            reject_value_scalar(self.st, self.budget, 8)
+        }
+        fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+            reject_value_scalar(self.st, self.budget, 8)
+        }
+        fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+            reject_value_scalar(self.st, self.budget, 8)
+        }
+        fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+            reject_value_scalar(self.st, self.budget, value.len() as u64)
+        }
+    };
+}
+
+macro_rules! reject_value_scalars {
+    () => {
+        reject_value_non_null_scalars!();
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            reject_value_scalar(self.st, self.budget, 1)
+        }
+    };
 }
 
 /// An `attributes` list. In extract mode (span attributes) recognized MCP values are applied to
@@ -52,8 +90,13 @@ impl<'de> Visitor<'de> for AttributeListSeed<'_, '_> {
         f.write_str("an attribute list")
     }
 
-    reject_scalars_at!(ShapeSite::AttributeList);
+    reject_non_null_scalars_at!(ShapeSite::AttributeList);
     reject_container_at!(map, ShapeSite::AttributeList);
+
+    fn visit_unit<E: de::Error>(self) -> Result<(), E> {
+        self.st.borrow_mut().charge(1)?;
+        Ok(())
+    }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
         self.st.borrow_mut().enter(self.depth)?;
@@ -122,7 +165,12 @@ impl<'de> Visitor<'de> for AttributeEntrySeed<'_, '_> {
         while let Some(member) = map.next_key_seed(KeySeed { st: self.st })? {
             members.admit(self.st, &member)?;
             match member.as_str() {
-                "key" => key = Some(map.next_value_seed(AttrKeySeed { st: self.st })?),
+                "key" => {
+                    key = Some(map.next_value_seed(AttrKeySeed {
+                        st: self.st,
+                        depth: self.depth + 1,
+                    })?)
+                }
                 "value" => {
                     value = Some(map.next_value_seed(AnyValueSeed {
                         st: self.st,
@@ -152,6 +200,7 @@ impl<'de> Visitor<'de> for AttributeEntrySeed<'_, '_> {
 /// entry fault.
 struct AttrKeySeed<'a> {
     st: St<'a>,
+    depth: u64,
 }
 
 impl<'de> DeserializeSeed<'de> for AttrKeySeed<'_> {
@@ -180,42 +229,49 @@ impl<'de> Visitor<'de> for AttrKeySeed<'_> {
     }
 
     fn visit_bool<E: de::Error>(self, _: bool) -> Result<String, E> {
+        self.st.borrow_mut().charge(1)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry)))
     }
     fn visit_i64<E: de::Error>(self, _: i64) -> Result<String, E> {
+        self.st.borrow_mut().charge(8)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry)))
     }
     fn visit_u64<E: de::Error>(self, _: u64) -> Result<String, E> {
+        self.st.borrow_mut().charge(8)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry)))
     }
     fn visit_f64<E: de::Error>(self, _: f64) -> Result<String, E> {
+        self.st.borrow_mut().charge(8)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry)))
     }
     fn visit_unit<E: de::Error>(self) -> Result<String, E> {
+        self.st.borrow_mut().charge(1)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry)))
     }
     fn visit_seq<A: SeqAccess<'de>>(self, _: A) -> Result<String, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeEntry)))
     }
     fn visit_map<A: MapAccess<'de>>(self, _: A) -> Result<String, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
         Err(self
             .st
             .borrow_mut()
@@ -249,30 +305,40 @@ impl<'de> Visitor<'de> for AnyValueSeed<'_, '_> {
     reject_container_at!(seq, ShapeSite::AttributeValue);
 
     fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(1)?;
+        charge_value(self.st, self.budget, 1)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
     }
     fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(8)?;
+        charge_value(self.st, self.budget, 8)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
     }
     fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(8)?;
+        charge_value(self.st, self.budget, 8)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
     }
     fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(8)?;
+        charge_value(self.st, self.budget, 8)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
     }
-    fn visit_str<E: de::Error>(self, _: &str) -> Result<Self::Value, E> {
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(value.len() as u64)?;
+        charge_value(self.st, self.budget, value.len() as u64)?;
         Err(self
             .st
             .borrow_mut()
@@ -304,103 +370,62 @@ impl<'de> Visitor<'de> for AnyValueSeed<'_, '_> {
                 // value ceiling remains the first boundary crossed by the next list member.
                 charge_value(self.st, self.budget, member.len() as u64)?;
             }
-            if recognized && decoded.is_some() {
-                return Err(self
-                    .st
-                    .borrow_mut()
-                    .fail(OtlpIngestError::ConflictingAttributeValue));
-            }
             members.admit(self.st, &member)?;
             let value = match member.as_str() {
-                "stringValue" => {
-                    let Some(s) = map.next_value_seed(ValueStrSeed {
+                "stringValue" => map
+                    .next_value_seed(ValueStrSeed {
                         st: self.st,
+                        depth: self.depth + 1,
                         budget: self.budget,
                     })?
-                    else {
-                        continue;
-                    };
-                    DecodedValue::Str(s)
-                }
-                "intValue" => {
-                    if map
-                        .next_value_seed(ValueIntSeed {
-                            st: self.st,
-                            budget: self.budget,
-                        })?
-                        .is_none()
-                    {
-                        continue;
-                    }
-                    DecodedValue::Other
-                }
-                "doubleValue" => {
-                    if map
-                        .next_value_seed(ValueScalarSeed {
-                            st: self.st,
-                            budget: self.budget,
-                            kind: ScalarKind::Number,
-                        })?
-                        .is_none()
-                    {
-                        continue;
-                    }
-                    DecodedValue::Other
-                }
-                "boolValue" => {
-                    if map
-                        .next_value_seed(ValueScalarSeed {
-                            st: self.st,
-                            budget: self.budget,
-                            kind: ScalarKind::Bool,
-                        })?
-                        .is_none()
-                    {
-                        continue;
-                    }
-                    DecodedValue::Other
-                }
-                "bytesValue" => {
-                    if map
-                        .next_value_seed(ValueScalarSeed {
-                            st: self.st,
-                            budget: self.budget,
-                            kind: ScalarKind::Base64,
-                        })?
-                        .is_none()
-                    {
-                        continue;
-                    }
-                    DecodedValue::Other
-                }
-                "arrayValue" => {
-                    if map
-                        .next_value_seed(ValueListSeed {
-                            st: self.st,
-                            depth: self.depth + 1,
-                            budget: self.budget,
-                            kind: ListKind::Array,
-                        })?
-                        .is_none()
-                    {
-                        continue;
-                    }
-                    DecodedValue::Other
-                }
-                "kvlistValue" => {
-                    if map
-                        .next_value_seed(ValueListSeed {
-                            st: self.st,
-                            depth: self.depth + 1,
-                            budget: self.budget,
-                            kind: ListKind::Kv,
-                        })?
-                        .is_none()
-                    {
-                        continue;
-                    }
-                    DecodedValue::Other
-                }
+                    .map(DecodedValue::Str),
+                "intValue" => map
+                    .next_value_seed(ValueIntSeed {
+                        st: self.st,
+                        depth: self.depth + 1,
+                        budget: self.budget,
+                    })?
+                    .map(|_| DecodedValue::Other),
+                "doubleValue" => map
+                    .next_value_seed(ValueScalarSeed {
+                        st: self.st,
+                        depth: self.depth + 1,
+                        budget: self.budget,
+                        kind: ScalarKind::Number,
+                    })?
+                    .map(|_| DecodedValue::Other),
+                "boolValue" => map
+                    .next_value_seed(ValueScalarSeed {
+                        st: self.st,
+                        depth: self.depth + 1,
+                        budget: self.budget,
+                        kind: ScalarKind::Bool,
+                    })?
+                    .map(|_| DecodedValue::Other),
+                "bytesValue" => map
+                    .next_value_seed(ValueScalarSeed {
+                        st: self.st,
+                        depth: self.depth + 1,
+                        budget: self.budget,
+                        kind: ScalarKind::Base64,
+                    })?
+                    .map(|_| DecodedValue::Other),
+                "arrayValue" => map
+                    .next_value_seed(ValueListSeed {
+                        st: self.st,
+                        depth: self.depth + 1,
+                        budget: self.budget,
+                        kind: ListKind::Array,
+                    })?
+                    .map(|_| DecodedValue::Other),
+                "kvlistValue" => map
+                    .next_value_seed(ValueListSeed {
+                        st: self.st,
+                        depth: self.depth + 1,
+                        budget: self.budget,
+                        kind: ListKind::Kv,
+                    })?
+                    .map(|_| DecodedValue::Other),
                 _ => {
                     // OTLP protobuf JSON receivers ignore unknown fields. They still consume the
                     // same depth/global/value budgets and reject duplicate members.
@@ -409,10 +434,20 @@ impl<'de> Visitor<'de> for AnyValueSeed<'_, '_> {
                         depth: self.depth + 1,
                         budget: self.budget,
                     })?;
-                    continue;
+                    None
                 }
             };
-            decoded = Some(value);
+            if recognized {
+                if let Some(value) = value {
+                    if decoded.is_some() {
+                        return Err(self
+                            .st
+                            .borrow_mut()
+                            .fail(OtlpIngestError::ConflictingAttributeValue));
+                    }
+                    decoded = Some(value);
+                }
+            }
         }
         Ok(decoded.unwrap_or(DecodedValue::Other))
     }
@@ -497,6 +532,7 @@ impl<'de> Visitor<'de> for ValueSkipSeed<'_, '_> {
 /// A `stringValue`: charged to both the global and the per-value ceilings before retention.
 struct ValueStrSeed<'a, 'b> {
     st: St<'a>,
+    depth: u64,
     budget: &'b mut u64,
 }
 
@@ -521,28 +557,16 @@ impl<'de> Visitor<'de> for ValueStrSeed<'_, '_> {
     }
 
     fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
-        Err(self
-            .st
-            .borrow_mut()
-            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
+        reject_value_scalar(self.st, self.budget, 1)
     }
     fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
-        Err(self
-            .st
-            .borrow_mut()
-            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
+        reject_value_scalar(self.st, self.budget, 8)
     }
     fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
-        Err(self
-            .st
-            .borrow_mut()
-            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
+        reject_value_scalar(self.st, self.budget, 8)
     }
     fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
-        Err(self
-            .st
-            .borrow_mut()
-            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
+        reject_value_scalar(self.st, self.budget, 8)
     }
     fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
         self.st.borrow_mut().charge(1)?;
@@ -550,12 +574,14 @@ impl<'de> Visitor<'de> for ValueStrSeed<'_, '_> {
         Ok(None)
     }
     fn visit_seq<A: SeqAccess<'de>>(self, _: A) -> Result<Self::Value, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
     }
     fn visit_map<A: MapAccess<'de>>(self, _: A) -> Result<Self::Value, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
         Err(self
             .st
             .borrow_mut()
@@ -567,6 +593,7 @@ impl<'de> Visitor<'de> for ValueStrSeed<'_, '_> {
 /// accepted, matching lenient upstream decoders. Anything else is a shape fault.
 struct ValueIntSeed<'a, 'b> {
     st: St<'a>,
+    depth: u64,
     budget: &'b mut u64,
 }
 
@@ -589,10 +616,7 @@ impl<'de> Visitor<'de> for ValueIntSeed<'_, '_> {
         // the shared charge model, never a fixed numeric width, and is charged before parsing.
         self.st.borrow_mut().charge(s.len() as u64)?;
         charge_value(self.st, self.budget, s.len() as u64)?;
-        let parsed = s
-            .parse::<i64>()
-            .ok()
-            .or_else(|| s.parse::<f64>().ok().and_then(integral_i64));
+        let parsed = parse_decimal_i64(s);
         parsed.map(Some).ok_or_else(|| {
             self.st
                 .borrow_mut()
@@ -617,10 +641,7 @@ impl<'de> Visitor<'de> for ValueIntSeed<'_, '_> {
     }
 
     fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
-        Err(self
-            .st
-            .borrow_mut()
-            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
+        reject_value_scalar(self.st, self.budget, 1)
     }
     fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
         self.st.borrow_mut().charge(8)?;
@@ -637,12 +658,14 @@ impl<'de> Visitor<'de> for ValueIntSeed<'_, '_> {
         Ok(None)
     }
     fn visit_seq<A: SeqAccess<'de>>(self, _: A) -> Result<Self::Value, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
     }
     fn visit_map<A: MapAccess<'de>>(self, _: A) -> Result<Self::Value, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
         Err(self
             .st
             .borrow_mut()
@@ -659,18 +682,102 @@ fn integral_i64(value: f64) -> Option<i64> {
     .then_some(value as i64)
 }
 
+/// Parse ProtoJSON's quoted decimal/exponent form without routing through binary64. Floating-point
+/// conversion can round a fractional or out-of-range decimal onto an integral boundary.
+fn parse_decimal_i64(value: &str) -> Option<i64> {
+    let (negative, unsigned) = match value.as_bytes().first() {
+        Some(b'-') => (true, &value[1..]),
+        Some(b'+') | None => return None,
+        _ => (false, value),
+    };
+    let (mantissa, exponent) = match unsigned.find(['e', 'E']) {
+        Some(index) => {
+            let exponent_text = &unsigned[index + 1..];
+            if exponent_text.is_empty() || unsigned[index + 1..].contains(['e', 'E']) {
+                return None;
+            }
+            let exponent = exponent_text.parse::<i64>().ok()?;
+            (&unsigned[..index], exponent)
+        }
+        None => (unsigned, 0),
+    };
+    let (integer, fraction) = match mantissa.split_once('.') {
+        Some((integer, fraction)) if !integer.is_empty() && !fraction.is_empty() => {
+            (integer, fraction)
+        }
+        Some(_) => return None,
+        None if !mantissa.is_empty() => (mantissa, ""),
+        None => return None,
+    };
+    if !integer.bytes().all(|b| b.is_ascii_digit()) || !fraction.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+
+    let mut digits = Vec::with_capacity(integer.len().saturating_add(fraction.len()));
+    digits.extend(integer.bytes());
+    digits.extend(fraction.bytes());
+    let scale = exponent.checked_sub(i64::try_from(fraction.len()).ok()?)?;
+    if scale < 0 {
+        let remove = usize::try_from(scale.unsigned_abs()).ok()?;
+        if remove > digits.len() {
+            return digits.iter().all(|digit| *digit == b'0').then_some(0);
+        }
+        let split = digits.len() - remove;
+        if !digits[split..].iter().all(|digit| *digit == b'0') {
+            return None;
+        }
+        digits.truncate(split);
+    }
+
+    let first_nonzero = digits.iter().position(|digit| *digit != b'0');
+    let Some(first_nonzero) = first_nonzero else {
+        return Some(0);
+    };
+    let significant = &digits[first_nonzero..];
+    let appended_zeros = usize::try_from(scale.max(0)).ok()?;
+    let effective_len = significant.len().checked_add(appended_zeros)?;
+    if effective_len > 19 {
+        return None;
+    }
+
+    let mut magnitude = 0_u64;
+    for digit in significant
+        .iter()
+        .copied()
+        .chain(std::iter::repeat_n(b'0', appended_zeros))
+    {
+        magnitude = magnitude
+            .checked_mul(10)?
+            .checked_add(u64::from(digit - b'0'))?;
+    }
+    if negative {
+        const MIN_MAGNITUDE: u64 = i64::MAX as u64 + 1;
+        if magnitude == MIN_MAGNITUDE {
+            Some(i64::MIN)
+        } else if magnitude <= i64::MAX as u64 {
+            Some(-(magnitude as i64))
+        } else {
+            None
+        }
+    } else {
+        i64::try_from(magnitude).ok()
+    }
+}
+
 enum ScalarKind {
     /// `doubleValue`: a JSON number.
     Number,
     /// `boolValue`: a JSON boolean.
     Bool,
-    /// `bytesValue`: base64 text, charged by its encoded length and never decoded.
+    /// `bytesValue`: base64 text, charged by encoded length and decoded transiently for validation.
     Base64,
 }
 
 /// A non-extracted scalar `AnyValue` member: validated for shape and charged, never retained.
 struct ValueScalarSeed<'a, 'b> {
     st: St<'a>,
+    depth: u64,
     budget: &'b mut u64,
     kind: ScalarKind,
 }
@@ -690,9 +797,9 @@ impl<'de> Visitor<'de> for ValueScalarSeed<'_, '_> {
     }
 
     fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(1)?;
+        charge_value(self.st, self.budget, 1)?;
         if matches!(self.kind, ScalarKind::Bool) {
-            self.st.borrow_mut().charge(1)?;
-            charge_value(self.st, self.budget, 1)?;
             Ok(Some(()))
         } else {
             Err(self
@@ -703,9 +810,9 @@ impl<'de> Visitor<'de> for ValueScalarSeed<'_, '_> {
     }
 
     fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(8)?;
+        charge_value(self.st, self.budget, 8)?;
         if matches!(self.kind, ScalarKind::Number) {
-            self.st.borrow_mut().charge(8)?;
-            charge_value(self.st, self.budget, 8)?;
             Ok(Some(()))
         } else {
             Err(self
@@ -749,12 +856,14 @@ impl<'de> Visitor<'de> for ValueScalarSeed<'_, '_> {
         Ok(None)
     }
     fn visit_seq<A: SeqAccess<'de>>(self, _: A) -> Result<Self::Value, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
     }
     fn visit_map<A: MapAccess<'de>>(self, _: A) -> Result<Self::Value, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
         Err(self
             .st
             .borrow_mut()
@@ -803,36 +912,7 @@ impl<'de> Visitor<'de> for ValueListSeed<'_, '_> {
 
     reject_container_at!(seq, ShapeSite::AttributeValue);
 
-    fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
-        Err(self
-            .st
-            .borrow_mut()
-            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
-    }
-    fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
-        Err(self
-            .st
-            .borrow_mut()
-            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
-    }
-    fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
-        Err(self
-            .st
-            .borrow_mut()
-            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
-    }
-    fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
-        Err(self
-            .st
-            .borrow_mut()
-            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
-    }
-    fn visit_str<E: de::Error>(self, _: &str) -> Result<Self::Value, E> {
-        Err(self
-            .st
-            .borrow_mut()
-            .fail(OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)))
-    }
+    reject_value_non_null_scalars!();
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         self.st.borrow_mut().enter(self.depth)?;
@@ -891,8 +971,14 @@ impl<'de> Visitor<'de> for ValueElementsSeed<'_, '_> {
         f.write_str("an AnyValue values array")
     }
 
-    reject_scalars_at!(ShapeSite::AttributeValue);
+    reject_value_non_null_scalars!();
     reject_container_at!(map, ShapeSite::AttributeValue);
+
+    fn visit_unit<E: de::Error>(self) -> Result<(), E> {
+        self.st.borrow_mut().charge(1)?;
+        charge_value(self.st, self.budget, 1)?;
+        Ok(())
+    }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
         self.st.borrow_mut().enter(self.depth)?;
@@ -944,7 +1030,7 @@ impl<'de> Visitor<'de> for KvEntrySeed<'_, '_> {
         f.write_str("a kvlist entry object")
     }
 
-    reject_scalars_at!(ShapeSite::AttributeValue);
+    reject_value_scalars!();
     reject_container_at!(seq, ShapeSite::AttributeValue);
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {

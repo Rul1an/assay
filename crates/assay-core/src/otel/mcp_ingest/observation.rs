@@ -147,6 +147,13 @@ pub(crate) enum SpanProtocolVersion {
     PresentUnsupported(String),
 }
 
+/// Bounded identity reported by the enclosing OTLP instrumentation scope.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct InstrumentationScopeObservation {
+    pub(crate) name: Option<String>,
+    pub(crate) version: Option<String>,
+}
+
 /// One decoded MCP-shaped span, carrying only the explicit observation fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct McpSpanObservation {
@@ -154,6 +161,9 @@ pub(crate) struct McpSpanObservation {
     pub(crate) trace_id: String,
     /// 16-char hex span id, validated case-insensitively and normalized to lowercase.
     pub(crate) span_id: String,
+    /// Optional 16-char parent span id, normalized to lowercase when present.
+    pub(crate) parent_span_id: Option<String>,
+    pub(crate) instrumentation_scope: Option<InstrumentationScopeObservation>,
     pub(crate) kind: SpanKind,
     pub(crate) method: MethodObservation,
     pub(crate) operation: OperationObservation,

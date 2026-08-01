@@ -13,9 +13,9 @@ use super::limits::{
     SpanField,
 };
 use super::observation::{
-    ErrorTypeObservation, McpResourceSpansObservation, MethodObservation, OperationObservation,
-    RequestIdObservation, RpcResponseStatusObservation, SpanKind, SpanProtocolVersion,
-    StatusObservation, UpstreamField, SEMCONV_PIN,
+    ErrorTypeObservation, InstrumentationScopeObservation, McpResourceSpansObservation,
+    MethodObservation, OperationObservation, RequestIdObservation, RpcResponseStatusObservation,
+    SpanKind, SpanProtocolVersion, StatusObservation, UpstreamField, SEMCONV_PIN,
 };
 
 const FIXTURE_DIR: &str = concat!(
@@ -131,11 +131,64 @@ fn client_fixture_decodes_and_extracts_explicit_fields() {
         SpanProtocolVersion::PresentSupported("2024-11-05".into())
     );
     assert_eq!(span.status, StatusObservation::Ok);
+    assert_eq!(
+        span.instrumentation_scope,
+        Some(InstrumentationScopeObservation {
+            name: Some("mcp-fixture-generator".into()),
+            version: Some("1.0.0".into()),
+        })
+    );
     assert_eq!(span.error_type, ErrorTypeObservation::Absent);
     assert_eq!(
         span.rpc_response_status,
         RpcResponseStatusObservation::Absent
     );
+}
+
+#[test]
+fn parent_span_and_instrumentation_scope_are_retained_when_present() {
+    let parent = "A7AD6B7169203331";
+    let span = format!(
+        r#"{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}","parentSpanId":"{parent}","attributes":[{}]}}"#,
+        attr_str("mcp.method.name", "tools/call")
+    );
+    let doc = format!(
+        r#"{{"resourceSpans":[{{"scopeSpans":[{{"spans":[{span}],"scope":{{"version":"1.2.3","name":"fixture-scope"}}}}]}}]}}"#
+    );
+    let obs = decode_str(&doc, &corpus_limits()).expect("bounded parent and scope identity");
+    assert_eq!(obs.spans.len(), 1);
+    assert_eq!(
+        obs.spans[0].parent_span_id.as_deref(),
+        Some("a7ad6b7169203331")
+    );
+    assert_eq!(
+        obs.spans[0].instrumentation_scope,
+        Some(InstrumentationScopeObservation {
+            name: Some("fixture-scope".into()),
+            version: Some("1.2.3".into()),
+        })
+    );
+}
+
+#[test]
+fn absent_null_and_empty_parent_or_scope_identity_remain_absent() {
+    for parent in ["", "null"] {
+        let parent_field = if parent == "null" {
+            r#""parentSpanId":null,"#.to_string()
+        } else {
+            r#""parentSpanId":"","#.to_string()
+        };
+        let span = format!(
+            r#"{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}",{parent_field}"attributes":[{}]}}"#,
+            attr_str("mcp.method.name", "tools/call")
+        );
+        let doc = format!(
+            r#"{{"resourceSpans":[{{"scopeSpans":[{{"scope":{{"name":"","version":""}},"spans":[{span}]}}]}}]}}"#
+        );
+        let obs = decode_str(&doc, &corpus_limits()).expect("default-valued identities are absent");
+        assert_eq!(obs.spans[0].parent_span_id, None);
+        assert_eq!(obs.spans[0].instrumentation_scope, None);
+    }
 }
 
 #[test]
@@ -695,7 +748,7 @@ fn any_value_with_conflicting_members_rejects() {
     assert_eq!(
         decode_str(&doc_with_attrs(&[duplicate_variant]), &corpus_limits())
             .expect_err("duplicate value member"),
-        OtlpIngestError::ConflictingAttributeValue
+        OtlpIngestError::DuplicateField(ShapeSite::AttributeValue)
     );
 }
 
@@ -896,6 +949,59 @@ fn unrelated_spans_do_not_apply_mcp_projection_type_rules() {
 }
 
 #[test]
+fn mcp_projection_is_independent_of_attribute_order() {
+    let attrs = [
+        attr_str("gen_ai.tool.name", "read_file"),
+        attr_str("jsonrpc.request.id", "17"),
+        attr_str("mcp.method.name", "tools/call"),
+    ];
+    let obs = decode_str(&doc_with_attrs(&attrs), &corpus_limits())
+        .expect("candidate observations before the MCP marker are retained until classification");
+    assert_eq!(obs.spans.len(), 1);
+    assert_eq!(obs.spans[0].tool_name.as_deref(), Some("read_file"));
+    assert_eq!(
+        obs.spans[0].request_id,
+        Some(RequestIdObservation::String("17".into()))
+    );
+
+    let wrong_before_marker = [
+        r#"{"key":"gen_ai.tool.name","value":{"intValue":"7"}}"#.to_string(),
+        attr_str("mcp.method.name", "tools/call"),
+    ];
+    assert_eq!(
+        decode_str(&doc_with_attrs(&wrong_before_marker), &corpus_limits())
+            .expect_err("order must not hide a wrong-typed recognized observation"),
+        OtlpIngestError::RecognizedAttributeWrongType(RecognizedAttribute::ToolName)
+    );
+}
+
+#[test]
+fn unknown_mcp_prefixed_attribute_does_not_establish_identity() {
+    let attrs = [attr_str("mcp.future.extension", "value")];
+    let obs = decode_str(&doc_with_attrs(&attrs), &corpus_limits())
+        .expect("only exact pinned MCP markers establish identity");
+    assert!(obs.spans.is_empty());
+}
+
+#[test]
+fn wrong_typed_observation_error_is_value_free_after_mcp_identity_is_known() {
+    const MARKER: &str = "ZZ_ATTACKER_MARKER_ZZ";
+    let attrs = [
+        attr_str("x", MARKER),
+        r#"{"key":"gen_ai.tool.name","value":{"intValue":"1"}}"#.to_string(),
+        attr_str("mcp.method.name", "tools/call"),
+    ];
+    let err = decode_str(&doc_with_attrs(&attrs), &corpus_limits())
+        .expect_err("wrong-typed candidate remains a fault even when it precedes the marker");
+    assert_eq!(
+        err,
+        OtlpIngestError::RecognizedAttributeWrongType(RecognizedAttribute::ToolName)
+    );
+    assert!(!err.to_string().contains(MARKER));
+    assert!(!format!("{err:?}").contains(MARKER));
+}
+
+#[test]
 fn integer_request_id_is_wrong_typed_for_the_pinned_semconv() {
     let entry = r#"{"key":"jsonrpc.request.id","value":{"intValue":"42"}}"#.to_string();
     assert_eq!(
@@ -986,6 +1092,59 @@ fn protojson_null_leaves_anyvalue_member_unset() {
 }
 
 #[test]
+fn protojson_null_leaves_repeated_and_message_fields_unset() {
+    for doc in [
+        r#"{"resourceSpans":null}"#.to_string(),
+        r#"{"resourceSpans":[{"resource":null,"scopeSpans":null}]}"#.to_string(),
+        format!(
+            r#"{{"resourceSpans":[{{"scopeSpans":[{{"scope":null,"spans":[{{"traceId":"{TRACE_ID}","spanId":"{SPAN_ID}","attributes":[{}],"status":null}}]}}]}}]}}"#,
+            attr_str("mcp.method.name", "tools/call")
+        ),
+    ] {
+        decode_str(&doc, &corpus_limits())
+            .unwrap_or_else(|err| panic!("ProtoJSON null field must remain unset: {err:?}"));
+    }
+
+    for value in [
+        r#"{"arrayValue":{"values":null}}"#,
+        r#"{"kvlistValue":{"values":null}}"#,
+    ] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{value}}}"#);
+        decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+            .unwrap_or_else(|err| panic!("ProtoJSON null repeated field must be empty: {err:?}"));
+    }
+}
+
+#[test]
+fn protojson_null_does_not_create_a_oneof_conflict() {
+    for value in [
+        r#"{"stringValue":"kept","intValue":null}"#,
+        r#"{"intValue":null,"stringValue":"kept"}"#,
+    ] {
+        let entry = format!(r#"{{"key":"unrecognized","value":{value}}}"#);
+        decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+            .unwrap_or_else(|err| panic!("a null oneof member remains unset: {err:?}"));
+    }
+}
+
+#[test]
+fn duplicate_anyvalue_member_precedes_oneof_conflict() {
+    let duplicate = r#"{"key":"x","value":{"stringValue":"a","stringValue":"b"}}"#.to_string();
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[duplicate]), &corpus_limits())
+            .expect_err("the same AnyValue member is duplicated"),
+        OtlpIngestError::DuplicateField(ShapeSite::AttributeValue)
+    );
+
+    let conflict = r#"{"key":"x","value":{"stringValue":"a","intValue":"1"}}"#.to_string();
+    assert_eq!(
+        decode_str(&doc_with_attrs(&[conflict]), &corpus_limits())
+            .expect_err("two populated oneof members conflict"),
+        OtlpIngestError::ConflictingAttributeValue
+    );
+}
+
+#[test]
 fn nested_protojson_unknown_fields_are_ignored_but_bounded() {
     for value in [
         r#"{"arrayValue":{"future":null,"values":[]}}"#,
@@ -1020,6 +1179,85 @@ fn protojson_int64_accepts_integral_number_and_exponent_forms() {
             decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
                 .expect_err("non-integral or out-of-range int64 must reject"),
             OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue)
+        );
+    }
+}
+
+#[test]
+fn protojson_int64_string_conversion_is_exact() {
+    for int_value in [
+        r#""-9223372036854775809""#,
+        r#""9223372036854775808""#,
+        r#""9007199254740992.5""#,
+        r#""-9.223372036854775809e18""#,
+    ] {
+        let entry = format!(r#"{{"key":"x","value":{{"intValue":{int_value}}}}}"#);
+        assert_eq!(
+            decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+                .expect_err("fractional or out-of-range decimal must not round into int64"),
+            OtlpIngestError::UnexpectedShape(ShapeSite::AttributeValue),
+            "accepted {int_value}"
+        );
+    }
+
+    for int_value in [
+        r#""-9223372036854775808""#,
+        r#""9223372036854775807""#,
+        r#""-9.223372036854775808e18""#,
+    ] {
+        let entry = format!(r#"{{"key":"x","value":{{"intValue":{int_value}}}}}"#);
+        decode_str(&doc_with_attrs(&[entry]), &corpus_limits())
+            .unwrap_or_else(|err| panic!("exact in-range int64 {int_value}: {err:?}"));
+    }
+}
+
+#[test]
+fn malformed_shapes_still_cross_their_resource_ceiling_first() {
+    let mut decoded = corpus_limits();
+    decoded.max_decoded_bytes = "resourceSpans".len() as u64 + 1;
+    assert_limit(
+        decode_str(r#"{"resourceSpans":"xx"}"#, &decoded),
+        OtlpLimitDimension::DecodedBytes,
+        decoded.max_decoded_bytes,
+    );
+
+    let mut value = corpus_limits();
+    value.max_attribute_value_bytes = 0;
+    let wrong_value = r#"{"key":"mcp.method.name","value":true}"#.to_string();
+    assert_limit(
+        decode_str(&doc_with_attrs(&[wrong_value]), &value),
+        OtlpLimitDimension::AttributeValueBytes,
+        0,
+    );
+
+    let mut depth = corpus_limits();
+    depth.max_nesting_depth = 1;
+    assert_limit(
+        decode_str(r#"{"resourceSpans":{}}"#, &depth),
+        OtlpLimitDimension::NestingDepth,
+        1,
+    );
+}
+
+#[test]
+fn malformed_anyvalue_scalars_are_charged_at_every_nested_layer() {
+    let values = [
+        r#"true"#,
+        r#"{"stringValue":true}"#,
+        r#"{"intValue":true}"#,
+        r#"{"doubleValue":true}"#,
+        r#"{"arrayValue":true}"#,
+        r#"{"arrayValue":{"values":true}}"#,
+        r#"{"kvlistValue":{"values":[true]}}"#,
+    ];
+    for value in values {
+        let mut limits = corpus_limits();
+        limits.max_attribute_value_bytes = 0;
+        let entry = format!(r#"{{"key":"x","value":{value}}}"#);
+        assert_limit(
+            decode_str(&doc_with_attrs(&[entry]), &limits),
+            OtlpLimitDimension::AttributeValueBytes,
+            0,
         );
     }
 }
@@ -1185,11 +1423,6 @@ fn rejection_errors_never_echo_attacker_content() {
         doc_with_attrs(&[
             attr_str(&format!("a{MARKER}"), "v"),
             attr_str(&format!("a{MARKER}"), "v"),
-        ]),
-        // Wrong-typed recognized attribute whose sibling carries the marker.
-        doc_with_attrs(&[
-            attr_str("x", MARKER),
-            r#"{"key":"gen_ai.tool.name","value":{"intValue":"1"}}"#.to_string(),
         ]),
         // Malformed id carrying the marker.
         doc_with_spans(&[format!(r#"{{"traceId":"{MARKER}","spanId":"{SPAN_ID}"}}"#)]),

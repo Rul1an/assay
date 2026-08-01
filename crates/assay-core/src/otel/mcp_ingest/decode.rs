@@ -26,9 +26,9 @@ use super::limits::{
     SpanField,
 };
 use super::observation::{
-    ErrorTypeObservation, McpResourceSpansObservation, McpSpanObservation, MethodObservation,
-    OperationObservation, RequestIdObservation, RpcResponseStatusObservation, SpanKind,
-    SpanProtocolVersion, StatusObservation, SEMCONV_PIN,
+    ErrorTypeObservation, InstrumentationScopeObservation, McpResourceSpansObservation,
+    McpSpanObservation, MethodObservation, OperationObservation, RequestIdObservation,
+    RpcResponseStatusObservation, SpanKind, SpanProtocolVersion, StatusObservation, SEMCONV_PIN,
 };
 use crate::mcp::era::{is_version_shaped, SUPPORTED_VERSIONS};
 
@@ -58,12 +58,15 @@ pub(crate) fn decode_mcp_resource_spans<R: Read>(
         state: &state,
     };
     let mut de = serde_json::Deserializer::from_reader(reader);
-    let outcome = (RootSeed { st: &state })
-        .deserialize(&mut de)
-        .and_then(|value| {
-            de.end()?;
-            Ok(value)
-        });
+    let outcome = (RootSeed {
+        st: &state,
+        depth: 1,
+    })
+    .deserialize(&mut de)
+    .and_then(|value| {
+        de.end()?;
+        Ok(value)
+    });
     match outcome {
         Ok(value) => Ok(value),
         Err(err) => Err(classify(state.into_inner().typed, &err)),
@@ -163,39 +166,51 @@ impl<R: Read> Read for TrackingReader<'_, R> {
 
 /// Reject every scalar shape with a typed site fault, so a wrong shape never falls through to a
 /// `serde_json` message.
-macro_rules! reject_scalars_at {
+macro_rules! reject_non_null_scalars_at {
     ($site:expr) => {
         fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+            self.st.borrow_mut().charge(1)?;
             Err(self
                 .st
                 .borrow_mut()
                 .fail(OtlpIngestError::UnexpectedShape($site)))
         }
         fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+            self.st.borrow_mut().charge(8)?;
             Err(self
                 .st
                 .borrow_mut()
                 .fail(OtlpIngestError::UnexpectedShape($site)))
         }
         fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+            self.st.borrow_mut().charge(8)?;
             Err(self
                 .st
                 .borrow_mut()
                 .fail(OtlpIngestError::UnexpectedShape($site)))
         }
         fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+            self.st.borrow_mut().charge(8)?;
             Err(self
                 .st
                 .borrow_mut()
                 .fail(OtlpIngestError::UnexpectedShape($site)))
         }
-        fn visit_str<E: de::Error>(self, _: &str) -> Result<Self::Value, E> {
+        fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+            self.st.borrow_mut().charge(value.len() as u64)?;
             Err(self
                 .st
                 .borrow_mut()
                 .fail(OtlpIngestError::UnexpectedShape($site)))
         }
+    };
+}
+
+macro_rules! reject_scalars_at {
+    ($site:expr) => {
+        reject_non_null_scalars_at!($site);
         fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            self.st.borrow_mut().charge(1)?;
             Err(self
                 .st
                 .borrow_mut()
@@ -208,6 +223,7 @@ macro_rules! reject_scalars_at {
 macro_rules! reject_container_at {
     (map, $site:expr) => {
         fn visit_map<A: MapAccess<'de>>(self, _: A) -> Result<Self::Value, A::Error> {
+            self.st.borrow_mut().enter(self.depth)?;
             Err(self
                 .st
                 .borrow_mut()
@@ -216,6 +232,7 @@ macro_rules! reject_container_at {
     };
     (seq, $site:expr) => {
         fn visit_seq<A: SeqAccess<'de>>(self, _: A) -> Result<Self::Value, A::Error> {
+            self.st.borrow_mut().enter(self.depth)?;
             Err(self
                 .st
                 .borrow_mut()
@@ -224,7 +241,7 @@ macro_rules! reject_container_at {
     };
 }
 
-pub(super) use {reject_container_at, reject_scalars_at};
+pub(super) use {reject_container_at, reject_non_null_scalars_at, reject_scalars_at};
 
 // --- Generic bounded skip -------------------------------------------------------------------
 
@@ -349,6 +366,7 @@ impl Members {
 /// Root object: `{"resourceSpans": [...]}` at depth 1.
 struct RootSeed<'a> {
     st: St<'a>,
+    depth: u64,
 }
 
 impl<'de> DeserializeSeed<'de> for RootSeed<'_> {
@@ -369,7 +387,7 @@ impl<'de> Visitor<'de> for RootSeed<'_> {
     reject_container_at!(seq, ShapeSite::Root);
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        self.st.borrow_mut().enter(1)?;
+        self.st.borrow_mut().enter(self.depth)?;
         let mut members = Members::new(ShapeSite::Root);
         let mut spans = Vec::new();
         while let Some(key) = map.next_key_seed(KeySeed { st: self.st })? {
@@ -414,8 +432,13 @@ impl<'de> Visitor<'de> for ResourceSpansSeed<'_, '_> {
         f.write_str("a resourceSpans array")
     }
 
-    reject_scalars_at!(ShapeSite::ResourceSpans);
+    reject_non_null_scalars_at!(ShapeSite::ResourceSpans);
     reject_container_at!(map, ShapeSite::ResourceSpans);
+
+    fn visit_unit<E: de::Error>(self) -> Result<(), E> {
+        self.st.borrow_mut().charge(1)?;
+        Ok(())
+    }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
         self.st.borrow_mut().enter(self.depth)?;
@@ -500,8 +523,13 @@ impl<'de> Visitor<'de> for ResourceSeed<'_> {
         f.write_str("a resource object")
     }
 
-    reject_scalars_at!(ShapeSite::Resource);
+    reject_non_null_scalars_at!(ShapeSite::Resource);
     reject_container_at!(seq, ShapeSite::Resource);
+
+    fn visit_unit<E: de::Error>(self) -> Result<(), E> {
+        self.st.borrow_mut().charge(1)?;
+        Ok(())
+    }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
         self.st.borrow_mut().enter(self.depth)?;
@@ -547,8 +575,13 @@ impl<'de> Visitor<'de> for ScopeSpansSeed<'_, '_> {
         f.write_str("a scopeSpans array")
     }
 
-    reject_scalars_at!(ShapeSite::ScopeSpans);
+    reject_non_null_scalars_at!(ShapeSite::ScopeSpans);
     reject_container_at!(map, ShapeSite::ScopeSpans);
+
+    fn visit_unit<E: de::Error>(self) -> Result<(), E> {
+        self.st.borrow_mut().charge(1)?;
+        Ok(())
+    }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
         self.st.borrow_mut().enter(self.depth)?;
@@ -564,7 +597,7 @@ impl<'de> Visitor<'de> for ScopeSpansSeed<'_, '_> {
     }
 }
 
-/// One scope entry: `{"scope": {...}, "spans": [...]}`; the scope itself is skipped.
+/// One scope entry: `{"scope": {...}, "spans": [...]}`.
 struct ScopeSpansEntrySeed<'a, 'v> {
     st: St<'a>,
     depth: u64,
@@ -591,9 +624,17 @@ impl<'de> Visitor<'de> for ScopeSpansEntrySeed<'_, '_> {
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
         self.st.borrow_mut().enter(self.depth)?;
         let mut members = Members::new(ShapeSite::ScopeSpansEntry);
+        let first_span = self.spans.len();
+        let mut scope = None;
         while let Some(key) = map.next_key_seed(KeySeed { st: self.st })? {
             members.admit(self.st, &key)?;
             match key.as_str() {
+                "scope" => {
+                    scope = map.next_value_seed(InstrumentationScopeSeed {
+                        st: self.st,
+                        depth: self.depth + 1,
+                    })?;
+                }
                 "spans" => map.next_value_seed(SpansSeed {
                     st: self.st,
                     depth: self.depth + 1,
@@ -605,7 +646,172 @@ impl<'de> Visitor<'de> for ScopeSpansEntrySeed<'_, '_> {
                 })?,
             }
         }
+        if let Some(scope) = scope {
+            for span in &mut self.spans[first_span..] {
+                span.instrumentation_scope = Some(scope.clone());
+            }
+        }
         Ok(())
+    }
+}
+
+struct InstrumentationScopeSeed<'a> {
+    st: St<'a>,
+    depth: u64,
+}
+
+impl<'de> DeserializeSeed<'de> for InstrumentationScopeSeed<'_> {
+    type Value = Option<InstrumentationScopeObservation>;
+    fn deserialize<D: de::Deserializer<'de>>(self, de: D) -> Result<Self::Value, D::Error> {
+        de.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for InstrumentationScopeSeed<'_> {
+    type Value = Option<InstrumentationScopeObservation>;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("an instrumentation scope object")
+    }
+
+    fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(1)?;
+        Err(self.st.borrow_mut().fail(OtlpIngestError::UnexpectedShape(
+            ShapeSite::InstrumentationScope,
+        )))
+    }
+    fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(8)?;
+        Err(self.st.borrow_mut().fail(OtlpIngestError::UnexpectedShape(
+            ShapeSite::InstrumentationScope,
+        )))
+    }
+    fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(8)?;
+        Err(self.st.borrow_mut().fail(OtlpIngestError::UnexpectedShape(
+            ShapeSite::InstrumentationScope,
+        )))
+    }
+    fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(8)?;
+        Err(self.st.borrow_mut().fail(OtlpIngestError::UnexpectedShape(
+            ShapeSite::InstrumentationScope,
+        )))
+    }
+    reject_container_at!(seq, ShapeSite::InstrumentationScope);
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(1)?;
+        Ok(None)
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
+        let mut members = Members::new(ShapeSite::InstrumentationScope);
+        let mut name = None;
+        let mut version = None;
+        while let Some(key) = map.next_key_seed(KeySeed { st: self.st })? {
+            members.admit(self.st, &key)?;
+            match key.as_str() {
+                "name" => {
+                    name = map.next_value_seed(OptionalScopeStringSeed {
+                        st: self.st,
+                        depth: self.depth + 1,
+                    })?;
+                }
+                "version" => {
+                    version = map.next_value_seed(OptionalScopeStringSeed {
+                        st: self.st,
+                        depth: self.depth + 1,
+                    })?;
+                }
+                "attributes" => {
+                    map.next_value_seed(AttributeListSeed {
+                        st: self.st,
+                        depth: self.depth + 1,
+                        extract: None,
+                    })?;
+                }
+                _ => map.next_value_seed(SkipSeed {
+                    st: self.st,
+                    depth: self.depth + 1,
+                })?,
+            }
+        }
+        if name.is_none() && version.is_none() {
+            Ok(None)
+        } else {
+            Ok(Some(InstrumentationScopeObservation { name, version }))
+        }
+    }
+}
+
+struct OptionalScopeStringSeed<'a> {
+    st: St<'a>,
+    depth: u64,
+}
+
+impl<'de> DeserializeSeed<'de> for OptionalScopeStringSeed<'_> {
+    type Value = Option<String>;
+    fn deserialize<D: de::Deserializer<'de>>(self, de: D) -> Result<Self::Value, D::Error> {
+        de.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for OptionalScopeStringSeed<'_> {
+    type Value = Option<String>;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("an instrumentation scope string")
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(value.len() as u64)?;
+        Ok((!value.is_empty()).then(|| value.to_owned()))
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(1)?;
+        Ok(None)
+    }
+
+    fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(1)?;
+        Err(self.st.borrow_mut().fail(OtlpIngestError::UnexpectedShape(
+            ShapeSite::InstrumentationScope,
+        )))
+    }
+    fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(8)?;
+        Err(self.st.borrow_mut().fail(OtlpIngestError::UnexpectedShape(
+            ShapeSite::InstrumentationScope,
+        )))
+    }
+    fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(8)?;
+        Err(self.st.borrow_mut().fail(OtlpIngestError::UnexpectedShape(
+            ShapeSite::InstrumentationScope,
+        )))
+    }
+    fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(8)?;
+        Err(self.st.borrow_mut().fail(OtlpIngestError::UnexpectedShape(
+            ShapeSite::InstrumentationScope,
+        )))
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, _: A) -> Result<Self::Value, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
+        Err(self.st.borrow_mut().fail(OtlpIngestError::UnexpectedShape(
+            ShapeSite::InstrumentationScope,
+        )))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, _: A) -> Result<Self::Value, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
+        Err(self.st.borrow_mut().fail(OtlpIngestError::UnexpectedShape(
+            ShapeSite::InstrumentationScope,
+        )))
     }
 }
 
@@ -630,8 +836,13 @@ impl<'de> Visitor<'de> for SpansSeed<'_, '_> {
         f.write_str("a spans array")
     }
 
-    reject_scalars_at!(ShapeSite::Spans);
+    reject_non_null_scalars_at!(ShapeSite::Spans);
     reject_container_at!(map, ShapeSite::Spans);
+
+    fn visit_unit<E: de::Error>(self) -> Result<(), E> {
+        self.st.borrow_mut().charge(1)?;
+        Ok(())
+    }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
         self.st.borrow_mut().enter(self.depth)?;
@@ -836,6 +1047,7 @@ impl<'de> Visitor<'de> for SpanSeed<'_> {
         let mut members = Members::new(ShapeSite::Span);
         let mut trace_id: Option<String> = None;
         let mut span_id: Option<String> = None;
+        let mut parent_span_id: Option<String> = None;
         let mut kind = SpanKind::Unspecified;
         let mut attrs = SpanAttrs::default();
         let mut status = StatusObservation::Absent;
@@ -847,6 +1059,7 @@ impl<'de> Visitor<'de> for SpanSeed<'_> {
                         st: self.st,
                         hex_len: 32,
                         field: SpanField::TraceId,
+                        depth: self.depth + 1,
                     })?);
                 }
                 "spanId" => {
@@ -854,13 +1067,23 @@ impl<'de> Visitor<'de> for SpanSeed<'_> {
                         st: self.st,
                         hex_len: 16,
                         field: SpanField::SpanId,
+                        depth: self.depth + 1,
                     })?);
+                }
+                "parentSpanId" => {
+                    parent_span_id = map.next_value_seed(OptionalIdSeed {
+                        st: self.st,
+                        hex_len: 16,
+                        field: SpanField::ParentSpanId,
+                        depth: self.depth + 1,
+                    })?;
                 }
                 "kind" => {
                     kind = map.next_value_seed(EnumSeed {
                         st: self.st,
                         field: SpanField::Kind,
                         decode: decode_span_kind,
+                        depth: self.depth + 1,
                     })?;
                 }
                 "attributes" => {
@@ -902,6 +1125,8 @@ impl<'de> Visitor<'de> for SpanSeed<'_> {
         Ok(Some(McpSpanObservation {
             trace_id,
             span_id,
+            parent_span_id,
+            instrumentation_scope: None,
             kind,
             method: attrs.method,
             operation: attrs.operation,
@@ -915,6 +1140,93 @@ impl<'de> Visitor<'de> for SpanSeed<'_> {
     }
 }
 
+struct OptionalIdSeed<'a> {
+    st: St<'a>,
+    hex_len: usize,
+    field: SpanField,
+    depth: u64,
+}
+
+impl<'de> DeserializeSeed<'de> for OptionalIdSeed<'_> {
+    type Value = Option<String>;
+    fn deserialize<D: de::Deserializer<'de>>(self, de: D) -> Result<Self::Value, D::Error> {
+        de.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for OptionalIdSeed<'_> {
+    type Value = Option<String>;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("an optional hex identifier")
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(value.len() as u64)?;
+        if value.is_empty() {
+            return Ok(None);
+        }
+        if value.len() != self.hex_len
+            || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || value.bytes().all(|byte| byte == b'0')
+        {
+            return Err(self
+                .st
+                .borrow_mut()
+                .fail(OtlpIngestError::MalformedSpanField(self.field)));
+        }
+        Ok(Some(value.to_ascii_lowercase()))
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(1)?;
+        Ok(None)
+    }
+
+    fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(1)?;
+        Err(self
+            .st
+            .borrow_mut()
+            .fail(OtlpIngestError::MalformedSpanField(self.field)))
+    }
+    fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(8)?;
+        Err(self
+            .st
+            .borrow_mut()
+            .fail(OtlpIngestError::MalformedSpanField(self.field)))
+    }
+    fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(8)?;
+        Err(self
+            .st
+            .borrow_mut()
+            .fail(OtlpIngestError::MalformedSpanField(self.field)))
+    }
+    fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(8)?;
+        Err(self
+            .st
+            .borrow_mut()
+            .fail(OtlpIngestError::MalformedSpanField(self.field)))
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, _: A) -> Result<Self::Value, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
+        Err(self
+            .st
+            .borrow_mut()
+            .fail(OtlpIngestError::MalformedSpanField(self.field)))
+    }
+    fn visit_map<A: MapAccess<'de>>(self, _: A) -> Result<Self::Value, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
+        Err(self
+            .st
+            .borrow_mut()
+            .fail(OtlpIngestError::MalformedSpanField(self.field)))
+    }
+}
+
 /// A fixed-length hex identifier. OTLP/JSON hex ids are case-insensitive, so both cases are
 /// accepted and the retained id is normalized to lowercase — one span must never split into
 /// two identities by case. Anything else is a typed malformed-field fault that never carries
@@ -923,6 +1235,7 @@ struct IdSeed<'a> {
     st: St<'a>,
     hex_len: usize,
     field: SpanField,
+    depth: u64,
 }
 
 impl<'de> DeserializeSeed<'de> for IdSeed<'_> {
@@ -954,42 +1267,49 @@ impl<'de> Visitor<'de> for IdSeed<'_> {
     }
 
     fn visit_bool<E: de::Error>(self, _: bool) -> Result<String, E> {
+        self.st.borrow_mut().charge(1)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::MalformedSpanField(self.field)))
     }
     fn visit_i64<E: de::Error>(self, _: i64) -> Result<String, E> {
+        self.st.borrow_mut().charge(8)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::MalformedSpanField(self.field)))
     }
     fn visit_u64<E: de::Error>(self, _: u64) -> Result<String, E> {
+        self.st.borrow_mut().charge(8)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::MalformedSpanField(self.field)))
     }
     fn visit_f64<E: de::Error>(self, _: f64) -> Result<String, E> {
+        self.st.borrow_mut().charge(8)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::MalformedSpanField(self.field)))
     }
     fn visit_unit<E: de::Error>(self) -> Result<String, E> {
+        self.st.borrow_mut().charge(1)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::MalformedSpanField(self.field)))
     }
     fn visit_seq<A: SeqAccess<'de>>(self, _: A) -> Result<String, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::MalformedSpanField(self.field)))
     }
     fn visit_map<A: MapAccess<'de>>(self, _: A) -> Result<String, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
         Err(self
             .st
             .borrow_mut()
@@ -1024,6 +1344,7 @@ struct EnumSeed<'a, T> {
     st: St<'a>,
     field: SpanField,
     decode: fn(i32) -> T,
+    depth: u64,
 }
 
 impl<'de, T> DeserializeSeed<'de> for EnumSeed<'_, T> {
@@ -1063,18 +1384,21 @@ impl<'de, T> Visitor<'de> for EnumSeed<'_, T> {
     }
 
     fn visit_bool<E: de::Error>(self, _: bool) -> Result<T, E> {
+        self.st.borrow_mut().charge(1)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::MalformedSpanField(self.field)))
     }
     fn visit_f64<E: de::Error>(self, _: f64) -> Result<T, E> {
+        self.st.borrow_mut().charge(8)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::MalformedSpanField(self.field)))
     }
-    fn visit_str<E: de::Error>(self, _: &str) -> Result<T, E> {
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<T, E> {
+        self.st.borrow_mut().charge(value.len() as u64)?;
         Err(self
             .st
             .borrow_mut()
@@ -1085,12 +1409,14 @@ impl<'de, T> Visitor<'de> for EnumSeed<'_, T> {
         Ok((self.decode)(0))
     }
     fn visit_seq<A: SeqAccess<'de>>(self, _: A) -> Result<T, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
         Err(self
             .st
             .borrow_mut()
             .fail(OtlpIngestError::MalformedSpanField(self.field)))
     }
     fn visit_map<A: MapAccess<'de>>(self, _: A) -> Result<T, A::Error> {
+        self.st.borrow_mut().enter(self.depth)?;
         Err(self
             .st
             .borrow_mut()
@@ -1118,8 +1444,13 @@ impl<'de> Visitor<'de> for StatusSeed<'_> {
         f.write_str("a span status object")
     }
 
-    reject_scalars_at!(ShapeSite::Status);
+    reject_non_null_scalars_at!(ShapeSite::Status);
     reject_container_at!(seq, ShapeSite::Status);
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        self.st.borrow_mut().charge(1)?;
+        Ok(StatusObservation::Absent)
+    }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         self.st.borrow_mut().enter(self.depth)?;
@@ -1134,6 +1465,7 @@ impl<'de> Visitor<'de> for StatusSeed<'_> {
                         st: self.st,
                         field: SpanField::StatusCode,
                         decode: decode_status_code,
+                        depth: self.depth + 1,
                     })?;
                 }
                 _ => map.next_value_seed(SkipSeed {
