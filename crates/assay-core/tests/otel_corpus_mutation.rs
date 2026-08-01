@@ -309,17 +309,14 @@ fn test_unlisted_generator_source() {
     assert_eq!(result, Err(ValidationError::UnlistedFileInCorpus));
 }
 
+#[cfg(unix)]
 #[test]
 fn test_symlink_rejected() {
     let (_tmp, corpus) = copy_corpus_to_temp();
     let link_path = corpus.join("symlink.json");
-    // Create a symlink to an existing file
-    #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink(corpus.join("upstream.lock.json"), &link_path).unwrap();
-        let result = validate_corpus_at_path(&corpus);
-        assert_eq!(result, Err(ValidationError::SymlinkInCorpus));
-    }
+    std::os::unix::fs::symlink(corpus.join("upstream.lock.json"), &link_path).unwrap();
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SymlinkInCorpus));
 }
 
 #[test]
@@ -435,9 +432,8 @@ fn test_absolute_path_in_fixture() {
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
-    // Structural duplicate check sees the changed name breaks the fixture set,
-    // and cardinality fires because the expected tuple is missing
-    assert_eq!(result, Err(ValidationError::CorpusCardinalityMismatch));
+    // Path safety check in Phase 3 catches absolute paths before cardinality
+    assert_eq!(result, Err(ValidationError::PathTraversal));
 }
 
 #[test]
@@ -454,6 +450,103 @@ fn test_path_traversal_in_vendored() {
 
     let result = validate_corpus_at_path(&corpus);
     assert_eq!(result, Err(ValidationError::PathTraversal));
+}
+
+// -- Missing governed file tests (Fix 1: exact set completeness) ------------------------------
+
+#[test]
+fn test_readme_missing_governed_completeness() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    fs::remove_file(corpus.join("README.md")).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::GovernedFileMissing));
+}
+
+// -- Path safety tests (additional: sidecar/hostile traversal) --------------------------------
+
+#[test]
+fn test_path_traversal_in_sidecar() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_reader(fs::File::open(&lock_path).unwrap()).unwrap();
+
+    lock["corpus"][0]["sidecar"] = serde_json::json!("../escape.meta.json");
+
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::PathTraversal));
+}
+
+#[test]
+fn test_path_traversal_in_hostile() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_reader(fs::File::open(&lock_path).unwrap()).unwrap();
+
+    lock["hostile_fixtures"][0]["fixture"] = serde_json::json!("../../../etc/passwd");
+
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::PathTraversal));
+}
+
+// -- Generator identity tests (Fix 3: freeze directory+script name) ---------------------------
+
+#[test]
+fn test_generator_directory_repointed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["generator"]["directory"] = serde_json::json!("scripts");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::GeneratorIdentityMismatch));
+}
+
+#[test]
+fn test_generator_script_repointed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    // Repoint script to package.json - with matching hash this would still pass
+    // hash validation, but generator identity must reject it
+    lock["generator"]["script"] = serde_json::json!("package.json");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::GeneratorIdentityMismatch));
+}
+
+#[test]
+fn test_generator_consistent_repoint_to_package_json() {
+    // Consistent mutation: repoint lock.generator.script to package.json and
+    // update script_sha256 to match. The generator identity freeze must still
+    // catch this because the script name is not 'generate.js'.
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let pkg_json_hash = sha256_of(&corpus.join("generator/package.json"));
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["generator"]["script"] = serde_json::json!("package.json");
+    lock["generator"]["script_sha256"] = serde_json::json!(pkg_json_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::GeneratorIdentityMismatch));
 }
 
 // -- Semantic sidecar tests (with hash update) ------------------------------------------------

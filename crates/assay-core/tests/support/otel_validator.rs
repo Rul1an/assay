@@ -106,6 +106,10 @@ const EXPECTED_GENAI_OPERATION_NAME: &str = "execute_tool";
 const EXPECTED_GENAI_TOOL_NAME: &str = "read_file";
 const EXPECTED_MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 
+/// Exact generator identity: directory must be 'generator' and script must be 'generate.js'.
+const EXPECTED_GENERATOR_DIRECTORY: &str = "generator";
+const EXPECTED_GENERATOR_SCRIPT: &str = "generate.js";
+
 /// Exact governed file set (recursive). Every file in the corpus root must be in this set.
 /// generator/node_modules is explicitly ignored (created locally by npm ci).
 const GOVERNED_FILES: &[&str] = &[
@@ -171,6 +175,8 @@ pub enum ValidationError {
     CorpusCardinalityMismatch,
     HostileCardinalityMismatch,
     SymlinkInCorpus,
+    GovernedFileMissing,
+    GeneratorIdentityMismatch,
 }
 
 // -- Serde models (test-only, not production) -------------------------------------------------
@@ -440,12 +446,37 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
             return Err(ValidationError::UnlistedFileInCorpus);
         }
     }
-    // Also check all governed files exist
+    // Also check all governed files exist, classifying missing files by domain
     for governed in &governed_set {
         if !actual_files.contains(governed) {
-            // Missing governed file - will be caught by specific checks below
-            // but we only fail here for the governed-set completeness
-            // (specific missing-file errors are more precise, so skip this)
+            // Classify by file domain for precise typed errors
+            if governed == "README.md" {
+                return Err(ValidationError::GovernedFileMissing);
+            } else if governed.starts_with("vendor/") {
+                return Err(ValidationError::VendoredFileMissing);
+            } else if governed.starts_with("generator/") {
+                return Err(ValidationError::GeneratorFileMissing);
+            } else if governed == "upstream.lock.json" {
+                // Lock file absence is already caught before we reach here
+                return Err(ValidationError::LockFileMissing);
+            } else if EXPECTED_HOSTILE
+                .iter()
+                .any(|(name, _)| *name == governed.as_str())
+            {
+                return Err(ValidationError::HostileMissing);
+            } else if EXPECTED_CORPUS
+                .iter()
+                .any(|(fix, _, _, _)| *fix == governed.as_str())
+            {
+                return Err(ValidationError::FixtureMissing);
+            } else if EXPECTED_CORPUS
+                .iter()
+                .any(|(_, sc, _, _)| *sc == governed.as_str())
+            {
+                return Err(ValidationError::SidecarMissing);
+            } else {
+                return Err(ValidationError::GovernedFileMissing);
+            }
         }
     }
 
@@ -488,6 +519,28 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
                 return Err(ValidationError::VendoredDuplicateFile);
             }
         }
+    }
+
+    // Validate generator identity before anything else uses those paths
+    if lock.generator.directory != EXPECTED_GENERATOR_DIRECTORY
+        || lock.generator.script != EXPECTED_GENERATOR_SCRIPT
+    {
+        return Err(ValidationError::GeneratorIdentityMismatch);
+    }
+
+    // Path safety on generator paths
+    validate_safe_relative_path(&lock.generator.directory)?;
+    validate_safe_relative_path(&lock.generator.script)?;
+
+    // Path safety on corpus fixture and sidecar paths
+    for entry in &lock.corpus {
+        validate_safe_relative_path(&entry.fixture)?;
+        validate_safe_relative_path(&entry.sidecar)?;
+    }
+
+    // Path safety on hostile fixture paths
+    for entry in &lock.hostile_fixtures {
+        validate_safe_relative_path(&entry.fixture)?;
     }
 
     // Validate corpus for duplicate paths
@@ -640,10 +693,7 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         }
     }
 
-    // Validate generator
-    validate_safe_relative_path(&lock.generator.directory)?;
-    validate_safe_relative_path(&lock.generator.script)?;
-
+    // Validate generator (path safety already checked in Phase 3)
     let gen_root = build_path(&lock.generator.directory)?;
     let pkg_path = gen_root.join("package.json");
     if !pkg_path.exists() {
@@ -704,11 +754,8 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         return Err(ValidationError::PackageLockMismatch);
     }
 
-    // Validate corpus fixture hashes and sidecar content
+    // Validate corpus fixture hashes and sidecar content (path safety already checked in Phase 3)
     for entry in &lock.corpus {
-        validate_safe_relative_path(&entry.fixture)?;
-        validate_safe_relative_path(&entry.sidecar)?;
-
         let fixture_path = build_path(&entry.fixture)?;
         if !fixture_path.exists() {
             return Err(ValidationError::FixtureMissing);
@@ -897,8 +944,7 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
     // -- Phase 7: Hostile fixture validation (purpose checked after name/cardinality) ----------
 
     for entry in &lock.hostile_fixtures {
-        validate_safe_relative_path(&entry.fixture)?;
-
+        // Path safety already checked in Phase 3
         let path = build_path(&entry.fixture)?;
         if !path.exists() {
             return Err(ValidationError::HostileMissing);
