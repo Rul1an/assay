@@ -43,9 +43,9 @@ The fixed corpus exercises these boundaries:
 | 2026 `complete` result without a non-null `inputRequests` or `requestState` | Terminal |
 | 2026 `complete` result with any non-null `inputRequests` or `requestState` | Incomplete because completion contradicts the continuation |
 | 2026 `input_required` with a string `requestState` or object `inputRequests`, and no malformed sibling | Valid but non-terminal |
-| 2026 `input_required` with neither such member, or with another top-level JSON type | Invalid rather than an ordinary unfinished call |
+| 2026 `input_required` with neither such member, or with a non-null member of another top-level JSON type | Invalid rather than an ordinary unfinished call; `null` is treated as absent |
 | 2026 result without `resultType` | Invalid once the era is known |
-| Present but unrecognized result token | Always incomplete; capabilities distinguish unrecognized from recognition-undeterminable |
+| Present but unrecognized result token | Incomplete when capabilities are readable, absent, or unavailable; malformed modern capabilities are invalid before recognition |
 | Unknown protocol era | No terminal conclusion |
 | Conflicting header and request-metadata eras | Refused distinctly from an unknown era |
 | Multi-hop interim flow | Separate records; no pairing or eventual completion is inferred |
@@ -68,6 +68,8 @@ request, or that an external side effect occurred.
   [`PIN.json`](https://github.com/Rul1an/assay/blob/5e2203e183c6630101f4c6d356cdd7c465ff1364/crates/assay-core/tests/fixtures/mcp-era-parity-v0/PIN.json)
 - Canonical MCP specification commit:
   [`5f5440bb26a62e2cf3440b92da5a667efa03b267`](https://github.com/modelcontextprotocol/modelcontextprotocol/commit/5f5440bb26a62e2cf3440b92da5a667efa03b267)
+- Upstream reference-lane definition and pins:
+  [`mcp-upstream-reference.yml`](https://github.com/Rul1an/assay/blob/5e2203e183c6630101f4c6d356cdd7c465ff1364/.github/workflows/mcp-upstream-reference.yml)
 
 Assay also runs a separate, pinned upstream reference lane for the official MCP conformance source
 and Rust SDK. That lane checks named upstream scenarios and source integrity. It does not represent
