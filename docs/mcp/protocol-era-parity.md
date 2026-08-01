@@ -69,7 +69,7 @@ request, or that an external side effect occurred.
 - Canonical MCP specification commit:
   [`5f5440bb26a62e2cf3440b92da5a667efa03b267`](https://github.com/modelcontextprotocol/modelcontextprotocol/commit/5f5440bb26a62e2cf3440b92da5a667efa03b267)
 - Upstream reference-lane definition and pins:
-  [`mcp-upstream-reference.yml`](https://github.com/Rul1an/assay/blob/5e2203e183c6630101f4c6d356cdd7c465ff1364/.github/workflows/mcp-upstream-reference.yml)
+  [`mcp-upstream-reference.yml`](https://github.com/Rul1an/assay/blob/f31f839e08b79205954aa5a85650295b06497eba/.github/workflows/mcp-upstream-reference.yml)
 
 Assay also runs a separate, pinned upstream reference lane for the official MCP conformance source
 and Rust SDK. That lane checks named upstream scenarios and source integrity. It does not represent
