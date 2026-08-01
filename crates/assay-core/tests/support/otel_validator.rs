@@ -834,17 +834,19 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
     }
 
     // Validate package-lock root packages[""].engines.node matches governed node_version.
-    // This catches the exact bug where package-lock.json carried the stale EOL Node version
-    // (e.g. 20.16.0) after upgrading .node-version to 22.16.0.
-    if let Some(root_pkg) = pkg_lock_json.get("packages").and_then(|p| p.get("")) {
-        if let Some(engines_node) = root_pkg
-            .get("engines")
+    // Total extraction: packages[""] must exist, engines.node must be a string, and it
+    // must exactly equal the governed version. Missing or non-string values are rejected
+    // (fail-closed) rather than silently accepted.
+    {
+        let engines_node = pkg_lock_json
+            .get("packages")
+            .and_then(|p| p.get(""))
+            .and_then(|root_pkg| root_pkg.get("engines"))
             .and_then(|e| e.get("node"))
-            .and_then(|n| n.as_str())
-        {
-            if engines_node != lock.generator.node_version {
-                return Err(ValidationError::PackageLockNodeVersionMismatch);
-            }
+            .and_then(|n| n.as_str());
+        match engines_node {
+            Some(v) if v == lock.generator.node_version => {} // exact match
+            _ => return Err(ValidationError::PackageLockNodeVersionMismatch),
         }
     }
 

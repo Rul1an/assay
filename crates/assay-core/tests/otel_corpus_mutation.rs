@@ -1459,6 +1459,70 @@ fn test_package_lock_root_engines_node_mismatch() {
     assert_eq!(result, Err(ValidationError::PackageLockNodeVersionMismatch));
 }
 
+/// Consistent mutation: remove packages[""].engines.node entirely (keep engines object
+/// but drop the "node" key). Update package-lock hash so validation reaches the
+/// engines.node guard. Must reject — a missing engines.node is not "matches governed
+/// version".
+#[test]
+fn test_package_lock_engines_node_missing() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+    let pkg_lock_path = corpus.join("generator/package-lock.json");
+
+    // Remove packages[""].engines.node but keep the engines object
+    let mut pkg_lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pkg_lock_path).unwrap()).unwrap();
+    pkg_lock["packages"][""]["engines"]
+        .as_object_mut()
+        .unwrap()
+        .remove("node");
+    fs::write(
+        &pkg_lock_path,
+        serde_json::to_vec_pretty(&pkg_lock).unwrap(),
+    )
+    .unwrap();
+
+    // Update lock's package_lock_sha256 to match modified package-lock
+    let new_hash = sha256_of(&pkg_lock_path);
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["generator"]["package_lock_sha256"] = serde_json::json!(new_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::PackageLockNodeVersionMismatch));
+}
+
+/// Consistent mutation: set packages[""].engines.node to a non-string (integer).
+/// Update package-lock hash so validation reaches the engines.node guard. Must reject —
+/// a non-string engines.node is not "matches governed version".
+#[test]
+fn test_package_lock_engines_node_non_string() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+    let pkg_lock_path = corpus.join("generator/package-lock.json");
+
+    // Set packages[""].engines.node to an integer
+    let mut pkg_lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pkg_lock_path).unwrap()).unwrap();
+    pkg_lock["packages"][""]["engines"]["node"] = serde_json::json!(22);
+    fs::write(
+        &pkg_lock_path,
+        serde_json::to_vec_pretty(&pkg_lock).unwrap(),
+    )
+    .unwrap();
+
+    // Update lock's package_lock_sha256 to match modified package-lock
+    let new_hash = sha256_of(&pkg_lock_path);
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["generator"]["package_lock_sha256"] = serde_json::json!(new_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::PackageLockNodeVersionMismatch));
+}
+
 #[test]
 fn test_fixture_duplicate_attribute() {
     let (_tmp, corpus) = copy_corpus_to_temp();
