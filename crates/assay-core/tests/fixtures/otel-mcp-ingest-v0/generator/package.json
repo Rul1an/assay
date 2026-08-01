@@ -17,7 +17,7 @@
     "@opentelemetry/semantic-conventions": "1.43.0"
   },
   "engines": {
-    "node": "20.16.0"
+    "node": "22.16.0"
   },
-  "packageManager": "npm@10.8.1"
+  "packageManager": "npm@10.9.2"
 }

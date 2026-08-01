@@ -111,7 +111,7 @@ const EXPECTED_MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 const EXPECTED_GENERATOR_DIRECTORY: &str = "generator";
 const EXPECTED_GENERATOR_SCRIPT: &str = "generate.js";
 const EXPECTED_NODE_VERSION_FILE: &str = ".node-version";
-const EXPECTED_NODE_VERSION: &str = "20.16.0";
+const EXPECTED_NODE_VERSION: &str = "22.16.0";
 
 /// Independently frozen expected digests for vendored content files.
 /// These are NOT read from upstream.lock.json; they are compiled into the

@@ -44,7 +44,7 @@ Hostile fixtures are **locked inputs only** -- Slice B will define rejection sem
 ## Generator
 
 Located in `generator/`:
-- `.node-version` governs the exact Node runtime (`20.16.0`)
+- `.node-version` governs the exact Node runtime (`22.16.0`)
 - `package.json` with exact `engines`, `packageManager`, and preinstall guard
 - `generate.js` reads `.node-version` and refuses to run on a different Node version
 - Captures official exporter output via ephemeral HTTP server
