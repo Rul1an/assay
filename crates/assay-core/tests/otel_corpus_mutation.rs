@@ -1121,7 +1121,7 @@ fn test_provenance_note_with_contradictory_suffix() {
         serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
     // Append a contradictory suffix -- old substring check would pass this
     lock["provenance"]["note"] = serde_json::json!(
-        "Locally generated test fixtures using official OpenTelemetry SDK and OTLP HTTP exporter. Not external deployment evidence. No production decoder in assay-core. HOWEVER this is actually production data."
+        "Locally generated test fixtures using official OpenTelemetry SDK and OTLP HTTP exporter. Not external deployment evidence. Slice A adds no production decoder for this MCP-shaped OTLP/JSON corpus. HOWEVER this is actually production data."
     );
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 
@@ -1829,6 +1829,34 @@ fn test_package_lock_malformed_is_parse_error() {
 
     let result = validate_corpus_at_path(&corpus);
     assert_eq!(result, Err(ValidationError::GeneratorParseError));
+}
+
+/// Regression pin: hash-before-parse classification for generator/package.json.
+/// Malformed bytes WITHOUT a matching governed digest must be typed as the
+/// hash claim (GeneratorHashMismatch), not the parse claim: the byte-integrity
+/// decision precedes parsing, so an untrusted edit is reported as tamper first.
+#[test]
+fn test_package_json_malformed_without_hash_update_is_hash_mismatch() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let pkg_path = corpus.join("generator/package.json");
+
+    fs::write(&pkg_path, b"{ \"packageManager\": ").unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::GeneratorHashMismatch));
+}
+
+/// Regression pin: hash-before-parse classification for
+/// generator/package-lock.json, same construction as above.
+#[test]
+fn test_package_lock_malformed_without_hash_update_is_hash_mismatch() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let pkg_lock_path = corpus.join("generator/package-lock.json");
+
+    fs::write(&pkg_lock_path, b"{ \"packages\": [ oops").unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::GeneratorHashMismatch));
 }
 
 /// Proves duplicate object keys in generator/package.json are structurally
