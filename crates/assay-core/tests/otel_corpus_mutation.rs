@@ -36,12 +36,90 @@ fn copy_corpus_to_temp() -> (TempDir, PathBuf) {
     (tmp, corpus_path)
 }
 
+/// Recompute SHA-256 of a file and return the hex-encoded hash.
+fn sha256_of(path: &std::path::Path) -> String {
+    use sha2::{Digest, Sha256};
+    let bytes = fs::read(path).unwrap();
+    hex::encode(Sha256::digest(&bytes))
+}
+
+/// Helper: update the lock file's sidecar hash for a given corpus index after
+/// modifying the sidecar file. This allows tests to bypass the sidecar hash check
+/// and reach deeper semantic validation.
+fn update_sidecar_hash_in_lock(corpus: &std::path::Path, corpus_index: usize) {
+    let lock_path = corpus.join("upstream.lock.json");
+    let sidecar_name = {
+        let lock: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+        lock["corpus"][corpus_index]["sidecar"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let sidecar_path = corpus.join(&sidecar_name);
+    let new_hash = sha256_of(&sidecar_path);
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["corpus"][corpus_index]["sidecar_sha256"] = serde_json::json!(new_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+}
+
+/// Helper: rewrite a fixture file with new JSON content, then update both the
+/// lock file (content_sha256 + byte_count) and the sidecar (content_sha256 +
+/// byte_count) to keep hashes internally consistent, so the test reaches
+/// semantic validation rather than stopping at hash checks.
+fn rewrite_fixture_consistent(
+    corpus: &std::path::Path,
+    corpus_index: usize,
+    new_fixture_content: &[u8],
+) {
+    let lock_path = corpus.join("upstream.lock.json");
+    let lock_val: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    let fixture_name = lock_val["corpus"][corpus_index]["fixture"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let sidecar_name = lock_val["corpus"][corpus_index]["sidecar"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Write new fixture content
+    let fixture_path = corpus.join(&fixture_name);
+    fs::write(&fixture_path, new_fixture_content).unwrap();
+    let new_fixture_hash = sha256_of(&fixture_path);
+    let new_byte_count = new_fixture_content.len();
+
+    // Update sidecar with new hash and byte count
+    let sidecar_path = corpus.join(&sidecar_name);
+    let mut sidecar: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&sidecar_path).unwrap()).unwrap();
+    sidecar["content_sha256"] = serde_json::json!(new_fixture_hash);
+    sidecar["byte_count"] = serde_json::json!(new_byte_count);
+    fs::write(&sidecar_path, serde_json::to_vec_pretty(&sidecar).unwrap()).unwrap();
+    let new_sidecar_hash = sha256_of(&sidecar_path);
+
+    // Update lock with new hashes and byte count
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["corpus"][corpus_index]["content_sha256"] = serde_json::json!(new_fixture_hash);
+    lock["corpus"][corpus_index]["byte_count"] = serde_json::json!(new_byte_count);
+    lock["corpus"][corpus_index]["sidecar_sha256"] = serde_json::json!(new_sidecar_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+}
+
+// ── Baseline ───────────────────────────────────────────────────────────────
+
 #[test]
 fn test_clean_corpus_acceptance() {
     let (_tmp, corpus) = copy_corpus_to_temp();
     let result = validate_corpus_at_path(&corpus);
     assert!(result.is_ok(), "Clean corpus must validate");
 }
+
+// ── Byte-level tamper tests ────────────────────────────────────────────────
 
 #[test]
 fn test_fixture_byte_tamper() {
@@ -114,6 +192,8 @@ fn test_semconv_tamper() {
     assert_eq!(result, Err(ValidationError::VendoredHashMismatch));
 }
 
+// ── Generator tamper tests ─────────────────────────────────────────────────
+
 #[test]
 fn test_generator_source_tamper() {
     let (_tmp, corpus) = copy_corpus_to_temp();
@@ -140,6 +220,8 @@ fn test_package_lock_tamper() {
     assert_eq!(result, Err(ValidationError::GeneratorHashMismatch));
 }
 
+// ── Missing file tests ─────────────────────────────────────────────────────
+
 #[test]
 fn test_missing_fixture() {
     let (_tmp, corpus) = copy_corpus_to_temp();
@@ -156,43 +238,6 @@ fn test_missing_sidecar() {
 
     let result = validate_corpus_at_path(&corpus);
     assert_eq!(result, Err(ValidationError::SidecarMissing));
-}
-
-#[test]
-fn test_unlisted_file() {
-    let (_tmp, corpus) = copy_corpus_to_temp();
-    fs::write(corpus.join("rogue_fixture.json"), b"{}").unwrap();
-
-    let result = validate_corpus_at_path(&corpus);
-    assert_eq!(result, Err(ValidationError::UnlistedFileInCorpus));
-}
-
-#[test]
-fn test_external_deployment_true_with_updated_hash() {
-    let (_tmp, corpus) = copy_corpus_to_temp();
-    let sidecar_path = corpus.join("mcp_client_tools_call.meta.json");
-    let lock_path = corpus.join("upstream.lock.json");
-
-    // Modify sidecar
-    let mut sidecar: serde_json::Value =
-        serde_json::from_reader(fs::File::open(&sidecar_path).unwrap()).unwrap();
-    sidecar["provenance"]["external_deployment"] = serde_json::json!(true);
-    fs::write(&sidecar_path, serde_json::to_vec_pretty(&sidecar).unwrap()).unwrap();
-
-    // Recompute sidecar hash
-    use sha2::{Digest, Sha256};
-    let sidecar_bytes = fs::read(&sidecar_path).unwrap();
-    let new_hash = hex::encode(Sha256::digest(&sidecar_bytes));
-
-    // Update lock file with new sidecar hash
-    let mut lock: serde_json::Value =
-        serde_json::from_reader(fs::File::open(&lock_path).unwrap()).unwrap();
-    lock["corpus"][0]["sidecar_sha256"] = serde_json::json!(new_hash);
-    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
-
-    let result = validate_corpus_at_path(&corpus);
-    // Now reaches the semantic check
-    assert_eq!(result, Err(ValidationError::ExternalDeploymentTrue));
 }
 
 #[test]
@@ -222,6 +267,17 @@ fn test_hostile_fixture_missing() {
 
     let result = validate_corpus_at_path(&corpus);
     assert_eq!(result, Err(ValidationError::HostileMissing));
+}
+
+// ── Unlisted / duplicate file tests ────────────────────────────────────────
+
+#[test]
+fn test_unlisted_file() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    fs::write(corpus.join("rogue_fixture.json"), b"{}").unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::UnlistedFileInCorpus));
 }
 
 #[test]
@@ -274,7 +330,7 @@ fn test_duplicate_fixture_path() {
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
-    assert_eq!(result, Err(ValidationError::FixtureDuplicatePath));
+    assert_eq!(result, Err(ValidationError::CorpusCardinalityMismatch));
 }
 
 #[test]
@@ -294,7 +350,7 @@ fn test_duplicate_hostile_path() {
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
-    assert_eq!(result, Err(ValidationError::HostileDuplicatePath));
+    assert_eq!(result, Err(ValidationError::HostileCardinalityMismatch));
 }
 
 #[test]
@@ -316,8 +372,11 @@ fn test_duplicate_vendored_file() {
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
-    assert_eq!(result, Err(ValidationError::VendoredDuplicateFile));
+    // Source identity check now catches the extra proto file before the duplicate check
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
 }
+
+// ── Path safety tests ──────────────────────────────────────────────────────
 
 #[test]
 fn test_absolute_path_in_fixture() {
@@ -332,7 +391,8 @@ fn test_absolute_path_in_fixture() {
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
-    assert_eq!(result, Err(ValidationError::PathTraversal));
+    // Cardinality check fires first because fixture name doesn't match expected set
+    assert_eq!(result, Err(ValidationError::CorpusCardinalityMismatch));
 }
 
 #[test]
@@ -351,11 +411,30 @@ fn test_path_traversal_in_vendored() {
     assert_eq!(result, Err(ValidationError::PathTraversal));
 }
 
+// ── Semantic sidecar tests (with hash update) ──────────────────────────────
+
+#[test]
+fn test_external_deployment_true_with_updated_hash() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let sidecar_path = corpus.join("mcp_client_tools_call.meta.json");
+
+    // Modify sidecar
+    let mut sidecar: serde_json::Value =
+        serde_json::from_reader(fs::File::open(&sidecar_path).unwrap()).unwrap();
+    sidecar["provenance"]["external_deployment"] = serde_json::json!(true);
+    fs::write(&sidecar_path, serde_json::to_vec_pretty(&sidecar).unwrap()).unwrap();
+
+    // Recompute sidecar hash in lock
+    update_sidecar_hash_in_lock(&corpus, 0);
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::ExternalDeploymentTrue));
+}
+
 #[test]
 fn test_fixture_semantic_label_mismatch_with_updated_hash() {
     let (_tmp, corpus) = copy_corpus_to_temp();
     let sidecar_path = corpus.join("mcp_client_tools_call.meta.json");
-    let lock_path = corpus.join("upstream.lock.json");
 
     // Modify sidecar to have wrong fixture_name
     let mut sidecar: serde_json::Value =
@@ -363,18 +442,420 @@ fn test_fixture_semantic_label_mismatch_with_updated_hash() {
     sidecar["fixture_name"] = serde_json::json!("wrong_name");
     fs::write(&sidecar_path, serde_json::to_vec_pretty(&sidecar).unwrap()).unwrap();
 
-    // Recompute sidecar hash
-    use sha2::{Digest, Sha256};
-    let sidecar_bytes = fs::read(&sidecar_path).unwrap();
-    let new_hash = hex::encode(Sha256::digest(&sidecar_bytes));
+    // Recompute sidecar hash in lock
+    update_sidecar_hash_in_lock(&corpus, 0);
 
-    // Update lock file with new sidecar hash
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SidecarSemanticMismatch));
+}
+
+// ── Blocker 1: Frozen contract identity mutation tests ─────────────────────
+
+#[test]
+fn test_proto_tag_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
     let mut lock: serde_json::Value =
-        serde_json::from_reader(fs::File::open(&lock_path).unwrap()).unwrap();
-    lock["corpus"][0]["sidecar_sha256"] = serde_json::json!(new_hash);
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["upstream_sources"][0]["tag"] = serde_json::json!("v1.12.0");
     fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
 
     let result = validate_corpus_at_path(&corpus);
-    // Now reaches the semantic check
-    assert_eq!(result, Err(ValidationError::SidecarSemanticMismatch));
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+}
+
+#[test]
+fn test_semconv_commit_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["upstream_sources"][1]["commit"] =
+        serde_json::json!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+}
+
+#[test]
+fn test_third_upstream_source_added() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+
+    // Add a valid-looking third upstream source
+    let new_source = serde_json::json!({
+        "type": "proto",
+        "repository": "https://github.com/open-telemetry/opentelemetry-proto-go",
+        "tag": "v1.0.0",
+        "commit": null,
+        "files": []
+    });
+    lock["upstream_sources"]
+        .as_array_mut()
+        .unwrap()
+        .push(new_source);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+}
+
+#[test]
+fn test_sdk_package_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["sdk"]["package"] = serde_json::json!("@opentelemetry/sdk-trace-web");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+}
+
+#[test]
+fn test_sdk_version_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["sdk"]["version"] = serde_json::json!("3.0.0");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+}
+
+#[test]
+fn test_exporter_version_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["exporter"]["version"] = serde_json::json!("1.0.0");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+}
+
+#[test]
+fn test_third_corpus_entry_added() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+
+    // Add a valid-looking third corpus entry
+    let new_entry = serde_json::json!({
+        "fixture": "mcp_extra_tools_call.json",
+        "sidecar": "mcp_extra_tools_call.meta.json",
+        "sidecar_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "byte_count": 100,
+        "span_kind": "CLIENT",
+        "mcp_method": "tools/call"
+    });
+    lock["corpus"].as_array_mut().unwrap().push(new_entry);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::CorpusCardinalityMismatch));
+}
+
+#[test]
+fn test_hostile_purpose_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    // Change purpose while keeping the fixture name and hash correct
+    lock["hostile_fixtures"][0]["purpose"] = serde_json::json!("test_something_else");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::HostileCardinalityMismatch));
+}
+
+#[test]
+fn test_fourth_hostile_added() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+
+    let new_hostile = serde_json::json!({
+        "fixture": "hostile_unicode_bomb.json",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "purpose": "test_unicode_normalization"
+    });
+    lock["hostile_fixtures"]
+        .as_array_mut()
+        .unwrap()
+        .push(new_hostile);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::HostileCardinalityMismatch));
+}
+
+#[test]
+fn test_proto_source_path_changed() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    // Change one of the proto source paths
+    lock["upstream_sources"][0]["files"][0]["source_path"] =
+        serde_json::json!("opentelemetry/proto/metrics/v1/metrics.proto");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::SourceIdentityMismatch));
+}
+
+// ── Blocker 3: Exact provenance note tests ─────────────────────────────────
+
+#[test]
+fn test_provenance_note_with_contradictory_suffix() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    // Append a contradictory suffix — old substring check would pass this
+    lock["provenance"]["note"] = serde_json::json!(
+        "Locally generated test fixtures using official OpenTelemetry SDK and OTLP HTTP exporter. Not external deployment evidence. No production decoder in assay-core. HOWEVER this is actually production data."
+    );
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::ProvenanceMarkerInvalid));
+}
+
+#[test]
+fn test_provenance_note_completely_wrong() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["provenance"]["note"] =
+        serde_json::json!("External production evidence from customer deployment.");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::ProvenanceMarkerInvalid));
+}
+
+// ── Blocker 2: Deep semantic tamper tests ──────────────────────────────────
+// These tests mutate fixture content semantics, recompute all hashes to keep
+// them internally consistent, and verify the validator still catches the
+// semantic violation with a typed error.
+
+#[test]
+fn test_span_name_tampered_consistent_hashes() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let fixture_path = corpus.join("mcp_client_tools_call.json");
+
+    // Change span name but keep it superficially similar, via JSON parse/modify/serialize
+    let content = fs::read_to_string(&fixture_path).unwrap();
+    let mut fixture: serde_json::Value = serde_json::from_str(&content).unwrap();
+    fixture["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["name"] =
+        serde_json::json!("tools/call write_file");
+    let modified = serde_json::to_string_pretty(&fixture).unwrap() + "\n";
+
+    rewrite_fixture_consistent(&corpus, 0, modified.as_bytes());
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::FixtureSemanticMismatch));
+}
+
+#[test]
+fn test_mcp_method_value_tampered_consistent_hashes() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let fixture_path = corpus.join("mcp_client_tools_call.json");
+
+    // Change mcp.method.name value via JSON parse/modify/serialize
+    let content = fs::read_to_string(&fixture_path).unwrap();
+    let mut fixture: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let attrs = fixture["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
+        .as_array_mut()
+        .unwrap();
+    for attr in attrs.iter_mut() {
+        if attr["key"].as_str() == Some("mcp.method.name") {
+            attr["value"]["stringValue"] = serde_json::json!("tools/list");
+        }
+    }
+    let modified = serde_json::to_string_pretty(&fixture).unwrap() + "\n";
+
+    rewrite_fixture_consistent(&corpus, 0, modified.as_bytes());
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::FixtureAttributeValueMismatch));
+}
+
+#[test]
+fn test_genai_operation_value_tampered_consistent_hashes() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let fixture_path = corpus.join("mcp_client_tools_call.json");
+
+    // Change gen_ai.operation.name value via JSON parse/modify/serialize
+    let content = fs::read_to_string(&fixture_path).unwrap();
+    let mut fixture: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let attrs = fixture["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
+        .as_array_mut()
+        .unwrap();
+    for attr in attrs.iter_mut() {
+        if attr["key"].as_str() == Some("gen_ai.operation.name") {
+            attr["value"]["stringValue"] = serde_json::json!("list_tools");
+        }
+    }
+    let modified = serde_json::to_string_pretty(&fixture).unwrap() + "\n";
+
+    rewrite_fixture_consistent(&corpus, 0, modified.as_bytes());
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::FixtureAttributeValueMismatch));
+}
+
+#[test]
+fn test_genai_tool_name_tampered_consistent_hashes() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let fixture_path = corpus.join("mcp_client_tools_call.json");
+
+    // Change gen_ai.tool.name value via JSON parse/modify/serialize
+    let content = fs::read_to_string(&fixture_path).unwrap();
+    let mut fixture: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let attrs = fixture["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
+        .as_array_mut()
+        .unwrap();
+    for attr in attrs.iter_mut() {
+        if attr["key"].as_str() == Some("gen_ai.tool.name") {
+            attr["value"]["stringValue"] = serde_json::json!("write_file");
+        }
+    }
+    let modified = serde_json::to_string_pretty(&fixture).unwrap() + "\n";
+
+    rewrite_fixture_consistent(&corpus, 0, modified.as_bytes());
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::FixtureAttributeValueMismatch));
+}
+
+#[test]
+fn test_protocol_version_non_date_consistent_hashes() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let fixture_path = corpus.join("mcp_client_tools_call.json");
+
+    // Change mcp.protocol.version to a non-date value via JSON parse/modify/serialize
+    let content = fs::read_to_string(&fixture_path).unwrap();
+    let mut fixture: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let attrs = fixture["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
+        .as_array_mut()
+        .unwrap();
+    for attr in attrs.iter_mut() {
+        if attr["key"].as_str() == Some("mcp.protocol.version") {
+            attr["value"]["stringValue"] = serde_json::json!("v1.0.0");
+        }
+    }
+    let modified = serde_json::to_string_pretty(&fixture).unwrap() + "\n";
+
+    rewrite_fixture_consistent(&corpus, 0, modified.as_bytes());
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::FixtureAttributeValueMismatch));
+}
+
+#[test]
+fn test_protocol_version_wrong_date_consistent_hashes() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let fixture_path = corpus.join("mcp_client_tools_call.json");
+
+    // Change mcp.protocol.version to a different valid date via JSON parse/modify/serialize
+    let content = fs::read_to_string(&fixture_path).unwrap();
+    let mut fixture: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let attrs = fixture["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
+        .as_array_mut()
+        .unwrap();
+    for attr in attrs.iter_mut() {
+        if attr["key"].as_str() == Some("mcp.protocol.version") {
+            attr["value"]["stringValue"] = serde_json::json!("2025-01-01");
+        }
+    }
+    let modified = serde_json::to_string_pretty(&fixture).unwrap() + "\n";
+
+    rewrite_fixture_consistent(&corpus, 0, modified.as_bytes());
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::FixtureAttributeValueMismatch));
+}
+
+#[test]
+fn test_jsonrpc_id_removed_consistent_hashes() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let fixture_path = corpus.join("mcp_client_tools_call.json");
+
+    // Remove the jsonrpc.request.id attribute entirely
+    let content = fs::read_to_string(&fixture_path).unwrap();
+    let mut fixture: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+    let attrs = fixture["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
+        .as_array_mut()
+        .unwrap();
+    attrs.retain(|a| a["key"].as_str() != Some("jsonrpc.request.id"));
+
+    let modified = serde_json::to_string_pretty(&fixture).unwrap() + "\n";
+    rewrite_fixture_consistent(&corpus, 0, modified.as_bytes());
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(
+        result,
+        Err(ValidationError::FixtureMissingRequiredAttribute)
+    );
+}
+
+#[test]
+fn test_corpus_role_swapped() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    // Swap CLIENT to SERVER for the first entry
+    lock["corpus"][0]["span_kind"] = serde_json::json!("SERVER");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    // Cardinality check: no CLIENT entry found
+    assert_eq!(result, Err(ValidationError::CorpusCardinalityMismatch));
+}
+
+#[test]
+fn test_hostile_purpose_suffix_contradiction() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    // Purpose starts with expected value but has contradiction suffix
+    lock["hostile_fixtures"][0]["purpose"] =
+        serde_json::json!("test_parser_depth_limits but actually benign");
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::HostileCardinalityMismatch));
 }

@@ -20,8 +20,8 @@
 //! ## Provenance
 //!
 //! Fixtures are generated using:
-//! - `@opentelemetry/sdk-trace-node@1.28.0`
-//! - `@opentelemetry/exporter-trace-otlp-http@0.56.0`
+//! - `@opentelemetry/sdk-trace-node@2.10.0`
+//! - `@opentelemetry/exporter-trace-otlp-http@0.221.0`
 //! - Deterministic IDs, fixed timestamps, official OTLP HTTP exporter output
 //! - **Not external deployment evidence** (self-attestation in sidecar `.meta.json`)
 //!
@@ -36,9 +36,10 @@
 //! - Corpus: Every fixture with sidecar (provenance, SHA-256, byte count, span kind, MCP method)
 //! - Hostile: Locked list of adversarial inputs for Slice B rejection testing
 //!
-//! Integration tests validate the lock and provide comprehensive mutation coverage (bit flip,
-//! truncate, hash tamper, missing file, unlisted file, duplicate lock field, external_deployment
-//! true, etc.) with typed errors that never include user-supplied values.
+//! Integration tests validate the lock with mutation coverage for the locked contract surface
+//! (bit flip, hash tamper, missing file, unlisted file, duplicate lock field,
+//! external_deployment true, exact source identity, exact corpus cardinality, exact hostile
+//! purpose, exact attribute values, etc.) with typed errors that never include user values.
 //!
 //! ## Drift Monitoring
 //!
@@ -97,7 +98,7 @@
 //!
 //! - Test-only or internal bounded OTLP parser for projection to `TraceEvent`
 //! - Hostile fixture rejection semantics (depth limits, size limits, schema validation)
-//! - Optional CLI integration (`assay import otlp`) if requirements emerge
+//! - Optional CLI integration (`assay evidence inspect-otel-mcp`) if requirements emerge
 //!
 //! This file intentionally contains no types, functions, or serde models—it is
 //! documentation only.

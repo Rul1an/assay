@@ -68,11 +68,11 @@ Verify hashes match lock. CI never runs the generator—it only validates the lo
 Integration tests (`crates/assay-core/tests/otel_*.rs`) use a hermetic validator that:
 1. Parses the lock file and validates schema/provenance markers
 2. Validates every vendored file, generator file, and corpus fixture hash
-3. Validates upstream source types, repositories, and tag-or-commit cardinality
-4. Validates benign fixture semantics: span kind, MCP method, required attributes
+3. Validates exact upstream source identities, repositories, tags/commits, and file paths
+4. Validates benign fixture semantics: exact span name, span kind, exact attribute values
 5. Validates all sidecar semantics: schema version, fixture name, generator, timestamps
 6. Fails with typed errors (no user values in messages) if any check fails
-7. Provides comprehensive mutation tests (byte flip, duplicate fields/paths, absolute paths, semantic mismatches)
+7. Provides mutation tests for the locked contract surface (byte flip, duplicate fields/paths, absolute paths, exact identity/cardinality/purpose/attribute-value checks)
 
 Every retained field is semantically validated. Test-only parser validates fixture structure without
 introducing unbounded production parsers into `assay-core`.

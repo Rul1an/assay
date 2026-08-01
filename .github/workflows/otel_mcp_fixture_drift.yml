@@ -65,7 +65,6 @@ jobs:
             VENDORED=$(shasum -a 256 < "$FILE" | awk '{print $1}')
             if [ "$UPSTREAM" != "$VENDORED" ]; then DRIFT=true; fi
           else
-            echo "::warning::$FILE missing"
             DRIFT=true
           fi
 
@@ -122,7 +121,6 @@ jobs:
 
           if [ ! -f "$SEMCONV_FILE" ]; then
             echo "drift=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::MCP semconv file missing"
             exit 0
           fi
 
@@ -144,6 +142,15 @@ jobs:
           echo "Latest semantic-conventions-genai commit: $LATEST"
 
       - name: Report to Summary
+        env:
+          LOCKED_SDK: ${{ steps.lock.outputs.locked_sdk }}
+          LOCKED_EXPORTER: ${{ steps.lock.outputs.locked_exporter }}
+          LATEST_SDK: ${{ steps.latest.outputs.sdk }}
+          LATEST_EXPORTER: ${{ steps.latest.outputs.exporter }}
+          PROTO_DRIFT: ${{ steps.proto_pin.outputs.drift }}
+          PROTO_LATEST_TAG: ${{ steps.proto_latest.outputs.tag }}
+          SEMCONV_DRIFT: ${{ steps.semconv_pin.outputs.drift }}
+          SEMCONV_LATEST_COMMIT: ${{ steps.semconv_latest.outputs.commit }}
         run: |
           set -euo pipefail
           {
@@ -153,31 +160,31 @@ jobs:
             echo ""
 
             # SDK
-            if [ "${{ steps.lock.outputs.locked_sdk }}" != "${{ steps.latest.outputs.sdk }}" ]; then
+            if [ "$LOCKED_SDK" != "$LATEST_SDK" ]; then
               echo "## SDK Drift Detected"
               echo ""
-              echo "- Locked: \`${{ steps.lock.outputs.locked_sdk }}\`"
-              echo "- Latest: \`${{ steps.latest.outputs.sdk }}\`"
+              echo "- Locked: \`$LOCKED_SDK\`"
+              echo "- Latest: \`$LATEST_SDK\`"
               echo ""
             else
-              echo "## SDK: No Drift (\`${{ steps.lock.outputs.locked_sdk }}\`)"
+              echo "## SDK: No Drift (\`$LOCKED_SDK\`)"
               echo ""
             fi
 
             # Exporter
-            if [ "${{ steps.lock.outputs.locked_exporter }}" != "${{ steps.latest.outputs.exporter }}" ]; then
+            if [ "$LOCKED_EXPORTER" != "$LATEST_EXPORTER" ]; then
               echo "## Exporter Drift Detected"
               echo ""
-              echo "- Locked: \`${{ steps.lock.outputs.locked_exporter }}\`"
-              echo "- Latest: \`${{ steps.latest.outputs.exporter }}\`"
+              echo "- Locked: \`$LOCKED_EXPORTER\`"
+              echo "- Latest: \`$LATEST_EXPORTER\`"
               echo ""
             else
-              echo "## Exporter: No Drift (\`${{ steps.lock.outputs.locked_exporter }}\`)"
+              echo "## Exporter: No Drift (\`$LOCKED_EXPORTER\`)"
               echo ""
             fi
 
             # Proto Pin Integrity
-            if [ "${{ steps.proto_pin.outputs.drift }}" = "true" ]; then
+            if [ "$PROTO_DRIFT" = "true" ]; then
               echo "## Proto Pin Integrity: DRIFT DETECTED"
               echo ""
               echo "One or more proto files differ from pinned v1.11.0."
@@ -191,11 +198,11 @@ jobs:
             echo "## Proto Latest Release"
             echo ""
             echo "- Pinned: \`v1.11.0\`"
-            echo "- Latest: \`${{ steps.proto_latest.outputs.tag }}\`"
+            echo "- Latest: \`$PROTO_LATEST_TAG\`"
             echo ""
 
             # Semconv Pin Integrity
-            if [ "${{ steps.semconv_pin.outputs.drift }}" = "true" ]; then
+            if [ "$SEMCONV_DRIFT" = "true" ]; then
               echo "## Semconv Pin Integrity: DRIFT DETECTED"
               echo ""
               echo "Vendored MCP semconv differs from pinned commit 434c91dc."
@@ -209,7 +216,7 @@ jobs:
             echo "## Semconv Latest Commit"
             echo ""
             echo "- Pinned: \`434c91dcc34ed038e3048c07720ddfed2c6bddfc\`"
-            echo "- Latest: \`${{ steps.semconv_latest.outputs.commit }}\`"
+            echo "- Latest: \`$SEMCONV_LATEST_COMMIT\`"
             echo ""
 
             # Overall

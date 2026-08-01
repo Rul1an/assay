@@ -9,6 +9,73 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+// ── Frozen Slice A contract constants ──────────────────────────────────────
+
+/// Exact upstream source set (repo URL, type, tag-or-commit).
+const EXPECTED_SOURCES: &[(&str, &str, Option<&str>, Option<&str>)] = &[
+    (
+        "https://github.com/open-telemetry/opentelemetry-proto",
+        "proto",
+        Some("v1.11.0"),
+        None,
+    ),
+    (
+        "https://github.com/open-telemetry/semantic-conventions-genai",
+        "semconv",
+        None,
+        Some("434c91dcc34ed038e3048c07720ddfed2c6bddfc"),
+    ),
+];
+
+/// Exact proto source paths (must appear in the proto upstream source).
+const EXPECTED_PROTO_SOURCE_PATHS: &[&str] = &[
+    "opentelemetry/proto/collector/trace/v1/trace_service.proto",
+    "opentelemetry/proto/trace/v1/trace.proto",
+    "opentelemetry/proto/resource/v1/resource.proto",
+    "opentelemetry/proto/common/v1/common.proto",
+];
+
+/// Exact semconv source path (must appear in the semconv upstream source).
+const EXPECTED_SEMCONV_SOURCE_PATH: &str = "docs/gen-ai/mcp.md";
+
+/// Exact SDK identity.
+const EXPECTED_SDK_PACKAGE: &str = "@opentelemetry/sdk-trace-node";
+const EXPECTED_SDK_VERSION: &str = "2.10.0";
+
+/// Exact exporter identity.
+const EXPECTED_EXPORTER_PACKAGE: &str = "@opentelemetry/exporter-trace-otlp-http";
+const EXPECTED_EXPORTER_VERSION: &str = "0.221.0";
+
+/// Exact corpus fixture names and their span kinds.
+const EXPECTED_CORPUS: &[(&str, &str)] = &[
+    ("mcp_client_tools_call.json", "CLIENT"),
+    ("mcp_server_tools_call.json", "SERVER"),
+];
+
+/// Exact hostile fixture names and their purposes.
+const EXPECTED_HOSTILE: &[(&str, &str)] = &[
+    ("hostile_deep_nesting.json", "test_parser_depth_limits"),
+    ("hostile_oversized_attribute.json", "test_size_limits"),
+    (
+        "hostile_missing_required_fields.json",
+        "test_schema_validation",
+    ),
+];
+
+/// Exact provenance note (no substring acceptance).
+const EXPECTED_PROVENANCE_NOTE: &str = "Locally generated test fixtures using official OpenTelemetry SDK and OTLP HTTP exporter. Not external deployment evidence. No production decoder in assay-core.";
+
+/// Exact span name for all benign fixtures.
+const EXPECTED_SPAN_NAME: &str = "tools/call read_file";
+
+/// Exact required attribute values for benign fixtures.
+const EXPECTED_MCP_METHOD_NAME: &str = "tools/call";
+const EXPECTED_GENAI_OPERATION_NAME: &str = "execute_tool";
+const EXPECTED_GENAI_TOOL_NAME: &str = "read_file";
+const EXPECTED_MCP_PROTOCOL_VERSION: &str = "2024-11-05";
+
+// ── Error types ────────────────────────────────────────────────────────────
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum ValidationError {
     LockFileMissing,
@@ -23,6 +90,7 @@ pub enum ValidationError {
     FixtureDuplicatePath,
     FixtureSemanticMismatch,
     FixtureMissingRequiredAttribute,
+    FixtureAttributeValueMismatch,
     FixtureDuplicateAttribute,
     FixtureInvalidSpanKind,
     FixtureSpanCountMismatch,
@@ -33,6 +101,7 @@ pub enum ValidationError {
     HostileMissing,
     HostileHashMismatch,
     HostileDuplicatePath,
+    HostilePurposeMismatch,
     UnlistedFileInCorpus,
     ExternalDeploymentTrue,
     PathTraversal,
@@ -43,7 +112,12 @@ pub enum ValidationError {
     UpstreamSourceTypeInvalid,
     UpstreamSourceRepositoryInvalid,
     UpstreamSourceCardinalityInvalid,
+    SourceIdentityMismatch,
+    CorpusCardinalityMismatch,
+    HostileCardinalityMismatch,
 }
+
+// ── Serde models (test-only, not production) ───────────────────────────────
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -219,15 +293,26 @@ fn validate_safe_relative_path(path_str: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
+/// Validate that a string is a syntactically valid date-shaped version (YYYY-MM-DD).
+fn is_date_shaped_version(s: &str) -> bool {
+    if s.len() != 10 {
+        return false;
+    }
+    let parts: Vec<&str> = s.split('-').collect();
+    if parts.len() != 3 {
+        return false;
+    }
+    let year = parts[0].parse::<u32>();
+    let month = parts[1].parse::<u32>();
+    let day = parts[2].parse::<u32>();
+    matches!((year, month, day), (Ok(y), Ok(m), Ok(d)) if y >= 2000 && (1..=12).contains(&m) && (1..=31).contains(&d))
+}
+
 /// Public entry point for validating the corpus at a given root path.
 /// Used by mutation tests to verify that tampering is detected.
 pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
     let lock_path = root.join("upstream.lock.json");
     let content = fs::read_to_string(&lock_path).map_err(|_| ValidationError::LockFileMissing)?;
-
-    // Test for duplicate fields by attempting to parse as raw JSON first
-    let _raw: serde_json::Value =
-        serde_json::from_str(&content).map_err(|_| ValidationError::LockParseError)?;
 
     let lock: UpstreamLock =
         serde_json::from_str(&content).map_err(|_| ValidationError::LockParseError)?;
@@ -242,11 +327,98 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
         return Err(ValidationError::SchemaVersionInvalid);
     }
 
-    // Validate provenance marker
-    if !lock.provenance.note.contains("Locally generated")
-        || !lock.provenance.note.contains("Not external deployment")
-    {
+    // Validate exact provenance note (no substring acceptance)
+    if lock.provenance.note != EXPECTED_PROVENANCE_NOTE {
         return Err(ValidationError::ProvenanceMarkerInvalid);
+    }
+
+    // Validate exact SDK identity
+    if lock.sdk.package != EXPECTED_SDK_PACKAGE || lock.sdk.version != EXPECTED_SDK_VERSION {
+        return Err(ValidationError::SourceIdentityMismatch);
+    }
+
+    // Validate exact exporter identity
+    if lock.exporter.package != EXPECTED_EXPORTER_PACKAGE
+        || lock.exporter.version != EXPECTED_EXPORTER_VERSION
+    {
+        return Err(ValidationError::SourceIdentityMismatch);
+    }
+
+    // Validate exact upstream source set cardinality and identity
+    if lock.upstream_sources.len() != EXPECTED_SOURCES.len() {
+        return Err(ValidationError::SourceIdentityMismatch);
+    }
+
+    for (expected_repo, expected_type, expected_tag, expected_commit) in EXPECTED_SOURCES {
+        let found = lock.upstream_sources.iter().any(|s| {
+            s.repository == *expected_repo
+                && s.source_type == *expected_type
+                && s.tag.as_deref() == *expected_tag
+                && s.commit.as_deref() == *expected_commit
+        });
+        if !found {
+            return Err(ValidationError::SourceIdentityMismatch);
+        }
+    }
+
+    // Validate exact proto source paths
+    let proto_source = lock
+        .upstream_sources
+        .iter()
+        .find(|s| s.source_type == "proto")
+        .ok_or(ValidationError::SourceIdentityMismatch)?;
+    if proto_source.files.len() != EXPECTED_PROTO_SOURCE_PATHS.len() {
+        return Err(ValidationError::SourceIdentityMismatch);
+    }
+    for expected_path in EXPECTED_PROTO_SOURCE_PATHS {
+        if !proto_source
+            .files
+            .iter()
+            .any(|f| f.source_path == *expected_path)
+        {
+            return Err(ValidationError::SourceIdentityMismatch);
+        }
+    }
+
+    // Validate exact semconv source path
+    let semconv_source = lock
+        .upstream_sources
+        .iter()
+        .find(|s| s.source_type == "semconv")
+        .ok_or(ValidationError::SourceIdentityMismatch)?;
+    if semconv_source.files.len() != 1 {
+        return Err(ValidationError::SourceIdentityMismatch);
+    }
+    if semconv_source.files[0].source_path != EXPECTED_SEMCONV_SOURCE_PATH {
+        return Err(ValidationError::SourceIdentityMismatch);
+    }
+
+    // Validate exact corpus cardinality and fixture names/roles
+    if lock.corpus.len() != EXPECTED_CORPUS.len() {
+        return Err(ValidationError::CorpusCardinalityMismatch);
+    }
+    for (expected_fixture, expected_kind) in EXPECTED_CORPUS {
+        let found = lock
+            .corpus
+            .iter()
+            .any(|c| c.fixture == *expected_fixture && c.span_kind == *expected_kind);
+        if !found {
+            return Err(ValidationError::CorpusCardinalityMismatch);
+        }
+    }
+
+    // Validate exact hostile fixture cardinality, names, and purposes
+    if lock.hostile_fixtures.len() != EXPECTED_HOSTILE.len() {
+        return Err(ValidationError::HostileCardinalityMismatch);
+    }
+    for (expected_fixture, expected_purpose) in EXPECTED_HOSTILE {
+        let found = lock
+            .hostile_fixtures
+            .iter()
+            .any(|h| h.fixture == *expected_fixture && h.purpose == *expected_purpose);
+        if !found {
+            return Err(ValidationError::HostileCardinalityMismatch);
+        }
     }
 
     // Helper to build path from temp root
@@ -481,21 +653,18 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
             return Err(ValidationError::FixtureSemanticMismatch);
         }
 
-        // Validate span name contains "tools/call"
-        if !span.name.contains("tools/call") || !span.name.contains("read_file") {
+        // Validate exact span name (no substring acceptance)
+        if span.name != EXPECTED_SPAN_NAME {
             return Err(ValidationError::FixtureSemanticMismatch);
         }
 
-        // Validate required attributes
+        // Validate required attributes with exact values
         let mut seen_attr_keys = HashSet::new();
         let mut found_mcp_method = None;
-        let required_attrs = [
-            "mcp.method.name",
-            "gen_ai.operation.name",
-            "gen_ai.tool.name",
-            "jsonrpc.request.id",
-            "mcp.protocol.version",
-        ];
+        let mut found_genai_operation = None;
+        let mut found_genai_tool = None;
+        let mut found_jsonrpc_id = None;
+        let mut found_protocol_version = None;
 
         for attr in &span.attributes {
             // Check for duplicates
@@ -513,15 +682,54 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
                 return Err(ValidationError::FixtureSemanticMismatch);
             }
 
-            if attr.key == "mcp.method.name" {
-                found_mcp_method = attr.value.string_value.as_deref();
+            match attr.key.as_str() {
+                "mcp.method.name" => found_mcp_method = attr.value.string_value.as_deref(),
+                "gen_ai.operation.name" => {
+                    found_genai_operation = attr.value.string_value.as_deref()
+                }
+                "gen_ai.tool.name" => found_genai_tool = attr.value.string_value.as_deref(),
+                "jsonrpc.request.id" => found_jsonrpc_id = attr.value.string_value.as_deref(),
+                "mcp.protocol.version" => {
+                    found_protocol_version = attr.value.string_value.as_deref()
+                }
+                _ => {}
             }
         }
 
+        // Check required attributes are present
+        let required_attrs = [
+            "mcp.method.name",
+            "gen_ai.operation.name",
+            "gen_ai.tool.name",
+            "jsonrpc.request.id",
+            "mcp.protocol.version",
+        ];
         for req in &required_attrs {
             if !seen_attr_keys.contains(*req) {
                 return Err(ValidationError::FixtureMissingRequiredAttribute);
             }
+        }
+
+        // Validate exact attribute values
+        if found_mcp_method != Some(EXPECTED_MCP_METHOD_NAME) {
+            return Err(ValidationError::FixtureAttributeValueMismatch);
+        }
+        if found_genai_operation != Some(EXPECTED_GENAI_OPERATION_NAME) {
+            return Err(ValidationError::FixtureAttributeValueMismatch);
+        }
+        if found_genai_tool != Some(EXPECTED_GENAI_TOOL_NAME) {
+            return Err(ValidationError::FixtureAttributeValueMismatch);
+        }
+
+        // jsonrpc.request.id must be a string (presence of string_value suffices)
+        if found_jsonrpc_id.is_none() {
+            return Err(ValidationError::FixtureAttributeValueMismatch);
+        }
+
+        // mcp.protocol.version must be date-shaped and match expected value
+        match found_protocol_version {
+            Some(v) if is_date_shaped_version(v) && v == EXPECTED_MCP_PROTOCOL_VERSION => {}
+            _ => return Err(ValidationError::FixtureAttributeValueMismatch),
         }
 
         // Validate mcp_method derived from actual attribute
@@ -541,9 +749,14 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
     for entry in &lock.hostile_fixtures {
         validate_safe_relative_path(&entry.fixture)?;
 
-        // Validate purpose is non-empty
-        if entry.purpose.is_empty() {
-            return Err(ValidationError::HostileHashMismatch);
+        // Validate purpose matches expected constant (exact match, not non-empty)
+        let expected_purpose = EXPECTED_HOSTILE
+            .iter()
+            .find(|(name, _)| *name == entry.fixture)
+            .map(|(_, purpose)| *purpose);
+        match expected_purpose {
+            Some(p) if entry.purpose == p => {}
+            _ => return Err(ValidationError::HostilePurposeMismatch),
         }
 
         let path = build_path(&entry.fixture)?;
