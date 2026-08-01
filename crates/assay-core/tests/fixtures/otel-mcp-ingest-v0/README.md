@@ -6,9 +6,10 @@ convention testing in Assay.
 
 ## Purpose
 
-- **Test-only input corpus**: Validates OTLP/JSON ingestion for MCP-instrumented traces
-- **No production decoder**: `assay-core` contains no serde models or parsers for OTLP
+- **Test-only input corpus**: Locked reference fixtures for future OTLP/JSON MCP ingest work
+- **No production decoder**: `assay-core` contains no serde models or parsers for OTLP (Slice A scope)
 - **Hermetic validator**: Integration tests use a typed, test-only validator with strict lock checking
+- **Future work**: Slice B+ will add `assay evidence inspect-otel-mcp` for semantic validation
 
 ## Fixtures
 
@@ -33,8 +34,8 @@ Hostile fixtures are **locked inputs only**—Slice B will define rejection sema
 ## Lock File
 
 `upstream.lock.json` binds every corpus element:
-- SDK: `@opentelemetry/sdk-trace-node@1.28.0`
-- Exporter: `@opentelemetry/exporter-trace-otlp-http@0.56.0`
+- SDK: `@opentelemetry/sdk-trace-node@2.10.0`
+- Exporter: `@opentelemetry/exporter-trace-otlp-http@0.221.0`
 - Proto files: 4 vendored `.proto` files from `opentelemetry-proto v1.11.0` with SHA-256
 - MCP semconv: `semantic-conventions-genai` commit 434c91dc, `docs/gen-ai/mcp.md` with SHA-256
 - Generator: `package.json`, `package-lock.json`, `generate.js` with SHA-256
@@ -65,9 +66,13 @@ Verify hashes match lock. CI never runs the generator—it only validates the lo
 ## Validation
 
 Integration tests (`crates/assay-core/tests/otel_*.rs`) use a hermetic validator that:
-1. Parses the lock file
+1. Parses the lock file and validates schema/provenance markers
 2. Validates every vendored file, generator file, and corpus fixture hash
-3. Fails with typed errors (no user values in messages) if any hash mismatches
-4. Provides mutation tests (bit flip, truncate, hash tamper, missing file, unlisted file, etc.)
+3. Validates upstream source types, repositories, and tag-or-commit cardinality
+4. Validates benign fixture semantics: span kind, MCP method, required attributes
+5. Validates all sidecar semantics: schema version, fixture name, generator, timestamps
+6. Fails with typed errors (no user values in messages) if any check fails
+7. Provides comprehensive mutation tests (byte flip, duplicate fields/paths, absolute paths, semantic mismatches)
 
-No field is ignored. No blanket `allow(dead_code)` on test-only types.
+Every retained field is semantically validated. Test-only parser validates fixture structure without
+introducing unbounded production parsers into `assay-core`.

@@ -47,8 +47,8 @@ jobs:
           echo "exporter=$EXPORTER_LATEST" >> "$GITHUB_OUTPUT"
           echo "Latest SDK: $SDK_LATEST, Exporter: $EXPORTER_LATEST"
 
-      - name: Check Proto Drift (All 4 Files)
-        id: proto
+      - name: Check Proto Pin Integrity
+        id: proto_pin
         run: |
           set -euo pipefail
           BASE="vendor/opentelemetry-proto-v1.11.0/opentelemetry/proto"
@@ -104,8 +104,16 @@ jobs:
 
           echo "drift=$DRIFT" >> "$GITHUB_OUTPUT"
 
-      - name: Check MCP Semconv Drift
-        id: semconv
+      - name: Check Proto Latest Release
+        id: proto_latest
+        run: |
+          set -euo pipefail
+          LATEST=$(curl --fail --retry 3 -sS https://api.github.com/repos/open-telemetry/opentelemetry-proto/releases/latest | jq -r '.tag_name')
+          echo "tag=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "Latest opentelemetry-proto: $LATEST"
+
+      - name: Check Semconv Pin Integrity
+        id: semconv_pin
         run: |
           set -euo pipefail
           SEMCONV_FILE="crates/assay-core/tests/fixtures/otel-mcp-ingest-v0/vendor/semantic-conventions-genai-434c91dc/mcp.md"
@@ -126,6 +134,14 @@ jobs:
           else
             echo "drift=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Check Semconv Latest Commit
+        id: semconv_latest
+        run: |
+          set -euo pipefail
+          LATEST=$(curl --fail --retry 3 -sS https://api.github.com/repos/open-telemetry/semantic-conventions-genai/commits/main | jq -r '.sha')
+          echo "commit=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "Latest semantic-conventions-genai commit: $LATEST"
 
       - name: Report to Summary
         run: |
@@ -160,27 +176,41 @@ jobs:
               echo ""
             fi
 
-            # Proto
-            if [ "${{ steps.proto.outputs.drift }}" = "true" ]; then
-              echo "## Proto Drift Detected"
+            # Proto Pin Integrity
+            if [ "${{ steps.proto_pin.outputs.drift }}" = "true" ]; then
+              echo "## Proto Pin Integrity: DRIFT DETECTED"
               echo ""
-              echo "One or more proto files differ from v1.11.0 upstream."
+              echo "One or more proto files differ from pinned v1.11.0."
               echo ""
             else
-              echo "## Proto: No Drift (v1.11.0)"
+              echo "## Proto Pin Integrity: OK (v1.11.0)"
               echo ""
             fi
 
-            # MCP Semconv
-            if [ "${{ steps.semconv.outputs.drift }}" = "true" ]; then
-              echo "## MCP Semconv Drift Detected"
+            # Proto Latest Release
+            echo "## Proto Latest Release"
+            echo ""
+            echo "- Pinned: \`v1.11.0\`"
+            echo "- Latest: \`${{ steps.proto_latest.outputs.tag }}\`"
+            echo ""
+
+            # Semconv Pin Integrity
+            if [ "${{ steps.semconv_pin.outputs.drift }}" = "true" ]; then
+              echo "## Semconv Pin Integrity: DRIFT DETECTED"
               echo ""
-              echo "Vendored MCP semconv differs from commit 434c91dc."
+              echo "Vendored MCP semconv differs from pinned commit 434c91dc."
               echo ""
             else
-              echo "## MCP Semconv: No Drift (434c91dc)"
+              echo "## Semconv Pin Integrity: OK (434c91dc)"
               echo ""
             fi
+
+            # Semconv Latest Commit
+            echo "## Semconv Latest Commit"
+            echo ""
+            echo "- Pinned: \`434c91dcc34ed038e3048c07720ddfed2c6bddfc\`"
+            echo "- Latest: \`${{ steps.semconv_latest.outputs.commit }}\`"
+            echo ""
 
             # Overall
             echo "## Status"

@@ -4,14 +4,12 @@
 //! detects the specific error. All tests call validate_corpus_at_path() and assert
 //! precise typed errors (no value leakage).
 
+mod support;
+use support::otel_validator::{validate_corpus_at_path, ValidationError};
+
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
-
-// Import the validator from hermetic test module
-#[path = "otel_corpus_hermetic.rs"]
-mod hermetic;
-use hermetic::{validate_corpus_at_path, ValidationError};
 
 const FIXTURE_ROOT: &str = "tests/fixtures/otel-mcp-ingest-v0";
 
@@ -170,18 +168,31 @@ fn test_unlisted_file() {
 }
 
 #[test]
-fn test_external_deployment_true_rejected() {
+fn test_external_deployment_true_with_updated_hash() {
     let (_tmp, corpus) = copy_corpus_to_temp();
     let sidecar_path = corpus.join("mcp_client_tools_call.meta.json");
+    let lock_path = corpus.join("upstream.lock.json");
 
+    // Modify sidecar
     let mut sidecar: serde_json::Value =
         serde_json::from_reader(fs::File::open(&sidecar_path).unwrap()).unwrap();
     sidecar["provenance"]["external_deployment"] = serde_json::json!(true);
     fs::write(&sidecar_path, serde_json::to_vec_pretty(&sidecar).unwrap()).unwrap();
 
+    // Recompute sidecar hash
+    use sha2::{Digest, Sha256};
+    let sidecar_bytes = fs::read(&sidecar_path).unwrap();
+    let new_hash = hex::encode(Sha256::digest(&sidecar_bytes));
+
+    // Update lock file with new sidecar hash
+    let mut lock: serde_json::Value =
+        serde_json::from_reader(fs::File::open(&lock_path).unwrap()).unwrap();
+    lock["corpus"][0]["sidecar_sha256"] = serde_json::json!(new_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
     let result = validate_corpus_at_path(&corpus);
-    // Sidecar file changed so hash mismatch first
-    assert_eq!(result, Err(ValidationError::SidecarHashMismatch));
+    // Now reaches the semantic check
+    assert_eq!(result, Err(ValidationError::ExternalDeploymentTrue));
 }
 
 #[test]
@@ -214,6 +225,25 @@ fn test_hostile_fixture_missing() {
 }
 
 #[test]
+fn test_duplicate_json_field_in_lock() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    // Read raw JSON and manually insert duplicate key
+    let content = fs::read_to_string(&lock_path).unwrap();
+    // Insert a duplicate "schema_version" field right after the first one
+    let modified = content.replace(
+        r#""schema_version": "1","#,
+        r#""schema_version": "1","schema_version": "duplicate","#,
+    );
+    fs::write(&lock_path, modified).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    // serde_json should reject duplicate keys with an error
+    assert_eq!(result, Err(ValidationError::LockParseError));
+}
+
+#[test]
 fn test_unknown_lock_field() {
     let (_tmp, corpus) = copy_corpus_to_temp();
     let lock_path = corpus.join("upstream.lock.json");
@@ -225,4 +255,126 @@ fn test_unknown_lock_field() {
 
     let result = validate_corpus_at_path(&corpus);
     assert_eq!(result, Err(ValidationError::LockParseError));
+}
+
+#[test]
+fn test_duplicate_fixture_path() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_reader(fs::File::open(&lock_path).unwrap()).unwrap();
+
+    // Duplicate the first corpus entry
+    if let Some(corpus_array) = lock["corpus"].as_array_mut() {
+        let first = corpus_array[0].clone();
+        corpus_array.push(first);
+    }
+
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::FixtureDuplicatePath));
+}
+
+#[test]
+fn test_duplicate_hostile_path() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_reader(fs::File::open(&lock_path).unwrap()).unwrap();
+
+    // Duplicate the first hostile entry
+    if let Some(hostile_array) = lock["hostile_fixtures"].as_array_mut() {
+        let first = hostile_array[0].clone();
+        hostile_array.push(first);
+    }
+
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::HostileDuplicatePath));
+}
+
+#[test]
+fn test_duplicate_vendored_file() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_reader(fs::File::open(&lock_path).unwrap()).unwrap();
+
+    // Duplicate a file entry within the first upstream source
+    if let Some(sources) = lock["upstream_sources"].as_array_mut() {
+        if let Some(files) = sources[0]["files"].as_array_mut() {
+            let first = files[0].clone();
+            files.push(first);
+        }
+    }
+
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::VendoredDuplicateFile));
+}
+
+#[test]
+fn test_absolute_path_in_fixture() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_reader(fs::File::open(&lock_path).unwrap()).unwrap();
+
+    lock["corpus"][0]["fixture"] = serde_json::json!("/etc/passwd");
+
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::PathTraversal));
+}
+
+#[test]
+fn test_path_traversal_in_vendored() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+
+    let mut lock: serde_json::Value =
+        serde_json::from_reader(fs::File::open(&lock_path).unwrap()).unwrap();
+
+    lock["upstream_sources"][0]["files"][0]["vendored_path"] = serde_json::json!("../escape.proto");
+
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::PathTraversal));
+}
+
+#[test]
+fn test_fixture_semantic_label_mismatch_with_updated_hash() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let sidecar_path = corpus.join("mcp_client_tools_call.meta.json");
+    let lock_path = corpus.join("upstream.lock.json");
+
+    // Modify sidecar to have wrong fixture_name
+    let mut sidecar: serde_json::Value =
+        serde_json::from_reader(fs::File::open(&sidecar_path).unwrap()).unwrap();
+    sidecar["fixture_name"] = serde_json::json!("wrong_name");
+    fs::write(&sidecar_path, serde_json::to_vec_pretty(&sidecar).unwrap()).unwrap();
+
+    // Recompute sidecar hash
+    use sha2::{Digest, Sha256};
+    let sidecar_bytes = fs::read(&sidecar_path).unwrap();
+    let new_hash = hex::encode(Sha256::digest(&sidecar_bytes));
+
+    // Update lock file with new sidecar hash
+    let mut lock: serde_json::Value =
+        serde_json::from_reader(fs::File::open(&lock_path).unwrap()).unwrap();
+    lock["corpus"][0]["sidecar_sha256"] = serde_json::json!(new_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    // Now reaches the semantic check
+    assert_eq!(result, Err(ValidationError::SidecarSemanticMismatch));
 }
