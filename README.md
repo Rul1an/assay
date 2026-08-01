@@ -133,6 +133,7 @@ Generate one from observed behaviour with `assay init --from-trace trace.jsonl`,
 ## Learn more
 
 - [MCP Quickstart](examples/mcp-quickstart/) · [Editor MCP recipe](docs/guides/editor-mcp-recipe.md) — policy-enforcing MCP in Cursor / Claude Code / Codex
+- [MCP 2025/2026 protocol-era parity](https://docs.getassay.dev/mcp/protocol-era-parity/) — pinned `resultType` and interim-result compatibility corpus
 - [Coding-agent governance](docs/guides/coding-agent-governance.md) · [OpenTelemetry & Langfuse](docs/guides/otel-langfuse.md) — observed runs → evidence
 - [Evidence Receipts in Action](docs/notes/EVIDENCE-RECEIPTS-IN-ACTION.md) — Promptfoo / OpenFeature / CycloneDX receipt families
 - [CI Guide](docs/guides/github-action.md) · [Evidence Store](docs/guides/evidence-store-aws-s3.md) (S3 / B2 / MinIO)

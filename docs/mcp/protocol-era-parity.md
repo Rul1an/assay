@@ -1,3 +1,8 @@
+---
+title: MCP 2025/2026 Protocol-Era Parity
+description: Reproduce Assay's pinned MCP 2025-06-18 and 2026-07-28 resultType parity corpus for complete, input_required, and interim tool results.
+---
+
 # MCP Protocol-Era Parity
 
 Assay carries an executable, exploratory corpus for one narrow compatibility question across MCP
