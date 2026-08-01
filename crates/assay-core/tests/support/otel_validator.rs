@@ -429,6 +429,89 @@ pub fn path_to_posix(rel: &Path) -> Result<String, ValidationError> {
     Ok(parts.join("/"))
 }
 
+/// A `serde_json::Value` wrapper whose `Deserialize` rejects duplicate object
+/// keys at every nesting depth via a structured serde visitor (no regex or
+/// string scanning). Plain `Value` is last-wins for duplicate keys, which
+/// would let a duplicated governed field smuggle a hidden earlier value past
+/// semantic extraction. Everything else (unknown fields included) is kept, so
+/// tolerance of extra fields is unchanged.
+struct StrictJson(serde_json::Value);
+
+impl<'de> serde::de::Deserialize<'de> for StrictJson {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        use serde::de::{Error as DeError, MapAccess, SeqAccess, Visitor};
+        use std::fmt;
+
+        struct StrictVisitor;
+
+        impl<'de> Visitor<'de> for StrictVisitor {
+            type Value = StrictJson;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a JSON value without duplicate object keys")
+            }
+
+            fn visit_bool<E: DeError>(self, v: bool) -> Result<Self::Value, E> {
+                Ok(StrictJson(serde_json::Value::Bool(v)))
+            }
+            fn visit_i64<E: DeError>(self, v: i64) -> Result<Self::Value, E> {
+                Ok(StrictJson(serde_json::Value::from(v)))
+            }
+            fn visit_u64<E: DeError>(self, v: u64) -> Result<Self::Value, E> {
+                Ok(StrictJson(serde_json::Value::from(v)))
+            }
+            fn visit_f64<E: DeError>(self, v: f64) -> Result<Self::Value, E> {
+                Ok(StrictJson(serde_json::Value::from(v)))
+            }
+            fn visit_str<E: DeError>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(StrictJson(serde_json::Value::String(v.to_owned())))
+            }
+            fn visit_unit<E: DeError>(self) -> Result<Self::Value, E> {
+                Ok(StrictJson(serde_json::Value::Null))
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut out = Vec::new();
+                while let Some(StrictJson(v)) = seq.next_element()? {
+                    out.push(v);
+                }
+                Ok(StrictJson(serde_json::Value::Array(out)))
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut out = serde_json::Map::new();
+                while let Some((key, StrictJson(value))) = map.next_entry::<String, StrictJson>()? {
+                    if out.insert(key, value).is_some() {
+                        // Value-free: the offending key name is not echoed.
+                        return Err(DeError::custom("duplicate object key"));
+                    }
+                }
+                Ok(StrictJson(serde_json::Value::Object(out)))
+            }
+        }
+
+        deserializer.deserialize_any(StrictVisitor)
+    }
+}
+
+/// Parse governed generator JSON strictly: malformed input or duplicate object
+/// keys at any depth are the value-free `GeneratorParseError`. Shared by both
+/// generator parse sites so the duplicate-key contract is symmetric.
+fn parse_generator_json_strict(content: &str) -> Result<serde_json::Value, ValidationError> {
+    serde_json::from_str::<StrictJson>(content)
+        .map(|s| s.0)
+        .map_err(|_| ValidationError::GeneratorParseError)
+}
+
 /// Look up the compiled-in frozen digest for a vendored path. Absence is
 /// fail-closed: every governed vendored file must carry an independent frozen
 /// digest, so a missing mapping is a `VendoredHashMismatch`, never a skip.
@@ -865,8 +948,7 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
     // only enforcement point. Missing or wrong values are rejected (fail-closed).
     let pkg_json_content =
         fs::read_to_string(&pkg_path).map_err(|_| ValidationError::GeneratorFileMissing)?;
-    let pkg_json: serde_json::Value = serde_json::from_str(&pkg_json_content)
-        .map_err(|_| ValidationError::GeneratorParseError)?;
+    let pkg_json: serde_json::Value = parse_generator_json_strict(&pkg_json_content)?;
     {
         let expected_pm = format!("npm@{}", lock.generator.npm_version);
         let actual_pm = pkg_json.get("packageManager").and_then(|v| v.as_str());
@@ -879,8 +961,7 @@ pub fn validate_corpus_at_path(root: &Path) -> Result<(), ValidationError> {
     // Validate package-lock bindings (version, resolved, integrity)
     let pkg_lock_content =
         fs::read_to_string(&pkg_lock_path).map_err(|_| ValidationError::GeneratorFileMissing)?;
-    let pkg_lock_json: serde_json::Value = serde_json::from_str(&pkg_lock_content)
-        .map_err(|_| ValidationError::GeneratorParseError)?;
+    let pkg_lock_json: serde_json::Value = parse_generator_json_strict(&pkg_lock_content)?;
 
     if let Some(packages) = pkg_lock_json.get("packages").and_then(|p| p.as_object()) {
         let sdk_key = format!("node_modules/{}", lock.sdk.package);

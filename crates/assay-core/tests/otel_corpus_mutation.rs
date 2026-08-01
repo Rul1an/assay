@@ -1831,6 +1831,68 @@ fn test_package_lock_malformed_is_parse_error() {
     assert_eq!(result, Err(ValidationError::GeneratorParseError));
 }
 
+/// Proves duplicate object keys in generator/package.json are structurally
+/// rejected as GeneratorParseError. The duplicate packageManager carries the
+/// governed npm value LAST, so a last-wins Value parser would accept the file
+/// silently and full validation would pass; only depth-aware duplicate-key
+/// rejection catches it. The governed hash is updated so validation reaches
+/// the parse site.
+#[test]
+fn test_package_json_duplicate_package_manager_is_parse_error() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+    let pkg_path = corpus.join("generator/package.json");
+
+    fs::write(
+        &pkg_path,
+        b"{\n  \"packageManager\": \"npm@9.9.9\",\n  \"packageManager\": \"npm@10.9.2\"\n}\n",
+    )
+    .unwrap();
+
+    let new_hash = sha256_of(&pkg_path);
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["generator"]["package_json_sha256"] = serde_json::json!(new_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::GeneratorParseError));
+}
+
+/// Proves duplicate object keys nested deep inside generator/package-lock.json
+/// are structurally rejected as GeneratorParseError. The duplicated critical
+/// key is packages[""].engines.node with the governed version LAST, so a
+/// last-wins parser would pass the engines.node exact-runtime check and full
+/// validation would succeed. The governed hash is updated so validation
+/// reaches the parse site.
+#[test]
+fn test_package_lock_nested_duplicate_key_is_parse_error() {
+    let (_tmp, corpus) = copy_corpus_to_temp();
+    let lock_path = corpus.join("upstream.lock.json");
+    let pkg_lock_path = corpus.join("generator/package-lock.json");
+
+    let content = fs::read_to_string(&pkg_lock_path).unwrap();
+    let duplicated = content.replacen(
+        "\"node\": \"22.16.0\"",
+        "\"node\": \"1.0.0\", \"node\": \"22.16.0\"",
+        1,
+    );
+    assert_ne!(
+        content, duplicated,
+        "engines.node injection site must exist in package-lock.json"
+    );
+    fs::write(&pkg_lock_path, duplicated.as_bytes()).unwrap();
+
+    let new_hash = sha256_of(&pkg_lock_path);
+    let mut lock: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&lock_path).unwrap()).unwrap();
+    lock["generator"]["package_lock_sha256"] = serde_json::json!(new_hash);
+    fs::write(&lock_path, serde_json::to_vec_pretty(&lock).unwrap()).unwrap();
+
+    let result = validate_corpus_at_path(&corpus);
+    assert_eq!(result, Err(ValidationError::GeneratorParseError));
+}
+
 /// Proves the validator rejects when the lock file's npm_version does not match
 /// the governed constant (catch an attempt to downgrade/upgrade npm in the lock).
 #[test]

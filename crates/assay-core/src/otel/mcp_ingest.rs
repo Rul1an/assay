@@ -32,7 +32,10 @@
 //! - Exporter: package, version, integrity, resolved URL
 //! - Proto files: 4 vendored `.proto` files from `opentelemetry-proto v1.11.0` with SHA-256
 //! - MCP semconv: `semantic-conventions-genai` commit 434c91dc, `docs/gen-ai/mcp.md` with SHA-256
-//! - Generator: `package.json`, `package-lock.json`, `generate.js` with SHA-256
+//! - Generator: `package.json`, `package-lock.json`, `generate.js`, `check-runtime.cjs`,
+//!   and `.node-version` with SHA-256; exact runtime pair governance (lock `node_version`
+//!   and `npm_version`, `package.json` `packageManager` = `npm@<governed>`, package-lock
+//!   root `engines.node` = governed Node version)
 //! - Corpus: Every fixture with sidecar (provenance, SHA-256, byte count, span kind, MCP method)
 //! - Hostile: Locked list of adversarial inputs for Slice B rejection testing
 //!
