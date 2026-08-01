@@ -22,6 +22,26 @@ pin() {
   grep -F -- "$needle" "$WORKFLOW" >/dev/null || fail "$message"
 }
 
+event_path_count() {
+  local event="$1" needle="$2"
+  awk -v event="$event" -v needle="$needle" '
+    $0 == "  " event ":" { in_event = 1; next }
+    in_event && $0 ~ /^  [[:alnum:]_-]+:/ { exit }
+    in_event && index($0, needle) { count++ }
+    END { print count + 0 }
+  ' "$WORKFLOW"
+}
+
+step_contains() {
+  local step="$1" needle="$2" message="$3"
+  awk -v step="$step" -v needle="$needle" '
+    $0 == "      - name: " step { in_step = 1; next }
+    in_step && $0 ~ /^      - name:/ { exit }
+    in_step && index($0, needle) { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$WORKFLOW" || fail "$message"
+}
+
 pin "49103de6ed70804e940637bf3e9e29e4a3f54e64" \
   "workflow must pin the conformance source commit"
 pin "e48c96369788414b05c6d3cf4a7233d01ff6e6a88e8f8943d586ae3dda1b87fe" \
@@ -63,8 +83,20 @@ pin "cp \"\$GITHUB_WORKSPACE/\$RUST_SDK_LOCKFILE\" \"\$sdk_dir/Cargo.lock\"" \
   "workflow must install the reviewed Rust SDK lock"
 pin "test \"\$actual_sdk_lock\" = \"\$RUST_SDK_LOCK_SHA256\"" \
   "workflow must verify the Rust SDK lock pin"
-pin 'scripts/ci/fixtures/mcp-upstream-reference/**' \
-  "workflow must run when the reviewed Rust SDK lock changes"
+pin "Verify the installed Rust SDK lock remained unchanged" \
+  "workflow must verify the Rust SDK lock after the scenarios"
+step_contains "Fetch the official Rust SDK source and install its reviewed lock" \
+  "sha256sum \"\$reviewed_sdk_lock\"" \
+  "workflow must hash the reviewed Rust SDK lock before installation"
+step_contains "Fetch the official Rust SDK source and install its reviewed lock" \
+  "sha256sum \"\$sdk_dir/Cargo.lock\"" \
+  "workflow must hash the installed Rust SDK lock"
+step_contains "Verify the installed Rust SDK lock remained unchanged" \
+  "sha256sum \"\$RUNNER_TEMP/mcp-rust-sdk/Cargo.lock\"" \
+  "workflow must hash the installed Rust SDK lock after the scenarios"
+step_contains "Verify the installed Rust SDK lock remained unchanged" \
+  "test \"\$actual_sdk_lock\" = \"\$RUST_SDK_LOCK_SHA256\"" \
+  "workflow must compare the post-scenario SDK lock with the reviewed digest"
 pin "--path \"\$sdk_dir\"" \
   "workflow must execute the verified Rust SDK checkout"
 pin '--build-cmd "cargo build --locked -p mcp-conformance"' \
@@ -84,6 +116,16 @@ fi
 if grep -F 'cargo generate-lockfile' "$WORKFLOW" >/dev/null; then
   fail "the reference run must not resolve a fresh Rust SDK dependency graph"
 fi
+
+if grep -F 'cargo update' "$WORKFLOW" >/dev/null; then
+  fail "the reference run must not update the reviewed Rust SDK dependency graph"
+fi
+
+fixture_path='scripts/ci/fixtures/mcp-upstream-reference/**'
+[[ "$(event_path_count pull_request "$fixture_path")" == "1" ]] \
+  || fail "pull_request must run exactly once for reviewed Rust SDK lock changes"
+[[ "$(event_path_count push "$fixture_path")" == "1" ]] \
+  || fail "push must run exactly once for reviewed Rust SDK lock changes"
 
 actual_sdk_lock="$(shasum -a 256 "$SDK_LOCK_FIXTURE" | awk '{print $1}')"
 [[ "$actual_sdk_lock" == "ff0bab171e7e812b41c8c653cd33ac07c948f594cc2beedf6e34ac5711ecc031" ]] \

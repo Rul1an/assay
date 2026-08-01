@@ -137,6 +137,15 @@ jobs:
             --skip-build \
             --output "$results"
 
+      - name: Verify the installed Rust SDK lock remained unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sdk_lock="$(
+            sha256sum "$RUNNER_TEMP/mcp-rust-sdk/Cargo.lock" | cut -d' ' -f1
+          )"
+          test "$actual_sdk_lock" = "$RUST_SDK_LOCK_SHA256"
+
       - name: Verify named check records
         run: |
           python3 scripts/ci/verify-mcp-upstream-reference.py \
