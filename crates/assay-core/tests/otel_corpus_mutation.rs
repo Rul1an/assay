@@ -1812,18 +1812,13 @@ fn test_check_runtime_malformed_package_json_no_content_leak() {
     )
     .unwrap();
 
-    let output = match std::process::Command::new("node")
+    // Unavailable infrastructure must never become a clean result: a missing
+    // Node runtime fails this test rather than silently skipping the proof.
+    let output = std::process::Command::new("node")
         .arg("check-runtime.cjs")
         .current_dir(&generator)
         .output()
-    {
-        Ok(o) => o,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            eprintln!("skipping test_check_runtime_malformed_package_json_no_content_leak: node not on PATH");
-            return;
-        }
-        Err(e) => panic!("failed to spawn node: {e}"),
-    };
+        .expect("prerequisite missing: node runtime required to run check-runtime.cjs");
 
     assert!(
         !output.status.success(),
