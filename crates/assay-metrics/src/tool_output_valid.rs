@@ -270,6 +270,12 @@ mod tests {
             .await
             .expect_err("metric compilation must not retrieve an external schema");
         assert!(err.to_string().contains("schema"), "{err:#}");
+        // Pin WHICH layer refused; see json_schema.rs for the reasoning.
+        assert!(
+            err.to_string()
+                .contains("external JSON Schema retrieval is disabled"),
+            "refusal must come from the explicit retriever: {err:#}"
+        );
     }
 
     #[tokio::test]

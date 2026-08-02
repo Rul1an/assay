@@ -133,5 +133,13 @@ mod tests {
             .await
             .expect_err("metric compilation must not retrieve an external schema");
         assert!(err.to_string().contains("schema compile failed"), "{err:#}");
+        // Pin WHICH layer refused. Without this the test passes even if the
+        // explicit retriever is deleted, leaving hermeticity resting solely on
+        // a Cargo default-features setting that feature unification can undo.
+        assert!(
+            err.to_string()
+                .contains("external JSON Schema retrieval is disabled"),
+            "refusal must come from the explicit retriever: {err:#}"
+        );
     }
 }
