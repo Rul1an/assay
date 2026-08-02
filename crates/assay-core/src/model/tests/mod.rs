@@ -1504,11 +1504,16 @@ fn universal_or_empty_tool_allowlists_do_not_rescue_a_vacuous_policy() {
 
 #[test]
 fn args_policy_oracles_agree() {
-    // The load-time vacuity check and the execution-time effectiveness check are
-    // two implementations of one rule. Every round of review found them drifted
-    // apart in a different place, so pin them to each other rather than pinning
-    // each separately: a policy must not load and then be rejected at run.
-    let cases = [
+    // Two implementations of one rule; every round of review found them drifted
+    // apart somewhere new, so pin them to each other rather than separately.
+    //
+    // The safety direction is unconditional: load must never reject a policy
+    // that execution would accept, or a working config stops loading. The
+    // converse holds only for policies the load-time rule claims to fully
+    // understand; for the rest it deliberately defers so execution's specific
+    // diagnosis ("not enforced", "must be a list") is not replaced by a generic
+    // "asserts nothing".
+    let fully_understood = [
         serde_json::json!({"tools": {"allow": ["read_*"]}}),
         serde_json::json!({"tools": {"allow": ["*"]}}),
         serde_json::json!({"tools": {"allow": []}}),
@@ -1523,25 +1528,56 @@ fn args_policy_oracles_agree() {
         serde_json::json!({"enforcement": {"unconstrained_tools": "allow"}}),
         serde_json::json!({"version": "2.0"}),
         serde_json::json!({
-            "tools": {"allow": ["read_*"]},
-            "schemas": {"read_file": {"type": "object", "required": ["path"]}}
-        }),
-        serde_json::json!({
             "enforcement": {"unconstrained_tools": "warn"},
             "schemas": {"read_file": {"type": "object", "required": ["path"]}}
         }),
         serde_json::json!({"version": "2.0", "schemas": {"$defs": {"p": {"type": "string"}}}}),
     ];
-    for schema in cases {
+    // Load defers to a more specific execution-time diagnosis. Each of these was
+    // a live disagreement found in review.
+    let load_defers = [
+        serde_json::json!({"tools": {"redact_args": ["password"]}}),
+        serde_json::json!({"tools": {"deny": ["fs_write"], "redact_args": ["password"]}}),
+        serde_json::json!({"allow": ["read_x", 1]}),
+        serde_json::json!({"tools": {"deny": ["x", 1]}}),
+        serde_json::json!({"version": "2.0", "allow": "read_x", "deny": ["y"]}),
+        serde_json::json!({"version": "2.0", "schemas": "nope"}),
+        serde_json::json!({"version": "2.0", "schemas": []}),
+        serde_json::json!({"limits": {}}),
+    ];
+
+    let loads = |schema: &serde_json::Value| {
         let expected = Expected::ArgsValid {
             schema: Some(schema.clone()),
             policy: None,
         };
-        let loads = crate::model::validation::vacuous_expected_field(&expected).is_none();
-        let runs = crate::model::validate_args_policy_value(&schema).is_ok();
+        crate::model::validation::vacuous_expected_field(&expected).is_none()
+    };
+
+    for schema in fully_understood.iter().chain(load_defers.iter()) {
+        let runs = crate::model::validate_args_policy_value(schema).is_ok();
+        assert!(
+            !runs || loads(schema),
+            "load rejects a policy execution accepts: {schema}"
+        );
+    }
+    for schema in &fully_understood {
+        let runs = crate::model::validate_args_policy_value(schema).is_ok();
         assert_eq!(
-            loads, runs,
-            "oracles disagree for {schema}: load-time accepts={loads}, execution accepts={runs}"
+            loads(schema),
+            runs,
+            "oracles disagree for {schema}: load={}, execution={runs}",
+            loads(schema)
+        );
+    }
+    for schema in &load_defers {
+        assert!(
+            loads(schema),
+            "load must defer so execution's specific diagnosis survives: {schema}"
+        );
+        assert!(
+            crate::model::validate_args_policy_value(schema).is_err(),
+            "case is mislabelled as deferred: {schema}"
         );
     }
 }

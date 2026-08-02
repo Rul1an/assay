@@ -92,26 +92,68 @@ fn args_policy_asserts_nothing(schema: &serde_json::Value) -> bool {
         if schemas_assert || structured_controls_assert(root) {
             return false;
         }
-        // Only claim vacuity for a policy built entirely from keys this rule
-        // understands. Anything else (`constraints`, `limits`, ...) has a more
-        // specific downstream diagnosis, which a generic "asserts nothing"
-        // must not take precedence over.
-        const KNOWN: [&str; 8] = [
-            "version",
-            "name",
-            "tools",
-            "schemas",
-            "enforcement",
-            "allow",
-            "deny",
-            "$defs",
-        ];
-        return root.keys().all(|key| KNOWN.contains(&key.as_str()));
+        // Claim vacuity only for a policy this rule fully understands. Anything
+        // else — an unenforced field, a malformed list, a non-mapping `schemas`
+        // — has a specific downstream diagnosis that is more useful than a
+        // generic "asserts nothing", so defer to it.
+        return structured_policy_is_fully_understood(root);
     }
     schema_map_asserts_nothing(schema)
 }
 
 /// Mirror of `validate_args_policy_value`'s control-surface effectiveness rule.
+/// Whether every part of a structured policy is something this rule models.
+///
+/// The vacuity verdict is only honest for a policy it fully understands. For
+/// anything else the execution-time check has a specific message ("not enforced
+/// by this evaluator", "must be a list", "must be a mapping") that is far more
+/// useful than "asserts nothing", so those defer to it.
+fn structured_policy_is_fully_understood(
+    root: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    const KNOWN_ROOT: [&str; 8] = [
+        "version",
+        "name",
+        "tools",
+        "schemas",
+        "enforcement",
+        "allow",
+        "deny",
+        "$defs",
+    ];
+    if !root.keys().all(|key| KNOWN_ROOT.contains(&key.as_str())) {
+        return false;
+    }
+    fn well_formed_list(value: Option<&serde_json::Value>) -> bool {
+        value.is_none_or(|value| {
+            value
+                .as_array()
+                .is_some_and(|entries| entries.iter().all(serde_json::Value::is_string))
+        })
+    }
+    if !well_formed_list(root.get("allow")) || !well_formed_list(root.get("deny")) {
+        return false;
+    }
+    if let Some(tools) = root.get("tools") {
+        let Some(tools) = tools.as_object() else {
+            return false;
+        };
+        // Execution enforces only `allow`/`deny`; every other key gets its own
+        // "not enforced by this evaluator" diagnosis.
+        if !tools.keys().all(|k| matches!(k.as_str(), "allow" | "deny")) {
+            return false;
+        }
+        if !well_formed_list(tools.get("allow")) || !well_formed_list(tools.get("deny")) {
+            return false;
+        }
+    }
+    if root.get("schemas").is_some_and(|s| !s.is_object()) {
+        return false;
+    }
+    root.get("enforcement")
+        .is_none_or(serde_json::Value::is_object)
+}
+
 fn structured_controls_assert(root: &serde_json::Map<String, serde_json::Value>) -> bool {
     fn list(value: Option<&serde_json::Value>) -> Vec<&str> {
         value
