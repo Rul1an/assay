@@ -18,18 +18,49 @@ pub(crate) fn is_default_settings(s: &Settings) -> bool {
     s == &Settings::default()
 }
 
-/// True when `expected` asserts nothing (an empty `must_contain`/`must_not_contain`).
+/// The field or field group that leaves `expected` without an effective check.
+///
+/// This is the shared definition used by parsing, serialization, and validation.
+/// Keeping it here prevents those three surfaces from disagreeing about a shape
+/// that would otherwise pass without evaluating any constraint.
+pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
+    match e {
+        Expected::MustContain { must_contain } if must_contain.is_empty() => Some("must_contain"),
+        Expected::MustNotContain { must_not_contain } if must_not_contain.is_empty() => {
+            Some("must_not_contain")
+        }
+        Expected::ArgsValid { policy, schema }
+            if policy.is_none()
+                && schema
+                    .as_ref()
+                    .is_none_or(|value| value.as_object().is_some_and(|map| map.is_empty())) =>
+        {
+            Some("policy/schema")
+        }
+        Expected::SequenceValid {
+            policy,
+            sequence,
+            rules,
+        } if policy.is_none() && sequence.is_none() && rules.as_ref().is_none_or(Vec::is_empty) => {
+            Some("policy/sequence/rules")
+        }
+        Expected::ToolOutputValid { schemas }
+            if schemas
+                .as_ref()
+                .is_none_or(|value| value.as_object().is_some_and(|map| map.is_empty())) =>
+        {
+            Some("schemas")
+        }
+        _ => None,
+    }
+}
+
+/// True when `expected` asserts nothing.
 ///
 /// Used to skip serializing the vacuous default. Without this, a writer such as
-/// `assay migrate` would materialise `expected: {type: must_contain, must_contain: []}`
-/// into the config for every test that legitimately omitted the key — a shape the
-/// parser now rejects, so the tool's own output would no longer load.
+/// `assay migrate` would materialise an assertion that the parser rejects.
 pub(crate) fn is_vacuous_expected(e: &Expected) -> bool {
-    match e {
-        Expected::MustContain { must_contain } => must_contain.is_empty(),
-        Expected::MustNotContain { must_not_contain } => must_not_contain.is_empty(),
-        _ => false,
-    }
+    vacuous_expected_field(e).is_some()
 }
 
 pub(crate) fn default_one() -> u32 {

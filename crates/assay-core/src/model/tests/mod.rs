@@ -225,6 +225,45 @@ fn test_explicit_empty_must_not_contain_is_hard_error() {
     );
 }
 
+#[test]
+fn test_tagged_args_valid_without_policy_or_schema_is_hard_error() {
+    let yaml = r#"
+            id: vacuous_args
+            input: "test"
+            expected:
+              type: args_valid
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("args_valid without policy or schema must not parse");
+    assert!(err.to_string().contains("asserts nothing"), "{}", err);
+}
+
+#[test]
+fn test_tagged_sequence_valid_without_constraint_is_hard_error() {
+    let yaml = r#"
+            id: vacuous_sequence
+            input: "test"
+            expected:
+              type: sequence_valid
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("sequence_valid without a constraint must not parse");
+    assert!(err.to_string().contains("asserts nothing"), "{}", err);
+}
+
+#[test]
+fn test_tagged_tool_output_valid_without_schemas_is_hard_error() {
+    let yaml = r#"
+            id: vacuous_output
+            input: "test"
+            expected:
+              type: tool_output_valid
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("tool_output_valid without schemas must not parse");
+    assert!(err.to_string().contains("asserts nothing"), "{}", err);
+}
+
 /// A block that opts into the tagged form and matches NO legacy key gets the
 /// underlying serde error, not the generic "unrecognized keys" message.
 #[test]
@@ -266,6 +305,148 @@ fn test_tagged_parse_failure_cannot_fallback_to_different_legacy_metric() {
         "message must preserve the tagged parse failure: {}",
         msg
     );
+}
+
+#[test]
+fn test_unrelated_tagged_failure_is_not_replaced_by_legacy_value_error() {
+    let yaml = r#"
+            id: mismatched_malformed_legacy
+            input: "test"
+            expected:
+              type: regex_match
+              must_contain: {not: a-list}
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("an unrelated legacy decoder must not replace the tagged error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("invalid `expected:` block") && !msg.contains("must be a string or a list"),
+        "message must preserve the tagged parse failure: {}",
+        msg
+    );
+}
+
+#[test]
+fn test_valid_tagged_metric_rejects_additional_legacy_assertion() {
+    let yaml = r#"
+            id: tagged_extra
+            input: "test"
+            expected:
+              type: regex_match
+              pattern: "^hello$"
+              must_contain: "ignored"
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("a tagged assertion must not ignore another assertion");
+    assert!(err.to_string().contains("must_contain"), "{}", err);
+}
+
+#[test]
+fn test_valid_tagged_metric_rejects_unknown_field() {
+    let yaml = r#"
+            id: tagged_typo
+            input: "test"
+            expected:
+              type: regex_match
+              pattern: "^hello$"
+              pattten: "ignored"
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("a tagged assertion must not ignore a misspelled field");
+    assert!(err.to_string().contains("pattten"), "{}", err);
+}
+
+#[test]
+fn test_legacy_metric_rejects_unknown_field() {
+    let yaml = r#"
+            id: legacy_typo
+            input: "test"
+            expected:
+              must_contain: "hello"
+              extra_check: "ignored"
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("a legacy assertion must not ignore a misspelled field");
+    assert!(err.to_string().contains("extra_check"), "{}", err);
+}
+
+#[test]
+fn test_tagged_legacy_compatibility_rejects_second_assertion() {
+    let yaml = r#"
+            id: tagged_ambiguous
+            input: "test"
+            expected:
+              type: must_contain
+              must_contain: "hello"
+              sequence: ["Search"]
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("tagged compatibility must not hide a second assertion");
+    assert!(err.to_string().contains("ambiguous"), "{}", err);
+}
+
+#[test]
+fn test_scalar_expected_value_is_rejected() {
+    let yaml = r#"
+            id: scalar_expected
+            input: "test"
+            expected: "hello"
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml).expect_err("scalar expected must not parse");
+    assert!(err.to_string().contains("must be a mapping"), "{}", err);
+}
+
+#[test]
+fn test_legacy_ref_still_parses_and_requires_a_string() {
+    let valid = r#"
+            id: ref_test
+            input: "test"
+            expected:
+              $ref: "shared/checks.yaml"
+        "#;
+    let tc: TestCase = serde_yaml::from_str(valid).expect("legacy $ref must parse");
+    match tc.expected {
+        Expected::Reference { path } => assert_eq!(path, "shared/checks.yaml"),
+        other => panic!("Expected Reference, got {:?}", other),
+    }
+
+    let invalid = r#"
+            id: bad_ref
+            input: "test"
+            expected:
+              $ref: 42
+        "#;
+    let err =
+        serde_yaml::from_str::<TestCase>(invalid).expect_err("non-string $ref must not parse");
+    assert!(
+        err.to_string().contains("`$ref` must be a string"),
+        "{}",
+        err
+    );
+}
+
+#[test]
+fn test_legacy_schema_parses_but_cannot_be_combined() {
+    let valid = r#"
+            id: schema_test
+            input: "test"
+            expected:
+              schema:
+                Search: {type: object}
+        "#;
+    let tc: TestCase = serde_yaml::from_str(valid).expect("legacy schema must parse");
+    assert!(matches!(tc.expected, Expected::ArgsValid { .. }));
+
+    let ambiguous = r#"
+            id: schema_ambiguous
+            input: "test"
+            expected:
+              schema: {Search: {type: object}}
+              must_contain: "hello"
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(ambiguous)
+        .expect_err("schema plus another legacy assertion must not parse");
+    assert!(err.to_string().contains("ambiguous"), "{}", err);
 }
 
 /// Untagged single mappings are read with the same legacy heuristics as list

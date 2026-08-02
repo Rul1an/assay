@@ -89,7 +89,7 @@ pub struct TestInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "type")]
+#[serde(deny_unknown_fields, rename_all = "snake_case", tag = "type")]
 pub enum Expected {
     MustContain {
         #[serde(default)]

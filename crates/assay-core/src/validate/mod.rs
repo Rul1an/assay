@@ -58,15 +58,13 @@ pub async fn validate(
         }
     }
 
-    // Return early if basic files missing to avoid noise. The vacuous-expected scan is
-    // still reported: it is a pure config check that needs neither trace nor baseline.
-    if !diags.is_empty() {
-        diags.extend(check_vacuous_expected(cfg));
+    // Missing path assets stop the deeper checks to avoid noise. The vacuous scan
+    // still runs once because it needs neither trace nor baseline.
+    let paths_missing = !diags.is_empty();
+    diags.extend(check_vacuous_expected(cfg));
+    if paths_missing {
         return Ok(ValidateReport { diagnostics: diags });
     }
-
-    // 1b. Vacuous assertions (W_CFG_VACUOUS_EXPECTED)
-    diags.extend(check_vacuous_expected(cfg));
 
     // 2. Load Trace & Baseline for deeper checks
     let trace_client = if let Some(path) = &opts.trace_file {
@@ -281,11 +279,11 @@ pub async fn validate(
 
 /// Warn about tests that assert nothing and therefore always pass.
 ///
-/// By the time a config has loaded, an empty `must_contain` / `must_not_contain` can
-/// only have come from an OMITTED `expected:` key resolving to `Expected::default()`.
-/// An assertion the author actually wrote out as empty is rejected at parse time (see
-/// `model::serde::reject_vacuous`), which is a hard error and reaches every command
-/// that loads a config, including `assay run` and `assay ci`.
+/// By the time a config has loaded, a vacuous value normally came from an omitted or
+/// null `expected:` key resolving to `Expected::default()`. An explicit tagged
+/// assertion that has no effective constraint is rejected at parse time (see
+/// `model::serde::reject_vacuous`), which is a hard error for every command that
+/// loads a config, including `assay run` and `assay ci`.
 ///
 /// That split is deliberate. Omitting `expected:` is a documented, legitimate shape —
 /// a test may carry its checks in `assertions:` — so making it an error here would
@@ -306,20 +304,16 @@ fn check_vacuous_expected(cfg: &EvalConfig) -> Vec<Diagnostic> {
             continue;
         }
 
-        let field = match &tc.expected {
-            Expected::MustContain { must_contain } if must_contain.is_empty() => "must_contain",
-            Expected::MustNotContain { must_not_contain } if must_not_contain.is_empty() => {
-                "must_not_contain"
-            }
-            _ => continue,
+        let Some(field) = crate::model::vacuous_expected_field(&tc.expected) else {
+            continue;
         };
 
         diags.push(
             Diagnostic::new(
                 codes::W_CFG_VACUOUS_EXPECTED,
                 format!(
-                    "Test '{}' asserts nothing: it has no `expected:` block and no `assertions:`, so it passes for any response",
-                    tc.id
+                    "Test '{}' asserts nothing: `{}` is empty and there are no `assertions:`, so it passes for any response",
+                    tc.id, field
                 ),
             )
             .with_severity("warn")
@@ -463,11 +457,16 @@ mod vacuous_expected_tests {
         let diags = check_vacuous_expected(&cfg);
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].code, codes::W_CFG_VACUOUS_EXPECTED);
-        // Warning, not error: by this point the shape can only have come from an
-        // omitted `expected:` key, which the parser deliberately permits. An
-        // explicitly-written empty assertion never gets this far.
+        // Warning, not error: omitted or null `expected:` values resolve to the
+        // default, while an explicitly tagged empty assertion never gets this far.
         assert_eq!(diags[0].severity, "warn");
         assert!(diags[0].message.contains("t1"), "{}", diags[0].message);
+        assert!(
+            diags[0].message.contains("`must_contain` is empty"),
+            "{}",
+            diags[0].message
+        );
+        assert!(!diags[0].message.contains("no `expected:` block"));
     }
 
     #[test]

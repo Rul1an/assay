@@ -52,6 +52,51 @@ fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
         ));
     };
 
+    let matched_keys: Vec<&str> = LEGACY_EXPECTED_KEYS
+        .iter()
+        .copied()
+        .filter(|key| obj.contains_key(*key))
+        .collect();
+
+    // A failed tagged parse may enter the legacy decoder only for the two frozen
+    // compatibility forms. Establish that before decoding any legacy value: an
+    // unrelated malformed value must not replace the original tagged error.
+    if let Some(tag) = obj.get("type") {
+        let compatibility_key = match tag.as_str() {
+            Some("must_contain") => "must_contain",
+            Some("sequence") => "sequence",
+            _ => return Err(format!("invalid `expected:` block: {}", strict_err)),
+        };
+
+        if matched_keys.len() > 1 {
+            return Err(format!(
+                "ambiguous legacy `expected:` block contains multiple assertions {:?}; \
+                 use one tagged assertion or move additional checks to `assertions:`",
+                matched_keys
+            ));
+        }
+
+        let only_compatibility_key = matched_keys.as_slice() == [compatibility_key];
+        let has_unknown_key = obj
+            .keys()
+            .any(|key| key != "type" && key != compatibility_key);
+        if !only_compatibility_key || has_unknown_key {
+            return Err(format!("invalid `expected:` block: {}", strict_err));
+        }
+    } else {
+        let unknown_keys: Vec<&str> = obj
+            .keys()
+            .map(String::as_str)
+            .filter(|key| !LEGACY_EXPECTED_KEYS.contains(key))
+            .collect();
+        if !unknown_keys.is_empty() {
+            return Err(format!(
+                "unrecognized legacy `expected:` key(s) {:?}; supported keys are {:?}",
+                unknown_keys, LEGACY_EXPECTED_KEYS
+            ));
+        }
+    }
+
     // 2. Legacy heuristics.
     //
     // These also recognize two tagged compatibility forms: a scalar value for
@@ -59,7 +104,6 @@ fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
     // parse may not fall back through an unrelated legacy key, because that would
     // silently change the metric the author selected.
     let mut parsed = None;
-    let mut matched_keys = Vec::new();
 
     if let Some(r) = obj.get("$ref") {
         let path = r
@@ -68,7 +112,6 @@ fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
         parsed = Some(Expected::Reference {
             path: path.to_string(),
         });
-        matched_keys.push("$ref");
     }
 
     // Don't chain else-ifs, check all to detect ambiguity
@@ -91,7 +134,6 @@ fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
         if parsed.is_none() {
             parsed = Some(Expected::MustContain { must_contain: val });
         }
-        matched_keys.push("must_contain");
     }
 
     if let Some(seq) = obj.get("sequence") {
@@ -112,17 +154,13 @@ fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
                 rules: None,
             });
         }
-        matched_keys.push("sequence");
     }
 
-    if obj.get("schema").is_some() {
-        if parsed.is_none() {
-            parsed = Some(Expected::ArgsValid {
-                policy: None,
-                schema: obj.get("schema").cloned(),
-            });
-        }
-        matched_keys.push("schema");
+    if obj.get("schema").is_some() && parsed.is_none() {
+        parsed = Some(Expected::ArgsValid {
+            policy: None,
+            schema: obj.get("schema").cloned(),
+        });
     }
 
     if matched_keys.len() > 1 {
@@ -134,17 +172,6 @@ fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
     }
 
     if let Some(p) = parsed {
-        if let Some(tag) = obj.get("type") {
-            let compatible_legacy_form = tag.as_str().is_some_and(|tag| {
-                matches!(
-                    (tag, matched_keys[0]),
-                    ("must_contain", "must_contain") | ("sequence", "sequence")
-                )
-            });
-            if !compatible_legacy_form {
-                return Err(format!("invalid `expected:` block: {}", strict_err));
-            }
-        }
         return reject_vacuous(p);
     }
 
@@ -175,16 +202,12 @@ fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
 /// altogether stays permissive — see the note in the `TestCase` deserializer — and
 /// is reported as a warning by the `W_CFG_VACUOUS_EXPECTED` rule instead.
 fn reject_vacuous(exp: Expected) -> Result<Expected, String> {
-    let field = match &exp {
-        Expected::MustContain { must_contain } if must_contain.is_empty() => "must_contain",
-        Expected::MustNotContain { must_not_contain } if must_not_contain.is_empty() => {
-            "must_not_contain"
-        }
-        _ => return Ok(exp),
+    let Some(field) = super::validation::vacuous_expected_field(&exp) else {
+        return Ok(exp);
     };
 
     Err(format!(
-        "`{}` is empty, so this test would pass for any response. \
+        "`{}` asserts nothing, so this test would pass for any response. \
          Give it at least one entry, or remove the `expected:` block and put the \
          test's checks in `assertions:`.",
         field

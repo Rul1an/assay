@@ -35,7 +35,6 @@ Each test in the `tests` list defines a scenario and its validation rules.
 
 ```yaml
 - id: my_test_id
-  description: "Optional description (ignored by runner)"
   input:
     prompt: "..."
   expected:
@@ -65,9 +64,28 @@ Defines the **output** validation (the final answer).
 | `json_schema` | Validates the response against a JSON schema. |
 | `semantic_similarity_to` | Embedding similarity against a reference answer. |
 
-An `expected:` block must assert something. An empty `must_contain`/`must_not_contain`
-passes for any response, so it is rejected as a config error. A test may omit
-`expected:` entirely when its checks live in `assertions:`.
+An `expected:` block must contain exactly one effective output check. Empty checks,
+unknown fields, and multiple checks in one block are rejected as config errors.
+
+The tagged V1 form above is preferred. Existing configurations may keep either of
+these compatibility forms:
+
+```yaml
+# Legacy scalar value
+expected:
+  must_contain: "Tokyo"
+
+# Legacy list wrapper, with exactly one entry
+expected:
+  - must_contain: "Tokyo"
+```
+
+The historical `type: sequence` form remains readable. A legacy `expected:` list
+with more than one entry is rejected because the model can enforce only one output
+check; move additional checks to `assertions:` or split them into separate tests.
+
+A test may omit `expected:` when its checks live in `assertions:`. Omitting both is
+accepted for compatibility but `assay validate` emits `W_CFG_VACUOUS_EXPECTED`.
 
 ### `assertions`
 
