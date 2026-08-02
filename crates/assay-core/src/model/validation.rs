@@ -43,12 +43,10 @@ pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
             Some("min_score")
         }
         Expected::ArgsValid { policy, schema }
-            if schema.as_ref().is_some_and(|schema| {
-                !schema.as_object().is_some_and(|root| {
-                    root.keys()
-                        .any(|key| key != "$defs" && is_json_schema_keyword(key))
-                }) && schema_map_asserts_nothing(schema)
-            }) || (policy.is_none() && schema.is_none()) =>
+            if schema
+                .as_ref()
+                .is_some_and(|schema| args_policy_asserts_nothing(schema))
+                || (policy.is_none() && schema.is_none()) =>
         {
             Some("policy/schema")
         }
@@ -69,6 +67,40 @@ pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
         Expected::ToolBlocklist { blocked } if blocked.is_empty() => Some("blocked"),
         _ => None,
     }
+}
+
+/// Decide whether an `args_valid` policy asserts anything.
+///
+/// A structured policy carries control containers (`tools`, `enforcement`)
+/// beside the per-tool `schemas`. Walking the root as a tool map would read
+/// those containers as if each were a tool schema, find no assertions in them,
+/// and reject an effective policy at config load. Each container is therefore
+/// judged on its own terms, while root-level `allow`/`deny` stay on the legacy
+/// walk below so `allow: ["*"]` still correctly asserts nothing.
+fn args_policy_asserts_nothing(schema: &serde_json::Value) -> bool {
+    let Some(root) = schema.as_object() else {
+        return schema_map_asserts_nothing(schema);
+    };
+    // The root is itself a JSON Schema rather than a tool map.
+    if root
+        .keys()
+        .any(|key| key != "$defs" && is_json_schema_keyword(key))
+    {
+        return false;
+    }
+    if has_structured_args_policy_shape(schema) {
+        let schemas_assert = root
+            .get("schemas")
+            .is_some_and(|schemas| !schema_map_asserts_nothing(schemas));
+        let tools_assert = root
+            .get("tools")
+            .and_then(serde_json::Value::as_object)
+            .is_some_and(|tools| !tools.is_empty());
+        if schemas_assert || tools_assert || root.contains_key("enforcement") {
+            return false;
+        }
+    }
+    schema_map_asserts_nothing(schema)
 }
 
 fn schema_map_asserts_nothing(value: &serde_json::Value) -> bool {

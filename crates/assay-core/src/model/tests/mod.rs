@@ -1405,3 +1405,30 @@ fn test_thresholding_for_metric() {
     let t = exp.thresholding_for_metric("faithfulness").unwrap();
     assert_eq!(t.max_drop, Some(0.1));
 }
+
+#[test]
+fn f1_structured_policy_with_only_object_roots_is_not_vacuous() {
+    // Regression: a structured args_valid policy whose root values are all
+    // objects (no scalar discriminator) must not be rejected as vacuous.
+    for schema in [
+        serde_json::json!({
+            "tools": {"allow": ["read_*"]},
+            "schemas": {"read_file": {"type": "object", "required": ["path"]}}
+        }),
+        serde_json::json!({
+            "enforcement": {"unconstrained_tools": "deny"},
+            "schemas": {"read_file": {"type": "object", "required": ["path"]}}
+        }),
+        // Maximally strict and carrying no schemas at all.
+        serde_json::json!({"tools": {"deny": ["*"]}}),
+    ] {
+        let expected = Expected::ArgsValid {
+            schema: Some(schema.clone()),
+            policy: None,
+        };
+        assert!(
+            crate::model::validation::vacuous_expected_field(&expected).is_none(),
+            "structured policy wrongly rejected as vacuous: {schema}"
+        );
+    }
+}
