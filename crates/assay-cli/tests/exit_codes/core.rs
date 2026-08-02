@@ -306,6 +306,46 @@ tests:
 }
 
 #[test]
+fn contract_run_preflight_contract_error_writes_cfg_parse_artifact() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("eval.yaml"),
+        r#"configVersion: 1
+suite: preflight-contract
+model: dummy
+settings:
+  cache: false
+tests:
+  - id: invalid-static-input
+    input: { prompt: "hi" }
+    expected:
+      type: json_schema
+      json_schema: ""
+      schema_file: missing.schema.json
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("assay").unwrap();
+    cmd.current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("eval.yaml")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+    assert!(
+        run["resolution"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("missing.schema.json")),
+        "{run:#}"
+    );
+}
+
+#[test]
 fn contract_run_format_json_emits_report_to_stdout() {
     let dir = tempdir().unwrap();
     fs::write(

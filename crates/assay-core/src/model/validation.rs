@@ -189,8 +189,8 @@ fn validate_static_inputs(e: &Expected) -> anyhow::Result<()> {
         Expected::ArgsValid {
             schema: Some(schema),
             ..
-        }
-        | Expected::ToolOutputValid {
+        } => validate_args_policy_value(schema)?,
+        Expected::ToolOutputValid {
             schemas: Some(schema),
         } => validate_schema_map(schema)?,
         Expected::ArgsValid {
@@ -205,12 +205,68 @@ fn validate_static_inputs(e: &Expected) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Replace file-backed assertion inputs with an immutable execution snapshot.
+///
+/// The returned `Expected` value is what validation, fingerprinting, and metric
+/// evaluation must all consume. This prevents incremental-cache drift and avoids
+/// a second file read after provider dispatch.
+pub(crate) fn bind_external_expected_inputs(e: &mut Expected) -> anyhow::Result<()> {
+    match e {
+        Expected::JsonSchema {
+            json_schema,
+            schema_file,
+        } => {
+            if let Some(path) = schema_file.take() {
+                *json_schema = std::fs::read_to_string(&path)
+                    .map_err(|err| anyhow::anyhow!("failed to read schema_file '{path}': {err}"))?;
+            }
+        }
+        Expected::ArgsValid { policy, schema } if schema.is_none() => {
+            if let Some(path) = policy.take() {
+                let source = std::fs::read_to_string(&path).map_err(|err| {
+                    anyhow::anyhow!("failed to read args_valid policy '{path}': {err}")
+                })?;
+                *schema = Some(
+                    serde_yaml::from_str(&source)
+                        .map_err(|err| anyhow::anyhow!("invalid args_valid policy YAML: {err}"))?,
+                );
+            }
+        }
+        Expected::SequenceValid {
+            policy,
+            sequence,
+            rules,
+        } if sequence.is_none() && rules.is_none() => {
+            if let Some(path) = policy.take() {
+                let source = std::fs::read_to_string(&path).map_err(|err| {
+                    anyhow::anyhow!("failed to read sequence_valid policy '{path}': {err}")
+                })?;
+                if let Ok(loaded) = serde_yaml::from_str::<Vec<String>>(&source) {
+                    *sequence = Some(loaded);
+                } else if let Ok(loaded) = serde_yaml::from_str::<super::types::Policy>(&source) {
+                    *rules = Some(loaded.sequences);
+                } else {
+                    *rules = Some(serde_yaml::from_str::<Vec<SequenceRule>>(&source).map_err(
+                        |err| anyhow::anyhow!("invalid sequence_valid policy YAML: {err}"),
+                    )?);
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn validate_args_policy(path: &str) -> anyhow::Result<()> {
     let source = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("failed to read args_valid policy '{path}': {e}"))?;
     let policy: serde_json::Value = serde_yaml::from_str(&source)
         .map_err(|e| anyhow::anyhow!("invalid args_valid policy YAML: {e}"))?;
 
+    validate_args_policy_value(&policy)
+}
+
+fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<()> {
     let structured = [
         "version",
         "name",
@@ -231,18 +287,82 @@ fn validate_args_policy(path: &str) -> anyhow::Result<()> {
     .any(|key| policy.get(key).is_some());
 
     if structured {
+        const UNENFORCED: &[&str] = &[
+            "constraints",
+            "limits",
+            "signatures",
+            "tool_pins",
+            "discovery",
+            "runtime_monitor",
+            "kill_switch",
+        ];
+        let unsupported: Vec<_> = UNENFORCED
+            .iter()
+            .copied()
+            .filter(|key| policy.get(*key).is_some())
+            .collect();
+        if !unsupported.is_empty() {
+            anyhow::bail!(
+                "args_valid policy fields are not enforced by this evaluator: {}",
+                unsupported.join(", ")
+            );
+        }
+
+        let string_list_nonempty = |value: Option<&serde_json::Value>, field: &str| {
+            let Some(value) = value else {
+                return Ok(false);
+            };
+            let values = value
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("args_valid policy {field} must be a list"))?;
+            if values.iter().any(|value| value.as_str().is_none()) {
+                anyhow::bail!("args_valid policy {field} entries must be strings");
+            }
+            Ok(!values.is_empty())
+        };
+
+        let mut effective = string_list_nonempty(policy.get("allow"), "allow")?
+            || string_list_nonempty(policy.get("deny"), "deny")?;
+        if let Some(tools) = policy.get("tools") {
+            let tools = tools
+                .as_object()
+                .ok_or_else(|| anyhow::anyhow!("args_valid policy tools must be a mapping"))?;
+            effective |= string_list_nonempty(tools.get("allow"), "tools.allow")?
+                || string_list_nonempty(tools.get("deny"), "tools.deny")?;
+        }
+
         if let Some(schemas) = policy.get("schemas") {
             let schemas = schemas
                 .as_object()
                 .ok_or_else(|| anyhow::anyhow!("args_valid policy schemas must be a mapping"))?;
             if !schemas.is_empty() {
-                validate_schema_map(&serde_json::Value::Object(schemas.clone()))?;
+                let schemas = serde_json::Value::Object(schemas.clone());
+                validate_schema_map(&schemas)?;
+                effective |= !schema_map_asserts_nothing(&schemas);
             }
+        }
+
+        if let Some(enforcement) = policy.get("enforcement") {
+            let enforcement = enforcement.as_object().ok_or_else(|| {
+                anyhow::anyhow!("args_valid policy enforcement must be a mapping")
+            })?;
+            if let Some(mode) = enforcement.get("unconstrained_tools") {
+                let mode = mode.as_str().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "args_valid policy enforcement.unconstrained_tools must be a string"
+                    )
+                })?;
+                effective |= mode == "deny";
+            }
+        }
+
+        if !effective {
+            anyhow::bail!("args_valid policy asserts nothing enforced by this evaluator");
         }
         return Ok(());
     }
 
-    validate_schema_map(&policy)
+    validate_schema_map(policy)
 }
 
 fn validate_sequence_policy(path: &str) -> anyhow::Result<()> {
@@ -280,6 +400,14 @@ fn validate_schema_map(value: &serde_json::Value) -> anyhow::Result<()> {
         .as_object()
         .filter(|schemas| !schemas.is_empty())
         .ok_or_else(|| anyhow::anyhow!("schema must be a non-empty tool-name-to-schema map"))?;
+    if schemas.keys().any(|key| is_json_schema_keyword(key)) {
+        anyhow::bail!(
+            "root JSON Schema keywords cannot be used as tool names; expected a tool-name-to-schema map"
+        );
+    }
+    if schema_map_asserts_nothing(value) {
+        anyhow::bail!("schema map asserts nothing");
+    }
     for (tool, schema) in schemas {
         if !schema.is_object() && !schema.is_boolean() {
             anyhow::bail!(
@@ -290,6 +418,69 @@ fn validate_schema_map(value: &serde_json::Value) -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("schema for tool '{tool}' failed to compile: {e}"))?;
     }
     Ok(())
+}
+
+fn is_json_schema_keyword(key: &str) -> bool {
+    matches!(
+        key,
+        "$schema"
+            | "$id"
+            | "$ref"
+            | "$defs"
+            | "$anchor"
+            | "$dynamicRef"
+            | "$dynamicAnchor"
+            | "$vocabulary"
+            | "$comment"
+            | "type"
+            | "enum"
+            | "const"
+            | "multipleOf"
+            | "maximum"
+            | "exclusiveMaximum"
+            | "minimum"
+            | "exclusiveMinimum"
+            | "maxLength"
+            | "minLength"
+            | "pattern"
+            | "items"
+            | "prefixItems"
+            | "contains"
+            | "maxItems"
+            | "minItems"
+            | "uniqueItems"
+            | "maxContains"
+            | "minContains"
+            | "properties"
+            | "patternProperties"
+            | "additionalProperties"
+            | "propertyNames"
+            | "maxProperties"
+            | "minProperties"
+            | "required"
+            | "dependentRequired"
+            | "dependentSchemas"
+            | "unevaluatedItems"
+            | "unevaluatedProperties"
+            | "allOf"
+            | "anyOf"
+            | "oneOf"
+            | "not"
+            | "if"
+            | "then"
+            | "else"
+            | "title"
+            | "description"
+            | "default"
+            | "deprecated"
+            | "readOnly"
+            | "writeOnly"
+            | "examples"
+            | "format"
+            | "contentEncoding"
+            | "contentMediaType"
+            | "contentSchema"
+    )
 }
 
 /// Validate the execution contract while preserving omitted-`expected` compatibility.

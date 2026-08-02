@@ -76,6 +76,12 @@ pub(super) fn load_policy_source(path: &Path) -> anyhow::Result<PolicySource> {
     let policy_json: serde_json::Value = serde_yaml::from_str(&policy_content)
         .map_err(|e| anyhow::anyhow!("config error: invalid args_valid policy YAML: {}", e))?;
 
+    load_policy_source_value(policy_json)
+}
+
+pub(super) fn load_policy_source_value(
+    policy_json: serde_json::Value,
+) -> anyhow::Result<PolicySource> {
     if has_structured_policy_shape(&policy_json) {
         let allow = {
             let mut merged = extract_string_list(policy_json.get("allow"));
@@ -104,8 +110,8 @@ pub(super) fn load_policy_source(path: &Path) -> anyhow::Result<PolicySource> {
             unconstrained: parse_unconstrained_mode(&policy_json),
         }))
     } else {
-        let schemas: HashMap<String, serde_json::Value> = serde_yaml::from_str(&policy_content)
-            .map_err(|e| anyhow::anyhow!("config error: invalid args_valid policy YAML: {}", e))?;
+        let schemas: HashMap<String, serde_json::Value> = serde_json::from_value(policy_json)
+            .map_err(|e| anyhow::anyhow!("config error: invalid args_valid schema map: {}", e))?;
         Ok(PolicySource::SchemaMap(schemas))
     }
 }

@@ -252,6 +252,78 @@ fn test_reference_resolution_accepts_strict_expected_but_rejects_root_schema() -
         schema_err.to_string().contains("tool-name-to-schema map"),
         "{schema_err:#}"
     );
+
+    let object_only = tempdir()?;
+    std::fs::write(
+        object_only.path().join("root-schema.yaml"),
+        "properties:\n  query: {type: string}\n",
+    )?;
+    let object_only_path = object_only.path().join("eval.yaml");
+    std::fs::write(
+        &object_only_path,
+        r#"
+suite: object-only-root
+model: dummy
+tests:
+  - id: root
+    input: "hi"
+    expected:
+      type: args_valid
+      policy: root-schema.yaml
+"#,
+    )?;
+    let object_only_config = load_config(&object_only_path, true, false)?;
+    let object_only_err = resolve_policies(object_only_config, object_only.path())
+        .expect_err("an object-only root schema must not be flattened as a tool map");
+    let object_only_chain = format!("{object_only_err:#}");
+    assert!(
+        object_only_chain.contains("tool-name-to-schema map"),
+        "{object_only_chain}"
+    );
+    Ok(())
+}
+
+#[test]
+fn referenced_schema_file_resolves_from_the_reference_directory() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let checks = dir.path().join("checks");
+    std::fs::create_dir(&checks)?;
+    std::fs::write(
+        checks.join("response.schema.json"),
+        r#"{"type":"object","required":["ok"]}"#,
+    )?;
+    std::fs::write(
+        checks.join("expected.yaml"),
+        "type: json_schema\njson_schema: ''\nschema_file: response.schema.json\n",
+    )?;
+    let config_path = dir.path().join("eval.yaml");
+    std::fs::write(
+        &config_path,
+        r#"
+suite: nested-reference
+model: dummy
+tests:
+  - id: nested
+    input: "hi"
+    expected:
+      $ref: checks/expected.yaml
+"#,
+    )?;
+
+    let config = load_config(&config_path, true, false)?;
+    let resolved = resolve_policies(config, dir.path())?;
+    let Expected::JsonSchema { schema_file, .. } = &resolved.tests[0].expected else {
+        panic!("reference must resolve to json_schema");
+    };
+    assert_eq!(
+        schema_file.as_deref(),
+        Some(
+            checks
+                .join("response.schema.json")
+                .to_string_lossy()
+                .as_ref()
+        )
+    );
     Ok(())
 }
 

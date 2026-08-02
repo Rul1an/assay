@@ -53,10 +53,11 @@ pub fn resolve_policies(mut config: EvalConfig, base_dir: &Path) -> Result<EvalC
             }
             Expected::Reference { path } => {
                 let policy_content = read_policy_file(base_dir, path)?;
+                let reference_path = base_dir.join(&*path);
                 let value: serde_json::Value = serde_yaml::from_str(&policy_content)
                     .with_context(|| format!("failed to parse policy: {}", path))?;
 
-                test.expected = match crate::model::parse_expected_entry(&value) {
+                let mut resolved = match crate::model::parse_expected_entry(&value) {
                     Ok(expected) => expected,
                     Err(parse_error) => anyhow::bail!(
                         "failed to resolve expected reference '{}': {}. A referenced args_valid policy must be an Expected block or a tool-name-to-schema map under type: args_valid",
@@ -64,6 +65,8 @@ pub fn resolve_policies(mut config: EvalConfig, base_dir: &Path) -> Result<EvalC
                         parse_error
                     ),
                 };
+                resolve_nested_expected_paths(&mut resolved, &reference_path);
+                test.expected = resolved;
             }
             _ => {}
         }
@@ -84,6 +87,29 @@ pub fn resolve_policies(mut config: EvalConfig, base_dir: &Path) -> Result<EvalC
     // But for equivalence tests we want them equal.
 
     Ok(config)
+}
+
+fn resolve_nested_expected_paths(expected: &mut Expected, reference_path: &Path) {
+    let base = reference_path.parent().unwrap_or(Path::new("."));
+    let resolve = |path: &mut String| {
+        let candidate = Path::new(path);
+        if !candidate.is_absolute() {
+            *path = base.join(candidate).to_string_lossy().into_owned();
+        }
+    };
+    match expected {
+        Expected::JsonSchema {
+            schema_file: Some(path),
+            ..
+        }
+        | Expected::ArgsValid {
+            policy: Some(path), ..
+        }
+        | Expected::SequenceValid {
+            policy: Some(path), ..
+        } => resolve(path),
+        _ => {}
+    }
 }
 
 fn is_structured_args_policy(value: &serde_json::Value) -> bool {

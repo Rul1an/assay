@@ -265,10 +265,13 @@ pub(crate) async fn execute_pipeline(
     }
     let progress = assay_core::report::console::default_progress_sink(total);
     let run_suite_start = Instant::now();
-    let mut artifacts = runner
-        .run_suite(&cfg, progress)
-        .await
-        .map_err(PipelineError::Fatal)?;
+    let mut artifacts = runner.run_suite(&cfg, progress).await.map_err(|error| {
+        error
+            .downcast_ref::<assay_core::errors::RunError>()
+            .cloned()
+            .map(PipelineError::from_run_error)
+            .unwrap_or(PipelineError::Fatal(error))
+    })?;
     timings.run_suite_ms = Some(elapsed_ms(run_suite_start));
 
     if input.redact_prompts {

@@ -111,6 +111,35 @@ schemas:
 }
 
 #[tokio::test]
+async fn bound_structured_policy_preserves_deny_semantics_inline() {
+    let metric = ArgsValidMetric;
+    let tc = make_test_case();
+    let expected = Expected::ArgsValid {
+        policy: None,
+        schema: Some(serde_json::json!({
+            "version": "2.0",
+            "tools": {"allow": ["*"], "deny": ["exec"]},
+            "schemas": {
+                "read_file": {
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {"path": {"type": "string"}}
+                }
+            }
+        })),
+    };
+    let resp = make_response_with_tool("exec", serde_json::json!({"command":"rm -rf /"}));
+
+    let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+    assert!(!result.passed);
+    assert!(
+        result.details.to_string().contains("E_TOOL_DENIED"),
+        "details={}",
+        result.details
+    );
+}
+
+#[tokio::test]
 async fn legacy_schema_map_keeps_missing_tool_compat() {
     let policy_path = write_temp_policy(
         r#"read_file:

@@ -18,9 +18,16 @@ pub(crate) async fn run_suite_impl(
     cfg: &EvalConfig,
     progress: Option<ProgressSink>,
 ) -> anyhow::Result<RunArtifacts> {
-    for test in &cfg.tests {
-        crate::model::validate_test_case_for_execution(test)
-            .map_err(|e| anyhow::anyhow!("test '{}': invalid execution contract: {e}", test.id))?;
+    let mut execution_cfg = cfg.clone();
+    for test in &mut execution_cfg.tests {
+        let result = crate::model::bind_external_expected_inputs(&mut test.expected)
+            .and_then(|()| crate::model::validate_test_case_for_execution(test));
+        if let Err(error) = result {
+            let detail = format!("test '{}': invalid execution contract: {error}", test.id);
+            return Err(anyhow::Error::new(crate::errors::RunError::config_parse(
+                None, detail,
+            )));
+        }
     }
 
     let run_id = runner.store.create_run(cfg)?;
@@ -29,7 +36,7 @@ pub(crate) async fn run_suite_impl(
     let sem = Arc::new(Semaphore::new(parallel));
     let mut join_set = JoinSet::new();
 
-    let mut cfg = cfg.clone();
+    let mut cfg = execution_cfg;
     if cfg.settings.seed.is_none() {
         let s = rand::random();
         cfg.settings.seed = Some(s);

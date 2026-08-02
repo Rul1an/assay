@@ -1,11 +1,12 @@
 use assay_core::metrics_api::{Metric, MetricResult};
 use assay_core::model::{Expected, LlmResponse, TestCase, ToolCallRecord};
 use async_trait::async_trait;
-use std::collections::HashMap;
 use std::path::Path;
 
 use super::matcher::matches_tool_pattern;
-use super::policy::{load_policy_source, PolicySource, UnconstrainedMode};
+use super::policy::{
+    load_policy_source, load_policy_source_value, PolicySource, UnconstrainedMode,
+};
 use crate::policy_warning::should_emit_deprecated_policy_warning;
 use crate::tool_calls::extract_tool_calls_best_effort;
 
@@ -29,11 +30,7 @@ impl Metric for ArgsValidMetric {
         };
 
         let policy_source = if let Some(schema) = inline_schema {
-            let schemas: HashMap<String, serde_json::Value> =
-                serde_json::from_value(schema.clone()).map_err(|e| {
-                    anyhow::anyhow!("config error: invalid inline args_valid schema: {}", e)
-                })?;
-            PolicySource::SchemaMap(schemas)
+            load_policy_source_value(schema.clone())?
         } else if let Some(path) = policy_path {
             if should_emit_deprecated_policy_warning(self.name(), path) {
                 eprintln!(

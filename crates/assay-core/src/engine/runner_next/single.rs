@@ -8,9 +8,13 @@ pub(crate) async fn run_test_once_impl(
     cfg: &EvalConfig,
     tc: &TestCase,
 ) -> anyhow::Result<(TestResultRow, LlmResponse)> {
-    // Keep direct internal callers fail-closed as well. `run_suite_impl` performs
-    // the same validation before spawning tasks so `on_error` cannot absorb it.
-    crate::model::validate_test_case_for_execution(tc)?;
+    // Keep direct internal callers fail-closed and bind external bytes to the
+    // same snapshot used by fingerprinting and metric evaluation. `run_suite_impl`
+    // already does this before spawning tasks, so this is a no-op on that path.
+    let mut bound_tc = tc.clone();
+    crate::model::bind_external_expected_inputs(&mut bound_tc.expected)?;
+    crate::model::validate_test_case_for_execution(&bound_tc)?;
+    let tc = &bound_tc;
 
     let expected_json = serde_json::to_string(&tc.expected).unwrap_or_default();
     let metric_versions = [("assay", env!("CARGO_PKG_VERSION"))];
