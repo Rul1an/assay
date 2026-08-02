@@ -184,6 +184,51 @@ async fn metadata_named_tool_remains_a_schema_map_entry() {
 }
 
 #[tokio::test]
+async fn tool_named_schemas_remains_a_schema_map_entry() {
+    let metric = ArgsValidMetric;
+    let tc = make_test_case();
+    let expected = Expected::ArgsValid {
+        policy: None,
+        schema: Some(serde_json::json!({
+            "schemas": {
+                "properties": {
+                    "query": {"type": "string"}
+                }
+            }
+        })),
+    };
+    let resp = make_response_with_tool("schemas", serde_json::json!({"query": 42}));
+
+    let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+    assert!(
+        !result.passed,
+        "the schema for tool `schemas` must be enforced"
+    );
+}
+
+#[tokio::test]
+async fn direct_metric_rejects_policies_that_execution_preflight_rejects() {
+    let metric = ArgsValidMetric;
+    let tc = make_test_case();
+    let resp = make_response_with_tool("Search", serde_json::json!({}));
+
+    for schema in [
+        serde_json::json!({"version": "2.0", "allow": ["*"]}),
+        serde_json::json!({"version": "2.0", "constraints": {}}),
+        serde_json::json!({"version": "2.0", "schemas": {"Search": []}}),
+    ] {
+        let expected = Expected::ArgsValid {
+            policy: None,
+            schema: Some(schema),
+        };
+        metric
+            .evaluate(&tc, &expected, &resp)
+            .await
+            .expect_err("direct metric use must preserve execution validation");
+    }
+}
+
+#[tokio::test]
 async fn legacy_schema_map_keeps_missing_tool_compat() {
     let policy_path = write_temp_policy(
         r#"read_file:

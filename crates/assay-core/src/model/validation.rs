@@ -274,7 +274,8 @@ fn validate_args_policy(path: &str) -> anyhow::Result<()> {
     validate_args_policy_value(&policy)
 }
 
-fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<()> {
+/// Validate an inline `args_valid` policy using the execution-time contract.
+pub fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<()> {
     let structured = has_structured_args_policy_shape(policy);
 
     if structured {
@@ -378,7 +379,12 @@ fn is_universal_tool_pattern(pattern: &str) -> bool {
     !pattern.is_empty() && pattern.bytes().all(|byte| byte == b'*')
 }
 
-pub(crate) fn has_structured_args_policy_shape(policy: &serde_json::Value) -> bool {
+/// Return whether a value carries an unambiguous structured-policy discriminator.
+///
+/// `schemas` alone is intentionally not a discriminator: the same JSON shape can
+/// be a legacy schema map for a tool literally named `schemas`. Current policy
+/// documents identify themselves with `version: "2.0"` or another policy field.
+pub fn has_structured_args_policy_shape(policy: &serde_json::Value) -> bool {
     let Some(root) = policy.as_object() else {
         return false;
     };
@@ -406,14 +412,6 @@ pub(crate) fn has_structured_args_policy_shape(policy: &serde_json::Value) -> bo
         ]
         .iter()
         .any(|key| root.contains_key(*key))
-        || root.get("schemas").is_some_and(|schemas| {
-            schemas.as_object().is_none_or(|schemas| {
-                !schemas.is_empty()
-                    && schemas
-                        .values()
-                        .all(|schema| schema.is_object() || schema.is_boolean())
-            })
-        })
 }
 
 fn validate_sequence_policy(path: &str) -> anyhow::Result<()> {

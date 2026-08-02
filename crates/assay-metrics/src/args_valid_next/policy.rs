@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use assay_core::model::{has_structured_args_policy_shape, validate_args_policy_value};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum UnconstrainedMode {
     Warn,
@@ -46,44 +48,6 @@ fn parse_unconstrained_mode(policy_json: &serde_json::Value) -> anyhow::Result<U
     }
 }
 
-fn has_structured_policy_shape(root: &serde_json::Value) -> bool {
-    let Some(root) = root.as_object() else {
-        return false;
-    };
-    root.get("version")
-        .is_some_and(serde_json::Value::is_string)
-        || root.get("name").is_some_and(serde_json::Value::is_string)
-        || root.get("allow").is_some_and(serde_json::Value::is_array)
-        || root.get("deny").is_some_and(serde_json::Value::is_array)
-        || root
-            .get("tools")
-            .and_then(serde_json::Value::as_object)
-            .is_some_and(|tools| tools.contains_key("allow") || tools.contains_key("deny"))
-        || root
-            .get("enforcement")
-            .and_then(serde_json::Value::as_object)
-            .is_some_and(|enforcement| enforcement.contains_key("unconstrained_tools"))
-        || [
-            "constraints",
-            "limits",
-            "signatures",
-            "tool_pins",
-            "discovery",
-            "runtime_monitor",
-            "kill_switch",
-        ]
-        .iter()
-        .any(|key| root.contains_key(*key))
-        || root.get("schemas").is_some_and(|schemas| {
-            schemas.as_object().is_none_or(|schemas| {
-                !schemas.is_empty()
-                    && schemas
-                        .values()
-                        .all(|schema| schema.is_object() || schema.is_boolean())
-            })
-        })
-}
-
 pub(super) fn load_policy_source(path: &Path) -> anyhow::Result<PolicySource> {
     let policy_content = std::fs::read_to_string(path).map_err(|e| {
         anyhow::anyhow!(
@@ -102,7 +66,9 @@ pub(super) fn load_policy_source(path: &Path) -> anyhow::Result<PolicySource> {
 pub(super) fn load_policy_source_value(
     policy_json: serde_json::Value,
 ) -> anyhow::Result<PolicySource> {
-    if has_structured_policy_shape(&policy_json) {
+    validate_args_policy_value(&policy_json)?;
+
+    if has_structured_args_policy_shape(&policy_json) {
         let allow = {
             let mut merged = extract_string_list(policy_json.get("allow"));
             merged.extend(extract_string_list(policy_json.pointer("/tools/allow")));

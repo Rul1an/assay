@@ -577,8 +577,11 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("temporary policy directory");
         let policy_path = dir.path().join("invalid-policy.yaml");
-        std::fs::write(&policy_path, "schemas: definitely-not-a-map\n")
-            .expect("write invalid policy");
+        std::fs::write(
+            &policy_path,
+            "version: '2.0'\nschemas: definitely-not-a-map\n",
+        )
+        .expect("write invalid policy");
         cfg.tests[0].expected = Expected::ArgsValid {
             policy: Some(policy_path.to_string_lossy().into_owned()),
             schema: None,

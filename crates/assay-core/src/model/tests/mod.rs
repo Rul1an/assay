@@ -657,6 +657,19 @@ fn test_explicit_schema_containers_preserve_keyword_tool_names() {
 }
 
 #[test]
+fn tool_named_schemas_is_not_a_structured_policy_without_a_policy_discriminant() {
+    let schema_map = serde_json::json!({
+        "schemas": {
+            "properties": {
+                "query": {"type": "string"}
+            }
+        }
+    });
+
+    assert!(!crate::model::has_structured_args_policy_shape(&schema_map));
+}
+
+#[test]
 fn test_tagged_tool_output_valid_without_schemas_is_hard_error() {
     let yaml = r#"
             id: vacuous_output
