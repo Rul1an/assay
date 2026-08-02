@@ -2,6 +2,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
+struct LocalOnlyRetriever;
+
+impl jsonschema::Retrieve for LocalOnlyRetriever {
+    fn retrieve(
+        &self,
+        _uri: &jsonschema::Uri<String>,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        Err("external JSON Schema retrieval is disabled".into())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum VerdictStatus {
@@ -20,29 +31,31 @@ pub struct Verdict {
 /// The policy is expected to be a map of tool_name -> schema.
 pub fn evaluate_tool_args(policy: &Value, tool_name: &str, tool_args: &Value) -> Verdict {
     // 1. Check if tool exists in policy
-    let schema_val = match policy.get(tool_name) {
-        Some(s) => s,
-        None => {
-            // Check for potential typos
-            let mut message = format!("Tool '{}' not defined in policy", tool_name);
-            if let Some(obj) = policy.as_object() {
-                // Use our similarity helper
-                if let Some(match_) =
-                    crate::errors::similarity::closest_prompt(tool_name, obj.keys())
-                {
-                    message.push_str(&format!(". Did you mean '{}'?", match_.prompt));
-                }
+    if policy
+        .as_object()
+        .and_then(|schemas| schemas.get(tool_name))
+        .filter(|_| tool_name != "$defs")
+        .is_none()
+    {
+        // Check for potential typos
+        let mut message = format!("Tool '{}' not defined in policy", tool_name);
+        if let Some(obj) = policy.as_object() {
+            // Use our similarity helper
+            if let Some(match_) = crate::errors::similarity::closest_prompt(
+                tool_name,
+                obj.keys().filter(|name| name.as_str() != "$defs"),
+            ) {
+                message.push_str(&format!(". Did you mean '{}'?", match_.prompt));
             }
-
-            return Verdict {
-                status: VerdictStatus::Blocked,
-                reason_code: "E_POLICY_MISSING_TOOL".to_string(),
-                details: serde_json::json!({
-                    "message": message
-                }),
-            };
         }
-    };
+        return Verdict {
+            status: VerdictStatus::Blocked,
+            reason_code: "E_POLICY_MISSING_TOOL".to_string(),
+            details: serde_json::json!({
+                "message": message
+            }),
+        };
+    }
 
     // 2. Compile Schema
     // In a real high-perf scenario, we'd cache this (Compilation is expensive).
@@ -52,17 +65,13 @@ pub fn evaluate_tool_args(policy: &Value, tool_name: &str, tool_args: &Value) ->
     // To support caching, we'd need a `PolicyState` struct.
     // For now, I'll compile on the fly (parity correctness first).
 
-    let compiled = match jsonschema::validator_for(schema_val) {
+    let schema_val = match prepare_tool_schema(policy, tool_name) {
+        Ok(schema) => schema,
+        Err(error) => return schema_compile_error(tool_name, &error),
+    };
+    let compiled = match compile_schema(&schema_val) {
         Ok(c) => c,
-        Err(e) => {
-            return Verdict {
-                status: VerdictStatus::Blocked,
-                reason_code: "E_SCHEMA_COMPILE".to_string(),
-                details: serde_json::json!({
-                    "message": format!("Invalid schema for tool '{}': {}", tool_name, e)
-                }),
-            };
-        }
+        Err(e) => return schema_compile_error(tool_name, &e),
     };
 
     // 3. Validate
@@ -107,21 +116,116 @@ pub struct PolicyState {
     tool_names: Vec<String>,
 }
 
+/// Prepare a tool-schema map for compilation without permitting external retrieval.
+///
+/// Root `$defs` are merged into each object-valued tool schema and therefore compile under that
+/// schema's declared dialect. A shared definition may not replace a tool-local definition with the
+/// same name. With only boolean tools, the otherwise-unscoped definitions use the default dialect.
+pub(crate) fn prepare_schema_map(policy: &Value) -> Result<Value, String> {
+    let Some(schemas) = policy.as_object() else {
+        return Ok(policy.clone());
+    };
+    let root_defs = shared_defs(schemas)?;
+    let has_object_tool = schemas
+        .iter()
+        .any(|(tool, schema)| tool != "$defs" && schema.is_object());
+    if let Some(root_defs) = root_defs.filter(|_| !has_object_tool) {
+        validate_unscoped_shared_defs(root_defs)?;
+    }
+    let mut prepared = serde_json::Map::new();
+    for tool in schemas.keys().filter(|tool| tool.as_str() != "$defs") {
+        prepared.insert(tool.clone(), prepare_tool_schema(policy, tool)?);
+    }
+    Ok(Value::Object(prepared))
+}
+
+fn shared_defs(
+    schemas: &serde_json::Map<String, Value>,
+) -> Result<Option<&serde_json::Map<String, Value>>, String> {
+    Ok(match schemas.get("$defs") {
+        Some(Value::Object(defs)) => Some(defs),
+        Some(_) => return Err("shared $defs must be a mapping".to_string()),
+        None => None,
+    })
+}
+
+pub(crate) fn prepare_tool_schema(policy: &Value, tool: &str) -> Result<Value, String> {
+    let schemas = policy
+        .as_object()
+        .ok_or_else(|| "policy must be a tool-name-to-schema mapping".to_string())?;
+    let root_defs = shared_defs(schemas)?;
+    let mut schema = schemas
+        .get(tool)
+        .cloned()
+        .ok_or_else(|| format!("tool '{tool}' is not present"))?;
+    if let Some(root_defs) = root_defs {
+        match &mut schema {
+            Value::Object(schema_object) => {
+                let local_defs = match schema_object.get_mut("$defs") {
+                    Some(Value::Object(defs)) => defs,
+                    Some(_) => return Err("tool-local $defs must be a mapping".to_string()),
+                    None => {
+                        schema_object.insert("$defs".to_string(), Value::Object(root_defs.clone()));
+                        return Ok(schema);
+                    }
+                };
+                for (name, definition) in root_defs {
+                    if local_defs.contains_key(name) {
+                        return Err(
+                            "shared and tool-local $defs entries must not overlap".to_string()
+                        );
+                    }
+                    local_defs.insert(name.clone(), definition.clone());
+                }
+            }
+            Value::Bool(_) => validate_unscoped_shared_defs(root_defs)?,
+            _ => {}
+        }
+    }
+    Ok(schema)
+}
+
+fn validate_unscoped_shared_defs(root_defs: &serde_json::Map<String, Value>) -> Result<(), String> {
+    let definitions_schema = serde_json::json!({"$defs": root_defs});
+    compile_schema(&definitions_schema)
+        .map(|_| ())
+        .map_err(|error| format!("shared $defs failed to compile: {error}"))
+}
+
+pub(crate) fn compile_schema(schema: &Value) -> Result<jsonschema::Validator, String> {
+    jsonschema::options()
+        .with_retriever(LocalOnlyRetriever)
+        .build(schema)
+        .map_err(|error| error.to_string())
+}
+
+fn schema_compile_error(tool_name: &str, error: &str) -> Verdict {
+    Verdict {
+        status: VerdictStatus::Blocked,
+        reason_code: "E_SCHEMA_COMPILE".to_string(),
+        details: serde_json::json!({
+            "message": format!("Invalid schema for tool '{}': {}", tool_name, error)
+        }),
+    }
+}
+
 impl PolicyState {
     /// Compile every tool schema in the policy once. A tool whose schema fails to compile is recorded
     /// as an error and only surfaces (as `E_SCHEMA_COMPILE`) if that tool is later evaluated, matching
     /// the one-shot `evaluate_tool_args` behavior of only compiling the requested tool's schema.
     pub fn compile(policy: &Value) -> Self {
         let mut validators = HashMap::new();
-        let mut tool_names = Vec::new();
-        if let Some(obj) = policy.as_object() {
-            for (tool, schema_val) in obj {
-                tool_names.push(tool.clone());
-                validators.insert(
-                    tool.clone(),
-                    jsonschema::validator_for(schema_val).map_err(|e| e.to_string()),
-                );
-            }
+        let tool_names: Vec<_> = policy
+            .as_object()
+            .into_iter()
+            .flat_map(|schemas| schemas.keys())
+            .filter(|tool| tool.as_str() != "$defs")
+            .cloned()
+            .collect();
+        for tool in &tool_names {
+            let compiled =
+                prepare_tool_schema(policy, tool).and_then(|schema| compile_schema(&schema));
+            validators.insert(tool.clone(), compiled);
         }
         Self {
             validators,
@@ -131,8 +235,8 @@ impl PolicyState {
 
     /// Evaluate one tool call against the pre-compiled validators.
     pub fn evaluate(&self, tool_name: &str, tool_args: &Value) -> Verdict {
-        match self.validators.get(tool_name) {
-            None => {
+        if !self.tool_names.iter().any(|tool| tool == tool_name) {
+            return {
                 let mut message = format!("Tool '{}' not defined in policy", tool_name);
                 if let Some(match_) =
                     crate::errors::similarity::closest_prompt(tool_name, self.tool_names.iter())
@@ -144,14 +248,11 @@ impl PolicyState {
                     reason_code: "E_POLICY_MISSING_TOOL".to_string(),
                     details: serde_json::json!({ "message": message }),
                 }
-            }
-            Some(Err(e)) => Verdict {
-                status: VerdictStatus::Blocked,
-                reason_code: "E_SCHEMA_COMPILE".to_string(),
-                details: serde_json::json!({
-                    "message": format!("Invalid schema for tool '{}': {}", tool_name, e)
-                }),
-            },
+            };
+        }
+        match self.validators.get(tool_name) {
+            None => schema_compile_error(tool_name, "schema preparation produced no validator"),
+            Some(Err(e)) => schema_compile_error(tool_name, e),
             Some(Ok(compiled)) => evaluate_schema(compiled, tool_args),
         }
     }

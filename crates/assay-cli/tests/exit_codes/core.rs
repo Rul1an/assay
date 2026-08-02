@@ -306,6 +306,46 @@ tests:
 }
 
 #[test]
+fn contract_run_preflight_contract_error_writes_cfg_parse_artifact() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("eval.yaml"),
+        r#"configVersion: 1
+suite: preflight-contract
+model: dummy
+settings:
+  cache: false
+tests:
+  - id: invalid-static-input
+    input: { prompt: "hi" }
+    expected:
+      type: json_schema
+      json_schema: ""
+      schema_file: missing.schema.json
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("assay").unwrap();
+    cmd.current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("eval.yaml")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+    assert!(
+        run["resolution"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("missing.schema.json")),
+        "{run:#}"
+    );
+}
+
+#[test]
 fn contract_run_format_json_emits_report_to_stdout() {
     let dir = tempdir().unwrap();
     fs::write(
@@ -373,4 +413,243 @@ fn contract_run_default_text_keeps_stdout_clean() {
         "default text run must not write to stdout, got: {:?}",
         String::from_utf8_lossy(&out.stdout)
     );
+}
+
+// ---------------------------------------------------------------------------
+// Vacuous / unparsable `expected:` blocks
+//
+// A YAML typo in `expected:` used to fall back to `Expected::default()` — an
+// empty `must_contain`, which passes for any response. These pin the three
+// silent paths to the default as config errors (exit 2), end to end.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn contract_run_rejects_unparsable_expected_object() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"suite: typo
+model: dummy
+tests:
+  - id: t1
+    input: hello
+    expected:
+      must_contains: ["hello"]
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+}
+
+#[test]
+fn contract_run_rejects_unrecognized_expected_list_entry() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"suite: typo
+model: dummy
+tests:
+  - id: t1
+    input: hello
+    expected:
+      - must_contains: ["hello"]
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+}
+
+#[test]
+fn contract_run_rejects_tagged_fallback_to_different_legacy_metric() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"suite: mismatched-tag
+model: dummy
+tests:
+  - id: t1
+    input: hello
+    expected:
+      type: regex_match
+      must_contain: "not-the-dummy-output"
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+}
+
+#[test]
+fn contract_run_rejects_ambiguous_legacy_expected_block() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"suite: ambiguous-legacy
+model: dummy
+tests:
+  - id: t1
+    input: hello
+    expected:
+      must_contain: "passed"
+      sequence: ["Search"]
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+}
+
+#[test]
+fn contract_run_rejects_multi_element_expected_list() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"suite: multi
+model: dummy
+tests:
+  - id: t1
+    input: hello
+    expected:
+      - must_contain: "hello"
+      - must_contain: "world"
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+}
+
+/// An explicitly-written empty assertion is a HARD ERROR, and it must be caught on
+/// the paths that decide outcomes — `run` and `ci`, not just `validate`.
+#[test]
+fn contract_run_rejects_explicitly_empty_assertion() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"suite: vacuous
+model: dummy
+tests:
+  - id: always_green
+    input: hello
+    expected:
+      type: must_contain
+      must_contain: []
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+}
+
+/// A test that omits `expected:` AND has no `assertions:` asserts nothing, but the
+/// omission itself is a documented, legitimate shape — so `assay validate` sweeps for
+/// it as a WARNING (exit 0), not an error.
+#[test]
+fn contract_validate_warns_on_test_with_no_assertion() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"suite: vacuous
+model: dummy
+tests:
+  - id: always_green
+    input: hello
+"#,
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .arg("validate")
+        .arg("--config")
+        .arg("assay.yaml")
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .code(0)
+        .get_output()
+        .clone();
+
+    let report: Value = serde_json::from_slice(&out.stdout).expect("validate json");
+    let diags = report["diagnostics"].as_array().expect("diagnostics array");
+    let vacuous: Vec<&Value> = diags
+        .iter()
+        .filter(|d| d["code"] == "W_CFG_VACUOUS_EXPECTED")
+        .collect();
+    assert_eq!(
+        vacuous.len(),
+        1,
+        "expected one vacuous warning, got {:?}",
+        diags
+    );
+    assert_eq!(vacuous[0]["severity"], "warn");
 }

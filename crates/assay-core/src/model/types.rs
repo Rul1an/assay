@@ -65,6 +65,9 @@ pub struct ThresholdingSettings {
 pub struct TestCase {
     pub id: String,
     pub input: TestInput,
+    /// Skipped for the legacy empty-`must_contain` sentinel. The public model does
+    /// not retain whether that shape came from omission or programmatic construction.
+    #[serde(skip_serializing_if = "crate::model::validation::is_omitted_expected_sentinel")]
     pub expected: Expected,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assertions: Option<Vec<crate::agent_assertions::model::TraceAssertion>>,
@@ -86,7 +89,7 @@ pub struct TestInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "type")]
+#[serde(deny_unknown_fields, rename_all = "snake_case", tag = "type")]
 pub enum Expected {
     MustContain {
         #[serde(default)]
@@ -204,6 +207,15 @@ pub struct PinnedTool {
 }
 
 impl Default for Expected {
+    /// NOTE: this default is **vacuous** — an empty `must_contain` makes the
+    /// `must_contain` metric pass unconditionally, because it has no substring to
+    /// look for. It exists only so `TestCase` can derive `Default` and so a test
+    /// whose checks live in `assertions:` can omit `expected:` entirely.
+    ///
+    /// It must never be used as a parse fallback: an `expected:` block that fails
+    /// to parse is a hard config error (see `model::serde`), and a test that ends
+    /// up holding this value with no assertions is reported by the
+    /// `W_CFG_VACUOUS_EXPECTED` rule in `assay validate`.
     fn default() -> Self {
         Expected::MustContain {
             must_contain: vec![],

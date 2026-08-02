@@ -111,6 +111,226 @@ schemas:
 }
 
 #[tokio::test]
+async fn bound_structured_policy_preserves_deny_semantics_inline() {
+    let metric = ArgsValidMetric;
+    let tc = make_test_case();
+    let expected = Expected::ArgsValid {
+        policy: None,
+        schema: Some(serde_json::json!({
+            "version": "2.0",
+            "tools": {"allow": ["*"], "deny": ["exec"]},
+            "schemas": {
+                "read_file": {
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {"path": {"type": "string"}}
+                }
+            }
+        })),
+    };
+    let resp = make_response_with_tool("exec", serde_json::json!({"command":"rm -rf /"}));
+
+    let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+    assert!(!result.passed);
+    assert!(
+        result.details.to_string().contains("E_TOOL_DENIED"),
+        "details={}",
+        result.details
+    );
+}
+
+#[tokio::test]
+async fn structured_trivial_schema_still_enforces_unconstrained_deny() {
+    let metric = ArgsValidMetric;
+    let tc = make_test_case();
+    let expected = Expected::ArgsValid {
+        policy: None,
+        schema: Some(serde_json::json!({
+            "version": "2.0",
+            "enforcement": {"unconstrained_tools": "deny"},
+            "schemas": {"Search": true}
+        })),
+    };
+    let resp = make_response_with_tool("exec", serde_json::json!({"command":"ls"}));
+
+    let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+    assert!(!result.passed);
+    assert!(
+        result.details.to_string().contains("E_TOOL_UNCONSTRAINED"),
+        "details={}",
+        result.details
+    );
+}
+
+#[tokio::test]
+async fn structured_policy_injects_shared_defs_into_each_tool_schema() {
+    let metric = ArgsValidMetric;
+    let tc = make_test_case();
+    let expected = Expected::ArgsValid {
+        policy: None,
+        schema: Some(serde_json::json!({
+            "version": "2.0",
+            "schemas": {
+                "$defs": {
+                    "safe_path": {
+                        "type": "string",
+                        "pattern": "^/workspace/.*"
+                    }
+                },
+                "read_file": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"$ref": "#/$defs/safe_path"}
+                    },
+                    "required": ["path"]
+                }
+            }
+        })),
+    };
+
+    let valid = metric
+        .evaluate(
+            &tc,
+            &expected,
+            &make_response_with_tool("read_file", serde_json::json!({"path": "/workspace/a"})),
+        )
+        .await
+        .expect("the documented shared definition must compile");
+    assert!(valid.passed, "details={}", valid.details);
+
+    let invalid = metric
+        .evaluate(
+            &tc,
+            &expected,
+            &make_response_with_tool("read_file", serde_json::json!({"path": "/tmp/a"})),
+        )
+        .await
+        .expect("schema violations are metric results, not configuration errors");
+    assert!(!invalid.passed, "the injected definition must be enforced");
+}
+
+#[tokio::test]
+async fn metadata_named_tool_remains_a_schema_map_entry() {
+    let metric = ArgsValidMetric;
+    let tc = make_test_case();
+    let expected = Expected::ArgsValid {
+        policy: None,
+        schema: Some(serde_json::json!({
+            "allow": {"type": "object", "required": ["query"]}
+        })),
+    };
+    let resp = make_response_with_tool("allow", serde_json::json!({}));
+
+    let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+    assert!(!result.passed);
+    assert!(
+        result.details.to_string().contains("required property"),
+        "details={}",
+        result.details
+    );
+}
+
+#[tokio::test]
+async fn tool_named_schemas_requires_an_explicit_policy_discriminant() {
+    let metric = ArgsValidMetric;
+    let tc = make_test_case();
+    let resp = make_response_with_tool("schemas", serde_json::json!({"query": 42}));
+    let ambiguous = Expected::ArgsValid {
+        policy: None,
+        schema: Some(serde_json::json!({
+            "schemas": {
+                "properties": {
+                    "query": {"type": "string"}
+                }
+            }
+        })),
+    };
+    metric
+        .evaluate(&tc, &ambiguous, &resp)
+        .await
+        .expect_err("schemas-only input must not be assigned a silent interpretation");
+
+    let expected = Expected::ArgsValid {
+        policy: None,
+        schema: Some(serde_json::json!({
+            "version": "2.0",
+            "schemas": {
+                "schemas": {
+                    "properties": {
+                        "query": {"type": "string"}
+                    }
+                }
+            }
+        })),
+    };
+    let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+    assert!(
+        !result.passed,
+        "the schema for tool `schemas` must be enforced"
+    );
+}
+
+#[tokio::test]
+async fn direct_metric_rejects_policies_that_execution_preflight_rejects() {
+    let metric = ArgsValidMetric;
+    let tc = make_test_case();
+    let resp = make_response_with_tool("Search", serde_json::json!({}));
+
+    for schema in [
+        serde_json::json!({"version": "2.0", "allow": ["*"]}),
+        serde_json::json!({"version": "2.0", "constraints": {}}),
+        serde_json::json!({"version": "2.0", "schemas": {"Search": []}}),
+        serde_json::json!({
+            "version": "2.0",
+            "tools": {
+                "deny": ["never_called"],
+                "restrict_scope": ["Search"]
+            }
+        }),
+    ] {
+        let expected = Expected::ArgsValid {
+            policy: None,
+            schema: Some(schema),
+        };
+        metric
+            .evaluate(&tc, &expected, &resp)
+            .await
+            .expect_err("direct metric use must preserve execution validation");
+    }
+
+    metric
+        .evaluate(
+            &tc,
+            &Expected::ArgsValid {
+                policy: None,
+                schema: None,
+            },
+            &resp,
+        )
+        .await
+        .expect_err("an empty args_valid contract must not pass direct metric use");
+}
+
+#[tokio::test]
+async fn malformed_present_tool_calls_fail_args_validation() {
+    let metric = ArgsValidMetric;
+    let tc = make_test_case();
+    let expected = Expected::ArgsValid {
+        policy: None,
+        schema: Some(serde_json::json!({
+            "Search": {"type": "object"}
+        })),
+    };
+    let resp = LlmResponse {
+        meta: serde_json::json!({"tool_calls": {"tool_name": "Search"}}),
+        ..Default::default()
+    };
+
+    let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+    assert!(!result.passed, "malformed presence is not an empty trace");
+}
+
+#[tokio::test]
 async fn legacy_schema_map_keeps_missing_tool_compat() {
     let policy_path = write_temp_policy(
         r#"read_file:
@@ -183,7 +403,7 @@ schemas:
 }
 
 #[test]
-fn extract_tool_calls_best_effort_preserves_order_and_field_mapping() {
+fn extract_tool_calls_best_effort_preserves_valid_legacy_order_and_field_mapping() {
     let resp = LlmResponse {
         meta: serde_json::json!({
             "tool_calls": [
@@ -200,17 +420,14 @@ fn extract_tool_calls_best_effort_preserves_order_and_field_mapping() {
                     "tool": "beta",
                     "args": ["x"],
                     "error": {"code": "E_FAIL"}
-                },
-                {
-                    "args": {"missing_tool": true}
                 }
             ]
         }),
         ..Default::default()
     };
 
-    let calls = extract_tool_calls_best_effort(&resp);
-    assert_eq!(calls.len(), 2, "non-parseable entries must be skipped");
+    let calls = extract_tool_calls_best_effort(&resp).unwrap();
+    assert_eq!(calls.len(), 2);
 
     assert_eq!(calls[0].tool_name, "alpha");
     assert_eq!(calls[0].id, "c0");
@@ -230,16 +447,16 @@ fn extract_tool_calls_best_effort_preserves_order_and_field_mapping() {
 }
 
 #[test]
-fn extract_tool_calls_best_effort_returns_empty_for_missing_or_non_array_tool_calls() {
+fn extract_tool_calls_best_effort_distinguishes_missing_from_non_array() {
     let missing = LlmResponse {
         meta: serde_json::json!({}),
         ..Default::default()
     };
-    assert!(extract_tool_calls_best_effort(&missing).is_empty());
+    assert!(extract_tool_calls_best_effort(&missing).unwrap().is_empty());
 
     let non_array = LlmResponse {
         meta: serde_json::json!({"tool_calls": {"tool_name": "x"}}),
         ..Default::default()
     };
-    assert!(extract_tool_calls_best_effort(&non_array).is_empty());
+    assert!(extract_tool_calls_best_effort(&non_array).is_err());
 }

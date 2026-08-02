@@ -26,3 +26,5 @@ hex.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+tempfile.workspace = true
+url = "2.5.8"

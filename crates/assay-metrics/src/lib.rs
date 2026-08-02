@@ -8,6 +8,7 @@ mod must_contain;
 mod must_not_contain;
 mod policy_warning;
 mod regex_match;
+mod schema_support;
 mod semantic;
 mod tool_calls;
 

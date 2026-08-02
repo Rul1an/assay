@@ -208,6 +208,123 @@ mod tests {
         }
     }
 
+    struct CountingClient {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl LlmClient for CountingClient {
+        async fn complete(
+            &self,
+            _prompt: &str,
+            _context: Option<&[String]>,
+        ) -> anyhow::Result<LlmResponse> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(LlmResponse {
+                text: "ok".into(),
+                provider: "counting".into(),
+                model: "fake-model".into(),
+                cached: false,
+                meta: serde_json::json!({}),
+            })
+        }
+
+        fn provider_name(&self) -> &'static str {
+            "counting"
+        }
+    }
+
+    struct DeletingClient {
+        path: std::path::PathBuf,
+    }
+
+    #[async_trait]
+    impl LlmClient for DeletingClient {
+        async fn complete(
+            &self,
+            _prompt: &str,
+            _context: Option<&[String]>,
+        ) -> anyhow::Result<LlmResponse> {
+            std::fs::remove_file(&self.path)?;
+            Ok(LlmResponse {
+                text: r#"{"ok":true}"#.into(),
+                provider: "deleting".into(),
+                model: "fake-model".into(),
+                cached: false,
+                meta: serde_json::json!({}),
+            })
+        }
+
+        fn provider_name(&self) -> &'static str {
+            "deleting"
+        }
+    }
+
+    struct BoundSchemaMetric;
+
+    #[async_trait]
+    impl Metric for BoundSchemaMetric {
+        fn name(&self) -> &'static str {
+            "bound_schema"
+        }
+
+        async fn evaluate(
+            &self,
+            _tc: &TestCase,
+            expected: &Expected,
+            _resp: &LlmResponse,
+        ) -> anyhow::Result<MetricResult> {
+            let Expected::JsonSchema {
+                json_schema,
+                schema_file,
+            } = expected
+            else {
+                anyhow::bail!("expected json_schema contract");
+            };
+            anyhow::ensure!(
+                schema_file.is_none(),
+                "schema_file was reread after preflight"
+            );
+            anyhow::ensure!(
+                json_schema.contains("required"),
+                "schema bytes were not bound"
+            );
+            Ok(MetricResult::pass(1.0))
+        }
+    }
+
+    struct BoundSequenceMetric;
+
+    #[async_trait]
+    impl Metric for BoundSequenceMetric {
+        fn name(&self) -> &'static str {
+            "bound_sequence"
+        }
+
+        async fn evaluate(
+            &self,
+            _tc: &TestCase,
+            expected: &Expected,
+            _resp: &LlmResponse,
+        ) -> anyhow::Result<MetricResult> {
+            let Expected::SequenceValid {
+                policy,
+                sequence,
+                rules,
+            } = expected
+            else {
+                anyhow::bail!("expected sequence_valid contract");
+            };
+            anyhow::ensure!(policy.is_none(), "policy path survived binding");
+            anyhow::ensure!(sequence.as_deref() == Some(&[]), "inline sequence changed");
+            anyhow::ensure!(
+                matches!(rules.as_deref(), Some([crate::model::SequenceRule::Require { tool }]) if tool == "Search"),
+                "file-backed rules were not merged into the snapshot"
+            );
+            Ok(MetricResult::pass(1.0))
+        }
+    }
+
     fn runner_for_contract_tests(
         client: Arc<dyn LlmClient>,
         metrics: Vec<Arc<dyn Metric>>,
@@ -390,6 +507,246 @@ mod tests {
             .collect();
         assert_eq!(ids, vec!["t1", "t2", "t3"]);
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn runner_rejects_an_unresolved_expected_reference_before_execution() {
+        let mut cfg = single_test_config(ErrorPolicy::Block);
+        cfg.tests[0].expected = Expected::Reference {
+            path: "checks/expected.yaml".to_string(),
+        };
+        let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));
+        let runner =
+            runner_for_contract_tests(client, vec![Arc::new(ScriptedMetric::always_pass())], 0);
+
+        let err = runner
+            .run_test_once(&cfg, &cfg.tests[0])
+            .await
+            .expect_err("an unresolved migration reference must not reach metric dispatch");
+        assert!(err.to_string().contains("unresolved `$ref`"), "{err:#}");
+    }
+
+    #[tokio::test]
+    async fn on_error_allow_cannot_turn_invalid_configuration_into_a_pass() {
+        let mut cfg = single_test_config(ErrorPolicy::Allow);
+        cfg.tests[0].expected = Expected::Reference {
+            path: "checks/expected.yaml".to_string(),
+        };
+        let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));
+        let runner =
+            runner_for_contract_tests(client, vec![Arc::new(ScriptedMetric::always_pass())], 0);
+
+        let err = runner
+            .run_suite(&cfg, None)
+            .await
+            .expect_err("configuration errors must precede the on_error policy");
+        assert!(err.to_string().contains("unresolved `$ref`"), "{err:#}");
+    }
+
+    #[tokio::test]
+    async fn static_expected_inputs_are_validated_before_provider_dispatch() {
+        let mut cfg = single_test_config(ErrorPolicy::Allow);
+        cfg.tests[0].expected = Expected::RegexMatch {
+            pattern: "(".into(),
+            flags: Vec::new(),
+        };
+        let client = Arc::new(CountingClient {
+            calls: AtomicUsize::new(0),
+        });
+        let runner = runner_for_contract_tests(client.clone(), vec![], 0);
+
+        let err = runner
+            .run_suite(&cfg, None)
+            .await
+            .expect_err("invalid regex must fail before provider dispatch");
+        assert!(err.to_string().contains("invalid regex"), "{err:#}");
+        assert_eq!(client.calls.load(Ordering::SeqCst), 0);
+
+        cfg.tests[0].expected = Expected::ArgsValid {
+            policy: None,
+            schema: Some(serde_json::json!({
+                "Search": {"type": "definitely-not-a-json-schema-type"}
+            })),
+        };
+        let err = runner
+            .run_suite(&cfg, None)
+            .await
+            .expect_err("invalid schema must fail before provider dispatch");
+        assert!(err.to_string().contains("failed to compile"), "{err:#}");
+        assert_eq!(client.calls.load(Ordering::SeqCst), 0);
+
+        let dir = tempfile::tempdir().expect("temporary policy directory");
+        let policy_path = dir.path().join("invalid-policy.yaml");
+        std::fs::write(
+            &policy_path,
+            "version: '2.0'\nschemas: definitely-not-a-map\n",
+        )
+        .expect("write invalid policy");
+        cfg.tests[0].expected = Expected::ArgsValid {
+            policy: Some(policy_path.to_string_lossy().into_owned()),
+            schema: None,
+        };
+        let err = runner
+            .run_suite(&cfg, None)
+            .await
+            .expect_err("invalid policy must fail before provider dispatch");
+        assert!(
+            err.to_string().contains("schemas must be a mapping"),
+            "{err:#}"
+        );
+        assert_eq!(client.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn schema_file_bytes_are_bound_before_provider_dispatch() {
+        let dir = tempfile::tempdir().expect("temporary schema directory");
+        let schema_path = dir.path().join("response.schema.json");
+        std::fs::write(&schema_path, r#"{"type":"object","required":["ok"]}"#)
+            .expect("write schema");
+        let mut cfg = single_test_config(ErrorPolicy::Allow);
+        cfg.tests[0].expected = Expected::JsonSchema {
+            json_schema: String::new(),
+            schema_file: Some(schema_path.to_string_lossy().into_owned()),
+        };
+        let runner = runner_for_contract_tests(
+            Arc::new(DeletingClient {
+                path: schema_path.clone(),
+            }),
+            vec![Arc::new(BoundSchemaMetric)],
+            0,
+        );
+
+        let artifacts = runner
+            .run_suite(&cfg, None)
+            .await
+            .expect("validated bytes must survive deletion of the source file");
+        assert_eq!(artifacts.results[0].status, TestStatus::Pass);
+        assert!(!schema_path.exists());
+    }
+
+    #[tokio::test]
+    async fn schema_file_content_participates_in_incremental_fingerprint() {
+        let dir = tempfile::tempdir().expect("temporary schema directory");
+        let schema_path = dir.path().join("response.schema.json");
+        std::fs::write(&schema_path, r#"{"type":"string"}"#).expect("write first schema");
+        let mut cfg = single_test_config(ErrorPolicy::Block);
+        cfg.tests[0].expected = Expected::JsonSchema {
+            json_schema: String::new(),
+            schema_file: Some(schema_path.to_string_lossy().into_owned()),
+        };
+        let client = Arc::new(CountingClient {
+            calls: AtomicUsize::new(0),
+        });
+        let mut runner = runner_for_contract_tests(
+            client.clone(),
+            vec![Arc::new(ScriptedMetric::always_pass())],
+            0,
+        );
+        runner.incremental = true;
+
+        runner.run_suite(&cfg, None).await.expect("first run");
+        std::fs::write(&schema_path, r#"{"type":"number"}"#).expect("write changed schema");
+        runner
+            .run_suite(&cfg, None)
+            .await
+            .expect("changed schema must run again");
+
+        assert_eq!(client.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn vacuous_file_policy_is_rejected_before_provider_dispatch() {
+        let dir = tempfile::tempdir().expect("temporary policy directory");
+        let policy_path = dir.path().join("vacuous-policy.yaml");
+        let mut cfg = single_test_config(ErrorPolicy::Allow);
+        cfg.tests[0].expected = Expected::ArgsValid {
+            policy: Some(policy_path.to_string_lossy().into_owned()),
+            schema: None,
+        };
+        let client = Arc::new(CountingClient {
+            calls: AtomicUsize::new(0),
+        });
+        let runner = runner_for_contract_tests(client.clone(), vec![], 0);
+
+        for (source, expected_error) in [
+            ("version: '2.0'\n", "asserts nothing"),
+            ("version: '2.0'\nconstraints: {}\n", "not enforced"),
+            ("version: '2.0'\nallow: ['*']\n", "asserts nothing"),
+            (
+                "version: '2.0'\ndeny: ['exec']\nenforcement:\n  unconstrained_tools: typo\n",
+                "must be one of",
+            ),
+            ("Search: true\n", "asserts nothing"),
+            ("Search: {}\n", "asserts nothing"),
+        ] {
+            std::fs::write(&policy_path, source).expect("write policy");
+            let err = runner
+                .run_suite(&cfg, None)
+                .await
+                .expect_err("file policy without an enforced constraint must be rejected");
+            assert!(err.to_string().contains(expected_error), "{err:#}");
+        }
+        assert_eq!(client.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn mixed_sequence_policy_bytes_are_bound_before_provider_dispatch() {
+        let dir = tempfile::tempdir().expect("temporary policy directory");
+        let policy_path = dir.path().join("rules.yaml");
+        std::fs::write(&policy_path, "- type: require\n  tool: Search\n")
+            .expect("write sequence policy");
+        let mut cfg = single_test_config(ErrorPolicy::Allow);
+        cfg.tests[0].expected = Expected::SequenceValid {
+            policy: Some(policy_path.to_string_lossy().into_owned()),
+            sequence: Some(Vec::new()),
+            rules: None,
+        };
+        let runner = runner_for_contract_tests(
+            Arc::new(DeletingClient {
+                path: policy_path.clone(),
+            }),
+            vec![Arc::new(BoundSequenceMetric)],
+            0,
+        );
+
+        let artifacts = runner
+            .run_suite(&cfg, None)
+            .await
+            .expect("mixed policy bytes must survive deletion after dispatch");
+        assert_eq!(artifacts.results[0].status, TestStatus::Pass);
+        assert!(!policy_path.exists());
+    }
+
+    #[tokio::test]
+    async fn runner_allows_omitted_expected_when_trace_assertions_carry_the_test() {
+        let mut cfg = single_test_config(ErrorPolicy::Block);
+        cfg.tests[0].expected = Expected::default();
+        cfg.tests[0].assertions = Some(vec![
+            crate::agent_assertions::model::TraceAssertion::TraceMaxSteps { max: 1 },
+        ]);
+        let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));
+        let runner =
+            runner_for_contract_tests(client, vec![Arc::new(ScriptedMetric::always_pass())], 0);
+
+        runner
+            .run_test_once(&cfg, &cfg.tests[0])
+            .await
+            .expect("effective trace assertions may carry a test with no expected block");
+    }
+
+    #[tokio::test]
+    async fn runner_preserves_warning_only_compatibility_for_an_omitted_expected_block() {
+        let mut cfg = single_test_config(ErrorPolicy::Block);
+        cfg.tests[0].expected = Expected::default();
+        cfg.tests[0].assertions = None;
+        let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));
+        let runner =
+            runner_for_contract_tests(client, vec![Arc::new(ScriptedMetric::always_pass())], 0);
+
+        runner
+            .run_test_once(&cfg, &cfg.tests[0])
+            .await
+            .expect("omitting both checks remains a validate warning, not a runtime error");
     }
 
     #[tokio::test]

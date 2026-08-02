@@ -6,4 +6,5 @@ tests:
   - id: "placeholder-smoke"
     input: "ignore"
     expected:
-      must_contain: []
+      type: must_contain
+      must_contain: ["passed"]

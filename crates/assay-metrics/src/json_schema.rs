@@ -57,8 +57,7 @@ impl Metric for JsonSchemaMetric {
         let schema_json: serde_json::Value = serde_json::from_str(&schema_str)
             .map_err(|e| anyhow::anyhow!("config error: invalid JSON schema: {}", e))?;
 
-        let compiled = jsonschema::options()
-            .build(&schema_json)
+        let compiled = crate::schema_support::compile(&schema_json)
             .map_err(|e| anyhow::anyhow!("config error: schema compile failed: {}", e))?;
 
         let instance: serde_json::Value = match serde_json::from_str(&resp.text) {
@@ -93,4 +92,54 @@ impl Metric for JsonSchemaMetric {
 
 pub fn metric() -> Arc<dyn Metric> {
     Arc::new(JsonSchemaMetric)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assay_core::model::{TestCase, TestInput};
+
+    #[tokio::test]
+    async fn external_file_refs_are_not_retrieved() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let schema_path = dir.path().join("external.json");
+        std::fs::write(&schema_path, r#"{"type":"string"}"#).expect("write external schema");
+        let external_ref = url::Url::from_file_path(&schema_path)
+            .expect("absolute path becomes file URL")
+            .to_string();
+        let expected = Expected::JsonSchema {
+            json_schema: serde_json::json!({"$ref": external_ref}).to_string(),
+            schema_file: None,
+        };
+        let test = TestCase {
+            id: "local-only-schema".to_string(),
+            input: TestInput {
+                prompt: "test".to_string(),
+                context: None,
+            },
+            expected: Expected::default(),
+            assertions: None,
+            on_error: None,
+            tags: vec![],
+            metadata: None,
+        };
+        let response = LlmResponse {
+            text: "\"would pass if the file were retrieved\"".to_string(),
+            ..Default::default()
+        };
+
+        let err = JsonSchemaMetric
+            .evaluate(&test, &expected, &response)
+            .await
+            .expect_err("metric compilation must not retrieve an external schema");
+        assert!(err.to_string().contains("schema compile failed"), "{err:#}");
+        // Pin WHICH layer refused. Without this the test passes even if the
+        // explicit retriever is deleted, leaving hermeticity resting solely on
+        // a Cargo default-features setting that feature unification can undo.
+        assert!(
+            err.to_string()
+                .contains("external JSON Schema retrieval is disabled"),
+            "refusal must come from the explicit retriever: {err:#}"
+        );
+    }
 }

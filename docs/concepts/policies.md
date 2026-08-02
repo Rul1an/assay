@@ -255,33 +255,38 @@ tests:
 
 ---
 
-## Policy Inheritance
+## Shared JSON Schema Definitions
 
-Use `$ref` to share common definitions:
+Schema evaluation is hermetic: Assay does not retrieve file or HTTP references while compiling a
+policy. Keep reusable definitions in the same document and reference them with a fragment:
 
 ```yaml
-# policies/common.yaml
-definitions:
-  customer_id:
-    type: string
-    pattern: "^cust_[0-9]+$"
-
-  order_id:
-    type: string
-    pattern: "^ord_[0-9]+$"
-
 # policies/customer-service.yaml
-tools:
+version: "2.0"
+schemas:
+  $defs:
+    customer_id:
+      type: string
+      pattern: "^cust_[0-9]+$"
+    order_id:
+      type: string
+      pattern: "^ord_[0-9]+$"
+
   get_customer:
-    arguments:
+    type: object
+    properties:
       id:
-        $ref: "common.yaml#/definitions/customer_id"
+        $ref: "#/$defs/customer_id"
 
   get_order:
-    arguments:
+    type: object
+    properties:
       order_id:
-        $ref: "common.yaml#/definitions/order_id"
+        $ref: "#/$defs/order_id"
 ```
+
+Bundle definitions into the policy before execution when migrating a multi-file policy. External
+`$ref` and `$dynamicRef` targets fail schema compilation; they are never fetched implicitly.
 
 ---
 

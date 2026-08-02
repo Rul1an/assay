@@ -98,6 +98,10 @@ pub mod codes {
     pub const E_POLICY_VIOLATION: &str = "E_POLICY_VIOLATION";
 
     // Warnings (Exit 0)
+    /// A test that asserts nothing: no `expected:` block and no `assertions:`, so it
+    /// passes for any response. An `expected:` block written out as empty is rejected
+    /// at parse time as `E_CFG_PARSE` instead.
+    pub const W_CFG_VACUOUS_EXPECTED: &str = "W_CFG_VACUOUS_EXPECTED";
     pub const W_BASE_FINGERPRINT: &str = "W_BASE_FINGERPRINT";
     pub const W_CACHE_CONFUSION: &str = "W_CACHE_CONFUSION";
 }

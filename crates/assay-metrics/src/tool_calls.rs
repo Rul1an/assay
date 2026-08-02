@@ -1,5 +1,8 @@
 use assay_core::model::{LlmResponse, ToolCallRecord};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MalformedToolCallEvidence;
+
 fn parse_best_effort_entry(v: &serde_json::Value, idx: usize) -> Option<ToolCallRecord> {
     if let Ok(call) = serde_json::from_value::<ToolCallRecord>(v.clone()) {
         return Some(call);
@@ -44,30 +47,32 @@ fn parse_best_effort_entry(v: &serde_json::Value, idx: usize) -> Option<ToolCall
     })
 }
 
-/// Canonical-only extraction: deserialize exact ToolCallRecord list or return empty.
-pub(crate) fn extract_tool_calls_canonical_or_empty(resp: &LlmResponse) -> Vec<ToolCallRecord> {
+/// Canonical-only extraction: absence is an empty trace; malformed presence is an error.
+pub(crate) fn extract_tool_calls_canonical(
+    resp: &LlmResponse,
+) -> Result<Vec<ToolCallRecord>, MalformedToolCallEvidence> {
     let Some(val) = resp.meta.get("tool_calls") else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    serde_json::from_value(val.clone()).unwrap_or_default()
+    serde_json::from_value(val.clone()).map_err(|_| MalformedToolCallEvidence)
 }
 
-/// Best-effort extraction: canonical parse first, then lenient legacy entry mapping.
-pub(crate) fn extract_tool_calls_best_effort(resp: &LlmResponse) -> Vec<ToolCallRecord> {
+/// Best-effort extraction preserves valid legacy entries but rejects malformed presence.
+pub(crate) fn extract_tool_calls_best_effort(
+    resp: &LlmResponse,
+) -> Result<Vec<ToolCallRecord>, MalformedToolCallEvidence> {
     let Some(val) = resp.meta.get("tool_calls") else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     if let Ok(calls) = serde_json::from_value::<Vec<ToolCallRecord>>(val.clone()) {
-        return calls;
+        return Ok(calls);
     }
     val.as_array()
-        .map(|arr| {
-            arr.iter()
-                .enumerate()
-                .filter_map(|(idx, entry)| parse_best_effort_entry(entry, idx))
-                .collect()
-        })
-        .unwrap_or_default()
+        .ok_or(MalformedToolCallEvidence)?
+        .iter()
+        .enumerate()
+        .map(|(idx, entry)| parse_best_effort_entry(entry, idx).ok_or(MalformedToolCallEvidence))
+        .collect()
 }
 
 #[cfg(test)]
@@ -75,7 +80,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn canonical_or_empty_parses_only_canonical_records() {
+    fn canonical_extraction_rejects_malformed_presence() {
         let canonical = LlmResponse {
             meta: serde_json::json!({
                 "tool_calls": [{
@@ -90,7 +95,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let calls = extract_tool_calls_canonical_or_empty(&canonical);
+        let calls = extract_tool_calls_canonical(&canonical).unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].tool_name, "exec");
 
@@ -98,23 +103,22 @@ mod tests {
             meta: serde_json::json!({"tool_calls": {"tool_name": "exec"}}),
             ..Default::default()
         };
-        assert!(extract_tool_calls_canonical_or_empty(&malformed).is_empty());
+        assert!(extract_tool_calls_canonical(&malformed).is_err());
     }
 
     #[test]
-    fn best_effort_accepts_legacy_and_skips_unparsable_entries() {
+    fn best_effort_accepts_legacy_entries_and_rejects_malformed_entries() {
         let resp = LlmResponse {
             meta: serde_json::json!({
                 "tool_calls": [
                     {"tool": "a", "args": {"x": 1}},
-                    {"args": {"missing": true}},
                     {"tool_name": "b", "args": ["x"], "error": {"code": "E_FAIL"}}
                 ]
             }),
             ..Default::default()
         };
 
-        let calls = extract_tool_calls_best_effort(&resp);
+        let calls = extract_tool_calls_best_effort(&resp).unwrap();
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].tool_name, "a");
         assert_eq!(calls[0].id, "legacy-0");
@@ -122,6 +126,12 @@ mod tests {
         assert_eq!(calls[1].tool_name, "b");
         assert_eq!(calls[1].args, serde_json::json!(["x"]));
         assert_eq!(calls[1].error, Some(serde_json::json!({"code":"E_FAIL"})));
+
+        let malformed = LlmResponse {
+            meta: serde_json::json!({"tool_calls": [{"args": {"missing": true}}]}),
+            ..Default::default()
+        };
+        assert!(extract_tool_calls_best_effort(&malformed).is_err());
     }
 
     #[test]
@@ -130,7 +140,7 @@ mod tests {
             meta: serde_json::json!({}),
             ..Default::default()
         };
-        assert!(extract_tool_calls_canonical_or_empty(&resp).is_empty());
-        assert!(extract_tool_calls_best_effort(&resp).is_empty());
+        assert!(extract_tool_calls_canonical(&resp).unwrap().is_empty());
+        assert!(extract_tool_calls_best_effort(&resp).unwrap().is_empty());
     }
 }

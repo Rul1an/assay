@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use assay_core::model::{has_structured_args_policy_shape, validate_args_policy_value};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum UnconstrainedMode {
     Warn,
@@ -32,36 +34,18 @@ fn extract_string_list(val: Option<&serde_json::Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn parse_unconstrained_mode(policy_json: &serde_json::Value) -> UnconstrainedMode {
+fn parse_unconstrained_mode(policy_json: &serde_json::Value) -> anyhow::Result<UnconstrainedMode> {
     match policy_json
         .pointer("/enforcement/unconstrained_tools")
         .and_then(|v| v.as_str())
     {
-        Some("deny") => UnconstrainedMode::Deny,
-        Some("allow") => UnconstrainedMode::Allow,
-        _ => UnconstrainedMode::Warn,
+        Some("deny") => Ok(UnconstrainedMode::Deny),
+        Some("allow") => Ok(UnconstrainedMode::Allow),
+        Some("warn") | None => Ok(UnconstrainedMode::Warn),
+        Some(_) => anyhow::bail!(
+            "config error: enforcement.unconstrained_tools must be one of: warn, deny, allow"
+        ),
     }
-}
-
-fn has_structured_policy_shape(root: &serde_json::Value) -> bool {
-    [
-        "version",
-        "name",
-        "tools",
-        "allow",
-        "deny",
-        "schemas",
-        "constraints",
-        "enforcement",
-        "limits",
-        "signatures",
-        "tool_pins",
-        "discovery",
-        "runtime_monitor",
-        "kill_switch",
-    ]
-    .iter()
-    .any(|k| root.get(k).is_some())
 }
 
 pub(super) fn load_policy_source(path: &Path) -> anyhow::Result<PolicySource> {
@@ -76,7 +60,15 @@ pub(super) fn load_policy_source(path: &Path) -> anyhow::Result<PolicySource> {
     let policy_json: serde_json::Value = serde_yaml::from_str(&policy_content)
         .map_err(|e| anyhow::anyhow!("config error: invalid args_valid policy YAML: {}", e))?;
 
-    if has_structured_policy_shape(&policy_json) {
+    load_policy_source_value(policy_json)
+}
+
+pub(super) fn load_policy_source_value(
+    policy_json: serde_json::Value,
+) -> anyhow::Result<PolicySource> {
+    validate_args_policy_value(&policy_json)?;
+
+    if has_structured_args_policy_shape(&policy_json) {
         let allow = {
             let mut merged = extract_string_list(policy_json.get("allow"));
             merged.extend(extract_string_list(policy_json.pointer("/tools/allow")));
@@ -101,11 +93,11 @@ pub(super) fn load_policy_source(path: &Path) -> anyhow::Result<PolicySource> {
             allow,
             deny,
             schemas,
-            unconstrained: parse_unconstrained_mode(&policy_json),
+            unconstrained: parse_unconstrained_mode(&policy_json)?,
         }))
     } else {
-        let schemas: HashMap<String, serde_json::Value> = serde_yaml::from_str(&policy_content)
-            .map_err(|e| anyhow::anyhow!("config error: invalid args_valid policy YAML: {}", e))?;
+        let schemas: HashMap<String, serde_json::Value> = serde_json::from_value(policy_json)
+            .map_err(|e| anyhow::anyhow!("config error: invalid args_valid schema map: {}", e))?;
         Ok(PolicySource::SchemaMap(schemas))
     }
 }
