@@ -657,16 +657,30 @@ fn test_explicit_schema_containers_preserve_keyword_tool_names() {
 }
 
 #[test]
-fn tool_named_schemas_is_not_a_structured_policy_without_a_policy_discriminant() {
-    let schema_map = serde_json::json!({
+fn schemas_only_policy_shape_is_rejected_as_ambiguous() {
+    let ambiguous = serde_json::json!({
         "schemas": {
             "properties": {
                 "query": {"type": "string"}
             }
         }
     });
+    let err = crate::model::validate_args_policy_value(&ambiguous)
+        .expect_err("schemas-only input has two valid interpretations");
+    assert!(err.to_string().contains("ambiguous"), "{err:#}");
 
-    assert!(!crate::model::has_structured_args_policy_shape(&schema_map));
+    let explicit = serde_json::json!({
+        "version": "2.0",
+        "schemas": {
+            "schemas": {
+                "properties": {
+                    "query": {"type": "string"}
+                }
+            }
+        }
+    });
+    crate::model::validate_args_policy_value(&explicit)
+        .expect("a versioned container disambiguates the tool named schemas");
 }
 
 #[test]

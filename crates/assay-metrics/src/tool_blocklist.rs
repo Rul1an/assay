@@ -2,7 +2,7 @@ use assay_core::metrics_api::{Metric, MetricResult};
 use assay_core::model::{Expected, LlmResponse, TestCase, ToolCallRecord};
 use async_trait::async_trait;
 
-use crate::tool_calls::extract_tool_calls_canonical_or_empty;
+use crate::tool_calls::extract_tool_calls_canonical;
 
 pub struct ToolBlocklistMetric;
 
@@ -23,7 +23,15 @@ impl Metric for ToolBlocklistMetric {
             _ => return Ok(MetricResult::pass(1.0)), // N/A
         };
 
-        let tool_calls: Vec<ToolCallRecord> = extract_tool_calls_canonical_or_empty(resp);
+        let tool_calls: Vec<ToolCallRecord> = match extract_tool_calls_canonical(resp) {
+            Ok(tool_calls) => tool_calls,
+            Err(_) => {
+                return Ok(MetricResult::fail(
+                    0.0,
+                    "tool_blocklist could not read canonical tool-call evidence",
+                ));
+            }
+        };
 
         for call in tool_calls {
             if blocked.contains(&call.tool_name) {
@@ -92,14 +100,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn malformed_or_legacy_tool_calls_are_canonical_or_empty() {
+    async fn malformed_or_legacy_tool_calls_fail_closed() {
         let metric = ToolBlocklistMetric;
         let tc = test_case();
         let expected = Expected::ToolBlocklist {
             blocked: vec!["exec".to_string()],
         };
 
-        // Non-array malformed payload -> empty -> pass.
         let malformed_resp = LlmResponse {
             meta: serde_json::json!({"tool_calls": {"tool_name": "exec"}}),
             ..Default::default()
@@ -108,9 +115,8 @@ mod tests {
             .evaluate(&tc, &expected, &malformed_resp)
             .await
             .unwrap();
-        assert!(malformed.passed);
+        assert!(!malformed.passed);
 
-        // Legacy minimal shape is not canonical ToolCallRecord -> empty -> pass.
         let legacy_resp = LlmResponse {
             meta: serde_json::json!({
                 "tool_calls": [{
@@ -121,6 +127,6 @@ mod tests {
             ..Default::default()
         };
         let legacy = metric.evaluate(&tc, &expected, &legacy_resp).await.unwrap();
-        assert!(legacy.passed);
+        assert!(!legacy.passed);
     }
 }

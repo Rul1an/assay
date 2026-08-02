@@ -184,10 +184,11 @@ async fn metadata_named_tool_remains_a_schema_map_entry() {
 }
 
 #[tokio::test]
-async fn tool_named_schemas_remains_a_schema_map_entry() {
+async fn tool_named_schemas_requires_an_explicit_policy_discriminant() {
     let metric = ArgsValidMetric;
     let tc = make_test_case();
-    let expected = Expected::ArgsValid {
+    let resp = make_response_with_tool("schemas", serde_json::json!({"query": 42}));
+    let ambiguous = Expected::ArgsValid {
         policy: None,
         schema: Some(serde_json::json!({
             "schemas": {
@@ -197,8 +198,24 @@ async fn tool_named_schemas_remains_a_schema_map_entry() {
             }
         })),
     };
-    let resp = make_response_with_tool("schemas", serde_json::json!({"query": 42}));
+    metric
+        .evaluate(&tc, &ambiguous, &resp)
+        .await
+        .expect_err("schemas-only input must not be assigned a silent interpretation");
 
+    let expected = Expected::ArgsValid {
+        policy: None,
+        schema: Some(serde_json::json!({
+            "version": "2.0",
+            "schemas": {
+                "schemas": {
+                    "properties": {
+                        "query": {"type": "string"}
+                    }
+                }
+            }
+        })),
+    };
     let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
     assert!(
         !result.passed,
@@ -226,6 +243,37 @@ async fn direct_metric_rejects_policies_that_execution_preflight_rejects() {
             .await
             .expect_err("direct metric use must preserve execution validation");
     }
+
+    metric
+        .evaluate(
+            &tc,
+            &Expected::ArgsValid {
+                policy: None,
+                schema: None,
+            },
+            &resp,
+        )
+        .await
+        .expect_err("an empty args_valid contract must not pass direct metric use");
+}
+
+#[tokio::test]
+async fn malformed_present_tool_calls_fail_args_validation() {
+    let metric = ArgsValidMetric;
+    let tc = make_test_case();
+    let expected = Expected::ArgsValid {
+        policy: None,
+        schema: Some(serde_json::json!({
+            "Search": {"type": "object"}
+        })),
+    };
+    let resp = LlmResponse {
+        meta: serde_json::json!({"tool_calls": {"tool_name": "Search"}}),
+        ..Default::default()
+    };
+
+    let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+    assert!(!result.passed, "malformed presence is not an empty trace");
 }
 
 #[tokio::test]
@@ -301,7 +349,7 @@ schemas:
 }
 
 #[test]
-fn extract_tool_calls_best_effort_preserves_order_and_field_mapping() {
+fn extract_tool_calls_best_effort_preserves_valid_legacy_order_and_field_mapping() {
     let resp = LlmResponse {
         meta: serde_json::json!({
             "tool_calls": [
@@ -318,17 +366,14 @@ fn extract_tool_calls_best_effort_preserves_order_and_field_mapping() {
                     "tool": "beta",
                     "args": ["x"],
                     "error": {"code": "E_FAIL"}
-                },
-                {
-                    "args": {"missing_tool": true}
                 }
             ]
         }),
         ..Default::default()
     };
 
-    let calls = extract_tool_calls_best_effort(&resp);
-    assert_eq!(calls.len(), 2, "non-parseable entries must be skipped");
+    let calls = extract_tool_calls_best_effort(&resp).unwrap();
+    assert_eq!(calls.len(), 2);
 
     assert_eq!(calls[0].tool_name, "alpha");
     assert_eq!(calls[0].id, "c0");
@@ -348,16 +393,16 @@ fn extract_tool_calls_best_effort_preserves_order_and_field_mapping() {
 }
 
 #[test]
-fn extract_tool_calls_best_effort_returns_empty_for_missing_or_non_array_tool_calls() {
+fn extract_tool_calls_best_effort_distinguishes_missing_from_non_array() {
     let missing = LlmResponse {
         meta: serde_json::json!({}),
         ..Default::default()
     };
-    assert!(extract_tool_calls_best_effort(&missing).is_empty());
+    assert!(extract_tool_calls_best_effort(&missing).unwrap().is_empty());
 
     let non_array = LlmResponse {
         meta: serde_json::json!({"tool_calls": {"tool_name": "x"}}),
         ..Default::default()
     };
-    assert!(extract_tool_calls_best_effort(&non_array).is_empty());
+    assert!(extract_tool_calls_best_effort(&non_array).is_err());
 }

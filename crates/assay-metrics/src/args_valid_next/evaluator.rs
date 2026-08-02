@@ -28,6 +28,9 @@ impl Metric for ArgsValidMetric {
             Expected::ArgsValid { policy, schema } => (policy, schema),
             _ => return Ok(MetricResult::pass(1.0)),
         };
+        if policy_path.is_none() && inline_schema.is_none() {
+            anyhow::bail!("config error: args_valid requires `policy` or `schema`");
+        }
 
         let policy_source = if let Some(schema) = inline_schema {
             load_policy_source_value(schema.clone())?
@@ -48,7 +51,15 @@ impl Metric for ArgsValidMetric {
         };
 
         // No calls -> valid args (vacuously true)
-        let tool_calls: Vec<ToolCallRecord> = extract_tool_calls_best_effort(resp);
+        let tool_calls: Vec<ToolCallRecord> = match extract_tool_calls_best_effort(resp) {
+            Ok(tool_calls) => tool_calls,
+            Err(_) => {
+                return Ok(MetricResult::fail(
+                    0.0,
+                    "args_valid could not read tool-call evidence",
+                ));
+            }
+        };
 
         let mut errors: Vec<serde_json::Value> = Vec::new();
 

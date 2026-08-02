@@ -51,7 +51,15 @@ impl Metric for ToolOutputValidMetric {
             compiled_schemas.insert(tool_name.as_str(), compiled);
         }
 
-        let tool_calls = extract_tool_calls_best_effort(resp);
+        let tool_calls = match extract_tool_calls_best_effort(resp) {
+            Ok(tool_calls) => tool_calls,
+            Err(_) => {
+                return Ok(MetricResult::fail(
+                    0.0,
+                    "tool_output_valid could not read tool-call evidence",
+                ));
+            }
+        };
         let mut violations: Vec<serde_json::Value> = Vec::new();
 
         for call in &tool_calls {
@@ -134,6 +142,24 @@ mod tests {
             meta: serde_json::json!({ "tool_calls": [call] }),
             ..Default::default()
         }
+    }
+
+    #[tokio::test]
+    async fn malformed_present_tool_calls_fail_output_validation() {
+        let metric = ToolOutputValidMetric;
+        let expected = Expected::ToolOutputValid {
+            schemas: Some(serde_json::json!({"Search": {"type": "object"}})),
+        };
+        let resp = LlmResponse {
+            meta: serde_json::json!({"tool_calls": {"tool_name": "Search"}}),
+            ..Default::default()
+        };
+
+        let result = metric
+            .evaluate(&test_case(), &expected, &resp)
+            .await
+            .unwrap();
+        assert!(!result.passed, "malformed presence is not an empty trace");
     }
 
     #[tokio::test]

@@ -276,6 +276,15 @@ fn validate_args_policy(path: &str) -> anyhow::Result<()> {
 
 /// Validate an inline `args_valid` policy using the execution-time contract.
 pub fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<()> {
+    if policy
+        .as_object()
+        .is_some_and(|root| root.len() == 1 && root.contains_key("schemas"))
+    {
+        anyhow::bail!(
+            "args_valid policy with only `schemas` is ambiguous; add `version: \"2.0\"` for a structured policy, including a tool named `schemas`"
+        );
+    }
+
     let structured = has_structured_args_policy_shape(policy);
 
     if structured {
