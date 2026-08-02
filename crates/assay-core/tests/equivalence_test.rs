@@ -150,9 +150,10 @@ tests:
     Ok(())
 }
 
-fn write_ref_config(dir: &std::path::Path, policy: &str) -> anyhow::Result<std::path::PathBuf> {
-    std::fs::write(dir.join("policy.yaml"), policy)?;
-    let config_path = dir.join("config.yaml");
+fn write_ref_config(policy: &str) -> anyhow::Result<(tempfile::TempDir, std::path::PathBuf)> {
+    let dir = tempdir()?;
+    std::fs::write(dir.path().join("policy.yaml"), policy)?;
+    let config_path = dir.path().join("config.yaml");
     std::fs::write(
         &config_path,
         r#"
@@ -165,13 +166,12 @@ tests:
       $ref: policy.yaml
 "#,
     )?;
-    Ok(config_path)
+    Ok((dir, config_path))
 }
 
 #[test]
 fn test_reference_resolution_rejects_malformed_must_contain() -> anyhow::Result<()> {
-    let dir = tempdir()?;
-    let config_path = write_ref_config(dir.path(), "must_contain: 42\n")?;
+    let (dir, config_path) = write_ref_config("must_contain: 42\n")?;
     let config = load_config(&config_path, true, false)?;
 
     let err = resolve_policies(config, dir.path())
@@ -182,8 +182,7 @@ fn test_reference_resolution_rejects_malformed_must_contain() -> anyhow::Result<
 
 #[test]
 fn test_reference_resolution_rejects_vacuous_must_contain() -> anyhow::Result<()> {
-    let dir = tempdir()?;
-    let config_path = write_ref_config(dir.path(), "must_contain: []\n")?;
+    let (dir, config_path) = write_ref_config("must_contain: []\n")?;
     let config = load_config(&config_path, true, false)?;
 
     let err = resolve_policies(config, dir.path())
@@ -194,8 +193,7 @@ fn test_reference_resolution_rejects_vacuous_must_contain() -> anyhow::Result<()
 
 #[test]
 fn test_reference_resolution_accepts_strict_expected_and_root_schema() -> anyhow::Result<()> {
-    let tagged = tempdir()?;
-    let tagged_path = write_ref_config(tagged.path(), "type: regex_match\npattern: '^ready$'\n")?;
+    let (tagged, tagged_path) = write_ref_config("type: regex_match\npattern: '^ready$'\n")?;
     let tagged_config = load_config(&tagged_path, true, false)?;
     let tagged_resolved = resolve_policies(tagged_config, tagged.path())?;
     assert!(matches!(
@@ -203,11 +201,8 @@ fn test_reference_resolution_accepts_strict_expected_and_root_schema() -> anyhow
         Expected::RegexMatch { .. }
     ));
 
-    let schema = tempdir()?;
-    let schema_path = write_ref_config(
-        schema.path(),
-        "type: object\nproperties:\n  query: {type: string}\n",
-    )?;
+    let (schema, schema_path) =
+        write_ref_config("type: object\nproperties:\n  query: {type: string}\n")?;
     let schema_config = load_config(&schema_path, true, false)?;
     let schema_resolved = resolve_policies(schema_config, schema.path())?;
     assert!(matches!(
