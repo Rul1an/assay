@@ -699,6 +699,39 @@ fn structured_args_policy_rejects_unenforced_nested_tool_controls() {
 }
 
 #[test]
+fn structured_args_policy_supports_shared_defs_but_defs_alone_are_vacuous() {
+    let shared_defs = serde_json::json!({
+        "safe_path": {
+            "type": "string",
+            "pattern": "^/workspace/.*"
+        }
+    });
+    let policy = serde_json::json!({
+        "version": "2.0",
+        "schemas": {
+            "$defs": shared_defs.clone(),
+            "read_file": {
+                "type": "object",
+                "properties": {
+                    "path": {"$ref": "#/$defs/safe_path"}
+                },
+                "required": ["path"]
+            }
+        }
+    });
+    crate::model::validate_args_policy_value(&policy)
+        .expect("documented shared definitions must compile for each tool schema");
+
+    let defs_only = serde_json::json!({
+        "version": "2.0",
+        "schemas": {"$defs": shared_defs}
+    });
+    let err = crate::model::validate_args_policy_value(&defs_only)
+        .expect_err("shared definitions without a tool schema assert nothing");
+    assert!(err.to_string().contains("asserts nothing"), "{err:#}");
+}
+
+#[test]
 fn test_tagged_tool_output_valid_without_schemas_is_hard_error() {
     let yaml = r#"
             id: vacuous_output

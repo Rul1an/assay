@@ -163,6 +163,53 @@ async fn structured_trivial_schema_still_enforces_unconstrained_deny() {
 }
 
 #[tokio::test]
+async fn structured_policy_injects_shared_defs_into_each_tool_schema() {
+    let metric = ArgsValidMetric;
+    let tc = make_test_case();
+    let expected = Expected::ArgsValid {
+        policy: None,
+        schema: Some(serde_json::json!({
+            "version": "2.0",
+            "schemas": {
+                "$defs": {
+                    "safe_path": {
+                        "type": "string",
+                        "pattern": "^/workspace/.*"
+                    }
+                },
+                "read_file": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"$ref": "#/$defs/safe_path"}
+                    },
+                    "required": ["path"]
+                }
+            }
+        })),
+    };
+
+    let valid = metric
+        .evaluate(
+            &tc,
+            &expected,
+            &make_response_with_tool("read_file", serde_json::json!({"path": "/workspace/a"})),
+        )
+        .await
+        .expect("the documented shared definition must compile");
+    assert!(valid.passed, "details={}", valid.details);
+
+    let invalid = metric
+        .evaluate(
+            &tc,
+            &expected,
+            &make_response_with_tool("read_file", serde_json::json!({"path": "/tmp/a"})),
+        )
+        .await
+        .expect("schema violations are metric results, not configuration errors");
+    assert!(!invalid.passed, "the injected definition must be enforced");
+}
+
+#[tokio::test]
 async fn metadata_named_tool_remains_a_schema_map_entry() {
     let metric = ArgsValidMetric;
     let tc = make_test_case();

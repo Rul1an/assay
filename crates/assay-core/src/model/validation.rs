@@ -69,10 +69,13 @@ pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
 
 fn schema_map_asserts_nothing(value: &serde_json::Value) -> bool {
     value.as_object().is_some_and(|schemas| {
-        schemas.values().all(|schema| {
-            schema == &serde_json::Value::Bool(true)
-                || schema.as_object().is_some_and(serde_json::Map::is_empty)
-        })
+        schemas
+            .iter()
+            .filter(|(tool, _)| tool.as_str() != "$defs")
+            .all(|(_, schema)| {
+                schema == &serde_json::Value::Bool(true)
+                    || schema.as_object().is_some_and(serde_json::Map::is_empty)
+            })
     })
 }
 
@@ -342,7 +345,13 @@ pub fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<
                 .ok_or_else(|| anyhow::anyhow!("args_valid policy schemas must be a mapping"))?;
             if !schemas.is_empty() {
                 let schemas = serde_json::Value::Object(schemas.clone());
-                validate_schema_map(&schemas, false, false)?;
+                let prepared_schemas = crate::policy_engine::schema_map_with_root_defs(&schemas);
+                if !prepared_schemas
+                    .as_object()
+                    .is_some_and(serde_json::Map::is_empty)
+                {
+                    validate_schema_map(&prepared_schemas, false, false)?;
+                }
                 effective |= !schema_map_asserts_nothing(&schemas);
             }
         }

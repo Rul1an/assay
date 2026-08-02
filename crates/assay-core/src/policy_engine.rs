@@ -107,6 +107,26 @@ pub struct PolicyState {
     tool_names: Vec<String>,
 }
 
+pub(crate) fn schema_map_with_root_defs(policy: &Value) -> Value {
+    let Some(schemas) = policy.as_object() else {
+        return policy.clone();
+    };
+    let root_defs = schemas.get("$defs");
+    Value::Object(
+        schemas
+            .iter()
+            .filter(|(tool, _)| tool.as_str() != "$defs")
+            .map(|(tool, schema)| {
+                let mut schema = schema.clone();
+                if let (Some(defs), Value::Object(schema)) = (root_defs, &mut schema) {
+                    schema.insert("$defs".to_string(), defs.clone());
+                }
+                (tool.clone(), schema)
+            })
+            .collect(),
+    )
+}
+
 impl PolicyState {
     /// Compile every tool schema in the policy once. A tool whose schema fails to compile is recorded
     /// as an error and only surfaces (as `E_SCHEMA_COMPILE`) if that tool is later evaluated, matching
@@ -114,7 +134,8 @@ impl PolicyState {
     pub fn compile(policy: &Value) -> Self {
         let mut validators = HashMap::new();
         let mut tool_names = Vec::new();
-        if let Some(obj) = policy.as_object() {
+        let prepared_policy = schema_map_with_root_defs(policy);
+        if let Some(obj) = prepared_policy.as_object() {
             for (tool, schema_val) in obj {
                 tool_names.push(tool.clone());
                 validators.insert(
