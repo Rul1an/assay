@@ -149,3 +149,124 @@ tests:
 
     Ok(())
 }
+
+fn write_ref_config(dir: &std::path::Path, policy: &str) -> anyhow::Result<std::path::PathBuf> {
+    std::fs::write(dir.join("policy.yaml"), policy)?;
+    let config_path = dir.join("config.yaml");
+    std::fs::write(
+        &config_path,
+        r#"
+suite: reference-resolution
+model: dummy
+tests:
+  - id: referenced
+    input: "hi"
+    expected:
+      $ref: policy.yaml
+"#,
+    )?;
+    Ok(config_path)
+}
+
+#[test]
+fn test_reference_resolution_rejects_malformed_must_contain() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let config_path = write_ref_config(dir.path(), "must_contain: 42\n")?;
+    let config = load_config(&config_path, true, false)?;
+
+    let err = resolve_policies(config, dir.path())
+        .expect_err("a malformed referenced assertion must not become an empty default");
+    assert!(err.to_string().contains("must_contain"), "{err:#}");
+    Ok(())
+}
+
+#[test]
+fn test_reference_resolution_rejects_vacuous_must_contain() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let config_path = write_ref_config(dir.path(), "must_contain: []\n")?;
+    let config = load_config(&config_path, true, false)?;
+
+    let err = resolve_policies(config, dir.path())
+        .expect_err("a referenced assertion must pass the same vacuity checks as inline YAML");
+    assert!(err.to_string().contains("asserts nothing"), "{err:#}");
+    Ok(())
+}
+
+#[test]
+fn test_reference_resolution_accepts_strict_expected_and_root_schema() -> anyhow::Result<()> {
+    let tagged = tempdir()?;
+    let tagged_path = write_ref_config(tagged.path(), "type: regex_match\npattern: '^ready$'\n")?;
+    let tagged_config = load_config(&tagged_path, true, false)?;
+    let tagged_resolved = resolve_policies(tagged_config, tagged.path())?;
+    assert!(matches!(
+        tagged_resolved.tests[0].expected,
+        Expected::RegexMatch { .. }
+    ));
+
+    let schema = tempdir()?;
+    let schema_path = write_ref_config(
+        schema.path(),
+        "type: object\nproperties:\n  query: {type: string}\n",
+    )?;
+    let schema_config = load_config(&schema_path, true, false)?;
+    let schema_resolved = resolve_policies(schema_config, schema.path())?;
+    assert!(matches!(
+        schema_resolved.tests[0].expected,
+        Expected::ArgsValid { .. }
+    ));
+    Ok(())
+}
+
+#[test]
+fn test_policy_resolution_rejects_vacuous_or_unimplemented_constraints() -> anyhow::Result<()> {
+    let args = tempdir()?;
+    std::fs::write(args.path().join("schema.yaml"), "{}\n")?;
+    let args_config_path = args.path().join("args.yaml");
+    std::fs::write(
+        &args_config_path,
+        r#"
+suite: policy-resolution
+model: dummy
+tests:
+  - id: empty-schema
+    input: "hi"
+    expected:
+      type: args_valid
+      policy: schema.yaml
+"#,
+    )?;
+    let args_config = load_config(&args_config_path, true, false)?;
+    let args_err = resolve_policies(args_config, args.path())
+        .expect_err("resolved policy files must pass the vacuity check");
+    let args_chain = format!("{args_err:#}");
+    assert!(args_chain.contains("asserts nothing"), "{args_chain}");
+
+    let sequence = tempdir()?;
+    std::fs::write(
+        sequence.path().join("rules.yaml"),
+        "- type: eventually\n  tool: Search\n  within: 2\n",
+    )?;
+    let sequence_config_path = sequence.path().join("sequence.yaml");
+    std::fs::write(
+        &sequence_config_path,
+        r#"
+suite: policy-resolution
+model: dummy
+tests:
+  - id: unsupported-rule
+    input: "hi"
+    expected:
+      type: sequence_valid
+      policy: rules.yaml
+"#,
+    )?;
+    let sequence_config = load_config(&sequence_config_path, true, false)?;
+    let sequence_err = resolve_policies(sequence_config, sequence.path())
+        .expect_err("resolved policy rules ignored by the evaluator must not execute");
+    let sequence_chain = format!("{sequence_err:#}");
+    assert!(
+        sequence_chain.contains("not executable"),
+        "{sequence_chain}"
+    );
+    Ok(())
+}

@@ -42,50 +42,33 @@ pub fn resolve_policies(mut config: EvalConfig, base_dir: &Path) -> Result<EvalC
             }
             Expected::Reference { path } => {
                 let policy_content = read_policy_file(base_dir, path)?;
-                // Heuristic parsing for legacy policies
-                // 1. Try parsing as full valid Expected (V1)
-                if let Ok(loaded) = serde_yaml::from_str::<Expected>(&policy_content) {
-                    test.expected = loaded;
-                } else {
-                    // 2. Try inferring type from keys
-                    let v: serde_json::Value = serde_yaml::from_str(&policy_content)
-                        .with_context(|| format!("failed to parse policy: {}", path))?;
+                let value: serde_json::Value = serde_yaml::from_str(&policy_content)
+                    .with_context(|| format!("failed to parse policy: {}", path))?;
 
-                    if v.get("schema").is_some() {
-                        test.expected = Expected::ArgsValid {
+                test.expected = match crate::model::parse_expected_entry(&value) {
+                    Ok(expected) => expected,
+                    Err(_parse_error)
+                        if value.get("type").and_then(|kind| kind.as_str()) == Some("object") =>
+                    {
+                        // Some legacy references point directly to a root JSON Schema rather
+                        // than to an Expected block. Preserve that documented migration form.
+                        Expected::ArgsValid {
                             policy: None,
-                            schema: v.get("schema").cloned(),
-                        };
-                    } else if v.get("sequence").is_some() {
-                        test.expected = Expected::SequenceValid {
-                            policy: None,
-                            sequence: serde_json::from_value(v.get("sequence").unwrap().clone())
-                                .ok(),
-                            rules: None,
-                        };
-                    } else if v.get("must_contain").is_some() {
-                        test.expected = Expected::MustContain {
-                            must_contain: serde_json::from_value(
-                                v.get("must_contain").unwrap().clone(),
-                            )
-                            .unwrap_or_default(),
-                        };
-                    } else {
-                        // Fallback: try parsing as simple schema (for ArgsValid ref)
-                        // Some legacy refs pointed directly to a JSON schema
-                        if v.get("type").and_then(|t| t.as_str()) == Some("object") {
-                            test.expected = Expected::ArgsValid {
-                                policy: None,
-                                schema: Some(v),
-                            };
-                        } else {
-                            anyhow::bail!("Could not infer policy type for {}", path);
+                            schema: Some(value),
                         }
                     }
-                }
+                    Err(parse_error) => anyhow::bail!(
+                        "failed to resolve expected reference '{}': {}",
+                        path,
+                        parse_error
+                    ),
+                };
             }
             _ => {}
         }
+
+        crate::model::validate_expected_for_execution(&test.expected)
+            .with_context(|| format!("test '{}': resolved expected block is invalid", test.id))?;
     }
 
     // Auto-bump version if resolving?

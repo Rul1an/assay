@@ -8,6 +8,8 @@ pub(crate) async fn run_test_once_impl(
     cfg: &EvalConfig,
     tc: &TestCase,
 ) -> anyhow::Result<(TestResultRow, LlmResponse)> {
+    crate::model::validate_test_case_for_execution(tc)?;
+
     let expected_json = serde_json::to_string(&tc.expected).unwrap_or_default();
     let metric_versions = [("assay", env!("CARGO_PKG_VERSION"))];
 

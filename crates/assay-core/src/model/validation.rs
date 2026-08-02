@@ -1,6 +1,8 @@
 use crate::on_error::ErrorPolicy;
 
-use super::types::{EvalConfig, Expected, Settings, TestCase, TestStatus, ThresholdingConfig};
+use super::types::{
+    EvalConfig, Expected, SequenceRule, Settings, TestCase, TestStatus, ThresholdingConfig,
+};
 
 pub(crate) fn is_default_otel(o: &crate::config::otel::OtelConfig) -> bool {
     o == &crate::config::otel::OtelConfig::default()
@@ -25,15 +27,17 @@ pub(crate) fn is_default_settings(s: &Settings) -> bool {
 /// that would otherwise pass without evaluating any constraint.
 pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
     match e {
-        Expected::MustContain { must_contain } if must_contain.is_empty() => Some("must_contain"),
+        Expected::MustContain { must_contain } if must_contain.iter().all(String::is_empty) => {
+            Some("must_contain")
+        }
         Expected::MustNotContain { must_not_contain } if must_not_contain.is_empty() => {
             Some("must_not_contain")
         }
+        Expected::RegexMatch { pattern, .. } if pattern.is_empty() => Some("pattern"),
+        Expected::SemanticSimilarityTo { min_score, .. } if *min_score <= -1.0 => Some("min_score"),
         Expected::ArgsValid { policy, schema }
-            if policy.is_none()
-                && schema
-                    .as_ref()
-                    .is_none_or(|value| value.as_object().is_some_and(|map| map.is_empty())) =>
+            if schema.as_ref().is_some_and(schema_map_asserts_nothing)
+                || (policy.is_none() && schema.is_none()) =>
         {
             Some("policy/schema")
         }
@@ -48,14 +52,100 @@ pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
             Some("policy/sequence/rules")
         }
         Expected::ToolOutputValid { schemas }
-            if schemas
-                .as_ref()
-                .is_none_or(|value| value.as_object().is_some_and(|map| map.is_empty())) =>
+            if schemas.as_ref().is_none_or(schema_map_asserts_nothing) =>
         {
             Some("schemas")
         }
+        Expected::ToolBlocklist { blocked } if blocked.is_empty() => Some("blocked"),
         _ => None,
     }
+}
+
+fn schema_map_asserts_nothing(value: &serde_json::Value) -> bool {
+    value.as_object().is_some_and(|schemas| {
+        schemas.values().all(|schema| {
+            schema == &serde_json::Value::Bool(true)
+                || schema.as_object().is_some_and(serde_json::Map::is_empty)
+        })
+    })
+}
+
+/// Explain an `Expected` shape that the current metric set cannot execute as written.
+pub(crate) fn non_executable_expected_reason(e: &Expected) -> Option<&'static str> {
+    match e {
+        Expected::JudgeCriteria { .. } => Some("judge_criteria has no registered evaluator"),
+        Expected::SequenceValid {
+            rules: Some(rules), ..
+        } => rules.iter().find_map(|rule| match rule {
+            SequenceRule::Require { .. }
+            | SequenceRule::Blocklist { .. }
+            | SequenceRule::Before { .. } => None,
+            SequenceRule::Eventually { .. } => {
+                Some("sequence rule eventually is not executable by sequence_valid")
+            }
+            SequenceRule::MaxCalls { .. } => {
+                Some("sequence rule max_calls is not executable by sequence_valid")
+            }
+            SequenceRule::After { .. } => {
+                Some("sequence rule after is not executable by sequence_valid")
+            }
+            SequenceRule::NeverAfter { .. } => {
+                Some("sequence rule never_after is not executable by sequence_valid")
+            }
+            SequenceRule::Sequence { .. } => {
+                Some("sequence rule sequence is not executable by sequence_valid")
+            }
+        }),
+        _ => None,
+    }
+}
+
+pub(crate) fn ineffective_expected_reason(e: &Expected) -> Option<&'static str> {
+    match e {
+        Expected::SequenceValid {
+            rules: Some(rules), ..
+        } if rules.iter().any(|rule| {
+            matches!(
+                rule,
+                SequenceRule::Before { first, then } if first == then
+            )
+        }) =>
+        {
+            Some("a before rule with identical tools cannot constrain a trace")
+        }
+        _ => None,
+    }
+}
+
+/// Reject any expected value that cannot safely reach metric dispatch.
+pub(crate) fn validate_expected_for_execution(e: &Expected) -> anyhow::Result<()> {
+    if matches!(e, Expected::Reference { .. }) {
+        anyhow::bail!("unresolved `$ref` cannot be executed; resolve or migrate it first");
+    }
+    if let Some(field) = vacuous_expected_field(e) {
+        anyhow::bail!("`{field}` asserts nothing");
+    }
+    if let Some(reason) = non_executable_expected_reason(e) {
+        anyhow::bail!("expected block is not executable: {reason}");
+    }
+    if let Some(reason) = ineffective_expected_reason(e) {
+        anyhow::bail!("{reason}");
+    }
+    Ok(())
+}
+
+/// Validate the execution contract while preserving omitted-`expected` compatibility.
+pub(crate) fn validate_test_case_for_execution(test: &TestCase) -> anyhow::Result<()> {
+    // Deserialization represents an omitted `expected:` key with this exact default.
+    // A written empty block never reaches here because the parser rejects it. Keep
+    // the historical warning-only behavior until the assertion contract is tightened.
+    if matches!(
+        &test.expected,
+        Expected::MustContain { must_contain } if must_contain.is_empty()
+    ) {
+        return Ok(());
+    }
+    validate_expected_for_execution(&test.expected)
 }
 
 /// True when `expected` asserts nothing.

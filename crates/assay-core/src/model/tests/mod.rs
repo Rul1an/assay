@@ -300,6 +300,260 @@ fn test_empty_sequence_with_nonempty_rules_still_parses() {
 }
 
 #[test]
+fn test_tagged_must_contain_with_only_empty_strings_is_hard_error() {
+    let yaml = r#"
+            id: vacuous_tagged_must_contain
+            input: "test"
+            expected:
+              type: must_contain
+              must_contain: [""]
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("must_contain with only empty strings must not parse");
+    assert!(err.to_string().contains("asserts nothing"), "{}", err);
+}
+
+#[test]
+fn test_legacy_scalar_empty_must_contain_is_hard_error() {
+    let yaml = r#"
+            id: vacuous_legacy_must_contain
+            input: "test"
+            expected:
+              must_contain: ""
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("legacy empty must_contain must not parse");
+    assert!(err.to_string().contains("asserts nothing"), "{}", err);
+}
+
+#[test]
+fn test_tagged_empty_regex_match_is_hard_error() {
+    let yaml = r#"
+            id: vacuous_regex
+            input: "test"
+            expected:
+              type: regex_match
+              pattern: ""
+        "#;
+    let err =
+        serde_yaml::from_str::<TestCase>(yaml).expect_err("an empty positive regex must not parse");
+    assert!(err.to_string().contains("asserts nothing"), "{}", err);
+}
+
+#[test]
+fn test_tagged_empty_tool_blocklist_is_hard_error() {
+    let yaml = r#"
+            id: vacuous_blocklist
+            input: "test"
+            expected:
+              type: tool_blocklist
+              blocked: []
+        "#;
+    let err =
+        serde_yaml::from_str::<TestCase>(yaml).expect_err("an empty tool blocklist must not parse");
+    assert!(err.to_string().contains("asserts nothing"), "{}", err);
+}
+
+#[test]
+fn test_nonempty_semantic_constraints_still_parse() {
+    let cases = [
+        r#"
+            id: constrained_must_contain
+            input: "test"
+            expected:
+              type: must_contain
+              must_contain: ["needle", ""]
+        "#,
+        r#"
+            id: constrained_regex
+            input: "test"
+            expected:
+              type: regex_match
+              pattern: "needle"
+        "#,
+        r#"
+            id: constrained_blocklist
+            input: "test"
+            expected:
+              type: tool_blocklist
+              blocked: ["exec"]
+        "#,
+    ];
+
+    for yaml in cases {
+        serde_yaml::from_str::<TestCase>(yaml).expect("a nonempty constraint must parse");
+    }
+}
+
+#[test]
+fn test_semantic_similarity_at_cosine_floor_is_hard_error() {
+    let yaml = r#"
+            id: vacuous_similarity
+            input: "test"
+            expected:
+              type: semantic_similarity_to
+              semantic_similarity_to: "reference"
+              min_score: -1.0
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("the cosine floor cannot reject a valid similarity score");
+    assert!(err.to_string().contains("asserts nothing"), "{}", err);
+
+    let constrained = yaml.replace("-1.0", "-0.99");
+    serde_yaml::from_str::<TestCase>(&constrained)
+        .expect("a threshold above the cosine floor must parse");
+}
+
+#[test]
+fn test_judge_criteria_without_an_evaluator_is_hard_error() {
+    let yaml = r#"
+            id: unsupported_judge
+            input: "test"
+            expected:
+              type: judge_criteria
+              judge_criteria:
+                rubric: "be concise"
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("an Expected variant with no evaluator must not parse");
+    assert!(err.to_string().contains("not executable"), "{}", err);
+}
+
+#[test]
+fn test_unimplemented_sequence_rules_are_hard_errors() {
+    let rules = [
+        "eventually\n                  tool: Search\n                  within: 2",
+        "max_calls\n                  tool: Search\n                  max: 2",
+        "after\n                  trigger: Search\n                  then: Create\n                  within: 2",
+        "never_after\n                  trigger: Delete\n                  forbidden: Export",
+        "sequence\n                  tools: [Search, Create]\n                  strict: true",
+    ];
+
+    for rule in rules {
+        let yaml = format!(
+            r#"
+            id: unsupported_sequence_rule
+            input: "test"
+            expected:
+              type: sequence_valid
+              rules:
+                - type: {rule}
+        "#
+        );
+        let err = serde_yaml::from_str::<TestCase>(&yaml)
+            .expect_err("a sequence rule ignored by the evaluator must not parse");
+        assert!(err.to_string().contains("not executable"), "{}", err);
+    }
+}
+
+#[test]
+fn test_tautological_before_rule_is_hard_error() {
+    let yaml = r#"
+            id: tautological_before
+            input: "test"
+            expected:
+              type: sequence_valid
+              rules:
+                - type: before
+                  first: Search
+                  then: Search
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("before with identical operands passes every trace");
+    assert!(err.to_string().contains("cannot constrain"), "{}", err);
+}
+
+#[test]
+fn test_supported_sequence_rules_still_parse() {
+    let yaml = r#"
+            id: supported_sequence_rules
+            input: "test"
+            expected:
+              type: sequence_valid
+              rules:
+                - type: require
+                  tool: Search
+                - type: before
+                  first: Search
+                  then: Create
+                - type: blocklist
+                  pattern: Delete
+        "#;
+    serde_yaml::from_str::<TestCase>(yaml).expect("implemented sequence rules must parse");
+}
+
+#[test]
+fn test_obviously_universal_args_schemas_are_hard_errors() {
+    let schemas = ["{}", "{Search: {}}", "{Search: true, Create: {}}"];
+
+    for schema in schemas {
+        let yaml = format!(
+            r#"
+            id: vacuous_args_schema
+            input: "test"
+            expected:
+              type: args_valid
+              policy: ignored-by-inline-schema.yaml
+              schema: {schema}
+        "#
+        );
+        let err = serde_yaml::from_str::<TestCase>(&yaml)
+            .expect_err("an inline schema map that accepts everything must not parse");
+        assert!(err.to_string().contains("asserts nothing"), "{}", err);
+    }
+}
+
+#[test]
+fn test_obviously_universal_output_schemas_are_hard_errors() {
+    let schemas = ["{}", "{Search: {}}", "{Search: true, Create: {}}"];
+
+    for schema in schemas {
+        let yaml = format!(
+            r#"
+            id: vacuous_output_schema
+            input: "test"
+            expected:
+              type: tool_output_valid
+              schemas: {schema}
+        "#
+        );
+        let err = serde_yaml::from_str::<TestCase>(&yaml)
+            .expect_err("an output schema map that accepts everything must not parse");
+        assert!(err.to_string().contains("asserts nothing"), "{}", err);
+    }
+}
+
+#[test]
+fn test_constraining_schema_maps_still_parse() {
+    let cases = [
+        r#"
+            id: constrained_args_schema
+            input: "test"
+            expected:
+              type: args_valid
+              schema:
+                Search:
+                  type: object
+                  required: [query]
+        "#,
+        r#"
+            id: constrained_output_schema
+            input: "test"
+            expected:
+              type: tool_output_valid
+              schemas:
+                Search:
+                  type: object
+                  required: [results]
+        "#,
+    ];
+
+    for yaml in cases {
+        serde_yaml::from_str::<TestCase>(yaml).expect("a constraining schema map must parse");
+    }
+}
+
+#[test]
 fn test_tagged_tool_output_valid_without_schemas_is_hard_error() {
     let yaml = r#"
             id: vacuous_output

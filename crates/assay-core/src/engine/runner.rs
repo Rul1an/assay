@@ -393,6 +393,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn runner_rejects_an_unresolved_expected_reference_before_execution() {
+        let mut cfg = single_test_config(ErrorPolicy::Block);
+        cfg.tests[0].expected = Expected::Reference {
+            path: "checks/expected.yaml".to_string(),
+        };
+        let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));
+        let runner =
+            runner_for_contract_tests(client, vec![Arc::new(ScriptedMetric::always_pass())], 0);
+
+        let err = runner
+            .run_test_once(&cfg, &cfg.tests[0])
+            .await
+            .expect_err("an unresolved migration reference must not reach metric dispatch");
+        assert!(err.to_string().contains("unresolved `$ref`"), "{err:#}");
+    }
+
+    #[tokio::test]
+    async fn runner_allows_omitted_expected_when_trace_assertions_carry_the_test() {
+        let mut cfg = single_test_config(ErrorPolicy::Block);
+        cfg.tests[0].expected = Expected::default();
+        cfg.tests[0].assertions = Some(vec![
+            crate::agent_assertions::model::TraceAssertion::TraceMaxSteps { max: 1 },
+        ]);
+        let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));
+        let runner =
+            runner_for_contract_tests(client, vec![Arc::new(ScriptedMetric::always_pass())], 0);
+
+        runner
+            .run_test_once(&cfg, &cfg.tests[0])
+            .await
+            .expect("effective trace assertions may carry a test with no expected block");
+    }
+
+    #[tokio::test]
+    async fn runner_preserves_warning_only_compatibility_for_an_omitted_expected_block() {
+        let mut cfg = single_test_config(ErrorPolicy::Block);
+        cfg.tests[0].expected = Expected::default();
+        cfg.tests[0].assertions = None;
+        let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));
+        let runner =
+            runner_for_contract_tests(client, vec![Arc::new(ScriptedMetric::always_pass())], 0);
+
+        runner
+            .run_test_once(&cfg, &cfg.tests[0])
+            .await
+            .expect("omitting both checks remains a validate warning, not a runtime error");
+    }
+
+    #[tokio::test]
     async fn runner_contract_progress_sink_reports_done_total() -> anyhow::Result<()> {
         let cfg = config_with_test_ids(&["p1", "p2", "p3"], ErrorPolicy::Block);
         let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));

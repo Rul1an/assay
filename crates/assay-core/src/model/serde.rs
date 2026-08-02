@@ -38,10 +38,10 @@ fn value_kind(v: &serde_json::Value) -> &'static str {
 /// branch applied legacy heuristics, the scalar branch did not), which made
 /// `expected: {must_contain: [...]}` silently vacuous while the list-wrapped form
 /// of the same YAML worked.
-fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
+pub(crate) fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
     // 1. Strict V1 (tagged).
     let strict_err = match serde_json::from_value::<Expected>(item.clone()) {
-        Ok(exp) => return reject_vacuous(exp),
+        Ok(exp) => return reject_for_parse(exp),
         Err(e) => e,
     };
 
@@ -172,7 +172,7 @@ fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
     }
 
     if let Some(p) = parsed {
-        return reject_vacuous(p);
+        return reject_for_parse(p);
     }
 
     // 3. Nothing matched. A block that carries `type:` was asking for the tagged
@@ -212,6 +212,17 @@ fn reject_vacuous(exp: Expected) -> Result<Expected, String> {
          test's checks in `assertions:`.",
         field
     ))
+}
+
+fn reject_for_parse(exp: Expected) -> Result<Expected, String> {
+    let exp = reject_vacuous(exp)?;
+    if let Some(reason) = super::validation::non_executable_expected_reason(&exp) {
+        return Err(format!("expected block is not executable: {reason}"));
+    }
+    if let Some(reason) = super::validation::ineffective_expected_reason(&exp) {
+        return Err(reason.to_string());
+    }
+    Ok(exp)
 }
 
 /// Parse the whole `expected:` value (scalar or list form) for one test case.
