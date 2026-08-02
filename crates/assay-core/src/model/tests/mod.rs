@@ -1501,3 +1501,47 @@ fn universal_or_empty_tool_allowlists_do_not_rescue_a_vacuous_policy() {
         );
     }
 }
+
+#[test]
+fn args_policy_oracles_agree() {
+    // The load-time vacuity check and the execution-time effectiveness check are
+    // two implementations of one rule. Every round of review found them drifted
+    // apart in a different place, so pin them to each other rather than pinning
+    // each separately: a policy must not load and then be rejected at run.
+    let cases = [
+        serde_json::json!({"tools": {"allow": ["read_*"]}}),
+        serde_json::json!({"tools": {"allow": ["*"]}}),
+        serde_json::json!({"tools": {"allow": []}}),
+        serde_json::json!({"tools": {"allow": ["*", "read_x"]}}),
+        serde_json::json!({"tools": {"deny": []}}),
+        serde_json::json!({"tools": {"deny": ["*"]}}),
+        serde_json::json!({"allow": ["*"]}),
+        serde_json::json!({"allow": []}),
+        serde_json::json!({"allow": ["read_x"], "tools": {"allow": ["*"]}}),
+        serde_json::json!({"enforcement": {"unconstrained_tools": "deny"}}),
+        serde_json::json!({"enforcement": {"unconstrained_tools": "warn"}}),
+        serde_json::json!({"enforcement": {"unconstrained_tools": "allow"}}),
+        serde_json::json!({"version": "2.0"}),
+        serde_json::json!({
+            "tools": {"allow": ["read_*"]},
+            "schemas": {"read_file": {"type": "object", "required": ["path"]}}
+        }),
+        serde_json::json!({
+            "enforcement": {"unconstrained_tools": "warn"},
+            "schemas": {"read_file": {"type": "object", "required": ["path"]}}
+        }),
+        serde_json::json!({"version": "2.0", "schemas": {"$defs": {"p": {"type": "string"}}}}),
+    ];
+    for schema in cases {
+        let expected = Expected::ArgsValid {
+            schema: Some(schema.clone()),
+            policy: None,
+        };
+        let loads = crate::model::validation::vacuous_expected_field(&expected).is_none();
+        let runs = crate::model::validate_args_policy_value(&schema).is_ok();
+        assert_eq!(
+            loads, runs,
+            "oracles disagree for {schema}: load-time accepts={loads}, execution accepts={runs}"
+        );
+    }
+}
