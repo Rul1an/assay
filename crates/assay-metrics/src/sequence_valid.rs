@@ -251,6 +251,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn empty_exact_sequence_requires_no_tool_calls() {
+        let metric = SequenceValidMetric;
+        let expected = Expected::SequenceValid {
+            policy: None,
+            sequence: Some(Vec::new()),
+            rules: None,
+        };
+
+        let (empty_tc, empty_response) = make_test_case(Vec::new());
+        let empty_result = metric
+            .evaluate(&empty_tc, &expected, &empty_response)
+            .await
+            .unwrap();
+        assert!(empty_result.passed);
+
+        let (called_tc, called_response) = make_test_case(vec!["Search"]);
+        let called_result = metric
+            .evaluate(&called_tc, &expected, &called_response)
+            .await
+            .unwrap();
+        assert!(!called_result.passed);
+    }
+
+    #[tokio::test]
     async fn test_fails_when_missing_required() {
         let metric = SequenceValidMetric;
         let (tc, resp) = make_test_case(vec!["A", "C"]); // Missing B

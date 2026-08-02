@@ -63,6 +63,18 @@ fn test_empty_expected_list_is_rejected() {
     assert!(err.to_string().contains("empty list"), "{}", err);
 }
 
+#[test]
+fn test_explicit_null_expected_is_rejected_instead_of_treated_as_omitted() {
+    let yaml = r#"
+            id: explicit_null
+            input: "test"
+            expected: null
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("an explicit null expected block must not become the omitted sentinel");
+    assert!(err.to_string().contains("expected"), "{err}");
+}
+
 /// The headline regression: a typo in a key used to fall back to
 /// `Expected::default()` (an empty `must_contain`), which passes unconditionally.
 #[test]
@@ -252,7 +264,7 @@ fn test_tagged_sequence_valid_without_constraint_is_hard_error() {
 }
 
 #[test]
-fn test_tagged_sequence_valid_with_empty_sequence_is_hard_error() {
+fn test_tagged_sequence_valid_with_empty_sequence_is_an_exact_constraint() {
     let yaml = r#"
             id: vacuous_tagged_sequence
             input: "test"
@@ -260,22 +272,42 @@ fn test_tagged_sequence_valid_with_empty_sequence_is_hard_error() {
               type: sequence_valid
               sequence: []
         "#;
-    let err = serde_yaml::from_str::<TestCase>(yaml)
-        .expect_err("sequence_valid with an empty sequence must not parse");
-    assert!(err.to_string().contains("asserts nothing"), "{}", err);
+    let tc: TestCase = serde_yaml::from_str(yaml)
+        .expect("an empty exact sequence requires the trace to contain no tool calls");
+    assert!(matches!(
+        tc.expected,
+        Expected::SequenceValid {
+            sequence: Some(ref sequence),
+            ..
+        } if sequence.is_empty()
+    ));
 }
 
 #[test]
-fn test_legacy_empty_sequence_is_hard_error() {
+fn test_legacy_empty_sequence_is_an_exact_constraint() {
     let yaml = r#"
             id: vacuous_legacy_sequence
             input: "test"
             expected:
               sequence: []
         "#;
-    let err =
-        serde_yaml::from_str::<TestCase>(yaml).expect_err("legacy empty sequence must not parse");
-    assert!(err.to_string().contains("asserts nothing"), "{}", err);
+    serde_yaml::from_str::<TestCase>(yaml)
+        .expect("legacy empty sequence still requires a trace with no tool calls");
+}
+
+#[test]
+fn test_empty_inline_rules_cannot_erase_a_referenced_policy() {
+    let yaml = r#"
+            id: erased_policy
+            input: "test"
+            expected:
+              type: sequence_valid
+              policy: checks.yaml
+              rules: []
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("empty inline rules override the referenced policy and assert nothing");
+    assert!(err.to_string().contains("asserts nothing"), "{err}");
 }
 
 #[test]
@@ -398,6 +430,11 @@ fn test_semantic_similarity_at_cosine_floor_is_hard_error() {
     let err = serde_yaml::from_str::<TestCase>(yaml)
         .expect_err("the cosine floor cannot reject a valid similarity score");
     assert!(err.to_string().contains("asserts nothing"), "{}", err);
+
+    let epsilon_floor = yaml.replace("-1.0", "-0.9999995");
+    let err = serde_yaml::from_str::<TestCase>(&epsilon_floor)
+        .expect_err("the evaluator epsilon makes this threshold universally passing");
+    assert!(err.to_string().contains("asserts nothing"), "{err}");
 
     let constrained = yaml.replace("-1.0", "-0.99");
     serde_yaml::from_str::<TestCase>(&constrained)
@@ -816,6 +853,53 @@ fn test_omitted_expected_round_trips_through_serialization() {
 
     let reparsed: TestCase = serde_yaml::from_str(&written).expect("writer output must load again");
     assert_eq!(reparsed.id, "assertions_only");
+}
+
+#[test]
+fn test_explicit_expected_variant_is_not_erased_during_serialization() {
+    let tc = TestCase {
+        id: "explicit-regex".into(),
+        input: TestInput {
+            prompt: "test".into(),
+            context: None,
+        },
+        expected: Expected::RegexMatch {
+            pattern: String::new(),
+            flags: Vec::new(),
+        },
+        assertions: None,
+        on_error: None,
+        tags: Vec::new(),
+        metadata: None,
+    };
+
+    let written = serde_yaml::to_string(&tc).expect("serialize");
+    assert!(written.contains("regex_match"), "{written}");
+    assert!(written.contains("pattern"), "{written}");
+}
+
+#[test]
+fn test_impossible_negative_assertions_are_rejected() {
+    for yaml in [
+        r#"
+            id: impossible_substring
+            input: "test"
+            expected:
+              type: must_not_contain
+              must_not_contain: [""]
+        "#,
+        r#"
+            id: impossible_regex
+            input: "test"
+            expected:
+              type: regex_not_match
+              pattern: ""
+        "#,
+    ] {
+        let err = serde_yaml::from_str::<TestCase>(yaml)
+            .expect_err("an assertion that no response can satisfy must be rejected");
+        assert!(err.to_string().contains("pass"), "{err}");
+    }
 }
 
 /// (d) A missing `expected:` key stays permissive: `assertions:` may carry the

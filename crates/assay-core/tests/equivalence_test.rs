@@ -11,9 +11,10 @@ fn test_equivalence_args_valid() -> anyhow::Result<()> {
     std::fs::write(
         &policy_path,
         r#"
-type: object
-properties:
-  foo: { type: string }
+Search:
+  type: object
+  properties:
+    foo: { type: string }
 "#,
     )?;
 
@@ -48,8 +49,8 @@ tests:
 
     if let Expected::ArgsValid { schema, .. } = &migrated.tests[0].expected {
         let s = schema.as_ref().expect("schema should be populated");
-        assert_eq!(s["type"], "object");
-        assert_eq!(s["properties"]["foo"]["type"], "string");
+        assert_eq!(s["Search"]["type"], "object");
+        assert_eq!(s["Search"]["properties"]["foo"]["type"], "string");
     } else {
         panic!("Expected ArgsValid variant");
     }
@@ -150,6 +151,46 @@ tests:
     Ok(())
 }
 
+#[test]
+fn test_equivalence_sequence_valid_structured_policy() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let config_path = dir.path().join("structured.yaml");
+    std::fs::write(
+        dir.path().join("policy.yaml"),
+        r#"
+version: "1"
+sequences:
+  - type: require
+    tool: Search
+"#,
+    )?;
+    std::fs::write(
+        &config_path,
+        r#"
+suite: equivalence
+model: dummy
+tests:
+  - id: t1
+    input: "hi"
+    expected:
+      type: sequence_valid
+      policy: policy.yaml
+"#,
+    )?;
+
+    let config = load_config(&config_path, true, false)?;
+    let migrated = resolve_policies(config, dir.path())?;
+    assert!(matches!(
+        migrated.tests[0].expected,
+        Expected::SequenceValid {
+            policy: None,
+            rules: Some(ref rules),
+            ..
+        } if rules.len() == 1
+    ));
+    Ok(())
+}
+
 fn write_ref_config(policy: &str) -> anyhow::Result<(tempfile::TempDir, std::path::PathBuf)> {
     let dir = tempdir()?;
     std::fs::write(dir.path().join("policy.yaml"), policy)?;
@@ -192,7 +233,8 @@ fn test_reference_resolution_rejects_vacuous_must_contain() -> anyhow::Result<()
 }
 
 #[test]
-fn test_reference_resolution_accepts_strict_expected_and_root_schema() -> anyhow::Result<()> {
+fn test_reference_resolution_accepts_strict_expected_but_rejects_root_schema() -> anyhow::Result<()>
+{
     let (tagged, tagged_path) = write_ref_config("type: regex_match\npattern: '^ready$'\n")?;
     let tagged_config = load_config(&tagged_path, true, false)?;
     let tagged_resolved = resolve_policies(tagged_config, tagged.path())?;
@@ -204,11 +246,36 @@ fn test_reference_resolution_accepts_strict_expected_and_root_schema() -> anyhow
     let (schema, schema_path) =
         write_ref_config("type: object\nproperties:\n  query: {type: string}\n")?;
     let schema_config = load_config(&schema_path, true, false)?;
-    let schema_resolved = resolve_policies(schema_config, schema.path())?;
-    assert!(matches!(
-        schema_resolved.tests[0].expected,
-        Expected::ArgsValid { .. }
-    ));
+    let schema_err = resolve_policies(schema_config, schema.path())
+        .expect_err("a root schema has no tool name and cannot become an args_valid schema map");
+    assert!(
+        schema_err.to_string().contains("tool-name-to-schema map"),
+        "{schema_err:#}"
+    );
+    Ok(())
+}
+
+#[test]
+fn policy_resolution_preserves_omitted_expected_for_migration() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let config_path = dir.path().join("config.yaml");
+    std::fs::write(
+        &config_path,
+        r#"
+suite: migration
+model: dummy
+tests:
+  - id: assertions-only
+    input: "hi"
+    assertions:
+      - type: trace_max_steps
+        max: 1
+"#,
+    )?;
+
+    let config = load_config(&config_path, true, false)?;
+    resolve_policies(config, dir.path())
+        .expect("migration must preserve the compatibility sentinel for omitted expected");
     Ok(())
 }
 
@@ -262,6 +329,45 @@ tests:
     assert!(
         sequence_chain.contains("not executable"),
         "{sequence_chain}"
+    );
+    Ok(())
+}
+
+#[test]
+fn policy_resolution_refuses_to_flatten_structured_args_policy() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    std::fs::write(
+        dir.path().join("policy.yaml"),
+        r#"
+version: "2.0"
+deny: [Delete]
+schemas:
+  Search:
+    type: object
+    required: [query]
+"#,
+    )?;
+    let config_path = dir.path().join("config.yaml");
+    std::fs::write(
+        &config_path,
+        r#"
+suite: structured-policy
+model: dummy
+tests:
+  - id: protected
+    input: "hi"
+    expected:
+      type: args_valid
+      policy: policy.yaml
+"#,
+    )?;
+
+    let config = load_config(&config_path, true, false)?;
+    let err = resolve_policies(config, dir.path())
+        .expect_err("migration must not discard allow/deny/enforcement policy fields");
+    assert!(
+        err.to_string().contains("structured args_valid policy"),
+        "{err:#}"
     );
     Ok(())
 }

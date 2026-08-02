@@ -18,6 +18,11 @@ pub(crate) async fn run_suite_impl(
     cfg: &EvalConfig,
     progress: Option<ProgressSink>,
 ) -> anyhow::Result<RunArtifacts> {
+    for test in &cfg.tests {
+        crate::model::validate_test_case_for_execution(test)
+            .map_err(|e| anyhow::anyhow!("test '{}': invalid execution contract: {e}", test.id))?;
+    }
+
     let run_id = runner.store.create_run(cfg)?;
 
     let parallel = cfg.settings.parallel.unwrap_or(4).max(1);

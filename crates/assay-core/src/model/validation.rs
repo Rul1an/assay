@@ -4,6 +4,9 @@ use super::types::{
     EvalConfig, Expected, SequenceRule, Settings, TestCase, TestStatus, ThresholdingConfig,
 };
 
+/// Tolerance used by the semantic-similarity evaluator at its pass boundary.
+pub const SEMANTIC_SIMILARITY_EPSILON: f64 = 1e-6;
+
 pub(crate) fn is_default_otel(o: &crate::config::otel::OtelConfig) -> bool {
     o == &crate::config::otel::OtelConfig::default()
 }
@@ -22,9 +25,9 @@ pub(crate) fn is_default_settings(s: &Settings) -> bool {
 
 /// The field or field group that leaves `expected` without an effective check.
 ///
-/// This is the shared definition used by parsing, serialization, and validation.
-/// Keeping it here prevents those three surfaces from disagreeing about a shape
-/// that would otherwise pass without evaluating any constraint.
+/// Parsing and execution share this predicate because both must reject an
+/// explicitly inert assertion. Serialization deliberately uses a narrower
+/// predicate: only the synthetic omitted-key sentinel may disappear on write.
 pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
     match e {
         Expected::MustContain { must_contain } if must_contain.iter().all(String::is_empty) => {
@@ -34,7 +37,11 @@ pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
             Some("must_not_contain")
         }
         Expected::RegexMatch { pattern, .. } if pattern.is_empty() => Some("pattern"),
-        Expected::SemanticSimilarityTo { min_score, .. } if *min_score <= -1.0 => Some("min_score"),
+        Expected::SemanticSimilarityTo { min_score, .. }
+            if *min_score <= -1.0 + SEMANTIC_SIMILARITY_EPSILON =>
+        {
+            Some("min_score")
+        }
         Expected::ArgsValid { policy, schema }
             if schema.as_ref().is_some_and(schema_map_asserts_nothing)
                 || (policy.is_none() && schema.is_none()) =>
@@ -45,9 +52,8 @@ pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
             policy,
             sequence,
             rules,
-        } if policy.is_none()
-            && sequence.as_ref().is_none_or(Vec::is_empty)
-            && rules.as_ref().is_none_or(Vec::is_empty) =>
+        } if (sequence.is_none() && rules.is_none() && policy.is_none())
+            || (sequence.is_none() && rules.as_ref().is_some_and(Vec::is_empty)) =>
         {
             Some("policy/sequence/rules")
         }
@@ -102,6 +108,14 @@ pub(crate) fn non_executable_expected_reason(e: &Expected) -> Option<&'static st
 
 pub(crate) fn ineffective_expected_reason(e: &Expected) -> Option<&'static str> {
     match e {
+        Expected::MustNotContain { must_not_contain }
+            if must_not_contain.iter().any(String::is_empty) =>
+        {
+            Some("must_not_contain contains an empty string, so no response can pass")
+        }
+        Expected::RegexNotMatch { pattern, .. } if pattern.is_empty() => {
+            Some("an empty regex_not_match pattern matches every response, so no response can pass")
+        }
         Expected::SequenceValid {
             rules: Some(rules), ..
         } if rules.iter().any(|rule| {
@@ -131,6 +145,150 @@ pub(crate) fn validate_expected_for_execution(e: &Expected) -> anyhow::Result<()
     if let Some(reason) = ineffective_expected_reason(e) {
         anyhow::bail!("{reason}");
     }
+    validate_static_inputs(e)?;
+    Ok(())
+}
+
+fn validate_static_inputs(e: &Expected) -> anyhow::Result<()> {
+    match e {
+        Expected::RegexMatch { pattern, flags } | Expected::RegexNotMatch { pattern, flags } => {
+            let mut builder = regex::RegexBuilder::new(pattern);
+            for flag in flags {
+                match flag.as_str() {
+                    "i" => {
+                        builder.case_insensitive(true);
+                    }
+                    "m" => {
+                        builder.multi_line(true);
+                    }
+                    "s" => {
+                        builder.dot_matches_new_line(true);
+                    }
+                    _ => {}
+                }
+            }
+            builder
+                .build()
+                .map_err(|e| anyhow::anyhow!("invalid regex pattern: {e}"))?;
+        }
+        Expected::JsonSchema {
+            json_schema,
+            schema_file,
+        } => {
+            let source = if let Some(path) = schema_file {
+                std::fs::read_to_string(path)
+                    .map_err(|e| anyhow::anyhow!("failed to read schema_file '{path}': {e}"))?
+            } else {
+                json_schema.clone()
+            };
+            let schema: serde_json::Value = serde_json::from_str(&source)
+                .map_err(|e| anyhow::anyhow!("invalid JSON schema: {e}"))?;
+            jsonschema::validator_for(&schema)
+                .map_err(|e| anyhow::anyhow!("schema compile failed: {e}"))?;
+        }
+        Expected::ArgsValid {
+            schema: Some(schema),
+            ..
+        }
+        | Expected::ToolOutputValid {
+            schemas: Some(schema),
+        } => validate_schema_map(schema)?,
+        Expected::ArgsValid {
+            policy: Some(path),
+            schema: None,
+        } => validate_args_policy(path)?,
+        Expected::SequenceValid {
+            policy: Some(path), ..
+        } => validate_sequence_policy(path)?,
+        _ => {}
+    }
+    Ok(())
+}
+
+fn validate_args_policy(path: &str) -> anyhow::Result<()> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("failed to read args_valid policy '{path}': {e}"))?;
+    let policy: serde_json::Value = serde_yaml::from_str(&source)
+        .map_err(|e| anyhow::anyhow!("invalid args_valid policy YAML: {e}"))?;
+
+    let structured = [
+        "version",
+        "name",
+        "tools",
+        "allow",
+        "deny",
+        "schemas",
+        "constraints",
+        "enforcement",
+        "limits",
+        "signatures",
+        "tool_pins",
+        "discovery",
+        "runtime_monitor",
+        "kill_switch",
+    ]
+    .iter()
+    .any(|key| policy.get(key).is_some());
+
+    if structured {
+        if let Some(schemas) = policy.get("schemas") {
+            let schemas = schemas
+                .as_object()
+                .ok_or_else(|| anyhow::anyhow!("args_valid policy schemas must be a mapping"))?;
+            if !schemas.is_empty() {
+                validate_schema_map(&serde_json::Value::Object(schemas.clone()))?;
+            }
+        }
+        return Ok(());
+    }
+
+    validate_schema_map(&policy)
+}
+
+fn validate_sequence_policy(path: &str) -> anyhow::Result<()> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("failed to read sequence_valid policy '{path}': {e}"))?;
+    if serde_yaml::from_str::<Vec<String>>(&source).is_ok() {
+        return Ok(());
+    }
+
+    let rules = if let Ok(policy) = serde_yaml::from_str::<super::types::Policy>(&source) {
+        policy.sequences
+    } else {
+        serde_yaml::from_str::<Vec<SequenceRule>>(&source)
+            .map_err(|e| anyhow::anyhow!("invalid sequence_valid policy YAML: {e}"))?
+    };
+    let expected = Expected::SequenceValid {
+        policy: None,
+        sequence: None,
+        rules: Some(rules),
+    };
+    if let Some(field) = vacuous_expected_field(&expected) {
+        anyhow::bail!("`{field}` asserts nothing");
+    }
+    if let Some(reason) = non_executable_expected_reason(&expected) {
+        anyhow::bail!("expected block is not executable: {reason}");
+    }
+    if let Some(reason) = ineffective_expected_reason(&expected) {
+        anyhow::bail!("{reason}");
+    }
+    Ok(())
+}
+
+fn validate_schema_map(value: &serde_json::Value) -> anyhow::Result<()> {
+    let schemas = value
+        .as_object()
+        .filter(|schemas| !schemas.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("schema must be a non-empty tool-name-to-schema map"))?;
+    for (tool, schema) in schemas {
+        if !schema.is_object() && !schema.is_boolean() {
+            anyhow::bail!(
+                "schema entry '{tool}' must be a JSON Schema; expected a tool-name-to-schema map"
+            );
+        }
+        jsonschema::validator_for(schema)
+            .map_err(|e| anyhow::anyhow!("schema for tool '{tool}' failed to compile: {e}"))?;
+    }
     Ok(())
 }
 
@@ -148,12 +306,12 @@ pub(crate) fn validate_test_case_for_execution(test: &TestCase) -> anyhow::Resul
     validate_expected_for_execution(&test.expected)
 }
 
-/// True when `expected` asserts nothing.
+/// True for the legacy empty-`must_contain` sentinel.
 ///
-/// Used to skip serializing the vacuous default. Without this, a writer such as
-/// `assay migrate` would materialise an assertion that the parser rejects.
-pub(crate) fn is_vacuous_expected(e: &Expected) -> bool {
-    vacuous_expected_field(e).is_some()
+/// `TestCase` does not retain whether this shape came from an omitted key or from
+/// programmatic construction, so serialization cannot distinguish those origins.
+pub(crate) fn is_omitted_expected_sentinel(e: &Expected) -> bool {
+    matches!(e, Expected::MustContain { must_contain } if must_contain.is_empty())
 }
 
 pub(crate) fn default_one() -> u32 {

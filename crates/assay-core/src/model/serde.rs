@@ -11,6 +11,22 @@ use super::types::{Expected, TestCase, TestInput};
 /// alternatives instead of leaving the author to guess.
 const LEGACY_EXPECTED_KEYS: [&str; 4] = ["$ref", "must_contain", "sequence", "schema"];
 
+#[derive(Default)]
+enum RawExpected {
+    #[default]
+    Missing,
+    Present(serde_json::Value),
+}
+
+impl<'de> Deserialize<'de> for RawExpected {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        serde_json::Value::deserialize(deserializer).map(Self::Present)
+    }
+}
+
 /// Describe a JSON value's shape for error messages.
 fn value_kind(v: &serde_json::Value) -> &'static str {
     match v {
@@ -267,7 +283,7 @@ impl<'de> Deserialize<'de> for TestCase {
             id: String,
             input: TestInput,
             #[serde(default)]
-            expected: Option<serde_json::Value>,
+            expected: RawExpected,
             assertions: Option<Vec<crate::agent_assertions::model::TraceAssertion>>,
             #[serde(default)]
             on_error: Option<ErrorPolicy>,
@@ -285,8 +301,10 @@ impl<'de> Deserialize<'de> for TestCase {
         // no assertions either. A present-but-unparsable key is a different matter and
         // is a hard error below.
         let expected_main = match &raw.expected {
-            Some(val) => parse_expected_value(&raw.id, val).map_err(D::Error::custom)?,
-            None => Expected::default(),
+            RawExpected::Present(val) => {
+                parse_expected_value(&raw.id, val).map_err(D::Error::custom)?
+            }
+            RawExpected::Missing => Expected::default(),
         };
 
         Ok(TestCase {

@@ -1,9 +1,7 @@
 use assay_core::embeddings::util::cosine_similarity_f64;
 use assay_core::metrics_api::{Metric, MetricResult};
-use assay_core::model::{Expected, LlmResponse, TestCase};
+use assay_core::model::{Expected, LlmResponse, TestCase, SEMANTIC_SIMILARITY_EPSILON};
 use async_trait::async_trait;
-
-const EPSILON: f64 = 1e-6;
 
 pub struct SemanticSimilarityMetric;
 
@@ -62,7 +60,7 @@ impl Metric for SemanticSimilarityMetric {
 
         // Guard against tiny floating point rounding differences near the threshold.
         // Scores within EPSILON of the threshold are treated as passing.
-        let passed = score + EPSILON >= *min_score;
+        let passed = score + SEMANTIC_SIMILARITY_EPSILON >= *min_score;
 
         Ok(MetricResult {
             score,
@@ -71,7 +69,7 @@ impl Metric for SemanticSimilarityMetric {
             details: serde_json::json!({
                 "score": score,
                 "min_score": min_score,
-                "epsilon": EPSILON,
+                "epsilon": SEMANTIC_SIMILARITY_EPSILON,
                 "dims": va.len(),
                 "model": resp.meta.pointer("/assay/embeddings/model"),
                 "source_response": resp.meta.pointer("/assay/embeddings/source_response"),
@@ -162,7 +160,7 @@ mod tests {
         let metric = SemanticSimilarityMetric;
         let v = vec![1.0, 0.0];
         // Threshold = 1.0 + 5e-7
-        let threshold = 1.0 + (0.5 * EPSILON);
+        let threshold = 1.0 + (0.5 * SEMANTIC_SIMILARITY_EPSILON);
 
         let (tc, expected, resp) = make_test_case(threshold, &v, &v);
         let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
@@ -174,7 +172,8 @@ mod tests {
 
         // Sanity check: verify it fails if threshold is too high
         // Threshold = 1.0 + 2.0 * EPSILON
-        let (tc_fail, expected_fail, resp_fail) = make_test_case(1.0 + (2.0 * EPSILON), &v, &v);
+        let (tc_fail, expected_fail, resp_fail) =
+            make_test_case(1.0 + (2.0 * SEMANTIC_SIMILARITY_EPSILON), &v, &v);
         let result_fail = metric
             .evaluate(&tc_fail, &expected_fail, &resp_fail)
             .await

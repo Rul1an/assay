@@ -208,6 +208,32 @@ mod tests {
         }
     }
 
+    struct CountingClient {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl LlmClient for CountingClient {
+        async fn complete(
+            &self,
+            _prompt: &str,
+            _context: Option<&[String]>,
+        ) -> anyhow::Result<LlmResponse> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(LlmResponse {
+                text: "ok".into(),
+                provider: "counting".into(),
+                model: "fake-model".into(),
+                cached: false,
+                meta: serde_json::json!({}),
+            })
+        }
+
+        fn provider_name(&self) -> &'static str {
+            "counting"
+        }
+    }
+
     fn runner_for_contract_tests(
         client: Arc<dyn LlmClient>,
         metrics: Vec<Arc<dyn Metric>>,
@@ -407,6 +433,74 @@ mod tests {
             .await
             .expect_err("an unresolved migration reference must not reach metric dispatch");
         assert!(err.to_string().contains("unresolved `$ref`"), "{err:#}");
+    }
+
+    #[tokio::test]
+    async fn on_error_allow_cannot_turn_invalid_configuration_into_a_pass() {
+        let mut cfg = single_test_config(ErrorPolicy::Allow);
+        cfg.tests[0].expected = Expected::Reference {
+            path: "checks/expected.yaml".to_string(),
+        };
+        let client = Arc::new(FakeClient::new("fake-model".to_string()).with_response("ok".into()));
+        let runner =
+            runner_for_contract_tests(client, vec![Arc::new(ScriptedMetric::always_pass())], 0);
+
+        let err = runner
+            .run_suite(&cfg, None)
+            .await
+            .expect_err("configuration errors must precede the on_error policy");
+        assert!(err.to_string().contains("unresolved `$ref`"), "{err:#}");
+    }
+
+    #[tokio::test]
+    async fn static_expected_inputs_are_validated_before_provider_dispatch() {
+        let mut cfg = single_test_config(ErrorPolicy::Allow);
+        cfg.tests[0].expected = Expected::RegexMatch {
+            pattern: "(".into(),
+            flags: Vec::new(),
+        };
+        let client = Arc::new(CountingClient {
+            calls: AtomicUsize::new(0),
+        });
+        let runner = runner_for_contract_tests(client.clone(), vec![], 0);
+
+        let err = runner
+            .run_suite(&cfg, None)
+            .await
+            .expect_err("invalid regex must fail before provider dispatch");
+        assert!(err.to_string().contains("invalid regex"), "{err:#}");
+        assert_eq!(client.calls.load(Ordering::SeqCst), 0);
+
+        cfg.tests[0].expected = Expected::ArgsValid {
+            policy: None,
+            schema: Some(serde_json::json!({
+                "Search": {"type": "definitely-not-a-json-schema-type"}
+            })),
+        };
+        let err = runner
+            .run_suite(&cfg, None)
+            .await
+            .expect_err("invalid schema must fail before provider dispatch");
+        assert!(err.to_string().contains("failed to compile"), "{err:#}");
+        assert_eq!(client.calls.load(Ordering::SeqCst), 0);
+
+        let dir = tempfile::tempdir().expect("temporary policy directory");
+        let policy_path = dir.path().join("invalid-policy.yaml");
+        std::fs::write(&policy_path, "schemas: definitely-not-a-map\n")
+            .expect("write invalid policy");
+        cfg.tests[0].expected = Expected::ArgsValid {
+            policy: Some(policy_path.to_string_lossy().into_owned()),
+            schema: None,
+        };
+        let err = runner
+            .run_suite(&cfg, None)
+            .await
+            .expect_err("invalid policy must fail before provider dispatch");
+        assert!(
+            err.to_string().contains("schemas must be a mapping"),
+            "{err:#}"
+        );
+        assert_eq!(client.calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

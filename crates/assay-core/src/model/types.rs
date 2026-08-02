@@ -65,9 +65,9 @@ pub struct ThresholdingSettings {
 pub struct TestCase {
     pub id: String,
     pub input: TestInput,
-    /// Skipped on serialize when vacuous: writers such as `assay migrate` must not
-    /// materialise an empty `must_contain` that the parser would then reject.
-    #[serde(skip_serializing_if = "crate::model::validation::is_vacuous_expected")]
+    /// Skipped for the legacy empty-`must_contain` sentinel. The public model does
+    /// not retain whether that shape came from omission or programmatic construction.
+    #[serde(skip_serializing_if = "crate::model::validation::is_omitted_expected_sentinel")]
     pub expected: Expected,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assertions: Option<Vec<crate::agent_assertions::model::TraceAssertion>>,

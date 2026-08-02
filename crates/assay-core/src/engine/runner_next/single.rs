@@ -8,6 +8,8 @@ pub(crate) async fn run_test_once_impl(
     cfg: &EvalConfig,
     tc: &TestCase,
 ) -> anyhow::Result<(TestResultRow, LlmResponse)> {
+    // Keep direct internal callers fail-closed as well. `run_suite_impl` performs
+    // the same validation before spawning tasks so `on_error` cannot absorb it.
     crate::model::validate_test_case_for_execution(tc)?;
 
     let expected_json = serde_json::to_string(&tc.expected).unwrap_or_default();

@@ -154,10 +154,11 @@ mod tests {
         std::fs::write(
             &policy_path,
             r#"
-type: object
-properties:
-  foo:
-    type: string
+Search:
+  type: object
+  properties:
+    foo:
+      type: string
 "#,
         )?;
 
@@ -193,6 +194,7 @@ tests:
         assert!(content.contains("configVersion: 1"));
         assert!(!content.contains("policy: args.yaml"));
         assert!(content.contains("schema:"));
+        assert!(content.contains("Search:"));
         assert!(content.contains("type: object"));
 
         // Check backup
