@@ -444,6 +444,68 @@ tests:
 }
 
 #[test]
+fn contract_run_rejects_tagged_fallback_to_different_legacy_metric() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"suite: mismatched-tag
+model: dummy
+tests:
+  - id: t1
+    input: hello
+    expected:
+      type: regex_match
+      must_contain: "not-the-dummy-output"
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+}
+
+#[test]
+fn contract_run_rejects_ambiguous_legacy_expected_block() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        r#"suite: ambiguous-legacy
+model: dummy
+tests:
+  - id: t1
+    input: hello
+    expected:
+      must_contain: "passed"
+      sequence: ["Search"]
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("assay")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("ASSAY_EXIT_CODES", "v2")
+        .arg("run")
+        .arg("--config")
+        .arg("assay.yaml")
+        .assert()
+        .code(2);
+
+    let run = read_run_json(dir.path());
+    assert_eq!(run["reason_code"], "E_CFG_PARSE");
+}
+
+#[test]
 fn contract_run_rejects_multi_element_expected_list() {
     let dir = tempdir().unwrap();
     fs::write(

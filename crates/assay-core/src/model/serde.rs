@@ -54,12 +54,10 @@ fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
 
     // 2. Legacy heuristics.
     //
-    // These run even when the block carries a `type:` key. A tagged block whose
-    // VALUE shape is legacy — `{type: must_contain, must_contain: "hello"}`, where
-    // the scalar string is the legacy spelling of a one-element list — fails the
-    // strict parse but is a perfectly good assertion, and rejecting it would turn
-    // working suites into config errors. Only when no legacy key matches at all do
-    // we fall back to reporting why the strict parse failed.
+    // These also recognize two tagged compatibility forms: a scalar value for
+    // `type: must_contain`, and the historical `type: sequence`. A failed tagged
+    // parse may not fall back through an unrelated legacy key, because that would
+    // silently change the metric the author selected.
     let mut parsed = None;
     let mut matched_keys = Vec::new();
 
@@ -128,13 +126,25 @@ fn parse_expected_entry(item: &serde_json::Value) -> Result<Expected, String> {
     }
 
     if matched_keys.len() > 1 {
-        eprintln!(
-            "WARN: Ambiguous legacy expected block. Found keys: {:?}. Using first match.",
+        return Err(format!(
+            "ambiguous legacy `expected:` block contains multiple assertions {:?}; \
+             use one tagged assertion or move additional checks to `assertions:`",
             matched_keys
-        );
+        ));
     }
 
     if let Some(p) = parsed {
+        if let Some(tag) = obj.get("type") {
+            let compatible_legacy_form = tag.as_str().is_some_and(|tag| {
+                matches!(
+                    (tag, matched_keys[0]),
+                    ("must_contain", "must_contain") | ("sequence", "sequence")
+                )
+            });
+            if !compatible_legacy_form {
+                return Err(format!("invalid `expected:` block: {}", strict_err));
+            }
+        }
         return reject_vacuous(p);
     }
 

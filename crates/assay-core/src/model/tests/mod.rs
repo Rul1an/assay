@@ -246,6 +246,28 @@ fn test_tagged_expected_reports_underlying_error() {
     );
 }
 
+/// A failed tagged parse must not change metric type through an unrelated legacy
+/// key. This block asks for `regex_match`; accepting it as `must_contain` would
+/// silently enforce a different assertion than the author selected.
+#[test]
+fn test_tagged_parse_failure_cannot_fallback_to_different_legacy_metric() {
+    let yaml = r#"
+            id: mismatched_tag
+            input: "test"
+            expected:
+              type: regex_match
+              must_contain: "not-the-dummy-output"
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("failed tagged parse must not change metric type");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("pattern"),
+        "message must preserve the tagged parse failure: {}",
+        msg
+    );
+}
+
 /// Untagged single mappings are read with the same legacy heuristics as list
 /// entries. Before the fix, this shape silently became an empty `must_contain`.
 #[test]
@@ -261,6 +283,28 @@ fn test_untagged_single_object_uses_legacy_heuristics() {
         Expected::MustContain { must_contain } => assert_eq!(must_contain, vec!["Paris"]),
         other => panic!("Expected MustContain, got {:?}", other),
     }
+}
+
+/// Multiple legacy keys are multiple assertions. Choosing one would silently
+/// discard the rest, so the single-assertion model must reject the block.
+#[test]
+fn test_ambiguous_legacy_expected_is_rejected() {
+    let yaml = r#"
+            id: ambiguous_legacy
+            input: "test"
+            expected:
+              must_contain: "passed"
+              sequence: ["Search"]
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("ambiguous legacy assertions must not be truncated");
+    let msg = err.to_string();
+    assert!(msg.contains("ambiguous"), "{}", msg);
+    assert!(
+        msg.contains("must_contain") && msg.contains("sequence"),
+        "{}",
+        msg
+    );
 }
 
 /// Writers must not emit a config the parser rejects.
