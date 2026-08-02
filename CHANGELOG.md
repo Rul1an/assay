@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.37.0] - 2026-08-02
+
+### Added
+- Observe the MCP protocol era on import and carry it through wire-profile
+  normalization, with an era-parity corpus pinning how protocol-era results are
+  concluded. The event shape is unchanged (#1929, #1934, #1935).
+- Bounded MCP OTLP/JSON decoder with pre-retention ceilings, so an oversized or
+  deeply nested payload is refused before it is retained rather than after
+  (#1931, #1944).
+
+### Fixed
+- Reject vacuous and ambiguous `expected` assertions. An `args_valid` policy
+  that asserts nothing now fails at config load instead of passing every
+  response, and shared JSON Schema `$defs` are prepared once for the preflight,
+  cached, one-shot and MCP paths so they cannot drift apart. JSON Schema is
+  compiled hermetically: an external `$ref` is refused by an explicit denying
+  retriever, with jsonschema's default features off as a second layer. Only
+  same-document and embedded references are supported (#1948).
+- Separate immutable MCP replay from live drift in CI (#1947).
+- ProtoJSON ingest correctness: int64 coercion, omitted-message defaults and
+  nested null key defaults now follow the spec.
+
+### Notes
+- Not a general schema satisfiability solver. `expected` is judged vacuous only
+  for policies the rule fully understands; anything else keeps its specific
+  diagnosis ("not enforced by this evaluator", "must be a list").
+
 ## [3.36.0] - 2026-07-29
 
 ### Added
