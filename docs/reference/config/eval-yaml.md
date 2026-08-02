@@ -67,6 +67,22 @@ Defines the **output** validation (the final answer).
 An `expected:` block must contain exactly one effective output check. Empty checks,
 unknown fields, and multiple checks in one block are rejected as config errors.
 
+`sequence: []` is not vacuous: it is the exact constraint that the trace contains
+zero tool calls. Empty `rules: []` without an effective `sequence` or referenced
+policy is rejected.
+
+```yaml
+# Accepted: require an exact empty tool-call sequence.
+expected:
+  type: sequence_valid
+  sequence: []
+
+# Rejected: no sequence, policy, or effective rule.
+expected:
+  type: sequence_valid
+  rules: []
+```
+
 The tagged V1 form above is preferred. Existing configurations may keep either of
 these compatibility forms:
 
