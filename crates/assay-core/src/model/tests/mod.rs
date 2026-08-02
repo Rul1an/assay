@@ -878,10 +878,6 @@ fn empty_required_does_not_make_a_schema_effective() {
             "$schema": "http://json-schema.org/draft-07/schema#",
             "dependentSchemas": {"credit_card": false}
         }),
-        serde_json::json!({
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "dependencies": {"credit_card": ["billing_address"]}
-        }),
     ];
     for schema in no_ops {
         let policy = serde_json::json!({"Search": schema});
@@ -1430,5 +1426,27 @@ fn f1_structured_policy_with_only_object_roots_is_not_vacuous() {
             crate::model::validation::vacuous_expected_field(&expected).is_none(),
             "structured policy wrongly rejected as vacuous: {schema}"
         );
+    }
+}
+
+#[test]
+fn dependencies_asserts_under_every_dialect() {
+    // jsonschema compiles `dependencies` whenever the applicator vocabulary is
+    // declared, which 2020-12 does — so a policy using it is enforced at
+    // runtime and must not be rejected at parse as vacuous.
+    for schema in [
+        serde_json::json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "dependencies": {"credit_card": ["billing_address"]}
+        }),
+        serde_json::json!({"dependencies": {"credit_card": ["billing_address"]}}),
+        serde_json::json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "dependencies": {"credit_card": ["billing_address"]}
+        }),
+    ] {
+        let policy = serde_json::json!({"pay": schema.clone()});
+        crate::model::validate_args_policy_value(&policy)
+            .unwrap_or_else(|e| panic!("`dependencies` must assert: {schema} -> {e:#}"));
     }
 }

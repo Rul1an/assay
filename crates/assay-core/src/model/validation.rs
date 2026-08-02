@@ -43,9 +43,7 @@ pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
             Some("min_score")
         }
         Expected::ArgsValid { policy, schema }
-            if schema
-                .as_ref()
-                .is_some_and(|schema| args_policy_asserts_nothing(schema))
+            if schema.as_ref().is_some_and(args_policy_asserts_nothing)
                 || (policy.is_none() && schema.is_none()) =>
         {
             Some("policy/schema")
@@ -225,7 +223,10 @@ fn schema_keyword_asserts(
                 .values()
                 .any(|schema| !schema_asserts_nothing_inner(schema, root, dialect, depth))
         }),
-        "dependencies" if dialect.is_legacy() => value.as_object().is_some_and(|dependencies| {
+        // jsonschema compiles `dependencies` for every draft that declares the
+        // applicator vocabulary (keywords/mod.rs: `(_, "dependencies")`), so it
+        // asserts under the modern dialect too even though the spec dropped it.
+        "dependencies" => value.as_object().is_some_and(|dependencies| {
             dependencies.values().any(|dependency| {
                 dependency
                     .as_array()
