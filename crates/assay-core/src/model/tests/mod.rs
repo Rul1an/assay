@@ -684,6 +684,21 @@ fn schemas_only_policy_shape_is_rejected_as_ambiguous() {
 }
 
 #[test]
+fn structured_args_policy_rejects_unenforced_nested_tool_controls() {
+    let policy = serde_json::json!({
+        "version": "2.0",
+        "tools": {
+            "deny": ["never_called"],
+            "restrict_scope": ["exec"]
+        }
+    });
+
+    let err = crate::model::validate_args_policy_value(&policy)
+        .expect_err("nested controls outside the args_valid evaluator must not be ignored");
+    assert!(err.to_string().contains("tools.restrict_scope"), "{err:#}");
+}
+
+#[test]
 fn test_tagged_tool_output_valid_without_schemas_is_hard_error() {
     let yaml = r#"
             id: vacuous_output

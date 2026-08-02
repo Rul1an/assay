@@ -315,6 +315,18 @@ pub fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<
             let tools = tools
                 .as_object()
                 .ok_or_else(|| anyhow::anyhow!("args_valid policy tools must be a mapping"))?;
+            let mut unsupported: Vec<_> = tools
+                .keys()
+                .filter(|key| !matches!(key.as_str(), "allow" | "deny"))
+                .map(|key| format!("tools.{key}"))
+                .collect();
+            unsupported.sort_unstable();
+            if !unsupported.is_empty() {
+                anyhow::bail!(
+                    "args_valid policy fields are not enforced by this evaluator: {}",
+                    unsupported.join(", ")
+                );
+            }
             allow.extend(policy_string_list(tools.get("allow"), "tools.allow")?);
             deny.extend(policy_string_list(tools.get("deny"), "tools.deny")?);
         }
@@ -405,7 +417,24 @@ pub fn has_structured_args_policy_shape(policy: &serde_json::Value) -> bool {
         || root
             .get("tools")
             .and_then(serde_json::Value::as_object)
-            .is_some_and(|tools| tools.contains_key("allow") || tools.contains_key("deny"))
+            .is_some_and(|tools| {
+                [
+                    "allow",
+                    "deny",
+                    "allow_classes",
+                    "deny_classes",
+                    "approval_required",
+                    "approval_required_classes",
+                    "restrict_scope",
+                    "restrict_scope_classes",
+                    "restrict_scope_contract",
+                    "redact_args",
+                    "redact_args_classes",
+                    "redact_args_contract",
+                ]
+                .iter()
+                .any(|key| tools.contains_key(*key))
+            })
         || root
             .get("enforcement")
             .and_then(serde_json::Value::as_object)

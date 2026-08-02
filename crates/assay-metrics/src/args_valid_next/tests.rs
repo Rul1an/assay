@@ -233,6 +233,13 @@ async fn direct_metric_rejects_policies_that_execution_preflight_rejects() {
         serde_json::json!({"version": "2.0", "allow": ["*"]}),
         serde_json::json!({"version": "2.0", "constraints": {}}),
         serde_json::json!({"version": "2.0", "schemas": {"Search": []}}),
+        serde_json::json!({
+            "version": "2.0",
+            "tools": {
+                "deny": ["never_called"],
+                "restrict_scope": ["Search"]
+            }
+        }),
     ] {
         let expected = Expected::ArgsValid {
             policy: None,
