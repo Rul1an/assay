@@ -41,7 +41,10 @@ pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
             policy,
             sequence,
             rules,
-        } if policy.is_none() && sequence.is_none() && rules.as_ref().is_none_or(Vec::is_empty) => {
+        } if policy.is_none()
+            && sequence.as_ref().is_none_or(Vec::is_empty)
+            && rules.as_ref().is_none_or(Vec::is_empty) =>
+        {
             Some("policy/sequence/rules")
         }
         Expected::ToolOutputValid { schemas }

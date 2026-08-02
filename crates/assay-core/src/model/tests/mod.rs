@@ -252,6 +252,54 @@ fn test_tagged_sequence_valid_without_constraint_is_hard_error() {
 }
 
 #[test]
+fn test_tagged_sequence_valid_with_empty_sequence_is_hard_error() {
+    let yaml = r#"
+            id: vacuous_tagged_sequence
+            input: "test"
+            expected:
+              type: sequence_valid
+              sequence: []
+        "#;
+    let err = serde_yaml::from_str::<TestCase>(yaml)
+        .expect_err("sequence_valid with an empty sequence must not parse");
+    assert!(err.to_string().contains("asserts nothing"), "{}", err);
+}
+
+#[test]
+fn test_legacy_empty_sequence_is_hard_error() {
+    let yaml = r#"
+            id: vacuous_legacy_sequence
+            input: "test"
+            expected:
+              sequence: []
+        "#;
+    let err =
+        serde_yaml::from_str::<TestCase>(yaml).expect_err("legacy empty sequence must not parse");
+    assert!(err.to_string().contains("asserts nothing"), "{}", err);
+}
+
+#[test]
+fn test_empty_sequence_with_nonempty_rules_still_parses() {
+    let yaml = r#"
+            id: rule_constrained_sequence
+            input: "test"
+            expected:
+              type: sequence_valid
+              sequence: []
+              rules:
+                - type: require
+                  tool: Search
+        "#;
+    let tc: TestCase = serde_yaml::from_str(yaml).expect("nonempty rules assert a constraint");
+    match tc.expected {
+        Expected::SequenceValid { rules, .. } => {
+            assert_eq!(rules.expect("rules").len(), 1);
+        }
+        other => panic!("Expected SequenceValid, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_tagged_tool_output_valid_without_schemas_is_hard_error() {
     let yaml = r#"
             id: vacuous_output
