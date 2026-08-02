@@ -3,7 +3,7 @@ use assay_core::model::{Expected, LlmResponse, TestCase, ToolCallRecord};
 use async_trait::async_trait;
 
 use crate::policy_warning::should_emit_deprecated_policy_warning;
-use crate::tool_calls::extract_tool_calls_canonical_or_empty;
+use crate::tool_calls::extract_tool_calls_canonical;
 
 pub struct SequenceValidMetric;
 
@@ -71,7 +71,15 @@ impl Metric for SequenceValidMetric {
         }
 
         // Parse Tool Calls
-        let tool_calls: Vec<ToolCallRecord> = extract_tool_calls_canonical_or_empty(resp);
+        let tool_calls: Vec<ToolCallRecord> = match extract_tool_calls_canonical(resp) {
+            Ok(tool_calls) => tool_calls,
+            Err(_) => {
+                return Ok(MetricResult::fail(
+                    0.0,
+                    "sequence_valid could not read canonical tool-call evidence",
+                ));
+            }
+        };
 
         // Sort by index
         let mut actual_sequence = tool_calls.clone();
@@ -275,6 +283,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn empty_exact_sequence_rejects_malformed_present_tool_calls() {
+        let metric = SequenceValidMetric;
+        let expected = Expected::SequenceValid {
+            policy: None,
+            sequence: Some(Vec::new()),
+            rules: None,
+        };
+        let (tc, mut resp) = make_test_case(Vec::new());
+        resp.meta = serde_json::json!({"tool_calls": {"tool_name": "Search"}});
+
+        let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+        assert!(!result.passed, "malformed-present evidence is not absence");
+        assert_eq!(
+            result.details["message"].as_str(),
+            Some("sequence_valid could not read canonical tool-call evidence")
+        );
+    }
+
+    #[tokio::test]
     async fn test_fails_when_missing_required() {
         let metric = SequenceValidMetric;
         let (tc, resp) = make_test_case(vec!["A", "C"]); // Missing B
@@ -333,7 +360,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_malformed_tool_calls_fail_open_to_empty_sequence() {
+    async fn malformed_tool_calls_fail_closed_before_rule_evaluation() {
         let metric = SequenceValidMetric;
         let tc = TestCase {
             id: "test".to_string(),
@@ -362,8 +389,11 @@ mod tests {
         };
 
         let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
-        assert_eq!(result.score, 0.0, "malformed should be treated as empty");
+        assert_eq!(result.score, 0.0);
         let msg = result.details["message"].as_str().unwrap();
-        assert!(msg.contains("required tool 'A' not found"), "msg={}", msg);
+        assert_eq!(
+            msg,
+            "sequence_valid could not read canonical tool-call evidence"
+        );
     }
 }

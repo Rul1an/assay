@@ -14,9 +14,9 @@ pub fn resolve_policies(mut config: EvalConfig, base_dir: &Path) -> Result<EvalC
                     let loaded: serde_json::Value = serde_yaml::from_str(&policy_content)
                         .with_context(|| format!("failed to parse policy YAML: {}", path))?;
 
-                    if is_structured_args_policy(&loaded) {
+                    if crate::model::has_structured_args_policy_shape(&loaded) {
                         anyhow::bail!(
-                            "structured args_valid policy '{}' cannot be inlined without changing its allow/deny/enforcement semantics; keep the policy reference",
+                            "migration does not serialize structured args_valid policy '{}' into the public inline schema form; keep the policy reference",
                             path
                         );
                     }
@@ -110,27 +110,6 @@ fn resolve_nested_expected_paths(expected: &mut Expected, reference_path: &Path)
         } => resolve(path),
         _ => {}
     }
-}
-
-fn is_structured_args_policy(value: &serde_json::Value) -> bool {
-    [
-        "version",
-        "name",
-        "tools",
-        "allow",
-        "deny",
-        "schemas",
-        "constraints",
-        "enforcement",
-        "limits",
-        "signatures",
-        "tool_pins",
-        "discovery",
-        "runtime_monitor",
-        "kill_switch",
-    ]
-    .iter()
-    .any(|key| value.get(key).is_some())
 }
 
 fn read_policy_file(base_dir: &Path, policy_rel: &str) -> Result<String> {

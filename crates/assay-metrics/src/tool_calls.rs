@@ -44,12 +44,19 @@ fn parse_best_effort_entry(v: &serde_json::Value, idx: usize) -> Option<ToolCall
     })
 }
 
-/// Canonical-only extraction: deserialize exact ToolCallRecord list or return empty.
-pub(crate) fn extract_tool_calls_canonical_or_empty(resp: &LlmResponse) -> Vec<ToolCallRecord> {
+/// Canonical-only extraction: absence is an empty trace; malformed presence is an error.
+pub(crate) fn extract_tool_calls_canonical(
+    resp: &LlmResponse,
+) -> Result<Vec<ToolCallRecord>, serde_json::Error> {
     let Some(val) = resp.meta.get("tool_calls") else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    serde_json::from_value(val.clone()).unwrap_or_default()
+    serde_json::from_value(val.clone())
+}
+
+/// Legacy compatibility for metrics that historically treated malformed evidence as absent.
+pub(crate) fn extract_tool_calls_canonical_or_empty(resp: &LlmResponse) -> Vec<ToolCallRecord> {
+    extract_tool_calls_canonical(resp).unwrap_or_default()
 }
 
 /// Best-effort extraction: canonical parse first, then lenient legacy entry mapping.
@@ -90,7 +97,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let calls = extract_tool_calls_canonical_or_empty(&canonical);
+        let calls = extract_tool_calls_canonical(&canonical).unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].tool_name, "exec");
 
@@ -98,7 +105,7 @@ mod tests {
             meta: serde_json::json!({"tool_calls": {"tool_name": "exec"}}),
             ..Default::default()
         };
-        assert!(extract_tool_calls_canonical_or_empty(&malformed).is_empty());
+        assert!(extract_tool_calls_canonical(&malformed).is_err());
     }
 
     #[test]
@@ -130,7 +137,7 @@ mod tests {
             meta: serde_json::json!({}),
             ..Default::default()
         };
-        assert!(extract_tool_calls_canonical_or_empty(&resp).is_empty());
+        assert!(extract_tool_calls_canonical(&resp).unwrap().is_empty());
         assert!(extract_tool_calls_best_effort(&resp).is_empty());
     }
 }

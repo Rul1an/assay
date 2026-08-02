@@ -253,15 +253,16 @@ fn test_reference_resolution_accepts_strict_expected_but_rejects_root_schema() -
         "{schema_err:#}"
     );
 
-    let object_only = tempdir()?;
-    std::fs::write(
-        object_only.path().join("root-schema.yaml"),
+    for root_schema in [
         "properties:\n  query: {type: string}\n",
-    )?;
-    let object_only_path = object_only.path().join("eval.yaml");
-    std::fs::write(
-        &object_only_path,
-        r#"
+        "dependencies:\n  query: [other]\n",
+    ] {
+        let object_only = tempdir()?;
+        std::fs::write(object_only.path().join("root-schema.yaml"), root_schema)?;
+        let object_only_path = object_only.path().join("eval.yaml");
+        std::fs::write(
+            &object_only_path,
+            r#"
 suite: object-only-root
 model: dummy
 tests:
@@ -271,15 +272,16 @@ tests:
       type: args_valid
       policy: root-schema.yaml
 "#,
-    )?;
-    let object_only_config = load_config(&object_only_path, true, false)?;
-    let object_only_err = resolve_policies(object_only_config, object_only.path())
-        .expect_err("an object-only root schema must not be flattened as a tool map");
-    let object_only_chain = format!("{object_only_err:#}");
-    assert!(
-        object_only_chain.contains("tool-name-to-schema map"),
-        "{object_only_chain}"
-    );
+        )?;
+        let object_only_config = load_config(&object_only_path, true, false)?;
+        let object_only_err = resolve_policies(object_only_config, object_only.path())
+            .expect_err("a root schema must not be flattened as a bare tool map");
+        let object_only_chain = format!("{object_only_err:#}");
+        assert!(
+            object_only_chain.contains("tool-name-to-schema map"),
+            "{object_only_chain}"
+        );
+    }
     Ok(())
 }
 

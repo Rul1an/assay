@@ -140,6 +140,50 @@ async fn bound_structured_policy_preserves_deny_semantics_inline() {
 }
 
 #[tokio::test]
+async fn structured_trivial_schema_still_enforces_unconstrained_deny() {
+    let metric = ArgsValidMetric;
+    let tc = make_test_case();
+    let expected = Expected::ArgsValid {
+        policy: None,
+        schema: Some(serde_json::json!({
+            "version": "2.0",
+            "enforcement": {"unconstrained_tools": "deny"},
+            "schemas": {"Search": true}
+        })),
+    };
+    let resp = make_response_with_tool("exec", serde_json::json!({"command":"ls"}));
+
+    let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+    assert!(!result.passed);
+    assert!(
+        result.details.to_string().contains("E_TOOL_UNCONSTRAINED"),
+        "details={}",
+        result.details
+    );
+}
+
+#[tokio::test]
+async fn metadata_named_tool_remains_a_schema_map_entry() {
+    let metric = ArgsValidMetric;
+    let tc = make_test_case();
+    let expected = Expected::ArgsValid {
+        policy: None,
+        schema: Some(serde_json::json!({
+            "allow": {"type": "object", "required": ["query"]}
+        })),
+    };
+    let resp = make_response_with_tool("allow", serde_json::json!({}));
+
+    let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+    assert!(!result.passed);
+    assert!(
+        result.details.to_string().contains("required property"),
+        "details={}",
+        result.details
+    );
+}
+
+#[tokio::test]
 async fn legacy_schema_map_keeps_missing_tool_compat() {
     let policy_path = write_temp_policy(
         r#"read_file:

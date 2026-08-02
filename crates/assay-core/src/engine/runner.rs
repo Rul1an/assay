@@ -293,6 +293,38 @@ mod tests {
         }
     }
 
+    struct BoundSequenceMetric;
+
+    #[async_trait]
+    impl Metric for BoundSequenceMetric {
+        fn name(&self) -> &'static str {
+            "bound_sequence"
+        }
+
+        async fn evaluate(
+            &self,
+            _tc: &TestCase,
+            expected: &Expected,
+            _resp: &LlmResponse,
+        ) -> anyhow::Result<MetricResult> {
+            let Expected::SequenceValid {
+                policy,
+                sequence,
+                rules,
+            } = expected
+            else {
+                anyhow::bail!("expected sequence_valid contract");
+            };
+            anyhow::ensure!(policy.is_none(), "policy path survived binding");
+            anyhow::ensure!(sequence.as_deref() == Some(&[]), "inline sequence changed");
+            anyhow::ensure!(
+                matches!(rules.as_deref(), Some([crate::model::SequenceRule::Require { tool }]) if tool == "Search"),
+                "file-backed rules were not merged into the snapshot"
+            );
+            Ok(MetricResult::pass(1.0))
+        }
+    }
+
     fn runner_for_contract_tests(
         client: Arc<dyn LlmClient>,
         metrics: Vec<Arc<dyn Metric>>,
@@ -636,6 +668,11 @@ mod tests {
         for (source, expected_error) in [
             ("version: '2.0'\n", "asserts nothing"),
             ("version: '2.0'\nconstraints: {}\n", "not enforced"),
+            ("version: '2.0'\nallow: ['*']\n", "asserts nothing"),
+            (
+                "version: '2.0'\ndeny: ['exec']\nenforcement:\n  unconstrained_tools: typo\n",
+                "must be one of",
+            ),
             ("Search: true\n", "asserts nothing"),
             ("Search: {}\n", "asserts nothing"),
         ] {
@@ -647,6 +684,34 @@ mod tests {
             assert!(err.to_string().contains(expected_error), "{err:#}");
         }
         assert_eq!(client.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn mixed_sequence_policy_bytes_are_bound_before_provider_dispatch() {
+        let dir = tempfile::tempdir().expect("temporary policy directory");
+        let policy_path = dir.path().join("rules.yaml");
+        std::fs::write(&policy_path, "- type: require\n  tool: Search\n")
+            .expect("write sequence policy");
+        let mut cfg = single_test_config(ErrorPolicy::Allow);
+        cfg.tests[0].expected = Expected::SequenceValid {
+            policy: Some(policy_path.to_string_lossy().into_owned()),
+            sequence: Some(Vec::new()),
+            rules: None,
+        };
+        let runner = runner_for_contract_tests(
+            Arc::new(DeletingClient {
+                path: policy_path.clone(),
+            }),
+            vec![Arc::new(BoundSequenceMetric)],
+            0,
+        );
+
+        let artifacts = runner
+            .run_suite(&cfg, None)
+            .await
+            .expect("mixed policy bytes must survive deletion after dispatch");
+        assert_eq!(artifacts.results[0].status, TestStatus::Pass);
+        assert!(!policy_path.exists());
     }
 
     #[tokio::test]

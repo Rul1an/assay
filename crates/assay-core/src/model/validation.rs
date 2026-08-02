@@ -192,7 +192,7 @@ fn validate_static_inputs(e: &Expected) -> anyhow::Result<()> {
         } => validate_args_policy_value(schema)?,
         Expected::ToolOutputValid {
             schemas: Some(schema),
-        } => validate_schema_map(schema)?,
+        } => validate_schema_map(schema, false, true)?,
         Expected::ArgsValid {
             policy: Some(path),
             schema: None,
@@ -236,19 +236,27 @@ pub(crate) fn bind_external_expected_inputs(e: &mut Expected) -> anyhow::Result<
             policy,
             sequence,
             rules,
-        } if sequence.is_none() && rules.is_none() => {
+        } => {
             if let Some(path) = policy.take() {
                 let source = std::fs::read_to_string(&path).map_err(|err| {
                     anyhow::anyhow!("failed to read sequence_valid policy '{path}': {err}")
                 })?;
                 if let Ok(loaded) = serde_yaml::from_str::<Vec<String>>(&source) {
-                    *sequence = Some(loaded);
+                    if sequence.is_none() {
+                        *sequence = Some(loaded);
+                    }
                 } else if let Ok(loaded) = serde_yaml::from_str::<super::types::Policy>(&source) {
-                    *rules = Some(loaded.sequences);
+                    if rules.is_none() {
+                        *rules = Some(loaded.sequences);
+                    }
                 } else {
-                    *rules = Some(serde_yaml::from_str::<Vec<SequenceRule>>(&source).map_err(
-                        |err| anyhow::anyhow!("invalid sequence_valid policy YAML: {err}"),
-                    )?);
+                    let loaded =
+                        serde_yaml::from_str::<Vec<SequenceRule>>(&source).map_err(|err| {
+                            anyhow::anyhow!("invalid sequence_valid policy YAML: {err}")
+                        })?;
+                    if rules.is_none() {
+                        *rules = Some(loaded);
+                    }
                 }
             }
         }
@@ -267,24 +275,7 @@ fn validate_args_policy(path: &str) -> anyhow::Result<()> {
 }
 
 fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<()> {
-    let structured = [
-        "version",
-        "name",
-        "tools",
-        "allow",
-        "deny",
-        "schemas",
-        "constraints",
-        "enforcement",
-        "limits",
-        "signatures",
-        "tool_pins",
-        "discovery",
-        "runtime_monitor",
-        "kill_switch",
-    ]
-    .iter()
-    .any(|key| policy.get(key).is_some());
+    let structured = has_structured_args_policy_shape(policy);
 
     if structured {
         const UNENFORCED: &[&str] = &[
@@ -308,28 +299,20 @@ fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<()> 
             );
         }
 
-        let string_list_nonempty = |value: Option<&serde_json::Value>, field: &str| {
-            let Some(value) = value else {
-                return Ok(false);
-            };
-            let values = value
-                .as_array()
-                .ok_or_else(|| anyhow::anyhow!("args_valid policy {field} must be a list"))?;
-            if values.iter().any(|value| value.as_str().is_none()) {
-                anyhow::bail!("args_valid policy {field} entries must be strings");
-            }
-            Ok(!values.is_empty())
-        };
-
-        let mut effective = string_list_nonempty(policy.get("allow"), "allow")?
-            || string_list_nonempty(policy.get("deny"), "deny")?;
+        let mut allow = policy_string_list(policy.get("allow"), "allow")?;
+        let mut deny = policy_string_list(policy.get("deny"), "deny")?;
         if let Some(tools) = policy.get("tools") {
             let tools = tools
                 .as_object()
                 .ok_or_else(|| anyhow::anyhow!("args_valid policy tools must be a mapping"))?;
-            effective |= string_list_nonempty(tools.get("allow"), "tools.allow")?
-                || string_list_nonempty(tools.get("deny"), "tools.deny")?;
+            allow.extend(policy_string_list(tools.get("allow"), "tools.allow")?);
+            deny.extend(policy_string_list(tools.get("deny"), "tools.deny")?);
         }
+        let mut effective = !deny.is_empty()
+            || (!allow.is_empty()
+                && !allow
+                    .iter()
+                    .any(|pattern| is_universal_tool_pattern(pattern)));
 
         if let Some(schemas) = policy.get("schemas") {
             let schemas = schemas
@@ -337,7 +320,7 @@ fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<()> 
                 .ok_or_else(|| anyhow::anyhow!("args_valid policy schemas must be a mapping"))?;
             if !schemas.is_empty() {
                 let schemas = serde_json::Value::Object(schemas.clone());
-                validate_schema_map(&schemas)?;
+                validate_schema_map(&schemas, false, false)?;
                 effective |= !schema_map_asserts_nothing(&schemas);
             }
         }
@@ -352,7 +335,13 @@ fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<()> 
                         "args_valid policy enforcement.unconstrained_tools must be a string"
                     )
                 })?;
-                effective |= mode == "deny";
+                match mode {
+                    "deny" => effective = true,
+                    "warn" | "allow" => {}
+                    _ => anyhow::bail!(
+                        "args_valid policy enforcement.unconstrained_tools must be one of: warn, deny, allow"
+                    ),
+                }
             }
         }
 
@@ -362,7 +351,69 @@ fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<()> 
         return Ok(());
     }
 
-    validate_schema_map(policy)
+    validate_schema_map(policy, true, true)
+}
+
+fn policy_string_list<'a>(
+    value: Option<&'a serde_json::Value>,
+    field: &str,
+) -> anyhow::Result<Vec<&'a str>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("args_valid policy {field} must be a list"))?;
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("args_valid policy {field} entries must be strings"))
+        })
+        .collect()
+}
+
+fn is_universal_tool_pattern(pattern: &str) -> bool {
+    !pattern.is_empty() && pattern.bytes().all(|byte| byte == b'*')
+}
+
+pub(crate) fn has_structured_args_policy_shape(policy: &serde_json::Value) -> bool {
+    let Some(root) = policy.as_object() else {
+        return false;
+    };
+    root.get("version")
+        .is_some_and(serde_json::Value::is_string)
+        || root.get("name").is_some_and(serde_json::Value::is_string)
+        || root.get("allow").is_some_and(serde_json::Value::is_array)
+        || root.get("deny").is_some_and(serde_json::Value::is_array)
+        || root
+            .get("tools")
+            .and_then(serde_json::Value::as_object)
+            .is_some_and(|tools| tools.contains_key("allow") || tools.contains_key("deny"))
+        || root
+            .get("enforcement")
+            .and_then(serde_json::Value::as_object)
+            .is_some_and(|enforcement| enforcement.contains_key("unconstrained_tools"))
+        || [
+            "constraints",
+            "limits",
+            "signatures",
+            "tool_pins",
+            "discovery",
+            "runtime_monitor",
+            "kill_switch",
+        ]
+        .iter()
+        .any(|key| root.contains_key(*key))
+        || root.get("schemas").is_some_and(|schemas| {
+            schemas.as_object().is_none_or(|schemas| {
+                !schemas.is_empty()
+                    && schemas
+                        .values()
+                        .all(|schema| schema.is_object() || schema.is_boolean())
+            })
+        })
 }
 
 fn validate_sequence_policy(path: &str) -> anyhow::Result<()> {
@@ -395,17 +446,21 @@ fn validate_sequence_policy(path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn validate_schema_map(value: &serde_json::Value) -> anyhow::Result<()> {
+fn validate_schema_map(
+    value: &serde_json::Value,
+    reject_root_schema_keywords: bool,
+    require_effective_schema: bool,
+) -> anyhow::Result<()> {
     let schemas = value
         .as_object()
         .filter(|schemas| !schemas.is_empty())
         .ok_or_else(|| anyhow::anyhow!("schema must be a non-empty tool-name-to-schema map"))?;
-    if schemas.keys().any(|key| is_json_schema_keyword(key)) {
+    if reject_root_schema_keywords && schemas.keys().any(|key| is_json_schema_keyword(key)) {
         anyhow::bail!(
             "root JSON Schema keywords cannot be used as tool names; expected a tool-name-to-schema map"
         );
     }
-    if schema_map_asserts_nothing(value) {
+    if require_effective_schema && schema_map_asserts_nothing(value) {
         anyhow::bail!("schema map asserts nothing");
     }
     for (tool, schema) in schemas {
@@ -432,6 +487,15 @@ fn is_json_schema_keyword(key: &str) -> bool {
             | "$dynamicAnchor"
             | "$vocabulary"
             | "$comment"
+            | "id"
+            | "definitions"
+            | "dependencies"
+            | "additionalItems"
+            | "$recursiveRef"
+            | "$recursiveAnchor"
+            | "divisibleBy"
+            | "disallow"
+            | "extends"
             | "type"
             | "enum"
             | "const"

@@ -591,6 +591,72 @@ fn test_constraining_schema_maps_still_parse() {
 }
 
 #[test]
+fn test_structured_policy_combines_trivial_schemas_with_effective_enforcement() {
+    let yaml = r#"
+            id: structured_allowlist
+            input: "test"
+            expected:
+              type: args_valid
+              schema:
+                version: "2.0"
+                enforcement:
+                  unconstrained_tools: deny
+                schemas:
+                  Search: true
+        "#;
+
+    let test = serde_yaml::from_str::<TestCase>(yaml)
+        .expect("trivial schemas participate in an effective structured allowlist");
+    crate::model::validate_test_case_for_execution(&test)
+        .expect("combined structured constraints must be validated in context");
+}
+
+#[test]
+fn test_explicit_schema_containers_preserve_keyword_tool_names() {
+    let cases = [
+        r#"
+            id: structured_keyword_tool
+            input: "test"
+            expected:
+              type: args_valid
+              schema:
+                version: "2.0"
+                schemas:
+                  properties:
+                    type: object
+                    required: [query]
+        "#,
+        r#"
+            id: output_keyword_tool
+            input: "test"
+            expected:
+              type: tool_output_valid
+              schemas:
+                type:
+                  type: object
+                  required: [result]
+        "#,
+        r#"
+            id: bare_metadata_named_tool
+            input: "test"
+            expected:
+              type: args_valid
+              schema:
+                allow:
+                  type: object
+                  required: [query]
+        "#,
+    ];
+
+    for yaml in cases {
+        let test = serde_yaml::from_str::<TestCase>(yaml)
+            .expect("an explicit schema container must not reserve valid tool names");
+        crate::model::validate_test_case_for_execution(&test)
+            .expect("explicit containers remove root-schema ambiguity");
+    }
+}
+
+#[test]
 fn test_tagged_tool_output_valid_without_schemas_is_hard_error() {
     let yaml = r#"
             id: vacuous_output
