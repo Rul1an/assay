@@ -139,6 +139,8 @@ If a call violates the schema, Assay denies it with `E_ARG_SCHEMA`.
 
 Assay supports local shared definitions via `$defs`.
 Use `#/$defs/...` references inside tool schemas.
+File and HTTP references are not retrieved during evaluation. Bundle external definitions into the
+policy document before execution.
 
 ```yaml
 schemas:

@@ -732,6 +732,274 @@ fn structured_args_policy_supports_shared_defs_but_defs_alone_are_vacuous() {
 }
 
 #[test]
+fn malformed_structured_version_never_falls_back_to_a_legacy_tool_map() {
+    let malformed = serde_json::json!({
+        "version": {},
+        "schemas": {
+            "read_file": {"type": "object"}
+        }
+    });
+    let err = crate::model::validate_args_policy_value(&malformed)
+        .expect_err("a present structured discriminator must be validated");
+    assert!(
+        err.to_string().contains("version must be a string"),
+        "{err:#}"
+    );
+
+    let explicit_tool = serde_json::json!({
+        "version": "2.0",
+        "schemas": {
+            "version": {"type": "object"}
+        }
+    });
+    crate::model::validate_args_policy_value(&explicit_tool)
+        .expect("the structured container still permits a tool named version");
+}
+
+#[test]
+fn shared_defs_must_be_a_mapping_even_for_boolean_tool_schemas() {
+    let malformed = serde_json::json!({
+        "version": "2.0",
+        "schemas": {
+            "$defs": ["not", "a", "mapping"],
+            "deny_all": false
+        }
+    });
+    let err = crate::model::validate_args_policy_value(&malformed)
+        .expect_err("malformed shared definitions must not disappear beside a boolean schema");
+    assert!(
+        err.to_string().contains("$defs must be a mapping"),
+        "{err:#}"
+    );
+}
+
+#[test]
+fn shared_defs_are_validated_even_when_all_tool_schemas_are_boolean() {
+    let malformed = serde_json::json!({
+        "version": "2.0",
+        "schemas": {
+            "$defs": {
+                "invalid": {"type": "not-a-json-schema-type"}
+            },
+            "deny_all": false
+        }
+    });
+    let err = crate::model::validate_args_policy_value(&malformed)
+        .expect_err("shared definitions are policy input even when no object schema uses them");
+    assert!(
+        err.to_string().contains("shared $defs failed to compile"),
+        "{err:#}"
+    );
+}
+
+#[test]
+fn tool_local_defs_without_assertions_are_vacuous() {
+    let policy = serde_json::json!({
+        "Search": {
+            "$defs": {
+                "query": {"type": "string"}
+            }
+        }
+    });
+    let err = crate::model::validate_args_policy_value(&policy)
+        .expect_err("definitions do not constrain a tool call unless a schema references them");
+    assert!(err.to_string().contains("asserts nothing"), "{err:#}");
+}
+
+#[test]
+fn tool_schema_annotations_do_not_make_shared_defs_effective() {
+    let annotations = [
+        ("$comment", serde_json::json!("implementation note")),
+        ("$id", serde_json::json!("urn:assay:test-schema")),
+        (
+            "$schema",
+            serde_json::json!("https://json-schema.org/draft/2020-12/schema"),
+        ),
+        ("title", serde_json::json!("Search arguments")),
+        ("description", serde_json::json!("Shared query definitions")),
+        ("default", serde_json::json!({})),
+        ("deprecated", serde_json::json!(false)),
+        ("readOnly", serde_json::json!(true)),
+        ("writeOnly", serde_json::json!(true)),
+        ("examples", serde_json::json!([])),
+        ("id", serde_json::json!("legacy-schema-id")),
+        (
+            "definitions",
+            serde_json::json!({"unused": {"type": "string"}}),
+        ),
+        ("$recursiveAnchor", serde_json::json!(true)),
+        ("x-note", serde_json::json!("extension annotation")),
+    ];
+
+    for (keyword, annotation) in annotations {
+        let mut schema = serde_json::json!({
+            "$defs": {"query": {"type": "string"}}
+        });
+        schema
+            .as_object_mut()
+            .expect("schema object")
+            .insert(keyword.to_string(), annotation);
+        let policy = serde_json::json!({"Search": schema});
+        let err = crate::model::validate_args_policy_value(&policy)
+            .expect_err("annotations do not constrain any instance");
+        assert!(
+            err.to_string().contains("asserts nothing"),
+            "{keyword}: {err:#}"
+        );
+    }
+}
+
+#[test]
+fn empty_required_does_not_make_a_schema_effective() {
+    let no_ops = [
+        serde_json::json!({"required": []}),
+        serde_json::json!({"dependentRequired": {"kind": []}}),
+        serde_json::json!({"properties": {"query": true}}),
+        serde_json::json!({"allOf": [true]}),
+        serde_json::json!({"anyOf": [true]}),
+        serde_json::json!({"oneOf": [true]}),
+        serde_json::json!({"if": {"type": "string"}}),
+        serde_json::json!({"minLength": 0}),
+        serde_json::json!({"uniqueItems": false}),
+        serde_json::json!({"$defs": {"noop": true}, "$ref": "#/$defs/noop"}),
+        serde_json::json!({"pattern": ""}),
+        serde_json::json!({"oneOf": [true, false]}),
+        serde_json::json!({"contains": false, "minContains": 0}),
+        serde_json::json!({"if": false, "then": false}),
+        serde_json::json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalItems": false
+        }),
+        serde_json::json!({
+            "$schema": "http://json-schema.org/draft-04/schema#",
+            "const": 5
+        }),
+        serde_json::json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "dependentSchemas": {"credit_card": false}
+        }),
+        serde_json::json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "dependencies": {"credit_card": ["billing_address"]}
+        }),
+    ];
+    for schema in no_ops {
+        let policy = serde_json::json!({"Search": schema});
+        let err = crate::model::validate_args_policy_value(&policy)
+            .expect_err("a no-op JSON Schema must constrain no instance");
+        assert!(err.to_string().contains("asserts nothing"), "{err:#}");
+    }
+
+    for schema in [
+        serde_json::json!({"required": ["query"]}),
+        serde_json::json!({"properties": {"query": false}}),
+        serde_json::json!({"oneOf": [true, true]}),
+        serde_json::json!({"if": true, "then": false}),
+        serde_json::json!({"minLength": 1}),
+        serde_json::json!({"uniqueItems": true}),
+        serde_json::json!({"$defs": {"deny": false}, "$ref": "#/$defs/deny"}),
+        serde_json::json!({"contains": true}),
+        serde_json::json!({"if": false, "else": false}),
+        serde_json::json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "dependencies": {"credit_card": ["billing_address"]}
+        }),
+        serde_json::json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "format": "email"
+        }),
+        serde_json::json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "items": [true],
+            "additionalItems": false
+        }),
+        serde_json::json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "contains": false,
+            "minContains": 0
+        }),
+    ] {
+        let policy = serde_json::json!({"Search": schema});
+        crate::model::validate_args_policy_value(&policy)
+            .expect("an asserting JSON Schema must remain executable");
+    }
+}
+
+#[test]
+fn ref_shaped_instance_data_is_not_a_schema_reference() {
+    let policy = serde_json::json!({
+        "version": "2.0",
+        "schemas": {
+            "record": {"const": {"$ref": "https://example.invalid/instance-data"}}
+        }
+    });
+    crate::model::validate_args_policy_value(&policy)
+        .expect("a $ref key inside const is ordinary instance data");
+}
+
+#[test]
+fn json_schema_expected_does_not_retrieve_file_refs() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let schema_path = dir.path().join("external.json");
+    std::fs::write(&schema_path, r#"{"type":"string"}"#).expect("write external schema");
+    let external_ref = url::Url::from_file_path(&schema_path)
+        .expect("absolute path becomes file URL")
+        .to_string();
+    let schema = serde_json::json!({"$ref": external_ref}).to_string();
+    let yaml = format!(
+        "id: local_only_schema\ninput: test\nexpected:\n  type: json_schema\n  json_schema: '{}'\n",
+        schema.replace('\'', "''")
+    );
+    let test = serde_yaml::from_str::<TestCase>(&yaml).expect("test case parses");
+
+    let err = crate::model::validate_test_case_for_execution(&test)
+        .expect_err("preflight must not retrieve an external schema");
+    assert!(err.to_string().contains("schema compile failed"), "{err:#}");
+}
+
+#[test]
+fn shared_defs_cannot_overwrite_tool_local_definitions() {
+    let collision = serde_json::json!({
+        "version": "2.0",
+        "schemas": {
+            "$defs": {"identifier": {"type": "string"}},
+            "lookup": {
+                "$defs": {"identifier": {"type": "integer"}},
+                "$ref": "#/$defs/identifier"
+            }
+        }
+    });
+    let err = crate::model::validate_args_policy_value(&collision)
+        .expect_err("shared and local definitions need explicit collision semantics");
+    assert!(
+        err.to_string().contains("$defs entries must not overlap"),
+        "{err:#}"
+    );
+}
+
+#[test]
+fn external_schema_refs_are_rejected_before_retrieval() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let schema_path = dir.path().join("external.json");
+    std::fs::write(&schema_path, r#"{"type":"string"}"#).expect("write external schema");
+    let external_ref = url::Url::from_file_path(&schema_path)
+        .expect("absolute path becomes file URL")
+        .to_string();
+    let policy = serde_json::json!({
+        "version": "2.0",
+        "schemas": {"lookup": {"$ref": external_ref}}
+    });
+
+    let err = crate::model::validate_args_policy_value(&policy)
+        .expect_err("policy validation must never retrieve an external schema");
+    assert!(
+        err.to_string()
+            .contains("external JSON Schema retrieval is disabled"),
+        "{err:#}"
+    );
+}
+
+#[test]
 fn test_tagged_tool_output_valid_without_schemas_is_hard_error() {
     let yaml = r#"
             id: vacuous_output

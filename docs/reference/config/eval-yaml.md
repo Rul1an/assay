@@ -68,8 +68,9 @@ An `expected:` block must contain exactly one effective output check. Empty chec
 unknown fields, and multiple checks in one block are rejected as config errors.
 
 `sequence: []` is not vacuous: it is the exact constraint that the trace contains
-zero tool calls. Empty `rules: []` without an effective `sequence` or referenced
-policy is rejected.
+zero tool calls. Explicit empty `rules: []` is rejected unless an effective
+`sequence` is also present; a referenced policy does not make empty inline rules
+effective.
 
 ```yaml
 # Accepted: require an exact empty tool-call sequence.

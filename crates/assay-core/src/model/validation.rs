@@ -43,8 +43,12 @@ pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
             Some("min_score")
         }
         Expected::ArgsValid { policy, schema }
-            if schema.as_ref().is_some_and(schema_map_asserts_nothing)
-                || (policy.is_none() && schema.is_none()) =>
+            if schema.as_ref().is_some_and(|schema| {
+                !schema.as_object().is_some_and(|root| {
+                    root.keys()
+                        .any(|key| key != "$defs" && is_json_schema_keyword(key))
+                }) && schema_map_asserts_nothing(schema)
+            }) || (policy.is_none() && schema.is_none()) =>
         {
             Some("policy/schema")
         }
@@ -69,14 +73,259 @@ pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
 
 fn schema_map_asserts_nothing(value: &serde_json::Value) -> bool {
     value.as_object().is_some_and(|schemas| {
+        let shared_defs = schemas.get("$defs").and_then(serde_json::Value::as_object);
         schemas
             .iter()
             .filter(|(tool, _)| tool.as_str() != "$defs")
             .all(|(_, schema)| {
-                schema == &serde_json::Value::Bool(true)
-                    || schema.as_object().is_some_and(serde_json::Map::is_empty)
+                let mut materialized = schema.clone();
+                if let (Some(shared_defs), Some(schema)) =
+                    (shared_defs, materialized.as_object_mut())
+                {
+                    match schema.get_mut("$defs") {
+                        Some(serde_json::Value::Object(local_defs)) => {
+                            if shared_defs.keys().any(|name| local_defs.contains_key(name)) {
+                                return false;
+                            }
+                            local_defs.extend(shared_defs.clone());
+                        }
+                        Some(_) => return false,
+                        None => {
+                            schema.insert(
+                                "$defs".to_string(),
+                                serde_json::Value::Object(shared_defs.clone()),
+                            );
+                        }
+                    }
+                }
+                schema_asserts_nothing(&materialized)
             })
     })
+}
+
+fn schema_asserts_nothing(schema: &serde_json::Value) -> bool {
+    let dialect = SchemaDialect::from_schema(schema);
+    schema_asserts_nothing_inner(schema, schema, dialect, 0)
+}
+
+#[derive(Clone, Copy)]
+enum SchemaDialect {
+    Draft4,
+    Draft6,
+    Draft7,
+    Modern,
+}
+
+impl SchemaDialect {
+    fn from_schema(schema: &serde_json::Value) -> Self {
+        match schema
+            .get("$schema")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+        {
+            value if value.contains("draft-04") => Self::Draft4,
+            value if value.contains("draft-06") => Self::Draft6,
+            value if value.contains("draft-07") => Self::Draft7,
+            _ => Self::Modern,
+        }
+    }
+
+    fn is_legacy(self) -> bool {
+        matches!(self, Self::Draft4 | Self::Draft6 | Self::Draft7)
+    }
+}
+
+fn schema_asserts_nothing_inner(
+    schema: &serde_json::Value,
+    root: &serde_json::Value,
+    dialect: SchemaDialect,
+    depth: usize,
+) -> bool {
+    if depth > 64 {
+        return false;
+    }
+    match schema {
+        serde_json::Value::Bool(value) => *value,
+        serde_json::Value::Object(schema) => {
+            let direct_assertion = schema.iter().any(|(keyword, value)| {
+                schema_keyword_asserts(keyword, value, schema, root, dialect, depth + 1)
+            });
+            let conditional_assertion = conditional_asserts(schema, root, dialect, depth + 1);
+            !direct_assertion && !conditional_assertion
+        }
+        _ => false,
+    }
+}
+
+fn schema_keyword_asserts(
+    keyword: &str,
+    value: &serde_json::Value,
+    containing_schema: &serde_json::Map<String, serde_json::Value>,
+    root: &serde_json::Value,
+    dialect: SchemaDialect,
+    depth: usize,
+) -> bool {
+    match keyword {
+        "$ref" => local_ref_target(value, root)
+            .is_none_or(|target| !schema_asserts_nothing_inner(target, root, dialect, depth)),
+        "$dynamicRef" | "$recursiveRef" | "type" | "enum" | "multipleOf" | "maximum"
+        | "minimum" | "maxLength" | "maxItems" | "maxProperties" => true,
+        "const" => !matches!(dialect, SchemaDialect::Draft4),
+        "exclusiveMaximum" | "exclusiveMinimum" => value.as_bool() != Some(false),
+        "pattern" => value.as_str() != Some(""),
+        "minLength" | "minItems" | "minProperties" => {
+            value.as_u64().is_none_or(|minimum| minimum > 0)
+        }
+        "uniqueItems" => value.as_bool() != Some(false),
+        "required" => value.as_array().is_some_and(|entries| !entries.is_empty()),
+        "dependentRequired" if !dialect.is_legacy() => value.as_object().is_some_and(|entries| {
+            entries
+                .values()
+                .any(|required| required.as_array().is_some_and(|names| !names.is_empty()))
+        }),
+        "properties" | "patternProperties" => value.as_object().is_some_and(|schemas| {
+            schemas
+                .values()
+                .any(|schema| !schema_asserts_nothing_inner(schema, root, dialect, depth))
+        }),
+        "dependentSchemas" if !dialect.is_legacy() => value.as_object().is_some_and(|schemas| {
+            schemas
+                .values()
+                .any(|schema| !schema_asserts_nothing_inner(schema, root, dialect, depth))
+        }),
+        "dependencies" if dialect.is_legacy() => value.as_object().is_some_and(|dependencies| {
+            dependencies.values().any(|dependency| {
+                dependency
+                    .as_array()
+                    .is_some_and(|required| !required.is_empty())
+                    || dependency.is_object()
+                        && !schema_asserts_nothing_inner(dependency, root, dialect, depth)
+            })
+        }),
+        "additionalProperties" | "items" => {
+            !schema_asserts_nothing_inner(value, root, dialect, depth)
+        }
+        "unevaluatedProperties" | "unevaluatedItems" if !dialect.is_legacy() => {
+            !schema_asserts_nothing_inner(value, root, dialect, depth)
+        }
+        "propertyNames" if !matches!(dialect, SchemaDialect::Draft4) => {
+            !schema_asserts_nothing_inner(value, root, dialect, depth)
+        }
+        "additionalItems"
+            if dialect.is_legacy()
+                && containing_schema
+                    .get("items")
+                    .is_some_and(serde_json::Value::is_array) =>
+        {
+            !schema_asserts_nothing_inner(value, root, dialect, depth)
+        }
+        "prefixItems" if !dialect.is_legacy() => value.as_array().is_some_and(|schemas| {
+            schemas
+                .iter()
+                .any(|schema| !schema_asserts_nothing_inner(schema, root, dialect, depth))
+        }),
+        "allOf" => value.as_array().is_some_and(|schemas| {
+            schemas
+                .iter()
+                .any(|schema| !schema_asserts_nothing_inner(schema, root, dialect, depth))
+        }),
+        "anyOf" => value.as_array().is_some_and(|schemas| {
+            schemas.is_empty()
+                || schemas
+                    .iter()
+                    .all(|schema| !schema_asserts_nothing_inner(schema, root, dialect, depth))
+        }),
+        "oneOf" => value
+            .as_array()
+            .is_some_and(|schemas| match schemas.as_slice() {
+                [] => true,
+                [schema] => !schema_asserts_nothing_inner(schema, root, dialect, depth),
+                schemas
+                    if schemas
+                        .iter()
+                        .filter(|schema| schema.as_bool() == Some(true))
+                        .count()
+                        == 1
+                        && schemas.iter().all(serde_json::Value::is_boolean) =>
+                {
+                    false
+                }
+                _ => true,
+            }),
+        "not" => value != &serde_json::Value::Bool(false),
+        "contains" if matches!(dialect, SchemaDialect::Draft4) => false,
+        "contains" if dialect.is_legacy() => true,
+        "contains" => {
+            containing_schema
+                .get("minContains")
+                .and_then(serde_json::Value::as_u64)
+                != Some(0)
+                || containing_schema.contains_key("maxContains")
+        }
+        "format" if dialect.is_legacy() => is_known_format(value),
+        _ => false,
+    }
+}
+
+fn conditional_asserts(
+    schema: &serde_json::Map<String, serde_json::Value>,
+    root: &serde_json::Value,
+    dialect: SchemaDialect,
+    depth: usize,
+) -> bool {
+    if matches!(dialect, SchemaDialect::Draft4 | SchemaDialect::Draft6) {
+        return false;
+    }
+    let Some(condition) = schema.get("if") else {
+        return false;
+    };
+    let branch_asserts = |keyword| {
+        schema
+            .get(keyword)
+            .is_some_and(|branch| !schema_asserts_nothing_inner(branch, root, dialect, depth))
+    };
+    match condition.as_bool() {
+        Some(true) => branch_asserts("then"),
+        Some(false) => branch_asserts("else"),
+        None => branch_asserts("then") || branch_asserts("else"),
+    }
+}
+
+fn local_ref_target<'a>(
+    reference: &serde_json::Value,
+    root: &'a serde_json::Value,
+) -> Option<&'a serde_json::Value> {
+    let reference = reference.as_str()?;
+    let fragment = if let Some(fragment) = reference.strip_prefix('#') {
+        fragment
+    } else {
+        let root_id = root.get("$id")?.as_str()?;
+        reference.strip_prefix(root_id)?.strip_prefix('#')?
+    };
+    if fragment.is_empty() {
+        return None;
+    }
+    root.pointer(fragment)
+}
+
+fn is_known_format(value: &serde_json::Value) -> bool {
+    matches!(
+        value.as_str(),
+        Some(
+            "date"
+                | "date-time"
+                | "email"
+                | "hostname"
+                | "ipv4"
+                | "ipv6"
+                | "regex"
+                | "time"
+                | "uri"
+                | "uri-reference"
+                | "uri-template"
+                | "uuid"
+        )
+    )
 }
 
 /// Explain an `Expected` shape that the current metric set cannot execute as written.
@@ -186,7 +435,7 @@ fn validate_static_inputs(e: &Expected) -> anyhow::Result<()> {
             };
             let schema: serde_json::Value = serde_json::from_str(&source)
                 .map_err(|e| anyhow::anyhow!("invalid JSON schema: {e}"))?;
-            jsonschema::validator_for(&schema)
+            crate::policy_engine::compile_schema(&schema)
                 .map_err(|e| anyhow::anyhow!("schema compile failed: {e}"))?;
         }
         Expected::ArgsValid {
@@ -281,6 +530,15 @@ fn validate_args_policy(path: &str) -> anyhow::Result<()> {
 pub fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<()> {
     if policy
         .as_object()
+        .and_then(|root| root.get("version"))
+        .is_some_and(|version| !version.is_string())
+    {
+        anyhow::bail!(
+            "args_valid policy version must be a string; move a legacy tool named `version` under `version: \"2.0\"` and `schemas.version`"
+        );
+    }
+    if policy
+        .as_object()
         .is_some_and(|root| root.len() == 1 && root.contains_key("schemas"))
     {
         anyhow::bail!(
@@ -345,7 +603,8 @@ pub fn validate_args_policy_value(policy: &serde_json::Value) -> anyhow::Result<
                 .ok_or_else(|| anyhow::anyhow!("args_valid policy schemas must be a mapping"))?;
             if !schemas.is_empty() {
                 let schemas = serde_json::Value::Object(schemas.clone());
-                let prepared_schemas = crate::policy_engine::schema_map_with_root_defs(&schemas);
+                let prepared_schemas = crate::policy_engine::prepare_schema_map(&schemas)
+                    .map_err(anyhow::Error::msg)?;
                 if !prepared_schemas
                     .as_object()
                     .is_some_and(serde_json::Map::is_empty)
@@ -514,7 +773,7 @@ fn validate_schema_map(
                 "schema entry '{tool}' must be a JSON Schema; expected a tool-name-to-schema map"
             );
         }
-        jsonschema::validator_for(schema)
+        crate::policy_engine::compile_schema(schema)
             .map_err(|e| anyhow::anyhow!("schema for tool '{tool}' failed to compile: {e}"))?;
     }
     Ok(())

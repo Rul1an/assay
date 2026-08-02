@@ -41,7 +41,7 @@ impl Metric for ToolOutputValidMetric {
         // per-call loop, so traces with many calls to the same tool don't recompile.
         let mut compiled_schemas: HashMap<&str, jsonschema::Validator> = HashMap::new();
         for (tool_name, schema) in schemas_obj {
-            let compiled = jsonschema::options().build(schema).map_err(|e| {
+            let compiled = crate::schema_support::compile(schema).map_err(|e| {
                 anyhow::anyhow!(
                     "config error: invalid output schema for tool '{}': {}",
                     tool_name,
@@ -247,6 +247,29 @@ mod tests {
             err.to_string().contains("config error"),
             "expected a config error, got: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn external_file_refs_are_not_retrieved() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let schema_path = dir.path().join("external.json");
+        std::fs::write(&schema_path, r#"{"type":"object"}"#).expect("write external schema");
+        let external_ref = url::Url::from_file_path(&schema_path)
+            .expect("absolute path becomes file URL")
+            .to_string();
+        let expected = Expected::ToolOutputValid {
+            schemas: Some(serde_json::json!({"exec": {"$ref": external_ref}})),
+        };
+
+        let err = ToolOutputValidMetric
+            .evaluate(
+                &test_case(),
+                &expected,
+                &resp_with_result("exec", serde_json::json!({})),
+            )
+            .await
+            .expect_err("metric compilation must not retrieve an external schema");
+        assert!(err.to_string().contains("schema"), "{err:#}");
     }
 
     #[tokio::test]
