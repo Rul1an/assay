@@ -1417,6 +1417,9 @@ fn f1_structured_policy_with_only_object_roots_is_not_vacuous() {
         }),
         // Maximally strict and carrying no schemas at all.
         serde_json::json!({"tools": {"deny": ["*"]}}),
+        // Deny-by-default with no per-tool schemas: pins the `enforcement`
+        // clause, which every other case short-circuits before reaching.
+        serde_json::json!({"enforcement": {"unconstrained_tools": "deny"}}),
     ] {
         let expected = Expected::ArgsValid {
             schema: Some(schema.clone()),
@@ -1448,5 +1451,53 @@ fn dependencies_asserts_under_every_dialect() {
         let policy = serde_json::json!({"pay": schema.clone()});
         crate::model::validate_args_policy_value(&policy)
             .unwrap_or_else(|e| panic!("`dependencies` must assert: {schema} -> {e:#}"));
+    }
+}
+
+#[test]
+fn dependencies_no_op_forms_are_still_vacuous() {
+    // Removing the old no_ops row left the arm with no negative coverage, so a
+    // blanket `"dependencies" => true` would have passed CI.
+    for schema in [
+        serde_json::json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "dependencies": {"credit_card": []}
+        }),
+        serde_json::json!({"dependencies": {}}),
+    ] {
+        let policy = serde_json::json!({"pay": schema.clone()});
+        assert!(
+            crate::model::validate_args_policy_value(&policy).is_err(),
+            "`dependencies` no-op must stay vacuous: {schema}"
+        );
+    }
+}
+
+#[test]
+fn boolean_dependency_subschema_asserts() {
+    // jsonschema compiles a bool dependency (canonical/parse.rs matches
+    // `Value::Object(_) | Value::Bool(_)`), and `false` rejects every object
+    // carrying the key — maximally strict, so never vacuous.
+    let policy = serde_json::json!({"pay": {"dependencies": {"credit_card": false}}});
+    crate::model::validate_args_policy_value(&policy)
+        .expect("a `false` dependency subschema is maximally strict, not vacuous");
+}
+
+#[test]
+fn universal_or_empty_tool_allowlists_do_not_rescue_a_vacuous_policy() {
+    // The load-time oracle must agree with `validate_args_policy_value`: an
+    // allow-list of `*` or an empty list narrows nothing.
+    for schema in [
+        serde_json::json!({"tools": {"allow": ["*"]}}),
+        serde_json::json!({"tools": {"allow": []}}),
+    ] {
+        let expected = Expected::ArgsValid {
+            schema: Some(schema.clone()),
+            policy: None,
+        };
+        assert!(
+            crate::model::validation::vacuous_expected_field(&expected).is_some(),
+            "a universal or empty allow-list asserts nothing: {schema}"
+        );
     }
 }

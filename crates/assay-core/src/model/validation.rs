@@ -73,8 +73,10 @@ pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
 /// beside the per-tool `schemas`. Walking the root as a tool map would read
 /// those containers as if each were a tool schema, find no assertions in them,
 /// and reject an effective policy at config load. Each container is therefore
-/// judged on its own terms, while root-level `allow`/`deny` stay on the legacy
-/// walk below so `allow: ["*"]` still correctly asserts nothing.
+/// judged on its own terms. A `tools` container counts only when it actually
+/// narrows anything: a universal or empty allow-list constrains nothing, which
+/// is the same rule `validate_args_policy_value` applies at execution time, so
+/// the two oracles do not disagree about the same policy.
 fn args_policy_asserts_nothing(schema: &serde_json::Value) -> bool {
     let Some(root) = schema.as_object() else {
         return schema_map_asserts_nothing(schema);
@@ -93,7 +95,11 @@ fn args_policy_asserts_nothing(schema: &serde_json::Value) -> bool {
         let tools_assert = root
             .get("tools")
             .and_then(serde_json::Value::as_object)
-            .is_some_and(|tools| !tools.is_empty());
+            .is_some_and(|tools| {
+                tools
+                    .iter()
+                    .any(|(key, value)| tool_control_narrows(key, value))
+            });
         if schemas_assert || tools_assert || root.contains_key("enforcement") {
             return false;
         }
@@ -231,8 +237,8 @@ fn schema_keyword_asserts(
                 dependency
                     .as_array()
                     .is_some_and(|required| !required.is_empty())
-                    || dependency.is_object()
-                        && !schema_asserts_nothing_inner(dependency, root, dialect, depth)
+                    || (!dependency.is_array()
+                        && !schema_asserts_nothing_inner(dependency, root, dialect, depth))
             })
         }),
         "additionalProperties" | "items" => {
@@ -695,6 +701,25 @@ fn policy_string_list<'a>(
                 .ok_or_else(|| anyhow::anyhow!("args_valid policy {field} entries must be strings"))
         })
         .collect()
+}
+
+/// Whether one `tools` control actually narrows the allowed surface.
+///
+/// An empty list constrains nothing, and an allow-list of `*` allows everything;
+/// both are the "asserts nothing" cases `validate_args_policy_value` rejects.
+fn tool_control_narrows(key: &str, value: &serde_json::Value) -> bool {
+    let Some(entries) = value.as_array() else {
+        return true;
+    };
+    if entries.is_empty() {
+        return false;
+    }
+    if key == "allow" {
+        return !entries
+            .iter()
+            .all(|entry| entry.as_str().is_some_and(is_universal_tool_pattern));
+    }
+    true
 }
 
 fn is_universal_tool_pattern(pattern: &str) -> bool {
