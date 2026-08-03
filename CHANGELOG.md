@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- An `assertions:` entry that cannot check anything no longer reports as a pass.
+  Thirteen shapes evaluated to nothing or to a check that could not fail for any
+  input — an `args_valid` without `test_args`, a `sequence_valid` written
+  against the unread `test_trace` field or carrying no usable `regex`, a
+  `tool_blocklist` whose `blocked` list was absent, empty, wrongly typed or
+  partly unreadable, `min_calls: 0`, an empty `sequence` with
+  `allow_other_tools: true`, an empty `tool` name, a `max` at the largest
+  representable bound, and others — and each now reports
+  `E_ASSERT_INEFFECTIVE` naming the responsible field. Separately, `expect` was
+  compared by exact equality to `"pass"` at three sites, so any other spelling
+  silently selected *expect failure* and inverted the assertion; unrecognized
+  values are now rejected. **This turns previously green configurations red, by
+  design: they were green because they checked nothing** (#1949).
+
 ### Added
 - `assay.tool_decision_surface.v0` records now carry a typed `correlation`
   basis: a valid W3C `traceparent` from `_meta` is retained verbatim as a
