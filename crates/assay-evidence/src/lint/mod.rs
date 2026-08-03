@@ -103,7 +103,10 @@ impl LintFinding {
     }
 }
 
+/// `#[non_exhaustive]`: constructed only inside this crate (`compute_summary`), and a new severity
+/// bucket should be an additive change, not a breaking one for a downstream that reads it.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct LintSummary {
     pub total: usize,
     pub errors: usize,
@@ -111,7 +114,13 @@ pub struct LintSummary {
     pub infos: usize,
 }
 
+/// `#[non_exhaustive]`: this report grows as new disclosure fields are added (`truncated`,
+/// `truncated_count`, `applied_cap` arrived incrementally, and more will), and it is constructed
+/// only inside this crate. Marking it non-exhaustive stops each such addition from being a
+/// breaking change for a downstream that constructs or exhaustively destructures it; consumers
+/// read fields and must accept that unlisted ones may exist. Raised on Rul1an/assay#1962.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct LintReport {
     pub tool_version: String,
     pub bundle_meta: Manifest,
