@@ -186,11 +186,23 @@ basis it actually retains, in `correlation`:
 |---|---|
 | `propagated_trace_context` | the request carried a `traceparent` in `_meta` (SEP-414) that passes validation (four lowercase-hex fields `2-32-16-2`, non-zero trace/parent ids, version not `ff`); it is retained verbatim. `source_class: propagated` — a producer-propagated **claim**, never an observed transport fact. A covering, uniform trace-id can claim-support a grouping and a partitioned one can refute it; it cannot be lifted to proof. |
 | `malformed_trace_context` | a carrier was sent but does not pass that validation (wrong shape, non-hex, all-zero ids, hostile bytes, a non-string JSON value, or a future-version form this validator is deliberately stricter than W3C about). Its bytes are **not** retained. Distinct from `none` by design: a broken carrier and an absent carrier are different facts. |
-| `none` | the record is stateless; no carrier was sent, and the record's own `source_class` is null — it retains no basis to classify. Any grouping of such records rests on producer-minted envelope identity (e.g. a run id) and inherits `self_reported` class **from that envelope**, not from this record. |
+| `none` | the record is stateless; no carrier was sent, and the record's own `source_class` is null — it retains no basis to classify. Any grouping of such records rests on producer-minted envelope identity (e.g. a run id) — a producer assertion that lives outside this record's `correlation` field. |
+
+The `source_class` vocabulary of this record family is exactly `"propagated"` or JSON null; it
+deliberately borrows nothing from the gateway-evidence or tool-decision-truth source-class
+families (a different record family's vocabulary MUST NOT be used here). The consumer rule is a
+no-upgrade rule, not an ordering: a grouping claim over several records can never assert a
+stronger basis than any member retains, and a group containing a `none` or
+`malformed_trace_context` member cannot be grouped on trace context at all — that grouping claim
+is incomplete, not weakly supported.
 
 `tracestate` and `baggage` are deliberately not retained: their values are free-form and may carry
-data the redaction rules above cannot reason about. Consumers that group records across calls must
-carry the weakest `source_class` among the members' bases in any pooled verdict.
+data the redaction rules above cannot reason about.
+
+Era scoping: this server still negotiates only legacy handshakes (`2024-11-05` / `2025-11-25`);
+for such clients a `_meta.traceparent` is optional practice rather than SEP-414 conformance, so
+`basis: "none"` is the expected common case. The extraction does not gate on era: any client that
+does send the carrier gets it typed.
 
 ## Reason codes
 

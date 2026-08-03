@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `assay.tool_decision_surface.v0` records now carry a typed `correlation`
+  basis: a valid W3C `traceparent` from `_meta` is retained verbatim as a
+  propagated claim, a broken carrier is typed `malformed_trace_context` with
+  its bytes dropped, and a stateless record is typed `none` — never silently.
+  Additive to the shipped v0 shape; records from producers up to and including
+  3.37.0 carry no `correlation` field (#1955).
+
 ## [3.37.0] - 2026-08-02
 
 ### Added
