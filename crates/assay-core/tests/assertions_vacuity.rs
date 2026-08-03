@@ -73,16 +73,36 @@ fn store_with_one_call() -> anyhow::Result<(Store, i64, &'static str)> {
 /// "nothing to check" apart from "checked and held" without reading prose.
 const INEFFECTIVE: &str = "E_ASSERT_INEFFECTIVE";
 
-fn assert_reports_ineffective(diags: &[assay_core::errors::diagnostic::Diagnostic], case: &str) {
+/// Asserts the diagnostic exists **and** names the field actually responsible.
+///
+/// Checking only the code is too weak: several ineffective paths sit behind one another, so a
+/// diagnostic naming the wrong field still satisfies a code-only assertion while sending the
+/// author to look at a field they believe they already supplied. A mutation that removed the
+/// typed-`test_trace` guard survived a code-only assertion for exactly that reason.
+fn assert_reports_ineffective(
+    diags: &[assay_core::errors::diagnostic::Diagnostic],
+    case: &str,
+    expected_field: &str,
+) {
     assert!(
         !diags.is_empty(),
         "{case}: assertion evaluated to nothing and reported no diagnostic, \
          which is indistinguishable from a check that ran and held"
     );
-    assert!(
-        diags.iter().any(|d| d.code == INEFFECTIVE),
-        "{case}: expected a {INEFFECTIVE} diagnostic, got {:?}",
-        diags.iter().map(|d| &d.code).collect::<Vec<_>>()
+    let found = diags
+        .iter()
+        .find(|d| d.code == INEFFECTIVE)
+        .unwrap_or_else(|| {
+            panic!(
+                "{case}: expected a {INEFFECTIVE} diagnostic, got {:?}",
+                diags.iter().map(|d| &d.code).collect::<Vec<_>>()
+            )
+        });
+    let named = found.context.get("field").and_then(|v| v.as_str());
+    assert_eq!(
+        named,
+        Some(expected_field),
+        "{case}: diagnostic blamed the wrong field, which points the author at the wrong fix"
     );
 }
 
@@ -102,7 +122,7 @@ fn args_valid_without_test_args_is_not_a_pass() -> anyhow::Result<()> {
             expect: None,
         }],
     )?;
-    assert_reports_ineffective(&diags, "args_valid without test_args");
+    assert_reports_ineffective(&diags, "args_valid without test_args", "test_args");
     Ok(())
 }
 
@@ -145,7 +165,11 @@ fn sequence_valid_policy_without_regex_is_not_a_pass() -> anyhow::Result<()> {
             expect: None,
         }],
     )?;
-    assert_reports_ineffective(&diags, "sequence_valid policy without regex");
+    assert_reports_ineffective(
+        &diags,
+        "sequence_valid policy without regex",
+        "policy.regex",
+    );
     Ok(())
 }
 
@@ -165,7 +189,11 @@ fn sequence_valid_with_typed_test_trace_is_not_a_pass() -> anyhow::Result<()> {
             expect: None,
         }],
     )?;
-    assert_reports_ineffective(&diags, "sequence_valid using the typed test_trace field");
+    assert_reports_ineffective(
+        &diags,
+        "sequence_valid using the typed test_trace field",
+        "test_trace",
+    );
     Ok(())
 }
 
@@ -184,7 +212,11 @@ fn tool_blocklist_without_blocked_key_is_not_a_pass() -> anyhow::Result<()> {
             expect: None,
         }],
     )?;
-    assert_reports_ineffective(&diags, "tool_blocklist policy without a blocked key");
+    assert_reports_ineffective(
+        &diags,
+        "tool_blocklist policy without a blocked key",
+        "policy.blocked",
+    );
     Ok(())
 }
 
@@ -202,7 +234,7 @@ fn tool_blocklist_with_empty_blocked_list_is_not_a_pass() -> anyhow::Result<()> 
             expect: None,
         }],
     )?;
-    assert_reports_ineffective(&diags, "tool_blocklist with blocked: []");
+    assert_reports_ineffective(&diags, "tool_blocklist with blocked: []", "policy.blocked");
     Ok(())
 }
 
@@ -221,7 +253,11 @@ fn tool_blocklist_without_test_tool_calls_is_not_a_pass() -> anyhow::Result<()> 
             expect: None,
         }],
     )?;
-    assert_reports_ineffective(&diags, "tool_blocklist without test_tool_calls");
+    assert_reports_ineffective(
+        &diags,
+        "tool_blocklist without test_tool_calls",
+        "test_tool_calls",
+    );
     Ok(())
 }
 
