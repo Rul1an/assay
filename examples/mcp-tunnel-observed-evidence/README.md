@@ -75,6 +75,14 @@ joins or diagnostic correlation. Strong joins require a shared
 `request_envelope_digest` and `request_envelope_canonicalization`; route,
 upstream, request id, timestamp, or provider request id alone stay diagnostic.
 
+The join summary counts what a reference established, never what it declared. A
+reference that declares `same_request_instance` and `strong` but does not carry
+the matching digest and canonicalization is counted under
+`unsubstantiated_strong_claim`, not under `strong_same_request_instance` and not
+under `diagnostic_correlation`. A diagnostic reference is a valid weaker join,
+while an unsubstantiated one is a claim the artifact did not back up, and
+folding the second into the first would hide it.
+
 ## Map the substituted-upstream artifact
 
 ```bash

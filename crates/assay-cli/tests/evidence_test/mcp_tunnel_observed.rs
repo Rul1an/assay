@@ -154,4 +154,46 @@ fn verify_mcp_tunnel_observed_rejects_mismatched_strong_join() {
         .unwrap()
         .iter()
         .any(|check| check["id"] == "same_request_instance_strong_join" && check["ok"] == false));
+
+    // The summary must report what was established, not what the reference declared. A
+    // declared-strong join whose digest does not match is not a strong join, and it is not a
+    // diagnostic one either: it is a claim the artifact failed to substantiate, and it says so.
+    assert_eq!(report["join_summary"]["strong_same_request_instance"], 0);
+    assert_eq!(report["join_summary"]["unsubstantiated_strong_claim"], 1);
+    assert_eq!(report["join_summary"]["diagnostic_correlation"], 0);
+}
+
+/// A reference can declare `same_request_instance` + `strong` and carry no binding fields at all.
+/// That is the cheapest possible way to assert a strong join, so it must not produce one.
+#[test]
+fn verify_mcp_tunnel_observed_does_not_credit_a_bare_strong_declaration() {
+    let mut artifact = read_valid_tunnel();
+    artifact["evidence_refs"][0] = serde_json::json!({
+        "kind": "mcp.execution_record",
+        "digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "relationship": "same_request_instance",
+        "join_strength": "strong"
+    });
+    let (_dir, path) = write_fixture(&artifact, "bare-strong-declaration.tunnel.json");
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence",
+            "verify-mcp-tunnel-observed",
+            "--artifact",
+            path.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .code(2)
+        .get_output()
+        .stdout
+        .clone();
+
+    let report: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["ok"], false);
+    assert_eq!(report["join_summary"]["strong_same_request_instance"], 0);
+    assert_eq!(report["join_summary"]["unsubstantiated_strong_claim"], 1);
 }
