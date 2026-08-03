@@ -103,7 +103,12 @@ impl LintFinding {
     }
 }
 
+/// A lint run's finding counts by severity.
+///
+/// Non-exhaustive: this type may gain fields in future releases, so construct it through this
+/// crate rather than a struct literal, and match it with `..`.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct LintSummary {
     pub total: usize,
     pub errors: usize,
@@ -111,7 +116,13 @@ pub struct LintSummary {
     pub infos: usize,
 }
 
+/// The result of a lint run: the verified bundle, its findings, and disclosure fields describing
+/// how complete the run was.
+///
+/// Non-exhaustive: this type may gain fields in future releases, so construct it through this
+/// crate rather than a struct literal, and match it with `..`.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct LintReport {
     pub tool_version: String,
     pub bundle_meta: Manifest,
