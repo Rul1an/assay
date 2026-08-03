@@ -112,6 +112,18 @@ fn truncation_is_announced_in_a_tool_execution_notification() {
         text.contains(&report.truncated_count.to_string()),
         "the notice must carry how many were dropped: {text}"
     );
+    // OWASP agentic-skills #49 review point: a disclosed truncation is only actionable if the
+    // consumer can see the ceiling, not just the overflow. The cap travels as a machine-readable
+    // field and in the message, so a consumer reconstructs both without parsing prose.
+    assert!(
+        text.contains(&report.applied_cap.to_string()),
+        "the notice must name the cap the count was measured against: {text}"
+    );
+    assert_eq!(notifications[0]["properties"]["appliedCap"], 3);
+    assert_eq!(
+        notifications[0]["properties"]["droppedCount"],
+        report.truncated_count
+    );
 }
 
 /// The spec reading, pinned so it cannot be "fixed" into a plausible mistake later. SARIF 2.1.0
@@ -158,6 +170,10 @@ fn truncation_reaches_run_properties_without_packs() {
         "no packs were configured: {props}"
     );
     assert_eq!(props["truncatedCount"], report.truncated_count);
+    assert_eq!(
+        props["appliedCap"], 3,
+        "the run properties carry the configured ceiling, not only the overflow: {props}"
+    );
 }
 
 /// Appendix I's notification condition gates on `level == "error"`, and 3.20.21 makes that mean the

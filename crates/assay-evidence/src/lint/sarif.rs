@@ -331,6 +331,9 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
     if report.truncated {
         run_props.insert("truncated".into(), json!(true));
         run_props.insert("truncatedCount".into(), json!(report.truncated_count));
+        // The cap the count was measured against. Without it a consumer sees how many findings
+        // fell past the bound but not what the bound was (OWASP agentic-skills #49 review point).
+        run_props.insert("appliedCap".into(), json!(report.applied_cap));
     }
 
     let automation_id = format!(
@@ -374,12 +377,19 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
                 "level": "warning",
                 "message": {
                     "text": format!(
-                        "Result set is incomplete: {} finding(s) were dropped by the max_results \
-                         cap. The findings reported here are the highest severity that survived \
-                         the cap; absence of a lower-severity finding does not mean it was absent \
-                         from the bundle.",
-                        report.truncated_count
+                        "Result set is incomplete: {} finding(s) were dropped by a max_results \
+                         cap of {}. The findings reported here are the highest severity that \
+                         survived the cap; absence of a lower-severity finding does not mean it \
+                         was absent from the bundle.",
+                        report.truncated_count, report.applied_cap
                     )
+                },
+                // The configured limit and the suppressed count as separate machine-readable
+                // fields, so a consumer reconstructs both the ceiling and how many fell past it
+                // without parsing the message text.
+                "properties": {
+                    "appliedCap": report.applied_cap,
+                    "droppedCount": report.truncated_count
                 }
             }]),
         );

@@ -128,6 +128,11 @@ pub struct LintReport {
     pub truncated: bool,
     /// How many findings were dropped. Zero when `truncated` is false.
     pub truncated_count: usize,
+    /// The `max_results` cap that was in force this run. A disclosed truncation is only actionable
+    /// if a consumer can see the bound it was truncated to, not just how many findings fell past it
+    /// (the review point on OWASP agentic-skills #49): `truncated_count` says how many were
+    /// dropped, `applied_cap` says the ceiling they were dropped against.
+    pub applied_cap: usize,
 }
 
 impl LintReport {
