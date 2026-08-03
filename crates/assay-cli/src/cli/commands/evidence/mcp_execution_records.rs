@@ -9,7 +9,7 @@ mod report;
 
 use report::{
     print_table_report, AttestationReport, BackLinkReport, BindingReport, CheckReport,
-    DecisionReport, OutcomeReport, PairingReport, VerificationScope,
+    DecisionReport, OutcomeReport, PairingReport, ResultCommitmentReport, VerificationScope,
 };
 
 #[derive(Debug, Args, Clone)]
@@ -134,6 +134,8 @@ fn build_report(
     let expectation = binding_expectation(binding_input, &decision_backlink, fallback_projection)?;
 
     let mut checks = Vec::new();
+    let mut extra_claims: Vec<&'static str> = Vec::new();
+    let mut result_commitment = None;
     // Fail-closed: named projection requested but the binding block could not be resolved is
     // non-conformant, never a silent fall-back to hashing the whole envelope. The check id is the
     // stable reason code (invalid `_meta` vs missing `authorization_binding`).
@@ -182,6 +184,10 @@ fn build_report(
             outcome.and_then(outcome_status).as_deref(),
             &["executed", "refused", "errored"],
         ));
+        if let Some(outcome) = outcome {
+            result_commitment =
+                push_result_commitment_checks(&mut checks, &mut extra_claims, outcome);
+        }
     } else {
         checks.push(CheckReport {
             id: "outcome_absent",
@@ -201,6 +207,7 @@ fn build_report(
             status: outcome_status(outcome),
             completed_at: string_at(outcome, &["outcomeDerived", "completedAt"]),
             decision_digest: outcome_decision_digest(outcome),
+            result_commitment,
             backlink,
             signature_present: outcome.get("signature").and_then(Value::as_str).is_some(),
         }),
@@ -228,7 +235,11 @@ fn build_report(
         decision: decision_report,
         outcome: outcome_report,
         checks,
-        claims_not_made: claims_not_made(&expectation),
+        claims_not_made: {
+            let mut claims = claims_not_made(&expectation);
+            claims.extend(extra_claims);
+            claims
+        },
     })
 }
 
@@ -245,6 +256,107 @@ fn claims_not_made(expectation: &BindingExpectation) -> Vec<&'static str> {
         claims.push("fallback_nonce_freshness_or_uniqueness");
     }
     claims
+}
+
+/// SEP-2828 verification-algorithm step 5, split into the half a record-only consumer can settle
+/// and the half it cannot.
+///
+/// An `ArgsProjection` commits `projectionDigest` as sha256 over the UTF-8 bytes of the
+/// `projection` string, so a consumer holding nothing but the record recomputes it in full. An
+/// `ArgsRef` addresses content this verifier never fetches. Neither shape says whether the
+/// committed value is what the tool actually returned; that needs the runtime result, which a
+/// record consumer does not have. The first half is now checked. The second is *declared* rather
+/// than left to a reader's assumption, which is the point: an undeclared gap in coverage reads as
+/// coverage.
+fn push_result_commitment_checks(
+    checks: &mut Vec<CheckReport>,
+    extra_claims: &mut Vec<&'static str>,
+    outcome: &Value,
+) -> Option<ResultCommitmentReport> {
+    let status = outcome_status(outcome);
+    let commitment = outcome
+        .get("outcomeDerived")
+        .or_else(|| outcome.get("outcome_derived"))
+        .and_then(|d| {
+            d.get("resultCommitment")
+                .or_else(|| d.get("result_commitment"))
+        });
+
+    let Some(commitment) = commitment else {
+        // Absence is only meaningful for `refused`, which by definition has no result.
+        if status.as_deref() == Some("refused") {
+            checks.push(CheckReport {
+                id: "result_commitment_absent_for_refused",
+                ok: true,
+                detail: "refused outcome carries no resultCommitment".to_string(),
+            });
+        }
+        return None;
+    };
+
+    if status.as_deref() == Some("refused") {
+        checks.push(CheckReport {
+            id: "result_commitment_absent_for_refused",
+            ok: false,
+            detail: "refused outcome carries a resultCommitment; a refusal has no result"
+                .to_string(),
+        });
+    }
+
+    // The committed value is never compared against a runtime result, in either shape.
+    extra_claims.push("result_commitment_payload_binding");
+
+    let projection = commitment.get("projection").and_then(Value::as_str);
+    let projection_digest = string_at(commitment, &["projectionDigest"]);
+    let reference = commitment.get("ref").and_then(Value::as_str);
+
+    match (projection, reference) {
+        (Some(projection), _) => {
+            let recomputed = format!(
+                "sha256:{}",
+                hex::encode(Sha256::digest(projection.as_bytes()))
+            );
+            checks.push(check_eq(
+                "result_commitment_projection_digest_match",
+                projection_digest.as_deref(),
+                Some(recomputed.as_str()),
+                "projectionDigest matches sha256 over the projection string bytes",
+            ));
+            // The RECOMMENDED hash-only-identity form embeds a digest of the withheld value. It is
+            // surfaced so a reader can see what was committed to, and explicitly not checked.
+            let embedded = serde_json::from_str::<Value>(projection)
+                .ok()
+                .and_then(|p| string_at(&p, &["digest"]));
+            Some(ResultCommitmentReport {
+                kind: "args_projection",
+                projection_digest,
+                embedded_digest: embedded,
+                recomputed_projection_digest: Some(recomputed),
+            })
+        }
+        (None, Some(_)) => {
+            extra_claims.push("result_commitment_ref_not_dereferenced");
+            Some(ResultCommitmentReport {
+                kind: "args_ref",
+                projection_digest: string_at(commitment, &["digest"]),
+                embedded_digest: None,
+                recomputed_projection_digest: None,
+            })
+        }
+        (None, None) => {
+            checks.push(CheckReport {
+                id: "result_commitment_shape_recognized",
+                ok: false,
+                detail: "resultCommitment is neither an ArgsProjection nor an ArgsRef".to_string(),
+            });
+            Some(ResultCommitmentReport {
+                kind: "unrecognized",
+                projection_digest: None,
+                embedded_digest: None,
+                recomputed_projection_digest: None,
+            })
+        }
+    }
 }
 
 fn binding_expectation(

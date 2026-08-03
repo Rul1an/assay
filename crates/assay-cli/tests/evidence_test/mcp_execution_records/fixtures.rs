@@ -127,6 +127,55 @@ pub(super) fn outcome_json_with_backlink(
     )
 }
 
+/// sha256 over raw UTF-8 bytes. SEP-2828 defines `projectionDigest` over the bytes of the
+/// `projection` string itself, so this is deliberately not `jcs_digest_json`, which canonicalizes
+/// a value first.
+pub(super) fn sha256_of_str(value: &str) -> String {
+    format!("sha256:{}", hex::encode(Sha256::digest(value.as_bytes())))
+}
+
+/// The RECOMMENDED hash-only-identity commitment: a projection whose content is the JCS encoding
+/// of `{"digest": ...}`, committing to a result the record never carries.
+pub(super) fn hash_only_projection() -> String {
+    r#"{"digest":"sha256:8b7262647fbf76fb7ae30d664e65069eaffc35aa793718beaee239309c9055cf"}"#
+        .to_string()
+}
+
+pub(super) fn outcome_json_with_commitment(
+    digest: &str,
+    decision_digest: &str,
+    status: &str,
+    commitment: &str,
+) -> String {
+    let nonce = binding_nonce();
+    let receipt_nonce = fixture_value("outcome-receipt");
+    format!(
+        r#"{{
+  "version": 1,
+  "alg": "ES256",
+  "backLink": {{
+    "attestationDigest": "{digest}",
+    "attestationNonce": "{nonce}"
+  }},
+  "outcomeDerived": {{
+    "status": "{status}",
+    "completedAt": "2026-06-01T00:00:02Z",
+    "decisionDigest": "{decision_digest}",
+    "resultCommitment": {commitment}
+  }},
+  "receiptAsserted": {{
+    "iss": "server",
+    "sub": "agent:test",
+    "iat": "2026-06-01T00:00:02Z",
+    "nonce": "{receipt_nonce}",
+    "secretVersion": "test",
+    "alg": "ES256"
+  }},
+  "signature": "outcome-sig"
+}}"#
+    )
+}
+
 pub(super) fn request_envelope_json() -> &'static str {
     r#"{
   "name": "tools/call",
