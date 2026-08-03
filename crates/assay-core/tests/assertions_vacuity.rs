@@ -478,6 +478,49 @@ fn tool_blocklist_unusable_blocked_value_is_not_a_pass() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// An absent `blocked` and a wrongly-typed one need different fixes, so they must not share a
+/// message. Pinning the text as well as the field, because a diagnostic that blames the right
+/// field with the wrong explanation still misdirects — the same standard applied to `test_trace`.
+#[test]
+fn blocked_diagnostic_separates_absent_from_wrongly_typed() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    let message_for = |policy: serde_json::Value| -> anyhow::Result<String> {
+        let diags = verify_assertions(
+            &store,
+            run_id,
+            test_id,
+            &[TraceAssertion::ToolBlocklist {
+                test_tool_calls: Some(vec!["web_search".into()]),
+                policy: Some(policy),
+                expect: None,
+            }],
+        )?;
+        Ok(diags
+            .iter()
+            .find(|d| d.code == INEFFECTIVE)
+            .map(|d| d.message.clone())
+            .unwrap_or_default())
+    };
+
+    let absent = message_for(json!({ "deny": ["rm"] }))?;
+    let wrong_type = message_for(json!({ "blocked": "rm" }))?;
+
+    assert!(
+        absent.contains("carries no"),
+        "an absent `blocked` should say so; got {absent:?}"
+    );
+    assert!(
+        wrong_type.contains("not a list"),
+        "a wrongly-typed `blocked` should say so rather than claiming it is absent; got \
+         {wrong_type:?}"
+    );
+    assert_ne!(
+        absent, wrong_type,
+        "two different defects must not share one explanation"
+    );
+    Ok(())
+}
+
 /// The structural twin of `blocked: []`, from the other side: with no calls to check, the loop
 /// starts at "passing" and never iterates, so no blocklist can fail it. Rejecting one side of the
 /// pair and not the other would be an arbitrary boundary.
