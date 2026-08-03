@@ -137,6 +137,24 @@ The failure mode this catches is not arithmetic but attribution: the number is r
 ref, artifact, or build it describes is not. Name the artifact too when a generated form exists, since
 a correct reading of a generated layer is still the wrong layer.
 
+### One rule, one function
+
+When the same rule has to be answered in two places — a load-time check and an execution-time check, a
+display normaliser and a matching normaliser, a validator and the thing it validates against — make
+one side call the other, or extract the single function both use. Do not write the rule twice.
+
+The failure mode is drift, and it is silent: the second implementation starts as a faithful
+approximation and diverges one edit at a time, so both sides keep passing their own tests while
+disagreeing about a real input. PR #1948 spent five independent review rounds on exactly this, and
+each round fixed one divergence while introducing another. What held was making the second site
+mirror the first structurally and pinning them together with a test that asserts both answer the same
+for the same input.
+
+Where the two genuinely cannot share code, the fallback is that parity test — one test over a table of
+inputs asserting agreement, not two separate test suites that never meet. Prefer one function; treat
+the parity test as the compromise it is. `lycorp-jp/sim-use` states the same rule for its normalisers,
+so that display and round-trip "can never drift apart".
+
 ## Tool Boundaries
 
 - Codex owns programme-ledger coordination, CI triage, PR sequencing, and merge-state reconciliation.
