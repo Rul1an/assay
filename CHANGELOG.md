@@ -11,7 +11,8 @@ All notable changes to this project will be documented in this file.
   against the unread `test_trace` field or carrying no usable `regex`, a
   `tool_blocklist` whose `blocked` list was absent, empty, wrongly typed or
   partly unreadable, `min_calls: 0`, an empty `sequence` with
-  `allow_other_tools: true`, and others — and each now reports
+  `allow_other_tools: true`, an empty `tool` name, a `max` at the largest
+  representable bound, and others — and each now reports
   `E_ASSERT_INEFFECTIVE` naming the responsible field. Separately, `expect` was
   compared by exact equality to `"pass"` at three sites, so any other spelling
   silently selected *expect failure* and inverted the assertion; unrecognized

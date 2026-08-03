@@ -595,6 +595,103 @@ fn sequence_valid_unreadable_trace_entry_is_not_a_pass() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// No recorded tool call carries an empty name, so an empty `tool` names nothing. The polarity
+/// decides which way it breaks — permanently green here, permanently red for `must_call` below —
+/// but the config mistake is the same one, so it gets the same diagnostic.
+#[test]
+fn must_not_call_tool_with_empty_name_is_not_a_pass() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    let diags = verify_assertions(
+        &store,
+        run_id,
+        test_id,
+        &[TraceAssertion::TraceMustNotCallTool {
+            tool: String::new(),
+        }],
+    )?;
+    assert_reports_ineffective(
+        &diags,
+        "trace_must_not_call_tool with an empty tool",
+        "tool",
+    );
+    Ok(())
+}
+
+/// The mirror defect. This one fails rather than passes, so it is loud — but it fails for a
+/// reason that has nothing to do with the agent, and no trace can ever satisfy it. Reporting it
+/// as a behavioural failure would send the author looking at their agent.
+#[test]
+fn must_call_tool_with_empty_name_is_not_a_behavioural_failure() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    let diags = verify_assertions(
+        &store,
+        run_id,
+        test_id,
+        &[TraceAssertion::TraceMustCallTool {
+            tool: String::new(),
+            min_calls: Some(1),
+        }],
+    )?;
+    assert_reports_ineffective(&diags, "trace_must_call_tool with an empty tool", "tool");
+    assert!(
+        !diags.iter().any(|d| d.code == "E_TRACE_ASSERT_FAIL"),
+        "an unsatisfiable config must not be reported as the agent misbehaving"
+    );
+    Ok(())
+}
+
+/// `u32::MAX` cannot be exceeded by any step count, so the assertion holds for every trace.
+#[test]
+fn max_steps_at_the_ceiling_is_not_a_pass() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    let diags = verify_assertions(
+        &store,
+        run_id,
+        test_id,
+        &[TraceAssertion::TraceMaxSteps { max: u32::MAX }],
+    )?;
+    assert_reports_ineffective(&diags, "trace_max_steps at u32::MAX", "max");
+    Ok(())
+}
+
+/// Control: an ordinary large bound is a real constraint. It is not statically decidable whether
+/// a trace will exceed it, and rejecting it would be the over-eager vacuity detection the
+/// literature warns gets suppressed. Only the unreachable ceiling is refused.
+#[test]
+fn max_steps_at_a_large_but_reachable_bound_is_a_real_constraint() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    let diags = verify_assertions(
+        &store,
+        run_id,
+        test_id,
+        &[TraceAssertion::TraceMaxSteps { max: 100_000 }],
+    )?;
+    assert!(
+        diags.is_empty(),
+        "a large but reachable step bound must stay a real constraint, got {:?}",
+        diags.iter().map(|d| &d.code).collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
+/// Control: `max_steps` still fails when the trace genuinely exceeds the bound.
+#[test]
+fn max_steps_still_fails_when_exceeded() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    let diags = verify_assertions(
+        &store,
+        run_id,
+        test_id,
+        &[TraceAssertion::TraceMaxSteps { max: 0 }],
+    )?;
+    assert!(
+        diags.iter().any(|d| d.code == "E_TRACE_ASSERT_FAIL"),
+        "one step against max: 0 must fail, got {:?}",
+        diags.iter().map(|d| &d.code).collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
 /// Negative control: a fully specified assertion that genuinely holds must stay silent, or the
 /// fix has simply made everything noisy.
 #[test]

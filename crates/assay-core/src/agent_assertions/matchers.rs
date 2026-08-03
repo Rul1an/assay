@@ -19,6 +19,9 @@ pub fn evaluate(
 fn check_one(graph: &EpisodeGraph, a: &TraceAssertion) -> Option<Diagnostic> {
     match a {
         TraceAssertion::TraceMustCallTool { tool, min_calls } => {
+            if let Some(d) = names_no_tool(tool, "trace_must_call_tool", EMPTY_TOOL_NEVER_HOLDS) {
+                return Some(d);
+            }
             let actual = graph
                 .tool_calls
                 .iter()
@@ -49,6 +52,10 @@ fn check_one(graph: &EpisodeGraph, a: &TraceAssertion) -> Option<Diagnostic> {
             }
         }
         TraceAssertion::TraceMustNotCallTool { tool } => {
+            if let Some(d) = names_no_tool(tool, "trace_must_not_call_tool", EMPTY_TOOL_NEVER_FAILS)
+            {
+                return Some(d);
+            }
             if let Some(call) = graph
                 .tool_calls
                 .iter()
@@ -118,8 +125,23 @@ fn check_one(graph: &EpisodeGraph, a: &TraceAssertion) -> Option<Diagnostic> {
             }
         }
         TraceAssertion::TraceMaxSteps { max } => {
+            // No step count can exceed the ceiling of the type the bound is written in, so this
+            // one bound holds for every trace. Only the ceiling is refused: a merely large bound
+            // like 100_000 is a real constraint whose outcome depends on the trace, and refusing
+            // those is the over-eager vacuity detection that earns a suppression.
+            if *max == u32::MAX {
+                return Some(ineffective(
+                    "trace_max_steps",
+                    "max",
+                    "`max` is the largest representable bound, so no trace can exceed it and the \
+                     assertion cannot fail.",
+                    "Set `max` to the step budget the agent is actually expected to stay within.",
+                ));
+            }
             let count = graph.steps.len();
-            if count as u32 > *max {
+            // Compare in `usize` rather than casting the count down to `u32`: a count above
+            // 2^32 would wrap and could land under the bound.
+            if count > *max as usize {
                 return Some(make_diag(
                     "E_TRACE_ASSERT_FAIL",
                     &format!("Expected at most {} steps, got {}.", max, count),
@@ -438,6 +460,29 @@ fn check_subsequence(
     }
     Ok(())
 }
+
+/// An empty `tool` names nothing, and no recorded call carries an empty name.
+///
+/// Which way that breaks depends on the assertion's polarity — `trace_must_not_call_tool` can then
+/// never fail, `trace_must_call_tool` can never be satisfied — but the config mistake is the same
+/// one, so both report through here rather than through two codes for one typo. The permanently
+/// failing side matters as much as the permanently passing one: reported as a behavioural failure
+/// it would send the author to look at their agent for a defect that is in their config.
+fn names_no_tool(tool: &str, variant: &str, why: &'static str) -> Option<Diagnostic> {
+    tool.is_empty().then(|| {
+        ineffective(
+            variant,
+            "tool",
+            why,
+            "Name the tool the assertion is about.",
+        )
+    })
+}
+
+const EMPTY_TOOL_NEVER_FAILS: &str =
+    "`tool` is empty, so it names no recorded call and the assertion can never fail.";
+const EMPTY_TOOL_NEVER_HOLDS: &str =
+    "`tool` is empty, so it names no recorded call and the assertion can never be satisfied.";
 
 /// Reads the `expect` field, which selects the polarity of a policy-mode assertion.
 ///
