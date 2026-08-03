@@ -266,28 +266,59 @@ fn tool_blocklist_without_test_tool_calls_is_not_a_pass() -> anyhow::Result<()> 
 /// that goes green precisely when the policy would have rejected the input.
 ///
 /// This is worse than a no-op: a no-op stops checking, an inversion checks the opposite.
+///
+/// Covers **all three** call sites. Testing one of them was not enough: an adversarial review
+/// restored the pre-fix comparison at the `sequence_valid` and `tool_blocklist` sites and every
+/// test in the crate stayed green, because only `args_valid` was exercised here.
 #[test]
 fn unrecognised_expect_value_is_rejected_not_silently_inverted() -> anyhow::Result<()> {
     let (store, run_id, test_id) = store_with_one_call()?;
     for spelling in ["Pass", "PASS", "passes", "true", "ok", ""] {
-        let diags = verify_assertions(
-            &store,
-            run_id,
-            test_id,
-            &[TraceAssertion::ArgsValid {
+        for (site, assertion) in expect_sites(spelling) {
+            let diags = verify_assertions(&store, run_id, test_id, &[assertion])?;
+            assert!(
+                diags.iter().any(|d| d.code == "E_CONFIG_ERROR"),
+                "{site} with expect: {spelling:?} must be rejected, not read as \
+                 `expect failure`; got {:?}",
+                diags.iter().map(|d| &d.code).collect::<Vec<_>>()
+            );
+        }
+    }
+    Ok(())
+}
+
+/// One well-formed assertion per variant that reads `expect`, so the polarity parser is pinned
+/// everywhere it is called rather than only where it was convenient to test.
+fn expect_sites(spelling: &str) -> Vec<(&'static str, TraceAssertion)> {
+    let expect = Some(spelling.to_string());
+    vec![
+        (
+            "args_valid",
+            TraceAssertion::ArgsValid {
                 tool: "web_search".into(),
                 test_args: Some(json!({ "q": "rust" })),
                 policy: Some(json!({ "schema": { "type": "object", "required": ["q"] } })),
-                expect: Some(spelling.to_string()),
-            }],
-        )?;
-        assert!(
-            diags.iter().any(|d| d.code == "E_CONFIG_ERROR"),
-            "expect: {spelling:?} must be rejected, not read as `expect failure`; got {:?}",
-            diags.iter().map(|d| &d.code).collect::<Vec<_>>()
-        );
-    }
-    Ok(())
+                expect: expect.clone(),
+            },
+        ),
+        (
+            "sequence_valid",
+            TraceAssertion::SequenceValid {
+                test_trace: None,
+                test_trace_raw: Some(vec![json!({ "tool": "web_search" })]),
+                policy: Some(json!({ "regex": "^web_search$" })),
+                expect: expect.clone(),
+            },
+        ),
+        (
+            "tool_blocklist",
+            TraceAssertion::ToolBlocklist {
+                test_tool_calls: Some(vec!["web_search".into()]),
+                policy: Some(json!({ "blocked": ["rm"] })),
+                expect,
+            },
+        ),
+    ]
 }
 
 /// Both recognised spellings must keep working, so rejecting the rest does not break real configs.
@@ -444,6 +475,80 @@ fn tool_blocklist_unusable_blocked_value_is_not_a_pass() -> anyhow::Result<()> {
             "policy.blocked",
         );
     }
+    Ok(())
+}
+
+/// The structural twin of `blocked: []`, from the other side: with no calls to check, the loop
+/// starts at "passing" and never iterates, so no blocklist can fail it. Rejecting one side of the
+/// pair and not the other would be an arbitrary boundary.
+#[test]
+fn tool_blocklist_with_no_calls_to_check_is_not_a_pass() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    let diags = verify_assertions(
+        &store,
+        run_id,
+        test_id,
+        &[TraceAssertion::ToolBlocklist {
+            test_tool_calls: Some(vec![]),
+            policy: Some(json!({ "blocked": ["rm"] })),
+            expect: Some("pass".into()),
+        }],
+    )?;
+    assert_reports_ineffective(
+        &diags,
+        "tool_blocklist with an empty test_tool_calls",
+        "test_tool_calls",
+    );
+    Ok(())
+}
+
+/// A partly-unusable blocklist is worse than a wholly unusable one: the assertion keeps working
+/// for the entries it could read, so it looks complete while silently checking less.
+#[test]
+fn tool_blocklist_partially_unusable_blocked_is_not_a_pass() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    let diags = verify_assertions(
+        &store,
+        run_id,
+        test_id,
+        &[TraceAssertion::ToolBlocklist {
+            test_tool_calls: Some(vec!["drop_table".into()]),
+            policy: Some(json!({ "blocked": ["rm", { "name": "drop_table" }] })),
+            expect: None,
+        }],
+    )?;
+    assert_reports_ineffective(
+        &diags,
+        "tool_blocklist with a non-string entry in blocked",
+        "policy.blocked",
+    );
+    Ok(())
+}
+
+/// Same shape one variant over: an entry keyed on neither `tool` nor `tool_name` is dropped, so
+/// the sequence actually checked is shorter than the one written.
+#[test]
+fn sequence_valid_unreadable_trace_entry_is_not_a_pass() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    let diags = verify_assertions(
+        &store,
+        run_id,
+        test_id,
+        &[TraceAssertion::SequenceValid {
+            test_trace: None,
+            test_trace_raw: Some(vec![
+                json!({ "tool": "web_search" }),
+                json!({ "toolName": "delete_account" }),
+            ]),
+            policy: Some(json!({ "regex": "^web_search$" })),
+            expect: None,
+        }],
+    )?;
+    assert_reports_ineffective(
+        &diags,
+        "sequence_valid with an entry naming no tool",
+        "test_trace_raw",
+    );
     Ok(())
 }
 

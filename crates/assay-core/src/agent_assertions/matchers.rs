@@ -237,6 +237,19 @@ fn check_one(graph: &EpisodeGraph, a: &TraceAssertion) -> Option<Diagnostic> {
                                 .map(|s| s.to_string())
                         })
                         .collect();
+                    // An entry keyed on neither `tool` nor `tool_name` is dropped above, which
+                    // silently shortens the sequence being checked — a misspelled key would turn
+                    // this into a different, weaker assertion rather than an error.
+                    if tools.len() != trace_vals.len() {
+                        return Some(ineffective(
+                            "sequence_valid",
+                            "test_trace_raw",
+                            "an entry in `test_trace_raw` names no tool under `tool` or \
+                             `tool_name`, so it is dropped and the sequence checked is shorter \
+                             than the one written.",
+                            "Give every entry a `tool` key naming one tool.",
+                        ));
+                    }
 
                     // The policy carries the sequence constraint as a regex under `regex`.
                     // Defaulting a missing key to `.*` would make the assertion match every
@@ -307,18 +320,50 @@ fn check_one(graph: &EpisodeGraph, a: &TraceAssertion) -> Option<Diagnostic> {
                     ));
                 };
                 {
+                    // No calls to check is the same shape as an empty blocklist, from the other
+                    // side: the loop below starts at `actual_pass = true` and never iterates.
+                    if tools.is_empty() {
+                        return Some(ineffective(
+                            "tool_blocklist",
+                            "test_tool_calls",
+                            "`test_tool_calls` is empty, so there is no call to match against the \
+                             blocklist and the assertion cannot fail.",
+                            "List the calls the policy should be evaluated against, or remove the \
+                             assertion.",
+                        ));
+                    }
+
                     // pol should look like { "blocked": [...] }
                     // An absent key and an empty list are both a blocklist that admits every
                     // call, which cannot fail for any input.
-                    let Some(blocked_raw) = pol.get("blocked").and_then(|v| v.as_array()) else {
+                    let blocked_value = pol.get("blocked");
+                    let Some(blocked_raw) = blocked_value.and_then(|v| v.as_array()) else {
+                        // Distinguish absent from present-but-wrong-typed: they point the author
+                        // at different fixes, and "carries no list" is false for `blocked: "rm"`.
                         return Some(ineffective(
                             "tool_blocklist",
                             "policy.blocked",
-                            "the policy carries no `blocked` list, so every tool call is \
-                             admitted and the assertion cannot fail.",
-                            "Add a `blocked` array to the policy naming the disallowed tools.",
+                            if blocked_value.is_some() {
+                                "the policy's `blocked` is not a list, so no tool name can be \
+                                 matched against it and the assertion cannot fail."
+                            } else {
+                                "the policy carries no `blocked` list, so every tool call is \
+                                 admitted and the assertion cannot fail."
+                            },
+                            "Give `blocked` an array of tool names.",
                         ));
                     };
+                    // A non-string entry is dropped by the conversion below. Dropping some of the
+                    // blocklist silently would leave a check that looks complete and is not.
+                    if blocked_raw.iter().any(|v| !v.is_string()) {
+                        return Some(ineffective(
+                            "tool_blocklist",
+                            "policy.blocked",
+                            "`blocked` contains an entry that is not a tool name, which would be \
+                             dropped and leave the assertion checking less than it appears to.",
+                            "Make every entry in `blocked` a string naming one tool.",
+                        ));
+                    }
                     let blocked: Vec<String> = blocked_raw
                         .iter()
                         .filter_map(|v| v.as_str().map(|s| s.to_string()))
