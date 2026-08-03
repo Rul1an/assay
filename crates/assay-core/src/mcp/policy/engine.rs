@@ -42,7 +42,32 @@ pub(super) fn evaluate_with_metadata(
     }
 
     let compiled = policy.compiled_schemas();
-    if let Some(validator) = compiled.get(tool_name) {
+    if let Some(compile_result) = compiled.get(tool_name) {
+        let validator = match compile_result {
+            Ok(validator) => validator,
+            // A declared schema that fails to prepare or compile is a malformed constraint on
+            // THIS tool. Fail closed for the tool rather than aborting the server: the operator
+            // declared an intent to constrain it, so its calls must not pass unvalidated, and a
+            // proxy panic over user-authored policy input is the larger blast radius (#1952).
+            Err(error) => {
+                let reason = format!("Declared schema failed to prepare or compile: {error}");
+                return finalize_evaluation(
+                    policy,
+                    metadata,
+                    PolicyDecision::Deny {
+                        tool: tool_name.to_string(),
+                        code: "E_SCHEMA_COMPILE".to_string(),
+                        reason: reason.clone(),
+                        contract: serde_json::json!({
+                            "status": "deny",
+                            "error_code": "E_SCHEMA_COMPILE",
+                            "tool": tool_name,
+                            "message": reason,
+                        }),
+                    },
+                );
+            }
+        };
         if let Some(decision) = schema_violation_decision(tool_name, args, validator.as_ref()) {
             return finalize_evaluation(policy, metadata, decision);
         }

@@ -121,7 +121,13 @@ pub struct PolicyState {
 /// Root `$defs` are merged into each object-valued tool schema and therefore compile under that
 /// schema's declared dialect. A shared definition may not replace a tool-local definition with the
 /// same name. With only boolean tools, the otherwise-unscoped definitions use the default dialect.
-pub(crate) fn prepare_schema_map(policy: &Value) -> Result<Value, String> {
+///
+/// This is the ONE preparation semantics for `$defs` in a tool-schema map. Every consumer that
+/// compiles or reasons about such a map (the MCP proxy's load-time compiler, `check_tool_args`,
+/// the `tool_output_valid` metric, and config-validation vacuity checks) must go through it, or a
+/// `$defs` entry means different things on different paths. The returned map contains only tool
+/// entries: `$defs` is consumed by the merge and is never itself a tool schema.
+pub fn prepare_schema_map(policy: &Value) -> Result<Value, String> {
     let Some(schemas) = policy.as_object() else {
         return Ok(policy.clone());
     };
@@ -149,7 +155,7 @@ fn shared_defs(
     })
 }
 
-pub(crate) fn prepare_tool_schema(policy: &Value, tool: &str) -> Result<Value, String> {
+pub fn prepare_tool_schema(policy: &Value, tool: &str) -> Result<Value, String> {
     let schemas = policy
         .as_object()
         .ok_or_else(|| "policy must be a tool-name-to-schema mapping".to_string())?;

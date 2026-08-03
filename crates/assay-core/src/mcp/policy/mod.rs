@@ -64,13 +64,42 @@ impl McpPolicy {
         schema::migrate_constraints_to_schemas(self);
     }
 
-    fn compiled_schemas(&self) -> &HashMap<String, Arc<jsonschema::Validator>> {
+    fn compiled_schemas(&self) -> &types::CompiledSchemas {
         self.compiled
             .get_or_init(|| schema::compile_all_schemas(self))
     }
 
+    /// Compile every tool schema, failing with a message that names every broken tool. This is the
+    /// load-time validation surface: callers that want a policy rejected up front (`assay policy
+    /// validate`, migration) use this, while the enforcement path holds the same per-tool errors
+    /// and denies the affected tool's calls with `E_SCHEMA_COMPILE` instead of aborting.
+    pub fn try_compile_all_schemas(
+        &self,
+    ) -> Result<HashMap<String, Arc<jsonschema::Validator>>, String> {
+        let mut compiled = HashMap::new();
+        let mut errors: Vec<String> = Vec::new();
+        for (tool, result) in schema::compile_all_schemas(self) {
+            match result {
+                Ok(validator) => {
+                    compiled.insert(tool, validator);
+                }
+                Err(error) => errors.push(format!("tool '{tool}': {error}")),
+            }
+        }
+        if errors.is_empty() {
+            Ok(compiled)
+        } else {
+            errors.sort();
+            Err(errors.join("; "))
+        }
+    }
+
+    #[deprecated(
+        note = "panics on a policy whose schemas fail to prepare or compile; use                 try_compile_all_schemas and handle the error"
+    )]
     pub fn compile_all_schemas(&self) -> HashMap<String, Arc<jsonschema::Validator>> {
-        schema::compile_all_schemas(self)
+        self.try_compile_all_schemas()
+            .unwrap_or_else(|error| panic!("Failed to compile JSON schemas: {error}"))
     }
 
     pub fn policy_digest(&self) -> Option<String> {

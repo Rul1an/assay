@@ -1581,3 +1581,53 @@ fn args_policy_oracles_agree() {
         );
     }
 }
+
+/// #1951: the validation layer, the vacuity rule, and the runtime metric reason about the SAME
+/// prepared map. A shared-$defs `$ref` shape validates (it used to fail as unresolvable because
+/// validation compiled tool schemas verbatim), and a collision is a loud validation error rather
+/// than a config that reads as effective and then validates nothing at runtime.
+#[test]
+fn tool_output_valid_shared_defs_validate_and_collisions_are_loud() {
+    let supported = crate::model::Expected::ToolOutputValid {
+        schemas: Some(serde_json::json!({
+            "$defs": {"NonEmpty": {"type": "string", "minLength": 1}},
+            "exec": {"$ref": "#/$defs/NonEmpty"}
+        })),
+    };
+    crate::model::validation::validate_expected_for_execution(&supported)
+        .expect("shared $defs with a resolvable ref is a supported, effective config");
+
+    let colliding = crate::model::Expected::ToolOutputValid {
+        schemas: Some(serde_json::json!({
+            "$defs": {"X": {"type": "string"}},
+            "exec": {"$defs": {"X": {}}}
+        })),
+    };
+    let err = crate::model::validation::validate_expected_for_execution(&colliding)
+        .expect_err("a $defs collision is a preparation failure, not an effective schema");
+    assert!(err.to_string().contains("overlap"), "{err:#}");
+
+    let non_mapping = crate::model::Expected::ToolOutputValid {
+        schemas: Some(serde_json::json!({
+            "$defs": ["not", "a", "mapping"],
+            "exec": {"type": "object"}
+        })),
+    };
+    let err = crate::model::validation::validate_expected_for_execution(&non_mapping)
+        .expect_err("a non-mapping $defs is a preparation failure");
+    assert!(err.to_string().contains("mapping"), "{err:#}");
+}
+
+/// A map whose only entry is `$defs` still asserts nothing after preparation: the merge consumes
+/// the entry and leaves no tool schema behind, so the vacuity diagnosis fires, not a compile error.
+#[test]
+fn tool_output_valid_defs_only_map_is_vacuous() {
+    let defs_only = crate::model::Expected::ToolOutputValid {
+        schemas: Some(serde_json::json!({
+            "$defs": {"NonEmpty": {"type": "string", "minLength": 1}}
+        })),
+    };
+    let err = crate::model::validation::validate_expected_for_execution(&defs_only)
+        .expect_err("definitions without any tool schema assert nothing");
+    assert!(err.to_string().contains("nothing"), "{err:#}");
+}
