@@ -70,10 +70,19 @@ assay evidence verify-mcp-tunnel-observed \
 
 This checker is the reference fixture path for the sample. It validates the
 bounded `assay.mcp.tunnel_observed.v0` shape, keeps raw payload/auth material
-out, and classifies `evidence_refs` as either strong `same_request_instance`
-joins or diagnostic correlation. Strong joins require a shared
+out, and classifies each of the `evidence_refs` as one of three things: an
+established strong `same_request_instance` join, an unsubstantiated strong
+claim, or diagnostic correlation. Strong joins require a shared
 `request_envelope_digest` and `request_envelope_canonicalization`; route,
 upstream, request id, timestamp, or provider request id alone stay diagnostic.
+
+The join summary counts what a reference established, never what it declared. A
+reference that declares `same_request_instance` and `strong` but does not carry
+the matching digest and canonicalization is counted under
+`unsubstantiated_strong_claim`, not under `strong_same_request_instance` and not
+under `diagnostic_correlation`. A diagnostic reference is a valid weaker join,
+while an unsubstantiated one is a claim the artifact did not back up, and
+folding the second into the first would hide it.
 
 ## Map the substituted-upstream artifact
 

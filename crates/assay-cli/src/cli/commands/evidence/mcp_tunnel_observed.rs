@@ -69,9 +69,22 @@ struct RequestBindingReport {
     request_envelope_canonicalization: Option<String>,
 }
 
+/// Counts what the artifact ESTABLISHED, never what it declared.
+///
+/// A reference declares `relationship` and `join_strength` itself. Counting a strong join on those
+/// fields alone would let a producer's own assertion arrive in the summary as an established one,
+/// which is the failure mode this command exists to catch. So a declared-strong reference only
+/// reaches `strong_same_request_instance` once its `request_envelope_digest` and canonicalization
+/// actually match the request instance.
+///
+/// A declared-strong reference that fails that match is NOT folded into `diagnostic_correlation`
+/// either: a diagnostic reference is a valid weaker join, while this is a claim the artifact made
+/// and did not substantiate. Laundering the second into the first would hide it. It gets its own
+/// bucket so the count of unsubstantiated claims is readable rather than inferred.
 #[derive(Debug, Serialize, Default)]
 struct JoinSummary {
     strong_same_request_instance: usize,
+    unsubstantiated_strong_claim: usize,
     diagnostic_correlation: usize,
 }
 
@@ -384,11 +397,16 @@ fn push_evidence_ref_checks(
             && join_strength.as_deref() == Some("strong");
 
         if is_strong_same_request {
-            join_summary.strong_same_request_instance += 1;
             let ok = ref_digest.as_deref() == request_digest
                 && ref_canonicalization.as_deref() == request_canonicalization
                 && request_digest.is_some()
                 && request_canonicalization.is_some();
+            // Count the established join, not the declared one.
+            if ok {
+                join_summary.strong_same_request_instance += 1;
+            } else {
+                join_summary.unsubstantiated_strong_claim += 1;
+            }
             checks.push(CheckReport {
                 id: "same_request_instance_strong_join",
                 ok,
@@ -506,6 +524,10 @@ fn print_table_report(report: &TunnelObservedReport) {
     println!(
         "Strong joins:        {}",
         report.join_summary.strong_same_request_instance
+    );
+    println!(
+        "Unsubstantiated:     {}",
+        report.join_summary.unsubstantiated_strong_claim
     );
     println!(
         "Diagnostic joins:    {}",
