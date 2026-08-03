@@ -86,6 +86,49 @@ fn tool_decision_fixtures_hold_the_spec_invariants() {
                 "{name}: secret_material_stored must be false"
             );
 
+            // Correlation basis is required and typed, never silent: a traceparent is
+            // retained exactly when the basis is propagated_trace_context, and a malformed
+            // carrier keeps its bytes out of the record while staying distinct from `none`.
+            {
+                let corr = d.get("correlation").unwrap_or_else(|| {
+                    panic!("{name}: every decision must carry a typed correlation basis")
+                });
+                let basis = corr["basis"].as_str().unwrap_or("");
+                assert!(
+                    [
+                        "propagated_trace_context",
+                        "malformed_trace_context",
+                        "none"
+                    ]
+                    .contains(&basis),
+                    "{name}: unknown correlation basis {basis:?}"
+                );
+                let propagated = basis == "propagated_trace_context";
+                if propagated {
+                    assert!(
+                        corr["traceparent"].is_string(),
+                        "{name}: a propagated basis must retain the traceparent string"
+                    );
+                    assert_eq!(
+                        corr["source_class"].as_str(),
+                        Some("propagated"),
+                        "{name}: a propagated basis must carry source_class \"propagated\""
+                    );
+                } else {
+                    // JSON null exactly — a number or object here would be a shape drift the
+                    // is_string()/as_str() checks alone would wave through.
+                    assert!(
+                        corr["traceparent"].is_null(),
+                        "{name}: a non-propagated basis must carry traceparent null"
+                    );
+                    assert!(
+                        corr["source_class"].is_null(),
+                        "{name}: a non-propagated basis must carry source_class null — the \
+                         record retains no basis to classify"
+                    );
+                }
+            }
+
             // A classified privileged tool carries a derived required_scope (non-null string); an
             // unclassified tool carries null (read downstream as required_scope_unknown, not "none").
             let req = &d["action"]["required_scope"];

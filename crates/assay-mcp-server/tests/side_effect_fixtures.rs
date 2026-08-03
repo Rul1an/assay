@@ -108,3 +108,44 @@ fn levels_are_from_the_pinned_set() {
         );
     }
 }
+
+#[test]
+fn side_effect_vectors_carry_a_typed_correlation_basis() {
+    // These fixtures declare the same `assay.tool_decision_surface.v0` schema as the
+    // tool_decisions vectors, so the correlation contract binds them too: basis is required,
+    // typed, and never silent (see tests/tool_decision_fixtures.rs for the full invariant).
+    for name in ["asserted.json", "observed_confirmed.json", "verified.json"] {
+        let v = fx(name);
+        for d in v["observed_tool_decisions"].as_array().expect("decisions") {
+            let corr = d.get("correlation").unwrap_or_else(|| {
+                panic!("{name}: every decision must carry a typed correlation basis")
+            });
+            let basis = corr["basis"].as_str().unwrap_or("");
+            assert!(
+                [
+                    "propagated_trace_context",
+                    "malformed_trace_context",
+                    "none"
+                ]
+                .contains(&basis),
+                "{name}: unknown correlation basis {basis:?}"
+            );
+            if basis == "propagated_trace_context" {
+                assert!(
+                    corr["traceparent"].is_string(),
+                    "{name}: propagated must retain traceparent"
+                );
+                assert_eq!(corr["source_class"].as_str(), Some("propagated"), "{name}");
+            } else {
+                assert!(
+                    corr["traceparent"].is_null(),
+                    "{name}: non-propagated must carry null"
+                );
+                assert!(
+                    corr["source_class"].is_null(),
+                    "{name}: non-propagated must carry null"
+                );
+            }
+        }
+    }
+}
