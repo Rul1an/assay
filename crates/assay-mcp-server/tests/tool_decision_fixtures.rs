@@ -86,6 +86,33 @@ fn tool_decision_fixtures_hold_the_spec_invariants() {
                 "{name}: secret_material_stored must be false"
             );
 
+            // Correlation basis, when present, is typed and never silent: a traceparent is
+            // retained exactly when the basis is propagated_trace_context, and a malformed
+            // carrier keeps its bytes out of the record while staying distinct from `none`.
+            if let Some(corr) = d.get("correlation") {
+                let basis = corr["basis"].as_str().unwrap_or("");
+                assert!(
+                    [
+                        "propagated_trace_context",
+                        "malformed_trace_context",
+                        "none"
+                    ]
+                    .contains(&basis),
+                    "{name}: unknown correlation basis {basis:?}"
+                );
+                let propagated = basis == "propagated_trace_context";
+                assert_eq!(
+                    corr["traceparent"].is_string(),
+                    propagated,
+                    "{name}: traceparent must be retained iff basis is propagated_trace_context"
+                );
+                assert_eq!(
+                    corr["source_class"].as_str(),
+                    propagated.then_some("propagated"),
+                    "{name}: source_class must be \"propagated\" iff basis is propagated, else null"
+                );
+            }
+
             // A classified privileged tool carries a derived required_scope (non-null string); an
             // unclassified tool carries null (read downstream as required_scope_unknown, not "none").
             let req = &d["action"]["required_scope"];

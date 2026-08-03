@@ -35,6 +35,11 @@
         "arguments_redacted": true,
         "credential_alias": null,
         "secret_material_stored": false
+      },
+      "correlation": {
+        "basis": "none",
+        "traceparent": null,
+        "source_class": null
       }
     }
   ],

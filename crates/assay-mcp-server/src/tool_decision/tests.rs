@@ -8,6 +8,55 @@ fn call<'a>(tool: &'a str, args: &'a Value, effect: Effect, status: &'a str) -> 
         effect,
         status,
         rule_id: Some("r1"),
+        traceparent: None,
+    }
+}
+
+fn call_with_traceparent<'a>(args: &'a Value, traceparent: Option<&'a str>) -> ObservedCall<'a> {
+    ObservedCall {
+        traceparent,
+        ..call("github.add_deploy_key", args, Effect::Allow, "success")
+    }
+}
+
+#[test]
+fn valid_traceparent_is_retained_and_typed_as_propagated() {
+    let a = json!({});
+    let tp = "00-11111111111111111111111111111111-aaaaaaaaaaaaaaa1-01";
+    let d = build_decision(&call_with_traceparent(&a, Some(tp)));
+    assert_eq!(d["correlation"]["basis"], json!("propagated_trace_context"));
+    assert_eq!(d["correlation"]["traceparent"], json!(tp));
+    assert_eq!(d["correlation"]["source_class"], json!("propagated"));
+}
+
+#[test]
+fn absent_traceparent_is_typed_none_never_silent() {
+    let a = json!({});
+    let d = build_decision(&call_with_traceparent(&a, None));
+    assert_eq!(d["correlation"]["basis"], json!("none"));
+    assert_eq!(d["correlation"]["traceparent"], json!(null));
+    assert_eq!(d["correlation"]["source_class"], json!(null));
+}
+
+#[test]
+fn malformed_traceparent_is_typed_distinctly_and_not_retained() {
+    let a = json!({});
+    for bad in [
+        "not-a-traceparent",
+        "00-11111111111111111111111111111111-aaaaaaaaaaaaaaa1", // missing flags
+        "00-zzzz1111111111111111111111111111-aaaaaaaaaaaaaaa1-01", // non-hex
+        "00-00000000000000000000000000000000-aaaaaaaaaaaaaaa1-01", // all-zero trace-id
+        "00-11111111111111111111111111111111-0000000000000000-01", // all-zero parent-id
+        "00-1111\u{1b}]8;;evil\u{7}-aaaaaaaaaaaaaaa1-01",       // hostile bytes
+    ] {
+        let d = build_decision(&call_with_traceparent(&a, Some(bad)));
+        assert_eq!(
+            d["correlation"]["basis"],
+            json!("malformed_trace_context"),
+            "{bad}"
+        );
+        assert_eq!(d["correlation"]["traceparent"], json!(null), "{bad}");
+        assert_eq!(d["correlation"]["source_class"], json!(null), "{bad}");
     }
 }
 

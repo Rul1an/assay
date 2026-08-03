@@ -89,6 +89,11 @@ pub struct ObservedCall<'a> {
     pub status: &'a str,
     /// Policy rule id if the decision named one; `None` falls back to a neutral marker.
     pub rule_id: Option<&'a str>,
+    /// Raw `_meta.traceparent` from the request (SEP-414), if the client sent one. The record
+    /// types it as a propagated claim; it is never an observed transport fact. `tracestate` and
+    /// `baggage` are deliberately not retained: their values are free-form and may carry data
+    /// the redaction rules cannot reason about.
+    pub traceparent: Option<&'a str>,
 }
 
 /// Outcome of running the rule-based privileged-action classifiers over one observed call. Total:
@@ -307,6 +312,57 @@ pub fn sanitize(input: &str) -> String {
         .collect()
 }
 
+/// A W3C `traceparent` (version-traceid-parentid-flags) with lowercase hex fields and non-zero
+/// trace-id/parent-id. Anything else is retained only as the fact "malformed", never as bytes.
+fn is_valid_traceparent(tp: &str) -> bool {
+    let mut parts = tp.split('-');
+    let (Some(version), Some(trace_id), Some(parent_id), Some(flags), None) = (
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+    ) else {
+        return false;
+    };
+    let hex = |s: &str, len: usize| {
+        s.len() == len
+            && s.bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    };
+    hex(version, 2)
+        && hex(trace_id, 32)
+        && hex(parent_id, 16)
+        && hex(flags, 2)
+        && trace_id.bytes().any(|b| b != b'0')
+        && parent_id.bytes().any(|b| b != b'0')
+}
+
+/// The correlation basis of this record, typed. Three states, never silent (an absent carrier and
+/// a malformed one are different facts): `propagated_trace_context` (valid `_meta.traceparent`
+/// retained — a producer-propagated claim, not an observed transport fact), `malformed_trace_context`
+/// (a carrier was sent but is not a valid traceparent; its bytes are not retained), `none` (the
+/// record is stateless, per MCP 2026-07-28). Grouping built on this basis inherits its class.
+fn correlation(traceparent: Option<&str>) -> Value {
+    match traceparent {
+        Some(tp) if is_valid_traceparent(tp) => json!({
+            "basis": "propagated_trace_context",
+            "traceparent": tp,
+            "source_class": "propagated"
+        }),
+        Some(_) => json!({
+            "basis": "malformed_trace_context",
+            "traceparent": Value::Null,
+            "source_class": Value::Null
+        }),
+        None => json!({
+            "basis": "none",
+            "traceparent": Value::Null,
+            "source_class": Value::Null
+        }),
+    }
+}
+
 /// Build a single observed tool-decision entry. Redaction and the asserted-vs-verified rule are
 /// applied here by construction; no caller can opt out of them.
 pub fn build_decision(call: &ObservedCall<'_>) -> Value {
@@ -349,7 +405,8 @@ pub fn build_decision(call: &ObservedCall<'_>) -> Value {
             "arguments_redacted": true,
             "credential_alias": Value::Null,
             "secret_material_stored": false
-        }
+        },
+        "correlation": correlation(call.traceparent)
     });
     if let Some(detail) = c.detail {
         decision["detail"] = Value::String(detail);

@@ -108,6 +108,11 @@ complete tool observation" means "no observed tool use in this run" (see P58 cov
         "arguments_redacted": true,
         "credential_alias": "github-prod-admin",
         "secret_material_stored": false
+      },
+      "correlation": {
+        "basis": "propagated_trace_context",
+        "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+        "source_class": "propagated"
       }
     }
   ],
@@ -170,6 +175,22 @@ labels; principal-like identifiers are hashed (see Redaction).
   hash invites offline brute force.
 - Hostile strings (terminal escapes, control characters) are sanitized before the record is written,
   the same discipline the evidence TUI/rendering already applies.
+
+## Correlation basis
+
+MCP 2026-07-28 removed protocol-level sessions (SEP-2567), so "these N records belong to one
+interaction" is no longer a transport fact a reader may assume. Each record therefore types the
+basis it actually retains, in `correlation`:
+
+| `basis` | meaning |
+|---|---|
+| `propagated_trace_context` | the request carried a valid W3C `traceparent` in `_meta` (SEP-414); it is retained verbatim. `source_class: propagated` — a producer-propagated **claim**, never an observed transport fact. A covering, uniform trace-id can claim-support a grouping and a partitioned one can refute it; it cannot be lifted to proof. |
+| `malformed_trace_context` | a carrier was sent but is not a valid `traceparent` (wrong shape, non-hex, all-zero ids, hostile bytes). Its bytes are **not** retained. Distinct from `none` by design: a broken carrier and an absent carrier are different facts. |
+| `none` | the record is stateless; no carrier was sent. Any grouping of such records rests on producer-minted envelope identity (e.g. a run id) and inherits `self_reported` class from it. |
+
+`tracestate` and `baggage` are deliberately not retained: their values are free-form and may carry
+data the redaction rules above cannot reason about. Consumers that group records across calls must
+carry the weakest `source_class` among the members' bases in any pooled verdict.
 
 ## Reason codes
 
