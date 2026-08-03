@@ -103,8 +103,10 @@ impl LintFinding {
     }
 }
 
-/// `#[non_exhaustive]`: constructed only inside this crate (`compute_summary`), and a new severity
-/// bucket should be an additive change, not a breaking one for a downstream that reads it.
+/// A lint run's finding counts by severity.
+///
+/// Non-exhaustive: this type may gain fields in future releases, so construct it through this
+/// crate rather than a struct literal, and match it with `..`.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct LintSummary {
@@ -114,11 +116,11 @@ pub struct LintSummary {
     pub infos: usize,
 }
 
-/// `#[non_exhaustive]`: this report grows as new disclosure fields are added (`truncated`,
-/// `truncated_count`, `applied_cap` arrived incrementally, and more will), and it is constructed
-/// only inside this crate. Marking it non-exhaustive stops each such addition from being a
-/// breaking change for a downstream that constructs or exhaustively destructures it; consumers
-/// read fields and must accept that unlisted ones may exist. Raised on Rul1an/assay#1962.
+/// The result of a lint run: the verified bundle, its findings, and disclosure fields describing
+/// how complete the run was.
+///
+/// Non-exhaustive: this type may gain fields in future releases, so construct it through this
+/// crate rather than a struct literal, and match it with `..`.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct LintReport {
