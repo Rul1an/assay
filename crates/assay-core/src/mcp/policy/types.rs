@@ -6,6 +6,11 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, OnceLock};
 
+/// Per-tool compile results, materialized once per policy. `Err` carries the preparation or
+/// compile failure for that tool; the enforcement engine denies such a tool's calls with
+/// `E_SCHEMA_COMPILE` instead of aborting (#1952).
+pub(crate) type CompiledSchemas = HashMap<String, Result<Arc<jsonschema::Validator>, String>>;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct McpPolicy {
     #[serde(default)]
@@ -60,7 +65,7 @@ pub struct McpPolicy {
 
     /// Compiled schemas (lazy, thread-safe, shared across clones)
     #[serde(skip)]
-    pub(crate) compiled: Arc<OnceLock<HashMap<String, Arc<jsonschema::Validator>>>>,
+    pub(crate) compiled: Arc<OnceLock<CompiledSchemas>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

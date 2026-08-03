@@ -10,7 +10,9 @@ pub async fn run(args: PolicyMigrateArgs) -> Result<i32> {
     policy.migrate_constraints_to_schemas();
 
     // Ensure schemas compile after migration
-    policy.compile_all_schemas();
+    policy
+        .try_compile_all_schemas()
+        .map_err(|error| anyhow::anyhow!("migrated policy schemas failed to compile: {error}"))?;
 
     // Serialize to YAML
     let yaml = serde_yaml::to_string(&policy).context("failed to serialize migrated policy")?;

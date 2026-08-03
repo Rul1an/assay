@@ -188,34 +188,21 @@ fn structured_controls_assert(root: &serde_json::Map<String, serde_json::Value>)
 }
 
 fn schema_map_asserts_nothing(value: &serde_json::Value) -> bool {
-    value.as_object().is_some_and(|schemas| {
-        let shared_defs = schemas.get("$defs").and_then(serde_json::Value::as_object);
+    if !value.is_object() {
+        return false;
+    }
+    // Delegate the $defs merge to the one preparation implementation instead of hand-rolling a
+    // copy of it here; two approximations of the same merge drift (#1951). A map that fails to
+    // prepare (a $defs collision, a non-mapping $defs) is NOT classified as vacuous: preparation
+    // failure is a malformed config with its own loud diagnosis at the validation and runtime
+    // layers, and claiming vacuity (or effectiveness) for it here would mask that.
+    let Ok(prepared) = crate::policy_engine::prepare_schema_map(value) else {
+        return false;
+    };
+    prepared.as_object().is_some_and(|schemas| {
         schemas
             .iter()
-            .filter(|(tool, _)| tool.as_str() != "$defs")
-            .all(|(_, schema)| {
-                let mut materialized = schema.clone();
-                if let (Some(shared_defs), Some(schema)) =
-                    (shared_defs, materialized.as_object_mut())
-                {
-                    match schema.get_mut("$defs") {
-                        Some(serde_json::Value::Object(local_defs)) => {
-                            if shared_defs.keys().any(|name| local_defs.contains_key(name)) {
-                                return false;
-                            }
-                            local_defs.extend(shared_defs.clone());
-                        }
-                        Some(_) => return false,
-                        None => {
-                            schema.insert(
-                                "$defs".to_string(),
-                                serde_json::Value::Object(shared_defs.clone()),
-                            );
-                        }
-                    }
-                }
-                schema_asserts_nothing(&materialized)
-            })
+            .all(|(_, schema)| schema_asserts_nothing(schema))
     })
 }
 
@@ -563,7 +550,15 @@ fn validate_static_inputs(e: &Expected) -> anyhow::Result<()> {
         } => validate_args_policy_value(schema)?,
         Expected::ToolOutputValid {
             schemas: Some(schema),
-        } => validate_schema_map(schema, false, true)?,
+        } => {
+            // Prepare BEFORE validating, exactly as the structured args path does above, so a
+            // shared-$defs collision or a non-mapping $defs is a loud config error here rather
+            // than a silently vacuous schema at evaluation time (#1951). Validation, the vacuity
+            // rule, and the runtime metric all reason about the SAME prepared map.
+            let prepared = crate::policy_engine::prepare_schema_map(schema)
+                .map_err(|e| anyhow::anyhow!("tool_output_valid schemas: {e}"))?;
+            validate_schema_map(&prepared, false, true)?
+        }
         Expected::ArgsValid {
             policy: Some(path),
             schema: None,
