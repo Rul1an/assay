@@ -44,6 +44,11 @@
         "sanitized_fields": [
           "tool.name"
         ]
+      },
+      "correlation": {
+        "basis": "malformed_trace_context",
+        "traceparent": null,
+        "source_class": null
       }
     }
   ],

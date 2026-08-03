@@ -39,7 +39,7 @@ observed tool call
 | `assay.enforcement_decision.v0` | the enforcing proxy's per-call allow or deny: decision, precedence-pinned reason, `fail_closed`, drift state, credential alias (never the token) | [mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md) |
 | `assay.manifest_establish.v0` | the bounded pre-call re-list journey (establish path and run outcome), kept separate from the verdict | [mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md) |
 | `assay.denied_call_observation.v0` | opt-in caller-visible proxy-deny observation, kept separate from `assay.enforcement_decision.v0` verdict records | [mcp-upstream-proxy-enforcement.md](mcp-upstream-proxy-enforcement.md) |
-| `assay.tool_decision_surface.v0` | per-call: server, classified action + projected target, decision, response, redaction | [tool-decision-surface.md](tool-decision-surface.md) |
+| `assay.tool_decision_surface.v0` | per-call: server, classified action + projected target, decision, response, redaction, correlation basis | [tool-decision-surface.md](tool-decision-surface.md) |
 | `assay.declared_tool_surface.v0` | declared/allowed privileged actions, for observed-vs-declared review | [declared-tool-surface.md](declared-tool-surface.md) |
 | `assay.tool_decision_truth.v0` | experimental declared-vs-observed policy-decision carrier, digest, verdict, and pack-row primitive | [tool-decision-truth.md](tool-decision-truth.md) |
 | `action.required_scope` (+ declared credentials) | the scope an action requires vs the alias's declared scope | [credential-scope.md](credential-scope.md) |

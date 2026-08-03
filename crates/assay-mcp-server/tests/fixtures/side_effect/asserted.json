@@ -47,6 +47,11 @@
         "arguments_redacted": true,
         "credential_alias": "github-prod-admin",
         "secret_material_stored": false
+      },
+      "correlation": {
+        "basis": "none",
+        "traceparent": null,
+        "source_class": null
       }
     }
   ],
