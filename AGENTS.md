@@ -7,13 +7,18 @@ this contract.
 ## Canonical State
 
 - Repository truth is the checked-in code and documentation.
-- The public execution ledger for the active programme is
-  [issue #1866](https://github.com/Rul1an/assay/issues/1866). Keep the number to this one line;
-  everywhere else the contract names the role, so the next programme costs one edit here rather than
-  one in every section. Nothing enforces that, so it is an instruction and not a guarantee.
+- The public execution ledger for the active programme is named on this line. **No programme is
+  active.** The previous one, [issue #1866](https://github.com/Rul1an/assay/issues/1866), closed on
+  2026-08-01; name the new ledger here when one opens, and say so plainly here when none is. Keep
+  the number to this one line; everywhere else the contract names the role, so the next programme
+  costs one edit here rather than one in every section. Nothing enforces that, so it is an
+  instruction and not a guarantee — and the way it fails is quiet: the line kept pointing at a
+  finished programme, which reads as an active ledger and sends handoffs to a closed issue.
 - Agent chats, local plans, memories, and unpushed branches are not authoritative project state.
-- Every handoff records the branch, PR, exact head SHA, verification, reviews, non-claims, and open
-  findings in the ledger.
+- Every handoff for a programme slice records the branch, PR, exact head SHA, verification, reviews,
+  non-claims, and open findings in that programme's ledger. Work outside a programme — a standalone
+  fix, a documentation change — has no ledger to record to, and inventing one or appending to a
+  closed one is worse than the omission.
 
 ## ADR-042/043 Scope
 
