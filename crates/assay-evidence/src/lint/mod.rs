@@ -103,7 +103,12 @@ impl LintFinding {
     }
 }
 
+/// A lint run's finding counts by severity.
+///
+/// Non-exhaustive: this type may gain fields in future releases, so construct it through this
+/// crate rather than a struct literal, and match it with `..`.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct LintSummary {
     pub total: usize,
     pub errors: usize,
@@ -111,13 +116,34 @@ pub struct LintSummary {
     pub infos: usize,
 }
 
+/// The result of a lint run: the verified bundle, its findings, and disclosure fields describing
+/// how complete the run was.
+///
+/// Non-exhaustive: this type may gain fields in future releases, so construct it through this
+/// crate rather than a struct literal, and match it with `..`.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct LintReport {
     pub tool_version: String,
     pub bundle_meta: Manifest,
     pub verified: bool,
     pub findings: Vec<LintFinding>,
     pub summary: LintSummary,
+    /// Whether `max_results` dropped findings this run.
+    ///
+    /// This lives on the report rather than only in the pack metadata because truncation applies to
+    /// every run, and pack metadata is absent whenever no packs are configured. Carried there alone,
+    /// a default-path run could drop findings and present as if it had none to drop, which is the
+    /// one thing a lint report must never do quietly. `summary` is computed after truncation, so it
+    /// describes what survived and this flag is what says so.
+    pub truncated: bool,
+    /// How many findings were dropped. Zero when `truncated` is false.
+    pub truncated_count: usize,
+    /// The `max_results` cap that was in force this run. A disclosed truncation is only actionable
+    /// if a consumer can see the bound it was truncated to, not just how many findings fell past it
+    /// (the review point on OWASP agentic-skills #49): `truncated_count` says how many were
+    /// dropped, `applied_cap` says the ceiling they were dropped against.
+    pub applied_cap: usize,
 }
 
 impl LintReport {
