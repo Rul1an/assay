@@ -12,7 +12,9 @@ pub async fn run(args: PolicyValidateArgs) -> Result<i32> {
         .with_context(|| format!("failed to load policy {}", args.input.display()))?;
 
     // Force schema compilation so failures happen here (not at runtime).
-    policy.compile_all_schemas();
+    policy
+        .try_compile_all_schemas()
+        .map_err(|error| anyhow::anyhow!("policy schemas failed to compile: {error}"))?;
 
     eprintln!("✔ Policy OK: {}", args.input.display());
     Ok(exit_codes::OK)

@@ -106,8 +106,10 @@ pub(super) async fn cmd_coverage_legacy(args: CoverageArgs) -> Result<i32> {
 
     let mut trace_records = Vec::new();
 
-    // Prepare for validation
-    policy_v2.compile_all_schemas();
+    // Prepare for validation; a policy whose schemas cannot compile has no coverage story.
+    policy_v2
+        .try_compile_all_schemas()
+        .map_err(|error| anyhow::anyhow!("policy schemas failed to compile: {error}"))?;
     let mut state = assay_core::mcp::policy::PolicyState::default();
 
     let mut violations = Vec::new();

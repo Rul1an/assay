@@ -30,17 +30,29 @@ impl Metric for ToolOutputValidMetric {
 
         // Validate that schemas is a JSON object; return a config error otherwise
         // to prevent false negatives from silently skipping all tool validation.
-        let schemas_obj = schemas_value.as_object().ok_or_else(|| {
-            anyhow::anyhow!(
+        if !schemas_value.is_object() {
+            anyhow::bail!(
                 "config error: 'schemas' for ToolOutputValid must be a JSON object \
                  mapping tool names to JSON Schemas"
-            )
-        })?;
+            );
+        }
+
+        // Prepare the map with the same `$defs` semantics as the args path (shared `$defs`
+        // merged into each tool schema, collisions refused) BEFORE compiling anything. Without
+        // this, a `$defs` entry compiled as if it were a tool's schema, a `$ref` into shared
+        // definitions failed as unresolvable, and a colliding map compiled to a schema that
+        // validates nothing while the vacuity check upstream had modelled the merge and
+        // accepted the config as effective (#1951).
+        let prepared = assay_core::policy_engine::prepare_schema_map(schemas_value)
+            .map_err(|e| anyhow::anyhow!("config error: tool_output_valid schemas: {}", e))?;
+        let prepared_obj = prepared
+            .as_object()
+            .expect("prepare_schema_map returns an object for object input");
 
         // Pre-compile all schemas once per evaluate() call rather than inside the
         // per-call loop, so traces with many calls to the same tool don't recompile.
         let mut compiled_schemas: HashMap<&str, jsonschema::Validator> = HashMap::new();
-        for (tool_name, schema) in schemas_obj {
+        for (tool_name, schema) in prepared_obj {
             let compiled = crate::schema_support::compile(schema).map_err(|e| {
                 anyhow::anyhow!(
                     "config error: invalid output schema for tool '{}': {}",
@@ -276,6 +288,107 @@ mod tests {
                 .contains("external JSON Schema retrieval is disabled"),
             "refusal must come from the explicit retriever: {err:#}"
         );
+    }
+
+    /// #1951, the modelled-but-unsupported shape: shared `$defs` with a `$ref` into it used to
+    /// fail as an unresolvable reference because the metric never merged. Prepared, it validates.
+    #[tokio::test]
+    async fn shared_defs_are_merged_so_refs_resolve() {
+        let metric = ToolOutputValidMetric;
+        let expected = Expected::ToolOutputValid {
+            schemas: Some(serde_json::json!({
+                "$defs": {"NonEmpty": {"type": "string", "minLength": 1}},
+                "exec": {"$ref": "#/$defs/NonEmpty"}
+            })),
+        };
+
+        let ok = metric
+            .evaluate(
+                &test_case(),
+                &expected,
+                &resp_with_result("exec", serde_json::json!("out")),
+            )
+            .await
+            .unwrap();
+        assert!(ok.passed, "resolvable ref validates the output");
+
+        let bad = metric
+            .evaluate(
+                &test_case(),
+                &expected,
+                &resp_with_result("exec", serde_json::json!("")),
+            )
+            .await
+            .unwrap();
+        assert!(
+            !bad.passed,
+            "the merged schema actually constrains: {bad:?}"
+        );
+    }
+
+    /// #1951, the silent no-op: a shared/tool-local `$defs` collision used to compile the tool
+    /// schema verbatim to `{"$defs":{...}}`, which accepts any output. It is a loud config error.
+    #[tokio::test]
+    async fn colliding_defs_are_a_config_error_not_a_silent_accept() {
+        let metric = ToolOutputValidMetric;
+        let expected = Expected::ToolOutputValid {
+            schemas: Some(serde_json::json!({
+                "$defs": {"X": {"type": "string"}},
+                "exec": {"$defs": {"X": {}}}
+            })),
+        };
+
+        let err = metric
+            .evaluate(
+                &test_case(),
+                &expected,
+                &resp_with_result("exec", serde_json::json!({"anything": true})),
+            )
+            .await
+            .expect_err("a collision is a preparation failure, never an accepting schema");
+        assert!(err.to_string().contains("overlap"), "{err:#}");
+    }
+
+    /// `$defs` is consumed by the merge; it is never compiled as if it were a tool's schema, and
+    /// a trace calling a tool literally named `$defs` simply has no schema to check against.
+    #[tokio::test]
+    async fn defs_entry_is_not_a_tool_schema() {
+        let metric = ToolOutputValidMetric;
+        let expected = Expected::ToolOutputValid {
+            schemas: Some(serde_json::json!({
+                "$defs": {"NonEmpty": {"type": "string", "minLength": 1}},
+                "exec": {"$ref": "#/$defs/NonEmpty"}
+            })),
+        };
+        let resp = resp_with_result("$defs", serde_json::json!("anything"));
+        let result = metric
+            .evaluate(&test_case(), &expected, &resp)
+            .await
+            .unwrap();
+        assert!(
+            result.passed,
+            "no schema for a tool named $defs after preparation"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_mapping_defs_is_a_config_error() {
+        let metric = ToolOutputValidMetric;
+        let expected = Expected::ToolOutputValid {
+            schemas: Some(serde_json::json!({
+                "$defs": ["not", "a", "mapping"],
+                "exec": {"type": "object"}
+            })),
+        };
+        let err = metric
+            .evaluate(
+                &test_case(),
+                &expected,
+                &resp_with_result("exec", serde_json::json!({})),
+            )
+            .await
+            .expect_err("non-mapping $defs is a preparation failure");
+        assert!(err.to_string().contains("mapping"), "{err:#}");
     }
 
     #[tokio::test]
