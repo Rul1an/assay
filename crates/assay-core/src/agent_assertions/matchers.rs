@@ -110,7 +110,20 @@ fn check_one(graph: &EpisodeGraph, a: &TraceAssertion) -> Option<Diagnostic> {
             policy,
             expect,
         } => {
-            if let Some(args) = test_args {
+            let Some(args) = test_args else {
+                // No trace-mode evaluation exists for this variant, so without `test_args` there
+                // is nothing to check. Reporting nothing here would be indistinguishable from a
+                // check that ran and held.
+                return Some(ineffective(
+                    "args_valid",
+                    "test_args",
+                    "`args_valid` is only evaluated against the arguments supplied in `test_args`; \
+                     with that field absent the assertion checks nothing.",
+                    "Give the assertion `test_args`, or drop it and constrain the trace with \
+                     `trace_must_call_tool` or `trace_tool_sequence`.",
+                ));
+            };
+            {
                 let Some(pol) = policy else {
                     return Some(make_diag(
                         "E_CONFIG_ERROR",
@@ -149,13 +162,43 @@ fn check_one(graph: &EpisodeGraph, a: &TraceAssertion) -> Option<Diagnostic> {
             }
         }
         TraceAssertion::SequenceValid {
+            test_trace,
             test_trace_raw,
             policy,
             expect,
-            ..
         } => {
-            if let Some(trace_vals) = test_trace_raw {
-                if let Some(pol) = policy {
+            // The typed `test_trace` field is not evaluated — only `test_trace_raw` is read
+            // below. Saying so beats ignoring a field the author believed was carrying the test.
+            if test_trace.is_some() && test_trace_raw.is_none() {
+                return Some(ineffective(
+                    "sequence_valid",
+                    "test_trace",
+                    "`test_trace` is not evaluated; only `test_trace_raw` is read, so this \
+                     assertion checks nothing.",
+                    "Move the steps to `test_trace_raw` as a list of `{ tool: <name> }` entries.",
+                ));
+            }
+            let Some(trace_vals) = test_trace_raw else {
+                return Some(ineffective(
+                    "sequence_valid",
+                    "test_trace_raw",
+                    "`sequence_valid` is only evaluated against the steps supplied in \
+                     `test_trace_raw`; with that field absent the assertion checks nothing.",
+                    "Give the assertion `test_trace_raw`, or constrain the recorded trace with \
+                     `trace_tool_sequence` instead.",
+                ));
+            };
+            {
+                let Some(pol) = policy else {
+                    return Some(ineffective(
+                        "sequence_valid",
+                        "policy",
+                        "`sequence_valid` has no policy to evaluate the steps against, so the \
+                         assertion checks nothing.",
+                        "Give the assertion a `policy` carrying a `regex` field.",
+                    ));
+                };
+                {
                     // Extract tool names from trace
                     // trace_vals is Vec<Value>. Expect { tool_name: "..." }
                     let tools: Vec<String> = trace_vals
@@ -168,27 +211,20 @@ fn check_one(graph: &EpisodeGraph, a: &TraceAssertion) -> Option<Diagnostic> {
                         })
                         .collect();
 
-                    // Policy is { rules: [...] } or just rules array?
-                    // evaluate_sequence expects regex string.
-                    // But parity.rs constructs regex from JSON rules.
-                    // We need a helper to convert JSON rules to regex string.
-                    // crate::policy_engine::evaluate_sequence takes (regex, tools).
-                    // We can assume 'policy' here IS the regex string or we need transformation logic.
-                    // Implementation Plan: Assume policy contains "rules" and we construct regex or simplistic "join".
-                    // parity.rs did: rules.join(" THEN ") ? No, that was latency_check.
-                    // policy_engine has NO helper to convert JSON->Regex yet?
-                    // Wait, `policy_engine::evaluate_sequence` takes `policy_regex: &str`.
-                    // Does `policy_engine` have a JSON parser?
-                    // Let's assume for this specific integration, we pass the regex string in the policy field?
-                    // Or we assume the user provides it.
-                    // Actually, parity.rs handled `CheckType::SequenceValid` by converting JSON rules to Regex.
-                    // If we want Asserts to work, we verify what format `policy` comes in.
-                    // fp_suite.yaml doesn't specify policy format yet.
-                    // Let's assume policy IS the regex string for simplicity now, or simple rule list.
-
-                    // Simplified: We skip implementing full rule engine here if not readily avail.
-                    // We will allow `policy` to contain `regex` field.
-                    let regex = pol.get("regex").and_then(|s| s.as_str()).unwrap_or(".*");
+                    // The policy carries the sequence constraint as a regex under `regex`.
+                    // Defaulting a missing key to `.*` would make the assertion match every
+                    // possible trace, which is a check that cannot fail rather than a check
+                    // that passes.
+                    let Some(regex) = pol.get("regex").and_then(|s| s.as_str()) else {
+                        return Some(ineffective(
+                            "sequence_valid",
+                            "policy.regex",
+                            "the policy carries no `regex` key, so there is no constraint to \
+                             evaluate the steps against.",
+                            "Add a `regex` field to the policy describing the permitted tool \
+                             sequence.",
+                        ));
+                    };
 
                     let verdict = crate::policy_engine::evaluate_sequence(regex, &tools);
                     let expected_pass = expect.as_deref().unwrap_or("pass") == "pass";
@@ -214,20 +250,54 @@ fn check_one(graph: &EpisodeGraph, a: &TraceAssertion) -> Option<Diagnostic> {
             test_tool_calls,
             policy,
             expect,
-            ..
         } => {
-            if let Some(tools) = test_tool_calls {
-                if let Some(pol) = policy {
+            let Some(tools) = test_tool_calls else {
+                return Some(ineffective(
+                    "tool_blocklist",
+                    "test_tool_calls",
+                    "`tool_blocklist` is only evaluated against the calls supplied in \
+                     `test_tool_calls`; with that field absent the assertion checks nothing.",
+                    "Give the assertion `test_tool_calls`, or constrain the recorded trace with \
+                     `trace_must_not_call_tool` instead.",
+                ));
+            };
+            {
+                let Some(pol) = policy else {
+                    return Some(ineffective(
+                        "tool_blocklist",
+                        "policy",
+                        "`tool_blocklist` has no policy to evaluate the calls against, so the \
+                         assertion checks nothing.",
+                        "Give the assertion a `policy` carrying a `blocked` list.",
+                    ));
+                };
+                {
                     // pol should look like { "blocked": [...] }
-                    let blocked: Vec<String> = pol
-                        .get("blocked")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    // An absent key and an empty list are both a blocklist that admits every
+                    // call, which cannot fail for any input.
+                    let Some(blocked_raw) = pol.get("blocked").and_then(|v| v.as_array()) else {
+                        return Some(ineffective(
+                            "tool_blocklist",
+                            "policy.blocked",
+                            "the policy carries no `blocked` list, so every tool call is \
+                             admitted and the assertion cannot fail.",
+                            "Add a `blocked` array to the policy naming the disallowed tools.",
+                        ));
+                    };
+                    let blocked: Vec<String> = blocked_raw
+                        .iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect();
+                    if blocked.is_empty() {
+                        return Some(ineffective(
+                            "tool_blocklist",
+                            "policy.blocked",
+                            "the `blocked` list is empty, so every tool call is admitted and the \
+                             assertion cannot fail.",
+                            "Name at least one disallowed tool in `blocked`, or remove the \
+                             assertion.",
+                        ));
+                    }
 
                     let expected_pass = expect.as_deref().unwrap_or("pass") == "pass";
                     // Check if *any* tool is blocked
@@ -284,6 +354,23 @@ fn check_subsequence(
         }
     }
     Ok(())
+}
+
+/// An assertion that cannot check anything, reported under its own code so a suite can tell it
+/// apart from a check that ran and held.
+///
+/// `AGENTS.md`, Development Discipline: never turn absence of evidence into a clean result. The
+/// message names the variant and the field responsible rather than the value, so the diagnostic
+/// stays value-free and safe to print.
+fn ineffective(variant: &str, field: &str, why: &str, fix: &str) -> Diagnostic {
+    Diagnostic {
+        code: "E_ASSERT_INEFFECTIVE".to_string(),
+        severity: "error".to_string(),
+        source: "agent_assertions".to_string(),
+        message: format!("Assertion `{variant}` checks nothing: {why}"),
+        context: serde_json::json!({ "assertion": variant, "field": field }),
+        fix_steps: vec![fix.to_string()],
+    }
 }
 
 fn make_diag(
