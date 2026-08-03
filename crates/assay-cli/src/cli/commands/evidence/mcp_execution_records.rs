@@ -280,7 +280,11 @@ fn push_result_commitment_checks(
         .and_then(|d| {
             d.get("resultCommitment")
                 .or_else(|| d.get("result_commitment"))
-        });
+        })
+        // `Value::get` yields `Some(&Value::Null)` for a key present with an explicit null. A null
+        // commits to nothing, so it is the same as no key at all; without this filter a refused
+        // outcome would be failed for carrying a commitment it does not have.
+        .filter(|commitment| !commitment.is_null());
 
     let Some(commitment) = commitment else {
         // Absence is only meaningful for `refused`, which by definition has no result.
@@ -311,7 +315,25 @@ fn push_result_commitment_checks(
     let reference = commitment.get("ref").and_then(Value::as_str);
 
     match (projection, reference) {
-        (Some(projection), _) => {
+        // A commitment is one shape or the other. Carrying both leaves which one binds the result
+        // undecided, so it is a producer defect rather than a licence to pick the first match.
+        (Some(_), Some(_)) => {
+            checks.push(CheckReport {
+                id: "result_commitment_shape_recognized",
+                ok: false,
+                detail: "resultCommitment carries both `projection` and `ref`; a commitment is \
+                         one shape or the other"
+                    .to_string(),
+            });
+            Some(ResultCommitmentReport {
+                kind: "ambiguous",
+                projection_digest,
+                ref_digest: string_at(commitment, &["digest"]),
+                embedded_digest: None,
+                recomputed_projection_digest: None,
+            })
+        }
+        (Some(projection), None) => {
             let recomputed = format!(
                 "sha256:{}",
                 hex::encode(Sha256::digest(projection.as_bytes()))
@@ -330,15 +352,20 @@ fn push_result_commitment_checks(
             Some(ResultCommitmentReport {
                 kind: "args_projection",
                 projection_digest,
+                ref_digest: None,
                 embedded_digest: embedded,
                 recomputed_projection_digest: Some(recomputed),
             })
         }
         (None, Some(_)) => {
             extra_claims.push("result_commitment_ref_not_dereferenced");
+            // An ArgsRef's `digest` addresses referenced content. It is not a digest over a
+            // projection string, so it does not go in `projection_digest`: a reader keying on that
+            // field by name would compare two different quantities.
             Some(ResultCommitmentReport {
                 kind: "args_ref",
-                projection_digest: string_at(commitment, &["digest"]),
+                projection_digest: None,
+                ref_digest: string_at(commitment, &["digest"]),
                 embedded_digest: None,
                 recomputed_projection_digest: None,
             })
@@ -352,6 +379,7 @@ fn push_result_commitment_checks(
             Some(ResultCommitmentReport {
                 kind: "unrecognized",
                 projection_digest: None,
+                ref_digest: None,
                 embedded_digest: None,
                 recomputed_projection_digest: None,
             })

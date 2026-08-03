@@ -58,6 +58,11 @@ Declared rather than left to inference:
   `ArgsProjection` commits `projectionDigest` over the bytes of its `projection` string. Whether
   the committed value is what the tool returned needs the runtime result, which a record consumer
   does not hold. Reported as `result_commitment_payload_binding`.
+- **`ArgsRef` dereferencing.** Only the recomputable half of a commitment is verified. An
+  `ArgsRef` addresses content by URI, and this verifier fetches nothing, so its `digest` is
+  reported as `ref_digest` and never checked against anything. Reported as
+  `result_commitment_ref_not_dereferenced`. The embedded digest of the hash-only-identity
+  `ArgsProjection` form is surfaced on the same terms: shown, not checked.
 - **Runtime effect.** A reproduced verdict says the records bind to each other as specified. It
   does not say the recorded action occurred. Reported as `runtime_side_effect_truth`.
 
@@ -93,8 +98,18 @@ artifact is bad rather than that their pre-image is wrong.
 
 | | |
 |---|---|
-| Run | 2026-08-02 |
-| Assay | `assay-cli` 3.34.0, release profile |
+| Run | 2026-08-03 |
+| Assay | `assay-cli` 3.37.0, release profile |
 | Verifier commands | `assay evidence verify-mcp-records`, `assay evidence verify-mcp-supersession` |
-| Upstream vectors | `tests/vectors/decision_pairing_v0/normative`, fetched from `main` |
+| Upstream vectors | `tests/vectors/decision_pairing_v0/normative` at `519d3df8749bc0adbd79b28d0fb3d19142ababc7` |
 | Method | upstream JSON read; upstream checker read, not executed; all verdicts computed by `assay` |
+
+The upstream revision is pinned rather than tracked from `main`, because a record whose inputs can
+move is not a record. Drift shows up as a fetch failure instead of as a quietly different number.
+`ASSAY_INTEROP_REV` re-runs the comparison against another commit. The script prints the revision
+and the versions of `assay`, `curl` and `python3` it used, and fails closed on a bad fetch or an
+unexpected tool exit rather than reporting either as a comparison result.
+
+The comparison is per check, not per case. Each row above pins the specific check ids that must
+pass and must fail, so a case that reaches the right overall verdict for the wrong reason is
+reported as a divergence.

@@ -470,7 +470,12 @@ fn verify_mcp_records_declares_unfetched_result_commitment_ref() {
     );
 
     assert_eq!(report["ok"], true);
-    assert_eq!(report["outcome"]["result_commitment"]["kind"], "args_ref");
+    let commitment = &report["outcome"]["result_commitment"];
+    assert_eq!(commitment["kind"], "args_ref");
+    // An ArgsRef's digest addresses referenced content, so it must not surface as a projection
+    // digest: a consumer keying on that field name would be comparing two different quantities.
+    assert_eq!(commitment["ref_digest"], "sha256:abc");
+    assert_eq!(commitment["projection_digest"], Value::Null);
     let claims = claims(&report);
     assert!(claims.contains(&"result_commitment_ref_not_dereferenced".to_string()));
     assert!(claims.contains(&"result_commitment_payload_binding".to_string()));
@@ -564,4 +569,44 @@ fn claims(report: &Value) -> Vec<String> {
         .iter()
         .map(|v| v.as_str().unwrap().to_string())
         .collect()
+}
+
+/// `Value::get` yields `Some(&Value::Null)` for a key present with an explicit null, so an
+/// explicit null must be filtered to absent or a refusal is failed for a commitment it does not
+/// carry.
+#[test]
+fn verify_mcp_records_treats_explicit_null_commitment_as_absent() {
+    let report = run_with_commitment("refused", "null");
+
+    assert_eq!(report["ok"], true);
+    assert!(check_ok(&report, "result_commitment_absent_for_refused"));
+    assert_eq!(report["outcome"]["result_commitment"], Value::Null);
+}
+
+#[test]
+fn verify_mcp_records_treats_explicit_null_commitment_as_absent_when_executed() {
+    let report = run_with_commitment("executed", "null");
+
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["outcome"]["result_commitment"], Value::Null);
+    assert!(!claims(&report).contains(&"result_commitment_payload_binding".to_string()));
+}
+
+/// A commitment is an ArgsProjection or an ArgsRef. Carrying both leaves which one binds the
+/// result undecided, so picking the first match would be a guess.
+#[test]
+fn verify_mcp_records_fails_on_commitment_carrying_both_shapes() {
+    let projection = hash_only_projection();
+    let report = run_with_commitment(
+        "executed",
+        &format!(
+            r#"{{"projection": {}, "projectionDigest": "{}", "ref": "https://example.test/r", "digest": "sha256:abc"}}"#,
+            serde_json::to_string(&projection).unwrap(),
+            sha256_of_str(&projection)
+        ),
+    );
+
+    assert_eq!(report["ok"], false);
+    assert!(!check_ok(&report, "result_commitment_shape_recognized"));
+    assert_eq!(report["outcome"]["result_commitment"]["kind"], "ambiguous");
 }

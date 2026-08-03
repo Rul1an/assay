@@ -61,6 +61,9 @@ pub(super) struct OutcomeReport {
 pub(super) struct ResultCommitmentReport {
     pub(super) kind: &'static str,
     pub(super) projection_digest: Option<String>,
+    /// An `ArgsRef`'s `digest`, which addresses referenced content rather than a projection
+    /// string. Kept separate so a consumer keying on a field name never compares the two.
+    pub(super) ref_digest: Option<String>,
     pub(super) embedded_digest: Option<String>,
     pub(super) recomputed_projection_digest: Option<String>,
 }
