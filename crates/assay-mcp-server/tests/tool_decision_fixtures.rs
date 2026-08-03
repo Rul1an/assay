@@ -86,10 +86,13 @@ fn tool_decision_fixtures_hold_the_spec_invariants() {
                 "{name}: secret_material_stored must be false"
             );
 
-            // Correlation basis, when present, is typed and never silent: a traceparent is
+            // Correlation basis is required and typed, never silent: a traceparent is
             // retained exactly when the basis is propagated_trace_context, and a malformed
             // carrier keeps its bytes out of the record while staying distinct from `none`.
-            if let Some(corr) = d.get("correlation") {
+            {
+                let corr = d.get("correlation").unwrap_or_else(|| {
+                    panic!("{name}: every decision must carry a typed correlation basis")
+                });
                 let basis = corr["basis"].as_str().unwrap_or("");
                 assert!(
                     [

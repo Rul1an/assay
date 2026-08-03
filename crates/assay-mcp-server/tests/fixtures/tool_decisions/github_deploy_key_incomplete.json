@@ -39,7 +39,12 @@
         "credential_alias": "github-prod-admin",
         "secret_material_stored": false
       },
-      "detail": "missing_github_owner_or_repo"
+      "detail": "missing_github_owner_or_repo",
+      "correlation": {
+        "basis": "none",
+        "traceparent": null,
+        "source_class": null
+      }
     }
   ],
   "non_claims": [

@@ -184,8 +184,8 @@ basis it actually retains, in `correlation`:
 
 | `basis` | meaning |
 |---|---|
-| `propagated_trace_context` | the request carried a valid W3C `traceparent` in `_meta` (SEP-414); it is retained verbatim. `source_class: propagated` — a producer-propagated **claim**, never an observed transport fact. A covering, uniform trace-id can claim-support a grouping and a partitioned one can refute it; it cannot be lifted to proof. |
-| `malformed_trace_context` | a carrier was sent but is not a valid `traceparent` (wrong shape, non-hex, all-zero ids, hostile bytes). Its bytes are **not** retained. Distinct from `none` by design: a broken carrier and an absent carrier are different facts. |
+| `propagated_trace_context` | the request carried a `traceparent` in `_meta` (SEP-414) that passes validation (four lowercase-hex fields `2-32-16-2`, non-zero trace/parent ids, version not `ff`); it is retained verbatim. `source_class: propagated` — a producer-propagated **claim**, never an observed transport fact. A covering, uniform trace-id can claim-support a grouping and a partitioned one can refute it; it cannot be lifted to proof. |
+| `malformed_trace_context` | a carrier was sent but does not pass that validation (wrong shape, non-hex, all-zero ids, hostile bytes, a non-string JSON value, or a future-version form this validator is deliberately stricter than W3C about). Its bytes are **not** retained. Distinct from `none` by design: a broken carrier and an absent carrier are different facts. |
 | `none` | the record is stateless; no carrier was sent. Any grouping of such records rests on producer-minted envelope identity (e.g. a run id) and inherits `self_reported` class from it. |
 
 `tracestate` and `baggage` are deliberately not retained: their values are free-form and may carry
@@ -208,4 +208,8 @@ Machine-readable, never parsed from prose: `classified_github_deploy_key`,
 - `slack_add_member_allow.json` — classified, allowed
 - `workspace_admin_allow.json` — classified, allowed (one concrete tool)
 - `unknown_tool_observed.json` — `observed_unknown_tool`, never clean
-- `redacted_and_sanitized.json` — secret alias only, control chars sanitized
+- `redacted_and_sanitized.json` — secret alias only, control chars sanitized; carries the
+  `malformed_trace_context` correlation state (carrier sent but invalid, bytes dropped)
+
+Every fixture carries a `correlation` object; between them the vectors cover all three basis
+states (`propagated_trace_context`, `malformed_trace_context`, `none`).

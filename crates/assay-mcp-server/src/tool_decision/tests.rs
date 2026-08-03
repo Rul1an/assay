@@ -48,6 +48,8 @@ fn malformed_traceparent_is_typed_distinctly_and_not_retained() {
         "00-00000000000000000000000000000000-aaaaaaaaaaaaaaa1-01", // all-zero trace-id
         "00-11111111111111111111111111111111-0000000000000000-01", // all-zero parent-id
         "00-1111\u{1b}]8;;evil\u{7}-aaaaaaaaaaaaaaa1-01",       // hostile bytes
+        "ff-11111111111111111111111111111111-aaaaaaaaaaaaaaa1-01", // version ff forbidden by W3C
+        "", // present-but-non-string carrier is extracted as "" and must land here, not in "none"
     ] {
         let d = build_decision(&call_with_traceparent(&a, Some(bad)));
         assert_eq!(
@@ -58,6 +60,20 @@ fn malformed_traceparent_is_typed_distinctly_and_not_retained() {
         assert_eq!(d["correlation"]["traceparent"], json!(null), "{bad}");
         assert_eq!(d["correlation"]["source_class"], json!(null), "{bad}");
     }
+}
+
+#[test]
+fn traceparent_extraction_distinguishes_absent_from_non_string() {
+    let valid = "00-11111111111111111111111111111111-aaaaaaaaaaaaaaa1-01";
+    let with = json!({"name": "t", "_meta": {"traceparent": valid}});
+    assert_eq!(traceparent_from_params(&with), Some(valid));
+    // A present-but-non-string carrier is a malformed carrier, not an absent one.
+    let non_string = json!({"name": "t", "_meta": {"traceparent": 42}});
+    assert_eq!(traceparent_from_params(&non_string), Some(""));
+    let absent = json!({"name": "t"});
+    assert_eq!(traceparent_from_params(&absent), None);
+    let meta_not_object = json!({"name": "t", "_meta": 7});
+    assert_eq!(traceparent_from_params(&meta_not_object), None);
 }
 
 #[test]

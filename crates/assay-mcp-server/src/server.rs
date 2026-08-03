@@ -378,10 +378,7 @@ impl Server {
                                 rule_id: None,
                                 // SEP-414 (MCP 2026-07-28): trace context travels in `_meta`.
                                 // Validation and basis typing happen inside build_decision.
-                                traceparent: params
-                                    .get("_meta")
-                                    .and_then(|m| m.get("traceparent"))
-                                    .and_then(|v| v.as_str()),
+                                traceparent: crate::tool_decision::traceparent_from_params(&params),
                             });
                             tracing::info!(
                                 event = "tool_decision",

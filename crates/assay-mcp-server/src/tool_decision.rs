@@ -331,11 +331,23 @@ fn is_valid_traceparent(tp: &str) -> bool {
                 .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
     };
     hex(version, 2)
+        && version != "ff" // forbidden by W3C Trace Context
         && hex(trace_id, 32)
         && hex(parent_id, 16)
         && hex(flags, 2)
         && trace_id.bytes().any(|b| b != b'0')
         && parent_id.bytes().any(|b| b != b'0')
+}
+
+/// Extract the `_meta.traceparent` carrier from `tools/call` params (SEP-414). `None` means no
+/// carrier was sent; `Some("")` means a carrier was sent but is not a JSON string — the empty
+/// string fails validation, so a non-string carrier is typed `malformed_trace_context`, never
+/// silently collapsed into `none` (an absent carrier and a broken one are different facts).
+pub fn traceparent_from_params(params: &Value) -> Option<&str> {
+    params
+        .get("_meta")
+        .and_then(|m| m.get("traceparent"))
+        .map(|v| v.as_str().unwrap_or(""))
 }
 
 /// The correlation basis of this record, typed. Three states, never silent (an absent carrier and
