@@ -104,16 +104,29 @@ fn tool_decision_fixtures_hold_the_spec_invariants() {
                     "{name}: unknown correlation basis {basis:?}"
                 );
                 let propagated = basis == "propagated_trace_context";
-                assert_eq!(
-                    corr["traceparent"].is_string(),
-                    propagated,
-                    "{name}: traceparent must be retained iff basis is propagated_trace_context"
-                );
-                assert_eq!(
-                    corr["source_class"].as_str(),
-                    propagated.then_some("propagated"),
-                    "{name}: source_class must be \"propagated\" iff basis is propagated, else null"
-                );
+                if propagated {
+                    assert!(
+                        corr["traceparent"].is_string(),
+                        "{name}: a propagated basis must retain the traceparent string"
+                    );
+                    assert_eq!(
+                        corr["source_class"].as_str(),
+                        Some("propagated"),
+                        "{name}: a propagated basis must carry source_class \"propagated\""
+                    );
+                } else {
+                    // JSON null exactly — a number or object here would be a shape drift the
+                    // is_string()/as_str() checks alone would wave through.
+                    assert!(
+                        corr["traceparent"].is_null(),
+                        "{name}: a non-propagated basis must carry traceparent null"
+                    );
+                    assert!(
+                        corr["source_class"].is_null(),
+                        "{name}: a non-propagated basis must carry source_class null — the \
+                         record retains no basis to classify"
+                    );
+                }
             }
 
             // A classified privileged tool carries a derived required_scope (non-null string); an
