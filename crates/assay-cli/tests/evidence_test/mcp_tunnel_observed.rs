@@ -196,4 +196,44 @@ fn verify_mcp_tunnel_observed_does_not_credit_a_bare_strong_declaration() {
     assert_eq!(report["ok"], false);
     assert_eq!(report["join_summary"]["strong_same_request_instance"], 0);
     assert_eq!(report["join_summary"]["unsubstantiated_strong_claim"], 1);
+    // One reference lands in exactly one bucket. Without this a regression that incremented both
+    // the unsubstantiated and the diagnostic counter would pass.
+    assert_eq!(report["join_summary"]["diagnostic_correlation"], 0);
+}
+
+/// The canonicalization case above only proves one of the two required binding fields rejects a
+/// strong join. This proves the other: digest mismatch while canonicalization matches.
+#[test]
+fn verify_mcp_tunnel_observed_rejects_strong_join_on_digest_mismatch_alone() {
+    let mut artifact = read_valid_tunnel();
+    artifact["evidence_refs"][0]["request_envelope_digest"] = Value::String(
+        "sha256:9999999999999999999999999999999999999999999999999999999999999999".to_string(),
+    );
+    let (_dir, path) = write_fixture(&artifact, "digest-mismatch-strong-join.tunnel.json");
+
+    let output = Command::cargo_bin("assay")
+        .unwrap()
+        .args([
+            "evidence",
+            "verify-mcp-tunnel-observed",
+            "--artifact",
+            path.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .code(2)
+        .get_output()
+        .stdout
+        .clone();
+
+    let report: Value = serde_json::from_slice(&output).unwrap();
+    assert!(report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|check| check["id"] == "same_request_instance_strong_join" && check["ok"] == false));
+    assert_eq!(report["join_summary"]["strong_same_request_instance"], 0);
+    assert_eq!(report["join_summary"]["unsubstantiated_strong_claim"], 1);
+    assert_eq!(report["join_summary"]["diagnostic_correlation"], 0);
 }
