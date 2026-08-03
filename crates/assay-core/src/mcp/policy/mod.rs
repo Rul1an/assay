@@ -95,7 +95,7 @@ impl McpPolicy {
     }
 
     #[deprecated(
-        note = "panics on a policy whose schemas fail to prepare or compile; use                 try_compile_all_schemas and handle the error"
+        note = "panics on a policy whose schemas fail to prepare or compile; use try_compile_all_schemas and handle the error"
     )]
     pub fn compile_all_schemas(&self) -> HashMap<String, Arc<jsonschema::Validator>> {
         self.try_compile_all_schemas()

@@ -10,7 +10,11 @@ use std::sync::Arc;
 /// entry: `compile_all_schemas` records the same malformed declaration as a per-tool error that the
 /// enforcement engine denies with `E_SCHEMA_COMPILE`.
 pub(super) fn check_tool_args(policy: &McpPolicy, tool_name: &str, args: &Value) -> ArgsCheck {
-    if !policy.schemas.contains_key(tool_name) {
+    // `$defs` is the shared-definitions entry, consumed by preparation; it is never a tool. Without
+    // this, a call to a tool literally named "$defs" would compile the definitions map as a schema
+    // (which asserts nothing and accepts everything) while the load-time compiler produces no
+    // validator for it: exactly the cross-path drift this module exists to prevent.
+    if tool_name == "$defs" || !policy.schemas.contains_key(tool_name) {
         return ArgsCheck::NoSchema;
     }
     let schemas = Value::Object(policy.schemas.clone().into_iter().collect());
@@ -175,6 +179,14 @@ mod tests {
         assert_eq!(
             check_tool_args(&policy, "$weird", &json!({})),
             ArgsCheck::Valid
+        );
+        policy
+            .schemas
+            .insert("$defs".to_string(), json!({"shared": {"type": "string"}}));
+        assert_eq!(
+            check_tool_args(&policy, "$defs", &json!({})),
+            ArgsCheck::NoSchema,
+            "$defs is consumed by preparation and is never itself a checkable tool"
         );
         let compiled = compile_all_schemas(&policy);
         assert!(
