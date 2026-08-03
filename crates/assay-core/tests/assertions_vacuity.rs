@@ -261,6 +261,192 @@ fn tool_blocklist_without_test_tool_calls_is_not_a_pass() -> anyhow::Result<()> 
     Ok(())
 }
 
+/// `expect` was compared by exact string equality to `"pass"`, so any other spelling silently
+/// meant *expect failure* and inverted the assertion. An author writing `expect: Pass` got a test
+/// that goes green precisely when the policy would have rejected the input.
+///
+/// This is worse than a no-op: a no-op stops checking, an inversion checks the opposite.
+#[test]
+fn unrecognised_expect_value_is_rejected_not_silently_inverted() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    for spelling in ["Pass", "PASS", "passes", "true", "ok", ""] {
+        let diags = verify_assertions(
+            &store,
+            run_id,
+            test_id,
+            &[TraceAssertion::ArgsValid {
+                tool: "web_search".into(),
+                test_args: Some(json!({ "q": "rust" })),
+                policy: Some(json!({ "schema": { "type": "object", "required": ["q"] } })),
+                expect: Some(spelling.to_string()),
+            }],
+        )?;
+        assert!(
+            diags.iter().any(|d| d.code == "E_CONFIG_ERROR"),
+            "expect: {spelling:?} must be rejected, not read as `expect failure`; got {:?}",
+            diags.iter().map(|d| &d.code).collect::<Vec<_>>()
+        );
+    }
+    Ok(())
+}
+
+/// Both recognised spellings must keep working, so rejecting the rest does not break real configs.
+#[test]
+fn recognised_expect_values_still_work() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    let schema = json!({ "schema": { "type": "object", "required": ["q"] } });
+
+    // `pass` against args that satisfy the schema: holds, so silent.
+    let diags = verify_assertions(
+        &store,
+        run_id,
+        test_id,
+        &[TraceAssertion::ArgsValid {
+            tool: "web_search".into(),
+            test_args: Some(json!({ "q": "rust" })),
+            policy: Some(schema.clone()),
+            expect: Some("pass".into()),
+        }],
+    )?;
+    assert!(diags.is_empty(), "expect: pass on valid args must hold");
+
+    // `fail` against args that violate the schema: also holds, so also silent.
+    let diags = verify_assertions(
+        &store,
+        run_id,
+        test_id,
+        &[TraceAssertion::ArgsValid {
+            tool: "web_search".into(),
+            test_args: Some(json!({ "wrong": 1 })),
+            policy: Some(schema),
+            expect: Some("fail".into()),
+        }],
+    )?;
+    assert!(diags.is_empty(), "expect: fail on invalid args must hold");
+    Ok(())
+}
+
+/// `min_calls: 0` makes `(actual as u32) < 0` — never true for an unsigned count, so the
+/// assertion cannot fail for any trace.
+#[test]
+fn must_call_tool_with_min_calls_zero_is_not_a_pass() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    let diags = verify_assertions(
+        &store,
+        run_id,
+        test_id,
+        &[TraceAssertion::TraceMustCallTool {
+            tool: "web_search".into(),
+            min_calls: Some(0),
+        }],
+    )?;
+    assert_reports_ineffective(
+        &diags,
+        "trace_must_call_tool with min_calls: 0",
+        "min_calls",
+    );
+    Ok(())
+}
+
+/// An empty sequence under `allow_other_tools: true` is a subsequence check with nothing to
+/// find, which every trace satisfies.
+#[test]
+fn tool_sequence_empty_subsequence_is_not_a_pass() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    let diags = verify_assertions(
+        &store,
+        run_id,
+        test_id,
+        &[TraceAssertion::TraceToolSequence {
+            sequence: vec![],
+            allow_other_tools: true,
+        }],
+    )?;
+    assert_reports_ineffective(
+        &diags,
+        "trace_tool_sequence with an empty sequence and allow_other_tools",
+        "sequence",
+    );
+    Ok(())
+}
+
+/// The exact-sequence form of an empty sequence is *not* vacuous — it asserts the trace made no
+/// named tool call, which this trace violates. Positive control against over-rejecting.
+#[test]
+fn tool_sequence_empty_exact_is_a_real_constraint() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    let diags = verify_assertions(
+        &store,
+        run_id,
+        test_id,
+        &[TraceAssertion::TraceToolSequence {
+            sequence: vec![],
+            allow_other_tools: false,
+        }],
+    )?;
+    assert!(
+        diags.iter().any(|d| d.code == "E_TRACE_ASSERT_FAIL"),
+        "an empty exact sequence constrains the trace to no tool calls and must fail here, got {:?}",
+        diags.iter().map(|d| &d.code).collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
+/// A policy whose `regex` is present but cannot constrain anything — empty pattern, or a
+/// non-string that previously degraded to `.*`.
+#[test]
+fn sequence_valid_permissive_regex_is_not_a_pass() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    for pol in [json!({ "regex": "" }), json!({ "regex": 123 })] {
+        let diags = verify_assertions(
+            &store,
+            run_id,
+            test_id,
+            &[TraceAssertion::SequenceValid {
+                test_trace: None,
+                test_trace_raw: Some(vec![json!({ "tool": "web_search" })]),
+                policy: Some(pol.clone()),
+                expect: None,
+            }],
+        )?;
+        assert_reports_ineffective(
+            &diags,
+            &format!("sequence_valid regex {pol}"),
+            "policy.regex",
+        );
+    }
+    Ok(())
+}
+
+/// A `blocked` value that is not an array of strings collapses to an empty blocklist, which
+/// admits every call.
+#[test]
+fn tool_blocklist_unusable_blocked_value_is_not_a_pass() -> anyhow::Result<()> {
+    let (store, run_id, test_id) = store_with_one_call()?;
+    for pol in [
+        json!({ "blocked": "rm" }),
+        json!({ "blocked": [42] }),
+        json!({ "blocked": [{ "name": "rm" }] }),
+    ] {
+        let diags = verify_assertions(
+            &store,
+            run_id,
+            test_id,
+            &[TraceAssertion::ToolBlocklist {
+                test_tool_calls: Some(vec!["web_search".into()]),
+                policy: Some(pol.clone()),
+                expect: None,
+            }],
+        )?;
+        assert_reports_ineffective(
+            &diags,
+            &format!("tool_blocklist blocked {pol}"),
+            "policy.blocked",
+        );
+    }
+    Ok(())
+}
+
 /// Negative control: a fully specified assertion that genuinely holds must stay silent, or the
 /// fix has simply made everything noisy.
 #[test]

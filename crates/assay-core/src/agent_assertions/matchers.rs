@@ -25,6 +25,17 @@ fn check_one(graph: &EpisodeGraph, a: &TraceAssertion) -> Option<Diagnostic> {
                 .filter(|t| t.tool_name.as_deref() == Some(tool.as_str()))
                 .count();
             let min = min_calls.unwrap_or(1);
+            if min == 0 {
+                // `count < 0` is never true for an unsigned count, so no trace can fail this.
+                return Some(ineffective(
+                    "trace_must_call_tool",
+                    "min_calls",
+                    "`min_calls: 0` is satisfied by every trace, including one where the tool is \
+                     never called.",
+                    "Use `min_calls: 1` or higher, or express \"never called\" with \
+                     `trace_must_not_call_tool`.",
+                ));
+            }
             if (actual as u32) < min {
                 return Some(make_diag(
                     "E_TRACE_ASSERT_FAIL",
@@ -63,6 +74,19 @@ fn check_one(graph: &EpisodeGraph, a: &TraceAssertion) -> Option<Diagnostic> {
             allow_other_tools,
         } => {
             if *allow_other_tools {
+                // An empty subsequence has nothing to look for, so every trace contains it.
+                // The exact form is different: an empty sequence there asserts the trace made no
+                // named tool call at all, which is a real constraint.
+                if sequence.is_empty() {
+                    return Some(ineffective(
+                        "trace_tool_sequence",
+                        "sequence",
+                        "an empty `sequence` with `allow_other_tools: true` is contained in every \
+                         trace, so the assertion cannot fail.",
+                        "Name the tools the trace must contain, or set \
+                         `allow_other_tools: false` to assert that no tool was called.",
+                    ));
+                }
                 // Subsequence check
                 if let Err(msg) = check_subsequence(&graph.tool_calls, sequence) {
                     return Some(make_diag(
@@ -139,7 +163,10 @@ fn check_one(graph: &EpisodeGraph, a: &TraceAssertion) -> Option<Diagnostic> {
                 let policy_map = serde_json::json!({ tool: schema });
 
                 let verdict = crate::policy_engine::evaluate_tool_args(&policy_map, tool, args);
-                let expected_pass = expect.as_deref().unwrap_or("pass") == "pass";
+                let expected_pass = match expected_pass(expect, "args_valid") {
+                    Ok(v) => v,
+                    Err(d) => return Some(*d),
+                };
                 let actual_pass = verdict.status == crate::policy_engine::VerdictStatus::Allowed;
 
                 if expected_pass != actual_pass {
@@ -215,19 +242,27 @@ fn check_one(graph: &EpisodeGraph, a: &TraceAssertion) -> Option<Diagnostic> {
                     // Defaulting a missing key to `.*` would make the assertion match every
                     // possible trace, which is a check that cannot fail rather than a check
                     // that passes.
-                    let Some(regex) = pol.get("regex").and_then(|s| s.as_str()) else {
+                    let regex = pol
+                        .get("regex")
+                        .and_then(|s| s.as_str())
+                        .filter(|r| !r.is_empty());
+                    let Some(regex) = regex else {
                         return Some(ineffective(
                             "sequence_valid",
                             "policy.regex",
-                            "the policy carries no `regex` key, so there is no constraint to \
-                             evaluate the steps against.",
+                            "the policy carries no usable `regex`, so there is no constraint to \
+                             evaluate the steps against — an absent, non-string, or empty \
+                             pattern matches every possible trace.",
                             "Add a `regex` field to the policy describing the permitted tool \
                              sequence.",
                         ));
                     };
 
                     let verdict = crate::policy_engine::evaluate_sequence(regex, &tools);
-                    let expected_pass = expect.as_deref().unwrap_or("pass") == "pass";
+                    let expected_pass = match expected_pass(expect, "sequence_valid") {
+                        Ok(v) => v,
+                        Err(d) => return Some(*d),
+                    };
                     let actual_pass =
                         verdict.status == crate::policy_engine::VerdictStatus::Allowed;
 
@@ -299,7 +334,10 @@ fn check_one(graph: &EpisodeGraph, a: &TraceAssertion) -> Option<Diagnostic> {
                         ));
                     }
 
-                    let expected_pass = expect.as_deref().unwrap_or("pass") == "pass";
+                    let expected_pass = match expected_pass(expect, "tool_blocklist") {
+                        Ok(v) => v,
+                        Err(d) => return Some(*d),
+                    };
                     // Check if *any* tool is blocked
                     let mut actual_pass = true;
                     for t in tools {
@@ -354,6 +392,34 @@ fn check_subsequence(
         }
     }
     Ok(())
+}
+
+/// Reads the `expect` field, which selects the polarity of a policy-mode assertion.
+///
+/// This was three copies of `expect.as_deref().unwrap_or("pass") == "pass"`. Exact string
+/// equality meant every other spelling — `Pass`, `PASS`, `passes`, `true` — silently selected
+/// *expect failure* and inverted the assertion, so a config that reads as "this must be allowed"
+/// went green precisely when the policy rejected it. An inversion is worse than a no-op: a no-op
+/// stops checking, an inversion checks the opposite.
+///
+/// One function rather than three comparisons, per `AGENTS.md` Verification. The `Err` variant is
+/// boxed because `Diagnostic` is large enough to trip `result_large_err` on a `bool` happy path.
+fn expected_pass(expect: &Option<String>, variant: &str) -> Result<bool, Box<Diagnostic>> {
+    match expect.as_deref() {
+        None | Some("pass") => Ok(true),
+        Some("fail") => Ok(false),
+        Some(other) => Err(Box::new(make_diag(
+            "E_CONFIG_ERROR",
+            &format!(
+                "Assertion `{variant}` has an unrecognized `expect` value; \
+                 the only accepted values are `pass` and `fail`."
+            ),
+            None,
+            Some(
+                serde_json::json!({ "assertion": variant, "field": "expect", "length": other.len() }),
+            ),
+        ))),
+    }
 }
 
 /// An assertion that cannot check anything, reported under its own code so a suite can tell it
