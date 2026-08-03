@@ -49,8 +49,23 @@ pub(super) struct OutcomeReport {
     pub(super) status: Option<String>,
     pub(super) completed_at: Option<String>,
     pub(super) decision_digest: Option<String>,
+    pub(super) result_commitment: Option<ResultCommitmentReport>,
     pub(super) backlink: BackLinkReport,
     pub(super) signature_present: bool,
+}
+
+/// What the outcome record commits to about the result, and how much of that a record-only
+/// consumer settled. `embedded_digest` is surfaced but never checked: it binds a value this
+/// verifier never sees.
+#[derive(Debug, Serialize)]
+pub(super) struct ResultCommitmentReport {
+    pub(super) kind: &'static str,
+    pub(super) projection_digest: Option<String>,
+    /// An `ArgsRef`'s `digest`, which addresses referenced content rather than a projection
+    /// string. Kept separate so a consumer keying on a field name never compares the two.
+    pub(super) ref_digest: Option<String>,
+    pub(super) embedded_digest: Option<String>,
+    pub(super) recomputed_projection_digest: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
