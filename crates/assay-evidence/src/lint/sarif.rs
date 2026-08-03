@@ -318,15 +318,22 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
     }
 
     // Build run.properties
+    //
+    // Truncation is read off the report rather than the pack metadata. Both carry it and both are
+    // set from the same values, but pack metadata is absent whenever no packs are configured, so
+    // keying on it meant a default-path run disclosed nothing here at all.
     let mut run_props = serde_json::Map::new();
     if let Some(ref meta) = options.pack_meta {
         if let Some(ref disclaimer) = meta.disclaimer {
             run_props.insert("disclaimer".into(), json!(disclaimer));
         }
-        if meta.truncated {
-            run_props.insert("truncated".into(), json!(true));
-            run_props.insert("truncatedCount".into(), json!(meta.truncated_count));
-        }
+    }
+    if report.truncated {
+        run_props.insert("truncated".into(), json!(true));
+        run_props.insert("truncatedCount".into(), json!(report.truncated_count));
+        // The cap the count was measured against. Without it a consumer sees how many findings
+        // fell past the bound but not what the bound was (OWASP agentic-skills #49 review point).
+        run_props.insert("appliedCap".into(), json!(report.applied_cap));
     }
 
     let automation_id = format!(
@@ -337,9 +344,56 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
     // Build invocations
     // Note: workingDirectory is intentionally omitted to avoid leaking local paths
     // (e.g., /Users/... or /home/...). GitHub Code Scanning doesn't require it.
-    let invocation = json!({
+    //
+    // `executionSuccessful` stays true on a truncated run. SARIF 2.1.0 section 3.20.14 defines it
+    // as true "if the engineering system that started the process knows that the analysis tool
+    // succeeded", and its own example pairs `executionSuccessful: true` with a non-zero exit code.
+    // A capped run succeeded; it reported less than it found. Flipping this would assert a failure
+    // that did not happen.
+    //
+    // The cap itself is the deeper problem, and it is worth stating here rather than only in a
+    // commit message. Section 3.14.23 is normative: outside the failed-to-start cases, `results`
+    // "SHALL be present and SHALL contain all results detected by the tool". A configured
+    // `max_results` therefore puts this producer out of conformance whenever it fires. The cap
+    // exists because downstream consumers impose upload limits, so this is a real tension and not
+    // an oversight, but it is a tension the format resolves against us. An earlier version of this
+    // comment claimed SARIF had no home for a reporting cap; that was wrong, and the correction is
+    // that SARIF has a position instead of a gap.
+    //
+    // Until the cap goes, disclose it in both available places and claim neither as a blessing.
+    // `run.properties` is the machine-readable carrier. The notification is a human-readable aid at
+    // `warning`, which 3.58.6 defines as covering the case where "the analysis might be incomplete
+    // but the results that were generated are probably valid". It stays below Appendix I's `error`
+    // gate deliberately: 3.20.21 makes an error-level notification mean the run failed, and a cap
+    // is not a failed run.
+    let mut invocation = json!({
         "executionSuccessful": true
     });
+    if report.truncated {
+        invocation.as_object_mut().unwrap().insert(
+            "toolExecutionNotifications".into(),
+            json!([{
+                "descriptor": { "id": "ASSAY-LINT-TRUNCATED" },
+                "level": "warning",
+                "message": {
+                    "text": format!(
+                        "Result set is incomplete: {} finding(s) were dropped by a max_results \
+                         cap of {}. The findings reported here are the highest severity that \
+                         survived the cap; absence of a lower-severity finding does not mean it \
+                         was absent from the bundle.",
+                        report.truncated_count, report.applied_cap
+                    )
+                },
+                // The configured limit and the suppressed count as separate machine-readable
+                // fields, so a consumer reconstructs both the ceiling and how many fell past it
+                // without parsing the message text.
+                "properties": {
+                    "appliedCap": report.applied_cap,
+                    "droppedCount": report.truncated_count
+                }
+            }]),
+        );
+    }
 
     // Build tool.driver
     let mut driver = json!({

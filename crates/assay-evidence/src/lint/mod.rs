@@ -118,6 +118,21 @@ pub struct LintReport {
     pub verified: bool,
     pub findings: Vec<LintFinding>,
     pub summary: LintSummary,
+    /// Whether `max_results` dropped findings this run.
+    ///
+    /// This lives on the report rather than only in the pack metadata because truncation applies to
+    /// every run, and pack metadata is absent whenever no packs are configured. Carried there alone,
+    /// a default-path run could drop findings and present as if it had none to drop, which is the
+    /// one thing a lint report must never do quietly. `summary` is computed after truncation, so it
+    /// describes what survived and this flag is what says so.
+    pub truncated: bool,
+    /// How many findings were dropped. Zero when `truncated` is false.
+    pub truncated_count: usize,
+    /// The `max_results` cap that was in force this run. A disclosed truncation is only actionable
+    /// if a consumer can see the bound it was truncated to, not just how many findings fell past it
+    /// (the review point on OWASP agentic-skills #49): `truncated_count` says how many were
+    /// dropped, `applied_cap` says the ceiling they were dropped against.
+    pub applied_cap: usize,
 }
 
 impl LintReport {
