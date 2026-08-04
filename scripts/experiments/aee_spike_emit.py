@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-from pathlib import Path
 from typing import Any
 
 from aee_spike_lib import (
@@ -23,20 +22,27 @@ from aee_spike_lib import (
     digest_json,
     merkle_root,
     observation_record,
-    read_json,
-    write_json,
+    read_source_fixture,
+    run_binding_from_statement,
+    run_binding_input_from_statement,
+    write_statement_fixture,
 )
 
-ROOT = Path(__file__).resolve().parent
-FIXTURES = ROOT / "fixtures" / "aee"
-DEFAULT_OUT = ROOT / "fixtures" / "aee" / "statement-valid.json"
+VARIANT_NAMES = [
+    "missing-seal",
+    "defective-unreferenced-seal",
+    "artifact-labelled-substrate",
+    "reconstructed-priced-intercepted",
+    "run-population-overclaim",
+]
+
 
 def build_statement() -> dict[str, Any]:
-    corpus_manifest = read_json(FIXTURES / "corpus-manifest.json", base_dir=FIXTURES)
-    substrate_descriptor = read_json(FIXTURES / "substrate-descriptor.json", base_dir=FIXTURES)
-    catch_policy = read_json(FIXTURES / "catch-policy.json", base_dir=FIXTURES)
-    proxy_observation = read_json(FIXTURES / "proxy-deny-observation.json", base_dir=FIXTURES)
-    enforcement_health = read_json(FIXTURES / "enforcement-health-v1-active-probe.json", base_dir=FIXTURES)
+    corpus_manifest = read_source_fixture("corpus-manifest")
+    substrate_descriptor = read_source_fixture("substrate-descriptor")
+    catch_policy = read_source_fixture("catch-policy")
+    proxy_observation = read_source_fixture("proxy-deny-observation")
+    enforcement_health = read_source_fixture("enforcement-health-v1-active-probe")
 
     subject = {
         "name": "assay-aee-spike-fixture-subject",
@@ -70,17 +76,45 @@ def build_statement() -> dict[str, Any]:
         "manifest": corpus_manifest,
     }
 
-    run_binding_input = {
-        "aeeBindingVersion": "2",
-        "catchPolicy": catch_policy_descriptor["digest"]["sha256"],
-        "corpus": corpus["digest"]["sha256"],
-        "networkPosture": digest_json(network_posture),
-        "observationVocabulary": observation_vocabulary["digest"]["sha256"],
-        "runEntropy": run_entropy["digest"]["sha256"],
-        "subject": subject["digest"]["sha256"],
-        "substrate": substrate["digest"]["sha256"],
+    statement = {
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": [subject],
+        "predicateType": AEE_PREDICATE_TYPE,
+        "predicate": {
+            "result": "fail",
+            "observationEnvironment": {
+                "substrate": substrate,
+                "corpus": corpus,
+                "catchPolicy": catch_policy_descriptor,
+                "networkPosture": network_posture,
+                "observationVocabulary": observation_vocabulary,
+                "runEntropy": run_entropy,
+            },
+            "coverage": {"assessedClasses": ["MCP", "NET"], "outOfScope": {}, "routedElsewhere": {}},
+            "attackResults": [
+                {
+                    "attackId": "MCP-PROXY-DENY-001",
+                    "containmentObserved": "proxy_denied",
+                    "basis": "substrate",
+                    "method": "intercepted",
+                    "attribution": "pinned",
+                    "actualLayer": "proxy",
+                    "observationRefs": [0, 1, 2],
+                },
+                {
+                    "attackId": "NET-CONNECT-BLOCK-001",
+                    "containmentObserved": "connect_blocked",
+                    "basis": "substrate",
+                    "method": "intercepted",
+                    "attribution": "pinned",
+                    "actualLayer": "landlock",
+                    "observationRefs": [3, 1, 2],
+                },
+            ],
+        },
     }
-    run_binding = digest_json(run_binding_input)
+    run_binding_input = run_binding_input_from_statement(statement)
+    run_binding = run_binding_from_statement(statement)
 
     proxy_commitment = proxy_observation["caller_visible_response_digest"].removeprefix("sha256:")
     network_commitment = enforcement_health["probe"]["payload_commitment"].removeprefix("sha256:")
@@ -140,41 +174,8 @@ def build_statement() -> dict[str, Any]:
         observation_record(network_payload, 4),
     ]
 
-    statement = {
-        "_type": "https://in-toto.io/Statement/v1",
-        "subject": [subject],
-        "predicateType": AEE_PREDICATE_TYPE,
-        "predicate": {
-            "result": "fail",
-            "observationEnvironment": {
-                "substrate": substrate,
-                "corpus": corpus,
-                "catchPolicy": catch_policy_descriptor,
-                "networkPosture": network_posture,
-                "observationVocabulary": observation_vocabulary,
-                "runEntropy": run_entropy,
-            },
-            "coverage": {"assessedClasses": ["MCP", "NET"], "outOfScope": {}, "routedElsewhere": {}},
-            "attackResults": [
-                {
-                    "attackId": "MCP-PROXY-DENY-001",
-                    "containmentObserved": "proxy_denied",
-                    "basis": "substrate",
-                    "method": "intercepted",
-                    "attribution": "pinned",
-                    "actualLayer": "proxy",
-                    "observationRefs": [0, 1, 2],
-                },
-                {
-                    "attackId": "NET-CONNECT-BLOCK-001",
-                    "containmentObserved": "connect_blocked",
-                    "basis": "substrate",
-                    "method": "intercepted",
-                    "attribution": "pinned",
-                    "actualLayer": "landlock",
-                    "observationRefs": [3, 1, 2],
-                },
-            ],
+    statement["predicate"].update(
+        {
             "observationRecords": records,
             "batchRoot": merkle_root(records),
             "doesNotAssert": [
@@ -195,12 +196,12 @@ def build_statement() -> dict[str, Any]:
                     "nonProduction": True,
                 }
             },
-        },
-    }
+        }
+    )
     return statement
 
 
-def write_variant(path: Path, statement: dict[str, Any], variant: str) -> None:
+def write_variant(statement: dict[str, Any], variant: str) -> None:
     mutated = copy.deepcopy(statement)
     predicate = mutated["predicate"]
     if variant == "missing-seal":
@@ -252,33 +253,24 @@ def write_variant(path: Path, statement: dict[str, Any], variant: str) -> None:
         predicate["_ext"]["assaySpike"]["invalidClaim"] = "no sibling runs existed"
     else:
         raise ValueError(f"unknown variant: {variant}")
-    write_json(path, mutated, base_dir=FIXTURES)
+    write_statement_fixture(variant, mutated)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="Path for the valid emitted statement")
     parser.add_argument("--variants", action="store_true", help="Also emit intentionally invalid negative-control statements")
     args = parser.parse_args()
 
     statement = build_statement()
-    write_json(args.out, statement, base_dir=FIXTURES)
+    valid_path = write_statement_fixture("valid", statement)
 
     if args.variants:
-        variants_dir = args.out.parent / "negative-controls"
-        variants_dir.mkdir(parents=True, exist_ok=True)
-        for name in [
-            "missing-seal",
-            "defective-unreferenced-seal",
-            "artifact-labelled-substrate",
-            "reconstructed-priced-intercepted",
-            "run-population-overclaim",
-        ]:
-            write_variant(variants_dir / f"statement-{name}.json", statement, name)
+        for name in VARIANT_NAMES:
+            write_variant(statement, name)
 
-    print(f"wrote {args.out}")
+    print(f"wrote {valid_path}")
     if args.variants:
-        print(f"wrote negative controls under {args.out.parent / 'negative-controls'}")
+        print("wrote negative controls under scripts/experiments/fixtures/aee/negative-controls")
     return 0
 
 
