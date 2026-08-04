@@ -32,7 +32,7 @@ The fixture also carries synthetic substrate, catch-policy, corpus, network-post
 
 - `scripts/experiments/aee_spike_emit.py` emits the valid statement and optional negative controls.
 - `scripts/experiments/aee_spike_check.py` checks the fixture statement invariants.
-- `scripts/experiments/fixtures/aee/` contains the Assay-shaped source fixtures and emitted AEE-shaped statements.
+- `scripts/experiments/fixtures/aee/` contains the Assay-shaped source fixtures. The emitter writes generated AEE-shaped statements into this directory.
 
 ## Run
 
