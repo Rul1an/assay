@@ -329,11 +329,7 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
         }
     }
     if report.truncated {
-        run_props.insert("truncated".into(), json!(true));
-        run_props.insert("truncatedCount".into(), json!(report.truncated_count));
-        // The cap the count was measured against. Without it a consumer sees how many findings
-        // fell past the bound but not what the bound was (OWASP agentic-skills #49 review point).
-        run_props.insert("appliedCap".into(), json!(report.applied_cap));
+        run_props.append(&mut truncation_properties(report));
     }
 
     let automation_id = format!(
@@ -384,13 +380,9 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
                         report.truncated_count, report.applied_cap
                     )
                 },
-                // The configured limit and the suppressed count as separate machine-readable
-                // fields, so a consumer reconstructs both the ceiling and how many fell past it
-                // without parsing the message text.
-                "properties": {
-                    "appliedCap": report.applied_cap,
-                    "droppedCount": report.truncated_count
-                }
+                // The same keys the run properties carry, from the same builder — see
+                // The cross-emitter names, not this tool's; see `truncation_properties`.
+                "properties": truncation_notification_properties(report)
             }]),
         );
     }
@@ -435,6 +427,58 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
         "version": "2.1.0",
         "runs": [run]
     })
+}
+
+/// The truncation disclosure, built from one pair of values for two carriers that name them
+/// differently on purpose.
+///
+/// The names used to disagree by accident, which is a real defect and is what a consumer reading
+/// two names for one number cannot resolve. The fix is not to pick one, because the two bags
+/// address different readers.
+///
+/// `run.properties` is this tool's own carrier. `truncated` and `truncatedCount` are the names the
+/// pack-engine spec and the changelog publish, so renaming them would break consumers to settle an
+/// internal inconsistency.
+///
+/// The notification is where a consumer following the OWASP agentic-skills rule reads, and
+/// `appliedCap` / `droppedCount` is the pair a second emitter already carries and that
+/// `aliksir/claude-code-skill-security-check#24` is settling as the cross-emitter shape, citing
+/// this emitter for those keys. Renaming away from a vocabulary while it is being standardised,
+/// and while this producer is named in it, buys internal tidiness and pays for it in interop.
+///
+/// So the invariant is on the values rather than on the strings: both bags are derived from
+/// `applied_cap` and `truncated_count`, and the test asserts the carriers agree on what they
+/// disclose rather than on how they spell it. If the RFC pins a different pair, one function
+/// changes.
+///
+/// Worth knowing for whoever revisits this: SARIF property-bag names are flat. Making them
+/// hierarchical was proposed as `oasis-tcs/sarif-spec#181` in 2018, with `semmle/query-path` as
+/// the example, and closed without discussion, so 2.1.0 requires nothing. Every bare key shares
+/// one namespace with every other producer's, which is the condition that lets one fact acquire
+/// two names.
+///
+/// `appliedCap` travels with the count rather than only near it: without the ceiling a consumer
+/// sees how many findings fell past a bound but not what the bound was (OWASP agentic-skills #49
+/// review point).
+///
+/// Callers gate on `report.truncated`; these return the disclosure for a run already known to be
+/// truncated.
+fn truncation_properties(report: &LintReport) -> serde_json::Map<String, serde_json::Value> {
+    let mut props = serde_json::Map::new();
+    props.insert("truncated".into(), json!(true));
+    props.insert("truncatedCount".into(), json!(report.truncated_count));
+    props.insert("appliedCap".into(), json!(report.applied_cap));
+    props
+}
+
+/// The same two values in the cross-emitter vocabulary. See [`truncation_properties`].
+fn truncation_notification_properties(
+    report: &LintReport,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut props = serde_json::Map::new();
+    props.insert("appliedCap".into(), json!(report.applied_cap));
+    props.insert("droppedCount".into(), json!(report.truncated_count));
+    props
 }
 
 /// Extract a tag value from findings for a specific rule.
