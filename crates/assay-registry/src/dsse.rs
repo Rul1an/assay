@@ -57,10 +57,9 @@ struct SignatureIn {
 /// Build the DSSE v1 Pre-Authentication Encoding:
 /// `"DSSEv1" SP LEN(payloadType) SP payloadType SP LEN(payload) SP payload`, where SP is a single ASCII
 /// space and LEN is the ASCII-decimal byte length. The signature is computed over exactly these bytes.
-/// Delegates to [`crate::pae::build_pae`]. See that module for why one
-/// construction serves this crate.
+/// Delegates to [`assay_common::dsse::build_pae`], the workspace's one PAE.
 fn dsse_pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
-    crate::pae::build_pae(payload_type, payload)
+    assay_common::dsse::build_pae(payload_type, payload)
 }
 
 /// Verify a DSSE envelope over an in-toto Statement, fully offline, using the public key in `leaf_der`.

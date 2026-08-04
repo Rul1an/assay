@@ -9,15 +9,20 @@
 //! payload type another way, until a signature made by one side stops verifying
 //! on the other.
 //!
-//! Scope, stated exactly because an earlier version of this comment miscounted
-//! twice. `assay-evidence`'s mandate signing and `assay-core`'s MCP signing call
-//! this. `assay-registry` keeps its own in `assay_registry::pae`, collapsed there
-//! from three production copies, and is not folded in here: that crate has no
-//! internal dependencies at all, so giving a leaf crate its first edge is an
-//! architecture decision rather than a refactor. It also keeps one PAE in its
-//! `sigstore_bundle` tests on purpose, as an independent construction that would
-//! catch this one drifting. So this module is one construction for the crates
-//! that already share it, not one for the workspace.
+//! Scope: this is now the workspace's one construction. `assay-evidence`'s
+//! mandate signing, `assay-core`'s MCP signing, and `assay-registry` all call
+//! it. Getting here took two counting errors worth recording, since both were
+//! claims about how many copies existed made without opening every file: the
+//! first said the workspace had two and it had six, the second said
+//! `assay-registry` had four and it had three plus a test.
+//!
+//! One construction is deliberately left standing, in `assay-registry`'s
+//! `sigstore_bundle` tests. Those tests build a PAE, sign it, and assert the
+//! production verifier accepts the result, so it is an independent construction
+//! rather than a copy: if this module drifted, that signature would stop
+//! verifying and the tests would fail. Sharing it would leave those tests
+//! signing with the same code they verify with, and a bug here would agree with
+//! itself and pass.
 
 use std::string::ToString;
 use std::vec::Vec;
