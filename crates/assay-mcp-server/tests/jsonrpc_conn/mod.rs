@@ -30,6 +30,27 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long the child may take to exit once it has seen EOF on stdin.
 const REAP_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How many lines the reader thread may run ahead of the test before it blocks.
+///
+/// The channel is bounded because the deadline bounds time, not memory. A child writing lines
+/// faster than the caller skips them fills an unbounded channel for the whole budget: measured at
+/// ~110 MB/s against `yes`, which is ~3.3 GB at [`DEFAULT_TIMEOUT`] and ~8 GB at
+/// [`CARGO_RUN_TIMEOUT`]. With a bound the reader thread stops draining stdout, the child blocks on
+/// its own pipe, and the test keeps control of the deadline.
+///
+/// The bound is large rather than minimal on purpose. Backpressure introduces a deadlock the
+/// unbounded channel could not have: a test that writes several requests before reading any could,
+/// with a tiny bound, block in `send` on a full stdin pipe while the child blocks on a full stdout
+/// pipe — and `send` is not covered by the read deadline. 1024 lines plus the child's own ~64 KB
+/// stdout pipe is far beyond any interleaving in this directory (the deepest is two unread sends),
+/// while still costing only tens of kilobytes.
+const READ_AHEAD_LINES: usize = 1024;
+
+/// Cap on what [`Conn::drain_stdout_after_shutdown`] will collect, for the same reason: the lines
+/// it returns are accumulated in memory, so a still-running child would trade an unbounded wait for
+/// unbounded memory.
+const MAX_DRAINED_LINES: usize = 10_000;
+
 /// What the reader thread hands back: a line, or the error that ended the stream.
 enum Chunk {
     Line(String),
@@ -64,10 +85,11 @@ impl Conn {
             .stdout
             .take()
             .expect("child must be spawned with stdout piped");
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(READ_AHEAD_LINES);
 
         // Detached on purpose: joining this thread is exactly the block this module exists to
-        // avoid. It ends on its own when the child's stdout closes, which killing the child forces.
+        // avoid. It ends on its own when the child's stdout closes, which killing the child forces,
+        // or when a blocked `send` fails because the test dropped its `Conn`.
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             loop {
@@ -132,6 +154,9 @@ impl Conn {
     }
 
     /// Send a request and read the response to it.
+    ///
+    /// Reads with [`Conn::read_response`] and not [`Conn::read_json`]: the name promises the
+    /// response, so a notification arriving first must not be handed back in its place.
     pub fn request(&mut self, method: &str, params: Value, id: u64) -> Value {
         self.send(serde_json::json!({
             "jsonrpc": "2.0",
@@ -139,7 +164,7 @@ impl Conn {
             "params": params,
             "id": id
         }));
-        self.read_json()
+        self.read_response()
     }
 
     /// The next non-blank stdout line, parsed as JSON.
@@ -165,9 +190,10 @@ impl Conn {
 
     /// Every remaining stdout line up to EOF, used to prove nothing further reached the client.
     ///
-    /// Call this after the child has been shut down; on a still-running child there is no EOF to
-    /// wait for and this fails at the deadline.
-    pub fn drain_stdout(&mut self) -> Vec<String> {
+    /// Named for its precondition because it has one: the returned lines are accumulated in memory,
+    /// so this is only bounded when EOF is actually coming. On a still-running child there is no
+    /// EOF to wait for, and it stops at [`MAX_DRAINED_LINES`] or at the deadline, whichever first.
+    pub fn drain_stdout_after_shutdown(&mut self) -> Vec<String> {
         let deadline = Instant::now() + self.take_budget();
         let mut lines = Vec::new();
         loop {
@@ -175,6 +201,12 @@ impl Conn {
             let now = Instant::now();
             if now >= deadline {
                 self.fail("the child held stdout open past the deadline while draining it");
+            }
+            if lines.len() >= MAX_DRAINED_LINES {
+                self.fail(&format!(
+                    "the child wrote more than {MAX_DRAINED_LINES} lines after shutdown; \
+                     draining it is only bounded when EOF is actually coming"
+                ));
             }
             let remaining = deadline.saturating_duration_since(now);
             match self.rx.recv_timeout(remaining) {
@@ -184,7 +216,11 @@ impl Conn {
                         lines.push(trimmed.to_string());
                     }
                 }
-                Ok(Chunk::Err(_)) | Err(RecvTimeoutError::Disconnected) => return lines,
+                // EOF is the expected end. A read error is not, and must not look like one.
+                Err(RecvTimeoutError::Disconnected) => return lines,
+                Ok(Chunk::Err(e)) => self.fail(&format!(
+                    "reading the child's stdout failed while draining: {e}"
+                )),
                 Err(RecvTimeoutError::Timeout) => {
                     self.fail("the child held stdout open past the deadline while draining it")
                 }

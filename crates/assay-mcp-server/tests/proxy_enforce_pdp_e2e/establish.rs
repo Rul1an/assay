@@ -40,7 +40,7 @@ fn establish_then_allow_forwards_without_a_client_list() {
     assert!(!serde_json::to_string(&r)
         .unwrap()
         .contains("assay-establish-"));
-    for line in out.drain_stdout() {
+    for line in out.drain_stdout_after_shutdown() {
         assert!(
             !line.contains("assay-establish-"),
             "a synthetic establish line leaked to the client: {line}"
