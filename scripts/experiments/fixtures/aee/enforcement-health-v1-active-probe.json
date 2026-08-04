@@ -1,0 +1,27 @@
+{
+  "schema": "assay.enforcement_health.v1",
+  "status": "active",
+  "mechanism": "landlock",
+  "scope": "tcp_connect_landlock_port",
+  "policy_semantics": {
+    "default": "deny",
+    "allowed": []
+  },
+  "failure": null,
+  "landlock": {
+    "abi": 6,
+    "restrict_self_confirmed": true,
+    "ruleset_applied": true
+  },
+  "probe": {
+    "kind": "tcp_connect_block",
+    "target": "fixture.invalid:443",
+    "blocked_before_listener_reached": true,
+    "payload_commitment": "sha256:6d7cd7972edaa93427805b63e1836aabedbceec4e80b90b89389ff69853c9c15"
+  },
+  "non_claims": [
+    "probe proves one denied connect was blocked",
+    "does not prove complete run population",
+    "does not prove an AEE substrate-signed seal exists in production Assay"
+  ]
+}
