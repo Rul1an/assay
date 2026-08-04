@@ -45,18 +45,35 @@ def digest_json(value: Any) -> str:
     return hashlib.sha256(canonical_bytes(value)).hexdigest()
 
 
-def read_json(path: Path) -> Any:
-    with path.open("r", encoding="utf-8") as handle:
+def _resolve_under(path: Path, *, base_dir: Path | None) -> Path:
+    """Resolve a fixture path and optionally require it to stay under base_dir."""
+
+    resolved = path.resolve()
+    if base_dir is None:
+        return resolved
+    base = base_dir.resolve()
+    try:
+        resolved.relative_to(base)
+    except ValueError as exc:
+        raise ValueError(f"path must stay under {base}") from exc
+    return resolved
+
+
+def read_json(path: Path, *, base_dir: Path | None = None) -> Any:
+    resolved = _resolve_under(path, base_dir=base_dir)
+    with resolved.open("r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
-def write_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+def write_json(path: Path, value: Any, *, base_dir: Path | None = None) -> None:
+    resolved = _resolve_under(path, base_dir=base_dir)
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def dsse_pae(payload_type: str, payload: bytes) -> bytes:
-    return b"DSSEv1 " + str(len(payload_type)).encode("ascii") + b" " + payload_type.encode("utf-8") + b" " + str(len(payload)).encode("ascii") + b" " + payload
+    payload_type_bytes = payload_type.encode("utf-8")
+    return b"DSSEv1 " + str(len(payload_type_bytes)).encode("ascii") + b" " + payload_type_bytes + b" " + str(len(payload)).encode("ascii") + b" " + payload
 
 
 def sign_payload(payload_type: str, payload: bytes) -> str:
