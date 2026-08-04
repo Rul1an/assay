@@ -226,7 +226,10 @@ jobs:
       # invisible to the sweep above: cfg strips it to an empty crate and clippy lints nothing.
       # no_passthrough_e2e.rs is gated on `test-outbound` and would otherwise be the one test in
       # the workspace that no lint job ever sees.
-      - run: cargo clippy -p assay-mcp-server --all-targets --features test-outbound -- -D warnings
+      # The deny list matches split-wave0-gates.yml, which carries no --all-features either, so this
+      # step is the only place the gated file meets `clippy::todo` and `clippy::unimplemented`.
+      # Denying only `-D warnings` here would leave a placeholder legal in exactly one test file.
+      - run: cargo clippy -p assay-mcp-server --all-targets --features test-outbound -- -D warnings -D clippy::todo -D clippy::unimplemented
 
   rustdoc:
     name: Rustdoc (deny warnings)
@@ -613,9 +616,13 @@ jobs:
           set -euo pipefail
           cargo test --locked -p assay-mcp-server --features test-outbound --no-fail-fast no_passthrough \
             2>&1 | tee "$RUNNER_TEMP/e6a3.log"
-          # Matches libtest's line today and nextest's if this ever migrates, because a guard that
-          # reads "the test did not run" while the test is passing is worse than no guard.
-          grep -qE 'test_no_passthrough_e2e \.\.\. ok|^ *PASS .*test_no_passthrough_e2e' \
+          # This guard answers one question only: did the test run at all. Whether it passed is
+          # already settled above, by the exit code under `set -o pipefail` — a test that ran and
+          # failed never reaches this line. Keeping the two apart is what lets the pattern match a
+          # result line in any shape without enumerating which shapes mean success, which is where
+          # the earlier version went wrong: it matched nextest's plain PASS and so would have
+          # reported "did not run" for a test that passed after a retry or while leaking.
+          grep -qE 'test test_no_passthrough_e2e \.\.\.|^ *(PASS|FAIL|TRY|FLAKY|LEAK|SLOW|TIMEOUT).*test_no_passthrough_e2e' \
             "$RUNNER_TEMP/e6a3.log" || {
             echo "::error::E6a.3 no-pass-through test did not run. The test-outbound gate is misconfigured, so the invariant was never exercised."
             exit 1

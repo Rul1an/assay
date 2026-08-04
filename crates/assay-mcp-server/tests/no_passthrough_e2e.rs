@@ -5,12 +5,17 @@
 //! trigger the test-only outbound call, then assert the mock received no sensitive headers or
 //! sentinel values. Run with: cargo test -p assay-mcp-server --features test-outbound no_passthrough
 //!
-//! This file is gated on `test-outbound` so that it runs against the binary Cargo built for this
-//! test target. That is the whole reason for the gate: `CARGO_BIN_EXE_assay-mcp-server` points at
-//! whatever feature set this test target was built with, so the two can only be guaranteed to
-//! agree if the test compiles under the feature too. Previously the file compiled unconditionally
-//! and shelled out to `cargo build --features test-outbound`, whose inherited CARGO_MANIFEST_DIR
-//! dirtied the shared stack like every other nested Cargo here.
+//! This file is gated on `test-outbound`, and that gate is what makes `CARGO_BIN_EXE` safe to
+//! trust here. The variable is a fixed path — `target/debug/assay-mcp-server` — not a per-feature
+//! one, and its contents are whichever variant Cargo last uplifted, so the path alone guarantees
+//! nothing. What does guarantee it is that Cargo uplifts the matching variant in the same
+//! invocation that builds and runs this test, and the gate ensures the only invocations that run
+//! it are ones that asked for the feature.
+//!
+//! Previously the file compiled unconditionally and shelled out to `cargo build --features
+//! test-outbound`, whose inherited CARGO_MANIFEST_DIR dirtied the shared stack like every other
+//! nested Cargo here. Note the dependency stack itself never had two variants to thrash between:
+//! `test-outbound = []` enables no dependency features, so only this crate's own units differ.
 //!
 //! Gating trades a rebuild for an absence, which is the more dangerous failure: `cargo test` exits
 //! 0 when zero tests match. So the CI job that owns this invariant enables the feature and asserts
