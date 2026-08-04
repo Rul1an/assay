@@ -119,23 +119,10 @@ fn key_to_spki_der(key: &VerifyingKey) -> Result<Vec<u8>> {
 
 /// Build DSSE Pre-Authentication Encoding (PAE).
 ///
-/// ```text
-/// PAE(type, payload) = "DSSEv1" SP LEN(type) SP type SP LEN(payload) SP payload
-/// ```
+/// Delegates to [`assay_common::dsse::build_pae`], which `assay-evidence` also
+/// calls. PAE defines what a signature covers, so one construction serves both.
 fn build_pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
-    let type_len = payload_type.len().to_string();
-    let payload_len = payload.len().to_string();
-
-    let mut pae = Vec::new();
-    pae.extend_from_slice(b"DSSEv1 ");
-    pae.extend_from_slice(type_len.as_bytes());
-    pae.push(b' ');
-    pae.extend_from_slice(payload_type.as_bytes());
-    pae.push(b' ');
-    pae.extend_from_slice(payload_len.as_bytes());
-    pae.push(b' ');
-    pae.extend_from_slice(payload);
-    pae
+    assay_common::dsse::build_pae(payload_type, payload)
 }
 
 /// Remove x-assay-sig field from tool JSON.
