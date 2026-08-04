@@ -139,7 +139,20 @@ A trusted key outside scope is structurally valid but not credited as attested s
 
 ## Seal payload shape
 
-The first production payload should be JSON, signed as exact bytes, and treated verify-before-read.
+The first production payload is a signed envelope whose payload is canonical JSON encoded as UTF-8. The signed bytes are the exact UTF-8 bytes of that canonical payload plus the envelope's production signing preimage; consumers verify the envelope before reading any payload fields.
+
+### Production signing envelope
+
+The production seal MUST define its signing surface explicitly before any stable exporter is exposed:
+
+- envelope format: a versioned Assay observation envelope, with any DSSE use called out by name if selected;
+- payload type: a producer-owned media type for the seal payload, ending in `+json`;
+- payload bytes: RFC 8785 canonical JSON encoded as UTF-8, with duplicate object members rejected before signing or verification;
+- signature algorithm: a production asymmetric signature algorithm and key role approved for substrate observation signing; fixture HMAC keys are invalid in production;
+- verification rule: verify the envelope signature and key scope over the exact signed bytes before decoding the payload;
+- non-normative fixture boundary: `scripts/experiments/aee_spike_lib.py` and its fixture DSSE PAE/HMAC helper are experiment-only and do not define production signing semantics.
+
+Until those details are implemented and tested, this ADR authorizes only the primitive design and fixture/checker work, not stable production AEE export.
 
 Illustrative shape:
 
@@ -254,7 +267,7 @@ For each sealed record:
 
 ### Option A: Single substrate observation key, collection path in payload
 
-One key signs arming/interception/sealed payloads. Payloads carry `assayCollectionPath` and source schema; later AEE statement rows carry `actualLayer`.
+One key signs arming/interception/sealed payloads. Payloads carry `assayCollectionPath` and source schema. Later AEE statement rows may carry their row-level layer/attribution vocabulary, but this primitive does not add an `actualLayer` seal-payload member.
 
 Pros:
 
@@ -450,9 +463,7 @@ Any fixture, checker, or experiment path used while developing this primitive MU
 
 Before implementation is accepted:
 
-- Add fixtures for:
-  - valid Landlock seal;
-  - valid Landlock seal with empty `aeeObservedAttacks` under assembly-plane attribution.
+- Add fixtures for valid Landlock seal.
 - Add negative fixtures for:
   - missing seal;
   - mismatched run binding;
@@ -464,6 +475,7 @@ Before implementation is accepted:
   - label array present without matching `aeeObservedSet` digest;
   - `aeePostureDigest` confused with the run-binding digest of the full `networkPosture` object;
   - seal naming an attack not supported by caught rows;
+  - empty observed-attacks lower bound under assembly-plane attribution;
   - equality-required observed-attacks mismatch under substrate-runner attribution;
   - defective unreferenced seal;
 - Add property tests that malformed evidence is invalid, not clean.
