@@ -45,10 +45,14 @@ fn assay_bin() -> PathBuf {
 /// `owasp_mcp01_token_args_do_not_leak_to_proxy_logs` depends on the server
 /// answering at all; `e2e_wrap_denies_wildcard_contains` and
 /// `e2e_wrap_denies_schema_violation` assert verdicts the proxy reaches before
-/// dispatching upstream, and pass against anything spawnable — `/usr/bin/true`
-/// included, so not even holding the pipe open is required. Detecting a wrong
-/// server in those two needs an assertion only a correct server can satisfy,
-/// which is a change to what they test, not to how the binary is found.
+/// dispatching upstream. They pass against anything that spawns and then exits
+/// when its stdin closes — `/usr/bin/true` included, so the upstream need not
+/// speak the protocol, or read a byte, to satisfy them. (#1981 added an
+/// exit-status assert, which does make a server that hangs past five seconds
+/// fail them; that bounds how the upstream *terminates*, not what it answers.)
+/// Detecting a wrong server in those two needs an assertion only a correct
+/// server can satisfy, which is a change to what they test rather than to how
+/// the binary is found, and is what #1988 is for.
 ///
 /// Panics (never skips) if the build fails: a skipped e2e test that reads as
 /// green is a worse failure than a loud one.
