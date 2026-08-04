@@ -9,65 +9,23 @@ constraints, substrate coverage, and the known negative controls.
 from __future__ import annotations
 
 import argparse
-import base64
-import hashlib
-import hmac
-import json
 from pathlib import Path
 from typing import Any
 
-AEE_PREDICATE_TYPE = "https://in-toto.io/attestation/adversarial-execution-evidence/v0.7"
-PAYLOAD_TYPE = "application/vnd.assay.aee-spike.observation.v0+json"
-FIXTURE_KEY_ID = "assay-aee-spike-fixture-key-v0"
-FIXTURE_KEY = b"assay-aee-spike-fixture-key-v0-not-production"
-VALID_RESULTS = ["fail", "degraded", "pass_indirect", "pass"]
-VALID_BASIS = {"substrate", "artifact"}
-VALID_METHOD = {"intercepted", "reconstructed"}
-VALID_ATTRIBUTION = {"pinned", "paired"}
-COVERING_KINDS = {"interception", "arming", "sealed", "examination"}
-
-
-def canonical_bytes(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-
-
-def digest_json(value: Any) -> str:
-    return hashlib.sha256(canonical_bytes(value)).hexdigest()
-
-
-def dsse_pae(payload_type: str, payload: bytes) -> bytes:
-    return b"DSSEv1 " + str(len(payload_type)).encode("ascii") + b" " + payload_type.encode("utf-8") + b" " + str(len(payload)).encode("ascii") + b" " + payload
-
-
-def sign_payload(payload_type: str, payload: bytes) -> str:
-    return base64.b64encode(hmac.new(FIXTURE_KEY, dsse_pae(payload_type, payload), hashlib.sha256).digest()).decode("ascii")
-
-
-def merkle_root(leaves: list[dict[str, Any]]) -> str:
-    if not leaves:
-        return ""
-    layer = [hashlib.sha256(b"\x00" + canonical_bytes(leaf)).digest() for leaf in leaves]
-    while len(layer) > 1:
-        next_layer: list[bytes] = []
-        for idx in range(0, len(layer), 2):
-            if idx + 1 == len(layer):
-                next_layer.append(layer[idx])
-            else:
-                next_layer.append(hashlib.sha256(b"\x01" + layer[idx] + layer[idx + 1]).digest())
-        layer = next_layer
-    return layer[0].hex()
-
-
-def load_statement(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
-
-
-def decode_record(record: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
-    payload_bytes = base64.b64decode(record["payload"])
-    payload = json.loads(payload_bytes.decode("utf-8"))
-    return payload, payload_bytes
-
+from aee_spike_lib import (
+    AEE_PREDICATE_TYPE,
+    COVERING_KINDS,
+    FIXTURE_KEY_ID,
+    PAYLOAD_TYPE,
+    VALID_ATTRIBUTION,
+    VALID_BASIS,
+    VALID_METHOD,
+    decode_record,
+    digest_json,
+    merkle_root,
+    read_json,
+    sign_payload,
+)
 
 def recompute_run_binding(statement: dict[str, Any]) -> str:
     subject = statement["subject"][0]
@@ -223,7 +181,7 @@ def main() -> int:
     parser.add_argument("--expect-invalid", action="store_true", help="Exit 0 only when validation fails")
     args = parser.parse_args()
 
-    errors = validate(load_statement(args.statement))
+    errors = validate(read_json(args.statement))
     if args.expect_invalid:
         if errors:
             print(f"invalid as expected: {args.statement}")
