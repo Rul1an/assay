@@ -129,8 +129,10 @@ fn truncation_is_announced_in_a_tool_execution_notification() {
         "the notice must name the cap the count was measured against: {text}"
     );
     assert_eq!(notifications[0]["properties"]["appliedCap"], 3);
+    // The notification speaks the cross-emitter vocabulary; `run.properties` keeps this tool's
+    // published names. See `both_carriers_disclose_the_same_two_values`.
     assert_eq!(
-        notifications[0]["properties"]["truncatedCount"],
+        notifications[0]["properties"]["droppedCount"],
         report.truncated_count
     );
 }
@@ -139,21 +141,39 @@ fn truncation_is_announced_in_a_tool_execution_notification() {
 /// suppressed count `droppedCount` where `run.properties` called it `truncatedCount`, so a consumer
 /// reading both saw two names for one number. Pinned as equality rather than key-by-key, because
 /// the point is that neither carrier can grow a truncation key the other lacks. Equality is exact
-/// here because no packs are configured; with a compliance pack `run.properties` also carries a
-/// `disclaimer`, which is pack metadata rather than part of this disclosure.
+/// The two carriers name the cap differently on purpose, so the invariant is that they disclose
+/// the same two values rather than the same two strings. `run.properties` keeps this tool's
+/// published names; the notification carries the cross-emitter pair that
+/// aliksir/claude-code-skill-security-check#24 is settling. Asserting string equality here would
+/// pin the wrong thing and would break the moment either vocabulary moved, which is exactly what
+/// is expected to happen to one of them.
 #[test]
-fn both_carriers_disclose_the_truncation_under_the_same_keys() {
+fn both_carriers_disclose_the_same_two_values() {
     let bundle = bundle_with_many_findings(10);
     let report = lint_capped(&bundle, Some(3));
     let sarif = to_sarif(&report);
 
-    let notification_props =
-        &sarif["runs"][0]["invocations"][0]["toolExecutionNotifications"][0]["properties"];
-    let run_props = &sarif["runs"][0]["properties"];
+    let note = &sarif["runs"][0]["invocations"][0]["toolExecutionNotifications"][0]["properties"];
+    let run = &sarif["runs"][0]["properties"];
+
     assert_eq!(
-        notification_props, run_props,
-        "the two carriers must name the same fact identically: \
-         notification {notification_props}, run {run_props}"
+        note["appliedCap"], run["appliedCap"],
+        "the cap must be one number: notification {note}, run {run}"
+    );
+    assert_eq!(
+        note["droppedCount"], run["truncatedCount"],
+        "the suppressed count must be one number under either name: \
+         notification {note}, run {run}"
+    );
+    // And each carrier must actually use its own vocabulary, so a future edit that quietly
+    // unifies them fails here rather than surfacing on someone else's consumer.
+    assert!(
+        note.get("truncatedCount").is_none(),
+        "the notification carries the cross-emitter name only: {note}"
+    );
+    assert!(
+        run.get("droppedCount").is_none(),
+        "run.properties carries this tool's published names only: {run}"
     );
 }
 
