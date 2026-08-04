@@ -16,6 +16,39 @@ pub fn evaluate(
     Ok(out)
 }
 
+/// Why this assertion cannot check anything, decided from the configuration alone.
+///
+/// `Some` means no trace could ever make the assertion fail, so running it would report a pass
+/// that carries no information. `None` means the assertion constrains something; whether it then
+/// holds is a question about a trace and is not answered here.
+///
+/// This lets a static sweep — `assay validate`, which reads a config without running it — reach
+/// the same conclusions the evaluator reaches, **without a second definition of "cannot fail"**.
+/// Two implementations of one rule drift; the fix for that is one implementation with two callers.
+/// So this runs the real checker against an empty episode and keeps only the diagnostics that were
+/// decided before any trace was consulted.
+///
+/// That filter is exact rather than approximate, and the reason is a property of the checker:
+/// every `E_ASSERT_INEFFECTIVE` and `E_CONFIG_ERROR` in `check_one` is returned from a branch that
+/// reads only the assertion's own fields, and every branch that reads the graph returns a
+/// different code (`E_TRACE_ASSERT_FAIL`, `E_POLICY_ASSERT_FAIL`).
+/// `validate::vacuous_expected_tests::does_not_flag_an_assertion_that_merely_fails_for_a_trace`
+/// pins that split, so a future check that broke it fails there rather than silently making the
+/// sweep reject working configurations.
+///
+/// The cost of the reuse is that a valid `args_valid` compiles its schema here as well as at
+/// evaluation. In a static sweep that is acceptable and arguably the point: a schema that cannot
+/// compile is worth learning about from `assay validate` rather than from a run.
+pub fn ineffective_reason(a: &TraceAssertion) -> Option<Diagnostic> {
+    let no_trace = EpisodeGraph {
+        episode_id: "static_config_sweep".into(),
+        steps: vec![],
+        tool_calls: vec![],
+    };
+    check_one(&no_trace, a)
+        .filter(|d| d.code == "E_ASSERT_INEFFECTIVE" || d.code == "E_CONFIG_ERROR")
+}
+
 fn check_one(graph: &EpisodeGraph, a: &TraceAssertion) -> Option<Diagnostic> {
     match a {
         TraceAssertion::TraceMustCallTool { tool, min_calls } => {
