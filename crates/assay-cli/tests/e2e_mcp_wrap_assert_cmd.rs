@@ -143,6 +143,16 @@ fn extract_tool_payload(resp: &Value) -> anyhow::Result<Value> {
         .with_context(|| format!("result.content[0].text is not JSON: {text}"))
 }
 
+/// Mask the fixture's token-like argument in an assertion's failure message.
+///
+/// Only the rendered text is masked; every assertion still compares against the raw value, so a
+/// leak still fails the test. The surrounding record is kept intact, so a failure still shows
+/// which log line and which field carried the token — just with the canary itself replaced. A
+/// leak-detection fixture should not print its own canary into CI output.
+fn mask_secret(rendered: &str, secret: &str) -> String {
+    rendered.replace(secret, "<REDACTED-FIXTURE-TOKEN>")
+}
+
 #[test]
 fn owasp_mcp01_token_args_do_not_leak_to_proxy_logs() -> anyhow::Result<()> {
     let assay = bin_path("assay")?;
@@ -247,11 +257,12 @@ enforcement:
 
     // Normal path: the policy was found and evaluated, so redaction below is asserted on a
     // successful tool call and not merely on an early error.
+    let allowed_rendered = mask_secret(&allowed_resp.to_string(), secret);
     let allowed_payload = extract_tool_payload(&allowed_resp)?;
     assert_eq!(
         allowed_payload.get("allowed"),
         Some(&Value::Bool(true)),
-        "expected the policy to be evaluated and allow the call, got {allowed_resp}"
+        "expected the policy to be evaluated and allow the call, got {allowed_rendered}"
     );
     assert_eq!(
         allowed_resp
@@ -259,10 +270,11 @@ enforcement:
             .and_then(|r| r.get("isError"))
             .and_then(|v| v.as_bool()),
         Some(false),
-        "expected a non-error result on the normal path, got {allowed_resp}"
+        "expected a non-error result on the normal path, got {allowed_rendered}"
     );
 
     // Error path (retained): an unresolvable policy still reports E_POLICY_NOT_FOUND.
+    let error_rendered = mask_secret(&error_resp.to_string(), secret);
     let error_payload = extract_tool_payload(&error_resp)?;
     assert_eq!(
         error_payload
@@ -270,7 +282,7 @@ enforcement:
             .and_then(|e| e.get("code"))
             .and_then(|v| v.as_str()),
         Some("E_POLICY_NOT_FOUND"),
-        "expected E_POLICY_NOT_FOUND on the error path, got {error_resp}"
+        "expected E_POLICY_NOT_FOUND on the error path, got {error_rendered}"
     );
 
     // Neither response may echo the token back to the caller either.
@@ -278,7 +290,8 @@ enforcement:
         let rendered = resp.to_string();
         assert!(
             !rendered.contains(secret),
-            "response leaked raw token-like argument: {rendered}"
+            "response leaked raw token-like argument: {}",
+            mask_secret(&rendered, secret)
         );
     }
 
@@ -286,11 +299,13 @@ enforcement:
     let decisions = std::fs::read_to_string(&decision_log)?;
     assert!(
         !audit.contains(secret),
-        "audit log leaked raw token-like argument: {audit}"
+        "audit log leaked raw token-like argument: {}",
+        mask_secret(&audit, secret)
     );
     assert!(
         !decisions.contains(secret),
-        "decision log leaked raw token-like argument: {decisions}"
+        "decision log leaked raw token-like argument: {}",
+        mask_secret(&decisions, secret)
     );
     assert!(audit.contains("assay_check_args"));
     assert!(decisions.contains("assay_check_args"));
@@ -300,11 +315,13 @@ enforcement:
     for id in ["token-log-allowed", "token-log-missing"] {
         assert!(
             audit.contains(id),
-            "audit log is missing the record for request {id}: {audit}"
+            "audit log is missing the record for request {id}: {}",
+            mask_secret(&audit, secret)
         );
         assert!(
             decisions.contains(id),
-            "decision log is missing the record for request {id}: {decisions}"
+            "decision log is missing the record for request {id}: {}",
+            mask_secret(&decisions, secret)
         );
     }
 
