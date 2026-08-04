@@ -131,9 +131,21 @@ def validate(statement: dict[str, Any]) -> list[str]:
                     errors.append(f"sealed record {idx} is not still armed")
                 if payload.get("aeeDropCount") != 0 or payload.get("aeeDropBound") != 0:
                     errors.append(f"sealed record {idx} has non-zero or inconsistent drop accounting")
-                observed_set = sorted({row.get("containmentObserved") for row in rows if row.get("containmentObserved") in set(vocab.get("caught", []))})
+                caught_labels = set(vocab.get("caught", []))
+                observed_set = sorted({
+                    row.get("containmentObserved")
+                    for row in rows
+                    if row.get("containmentObserved") in caught_labels
+                })
                 if payload.get("aeeObservedSet") != observed_set:
                     errors.append(f"sealed record {idx} aeeObservedSet mismatch")
+                observed_attacks = sorted({
+                    row.get("attackId")
+                    for row in rows
+                    if row.get("containmentObserved") in caught_labels
+                })
+                if payload.get("aeeObservedAttacks") != observed_attacks:
+                    errors.append(f"sealed record {idx} aeeObservedAttacks mismatch")
             if payload.get("aeeMethod") not in VALID_METHOD and kind != "arming":
                 errors.append(f"record {idx} has invalid aeeMethod")
 
