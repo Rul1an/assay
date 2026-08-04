@@ -196,10 +196,9 @@ def emit_fixtures() -> None:
 
 
 def load_case(name: str) -> dict[str, Any]:
-    path = fixture_path(name)
-    if path.exists():
-        with path.open("r", encoding="utf-8") as handle:
-            return json.load(handle)
+    # The committed JSON files are review markers for the fixture names. The
+    # canonical fixture bodies are generated here so the checker and emitter
+    # cannot drift in this first slice.
     return case_statement(name)
 
 
