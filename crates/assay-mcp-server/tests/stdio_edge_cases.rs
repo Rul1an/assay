@@ -4,8 +4,7 @@
 //! `CARGO_BIN_EXE_assay-mcp-server`, rather than shelling out to `cargo run`. A nested Cargo
 //! inherits this process's CARGO_MANIFEST_DIR, which ring's build script tracks, so it marks the
 //! rustls/reqwest stack dirty every time it alternates with a shell build — measured at ~62s per
-//! test against a 120s nextest kill budget. It also made the server a grandchild of Cargo, so
-//! `child.kill()` reaped Cargo and left the server running.
+//! test against a 120s nextest kill budget.
 
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};

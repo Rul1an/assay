@@ -7,10 +7,9 @@ fn test_stdio_flow() {
     let policy_root = "../../tests/fixtures/mcp"; // Relative to crates/assay-mcp-server CWD
 
     // Cargo builds this crate's bin target before running its integration tests and hands us the
-    // path, so there is nothing to build here. Spawning `cargo run` instead would (a) inherit the
+    // path, so there is nothing to build here. Spawning `cargo run` instead would inherit the
     // Cargo environment, whose CARGO_MANIFEST_DIR is tracked by ring's build script and so marks
-    // the whole rustls/reqwest stack dirty on every alternation with a shell build, and (b) make
-    // the server a grandchild, leaving `child.kill()` reaping Cargo and orphaning the server.
+    // the whole rustls/reqwest stack dirty on every alternation with a shell build.
     let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
         .args(["--policy-root", policy_root])
         .stdin(Stdio::piped())

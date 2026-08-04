@@ -6,13 +6,17 @@
 //! sentinel values. Run with: cargo test -p assay-mcp-server --features test-outbound no_passthrough
 //!
 //! This file is gated on `test-outbound` so that it runs against the binary Cargo built for this
-//! test target, which is the only way to be sure the two agree about the feature. Previously it
-//! compiled unconditionally and shelled out to `cargo build --features test-outbound`, which meant
-//! a plain `cargo nextest run -p assay-mcp-server` built the whole dependency stack a second time
-//! under a different feature set — the two variants overwrite each other's artifacts, so each run
-//! undid the last. The gate makes absence the failure mode instead of a silent rebuild, so every
-//! CI job that is expected to exercise this invariant enables the feature and asserts the test
-//! actually ran; see the E6a.3 steps in .github/workflows/ci.yml.
+//! test target. That is the whole reason for the gate: `CARGO_BIN_EXE_assay-mcp-server` points at
+//! whatever feature set this test target was built with, so the two can only be guaranteed to
+//! agree if the test compiles under the feature too. Previously the file compiled unconditionally
+//! and shelled out to `cargo build --features test-outbound`, whose inherited CARGO_MANIFEST_DIR
+//! dirtied the shared stack like every other nested Cargo here.
+//!
+//! Gating trades a rebuild for an absence, which is the more dangerous failure: `cargo test` exits
+//! 0 when zero tests match. So the CI job that owns this invariant enables the feature and asserts
+//! the test actually ran; see the E6a.3 step in .github/workflows/ci.yml. Because the gate also
+//! hides this file from `cargo clippy --workspace --all-targets`, which carries no `--all-features`,
+//! there is a dedicated feature-enabled clippy step alongside it.
 #![cfg(feature = "test-outbound")]
 
 use assay_mcp_server::auth::SENSITIVE_HEADER_NAMES;
