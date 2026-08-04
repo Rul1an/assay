@@ -98,37 +98,52 @@ Use `eval.yaml` to define behavioral gates for your agent.
 
 ### Example Configuration
 
+Assertions are declared on a test case, under `tests:`. A top-level `policies:` block is not
+valid at `configVersion: 1` and is refused at load.
+
 ```yaml
-version: 1
+configVersion: 1
 suite: my-agent-suite
 model: gpt-4
-policies:
-  agent_policy:
+tests:
+  - id: agent_behaviour
+    input: "What is the weather in Berlin?"
     assertions:
       # 1. Must use a specific tool
       - type: trace_must_call_tool
-        tool_name: web_search
+        tool: web_search
         min_calls: 1
 
       # 2. Must NOT use a forbidden tool
-      - type: trace_must_call_tool
-        tool_name: delete_database
-        max_calls: 0
+      - type: trace_must_not_call_tool
+        tool: delete_database
 
       # 3. Enforce a specific sequence of actions
       - type: trace_tool_sequence
         sequence:
           - web_search
           - summarize_results
-        mode: loose # allow other steps in between
+        allow_other_tools: true # allow other steps in between
+
+      # 4. Bound the episode length
+      - type: trace_max_steps
+        max: 10
 ```
+
+Assertion 2 is the only correct way to forbid a tool. Writing it as `trace_must_call_tool` with a
+count of zero does not express the opposite of assertion 1 — `min_calls` defaults to 1, so such a
+config asserts that the forbidden tool **must** be called.
 
 ### Supported Assertions
 
-*   `trace_must_call_tool`: Verify tool usage counts (min/max).
-*   `trace_tool_sequence`: Verify order of operations (`exact` or `loose` modes).
-*   `trace_no_tool_errors`: Ensure no tool calls resulted in errors.
-*   `trace_max_steps`: Limit the number of steps (prevent infinite loops).
+The full catalogue, with every field, is in [Assertion Types](../metrics/index.md). The four used
+above:
+
+*   `trace_must_call_tool`: require at least `min_calls` calls to a tool. There is no upper bound.
+*   `trace_must_not_call_tool`: require zero calls to a tool.
+*   `trace_tool_sequence`: require an order of operations; `allow_other_tools` is required and
+    decides whether other calls may appear in between.
+*   `trace_max_steps`: limit the number of steps (prevent infinite loops).
 
 ## 4. CI Integration
 
