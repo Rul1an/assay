@@ -204,9 +204,17 @@ def write_variant(path: Path, statement: dict[str, Any], variant: str) -> None:
     mutated = copy.deepcopy(statement)
     predicate = mutated["predicate"]
     if variant == "missing-seal":
-        predicate["observationRecords"] = [r for r in predicate["observationRecords"] if decode_payload(r)["aeeKind"] != "sealed"]
-        for row in predicate["attackResults"]:
-            row["observationRefs"] = [idx for idx in row["observationRefs"] if idx != 2]
+        # Original records are [proxy, arming, sealed, network]. Drop only the
+        # seal and reindex the network interception so this negative control
+        # isolates the missing-seal failure instead of also creating an
+        # out-of-range reference.
+        predicate["observationRecords"] = [
+            predicate["observationRecords"][0],
+            predicate["observationRecords"][1],
+            predicate["observationRecords"][3],
+        ]
+        predicate["attackResults"][0]["observationRefs"] = [0, 1]
+        predicate["attackResults"][1]["observationRefs"] = [2, 1]
         predicate["batchRoot"] = merkle_root(predicate["observationRecords"])
     elif variant == "defective-unreferenced-seal":
         bad_payload = {
@@ -225,8 +233,14 @@ def write_variant(path: Path, statement: dict[str, Any], variant: str) -> None:
         predicate["observationRecords"].append(observation_record(bad_payload, 5))
         predicate["batchRoot"] = merkle_root(predicate["observationRecords"])
     elif variant == "artifact-labelled-substrate":
+        # The valid fixture row is already substrate-backed. To exercise the
+        # intended overclaim boundary, strip its substrate coverage and mark the
+        # producer-side claim being attempted: an artifact/proxy-produced
+        # observation being priced as substrate evidence.
         predicate["attackResults"][0]["basis"] = "substrate"
+        predicate["attackResults"][0]["method"] = "intercepted"
         predicate["attackResults"][0]["observationRefs"] = []
+        predicate["_ext"]["assaySpike"]["invalidClaim"] = "artifact-produced observation overclaimed as substrate"
     elif variant == "reconstructed-priced-intercepted":
         predicate["attackResults"][0]["method"] = "intercepted"
         payload = decode_payload(predicate["observationRecords"][0])
