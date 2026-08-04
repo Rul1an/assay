@@ -14,9 +14,9 @@ use crate::types::DsseEnvelope;
 use super::super::PAYLOAD_TYPE_PACK_V1;
 use super::digest::canonicalize_for_dsse_impl;
 
-/// Delegates to [`crate::pae::build_pae`].
+/// Delegates to [`assay_common::dsse::build_pae`], the workspace's one PAE.
 pub(crate) fn build_pae_impl(payload_type: &str, payload: &[u8]) -> Vec<u8> {
-    crate::pae::build_pae(payload_type, payload)
+    assay_common::dsse::build_pae(payload_type, payload)
 }
 
 pub(crate) fn verify_dsse_signature_bytes_impl(

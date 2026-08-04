@@ -153,7 +153,11 @@ const DSSE_ART_HEX: &str = "1111111111111111111111111111111111111111111111111111
 const DSSE_ART: &str = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 const DSSE_BUILDER: &str = "https://github.com/example/builder@refs/tags/v1";
 
-/// DSSE PAE, byte-identical to the verifier's `build_pae` (the bytes the signature is computed over).
+/// DSSE PAE, built here rather than by calling `assay_common::dsse::build_pae`, and deliberately
+/// so. These tests construct the bytes, sign them, and assert the production verifier accepts the
+/// result, which makes this an independent construction: if the shared PAE drifted, the signature
+/// would stop verifying and these tests would fail. Calling the shared one would leave the tests
+/// signing with the same code they verify with, and a bug in it would agree with itself and pass.
 fn pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
     let mut v = Vec::new();
     v.extend_from_slice(b"DSSEv1 ");

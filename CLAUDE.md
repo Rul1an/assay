@@ -120,6 +120,7 @@ assay-monitor -> assay-common, assay-policy
 assay-metrics -> assay-core, assay-common
 assay-core -> assay-adapter-api, assay-common
 assay-evidence -> assay-canonical, assay-common
+assay-registry -> assay-common
 assay-adapter-api -> assay-evidence
 assay-adapter-{a2a,acp,ucp} -> assay-adapter-api, assay-evidence
 assay-runner-core -> assay-common, assay-monitor, assay-runner-schema
@@ -127,7 +128,7 @@ assay-sim -> assay-core, assay-evidence
 assay-ebpf -> assay-common
 ```
 
-Leaf crates (no internal dependencies): `assay-common`, `assay-canonical`, `assay-policy`, `assay-registry`, `assay-runner-schema`, `assay-runner-linux`, `gateway-evidence-replay`, `assay-xtask`.
+Leaf crates (no internal dependencies): `assay-common`, `assay-canonical`, `assay-policy`, `assay-runner-schema`, `assay-runner-linux`, `gateway-evidence-replay`, `assay-xtask`.
 
 No circular dependencies. All dependencies flow in one direction.
 
@@ -139,13 +140,14 @@ holds the DSSE Pre-Authentication Encoding for the same reason: PAE defines what
 covers, so two constructions of it are two definitions of what a signature means, and both
 `assay-evidence`'s mandate signing and `assay-core`'s MCP signing call it.
 
-`assay-registry` keeps its own PAE in `assay_registry::pae` and is deliberately not folded in: it
-is a leaf crate with no internal dependencies, so sharing would give it a new edge, which is an
-architecture decision rather than a refactor. It had three production copies, collapsed into that
-one module; an earlier version of this paragraph said four, which counted a test helper in
-`sigstore_bundle` that is intentionally left standing. That helper builds a PAE, signs it, and
-asserts the production verifier accepts it, so it is an independent construction rather than a
-duplicate: sharing it would leave the tests signing with the same code they verify with.
+`assay-registry` now calls the shared PAE too, which is its first internal dependency and was
+taken deliberately rather than in passing: PAE defines what a signature covers, so a crate-local
+construction of it is a second answer to that question. The portability objection that held it
+back was checked and is void, since the release workflow ships an `x86_64-pc-windows-msvc` binary
+of `assay-cli`, which already depends on both crates. Two PAEs stay unshared, in `assay-registry`'s `sigstore_bundle` tests and `assay-cli`'s
+supply-chain conformance tests: each builds a PAE, signs it, and asserts the production verifier
+accepts it, so they are independent constructions that would catch the shared one drifting.
+Sharing them would leave those tests signing with the same code they verify with.
 
 Vocabularies still stay domain-local. `VerifyLimits` describes an evidence bundle and does not
 travel; neither does a payload type or a key policy. What travels is the construction, never the

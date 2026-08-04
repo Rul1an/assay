@@ -30,9 +30,9 @@ struct InTotoSubject {
 
 // ---- Verification --------------------------------------------------------------------------------
 
-/// Delegates to [`crate::pae::build_pae`].
+/// Delegates to [`assay_common::dsse::build_pae`], the workspace's one PAE.
 pub(super) fn build_pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
-    crate::pae::build_pae(payload_type, payload)
+    assay_common::dsse::build_pae(payload_type, payload)
 }
 
 /// Verify a DSSE envelope's signatures against the pinned trust store. Distinguishes "no trusted key
