@@ -266,13 +266,65 @@ fn first_party_suites_still_load() {
         .and_then(|p| p.parent())
         .expect("repo root");
 
-    for name in ["tests/fp_suite.yaml", "tests/regex_compatibility.yaml"] {
+    // No `if !path.exists() { continue }`. A missing path would make this test pass without
+    // loading anything, and this test is the only thing standing behind the claim that no
+    // first-party config broke — absence reported as a pass, in the guard against exactly that.
+    let suites = ["tests/fp_suite.yaml", "tests/regex_compatibility.yaml"];
+    let mut loaded = 0;
+    for name in suites {
         let path = repo_root.join(name);
-        if !path.exists() {
-            continue;
-        }
+        assert!(
+            path.exists(),
+            "{name} not found at {}; this test's coverage would otherwise be silently empty",
+            path.display()
+        );
         assay_core::config::load_config(&path, false, false).unwrap_or_else(|e| {
             panic!("{name} no longer loads after the unknown-field guard: {e}")
         });
+        loaded += 1;
+    }
+    assert_eq!(
+        loaded,
+        suites.len(),
+        "not every first-party suite was exercised"
+    );
+}
+
+/// `docs/metrics/index.md` states that `trace_must_call_tool` counts an errored call, because
+/// `ToolCallRow` carries no status or error column. That is a claim about a struct, and the
+/// documentation test next door checks the *examples*, not the prose — so if the row ever gains
+/// an outcome column the sentence would quietly become false.
+///
+/// This makes it rot loudly instead, two ways. The literal below stops compiling if a field is
+/// added, which points a change at this test; and the field-name check catches a rename that
+/// still compiles. If either fires, the doc is now wrong and the assertion may have become able
+/// to distinguish success from failure — a real capability worth documenting rather than a test
+/// to delete.
+#[test]
+fn the_documented_reason_errored_calls_still_count_is_still_true() {
+    let row = serde_json::to_value(assay_core::storage::rows::ToolCallRow {
+        id: 1,
+        step_id: "s".into(),
+        episode_id: "e".into(),
+        tool_name: Some("t".into()),
+        call_index: Some(0),
+        args: None,
+        result: None,
+    })
+    .expect("ToolCallRow serializes");
+    let fields: Vec<&str> = row
+        .as_object()
+        .expect("ToolCallRow is a struct")
+        .keys()
+        .map(|k| k.as_str())
+        .collect();
+
+    for outcome_ish in ["status", "error", "ok", "success", "outcome", "failed"] {
+        assert!(
+            !fields.contains(&outcome_ish),
+            "ToolCallRow gained a `{outcome_ish}` field. `docs/metrics/index.md` says an errored \
+             call satisfies `trace_must_call_tool` because no such column exists; update the doc \
+             (and consider whether the assertion should now distinguish them). Fields: {fields:?}"
+        );
     }
 }
