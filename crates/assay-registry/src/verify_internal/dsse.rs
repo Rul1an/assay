@@ -14,20 +14,9 @@ use crate::types::DsseEnvelope;
 use super::super::PAYLOAD_TYPE_PACK_V1;
 use super::digest::canonicalize_for_dsse_impl;
 
+/// Delegates to [`crate::pae::build_pae`].
 pub(crate) fn build_pae_impl(payload_type: &str, payload: &[u8]) -> Vec<u8> {
-    let type_len = payload_type.len().to_string();
-    let payload_len = payload.len().to_string();
-
-    let mut pae = Vec::new();
-    pae.extend_from_slice(b"DSSEv1 ");
-    pae.extend_from_slice(type_len.as_bytes());
-    pae.push(b' ');
-    pae.extend_from_slice(payload_type.as_bytes());
-    pae.push(b' ');
-    pae.extend_from_slice(payload_len.as_bytes());
-    pae.push(b' ');
-    pae.extend_from_slice(payload);
-    pae
+    crate::pae::build_pae(payload_type, payload)
 }
 
 pub(crate) fn verify_dsse_signature_bytes_impl(
