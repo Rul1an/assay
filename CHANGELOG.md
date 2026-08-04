@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- An `assertions:` entry carrying a key the type does not define is now rejected
+  at parse time, naming the offending key, instead of being dropped in silence.
+  Where the intended field had a default the dropped key left a check that could
+  not fail: the documented `max_calls: 0` "must NOT use a forbidden tool"
+  example inverted into "must be called at least once", because `max_calls` was
+  discarded and `min_calls` defaulted to 1. Rejection holds through the config
+  loader, which collects unknown keys elsewhere and outside strict mode only
+  warns about them. **This turns previously green configurations red, by design:
+  an unknown key in an assertion is either a typo or a feature that does not
+  exist** (#1961).
+- Every `assertions:` example in the documentation now loads. None of them did:
+  five of the seven documented types had no implementation, the two that existed
+  were shown with field names that did not, the architecture example nested them
+  under a top-level `policies:` block the loader refuses at `configVersion: 1`,
+  and the example labelled "must NOT use a forbidden tool" asserted the
+  opposite. The catalogue is rewritten from the enum, and a test now loads every
+  fenced example, requires every shipped variant to be documented, and requires
+  every type listed as unimplemented to actually be rejected (#1960).
 - An `assertions:` entry that cannot check anything no longer reports as a pass.
   Thirteen shapes evaluated to nothing or to a check that could not fail for any
   input — an `args_valid` without `test_args`, a `sequence_valid` written
