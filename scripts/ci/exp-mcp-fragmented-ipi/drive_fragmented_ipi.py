@@ -53,33 +53,26 @@ def parse_tool_payload(response):
         return {"raw": text}
 
 
-def require_prebuilt(path, package):
-    """Check a binary this driver consumes but deliberately does not build.
-
-    Callers pass the fully constructed path rather than a binary name: keeping the join a
-    literal at the call site is what stops the path expression depending on a variable
-    (py/path-injection), and there are only ever two of them.
-
-    This is a presence test, NOT a freshness test: it cannot tell a current binary from one
-    left over from an older source tree. Freshness is owned by the wrapper scripts, which
-    build before invoking this driver -- run_baseline.sh, run_protected.sh and
-    cross_session/run_cross_session_decay.sh, plus the scripts/ci/test-exp-mcp-fragmented-ipi*
-    entry points above them. The build lives there rather than here because this driver is
-    re-invoked once per run and per session, and a no-op cargo freshness check costs ~3s each
-    time; doing it here would re-verify what the wrapper just verified, several times over.
-
-    The consequence is worth stating plainly, because these runs produce published numbers:
-    invoke this driver directly against a stale target/debug and it will produce a summary for
-    source that never ran. Enter through a wrapper.
-    """
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Missing binary: {path}. This driver consumes a prebuilt binary and does not build "
-            f"one -- invoke it through its wrapper script (run_baseline.sh, run_protected.sh, "
-            f"cross_session/run_cross_session_decay.sh), or run "
-            f"`cargo build -p {package}` first."
-        )
-    return path
+# This driver consumes two prebuilt binaries -- target/debug/assay and
+# target/debug/assay-mcp-server -- and deliberately does not build either. The two checks below
+# are PRESENCE tests, NOT freshness tests: neither can tell a current binary from one left over
+# from an older source tree.
+#
+# Freshness is owned by the wrapper scripts, which build before invoking this driver:
+# run_baseline.sh, run_protected.sh and cross_session/run_cross_session_decay.sh, plus the
+# scripts/ci/test-exp-mcp-fragmented-ipi* entry points above them. The build lives there rather
+# than here because this driver is re-invoked once per run and per session, and a no-op cargo
+# freshness check costs ~3s each time; doing it here would re-verify what the wrapper just
+# verified, several times over.
+#
+# The consequence is worth stating plainly, because these runs produce published numbers:
+# invoke this driver directly against a stale target/debug and it will produce a summary for
+# source that never ran. Enter through a wrapper.
+#
+# The two checks are written out inline rather than shared through a helper on purpose. Routing
+# them through a function makes the path reach its check as a parameter, and CodeQL reports that
+# as py/path-injection off `--repo-root` (alert #701 on PR #1989). The duplication is two lines;
+# the rule that matters is this comment.
 
 
 def spawn_wrapped_server(repo_root, fixture_root, tool_log_path, decision_log_path, wrap_policy, run_live, mcp_host_cmd, mcp_host_args, assay_cmd):
@@ -96,7 +89,14 @@ def spawn_wrapped_server(repo_root, fixture_root, tool_log_path, decision_log_pa
         host_cmd = shlex.split(mcp_host_cmd)
         host_args = shlex.split(mcp_host_args or "")
     else:
-        wrap_cmd = [str(require_prebuilt(repo_root / "target/debug/assay", "assay-cli"))]
+        assay_bin = repo_root / "target/debug/assay"
+        if not assay_bin.exists():
+            raise FileNotFoundError(
+                f"Missing binary: {assay_bin}. This driver consumes a prebuilt binary and does "
+                f"not build one -- invoke it through a wrapper script, or run "
+                f"`cargo build -p assay-cli` first."
+            )
+        wrap_cmd = [str(assay_bin)]
         if env.get("EXPERIMENT_VARIANT") == "sink_failure":
             env["COMPAT_ROOT"] = str(fixture_root)
             env["COMPAT_AUDIT_LOG"] = str(tool_log_path)
@@ -120,7 +120,13 @@ def spawn_wrapped_server(repo_root, fixture_root, tool_log_path, decision_log_pa
 
 
 def spawn_sequence_guard(repo_root, policy_root):
-    bin_path = require_prebuilt(repo_root / "target/debug/assay-mcp-server", "assay-mcp-server")
+    bin_path = repo_root / "target/debug/assay-mcp-server"
+    if not bin_path.exists():
+        raise FileNotFoundError(
+            f"Missing binary: {bin_path}. This driver consumes a prebuilt binary and does not "
+            f"build one -- invoke it through a wrapper script, or run "
+            f"`cargo build -p assay-mcp-server` first."
+        )
     cmd = [str(bin_path), "--policy-root", str(policy_root)]
     return subprocess.Popen(cmd, cwd=repo_root, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
