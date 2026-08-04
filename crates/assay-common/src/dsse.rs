@@ -9,15 +9,15 @@
 //! payload type another way, until a signature made by one side stops verifying
 //! on the other.
 //!
-//! Scope, stated exactly because an earlier version of this comment claimed the
-//! workspace had two copies and it has six. `assay-evidence`'s mandate signing
-//! and `assay-core`'s MCP signing call this. `assay-registry` carries four more
-//! of its own, in `dsse`, `sigstore_bundle`, `supply_chain::provenance` and
-//! `verify_internal::dsse`, and they are not consolidated here: that crate has
-//! no internal dependencies at all, so folding them in means giving a leaf crate
-//! a new edge, which is an architecture decision rather than a refactor. This
-//! module is one construction for the crates that already share it, not one for
-//! the workspace.
+//! Scope, stated exactly because an earlier version of this comment miscounted
+//! twice. `assay-evidence`'s mandate signing and `assay-core`'s MCP signing call
+//! this. `assay-registry` keeps its own in `assay_registry::pae`, collapsed there
+//! from three production copies, and is not folded in here: that crate has no
+//! internal dependencies at all, so giving a leaf crate its first edge is an
+//! architecture decision rather than a refactor. It also keeps one PAE in its
+//! `sigstore_bundle` tests on purpose, as an independent construction that would
+//! catch this one drifting. So this module is one construction for the crates
+//! that already share it, not one for the workspace.
 
 use std::string::ToString;
 use std::vec::Vec;
@@ -44,7 +44,13 @@ pub fn build_pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
     let type_len = payload_type.len().to_string();
     let payload_len = payload.len().to_string();
 
-    let mut pae = Vec::new();
+    // Preallocated: the exact size is known, and PAE is built for every signature
+    // and every verification. `dsse::dsse_pae` carried this before the collapse
+    // and the shared one dropped it, which is the kind of regression a
+    // consolidation is otherwise free of.
+    let mut pae = Vec::with_capacity(
+        7 + type_len.len() + 1 + payload_type.len() + 1 + payload_len.len() + 1 + payload.len(),
+    );
     pae.extend_from_slice(b"DSSEv1 ");
     pae.extend_from_slice(type_len.as_bytes());
     pae.push(b' ');

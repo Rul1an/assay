@@ -33,7 +33,13 @@ pub(crate) fn build_pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
     let type_len = payload_type.len().to_string();
     let payload_len = payload.len().to_string();
 
-    let mut pae = Vec::new();
+    // Preallocated: the exact size is known, and PAE is built for every signature
+    // and every verification. `dsse::dsse_pae` carried this before the collapse
+    // and the shared one dropped it, which is the kind of regression a
+    // consolidation is otherwise free of.
+    let mut pae = Vec::with_capacity(
+        7 + type_len.len() + 1 + payload_type.len() + 1 + payload_len.len() + 1 + payload.len(),
+    );
     pae.extend_from_slice(b"DSSEv1 ");
     pae.extend_from_slice(type_len.as_bytes());
     pae.push(b' ');
