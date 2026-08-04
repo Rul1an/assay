@@ -1,0 +1,6 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "case": "valid-landlock-seal",
+  "note": "Marker fixture. Run scripts/experiments/aee_landlock_seal_fixture.py --emit to materialize the full generated body.",
+  "predicateType": "https://in-toto.io/attestation/adversarial-execution-evidence/v0.7"
+}
