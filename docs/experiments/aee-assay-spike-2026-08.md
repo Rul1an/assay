@@ -32,7 +32,7 @@ The fixture also carries synthetic substrate, catch-policy, corpus, network-post
 
 - `scripts/experiments/aee_spike_emit.py` emits the valid statement and optional negative controls.
 - `scripts/experiments/aee_spike_check.py` checks the fixture statement invariants.
-- `scripts/experiments/fixtures/aee/` contains the Assay-shaped source fixtures. The emitter writes generated AEE-shaped statements into this directory.
+- `scripts/experiments/fixtures/aee/` contains the Assay-shaped source fixtures and emitted AEE-shaped statements.
 
 ## Run
 
@@ -40,9 +40,14 @@ The fixture also carries synthetic substrate, catch-policy, corpus, network-post
 set -euo pipefail
 
 python3 scripts/experiments/aee_spike_emit.py --variants
-python3 scripts/experiments/aee_spike_check.py scripts/experiments/fixtures/aee/statement-valid.json
-for f in scripts/experiments/fixtures/aee/negative-controls/*.json; do
-  python3 scripts/experiments/aee_spike_check.py --expect-invalid "$f"
+python3 scripts/experiments/aee_spike_check.py valid
+for name in \
+  artifact-labelled-substrate \
+  defective-unreferenced-seal \
+  missing-seal \
+  reconstructed-priced-intercepted \
+  run-population-overclaim; do
+  python3 scripts/experiments/aee_spike_check.py --expect-invalid "$name"
 done
 python3 -m py_compile \
   scripts/experiments/aee_spike_lib.py \
@@ -60,7 +65,7 @@ This checker is intentionally not a general AEE verifier. It validates the spike
 - run-binding recomputation using AEE v0.7 binding version 2 inputs;
 - fixture signature verification for carried observation records;
 - `batchRoot` recomputation over carried records;
-- substrate rows carry arming, sealed, and interception coverage;
+- substrate rows carry arming and sealed coverage, and caught/intercepted substrate rows carry interception coverage;
 - every carried covering-kind record is constrained even when no row references it;
 - pinned rows match `expectedPayloads` commitments;
 - negative controls fail for the expected reason.
