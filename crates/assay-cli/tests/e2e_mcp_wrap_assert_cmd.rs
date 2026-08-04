@@ -1,11 +1,16 @@
 use anyhow::Context;
 
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, ChildStdout, Command, ExitStatus, Stdio};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::thread;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
+
+/// How long a single JSON-RPC response may take before the proxy is declared wedged.
+const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn exe_name(name: &str) -> String {
     if cfg!(windows) {
@@ -55,31 +60,96 @@ fn send_line(stdin: &mut dyn Write, v: &Value) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Read one JSON line from stdout with timeout (best-effort).
-fn read_json_line(
-    reader: &mut BufReader<std::process::ChildStdout>,
-    timeout: Duration,
-) -> anyhow::Result<Value> {
-    let start = Instant::now();
-    loop {
-        if start.elapsed() > timeout {
-            anyhow::bail!("timeout waiting for response");
-        }
-        let mut line = String::new();
-        let n = reader.read_line(&mut line)?;
-        if n == 0 {
-            anyhow::bail!("EOF from proxy");
-        }
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        // Ignore log lines if any
-        if !line.starts_with('{') {
-            continue;
-        }
-        return Ok(serde_json::from_str::<Value>(line)?);
+/// Line reader for the proxy's stdout whose timeout survives a proxy that never answers.
+///
+/// `BufRead::read_line` blocks until a newline, EOF, or error, so a deadline checked around it is
+/// only ever evaluated once a line has already arrived. The blocking read therefore runs on a
+/// worker thread and the test waits on a channel instead, which bounds the wait whether or not the
+/// proxy writes anything. (A read timeout on the pipe itself would do as well, but `ChildStdout`
+/// is not a socket, so that needs platform-specific code on both Unix and Windows.)
+///
+/// The worker exits on EOF, on a read error, or once the receiver is gone. If the proxy is wedged
+/// it stays parked in `read_line`; killing the child closes the pipe and releases it, which is why
+/// [`read_json_line`] kills on timeout rather than leaving the process behind.
+struct JsonLines {
+    rx: mpsc::Receiver<io::Result<String>>,
+}
+
+impl JsonLines {
+    fn new(stdout: ChildStdout) -> Self {
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    // EOF: dropping `tx` is what reports it to the receiver.
+                    Ok(0) => break,
+                    // A send error means the test has moved on; stop reading.
+                    Ok(_) => {
+                        if tx.send(Ok(line)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        let _ = tx.send(Err(err));
+                        break;
+                    }
+                }
+            }
+        });
+        Self { rx }
     }
+
+    /// Wait up to `timeout` for the next JSON line.
+    ///
+    /// `what` names the thing being awaited, so a timeout points at the request that went
+    /// unanswered instead of reporting a bare "timeout".
+    fn next_json(&mut self, timeout: Duration, what: &str) -> anyhow::Result<Value> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let line = match self.rx.recv_timeout(remaining) {
+                Ok(Ok(line)) => line,
+                Ok(Err(err)) => {
+                    return Err(anyhow::Error::new(err)
+                        .context(format!("read error while waiting for {what}")))
+                }
+                Err(RecvTimeoutError::Timeout) => anyhow::bail!(
+                    "timed out after {timeout:?} waiting for {what}: the proxy wrote no response line"
+                ),
+                Err(RecvTimeoutError::Disconnected) => {
+                    anyhow::bail!("EOF from proxy while waiting for {what}")
+                }
+            };
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            // Ignore log lines if any
+            if !line.starts_with('{') {
+                continue;
+            }
+            return serde_json::from_str::<Value>(line)
+                .with_context(|| format!("malformed JSON line while waiting for {what}: {line}"));
+        }
+    }
+}
+
+/// Read one JSON line from the proxy, killing it if the response does not arrive in time.
+///
+/// A timed-out read means the proxy is wedged, and leaving it running orphans it (and the server
+/// it wrapped) onto the inherited stderr for as long as the test binary lives.
+fn read_json_line(
+    child: &mut Child,
+    lines: &mut JsonLines,
+    timeout: Duration,
+    what: &str,
+) -> anyhow::Result<Value> {
+    lines.next_json(timeout, what).inspect_err(|_| {
+        let _ = child.kill();
+        let _ = child.wait();
+    })
 }
 
 fn wait_child_with_timeout(child: &mut Child, timeout: Duration) -> anyhow::Result<ExitStatus> {
@@ -220,7 +290,7 @@ enforcement:
 
     let mut stdin = child.stdin.take().expect("stdin");
     let stdout = child.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
+    let mut lines = JsonLines::new(stdout);
     let secret = "ghp_assay_fixture_DO_NOT_LEAK_0123456789";
 
     // Both calls carry the same token-like argument. The first resolves its policy and is actually
@@ -245,12 +315,22 @@ enforcement:
     };
 
     send_line(&mut stdin, &call("token-log-allowed", "read-file.yaml"))?;
-    let allowed_resp = read_json_line(&mut reader, Duration::from_secs(5))?;
+    let allowed_resp = read_json_line(
+        &mut child,
+        &mut lines,
+        RESPONSE_TIMEOUT,
+        "the tools/call response to request token-log-allowed (the normal, policy-resolving path)",
+    )?;
     send_line(
         &mut stdin,
         &call("token-log-missing", "does-not-exist.yaml"),
     )?;
-    let error_resp = read_json_line(&mut reader, Duration::from_secs(5))?;
+    let error_resp = read_json_line(
+        &mut child,
+        &mut lines,
+        RESPONSE_TIMEOUT,
+        "the tools/call response to request token-log-missing (the unresolvable-policy path)",
+    )?;
     drop(stdin);
     let status = wait_child_with_timeout(&mut child, Duration::from_secs(5))?;
     assert!(status.success(), "proxy exited with status {status}");
@@ -377,7 +457,7 @@ enforcement:
 
     let mut stdin = child.stdin.take().expect("stdin");
     let stdout = child.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
+    let mut lines = JsonLines::new(stdout);
 
     // tools/call -> "skill_check" should match *kill* and be denied by proxy
     let req = json!({
@@ -388,7 +468,12 @@ enforcement:
     });
 
     send_line(&mut stdin, &req)?;
-    let resp = read_json_line(&mut reader, Duration::from_secs(5))?;
+    let resp = read_json_line(
+        &mut child,
+        &mut lines,
+        RESPONSE_TIMEOUT,
+        "the tools/call response to the denied skill_check request",
+    )?;
 
     // Accept both transitional codes (old/new) while you converge
     let code = extract_error_code(&resp).unwrap_or_default();
@@ -460,7 +545,7 @@ enforcement:
 
     let mut stdin = child.stdin.take().expect("stdin");
     let stdout = child.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
+    let mut lines = JsonLines::new(stdout);
 
     // Violating path -> should be denied by schema
     let req = json!({
@@ -471,7 +556,12 @@ enforcement:
     });
 
     send_line(&mut stdin, &req)?;
-    let resp = read_json_line(&mut reader, Duration::from_secs(5))?;
+    let resp = read_json_line(
+        &mut child,
+        &mut lines,
+        RESPONSE_TIMEOUT,
+        "the tools/call response to the schema-violating read_file request",
+    )?;
 
     let code = extract_error_code(&resp).unwrap_or_default();
     assert!(
