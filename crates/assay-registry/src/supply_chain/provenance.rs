@@ -30,17 +30,9 @@ struct InTotoSubject {
 
 // ---- Verification --------------------------------------------------------------------------------
 
+/// Delegates to [`crate::pae::build_pae`].
 pub(super) fn build_pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
-    let mut pae = Vec::new();
-    pae.extend_from_slice(b"DSSEv1 ");
-    pae.extend_from_slice(payload_type.len().to_string().as_bytes());
-    pae.push(b' ');
-    pae.extend_from_slice(payload_type.as_bytes());
-    pae.push(b' ');
-    pae.extend_from_slice(payload.len().to_string().as_bytes());
-    pae.push(b' ');
-    pae.extend_from_slice(payload);
-    pae
+    crate::pae::build_pae(payload_type, payload)
 }
 
 /// Verify a DSSE envelope's signatures against the pinned trust store. Distinguishes "no trusted key
