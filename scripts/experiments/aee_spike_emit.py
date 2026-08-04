@@ -10,87 +10,26 @@ carriers do not emit an AEE-compatible substrate-signed sealed record.
 from __future__ import annotations
 
 import argparse
-import base64
 import copy
-import hashlib
-import hmac
-import json
 from pathlib import Path
 from typing import Any
 
-AEE_PR_HEAD = "c0c4da67defdf0f186f162e7ecb3f9527b6a94f8"
-AEE_SPEC_SHA256 = "fda0f5f7885d56feb93194cfa604f57c060c12677f77fa5579888b15dc1d1a2d"
-AEE_PREDICATE_TYPE = "https://in-toto.io/attestation/adversarial-execution-evidence/v0.7"
-AEE_VERSION = "0.7"
-PAYLOAD_TYPE = "application/vnd.assay.aee-spike.observation.v0+json"
-FIXTURE_KEY_ID = "assay-aee-spike-fixture-key-v0"
-FIXTURE_KEY = b"assay-aee-spike-fixture-key-v0-not-production"
+from aee_spike_lib import (
+    AEE_PR_HEAD,
+    AEE_SPEC_SHA256,
+    AEE_PREDICATE_TYPE,
+    AEE_VERSION,
+    decode_payload,
+    digest_json,
+    merkle_root,
+    observation_record,
+    read_json,
+    write_json,
+)
 
 ROOT = Path(__file__).resolve().parent
 FIXTURES = ROOT / "fixtures" / "aee"
 DEFAULT_OUT = ROOT / "fixtures" / "aee" / "statement-valid.json"
-
-
-def canonical_bytes(value: Any) -> bytes:
-    """Return deterministic JSON bytes close to the JCS shape used by AEE.
-
-    The fixture uses ASCII-only member names/values and safe integers. This is
-    not a general RFC 8785 implementation; the checker keeps the same helper so
-    the spike has one rule in one function rather than parallel approximations.
-    """
-
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-
-
-def sha256_hex_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def digest_json(value: Any) -> str:
-    return sha256_hex_bytes(canonical_bytes(value))
-
-
-def read_json(path: Path) -> Any:
-    with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
-
-
-def dsse_pae(payload_type: str, payload: bytes) -> bytes:
-    return b"DSSEv1 " + str(len(payload_type)).encode("ascii") + b" " + payload_type.encode("utf-8") + b" " + str(len(payload)).encode("ascii") + b" " + payload
-
-
-def sign_payload(payload_type: str, payload: bytes) -> str:
-    """Deterministic fixture-only signature, not a production DSSE algorithm."""
-
-    return base64.b64encode(hmac.new(FIXTURE_KEY, dsse_pae(payload_type, payload), hashlib.sha256).digest()).decode("ascii")
-
-
-def observation_record(payload: dict[str, Any], seq: int) -> dict[str, Any]:
-    payload_bytes = canonical_bytes(payload)
-    return {
-        "payload": base64.b64encode(payload_bytes).decode("ascii"),
-        "payloadType": PAYLOAD_TYPE,
-        "signatures": [{"keyid": FIXTURE_KEY_ID, "sig": sign_payload(PAYLOAD_TYPE, payload_bytes)}],
-        "seq": seq,
-    }
-
-
-def merkle_root(leaves: list[dict[str, Any]]) -> str:
-    """RFC6962-style SHA-256 Merkle root over canonical observation records."""
-
-    if not leaves:
-        return ""
-    layer = [hashlib.sha256(b"\x00" + canonical_bytes(leaf)).digest() for leaf in leaves]
-    while len(layer) > 1:
-        next_layer: list[bytes] = []
-        for idx in range(0, len(layer), 2):
-            if idx + 1 == len(layer):
-                next_layer.append(layer[idx])
-            else:
-                next_layer.append(hashlib.sha256(b"\x01" + layer[idx] + layer[idx + 1]).digest())
-        layer = next_layer
-    return layer[0].hex()
-
 
 def build_statement() -> dict[str, Any]:
     corpus_manifest = read_json(FIXTURES / "corpus-manifest.json")
@@ -299,11 +238,7 @@ def write_variant(path: Path, statement: dict[str, Any], variant: str) -> None:
         predicate["_ext"]["assaySpike"]["invalidClaim"] = "no sibling runs existed"
     else:
         raise ValueError(f"unknown variant: {variant}")
-    path.write_text(json.dumps(mutated, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def decode_payload(record: dict[str, Any]) -> dict[str, Any]:
-    return json.loads(base64.b64decode(record["payload"]).decode("utf-8"))
+    write_json(path, mutated)
 
 
 def main() -> int:
@@ -313,8 +248,7 @@ def main() -> int:
     args = parser.parse_args()
 
     statement = build_statement()
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(statement, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json(args.out, statement)
 
     if args.variants:
         variants_dir = args.out.parent / "negative-controls"
