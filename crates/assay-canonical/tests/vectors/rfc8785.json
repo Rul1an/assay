@@ -1,0 +1,163 @@
+{
+  "_about": {
+    "what": "RFC 8785 (JCS) conformance vectors for assay-canonical.",
+    "why": "Content ids, mandate ids and the bundle run root are all sha256 over these bytes. A canonicalization that diverges from RFC 8785 on any edge case makes those digests irreproducible by any other implementation, which is the property independent verification depends on.",
+    "expected_provenance": "Cross-validated against an independent implementation written in JavaScript, built from the primitives RFC 8785 defers to: ECMAScript Number::toString for numbers (RFC 8785 section 3.2.2.3), ECMAScript JSON string escaping (3.2.2.2), and Array.prototype.sort for key order, which compares by UTF-16 code unit (3.2.3). Both implementations agreed on all 31 vectors on 2026-08-04. Regenerate expectations by re-deriving from the RFC or another conforming implementation, never from this crate, or the check becomes circular.",
+    "fields": "input is the JSON source text. expected is the exact canonical output. pins states the property the vector exists to hold."
+  },
+  "empty_containers": {
+    "input": "{\"o\":{},\"a\":[],\"s\":\"\"}",
+    "expected": "{\"a\":[],\"o\":{},\"s\":\"\"}",
+    "pins": "Empty object, array and string have no whitespace and no separators."
+  },
+  "keyorder_ascii_case": {
+    "input": "{\"b\":1,\"A\":2,\"a\":3,\"B\":4}",
+    "expected": "{\"A\":2,\"B\":4,\"a\":3,\"b\":1}",
+    "pins": "Uppercase sorts before lowercase; ordering is by code unit, not case-insensitive or locale-aware."
+  },
+  "keyorder_digits_vs_letters": {
+    "input": "{\"1\":1,\"a\":2,\"_\":3,\"A\":4}",
+    "expected": "{\"1\":1,\"A\":4,\"_\":3,\"a\":2}",
+    "pins": "Digits, then uppercase, then underscore, then lowercase: ASCII code-unit order."
+  },
+  "keyorder_latin1": {
+    "input": "{\"\\u00e9\":1,\"z\":2,\"a\":3}",
+    "expected": "{\"a\":3,\"z\":2,\"\u00e9\":1}",
+    "pins": "A Latin-1 key sorts after all ASCII keys."
+  },
+  "keyorder_prefix": {
+    "input": "{\"ab\":1,\"a\":2,\"abc\":3}",
+    "expected": "{\"a\":2,\"ab\":1,\"abc\":3}",
+    "pins": "A shorter key sorts before a longer key that extends it."
+  },
+  "keyorder_utf16_vs_codepoint": {
+    "input": "{\"\\ud800\\udc00\":\"non-bmp U+10000\",\"\\ue000\":\"bmp U+E000\"}",
+    "expected": "{\"\ud800\udc00\":\"non-bmp U+10000\",\"\ue000\":\"bmp U+E000\"}",
+    "pins": "DECISIVE: sorting is by UTF-16 code unit, so a non-BMP key (leading surrogate 0xD800) sorts BEFORE U+E000. Code-point order and UTF-8 byte order both give the opposite. An implementation that sorts by either is wrong here and nowhere else in this file."
+  },
+  "nested_structure": {
+    "input": "{\"z\":{\"b\":[1,{\"y\":2,\"x\":3}],\"a\":null},\"A\":[]}",
+    "expected": "{\"A\":[],\"z\":{\"a\":null,\"b\":[1,{\"x\":3,\"y\":2}]}}",
+    "pins": "Ordering applies at every object depth, and array order is never changed."
+  },
+  "nfc_precomposed_vs_decomposed": {
+    "input": "{\"\\u00e9\":\"precomposed\",\"e\\u0301\":\"decomposed\"}",
+    "expected": "{\"e\u0301\":\"decomposed\",\"\u00e9\":\"precomposed\"}",
+    "pins": "JCS applies NO Unicode normalization: precomposed and decomposed forms stay two distinct keys. An implementation that normalizes would collapse them and silently change the digest."
+  },
+  "num_1e20": {
+    "input": "{\"a\":1e20}",
+    "expected": "{\"a\":100000000000000000000}",
+    "pins": "One below that boundary, so it must render in full, all twenty-one digits."
+  },
+  "num_1e21_boundary": {
+    "input": "{\"a\":1e21}",
+    "expected": "{\"a\":1e+21}",
+    "pins": "The ES6 boundary: at 1e21 the representation switches to exponent form."
+  },
+  "num_1e_minus_6": {
+    "input": "{\"a\":1e-6}",
+    "expected": "{\"a\":0.000001}",
+    "pins": "One above it, so plain decimal."
+  },
+  "num_1e_minus_7": {
+    "input": "{\"a\":1e-7}",
+    "expected": "{\"a\":1e-7}",
+    "pins": "The small-magnitude boundary: at 1e-7 the representation switches to exponent form."
+  },
+  "num_2pow53": {
+    "input": "{\"a\":9007199254740992}",
+    "expected": "{\"a\":9007199254740992}",
+    "pins": "The largest integer a double represents exactly."
+  },
+  "num_2pow53_plus1": {
+    "input": "{\"a\":9007199254740993}",
+    "expected": "{\"a\":9007199254740992}",
+    "pins": "One past it: rounds to the same double, so both inputs must canonicalize identically."
+  },
+  "num_big_exponent": {
+    "input": "{\"a\":1E30}",
+    "expected": "{\"a\":1e+30}",
+    "pins": "Exponent form carries the sign: 1e+30, not 1E30 or 1e30."
+  },
+  "num_i64_min": {
+    "input": "{\"a\":-9223372036854775808}",
+    "expected": "{\"a\":-9223372036854776000}",
+    "pins": "Same, on the negative side."
+  },
+  "num_integral_float": {
+    "input": "{\"a\":1.0}",
+    "expected": "{\"a\":1}",
+    "pins": "1.0 and 1 are the same double and must produce the same bytes."
+  },
+  "num_negative_zero": {
+    "input": "{\"a\":-0}",
+    "expected": "{\"a\":0}",
+    "pins": "Negative zero canonicalizes to 0. A signed zero would make two equal values hash differently."
+  },
+  "num_point_one": {
+    "input": "{\"a\":0.1}",
+    "expected": "{\"a\":0.1}",
+    "pins": "The classic non-representable decimal must round-trip to the shortest form."
+  },
+  "num_precision_loss": {
+    "input": "{\"a\":333333333.33333329}",
+    "expected": "{\"a\":333333333.3333333}",
+    "pins": "RFC 8785's own precision example: the input has more digits than a double can hold."
+  },
+  "num_small_exponent": {
+    "input": "{\"a\":2e-3}",
+    "expected": "{\"a\":0.002}",
+    "pins": "2e-3 renders as the plain decimal 0.002, not in exponent form."
+  },
+  "num_sum_artifact": {
+    "input": "{\"a\":0.30000000000000004}",
+    "expected": "{\"a\":0.30000000000000004}",
+    "pins": "A value whose shortest representation needs all seventeen significant digits."
+  },
+  "num_tiny": {
+    "input": "{\"a\":1e-27}",
+    "expected": "{\"a\":1e-27}",
+    "pins": "Below the plain-decimal threshold, so exponent form with a bare negative exponent."
+  },
+  "num_trailing_zero": {
+    "input": "{\"a\":4.50}",
+    "expected": "{\"a\":4.5}",
+    "pins": "4.50 is not a distinct value from 4.5; ES6 Number::toString drops the trailing zero."
+  },
+  "num_u64_max": {
+    "input": "{\"a\":18446744073709551615}",
+    "expected": "{\"a\":18446744073709552000}",
+    "pins": "An integer beyond the double range loses precision by design; RFC 8785 numbers are doubles."
+  },
+  "rfc8785_appendix_mixed": {
+    "input": "{\"numbers\":[333333333.33333329,1E30,4.50,2e-3,0.000000000000000000000000001],\"string\":\"\\u20ac$\\u000F\\u000aA'\\u0042\\u0022\\u005c\\\\\\\"\\/\",\"literals\":[null,true,false]}",
+    "expected": "{\"literals\":[null,true,false],\"numbers\":[333333333.3333333,1e+30,4.5,0.002,1e-27],\"string\":\"\u20ac$\\u000f\\nA'B\\\"\\\\\\\\\\\"/\"}",
+    "pins": "The composite example from RFC 8785 itself: number reformatting, escaping, and key reordering in one value."
+  },
+  "string_backslash_quote": {
+    "input": "{\"a\":\"q\\\"b\\\\c\"}",
+    "expected": "{\"a\":\"q\\\"b\\\\c\"}",
+    "pins": "Quote and backslash are escaped, and nothing else is."
+  },
+  "string_control_chars": {
+    "input": "{\"a\":\"\\u0000\\u0001\\u001f\\b\\f\\n\\r\\t\"}",
+    "expected": "{\"a\":\"\\u0000\\u0001\\u001f\\b\\f\\n\\r\\t\"}",
+    "pins": "Control characters use the short escapes where they exist and the six-character form otherwise."
+  },
+  "string_del_and_high_ascii": {
+    "input": "{\"a\":\"\\u007f\\u0080\"}",
+    "expected": "{\"a\":\"\u007f\u0080\"}",
+    "pins": "DEL and U+0080 are emitted literally; only C0 controls, quote and backslash are escaped."
+  },
+  "string_high_unicode": {
+    "input": "{\"a\":\"\\ud83d\\ude00 emoji\"}",
+    "expected": "{\"a\":\"\ud83d\ude00 emoji\"}",
+    "pins": "A non-BMP character is emitted as literal UTF-8, not as an escaped surrogate pair."
+  },
+  "string_solidus": {
+    "input": "{\"a\":\"a/b\"}",
+    "expected": "{\"a\":\"a/b\"}",
+    "pins": "The solidus is NOT escaped."
+  }
+}

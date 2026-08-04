@@ -44,6 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      issues: read
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -63,6 +64,68 @@ jobs:
           set -euo pipefail
           version="$(bash scripts/ci/resolve-release-version.sh)"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      # A release gate that lives only in an issue's prose is not a gate. v3.37.0 shipped with a
+      # blocker open because the only place the gate existed was one sentence, and nothing could
+      # read it. This step is what makes `release-blocking` mean something.
+      #
+      # Deliberately no override input. If a release must go out with a blocker open, the way to
+      # do it is to remove the label or move the issue out of the milestone — both are recorded
+      # decisions on the issue itself, which is better provenance than a workflow input nobody
+      # will find later.
+      #
+      # A release with no matching milestone is not blocked. Milestones are optional here, and
+      # failing on their absence would push people to stop using them, which costs the gate its
+      # only input.
+      - name: Refuse to release over an open blocker
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          milestone="v${VERSION}"
+
+          # Capture before testing, and paginate. Both matter, and both are fail-closed fixes:
+          #
+          #   - `if ! gh api ... | grep -q` would treat an API failure as "milestone not found",
+          #     because `set -e` is suspended inside an `if` condition and `!` inverts the pipe's
+          #     non-zero status. A rate limit or a network blip would have released over an open
+          #     blocker. Assigning first means a failure is distinguishable from a miss.
+          #   - `--paginate` because this gate is meant to outlive the milestones it reads. A repo
+          #     with more than one page of them would find nothing on page 1 and disable the gate
+          #     precisely when the project is old enough to have forgotten it exists.
+          if ! titles="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/milestones?state=all" --jq '.[].title')"; then
+            echo "::error::could not list milestones; refusing to release rather than guessing."
+            exit 1
+          fi
+
+          if ! grep -Fxq "$milestone" <<<"$titles"; then
+            echo "No milestone named ${milestone}; nothing to gate on."
+            exit 0
+          fi
+
+          # Deliberately NOT inside an `if`. Under `set -e` a failed query aborts the step, which
+          # is the fail-closed behaviour a gate needs. Wrapping this in a condition would swallow
+          # the failure and release, which is the same shape as the milestone bug above.
+          blockers="$(gh issue list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --label release-blocking \
+            --milestone "$milestone" \
+            --state open \
+            --limit 100 \
+            --json number,title \
+            --jq '.[] | "  #\(.number) \(.title)"')"
+
+          if [ -n "$blockers" ]; then
+            echo "::error::${milestone} has open release-blocking issues; refusing to release."
+            echo "$blockers"
+            echo
+            echo "Close them, drop the release-blocking label, or move them to a later milestone."
+            exit 1
+          fi
+
+          echo "No open release-blocking issues in ${milestone}."
 
   # ============================================================
   # Build matrix for all platforms
