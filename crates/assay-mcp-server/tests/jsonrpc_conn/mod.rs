@@ -292,7 +292,9 @@ impl Conn {
     /// attempts an optimistic `try_recv` first, so it hands back an already-queued line even when
     /// the remaining duration is zero; a child writing skippable lines faster than the callers
     /// above skip them therefore keeps the channel non-empty and would run unbounded past the
-    /// deadline. `a_flood_of_skippable_lines_cannot_outrun_the_deadline` covers that case.
+    /// deadline. `jsonrpc_conn_selftest.rs` covers that case, one test per skip loop:
+    /// `a_flood_of_blank_lines_cannot_outrun_the_deadline` and
+    /// `a_flood_of_notifications_cannot_outrun_the_deadline`.
     ///
     /// Credit: the same defect was found and fixed for the CLI's copy of this reader in #1987.
     fn next_line(&mut self, deadline: Instant) -> String {
