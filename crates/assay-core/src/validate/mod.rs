@@ -291,7 +291,17 @@ pub async fn validate(
 /// still worth reporting when such a test has no assertions either, because then it
 /// really does assert nothing; hence a warning rather than an error.
 ///
-/// Tests that carry `assertions:` are exempt.
+/// Tests that carry `assertions:` are not exempt — they are swept too.
+///
+/// The exemption used to test for a **non-empty** `assertions:` list rather than an **effective**
+/// one, and nothing looked at the assertions afterwards. One assertion that could not fail
+/// therefore cleared both gates in a single move: the `expected:` check was skipped because
+/// assertions existed, and the assertions were never examined. Reporting a suite as swept while
+/// stepping over the case the sweep exists to find is the failure this function is meant to
+/// prevent, one layer up.
+///
+/// Effectiveness is decided by `agent_assertions::matchers::ineffective_reason`, which is the same
+/// code the evaluator runs. Nothing here re-states what "cannot fail" means.
 ///
 /// This check reads only the config, so `assay validate` can sweep a suite for
 /// always-green tests without running it.
@@ -299,7 +309,29 @@ fn check_vacuous_expected(cfg: &EvalConfig) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
     for tc in &cfg.tests {
-        let has_assertions = tc.assertions.as_ref().is_some_and(|a| !a.is_empty());
+        let assertions = tc.assertions.as_deref().unwrap_or_default();
+        let has_assertions = !assertions.is_empty();
+
+        // An assertion that cannot fail is reported here rather than only when a run reaches it,
+        // so a suite can be swept for always-green tests without executing anything.
+        for (index, assertion) in assertions.iter().enumerate() {
+            let Some(mut reason) = crate::agent_assertions::matchers::ineffective_reason(assertion)
+            else {
+                continue;
+            };
+            // Keep the evaluator's own context — it names the variant and the responsible field —
+            // and add where in the suite it was found, which is what a sweep has to supply.
+            if let Some(obj) = reason.context.as_object_mut() {
+                obj.insert("test_id".into(), serde_json::json!(tc.id));
+                obj.insert("assertion_index".into(), serde_json::json!(index));
+            }
+            diags.push(
+                reason.with_fix_step(
+                    "Or remove the assertion, so the test does not appear to check it",
+                ),
+            );
+        }
+
         if has_assertions {
             continue;
         }
@@ -512,6 +544,220 @@ mod vacuous_expected_tests {
             }]),
         );
         assert!(check_vacuous_expected(&cfg).is_empty());
+    }
+
+    /// The case the exemption used to step over: a test carrying one assertion that cannot fail.
+    ///
+    /// Before this check, the non-empty `assertions:` list suppressed the `expected:` warning and
+    /// nothing looked at the assertion, so the suite swept clean while asserting nothing.
+    #[test]
+    fn flags_an_assertion_that_cannot_fail() {
+        let cfg = cfg_with(
+            Expected::default(),
+            Some(vec![TraceAssertion::TraceMustCallTool {
+                tool: "search".into(),
+                min_calls: Some(0),
+            }]),
+        );
+        let diags = check_vacuous_expected(&cfg);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].code, "E_ASSERT_INEFFECTIVE");
+        assert_eq!(diags[0].severity, "error");
+        assert_eq!(diags[0].context["field"], "min_calls");
+        assert_eq!(diags[0].context["test_id"], "t1");
+        assert_eq!(diags[0].context["assertion_index"], 0);
+    }
+
+    /// One per variant. A sweep that reached only the variants convenient to write would be the
+    /// same partial-coverage problem it exists to report.
+    #[test]
+    fn flags_a_vacuous_shape_of_every_variant() {
+        let cases: Vec<(&str, TraceAssertion)> = vec![
+            (
+                "tool",
+                TraceAssertion::TraceMustCallTool {
+                    tool: String::new(),
+                    min_calls: None,
+                },
+            ),
+            (
+                "tool",
+                TraceAssertion::TraceMustNotCallTool {
+                    tool: String::new(),
+                },
+            ),
+            (
+                "sequence",
+                TraceAssertion::TraceToolSequence {
+                    sequence: vec![],
+                    allow_other_tools: true,
+                },
+            ),
+            ("max", TraceAssertion::TraceMaxSteps { max: u32::MAX }),
+            (
+                "test_args",
+                TraceAssertion::ArgsValid {
+                    tool: "t".into(),
+                    test_args: None,
+                    policy: None,
+                    expect: None,
+                },
+            ),
+            (
+                "test_trace_raw",
+                TraceAssertion::SequenceValid {
+                    test_trace: None,
+                    test_trace_raw: None,
+                    policy: None,
+                    expect: None,
+                },
+            ),
+            (
+                "test_tool_calls",
+                TraceAssertion::ToolBlocklist {
+                    test_tool_calls: None,
+                    policy: None,
+                    expect: None,
+                },
+            ),
+        ];
+
+        for (field, assertion) in cases {
+            let cfg = cfg_with(Expected::default(), Some(vec![assertion.clone()]));
+            let diags = check_vacuous_expected(&cfg);
+            assert_eq!(diags.len(), 1, "{assertion:?} produced {diags:?}");
+            assert_eq!(
+                diags[0].context["field"], field,
+                "{assertion:?} blamed the wrong field: {}",
+                diags[0].message
+            );
+        }
+    }
+
+    /// An unrecognized `expect` spelling silently selected *expect failure* and inverted the
+    /// assertion. That is worse than a no-op — a no-op stops checking, an inversion checks the
+    /// opposite — so the static sweep has to reach it too, not only the evaluator.
+    #[test]
+    fn flags_an_unrecognized_expect_spelling() {
+        let cfg = cfg_with(
+            Expected::default(),
+            Some(vec![TraceAssertion::ArgsValid {
+                tool: "t".into(),
+                test_args: Some(serde_json::json!({})),
+                policy: Some(serde_json::json!({ "schema": {} })),
+                expect: Some("Pass".into()),
+            }]),
+        );
+        let diags = check_vacuous_expected(&cfg);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].code, "E_CONFIG_ERROR");
+        assert!(diags[0].message.contains("expect"), "{}", diags[0].message);
+    }
+
+    /// The invariant the static sweep rests on: it must reject configurations that cannot check
+    /// anything, and **only** those. An assertion that constrains something and would simply not
+    /// hold for a given trace is not a config defect, and reporting it here would make
+    /// `assay validate` refuse working suites — the over-eager detection that earns a suppression
+    /// and takes the real findings down with it.
+    ///
+    /// Each case below fails when evaluated against an empty episode, which is exactly the input
+    /// the sweep uses internally. If a future check answered one of these from the configuration,
+    /// this test fails rather than the sweep quietly growing false positives.
+    #[test]
+    fn does_not_flag_an_assertion_that_merely_fails_for_a_trace() {
+        for assertion in [
+            // Requires three calls; an empty episode has none.
+            TraceAssertion::TraceMustCallTool {
+                tool: "search".into(),
+                min_calls: Some(3),
+            },
+            // Requires this order; an empty episode has no calls at all.
+            TraceAssertion::TraceToolSequence {
+                sequence: vec!["a".into(), "b".into()],
+                allow_other_tools: true,
+            },
+            // Exact-sequence form, likewise unsatisfied by an empty episode.
+            TraceAssertion::TraceToolSequence {
+                sequence: vec!["a".into()],
+                allow_other_tools: false,
+            },
+            // A well-formed policy the supplied arguments violate: a real failure, not a
+            // configuration that checks nothing.
+            TraceAssertion::ArgsValid {
+                tool: "t".into(),
+                test_args: Some(serde_json::json!({ "percent": 90 })),
+                policy: Some(serde_json::json!({
+                    "schema": { "properties": { "percent": { "type": "number", "maximum": 30 } } }
+                })),
+                expect: Some("pass".into()),
+            },
+            // A blocked call that is actually made, expected to pass: fails, and should.
+            TraceAssertion::ToolBlocklist {
+                test_tool_calls: Some(vec!["rm".into()]),
+                policy: Some(serde_json::json!({ "blocked": ["rm"] })),
+                expect: Some("pass".into()),
+            },
+        ] {
+            let cfg = cfg_with(Expected::default(), Some(vec![assertion.clone()]));
+            let diags = check_vacuous_expected(&cfg);
+            assert!(
+                diags.is_empty(),
+                "the static sweep rejected a configuration that merely fails for a trace: \
+                 {assertion:?} -> {diags:?}"
+            );
+        }
+    }
+
+    /// The sweep reaches the schema compiler from a caller that did not exist before, so a
+    /// schema that cannot compile now has a new way to be encountered. A panic here would take
+    /// down `assay validate` on the one input it most needs to survive: a config someone is
+    /// trying to fix.
+    ///
+    /// It returns, and it says nothing. That was worth measuring rather than assuming, because
+    /// an earlier version of the doc comment on `ineffective_reason` claimed the opposite — that
+    /// the schema compilation the sweep performs would surface a broken schema early. It does
+    /// not: the resulting diagnostic carries an evaluation-decided code, which the filter drops.
+    /// Both are pinned here so the boundary is stated rather than rediscovered.
+    #[test]
+    fn a_schema_that_cannot_compile_neither_panics_nor_is_swept() {
+        for (case, policy) in [
+            (
+                "type is not a schema keyword value",
+                serde_json::json!({ "schema": { "type": 42 } }),
+            ),
+            (
+                "properties is not an object",
+                serde_json::json!({ "schema": { "properties": "not-an-object" } }),
+            ),
+            (
+                "required is not an array",
+                serde_json::json!({ "schema": { "required": 7 } }),
+            ),
+            (
+                "external ref, which the hermetic compiler refuses",
+                serde_json::json!({ "schema": { "$ref": "https://example.invalid/s.json" } }),
+            ),
+        ] {
+            let cfg = cfg_with(
+                Expected::default(),
+                Some(vec![TraceAssertion::ArgsValid {
+                    tool: "t".into(),
+                    test_args: Some(serde_json::json!({ "a": 1 })),
+                    policy: Some(policy),
+                    expect: Some("pass".into()),
+                }]),
+            );
+            // The assertion is that this returns rather than unwinding.
+            let diags = check_vacuous_expected(&cfg);
+            assert!(
+                diags.is_empty(),
+                "{case}: the sweep reported {diags:?}. An uncompilable schema is a broken \
+                 assertion, not one that cannot fail, and widening the sweep to catch it would \
+                 cost the narrowness `does_not_flag_an_assertion_that_merely_fails_for_a_trace` \
+                 protects. If this is now wanted, it belongs in a schema-validity check with its \
+                 own diagnostic, not in the vacuity filter."
+            );
+        }
     }
 
     /// The sweep must work with no trace file and no baseline — that is the point of
