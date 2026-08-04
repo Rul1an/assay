@@ -17,6 +17,10 @@ default = []
 oidc = []
 
 [dependencies]
+# The workspace's one DSSE PAE. This is this crate's first internal dependency,
+# taken deliberately: PAE defines what a signature covers, so a construction of
+# it that is local to a crate is a second answer to that question.
+assay-common = { workspace = true, features = ["std"] }
 # Core
 anyhow.workspace = true
 thiserror.workspace = true
