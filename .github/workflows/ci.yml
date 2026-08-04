@@ -591,15 +591,27 @@ jobs:
       # Linux: Test everything except eBPF and integration tests
       - name: Test Workspace (Linux)
         if: runner.os == 'Linux'
-        # no_passthrough_e2e shells out to a feature-enabled cargo build/run and has
-        # a dedicated step below. Skipping it here avoids duplicating that heavy build
-        # inside the already-large workspace test job on hosted Ubuntu runners.
-        run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it -- --skip test_no_passthrough_e2e
+        # no_passthrough_e2e is gated on `test-outbound` and so compiles to nothing here; it has a
+        # dedicated step below. It used to need an explicit --skip because it compiled everywhere
+        # and shelled out to its own feature-enabled cargo build.
+        run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it
 
-      # E6a.3 no-pass-through: E2E invariant test (requires test-outbound feature)
+      # E6a.3 no-pass-through: E2E invariant test (requires test-outbound feature).
+      #
+      # Runs on every OS, because this is now the only job that compiles the test at all — the
+      # workspace runs above and below build it out. That also means a missing or misspelled
+      # feature flag here would be silent: `cargo test` exits 0 when zero tests match. So assert
+      # the test actually executed rather than trusting the exit code.
       - name: Test MCP no-pass-through E2E (E6a.3)
-        if: runner.os == 'Linux'
-        run: cargo test -p assay-mcp-server --features test-outbound --no-fail-fast no_passthrough
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p assay-mcp-server --features test-outbound --no-fail-fast no_passthrough \
+            2>&1 | tee "$RUNNER_TEMP/e6a3.log"
+          grep -qF 'test_no_passthrough_e2e ... ok' "$RUNNER_TEMP/e6a3.log" || {
+            echo "::error::E6a.3 no-pass-through test did not run. The test-outbound gate is misconfigured, so the invariant was never exercised."
+            exit 1
+          }
 
       # Non-Linux: Exclude OS-specific crates (assay-monitor, assay-cli)
       # Windows/macOS automatically use bundled sqlite via cfg() in Cargo.toml

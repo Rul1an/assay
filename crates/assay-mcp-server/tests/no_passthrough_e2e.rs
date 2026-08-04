@@ -4,6 +4,16 @@
 //! must never appear on any Assay-originated outbound HTTP request. We send a sentinel field,
 //! trigger the test-only outbound call, then assert the mock received no sensitive headers or
 //! sentinel values. Run with: cargo test -p assay-mcp-server --features test-outbound no_passthrough
+//!
+//! This file is gated on `test-outbound` so that it runs against the binary Cargo built for this
+//! test target, which is the only way to be sure the two agree about the feature. Previously it
+//! compiled unconditionally and shelled out to `cargo build --features test-outbound`, which meant
+//! a plain `cargo nextest run -p assay-mcp-server` built the whole dependency stack a second time
+//! under a different feature set — the two variants overwrite each other's artifacts, so each run
+//! undid the last. The gate makes absence the failure mode instead of a silent rebuild, so every
+//! CI job that is expected to exercise this invariant enables the feature and asserts the test
+//! actually ran; see the E6a.3 steps in .github/workflows/ci.yml.
+#![cfg(feature = "test-outbound")]
 
 use assay_mcp_server::auth::SENSITIVE_HEADER_NAMES;
 use std::io::{BufRead, BufReader, Write};
@@ -58,30 +68,10 @@ async fn test_no_passthrough_e2e() {
     let policy_root = "../../tests/fixtures/mcp";
     let outbound_url = mock_server.uri();
 
-    let status = Command::new("cargo")
-        .args([
-            "build",
-            "-p",
-            "assay-mcp-server",
-            "--features",
-            "test-outbound",
-        ])
-        .status()
-        .expect("Failed to build server");
-    assert!(status.success(), "Build with test-outbound must succeed");
-
-    let mut child = Command::new("cargo")
-        .args([
-            "run",
-            "-q",
-            "-p",
-            "assay-mcp-server",
-            "--features",
-            "test-outbound",
-            "--",
-            "--policy-root",
-            policy_root,
-        ])
+    // This test only compiles under `test-outbound`, so the binary Cargo built for it carries the
+    // feature too — no separate build step, and no second feature variant to thrash against.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+        .args(["--policy-root", policy_root])
         .env("ASSAY_TEST_OUTBOUND_URL", outbound_url.as_str())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

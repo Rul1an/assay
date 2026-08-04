@@ -1,3 +1,12 @@
+//! Edge-case coverage for the stdio transport.
+//!
+//! Both spawn helpers below run the binary Cargo already built for this test target, via
+//! `CARGO_BIN_EXE_assay-mcp-server`, rather than shelling out to `cargo run`. A nested Cargo
+//! inherits this process's CARGO_MANIFEST_DIR, which ring's build script tracks, so it marks the
+//! rustls/reqwest stack dirty every time it alternates with a shell build — measured at ~62s per
+//! test against a 120s nextest kill budget. It also made the server a grandchild of Cargo, so
+//! `child.kill()` reaped Cargo and left the server running.
+
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
@@ -8,16 +17,8 @@ fn spawn_server() -> (
     BufReader<std::process::ChildStdout>,
 ) {
     let policy_root = "../../tests/fixtures/mcp";
-    let mut child = Command::new("cargo")
-        .args([
-            "run",
-            "-q",
-            "-p",
-            "assay-mcp-server",
-            "--",
-            "--policy-root",
-            policy_root,
-        ])
+    let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+        .args(["--policy-root", policy_root])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -38,16 +39,8 @@ fn spawn_server_with_env(
     BufReader<std::process::ChildStdout>,
 ) {
     let policy_root = "../../tests/fixtures/mcp";
-    let mut child = Command::new("cargo")
-        .args([
-            "run",
-            "-q",
-            "-p",
-            "assay-mcp-server",
-            "--",
-            "--policy-root",
-            policy_root,
-        ])
+    let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+        .args(["--policy-root", policy_root])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
