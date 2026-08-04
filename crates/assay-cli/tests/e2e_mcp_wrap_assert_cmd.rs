@@ -21,19 +21,29 @@ fn assay_bin() -> PathBuf {
 /// Cargo only injects `CARGO_BIN_EXE_*` for bins declared in the *same* package,
 /// and `assay-mcp-server` is a separate workspace member — so there is no env var
 /// to read here. The previous approach guessed at `<workspace>/target/debug/
-/// assay-mcp-server` and asserted the path existed, which is wrong in both
-/// directions: it fails on a tree that has simply never built the server (reading
-/// as a test failure rather than a missing build step), and it silently *passes*
-/// against a stale binary left over from an older tree, so the e2e suite reads
-/// green while exercising code that no longer exists.
+/// assay-mcp-server` and asserted the path existed, which fails on a tree that
+/// has never built the server, reading as a test failure rather than as a
+/// missing build step. It also could not tell a current binary from a stale one
+/// left over by an older tree.
 ///
 /// Instead, ask Cargo to build it and to report where it put it. Cargo owns the
 /// staleness computation, so this also covers changes in transitive dependencies
 /// such as `assay-core` that an mtime comparison against `assay-mcp-server/src`
 /// would miss. On an already-current tree this is a no-op freshness check.
 ///
+/// What this does and does not buy, because the difference is easy to overstate:
+/// it guarantees the binary these tests spawn is built from the current source.
+/// It does *not* make the tests fail when it would not be. Only
+/// `owasp_mcp01_token_args_do_not_leak_to_proxy_logs` depends on the server
+/// answering at all; `e2e_wrap_denies_wildcard_contains` and
+/// `e2e_wrap_denies_schema_violation` assert verdicts the proxy reaches before
+/// dispatching upstream, and pass against any executable that holds the pipe
+/// open. Detecting a wrong server in those two needs an assertion only a correct
+/// server can satisfy, which is a change to what they test, not to how the
+/// binary is found.
+///
 /// Panics (never skips) if the build fails: a skipped e2e test that reads as
-/// green is precisely the failure mode this replaces.
+/// green is a worse failure than a loud one.
 fn assay_mcp_server_bin() -> PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
     BIN.get_or_init(|| build_assay_mcp_server().expect("build assay-mcp-server for e2e wrap tests"))
@@ -43,16 +53,28 @@ fn assay_mcp_server_bin() -> PathBuf {
 /// Remove the per-crate variables Cargo injects into *this* test process, so the
 /// nested build sees the environment a plain shell `cargo build` would give it.
 ///
-/// Without this the nested build is not just noisy, it is slow on every run:
-/// dependency build scripts track these variables, and `ring` in particular goes
-/// dirty when `CARGO_MANIFEST_DIR` flips between unset (shell) and
-/// `crates/assay-cli` (inherited here). That drags the whole rustls/reqwest stack
-/// with it — ~13s of rebuild per alternation, in both directions.
+/// Without this the nested build is not merely noisy, it is slow on every run:
+/// build scripts track these variables, so flipping `CARGO_MANIFEST_DIR` between
+/// unset (shell) and `crates/assay-cli` (inherited here) marks units dirty in
+/// both directions. Measured on this workspace, the alternation rebuilds
+/// `assay-evidence`, `assay-adapter-api`, `assay-core`, `assay-metrics` and
+/// `assay-mcp-server`, plus `ring`'s build script and the rustls/reqwest stack
+/// above it: ~15s each way, on every run. With the strip, both directions are
+/// a sub-second freshness check.
 ///
-/// Variables the *user* set to configure Cargo (`CARGO_HOME`, `CARGO_TARGET_DIR`,
-/// `CARGO_NET_OFFLINE`, `RUSTFLAGS`, ...) are deliberately left alone: a shell
-/// would pass those through too, and dropping them would change where the build
-/// writes or whether it may reach the network.
+/// The list below is the set Cargo documents as per-crate injections, not the
+/// set observed in any one runner — several never appear under `cargo test` or
+/// `cargo nextest` today and are matched defensively. `CARGO_BIN_EXE_*` is set
+/// at runtime by nextest but not by cargo, which is why it is matched by prefix
+/// rather than assumed absent.
+///
+/// Two deliberate exclusions. Variables the *user* set to configure Cargo
+/// (`CARGO_HOME`, `CARGO_TARGET_DIR`, `CARGO_NET_OFFLINE`, `RUSTFLAGS`, ...) stay:
+/// a shell would pass those through too, and dropping them would change where
+/// the build writes or whether it may reach the network. The dynamic-library
+/// search path Cargo injects (`LD_LIBRARY_PATH`, and nextest's
+/// `NEXTEST_DYLD_FALLBACK_LIBRARY_PATH`) also stays: no build-script fingerprint
+/// tracks it, so it costs nothing, and removing it could break linking.
 fn strip_cargo_crate_env(cmd: &mut Command) {
     for (key, _) in std::env::vars_os() {
         let Some(key) = key.to_str() else { continue };
@@ -75,6 +97,60 @@ fn strip_cargo_crate_env(cmd: &mut Command) {
     }
 }
 
+/// Where the parent build put its artifacts: the cross-compilation target triple
+/// if there is one, and the profile directory.
+///
+/// Build the nested binary into the same place, so `cargo test --release` does
+/// not trigger a second full dependency build in the other profile.
+///
+/// `CARGO_BIN_EXE_assay` is `<target-dir>/<profile-dir>/assay`, or
+/// `<target-dir>/<triple>/<profile-dir>/assay` when the parent passed `--target`.
+/// Reading the parent directory name alone cannot tell those apart — under
+/// `--target` it still yields `debug`, and the nested build would then quietly
+/// produce a *host* binary, in a different artifact tree from the one under
+/// test. Stripping the target directory shows which shape it is.
+///
+/// Falls back to the profile-dir-only reading when the layout is not
+/// recognisable (a `build.target-dir` redirect, say). That is the pre-existing
+/// behaviour and is correct whenever `--target` is absent, which is every
+/// invocation in this repo today.
+fn target_and_profile(workspace_root: &Path) -> (Option<String>, String) {
+    let bin_exe = Path::new(env!("CARGO_BIN_EXE_assay"));
+    let dir_name = |p: Option<&Path>| {
+        p.and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(str::to_owned)
+    };
+    // `debug` is the fallback rather than an error: a wrong profile costs build
+    // time, and there is no reading of this path that should fail a test.
+    let profile_only = || {
+        (
+            None,
+            dir_name(bin_exe.parent()).unwrap_or_else(|| "debug".into()),
+        )
+    };
+
+    let target_dir = match std::env::var_os("CARGO_TARGET_DIR") {
+        Some(d) => PathBuf::from(d),
+        None => workspace_root.join("target"),
+    };
+    let Ok(rel) = bin_exe.strip_prefix(&target_dir) else {
+        return profile_only();
+    };
+
+    // rel is `<profile>/assay` or `<triple>/<profile>/assay`.
+    let mut components: Vec<_> = rel
+        .components()
+        .filter_map(|c| c.as_os_str().to_str())
+        .collect();
+    components.pop(); // the file name
+    match components[..] {
+        [profile] => (None, profile.to_owned()),
+        [triple, profile] => (Some(triple.to_owned()), profile.to_owned()),
+        _ => profile_only(),
+    }
+}
+
 fn build_assay_mcp_server() -> anyhow::Result<PathBuf> {
     // crates/assay-cli -> crates -> workspace root
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -82,16 +158,7 @@ fn build_assay_mcp_server() -> anyhow::Result<PathBuf> {
         .and_then(|p| p.parent())
         .context("failed to resolve workspace root from CARGO_MANIFEST_DIR")?;
 
-    // Build into the same profile directory the test itself was built into, so a
-    // `cargo test --release` run does not trigger a second full dependency build.
-    // `CARGO_BIN_EXE_assay` is `<target-dir>/<profile-dir>/assay`; the profile dir
-    // and the profile name coincide for every profile except dev, whose directory
-    // is `debug`.
-    let profile_dir = Path::new(env!("CARGO_BIN_EXE_assay"))
-        .parent()
-        .and_then(|p| p.file_name())
-        .and_then(|p| p.to_str())
-        .context("failed to resolve profile directory from CARGO_BIN_EXE_assay")?;
+    let (target_triple, profile_dir) = target_and_profile(workspace_root);
 
     let cargo = option_env!("CARGO").unwrap_or("cargo");
     let mut cmd = Command::new(cargo);
@@ -101,9 +168,16 @@ fn build_assay_mcp_server() -> anyhow::Result<PathBuf> {
         "assay-mcp-server",
         "--bin",
         "assay-mcp-server",
+        // The parent resolved the graph already; a test has no business editing
+        // Cargo.lock. `cargo test --locked` (ci.yml) would otherwise not extend
+        // its guarantee to the build this test performs.
+        "--locked",
     ]);
+    if let Some(triple) = &target_triple {
+        cmd.args(["--target", triple]);
+    }
     if profile_dir != "debug" {
-        cmd.args(["--profile", profile_dir]);
+        cmd.args(["--profile", &profile_dir]);
     }
     // json on stdout for the artifact path, human-readable diagnostics on stderr.
     cmd.arg("--message-format=json-render-diagnostics");

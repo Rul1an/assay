@@ -245,6 +245,7 @@ jobs:
             {
               echo ""
               echo "### assay-cli"
+              echo "- cargo build -p assay-mcp-server (pre-warm for the assay-cli e2e wrap tests)"
               echo "- cargo check -p assay-cli --no-default-features"
               echo "- cargo check -p assay-cli --no-default-features --features sim"
               echo "- cargo check -p assay-cli --no-default-features --features tui"
@@ -253,10 +254,12 @@ jobs:
               echo "- cargo nextest run -p assay-cli --all-features"
               echo "- cargo hack check -p assay-cli --each-feature --exclude-features experimental (touched crate)"
             } >> "$GITHUB_STEP_SUMMARY"
-            # No `cargo build -p assay-mcp-server` here: the assay-cli e2e wrap
-            # tests build that binary themselves, so the dependency lives in the
-            # test rather than in this workflow, where it could not detect a
-            # stale artifact anyway.
+            # Pre-warm only, no longer a correctness requirement: the e2e wrap
+            # tests build assay-mcp-server themselves, which is the only place
+            # that can also reject a stale artifact. Kept because nextest applies
+            # slow-timeout 60s x2 per test (.config/nextest.toml) and a cold
+            # compile inside that budget dies by SIGTERM without a useful message.
+            cargo build -p assay-mcp-server
             cargo check -p assay-cli --no-default-features
             cargo check -p assay-cli --no-default-features --features sim
             cargo check -p assay-cli --no-default-features --features tui
