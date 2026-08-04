@@ -245,7 +245,6 @@ jobs:
             {
               echo ""
               echo "### assay-cli"
-              echo "- cargo build -p assay-mcp-server (required by assay-cli e2e wrap tests)"
               echo "- cargo check -p assay-cli --no-default-features"
               echo "- cargo check -p assay-cli --no-default-features --features sim"
               echo "- cargo check -p assay-cli --no-default-features --features tui"
@@ -254,7 +253,10 @@ jobs:
               echo "- cargo nextest run -p assay-cli --all-features"
               echo "- cargo hack check -p assay-cli --each-feature --exclude-features experimental (touched crate)"
             } >> "$GITHUB_STEP_SUMMARY"
-            cargo build -p assay-mcp-server
+            # No `cargo build -p assay-mcp-server` here: the assay-cli e2e wrap
+            # tests build that binary themselves, so the dependency lives in the
+            # test rather than in this workflow, where it could not detect a
+            # stale artifact anyway.
             cargo check -p assay-cli --no-default-features
             cargo check -p assay-cli --no-default-features --features sim
             cargo check -p assay-cli --no-default-features --features tui

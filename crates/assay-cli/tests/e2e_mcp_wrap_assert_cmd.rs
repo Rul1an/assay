@@ -4,46 +4,140 @@ use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
-fn exe_name(name: &str) -> String {
-    if cfg!(windows) {
-        format!("{name}.exe")
-    } else {
-        name.to_string()
+/// Path to the `assay` binary under test.
+///
+/// `assay` is a bin target of this package, so Cargo injects the path at compile
+/// time and guarantees the binary is built and current before the test runs.
+fn assay_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_assay"))
+}
+
+/// Path to a freshly built `assay-mcp-server` binary.
+///
+/// Cargo only injects `CARGO_BIN_EXE_*` for bins declared in the *same* package,
+/// and `assay-mcp-server` is a separate workspace member — so there is no env var
+/// to read here. The previous approach guessed at `<workspace>/target/debug/
+/// assay-mcp-server` and asserted the path existed, which is wrong in both
+/// directions: it fails on a tree that has simply never built the server (reading
+/// as a test failure rather than a missing build step), and it silently *passes*
+/// against a stale binary left over from an older tree, so the e2e suite reads
+/// green while exercising code that no longer exists.
+///
+/// Instead, ask Cargo to build it and to report where it put it. Cargo owns the
+/// staleness computation, so this also covers changes in transitive dependencies
+/// such as `assay-core` that an mtime comparison against `assay-mcp-server/src`
+/// would miss. On an already-current tree this is a no-op freshness check.
+///
+/// Panics (never skips) if the build fails: a skipped e2e test that reads as
+/// green is precisely the failure mode this replaces.
+fn assay_mcp_server_bin() -> PathBuf {
+    static BIN: OnceLock<PathBuf> = OnceLock::new();
+    BIN.get_or_init(|| build_assay_mcp_server().expect("build assay-mcp-server for e2e wrap tests"))
+        .clone()
+}
+
+/// Remove the per-crate variables Cargo injects into *this* test process, so the
+/// nested build sees the environment a plain shell `cargo build` would give it.
+///
+/// Without this the nested build is not just noisy, it is slow on every run:
+/// dependency build scripts track these variables, and `ring` in particular goes
+/// dirty when `CARGO_MANIFEST_DIR` flips between unset (shell) and
+/// `crates/assay-cli` (inherited here). That drags the whole rustls/reqwest stack
+/// with it — ~13s of rebuild per alternation, in both directions.
+///
+/// Variables the *user* set to configure Cargo (`CARGO_HOME`, `CARGO_TARGET_DIR`,
+/// `CARGO_NET_OFFLINE`, `RUSTFLAGS`, ...) are deliberately left alone: a shell
+/// would pass those through too, and dropping them would change where the build
+/// writes or whether it may reach the network.
+fn strip_cargo_crate_env(cmd: &mut Command) {
+    for (key, _) in std::env::vars_os() {
+        let Some(key) = key.to_str() else { continue };
+        let injected = key.starts_with("CARGO_PKG_")
+            || key.starts_with("CARGO_BIN_EXE_")
+            || matches!(
+                key,
+                "CARGO_MANIFEST_DIR"
+                    | "CARGO_MANIFEST_PATH"
+                    | "CARGO_MANIFEST_LINKS"
+                    | "CARGO_CRATE_NAME"
+                    | "CARGO_BIN_NAME"
+                    | "CARGO_PRIMARY_PACKAGE"
+                    | "CARGO_TARGET_TMPDIR"
+                    | "OUT_DIR"
+            );
+        if injected {
+            cmd.env_remove(key);
+        }
     }
 }
 
-/// Try to locate a built binary without relying on PATH.
-///
-/// Priority:
-/// 1) Cargo-injected env var: CARGO_BIN_EXE_<name> (with '-' sometimes '_' in env var)
-/// 2) {CARGO_TARGET_DIR}/debug/<name>
-/// 3) <workspace_root>/target/debug/<name>
-fn bin_path(bin: &str) -> anyhow::Result<PathBuf> {
-    // Cargo typically uses underscores in env var keys for hyphenated bin names
-    let env_key_underscore = format!("CARGO_BIN_EXE_{}", bin.replace('-', "_"));
-    let env_key_hyphen = format!("CARGO_BIN_EXE_{bin}");
+fn build_assay_mcp_server() -> anyhow::Result<PathBuf> {
+    // crates/assay-cli -> crates -> workspace root
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .context("failed to resolve workspace root from CARGO_MANIFEST_DIR")?;
 
-    if let Ok(p) = std::env::var(&env_key_underscore).or_else(|_| std::env::var(&env_key_hyphen)) {
-        return Ok(PathBuf::from(p));
+    // Build into the same profile directory the test itself was built into, so a
+    // `cargo test --release` run does not trigger a second full dependency build.
+    // `CARGO_BIN_EXE_assay` is `<target-dir>/<profile-dir>/assay`; the profile dir
+    // and the profile name coincide for every profile except dev, whose directory
+    // is `debug`.
+    let profile_dir = Path::new(env!("CARGO_BIN_EXE_assay"))
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|p| p.to_str())
+        .context("failed to resolve profile directory from CARGO_BIN_EXE_assay")?;
+
+    let cargo = option_env!("CARGO").unwrap_or("cargo");
+    let mut cmd = Command::new(cargo);
+    cmd.current_dir(workspace_root).args([
+        "build",
+        "-p",
+        "assay-mcp-server",
+        "--bin",
+        "assay-mcp-server",
+    ]);
+    if profile_dir != "debug" {
+        cmd.args(["--profile", profile_dir]);
+    }
+    // json on stdout for the artifact path, human-readable diagnostics on stderr.
+    cmd.arg("--message-format=json-render-diagnostics");
+    strip_cargo_crate_env(&mut cmd);
+
+    let out = cmd
+        .output()
+        .with_context(|| format!("failed to run `{cargo} build -p assay-mcp-server`"))?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "`cargo build -p assay-mcp-server` failed with status {}.\n\
+             The e2e wrap tests drive the real server binary; run it yourself to \
+             see the errors:\n    cargo build -p assay-mcp-server\n--- cargo stderr ---\n{}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
-    let target_dir = if let Ok(td) = std::env::var("CARGO_TARGET_DIR") {
-        PathBuf::from(td)
-    } else {
-        // crates/assay-cli -> crates -> workspace root
-        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let workspace_root = manifest
-            .parent()
-            .and_then(|p| p.parent())
-            .context("failed to resolve workspace root from CARGO_MANIFEST_DIR")?;
-        workspace_root.join("target")
-    };
+    // Take the `executable` of the bin artifact. Cargo emits this for fresh
+    // (already up-to-date) units too, so it is authoritative either way.
+    let executable = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|msg| {
+            msg["reason"] == "compiler-artifact" && msg["target"]["name"] == "assay-mcp-server"
+        })
+        .filter_map(|msg| msg["executable"].as_str().map(PathBuf::from))
+        .next_back()
+        .context(
+            "`cargo build -p assay-mcp-server` reported no bin artifact; \
+             has the `assay-mcp-server` bin target been renamed or removed?",
+        )?;
 
-    let candidate = target_dir.join("debug").join(exe_name(bin));
-    Ok(candidate)
+    Ok(executable)
 }
 
 /// Write one JSON line to stdin (newline delimited JSON-RPC).
@@ -127,10 +221,8 @@ fn extract_error_code(resp: &Value) -> Option<String> {
 
 #[test]
 fn owasp_mcp01_token_args_do_not_leak_to_proxy_logs() -> anyhow::Result<()> {
-    let assay = bin_path("assay")?;
-    let server = bin_path("assay-mcp-server")?;
-    assert!(assay.exists(), "missing binary: {}", assay.display());
-    assert!(server.exists(), "missing binary: {}", server.display());
+    let assay = assay_bin();
+    let server = assay_mcp_server_bin();
 
     let tmp = TempDir::new()?;
     let policy_path = tmp.path().join("proxy-policy.yaml");
@@ -220,13 +312,8 @@ enforcement:
 
 #[test]
 fn e2e_wrap_denies_wildcard_contains() -> anyhow::Result<()> {
-    // Ensure binaries exist (nice error if not built)
-    let assay = bin_path("assay")?;
-    let server = bin_path("assay-mcp-server")?;
-
-    // In CI: run `cargo build --workspace` before tests so these exist.
-    assert!(assay.exists(), "missing binary: {}", assay.display());
-    assert!(server.exists(), "missing binary: {}", server.display());
+    let assay = assay_bin();
+    let server = assay_mcp_server_bin();
 
     let tmp = TempDir::new()?;
     let policy_path = tmp.path().join("proxy-policy.yaml");
@@ -294,10 +381,8 @@ enforcement:
 
 #[test]
 fn e2e_wrap_denies_schema_violation() -> anyhow::Result<()> {
-    let assay = bin_path("assay")?;
-    let server = bin_path("assay-mcp-server")?;
-    assert!(assay.exists(), "missing binary: {}", assay.display());
-    assert!(server.exists(), "missing binary: {}", server.display());
+    let assay = assay_bin();
+    let server = assay_mcp_server_bin();
 
     let tmp = TempDir::new()?;
     let policy_path = tmp.path().join("proxy-policy.yaml");
