@@ -8,6 +8,9 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
+mod common;
+use common::{cargo_bin, strip_cargo_crate_env};
+
 /// Path to the `assay` binary under test.
 ///
 /// `assay` is a bin target of this package, so Cargo injects the path at compile
@@ -37,10 +40,10 @@ fn assay_bin() -> PathBuf {
 /// `owasp_mcp01_token_args_do_not_leak_to_proxy_logs` depends on the server
 /// answering at all; `e2e_wrap_denies_wildcard_contains` and
 /// `e2e_wrap_denies_schema_violation` assert verdicts the proxy reaches before
-/// dispatching upstream, and pass against any executable that holds the pipe
-/// open. Detecting a wrong server in those two needs an assertion only a correct
-/// server can satisfy, which is a change to what they test, not to how the
-/// binary is found.
+/// dispatching upstream, and pass against anything spawnable — `/usr/bin/true`
+/// included, so not even holding the pipe open is required. Detecting a wrong
+/// server in those two needs an assertion only a correct server can satisfy,
+/// which is a change to what they test, not to how the binary is found.
 ///
 /// Panics (never skips) if the build fails: a skipped e2e test that reads as
 /// green is a worse failure than a loud one.
@@ -48,53 +51,6 @@ fn assay_mcp_server_bin() -> PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
     BIN.get_or_init(|| build_assay_mcp_server().expect("build assay-mcp-server for e2e wrap tests"))
         .clone()
-}
-
-/// Remove the per-crate variables Cargo injects into *this* test process, so the
-/// nested build sees the environment a plain shell `cargo build` would give it.
-///
-/// Without this the nested build is not merely noisy, it is slow on every run:
-/// build scripts track these variables, so flipping `CARGO_MANIFEST_DIR` between
-/// unset (shell) and `crates/assay-cli` (inherited here) marks units dirty in
-/// both directions. Measured on this workspace, the alternation rebuilds
-/// `assay-evidence`, `assay-adapter-api`, `assay-core`, `assay-metrics` and
-/// `assay-mcp-server`, plus `ring`'s build script and the rustls/reqwest stack
-/// above it: ~15s each way, on every run. With the strip, both directions are
-/// a sub-second freshness check.
-///
-/// The list below is the set Cargo documents as per-crate injections, not the
-/// set observed in any one runner — several never appear under `cargo test` or
-/// `cargo nextest` today and are matched defensively. `CARGO_BIN_EXE_*` is set
-/// at runtime by nextest but not by cargo, which is why it is matched by prefix
-/// rather than assumed absent.
-///
-/// Two deliberate exclusions. Variables the *user* set to configure Cargo
-/// (`CARGO_HOME`, `CARGO_TARGET_DIR`, `CARGO_NET_OFFLINE`, `RUSTFLAGS`, ...) stay:
-/// a shell would pass those through too, and dropping them would change where
-/// the build writes or whether it may reach the network. The dynamic-library
-/// search path Cargo injects (`LD_LIBRARY_PATH`, and nextest's
-/// `NEXTEST_DYLD_FALLBACK_LIBRARY_PATH`) also stays: no build-script fingerprint
-/// tracks it, so it costs nothing, and removing it could break linking.
-fn strip_cargo_crate_env(cmd: &mut Command) {
-    for (key, _) in std::env::vars_os() {
-        let Some(key) = key.to_str() else { continue };
-        let injected = key.starts_with("CARGO_PKG_")
-            || key.starts_with("CARGO_BIN_EXE_")
-            || matches!(
-                key,
-                "CARGO_MANIFEST_DIR"
-                    | "CARGO_MANIFEST_PATH"
-                    | "CARGO_MANIFEST_LINKS"
-                    | "CARGO_CRATE_NAME"
-                    | "CARGO_BIN_NAME"
-                    | "CARGO_PRIMARY_PACKAGE"
-                    | "CARGO_TARGET_TMPDIR"
-                    | "OUT_DIR"
-            );
-        if injected {
-            cmd.env_remove(key);
-        }
-    }
 }
 
 /// Where the parent build put its artifacts: the cross-compilation target triple
@@ -110,12 +66,21 @@ fn strip_cargo_crate_env(cmd: &mut Command) {
 /// produce a *host* binary, in a different artifact tree from the one under
 /// test. Stripping the target directory shows which shape it is.
 ///
-/// Falls back to the profile-dir-only reading when the layout is not
-/// recognisable (a `build.target-dir` redirect, say). That is the pre-existing
-/// behaviour and is correct whenever `--target` is absent, which is every
-/// invocation in this repo today.
+/// Both paths are canonicalised before comparing, because `strip_prefix` is
+/// lexical. `CARGO_TARGET_DIR` may be relative — AGENTS.md mandates a per-worktree
+/// target dir, so that is not exotic — and Cargo may canonicalise a symlinked one
+/// (on macOS, `/tmp` is `/private/tmp`), leaving the env var not a literal prefix
+/// of the path Cargo reports. Without this, both cases fall through to the
+/// profile-only reading and drop the triple.
+///
+/// Falls back to the profile-dir-only reading when the layout is still not
+/// recognisable. That is only correct when `--target` is absent — which is every
+/// invocation in this repo today — so the fallback carries a real, narrow risk:
+/// it would build a host binary while the test runs a cross-compiled one, where
+/// the code this replaced would have failed loudly with a missing binary. Made
+/// as narrow as canonicalising can make it, and called out rather than hidden.
 fn target_and_profile(workspace_root: &Path) -> (Option<String>, String) {
-    let bin_exe = Path::new(env!("CARGO_BIN_EXE_assay"));
+    let bin_exe_raw = Path::new(env!("CARGO_BIN_EXE_assay"));
     let dir_name = |p: Option<&Path>| {
         p.and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
@@ -126,7 +91,7 @@ fn target_and_profile(workspace_root: &Path) -> (Option<String>, String) {
     let profile_only = || {
         (
             None,
-            dir_name(bin_exe.parent()).unwrap_or_else(|| "debug".into()),
+            dir_name(bin_exe_raw.parent()).unwrap_or_else(|| "debug".into()),
         )
     };
 
@@ -134,6 +99,10 @@ fn target_and_profile(workspace_root: &Path) -> (Option<String>, String) {
         Some(d) => PathBuf::from(d),
         None => workspace_root.join("target"),
     };
+    // Canonicalising needs the paths to exist. They do: the binary is what Cargo
+    // just built, and the target dir contains it. Fall back rather than fail.
+    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let (bin_exe, target_dir) = (canon(bin_exe_raw), canon(&target_dir));
     let Ok(rel) = bin_exe.strip_prefix(&target_dir) else {
         return profile_only();
     };
@@ -160,7 +129,7 @@ fn build_assay_mcp_server() -> anyhow::Result<PathBuf> {
 
     let (target_triple, profile_dir) = target_and_profile(workspace_root);
 
-    let cargo = option_env!("CARGO").unwrap_or("cargo");
+    let cargo = cargo_bin();
     let mut cmd = Command::new(cargo);
     cmd.current_dir(workspace_root).args([
         "build",

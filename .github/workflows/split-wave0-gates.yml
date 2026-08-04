@@ -254,11 +254,15 @@ jobs:
               echo "- cargo nextest run -p assay-cli --all-features"
               echo "- cargo hack check -p assay-cli --each-feature --exclude-features experimental (touched crate)"
             } >> "$GITHUB_STEP_SUMMARY"
-            # Pre-warm only, no longer a correctness requirement: the e2e wrap
-            # tests build assay-mcp-server themselves, which is the only place
-            # that can also reject a stale artifact. Kept because nextest applies
-            # slow-timeout 60s x2 per test (.config/nextest.toml) and a cold
-            # compile inside that budget dies by SIGTERM without a useful message.
+            # Pre-warm only, not a correctness requirement: the e2e wrap tests
+            # build assay-mcp-server themselves, which is the only place that can
+            # also reject a stale artifact. Kept because nextest applies
+            # slow-timeout 60s x2 per test (.config/nextest.toml), so a cold
+            # compile inside a test dies by SIGTERM with no useful message.
+            # This only works because every test in the crate that shells out to
+            # Cargo strips the inherited Cargo environment (tests/common/mod.rs);
+            # when one of them did not, it re-dirtied these units from inside the
+            # nextest run below and the pre-warm bought nothing.
             cargo build -p assay-mcp-server
             cargo check -p assay-cli --no-default-features
             cargo check -p assay-cli --no-default-features --features sim
