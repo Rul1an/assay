@@ -105,10 +105,23 @@ impl JsonLines {
     ///
     /// `what` names the thing being awaited, so a timeout points at the request that went
     /// unanswered instead of reporting a bare "timeout".
+    ///
+    /// The deadline is checked explicitly at the top of each iteration and not left to
+    /// `recv_timeout` alone. `recv_timeout` attempts an optimistic `try_recv` first, so it returns
+    /// an already-queued line even when the remaining duration is zero; a child that writes
+    /// non-JSON faster than this loop skips it therefore keeps the channel non-empty and runs
+    /// unbounded past the deadline. `json_lines_deadline_holds_against_a_flood_of_non_json_lines`
+    /// covers that case.
     fn next_json(&mut self, timeout: Duration, what: &str) -> anyhow::Result<Value> {
         let deadline = Instant::now() + timeout;
         loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
+            let now = Instant::now();
+            if now >= deadline {
+                anyhow::bail!(
+                    "timed out after {timeout:?} waiting for {what}: no JSON response line arrived"
+                );
+            }
+            let remaining = deadline.saturating_duration_since(now);
             let line = match self.rx.recv_timeout(remaining) {
                 Ok(Ok(line)) => line,
                 Ok(Err(err)) => {
@@ -150,6 +163,51 @@ fn read_json_line(
         let _ = child.kill();
         let _ = child.wait();
     })
+}
+
+/// A child that floods stdout with non-JSON must not be able to outrun the deadline.
+///
+/// The silent-child case and this one fail differently: there, no line ever arrives and
+/// `recv_timeout` reports `Timeout`; here lines arrive faster than they are skipped, so the
+/// channel is never empty when the receive is attempted, and `recv_timeout`'s optimistic
+/// `try_recv` hands back a queued line even at zero remaining duration. Only the explicit deadline
+/// check in `next_json` ends this run.
+///
+/// `yes` and not a shell `while` loop on purpose: a shell loop produces more slowly than this
+/// consumer skips, so the channel drains, the receive finds it empty, and the run bounds itself
+/// even without the deadline check. Reproducing the defect needs a producer that outruns the
+/// consumer, which is what makes this a regression test rather than a test that happens to pass.
+#[cfg(unix)]
+#[test]
+fn json_lines_deadline_holds_against_a_flood_of_non_json_lines() -> anyhow::Result<()> {
+    let timeout = Duration::from_secs(1);
+    let mut child = Command::new("yes")
+        .arg("not-json")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let mut lines = JsonLines::new(child.stdout.take().expect("stdout"));
+
+    let start = Instant::now();
+    let err = lines
+        .next_json(timeout, "a response that never comes")
+        .expect_err("a flood of non-JSON lines must not satisfy the read");
+    let elapsed = start.elapsed();
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    // Generous headroom over the 1s deadline: this asserts the deadline is enforced at all, not
+    // that it is precise, so a loaded CI machine does not turn a real bound into a flaky one.
+    assert!(
+        elapsed < timeout * 5,
+        "the deadline did not bound the read: gave up only after {elapsed:?} (timeout was {timeout:?})"
+    );
+    assert!(
+        err.to_string().contains("timed out"),
+        "expected a timeout failure, got: {err}"
+    );
+    Ok(())
 }
 
 fn wait_child_with_timeout(child: &mut Child, timeout: Duration) -> anyhow::Result<ExitStatus> {
