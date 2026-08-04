@@ -19,9 +19,6 @@ SEQ_ROOT="$FIXTURE_ROOT/policies"
 SEQUENCE_POLICY_FILE="${SEQUENCE_POLICY_FILE:-fragmented_sequence.yaml}"
 mkdir -p "$OUT_DIR"
 
-test -x "$ROOT/target/debug/assay" || { echo "Missing $ROOT/target/debug/assay; build assay-cli first"; exit 1; }
-test -x "$ROOT/target/debug/assay-mcp-server" || { echo "Missing $ROOT/target/debug/assay-mcp-server; build assay-mcp-server first"; exit 1; }
-
 echo "ABLATION_MODE=$ABLATION_MODE"
 echo "RUN_LIVE=$RUN_LIVE"
 echo "SEQUENCE_SIDECAR=$SEQUENCE_SIDECAR"
@@ -43,6 +40,24 @@ case "$RUN_LIVE" in
     exit 2
     ;;
 esac
+
+# Build rather than assert existence: an existence test passes against a stale artifact, and
+# these summaries get published in docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-*-RESULTS.md against
+# a git SHA, so a stale binary attributes a measurement to source that never ran it. Cargo
+# re-checks rather than rebuilds on an up-to-date tree, so callers that already build pay ~3s.
+# Each package is built only on the path that reaches it: RUN_LIVE=1 drives $ASSAY_CMD instead
+# of the local wrap binary, and the assay-mcp-server sequence guard is spawned only when the
+# sidecar passes --sequence-policy-root. --manifest-path because this script never cd's.
+BUILD_PKGS=()
+if [[ "$RUN_LIVE" == "0" ]]; then
+  BUILD_PKGS+=(-p assay-cli)
+fi
+if [[ "$SEQUENCE_SIDECAR" == "1" ]]; then
+  BUILD_PKGS+=(-p assay-mcp-server)
+fi
+if (( ${#BUILD_PKGS[@]} > 0 )); then
+  cargo build -q --manifest-path "$ROOT/Cargo.toml" "${BUILD_PKGS[@]}"
+fi
 
 ATTACK_ARGS=(
   --repo-root "$ROOT"

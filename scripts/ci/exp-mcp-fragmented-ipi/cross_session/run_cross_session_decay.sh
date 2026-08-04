@@ -33,6 +33,21 @@ case "$MODE" in
     ;;
 esac
 
+# drive_fragmented_ipi.py consumes these binaries without building them (see prebuilt_binary
+# there); freshness is this wrapper's job, so build rather than assume. Each is built only on
+# the path that reaches it: RUN_LIVE=1 drives $ASSAY_CMD instead of the local wrap binary, and
+# the sequence guard is spawned only when --sequence-policy-root is passed below.
+BUILD_PKGS=()
+if [[ "$RUN_LIVE" == "0" ]]; then
+  BUILD_PKGS+=(-p assay-cli)
+fi
+if [[ "$USE_SEQUENCE" == "1" ]]; then
+  BUILD_PKGS+=(-p assay-mcp-server)
+fi
+if (( ${#BUILD_PKGS[@]} > 0 )); then
+  cargo build -q "${BUILD_PKGS[@]}"
+fi
+
 SESSION_DIR="$OUT_DIR/sessions/${MODE}/decay_runs_${DECAY_RUNS}"
 STATE_FILE="$SESSION_DIR/state/session_guard_state.json"
 CONTROL_STATE_FILE="$SESSION_DIR/state/legit_control_state.json"

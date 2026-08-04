@@ -1,7 +1,7 @@
 //! Criterion benchmark: suite run worstcase (runner → store → report, file-backed WAL).
 //! Generates enough writes so WAL/checkpointing can occur; for P0.3 regression.
 //! Run with: cargo bench -p assay-cli --bench suite_run_worstcase
-//! Requires: assay binary (cargo build --release or CARGO_BIN_EXE_assay when run via cargo bench).
+//! The assay binary is supplied by cargo via CARGO_BIN_EXE_assay; no prior build is needed.
 //!
 //! **Duration:** Each iteration runs a full `assay run` subprocess (12 episodes, file-backed DB).
 //! With QUICK=1 (10 samples, 300ms warm-up, 1s measurement): expect ~20–40s total. Not a hang.
@@ -15,18 +15,10 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 fn assay_bin() -> PathBuf {
-    if let Some(p) = option_env!("CARGO_BIN_EXE_assay") {
-        return PathBuf::from(p);
-    }
-    // Fallback when not invoked by cargo bench: workspace target dir
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let release = manifest.join("../../target/release/assay");
-    let debug = manifest.join("../../target/debug/assay");
-    if release.exists() {
-        release
-    } else {
-        debug
-    }
+    // Cargo sets CARGO_BIN_EXE_<name> for bench targets and builds that binary from the
+    // current source first, so this path cannot resolve to a stale artifact. The value is
+    // baked in at compile time, so it also holds when the bench binary is run directly.
+    PathBuf::from(env!("CARGO_BIN_EXE_assay"))
 }
 
 /// Write minimal worstcase eval (12 tests, deterministic-only) and trace (12 episodes × 8 tool_calls, ~400B payload).
