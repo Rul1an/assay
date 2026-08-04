@@ -9,20 +9,21 @@
 //! payload type another way, until a signature made by one side stops verifying
 //! on the other.
 //!
-//! Scope: this is now the workspace's one construction. `assay-evidence`'s
-//! mandate signing, `assay-core`'s MCP signing, and `assay-registry` all call
-//! it. Getting here took two counting errors worth recording, since both were
+//! Scope: this is the workspace's one *production* construction. `assay-evidence`'s
+//! mandate signing, `assay-core`'s MCP signing, and `assay-registry` all call it. Getting here took two counting errors worth recording, since both were
 //! claims about how many copies existed made without opening every file: the
 //! first said the workspace had two and it had six, the second said
 //! `assay-registry` had four and it had three plus a test.
 //!
-//! One construction is deliberately left standing, in `assay-registry`'s
-//! `sigstore_bundle` tests. Those tests build a PAE, sign it, and assert the
-//! production verifier accepts the result, so it is an independent construction
-//! rather than a copy: if this module drifted, that signature would stop
-//! verifying and the tests would fail. Sharing it would leave those tests
-//! signing with the same code they verify with, and a bug here would agree with
-//! itself and pass.
+//! Two constructions are deliberately left standing, in `assay-registry`'s
+//! `sigstore_bundle` tests and in `assay-cli`'s supply-chain conformance tests.
+//! Each builds a PAE, signs it, and asserts the production verifier accepts the
+//! result, so they are independent constructions rather than copies: if this
+//! module drifted, those signatures would stop verifying and the tests would
+//! fail. Sharing them would leave the tests signing with the same code they
+//! verify with, and a bug here would agree with itself and pass. That is why
+//! "one production construction" and "two left standing" are consistent rather
+//! than contradictory: the tests are the instrument, not a duplicate of it.
 
 use std::string::ToString;
 use std::vec::Vec;
