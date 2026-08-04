@@ -612,17 +612,28 @@ jobs:
       # the test actually executed rather than trusting the exit code.
       - name: Test MCP no-pass-through E2E (E6a.3)
         shell: bash
+        # The guard below reads the log with anchored patterns, and a colour escape sits between
+        # the anchor and the status word. Runners are not TTYs so cargo defaults to plain output,
+        # but split-wave0-gates.yml sets CARGO_TERM_COLOR: always at workflow level — pinning it
+        # here means copying this step somewhere else cannot silently disarm half the pattern.
+        env:
+          CARGO_TERM_COLOR: never
         run: |
           set -euo pipefail
           cargo test --locked -p assay-mcp-server --features test-outbound --no-fail-fast no_passthrough \
             2>&1 | tee "$RUNNER_TEMP/e6a3.log"
-          # This guard answers one question only: did the test run at all. Whether it passed is
+          # This guard answers one question only: did the test execute. Whether it passed is
           # already settled above, by the exit code under `set -o pipefail` — a test that ran and
-          # failed never reaches this line. Keeping the two apart is what lets the pattern match a
-          # result line in any shape without enumerating which shapes mean success, which is where
-          # the earlier version went wrong: it matched nextest's plain PASS and so would have
-          # reported "did not run" for a test that passed after a retry or while leaking.
-          grep -qE 'test test_no_passthrough_e2e \.\.\.|^ *(PASS|FAIL|TRY|FLAKY|LEAK|SLOW|TIMEOUT).*test_no_passthrough_e2e' \
+          # failed never reaches this line. That separation is what lets the pattern accept any
+          # runner's vocabulary rather than enumerating which words mean success.
+          #
+          # "Executed" is the load-bearing word, and it is narrower than "was mentioned". libtest
+          # prints `... ignored` for a skipped test and exits 0, so the arm below requires a
+          # terminal status: `ok` and `FAILED` both mean it ran, `ignored` means it did not. That
+          # matters most on the OS legs this step added — `#[cfg_attr(windows, ignore)]` is the
+          # routine answer to a flaky spawn-a-server test, and it must turn this step red rather
+          # than let it certify an invariant nobody checked.
+          grep -qE 'test test_no_passthrough_e2e \.\.\. (ok|FAILED)|^ *(PASS|FAIL|TRY|FLAKY|LEAK|SLOW|TIMEOUT).*test_no_passthrough_e2e([[:space:]]|$)' \
             "$RUNNER_TEMP/e6a3.log" || {
             echo "::error::E6a.3 no-pass-through test did not run. The test-outbound gate is misconfigured, so the invariant was never exercised."
             exit 1
