@@ -32,11 +32,11 @@ FIXTURES = ROOT / "fixtures" / "aee"
 DEFAULT_OUT = ROOT / "fixtures" / "aee" / "statement-valid.json"
 
 def build_statement() -> dict[str, Any]:
-    corpus_manifest = read_json(FIXTURES / "corpus-manifest.json")
-    substrate_descriptor = read_json(FIXTURES / "substrate-descriptor.json")
-    catch_policy = read_json(FIXTURES / "catch-policy.json")
-    proxy_observation = read_json(FIXTURES / "proxy-deny-observation.json")
-    enforcement_health = read_json(FIXTURES / "enforcement-health-v1-active-probe.json")
+    corpus_manifest = read_json(FIXTURES / "corpus-manifest.json", base_dir=FIXTURES)
+    substrate_descriptor = read_json(FIXTURES / "substrate-descriptor.json", base_dir=FIXTURES)
+    catch_policy = read_json(FIXTURES / "catch-policy.json", base_dir=FIXTURES)
+    proxy_observation = read_json(FIXTURES / "proxy-deny-observation.json", base_dir=FIXTURES)
+    enforcement_health = read_json(FIXTURES / "enforcement-health-v1-active-probe.json", base_dir=FIXTURES)
 
     subject = {
         "name": "assay-aee-spike-fixture-subject",
@@ -252,7 +252,7 @@ def write_variant(path: Path, statement: dict[str, Any], variant: str) -> None:
         predicate["_ext"]["assaySpike"]["invalidClaim"] = "no sibling runs existed"
     else:
         raise ValueError(f"unknown variant: {variant}")
-    write_json(path, mutated)
+    write_json(path, mutated, base_dir=FIXTURES)
 
 
 def main() -> int:
@@ -262,7 +262,7 @@ def main() -> int:
     args = parser.parse_args()
 
     statement = build_statement()
-    write_json(args.out, statement)
+    write_json(args.out, statement, base_dir=FIXTURES)
 
     if args.variants:
         variants_dir = args.out.parent / "negative-controls"
