@@ -53,8 +53,12 @@ def parse_tool_payload(response):
         return {"raw": text}
 
 
-def prebuilt_binary(repo_root, name, package):
-    """Resolve a binary this driver consumes but deliberately does not build.
+def require_prebuilt(path, package):
+    """Check a binary this driver consumes but deliberately does not build.
+
+    Callers pass the fully constructed path rather than a binary name: keeping the join a
+    literal at the call site is what stops the path expression depending on a variable
+    (py/path-injection), and there are only ever two of them.
 
     This is a presence test, NOT a freshness test: it cannot tell a current binary from one
     left over from an older source tree. Freshness is owned by the wrapper scripts, which
@@ -68,7 +72,6 @@ def prebuilt_binary(repo_root, name, package):
     invoke this driver directly against a stale target/debug and it will produce a summary for
     source that never ran. Enter through a wrapper.
     """
-    path = repo_root / "target/debug" / name
     if not path.exists():
         raise FileNotFoundError(
             f"Missing binary: {path}. This driver consumes a prebuilt binary and does not build "
@@ -93,7 +96,7 @@ def spawn_wrapped_server(repo_root, fixture_root, tool_log_path, decision_log_pa
         host_cmd = shlex.split(mcp_host_cmd)
         host_args = shlex.split(mcp_host_args or "")
     else:
-        wrap_cmd = [str(prebuilt_binary(repo_root, "assay", "assay-cli"))]
+        wrap_cmd = [str(require_prebuilt(repo_root / "target/debug/assay", "assay-cli"))]
         if env.get("EXPERIMENT_VARIANT") == "sink_failure":
             env["COMPAT_ROOT"] = str(fixture_root)
             env["COMPAT_AUDIT_LOG"] = str(tool_log_path)
@@ -117,7 +120,7 @@ def spawn_wrapped_server(repo_root, fixture_root, tool_log_path, decision_log_pa
 
 
 def spawn_sequence_guard(repo_root, policy_root):
-    bin_path = prebuilt_binary(repo_root, "assay-mcp-server", "assay-mcp-server")
+    bin_path = require_prebuilt(repo_root / "target/debug/assay-mcp-server", "assay-mcp-server")
     cmd = [str(bin_path), "--policy-root", str(policy_root)]
     return subprocess.Popen(cmd, cwd=repo_root, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
