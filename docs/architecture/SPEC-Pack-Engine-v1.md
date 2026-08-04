@@ -473,7 +473,18 @@ GitHub rejects SARIF uploads > 10 MB and has result count limits.
 **Mitigation**:
 - Default `--max-results 500`
 - Truncation policy: lowest severity first, then oldest
-- Add `run.properties.truncated: true` and `run.properties.truncatedCount: N` when truncated
+- Add `run.properties.truncated: true`, `truncatedCount: N`, and `appliedCap: N` when truncated
+- Carry the same two values in the `ASSAY-LINT-TRUNCATED` tool-execution notification's
+  `properties`, as `appliedCap` and `droppedCount`. The names differ from `run.properties` on
+  purpose: that bag is this tool's own and keeps the names published here, while the notification
+  is where a consumer following the OWASP agentic-skills rule reads and carries the cross-emitter
+  pair a second emitter already uses. The invariant is that the two carriers disclose the same
+  cap and the same count, not that they spell them alike
+
+The cap is a mitigation for a consumer limit, not a conforming behaviour: SARIF 2.1.0 3.14.23 is
+normative that `results` "SHALL be present and SHALL contain all results detected by the tool", so
+a cap that fires puts the producer out of conformance. The disclosure above is what that producer
+owes a consumer; it is not a construct the format provides for capping.
 
 ### Complete SARIF Example
 
@@ -1018,7 +1029,9 @@ fn test_lint_empty_bundle_fails_eu12_001() {
 - [ ] `rules[].properties` includes pack, pack_version, short_id, article_ref
 - [ ] `results[].properties` includes article_ref
 - [ ] `run.properties.disclaimer` for compliance packs
-- [ ] `run.properties.truncated` + `truncatedCount` when applicable
+- [ ] `run.properties.truncated` + `truncatedCount` + `appliedCap` when applicable
+- [ ] notification `properties.appliedCap` + `droppedCount` carrying the same two values
+- [ ] `toolExecutionNotifications[].properties` carries those same truncation keys
 - [ ] Single run per SARIF file (no multi-run)
 
 ### Console Output (Must Have)
