@@ -50,10 +50,6 @@ pub mod cache;
 pub mod canonicalize;
 pub mod client;
 mod digest;
-/// One DSSE PAE for this crate; see the module docs for why it is not shared
-/// with `assay-common` yet.
-pub(crate) mod pae;
-
 pub mod dsse;
 pub mod error;
 pub mod lockfile;
