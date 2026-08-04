@@ -708,6 +708,58 @@ mod vacuous_expected_tests {
         }
     }
 
+    /// The sweep reaches the schema compiler from a caller that did not exist before, so a
+    /// schema that cannot compile now has a new way to be encountered. A panic here would take
+    /// down `assay validate` on the one input it most needs to survive: a config someone is
+    /// trying to fix.
+    ///
+    /// It returns, and it says nothing. That was worth measuring rather than assuming, because
+    /// an earlier version of the doc comment on `ineffective_reason` claimed the opposite — that
+    /// the schema compilation the sweep performs would surface a broken schema early. It does
+    /// not: the resulting diagnostic carries an evaluation-decided code, which the filter drops.
+    /// Both are pinned here so the boundary is stated rather than rediscovered.
+    #[test]
+    fn a_schema_that_cannot_compile_neither_panics_nor_is_swept() {
+        for (case, policy) in [
+            (
+                "type is not a schema keyword value",
+                serde_json::json!({ "schema": { "type": 42 } }),
+            ),
+            (
+                "properties is not an object",
+                serde_json::json!({ "schema": { "properties": "not-an-object" } }),
+            ),
+            (
+                "required is not an array",
+                serde_json::json!({ "schema": { "required": 7 } }),
+            ),
+            (
+                "external ref, which the hermetic compiler refuses",
+                serde_json::json!({ "schema": { "$ref": "https://example.invalid/s.json" } }),
+            ),
+        ] {
+            let cfg = cfg_with(
+                Expected::default(),
+                Some(vec![TraceAssertion::ArgsValid {
+                    tool: "t".into(),
+                    test_args: Some(serde_json::json!({ "a": 1 })),
+                    policy: Some(policy),
+                    expect: Some("pass".into()),
+                }]),
+            );
+            // The assertion is that this returns rather than unwinding.
+            let diags = check_vacuous_expected(&cfg);
+            assert!(
+                diags.is_empty(),
+                "{case}: the sweep reported {diags:?}. An uncompilable schema is a broken \
+                 assertion, not one that cannot fail, and widening the sweep to catch it would \
+                 cost the narrowness `does_not_flag_an_assertion_that_merely_fails_for_a_trace` \
+                 protects. If this is now wanted, it belongs in a schema-validity check with its \
+                 own diagnostic, not in the vacuity filter."
+            );
+        }
+    }
+
     /// The sweep must work with no trace file and no baseline — that is the point of
     /// being able to check a suite without running it.
     #[tokio::test]

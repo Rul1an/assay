@@ -37,8 +37,11 @@ pub fn evaluate(
 /// sweep reject working configurations.
 ///
 /// The cost of the reuse is that a valid `args_valid` compiles its schema here as well as at
-/// evaluation. In a static sweep that is acceptable and arguably the point: a schema that cannot
-/// compile is worth learning about from `assay validate` rather than from a run.
+/// evaluation, and the result is then discarded. In a static sweep that cost is acceptable, but
+/// it buys nothing: a schema that cannot compile produces an evaluation-decided code, which this
+/// filter drops, so the sweep stays silent about it. That is deliberate — a broken schema is not
+/// an assertion that cannot fail — but it is a boundary rather than a feature, and
+/// `a_schema_that_cannot_compile_neither_panics_nor_is_swept` pins it so nobody has to rediscover it.
 pub fn ineffective_reason(a: &TraceAssertion) -> Option<Diagnostic> {
     let no_trace = EpisodeGraph {
         episode_id: "static_config_sweep".into(),
