@@ -131,10 +131,17 @@ Leaf crates (no internal dependencies): `assay-common`, `assay-canonical`, `assa
 
 No circular dependencies. All dependencies flow in one direction.
 
-`assay-evidence -> assay-common` carries only the bounded-ingest primitive
-(`assay_common::limits::LimitReader`, ADR-043 §1), shared with the replay verifier in
-`assay-core` so both apply one ceiling mechanism. Limit *vocabularies* stay domain-local:
-`VerifyLimits` describes an evidence bundle and does not travel.
+`assay-evidence -> assay-common` carries two shared primitives, and the test for admitting one
+is the same in both cases: a mechanism whose second implementation would silently mean something
+different. The bounded-ingest primitive (`assay_common::limits::LimitReader`, ADR-043 §1) is
+shared with the replay verifier in `assay-core` so both apply one ceiling. `assay_common::dsse`
+holds the DSSE Pre-Authentication Encoding for the same reason: PAE defines what a signature
+covers, so two constructions of it are two definitions of what a signature means, and both
+`assay-evidence`'s mandate signing and `assay-core`'s MCP signing call it.
+
+Vocabularies still stay domain-local. `VerifyLimits` describes an evidence bundle and does not
+travel; neither does a payload type or a key policy. What travels is the construction, never the
+domain's reading of it.
 
 ## assay-sim (Attack Simulation)
 
