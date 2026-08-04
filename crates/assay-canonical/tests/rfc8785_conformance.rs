@@ -16,6 +16,13 @@
 //! file). When adding a vector, derive its expectation from the RFC or from a second conforming
 //! implementation — never from this crate, or the check becomes a snapshot of whatever we already
 //! do and stops being a conformance check at all.
+//!
+//! **To confirm this corpus still bites**, swap `serde_jcs::to_vec` for `serde_json::to_vec` in
+//! `src/jcs.rs` and run this file. At least 8 vectors must fail, and
+//! `keyorder_utf16_vs_codepoint` must be among them — `serde_json::Map` also sorts, so it is the
+//! only ordering vector here where code-unit, code-point and byte order disagree. A corpus that
+//! survives that substitution is measuring nothing, and the property is written here rather than
+//! left in a pull request description so it stays checkable rather than remembered.
 
 use std::collections::BTreeMap;
 
@@ -100,11 +107,11 @@ fn distinct_spellings_of_one_value_canonicalize_identically() {
         ("signed zero", r#"{"a":-0}"#, r#"{"a":0}"#),
         ("key order", r#"{"b":1,"a":2}"#, r#"{"a":2,"b":1}"#),
         ("whitespace", "{\"a\": 1,\n \"b\": 2}", r#"{"a":1,"b":2}"#),
-        (
-            "past double precision",
-            r#"{"a":9007199254740993}"#,
-            r#"{"a":9007199254740992}"#,
-        ),
+        // `9007199254740993` vs `...992` deliberately does NOT belong here. Those are two
+        // different integers that happen to round to one double, not one value spelled two ways,
+        // and the collapse is precision loss rather than canonicalization. It is covered by
+        // `integers_canonicalize_identically_from_a_struct_and_from_a_parsed_value`, where the
+        // framing is right and a future divergence would send the reader to the correct cause.
     ] {
         let canon = |src: &str| {
             let v: serde_json::Value = serde_json::from_str(src).expect("parse");
