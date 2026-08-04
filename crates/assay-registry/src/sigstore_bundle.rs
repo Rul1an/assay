@@ -297,6 +297,15 @@ mod tests {
     }
 
     /// DSSE v1 PAE (mirrors the dsse module; tests build their own signed bytes).
+    /// Deliberately not delegated to `crate::pae::build_pae`, unlike the three
+    /// production copies this crate collapsed into it.
+    ///
+    /// These tests build a PAE here, sign it, and assert the production verifier
+    /// accepts the result. That makes this an independent construction rather
+    /// than a duplicate: if the shared one drifted, the signature would stop
+    /// verifying and these tests would fail, which is the whole point. Sharing
+    /// it would leave the tests signing with the same code they verify with, and
+    /// a PAE bug would agree with itself and pass.
     fn pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
         let mut p = Vec::new();
         p.extend_from_slice(b"DSSEv1 ");
