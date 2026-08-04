@@ -329,11 +329,7 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
         }
     }
     if report.truncated {
-        run_props.insert("truncated".into(), json!(true));
-        run_props.insert("truncatedCount".into(), json!(report.truncated_count));
-        // The cap the count was measured against. Without it a consumer sees how many findings
-        // fell past the bound but not what the bound was (OWASP agentic-skills #49 review point).
-        run_props.insert("appliedCap".into(), json!(report.applied_cap));
+        run_props.append(&mut truncation_properties(report));
     }
 
     let automation_id = format!(
@@ -384,13 +380,9 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
                         report.truncated_count, report.applied_cap
                     )
                 },
-                // The configured limit and the suppressed count as separate machine-readable
-                // fields, so a consumer reconstructs both the ceiling and how many fell past it
-                // without parsing the message text.
-                "properties": {
-                    "appliedCap": report.applied_cap,
-                    "droppedCount": report.truncated_count
-                }
+                // The same keys the run properties carry, from the same builder — see
+                // `truncation_properties`.
+                "properties": truncation_properties(report)
             }]),
         );
     }
@@ -435,6 +427,32 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
         "version": "2.1.0",
         "runs": [run]
     })
+}
+
+/// The truncation disclosure as one set of keys, built once for both carriers.
+///
+/// `run.properties` and the tool-execution notification describe the same cap firing, so they say
+/// it the same way. They used to disagree: the notification called the suppressed count
+/// `droppedCount` while the run called it `truncatedCount`, which left a consumer reading two names
+/// for one number with no way to tell whether the difference was a difference in meaning.
+/// `truncatedCount` is the name that survives because it is the published one — the pack-engine
+/// spec and the changelog both name `run.properties.truncated` / `truncatedCount`, and nothing
+/// documents `droppedCount`.
+///
+/// `appliedCap` travels with the count rather than only near it: without the ceiling a consumer
+/// sees how many findings fell past a bound but not what the bound was (OWASP agentic-skills #49
+/// review point). `truncated` is redundant inside a notification that is only emitted on a
+/// truncated run, and it is emitted anyway, because a consumer that reads one bag should not have
+/// to know which bag it is holding to know which keys are in it.
+///
+/// Callers gate on `report.truncated`; this returns the disclosure for a run already known to be
+/// truncated.
+fn truncation_properties(report: &LintReport) -> serde_json::Map<String, serde_json::Value> {
+    let mut props = serde_json::Map::new();
+    props.insert("truncated".into(), json!(true));
+    props.insert("truncatedCount".into(), json!(report.truncated_count));
+    props.insert("appliedCap".into(), json!(report.applied_cap));
+    props
 }
 
 /// Extract a tag value from findings for a specific rule.
