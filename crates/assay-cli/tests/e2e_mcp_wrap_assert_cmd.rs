@@ -125,6 +125,24 @@ fn extract_error_code(resp: &Value) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Parse the JSON payload the server returns as `result.content[0].text`.
+///
+/// `assay_check_args` reports its verdict in that text block (not in `structuredContent`), so a
+/// test that wants to distinguish "the policy was evaluated" from "the call errored out" has to
+/// look here.
+fn extract_tool_payload(resp: &Value) -> anyhow::Result<Value> {
+    let text = resp
+        .get("result")
+        .and_then(|r| r.get("content"))
+        .and_then(|c| c.as_array())
+        .and_then(|c| c.first())
+        .and_then(|c| c.get("text"))
+        .and_then(|v| v.as_str())
+        .with_context(|| format!("response has no result.content[0].text: {resp}"))?;
+    serde_json::from_str::<Value>(text)
+        .with_context(|| format!("result.content[0].text is not JSON: {text}"))
+}
+
 #[test]
 fn owasp_mcp01_token_args_do_not_leak_to_proxy_logs() -> anyhow::Result<()> {
     let assay = bin_path("assay")?;
@@ -146,6 +164,22 @@ version: "2.0"
 name: "owasp-mcp01-token-log-fixture"
 tools:
   allow: ["assay_check_args"]
+enforcement:
+  unconstrained_tools: allow
+"#,
+    )?;
+
+    // The `policy` argument of `assay_check_args` is a path RELATIVE TO --policy-root, not an
+    // inline policy document. Passing YAML text there resolves to a nonexistent file and the call
+    // errors out with E_POLICY_NOT_FOUND before any policy is evaluated, which would leave this
+    // regression test asserting redaction only on the error path.
+    std::fs::write(
+        policy_root.join("read-file.yaml"),
+        r#"
+version: "2.0"
+name: "owasp-mcp01-inner"
+tools:
+  allow: ["read_file"]
 enforcement:
   unconstrained_tools: allow
 "#,
@@ -179,28 +213,74 @@ enforcement:
     let mut reader = BufReader::new(stdout);
     let secret = "ghp_assay_fixture_DO_NOT_LEAK_0123456789";
 
-    let req = json!({
-        "jsonrpc": "2.0",
-        "id": "token-log-fixture",
-        "method": "tools/call",
-        "params": {
-            "name": "assay_check_args",
-            "arguments": {
-                "tool": "read_file",
+    // Both calls carry the same token-like argument. The first resolves its policy and is actually
+    // evaluated (normal path); the second names a policy that does not exist (error path).
+    let call = |id: &str, policy: &str| {
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "tools/call",
+            "params": {
+                "name": "assay_check_args",
                 "arguments": {
-                    "path": "/workspace/report.md",
-                    "authorization": secret
-                },
-                "policy": "version: \"2.0\"\ntools:\n  allow: [\"read_file\"]\nenforcement:\n  unconstrained_tools: allow\n"
+                    "tool": "read_file",
+                    "arguments": {
+                        "path": "/workspace/report.md",
+                        "authorization": secret
+                    },
+                    "policy": policy
+                }
             }
-        }
-    });
+        })
+    };
 
-    send_line(&mut stdin, &req)?;
-    let _ = read_json_line(&mut reader, Duration::from_secs(5))?;
+    send_line(&mut stdin, &call("token-log-allowed", "read-file.yaml"))?;
+    let allowed_resp = read_json_line(&mut reader, Duration::from_secs(5))?;
+    send_line(
+        &mut stdin,
+        &call("token-log-missing", "does-not-exist.yaml"),
+    )?;
+    let error_resp = read_json_line(&mut reader, Duration::from_secs(5))?;
     drop(stdin);
     let status = wait_child_with_timeout(&mut child, Duration::from_secs(5))?;
     assert!(status.success(), "proxy exited with status {status}");
+
+    // Normal path: the policy was found and evaluated, so redaction below is asserted on a
+    // successful tool call and not merely on an early error.
+    let allowed_payload = extract_tool_payload(&allowed_resp)?;
+    assert_eq!(
+        allowed_payload.get("allowed"),
+        Some(&Value::Bool(true)),
+        "expected the policy to be evaluated and allow the call, got {allowed_resp}"
+    );
+    assert_eq!(
+        allowed_resp
+            .get("result")
+            .and_then(|r| r.get("isError"))
+            .and_then(|v| v.as_bool()),
+        Some(false),
+        "expected a non-error result on the normal path, got {allowed_resp}"
+    );
+
+    // Error path (retained): an unresolvable policy still reports E_POLICY_NOT_FOUND.
+    let error_payload = extract_tool_payload(&error_resp)?;
+    assert_eq!(
+        error_payload
+            .get("error")
+            .and_then(|e| e.get("code"))
+            .and_then(|v| v.as_str()),
+        Some("E_POLICY_NOT_FOUND"),
+        "expected E_POLICY_NOT_FOUND on the error path, got {error_resp}"
+    );
+
+    // Neither response may echo the token back to the caller either.
+    for resp in [&allowed_resp, &error_resp] {
+        let rendered = resp.to_string();
+        assert!(
+            !rendered.contains(secret),
+            "response leaked raw token-like argument: {rendered}"
+        );
+    }
 
     let audit = std::fs::read_to_string(&audit_log)?;
     let decisions = std::fs::read_to_string(&decision_log)?;
@@ -214,6 +294,19 @@ enforcement:
     );
     assert!(audit.contains("assay_check_args"));
     assert!(decisions.contains("assay_check_args"));
+
+    // Both calls must be present in both logs, so the no-leak assertions above cover the normal
+    // path and the error path rather than one standing in for the other.
+    for id in ["token-log-allowed", "token-log-missing"] {
+        assert!(
+            audit.contains(id),
+            "audit log is missing the record for request {id}: {audit}"
+        );
+        assert!(
+            decisions.contains(id),
+            "decision log is missing the record for request {id}: {decisions}"
+        );
+    }
 
     Ok(())
 }
@@ -287,8 +380,12 @@ enforcement:
         "expected deny-ish error_code, got '{code}'. resp={resp}"
     );
 
-    let _ = child.kill();
-    let _ = child.wait();
+    // Close stdin and reap the proxy instead of killing it: a kill only reaches the `assay`
+    // parent, orphaning the wrapped assay-mcp-server, which then races TempDir teardown and fails
+    // its own --policy-root canonicalization on a directory that has just been deleted.
+    drop(stdin);
+    let status = wait_child_with_timeout(&mut child, Duration::from_secs(5))?;
+    assert!(status.success(), "proxy exited with status {status}");
     Ok(())
 }
 
@@ -365,7 +462,11 @@ enforcement:
         "expected schema/constraint error_code, got '{code}'. resp={resp}"
     );
 
-    let _ = child.kill();
-    let _ = child.wait();
+    // Close stdin and reap the proxy instead of killing it: a kill only reaches the `assay`
+    // parent, orphaning the wrapped assay-mcp-server, which then races TempDir teardown and fails
+    // its own --policy-root canonicalization on a directory that has just been deleted.
+    drop(stdin);
+    let status = wait_child_with_timeout(&mut child, Duration::from_secs(5))?;
+    assert!(status.success(), "proxy exited with status {status}");
     Ok(())
 }
