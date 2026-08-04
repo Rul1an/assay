@@ -1,0 +1,19 @@
+{
+  "schema": "assay.aee_spike.catch_policy.v0",
+  "domains": {
+    "proxy_deny_tool_call": {
+      "tool": "github.add_deploy_key",
+      "decision": "deny",
+      "reason": "fixture policy denies privileged deploy-key creation"
+    },
+    "network_connect_block": {
+      "mechanism": "landlock",
+      "scope": "tcp_connect_landlock_port",
+      "blockedPort": 443
+    }
+  },
+  "nonClaims": [
+    "not an Assay production policy format",
+    "not a stable AEE policy vocabulary"
+  ]
+}
