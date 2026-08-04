@@ -4,7 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.38.0] - 2026-08-04
+
+### Changed
+- Releases now refuse to build over an open blocker. A `release-blocking`
+  label plus a step in the release workflow's contract job: if the milestone
+  being released has an open issue carrying that label, the run fails and names
+  the issues before any artifact is built. There is deliberately no override
+  input — removing the label or moving the issue to a later milestone are
+  recorded decisions on the issue itself, which is better provenance than a
+  workflow toggle. A release with no matching milestone is not blocked. This
+  exists because the gate on #1949 lived only in a sentence and lapsed when
+  3.37.0 shipped over it (#1985).
+
 ### Fixed
+- The canonicalizer is now checked against RFC 8785 rather than against itself.
+  31 edge-case vectors, cross-validated with an independent implementation in
+  another language, covering number reformatting, both ES6 exponent boundaries,
+  UTF-16 code-unit key ordering and the absence of Unicode normalization. Every
+  content id, mandate id and bundle run root is a sha256 over these bytes, so a
+  divergence would have made those digests irreproducible by any conforming
+  implementation while every internal test stayed green (#1982).
 - An `assertions:` entry carrying a key the type does not define is now rejected
   at parse time, naming the offending key, instead of being dropped in silence.
   Where the intended field had a default the dropped key left a check that could
