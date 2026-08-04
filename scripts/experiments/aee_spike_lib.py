@@ -2,8 +2,8 @@
 
 This module is intentionally narrow. It is not a general AEE verifier or a
 production signing library; it keeps the experiment's deterministic JSON,
-fixture signature, and RFC6962-style Merkle rules in one place so the emitter
-and checker cannot drift.
+fixture signature, run-binding, and RFC6962-style Merkle rules in one place so
+emitter and checker cannot drift.
 """
 
 from __future__ import annotations
@@ -29,6 +29,27 @@ VALID_METHOD = {"intercepted", "reconstructed"}
 VALID_ATTRIBUTION = {"pinned", "paired"}
 COVERING_KINDS = {"interception", "arming", "sealed", "examination"}
 
+EXPERIMENT_ROOT = Path(__file__).resolve().parent
+FIXTURES = EXPERIMENT_ROOT / "fixtures" / "aee"
+NEGATIVE_CONTROLS = FIXTURES / "negative-controls"
+
+SOURCE_FIXTURE_PATHS = {
+    "catch-policy": FIXTURES / "catch-policy.json",
+    "corpus-manifest": FIXTURES / "corpus-manifest.json",
+    "enforcement-health-v1-active-probe": FIXTURES / "enforcement-health-v1-active-probe.json",
+    "proxy-deny-observation": FIXTURES / "proxy-deny-observation.json",
+    "substrate-descriptor": FIXTURES / "substrate-descriptor.json",
+}
+
+STATEMENT_PATHS = {
+    "valid": FIXTURES / "statement-valid.json",
+    "artifact-labelled-substrate": NEGATIVE_CONTROLS / "statement-artifact-labelled-substrate.json",
+    "defective-unreferenced-seal": NEGATIVE_CONTROLS / "statement-defective-unreferenced-seal.json",
+    "missing-seal": NEGATIVE_CONTROLS / "statement-missing-seal.json",
+    "reconstructed-priced-intercepted": NEGATIVE_CONTROLS / "statement-reconstructed-priced-intercepted.json",
+    "run-population-overclaim": NEGATIVE_CONTROLS / "statement-run-population-overclaim.json",
+}
+
 
 def canonical_bytes(value: Any) -> bytes:
     """Return deterministic JSON bytes close to the JCS shape used by AEE.
@@ -45,30 +66,24 @@ def digest_json(value: Any) -> str:
     return hashlib.sha256(canonical_bytes(value)).hexdigest()
 
 
-def _resolve_under(path: Path, *, base_dir: Path | None) -> Path:
-    """Resolve a fixture path and optionally require it to stay under base_dir."""
-
-    resolved = path.resolve()
-    if base_dir is None:
-        return resolved
-    base = base_dir.resolve()
-    try:
-        resolved.relative_to(base)
-    except ValueError as exc:
-        raise ValueError(f"path must stay under {base}") from exc
-    return resolved
+def read_source_fixture(name: str) -> Any:
+    return _read_known_json(SOURCE_FIXTURE_PATHS[name])
 
 
-def read_json(path: Path, *, base_dir: Path | None = None) -> Any:
-    resolved = _resolve_under(path, base_dir=base_dir)
-    with resolved.open("r", encoding="utf-8") as handle:
+def read_statement_fixture(name: str) -> Any:
+    return _read_known_json(STATEMENT_PATHS[name])
+
+
+def write_statement_fixture(name: str, value: Any) -> Path:
+    path = STATEMENT_PATHS[name]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def _read_known_json(path: Path) -> Any:
+    with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
-
-
-def write_json(path: Path, value: Any, *, base_dir: Path | None = None) -> None:
-    resolved = _resolve_under(path, base_dir=base_dir)
-    resolved.parent.mkdir(parents=True, exist_ok=True)
-    resolved.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def dsse_pae(payload_type: str, payload: bytes) -> bytes:
@@ -122,3 +137,23 @@ def merkle_root(leaves: list[dict[str, Any]]) -> str:
                 next_layer.append(hashlib.sha256(b"\x01" + layer[idx] + layer[idx + 1]).digest())
         layer = next_layer
     return layer[0].hex()
+
+
+def run_binding_input_from_statement(statement: dict[str, Any]) -> dict[str, str]:
+    subject = statement["subject"][0]
+    env = statement["predicate"]["observationEnvironment"]
+    network_posture = env["networkPosture"]
+    return {
+        "aeeBindingVersion": "2",
+        "catchPolicy": env["catchPolicy"]["digest"]["sha256"],
+        "corpus": env["corpus"]["digest"]["sha256"],
+        "networkPosture": digest_json(network_posture),
+        "observationVocabulary": env["observationVocabulary"]["digest"]["sha256"],
+        "runEntropy": env["runEntropy"]["digest"]["sha256"],
+        "subject": subject["digest"]["sha256"],
+        "substrate": env["substrate"]["digest"]["sha256"],
+    }
+
+
+def run_binding_from_statement(statement: dict[str, Any]) -> str:
+    return digest_json(run_binding_input_from_statement(statement))
