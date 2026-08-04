@@ -9,7 +9,6 @@ constraints, substrate coverage, and the known negative controls.
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 from typing import Any
 
 from aee_spike_lib import (
@@ -17,34 +16,17 @@ from aee_spike_lib import (
     COVERING_KINDS,
     FIXTURE_KEY_ID,
     PAYLOAD_TYPE,
+    STATEMENT_PATHS,
     VALID_ATTRIBUTION,
     VALID_BASIS,
     VALID_METHOD,
     decode_record,
     digest_json,
     merkle_root,
-    read_json,
+    read_statement_fixture,
+    run_binding_from_statement,
     sign_payload,
 )
-
-ROOT = Path(__file__).resolve().parent
-FIXTURES = ROOT / "fixtures" / "aee"
-
-def recompute_run_binding(statement: dict[str, Any]) -> str:
-    subject = statement["subject"][0]
-    env = statement["predicate"]["observationEnvironment"]
-    network_posture = env["networkPosture"]
-    preimage = {
-        "aeeBindingVersion": "2",
-        "catchPolicy": env["catchPolicy"]["digest"]["sha256"],
-        "corpus": env["corpus"]["digest"]["sha256"],
-        "networkPosture": digest_json(network_posture),
-        "observationVocabulary": env["observationVocabulary"]["digest"]["sha256"],
-        "runEntropy": env["runEntropy"]["digest"]["sha256"],
-        "subject": subject["digest"]["sha256"],
-        "substrate": env["substrate"]["digest"]["sha256"],
-    }
-    return digest_json(preimage)
 
 
 def expected_result(predicate: dict[str, Any]) -> str:
@@ -96,9 +78,9 @@ def validate(statement: dict[str, Any]) -> list[str]:
     run_binding = None
     if any(row.get("basis") == "substrate" for row in rows):
         try:
-            run_binding = recompute_run_binding(statement)
-        except KeyError as exc:
-            errors.append(f"run binding cannot be derived: missing {exc}")
+            run_binding = run_binding_from_statement(statement)
+        except (KeyError, IndexError, TypeError) as exc:
+            errors.append(f"run binding cannot be derived: malformed statement: {exc}")
 
     payloads: list[dict[str, Any]] = []
     for idx, record in enumerate(records):
@@ -195,11 +177,14 @@ def validate(statement: dict[str, Any]) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("statement", type=Path, help="AEE spike statement JSON to check")
+    parser.add_argument("statement", choices=sorted(STATEMENT_PATHS), help="Named emitted fixture statement to check")
     parser.add_argument("--expect-invalid", action="store_true", help="Exit 0 only when validation fails")
     args = parser.parse_args()
 
-    errors = validate(read_json(args.statement, base_dir=FIXTURES))
+    try:
+        errors = validate(read_statement_fixture(args.statement))
+    except Exception as exc:  # noqa: BLE001 - malformed fixture input is invalid, not a traceback.
+        errors = [f"malformed statement: {exc}"]
     if args.expect_invalid:
         if errors:
             print(f"invalid as expected: {args.statement}")
