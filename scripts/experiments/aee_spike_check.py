@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any
 
 from aee_spike_lib import (
     AEE_PREDICATE_TYPE,
@@ -169,8 +168,11 @@ def validate(statement: dict[str, Any]) -> list[str]:
         if payload.get("aeeKind") == "interception" and idx not in referenced_interceptions:
             errors.append(f"interception record {idx} is not resolved by a caught row")
 
-    if predicate.get("_ext", {}).get("assaySpike", {}).get("invalidClaim") == "no sibling runs existed":
+    invalid_claim = predicate.get("_ext", {}).get("assaySpike", {}).get("invalidClaim")
+    if invalid_claim == "no sibling runs existed":
         errors.append("run population overclaim: AEE/Assay spike must not claim no sibling runs existed")
+    elif invalid_claim == "artifact-produced observation overclaimed as substrate":
+        errors.append("artifact/proxy observation overclaim: substrate basis requires substrate coverage")
 
     return errors
 
