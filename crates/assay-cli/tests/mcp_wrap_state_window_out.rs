@@ -1,40 +1,9 @@
 #![allow(deprecated)]
 
-use anyhow::Context;
 use assert_cmd::Command;
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tempfile::TempDir;
-
-fn exe_name(name: &str) -> String {
-    if cfg!(windows) {
-        format!("{name}.exe")
-    } else {
-        name.to_string()
-    }
-}
-
-fn bin_path(bin: &str) -> anyhow::Result<PathBuf> {
-    let env_key_underscore = format!("CARGO_BIN_EXE_{}", bin.replace('-', "_"));
-    let env_key_hyphen = format!("CARGO_BIN_EXE_{bin}");
-
-    if let Ok(p) = std::env::var(&env_key_underscore).or_else(|_| std::env::var(&env_key_hyphen)) {
-        return Ok(PathBuf::from(p));
-    }
-
-    let target_dir = if let Ok(td) = std::env::var("CARGO_TARGET_DIR") {
-        PathBuf::from(td)
-    } else {
-        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let workspace_root = manifest
-            .parent()
-            .and_then(|p| p.parent())
-            .context("failed to resolve workspace root from CARGO_MANIFEST_DIR")?;
-        workspace_root.join("target")
-    };
-
-    Ok(target_dir.join("debug").join(exe_name(bin)))
-}
 
 fn read_json(path: &Path) -> Value {
     let content = std::fs::read_to_string(path).expect("state window report should exist");
@@ -43,8 +12,8 @@ fn read_json(path: &Path) -> Value {
 
 #[test]
 fn mcp_wrap_state_window_out_writes_valid_v1_report() -> anyhow::Result<()> {
-    let assay = bin_path("assay")?;
-    assert!(assay.exists(), "missing binary: {}", assay.display());
+    // `assay` is a bin of this package, so Cargo builds it and injects the path.
+    let assay = env!("CARGO_BIN_EXE_assay");
 
     let tmp = TempDir::new()?;
     let policy_path = tmp.path().join("proxy-policy.yaml");
@@ -62,7 +31,7 @@ enforcement:
 "#,
     )?;
 
-    Command::new(&assay)
+    Command::new(assay)
         .args([
             "mcp",
             "wrap",
