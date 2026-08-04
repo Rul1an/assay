@@ -5,14 +5,23 @@
 //! findings and present as though it had none to drop. For a tool whose own position is that a
 //! partial scan must not read as a clean one, that was the wrong silence to keep.
 //!
-//! The SARIF half is about reach, and about not overclaiming what the format supports. SARIF 2.1.0
-//! has no construct for a reporting cap: Appendix I ("Detecting incomplete result sets",
-//! informative) lists three conditions and every one describes a tool that failed to *analyse*, not
-//! one that reported less than it found. So the cap is disclosed twice and neither is claimed as
-//! normative. `run.properties` is the machine-readable home, now emitted on every path rather than
-//! only when packs are configured. The notification is a human-readable aid at `warning`, which
-//! deliberately misses Appendix I's `error` gate, because per 3.20.21 an error-level notification
-//! means the run failed and a cap is not a failure.
+//! The SARIF half is about reach, and about not overclaiming what the disclosure buys. SARIF 2.1.0
+//! has a position on a reporting cap rather than a gap where one would go: 3.14.23 is normative and
+//! says `results` "SHALL be present and SHALL contain all results detected by the tool", so a
+//! configured `max_results` puts this producer out of conformance whenever it fires. The informative
+//! Appendix I ("Detecting incomplete result sets") does not rescue it either: its three conditions
+//! each describe a tool that failed to *analyse*, not one that reported less than it found. So the
+//! cap is disclosed twice and neither disclosure is claimed as conformance. `run.properties` is the
+//! machine-readable home, now emitted on every path rather than only when packs are configured. The
+//! notification is a human-readable aid at `warning`, which 3.58.6 defines as covering results that
+//! "might be incomplete" while remaining probably valid; it deliberately misses Appendix I's `error`
+//! gate, because per 3.20.21 an error-level notification means the run failed and a cap is not a
+//! failure.
+//!
+//! An earlier version of this doc said SARIF had no construct for a reporting cap. That was wrong
+//! and is retracted here as it is in `lint::sarif`: the format has a ruling, and it rules against
+//! us. The disclosure is what an out-of-conformance producer owes a consumer, not a substitute for
+//! conformance.
 
 use assay_evidence::bundle::BundleWriter;
 use assay_evidence::lint::engine::{lint_bundle_with_options, LintOptions};
@@ -120,9 +129,51 @@ fn truncation_is_announced_in_a_tool_execution_notification() {
         "the notice must name the cap the count was measured against: {text}"
     );
     assert_eq!(notifications[0]["properties"]["appliedCap"], 3);
+    // The notification speaks the cross-emitter vocabulary; `run.properties` keeps this tool's
+    // published names. See `both_carriers_disclose_the_same_two_values`.
     assert_eq!(
         notifications[0]["properties"]["droppedCount"],
         report.truncated_count
+    );
+}
+
+/// One cap firing, said the same way in both places it is said. The notification used to call the
+/// suppressed count `droppedCount` where `run.properties` called it `truncatedCount`, so a consumer
+/// reading both saw two names for one number. Pinned as equality rather than key-by-key, because
+/// the point is that neither carrier can grow a truncation key the other lacks. Equality is exact
+/// The two carriers name the cap differently on purpose, so the invariant is that they disclose
+/// the same two values rather than the same two strings. `run.properties` keeps this tool's
+/// published names; the notification carries the cross-emitter pair that
+/// aliksir/claude-code-skill-security-check#24 is settling. Asserting string equality here would
+/// pin the wrong thing and would break the moment either vocabulary moved, which is exactly what
+/// is expected to happen to one of them.
+#[test]
+fn both_carriers_disclose_the_same_two_values() {
+    let bundle = bundle_with_many_findings(10);
+    let report = lint_capped(&bundle, Some(3));
+    let sarif = to_sarif(&report);
+
+    let note = &sarif["runs"][0]["invocations"][0]["toolExecutionNotifications"][0]["properties"];
+    let run = &sarif["runs"][0]["properties"];
+
+    assert_eq!(
+        note["appliedCap"], run["appliedCap"],
+        "the cap must be one number: notification {note}, run {run}"
+    );
+    assert_eq!(
+        note["droppedCount"], run["truncatedCount"],
+        "the suppressed count must be one number under either name: \
+         notification {note}, run {run}"
+    );
+    // And each carrier must actually use its own vocabulary, so a future edit that quietly
+    // unifies them fails here rather than surfacing on someone else's consumer.
+    assert!(
+        note.get("truncatedCount").is_none(),
+        "the notification carries the cross-emitter name only: {note}"
+    );
+    assert!(
+        run.get("droppedCount").is_none(),
+        "run.properties carries this tool's published names only: {run}"
     );
 }
 
