@@ -86,12 +86,28 @@ jobs:
           set -euo pipefail
           milestone="v${VERSION}"
 
-          if ! gh api "repos/${GITHUB_REPOSITORY}/milestones?state=all&per_page=100" \
-                 --jq '.[].title' | grep -Fxq "$milestone"; then
+          # Capture before testing, and paginate. Both matter, and both are fail-closed fixes:
+          #
+          #   - `if ! gh api ... | grep -q` would treat an API failure as "milestone not found",
+          #     because `set -e` is suspended inside an `if` condition and `!` inverts the pipe's
+          #     non-zero status. A rate limit or a network blip would have released over an open
+          #     blocker. Assigning first means a failure is distinguishable from a miss.
+          #   - `--paginate` because this gate is meant to outlive the milestones it reads. A repo
+          #     with more than one page of them would find nothing on page 1 and disable the gate
+          #     precisely when the project is old enough to have forgotten it exists.
+          if ! titles="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/milestones?state=all" --jq '.[].title')"; then
+            echo "::error::could not list milestones; refusing to release rather than guessing."
+            exit 1
+          fi
+
+          if ! grep -Fxq "$milestone" <<<"$titles"; then
             echo "No milestone named ${milestone}; nothing to gate on."
             exit 0
           fi
 
+          # Deliberately NOT inside an `if`. Under `set -e` a failed query aborts the step, which
+          # is the fail-closed behaviour a gate needs. Wrapping this in a condition would swallow
+          # the failure and release, which is the same shape as the milestone bug above.
           blockers="$(gh issue list \
             --repo "${GITHUB_REPOSITORY}" \
             --label release-blocking \
