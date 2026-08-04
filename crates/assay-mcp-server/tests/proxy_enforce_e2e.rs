@@ -11,9 +11,11 @@
 //! with `pdp_gate_unavailable`.
 
 use serde_json::Value;
-use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, Command, Stdio};
+
+mod jsonrpc_conn;
+use jsonrpc_conn::Conn;
 
 const PROXY_UNSUPPORTED: i64 = -32040;
 const PROXY_DENIED: i64 = -32042;
@@ -94,29 +96,6 @@ fn spawn_enforce(log: &std::path::Path, policy: &std::path::Path) -> Child {
         .expect("spawn enforce proxy (is python installed?)")
 }
 
-fn send(stdin: &mut ChildStdin, v: Value) {
-    writeln!(stdin, "{v}").expect("write");
-    stdin.flush().expect("flush");
-}
-
-fn read_response(reader: &mut BufReader<ChildStdout>) -> Value {
-    let mut line = String::new();
-    loop {
-        line.clear();
-        let n = reader.read_line(&mut line).expect("read");
-        assert!(n > 0, "proxy closed stdout before responding");
-        let t = line.trim();
-        if t.is_empty() {
-            continue;
-        }
-        let v: Value = serde_json::from_str(t).expect("parse JSON");
-        if v.get("method").is_some() {
-            continue; // skip notifications/upstream-initiated requests
-        }
-        return v;
-    }
-}
-
 fn init() -> Value {
     serde_json::json!({
         "jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -132,11 +111,6 @@ fn read_methods(log: &std::path::Path) -> Vec<String> {
         .collect()
 }
 
-fn shutdown(mut child: Child, stdin: ChildStdin) {
-    drop(stdin);
-    let _ = child.wait();
-}
-
 // --- the load-bearing test, first ---------------------------------------------------------------
 
 #[test]
@@ -144,24 +118,18 @@ fn enforcing_mode_tools_call_denied_and_not_forwarded() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
     let policy = write_policy(dir.path(), MINIMAL_POLICY);
-    let mut child = spawn_enforce(&log, &policy);
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_enforce(&log, &policy));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let _ = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let _ = out.read_response();
 
-    send(
-        &mut stdin,
+    out.send(
         serde_json::json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                            "params": {"name": "echo", "arguments": {}}}),
     );
-    let r = read_response(&mut out);
+    let r = out.read_response();
     assert_eq!(r["id"], 3);
     assert_eq!(
         r["error"]["code"], PROXY_DENIED,
@@ -174,7 +142,7 @@ fn enforcing_mode_tools_call_denied_and_not_forwarded() {
         "an unclassified tool denies at the classification gate"
     );
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
 
     let methods = read_methods(&log);
     assert!(methods.contains(&"initialize".to_string()));
@@ -192,24 +160,19 @@ fn enforcing_mode_unknown_method_is_unsupported_not_denied() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
     let policy = write_policy(dir.path(), MINIMAL_POLICY);
-    let mut child = spawn_enforce(&log, &policy);
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_enforce(&log, &policy));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 7, "method": "resources/list"}),
-    );
-    let r = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 7, "method": "resources/list"}));
+    let r = out.read_response();
     assert_eq!(
         r["error"]["code"], PROXY_UNSUPPORTED,
         "non-tools/call stays unsupported, not denied"
     );
     assert_eq!(r["error"]["data"]["reason"], "method_not_allowlisted");
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     assert!(!read_methods(&log).contains(&"resources/list".to_string()));
 }
 
@@ -218,24 +181,19 @@ fn enforcing_mode_list_methods_still_forward() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
     let policy = write_policy(dir.path(), MINIMAL_POLICY);
-    let mut child = spawn_enforce(&log, &policy);
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_enforce(&log, &policy));
 
-    send(&mut stdin, init());
-    let r = read_response(&mut out);
+    out.send(init());
+    let r = out.read_response();
     assert_eq!(
         r["result"]["serverInfo"]["name"], "mock-upstream",
         "initialize relayed"
     );
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let r = read_response(&mut out);
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let r = out.read_response();
     assert!(r["result"]["tools"].is_array(), "tools/list relayed");
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let methods = read_methods(&log);
     assert!(
         methods.contains(&"initialize".to_string()) && methods.contains(&"tools/list".to_string())
@@ -247,21 +205,18 @@ fn observe_mode_tools_call_still_unsupported() {
     // The shipped observe mode is unchanged: a tools/call is proxy_unsupported, NOT proxy_denied.
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
-    let mut child = spawn_observe(&log);
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_observe(&log));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
+    out.send(init());
+    let _ = out.read_response();
+    out.send(
         serde_json::json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                            "params": {"name": "echo", "arguments": {}}}),
     );
-    let r = read_response(&mut out);
+    let r = out.read_response();
     assert_eq!(r["error"]["code"], PROXY_UNSUPPORTED);
     assert_eq!(r["error"]["data"]["reason"], "method_not_allowlisted");
-    shutdown(child, stdin);
+    let _ = out.shutdown();
 }
 
 #[test]
@@ -270,24 +225,18 @@ fn existing_proxy_invocation_still_observes() {
     // handshake and tools/list reach the upstream, tools/call does not.
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
-    let mut child = spawn_observe(&log);
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_observe(&log));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
+    out.send(init());
+    let _ = out.read_response();
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let _ = out.read_response();
+    out.send(
         serde_json::json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "echo"}}),
     );
-    let _ = read_response(&mut out);
+    let _ = out.read_response();
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let methods = read_methods(&log);
     assert!(methods.contains(&"initialize".to_string()));
     assert!(methods.contains(&"tools/list".to_string()));

@@ -1,4 +1,3 @@
-use std::io::BufReader;
 use std::process::{Command, Stdio};
 
 use crate::support::*;
@@ -13,21 +12,24 @@ fn establish_then_allow_forwards_without_a_client_list() {
     let log = dir.path().join("methods.log");
     let decisions = dir.path().join("decisions.ndjson");
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child =
-        spawn_enforce_with_decisions(&log, &policy, &approved_baseline_path(), "p60a", &decisions);
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_enforce_with_decisions(
+        &log,
+        &policy,
+        &approved_baseline_path(),
+        "p60a",
+        &decisions,
+    ));
 
-    send(&mut stdin, init());
-    let init_resp = read_response(&mut out);
+    out.send(init());
+    let init_resp = out.read_response();
     assert_eq!(init_resp["result"]["serverInfo"]["name"], "mock-upstream");
 
-    send(&mut stdin, deploy_key_call());
-    let r = read_response(&mut out);
+    out.send(deploy_key_call());
+    let r = out.read_response();
     assert_eq!(r["id"], DEPLOY_KEY_CALL_ID);
     assert_eq!(r["result"]["content"][0]["text"], "forwarded-ok");
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let methods = read_methods(&log);
     assert!(methods.contains(&"tools/list".to_string()));
     assert!(methods.contains(&"tools/call".to_string()));
@@ -38,7 +40,7 @@ fn establish_then_allow_forwards_without_a_client_list() {
     assert!(!serde_json::to_string(&r)
         .unwrap()
         .contains("assay-establish-"));
-    for line in drain_stdout(&mut out) {
+    for line in out.drain_stdout() {
         assert!(
             !line.contains("assay-establish-"),
             "a synthetic establish line leaked to the client: {line}"
@@ -57,37 +59,37 @@ fn establish_timeout_denies_to_client_within_budget() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
-        .args([
-            "proxy-enforce",
-            "--upstream-command",
-            python(),
-            "--upstream-arg",
-            "-u",
-            "--upstream-arg",
-            mock_path().to_str().unwrap(),
-            "--enforce-policy",
-            policy.to_str().unwrap(),
-            "--declared-mcp-manifest",
-            approved_baseline_path().to_str().unwrap(),
-            "--manifest-establish-budget-ms",
-            "300",
-        ])
-        .env("MOCK_UPSTREAM_LOG", &log)
-        .env("MOCK_UPSTREAM_MODE", "drop_list")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .expect("spawn enforce proxy (is python installed?)");
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(
+        Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+            .args([
+                "proxy-enforce",
+                "--upstream-command",
+                python(),
+                "--upstream-arg",
+                "-u",
+                "--upstream-arg",
+                mock_path().to_str().unwrap(),
+                "--enforce-policy",
+                policy.to_str().unwrap(),
+                "--declared-mcp-manifest",
+                approved_baseline_path().to_str().unwrap(),
+                "--manifest-establish-budget-ms",
+                "300",
+            ])
+            .env("MOCK_UPSTREAM_LOG", &log)
+            .env("MOCK_UPSTREAM_MODE", "drop_list")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("spawn enforce proxy (is python installed?)"),
+    );
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
     let start = std::time::Instant::now();
-    send(&mut stdin, deploy_key_call());
-    let r = read_response(&mut out);
+    out.send(deploy_key_call());
+    let r = out.read_response();
     let elapsed = start.elapsed();
 
     assert_eq!(r["id"], DEPLOY_KEY_CALL_ID);
@@ -101,7 +103,7 @@ fn establish_timeout_denies_to_client_within_budget() {
         "the client must get its deny within budget + margin, not hang; took {elapsed:?}"
     );
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let methods = read_methods(&log);
     assert!(methods.contains(&"tools/list".to_string()));
     assert!(!methods.contains(&"tools/call".to_string()));
@@ -112,26 +114,26 @@ fn ambiguous_observation_denies_without_attempting_establish() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child = spawn_enforce(&log, &policy, &approved_baseline_path(), "duplicate");
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_enforce(
+        &log,
+        &policy,
+        &approved_baseline_path(),
+        "duplicate",
+    ));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let _ = read_response(&mut out);
-    send(&mut stdin, deploy_key_call());
-    let r = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let _ = out.read_response();
+    out.send(deploy_key_call());
+    let r = out.read_response();
     assert_eq!(r["error"]["code"], PROXY_DENIED);
     assert_eq!(
         r["error"]["data"]["reason"],
         "manifest_observation_ambiguous"
     );
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let lists = read_methods(&log)
         .iter()
         .filter(|m| m.as_str() == "tools/list")
@@ -144,21 +146,24 @@ fn establish_completes_but_tool_absent_denies() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child = spawn_enforce(&log, &policy, &approved_baseline_path(), "normal");
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_enforce(
+        &log,
+        &policy,
+        &approved_baseline_path(),
+        "normal",
+    ));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(&mut stdin, deploy_key_call());
-    let r = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(deploy_key_call());
+    let r = out.read_response();
     assert_eq!(r["error"]["code"], PROXY_DENIED);
     assert_eq!(
         r["error"]["data"]["reason"],
         "manifest_current_observation_incomplete"
     );
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let methods = read_methods(&log);
     assert!(methods.contains(&"tools/list".to_string()));
     assert!(!methods.contains(&"tools/call".to_string()));
@@ -171,7 +176,7 @@ fn no_establish_needed_allow_writes_carrier_and_decision() {
     let decisions = dir.path().join("decisions.ndjson");
     let establish = dir.path().join("establish.ndjson");
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child = spawn_enforce_recording(
+    let mut out = Conn::attach(spawn_enforce_recording(
         &log,
         &policy,
         &approved_baseline_path(),
@@ -179,22 +184,17 @@ fn no_establish_needed_allow_writes_carrier_and_decision() {
         &decisions,
         &establish,
         None,
-    );
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    ));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let _ = read_response(&mut out);
-    send(&mut stdin, deploy_key_call());
-    let r = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let _ = out.read_response();
+    out.send(deploy_key_call());
+    let r = out.read_response();
     assert_eq!(r["result"]["content"][0]["text"], "forwarded-ok");
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let recs = read_establish_records(&establish);
     assert_eq!(recs.len(), 1);
     let rec = &recs[0];
@@ -213,7 +213,7 @@ fn establish_then_allow_writes_established_then_allowed() {
     let decisions = dir.path().join("decisions.ndjson");
     let establish = dir.path().join("establish.ndjson");
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child = spawn_enforce_recording(
+    let mut out = Conn::attach(spawn_enforce_recording(
         &log,
         &policy,
         &approved_baseline_path(),
@@ -221,17 +221,15 @@ fn establish_then_allow_writes_established_then_allowed() {
         &decisions,
         &establish,
         None,
-    );
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    ));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(&mut stdin, deploy_key_call());
-    let r = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(deploy_key_call());
+    let r = out.read_response();
     assert_eq!(r["result"]["content"][0]["text"], "forwarded-ok");
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let recs = read_establish_records(&establish);
     assert_eq!(recs.len(), 1);
     let rec = &recs[0];
@@ -249,7 +247,7 @@ fn establish_complete_but_absent_writes_established_then_denied() {
     let decisions = dir.path().join("decisions.ndjson");
     let establish = dir.path().join("establish.ndjson");
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child = spawn_enforce_recording(
+    let mut out = Conn::attach(spawn_enforce_recording(
         &log,
         &policy,
         &approved_baseline_path(),
@@ -257,17 +255,15 @@ fn establish_complete_but_absent_writes_established_then_denied() {
         &decisions,
         &establish,
         None,
-    );
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    ));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(&mut stdin, deploy_key_call());
-    let r = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(deploy_key_call());
+    let r = out.read_response();
     assert_eq!(r["error"]["code"], PROXY_DENIED);
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let recs = read_establish_records(&establish);
     assert_eq!(recs.len(), 1);
     let rec = &recs[0];
@@ -284,7 +280,7 @@ fn establish_timeout_writes_immediate_deny_timed_out() {
     let decisions = dir.path().join("decisions.ndjson");
     let establish = dir.path().join("establish.ndjson");
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child = spawn_enforce_recording(
+    let mut out = Conn::attach(spawn_enforce_recording(
         &log,
         &policy,
         &approved_baseline_path(),
@@ -292,17 +288,15 @@ fn establish_timeout_writes_immediate_deny_timed_out() {
         &decisions,
         &establish,
         Some(300),
-    );
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    ));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(&mut stdin, deploy_key_call());
-    let r = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(deploy_key_call());
+    let r = out.read_response();
     assert_eq!(r["error"]["code"], PROXY_DENIED);
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let recs = read_establish_records(&establish);
     assert_eq!(recs.len(), 1);
     let rec = &recs[0];
@@ -319,7 +313,7 @@ fn ambiguous_writes_immediate_deny_not_performed_no_synthetic_list() {
     let decisions = dir.path().join("decisions.ndjson");
     let establish = dir.path().join("establish.ndjson");
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child = spawn_enforce_recording(
+    let mut out = Conn::attach(spawn_enforce_recording(
         &log,
         &policy,
         &approved_baseline_path(),
@@ -327,25 +321,20 @@ fn ambiguous_writes_immediate_deny_not_performed_no_synthetic_list() {
         &decisions,
         &establish,
         None,
-    );
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    ));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let _ = read_response(&mut out);
-    send(&mut stdin, deploy_key_call());
-    let r = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let _ = out.read_response();
+    out.send(deploy_key_call());
+    let r = out.read_response();
     assert_eq!(
         r["error"]["data"]["reason"],
         "manifest_observation_ambiguous"
     );
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let recs = read_establish_records(&establish);
     assert_eq!(recs.len(), 1);
     let rec = &recs[0];
