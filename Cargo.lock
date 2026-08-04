@@ -486,6 +486,7 @@ name = "assay-registry"
 version = "3.37.0"
 dependencies = [
  "anyhow",
+ "assay-common",
  "async-trait",
  "base64",
  "chrono",
