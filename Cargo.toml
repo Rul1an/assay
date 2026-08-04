@@ -44,7 +44,7 @@ print_stdout = "allow"
 missing_errors_doc = "allow"
 
 [workspace.package]
-version = "3.37.0"
+version = "3.38.0"
 edition = "2021"
 rust-version = "1.89"
 license = "MIT"
