@@ -215,7 +215,6 @@ def validate(statement: dict[str, Any]) -> list[str]:
         errors.append(f"run binding cannot be derived: {exc}")
         rb = None
     payloads = []
-    keyids = []
     for idx, rec in enumerate(records):
         payload = rec.get("payload")
         if not isinstance(payload, dict):
@@ -225,10 +224,8 @@ def validate(statement: dict[str, Any]) -> list[str]:
         sigs = rec.get("signatures", [])
         if len(sigs) != 1:
             errors.append(f"record {idx} must carry exactly one fixture signature")
-            keyids.append("")
             continue
         keyid = sigs[0].get("keyid", "")
-        keyids.append(keyid)
         if sigs[0].get("sig") != sign(payload, keyid):
             errors.append(f"record {idx} fixture signature does not verify")
         if production_path and keyid.startswith(FIXTURE_KEY_PREFIX):
