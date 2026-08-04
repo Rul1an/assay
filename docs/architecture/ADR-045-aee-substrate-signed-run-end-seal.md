@@ -246,15 +246,15 @@ Assembly-plane attribution may support a weaker row-level binding, but MUST NOT 
 For each sealed record:
 
 1. Every attack ID named in `aeeObservedAttacks` MUST correspond to at least one caught row in the carried statement, unless the seal is being validated standalone before statement assembly.
-2. A caught row MAY exist whose `attackId` is not named in `aeeObservedAttacks` when `assayAttackAttributionSource = "assembly-plane"`.
-3. Equality between `aeeObservedAttacks` and caught row attack IDs is required only when `assayAttackAttributionSource = "substrate-runner"` or an equivalent signed substrate-dispatch boundary is present.
+2. A caught row MAY exist whose `attackId` is not named in `aeeObservedAttacks` when `assayAttackRowAttributionSource = "assembly-plane"`.
+3. Equality between `aeeObservedAttacks` and caught row attack IDs is required only when `assayAttackRowAttributionSource = "substrate-runner"` or an equivalent signed substrate-dispatch boundary is present.
 4. Empty `aeeObservedAttacks` is valid for a pure Landlock seal and means the substrate signs no attack-ID correspondence.
 
 ## Options considered
 
 ### Option A: Single substrate observation key, collection path in payload
 
-One key signs arming/interception/sealed payloads. Payloads carry `assayCollectionPath`, `actualLayer`, and source schema.
+One key signs arming/interception/sealed payloads. Payloads carry `assayCollectionPath` and source schema; later AEE statement rows carry `actualLayer`.
 
 Pros:
 
@@ -450,7 +450,9 @@ Any fixture, checker, or experiment path used while developing this primitive MU
 
 Before implementation is accepted:
 
-- Add fixtures for valid Landlock seal.
+- Add fixtures for:
+  - valid Landlock seal;
+  - valid Landlock seal with empty `aeeObservedAttacks` under assembly-plane attribution.
 - Add negative fixtures for:
   - missing seal;
   - mismatched run binding;
@@ -462,7 +464,6 @@ Before implementation is accepted:
   - label array present without matching `aeeObservedSet` digest;
   - `aeePostureDigest` confused with the run-binding digest of the full `networkPosture` object;
   - seal naming an attack not supported by caught rows;
-  - empty observed-attacks lower bound under assembly-plane attribution;
   - equality-required observed-attacks mismatch under substrate-runner attribution;
   - defective unreferenced seal;
 - Add property tests that malformed evidence is invalid, not clean.
