@@ -37,11 +37,17 @@ The fixture also carries synthetic substrate, catch-policy, corpus, network-post
 ## Run
 
 ```bash
+set -euo pipefail
+
 python3 scripts/experiments/aee_spike_emit.py --variants
 python3 scripts/experiments/aee_spike_check.py scripts/experiments/fixtures/aee/statement-valid.json
 for f in scripts/experiments/fixtures/aee/negative-controls/*.json; do
   python3 scripts/experiments/aee_spike_check.py --expect-invalid "$f"
 done
+python3 -m py_compile \
+  scripts/experiments/aee_spike_lib.py \
+  scripts/experiments/aee_spike_emit.py \
+  scripts/experiments/aee_spike_check.py
 ```
 
 ## What the checker validates
