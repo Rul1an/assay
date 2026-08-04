@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 from aee_spike_lib import (
     AEE_PREDICATE_TYPE,
@@ -25,6 +26,9 @@ from aee_spike_lib import (
     read_json,
     sign_payload,
 )
+
+ROOT = Path(__file__).resolve().parent
+FIXTURES = ROOT / "fixtures" / "aee"
 
 def recompute_run_binding(statement: dict[str, Any]) -> str:
     subject = statement["subject"][0]
@@ -183,7 +187,7 @@ def main() -> int:
     parser.add_argument("--expect-invalid", action="store_true", help="Exit 0 only when validation fails")
     args = parser.parse_args()
 
-    errors = validate(read_json(args.statement))
+    errors = validate(read_json(args.statement, base_dir=FIXTURES))
     if args.expect_invalid:
         if errors:
             print(f"invalid as expected: {args.statement}")
