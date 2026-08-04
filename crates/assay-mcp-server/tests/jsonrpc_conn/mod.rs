@@ -171,7 +171,12 @@ impl Conn {
         let deadline = Instant::now() + self.take_budget();
         let mut lines = Vec::new();
         loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
+            // Same reason as in `next_line`: a queued line comes back even at zero remaining.
+            let now = Instant::now();
+            if now >= deadline {
+                self.fail("the child held stdout open past the deadline while draining it");
+            }
+            let remaining = deadline.saturating_duration_since(now);
             match self.rx.recv_timeout(remaining) {
                 Ok(Chunk::Line(line)) => {
                     let trimmed = line.trim();
@@ -246,8 +251,20 @@ impl Conn {
     }
 
     /// The next line from the reader thread, or a failure that names the stalled exchange.
+    ///
+    /// The deadline is checked here explicitly rather than left to `recv_timeout`. `recv_timeout`
+    /// attempts an optimistic `try_recv` first, so it hands back an already-queued line even when
+    /// the remaining duration is zero; a child writing skippable lines faster than the callers
+    /// above skip them therefore keeps the channel non-empty and would run unbounded past the
+    /// deadline. `a_flood_of_skippable_lines_cannot_outrun_the_deadline` covers that case.
+    ///
+    /// Credit: the same defect was found and fixed for the CLI's copy of this reader in #1987.
     fn next_line(&mut self, deadline: Instant) -> String {
-        let remaining = deadline.saturating_duration_since(Instant::now());
+        let now = Instant::now();
+        if now >= deadline {
+            self.fail("the deadline passed while skipping lines that were not the response");
+        }
+        let remaining = deadline.saturating_duration_since(now);
         match self.rx.recv_timeout(remaining) {
             Ok(Chunk::Line(line)) => line,
             Ok(Chunk::Err(e)) => self.fail(&format!("reading the child's stdout failed: {e}")),
