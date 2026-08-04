@@ -139,6 +139,10 @@ holds the DSSE Pre-Authentication Encoding for the same reason: PAE defines what
 covers, so two constructions of it are two definitions of what a signature means, and both
 `assay-evidence`'s mandate signing and `assay-core`'s MCP signing call it.
 
+`assay-registry` carries four PAE copies of its own and is deliberately not folded in: it is a
+leaf crate with no internal dependencies, so sharing would give it a new edge, which is an
+architecture decision rather than a refactor. The shared module says so in its own docs.
+
 Vocabularies still stay domain-local. `VerifyLimits` describes an evidence bundle and does not
 travel; neither does a payload type or a key policy. What travels is the construction, never the
 domain's reading of it.

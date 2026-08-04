@@ -1,17 +1,23 @@
-//! DSSE Pre-Authentication Encoding, in one place.
+//! DSSE Pre-Authentication Encoding, for the crates that share this one.
 //!
 //! std-only, like [`crate::limits`]: it allocates.
 //!
 //! PAE is what a DSSE signature is actually taken over, so two implementations
-//! of it are two definitions of what a signature means. They had been
-//! byte-identical, which is the state a drift starts from rather than a defence
-//! against one: nothing failed if one of them gained a space, a different length
-//! encoding, or a non-ASCII payload type handled another way, until a signature
-//! made by one side stopped verifying on the other.
+//! of it are two definitions of what a signature covers. Byte-identical copies
+//! are where a drift starts rather than a defence against one: nothing fails if
+//! one gains a space, renders a length differently, or handles a non-ASCII
+//! payload type another way, until a signature made by one side stops verifying
+//! on the other.
 //!
-//! There were two copies before this module, in `assay-evidence`'s mandate
-//! signing and in `assay-core`'s MCP signing, and a third was about to be
-//! written for a run-end seal. Both now call this.
+//! Scope, stated exactly because an earlier version of this comment claimed the
+//! workspace had two copies and it has six. `assay-evidence`'s mandate signing
+//! and `assay-core`'s MCP signing call this. `assay-registry` carries four more
+//! of its own, in `dsse`, `sigstore_bundle`, `supply_chain::provenance` and
+//! `verify_internal::dsse`, and they are not consolidated here: that crate has
+//! no internal dependencies at all, so folding them in means giving a leaf crate
+//! a new edge, which is an architecture decision rather than a refactor. This
+//! module is one construction for the crates that already share it, not one for
+//! the workspace.
 
 use std::string::ToString;
 use std::vec::Vec;
@@ -67,10 +73,13 @@ mod tests {
         let ty = "café/json"; // 9 chars, 10 bytes
         assert_eq!(ty.chars().count(), 9);
         let pae = build_pae(ty, b"x");
+        // The diagnostic must not decode: a fixed-width slice of a PAE carrying a
+        // multi-byte payload type can land mid-codepoint, and a panicking failure
+        // message hides the assertion it was written to explain.
         assert!(
             pae.starts_with(b"DSSEv1 10 "),
-            "type length must be the byte length: {:?}",
-            std::str::from_utf8(&pae[..14]).unwrap()
+            "type length must be the byte length, got prefix {:?}",
+            &pae[..pae.len().min(14)]
         );
     }
 
