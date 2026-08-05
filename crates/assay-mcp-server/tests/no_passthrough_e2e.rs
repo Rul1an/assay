@@ -33,7 +33,8 @@
 //! *this* package — split-wave0-gates.yml does so for assay-core, assay-cli, assay-registry and
 //! assay-evidence, but never for assay-mcp-server. That includes
 //! `cargo clippy --workspace --all-targets` in CI, which is why a dedicated feature-enabled clippy
-//! step sits beside the test step, but it also includes both pre-push hooks
+//! step exists in that workflow's `clippy` job — a different job from the one that runs this test,
+//! and it only type-checks the file. Absence also covers both pre-push hooks
 //! (`scripts/precommit/cargo-clippy.sh`, `scripts/ci/check-linux.sh`) and a plain
 //! `cargo test -p assay-mcp-server`. A syntax or type error here passes every local check and only
 //! surfaces on CI. Run the documented command above before pushing changes to this file.
