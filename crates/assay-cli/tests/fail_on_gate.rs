@@ -166,3 +166,33 @@ fn every_advertised_spelling_is_accepted() {
         );
     }
 }
+
+/// The `warning` alias by effect rather than by acceptance.
+///
+/// `every_advertised_spelling_is_accepted` runs on a bundle with no findings, where every valid
+/// threshold exits 0, so it cannot tell `warning` from `error`. It only proves the spelling parses.
+///
+/// The distinction is load-bearing outside this crate. `packs/open/cicd-starter/README.md` tells
+/// users to set `fail_on: warning`, and the Action's own bash `case` had no arm for it and no
+/// default, so the value gated nothing at all (#2037). The Action now forwards the input here
+/// unmodified, which makes this the assertion standing behind that README.
+#[test]
+fn warning_gates_the_same_findings_as_warn() {
+    let warn = lint_pack(WARNING_PACK, "warn").status.code();
+    let warning = lint_pack(WARNING_PACK, "warning").status.code();
+    let error = lint_pack(WARNING_PACK, "error").status.code();
+
+    assert_eq!(
+        warn,
+        Some(1),
+        "fixture no longer yields a warning finding under {WARNING_PACK}, so the rest proves nothing"
+    );
+    assert_eq!(
+        warning, warn,
+        "`warning` is not the alias of `warn` its callers rely on"
+    );
+    assert_ne!(
+        warning, error,
+        "`warning` decides what `error` decides, so the alias distinguishes nothing"
+    );
+}
