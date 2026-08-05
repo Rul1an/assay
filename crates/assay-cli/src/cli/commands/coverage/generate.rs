@@ -78,13 +78,7 @@ pub(super) async fn cmd_coverage_generate(args: &CoverageArgs) -> Result<i32> {
         Err(code) => return Ok(code),
     };
 
-    let output_format = match parse_generate_output_format(&args.format) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("Measurement error: {e}");
-            return Ok(EXIT_CONFIG_ERROR);
-        }
-    };
+    let output_format = CoverageOutputFormat::narrow(args.format);
 
     let primary_format = if args.out_md.is_some() {
         CoverageOutputFormat::Json
@@ -157,14 +151,4 @@ async fn load_declared_tools(args: &CoverageArgs) -> std::result::Result<Vec<Str
     }
 
     Ok(declared.into_iter().collect())
-}
-
-fn parse_generate_output_format(raw: &str) -> std::result::Result<CoverageOutputFormat, String> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "json" | "text" => Ok(CoverageOutputFormat::Json),
-        "md" | "markdown" | "github" => Ok(CoverageOutputFormat::Markdown),
-        other => Err(format!(
-            "--format must be one of: json|md for --input mode (got '{other}')"
-        )),
-    }
 }

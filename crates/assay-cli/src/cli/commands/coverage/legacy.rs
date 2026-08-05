@@ -1,8 +1,12 @@
 use super::io::{print_markdown_report, print_text_report};
+use super::LegacyOutputFormat;
 use crate::cli::args::CoverageArgs;
 use anyhow::{Context, Result};
 
-pub(super) async fn cmd_coverage_legacy(args: CoverageArgs) -> Result<i32> {
+pub(super) async fn cmd_coverage_legacy(
+    args: CoverageArgs,
+    output: LegacyOutputFormat,
+) -> Result<i32> {
     let trace_file = match args.trace_file.as_ref() {
         Some(path) => path,
         None => {
@@ -224,18 +228,14 @@ pub(super) async fn cmd_coverage_legacy(args: CoverageArgs) -> Result<i32> {
     report.policy_warnings = warnings;
 
     // 5. Output
-    match args.format.as_str() {
-        "json" => {
+    match output {
+        LegacyOutputFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
-        "markdown" => {
+        LegacyOutputFormat::Markdown => {
             print_markdown_report(&report);
         }
-        "github" => {
-            print_markdown_report(&report);
-        }
-        _ => {
-            // text
+        LegacyOutputFormat::Text => {
             print_text_report(&report);
         }
     }

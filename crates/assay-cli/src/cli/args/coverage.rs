@@ -1,5 +1,28 @@
 use std::path::PathBuf;
 
+/// The spellings `coverage --format` accepts.
+///
+/// This is the argument's surface, not an output kind. `coverage` is two commands behind one
+/// name, and the two honour different sets, so each mode narrows this to its own output type at
+/// the boundary rather than matching on the spelling. Without that split a single enum over the
+/// union would move the ambiguity into the type and make it look settled.
+///
+/// `github` is an alias of `markdown` because both modes already render markdown for it, so
+/// collapsing the spelling changes nothing. `md` keeps a variant of its own for the opposite
+/// reason: legacy mode has to refuse it by name, and an alias does not survive parsing.
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CoverageFormat {
+    #[default]
+    Text,
+    Json,
+    // No doc comment on a variant: clap renders per-value help as a bulleted list and drops the
+    // inline `[possible values: ...]`, which would make this the one format argument in the CLI
+    // whose help is laid out differently. The reasoning lives on the enum instead.
+    Md,
+    #[value(alias = "github")]
+    Markdown,
+}
+
 #[derive(clap::Args, Debug, Clone)]
 pub struct CoverageArgs {
     /// Path to JSONL tool/decision events for coverage_report_v1 generation.
@@ -40,12 +63,11 @@ pub struct CoverageArgs {
     #[arg(long)]
     pub export_baseline: Option<PathBuf>,
 
-    /// Output format.
-    /// - `--format md|json` for `--input` mode
-    /// - `--input` mode: json|md (text aliases to json; markdown/github alias to md)
-    /// - legacy mode: text|json|markdown|github
-    #[arg(long, default_value = "text", value_parser = ["text", "json", "md", "markdown", "github"])]
-    pub format: String,
+    /// Output format. With `--input`: `json` or `md`, and `text` names the canonical JSON.
+    /// Without it: `text`, `json` or `markdown`, and `md` is rejected in favour of `markdown`.
+    /// `github` is accepted as an alias of `markdown`.
+    #[arg(long, default_value = "text")]
+    pub format: CoverageFormat,
 
     /// Number of top routes to include in markdown output (default: 10).
     #[arg(long = "routes-top", default_value_t = 10)]
