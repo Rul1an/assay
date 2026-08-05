@@ -865,6 +865,7 @@ runs:
       shell: bash
       env:
         PACKS: ${{ inputs.pack }}
+        FAIL_ON: ${{ inputs.fail_on }}
         BUNDLES_FILE: ${{ steps.discover.outputs.bundles_file }}
         REPORTS_DIR: ${{ steps.process.outputs.reports_dir }}
       run: |
