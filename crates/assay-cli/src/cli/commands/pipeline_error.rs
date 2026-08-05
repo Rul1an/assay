@@ -1,7 +1,8 @@
 use super::reporting::write_error_artifacts;
 use super::run_output::reason_code_from_run_error;
 use crate::exit_codes::{ExitCodeVersion, ReasonCode};
-use assay_core::errors::RunError;
+use assay_core::errors::{Diagnostic, RunError, RunErrorKind};
+use std::io::{IsTerminal, Write};
 use std::path::Path;
 use std::time::Instant;
 
@@ -17,6 +18,79 @@ pub(crate) fn elapsed_ms(start: Instant) -> u64 {
     } else {
         ms as u64
     }
+}
+
+/// Where the operator should go looking, derived from the error kind rather than
+/// from the message text.
+fn source_for(run_error: &RunError) -> String {
+    match run_error.kind {
+        RunErrorKind::ConfigParse | RunErrorKind::MissingConfig => "config".to_string(),
+        RunErrorKind::TraceNotFound => "trace".to_string(),
+        RunErrorKind::InvalidArgs => "cli".to_string(),
+        RunErrorKind::ProviderRateLimit
+        | RunErrorKind::ProviderTimeout
+        | RunErrorKind::ProviderServer
+        | RunErrorKind::JudgeUnavailable => run_error
+            .provider
+            .clone()
+            .unwrap_or_else(|| "provider".to_string()),
+        RunErrorKind::Network => "network".to_string(),
+        RunErrorKind::Other => "unknown".to_string(),
+    }
+}
+
+/// Build the operator-facing diagnostic from the same `ReasonCode` that goes into
+/// `run.json`.
+///
+/// Both the code and the fix step come from `ReasonCode`: `as_str()` and
+/// `next_step()`. That is what keeps stderr and the artifacts from drifting. A
+/// second, stderr-only code table would be free to disagree with the one frozen
+/// in SPEC-PR-Gate-Outputs-v1.
+pub(crate) fn diagnostic_for(run_error: &RunError, reason: ReasonCode) -> Diagnostic {
+    let mut context = serde_json::Map::new();
+
+    if let Some(path) = &run_error.path {
+        context.insert("path".into(), path.clone().into());
+    }
+    if let Some(provider) = &run_error.provider {
+        context.insert("provider".into(), provider.clone().into());
+    }
+    if let Some(status) = run_error.status {
+        context.insert("status".into(), status.into());
+    }
+    // Several constructors set `detail` from the same string as `message`
+    // (`RunError::config_parse` among them), so echo it only when it adds something.
+    if let Some(detail) = &run_error.detail {
+        if detail != &run_error.message {
+            context.insert("detail".into(), detail.clone().into());
+        }
+    }
+    // Say so when the code came from parsing a message rather than from a typed
+    // constructor: it is the difference between a classification and a guess.
+    if run_error.legacy_classified {
+        context.insert("classified_from".into(), "message".into());
+    }
+
+    Diagnostic::new(reason.as_str(), run_error.message.clone())
+        .with_source(source_for(run_error))
+        .with_context(serde_json::Value::Object(context))
+        .with_fix_step(reason.next_step(run_error.path.as_deref()))
+}
+
+/// Write the diagnostic to stderr, decorated only when stderr is a terminal.
+///
+/// Returns `()`, not `Result`. The exit code is the gate contract; stderr is an
+/// affordance for the human reading the log. A closed pipe must not be able to
+/// change the former.
+pub(crate) fn emit_operator_diagnostic(diagnostic: &Diagnostic) {
+    let stderr = std::io::stderr();
+    let decorated = stderr.is_terminal() && std::env::var_os("NO_COLOR").is_none();
+    let rendered = if decorated {
+        diagnostic.format_terminal()
+    } else {
+        diagnostic.format_plain()
+    };
+    let _ = stderr.lock().write_all(rendered.as_bytes());
 }
 
 impl PipelineError {
@@ -52,6 +126,7 @@ impl PipelineError {
             Self::Classified { run_error } => {
                 let reason =
                     reason_code_from_run_error(&run_error).unwrap_or(ReasonCode::ECfgParse);
+                emit_operator_diagnostic(&diagnostic_for(&run_error, reason));
                 write_error_artifacts(
                     reason,
                     run_error.message,
@@ -62,5 +137,129 @@ impl PipelineError {
             }
             Self::Fatal(err) => Err(err),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::exit_codes::RunOutcome;
+
+    fn cases() -> Vec<RunError> {
+        vec![
+            RunError::config_parse(
+                Some("assay.yaml".to_string()),
+                "mapping values are not allowed here",
+            ),
+            RunError::missing_config("assay.yaml", "no config file found"),
+            RunError::trace_not_found("traces/run.jsonl", "trace file does not exist"),
+            RunError::invalid_args("unrecognized flag --nope"),
+        ]
+    }
+
+    /// The property this issue exists to establish: an operator grepping stderr and
+    /// a CI job parsing run.json see the same code for the same failure.
+    #[test]
+    fn stderr_code_matches_run_json_reason_code() {
+        for run_error in cases() {
+            let reason =
+                reason_code_from_run_error(&run_error).expect("typed constructors classify");
+            let diagnostic = diagnostic_for(&run_error, reason);
+            let outcome = RunOutcome::from_reason(reason, Some(run_error.message.clone()), None);
+
+            assert_eq!(diagnostic.code, reason.as_str());
+            assert_eq!(diagnostic.code, outcome.reason_code);
+        }
+    }
+
+    /// The fix step is not retyped for stderr; it is the one already in run.json.
+    #[test]
+    fn fix_step_matches_run_json_next_step() {
+        for run_error in cases() {
+            let reason = reason_code_from_run_error(&run_error).unwrap();
+            let diagnostic = diagnostic_for(&run_error, reason);
+            let outcome = RunOutcome::from_reason(
+                reason,
+                Some(run_error.message.clone()),
+                run_error.path.as_deref(),
+            );
+
+            assert_eq!(diagnostic.fix_steps, vec![outcome.next_step.unwrap()]);
+        }
+    }
+
+    #[test]
+    fn config_parse_context_does_not_repeat_the_message() {
+        let run_error = RunError::config_parse(
+            Some("assay.yaml".to_string()),
+            "mapping values are not allowed here",
+        );
+        // The constructor sets detail == message; the diagnostic must not print both.
+        assert_eq!(run_error.detail.as_deref(), Some(run_error.message.as_str()));
+
+        let diagnostic = diagnostic_for(&run_error, ReasonCode::ECfgParse);
+        let context = diagnostic.context.as_object().unwrap();
+        assert!(!context.contains_key("detail"));
+        assert_eq!(context.get("path").unwrap(), "assay.yaml");
+        assert_eq!(diagnostic.source, "config");
+    }
+
+    #[test]
+    fn detail_is_kept_when_it_adds_something() {
+        let run_error = RunError::new(RunErrorKind::ConfigParse, "config rejected")
+            .with_detail("line 4, column 11");
+        let diagnostic = diagnostic_for(&run_error, ReasonCode::ECfgParse);
+        assert_eq!(
+            diagnostic.context.get("detail").and_then(|v| v.as_str()),
+            Some("line 4, column 11")
+        );
+    }
+
+    #[test]
+    fn message_derived_classification_is_marked_as_such() {
+        let typed = RunError::invalid_args("unrecognized flag --nope");
+        assert!(!typed.legacy_classified);
+        let diagnostic = diagnostic_for(&typed, ReasonCode::EInvalidArgs);
+        assert!(!diagnostic
+            .context
+            .as_object()
+            .unwrap()
+            .contains_key("classified_from"));
+
+        let mut guessed = typed;
+        guessed.legacy_classified = true;
+        let diagnostic = diagnostic_for(&guessed, ReasonCode::EInvalidArgs);
+        assert_eq!(
+            diagnostic
+                .context
+                .get("classified_from")
+                .and_then(|v| v.as_str()),
+            Some("message")
+        );
+    }
+
+    #[test]
+    fn provider_errors_name_the_provider_as_the_source() {
+        let run_error = RunError::new(RunErrorKind::ProviderServer, "upstream 503")
+            .with_provider("openai")
+            .with_status(503);
+        let diagnostic = diagnostic_for(&run_error, ReasonCode::EProvider5xx);
+        assert_eq!(diagnostic.source, "openai");
+        assert_eq!(
+            diagnostic.context.get("status").and_then(|v| v.as_u64()),
+            Some(503)
+        );
+    }
+
+    /// Non-TTY rendering goes into CI logs, so it has to stay greppable.
+    #[test]
+    fn plain_rendering_is_ascii_and_leads_with_the_code() {
+        let run_error = RunError::config_parse(
+            Some("assay.yaml".to_string()),
+            "mapping values are not allowed here",
+        );
+        let rendered = diagnostic_for(&run_error, ReasonCode::ECfgParse).format_plain();
+        assert!(rendered.is_ascii(), "{rendered:?}");
+        assert!(rendered.starts_with("[E_CFG_PARSE]"));
     }
 }
