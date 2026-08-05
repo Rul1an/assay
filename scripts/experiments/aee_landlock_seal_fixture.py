@@ -99,6 +99,7 @@ NEGATIVE_CONTROLS: dict[str, str] = {
     "key-scope-substrate-mismatch": "key-scope-substrate-mismatch",
     "key-outside-validity-window": "key-outside-validity-window",
     "unsupported-envelope-shape": "unsupported-envelope-shape",
+    "posture-digest-is-run-binding-input": "posture-digest-mismatch",
 }
 
 CASES = [POSITIVE_CASE, *NEGATIVE_CONTROLS]
@@ -276,6 +277,14 @@ def case_statement(name: str) -> dict[str, Any]:
         set_scopes(stmt, [trusted_scope(STRUCTURAL_KEY, substrate="assay-some-other-substrate")])
     elif name == "key-outside-validity-window":
         set_scopes(stmt, [trusted_scope(STRUCTURAL_KEY, validUntil=KEY_EXPIRED_UNTIL)])
+    elif name == "posture-digest-is-run-binding-input":
+        # ADR-045 line 476 requires this control by name. `aeePostureDigest` must equal the carried
+        # `networkPosture.digest.sha256`; the run-binding input is the digest of the whole carried
+        # object, which -- because the digest member is inserted after that member is computed -- is
+        # a strictly larger object and a different value. Two plausible readings, one correct, and
+        # the ADR names the confusion rather than leaving it to be discovered.
+        seal["aeePostureDigest"] = digest_json(pred["observationEnvironment"]["networkPosture"])
+        replace_payload(stmt, 2, seal)
     elif name == "unsupported-envelope-shape":
         # Self-consistent envelope, signed over its own declared payload type.
         # Nothing here is malformed; the checker simply does not implement this
@@ -352,7 +361,7 @@ def emit_parity_vectors() -> None:
         ],
         "expected": {
             "runBinding": run_binding(stmt),
-            "networkPostureDigest": digest_json(env["networkPosture"]),
+            "networkPostureDigest": env["networkPosture"]["digest"]["sha256"],
             "observedSet": observed_set(stmt["predicate"]["observationRecords"]),
             "orderingObservedSet": observed_set([
                 {"payload": {"aeeKind": "interception", "aeeVersion": AEE_VERSION, "assayOrderProbe": "zzz"}, "payloadType": PAYLOAD_TYPE},
@@ -474,7 +483,7 @@ def validate(statement: dict[str, Any], disabled: frozenset[str] = frozenset()) 
         if sealed_at is None or valid_from is None or valid_until is None:
             continue
         if not (valid_from <= sealed_at <= valid_until):
-            add("key-outside-validity-window", PHASE_NOT_CREDITED, f"record {idx} seal instant {SEALED_AT} is outside the key window {scope.get('validFrom')}..{scope.get('validUntil')}")
+            add("key-outside-validity-window", PHASE_NOT_CREDITED, f"record {idx} seal instant {payloads[seals[0]].get('assaySealedAt')} is outside the key window {scope.get('validFrom')}..{scope.get('validUntil')}")
 
     if any(row.get("basis") == "substrate" for row in rows) and not seals:
         add("substrate-row-missing-sealed-coverage", PHASE_MALFORMED, "substrate row lacks required sealed coverage")

@@ -119,6 +119,13 @@ impl std::fmt::Display for NotSealEligible {
     }
 }
 
+/// Lowercase SHA-256 hex, the shape the #2001 field contract requires of every digest member.
+fn is_sha256_hex(v: &str) -> bool {
+    v.len() == 64
+        && v.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 /// `YYYY-MM-DDTHH:MM:SSZ`, the shape the ADR-045 checker's validity-window check parses.
 fn is_rfc3339_utc(v: &str) -> bool {
     let b = v.as_bytes();
@@ -390,7 +397,21 @@ pub fn build_sealed_run(
         return Err(NotSealEligible::UnprovenContextValue { field: "sealed_at" });
     }
     let rb = run_binding(env)?;
-    let posture_digest = digest_json(&env.network_posture)?;
+    // ADR-045 line 192, and its line 476 negative fixture: `aeePostureDigest` is the digest the
+    // posture object *declares*, not the digest *of* that object. They differ by construction --
+    // the declared value is computed before the `digest` member is inserted, so hashing the carried
+    // object hashes a strictly larger thing. Two plausible readings, and the ADR names the wrong one
+    // by name because it is the one an implementer reaches for.
+    let posture_digest = env
+        .network_posture
+        .get("digest")
+        .and_then(|d| d.get("sha256"))
+        .and_then(|v| v.as_str())
+        .filter(|v| is_sha256_hex(v))
+        .ok_or(NotSealEligible::UnprovenContextValue {
+            field: "networkPosture.digest.sha256",
+        })?
+        .to_string();
 
     let mut records = prior_records.to_vec();
     records.push(probe_examination_record(probe, &rb));
@@ -477,17 +498,50 @@ mod tests {
     /// a diff in the committed file and a divergence lands as a failure — unlike a transcribed
     /// literal, which stays green while the two implementations drift apart.
     #[test]
-    fn run_binding_and_posture_digest_match_the_checker() {
+    fn run_binding_matches_the_checker() {
         let p = parity();
-        let env = env_from_parity();
         assert_eq!(
-            run_binding(&env).unwrap(),
+            run_binding(&env_from_parity()).unwrap(),
             p["expected"]["runBinding"].as_str().unwrap()
         );
+    }
+
+    /// The seal must carry the digest the posture object *declares*, not the digest *of* that
+    /// object. ADR-045 line 476 names this confusion as a required negative fixture, and the two
+    /// values differ by construction because the declared one is computed before the `digest`
+    /// member is inserted. Asserted on the payload rather than on a helper: a test that checks the
+    /// function and not where its result lands is how the wrong quantity reached the wire.
+    #[test]
+    fn the_seal_carries_the_declared_posture_digest_not_the_object_digest() {
+        let p = parity();
+        let env = env_from_parity();
+        let run = build_sealed_run(&healthy(), &env, &[], "2026-08-05T00:00:00Z").unwrap();
         assert_eq!(
-            digest_json(&env.network_posture).unwrap(),
+            run.seal.aee_posture_digest,
             p["expected"]["networkPostureDigest"].as_str().unwrap()
         );
+        assert_ne!(
+            run.seal.aee_posture_digest,
+            digest_json(&env.network_posture).unwrap(),
+            "the run-binding input is the value the ADR names as the wrong one"
+        );
+    }
+
+    /// A posture object that declares no usable digest cannot be sealed against.
+    #[test]
+    fn a_posture_without_a_declared_digest_is_refused() {
+        for posture in [
+            serde_json::json!({"mode": "deny-default"}),
+            serde_json::json!({"mode": "deny-default", "digest": {}}),
+            serde_json::json!({"mode": "deny-default", "digest": {"sha256": "NOT-HEX"}}),
+        ] {
+            let mut env = env_from_parity();
+            env.network_posture = posture;
+            assert!(
+                build_sealed_run(&healthy(), &env, &[], "2026-08-05T00:00:00Z").is_err(),
+                "a posture that declares no usable digest must not seal"
+            );
+        }
     }
 
     #[test]
@@ -613,6 +667,82 @@ mod tests {
             a.seal.aee_observed_set, b.seal.aee_observed_set,
             "a dropped record must move the value"
         );
+    }
+
+    /// Every value the seal carries, asserted where it lands. The previous rewrite dropped this
+    /// module and fourteen of fifteen payload mutants survived -- `aeeKind: "arming"`,
+    /// `aeeStillArmed: false`, an empty run binding, emptied non-claims. Checking a derivation
+    /// function proves nothing about the field it is supposed to fill.
+    #[test]
+    fn every_carried_value_lands_in_its_own_payload_field() {
+        let p = parity();
+        let env = env_from_parity();
+        let h = healthy();
+        let run = build_sealed_run(&h, &env, &[], "2026-08-05T12:34:56Z").unwrap();
+        let s = &run.seal;
+
+        assert_eq!(s.aee_kind, "sealed");
+        assert_eq!(s.aee_version, "0.7");
+        assert_eq!(s.aee_method, "intercepted");
+        assert!(s.aee_still_armed);
+        assert_eq!((s.aee_drop_count, s.aee_drop_bound), (0, 0));
+        assert_eq!(
+            s.aee_run_binding,
+            p["expected"]["runBinding"].as_str().unwrap()
+        );
+        assert_eq!(
+            s.aee_posture_digest,
+            p["expected"]["networkPostureDigest"].as_str().unwrap()
+        );
+        assert_eq!(s.aee_observed_set, observed_set(&run.records).unwrap());
+        assert!(s.aee_observed_attacks.is_empty());
+        assert_eq!(
+            s.assay_collection_path,
+            COLLECTION_PATH_LANDLOCK_TCP_CONNECT
+        );
+        assert_eq!(s.assay_sealed_at, "2026-08-05T12:34:56Z");
+        assert_eq!(s.assay_source_schema, h.schema);
+        assert_eq!(s.assay_seal_scope, h.scope);
+        assert_eq!(s.assay_drop_proof_model, DROP_PROOF_SYNCHRONOUS_PROBE);
+        assert_eq!(s.assay_attack_row_attribution_source, "assembly-plane");
+        assert_eq!(s.assay_observed_labels, vec!["connect_blocked".to_string()]);
+        for required in [
+            "does not prove complete run population",
+            "does not prove agent safety",
+            "does not prove provider side effects",
+            "does not prove independent substrate operation",
+        ] {
+            assert!(
+                s.assay_non_claims.iter().any(|c| c == required),
+                "missing non-claim: {required}"
+            );
+        }
+
+        // The examination record is the observation. Emptying it must not go unnoticed.
+        let exam = run
+            .records
+            .iter()
+            .find(|r| r.payload["aeeKind"] == "examination")
+            .unwrap();
+        assert_eq!(exam.payload["assayProbeErrno"], "EACCES");
+        assert_eq!(exam.payload["assayProbeListenerReached"], false);
+        assert_eq!(exam.payload["aeeRunBinding"], s.aee_run_binding);
+    }
+
+    /// The member set the checker reads, pinned where it is emitted.
+    #[test]
+    fn the_payload_member_set_is_the_eighteen_the_checker_carries() {
+        let run =
+            build_sealed_run(&healthy(), &env_from_parity(), &[], "2026-08-05T00:00:00Z").unwrap();
+        let value = serde_json::to_value(&run.seal).unwrap();
+        let mut got: Vec<&str> = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        got.sort_unstable();
+        assert_eq!(got.len(), 18, "members: {got:?}");
     }
 
     // ---- refusals ----------------------------------------------------------------------------

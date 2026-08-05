@@ -16,7 +16,7 @@
     "substrate": "891115d05edc57baea96aec23a4ad4142113d3ea046e0f496555dfff3adec3f8"
   },
   "expected": {
-    "networkPostureDigest": "171b7439dc3205acd11b81f20090703174c063f93e7561d6c48158baf3b80559",
+    "networkPostureDigest": "10df2fcf9313ac86ff28723ee42e7419a1b19d747a732959a6bab8d9670c9984",
     "observedSet": "d4cd5a1f003ba053da3535f62e0969c9fbdbae9e83e9edaf2aaedafde313686f",
     "orderingObservedSet": "b14391d2a0c0cd2d3f8acac59b8bb3d88ae077dcf241f8a5606cab3d99ffd752",
     "runBinding": "53d1c00074eafe85a80c286ee01bcf8ea6a61b924fef4d20530b5db079c9a001"
