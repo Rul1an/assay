@@ -8,11 +8,50 @@ pub mod resolve;
 
 pub const SUPPORTED_CONFIG_VERSION: u32 = 1;
 
+/// What a caller wants the loader to refuse, rather than merely parse.
+///
+/// Each field is a separate axis on purpose. `strict_unknown_fields` and
+/// `deny_ineffective_assertions` refuse different things — a key the schema does not know versus an
+/// assertion that no trace could ever fail — and folding them into one flag would mean a caller who
+/// wanted one silently acquired the other.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LoadOptions {
+    /// Treat a v0 config as v0 rather than trusting its declared version.
+    pub legacy_mode: bool,
+    /// Refuse a config carrying keys this version does not understand.
+    pub strict_unknown_fields: bool,
+    /// Refuse a config whose `assertions:` include one that cannot fail.
+    ///
+    /// Opt-in, and deliberately not on by default: `assay validate` has reported these as a
+    /// warning since #1983, and turning that into a load-time error for every caller at once would
+    /// break suites that are running today. The phased route in #1949 is warning, then opt-in here,
+    /// then default at a major after an announced window.
+    pub deny_ineffective_assertions: bool,
+}
+
+/// Backwards-compatible loader. Every existing caller keeps its behaviour, and the new refusal is
+/// reachable only through [`load_config_with`], which is what makes it opt-in.
 pub fn load_config(
     path: &Path,
     legacy_mode: bool,
     strict: bool,
 ) -> Result<EvalConfig, ConfigError> {
+    load_config_with(
+        path,
+        LoadOptions {
+            legacy_mode,
+            strict_unknown_fields: strict,
+            ..Default::default()
+        },
+    )
+}
+
+pub fn load_config_with(path: &Path, opts: LoadOptions) -> Result<EvalConfig, ConfigError> {
+    let LoadOptions {
+        legacy_mode,
+        strict_unknown_fields: strict,
+        deny_ineffective_assertions,
+    } = opts;
     let raw = std::fs::read_to_string(path)
         .map_err(|e| ConfigError(format!("failed to read config {}: {}", path.display(), e)))?;
 
@@ -74,6 +113,42 @@ pub fn load_config(
 
     if cfg.tests.is_empty() {
         return Err(ConfigError("config has no tests".into()));
+    }
+
+    // Fail closed before execution rather than after. An assertion that cannot fail reports a pass
+    // carrying no information, and a run that reaches it has already spent the time and money to
+    // produce that non-answer. The decision itself is `validate::ineffective_assertions`, which is
+    // the same code `assay validate` sweeps with, so this cannot drift away from what the warning
+    // says. Diagnostics stay value-free: they name the test, the index, the variant and the
+    // responsible field, never the configured value.
+    if deny_ineffective_assertions {
+        let ineffective = crate::validate::ineffective_assertions(&cfg);
+        if !ineffective.is_empty() {
+            let detail = ineffective
+                .iter()
+                .map(|d| {
+                    let test = d
+                        .context
+                        .get("test_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
+                    let index = d
+                        .context
+                        .get("assertion_index")
+                        .and_then(|v| v.as_u64())
+                        .map(|i| i.to_string())
+                        .unwrap_or_else(|| "?".into());
+                    format!("test '{}' assertion {}: {}", test, index, d.message)
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(ConfigError(format!(
+                "{} assertion(s) cannot fail and were refused because --deny-ineffective-assertions is set ({}): {}",
+                ineffective.len(),
+                path.display(),
+                detail
+            )));
+        }
     }
 
     normalize_paths(&mut cfg, path)
