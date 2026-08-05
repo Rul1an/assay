@@ -21,6 +21,8 @@ pub const COLLECTION_PATH_LANDLOCK_TCP_CONNECT: &str = "landlock-tcp-connect";
 pub const AEE_VERSION: &str = "0.7";
 /// The only drop-accounting proof model the Landlock-first slice can honestly carry.
 pub const DROP_PROOF_SYNCHRONOUS_PROBE: &str = "synchronous-probe";
+/// The other model ADR-045 names: every channel exposes a loss counter and each read zero.
+pub const DROP_PROOF_COUNTED_QUEUE_ZERO: &str = "counted-queue-zero";
 
 /// Landlock denies `connect(2)` with `EACCES`. ADR-045 and `enforcement_health.v1` agree that weak
 /// signals never count as a block: a timeout or `ECONNREFUSED` can be produced by a host that is
@@ -72,8 +74,10 @@ pub enum NotSealEligible {
     UnprovenContextValue { field: &'static str },
     /// A digest the seal must derive could not be computed from the inputs given.
     DerivationFailed { what: &'static str },
-    /// Zero drop accounting cannot be proved for this run under any model this slice implements.
-    DropAccountingUnprovable { committed: usize },
+    /// A counted-queue channel reported lost observations, so zero cannot be carried.
+    ObservationsLost { channel: String, lost: u64 },
+    /// A counted-queue model was declared with no channels, which proves nothing.
+    DropAccountingUnnamed,
 }
 
 impl NotSealEligible {
@@ -91,7 +95,8 @@ impl NotSealEligible {
             Self::RecordSelfContradictory { .. } => "record-self-contradictory",
             Self::UnprovenContextValue { .. } => "unproven-context-value",
             Self::DerivationFailed { .. } => "derivation-failed",
-            Self::DropAccountingUnprovable { .. } => "drop-accounting-unprovable",
+            Self::ObservationsLost { .. } => "observations-lost",
+            Self::DropAccountingUnnamed => "drop-accounting-unnamed",
         }
     }
 }
@@ -109,7 +114,8 @@ impl std::fmt::Display for NotSealEligible {
             Self::RecordSelfContradictory { detail } => write!(f, "health record contradicts itself: {detail}"),
             Self::UnprovenContextValue { field } => write!(f, "run-context field {field} is not a value this run proved"),
             Self::DerivationFailed { what } => write!(f, "could not derive a required digest: {what}"),
-            Self::DropAccountingUnprovable { committed } => write!(f, "{committed} committed observations: the synchronous-probe model holds only for the probe alone, and no counted-queue counters are available here"),
+            Self::ObservationsLost { channel, lost } => write!(f, "channel {channel} lost {lost} observations, so zero drop accounting cannot be carried"),
+            Self::DropAccountingUnnamed => write!(f, "a counted-queue model with no channels names no proof at all"),
         }
     }
 }
@@ -144,6 +150,11 @@ fn is_rfc3339_utc(v: &str) -> bool {
     let num = |a: usize, z: usize| v[a..z].parse::<u32>().unwrap_or(u32::MAX);
     let (year, month, day) = (num(0, 4), num(5, 7), num(8, 10));
     let (hour, minute, second) = (num(11, 13), num(14, 16), num(17, 19));
+    // `strptime` has no year 0, so accepting one emits an instant the checker cannot parse -- and an
+    // unparsable instant makes it skip the whole key-validity-window loop.
+    if year < 1 {
+        return false;
+    }
     let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
     let days_in_month = match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
@@ -387,6 +398,50 @@ pub fn seal_eligibility(health: &EnforcementHealthV1) -> Result<&Probe, NotSealE
     Ok(probe)
 }
 
+/// How the caller proves the drop accounting the seal will carry.
+///
+/// ADR-045 line 232 permits `aeeDropCount = 0` and `aeeDropBound = 0` only under a named collection
+/// model, and forbids "an AEE-looking seal with guessed zero drop accounting". This module cannot
+/// observe the collection path, so the model is the caller's to declare -- but it is a required
+/// argument rather than a default, because a value that can be omitted is a value that gets guessed.
+///
+/// An earlier version counted the committed observations and refused anything but a lone probe. That
+/// measured the wrong thing: two synchronously captured observations are as unbuffered as one, and
+/// one observation says nothing about whether others were lost upstream. It also refused every run
+/// carrying an interception, which is every run with attack evidence in it.
+#[derive(Debug, Clone)]
+pub enum DropAccounting {
+    /// The sealed observation is the probe result itself, taken synchronously, with no queue between
+    /// capture and this builder. Not checkable here; the caller owns the collection path and says so.
+    SynchronousProbe,
+    /// Every channel between capture and this builder exposes a loss counter, and each was read at
+    /// run end. Checkable: a non-zero counter refuses.
+    CountedQueue { channels: Vec<(String, u64)> },
+}
+
+impl DropAccounting {
+    fn model(&self) -> &'static str {
+        match self {
+            Self::SynchronousProbe => DROP_PROOF_SYNCHRONOUS_PROBE,
+            Self::CountedQueue { .. } => DROP_PROOF_COUNTED_QUEUE_ZERO,
+        }
+    }
+
+    fn check(&self) -> Result<(), NotSealEligible> {
+        match self {
+            Self::SynchronousProbe => Ok(()),
+            Self::CountedQueue { channels } => match channels.iter().find(|(_, lost)| *lost != 0) {
+                Some((name, lost)) => Err(NotSealEligible::ObservationsLost {
+                    channel: name.clone(),
+                    lost: *lost,
+                }),
+                None if channels.is_empty() => Err(NotSealEligible::DropAccountingUnnamed),
+                None => Ok(()),
+            },
+        }
+    }
+}
+
 /// What a sealed run produces: the seal, and the records its observed set commits to.
 ///
 /// **Not a complete statement.** `observed_set` counts `interception` and `examination` alike, but
@@ -411,6 +466,7 @@ pub fn build_sealed_run(
     env: &ObservationEnvironment,
     prior_records: &[ObservationRecord],
     sealed_at: &str,
+    drop_accounting: &DropAccounting,
 ) -> Result<SealedRun, NotSealEligible> {
     let probe = seal_eligibility(health)?;
     if !is_rfc3339_utc(sealed_at) {
@@ -436,24 +492,7 @@ pub fn build_sealed_run(
     let mut records = prior_records.to_vec();
     records.push(probe_examination_record(probe, &rb));
 
-    // ADR-045 line 232: zero drop accounting may be emitted only under a named collection model,
-    // and "MUST NOT emit an AEE-looking seal with guessed zero drop accounting". The
-    // synchronous-probe model holds when the sealed observation *is* the probe result, taken with
-    // no queue in between -- so it holds only while the probe is the sole committed observation.
-    // Emitting the constant beside a larger set is the guess the ADR forbids, so the run is refused
-    // instead. A counted-queue model would need its counters, which this slice has no access to.
-    let committed = records
-        .iter()
-        .filter(|r| {
-            matches!(
-                r.payload.get("aeeKind").and_then(|v| v.as_str()),
-                Some("interception") | Some("examination")
-            )
-        })
-        .count();
-    if committed != 1 {
-        return Err(NotSealEligible::DropAccountingUnprovable { committed });
-    }
+    drop_accounting.check()?;
     let observed = observed_set(&records)?;
 
     Ok(SealedRun {
@@ -473,7 +512,7 @@ pub fn build_sealed_run(
             assay_sealed_at: sealed_at.to_string(),
             assay_source_schema: health.schema.clone(),
             assay_seal_scope: health.scope.clone(),
-            assay_drop_proof_model: DROP_PROOF_SYNCHRONOUS_PROBE.to_string(),
+            assay_drop_proof_model: drop_accounting.model().to_string(),
             assay_attack_row_attribution_source: "assembly-plane".to_string(),
             assay_non_claims: payload_non_claims(),
         },
@@ -525,9 +564,15 @@ mod tests {
     }
 
     fn refusal(h: &EnforcementHealthV1) -> &'static str {
-        build_sealed_run(h, &env_from_parity(), &[], "2026-08-05T00:00:00Z")
-            .expect_err("must refuse")
-            .code()
+        build_sealed_run(
+            h,
+            &env_from_parity(),
+            &[],
+            "2026-08-05T00:00:00Z",
+            &DropAccounting::SynchronousProbe,
+        )
+        .expect_err("must refuse")
+        .code()
     }
 
     // ---- derivation parity with the checker -------------------------------------------------
@@ -554,7 +599,14 @@ mod tests {
     fn the_seal_carries_the_declared_posture_digest_not_the_object_digest() {
         let p = parity();
         let env = env_from_parity();
-        let run = build_sealed_run(&healthy(), &env, &[], "2026-08-05T00:00:00Z").unwrap();
+        let run = build_sealed_run(
+            &healthy(),
+            &env,
+            &[],
+            "2026-08-05T00:00:00Z",
+            &DropAccounting::SynchronousProbe,
+        )
+        .unwrap();
         assert_eq!(
             run.seal.aee_posture_digest,
             p["expected"]["networkPostureDigest"].as_str().unwrap()
@@ -577,7 +629,14 @@ mod tests {
             let mut env = env_from_parity();
             env.network_posture = posture;
             assert!(
-                build_sealed_run(&healthy(), &env, &[], "2026-08-05T00:00:00Z").is_err(),
+                build_sealed_run(
+                    &healthy(),
+                    &env,
+                    &[],
+                    "2026-08-05T00:00:00Z",
+                    &DropAccounting::SynchronousProbe
+                )
+                .is_err(),
                 "a posture that declares no usable digest must not seal"
             );
         }
@@ -638,8 +697,14 @@ mod tests {
     /// chose, so this says nothing about when the probe ran.
     #[test]
     fn the_seal_commits_to_the_probe_examination_leaf() {
-        let run =
-            build_sealed_run(&healthy(), &env_from_parity(), &[], "2026-08-05T00:00:00Z").unwrap();
+        let run = build_sealed_run(
+            &healthy(),
+            &env_from_parity(),
+            &[],
+            "2026-08-05T00:00:00Z",
+            &DropAccounting::SynchronousProbe,
+        )
+        .unwrap();
         let probe_rec = run
             .records
             .iter()
@@ -656,33 +721,93 @@ mod tests {
         );
     }
 
-    /// Zero drop accounting is refused rather than asserted once the probe is not the sole
-    /// committed observation. ADR-045 line 232 forbids emitting a seal with guessed zero drops, and
-    /// the constant beside a larger set is exactly that guess.
+    /// A run carrying attack evidence must still be sealable. The previous gate counted committed
+    /// observations and refused anything but a lone probe, which forbade exactly the statements
+    /// ADR-045 line 425 allows ("zero or more interception records per run") and the checker
+    /// requires for a caught substrate row.
     #[test]
-    fn a_run_whose_drop_accounting_cannot_be_proved_is_refused() {
+    fn a_run_carrying_an_interception_can_still_seal() {
         let prior = vec![ObservationRecord {
             payload: serde_json::json!({"aeeKind": "interception", "aeeVersion": "0.7", "x": 1}),
             payload_type: OBSERVATION_PAYLOAD_TYPE.to_string(),
         }];
-        let err = build_sealed_run(
+        let run = build_sealed_run(
             &healthy(),
             &env_from_parity(),
             &prior,
             "2026-08-05T00:00:00Z",
+            &DropAccounting::SynchronousProbe,
         )
-        .expect_err("two committed observations cannot carry synchronous-probe");
-        assert_eq!(err.code(), "drop-accounting-unprovable");
+        .expect("an interception must not block the seal");
+        assert_eq!(run.records.len(), 2);
+        assert_ne!(
+            run.seal.aee_observed_set,
+            observed_set(&run.records[1..]).unwrap(),
+            "dropping the interception must move the commitment"
+        );
     }
 
-    /// Every value the seal carries, asserted where it lands. Checking a derivation function proves
-    /// nothing about the field it is supposed to fill; that is how the wrong posture digest reached
-    /// the wire.
+    /// The counted-queue model is the one this module can check, and it refuses on a lost
+    /// observation rather than carrying zero beside it.
+    #[test]
+    fn a_counted_queue_that_lost_an_observation_is_refused() {
+        let lossy = DropAccounting::CountedQueue {
+            channels: vec![("probe-ring".into(), 0), ("event-ring".into(), 3)],
+        };
+        let err = build_sealed_run(
+            &healthy(),
+            &env_from_parity(),
+            &[],
+            "2026-08-05T00:00:00Z",
+            &lossy,
+        )
+        .expect_err("a lost observation cannot carry zero");
+        assert_eq!(err.code(), "observations-lost");
+
+        let empty = DropAccounting::CountedQueue { channels: vec![] };
+        assert_eq!(
+            build_sealed_run(
+                &healthy(),
+                &env_from_parity(),
+                &[],
+                "2026-08-05T00:00:00Z",
+                &empty
+            )
+            .expect_err("no channels proves nothing")
+            .code(),
+            "drop-accounting-unnamed"
+        );
+
+        let clean = DropAccounting::CountedQueue {
+            channels: vec![("probe-ring".into(), 0)],
+        };
+        let run = build_sealed_run(
+            &healthy(),
+            &env_from_parity(),
+            &[],
+            "2026-08-05T00:00:00Z",
+            &clean,
+        )
+        .expect("all counters zero");
+        assert_eq!(
+            run.seal.assay_drop_proof_model, DROP_PROOF_COUNTED_QUEUE_ZERO,
+            "the payload names the model the caller proved, not a constant"
+        );
+    }
+
+    /// Every value the seal carries, asserted where it lands.
     #[test]
     fn every_carried_value_lands_in_its_own_payload_field() {
         let p = parity();
         let h = healthy();
-        let run = build_sealed_run(&h, &env_from_parity(), &[], "2026-08-05T12:34:56Z").unwrap();
+        let run = build_sealed_run(
+            &h,
+            &env_from_parity(),
+            &[],
+            "2026-08-05T12:34:56Z",
+            &DropAccounting::SynchronousProbe,
+        )
+        .unwrap();
         let s = &run.seal;
         assert_eq!(s.aee_kind, "sealed");
         assert_eq!(s.aee_version, "0.7");
@@ -709,25 +834,30 @@ mod tests {
         assert_eq!(s.assay_drop_proof_model, DROP_PROOF_SYNCHRONOUS_PROBE);
         assert_eq!(s.assay_attack_row_attribution_source, "assembly-plane");
         assert_eq!(s.assay_observed_labels, vec!["connect_blocked".to_string()]);
-        for required in [
-            "does not prove complete run population",
-            "does not prove agent safety",
-            "does not prove provider side effects",
-            "does not prove independent substrate operation",
-        ] {
-            assert!(
-                s.assay_non_claims.iter().any(|c| c == required),
-                "missing non-claim: {required}"
-            );
-        }
+        // Exact, not subset: `.any()` licenses any addition to a signed field, and ADR-042's stop
+        // list bans exactly the kind of claim someone would append.
+        assert_eq!(
+            s.assay_non_claims,
+            vec![
+                "does not prove complete run population".to_string(),
+                "does not prove agent safety".to_string(),
+                "does not prove provider side effects".to_string(),
+                "does not prove independent substrate operation".to_string(),
+            ]
+        );
     }
 
-    /// The wire names the checker reads. A count cannot see a rename, and every member could be
-    /// renamed at once while the checker read none of them.
+    /// The wire names the checker reads. A count cannot see a rename.
     #[test]
     fn the_payload_member_names_are_the_ones_the_checker_reads() {
-        let run =
-            build_sealed_run(&healthy(), &env_from_parity(), &[], "2026-08-05T00:00:00Z").unwrap();
+        let run = build_sealed_run(
+            &healthy(),
+            &env_from_parity(),
+            &[],
+            "2026-08-05T00:00:00Z",
+            &DropAccounting::SynchronousProbe,
+        )
+        .unwrap();
         let value = serde_json::to_value(&run.seal).unwrap();
         let mut got: Vec<&str> = value
             .as_object()
@@ -763,20 +893,33 @@ mod tests {
 
     /// The examination record is the observation, and its members travel inside the leaf the seal
     /// commits to. `assayCollectionPath` is the one that bites: the checker reads it on every record
-    /// for the key-scope check, so a wrong value is a `key-scope-collection-path-mismatch`. The
-    /// payload type is asserted too -- it is an argument to `build_pae`, so it silently changes
-    /// every leaf hash.
+    /// for the key-scope check.
     #[test]
     fn the_examination_record_carries_the_probe_it_was_built_from() {
         let h = healthy();
         let probe = h.probe.as_ref().unwrap().clone();
-        let run = build_sealed_run(&h, &env_from_parity(), &[], "2026-08-05T00:00:00Z").unwrap();
+        let run = build_sealed_run(
+            &h,
+            &env_from_parity(),
+            &[],
+            "2026-08-05T00:00:00Z",
+            &DropAccounting::SynchronousProbe,
+        )
+        .unwrap();
         let e = run
             .records
             .iter()
             .find(|r| r.payload["aeeKind"] == "examination")
             .unwrap();
-        assert_eq!(e.payload_type, OBSERVATION_PAYLOAD_TYPE);
+        // A literal, not the constant: the field is filled *from* that constant, so comparing the
+        // two compares it to itself. It is an argument to `build_pae`, so a change to it silently
+        // rewrites every leaf hash and every observed set.
+        assert_eq!(
+            e.payload_type,
+            "application/vnd.assay.aee-landlock-seal.fixture.v0+json"
+        );
+        assert_eq!(e.payload["aeeRunBinding"], run.seal.aee_run_binding);
+        assert_eq!(e.payload["aeeVersion"], "0.7");
         assert_eq!(e.payload["aeeMethod"], "intercepted");
         assert_eq!(
             e.payload["assayCollectionPath"],
@@ -792,8 +935,8 @@ mod tests {
         );
     }
 
-    /// Calendar-invalid instants the shape check used to accept and the checker's `strptime`
-    /// refuses. Each is 20 chars ending in Z, so none dies on the length check.
+    /// Calendar-invalid instants the shape check accepted and the checker's `strptime` refuses.
+    /// Each is 20 chars ending in Z, so none dies on the length check.
     #[test]
     fn a_calendar_invalid_instant_is_refused() {
         for bad in [
@@ -803,16 +946,39 @@ mod tests {
             "2027-02-29T00:00:00Z",
             "2026-00-05T00:00:00Z",
             "2026-08-00T00:00:00Z",
+            // Gregorian century rule: 2100 is not a leap year. `year % 4 == 0` alone accepts it.
+            "2100-02-29T00:00:00Z",
+            // `strptime` has no year 0, and an unparsable instant makes the checker skip its whole
+            // key-validity-window loop.
+            "0000-01-01T00:00:00Z",
+            // A leap second: `datetime` rejects second=60, so both sides must.
+            "2026-06-30T23:59:60Z",
         ] {
             assert!(
-                build_sealed_run(&healthy(), &env_from_parity(), &[], bad).is_err(),
+                build_sealed_run(
+                    &healthy(),
+                    &env_from_parity(),
+                    &[],
+                    bad,
+                    &DropAccounting::SynchronousProbe
+                )
+                .is_err(),
                 "sealed_at {bad:?} must be refused"
             );
         }
-        assert!(
-            build_sealed_run(&healthy(), &env_from_parity(), &[], "2028-02-29T23:59:59Z").is_ok(),
-            "a real leap day must still seal"
-        );
+        for good in ["2028-02-29T23:59:59Z", "2000-02-29T23:59:59Z"] {
+            assert!(
+                build_sealed_run(
+                    &healthy(),
+                    &env_from_parity(),
+                    &[],
+                    good,
+                    &DropAccounting::SynchronousProbe
+                )
+                .is_ok(),
+                "{good:?} is a real leap day and must still seal"
+            );
+        }
     }
 
     // ---- refusals ----------------------------------------------------------------------------
@@ -873,7 +1039,14 @@ mod tests {
             "2026-08-05T00:00:00",
         ] {
             assert!(
-                build_sealed_run(&healthy(), &env_from_parity(), &[], bad).is_err(),
+                build_sealed_run(
+                    &healthy(),
+                    &env_from_parity(),
+                    &[],
+                    bad,
+                    &DropAccounting::SynchronousProbe
+                )
+                .is_err(),
                 "sealed_at {bad:?} must be refused"
             );
         }
@@ -885,7 +1058,14 @@ mod tests {
     fn derived_fields_come_from_the_record_not_from_constants() {
         let mut h = healthy();
         h.schema = "assay.enforcement_health.v0".into();
-        let run = build_sealed_run(&h, &env_from_parity(), &[], "2026-08-05T00:00:00Z").unwrap();
+        let run = build_sealed_run(
+            &h,
+            &env_from_parity(),
+            &[],
+            "2026-08-05T00:00:00Z",
+            &DropAccounting::SynchronousProbe,
+        )
+        .unwrap();
         assert_eq!(
             run.seal.assay_source_schema, "assay.enforcement_health.v0",
             "must not relabel the artifact"
@@ -903,8 +1083,14 @@ mod tests {
     fn the_committed_carrier_fixture_still_parses_and_seals_through_the_commitment() {
         let raw = include_str!("../tests/fixtures/enforcement_health/v1/active_with_probe.json");
         let h: EnforcementHealthV1 = serde_json::from_str(raw).expect("fixture parses");
-        let run = build_sealed_run(&h, &env_from_parity(), &[], "2026-08-05T00:00:00Z")
-            .expect("eligible");
+        let run = build_sealed_run(
+            &h,
+            &env_from_parity(),
+            &[],
+            "2026-08-05T00:00:00Z",
+            &DropAccounting::SynchronousProbe,
+        )
+        .expect("eligible");
         assert_eq!(
             run.records.len(),
             1,

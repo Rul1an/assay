@@ -19,7 +19,15 @@ fixture_dir="scripts/experiments/fixtures/aee-landlock-seal"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 
-cp -R "$fixture_dir" "$scratch/committed"
+# A symlink standing in for a fixture points the signing surface outside the repo, and both `cp -R`
+# and `diff -r` follow it, so the comparison passes while the bytes under review are somewhere else.
+if find "$fixture_dir" -type l -print -quit | grep -q .; then
+  echo "error: symlink in $fixture_dir; fixtures must be regular files:" >&2
+  find "$fixture_dir" -type l >&2
+  exit 1
+fi
+
+cp -RP "$fixture_dir" "$scratch/committed"
 ASSAY_AEE_FIXTURE_ROOT="$scratch/emitted" \
   python3 scripts/experiments/aee_landlock_seal_fixture.py --emit >/dev/null
 
