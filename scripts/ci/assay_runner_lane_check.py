@@ -1699,6 +1699,7 @@ def self_test() -> None:
     assert not recorded_gate_ok("- gate: kernel-only", Gate.OPENAI_AGENTS_KERNEL_POLICY)
     assert uncovered_content_provenance_files(["crates/assay-runner-core/src/lib.rs"]) == ()
     assert uncovered_content_provenance_files(["Cargo.lock"]) == ("Cargo.lock",)
+    _test_declared_gate_surfaces_exist()
     _test_content_tree_comparison()
 
     valid_run = {
@@ -1741,6 +1742,41 @@ def self_test() -> None:
     # touching the classifier itself, including any future PR that
     # might silently re-introduce a spike dependency.
     _assert_assay_cli_does_not_consume_spike()
+
+
+def _test_declared_gate_surfaces_exist() -> None:
+    """Every declared gate surface matches at least one tracked file.
+
+    `all_gate_paths` matches exactly and `all_gate_prefixes` matches by
+    descent, so a file that moves stops being gated without producing any
+    diagnostic: the stale entry matches nothing, the new location matches no
+    rule, and the entry still reads as coverage. That is how
+    `crates/assay-cli/src/cli/commands/runner_spike.rs` came to gate a 17-line
+    module facade while the eight files holding the behaviour were ungated,
+    and how `crates/assay-cli/src/cgroup.rs` stayed declared after the file
+    moved (#2020).
+
+    The surface list is read from `assay_runner_gated_paths.json` and matched
+    against `git ls-files` with the production `starts` helper; nothing here
+    restates the manifest.
+
+    Bounded on purpose: this proves no declared surface is dead. It does not
+    prove the gated set is the right set. Most gating lives in `classify_file`
+    rather than the manifest, and which of the two is the source of truth is
+    open in #2020.
+    """
+    config = load_gated_path_config()
+    root = Path(__file__).resolve().parents[2]
+    tracked = subprocess.check_output(
+        ["git", "-C", str(root), "ls-files", "-z"], text=True
+    ).split("\0")
+    surfaces = (*config.all_gate_paths, *config.all_gate_prefixes)
+    dead = sorted(
+        surface
+        for surface in surfaces
+        if not any(starts(path, surface) for path in tracked if path)
+    )
+    assert not dead, f"declared gate surfaces matching no tracked file: {dead}"
 
 
 def _test_content_tree_comparison() -> None:
