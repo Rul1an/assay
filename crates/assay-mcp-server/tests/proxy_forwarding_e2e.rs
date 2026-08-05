@@ -7,9 +7,11 @@
 //! received nothing" is a checkable fact, not an assumption.
 
 use serde_json::Value;
-use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, Command, Stdio};
+
+mod jsonrpc_conn;
+use jsonrpc_conn::Conn;
 
 const PROXY_UNSUPPORTED: i64 = -32040;
 const PROXY_FAILED: i64 = -32041;
@@ -51,24 +53,6 @@ fn spawn_proxy(log: &std::path::Path, raw_log: Option<&std::path::Path>, mode: &
     cmd.spawn().expect("spawn proxy (is python installed?)")
 }
 
-fn send(stdin: &mut ChildStdin, v: Value) {
-    writeln!(stdin, "{v}").expect("write request");
-    stdin.flush().expect("flush request");
-}
-
-/// Read the next non-empty JSON line from the proxy's stdout.
-fn read_response(reader: &mut BufReader<ChildStdout>) -> Value {
-    let mut line = String::new();
-    loop {
-        line.clear();
-        let n = reader.read_line(&mut line).expect("read response");
-        assert!(n > 0, "proxy closed stdout before responding");
-        if !line.trim().is_empty() {
-            return serde_json::from_str(line.trim()).expect("parse response JSON");
-        }
-    }
-}
-
 fn init() -> Value {
     serde_json::json!({
         "jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -84,44 +68,33 @@ fn read_methods(log: &std::path::Path) -> Vec<String> {
         .collect()
 }
 
-fn shutdown(mut child: Child, stdin: ChildStdin) {
-    drop(stdin); // client EOF
-    let _ = child.wait();
-}
-
 // --- the load-bearing test, first ---------------------------------------------------------------
 
 #[test]
 fn tools_call_never_reaches_upstream() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
-    let mut child = spawn_proxy(&log, None, "normal");
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_proxy(&log, None, "normal"));
 
-    send(&mut stdin, init());
-    let r = read_response(&mut out);
+    out.send(init());
+    let r = out.read_json();
     assert_eq!(r["result"]["serverInfo"]["name"], "mock-upstream");
 
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let r = read_response(&mut out);
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let r = out.read_json();
     assert!(r["result"]["tools"].is_array());
 
     // The denied call: the proxy must answer proxy_unsupported and the upstream must never see it.
-    send(
-        &mut stdin,
+    out.send(
         serde_json::json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                            "params": {"name": "echo", "arguments": {}}}),
     );
-    let r = read_response(&mut out);
+    let r = out.read_json();
     assert_eq!(r["id"], 3);
     assert_eq!(r["error"]["code"], PROXY_UNSUPPORTED);
     assert_eq!(r["error"]["data"]["origin"], "assay-proxy");
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
 
     let methods = read_methods(&log);
     assert!(
@@ -142,22 +115,17 @@ fn tools_call_never_reaches_upstream() {
 fn non_allowlisted_method_is_denied_and_not_forwarded() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
-    let mut child = spawn_proxy(&log, None, "normal");
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_proxy(&log, None, "normal"));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_json();
 
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 7, "method": "resources/list"}),
-    );
-    let r = read_response(&mut out);
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 7, "method": "resources/list"}));
+    let r = out.read_json();
     assert_eq!(r["error"]["code"], PROXY_UNSUPPORTED);
     assert_eq!(r["error"]["data"]["origin"], "assay-proxy");
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     assert!(!read_methods(&log).contains(&"resources/list".to_string()));
 }
 
@@ -179,21 +147,16 @@ const DENIED_METHODS: &[&str] = &[
 fn non_allowlisted_methods_are_unsupported_and_never_forwarded() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
-    let mut child = spawn_proxy(&log, None, "normal");
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_proxy(&log, None, "normal"));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_json();
 
     let mut id = 100;
     for method in DENIED_METHODS {
         id += 1;
-        send(
-            &mut stdin,
-            serde_json::json!({"jsonrpc": "2.0", "id": id, "method": method}),
-        );
-        let r = read_response(&mut out);
+        out.send(serde_json::json!({"jsonrpc": "2.0", "id": id, "method": method}));
+        let r = out.read_json();
         assert_eq!(r["id"], id);
         assert_eq!(
             r["error"]["code"], PROXY_UNSUPPORTED,
@@ -206,7 +169,7 @@ fn non_allowlisted_methods_are_unsupported_and_never_forwarded() {
         );
     }
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let methods = read_methods(&log);
     for method in DENIED_METHODS {
         assert!(
@@ -222,26 +185,20 @@ fn non_allowlisted_client_notification_is_dropped_and_not_forwarded() {
     // forwarded. A following allowlisted request still works, proving the stream is intact.
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
-    let mut child = spawn_proxy(&log, None, "normal");
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_proxy(&log, None, "normal"));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_json();
 
-    send(
-        &mut stdin,
+    out.send(
         serde_json::json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {}}),
     );
     // Liveness: a following allowlisted ping is answered, so the dropped notification broke nothing.
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 50, "method": "ping"}),
-    );
-    let r = read_response(&mut out);
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 50, "method": "ping"}));
+    let r = out.read_json();
     assert_eq!(r["id"], 50);
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let methods = read_methods(&log);
     assert!(
         !methods.contains(&"notifications/cancelled".to_string()),
@@ -260,14 +217,12 @@ fn proxy_does_not_inject_inbound_transport_auth() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
     let raw = dir.path().join("raw.log");
-    let mut child = spawn_proxy(&log, Some(&raw), "normal");
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_proxy(&log, Some(&raw), "normal"));
 
     let sent = init();
-    send(&mut stdin, sent.clone());
-    let _ = read_response(&mut out);
-    shutdown(child, stdin);
+    out.send(sent.clone());
+    let _ = out.read_json();
+    let _ = out.shutdown();
 
     let raw_lines = std::fs::read_to_string(&raw).unwrap_or_default();
     let received: Value =
@@ -288,23 +243,18 @@ fn proxy_does_not_inject_inbound_transport_auth() {
 fn initialize_and_tools_list_forward_and_response_is_unmutated() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
-    let mut child = spawn_proxy(&log, None, "normal");
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_proxy(&log, None, "normal"));
 
-    send(&mut stdin, init());
-    let r = read_response(&mut out);
+    out.send(init());
+    let r = out.read_json();
     // The upstream's canned serverInfo is relayed unmutated.
     assert_eq!(r["result"]["serverInfo"]["version"], "0.0.0");
 
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let r = read_response(&mut out);
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let r = out.read_json();
     assert_eq!(r["result"]["tools"][0]["name"], "echo");
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let methods = read_methods(&log);
     assert!(methods.contains(&"initialize".to_string()));
     assert!(methods.contains(&"tools/list".to_string()));
@@ -314,21 +264,16 @@ fn initialize_and_tools_list_forward_and_response_is_unmutated() {
 fn ping_is_forwarded() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
-    let mut child = spawn_proxy(&log, None, "normal");
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_proxy(&log, None, "normal"));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 5, "method": "ping"}),
-    );
-    let r = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_json();
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 5, "method": "ping"}));
+    let r = out.read_json();
     assert_eq!(r["id"], 5);
     assert!(r["result"].is_object());
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     assert!(read_methods(&log).contains(&"ping".to_string()));
 }
 
@@ -337,53 +282,48 @@ fn upstream_spawn_failure_yields_proxy_failed() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
     // An upstream command that cannot be spawned.
-    let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
-        .args([
-            "proxy",
-            "--upstream-command",
-            "this-binary-does-not-exist-assay-test",
-        ])
-        .env("MOCK_UPSTREAM_LOG", &log)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .unwrap();
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(
+        Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+            .args([
+                "proxy",
+                "--upstream-command",
+                "this-binary-does-not-exist-assay-test",
+            ])
+            .env("MOCK_UPSTREAM_LOG", &log)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
 
-    send(&mut stdin, init());
-    let r = read_response(&mut out);
+    out.send(init());
+    let r = out.read_json();
     assert_eq!(r["error"]["code"], PROXY_FAILED);
     assert_eq!(r["error"]["data"]["origin"], "assay-proxy");
     assert_eq!(r["error"]["data"]["reason"], "upstream_spawn_failed");
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
 }
 
 #[test]
 fn malformed_upstream_response_is_not_trusted() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
-    let mut child = spawn_proxy(&log, None, "malformed");
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_proxy(&log, None, "malformed"));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out); // initialize is normal
+    out.send(init());
+    let _ = out.read_json(); // initialize is normal
 
     // tools/list: the mock emits a non-JSON line; the proxy must surface a proxy_failed, never relay
     // the garbage as a successful result.
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let r = read_response(&mut out);
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let r = out.read_json();
     assert_eq!(r["error"]["code"], PROXY_FAILED);
     assert_eq!(r["error"]["data"]["origin"], "assay-proxy");
     assert_eq!(r["error"]["data"]["reason"], "malformed_upstream_response");
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
 }
 
 #[test]
@@ -392,33 +332,30 @@ fn default_mode_spawns_no_upstream_and_serves_local_tools() {
     // point at a sentinel log that must stay absent/empty because no mock can have been spawned.
     let dir = tempfile::tempdir().unwrap();
     let sentinel = dir.path().join("must_stay_absent.log");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
-        .args(["--policy-root", "../../tests/fixtures/mcp"])
-        .env("MOCK_UPSTREAM_LOG", &sentinel)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .unwrap();
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(
+        Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+            .args(["--policy-root", "../../tests/fixtures/mcp"])
+            .env("MOCK_UPSTREAM_LOG", &sentinel)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
 
-    send(&mut stdin, init());
-    let r = read_response(&mut out);
+    out.send(init());
+    let r = out.read_json();
     // The default server answers initialize itself (its own serverInfo, not the mock's).
     assert_ne!(r["result"]["serverInfo"]["name"], "mock-upstream");
 
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let r = read_response(&mut out);
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let r = out.read_json();
     assert!(
         r["result"]["tools"].is_array(),
         "default server serves its own tools"
     );
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     assert!(
         !sentinel.exists(),
         "default mode must not spawn any upstream (mock log must not exist)"
@@ -431,17 +368,12 @@ fn no_artifact_is_written_without_the_out_flag() {
     // the proxy writes no artifact. (Manifest emission itself is covered in proxy_manifest_e2e.rs.)
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
-    let mut child = spawn_proxy(&log, None, "normal");
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let _ = read_response(&mut out);
-    shutdown(child, stdin);
+    let mut out = Conn::attach(spawn_proxy(&log, None, "normal"));
+    out.send(init());
+    let _ = out.read_json();
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let _ = out.read_json();
+    let _ = out.shutdown();
 
     let stray: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()
