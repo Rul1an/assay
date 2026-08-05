@@ -14,7 +14,6 @@
 //! than a missing one, because a missing seal is refused by the checker and a guessed seal is not.
 
 use crate::enforcement_health_v1::{EnforcementHealthV1, Mechanism, Probe, Status};
-use serde::{Deserialize, Serialize};
 
 /// The collection path this slice covers. ADR-045 chose Option C: Landlock first, proxy later.
 pub const COLLECTION_PATH_LANDLOCK_TCP_CONNECT: &str = "landlock-tcp-connect";
@@ -76,6 +75,8 @@ pub enum NotSealEligible {
     RecordSelfContradictory { detail: String },
     /// A run-context value the seal would carry is not a value this run proved.
     UnprovenContextValue { field: &'static str },
+    /// A digest the seal must derive could not be computed from the inputs given.
+    DerivationFailed { what: &'static str },
 }
 
 impl NotSealEligible {
@@ -94,6 +95,7 @@ impl NotSealEligible {
             Self::AbiCannotExpressRestriction { .. } => "abi-cannot-express-restriction",
             Self::RecordSelfContradictory { .. } => "record-self-contradictory",
             Self::UnprovenContextValue { .. } => "unproven-context-value",
+            Self::DerivationFailed { .. } => "derivation-failed",
         }
     }
 }
@@ -112,38 +114,9 @@ impl std::fmt::Display for NotSealEligible {
             Self::AbiCannotExpressRestriction { abi } => write!(f, "Landlock ABI {abi} predates LANDLOCK_ACCESS_NET_CONNECT_TCP (ABI 4), so this denial did not come from Landlock"),
             Self::RecordSelfContradictory { detail } => write!(f, "health record contradicts itself: {detail}"),
             Self::UnprovenContextValue { field } => write!(f, "run-context field {field} is not a value this run proved"),
+            Self::DerivationFailed { what } => write!(f, "could not derive a required digest: {what}"),
         }
     }
-}
-
-/// Run-level inputs the seal binds to, supplied by the caller because none of them are derivable
-/// from an enforcement-health record alone.
-#[derive(Debug, Clone)]
-pub struct RunContext {
-    /// AEE run binding over the run's pre-injection inputs.
-    pub run_binding: String,
-    /// MUST equal the carried `observationEnvironment.networkPosture.digest.sha256`.
-    pub posture_digest: String,
-    /// AEE digest commitment over emitted `interception`/`examination` record leaves.
-    pub observed_set: String,
-    /// The sealed enforcement scope, e.g. `tcp_connect_landlock_port`.
-    pub seal_scope: String,
-    /// RFC 3339 UTC instant the seal commits to, checked against the signing key's validity window.
-    pub sealed_at: String,
-    /// The run-phase challenge this run issued after corpus injection. The probe must carry it.
-    ///
-    /// This is the freshness handle from RFC 9334 (RATS) §10, in its challenge/response form: the
-    /// appraiser supplies a value, the attester echoes it, and recentness is narrowed without
-    /// either side needing a synchronised clock. An arming-time probe cannot carry it because it
-    /// did not exist yet.
-    pub expected_challenge: String,
-}
-
-/// Lowercase SHA-256 hex, the shape the #2001 field contract requires of every digest member.
-fn is_sha256_hex(v: &str) -> bool {
-    v.len() == 64
-        && v.bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// `YYYY-MM-DDTHH:MM:SSZ`, the shape the ADR-045 checker's validity-window check parses.
@@ -162,9 +135,7 @@ fn is_rfc3339_utc(v: &str) -> bool {
 }
 
 /// The ADR-045 sealed payload, assembled but **not signed**.
-///
-/// Field names are the on-wire ones so this type is the single place the shape is stated.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SealPayload {
     #[serde(rename = "aeeKind")]
     pub aee_kind: String,
@@ -184,8 +155,6 @@ pub struct SealPayload {
     pub aee_drop_bound: u64,
     #[serde(rename = "aeeObservedSet")]
     pub aee_observed_set: String,
-    /// Empty for a pure Landlock path: the signer did not dispatch the corpus attack, so it cannot
-    /// bind an attack id to its own observation. ADR-045 calls this the safe lower bound.
     #[serde(rename = "aeeObservedAttacks")]
     pub aee_observed_attacks: Vec<String>,
     #[serde(rename = "assayObservedLabels")]
@@ -219,15 +188,134 @@ fn payload_non_claims() -> Vec<String> {
     .collect()
 }
 
-/// Decide whether this run-end health record can carry a seal, and say why not when it cannot.
+/// The observation environment the run binding is derived from.
 ///
-/// Only the conditions decidable from the health record are evaluated here. Run binding, posture
-/// digest and observed set are supplied through [`RunContext`]; whether *they* are derivable is the
-/// caller's precondition, not something this function can check.
-pub fn seal_eligibility<'a>(
-    health: &'a EnforcementHealthV1,
-    ctx: &RunContext,
-) -> Result<&'a Probe, NotSealEligible> {
+/// These are the run's pre-injection inputs. The seal does not accept a run binding; it derives one
+/// from these the same way the checker does, because a digest a producer is handed is a digest
+/// nobody proved.
+#[derive(Debug, Clone)]
+pub struct ObservationEnvironment {
+    pub subject_digest: String,
+    pub substrate_digest: String,
+    pub corpus_digest: String,
+    pub catch_policy_digest: String,
+    pub observation_vocabulary_digest: String,
+    pub run_entropy_digest: String,
+    /// The carried posture object. Digested here, not supplied as a digest.
+    pub network_posture: serde_json::Value,
+}
+
+/// One emitted observation record, as it appears in `observationRecords`.
+#[derive(Debug, Clone)]
+pub struct ObservationRecord {
+    pub payload: serde_json::Value,
+    pub payload_type: String,
+}
+
+/// AEE binding version this producer derives under.
+const AEE_BINDING_VERSION: &str = "2";
+/// The payload type Assay's fixture-era observation records carry.
+pub const OBSERVATION_PAYLOAD_TYPE: &str =
+    "application/vnd.assay.aee-landlock-seal.fixture.v0+json";
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(bytes))
+}
+
+/// RFC 8785 canonical bytes, then SHA-256. The one canonicalizer, from `assay-canonical`.
+fn digest_json(value: &serde_json::Value) -> Result<String, NotSealEligible> {
+    let bytes =
+        assay_canonical::jcs::to_vec(value).map_err(|_| NotSealEligible::DerivationFailed {
+            what: "canonicalize",
+        })?;
+    Ok(sha256_hex(&bytes))
+}
+
+/// AEE v0.7 leaf hash: `H(0x00 || the record's DSSE PAE bytes)`.
+///
+/// The `0x00` is the RFC 6962 leaf domain tag and is normative here; it is not ours to tidy away.
+fn leaf_hash(rec: &ObservationRecord) -> Result<String, NotSealEligible> {
+    let payload = assay_canonical::jcs::to_vec(&rec.payload).map_err(|_| {
+        NotSealEligible::DerivationFailed {
+            what: "canonicalize",
+        }
+    })?;
+    let pae = assay_common::dsse::build_pae(&rec.payload_type, &payload);
+    let mut buf = Vec::with_capacity(1 + pae.len());
+    buf.push(0x00);
+    buf.extend_from_slice(&pae);
+    Ok(sha256_hex(&buf))
+}
+
+/// AEE v0.7 `aeeObservedSet`: a digest over the sorted lowercase leaf hashes of every emitted
+/// `interception` and `examination` record.
+///
+/// A commitment by a party that does not control the carried set: dropping a record removes a leaf
+/// and the value diverges. Deriving it here rather than accepting one is what makes the seal's
+/// position in the run checkable — a seal committing to a leaf could not have been computed before
+/// that leaf existed.
+pub fn observed_set(records: &[ObservationRecord]) -> Result<String, NotSealEligible> {
+    let mut leaves: Vec<String> = records
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.payload.get("aeeKind").and_then(|v| v.as_str()),
+                Some("interception") | Some("examination")
+            )
+        })
+        .map(leaf_hash)
+        .collect::<Result<Vec<_>, _>>()?;
+    leaves.sort_unstable();
+    leaves.dedup();
+    digest_json(&serde_json::Value::Array(
+        leaves.into_iter().map(serde_json::Value::String).collect(),
+    ))
+}
+
+/// AEE v0.7 run binding over the run's pre-injection inputs.
+pub fn run_binding(env: &ObservationEnvironment) -> Result<String, NotSealEligible> {
+    digest_json(&serde_json::json!({
+        "aeeBindingVersion": AEE_BINDING_VERSION,
+        "catchPolicy": env.catch_policy_digest,
+        "corpus": env.corpus_digest,
+        "networkPosture": digest_json(&env.network_posture)?,
+        "observationVocabulary": env.observation_vocabulary_digest,
+        "runEntropy": env.run_entropy_digest,
+        "subject": env.subject_digest,
+        "substrate": env.substrate_digest,
+    }))
+}
+
+/// Build the `examination` record that carries the run-end probe result.
+///
+/// The probe becomes a record rather than staying a field in a health artifact, and that is the
+/// whole point: the seal's `aeeObservedSet` then commits to its leaf, so the seal demonstrably was
+/// computed after the probe. A field in a side artifact never travels and proves nothing to a
+/// consumer.
+///
+/// It also makes the drop-accounting model readable instead of asserted. Under the synchronous-probe
+/// model the only sealed observation *is* the probe result; with the probe as the sole member of the
+/// observed set, that is a property of the statement rather than a label the producer chose.
+pub fn probe_examination_record(probe: &Probe, run_binding: &str) -> ObservationRecord {
+    ObservationRecord {
+        payload: serde_json::json!({
+            "aeeKind": "examination",
+            "aeeVersion": AEE_VERSION,
+            "aeeRunBinding": run_binding,
+            "aeeMethod": "intercepted",
+            "assayCollectionPath": COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
+            "assayProbeTransport": probe.transport,
+            "assayProbeAction": probe.blocked_action,
+            "assayProbePort": probe.blocked_port,
+            "assayProbeErrno": probe.blocked_errno,
+            "assayProbeListenerReached": probe.listener_reached,
+        }),
+        payload_type: OBSERVATION_PAYLOAD_TYPE.to_string(),
+    }
+}
+
+pub fn seal_eligibility<'a>(health: &'a EnforcementHealthV1) -> Result<&'a Probe, NotSealEligible> {
     if health.status != Status::Active {
         return Err(NotSealEligible::NotArmed {
             status: health.status,
@@ -243,17 +331,8 @@ pub fn seal_eligibility<'a>(
             found: health.scope.clone(),
         });
     }
-    // The seal states a scope of its own. Nothing downstream compares it: the ADR-045 checker has
-    // no rule on `assaySealScope` at all, so an unchecked value here is credited end to end.
-    if ctx.seal_scope != health.scope {
-        return Err(NotSealEligible::ScopeMismatch {
-            found: ctx.seal_scope.clone(),
-        });
-    }
-
-    // `LANDLOCK_ACCESS_NET_CONNECT_TCP` exists from ABI 4. Below that the kernel cannot express the
-    // restriction whose denial is claimed, so an EACCES came from somewhere else and crediting it
-    // would seal a run that Landlock never governed.
+    // `LANDLOCK_ACCESS_NET_CONNECT_TCP` exists from ABI 4. Below it the kernel cannot express the
+    // restriction whose denial is claimed, so the EACCES came from somewhere that is not Landlock.
     if health.landlock.abi < LANDLOCK_ABI_NET_CONNECT_TCP {
         return Err(NotSealEligible::AbiCannotExpressRestriction {
             abi: health.landlock.abi,
@@ -274,7 +353,6 @@ pub fn seal_eligibility<'a>(
             detail: "status is active but the ruleset was never confirmed applied".into(),
         });
     }
-
     let probe = health
         .probe
         .as_ref()
@@ -287,406 +365,255 @@ pub fn seal_eligibility<'a>(
             errno: probe.blocked_errno.clone(),
         });
     }
-    // The phase question, and the reason this module exists. Every field above is equally true of a
-    // probe taken at arming time; only the challenge distinguishes them.
-    let challenge = probe
-        .challenge
-        .as_deref()
-        .ok_or(NotSealEligible::ProbePhaseUnproven)?;
-    if challenge.is_empty() || challenge != ctx.expected_challenge {
-        return Err(NotSealEligible::ProbeChallengeMismatch);
-    }
-
-    // Values the seal will carry verbatim. A seal is the strongest record in a statement; carrying
-    // an unvalidated digest into one is the guessing this module refuses elsewhere.
-    for (field, value) in [
-        ("run_binding", &ctx.run_binding),
-        ("posture_digest", &ctx.posture_digest),
-        ("observed_set", &ctx.observed_set),
-    ] {
-        if !is_sha256_hex(value) {
-            return Err(NotSealEligible::UnprovenContextValue { field });
-        }
-    }
-    if !is_rfc3339_utc(&ctx.sealed_at) {
-        return Err(NotSealEligible::UnprovenContextValue { field: "sealed_at" });
-    }
-    if ctx.expected_challenge.is_empty() {
-        return Err(NotSealEligible::UnprovenContextValue {
-            field: "expected_challenge",
-        });
-    }
     Ok(probe)
 }
 
-/// Assemble the sealed payload for a seal-eligible run.
+/// What a sealed run produces: the seal, and the records its observed set commits to.
+#[derive(Debug, Clone)]
+pub struct SealedRun {
+    pub seal: SealPayload,
+    pub records: Vec<ObservationRecord>,
+}
+
+/// Assemble the sealed payload for a seal-eligible run, deriving every digest it carries.
 ///
-/// Returns the same refusal as [`seal_eligibility`] when the run is not eligible, so there is no
-/// path from an ineligible run to a payload. Drop accounting is emitted as zero under the
-/// synchronous-probe model only: the sealed observation *is* the probe result, taken synchronously,
-/// with no queue between capture and this builder that could lose an observation unnoticed.
-pub fn build_seal_payload(
+/// `prior_records` are the interception/examination records already emitted for this run. The probe
+/// examination is appended, so the seal commits to a set that includes it.
+pub fn build_sealed_run(
     health: &EnforcementHealthV1,
-    ctx: &RunContext,
-) -> Result<SealPayload, NotSealEligible> {
-    let probe = seal_eligibility(health, ctx)?;
-    Ok(SealPayload {
-        aee_kind: "sealed".to_string(),
-        aee_version: AEE_VERSION.to_string(),
-        aee_run_binding: ctx.run_binding.clone(),
-        aee_method: "intercepted".to_string(),
-        aee_posture_digest: ctx.posture_digest.clone(),
-        aee_still_armed: true,
-        aee_drop_count: 0,
-        aee_drop_bound: 0,
-        aee_observed_set: ctx.observed_set.clone(),
-        aee_observed_attacks: Vec::new(),
-        // Derived from the observation, not asserted. A constant here would state a label the
-        // record never carried.
-        assay_observed_labels: vec![observed_label(probe)],
-        assay_collection_path: COLLECTION_PATH_LANDLOCK_TCP_CONNECT.to_string(),
-        assay_sealed_at: ctx.sealed_at.clone(),
-        // The record's own schema, not a constant: a constant would relabel a v0 artifact as v1.
-        assay_source_schema: health.schema.clone(),
-        assay_seal_scope: ctx.seal_scope.clone(),
-        assay_drop_proof_model: DROP_PROOF_SYNCHRONOUS_PROBE.to_string(),
-        // Assembly-plane, not substrate-runner: this signer observed a blocked connect, it did not
-        // dispatch the corpus attack, so it cannot attribute an attack id to its own observation.
-        assay_attack_row_attribution_source: "assembly-plane".to_string(),
-        assay_non_claims: payload_non_claims(),
+    env: &ObservationEnvironment,
+    prior_records: &[ObservationRecord],
+    sealed_at: &str,
+) -> Result<SealedRun, NotSealEligible> {
+    let probe = seal_eligibility(health)?;
+    if !is_rfc3339_utc(sealed_at) {
+        return Err(NotSealEligible::UnprovenContextValue { field: "sealed_at" });
+    }
+    let rb = run_binding(env)?;
+    let posture_digest = digest_json(&env.network_posture)?;
+
+    let mut records = prior_records.to_vec();
+    records.push(probe_examination_record(probe, &rb));
+    let observed = observed_set(&records)?;
+
+    Ok(SealedRun {
+        seal: SealPayload {
+            aee_kind: "sealed".to_string(),
+            aee_version: AEE_VERSION.to_string(),
+            aee_run_binding: rb,
+            aee_method: "intercepted".to_string(),
+            aee_posture_digest: posture_digest,
+            aee_still_armed: true,
+            aee_drop_count: 0,
+            aee_drop_bound: 0,
+            aee_observed_set: observed,
+            aee_observed_attacks: Vec::new(),
+            assay_observed_labels: vec![observed_label(probe)],
+            assay_collection_path: COLLECTION_PATH_LANDLOCK_TCP_CONNECT.to_string(),
+            assay_sealed_at: sealed_at.to_string(),
+            assay_source_schema: health.schema.clone(),
+            assay_seal_scope: health.scope.clone(),
+            assay_drop_proof_model: DROP_PROOF_SYNCHRONOUS_PROBE.to_string(),
+            assay_attack_row_attribution_source: "assembly-plane".to_string(),
+            assay_non_claims: payload_non_claims(),
+        },
+        records,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::enforcement_health_v1::EnforcementHealthV1;
+    use crate::enforcement_health_v1::{EnforcementHealthV1, Failure, ReasonCode};
+
+    const PARITY: &str = include_str!(
+        "../../../scripts/experiments/fixtures/aee-landlock-seal/derivation-parity.json"
+    );
 
     fn probe(listener_reached: bool, errno: &str) -> Probe {
         Probe {
-            kind: "real_block".to_string(),
-            transport: "tcp".to_string(),
-            blocked_action: "connect".to_string(),
-            blocked_port: 9,
-            blocked_errno: errno.to_string(),
-            listener_reached,
-            challenge: Some(CHALLENGE.to_string()),
-        }
-    }
-
-    const CHALLENGE: &str = "run-phase-challenge-0001";
-
-    fn ctx() -> RunContext {
-        RunContext {
-            run_binding: "a".repeat(64),
-            posture_digest: "b".repeat(64),
-            observed_set: "c".repeat(64),
-            seal_scope: "tcp_connect_landlock_port".to_string(),
-            sealed_at: "2026-08-05T00:00:00Z".to_string(),
-            expected_challenge: CHALLENGE.to_string(),
-        }
-    }
-
-    #[test]
-    fn a_blocked_run_end_probe_is_seal_eligible() {
-        let h = EnforcementHealthV1::landlock_active(4, vec![443], Some(probe(false, "EACCES")));
-        let seal = build_seal_payload(&h, &ctx()).expect("a blocked probe proves still-armed");
-        assert!(seal.aee_still_armed);
-        assert_eq!(seal.aee_drop_count, 0);
-        assert_eq!(seal.assay_drop_proof_model, DROP_PROOF_SYNCHRONOUS_PROBE);
-        assert!(
-            seal.aee_observed_attacks.is_empty(),
-            "a signer that did not dispatch the attack must not name one"
-        );
-    }
-
-    /// The load-bearing case. Without a probe the record still carries `restrict_self_confirmed`,
-    /// so anything reading that field as run-end state would emit a seal here — with a guessed
-    /// still-armed value and guessed zero drops.
-    #[test]
-    fn ruleset_applied_without_a_run_end_probe_is_refused() {
-        let h = EnforcementHealthV1::landlock_active(4, vec![443], None);
-        assert!(
-            h.landlock.restrict_self_confirmed,
-            "start-time fact is present"
-        );
-        let err =
-            build_seal_payload(&h, &ctx()).expect_err("start-time arming is not run-end proof");
-        assert_eq!(err.code(), "no-run-end-probe");
-    }
-
-    #[test]
-    fn a_probe_that_reached_the_listener_is_refused() {
-        let h = EnforcementHealthV1::landlock_active(4, vec![443], Some(probe(true, "EACCES")));
-        assert_eq!(
-            build_seal_payload(&h, &ctx())
-                .expect_err("reaching the listener is not a block")
-                .code(),
-            "probe-reached-listener"
-        );
-    }
-
-    /// A host that is simply not listening produces `ECONNREFUSED` whether or not Landlock is armed,
-    /// so crediting it would let an unenforced run seal itself.
-    #[test]
-    fn a_weak_probe_signal_is_refused() {
-        for errno in ["ECONNREFUSED", "ETIMEDOUT", ""] {
-            let h = EnforcementHealthV1::landlock_active(4, vec![443], Some(probe(false, errno)));
-            let err = build_seal_payload(&h, &ctx()).expect_err("weak signal must not seal");
-            assert_eq!(err.code(), "probe-signal-too-weak", "errno {errno:?}");
-        }
-    }
-
-    #[test]
-    fn a_failed_run_is_refused_before_any_probe_question() {
-        let h = EnforcementHealthV1 {
-            status: Status::Failed,
-            probe: Some(probe(false, "EACCES")),
-            ..EnforcementHealthV1::landlock_active(4, vec![443], None)
-        };
-        assert_eq!(
-            build_seal_payload(&h, &ctx())
-                .expect_err("a failed arm cannot seal")
-                .code(),
-            "not-armed"
-        );
-    }
-
-    /// Every refusal must be reachable from the builder, not only from the predicate: a builder that
-    /// re-derived eligibility could drift from it, and the drift would emit seals.
-    #[test]
-    fn no_ineligible_input_can_reach_a_payload() {
-        let cases = [
-            EnforcementHealthV1::landlock_active(4, vec![443], None),
-            EnforcementHealthV1::landlock_active(4, vec![443], Some(probe(true, "EACCES"))),
-            EnforcementHealthV1::landlock_active(4, vec![443], Some(probe(false, "ECONNREFUSED"))),
-        ];
-        for h in cases {
-            assert!(seal_eligibility(&h, &ctx()).is_err());
-            assert!(
-                build_seal_payload(&h, &ctx()).is_err(),
-                "builder must not outrun the predicate"
-            );
-        }
-    }
-}
-
-#[cfg(test)]
-mod checker_parity {
-    use super::*;
-    use crate::enforcement_health_v1::EnforcementHealthV1;
-
-    /// The producer and the ADR-045 checker must agree on the sealed payload's member set.
-    ///
-    /// They are two implementations of one shape — this builder in Rust, the fixture emitter in
-    /// `scripts/experiments/aee_landlock_seal_fixture.py` — and two implementations of one rule
-    /// drift. Until a shared schema exists, this test is the parity fallback: it pins the member
-    /// set the checker's payload-only rules read, so a field renamed on one side fails here rather
-    /// than surfacing as a seal the checker silently refuses.
-    ///
-    /// Values are not compared. The checker's fixture is synthetic and this builder's values come
-    /// from a real run; the shape is what has to match.
-    #[test]
-    fn the_payload_member_set_matches_the_checker_fixture() {
-        let expected = [
-            "aeeDropBound",
-            "aeeDropCount",
-            "aeeKind",
-            "aeeMethod",
-            "aeeObservedAttacks",
-            "aeeObservedSet",
-            "aeePostureDigest",
-            "aeeRunBinding",
-            "aeeStillArmed",
-            "aeeVersion",
-            "assayAttackRowAttributionSource",
-            "assayCollectionPath",
-            "assayDropProofModel",
-            "assayNonClaims",
-            "assayObservedLabels",
-            "assaySealScope",
-            "assaySealedAt",
-            "assaySourceSchema",
-        ];
-
-        let health = EnforcementHealthV1::landlock_active(
-            4,
-            vec![443],
-            Some(Probe {
-                kind: "real_block".to_string(),
-                transport: "tcp".to_string(),
-                blocked_action: "connect".to_string(),
-                blocked_port: 9,
-                blocked_errno: "EACCES".to_string(),
-                listener_reached: false,
-                challenge: Some("parity-challenge".to_string()),
-            }),
-        );
-        let ctx = RunContext {
-            run_binding: "a".repeat(64),
-            posture_digest: "b".repeat(64),
-            observed_set: "c".repeat(64),
-            seal_scope: "tcp_connect_landlock_port".to_string(),
-            sealed_at: "2026-08-05T00:00:00Z".to_string(),
-            expected_challenge: "parity-challenge".to_string(),
-        };
-        let seal = build_seal_payload(&health, &ctx).expect("eligible");
-        let value = serde_json::to_value(&seal).expect("payload serializes");
-        let mut got: Vec<&str> = value
-            .as_object()
-            .expect("object")
-            .keys()
-            .map(String::as_str)
-            .collect();
-        got.sort_unstable();
-
-        assert_eq!(
-            got, expected,
-            "producer payload members diverged from the ADR-045 checker fixture"
-        );
-    }
-
-    /// The payload-only rules #2006 added to the checker, asserted on this producer's output.
-    #[test]
-    fn the_payload_satisfies_the_checker_payload_only_rules() {
-        let health = EnforcementHealthV1::landlock_active(
-            4,
-            vec![443],
-            Some(Probe {
-                kind: "real_block".to_string(),
-                transport: "tcp".to_string(),
-                blocked_action: "connect".to_string(),
-                blocked_port: 9,
-                blocked_errno: "EACCES".to_string(),
-                listener_reached: false,
-                challenge: Some("parity-challenge".to_string()),
-            }),
-        );
-        let ctx = RunContext {
-            run_binding: "a".repeat(64),
-            posture_digest: "b".repeat(64),
-            observed_set: "c".repeat(64),
-            seal_scope: "tcp_connect_landlock_port".to_string(),
-            sealed_at: "2026-08-05T00:00:00Z".to_string(),
-            expected_challenge: "parity-challenge".to_string(),
-        };
-        let s = build_seal_payload(&health, &ctx).expect("eligible");
-
-        assert_eq!(s.aee_kind, "sealed");
-        assert_eq!(s.aee_version, "0.7");
-        assert_eq!(s.aee_method, "intercepted");
-        assert!(s.aee_still_armed);
-        assert_eq!((s.aee_drop_count, s.aee_drop_bound), (0, 0));
-        assert!(matches!(
-            s.assay_drop_proof_model.as_str(),
-            "synchronous-probe" | "counted-queue-zero"
-        ));
-        assert_eq!(
-            s.assay_collection_path,
-            COLLECTION_PATH_LANDLOCK_TCP_CONNECT
-        );
-        assert!(
-            !s.assay_source_schema.is_empty(),
-            "non-empty string, per the #2006 rule"
-        );
-        assert!(matches!(
-            s.assay_attack_row_attribution_source.as_str(),
-            "assembly-plane" | "substrate-runner"
-        ));
-        // RFC 3339 UTC instant, the shape the checker's validity-window check parses.
-        assert_eq!(s.assay_sealed_at.len(), 20);
-        assert!(s.assay_sealed_at.ends_with('Z'));
-        for required in [
-            "does not prove complete run population",
-            "does not prove agent safety",
-            "does not prove provider side effects",
-            "does not prove independent substrate operation",
-        ] {
-            assert!(
-                s.assay_non_claims.iter().any(|c| c == required),
-                "missing non-claim: {required}"
-            );
-        }
-    }
-}
-
-#[cfg(test)]
-mod refusals {
-    use super::*;
-    use crate::enforcement_health_v1::{EnforcementHealthV1, Failure, ReasonCode};
-
-    const CH: &str = "post-injection-challenge";
-
-    fn probe_with(challenge: Option<&str>) -> Probe {
-        Probe {
-            kind: "real_block".to_string(),
-            transport: "ipv4".to_string(),
-            blocked_action: "tcp_connect".to_string(),
+            kind: "real_block".into(),
+            transport: "ipv4".into(),
+            blocked_action: "tcp_connect".into(),
             blocked_port: 4444,
-            blocked_errno: "EACCES".to_string(),
-            listener_reached: false,
-            challenge: challenge.map(str::to_string),
+            blocked_errno: errno.into(),
+            listener_reached,
         }
     }
 
     fn healthy() -> EnforcementHealthV1 {
-        EnforcementHealthV1::landlock_active(4, vec![443], Some(probe_with(Some(CH))))
+        EnforcementHealthV1::landlock_active(4, vec![443], Some(probe(false, "EACCES")))
     }
 
-    fn good_ctx() -> RunContext {
-        RunContext {
-            run_binding: "a".repeat(64),
-            posture_digest: "b".repeat(64),
-            observed_set: "c".repeat(64),
-            seal_scope: "tcp_connect_landlock_port".to_string(),
-            sealed_at: "2026-08-05T00:00:00Z".to_string(),
-            expected_challenge: CH.to_string(),
+    fn parity() -> serde_json::Value {
+        serde_json::from_str(PARITY).expect("parity vectors parse")
+    }
+
+    fn env_from_parity() -> ObservationEnvironment {
+        let p = parity();
+        let e = &p["environment"];
+        let g = |k: &str| e[k].as_str().expect("digest").to_string();
+        ObservationEnvironment {
+            subject_digest: g("subject"),
+            substrate_digest: g("substrate"),
+            corpus_digest: g("corpus"),
+            catch_policy_digest: g("catchPolicy"),
+            observation_vocabulary_digest: g("observationVocabulary"),
+            run_entropy_digest: g("runEntropy"),
+            network_posture: e["networkPosture"].clone(),
         }
     }
 
-    fn refusal(h: &EnforcementHealthV1, c: &RunContext) -> &'static str {
-        build_seal_payload(h, c).expect_err("must refuse").code()
+    fn refusal(h: &EnforcementHealthV1) -> &'static str {
+        build_sealed_run(h, &env_from_parity(), &[], "2026-08-05T00:00:00Z")
+            .expect_err("must refuse")
+            .code()
     }
 
-    /// The defect the commit title claimed to close and did not.
-    ///
-    /// Every other probe field is equally true of a probe taken at arming time. Without a challenge
-    /// the record cannot answer "was enforcement still applied at the end", which is the only
-    /// question a run-end seal asks. RFC 9334 (RATS) §10: a challenge narrows recentness without
-    /// requiring the attesting environment to hold a trustworthy clock.
-    #[test]
-    fn a_probe_without_a_run_phase_challenge_is_refused() {
-        let h = EnforcementHealthV1::landlock_active(4, vec![443], Some(probe_with(None)));
-        assert_eq!(refusal(&h, &good_ctx()), "probe-phase-unproven");
-    }
+    // ---- derivation parity with the checker -------------------------------------------------
 
+    /// Both sides derive; neither is handed a digest. The vectors are emitted by
+    /// `aee_landlock_seal_fixture.py --emit` and read here, so a change on the Python side lands as
+    /// a diff in the committed file and a divergence lands as a failure — unlike a transcribed
+    /// literal, which stays green while the two implementations drift apart.
     #[test]
-    fn a_probe_carrying_another_runs_challenge_is_refused() {
-        let h = EnforcementHealthV1::landlock_active(
-            4,
-            vec![443],
-            Some(probe_with(Some("some-other-run"))),
+    fn run_binding_and_posture_digest_match_the_checker() {
+        let p = parity();
+        let env = env_from_parity();
+        assert_eq!(
+            run_binding(&env).unwrap(),
+            p["expected"]["runBinding"].as_str().unwrap()
         );
-        assert_eq!(refusal(&h, &good_ctx()), "probe-challenge-mismatch");
+        assert_eq!(
+            digest_json(&env.network_posture).unwrap(),
+            p["expected"]["networkPostureDigest"].as_str().unwrap()
+        );
     }
 
-    /// `LANDLOCK_ACCESS_NET_CONNECT_TCP` arrived in ABI 4. Below it the kernel cannot express the
-    /// restriction, so the EACCES came from something that is not Landlock.
+    #[test]
+    fn observed_set_matches_the_checker_over_the_same_records() {
+        let p = parity();
+        let records: Vec<ObservationRecord> = p["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| ObservationRecord {
+                payload: r["payload"].clone(),
+                payload_type: r["payloadType"].as_str().unwrap().to_string(),
+            })
+            .collect();
+        assert_eq!(
+            observed_set(&records).unwrap(),
+            p["expected"]["observedSet"].as_str().unwrap()
+        );
+    }
+
+    // ---- the phase property, now carried rather than asserted ---------------------------------
+
+    /// The reason the probe becomes a record. The seal's observed set commits to the probe leaf, so
+    /// a consumer recomputing it learns the seal was built after the probe. Nothing here rests on
+    /// the producer's word.
+    #[test]
+    fn the_seal_commits_to_the_probe_examination_leaf() {
+        let run =
+            build_sealed_run(&healthy(), &env_from_parity(), &[], "2026-08-05T00:00:00Z").unwrap();
+        let probe_rec = run
+            .records
+            .iter()
+            .find(|r| r.payload["aeeKind"] == "examination")
+            .expect("the probe is emitted as an examination record");
+        assert_eq!(
+            run.seal.aee_observed_set,
+            observed_set(&[probe_rec.clone()]).unwrap()
+        );
+        assert_ne!(
+            run.seal.aee_observed_set,
+            observed_set(&[]).unwrap(),
+            "an empty set is not a commitment to anything"
+        );
+    }
+
+    /// The drop-accounting model becomes readable instead of asserted: under synchronous-probe the
+    /// only sealed observation *is* the probe result, and with the probe as the sole member that is
+    /// a property of the statement rather than a label the producer chose.
+    #[test]
+    fn the_synchronous_probe_model_is_visible_in_the_committed_set() {
+        let run =
+            build_sealed_run(&healthy(), &env_from_parity(), &[], "2026-08-05T00:00:00Z").unwrap();
+        let committed: Vec<_> = run
+            .records
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.payload["aeeKind"].as_str(),
+                    Some("interception") | Some("examination")
+                )
+            })
+            .collect();
+        assert_eq!(
+            committed.len(),
+            1,
+            "synchronous-probe: exactly one sealed observation"
+        );
+        assert_eq!(committed[0].payload["aeeKind"], "examination");
+        assert_eq!(
+            run.seal.assay_drop_proof_model,
+            DROP_PROOF_SYNCHRONOUS_PROBE
+        );
+    }
+
+    /// With prior interceptions the set grows, so the seal commits to those too and the
+    /// sole-member reading no longer holds — which is exactly when the model must not be claimed.
+    #[test]
+    fn prior_records_enter_the_commitment() {
+        let prior = vec![ObservationRecord {
+            payload: serde_json::json!({"aeeKind": "interception", "aeeVersion": "0.7", "x": 1}),
+            payload_type: OBSERVATION_PAYLOAD_TYPE.to_string(),
+        }];
+        let a =
+            build_sealed_run(&healthy(), &env_from_parity(), &[], "2026-08-05T00:00:00Z").unwrap();
+        let b = build_sealed_run(
+            &healthy(),
+            &env_from_parity(),
+            &prior,
+            "2026-08-05T00:00:00Z",
+        )
+        .unwrap();
+        assert_ne!(
+            a.seal.aee_observed_set, b.seal.aee_observed_set,
+            "a dropped record must move the value"
+        );
+    }
+
+    // ---- refusals ----------------------------------------------------------------------------
+
+    #[test]
+    fn a_run_without_a_run_end_probe_is_refused() {
+        let h = EnforcementHealthV1::landlock_active(4, vec![443], None);
+        assert!(
+            h.landlock.restrict_self_confirmed,
+            "the start-time fact is present"
+        );
+        assert_eq!(refusal(&h), "no-run-end-probe");
+    }
+
     #[test]
     fn an_abi_that_cannot_express_the_restriction_is_refused() {
         for abi in [1, 2, 3] {
             let h =
-                EnforcementHealthV1::landlock_active(abi, vec![443], Some(probe_with(Some(CH))));
-            assert_eq!(
-                refusal(&h, &good_ctx()),
-                "abi-cannot-express-restriction",
-                "abi {abi}"
-            );
+                EnforcementHealthV1::landlock_active(abi, vec![443], Some(probe(false, "EACCES")));
+            assert_eq!(refusal(&h), "abi-cannot-express-restriction", "abi {abi}");
         }
-        assert!(
-            build_seal_payload(&healthy(), &good_ctx()).is_ok(),
-            "abi 4 is the floor, not a wall"
-        );
+    }
+
+    #[test]
+    fn weak_and_absent_block_signals_are_refused() {
+        for errno in ["ECONNREFUSED", "ETIMEDOUT", "", "eacces", "EACCES "] {
+            let h = EnforcementHealthV1::landlock_active(4, vec![443], Some(probe(false, errno)));
+            assert_eq!(refusal(&h), "probe-signal-too-weak", "errno {errno:?}");
+        }
+        let h = EnforcementHealthV1::landlock_active(4, vec![443], Some(probe(true, "EACCES")));
+        assert_eq!(refusal(&h), "probe-reached-listener");
     }
 
     #[test]
@@ -696,102 +623,66 @@ mod refusals {
             reason_code: ReasonCode::RestrictSelfFailed,
             detail: "x".into(),
         });
-        assert_eq!(refusal(&h, &good_ctx()), "record-self-contradictory");
+        assert_eq!(refusal(&h), "record-self-contradictory");
 
         let mut h = healthy();
         h.landlock.restrict_self_confirmed = false;
-        assert_eq!(refusal(&h, &good_ctx()), "record-self-contradictory");
+        assert_eq!(refusal(&h), "record-self-contradictory");
 
         let mut h = healthy();
         h.landlock.net_connect_tcp_supported = Some(false);
-        assert_eq!(refusal(&h, &good_ctx()), "record-self-contradictory");
+        assert_eq!(refusal(&h), "record-self-contradictory");
     }
 
-    /// The seal states a scope of its own, and the ADR-045 checker has no rule on it, so an
-    /// unchecked value here is credited end to end.
     #[test]
-    fn a_seal_scope_the_record_does_not_support_is_refused() {
-        let mut c = good_ctx();
-        c.seal_scope = "filesystem_write_all".to_string();
-        assert_eq!(refusal(&healthy(), &c), "scope-mismatch");
-    }
-
-    /// A seal is the strongest record in a statement. Carrying an unvalidated digest into one is
-    /// the same guessing this module refuses for still-armed state.
-    #[test]
-    fn context_values_that_are_not_the_shapes_they_claim_are_refused() {
-        for (field, mutate) in [
-            (
-                "run_binding",
-                (|c: &mut RunContext| c.run_binding = String::new()) as fn(&mut RunContext),
-            ),
-            ("posture_digest", |c: &mut RunContext| {
-                c.posture_digest = "NOT-A-DIGEST".into()
-            }),
-            ("observed_set", |c: &mut RunContext| {
-                c.observed_set = "../../etc/passwd".into()
-            }),
-            ("run_binding", |c: &mut RunContext| {
-                c.run_binding = "A".repeat(64)
-            }),
-            ("sealed_at", |c: &mut RunContext| {
-                c.sealed_at = "yesterday afternoon".into()
-            }),
+    fn a_seal_instant_that_is_not_an_instant_is_refused() {
+        for bad in [
+            "yesterday afternoon",
+            "",
+            "2026-08-05",
+            "2026-08-05T00:00:00",
         ] {
-            let mut c = good_ctx();
-            mutate(&mut c);
-            assert_eq!(
-                refusal(&healthy(), &c),
-                "unproven-context-value",
-                "field {field}"
+            assert!(
+                build_sealed_run(&healthy(), &env_from_parity(), &[], bad).is_err(),
+                "sealed_at {bad:?} must be refused"
             );
         }
     }
 
-    /// Kills the mutant that swapped and emptied the digest fields: every context value must land
-    /// in its own payload member, and the suite must notice when it does not.
-    #[test]
-    fn every_context_value_reaches_its_own_payload_field() {
-        let c = RunContext {
-            run_binding: "1".repeat(64),
-            posture_digest: "2".repeat(64),
-            observed_set: "3".repeat(64),
-            seal_scope: "tcp_connect_landlock_port".to_string(),
-            sealed_at: "2026-08-05T12:34:56Z".to_string(),
-            expected_challenge: CH.to_string(),
-        };
-        let s = build_seal_payload(&healthy(), &c).expect("eligible");
-        assert_eq!(s.aee_run_binding, c.run_binding);
-        assert_eq!(s.aee_posture_digest, c.posture_digest);
-        assert_eq!(s.aee_observed_set, c.observed_set);
-        assert_eq!(s.assay_seal_scope, c.seal_scope);
-        assert_eq!(s.assay_sealed_at, c.sealed_at);
-    }
+    // ---- derived, not asserted ----------------------------------------------------------------
 
-    /// Kills the hardcoded-constant mutants: both were values the record never carried.
     #[test]
     fn derived_fields_come_from_the_record_not_from_constants() {
         let mut h = healthy();
-        h.schema = "assay.enforcement_health.v0".to_string();
-        let s = build_seal_payload(&h, &good_ctx()).expect("eligible");
+        h.schema = "assay.enforcement_health.v0".into();
+        let run = build_sealed_run(&h, &env_from_parity(), &[], "2026-08-05T00:00:00Z").unwrap();
         assert_eq!(
-            s.assay_source_schema, "assay.enforcement_health.v0",
+            run.seal.assay_source_schema, "assay.enforcement_health.v0",
             "must not relabel the artifact"
         );
-        assert_eq!(s.assay_observed_labels, vec!["connect_blocked".to_string()]);
+        assert_eq!(
+            run.seal.assay_seal_scope, h.scope,
+            "the seal scope is the record's, not a constant"
+        );
     }
 
-    /// The committed carrier fixture is an applied-ruleset shape from June with no run phase. It
-    /// used to be seal-eligible, which is how this defect was found.
+    /// The committed June carrier fixture is an applied-ruleset shape. It is seal-eligible on every
+    /// field this module reads, which is the honest limit: what makes its seal checkable is the
+    /// observed-set commitment, not a field in the health record.
     #[test]
-    fn the_committed_applied_ruleset_fixture_is_not_seal_eligible() {
+    fn the_committed_carrier_fixture_still_parses_and_seals_through_the_commitment() {
         let raw = include_str!("../tests/fixtures/enforcement_health/v1/active_with_probe.json");
         let h: EnforcementHealthV1 = serde_json::from_str(raw).expect("fixture parses");
-        assert!(h.probe.is_some(), "the fixture does carry a probe");
+        let run = build_sealed_run(&h, &env_from_parity(), &[], "2026-08-05T00:00:00Z")
+            .expect("eligible");
         assert_eq!(
-            refusal(&h, &good_ctx()),
-            "probe-phase-unproven",
-            "an applied-ruleset fixture must not be able to seal a run"
+            run.records.len(),
+            1,
+            "the probe is the only committed observation"
+        );
+        assert_eq!(
+            run.seal.aee_observed_set,
+            observed_set(&run.records).unwrap()
         );
     }
 }

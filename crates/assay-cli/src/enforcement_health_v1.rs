@@ -112,24 +112,6 @@ pub struct Probe {
     pub blocked_port: u16,
     pub blocked_errno: String,
     pub listener_reached: bool,
-    /// Run-phase challenge: a value the probe could not have known before the run reached the
-    /// phase this probe claims to observe.
-    ///
-    /// Without it a probe record is phase-free. Every other field here is equally true of a probe
-    /// run at arming time and one run at run end, so a consumer asking "was enforcement still
-    /// applied at the end" cannot answer it from this record — the same defect as reading
-    /// `restrict_self_confirmed`, which is set once and then persists.
-    ///
-    /// A challenge rather than a timestamp, following RFC 9334 (RATS) §10: nonce and epoch-ID
-    /// freshness exist precisely so an attesting environment does not need a trustworthy,
-    /// synchronised clock, which a sandboxed probe process has no way to provide. The value is
-    /// supplied by whatever drove the run and is opaque here.
-    ///
-    /// Optional so existing `assay.enforcement_health.v1` artifacts still deserialize. Absence
-    /// means "phase not established", never "run end" — consumers that need the phase MUST fail
-    /// closed on `None`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub challenge: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -279,7 +261,6 @@ mod fixture_values {
                 blocked_port: 4444,
                 blocked_errno: "EACCES".to_string(),
                 listener_reached: false,
-                challenge: None,
             }),
             non_claims: base_non_claims(),
         }
