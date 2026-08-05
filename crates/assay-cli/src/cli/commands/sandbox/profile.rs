@@ -1,3 +1,4 @@
+use crate::cli::args::ProfileFormat;
 use crate::cli::args::SandboxArgs;
 use crate::profile::{ProfileCollector, ProfileConfig};
 use sha2::Digest;
@@ -27,16 +28,16 @@ pub(super) fn maybe_profile_finish(
     };
     let suggestion = report.to_suggestion(sugg_cfg);
 
-    let content = match args.profile_format.as_str() {
-        "json" => crate::profile::writer::write_json(&suggestion)?,
-        _ => crate::profile::writer::write_yaml(&suggestion)?,
+    let content = match args.profile_format {
+        ProfileFormat::Json => crate::profile::writer::write_json(&suggestion)?,
+        ProfileFormat::Yaml => crate::profile::writer::write_yaml(&suggestion)?,
     };
 
     let out_path = args.profile.as_ref().expect("profiler active");
 
     crate::profile::writer::save_atomic(out_path, &content)?;
 
-    let evidence_profile_path = evidence_profile_path(out_path, &args.profile_format);
+    let evidence_profile_path = evidence_profile_path(out_path, args.profile_format.as_str());
     let run_id = evidence_profile_run_id(args, &report);
     let evidence_profile_name = out_path
         .file_stem()

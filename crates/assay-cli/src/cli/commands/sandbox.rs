@@ -316,7 +316,7 @@ mod tests {
             env_passthrough: false,
             env_safe_path: false,
             profile: None,
-            profile_format: "yaml".into(),
+            profile_format: crate::cli::args::ProfileFormat::Yaml,
             profile_report: None,
             bundle: None,
             otel_jsonl: None,

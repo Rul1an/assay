@@ -1,4 +1,4 @@
-use crate::cli::args::DiscoverArgs;
+use crate::cli::args::{DiscoverArgs, DiscoverFormat};
 use assay_core::discovery::{
     config_files::scan_config_files,
     processes::scan_processes,
@@ -104,8 +104,8 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
         summary: summary.clone(),
     };
 
-    match args.format.as_str() {
-        "json" => {
+    match args.format {
+        DiscoverFormat::Json => {
             let json_out = serde_json::to_string_pretty(&inventory)?;
             if let Some(out_path) = &args.output {
                 std::fs::write(out_path, json_out)?;
@@ -113,7 +113,7 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
                 println!("{}", json_out);
             }
         }
-        "yaml" => {
+        DiscoverFormat::Yaml => {
             let yaml_out = serde_yaml::to_string(&inventory)?;
             if let Some(out_path) = &args.output {
                 std::fs::write(out_path, yaml_out)?;
@@ -121,7 +121,7 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
                 println!("{}", yaml_out);
             }
         }
-        _ => {
+        DiscoverFormat::Table => {
             // table/text - usually stdout only
             print_table(&inventory);
         }
