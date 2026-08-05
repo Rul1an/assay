@@ -229,10 +229,12 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
 /// The severity at which a finding gates the run, or `None` when no finding does.
 ///
 /// `none` exists because a caller that reads the SARIF itself needs a non-zero exit to mean a pack
-/// or runtime fault rather than a policy finding. That is what `assay-action` asks for at
-/// `action.yml:888` and what `docs/AIcontext/quick-reference.md:112` documents, and it was never
-/// implemented: the old match sent it to `_ => Severity::Error`, gating on exactly the findings the
-/// caller had asked to ignore.
+/// or runtime fault rather than a policy finding. `assay-action` asks for it with a hard-coded
+/// `--fail-on none` at `action.yml:888`, and it was never implemented: the old match sent it to
+/// `_ => Severity::Error`, gating on exactly the findings the caller had asked to ignore.
+///
+/// The action input also called `fail_on` is a different thing — it is implemented in bash at
+/// `action.yml:527-549` and never reaches this flag.
 ///
 /// The value parser on `--fail-on` decides what reaches this function, so an unrecognized value is
 /// rejected before the command runs and never arrives here.
