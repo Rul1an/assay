@@ -118,6 +118,12 @@ class AttestedProofCheck:
     accepted: bool
     run: dict[str, object] | None
     diagnostics: tuple[str, ...]
+    # True when a proof pack was obtained and its contents were rejected, as
+    # opposed to no attested evidence being available at all. The legacy
+    # fallback exists for the second case; letting it cover the first is a
+    # downgrade, and would make failing validation no worse than never being
+    # validated.
+    evidence_rejected: bool = False
 
 
 @dataclass(frozen=True)
@@ -1541,6 +1547,7 @@ def find_valid_attested_proof(
     expected: Gate,
 ) -> AttestedProofCheck:
     diagnostics: list[str] = []
+    evidence_rejected = False
     for run_id in run_ids:
         try:
             run = dict(api.request("GET", f"/actions/runs/{run_id}"))
@@ -1560,6 +1567,7 @@ def find_valid_attested_proof(
         statement, statement_diagnostics = validate_attestation_statement(pack)
         if statement is None:
             diagnostics.extend(f"run {run_id}: {line}" for line in statement_diagnostics)
+            evidence_rejected = True
             continue
 
         semantic_diagnostics = validate_proof_manifest_semantics(
@@ -1571,24 +1579,28 @@ def find_valid_attested_proof(
         )
         if semantic_diagnostics:
             diagnostics.extend(f"run {run_id}: {line}" for line in semantic_diagnostics)
+            evidence_rejected = True
             continue
 
         predicate_diagnostics = validate_attestation_predicate(statement, pack.manifest, run, api)
         if predicate_diagnostics:
             diagnostics.extend(f"run {run_id}: {line}" for line in predicate_diagnostics)
+            evidence_rejected = True
             continue
 
         verification, verify_diagnostics = run_gh_attestation_verify(api, pack)
         if verification is None:
             diagnostics.extend(f"run {run_id}: {line}" for line in verify_diagnostics)
+            evidence_rejected = True
             continue
         claim_diagnostics = validate_gh_attestation_claims(verification, pack.manifest, api)
         if claim_diagnostics:
             diagnostics.extend(f"run {run_id}: {line}" for line in claim_diagnostics)
+            evidence_rejected = True
             continue
 
-        return AttestedProofCheck(True, run, tuple(diagnostics))
-    return AttestedProofCheck(False, None, tuple(diagnostics))
+        return AttestedProofCheck(True, run, tuple(diagnostics), evidence_rejected)
+    return AttestedProofCheck(False, None, tuple(diagnostics), evidence_rejected)
 
 
 def recorded_gate_ok(text: str, expected: Gate) -> bool:
@@ -1751,6 +1763,22 @@ def maybe_status(
         raise
 
 
+def fallback_applies(attested: AttestedProofCheck, eligible: bool) -> bool:
+    """Whether the legacy fallback may credit this PR.
+
+    No downgrade. The fallback exists for the case where no attested evidence is
+    available -- artifact retention expired, the attestation API unreachable, a
+    run predating the attested lane. It must not cover the case where a pack was
+    obtained and rejected on its contents, because then failing validation is no
+    worse than never being validated, and every strengthening of the attested
+    path widens the gap to the weaker one (#2040).
+
+    A function rather than an expression inside `run_check` so that a test can
+    exercise the decision the consumer actually makes.
+    """
+    return eligible and not attested.evidence_rejected
+
+
 def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) -> int:
     pr = load_pr(api, pr_number)
     classification = classify_files(pr.files)
@@ -1787,7 +1815,8 @@ def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) ->
     valid_run, run_diagnostics = find_valid_delegated_run(api, run_ids, pr.head_sha)
     sha_ok = text_mentions_head_sha(text, pr.head_sha)
     gate_ok = recorded_gate_ok(text, classification.gate)
-    fallback_passed = valid_run is not None and sha_ok and gate_ok
+    fallback_eligible = valid_run is not None and sha_ok and gate_ok
+    fallback_passed = fallback_applies(attested, fallback_eligible)
     passed = attested.accepted or fallback_passed
 
     details: list[str] = []
@@ -1825,6 +1854,12 @@ def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) ->
         status_description = f"legacy delegated proof accepted: gates={classification.gate.label}"
     else:
         status_description = f"delegated proof required: gates={classification.gate.label}"
+        if fallback_eligible and attested.evidence_rejected:
+            details.append(
+                "A recorded delegated run matches this head, but its attested proof\n"
+                "pack was rejected on its contents. The compatibility fallback is not\n"
+                "applied to a rejected pack -- see the attested diagnostics above."
+            )
     maybe_status(api, pr.head_sha, passed, status_description, status=status)
 
     if passed:
@@ -1937,6 +1972,7 @@ def self_test() -> None:
     assert uncovered_content_provenance_files(["crates/assay-runner-core/src/lib.rs"]) == ()
     assert uncovered_content_provenance_files(["Cargo.lock"]) == ("Cargo.lock",)
     _test_gating_rule_count_is_derived()
+    _test_rejected_evidence_does_not_fall_back()
     _test_gate_execution_is_verified()
     _test_gate_selections_match_the_workflow()
     _test_gating_map_is_current()
@@ -2017,6 +2053,33 @@ def _test_gating_rule_count_is_derived() -> None:
     the number goes stale. That is exactly how "eleven" survived.
     """
     assert gating_rule_count() == 14, gating_rule_count()
+
+
+def _test_rejected_evidence_does_not_fall_back() -> None:
+    """A rejected proof pack is not credited by the legacy path.
+
+    `run_check` accepts on `attested.accepted or fallback_passed`, and the
+    fallback never downloads a manifest -- it reads the run's conclusion and
+    greps the PR body for a gate name. Every check on the attested path was
+    therefore bypassable by having a recorded run, and the stronger that path
+    got, the wider the gap (#2040).
+
+    This calls `fallback_applies`, the function `run_check` uses, so removing
+    the rule fails here rather than leaving the suite green.
+    """
+    absent = AttestedProofCheck(False, None, ("run 1: could not download proof pack",))
+    rejected = AttestedProofCheck(
+        False, None, ("run 1: proof manifest gate 'x' is 'missing', expected 'passed'",), True
+    )
+    assert absent.evidence_rejected is False
+    assert rejected.evidence_rejected is True
+
+    # No attested evidence: the fallback keeps its purpose.
+    assert fallback_applies(absent, True) is True
+    assert fallback_applies(absent, False) is False
+    # Evidence obtained and rejected: no downgrade, whatever the PR body says.
+    assert fallback_applies(rejected, True) is False
+    assert fallback_applies(rejected, False) is False
 
 
 def _test_gate_execution_is_verified() -> None:
