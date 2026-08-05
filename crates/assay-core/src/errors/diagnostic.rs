@@ -10,6 +10,11 @@ pub struct Diagnostic {
     pub fix_steps: Vec<String>,
 }
 
+/// Severity icons, written as escapes so the source stays ASCII and the exact
+/// codepoints (including the variation selector on the warning sign) are visible.
+const ICON_ERROR: &str = "\u{274c} ";
+const ICON_WARN: &str = "\u{26a0}\u{fe0f} ";
+
 impl Diagnostic {
     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
@@ -42,13 +47,27 @@ impl Diagnostic {
         self
     }
 
+    /// Decorated rendering for an interactive terminal.
     pub fn format_terminal(&self) -> String {
         let icon = if self.severity == "warn" {
-            "⚠️ "
+            ICON_WARN
         } else {
-            "❌"
+            ICON_ERROR
         };
-        let mut s = format!("{} [{}] {}\n", icon, self.code, self.message);
+        self.render(icon)
+    }
+
+    /// Undecorated rendering for pipes, CI logs and files.
+    ///
+    /// This is not a synonym for `format_terminal`. Callers reach for it when the
+    /// sink is not a terminal, where an emoji is noise a log grep has to work
+    /// around rather than information.
+    pub fn format_plain(&self) -> String {
+        self.render("")
+    }
+
+    fn render(&self, prefix: &str) -> String {
+        let mut s = format!("{}[{}] {}\n", prefix, self.code, self.message);
         s.push_str(&format!("  source: {}\n", self.source));
 
         // Simple pretty print for context if not empty object
@@ -68,11 +87,6 @@ impl Diagnostic {
             }
         }
         s
-    }
-
-    pub fn format_plain(&self) -> String {
-        // Plain output path currently mirrors terminal formatting.
-        self.format_terminal()
     }
 }
 
@@ -104,4 +118,56 @@ pub mod codes {
     pub const W_CFG_VACUOUS_EXPECTED: &str = "W_CFG_VACUOUS_EXPECTED";
     pub const W_BASE_FINGERPRINT: &str = "W_BASE_FINGERPRINT";
     pub const W_CACHE_CONFUSION: &str = "W_CACHE_CONFUSION";
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> Diagnostic {
+        Diagnostic::new(codes::E_CFG_PARSE, "mapping values are not allowed here")
+            .with_source("config")
+            .with_context(serde_json::json!({ "path": "assay.yaml" }))
+            .with_fix_step("Run: assay doctor --config assay.yaml")
+    }
+
+    #[test]
+    fn plain_carries_no_terminal_decoration() {
+        let plain = sample().format_plain();
+        assert!(
+            plain.is_ascii(),
+            "plain output must stay ASCII for CI logs: {plain:?}"
+        );
+        assert!(plain.starts_with("[E_CFG_PARSE]"));
+
+        let warn_plain = sample().with_severity("warn").format_plain();
+        assert!(warn_plain.is_ascii(), "warnings must be plain too");
+    }
+
+    #[test]
+    fn terminal_carries_the_severity_icon() {
+        let error = sample().format_terminal();
+        assert!(error.starts_with(ICON_ERROR));
+
+        let warn = sample().with_severity("warn").format_terminal();
+        assert!(warn.starts_with(ICON_WARN));
+    }
+
+    #[test]
+    fn the_prefix_is_the_only_difference() {
+        let d = sample();
+        assert_eq!(
+            d.format_terminal().strip_prefix(ICON_ERROR),
+            Some(d.format_plain().as_str())
+        );
+    }
+
+    #[test]
+    fn body_carries_code_source_context_and_fix() {
+        let plain = sample().format_plain();
+        assert!(plain.contains("E_CFG_PARSE"));
+        assert!(plain.contains("source: config"));
+        assert!(plain.contains("assay.yaml"));
+        assert!(plain.contains("1. Run: assay doctor --config assay.yaml"));
+    }
 }
