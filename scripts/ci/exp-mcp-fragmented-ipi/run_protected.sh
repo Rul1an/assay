@@ -41,22 +41,34 @@ case "$RUN_LIVE" in
     ;;
 esac
 
-# Build rather than assert existence: an existence test passes against a stale artifact, and
-# these summaries get published in docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-*-RESULTS.md against
-# a git SHA, so a stale binary attributes a measurement to source that never ran it. Cargo
-# re-checks rather than rebuilds on an up-to-date tree, so callers that already build pay ~3s.
-# Each package is built only on the path that reaches it: RUN_LIVE=1 drives $ASSAY_CMD instead
-# of the local wrap binary, and the assay-mcp-server sequence guard is spawned only when the
-# sidecar passes --sequence-policy-root. --manifest-path because this script never cd's.
-BUILD_PKGS=()
-if [[ "$RUN_LIVE" == "0" ]]; then
-  BUILD_PKGS+=(-p assay-cli)
-fi
+# Build what this run executes, rather than asserting a binary exists: an existence test passes
+# against a stale artifact, and these summaries get published in
+# docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-*-RESULTS.md against a git SHA, so a stale binary
+# attributes a measurement to source that never ran it. Warm cost is ~0.3s.
+#
+# assay-cli is built on BOTH values of RUN_LIVE. RUN_LIVE=1 selects a real MCP host, not a
+# foreign assay: the live rerun docs set ASSAY_CMD to a target/debug/assay path, and
+# EXPERIMENT-MCP-FRAGMENTED-IPI-ABLATION-2026Q1-RERUN.md asks the operator by hand to "ensure
+# ASSAY_CMD points to the freshly built target/debug/assay". Gating this on RUN_LIVE=0 would
+# leave the live path -- whose numbers are published as live -- the one with no guarantee, and
+# with the sidecar on it would rebuild the guard while measuring it against a stale wrap binary.
+#
+# assay-mcp-server tracks the sidecar, which is the only thing that reaches the sequence guard.
+#
+# --target-dir pins the output to where the driver looks (repo_root/"target/debug/..."). Without
+# it a CARGO_TARGET_DIR -- which AGENTS.md tells worktree owners to set -- would send the build
+# somewhere the driver never opens. --manifest-path because this script never cd's.
+BUILD_PKGS=(-p assay-cli)
 if [[ "$SEQUENCE_SIDECAR" == "1" ]]; then
   BUILD_PKGS+=(-p assay-mcp-server)
 fi
-if (( ${#BUILD_PKGS[@]} > 0 )); then
-  cargo build -q --manifest-path "$ROOT/Cargo.toml" "${BUILD_PKGS[@]}"
+if [[ "${SKIP_CARGO_BUILD:-0}" != "1" ]]; then
+  cargo build -q --manifest-path "$ROOT/Cargo.toml" --target-dir "$ROOT/target" "${BUILD_PKGS[@]}"
+fi
+
+# Say what this build does not cover rather than implying it covers everything.
+if [[ "$RUN_LIVE" == "1" && "$ASSAY_CMD" != "$ROOT/target/debug/assay" ]]; then
+  echo "NOTE: ASSAY_CMD is not this worktree's target/debug/assay; that binary's freshness is the caller's"
 fi
 
 ATTACK_ARGS=(

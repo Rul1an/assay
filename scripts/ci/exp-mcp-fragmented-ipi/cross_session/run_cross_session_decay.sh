@@ -33,19 +33,35 @@ case "$MODE" in
     ;;
 esac
 
-# drive_fragmented_ipi.py consumes these binaries without building them (see prebuilt_binary
-# there); freshness is this wrapper's job, so build rather than assume. Each is built only on
-# the path that reaches it: RUN_LIVE=1 drives $ASSAY_CMD instead of the local wrap binary, and
-# the sequence guard is spawned only when --sequence-policy-root is passed below.
-BUILD_PKGS=()
-if [[ "$RUN_LIVE" == "0" ]]; then
-  BUILD_PKGS+=(-p assay-cli)
-fi
+case "$RUN_LIVE" in
+  0) ;;
+  1) : "${MCP_HOST_CMD:?MCP_HOST_CMD is required for RUN_LIVE=1}" ;;
+  *)
+    echo "FAIL: RUN_LIVE must be 0 or 1"
+    exit 2
+    ;;
+esac
+
+# drive_fragmented_ipi.py consumes these binaries without building them; freshness is this
+# wrapper's job, so build rather than assume. Warm cost is ~0.3s per invocation.
+#
+# assay-cli is built on BOTH values of RUN_LIVE: RUN_LIVE=1 selects a real MCP host, not a
+# foreign assay, and this runner's own rerun doc sets ASSAY_CMD to a target/debug/assay path.
+# assay-mcp-server tracks USE_SEQUENCE, which is what gates --sequence-policy-root below.
+#
+# --target-dir pins the output to where the driver looks (repo_root/"target/debug/..."), so a
+# CARGO_TARGET_DIR -- which AGENTS.md tells worktree owners to set -- cannot send the build
+# somewhere the driver never opens.
+BUILD_PKGS=(-p assay-cli)
 if [[ "$USE_SEQUENCE" == "1" ]]; then
   BUILD_PKGS+=(-p assay-mcp-server)
 fi
-if (( ${#BUILD_PKGS[@]} > 0 )); then
-  cargo build -q "${BUILD_PKGS[@]}"
+if [[ "${SKIP_CARGO_BUILD:-0}" != "1" ]]; then
+  cargo build -q --manifest-path "$ROOT/Cargo.toml" --target-dir "$ROOT/target" "${BUILD_PKGS[@]}"
+fi
+
+if [[ "$RUN_LIVE" == "1" && "${ASSAY_CMD:-assay}" != "$ROOT/target/debug/assay" ]]; then
+  echo "NOTE: ASSAY_CMD is not this worktree's target/debug/assay; that binary's freshness is the caller's"
 fi
 
 SESSION_DIR="$OUT_DIR/sessions/${MODE}/decay_runs_${DECAY_RUNS}"

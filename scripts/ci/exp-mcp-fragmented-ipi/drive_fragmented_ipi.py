@@ -58,12 +58,13 @@ def parse_tool_payload(response):
 # are PRESENCE tests, NOT freshness tests: neither can tell a current binary from one left over
 # from an older source tree.
 #
-# Freshness is owned by the wrapper scripts, which build before invoking this driver:
-# run_baseline.sh, run_protected.sh and cross_session/run_cross_session_decay.sh, plus the
-# scripts/ci/test-exp-mcp-fragmented-ipi* entry points above them. The build lives there rather
-# than here because this driver is re-invoked once per run and per session, and a no-op cargo
-# freshness check costs ~3s each time; doing it here would re-verify what the wrapper just
-# verified, several times over.
+# Freshness is owned by the three wrapper scripts, which are the only things that execute this
+# driver and which build first: run_baseline.sh, run_protected.sh and
+# cross_session/run_cross_session_decay.sh. (Some scripts/ci/test-exp-mcp-fragmented-ipi* entry
+# points build too, but not all of them do, so the wrappers are the guarantee, not the entry
+# points.) The build lives there rather than here because this driver is re-invoked once per run
+# and per session -- 4 times in a default cross-session run, 6 at DECAY_RUNS=3 -- and doing it
+# here would re-verify what the wrapper just verified, once per invocation.
 #
 # The consequence is worth stating plainly, because these runs produce published numbers:
 # invoke this driver directly against a stale target/debug and it will produce a summary for

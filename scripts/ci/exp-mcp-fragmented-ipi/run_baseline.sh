@@ -29,15 +29,30 @@ case "$RUN_LIVE" in
     ;;
 esac
 
-# Build rather than assert existence: an existence test passes against a stale artifact, and
-# these summaries get published in docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-*-RESULTS.md against
-# a git SHA, so a stale binary attributes a measurement to source that never ran it. Cargo
-# re-checks rather than rebuilds on an up-to-date tree, so callers that already build pay ~3s.
-# assay-cli only: RUN_LIVE=1 drives $ASSAY_CMD instead, and baseline never reaches the
-# assay-mcp-server sequence guard (drive_fragmented_ipi.py spawns it only for --mode protected
-# with --sequence-policy-root). --manifest-path because this script deliberately never cd's.
-if [[ "$RUN_LIVE" == "0" ]]; then
-  cargo build -q --manifest-path "$ROOT/Cargo.toml" -p assay-cli
+# Build what this run executes, rather than asserting a binary exists: an existence test passes
+# against a stale artifact, and these summaries get published in
+# docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-*-RESULTS.md against a git SHA, so a stale binary
+# attributes a measurement to source that never ran it. Warm cost is ~0.3s.
+#
+# assay-cli is built on BOTH values of RUN_LIVE. RUN_LIVE=1 selects a real MCP host, not a
+# foreign assay: the live rerun docs set ASSAY_CMD to a target/debug/assay path, and
+# EXPERIMENT-MCP-FRAGMENTED-IPI-ABLATION-2026Q1-RERUN.md asks the operator by hand to "ensure
+# ASSAY_CMD points to the freshly built target/debug/assay". This discharges that obligation
+# instead of restating it.
+#
+# assay-mcp-server is deliberately absent: drive_fragmented_ipi.py spawns the sequence guard
+# only for --mode protected with --sequence-policy-root, and baseline passes neither.
+#
+# --target-dir pins the output to where the driver looks (repo_root/"target/debug/..."). Without
+# it a CARGO_TARGET_DIR -- which AGENTS.md tells worktree owners to set -- would send the build
+# somewhere the driver never opens. --manifest-path because this script never cd's.
+if [[ "${SKIP_CARGO_BUILD:-0}" != "1" ]]; then
+  cargo build -q --manifest-path "$ROOT/Cargo.toml" --target-dir "$ROOT/target" -p assay-cli
+fi
+
+# Say what this build does not cover rather than implying it covers everything.
+if [[ "$RUN_LIVE" == "1" && "$ASSAY_CMD" != "$ROOT/target/debug/assay" ]]; then
+  echo "NOTE: ASSAY_CMD is not this worktree's target/debug/assay; that binary's freshness is the caller's"
 fi
 
 python3 "$ROOT/scripts/ci/exp-mcp-fragmented-ipi/drive_fragmented_ipi.py" \

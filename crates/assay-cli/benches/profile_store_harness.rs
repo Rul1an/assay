@@ -52,9 +52,11 @@ fn selected_workloads() -> Vec<Workload> {
 }
 
 fn assay_bin() -> PathBuf {
-    // Cargo sets CARGO_BIN_EXE_<name> for bench targets and builds that binary from the
-    // current source first, so this path cannot resolve to a stale artifact. The value is
-    // baked in at compile time, so it also holds when the bench binary is run directly.
+    // Cargo sets CARGO_BIN_EXE_<name> for bench targets and rebuilds that binary from the
+    // current source before running the bench, so under `cargo bench` this cannot resolve to a
+    // stale artifact. Running the compiled bench binary directly is a different case: the path
+    // is baked in at compile time so it still resolves, but no cargo runs, so the binary it
+    // points at is only as fresh as the last `cargo bench` left it.
     PathBuf::from(env!("CARGO_BIN_EXE_assay"))
 }
 
