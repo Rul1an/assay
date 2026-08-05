@@ -1,5 +1,6 @@
 {
   "schema": "assay.runner.gated_paths.v0",
+  "_source_of_truth": "classify_file() in scripts/ci/assay_runner_lane_check.py decides gating. It has 14 gating rules and reads all_gate_prefixes and all_gate_paths below in two of them; the remaining rules live in that function. Some of them name paths that also appear below, so this file is neither a complete nor an exclusive statement of what is gated. It is not the gating contract. For the complete current answer run `python3 scripts/ci/assay_runner_lane_check.py --explain-gating`, or read the generated map at scripts/ci/assay_runner_gating_map.txt.",
   "all_gate_prefixes": [
     "crates/assay-runner-schema/",
     "crates/assay-runner-core/",
