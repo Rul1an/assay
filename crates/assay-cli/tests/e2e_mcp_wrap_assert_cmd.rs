@@ -75,19 +75,23 @@ fn assay_mcp_server_bin() -> PathBuf {
 /// produce a *host* binary, in a different artifact tree from the one under
 /// test. Stripping the target directory shows which shape it is.
 ///
-/// Both paths are canonicalised before comparing, because `strip_prefix` is
-/// lexical. `CARGO_TARGET_DIR` may be relative — AGENTS.md mandates a per-worktree
-/// target dir, so that is not exotic — and Cargo may canonicalise a symlinked one
-/// (on macOS, `/tmp` is `/private/tmp`), leaving the env var not a literal prefix
-/// of the path Cargo reports. Without this, both cases fall through to the
-/// profile-only reading and drop the triple.
+/// The target directory comes from `cargo metadata`, not from reading
+/// `CARGO_TARGET_DIR`, and both paths are canonicalised before comparing, because
+/// `strip_prefix` is lexical. Two ways the env var alone gets this wrong, both
+/// verified against real Cargo output: a *relative* value is resolved by Cargo
+/// against the directory cargo was invoked from, not the package root a test runs
+/// in, so `target/wt` would canonicalise here to `crates/assay-cli/target/wt` and
+/// never match; and a symlinked one may be reported canonicalised by Cargo (on
+/// macOS `/tmp` is `/private/tmp`) while the env var still holds the symlink. A
+/// `build.target-dir` in `.cargo/config.toml` is invisible to the env var
+/// entirely. Each of those silently dropped the triple.
 ///
-/// Falls back to the profile-dir-only reading when the layout is still not
-/// recognisable. That is only correct when `--target` is absent — which is every
-/// invocation in this repo today — so the fallback carries a real, narrow risk:
-/// it would build a host binary while the test runs a cross-compiled one, where
-/// the code this replaced would have failed loudly with a missing binary. Made
-/// as narrow as canonicalising can make it, and called out rather than hidden.
+/// Falls back to the profile-dir-only reading if even that does not line up.
+/// That reading is correct whenever `--target` is absent, which is every
+/// invocation in this repo today, and wrong only under `--target`, where it
+/// would build a host binary while the test runs a cross-compiled one. The
+/// fallback is therefore stated rather than hidden — but asking Cargo removes
+/// the cases that actually reached it.
 fn target_and_profile(workspace_root: &Path) -> (Option<String>, String) {
     let bin_exe_raw = Path::new(env!("CARGO_BIN_EXE_assay"));
     let dir_name = |p: Option<&Path>| {
@@ -104,10 +108,17 @@ fn target_and_profile(workspace_root: &Path) -> (Option<String>, String) {
         )
     };
 
-    let target_dir = match std::env::var_os("CARGO_TARGET_DIR") {
-        Some(d) => PathBuf::from(d),
-        None => workspace_root.join("target"),
-    };
+    // Ask Cargo where the target directory is, rather than reading the env var
+    // and hoping. A relative `CARGO_TARGET_DIR` is resolved by Cargo against the
+    // directory *cargo* was invoked from, which is not the package root a test
+    // runs in — so reading it here and canonicalising against our own cwd turns
+    // `target/wt` into `crates/assay-cli/target/wt` and the prefix never matches.
+    // `cargo metadata` reports an absolute `target_directory` and settles it,
+    // including a `build.target-dir` set in config.toml, which the env var alone
+    // never sees. It is one extra process per test binary, inside the cached
+    // build, and this is a file about not guessing at Cargo's layout.
+    let target_dir =
+        resolved_target_dir(workspace_root).unwrap_or_else(|| workspace_root.join("target"));
     // Canonicalising needs the paths to exist. They do: the binary is what Cargo
     // just built, and the target dir contains it. Fall back rather than fail.
     let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
@@ -127,6 +138,29 @@ fn target_and_profile(workspace_root: &Path) -> (Option<String>, String) {
         [triple, profile] => (Some(triple.to_owned()), profile.to_owned()),
         _ => profile_only(),
     }
+}
+
+/// Cargo's own answer for where build artifacts go, absolute and already
+/// accounting for `CARGO_TARGET_DIR` and `build.target-dir`.
+///
+/// Returns `None` rather than failing: a wrong target directory costs a rebuild
+/// in the wrong place, and no reading of this should turn into a test failure.
+fn resolved_target_dir(workspace_root: &Path) -> Option<PathBuf> {
+    let mut cmd = Command::new(cargo_bin());
+    cmd.current_dir(workspace_root).args([
+        "metadata",
+        "--format-version",
+        "1",
+        "--no-deps",
+        "--offline",
+    ]);
+    strip_cargo_crate_env(&mut cmd);
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let meta: Value = serde_json::from_slice(&out.stdout).ok()?;
+    meta.get("target_directory")?.as_str().map(PathBuf::from)
 }
 
 fn build_assay_mcp_server() -> anyhow::Result<PathBuf> {
