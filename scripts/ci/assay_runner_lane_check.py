@@ -1288,6 +1288,144 @@ def validate_gh_attestation_claims(
     return tuple(diagnostics)
 
 
+def attested_gate_diagnostics(
+    statement: dict[str, object], manifest: dict[str, object], label: str
+) -> tuple[str, ...]:
+    """The pack must record exactly the gates the attested workflow runs, all passed.
+
+    Set equality is possible here where it was not before. An earlier attempt
+    compared the recorded gates against this process's copy of the selection and
+    deadlocked: the verifier runs the base's code, the pack is built at the head,
+    and any change to the gate set produced a pack its own verifier rejected in
+    both directions. Reading the expected set out of the attestation compares the
+    pack against the workflow that actually produced it, so a change to the gate
+    set is simply reflected in both.
+
+    That closes the size hole `gates=all` carried: a pack labelled `all` with
+    fewer entries than the attested branch runs is now rejected.
+    """
+    expected, diagnostics = attested_command_set(statement, label)
+    if expected is None:
+        return diagnostics
+
+    raw = manifest.get("gates")
+    if not isinstance(raw, list) or not raw:
+        return ("proof manifest has no gates array",)
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            out.append("proof manifest gates entry is not an object")
+            continue
+        name = str(entry.get("gate") or "")
+        if not name:
+            out.append("proof manifest gates entry has no gate name")
+            continue
+        if name in seen:
+            out.append(f"proof manifest records gate {name!r} more than once")
+            continue
+        seen.add(name)
+        if name not in expected:
+            out.append(
+                f"proof manifest records gate {name!r}, which the attested "
+                f"workflow does not run for {label!r}"
+            )
+            continue
+        status = str(entry.get("status") or "")
+        if status != "passed":
+            out.append(f"proof manifest gate {name!r} is {status!r}, expected 'passed'")
+
+    for name in expected:
+        if name not in seen:
+            out.append(
+                f"proof manifest records no result for gate {name!r}, which the "
+                f"attested workflow runs for {label!r}"
+            )
+    return tuple(out)
+
+
+def _fixture_statement() -> dict[str, object]:
+    """The attestation the self-test fixtures describe, naming this HEAD."""
+    return {
+        "predicate": {
+            "buildDefinition": {
+                "externalParameters": {"workflow": {"path": DELEGATED_WORKFLOW_PATH}},
+                "resolvedDependencies": [{"digest": {"gitCommit": _fixture_head()}}],
+            }
+        }
+    }
+
+
+def _fixture_head() -> str:
+    """The commit self-test fixtures describe: this checkout's HEAD."""
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+
+
+def attested_command_set(statement: dict[str, object], label: str) -> tuple[dict[str, str] | None, tuple[str, ...]]:
+    """Which gates the label runs, read from the commit GitHub attested.
+
+    The gate-to-script mapping lives in the delegated workflow's `case` branch.
+    Nothing on the delegated host can be trusted to describe it: the gate runs
+    as root and is handed its own proof directory, so a record written there
+    would be self-attested. An earlier attempt did exactly that and a gate could
+    forge its own entry with a digest that matched the forgery (#2041).
+
+    The attestation is signed by GitHub and names both the workflow file and the
+    commit -- `externalParameters.workflow.path` and the `gitCommit` in
+    `resolvedDependencies`. Reading the mapping there is anchored outside
+    anything the pull request can write.
+
+    It also removes the deadlock a pinned copy caused. The verifier runs the
+    base's code by design, so a pin in this file could never agree with a pack
+    built at a head that renamed a script. Reading the attested commit compares
+    the pack against the workflow that produced it.
+    """
+    predicate = statement.get("predicate")
+    if not isinstance(predicate, dict):
+        return None, ("attestation statement has no predicate",)
+    build = predicate.get("buildDefinition")
+    if not isinstance(build, dict):
+        return None, ("attestation predicate has no buildDefinition",)
+
+    external = build.get("externalParameters")
+    workflow = external.get("workflow") if isinstance(external, dict) else None
+    path = str(workflow.get("path") or "") if isinstance(workflow, dict) else ""
+    if path != DELEGATED_WORKFLOW_PATH:
+        return None, (f"attested workflow path is {path!r}, expected {DELEGATED_WORKFLOW_PATH!r}",)
+
+    commit = ""
+    resolved = build.get("resolvedDependencies")
+    if isinstance(resolved, list):
+        for dependency in resolved:
+            digest = dependency.get("digest") if isinstance(dependency, dict) else None
+            if isinstance(digest, dict) and digest.get("gitCommit"):
+                commit = str(digest["gitCommit"])
+                break
+    if not commit:
+        return None, ("attestation predicate names no source commit",)
+
+    try:
+        workflow_text = subprocess.check_output(
+            ["git", "show", f"{commit}:{path}"], text=True, stderr=subprocess.DEVNULL
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None, (f"could not read {path} at attested commit {commit[:12]}",)
+
+    marker = f"\n            {label})\n"
+    start = workflow_text.find(marker)
+    if start == -1:
+        return None, (f"attested workflow has no case branch for {label!r}",)
+    branch = workflow_text[start : workflow_text.find(";;", start)]
+    live = "\n".join(
+        line for line in branch.splitlines() if not line.lstrip().startswith("#")
+    )
+    pairs = re.findall(r'run_gate "([^"]+)"[^\n]*\n\s*"([^"]+)"', live)
+    if not pairs:
+        return None, (f"attested workflow branch for {label!r} runs no gates",)
+    return {key: script.rsplit("/", 1)[-1] for key, script in pairs}, ()
+
+
 def validate_attestation_predicate(
     statement: dict[str, object],
     manifest: dict[str, object],
@@ -1491,6 +1629,13 @@ def find_valid_attested_proof(
         )
         if semantic_diagnostics:
             diagnostics.extend(f"run {run_id}: {line}" for line in semantic_diagnostics)
+            continue
+
+        gate_diagnostics = attested_gate_diagnostics(
+            statement, pack.manifest, str((pack.manifest.get("inputs") or {}).get("gates") or "")
+        )
+        if gate_diagnostics:
+            diagnostics.extend(f"run {run_id}: {line}" for line in gate_diagnostics)
             continue
 
         predicate_diagnostics = validate_attestation_predicate(statement, pack.manifest, run, api)
@@ -1886,6 +2031,7 @@ def self_test() -> None:
     _test_gating_map_is_current()
     _test_prefix_gated_surfaces_keep_their_coverage()
     _test_declared_gate_surfaces_exist()
+    _test_gates_match_the_attested_workflow()
     _test_fallback_keyed_on_the_substrate_not_the_pack()
     _test_content_tree_comparison()
 
@@ -2053,6 +2199,46 @@ def _test_declared_gate_surfaces_exist() -> None:
     assert not dead, f"declared gate surfaces matching no tracked file: {dead}"
 
 
+def _test_gates_match_the_attested_workflow() -> None:
+    """The pack must record exactly the gates the attested commit runs.
+
+    Reads the expectation out of the attestation rather than out of a pin in
+    this file. That is what makes set equality possible at all: an earlier
+    attempt compared against the verifier's own copy and deadlocked, because the
+    verifier runs the base's code while the pack is built at the head.
+    """
+    statement = _fixture_statement()
+    expected, diagnostics = attested_command_set(statement, "all")
+    assert expected, diagnostics
+    full = list(expected)
+
+    def diagnose(gates: object) -> tuple[str, ...]:
+        return attested_gate_diagnostics(statement, {"gates": gates}, "all")
+
+    assert diagnose([{"gate": g, "status": "passed"} for g in full]) == ()
+
+    # The size hole: a label claiming five gates with one recorded.
+    assert "records no result" in diagnose([{"gate": full[0], "status": "passed"}])[0]
+
+    missing = [{"gate": g, "status": "passed"} for g in full]
+    missing[-1]["status"] = "missing"
+    assert "is 'missing'" in diagnose(missing)[0]
+
+    assert any(
+        "more than once" in d
+        for d in diagnose(
+            [{"gate": full[0], "status": "missing"}, {"gate": full[0], "status": "passed"}]
+            + [{"gate": g, "status": "passed"} for g in full[1:]]
+        )
+    )
+    assert "does not run" in diagnose(
+        [{"gate": g, "status": "passed"} for g in full] + [{"gate": "invented", "status": "passed"}]
+    )[0]
+
+    # A statement that names no commit cannot be checked, and fails closed.
+    assert attested_command_set({"predicate": {"buildDefinition": {}}}, "all")[0] is None
+
+
 def _test_fallback_keyed_on_the_substrate_not_the_pack() -> None:
     """The fallback turns on GitHub's artifact listing, and on nothing else.
 
@@ -2175,7 +2361,7 @@ def _test_attested_proof_pack_helpers() -> None:
         "kind": PROOF_PACK_KIND,
         "claim_ceiling": PROOF_PACK_CLAIM_CEILING,
         "source": {
-            "head_sha": "abc123",
+            "head_sha": _fixture_head(),
             "ref": "refs/heads/test",
             "repository": "Rul1an/assay",
             "run_attempt": "1",
@@ -2183,9 +2369,15 @@ def _test_attested_proof_pack_helpers() -> None:
             "run_url": "https://github.com/Rul1an/assay/actions/runs/12345",
             "workflow_name": DELEGATED_WORKFLOW_NAME,
             "workflow_path": DELEGATED_WORKFLOW_PATH,
-            "workflow_sha": "abc123",
+            "workflow_sha": _fixture_head(),
         },
         "inputs": {"gates": "all", "build_ebpf": "true"},
+        # Exactly the gates the attested workflow runs for this label; the
+        # fixture has to describe a pack that would be accepted.
+        "gates": [
+            {"gate": name, "status": "passed"}
+            for name in (attested_command_set(_fixture_statement(), "all")[0] or {})
+        ],
         "content_provenance": {"path_trees": {}},
         "proof_pack": {
             "subjects": [
@@ -2219,7 +2411,10 @@ def _test_attested_proof_pack_helpers() -> None:
                         "runner_environment": "self-hosted",
                     }
                 },
-                "resolvedDependencies": [{"digest": {"gitCommit": "abc123"}}],
+                # A resolvable commit: attested_gate_diagnostics reads the
+                # workflow there, so a synthetic sha would make the fixture
+                # pass by failing to find anything.
+                "resolvedDependencies": [{"digest": {"gitCommit": _fixture_head()}}],
             },
             "runDetails": {
                 "metadata": {
@@ -2254,7 +2449,7 @@ def _test_attested_proof_pack_helpers() -> None:
         "conclusion": "success",
         "id": 12345,
         "html_url": "https://github.com/Rul1an/assay/actions/runs/12345",
-        "head_sha": "abc123",
+        "head_sha": _fixture_head(),
     }
     assert validate_attestation_predicate(verified_statement, pack.manifest, run, GitHubApi("Rul1an/assay", "t")) == ()
     assert validate_gh_attestation_claims(
@@ -2265,8 +2460,8 @@ def _test_attested_proof_pack_helpers() -> None:
                     "githubWorkflowName": DELEGATED_WORKFLOW_NAME,
                     "githubWorkflowTrigger": "workflow_dispatch",
                     "githubWorkflowRepository": "Rul1an/assay",
-                    "sourceRepositoryDigest": "abc123",
-                    "githubWorkflowSHA": "abc123",
+                    "sourceRepositoryDigest": _fixture_head(),
+                    "githubWorkflowSHA": _fixture_head(),
                     "sourceRepositoryRef": "refs/heads/test",
                     "runnerEnvironment": "self-hosted",
                 }
@@ -2276,7 +2471,7 @@ def _test_attested_proof_pack_helpers() -> None:
         GitHubApi("Rul1an/assay", "t"),
     ) == ()
     assert "attestation claim githubWorkflowName missing" in validate_gh_attestation_claims(
-        [{"verificationResult": {"sourceRepositoryDigest": "abc123"}}],
+        [{"verificationResult": {"sourceRepositoryDigest": _fixture_head()}}],
         pack.manifest,
         GitHubApi("Rul1an/assay", "t"),
     )
@@ -2396,8 +2591,8 @@ def _test_attested_proof_pack_helpers() -> None:
                         "githubWorkflowName": DELEGATED_WORKFLOW_NAME,
                         "githubWorkflowTrigger": "workflow_dispatch",
                         "githubWorkflowRepository": "Rul1an/assay",
-                        "sourceRepositoryDigest": "abc123",
-                        "githubWorkflowSHA": "abc123",
+                        "sourceRepositoryDigest": _fixture_head(),
+                        "githubWorkflowSHA": _fixture_head(),
                         "sourceRepositoryRef": "refs/heads/test",
                         "runnerEnvironment": "self-hosted",
                     }
@@ -2419,7 +2614,7 @@ def _test_attested_proof_pack_helpers() -> None:
                 title="synthetic accept path",
                 body="",
                 author_login="Rul1an",
-                head_sha="abc123",
+                head_sha=_fixture_head(),
                 files=(".github/workflows/runner-spike-delegated.yml",),
             ),
             Gate.ALL,
