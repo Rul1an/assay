@@ -241,7 +241,15 @@ fn gate_threshold(fail_on: &str) -> Option<Severity> {
         "none" => None,
         "warn" | "warning" => Some(Severity::Warn),
         "info" => Some(Severity::Info),
-        _ => Some(Severity::Error),
+        "error" => Some(Severity::Error),
+        // Unreachable while the value parser guards this argument, and deliberately not written as
+        // a bare `_ => Severity::Error`: that spelling is what let `none` be reinterpreted for as
+        // long as it did. If a value is ever added to the parser without an arm here, this fails
+        // the test run rather than silently gating on errors.
+        other => {
+            debug_assert!(false, "--fail-on {other} has no threshold");
+            Some(Severity::Error)
+        }
     }
 }
 
