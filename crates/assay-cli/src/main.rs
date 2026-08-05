@@ -1,6 +1,7 @@
 #![allow(unsafe_code)]
 use clap::Parser;
 
+pub mod aee_seal;
 pub mod backend;
 pub mod caps;
 mod cli;
