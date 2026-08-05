@@ -1,0 +1,18 @@
+{
+  "call": {
+    "target_digest": "sha256:8a29d0d8e2f08b9298de4f618642895d6dcb9f6d9e33f4baf4c1f8fe9fb66f23",
+    "tool_name": "github.add_deploy_key"
+  },
+  "caller_visible_error": {
+    "code": -32042,
+    "origin": "assay-proxy",
+    "reason": "policy denied fixture deploy-key request"
+  },
+  "caller_visible_response_digest": "sha256:2f8d481ee9191e503eb4837b8c048f8be196b9884a2b33aa01850a7018e54bc7",
+  "non_claims": [
+    "observation only, not a policy verdict",
+    "does not assert upstream side effect",
+    "does not assert maliciousness or whole-action trust"
+  ],
+  "schema": "assay.denied_call_observation.v0"
+}
