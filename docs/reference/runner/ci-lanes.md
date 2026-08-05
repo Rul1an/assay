@@ -68,7 +68,14 @@ cleanup and checkout.
    `assay-runner-delegated-proof-pack-<run_id>` contains `manifest.json`,
    `subject-checksums.txt`, and `attestation-bundle.json`. Lane-check verifies
    the GitHub artifact attestation, the proof-pack subjects, the selected gate,
-   and the gated-path tree OIDs. During the transition, recording the workflow
+   the per-gate execution status recorded in the manifest, and the gated-path
+   tree OIDs. A pack in which any recorded gate is not `passed` is rejected.
+   Note what that does not cover: the *number* of gates is not verified, so a
+   pack labelled `gates=all` carrying fewer entries is accepted. Checking the
+   size would compare the verifier's copy of the selection against a pack built
+   at another ref, which deadlocks any change to the gate set. What guards the
+   size is review of the diff to `GATE_SELECTIONS`, which is content-addressed
+   and so forces a fresh dispatch when it changes. During the transition, recording the workflow
    run URL, commit SHA, selected gate, and result in the PR body or a PR comment
    remains a compatibility fallback.
 4. Do not treat a delegated skip as success. In the delegated lane, exit `40`
