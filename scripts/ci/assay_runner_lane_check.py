@@ -12,6 +12,7 @@ import base64
 import hashlib
 import http.client
 import io
+import inspect
 import json
 import os
 import re
@@ -336,7 +337,7 @@ def read_zip_member(
     return bytes(body), None
 
 
-def load_proof_pack_zip(data: bytes) -> tuple[ProofPackArtifact | None, tuple[str, ...], bool]:
+def load_proof_pack_zip(data: bytes) -> tuple[ProofPackArtifact | None, tuple[str, ...]]:
     if len(data) > PROOF_PACK_ARCHIVE_MAX_BYTES:
         return None, (
             f"proof artifact archive size {len(data)} exceeds limit "
@@ -1693,6 +1694,19 @@ def fallback_applies(attested: AttestedProofCheck, eligible: bool) -> bool:
     the current guidance for an unreachable verifier, and it matches this
     repository's own `ErrorClass`, which has no "could not check" class -- in
     the evidence path every failure is a verdict.
+
+    Bound, stated because it limits what this can claim: the listing cannot be
+    forged *positive*, but an author needs it *negative*, and negative is free.
+    The delegated workflow uploads with `if-no-files-found: warn` and is
+    `workflow_dispatch`-only, so it runs the definition on the dispatched ref --
+    the author's branch. Not producing an artifact leaves the run successful and
+    the listing empty. This therefore catches a proof that was presented and did
+    not hold up; it does not catch an author who never presents one. What binds
+    that case is `classify_file` requiring a delegated gate at all, and review of
+    the diff to the upload step, which is content-addressed.
+
+    Related bound: `run_ids` comes from the PR body and comments, so the set this
+    accumulates over is author-chosen. Dropping a run link drops its evidence.
     """
     return eligible and not attested.evidence_existed
 
@@ -1733,7 +1747,8 @@ def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) ->
     valid_run, run_diagnostics = find_valid_delegated_run(api, run_ids, pr.head_sha)
     sha_ok = text_mentions_head_sha(text, pr.head_sha)
     gate_ok = recorded_gate_ok(text, classification.gate)
-    fallback_passed = valid_run is not None and sha_ok and gate_ok
+    fallback_eligible = valid_run is not None and sha_ok and gate_ok
+    fallback_passed = fallback_applies(attested, fallback_eligible)
     passed = attested.accepted or fallback_passed
 
     details: list[str] = []
@@ -1886,6 +1901,7 @@ def self_test() -> None:
     _test_gating_map_is_current()
     _test_prefix_gated_surfaces_keep_their_coverage()
     _test_declared_gate_surfaces_exist()
+    _test_run_check_consults_the_predicate()
     _test_fallback_keyed_on_the_substrate_not_the_pack()
     _test_content_tree_comparison()
 
@@ -2051,6 +2067,23 @@ def _test_declared_gate_surfaces_exist() -> None:
         ]
     )
     assert not dead, f"declared gate surfaces matching no tracked file: {dead}"
+
+
+def _test_run_check_consults_the_predicate() -> None:
+    """`run_check` credits through `fallback_applies`, not around it.
+
+    The first revision of this change added the predicate, the flag and a test
+    for both, and never wired the predicate into `run_check` -- which stayed
+    byte-identical to main. The suite was green because the only caller of
+    `fallback_applies` was its own test. No test touched `run_check` at all,
+    which is why nothing noticed.
+
+    This asserts the connection: a proof pack that exists and fails must not be
+    credited, whatever the PR body records.
+    """
+    source = inspect.getsource(run_check)
+    assert "fallback_applies(" in source, "run_check does not consult the predicate"
+    assert "valid_run is not None and sha_ok and gate_ok\n    passed" not in source
 
 
 def _test_fallback_keyed_on_the_substrate_not_the_pack() -> None:
