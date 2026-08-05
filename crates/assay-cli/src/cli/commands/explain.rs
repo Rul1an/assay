@@ -17,6 +17,30 @@ use clap::Args;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+/// The shapes `explain` can emit. `md` stays accepted as an alias of `markdown`; it was accepted
+/// before and never advertised. The old match had a `_` arm whose body was a verbatim copy of the
+/// `terminal` arm, which is what a type removes rather than documents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ExplainFormat {
+    Terminal,
+    #[value(alias = "md")]
+    Markdown,
+    Html,
+    Json,
+}
+
+impl ExplainFormat {
+    /// The spelling downstream formatting keys on, derived from the variant.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ExplainFormat::Terminal => "terminal",
+            ExplainFormat::Markdown => "markdown",
+            ExplainFormat::Html => "html",
+            ExplainFormat::Json => "json",
+        }
+    }
+}
+
 #[derive(Args, Debug)]
 pub struct ExplainArgs {
     /// Trace file (JSON or JSONL format)
@@ -28,8 +52,8 @@ pub struct ExplainArgs {
     pub policy: PathBuf,
 
     /// Output format: terminal, markdown, html, json
-    #[arg(short, long, default_value = "terminal", value_parser = ["terminal", "markdown", "md", "html", "json"])]
-    pub format: String,
+    #[arg(short, long, default_value = "terminal")]
+    pub format: ExplainFormat,
 
     /// Output file (default: stdout)
     #[arg(short, long)]
@@ -133,20 +157,11 @@ pub async fn run(args: ExplainArgs) -> Result<i32> {
     };
 
     // Format output
-    let mut output = match args.format.as_str() {
-        "markdown" | "md" => explanation.to_markdown(),
-        "html" => explanation.to_html(),
-        "json" => serde_json::to_string_pretty(&explanation)?,
-        "terminal" => {
-            if args.verbose {
-                format_verbose(&explanation)
-            } else if args.blocked_only {
-                format_blocked_only(&explanation)
-            } else {
-                explanation.to_terminal()
-            }
-        }
-        _ => {
+    let mut output = match args.format {
+        ExplainFormat::Markdown => explanation.to_markdown(),
+        ExplainFormat::Html => explanation.to_html(),
+        ExplainFormat::Json => serde_json::to_string_pretty(&explanation)?,
+        ExplainFormat::Terminal => {
             if args.verbose {
                 format_verbose(&explanation)
             } else if args.blocked_only {
