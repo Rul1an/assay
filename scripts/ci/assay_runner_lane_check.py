@@ -987,6 +987,76 @@ def content_tree_proof_accepts_head(
     return compare_content_path_trees(manifest, current_trees)
 
 
+@lru_cache(maxsize=1)
+def gate_selections() -> dict[str, tuple[str, ...]]:
+    """Which gate keys each `inputs.gates` label is supposed to produce.
+
+    Imported from the producer rather than restated. The proof pack builder
+    already holds this mapping and uses it to decide which gates to collect; a
+    second copy here would be two answers to one question, and the consumer's
+    copy drifting silently is precisely the failure this verification exists to
+    catch.
+
+    Loaded by path from `__file__` so it has no cwd or `sys.path` precondition.
+    """
+    import importlib.util
+
+    sibling = Path(__file__).resolve().parent / "assay_runner_delegated_proof_pack.py"
+    spec = importlib.util.spec_from_file_location("_assay_proof_pack", sibling)
+    if spec is None or spec.loader is None:  # pragma: no cover - packaging fault
+        raise RuntimeError(f"cannot load {sibling}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return dict(module.GATE_SELECTIONS)
+
+
+def gate_execution_diagnostics(manifest: dict[str, object], label: str) -> tuple[str, ...]:
+    """Reject a proof whose gates did not all run and pass.
+
+    `inputs.gates` is a label. It says which set was requested, not which set
+    executed: the workflow's `all` branch and the builder's `GATE_SELECTIONS`
+    are separate lists, so a gate can be dropped from the branch and the run
+    still reports success, with the pack recording that gate as `missing`.
+    Until this check existed nothing read those per-gate statuses, and such a
+    pack was credited as `gates=all`.
+
+    Fail closed on absence, which is the harder half. A signature cannot
+    guarantee that a record arrives, so a gate that is simply not in the array
+    must be rejected rather than ignored.
+    """
+    diagnostics: list[str] = []
+    expected = gate_selections().get(label)
+    if expected is None:
+        return (f"proof manifest inputs.gates={label!r} is not a known selection",)
+
+    raw = manifest.get("gates")
+    if not isinstance(raw, list):
+        return ("proof manifest missing gates array",)
+
+    recorded: dict[str, str] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            diagnostics.append("proof manifest gates entry is not an object")
+            continue
+        name = str(entry.get("gate") or "")
+        if not name:
+            diagnostics.append("proof manifest gates entry has no gate name")
+            continue
+        recorded[name] = str(entry.get("status") or "")
+
+    for gate in expected:
+        status = recorded.get(gate)
+        if status is None:
+            diagnostics.append(f"proof manifest records no result for gate {gate!r}")
+        elif status != "passed":
+            diagnostics.append(f"proof manifest gate {gate!r} is {status!r}, expected 'passed'")
+
+    for gate in sorted(set(recorded) - set(expected)):
+        diagnostics.append(f"proof manifest records gate {gate!r}, which {label!r} does not select")
+
+    return tuple(diagnostics)
+
+
 def accepted_gates(expected: Gate) -> set[str]:
     if expected == Gate.KERNEL_ONLY:
         return {"kernel-only", "all"}
@@ -1428,6 +1498,8 @@ def validate_proof_manifest_semantics(
                 f"proof manifest inputs.gates={gate!r}, "
                 f"expected one of {sorted(accepted_gates(expected))!r}"
             )
+        else:
+            diagnostics.extend(gate_execution_diagnostics(manifest, gate))
         if inputs.get("build_ebpf") != "true":
             diagnostics.append("proof manifest inputs.build_ebpf must be 'true'")
 
@@ -1847,6 +1919,7 @@ def self_test() -> None:
     assert uncovered_content_provenance_files(["crates/assay-runner-core/src/lib.rs"]) == ()
     assert uncovered_content_provenance_files(["Cargo.lock"]) == ("Cargo.lock",)
     _test_gating_rule_count_is_derived()
+    _test_gate_selections_match_the_workflow()
     _test_gating_map_is_current()
     _test_prefix_gated_surfaces_keep_their_coverage()
     _test_declared_gate_surfaces_exist()
@@ -1925,6 +1998,34 @@ def _test_gating_rule_count_is_derived() -> None:
     the number goes stale. That is exactly how "eleven" survived.
     """
     assert gating_rule_count() == 14, gating_rule_count()
+
+
+def _test_gate_selections_match_the_workflow() -> None:
+    """`GATE_SELECTIONS` and the delegated workflow's case branch agree.
+
+    `gate_execution_diagnostics` rejects a proof whose recorded gates do not
+    match the selection, and it takes that selection from the pack builder. The
+    workflow's `case` branch is a third copy of the same mapping, and it is the
+    one that actually decides which scripts run. If it drifts, the builder
+    collects gates the workflow never ran -- which this verification would
+    report as a defective proof rather than as the drift it is.
+
+    Parity rather than derivation: the branch is shell inside YAML, and parsing
+    it to drive production would be a worse dependency than asserting on it.
+    """
+    root = Path(__file__).resolve().parents[2]
+    workflow = (root / DELEGATED_WORKFLOW_PATH).read_text(encoding="utf-8")
+    selections = gate_selections()
+    for label, expected in selections.items():
+        marker = f'\n            {label})\n' if label != "all" else '\n            all)\n'
+        start = workflow.find(marker)
+        assert start != -1, f"no case branch for {label!r} in {DELEGATED_WORKFLOW_PATH}"
+        end = workflow.find(";;", start)
+        branch = workflow[start:end]
+        ran = tuple(re.findall(r'run_gate "([^"]+)"', branch))
+        assert ran == tuple(expected), (
+            f"{label!r}: workflow runs {ran}, GATE_SELECTIONS says {tuple(expected)}"
+        )
 
 
 def _test_gating_map_is_current() -> None:
@@ -2083,6 +2184,9 @@ def _test_attested_proof_pack_helpers() -> None:
             "workflow_sha": "abc123",
         },
         "inputs": {"gates": "all", "build_ebpf": "true"},
+        "gates": [
+            {"gate": name, "status": "passed"} for name in gate_selections()["all"]
+        ],
         "content_provenance": {"path_trees": {}},
         "proof_pack": {
             "subjects": [
