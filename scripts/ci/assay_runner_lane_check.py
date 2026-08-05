@@ -631,6 +631,72 @@ def load_gated_path_config() -> GatedPathConfig:
     )
 
 
+def derive_gating_inventory() -> tuple[tuple[str, str, int, int], ...]:
+    """Derive the whole gating contract from `classify_file` over `git ls-files`.
+
+    One row per (gate, rule): the gate label, the rule text without its leading
+    path, how many tracked files the rule gates, and how many of those are not
+    content-addressed.
+
+    Derived, never declared. `classify_file` is the source of truth for gating:
+    it holds eleven rules and reads `assay_runner_gated_paths.json` in two of
+    them. The manifest stays because `content_provenance_paths` is a cross-tool
+    contract that `.github/actions/canonical-ebpf-build` also reads, but it is
+    not the gating contract and cannot become one — the reasons for most rules
+    are prose, and JSON has nowhere to put them.
+    """
+    config = load_gated_path_config()
+    root = Path(__file__).resolve().parents[2]
+    tracked = [
+        path
+        for path in subprocess.check_output(
+            ["git", "-C", str(root), "ls-files", "-z"], text=True
+        ).split("\0")
+        if path
+    ]
+    totals: dict[tuple[str, str], int] = {}
+    uncovered: dict[tuple[str, str], int] = {}
+    for path in tracked:
+        gate, reason = classify_file(path)
+        if gate is Gate.NONE:
+            continue
+        rule = reason.split(": ", 1)[1] if reason and ": " in reason else str(reason)
+        key = (gate.label, rule)
+        totals[key] = totals.get(key, 0) + 1
+        if not content_provenance_covers_path(path, config):
+            uncovered[key] = uncovered.get(key, 0) + 1
+    return tuple(
+        (gate, rule, totals[(gate, rule)], uncovered.get((gate, rule), 0))
+        for gate, rule in sorted(totals)
+    )
+
+
+def explain_gating() -> int:
+    """Print the derived gating contract.
+
+    Answers "what is gated, by which rule, and can it reuse a delegated proof"
+    without reading this file, so nobody has to infer the contract from the
+    manifest's partial view again.
+    """
+    rows = derive_gating_inventory()
+    print("Gating contract, derived from classify_file over git ls-files.")
+    print("classify_file is the source of truth; assay_runner_gated_paths.json")
+    print("carries only what other tools consume.")
+    print()
+    print(f"{'gate':<30} {'files':>5} {'uncov':>5}  rule")
+    for gate, rule, total, uncov in rows:
+        print(f"{gate:<30} {total:>5} {uncov:>5}  {rule}")
+    total_uncovered = sum(row[3] for row in rows)
+    print()
+    print(
+        f"{total_uncovered} gated files sit outside content_provenance_paths. A PR "
+        "touching one\ncannot reuse a delegated proof from another head, so it "
+        "always needs a fresh\ndispatch. That is fail-closed, and it is the cost "
+        "side of the coverage set."
+    )
+    return 0
+
+
 def classify_file(path: str) -> tuple[Gate, str | None]:
     gated_paths = load_gated_path_config()
     docs_runner_prefixes = (
@@ -1700,6 +1766,8 @@ def self_test() -> None:
     assert uncovered_content_provenance_files(["crates/assay-runner-core/src/lib.rs"]) == ()
     assert uncovered_content_provenance_files(["Cargo.lock"]) == ("Cargo.lock",)
     _test_declared_gate_surfaces_exist()
+    _test_uncovered_gating_rules_are_known()
+    _test_prefix_gated_surfaces_keep_their_coverage()
     _test_content_tree_comparison()
 
     valid_run = {
@@ -1742,6 +1810,60 @@ def self_test() -> None:
     # touching the classifier itself, including any future PR that
     # might silently re-introduce a spike dependency.
     _assert_assay_cli_does_not_consume_spike()
+
+
+def _test_uncovered_gating_rules_are_known() -> None:
+    """Which rules gate files that cannot be content-addressed is a known set.
+
+    A gated file outside `content_provenance_paths` can never reuse a delegated
+    proof from another head. That is fail-closed and correct, but it is a cost,
+    and a new rule that quietly adds one should be a decision rather than a
+    surprise. This asserts the rules, not the files, so adding a fixture under
+    an existing rule does not churn while a new uncovered surface does fail.
+
+    Derived from `classify_file` over `git ls-files`, which is where gating is
+    decided. Deriving it from the manifest instead would see two of the eleven
+    rules, which is the error #2018 shipped and was closed for.
+    """
+    uncovered_rules = sorted(
+        f"{gate}: {rule}" for gate, rule, _, uncov in derive_gating_inventory() if uncov
+    )
+    assert uncovered_rules == [
+        "all: Gemini google-genai fixture requires gates=all",
+        "all: ambiguous runner fixture surface defaults to gates=all",
+        "all: runner workflow, CLI, cgroup, or workspace dependency surface requires gates=all",
+        "all: shared runner/eBPF/monitor/xtask code requires gates=all",
+        "kernel-only: kernel-only fixture requires gates=kernel-only",
+        "kernel-policy: policy fixture requires gates=kernel-policy",
+        "openai-agents-kernel-policy: OpenAI Agents fixture requires gates=openai-agents-kernel-policy",
+    ], uncovered_rules
+
+
+def _test_prefix_gated_surfaces_keep_their_coverage() -> None:
+    """Which prefix-gated surfaces are content-addressed is a known set.
+
+    Separate subject from `_test_uncovered_gating_rules_are_known`, which pins
+    rules. This pins prefixes, because coverage can be withdrawn from a whole
+    crate without changing the rule set: the six prefixes share one rule, so
+    dropping `crates/assay-monitor` from `content_provenance_paths` leaves that
+    rule already-uncovered and the rule-level assertion green.
+
+    Stable against file churn — it reads prefixes, not files.
+
+    Still not claimed, on purpose: a `content_provenance_paths` entry that
+    covers only exact `all_gate_paths` members can still be withdrawn without
+    failing anything here, and neither test notices a shrinking file count
+    inside a rule that is already partly uncovered.
+    """
+    config = load_gated_path_config()
+    uncovered = sorted(
+        prefix
+        for prefix in config.all_gate_prefixes
+        if not content_provenance_covers_path(prefix, config)
+    )
+    assert uncovered == [
+        "crates/assay-cli/src/cli/commands/runner_spike/",
+    ], uncovered
 
 
 def _test_declared_gate_surfaces_exist() -> None:
@@ -2557,6 +2679,7 @@ def _assert_assay_cli_does_not_consume_spike() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--explain-gating", action="store_true")
     parser.add_argument("--resolve-pr-from-event", action="store_true")
     parser.add_argument("--pr-number", type=int, default=int(os.environ.get("PR_NUMBER", "0") or "0"))
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
@@ -2568,6 +2691,9 @@ def main() -> int:
         self_test()
         print("self-test ok")
         return 0
+
+    if args.explain_gating:
+        return explain_gating()
 
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
