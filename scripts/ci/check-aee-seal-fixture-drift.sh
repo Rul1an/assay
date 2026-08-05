@@ -21,6 +21,16 @@ trap 'rm -rf "$scratch"' EXIT
 
 # A symlink standing in for a fixture points the signing surface outside the repo, and both `cp -R`
 # and `diff -r` follow it, so the comparison passes while the bytes under review are somewhere else.
+# A symlinked *ancestor* leaves no symlink among the descendants, so checking the files is one
+# component too narrow: the fixtures can live outside the repo while every file under the path is
+# regular. Resolve the path and require it to be inside the worktree.
+resolved_dir="$(cd "$fixture_dir" 2>/dev/null && pwd -P || true)"
+resolved_root="$(cd "$repo_root" && pwd -P)"
+if [[ -z "$resolved_dir" || "$resolved_dir" != "$resolved_root"/* ]]; then
+  echo "error: $fixture_dir resolves to '$resolved_dir', outside the worktree at '$resolved_root'" >&2
+  exit 1
+fi
+
 if find "$fixture_dir" -type l -print -quit | grep -q .; then
   echo "error: symlink in $fixture_dir; fixtures must be regular files:" >&2
   find "$fixture_dir" -type l >&2

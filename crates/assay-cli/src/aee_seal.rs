@@ -752,7 +752,8 @@ mod tests {
     #[test]
     fn a_counted_queue_that_lost_an_observation_is_refused() {
         let lossy = DropAccounting::CountedQueue {
-            channels: vec![("probe-ring".into(), 0), ("event-ring".into(), 3)],
+            // One lost observation is the boundary; a test using 3 cannot see `lost > 1`.
+            channels: vec![("probe-ring".into(), 0), ("event-ring".into(), 1)],
         };
         let err = build_sealed_run(
             &healthy(),
@@ -1076,9 +1077,10 @@ mod tests {
         );
     }
 
-    /// The committed June carrier fixture is an applied-ruleset shape. It is seal-eligible on every
-    /// field this module reads, which is the honest limit: what makes its seal checkable is the
-    /// observed-set commitment, not a field in the health record.
+    /// The committed June carrier fixture is an applied-ruleset shape, and it seals. That is the
+    /// honest limit of this module: it is seal-eligible on every field it reads, and nothing here
+    /// establishes when the probe ran. The observed-set commitment carries the observation to a
+    /// consumer; it does not make the probe's position in the run checkable.
     #[test]
     fn the_committed_carrier_fixture_still_parses_and_seals_through_the_commitment() {
         let raw = include_str!("../tests/fixtures/enforcement_health/v1/active_with_probe.json");
