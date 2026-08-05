@@ -613,6 +613,13 @@ jobs:
       # So assert the test actually executed rather than trusting the exit code.
       - name: Test MCP no-pass-through E2E (E6a.3)
         shell: bash
+        # Load-bearing, and measured rather than assumed: on the runner cargo colours its own
+        # `Running` line (`ESC[1mESC[92m     RunningESC[0m tests/...`), which is the line the guard
+        # below keys its per-binary block on. Without this pin the block is never entered, the
+        # tally comes back empty, and the step fails a passing test. libtest's own lines are plain
+        # either way — this is about cargo's, not libtest's.
+        env:
+          CARGO_TERM_COLOR: never
         run: |
           set -euo pipefail
           cargo test --locked -p assay-mcp-server --features test-outbound --no-fail-fast no_passthrough \
@@ -633,10 +640,16 @@ jobs:
           # is a failure, so a shape this does not recognise cannot certify the invariant. That
           # includes nextest, which prints no such line; migrating this step means replacing this
           # check, and it will go red until someone does rather than silently stop checking.
+          # Colour is stripped before matching rather than tolerated in the patterns. The pin above
+          # should already keep these lines plain; this is the second lock, because the failure it
+          # prevents is not symmetric. An escape ahead of `Running` that stops the block from
+          # OPENING just fails a passing test, but one that stops it from CLOSING hands this check
+          # the next binary's tally — the single way it could pass without the test running.
           tally=$(awk '
-            /^[[:space:]]*Running[[:space:]].*no_passthrough_e2e/ { inblk = 1; next }
-            /^[[:space:]]*Running[[:space:]]/                     { inblk = 0 }
-            inblk && /^test result:/                              { print }
+            { gsub(/\033\[[0-9;]*m/, "") }
+            /Running[[:space:]]+[^[:space:]]*no_passthrough_e2e/ { inblk = 1; next }
+            /Running[[:space:]]/                                 { inblk = 0 }
+            inblk && /^test result:/                             { print }
           ' "$RUNNER_TEMP/e6a3.log")
           case "$tally" in
             "test result: ok. "[1-9]*" passed; 0 failed; 0 ignored;"*) ;;
