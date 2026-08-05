@@ -72,7 +72,12 @@ cleanup and checkout.
    run URL, commit SHA, selected gate, and result in the PR body or a PR comment
    remains a compatibility fallback.
 4. Do not treat a delegated skip as success. In the delegated lane, exit `40`
-   means the runner contract has drifted.
+   means the runner contract has drifted. Gate scripts that guard on host
+   prerequisites exit `40`; `run_gate` in the delegated workflow records any
+   non-zero status as a failed gate and returns it under `set -euo pipefail`,
+   so a skip fails the job and cannot reach the proof pack as a pass. See the
+   *Skip Semantics* section of the
+   [delegated runbook](../../ops/ASSAY-RUNNER-DELEGATED-RUNBOOK-2026-05-21.md).
 5. Do not bypass required repository checks for runner-impacting changes.
 
 If a runner-impacting PR cannot get a delegated run because the host is
@@ -99,6 +104,24 @@ identical tree OIDs for every content-provenance path in
 without another delegated run. This does not claim anything about unrelated
 repository state; it only preserves the proof for the gated content the
 delegated host actually exercised.
+
+Four gated paths sit outside the `content_provenance_paths` prefixes and are
+therefore not provable by tree OID at all:
+
+```
+Cargo.toml
+Cargo.lock
+crates/assay-cli/src/cgroup.rs
+crates/assay-cli/src/cli/commands/runner_spike.rs
+```
+
+`crates/assay-cli` is deliberately outside those prefixes; only the runner
+crates, monitor, ebpf and xtask are covered. A PR touching any of the four
+cannot reuse a proof produced on a different head, and lane-check rejects the
+reuse rather than accepting it silently. The set is derived from
+`assay_runner_gated_paths.json` rather than restated, and
+`--self-test` asserts it, so adding a gated path fails until its coverage is
+decided.
 
 The workflow keeps `pull-requests: write` while the transition comment channel
 exists. Empirically, `issues: write` plus `pull-requests: read` is not enough to

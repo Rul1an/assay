@@ -1699,6 +1699,7 @@ def self_test() -> None:
     assert not recorded_gate_ok("- gate: kernel-only", Gate.OPENAI_AGENTS_KERNEL_POLICY)
     assert uncovered_content_provenance_files(["crates/assay-runner-core/src/lib.rs"]) == ()
     assert uncovered_content_provenance_files(["Cargo.lock"]) == ("Cargo.lock",)
+    _test_content_provenance_coverage_is_decided()
     _test_content_tree_comparison()
 
     valid_run = {
@@ -1741,6 +1742,27 @@ def self_test() -> None:
     # touching the classifier itself, including any future PR that
     # might silently re-introduce a spike dependency.
     _assert_assay_cli_does_not_consume_spike()
+
+
+def _test_content_provenance_coverage_is_decided() -> None:
+    """Every gated path is either content-addressed or knowingly not.
+
+    This asserts the set derived from `assay_runner_gated_paths.json` rather
+    than restating it, so adding a gate path fails here until someone answers
+    whether it belongs under a `content_provenance_paths` prefix. A path that
+    is not content-addressed cannot be proven by tree OID, so any change to it
+    forces a fresh delegated dispatch instead of proof reuse.
+
+    `crates/assay-cli` is deliberately outside the content-provenance
+    prefixes: only the runner crates, monitor, ebpf and xtask are covered.
+    """
+    config = load_gated_path_config()
+    assert sorted(uncovered_content_provenance_files(config.all_gate_paths)) == [
+        "Cargo.lock",
+        "Cargo.toml",
+        "crates/assay-cli/src/cgroup.rs",
+        "crates/assay-cli/src/cli/commands/runner_spike.rs",
+    ]
 
 
 def _test_content_tree_comparison() -> None:

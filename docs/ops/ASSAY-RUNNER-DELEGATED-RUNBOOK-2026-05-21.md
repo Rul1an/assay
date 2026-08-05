@@ -148,6 +148,65 @@ Reason: this host is the environment where Linux, cgroup v2, Node 22, and the
 eBPF artifact are expected to exist. If a delegated script skips, the runner or
 workflow has drifted from its contract.
 
+This is enforced, not left to discipline. `run_gate` records any non-zero
+status as a failed gate and returns it under `set -euo pipefail`, so exit `40`
+fails the job like any other failure. Note that not every gate script has such
+a guard; the ones that do are the ones checking host prerequisites.
+
+## Lane-Check Interaction Failures
+
+A delegated run can pass and still leave the PR blocked. These four are the
+recurring causes; all four are consumer-side, none is visible in this
+workflow's own logs.
+
+**The proof binds to the dispatched ref, not to the PR.** The proof pack
+records `--head-sha "$GITHUB_SHA"`, which is the head of whatever ref you
+picked in the Run-workflow dropdown. There is no `expected_head_sha` input on
+this workflow; that input exists only on `assay-runner-lane-check.yml`.
+Dispatching against `main` while reviewing a PR produces a valid, attested,
+useless proof pack: lane-check compares the recorded head SHA against the PR
+head and rejects it. Always select the PR branch as the ref, and dispatch only
+after the branch holds the final candidate commit, since a later push
+invalidates the proof.
+
+**A red `lane-check` job is not a red `lane-check/proof`.** The Actions job is
+named `lane-check`; the required commit status is named `lane-check/proof`, and
+branch protection on `main` requires the status. A job that fails before
+reaching the status-posting step leaves the status stale or absent, which
+blocks the merge without producing a matching red job on the current head. When
+a merge is blocked and the job looks green, read the commit status directly.
+
+**Fork and Dependabot PRs cannot post the status from the PR event.** Posting
+needs `statuses: write`. On `pull_request` events from a fork or from
+Dependabot the token is read-only by GitHub policy, so the status cannot be
+written no matter how the workflow is configured. This is not a bug to fix in
+the workflow: lane-check degrades to a warning in exactly this case and in no
+other, because a 403 from a privileged dispatch context is misconfiguration
+rather than policy. Refresh the status through a `workflow_dispatch` of
+`Assay-Runner Lane Check` with the PR number. Run that dispatch from a trusted
+ref, never from a ref carrying the untrusted changes.
+
+**Content-identical trees may reuse an earlier proof, except on four paths.**
+Lane-check compares the gated-path tree OIDs recorded in the manifest against
+the current PR head, over every `content_provenance_path`, unconditionally. If
+all of them are unchanged, a proof produced on an earlier commit is accepted.
+That is deliberate rebuild avoidance, and it is guarded: four gated paths sit
+outside the content-provenance prefixes and are therefore not provable by tree
+OID at all.
+
+```
+Cargo.toml
+Cargo.lock
+crates/assay-cli/src/cgroup.rs
+crates/assay-cli/src/cli/commands/runner_spike.rs
+```
+
+A PR touching any of them cannot reuse a proof from a different head;
+lane-check rejects it and a fresh dispatch is required. The residual limit is
+narrower than it first appears: tree OIDs cover source content, not host state,
+so the current-state verification rule above still governs kernel, toolchain
+and dependency drift on the delegated host.
+
 ## Workflow Lifecycle Notes
 
 The workflow uses two jobs:
