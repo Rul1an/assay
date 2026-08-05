@@ -100,6 +100,28 @@ repos:
         pass_filenames: false
         files: ^(scripts/ci/(reconcile-docs-auto-pr|test-reconcile-docs-auto-pr)\.sh|\.github/workflows/(docs-auto-update|ci|assay-runner-lane-check|host-capability-check)\.yml|\.pre-commit-config\.yaml)$
 
+      - id: aee-seal-producer-mutations
+        name: ADR-045 seal producer mutations
+        entry: python3 scripts/ci/test_aee_seal_producer_mutations.py
+        language: system
+        pass_filenames: false
+        # Each mutation names the test that must catch it. Run by hand this went wrong four times in
+        # one session; mechanised it has not. Restores from a scratch copy, never from git, so it is
+        # safe on a dirty tree and needs no commit first.
+        #
+        # pre-push, not pre-commit: fourteen `cargo test` runs cost ~56s warm, and a gate that taxes
+        # every intermediate commit is a gate people learn to pass `--no-verify` to. The question it
+        # answers -- does this suite still have teeth -- is a push-time question.
+        stages: [pre-push]
+        files: ^(crates/assay-cli/src/aee_seal\.rs|scripts/ci/test_aee_seal_producer_mutations\.py|\.pre-commit-config\.yaml)$
+      - id: aee-seal-fixture-drift
+        name: ADR-045 seal fixture drift
+        entry: bash scripts/ci/check-aee-seal-fixture-drift.sh
+        language: system
+        pass_filenames: false
+        # The Rust producer's parity tests read `derivation-parity.json`, so the emitter and the
+        # committed vectors have to stay in step; nothing else regenerates them.
+        files: ^(scripts/experiments/aee_landlock_seal_fixture\.py|scripts/experiments/fixtures/aee-landlock-seal/.*|scripts/ci/check-aee-seal-fixture-drift\.sh|crates/assay-cli/src/aee_seal\.rs|\.pre-commit-config\.yaml)$
       - id: fuzz-lane-contract-self-test
         name: Fuzz lane contract
         entry: bash scripts/ci/test-fuzz-lane-contract.sh
