@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+#
+# Every place that must name the current version names it. #1996.
+#
+# A release prep touches a fixed set of files and nothing checked that it did: three of them sat a
+# release behind from v3.37.0 onward, and the internal dependency declarations had drifted as far
+# back as 3.19.1 while the workspace was at 3.38.0.
+#
+# WHY THIS IS NOT A GREP FOR OLD VERSION STRINGS
+#
+# Most version strings in this repo are supposed to be stale, because they record what happened
+# rather than what is current:
+#
+#   - CHANGELOG.md entries.
+#   - "Releases starting with 3.36.0 declare Rust 1.89 as their MSRV" in
+#     docs/getting-started/installation.md and docs/reference/rust-support.md. That sentence is
+#     permanently true and bumping the number would make it false.
+#   - Dated status syncs in docs/ROADMAP.md, which narrate a specific release line.
+#   - Recorded measurement provenance, e.g. docs/interop/sep2828-decision-pairing-v0.md.
+#
+# A repo-wide "no old versions" check flags exactly those, gets suppressed, and then catches
+# nothing. So this script checks only facts it can DERIVE, and never scans for version-shaped text:
+#
+#   1. Internal dependency declarations. Enumerated from the root Cargo.toml itself, not from a
+#      list kept here, so a new workspace crate is covered the day it is added.
+#   2. The `assay --version` sample output in the installation guide, compared against what the
+#      binary actually prints, so the expectation comes from the program rather than from a
+#      hard-coded string.
+#
+# Nothing is excluded by pattern. Lines that must stay historical are out of scope because they are
+# not derived from the current version in the first place.
+#
+# Usage: scripts/ci/check-release-surface.sh
+#        ASSAY_BIN=path/to/assay scripts/ci/check-release-surface.sh   (skips cargo build)
+
+set -euo pipefail
+
+cd "$(dirname "$0")/../.."
+
+failures=0
+fail() {
+  failures=$((failures + 1))
+  printf 'FAIL: %s\n' "$*"
+}
+note() { printf '%s\n' "$*"; }
+
+# ---------------------------------------------------------------------------
+# The one source of truth.
+# ---------------------------------------------------------------------------
+WORKSPACE_VERSION="$(
+  awk '
+    /^\[workspace\.package\]/ { in_section = 1; next }
+    /^\[/                     { in_section = 0 }
+    in_section && /^version *=/ {
+      gsub(/^version *= *"|".*$/, "")
+      print
+      exit
+    }
+  ' Cargo.toml
+)"
+
+if [ -z "$WORKSPACE_VERSION" ]; then
+  echo "could not read [workspace.package] version from Cargo.toml" >&2
+  exit 2
+fi
+note "workspace version: $WORKSPACE_VERSION"
+
+# ---------------------------------------------------------------------------
+# 1. Internal dependency declarations, enumerated from the manifest.
+#
+# Every crate in this workspace sets `version.workspace = true`, so each one is published at
+# WORKSPACE_VERSION. A declaration naming an older version still resolves, because ^3.19.1 is
+# satisfied by 3.38.0, which is why this drifted silently for so long. What it costs is a published
+# requirement looser than the truth: a consumer that pins the declared minimum gets a version this
+# workspace has not compiled against since.
+# ---------------------------------------------------------------------------
+note ""
+note "internal dependency declarations:"
+
+checked=0
+while IFS=$'\t' read -r name declared; do
+  checked=$((checked + 1))
+  if [ "$declared" != "$WORKSPACE_VERSION" ]; then
+    fail "Cargo.toml: $name declares version \"$declared\", workspace is \"$WORKSPACE_VERSION\""
+  fi
+done < <(
+  awk '
+    /^\[workspace\.dependencies\]/ { in_section = 1; next }
+    /^\[/                          { in_section = 0 }
+    in_section && /path *= *"(crates|assay-python-sdk)/ {
+      name = $1
+      if (match($0, /version *= *"[^"]+"/)) {
+        v = substr($0, RSTART, RLENGTH)
+        gsub(/version *= *"|"/, "", v)
+        printf "%s\t%s\n", name, v
+      }
+    }
+  ' Cargo.toml
+)
+
+if [ "$checked" -eq 0 ]; then
+  fail "no internal path dependencies found in [workspace.dependencies]; the enumeration is broken"
+else
+  note "  checked $checked declaration(s)"
+fi
+
+# ---------------------------------------------------------------------------
+# 2. The documented `assay --version` output.
+#
+# Derived from the binary rather than compared to a literal, so this cannot drift into asserting a
+# version the program does not print.
+# ---------------------------------------------------------------------------
+note ""
+note "documented CLI version output:"
+
+INSTALL_DOC="docs/getting-started/installation.md"
+ASSAY_BIN="${ASSAY_BIN:-}"
+
+if [ -z "$ASSAY_BIN" ]; then
+  if [ -x "target/debug/assay" ]; then
+    ASSAY_BIN="target/debug/assay"
+  elif [ -x "target/release/assay" ]; then
+    ASSAY_BIN="target/release/assay"
+  fi
+fi
+
+if [ -n "$ASSAY_BIN" ]; then
+  ACTUAL="$("$ASSAY_BIN" --version | head -1 | tr -d '\r')"
+  note "  binary prints: $ACTUAL"
+  if ! grep -qxF "$ACTUAL" "$INSTALL_DOC"; then
+    fail "$INSTALL_DOC does not show \"$ACTUAL\" as the expected \`assay --version\` output"
+  fi
+else
+  # No binary to ask, so fall back to the manifest. Still derived, one step further removed.
+  note "  no assay binary available; comparing against the manifest version instead"
+  if ! grep -qxF "assay $WORKSPACE_VERSION" "$INSTALL_DOC"; then
+    fail "$INSTALL_DOC does not show \"assay $WORKSPACE_VERSION\" as the expected \`assay --version\` output"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+note ""
+if [ "$failures" -gt 0 ]; then
+  note "release surface: $failures disagreement(s) with [workspace.package] version"
+  note ""
+  note "If this fired on a release prep, bump the files it names. If it fired on a line that is"
+  note "supposed to record history, that line should not be derived from the current version and"
+  note "this script should not be looking at it: fix the check, do not suppress it."
+  exit 1
+fi
+
+note "release surface: consistent at $WORKSPACE_VERSION"

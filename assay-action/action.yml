@@ -49,7 +49,7 @@ inputs:
     required: false
     default: ''
   fail_on:
-    description: 'Fail threshold: error, warn, info, none'
+    description: 'Fail threshold: error, warn (or warning), info, none. Validated by the CLI, so an unrecognized value fails the run instead of disabling the gate.'
     required: false
     default: 'error'
   sarif:
@@ -478,13 +478,40 @@ runs:
         # Lint all bundles (one at a time, aggregate results)
         TOTAL_ERRORS=0
         TOTAL_WARNS=0
+        GATE_HITS=0
         echo '{"findings":[]}' > "$REPORTS_DIR/lint.json"
 
         for bundle in $BUNDLES; do
           echo "Linting: $bundle"
 
-          # Lint to JSON for counting
-          LINT_JSON=$(assay evidence lint --format json "$bundle" 2>/dev/null || echo '{"findings":[]}')
+          # Lint to JSON for counting, and let the CLI decide the threshold.
+          #
+          # $FAIL_ON goes to the CLI unmodified so the vocabulary has one definition, the one clap
+          # validates. This replaces a bash `case` that had no default arm: any value it did not
+          # recognize gated nothing and exited 0, so `fail_on: warning` (which the cicd-starter
+          # README tells users to set) silently disabled the gate, as did any typo or casing.
+          #
+          # One invocation still serves both jobs. `assay evidence lint` writes its report first and
+          # decides the gate last, so the JSON below is produced whether or not the gate trips.
+          # `--fail-on none` is honoured by the CLI, so no case for it is needed here.
+          set +e
+          LINT_JSON=$(assay evidence lint --format json --fail-on "$FAIL_ON" "$bundle" 2>"$TEMP_DIR/lint.err")
+          LINT_CODE=$?
+          set -e
+
+          case "$LINT_CODE" in
+            0) ;;
+            1) GATE_HITS=$((GATE_HITS + 1)) ;;
+            *)
+              # 2 = verification failure, 3 = pack fault, 2 also = a fail_on the CLI does not accept.
+              # A threshold that could not be applied must not read as a threshold that passed.
+              echo "::error::Could not apply fail_on='$FAIL_ON' to $bundle (assay exited $LINT_CODE)"
+              cat "$TEMP_DIR/lint.err" >&2 || true
+              exit 2
+              ;;
+          esac
+
+          [ -n "$LINT_JSON" ] || LINT_JSON='{"findings":[]}'
 
           # Count findings in this bundle
           BUNDLE_ERRORS=$(echo "$LINT_JSON" | jq '[.findings // [] | .[] | select(.severity == "error")] | length' 2>/dev/null || echo "0")
@@ -523,32 +550,15 @@ runs:
         echo "findings_error=$ERRORS" >> $GITHUB_OUTPUT
         echo "findings_warn=$WARNS" >> $GITHUB_OUTPUT
 
-        # Apply fail_on threshold
-        case "$FAIL_ON" in
-          error)
-            if [ "$ERRORS" -gt 0 ]; then
-              echo "::error::$ERRORS error-level findings exceed threshold"
-              exit 1
-            fi
-            ;;
-          warn)
-            if [ "$ERRORS" -gt 0 ] || [ "$WARNS" -gt 0 ]; then
-              echo "::error::$ERRORS errors, $WARNS warnings exceed threshold"
-              exit 1
-            fi
-            ;;
-          info)
-            # Fail on any finding (info not yet implemented, treat as warn)
-            if [ "$ERRORS" -gt 0 ] || [ "$WARNS" -gt 0 ]; then
-              exit 1
-            fi
-            ;;
-          none)
-            # Never fail on findings
-            ;;
-        esac
-
+        # The counters above stay: they feed findings_error, findings_warn and diff_summary. Only the
+        # deciding moved, to the per-bundle `--fail-on` exit code collected in $GATE_HITS. The
+        # summary is written before the gate so a gated run still reports what it found.
         echo "diff_summary=Verified: $VERIFIED, Errors: $ERRORS, Warnings: $WARNS" >> $GITHUB_OUTPUT
+
+        if [ "$GATE_HITS" -gt 0 ]; then
+          echo "::error::$GATE_HITS bundle(s) have findings at or above '$FAIL_ON' ($ERRORS errors, $WARNS warnings)"
+          exit 1
+        fi
 
     # =========================================================================
     # E3: SARIF Upload
@@ -970,8 +980,8 @@ runs:
         # and pack_status readable by later steps, and exits 1 -- a policy failure, distinct from
         # the exit 3 this step uses for pack faults.
         #
-        # $FAIL_ON goes to the CLI unmodified. The CLI accepts "warning" as an alias of "warn";
-        # the bash case earlier in this file does not, which is tracked separately.
+        # $FAIL_ON goes to the CLI unmodified, as it now does on the non-pack path too. The CLI
+        # accepts "warning" as an alias of "warn", so both paths honour it.
         if [ "$FAIL_ON" != "none" ]; then
           PACK_GATE_HITS=0
           while IFS= read -r bundle || [ -n "$bundle" ]; do

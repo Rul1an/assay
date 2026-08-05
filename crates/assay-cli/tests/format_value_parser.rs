@@ -69,11 +69,20 @@ const FORMAT_ARGS: &[(&[&str], &str, &[&str])] = &[
     ),
     (&["mcp", "discover"], "--format", &["table", "json", "yaml"]),
     (&["sandbox"], "--profile-format", &["yaml", "json"]),
+    // `github` is accepted as an alias of `markdown` and deliberately not advertised. `md` stays
+    // advertised because it is the documented `--input` spelling, and legacy mode rejects it by
+    // name rather than reinterpreting it, so it is not interchangeable with `markdown`.
     (
         &["coverage"],
         "--format",
-        &["text", "json", "md", "markdown", "github"],
+        &["text", "json", "md", "markdown"],
     ),
+];
+
+/// Aliases that parse without appearing in the value list, as `(command, flag, alias)`.
+const HIDDEN_ALIASES: &[(&[&str], &str, &str)] = &[
+    (&["explain"], "--format", "md"),
+    (&["coverage"], "--format", "github"),
 ];
 
 #[test]
@@ -144,13 +153,24 @@ fn an_unrecognized_format_is_rejected_rather_than_reinterpreted() {
 /// breaks callers who relied on the old behaviour.
 #[test]
 fn an_alias_is_accepted_without_being_advertised() {
-    let out = Command::new(env!("CARGO_BIN_EXE_assay"))
-        .args(["explain", "--format", "md"])
-        .output()
-        .expect("failed to run assay");
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        !stderr.contains("invalid value"),
-        "the `md` alias was dropped rather than hidden: {stderr}"
-    );
+    for (cmd, flag, alias) in HIDDEN_ALIASES {
+        let out = Command::new(env!("CARGO_BIN_EXE_assay"))
+            .args(*cmd)
+            .args([*flag, *alias])
+            .output()
+            .expect("failed to run assay");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("invalid value"),
+            "`assay {} {flag} {alias}`: the alias was dropped rather than hidden: {stderr}",
+            cmd.join(" "),
+        );
+
+        let line = option_block(&help_for(cmd), flag);
+        assert!(
+            !line.contains(&format!("{alias},")) && !line.contains(&format!("{alias}]")),
+            "`assay {} {flag}` advertises `{alias}`, so it is a value and not a hidden alias: {line}",
+            cmd.join(" "),
+        );
+    }
 }

@@ -254,8 +254,10 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
 /// `--fail-on none` at `action.yml:888`, and it was never implemented: the old match sent it to
 /// `_ => Severity::Error`, gating on exactly the findings the caller had asked to ignore.
 ///
-/// The action input also called `fail_on` is a different thing — it is implemented in bash at
-/// `action.yml:527-549` and never reaches this flag.
+/// The action input also called `fail_on` used to be a different thing, implemented in a bash
+/// `case` that never reached this flag and had no default arm, so any value it did not recognize
+/// gated nothing. It now forwards the input here unmodified, which makes this function the only
+/// definition of the threshold vocabulary on either side of that boundary.
 ///
 /// The value parser on `--fail-on` decides what reaches this function, so an unrecognized value is
 /// rejected before the command runs and never arrives here.
