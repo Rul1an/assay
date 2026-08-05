@@ -122,7 +122,6 @@ pub(crate) async fn execute_pipeline(
     }
 
     if input.baseline.is_some() && input.export_baseline.is_some() {
-        eprintln!("config error: cannot use --baseline and --export-baseline together");
         return Err(PipelineError::invalid_args(
             "Cannot use --baseline and --export-baseline together",
         ));
@@ -173,7 +172,6 @@ pub(crate) async fn execute_pipeline(
     }
 
     if cfg.model == "trace" && input.trace_file.is_none() {
-        eprintln!("config error: model: trace requires --trace-file <PATH>");
         return Err(PipelineError::invalid_args(
             "config uses model: trace, so --trace-file <PATH> is required",
         ));
@@ -257,10 +255,9 @@ pub(crate) async fn execute_pipeline(
         Ok(r) => r,
         Err(e) => {
             if let Some(diag) = assay_core::errors::try_map_error(&e) {
-                eprintln!("{}", diag);
-                return Err(PipelineError::cfg_parse(
+                return Err(PipelineError::from_diagnostic(
                     input.config.display().to_string(),
-                    diag.to_string(),
+                    &diag,
                 ));
             }
             return Err(PipelineError::from_run_error(

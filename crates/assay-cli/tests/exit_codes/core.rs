@@ -108,8 +108,11 @@ tests:
         .arg("assay.yaml")
         .assert()
         .code(2)
+        // The console text is now the classified message itself rather than a separately
+        // worded copy of it, so this is the same string the artifact carries.
+        .stderr(predicate::str::contains("E_INVALID_ARGS"))
         .stderr(predicate::str::contains(
-            "model: trace requires --trace-file <PATH>",
+            "config uses model: trace, so --trace-file <PATH> is required",
         ));
 
     let v = read_run_json(dir.path());
@@ -652,4 +655,118 @@ tests:
         diags
     );
     assert_eq!(vacuous[0]["severity"], "warn");
+}
+
+// ---------------------------------------------------------------------------
+// One failure, one report.
+//
+// `into_exit_code` reports every classified failure, so the sites that also printed for
+// themselves produced two reports for one condition -- in two different wordings, which is
+// the arrangement that drifts. The `try_map_error` site was worse than duplicated: its
+// message was a rendered diagnostic, so the reported diagnostic framed an already framed
+// one and the result was unreadable.
+// ---------------------------------------------------------------------------
+
+fn stderr_of(dir: &std::path::Path, args: &[&str]) -> String {
+    let mut cmd = Command::cargo_bin("assay").unwrap();
+    cmd.current_dir(dir).env("ASSAY_EXIT_CODES", "v2");
+    for arg in args {
+        cmd.arg(arg);
+    }
+    let out = cmd.assert().code(2).get_output().clone();
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+#[test]
+fn contract_arg_conflict_is_reported_once() {
+    let dir = tempdir().unwrap();
+    let stderr = stderr_of(
+        dir.path(),
+        &["run", "--baseline", "dummy", "--export-baseline", "dummy"],
+    );
+
+    assert_eq!(
+        stderr.matches("-export-baseline").count(),
+        1,
+        "the conflict was reported more than once:\n{}",
+        stderr
+    );
+    assert!(stderr.contains("E_INVALID_ARGS"), "{}", stderr);
+}
+
+#[test]
+fn contract_missing_trace_file_is_reported_once() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        "suite: t\nmodel: trace\ntests:\n  - id: t1\n    input: hello\n",
+    )
+    .unwrap();
+
+    let stderr = stderr_of(dir.path(), &["run", "--config", "assay.yaml"]);
+
+    assert_eq!(
+        stderr.matches("--trace-file <PATH>").count(),
+        1,
+        "the requirement was reported more than once:\n{}",
+        stderr
+    );
+}
+
+#[test]
+fn contract_upstream_diagnostic_is_reported_once_and_not_nested() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("assay.yaml"),
+        "suite: demo\nmodel: dummy\ntests:\n  - id: t1\n    input: hello\n",
+    )
+    .unwrap();
+    // A schema version the loader refuses, which `try_map_error` classifies as a baseline
+    // mismatch before the pipeline turns it into a `PipelineError`.
+    fs::write(
+        dir.path().join("baseline.json"),
+        r#"{"schema_version":99,"suite":"demo","assay_version":"0.0.0","created_at":"2026-01-01T00:00:00Z","config_fingerprint":"abc","entries":[]}"#,
+    )
+    .unwrap();
+
+    let stderr = stderr_of(
+        dir.path(),
+        &[
+            "run",
+            "--config",
+            "assay.yaml",
+            "--baseline",
+            "baseline.json",
+        ],
+    );
+
+    assert_eq!(
+        stderr
+            .matches("Baseline incompatible with current run")
+            .count(),
+        1,
+        "the diagnostic was rendered inside itself:\n{}",
+        stderr
+    );
+    // What the classifier knew survives the fold: its own code, its context, its fix steps.
+    assert!(stderr.contains("E_BASE_MISMATCH"), "{}", stderr);
+    assert!(
+        stderr.contains("unsupported baseline schema version 99"),
+        "{}",
+        stderr
+    );
+    assert!(
+        stderr.contains("Regenerate baseline on main branch"),
+        "{}",
+        stderr
+    );
+
+    // The artifact carries a message, not a block of terminal output.
+    let v = read_run_json(dir.path());
+    let message = v["resolution"]["message"].as_str().expect("message");
+    assert!(
+        !message.contains('\n'),
+        "run.json message must not be a rendering: {:?}",
+        message
+    );
 }
