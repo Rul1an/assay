@@ -1,8 +1,16 @@
 use anyhow::{Context, Result};
 use assay_evidence::diff::engine::diff_bundles;
 use assay_evidence::VerifyLimits;
-use clap::Args;
+use clap::{Args, ValueEnum};
 use std::fs::File;
+
+/// The shapes `evidence diff` can emit. A type rather than a string, so the match over it is
+/// exhaustive and no spelling can reach it that the parser did not accept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum DiffFormat {
+    Human,
+    Json,
+}
 
 #[derive(Debug, Args, Clone)]
 pub struct DiffArgs {
@@ -15,8 +23,8 @@ pub struct DiffArgs {
     pub candidate: Option<std::path::PathBuf>,
 
     /// Output format: human or json
-    #[arg(long, default_value = "human", value_parser = ["human", "json"])]
-    pub format: String,
+    #[arg(long, default_value = "human")]
+    pub format: DiffFormat,
 
     /// Baseline directory (look for {dir}/{key}.tar.gz)
     #[arg(long)]
@@ -51,11 +59,11 @@ pub fn cmd_diff(args: DiffArgs) -> Result<i32> {
     let limits = VerifyLimits::default();
     let report = diff_bundles(baseline_file, candidate_file, limits)?;
 
-    match args.format.as_str() {
-        "json" => {
+    match args.format {
+        DiffFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
-        _ => {
+        DiffFormat::Human => {
             eprintln!("Assay Evidence Diff");
             eprintln!("===================");
             eprintln!(
