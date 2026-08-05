@@ -37,6 +37,15 @@ pub struct RunArgs {
     #[arg(long)]
     pub strict: bool,
 
+    /// Refuse to run a config carrying an assertion that no trace could fail.
+    ///
+    /// Separate from `--strict`, which decides exit codes for warn/flaky results, and from
+    /// `--deny-deprecations`, which refuses keys this version does not understand. An assertion
+    /// that cannot fail is neither: it parses, it is current, and it reports a pass that carries
+    /// no information.
+    #[arg(long)]
+    pub deny_ineffective_assertions: bool,
+
     /// embedder provider (none|openai|fake)
     #[arg(long, default_value = "none")]
     pub embedder: String,
@@ -114,6 +123,7 @@ impl Default for RunArgs {
             judge: JudgeArgs::default(),
             replay_strict: false,
             deny_deprecations: false,
+            deny_ineffective_assertions: false,
             exit_codes: crate::exit_codes::ExitCodeVersion::default(),
             no_verify: false,
             format: OutputFormat::Text,
@@ -156,6 +166,14 @@ pub struct CiArgs {
     /// strict mode (controls exit code policy: warn/flaky -> exit 1)
     #[arg(long)]
     pub strict: bool,
+
+    /// Refuse to run a config carrying an assertion that no trace could fail.
+    ///
+    /// Separate from `--strict` (exit-code policy) and `--deny-deprecations` (unknown keys). An
+    /// assertion that cannot fail is neither: it parses, it is current, and it reports a pass that
+    /// carries no information.
+    #[arg(long)]
+    pub deny_ineffective_assertions: bool,
 
     #[arg(long, default_value = "none")]
     pub embedder: String,
