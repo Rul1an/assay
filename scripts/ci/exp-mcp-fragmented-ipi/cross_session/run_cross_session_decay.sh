@@ -56,12 +56,22 @@ BUILD_PKGS=(-p assay-cli)
 if [[ "$USE_SEQUENCE" == "1" ]]; then
   BUILD_PKGS+=(-p assay-mcp-server)
 fi
-if [[ "${SKIP_CARGO_BUILD:-0}" != "1" ]]; then
+if [[ "${SKIP_CARGO_BUILD:-0}" == "1" ]]; then
+  # Since the existence checks are gone, this flag is the only thing between a run and a stale
+  # binary. Saying so is the same rule the rest of this script follows.
+  echo "NOTE: SKIP_CARGO_BUILD=1 -- binaries not rebuilt; their freshness is the caller's" >&2
+else
   cargo build -q --manifest-path "$ROOT/Cargo.toml" --target-dir "$ROOT/target" "${BUILD_PKGS[@]}"
 fi
 
-if [[ "$RUN_LIVE" == "1" && "${ASSAY_CMD:-assay}" != "$ROOT/target/debug/assay" ]]; then
-  echo "NOTE: ASSAY_CMD is not this worktree's target/debug/assay; that binary's freshness is the caller's"
+# Compare by inode after stripping arguments: ASSAY_CMD legitimately carries argv, and a relative
+# path or symlink still names the binary just refreshed. See run_baseline.sh for the full note.
+# Defaulted into a local first because this script, unlike its siblings, never sets ASSAY_CMD, and
+# ${ASSAY_CMD%% *} on an unset name aborts under `set -u`.
+ASSAY_CMD_PROG="${ASSAY_CMD:-assay}"
+if [[ "$RUN_LIVE" == "1" ]] &&
+   ! [[ "$(command -v -- "${ASSAY_CMD_PROG%% *}" 2>/dev/null)" -ef "$ROOT/target/debug/assay" ]]; then
+  echo "NOTE: ASSAY_CMD is not this worktree's target/debug/assay; that binary's freshness is the caller's" >&2
 fi
 
 SESSION_DIR="$OUT_DIR/sessions/${MODE}/decay_runs_${DECAY_RUNS}"

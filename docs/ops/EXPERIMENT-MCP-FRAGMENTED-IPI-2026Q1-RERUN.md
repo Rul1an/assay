@@ -19,6 +19,16 @@ bash scripts/ci/test-exp-mcp-fragmented-ipi.sh
 This rebuilds the required binaries, runs a small baseline/protected sample, and emits:
 - `target/exp-mcp-fragmented-ipi/test/summary.json`
 
+To check the harness itself rather than the experiment — that each runner builds the binaries its
+configuration executes, into the directory the driver reads:
+
+```bash
+bash scripts/ci/test-exp-mcp-fragmented-ipi-freshness.sh
+```
+
+Worth running after touching any runner script. Like the rest of this family it is not wired into
+CI, so nothing runs it for you.
+
 ## Full rerun matching the published results
 From repo root:
 
@@ -91,7 +101,9 @@ If you are also using the local experiment notebook, update:
 - `/Users/roelschuurkes/Documents/Obsidian Vault/Assay/Experiments/MCP-Fragmented-IPI-2026Q1/07 Results Draft.md`
 
 ## Known issues / troubleshooting
-- If the run stalls immediately, ensure `target/debug/assay` and `target/debug/assay-mcp-server` were built successfully.
+- The runner scripts build the binaries they execute, so a missing binary is no longer the usual
+  cause of a stall. If one is reported missing, check whether `SKIP_CARGO_BUILD=1` is set — that
+  disables the build, and the runners say so on stderr.
 - If local hooks fail due to `libsqlite3-sys` build artifacts:
   - run `cargo clean -p libsqlite3-sys`
   - retry the command

@@ -60,9 +60,10 @@ def parse_tool_payload(response):
 #
 # Freshness is owned by the three wrapper scripts, which are the only things that execute this
 # driver and which build first: run_baseline.sh, run_protected.sh and
-# cross_session/run_cross_session_decay.sh. (Some scripts/ci/test-exp-mcp-fragmented-ipi* entry
-# points build too, but not all of them do, so the wrappers are the guarantee, not the entry
-# points.) The build lives there rather than here because this driver is re-invoked once per run
+# cross_session/run_cross_session_decay.sh. (Every test-exp-mcp-fragmented-ipi* entry point that
+# reaches this driver builds as well; the wrappers are named as the guarantee because a person can
+# run this file directly, which is the case that has no entry point at all.) The build lives there
+# rather than here because this driver is re-invoked once per run
 # and per session -- 4 times in a default cross-session run, 6 at DECAY_RUNS=3 -- and doing it
 # here would re-verify what the wrapper just verified, once per invocation.
 #

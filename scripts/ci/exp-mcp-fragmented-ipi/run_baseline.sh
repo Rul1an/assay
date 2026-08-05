@@ -45,14 +45,27 @@ esac
 #
 # --target-dir pins the output to where the driver looks (repo_root/"target/debug/..."). Without
 # it a CARGO_TARGET_DIR -- which AGENTS.md tells worktree owners to set -- would send the build
-# somewhere the driver never opens. --manifest-path because this script never cd's.
-if [[ "${SKIP_CARGO_BUILD:-0}" != "1" ]]; then
+# somewhere the driver never opens. This is a workaround and not the right layer: the clean fix is
+# to hand the driver the resolved path, but a path arriving there as a parameter is exactly what
+# CodeQL flags as py/path-injection (alert #701, hit during this PR). The price is that whoever
+# set CARGO_TARGET_DIR gets a second target tree here, which on a full disk is not free.
+# --manifest-path because this script never cd's.
+if [[ "${SKIP_CARGO_BUILD:-0}" == "1" ]]; then
+  # Since the existence checks are gone, this flag is the only thing between a run and a stale
+  # binary. Saying so is the same rule the rest of this script follows.
+  echo "NOTE: SKIP_CARGO_BUILD=1 -- binaries not rebuilt; their freshness is the caller's" >&2
+else
   cargo build -q --manifest-path "$ROOT/Cargo.toml" --target-dir "$ROOT/target" -p assay-cli
 fi
 
-# Say what this build does not cover rather than implying it covers everything.
-if [[ "$RUN_LIVE" == "1" && "$ASSAY_CMD" != "$ROOT/target/debug/assay" ]]; then
-  echo "NOTE: ASSAY_CMD is not this worktree's target/debug/assay; that binary's freshness is the caller's"
+# Say what this build does not cover rather than implying it covers everything. Compare by inode
+# after stripping any arguments: ASSAY_CMD legitimately carries argv (the driver shlex-splits it),
+# and a relative path, a "./" or a symlink all still name the binary just refreshed. A string
+# comparison calls those foreign and cries wolf on the supported syntax. stderr, because
+# ablation/run_variant.sh redirects wrapper stdout into a log the operator does not read.
+if [[ "$RUN_LIVE" == "1" ]] &&
+   ! [[ "$(command -v -- "${ASSAY_CMD%% *}" 2>/dev/null)" -ef "$ROOT/target/debug/assay" ]]; then
+  echo "NOTE: ASSAY_CMD is not this worktree's target/debug/assay; that binary's freshness is the caller's" >&2
 fi
 
 python3 "$ROOT/scripts/ci/exp-mcp-fragmented-ipi/drive_fragmented_ipi.py" \

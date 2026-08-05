@@ -8,8 +8,13 @@
 
 ## Build
 ```bash
-CARGO_NET_OFFLINE=true cargo build -q -p assay-cli -p assay-mcp-server
+export CARGO_NET_OFFLINE=true
+cargo build -q -p assay-cli -p assay-mcp-server
 ```
+
+`export`, not a one-shot prefix: the runner scripts build the binaries they execute, so a value
+set for this command alone would not reach that build, and the `cargo_net_offline` field recorded
+in `build-info.json` below would describe a property the measured run did not have.
 
 ## Required environment
 ```bash

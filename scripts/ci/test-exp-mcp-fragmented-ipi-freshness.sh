@@ -82,6 +82,14 @@ succeeded() {
   else bad "$CASE: wrapper exited $LAST_STATUS: $(tail -2 "$TMP/out.log" | tr '\n' ' ')"; fi
 }
 target_pinned() { built "--target-dir"; built "$ROOT/target"; }
+warned() {
+  if grep -q -- "$1" "$TMP/out.log"; then ok "$CASE: warns about $1"
+  else bad "$CASE: expected a warning mentioning '$1'; got: $(tail -2 "$TMP/out.log" | tr '\n' ' ')"; fi
+}
+not_warned() {
+  if grep -q -- "$1" "$TMP/out.log"; then bad "$CASE: false warning about $1 on a supported form"
+  else ok "$CASE: no false warning about $1"; fi
+}
 
 echo "[freshness] A: baseline RUN_LIVE=0 builds only assay-cli, into the pinned dir"
 RUNS_ATTACK=1 RUNS_LEGIT=1 RUN_LIVE=0 record A bash "$EXP/run_baseline.sh" "$TMP/a"
@@ -108,6 +116,8 @@ built "assay-cli"; built "assay-mcp-server"
 echo "[freshness] F: SKIP_CARGO_BUILD is honoured by every wrapper"
 RUNS_ATTACK=1 RUNS_LEGIT=1 RUN_LIVE=0 SKIP_CARGO_BUILD=1 record F1 bash "$EXP/run_baseline.sh" "$TMP/f1"
 no_cargo
+# Skipping the build is now the only route to a stale binary, so silence about it is a defect.
+warned "SKIP_CARGO_BUILD=1"
 RUNS_ATTACK=1 RUNS_LEGIT=1 RUN_LIVE=0 SKIP_CARGO_BUILD=1 record F2 bash "$EXP/run_protected.sh" "$TMP/f2"
 no_cargo
 MODE=wrap_only OUT_DIR="$TMP/f3" SKIP_CARGO_BUILD=1 \
@@ -149,6 +159,20 @@ succeeded; built "assay-cli"; built "assay-mcp-server"; target_pinned
 echo "[freshness] K: cross-session combined builds both"
 MODE=combined OUT_DIR="$TMP/k" record K bash "$EXP/cross_session/run_cross_session_decay.sh"
 succeeded; built "assay-cli"; built "assay-mcp-server"
+
+echo "[freshness] N: the ASSAY_CMD warning fires on a foreign binary, not on supported syntax"
+# ASSAY_CMD legitimately carries argv and may be written relatively; both still name the binary the
+# wrapper just built. A string comparison calls them foreign, and a warning that cries wolf on the
+# documented syntax is one the operator learns to ignore.
+RUNS_ATTACK=1 RUNS_LEGIT=1 RUN_LIVE=1 MCP_HOST_CMD=true ASSAY_CMD="$ROOT/target/debug/assay --verbose" \
+  record N1 bash "$EXP/run_baseline.sh" "$TMP/n1"
+not_warned "ASSAY_CMD is not"
+RUNS_ATTACK=1 RUNS_LEGIT=1 RUN_LIVE=1 MCP_HOST_CMD=true ASSAY_CMD="$ROOT/./target/debug/assay" \
+  record N2 bash "$EXP/run_baseline.sh" "$TMP/n2"
+not_warned "ASSAY_CMD is not"
+RUNS_ATTACK=1 RUNS_LEGIT=1 RUN_LIVE=1 MCP_HOST_CMD=true ASSAY_CMD="/usr/bin/true" \
+  record N3 bash "$EXP/run_baseline.sh" "$TMP/n3"
+warned "ASSAY_CMD is not"
 
 echo "[freshness] L: what the wrappers build is what the driver opens"
 # The other half of the invariant. Cases A-K only prove cargo was asked for the right thing; if
