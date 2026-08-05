@@ -643,8 +643,11 @@ def derive_gating_inventory() -> tuple[tuple[str, str, int, int], ...]:
     it holds fourteen gating rules and reads `assay_runner_gated_paths.json`
     in two of them, which between them declare 74 of the 115 gated files. The manifest stays because `content_provenance_paths` is a cross-tool
     contract that `.github/actions/canonical-ebpf-build` also reads, but it is
-    not the gating contract and cannot become one — the reasons for most rules
-    are prose, and JSON has nowhere to put them.
+    not the gating contract. Moving the rules into it was considered and
+    rejected: first-match-wins ordering would become an implicit contract in a
+    JSON array, and turning a fail-closed classifier into a table interpreter
+    is a real regression surface for no gain now that the complete answer is
+    derivable.
     """
     config = load_gated_path_config()
     root = Path(__file__).resolve().parents[2]
@@ -675,19 +678,8 @@ def derive_gating_inventory() -> tuple[tuple[str, str, int, int], ...]:
 GATING_MAP_DOC = "scripts/ci/assay_runner_gating_map.txt"
 
 
-def emit_gating_map() -> int:
-    """Write every gated tracked file and the gate it requires.
-
-    A snapshot, not an assertion. Three attempts to pin this surface with a
-    derived key all failed the same way: any key coarse enough to absorb a
-    legitimate addition also absorbs a silent removal. Deriving the whole map
-    and diffing it is the only form that catches both, and it is the form this
-    repository already uses for generated artifacts that go stale quietly (see
-    `check-aee-seal-fixture-drift.sh`).
-
-    Churn is the point. A gated file appearing or disappearing is a change to
-    the gated surface, and the diff is where that decision gets reviewed.
-    """
+def gating_map_text() -> str:
+    """The gating map as it should be on disk, derived from classify_file."""
     root = Path(__file__).resolve().parents[2]
     tracked = [
         path
@@ -708,8 +700,28 @@ def emit_gating_map() -> int:
         "# A file the emitter no longer writes belongs deleted, not regenerated.",
     ]
     lines += [f"{gate}\t{path}" for gate, path in rows]
-    (root / GATING_MAP_DOC).write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"wrote {len(rows)} gated files to {GATING_MAP_DOC}")
+    return "\n".join(lines) + "\n"
+
+
+def emit_gating_map(output: str | None = None) -> int:
+    """Write every gated tracked file and the gate it requires.
+
+    A snapshot, not an assertion. Three attempts to pin this surface with a
+    derived key all failed the same way: any key coarse enough to absorb a
+    legitimate addition also absorbs a silent removal. Deriving the whole map
+    and diffing it is the only form that catches both, and it is the form this
+    repository already uses for generated artifacts that go stale quietly (see
+    `check-aee-seal-fixture-drift.sh`).
+
+    Churn is the point. A gated file appearing or disappearing is a change to
+    the gated surface, and the diff is where that decision gets reviewed.
+    """
+    root = Path(__file__).resolve().parents[2]
+    target = Path(output) if output else root / GATING_MAP_DOC
+    text = gating_map_text()
+    target.write_text(text, encoding="utf-8")
+    gated = sum(1 for line in text.splitlines() if not line.startswith("#"))
+    print(f"wrote {gated} gated files to {target}")
     return 0
 
 
@@ -726,7 +738,10 @@ def explain_gating() -> int:
     print("declares two of its rules -- together the majority of gated files --")
     print("and content_provenance_paths, which other tools also read.")
     print()
-    print(f"{len(rows)} of 14 gating rules match at least one tracked file.")
+    print(
+        f"{len(rows)} distinct (gate, rule) pairs match at least one tracked "
+        f"file, out of {gating_rule_count()} gating rules."
+    )
     print()
     print(f"{'gate':<30} {'files':>5} {'uncov':>5}  rule")
     for gate, rule, total, uncov in rows:
@@ -1739,6 +1754,7 @@ def self_test() -> None:
     cases = [
         (["docs/reference/runner/ci-lanes.md"], Gate.NONE),
         (["docs/reference/observability/claim-boundary-positioning.md"], Gate.NONE),
+        (["crates/assay-cli/src/cli/commands/runner_spike/cgroup.rs"], Gate.ALL),
         (["tests/fixtures/runner-spike/kernel-only-agent.sh"], Gate.KERNEL_ONLY),
         (["tests/fixtures/runner-spike/mcp-policy-agent.sh"], Gate.KERNEL_POLICY),
         (["runner-fixtures/openai-agents/package-lock.json"], Gate.OPENAI_AGENTS_KERNEL_POLICY),
@@ -1810,6 +1826,9 @@ def self_test() -> None:
     assert not recorded_gate_ok("- gate: kernel-only", Gate.OPENAI_AGENTS_KERNEL_POLICY)
     assert uncovered_content_provenance_files(["crates/assay-runner-core/src/lib.rs"]) == ()
     assert uncovered_content_provenance_files(["Cargo.lock"]) == ("Cargo.lock",)
+    _test_gating_rule_count_is_derived()
+    _test_gating_map_is_current()
+    _test_prefix_gated_surfaces_keep_their_coverage()
     _test_declared_gate_surfaces_exist()
     _test_content_tree_comparison()
 
@@ -1855,6 +1874,79 @@ def self_test() -> None:
     _assert_assay_cli_does_not_consume_spike()
 
 
+
+def gating_rule_count() -> int:
+    """How many rules in `classify_file` assign a gate, counted from the source.
+
+    Derived rather than written down. Four copies of the number "eleven" shipped
+    while the answer was fourteen, and the repository has the same lesson
+    recorded in `conformance/.../score_candidate.py` about a corpus that grew to
+    fourteen while a constant still said thirteen.
+    """
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(classify_file))
+    gating = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Return) or node.value is None:
+            continue
+        value = node.value
+        gate = value.elts[0] if isinstance(value, ast.Tuple) and value.elts else value
+        if isinstance(gate, ast.Attribute) and gate.attr != "NONE":
+            gating += 1
+    return gating
+
+
+def _test_gating_rule_count_is_derived() -> None:
+    """The rule count in prose matches the source.
+
+    Fails when a rule is added or removed, which is when every hardcoded copy of
+    the number goes stale. That is exactly how "eleven" survived.
+    """
+    assert gating_rule_count() == 14, gating_rule_count()
+
+
+def _test_gating_map_is_current() -> None:
+    """The committed gating map reproduces from classify_file.
+
+    This lives in `--self-test` rather than only in the drift script because
+    `--self-test` is what the required `lane-check/proof` status runs. The
+    drift script is the same comparison with a better error message and a
+    regeneration hint; it runs from pre-commit, which is not a required check.
+    """
+    root = Path(__file__).resolve().parents[2]
+    committed = (root / GATING_MAP_DOC).read_text(encoding="utf-8")
+    assert committed == gating_map_text(), (
+        f"{GATING_MAP_DOC} does not match classify_file; regenerate with "
+        "--emit-gating-map and read the diff before committing it"
+    )
+
+
+def _test_prefix_gated_surfaces_keep_their_coverage() -> None:
+    """Which prefix-gated surfaces are content-addressed is a known set.
+
+    Withdrawing a `content_provenance_paths` entry is a soundness change, not a
+    bookkeeping one: `extract_proof_path_tree_oids` iterates that list, so a
+    withdrawn path stops being compared and a delegated proof produced on a head
+    with different code under it becomes acceptable for the current head. The
+    gating map cannot see this — `classify_file` never reads
+    `content_provenance_paths`, so no such change moves a byte of it.
+
+    Scope, stated because an earlier version of this file overclaimed it: this
+    pins prefix coverage and nothing else. It does not detect gate removal, rule
+    identity, or a coverage entry that backs only exact `all_gate_paths`
+    members. Those belong to the gating map and to `cases`.
+    """
+    config = load_gated_path_config()
+    uncovered = sorted(
+        prefix
+        for prefix in config.all_gate_prefixes
+        if not content_provenance_covers_path(prefix, config)
+    )
+    assert uncovered == [
+        "crates/assay-cli/src/cli/commands/runner_spike/",
+    ], uncovered
 
 
 def _test_declared_gate_surfaces_exist() -> None:
@@ -2672,6 +2764,7 @@ def main() -> int:
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--explain-gating", action="store_true")
     parser.add_argument("--emit-gating-map", action="store_true")
+    parser.add_argument("--gating-map-output", default=None)
     parser.add_argument("--resolve-pr-from-event", action="store_true")
     parser.add_argument("--pr-number", type=int, default=int(os.environ.get("PR_NUMBER", "0") or "0"))
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
@@ -2688,7 +2781,7 @@ def main() -> int:
         return explain_gating()
 
     if args.emit_gating_map:
-        return emit_gating_map()
+        return emit_gating_map(args.gating_map_output)
 
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:

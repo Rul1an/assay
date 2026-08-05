@@ -28,12 +28,17 @@ trap 'rm -rf "$scratch"' EXIT
   exit 1
 }
 
-cp "$map" "$scratch/committed"
-python3 scripts/ci/assay_runner_lane_check.py --emit-gating-map >/dev/null
-cp "$map" "$scratch/emitted"
-cp "$scratch/committed" "$map"
+# The emitter writes into the scratch directory and nothing here touches the
+# committed tree. The first version of this script ran --emit-gating-map in
+# place and copied back afterwards, which loses the file on any interruption
+# between the write and the restore: an interrupted run rewrote the map with
+# the ungating it was meant to reject, turning "check failed" into "check
+# silently agreed". The reference script carries the same warning for the same
+# reason; this one earned it independently.
+python3 scripts/ci/assay_runner_lane_check.py \
+  --emit-gating-map --gating-map-output "$scratch/emitted" >/dev/null
 
-if ! diff -u "$scratch/committed" "$scratch/emitted" >"$scratch/delta" 2>&1; then
+if ! diff -u "$map" "$scratch/emitted" >"$scratch/delta" 2>&1; then
   echo "error: the committed gating map does not match classify_file." >&2
   sed 's/^/  /' "$scratch/delta" >&2
   echo >&2

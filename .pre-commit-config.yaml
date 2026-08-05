@@ -127,9 +127,11 @@ repos:
         entry: bash scripts/ci/check-runner-gating-map-drift.sh
         language: system
         pass_filenames: false
-        # classify_file decides gating; the map is the only complete statement of
-        # what it currently gates, and nothing else regenerates it.
-        files: ^(scripts/ci/assay_runner_lane_check\.py|scripts/ci/assay_runner_gated_paths\.json|scripts/ci/assay_runner_gating_map\.txt|scripts/ci/check-runner-gating-map-drift\.sh|\.pre-commit-config\.yaml)$
+        # No `files:` filter on purpose. The map is derived from `git ls-files`,
+        # so its input set is the whole tree while any trigger list is a handful
+        # of paths -- adding a file under `runner-fixtures/` changed the map and
+        # skipped the hook. The check costs ~0.2s, which is cheaper than a
+        # trigger list that has to be kept in step with the gated surface.
       - id: fuzz-lane-contract-self-test
         name: Fuzz lane contract
         entry: bash scripts/ci/test-fuzz-lane-contract.sh
