@@ -1757,8 +1757,14 @@ def _test_declared_gate_surfaces_exist() -> None:
     moved (#2020).
 
     The surface list is read from `assay_runner_gated_paths.json` and matched
-    against `git ls-files` with the production `starts` helper; nothing here
-    restates the manifest.
+    against `git ls-files`; nothing here restates the manifest.
+
+    Each kind is matched the way `classify_file` consumes it: `all_gate_paths`
+    by exact membership (`path in gated_paths.all_gate_paths`) and
+    `all_gate_prefixes` through the production `starts` helper. Matching an
+    exact declaration by descent instead would accept a directory name as
+    live while `classify_file` gates nothing under it, since `git ls-files`
+    never yields a directory.
 
     Bounded on purpose: this proves no declared surface is dead. It does not
     prove the gated set is the right set. Most gating lives in `classify_file`
@@ -1767,14 +1773,20 @@ def _test_declared_gate_surfaces_exist() -> None:
     """
     config = load_gated_path_config()
     root = Path(__file__).resolve().parents[2]
-    tracked = subprocess.check_output(
-        ["git", "-C", str(root), "ls-files", "-z"], text=True
-    ).split("\0")
-    surfaces = (*config.all_gate_paths, *config.all_gate_prefixes)
+    tracked = {
+        path
+        for path in subprocess.check_output(
+            ["git", "-C", str(root), "ls-files", "-z"], text=True
+        ).split("\0")
+        if path
+    }
     dead = sorted(
-        surface
-        for surface in surfaces
-        if not any(starts(path, surface) for path in tracked if path)
+        [path for path in config.all_gate_paths if path not in tracked]
+        + [
+            prefix
+            for prefix in config.all_gate_prefixes
+            if not any(starts(path, prefix) for path in tracked)
+        ]
     )
     assert not dead, f"declared gate surfaces matching no tracked file: {dead}"
 
