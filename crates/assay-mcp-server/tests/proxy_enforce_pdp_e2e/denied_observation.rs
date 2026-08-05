@@ -1,5 +1,4 @@
 use serde_json::Value;
-use std::io::BufReader;
 use std::process::{Command, Stdio};
 
 use crate::support::*;
@@ -49,32 +48,31 @@ fn denied_call_observation_records_caller_visible_proxy_denial_without_becoming_
     let log = dir.path().join("methods.log");
     let denied_observations = dir.path().join("denied_observations.ndjson");
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child = spawn_enforce_with_denied_observations(&log, &policy, &denied_observations);
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_enforce_with_denied_observations(
+        &log,
+        &policy,
+        &denied_observations,
+    ));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
-        serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 19,
-            "method": "tools/call",
-            "params": {
-                "name": "github.add_deploy_key",
-                "arguments": {"owner": "acme", "repo": "prod-app"}
-            }
-        }),
-    );
-    let response = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 19,
+        "method": "tools/call",
+        "params": {
+            "name": "github.add_deploy_key",
+            "arguments": {"owner": "acme", "repo": "prod-app"}
+        }
+    }));
+    let response = out.read_response();
     assert_eq!(response["error"]["code"], PROXY_DENIED);
     assert_eq!(response["error"]["data"]["origin"], "assay-proxy");
     assert_eq!(
         response["error"]["data"]["reason"],
         "manifest_current_observation_incomplete"
     );
-    shutdown(child, stdin);
+    let _ = out.shutdown();
 
     let records = read_denied_observation_records(&denied_observations);
     assert_eq!(
@@ -120,27 +118,27 @@ fn denied_call_observation_flag_off_writes_no_file() {
     let log = dir.path().join("methods.log");
     let denied_observations = dir.path().join("denied_observations.ndjson");
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child = spawn_enforce(&log, &policy, &approved_baseline_path(), "normal");
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_enforce(
+        &log,
+        &policy,
+        &approved_baseline_path(),
+        "normal",
+    ));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
-        serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 20,
-            "method": "tools/call",
-            "params": {
-                "name": "github.add_deploy_key",
-                "arguments": {"owner": "acme", "repo": "prod-app"}
-            }
-        }),
-    );
-    let response = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 20,
+        "method": "tools/call",
+        "params": {
+            "name": "github.add_deploy_key",
+            "arguments": {"owner": "acme", "repo": "prod-app"}
+        }
+    }));
+    let response = out.read_response();
     assert_eq!(response["error"]["code"], PROXY_DENIED);
-    shutdown(child, stdin);
+    let _ = out.shutdown();
 
     assert!(
         !denied_observations.exists(),

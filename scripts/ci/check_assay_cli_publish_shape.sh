@@ -108,4 +108,60 @@ if bad:
 
 print("Publish-shape guardrail OK: assay-cli has no non-optional deps on")
 print(f"publish = false crates ({len(publish_false)} workspace crates checked).")
+
+# 3. No packaged source file may `#[path]`-include a file outside the package.
+#
+# Background. crates/assay-cli/tests/e2e_mcp_wrap_assert_cmd.rs includes the shared
+# JSON-RPC test plumbing from crates/assay-mcp-server/tests/jsonrpc_conn/mod.rs so the
+# repo holds one timeout implementation rather than two. `cargo package` copies only the
+# package's own files, so shipping that file would put a test target in the crate that
+# cannot compile at all -- `couldn't read tests/../../assay-mcp-server/...` -- for anyone
+# running `cargo test` on the crates.io source. It is kept out with `exclude`.
+#
+# `exclude` is silent when it matches nothing: rename the file, or add a second test that
+# reaches outside, and the broken tarball comes back with no warning from cargo. That makes
+# the fix a point-in-time patch rather than a guarantee, which is what this check converts
+# it into. Static on purpose, like the dependency check above: it answers at PR time and
+# needs no network, no lockfile resolution, and no built target dir.
+#
+# cargo publish itself is NOT what this protects -- its verification step builds lib and
+# bins only, never test targets, so an unbuildable test target does not fail the release.
+# Downstream `cargo test` is what breaks: distro packagers, vendoring audits, cargo vendor.
+CLI_DIR = (ROOT / "crates" / "assay-cli").resolve()
+
+exclude_match = re.search(r"(?ms)^exclude\s*=\s*\[(.*?)\]", cli_text)
+excluded = {
+    p.strip(' "')
+    for p in re.findall(r'"([^"]+)"', exclude_match.group(1))
+} if exclude_match else set()
+
+escaping = []
+for src in sorted(CLI_DIR.rglob("*.rs")):
+    rel = src.relative_to(CLI_DIR).as_posix()
+    if rel in excluded:
+        continue
+    for target in re.findall(r'#\[path\s*=\s*"([^"]+)"\]', src.read_text(encoding="utf-8")):
+        resolved = (src.parent / target).resolve()
+        if not resolved.is_relative_to(CLI_DIR):
+            escaping.append((rel, target))
+
+if escaping:
+    print()
+    print("Publish-shape guardrail FAILED.")
+    print()
+    print("These packaged files `#[path]`-include a file outside crates/assay-cli.")
+    print("cargo package copies only this package's files, so the published crate")
+    print("would carry a target that cannot compile: `cargo test` on the crates.io")
+    print("source fails with \"couldn't read ...\". cargo publish itself still")
+    print("succeeds, which is exactly why this has to be caught here.")
+    print()
+    print("Either add the file to `exclude` in crates/assay-cli/Cargo.toml, or move")
+    print("the included module inside the package.")
+    print()
+    for rel, target in escaping:
+        print(f"  - {rel} includes {target}")
+    sys.exit(1)
+
+print("Publish-shape guardrail OK: no packaged file #[path]-includes outside the package")
+print(f"({len(excluded)} excluded path(s) honoured).")
 PY

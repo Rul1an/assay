@@ -9,6 +9,15 @@ readme.workspace = true
 description = "Policy-as-code gate for MCP agent tool calls, with verifiable evidence and Linux kernel enforcement."
 keywords = ["mcp", "ai-agents", "agent-security", "policy-as-code", "evidence"]
 categories = ["command-line-utilities", "development-tools::testing"]
+# Kept out of the published tarball because it reaches outside this package: it includes
+# `crates/assay-mcp-server/tests/jsonrpc_conn/mod.rs` by `#[path]`, and `cargo package` copies only
+# this package's files. Shipping it would put a test target in the crate that cannot compile at all
+# — `couldn't read tests/../../assay-mcp-server/...` — which is worse than its absence for anyone
+# running `cargo test` on the crates.io source (distro packagers, `cargo vendor` consumers). It
+# could never run from a tarball anyway: it shells out to `cargo build -p assay-mcp-server`, which
+# needs the workspace. `cargo publish`'s own verification builds lib and bins only, so this was not
+# a release blocker either way — it is the downstream `cargo test` that this protects.
+exclude = ["tests/e2e_mcp_wrap_assert_cmd.rs"]
 
 [lints]
 workspace = true
