@@ -1,5 +1,22 @@
 # Hotspot LOC Under 600 Refactor Implementation Plan
 
+> **STATUS: COMPLETE. Do not execute this plan.** Every hotspot it targets was split before this
+> note was written. Measured on `main` at `1619cad9`, plan figure vs current:
+>
+> | plan | now | file |
+> |---:|---:|---|
+> | 1630 | 35 | `crates/assay-mcp-server/src/proxy/enforce.rs` |
+> | 1565 | 24 | `crates/assay-mcp-server/tests/proxy_enforce_pdp_e2e.rs` |
+> | 1398 | 34 | `crates/assay-core/src/mcp/tool_decision_truth.rs` |
+> | 1390 | 321 | `crates/assay-mcp-server/src/proxy/mod.rs` |
+> | 1311 | 209 | `crates/assay-registry/src/supply_chain.rs` |
+> | 860 | 87 | `crates/assay-cli/src/cli/commands/supply_chain_conformance.rs` |
+>
+> The document is kept as the record of what was planned on `fcfdb8e1`, alongside its predecessor
+> `2026-06-05-assay-wave53-hotspot-top2-9-refactor.md`. The directive below tells an agentic worker
+> to implement it task-by-task; that directive is now spent, and this note sits above it so it is
+> read first.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Bring every current handwritten Rust hotspot at or above 600 LOC below 600 LOC, excluding generated files, while preserving behavior, public APIs, wire contracts, CLI output, and security invariants.
