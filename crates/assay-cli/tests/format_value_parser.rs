@@ -55,10 +55,12 @@ const FORMAT_ARGS: &[(&[&str], &str, &[&str])] = &[
         &["json", "sarif", "text"],
     ),
     (&["evidence", "diff"], "--format", &["human", "json"]),
+    // `md` is accepted as an alias of `markdown` and deliberately not advertised, which is clap's
+    // conventional treatment. `an_alias_is_accepted_without_being_advertised` covers it.
     (
         &["explain"],
         "--format",
-        &["terminal", "markdown", "md", "html", "json"],
+        &["terminal", "markdown", "html", "json"],
     ),
     (
         &["profile", "show"],
@@ -134,5 +136,21 @@ fn an_unrecognized_format_is_rejected_rather_than_reinterpreted() {
     assert!(
         stderr.contains("invalid value 'jsonn'") && stderr.contains("possible values"),
         "the error does not name the value or the accepted set: {stderr}",
+    );
+}
+
+/// Typing an argument turns an undocumented-but-accepted spelling into a declared alias. The alias
+/// must keep working even though it no longer appears in the value list, or the change silently
+/// breaks callers who relied on the old behaviour.
+#[test]
+fn an_alias_is_accepted_without_being_advertised() {
+    let out = Command::new(env!("CARGO_BIN_EXE_assay"))
+        .args(["explain", "--format", "md"])
+        .output()
+        .expect("failed to run assay");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("invalid value"),
+        "the `md` alias was dropped rather than hidden: {stderr}"
     );
 }

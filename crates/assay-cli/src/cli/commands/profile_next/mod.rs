@@ -84,14 +84,22 @@ pub struct UpdateArgs {
     pub verbose: bool,
 }
 
+/// The shapes `profile show` can emit. `Summary` was reachable only through the fallback arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ProfileShowFormat {
+    Summary,
+    Json,
+    Yaml,
+}
+
 #[derive(Args, Debug, Clone)]
 pub struct ShowArgs {
     #[arg(long)]
     pub profile: PathBuf,
 
     /// Output format: summary, yaml, json
-    #[arg(long, default_value = "summary", value_parser = ["summary", "json", "yaml"])]
-    pub format: String,
+    #[arg(long, default_value = "summary")]
+    pub format: ProfileShowFormat,
 
     /// Show top N entries per category
     #[arg(long, default_value_t = 10)]
@@ -290,10 +298,10 @@ fn cmd_update(args: UpdateArgs) -> Result<i32> {
 fn cmd_show(args: ShowArgs) -> Result<i32> {
     let profile = load_profile(&args.profile)?;
 
-    match args.format.as_str() {
-        "json" => println!("{}", serde_json::to_string_pretty(&profile)?),
-        "yaml" => println!("{}", serde_yaml::to_string(&profile)?),
-        _ => show_summary(&profile, args.top),
+    match args.format {
+        ProfileShowFormat::Json => println!("{}", serde_json::to_string_pretty(&profile)?),
+        ProfileShowFormat::Yaml => println!("{}", serde_yaml::to_string(&profile)?),
+        ProfileShowFormat::Summary => show_summary(&profile, args.top),
     }
 
     Ok(0)
