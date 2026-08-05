@@ -118,6 +118,11 @@ class AttestedProofCheck:
     accepted: bool
     run: dict[str, object] | None
     diagnostics: tuple[str, ...]
+    # True when GitHub's artifact listing showed a live proof pack for one of
+    # the runs considered. The legacy fallback exists for evidence that is not
+    # there; once the substrate says it is there, every later failure is a
+    # verdict about evidence rather than a report of its absence.
+    evidence_existed: bool = False
 
 
 @dataclass(frozen=True)
@@ -331,7 +336,7 @@ def read_zip_member(
     return bytes(body), None
 
 
-def load_proof_pack_zip(data: bytes) -> tuple[ProofPackArtifact | None, tuple[str, ...]]:
+def load_proof_pack_zip(data: bytes) -> tuple[ProofPackArtifact | None, tuple[str, ...], bool]:
     if len(data) > PROOF_PACK_ARCHIVE_MAX_BYTES:
         return None, (
             f"proof artifact archive size {len(data)} exceeds limit "
@@ -406,12 +411,12 @@ def download_proof_pack_artifact(
     try:
         response = api.request("GET", f"/actions/runs/{run_id}/artifacts")
     except TRANSIENT_REQUEST_ERRORS as exc:
-        return None, (f"run {run_id}: could not list artifacts ({exc})",)
+        return None, (f"run {run_id}: could not list artifacts ({exc})",), False
     if not isinstance(response, dict):
-        return None, (f"run {run_id}: artifacts response is not an object",)
+        return None, (f"run {run_id}: artifacts response is not an object",), False
     raw_artifacts = response.get("artifacts")
     if not isinstance(raw_artifacts, list):
-        return None, (f"run {run_id}: artifacts response missing artifacts list",)
+        return None, (f"run {run_id}: artifacts response missing artifacts list",), False
 
     expected_name = proof_pack_artifact_name(run_id)
     candidates = [
@@ -422,20 +427,23 @@ def download_proof_pack_artifact(
         and artifact.get("expired") is not True
     ]
     if not candidates:
-        return None, (f"run {run_id}: proof artifact {expected_name!r} not found or expired",)
+        return None, (f"run {run_id}: proof artifact {expected_name!r} not found or expired",), False
 
     artifact = dict(candidates[0])
     download_url = artifact.get("archive_download_url")
     if not isinstance(download_url, str) or not download_url:
-        return None, (f"run {run_id}: proof artifact missing archive_download_url",)
+        return None, (f"run {run_id}: proof artifact missing archive_download_url",), True
     try:
         data = api.download(download_url, max_bytes=PROOF_PACK_ARCHIVE_MAX_BYTES)
     except DownloadLimitExceeded as exc:
-        return None, (f"run {run_id}: proof artifact exceeds size limit ({exc})",)
+        return None, (f"run {run_id}: proof artifact exceeds size limit ({exc})",), True
     except TRANSIENT_REQUEST_ERRORS as exc:
-        return None, (f"run {run_id}: could not download proof artifact ({exc})",)
+        return None, (f"run {run_id}: could not download proof artifact ({exc})",), True
+    # GitHub's listing named a live artifact, so evidence existed for this run
+    # whatever happens to it from here. That answer comes from the substrate,
+    # not from parsing bytes the pull request author supplied.
     pack, diagnostics = load_proof_pack_zip(data)
-    return pack, tuple(f"run {run_id}: {line}" for line in diagnostics)
+    return pack, tuple(f"run {run_id}: {line}" for line in diagnostics), True
 
 
 def decode_dsse_statement(bundle: dict[str, object]) -> tuple[dict[str, object] | None, tuple[str, ...]]:
@@ -1451,6 +1459,7 @@ def find_valid_attested_proof(
     expected: Gate,
 ) -> AttestedProofCheck:
     diagnostics: list[str] = []
+    evidence_existed = False
     for run_id in run_ids:
         try:
             run = dict(api.request("GET", f"/actions/runs/{run_id}"))
@@ -1462,7 +1471,8 @@ def find_valid_attested_proof(
             diagnostics.append(basic)
             continue
 
-        pack, pack_diagnostics = download_proof_pack_artifact(api, run_id)
+        pack, pack_diagnostics, artifact_existed = download_proof_pack_artifact(api, run_id)
+        evidence_existed = evidence_existed or artifact_existed
         if pack is None:
             diagnostics.extend(pack_diagnostics)
             continue
@@ -1497,8 +1507,8 @@ def find_valid_attested_proof(
             diagnostics.extend(f"run {run_id}: {line}" for line in claim_diagnostics)
             continue
 
-        return AttestedProofCheck(True, run, tuple(diagnostics))
-    return AttestedProofCheck(False, None, tuple(diagnostics))
+        return AttestedProofCheck(True, run, tuple(diagnostics), evidence_existed)
+    return AttestedProofCheck(False, None, tuple(diagnostics), evidence_existed)
 
 
 def recorded_gate_ok(text: str, expected: Gate) -> bool:
@@ -1659,6 +1669,32 @@ def maybe_status(
             )
             return
         raise
+
+
+def fallback_applies(attested: AttestedProofCheck, eligible: bool) -> bool:
+    """Whether the legacy fallback may credit this PR.
+
+    The fallback exists for evidence that is not there: retention expired, a run
+    predating the attested lane, the artifacts API unreachable. It must not
+    cover evidence that is there and did not hold up, or failing verification
+    becomes no worse than never being verified (#2040).
+
+    The line is GitHub's artifact listing, and it is drawn once. An earlier
+    attempt set a flag at six separate failure sites and classified two of them
+    by matching words in `gh`'s stderr -- which echoes the malformed value out
+    of the pack, so a pull request author could put a marker string in their own
+    bundle and buy the fallback. Anything the interested party writes is the
+    wrong input for this decision. The listing is not: it comes from the
+    substrate, it carries `expired`, and it answers the only question that
+    matters here -- was there evidence at all.
+
+    Consequence, stated because it is a real cost: once the listing names a live
+    artifact, a Sigstore outage fails closed rather than falling back. That is
+    the current guidance for an unreachable verifier, and it matches this
+    repository's own `ErrorClass`, which has no "could not check" class -- in
+    the evidence path every failure is a verdict.
+    """
+    return eligible and not attested.evidence_existed
 
 
 def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) -> int:
@@ -1850,6 +1886,7 @@ def self_test() -> None:
     _test_gating_map_is_current()
     _test_prefix_gated_surfaces_keep_their_coverage()
     _test_declared_gate_surfaces_exist()
+    _test_fallback_keyed_on_the_substrate_not_the_pack()
     _test_content_tree_comparison()
 
     valid_run = {
@@ -2014,6 +2051,72 @@ def _test_declared_gate_surfaces_exist() -> None:
         ]
     )
     assert not dead, f"declared gate surfaces matching no tracked file: {dead}"
+
+
+def _test_fallback_keyed_on_the_substrate_not_the_pack() -> None:
+    """The fallback turns on GitHub's artifact listing, and on nothing else.
+
+    Drives the real `find_valid_attested_proof`, so the construction of
+    `evidence_existed` is covered and not only the decision that reads it. Two
+    earlier attempts pinned the decision alone; every site that produced the
+    input stayed deletable with the suite green.
+    """
+    pr = PullRequest(
+        number=1, title="", body="", author_login="x", head_sha="abc123", files=()
+    )
+    run = {
+        "name": DELEGATED_WORKFLOW_NAME,
+        "event": "workflow_dispatch",
+        "head_sha": "abc123",
+        "conclusion": "success",
+        "id": 1,
+        "html_url": "u",
+    }
+    listed = {
+        "artifacts": [
+            {
+                "name": "assay-runner-delegated-proof-pack-1",
+                "archive_download_url": "x",
+                "size_in_bytes": 10,
+                "expired": False,
+            }
+        ]
+    }
+
+    class _Api:
+        repo = "Rul1an/assay"
+
+        def __init__(self, artifacts: object, blob: bytes = b"", exc: Exception | None = None):
+            self._artifacts = artifacts
+            self._blob = blob
+            self._exc = exc
+
+        def request(self, method: str, path: str, payload: object = None) -> object:
+            return self._artifacts if "/artifacts" in path else run
+
+        def download(self, url: str, max_bytes: int | None = None) -> bytes:
+            if self._exc is not None:
+                raise self._exc
+            return self._blob
+
+    def fallback_for(api: object) -> bool:
+        return fallback_applies(find_valid_attested_proof(api, ["1"], pr, Gate.ALL), True)
+
+    # Substrate says no evidence: the fallback keeps its purpose.
+    assert fallback_for(_Api({"artifacts": []})) is True
+    assert (
+        fallback_for(
+            _Api({"artifacts": [{"name": "assay-runner-delegated-proof-pack-1", "expired": True}]})
+        )
+        is True
+    )
+
+    # Substrate says evidence exists: every later failure is a verdict.
+    assert fallback_for(_Api(listed, b"not a zip")) is False
+    assert fallback_for(_Api(listed, b"")) is False
+    # Oversize was the bypass the previous attempt left open: bytes arrived and
+    # were refused on their size, which is a property of the evidence.
+    assert fallback_for(_Api(listed, exc=DownloadLimitExceeded("too large"))) is False
 
 
 def _test_content_tree_comparison() -> None:

@@ -70,7 +70,13 @@ cleanup and checkout.
    the GitHub artifact attestation, the proof-pack subjects, the selected gate,
    and the gated-path tree OIDs. During the transition, recording the workflow
    run URL, commit SHA, selected gate, and result in the PR body or a PR comment
-   remains a compatibility fallback.
+   remains a compatibility fallback -- but only where GitHub's artifact listing
+   shows no live proof pack. Once the listing names one, every later failure is
+   a verdict about that evidence and the fallback does not apply, so failing
+   verification is not equivalent to never having been verified. A Sigstore or
+   attestation-API outage therefore fails closed rather than falling back; that
+   is deliberate, and matches `ErrorClass`, which has no "could not check"
+   class.
 4. Do not treat a delegated skip as success. In the delegated lane, exit `40`
    means the runner contract has drifted.
 5. Do not bypass required repository checks for runner-impacting changes.
