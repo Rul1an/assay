@@ -1,8 +1,8 @@
 # SKETCH: ADR-045 Landlock seal payload contract
 
-Status: Implementation sketch  
-Date: 2026-08-05  
-Applies: ADR-045  
+Status: Implementation sketch
+Date: 2026-08-05
+Applies: ADR-045
 Related: #1998, #2000
 
 ## Summary
@@ -82,6 +82,7 @@ Illustrative JSON shape:
   "aeeObservedAttacks": [],
   "assayObservedLabels": ["connect_blocked"],
   "assayCollectionPath": "landlock-tcp-connect",
+  "assaySealedAt": "2026-08-05T00:00:00Z",
   "assaySourceSchema": "assay.enforcement_health.v1",
   "assaySealScope": "tcp_connect_landlock_port",
   "assayAttackRowAttributionSource": "assembly-plane",
@@ -108,10 +109,11 @@ Illustrative JSON shape:
 | `aeeDropBound` | yes | integer | First slice MUST be `0`. | Bounds unobserved/lost observations under the named proof model only. |
 | `assayDropProofModel` | yes | string | First slice MUST be `synchronous-probe` or `counted-queue-zero`. | Identifies the proof model that makes zero-drop accounting creditable. |
 | `aeeObservedSet` | yes | string | Payload-only: MUST be lowercase SHA-256 hex. Post-assembly: MUST recompute over emitted interception/examination record leaves. | Digest commitment; not a label array. |
-| `aeeObservedAttacks` | yes | array of strings | Post-assembly: each named attack MUST be supported by a caught row unless validating standalone before statement assembly. | Lower-bound substrate attribution, not completeness. Empty is valid for pure Landlock assembly-plane attribution. |
+| `aeeObservedAttacks` | yes | array of strings | Payload-only: MUST be an array whose every member is a string. Post-assembly: each named attack MUST be supported by a caught row unless validating standalone before statement assembly. | Lower-bound substrate attribution, not completeness. Empty is valid for pure Landlock assembly-plane attribution. |
 | `assayObservedLabels` | no | array of strings | If present, MUST NOT substitute for `aeeObservedSet`. | Operator/debug vocabulary only. |
 | `assayCollectionPath` | yes | string | First slice MUST equal `landlock-tcp-connect`. Credited-evidence validation also checks trusted key scope. | Prevents flattening all substrate observations into one undifferentiated source. |
-| `assaySourceSchema` | yes | string | First slice SHOULD be `assay.enforcement_health.v1`. | Names the Assay source vocabulary, not external AEE conformance. |
+| `assaySealedAt` | yes | string | MUST be an RFC 3339 UTC instant (`YYYY-MM-DDTHH:MM:SSZ`). | Names the run-end instant the seal commits to. Checked against the signing key's validity window; not a trusted timestamp and not an anchor. |
+| `assaySourceSchema` | yes | string | MUST be a non-empty string. SHOULD be `assay.enforcement_health.v1`. | Names the Assay source vocabulary, not external AEE conformance. |
 | `assaySealScope` | yes | string | First slice MUST equal `tcp_connect_landlock_port`. | Names the bounded enforcement scope. |
 | `assayAttackRowAttributionSource` | yes | string | MUST be `assembly-plane` or `substrate-runner`. Equality with caught rows is required only for `substrate-runner`. | Must not upgrade assembly-plane attribution into substrate claim. |
 | `assayNonClaims` | yes | array of strings | MUST include the payload-local minimum non-claims listed below unless superseded by a later ADR. | Payload-local producer non-claims; does not replace predicate-level `doesNotAssert`. |
@@ -156,6 +158,9 @@ field constraints:
 13. `assayAttackRowAttributionSource` is `assembly-plane` or
     `substrate-runner`.
 14. `assayNonClaims` includes the payload-local minimum non-claims above.
+15. `assaySourceSchema` is a non-empty string.
+16. `aeeObservedAttacks` is an array whose every member is a string.
+17. `assaySealedAt` is an RFC 3339 UTC instant.
 
 ### Assembled-statement validation
 
@@ -180,17 +185,32 @@ Credited-evidence validation has access to signature verification material and
 consumer trust policy. It decides whether a structurally valid signed record is
 credited as attested substrate evidence:
 
-1. The envelope signature verifies over the exact signed bytes.
-2. The signing key is trusted by consumer policy.
-3. The signing key role is `substrate-observation`.
-4. The signing key's trusted scope includes the payload's
+1. The envelope's payload type is one the checker implements. A shape it does
+   not implement is **rejected as unsupported**, never skipped: a
+   "we did not check this" path that returns success is how an unverified record
+   comes to read as verified.
+2. The envelope signature verifies over the exact signed bytes, under the
+   payload type the envelope declares.
+3. The signing key is trusted by consumer policy.
+4. The signing key role is `substrate-observation`.
+5. The signing key's trusted scope includes the payload's
    `assayCollectionPath`.
-5. The signing key's trusted scope is compatible with the statement's substrate
+6. The signing key's trusted scope is compatible with the statement's substrate
    descriptor.
-6. A fixture key or fixture signer is not present in a production path.
+7. The seal's `assaySealedAt` falls inside the signing key's trusted validity
+   window. A checker with no notion of a window silently keeps crediting a
+   retired key, and adding the check later is a breaking change to every fixture
+   already written. This is not key management: the window is handed to the
+   checker, and rotation, revocation, and distribution belong with the
+   production signing primitive.
+8. A fixture key or fixture signer is not present in a production path.
 
 A valid signature from an untrusted or out-of-scope key is structurally valid as
-an envelope fact, but it is not credited as attested substrate evidence.
+an envelope fact, but it is not credited as attested substrate evidence. The
+three outcomes a checker reports must stay distinguishable — `malformed`,
+`structurally-valid-not-credited`, and `credited` — because ADR-043's rule that
+integrity never upgrades meaning only exists if a consumer can tell the second
+from the first.
 
 ## Canonicalization and signing boundary
 
@@ -245,14 +265,17 @@ This sketch does not claim:
 
 ## Next implementation slice
 
-After this sketch lands, the next implementation work should be a separate PR
-that hardens the fixture/checker boundary before producer code:
+The fixture/checker hardening this sketch called for landed in #2006:
 
-1. Decide whether committed fixtures are marker-only or full on-disk artifacts.
-2. Add key-scope negative controls for untrusted key, wrong key role, and wrong
-   collection path.
-3. Remove or validate `batchRoot` in the fixture slice.
-4. Keep exporter commands out of scope.
+1. Fixture policy decided — full on-disk positive, marker-only negative controls
+   (`docs/experiments/aee-landlock-seal-fixtures-2026-08.md`).
+2. Six key-scope negative controls added, each asserted on its own reason code:
+   untrusted key, wrong key role, collection-path mismatch, substrate mismatch,
+   validity window, unsupported envelope shape.
+3. `batchRoot` removed. It carried no semantics and no check, and an undefined
+   field crossing a signing boundary is more expensive than reintroducing it
+   later with defined semantics.
+4. Exporter commands stayed out of scope.
 
-Producer-side Landlock seal integration should start only after the checker can
-fail closed on malformed or missing production-oriented seal fixtures.
+Producer-side Landlock seal integration should start only now that the checker
+fails closed on malformed and uncredited seal fixtures.
