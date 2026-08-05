@@ -55,6 +55,13 @@ COLLECTION_PATH = "landlock-tcp-connect"
 OBSERVATION_ROLE = "substrate-observation"
 SOURCE_SCHEMA = "assay.enforcement_health.v1"
 
+# The one bounded enforcement scope this slice implements, per the #2001 field
+# contract. It is both what the fixture builds and what the checker requires,
+# from one constant: a seal that names a different scope is one this checker has
+# no rules for, and crediting it would report coverage of a boundary nothing
+# here observed.
+SEAL_SCOPE = "tcp_connect_landlock_port"
+
 # Fixed instants. A validity window needs something to be checked against, and a
 # wall clock would make the drift check flaky, which is how a gate gets disabled.
 SEALED_AT = "2026-08-05T00:00:00Z"
@@ -107,6 +114,8 @@ NEGATIVE_CONTROLS: dict[str, str] = {
     "key-outside-validity-window": "key-outside-validity-window",
     "unsupported-envelope-shape": "unsupported-envelope-shape",
     "posture-digest-is-run-binding-input": "posture-digest-mismatch",
+    "seal-scope-absent": "seal-scope-missing",
+    "seal-scope-other-boundary": "seal-scope-mismatch",
 }
 
 CASES = [POSITIVE_CASE, *NEGATIVE_CONTROLS]
@@ -191,8 +200,8 @@ def base_statement() -> dict[str, Any]:
     subject = {"name": "assay-aee-landlock-seal-fixture-subject", "digest": {"sha256": digest_json({"artifact": "landlock-seal", "v": 1})}}
     substrate_descriptor = {"name": SUBSTRATE_NAME, "collectionPaths": [COLLECTION_PATH]}
     corpus_manifest = {"classes": {"NET": ["NET-CONNECT-BLOCK-001"]}, "expectedPayloads": {"NET-CONNECT-BLOCK-001": [digest_json({"probe": "denied-connect", "port": 443})]}}
-    catch_policy = {"name": "deny-default-landlock-probe", "scope": "tcp_connect_landlock_port", "allowedPorts": []}
-    network_posture = {"mode": "deny-default", "mechanism": "landlock", "scope": "tcp_connect_landlock_port"}
+    catch_policy = {"name": "deny-default-landlock-probe", "scope": SEAL_SCOPE, "allowedPorts": []}
+    network_posture = {"mode": "deny-default", "mechanism": "landlock", "scope": SEAL_SCOPE}
     network_posture["digest"] = {"sha256": digest_json(network_posture)}
     vocab = {"labels": ["connect_blocked", "no_connect_block"], "caught": ["connect_blocked"]}
     vocab["digest"] = {"sha256": digest_json({"caught": vocab["caught"], "labels": vocab["labels"]})}
@@ -221,7 +230,7 @@ def base_statement() -> dict[str, Any]:
     interception = {"aeeKind": "interception", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePayloadCommitment": corpus_manifest["expectedPayloads"]["NET-CONNECT-BLOCK-001"][0], "assayCollectionPath": COLLECTION_PATH, "assaySourceSchema": "assay.enforcement_health.v1.probe"}
     arming = {"aeeKind": "arming", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "assayCollectionPath": COLLECTION_PATH}
     records = [record(interception, 1), record(arming, 2)]
-    sealed = {"aeeKind": "sealed", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "aeeStillArmed": True, "aeeDropCount": 0, "aeeDropBound": 0, "assayDropProofModel": "synchronous-probe", "aeeObservedSet": observed_set(records), "aeeObservedAttacks": [], "assayObservedLabels": ["connect_blocked"], "assayCollectionPath": COLLECTION_PATH, "assaySealedAt": SEALED_AT, "assaySourceSchema": SOURCE_SCHEMA, "assaySealScope": "tcp_connect_landlock_port", "assayAttackRowAttributionSource": "assembly-plane", "assayNonClaims": ["does not prove complete run population", "does not prove agent safety", "does not prove provider side effects", "does not prove independent substrate operation"]}
+    sealed = {"aeeKind": "sealed", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "aeeStillArmed": True, "aeeDropCount": 0, "aeeDropBound": 0, "assayDropProofModel": "synchronous-probe", "aeeObservedSet": observed_set(records), "aeeObservedAttacks": [], "assayObservedLabels": ["connect_blocked"], "assayCollectionPath": COLLECTION_PATH, "assaySealedAt": SEALED_AT, "assaySourceSchema": SOURCE_SCHEMA, "assaySealScope": SEAL_SCOPE, "assayAttackRowAttributionSource": "assembly-plane", "assayNonClaims": ["does not prove complete run population", "does not prove agent safety", "does not prove provider side effects", "does not prove independent substrate operation"]}
     records.append(record(sealed, 3))
     stmt["predicate"]["observationRecords"] = records
     return stmt
@@ -291,6 +300,19 @@ def case_statement(name: str) -> dict[str, Any]:
         # a strictly larger object and a different value. Two plausible readings, one correct, and
         # the ADR names the confusion rather than leaving it to be discovered.
         seal["aeePostureDigest"] = digest_json(pred["observationEnvironment"]["networkPosture"])
+        replace_payload(stmt, 2, seal)
+    elif name == "seal-scope-absent":
+        # The member simply is not there. Separated from the wrong-value control
+        # because an absent scope and a wrong one fail differently: one producer
+        # never wrote the field, the other wrote a boundary it did not observe.
+        del seal["assaySealScope"]
+        replace_payload(stmt, 2, seal)
+    elif name == "seal-scope-other-boundary":
+        # A well-formed scope name for an enforcement boundary this slice has no
+        # rules for. Everything else in the statement still describes a Landlock
+        # TCP-connect observation, which is the point: the seal claims a reach
+        # the observation records do not cover.
+        seal["assaySealScope"] = "filesystem_write_all"
         replace_payload(stmt, 2, seal)
     elif name == "unsupported-envelope-shape":
         # Self-consistent envelope, signed over its own declared payload type.
@@ -506,6 +528,16 @@ def validate(statement: dict[str, Any], disabled: frozenset[str] = frozenset()) 
         if not isinstance(observed_attacks, list) or not all(isinstance(item, str) for item in observed_attacks):
             add("payload-observed-attacks-invalid", PHASE_MALFORMED, f"sealed record {idx} aeeObservedAttacks must be an array of strings")
             observed_attacks = []
+
+        # The scope is what tells a consumer which bounded enforcement boundary
+        # the seal speaks for, so an unchecked one lets the strongest record in
+        # the statement claim a boundary nothing observed (#2014). The two
+        # branches are mutually exclusive so each isolates under `--meta-test`.
+        seal_scope = seal.get("assaySealScope")
+        if not isinstance(seal_scope, str) or not seal_scope:
+            add("seal-scope-missing", PHASE_MALFORMED, f"sealed record {idx} assaySealScope must be a non-empty string naming the sealed enforcement scope")
+        elif seal_scope != SEAL_SCOPE:
+            add("seal-scope-mismatch", PHASE_MALFORMED, f"sealed record {idx} assaySealScope {seal_scope!r} is not the scope this checker implements ({SEAL_SCOPE!r})")
 
         if seal.get("aeePostureDigest") != env.get("networkPosture", {}).get("digest", {}).get("sha256"):
             add("posture-digest-mismatch", PHASE_MALFORMED, f"sealed record {idx} aeePostureDigest mismatch")
