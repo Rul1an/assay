@@ -52,7 +52,7 @@ assay --version
 
 Expected output:
 ```
-assay 3.36.0
+assay 3.38.0
 ```
 
 ---
