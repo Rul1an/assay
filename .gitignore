@@ -37,6 +37,7 @@ benchmark_results/
 *.log
 junit.xml
 sarif.json
+enforcement.sarif
 run.json
 summary.json
 otel.jsonl
