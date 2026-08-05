@@ -236,6 +236,7 @@ name = "assay-cli"
 version = "3.38.0"
 dependencies = [
  "anyhow",
+ "assay-canonical",
  "assay-common",
  "assay-core",
  "assay-evidence",
