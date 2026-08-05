@@ -3,8 +3,11 @@
 //! Both spawn helpers below run the binary Cargo already built for this test target, via
 //! `CARGO_BIN_EXE_assay-mcp-server`, rather than shelling out to `cargo run`. A nested Cargo
 //! inherits this process's CARGO_MANIFEST_DIR, which ring's build script tracks, so it marks the
-//! rustls/reqwest stack dirty every time it alternates with a shell build — measured at ~62s per
-//! test against a 120s nextest kill budget.
+//! rustls/reqwest stack dirty every time it alternates with a shell build — 62.5s to 63.9s per
+//! test, against the 120s kill budget `.config/nextest.toml` sets via
+//! `slow-timeout = { period = "60s", terminate-after = 2 }`. Measured on 0799ab8b, rustc 1.96.0,
+//! aarch64-apple-darwin, two back-to-back `cargo nextest run -p assay-mcp-server` with nothing
+//! changed between them; the second run recompiled 14 crates before the tests even started.
 
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};

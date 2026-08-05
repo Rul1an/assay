@@ -612,32 +612,35 @@ jobs:
       # the test actually executed rather than trusting the exit code.
       - name: Test MCP no-pass-through E2E (E6a.3)
         shell: bash
-        # The guard below reads the log with anchored patterns, and a colour escape sits between
-        # the anchor and the status word. Runners are not TTYs so cargo defaults to plain output,
-        # but split-wave0-gates.yml sets CARGO_TERM_COLOR: always at workflow level — pinning it
-        # here means copying this step somewhere else cannot silently disarm half the pattern.
-        env:
-          CARGO_TERM_COLOR: never
         run: |
           set -euo pipefail
           cargo test --locked -p assay-mcp-server --features test-outbound --no-fail-fast no_passthrough \
             2>&1 | tee "$RUNNER_TEMP/e6a3.log"
-          # This guard answers one question only: did the test execute. Whether it passed is
-          # already settled above, by the exit code under `set -o pipefail` — a test that ran and
-          # failed never reaches this line. That separation is what lets the pattern accept any
-          # runner's vocabulary rather than enumerating which words mean success.
+          # Two questions, asked separately. Every previous version of this guard asked them with
+          # one pattern and got one of them wrong: too strict and it called a passing test absent,
+          # too loose and it called a skipped test present. Pass-versus-fail is not among them —
+          # `set -o pipefail` settles that above, so a test that ran and failed never reaches here.
           #
-          # "Executed" is the load-bearing word, and it is narrower than "was mentioned". libtest
-          # prints `... ignored` for a skipped test and exits 0, so the arm below requires a
-          # terminal status: `ok` and `FAILED` both mean it ran, `ignored` means it did not. That
-          # matters most on the OS legs this step added — `#[cfg_attr(windows, ignore)]` is the
-          # routine answer to a flaky spawn-a-server test, and it must turn this step red rather
-          # than let it certify an invariant nobody checked.
-          grep -qE 'test test_no_passthrough_e2e \.\.\. (ok|FAILED)|^ *(PASS|FAIL|TRY|FLAKY|LEAK|SLOW|TIMEOUT).*test_no_passthrough_e2e([[:space:]]|$)' \
-            "$RUNNER_TEMP/e6a3.log" || {
+          # 1. Did the runner report this test at all? Deliberately broad, because the shapes are
+          #    many: at --test-threads=1 libtest prints `test NAME ... ` before running, so this
+          #    test's own inherited stderr lands between the name and the status word; a
+          #    `- should panic` suffix or a module path shifts it further; nextest has its own
+          #    vocabulary entirely. Matching the name rather than the outcome survives all of them.
+          reported=$(grep -E '^test .*test_no_passthrough_e2e|^ *(PASS|FAIL|TRY|FLAKY|LEAK|SLOW|TIMEOUT).*test_no_passthrough_e2e([[:space:]]|$)' \
+            "$RUNNER_TEMP/e6a3.log" || true)
+          if [ -z "$reported" ]; then
             echo "::error::E6a.3 no-pass-through test did not run. The test-outbound gate is misconfigured, so the invariant was never exercised."
             exit 1
-          }
+          fi
+          # 2. Was it reported as skipped? `#[ignore]` prints a result line and exits 0, so being
+          #    reported is not the same as having executed. This is the routine answer to a flaky
+          #    spawn-a-server test on the OS legs this step just added, and it has to be loud.
+          case "$reported" in
+            *ignored*)
+              echo "::error::E6a.3 no-pass-through test was reported as ignored, not executed. The invariant was never exercised."
+              exit 1
+              ;;
+          esac
 
       # Non-Linux: Exclude OS-specific crates (assay-monitor, assay-cli)
       # Windows/macOS automatically use bundled sqlite via cfg() in Cargo.toml

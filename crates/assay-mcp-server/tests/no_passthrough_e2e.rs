@@ -5,12 +5,19 @@
 //! trigger the test-only outbound call, then assert the mock received no sensitive headers or
 //! sentinel values. Run with: cargo test -p assay-mcp-server --features test-outbound no_passthrough
 //!
-//! This file is gated on `test-outbound`, and that gate is what makes `CARGO_BIN_EXE` safe to
-//! trust here. The variable is a fixed path — `target/debug/assay-mcp-server` — not a per-feature
-//! one, and its contents are whichever variant Cargo last uplifted, so the path alone guarantees
-//! nothing. What does guarantee it is that Cargo uplifts the matching variant in the same
-//! invocation that builds and runs this test, and the gate ensures the only invocations that run
-//! it are ones that asked for the feature.
+//! This file is gated on `test-outbound` because `CARGO_BIN_EXE_assay-mcp-server` names one
+//! uplift slot, not a per-feature one — `target/debug/assay-mcp-server` for the usual dev build,
+//! relocated by `--target` or a non-dev profile and suffixed `.exe` on Windows — and its contents
+//! are whichever variant Cargo last put there. The gate is what makes the invocation that runs
+//! this test also be one that asked for the feature, so the variant Cargo uplifts on the way in
+//! is the one the test needs.
+//!
+//! That is narrower than it may read, and the narrowness was measured rather than assumed: Cargo
+//! releases the build lock when compilation finishes, before test binaries execute, so a
+//! concurrent `cargo build -p assay-mcp-server` in another shell can re-uplift the feature-less
+//! variant mid-run. Reproduced; the test then fails on `received.len() == 1` below, because a
+//! binary without the feature has no `assay_test_outbound` to call. It fails closed, never green,
+//! but it is a real flake if you build this crate in a second terminal while this test runs.
 //!
 //! Previously the file compiled unconditionally and shelled out to `cargo build --features
 //! test-outbound`, whose inherited CARGO_MANIFEST_DIR dirtied the shared stack like every other
@@ -19,9 +26,15 @@
 //!
 //! Gating trades a rebuild for an absence, which is the more dangerous failure: `cargo test` exits
 //! 0 when zero tests match. So the CI job that owns this invariant enables the feature and asserts
-//! the test actually ran; see the E6a.3 step in .github/workflows/ci.yml. Because the gate also
-//! hides this file from `cargo clippy --workspace --all-targets`, which carries no `--all-features`,
-//! there is a dedicated feature-enabled clippy step alongside it.
+//! the test actually ran; see the E6a.3 step in .github/workflows/ci.yml.
+//!
+//! Absence has a cost worth knowing before you edit this file: no gate that omits
+//! `--features test-outbound` compiles it, and none of them carry `--all-features`. That includes
+//! `cargo clippy --workspace --all-targets` in CI, which is why a dedicated feature-enabled clippy
+//! step sits beside the test step, but it also includes both pre-push hooks
+//! (`scripts/precommit/cargo-clippy.sh`, `scripts/ci/check-linux.sh`) and a plain
+//! `cargo test -p assay-mcp-server`. A syntax or type error here passes every local check and only
+//! surfaces on CI. Run the documented command above before pushing changes to this file.
 #![cfg(feature = "test-outbound")]
 
 use assay_mcp_server::auth::SENSITIVE_HEADER_NAMES;
