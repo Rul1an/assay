@@ -130,6 +130,14 @@ pub struct McpWrapArgs {
     pub deny_deprecations: bool,
 }
 
+/// The shapes `mcp discover` can emit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum DiscoverFormat {
+    Table,
+    Json,
+    Yaml,
+}
+
 #[derive(clap::Args, Debug, Clone)]
 pub struct DiscoverArgs {
     /// Scan local machine (config files & processes)
@@ -137,8 +145,8 @@ pub struct DiscoverArgs {
     pub local: bool,
 
     /// Output format (table, json, yaml)
-    #[clap(long, default_value = "table", value_parser = ["table", "json", "yaml"])]
-    pub format: String,
+    #[clap(long, default_value = "table")]
+    pub format: DiscoverFormat,
 
     /// Write output to file
     #[arg(short, long)]

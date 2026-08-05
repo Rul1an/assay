@@ -134,6 +134,26 @@ pub struct FixArgs {
     pub list: bool,
 }
 
+/// The shapes `sandbox --profile` can write. A type rather than a string: the fallback used to
+/// write YAML into a file the caller had named as JSON, and derive the evidence path from the raw
+/// string, so the record described bytes that were not on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ProfileFormat {
+    Yaml,
+    Json,
+}
+
+impl ProfileFormat {
+    /// The spelling that names this format in a path or an evidence record. Derived from the
+    /// variant so the bytes on disk and the name in the record cannot disagree.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProfileFormat::Yaml => "yaml",
+            ProfileFormat::Json => "json",
+        }
+    }
+}
+
 #[derive(clap::Args, Debug, Clone)]
 pub struct SandboxArgs {
     /// Command to run in the sandbox
@@ -207,8 +227,8 @@ pub struct SandboxArgs {
     pub profile: Option<PathBuf>,
 
     /// Profile output format: yaml | json (default: yaml)
-    #[arg(long, default_value = "yaml", value_parser = ["yaml", "json"])]
-    pub profile_format: String,
+    #[arg(long, default_value = "yaml")]
+    pub profile_format: ProfileFormat,
 
     /// Optional path for human-readable profile report
     #[arg(long)]
