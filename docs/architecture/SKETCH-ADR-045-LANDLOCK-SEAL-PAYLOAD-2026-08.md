@@ -77,6 +77,7 @@ Illustrative JSON shape:
   "aeeStillArmed": true,
   "aeeDropCount": 0,
   "aeeDropBound": 0,
+  "assayDropProofModel": "synchronous-probe",
   "aeeObservedSet": "<lowercase sha256 hex>",
   "aeeObservedAttacks": [],
   "assayObservedLabels": ["connect_blocked"],
@@ -99,49 +100,94 @@ Illustrative JSON shape:
 |---|---:|---|---|---|
 | `aeeKind` | yes | string | MUST equal `sealed`. | Identifies the covering record kind only. |
 | `aeeVersion` | yes | string | MUST equal `0.7` for this sketch. | Shape-compatible with current AEE draft vocabulary; not a conformance claim. |
-| `aeeRunBinding` | yes | string | MUST be lowercase SHA-256 hex derived by the shared run-binding function. | Binds this seal to the run inputs, not to a semantic evidence chain. |
+| `aeeRunBinding` | yes | string | Payload-only: MUST be lowercase SHA-256 hex. Post-assembly: MUST equal the shared run-binding derivation. | Binds this seal to the run inputs, not to a semantic evidence chain. |
 | `aeeMethod` | yes | string | For first slice, MUST equal `intercepted`. | Does not imply provider side-effect verification. |
-| `aeePostureDigest` | yes | string | MUST equal `observationEnvironment.networkPosture.digest.sha256`. | Binds the carried posture descriptor, not the full run binding preimage. |
+| `aeePostureDigest` | yes | string | Payload-only: MUST be lowercase SHA-256 hex. Post-assembly: MUST equal the assembled statement's `predicate.observationEnvironment.networkPosture.digest.sha256`. | Binds the carried posture descriptor, not the full run binding preimage. |
 | `aeeStillArmed` | yes | boolean | MUST be `true` for a successful Landlock seal. Unknown or failed state is invalid. | Claims run-end still-armed state only under ADR-045 proof rules. |
 | `aeeDropCount` | yes | integer | First slice MUST be `0`. | Counts observation drops/losses, not blocked policy events. |
 | `aeeDropBound` | yes | integer | First slice MUST be `0`. | Bounds unobserved/lost observations under the named proof model only. |
-| `aeeObservedSet` | yes | string | MUST be lowercase SHA-256 hex over emitted interception/examination record leaves. | Digest commitment; not a label array. |
-| `aeeObservedAttacks` | yes | array of strings | Each named attack MUST be supported by a caught row unless validating standalone before statement assembly. | Lower-bound substrate attribution, not completeness. Empty is valid for pure Landlock assembly-plane attribution. |
+| `assayDropProofModel` | yes | string | First slice MUST be `synchronous-probe` or `counted-queue-zero`. | Identifies the proof model that makes zero-drop accounting creditable. |
+| `aeeObservedSet` | yes | string | Payload-only: MUST be lowercase SHA-256 hex. Post-assembly: MUST recompute over emitted interception/examination record leaves. | Digest commitment; not a label array. |
+| `aeeObservedAttacks` | yes | array of strings | Post-assembly: each named attack MUST be supported by a caught row unless validating standalone before statement assembly. | Lower-bound substrate attribution, not completeness. Empty is valid for pure Landlock assembly-plane attribution. |
 | `assayObservedLabels` | no | array of strings | If present, MUST NOT substitute for `aeeObservedSet`. | Operator/debug vocabulary only. |
-| `assayCollectionPath` | yes | string | First slice MUST equal `landlock-tcp-connect`. | Prevents flattening all substrate observations into one undifferentiated source. |
+| `assayCollectionPath` | yes | string | First slice MUST equal `landlock-tcp-connect`. Credited-evidence validation also checks trusted key scope. | Prevents flattening all substrate observations into one undifferentiated source. |
 | `assaySourceSchema` | yes | string | First slice SHOULD be `assay.enforcement_health.v1`. | Names the Assay source vocabulary, not external AEE conformance. |
 | `assaySealScope` | yes | string | First slice MUST equal `tcp_connect_landlock_port`. | Names the bounded enforcement scope. |
 | `assayAttackRowAttributionSource` | yes | string | MUST be `assembly-plane` or `substrate-runner`. Equality with caught rows is required only for `substrate-runner`. | Must not upgrade assembly-plane attribution into substrate claim. |
-| `assayNonClaims` | yes | array of strings | MUST include the non-claims listed in this sketch unless superseded by a later ADR. | Payload-local producer non-claims; does not replace predicate-level `doesNotAssert`. |
+| `assayNonClaims` | yes | array of strings | MUST include the payload-local minimum non-claims listed below unless superseded by a later ADR. | Payload-local producer non-claims; does not replace predicate-level `doesNotAssert`. |
 
-## Structural validation sketch
+## Payload-local non-claims
 
-A checker for this payload shape must fail closed when any of the following is
-true:
+For this sketch, `assayNonClaims` MUST include at least these payload-local
+non-claims:
 
-1. The payload is not a JSON object.
-2. Any required field is absent.
-3. Any digest field is not lowercase SHA-256 hex.
-4. `aeeKind` is not `sealed`.
-5. `aeeVersion` is not `0.7` for this sketch.
-6. `aeeRunBinding` does not equal the shared run-binding derivation.
-7. `aeePostureDigest` does not equal the carried
-   `observationEnvironment.networkPosture.digest.sha256`.
-8. `aeeStillArmed` is not true.
-9. `aeeDropCount` or `aeeDropBound` is non-zero for the first Landlock slice.
-10. The named drop-accounting proof model is absent or not eligible under
-    ADR-045.
-11. `aeeObservedSet` does not recompute over emitted interception/examination
-    record leaves.
-12. `aeeObservedAttacks` names an attack unsupported by a caught row when the
-    seal is checked after statement assembly.
-13. `assayAttackRowAttributionSource = "substrate-runner"` and
-    `aeeObservedAttacks` is not equal to the sorted caught-row attack IDs.
-14. `assayCollectionPath` is not within the trusted key scope credited by
-    consumer policy.
-15. The signer key role is not `substrate-observation` when the record is being
-    credited as attested substrate evidence.
-16. A fixture key or fixture signer appears in a production path.
+- `does not prove complete run population`
+- `does not prove agent safety`
+- `does not prove provider side effects`
+- `does not prove independent substrate operation`
+
+The broader document-level non-claims remain normative for the sketch and PR
+scope, but they are not all required as payload-local `assayNonClaims` entries.
+Any future AEE statement exporter must still carry statement-level non-claims in
+predicate-level `doesNotAssert` as required by ADR-045.
+
+## Validation phases
+
+This sketch separates three validation phases so the payload contract does not
+pretend a payload-only validator has statement or trust-policy context.
+
+### Payload-only validation
+
+Payload-only validation can check only the sealed payload object and its local
+field constraints:
+
+1. The payload is a JSON object.
+2. Every required field is present.
+3. Every field has the expected primitive type.
+4. Every digest-shaped value is lowercase SHA-256 hex.
+5. `aeeKind` equals `sealed`.
+6. `aeeVersion` equals `0.7` for this sketch.
+7. `aeeMethod` equals `intercepted` for the first slice.
+8. `aeeStillArmed` is true.
+9. `aeeDropCount` and `aeeDropBound` are both zero.
+10. `assayDropProofModel` is `synchronous-probe` or `counted-queue-zero`.
+11. `assayCollectionPath` equals `landlock-tcp-connect` for the first slice.
+12. `assaySealScope` equals `tcp_connect_landlock_port` for the first slice.
+13. `assayAttackRowAttributionSource` is `assembly-plane` or
+    `substrate-runner`.
+14. `assayNonClaims` includes the payload-local minimum non-claims above.
+
+### Assembled-statement validation
+
+Assembled-statement validation has access to the carried statement around the
+payload and can check cross-record invariants:
+
+1. `aeeRunBinding` equals the shared run-binding derivation.
+2. `aeePostureDigest` equals the assembled statement's
+   `predicate.observationEnvironment.networkPosture.digest.sha256`.
+3. `aeeObservedSet` recomputes over emitted interception/examination record
+   leaves.
+4. `aeeObservedAttacks` names only attacks supported by caught rows when the
+   seal is checked after statement assembly.
+5. `assayAttackRowAttributionSource = "substrate-runner"` requires
+   `aeeObservedAttacks` to equal the sorted caught-row attack IDs.
+6. Every substrate row that claims sealed coverage actually references a valid
+   sealed record.
+
+### Credited-evidence validation
+
+Credited-evidence validation has access to signature verification material and
+consumer trust policy. It decides whether a structurally valid signed record is
+credited as attested substrate evidence:
+
+1. The envelope signature verifies over the exact signed bytes.
+2. The signing key is trusted by consumer policy.
+3. The signing key role is `substrate-observation`.
+4. The signing key's trusted scope includes the payload's
+   `assayCollectionPath`.
+5. The signing key's trusted scope is compatible with the statement's substrate
+   descriptor.
+6. A fixture key or fixture signer is not present in a production path.
 
 A valid signature from an untrusted or out-of-scope key is structurally valid as
 an envelope fact, but it is not credited as attested substrate evidence.
