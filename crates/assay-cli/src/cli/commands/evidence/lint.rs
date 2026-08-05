@@ -21,7 +21,7 @@ pub struct LintArgs {
     pub format: String,
 
     /// Fail (exit 1) if findings at or above this severity exist
-    #[arg(long, default_value = "error")]
+    #[arg(long, default_value = "error", value_parser = ["error", "warn", "warning", "info", "none"])]
     pub fail_on: String,
 
     /// Comma-separated pack references (built-in name or file path)
@@ -220,17 +220,28 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
     }
 
     // Exit codes: 0 = no findings at/above threshold, 1 = findings found, 2 = verification failure, 3 = pack error
-    let threshold = match args.fail_on.as_str() {
-        "error" => Severity::Error,
-        "warn" | "warning" => Severity::Warn,
-        "info" => Severity::Info,
-        _ => Severity::Error,
-    };
+    match gate_threshold(&args.fail_on) {
+        Some(t) if report.has_findings_at_or_above(&t) => Ok(1),
+        _ => Ok(0),
+    }
+}
 
-    if report.has_findings_at_or_above(&threshold) {
-        Ok(1)
-    } else {
-        Ok(0)
+/// The severity at which a finding gates the run, or `None` when no finding does.
+///
+/// `none` exists because a caller that reads the SARIF itself needs a non-zero exit to mean a pack
+/// or runtime fault rather than a policy finding. That is what `assay-action` asks for at
+/// `action.yml:888` and what `docs/AIcontext/quick-reference.md:112` documents, and it was never
+/// implemented: the old match sent it to `_ => Severity::Error`, gating on exactly the findings the
+/// caller had asked to ignore.
+///
+/// The value parser on `--fail-on` decides what reaches this function, so an unrecognized value is
+/// rejected before the command runs and never arrives here.
+fn gate_threshold(fail_on: &str) -> Option<Severity> {
+    match fail_on {
+        "none" => None,
+        "warn" | "warning" => Some(Severity::Warn),
+        "info" => Some(Severity::Info),
+        _ => Some(Severity::Error),
     }
 }
 
@@ -304,4 +315,25 @@ fn explain_rule(packs: &[LoadedPack], rule_ref: &str) -> Result<i32> {
     }
 
     Ok(0)
+}
+
+#[cfg(test)]
+mod gate_threshold_tests {
+    use super::*;
+
+    #[test]
+    fn none_gates_on_nothing() {
+        assert_eq!(gate_threshold("none"), None);
+    }
+
+    /// Every accepted value must carry its own intent. Before `none` existed it shared a threshold
+    /// with `error`, which inverted what the caller asked for.
+    #[test]
+    fn each_accepted_value_maps_to_its_own_threshold() {
+        assert_eq!(gate_threshold("error"), Some(Severity::Error));
+        assert_eq!(gate_threshold("warn"), Some(Severity::Warn));
+        assert_eq!(gate_threshold("warning"), Some(Severity::Warn));
+        assert_eq!(gate_threshold("info"), Some(Severity::Info));
+        assert_ne!(gate_threshold("none"), gate_threshold("error"));
+    }
 }
