@@ -2087,6 +2087,27 @@ GATE_SCRIPTS = {
 }
 
 
+WORKFLOW_READ_MAX_BYTES = 256 * 1024
+
+
+def selection_labels(condition: str) -> tuple[str, ...] | None:
+    """The labels a gate step's `if:` runs for, or None if the shape is unknown.
+
+    Parsed as a whole rather than searched for substrings. `false && (inputs.gates
+    == 'all')` contains the substring and runs for nothing; keying on containment
+    would read that step as live. Anything this cannot parse in full is refused
+    rather than guessed at, so an expression that grows a condition the assertion
+    does not understand fails loudly instead of silently passing.
+    """
+    labels: list[str] = []
+    for term in condition.split("||"):
+        match = re.fullmatch(r"\s*inputs\.gates == '([a-z0-9-]+)'\s*", term)
+        if match is None:
+            return None
+        labels.append(match.group(1))
+    return tuple(labels)
+
+
 def _test_gate_selections_match_the_workflow() -> None:
     """`GATE_SELECTIONS` and the delegated workflow's gate steps agree.
 
@@ -2105,30 +2126,37 @@ def _test_gate_selections_match_the_workflow() -> None:
     stripping comments and so lost every gate after a `;;` in a comment.
     """
     root = Path(__file__).resolve().parents[2]
+    source = root / DELEGATED_WORKFLOW_PATH
+    size = source.stat().st_size
+    assert size <= WORKFLOW_READ_MAX_BYTES, (
+        f"{DELEGATED_WORKFLOW_PATH} is {size} bytes, above the "
+        f"{WORKFLOW_READ_MAX_BYTES}-byte ceiling; refusing to materialize it"
+    )
     # Strip comment lines first. The pattern is text matching, so a commented-out
     # step otherwise counts as a step that runs -- the natural way to disable
     # one, and the same defect the `case`-branch version of this assertion had.
     workflow = "\n".join(
         line
-        for line in (root / DELEGATED_WORKFLOW_PATH).read_text(encoding="utf-8").splitlines()
+        for line in source.read_text(encoding="utf-8").splitlines()
         if not line.lstrip().startswith("#")
     )
     steps = re.findall(r'- name: "Gate: ([^"]+)"\n *if: ([^\n]+)', workflow)
     assert steps, f"no `Gate:` steps in {DELEGATED_WORKFLOW_PATH}"
 
+    for key, condition in steps:
+        labels = selection_labels(condition)
+        assert labels is not None, (
+            f"step {key!r} has condition {condition!r}, which is not a disjunction of "
+            "`inputs.gates == '<label>'` terms; this assertion cannot read it"
+        )
+
     for label, expected in gate_selections().items():
         runs = tuple(
-            key for key, condition in steps if f"inputs.gates == '{label}'" in condition
+            key for key, condition in steps if label in (selection_labels(condition) or ())
         )
         assert runs == tuple(expected), (
             f"{label!r}: workflow steps run {runs}, GATE_SELECTIONS says {tuple(expected)}"
         )
-
-    # Every step must belong to some selection, or it can never run.
-    for key, condition in steps:
-        assert any(
-            f"inputs.gates == '{label}'" in condition for label in gate_selections()
-        ), f"step {key!r} runs for no known selection"
 
 
 def _test_gating_map_is_current() -> None:
