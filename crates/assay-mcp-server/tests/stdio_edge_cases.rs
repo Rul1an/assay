@@ -1,3 +1,14 @@
+//! Edge-case coverage for the stdio transport.
+//!
+//! Both spawn helpers below run the binary Cargo already built for this test target, via
+//! `CARGO_BIN_EXE_assay-mcp-server`, rather than shelling out to `cargo run`. A nested Cargo
+//! inherits this process's CARGO_MANIFEST_DIR, which ring's build script tracks, so it marks the
+//! rustls/reqwest stack dirty every time it alternates with a shell build — 62.5s to 63.9s per
+//! test, against the 120s kill budget `.config/nextest.toml` sets via
+//! `slow-timeout = { period = "60s", terminate-after = 2 }`. Measured on 0799ab8b, rustc 1.96.0,
+//! aarch64-apple-darwin, two back-to-back `cargo nextest run -p assay-mcp-server` with nothing
+//! changed between them; the second run recompiled 14 crates before the tests even started.
+
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
@@ -8,16 +19,8 @@ fn spawn_server() -> (
     BufReader<std::process::ChildStdout>,
 ) {
     let policy_root = "../../tests/fixtures/mcp";
-    let mut child = Command::new("cargo")
-        .args([
-            "run",
-            "-q",
-            "-p",
-            "assay-mcp-server",
-            "--",
-            "--policy-root",
-            policy_root,
-        ])
+    let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+        .args(["--policy-root", policy_root])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -38,16 +41,8 @@ fn spawn_server_with_env(
     BufReader<std::process::ChildStdout>,
 ) {
     let policy_root = "../../tests/fixtures/mcp";
-    let mut child = Command::new("cargo")
-        .args([
-            "run",
-            "-q",
-            "-p",
-            "assay-mcp-server",
-            "--",
-            "--policy-root",
-            policy_root,
-        ])
+    let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+        .args(["--policy-root", policy_root])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
