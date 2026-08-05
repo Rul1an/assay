@@ -4,11 +4,32 @@ use assay_evidence::lint::packs::{load_packs, LoadedPack};
 use assay_evidence::lint::sarif::{to_sarif_with_options, SarifOptions};
 use assay_evidence::lint::Severity;
 use assay_evidence::VerifyLimits;
-use clap::Args;
+use clap::{Args, ValueEnum};
 use std::fs::File;
 
 /// Default pack when --pack is omitted (ADR-023).
 const DEFAULT_PACK: &str = "cicd-starter";
+
+/// The shapes `evidence lint` can emit. A type rather than a string, so the match over it is
+/// exhaustive and no spelling can reach it that the parser did not accept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum LintFormat {
+    Json,
+    Sarif,
+    Text,
+}
+
+/// The severity at which a finding gates the run. `None` gates on nothing, which is what a caller
+/// that reads the SARIF itself needs; it was documented and shipped for a long time before it was
+/// implemented, because a `_` arm reinterpreted it as `Error`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum FailOn {
+    Error,
+    #[value(alias = "warning")]
+    Warn,
+    Info,
+    None,
+}
 
 #[derive(Debug, Args, Clone)]
 pub struct LintArgs {
@@ -17,12 +38,12 @@ pub struct LintArgs {
     pub bundle: Option<std::path::PathBuf>,
 
     /// Output format: json, sarif, or text
-    #[arg(long, default_value = "text", value_parser = ["json", "sarif", "text"])]
-    pub format: String,
+    #[arg(long, default_value = "text")]
+    pub format: LintFormat,
 
     /// Fail (exit 1) if findings at or above this severity exist
-    #[arg(long, default_value = "error", value_parser = ["error", "warn", "warning", "info", "none"])]
-    pub fail_on: String,
+    #[arg(long, default_value = "error")]
+    pub fail_on: FailOn,
 
     /// Comma-separated pack references (built-in name or file path)
     #[arg(long, value_delimiter = ',')]
@@ -96,8 +117,8 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
     let report = &result.report;
     let pack_meta = &result.pack_meta;
 
-    match args.format.as_str() {
-        "json" => {
+    match args.format {
+        LintFormat::Json => {
             // Add disclaimer to JSON output for compliance packs
             let mut json_report = serde_json::to_value(report)?;
             if let Some(meta) = pack_meta {
@@ -120,7 +141,7 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
             }
             println!("{}", serde_json::to_string_pretty(&json_report)?);
         }
-        "sarif" => {
+        LintFormat::Sarif => {
             #[allow(deprecated)]
             let sarif_options = SarifOptions {
                 pack_meta: pack_meta.clone(),
@@ -130,7 +151,7 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
             let sarif = to_sarif_with_options(report, sarif_options);
             println!("{}", serde_json::to_string_pretty(&sarif)?);
         }
-        _ => {
+        LintFormat::Text => {
             eprintln!("Assay Evidence Lint");
             eprintln!("===================");
             eprintln!(
@@ -220,7 +241,7 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
     }
 
     // Exit codes: 0 = no findings at/above threshold, 1 = findings found, 2 = verification failure, 3 = pack error
-    match gate_threshold(&args.fail_on) {
+    match gate_threshold(args.fail_on) {
         Some(t) if report.has_findings_at_or_above(&t) => Ok(1),
         _ => Ok(0),
     }
@@ -238,20 +259,12 @@ pub fn cmd_lint(args: LintArgs) -> Result<i32> {
 ///
 /// The value parser on `--fail-on` decides what reaches this function, so an unrecognized value is
 /// rejected before the command runs and never arrives here.
-fn gate_threshold(fail_on: &str) -> Option<Severity> {
+fn gate_threshold(fail_on: FailOn) -> Option<Severity> {
     match fail_on {
-        "none" => None,
-        "warn" | "warning" => Some(Severity::Warn),
-        "info" => Some(Severity::Info),
-        "error" => Some(Severity::Error),
-        // Unreachable while the value parser guards this argument, and deliberately not written as
-        // a bare `_ => Severity::Error`: that spelling is what let `none` be reinterpreted for as
-        // long as it did. If a value is ever added to the parser without an arm here, this fails
-        // the test run rather than silently gating on errors.
-        other => {
-            debug_assert!(false, "--fail-on {other} has no threshold");
-            Some(Severity::Error)
-        }
+        FailOn::None => None,
+        FailOn::Warn => Some(Severity::Warn),
+        FailOn::Info => Some(Severity::Info),
+        FailOn::Error => Some(Severity::Error),
     }
 }
 
@@ -333,17 +346,17 @@ mod gate_threshold_tests {
 
     #[test]
     fn none_gates_on_nothing() {
-        assert_eq!(gate_threshold("none"), None);
+        assert_eq!(gate_threshold(FailOn::None), None);
     }
 
     /// Every accepted value must carry its own intent. Before `none` existed it shared a threshold
     /// with `error`, which inverted what the caller asked for.
     #[test]
     fn each_accepted_value_maps_to_its_own_threshold() {
-        assert_eq!(gate_threshold("error"), Some(Severity::Error));
-        assert_eq!(gate_threshold("warn"), Some(Severity::Warn));
-        assert_eq!(gate_threshold("warning"), Some(Severity::Warn));
-        assert_eq!(gate_threshold("info"), Some(Severity::Info));
-        assert_ne!(gate_threshold("none"), gate_threshold("error"));
+        assert_eq!(gate_threshold(FailOn::Error), Some(Severity::Error));
+        assert_eq!(gate_threshold(FailOn::Warn), Some(Severity::Warn));
+        assert_eq!(gate_threshold(FailOn::Warn), Some(Severity::Warn));
+        assert_eq!(gate_threshold(FailOn::Info), Some(Severity::Info));
+        assert_ne!(gate_threshold(FailOn::None), gate_threshold(FailOn::Error));
     }
 }
