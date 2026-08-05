@@ -1,6 +1,9 @@
 use std::path::Path;
 use std::process::Command;
 
+mod common;
+use common::{cargo_bin, strip_cargo_crate_env};
+
 #[test]
 fn test_golden_harness() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
@@ -8,11 +11,19 @@ fn test_golden_harness() {
 
     // Build binary first usually, but for test we can use cargo run?
     // Better to use the binary if available. But cargo run is easiest for dev/CI.
-
-    let output = Command::new("cargo")
+    //
+    // This must strip the inherited Cargo environment for the same reason
+    // e2e_mcp_wrap_assert_cmd does, and it is not optional politeness: both run
+    // inside one `cargo nextest run -p assay-cli`, so if only one of them strips,
+    // each undoes the other's work and every test that shells out to Cargo pays a
+    // ~15s rebuild on every run after the first. See tests/common/mod.rs.
+    let mut cmd = Command::new(cargo_bin());
+    strip_cargo_crate_env(&mut cmd);
+    let output = cmd
         .args([
             "run",
             "--quiet",
+            "--locked",
             "--bin",
             "assay",
             "--",

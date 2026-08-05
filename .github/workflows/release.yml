@@ -84,7 +84,20 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          milestone="v${VERSION}"
+
+          # `resolve-release-version.sh` returns the tag form, WITH the leading v (verified by
+          # running it: refs/tags/v3.38.0 -> "v3.38.0"). Blindly prefixing another one produced
+          # "vv3.38.0", which matches no milestone and takes the nothing-to-gate-on path -- a
+          # fail-open that logs like success, in the gate whose entire point is to fail closed.
+          # Normalise both known shapes and refuse anything else rather than guessing.
+          case "$VERSION" in
+            v[0-9]*)  milestone="$VERSION" ;;
+            [0-9]*)   milestone="v$VERSION" ;;
+            *)
+              echo "::error::unrecognised release version '${VERSION}'; refusing to release rather than guessing which milestone to check."
+              exit 1
+              ;;
+          esac
 
           # Capture before testing, and paginate. Both matter, and both are fail-closed fixes:
           #

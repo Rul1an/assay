@@ -1,0 +1,13 @@
+{
+  "name": "assay-runtime-substrate-spike",
+  "collectionPaths": [
+    "json-rpc-proxy",
+    "landlock-tcp-connect"
+  ],
+  "operator": "assay-spike-fixture",
+  "nonClaims": [
+    "fixture substrate descriptor only",
+    "not a production substrate attestation",
+    "one operator signs both collection paths in this spike"
+  ]
+}

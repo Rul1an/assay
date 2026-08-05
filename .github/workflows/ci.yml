@@ -222,6 +222,14 @@ jobs:
         with:
           components: clippy
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # `--all-targets` does not imply `--all-features`, so any test file gated behind a feature is
+      # invisible to the sweep above: cfg strips it to an empty crate and clippy lints nothing.
+      # no_passthrough_e2e.rs is gated on `test-outbound` and would otherwise be the one test in
+      # the workspace that no lint job ever sees.
+      # The deny list matches split-wave0-gates.yml, which carries no --all-features either, so this
+      # step is the only place the gated file meets `clippy::todo` and `clippy::unimplemented`.
+      # Denying only `-D warnings` here would leave a placeholder legal in exactly one test file.
+      - run: cargo clippy -p assay-mcp-server --all-targets --features test-outbound -- -D warnings -D clippy::todo -D clippy::unimplemented
 
   rustdoc:
     name: Rustdoc (deny warnings)
@@ -591,15 +599,58 @@ jobs:
       # Linux: Test everything except eBPF and integration tests
       - name: Test Workspace (Linux)
         if: runner.os == 'Linux'
-        # no_passthrough_e2e shells out to a feature-enabled cargo build/run and has
-        # a dedicated step below. Skipping it here avoids duplicating that heavy build
-        # inside the already-large workspace test job on hosted Ubuntu runners.
-        run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it -- --skip test_no_passthrough_e2e
+        # no_passthrough_e2e is gated on `test-outbound` and so compiles to nothing here; it has a
+        # dedicated step below. It used to need an explicit --skip because it compiled everywhere
+        # and shelled out to its own feature-enabled cargo build.
+        run: cargo test --locked --workspace --exclude assay-ebpf --exclude assay-it
 
-      # E6a.3 no-pass-through: E2E invariant test (requires test-outbound feature)
+      # E6a.3 no-pass-through: E2E invariant test (requires test-outbound feature).
+      #
+      # Runs on every OS, because this is the only job that RUNS the test — the workspace runs
+      # above and below build it out, and the feature-enabled clippy step near the top of this
+      # file compiles it but executes nothing. That also means a missing or misspelled feature
+      # flag here would be silent: `cargo test` exits 0 when zero tests match. So assert the test
+      # actually executed rather than trusting the exit code.
       - name: Test MCP no-pass-through E2E (E6a.3)
-        if: runner.os == 'Linux'
-        run: cargo test -p assay-mcp-server --features test-outbound --no-fail-fast no_passthrough
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p assay-mcp-server --features test-outbound --no-fail-fast no_passthrough \
+            2>&1 | tee "$RUNNER_TEMP/e6a3.log"
+          # Two questions. Every previous version of this guard folded them into one pattern and
+          # got one of them wrong: too strict and it called a passing test absent, too loose and
+          # it called a skipped test present. Pass-versus-fail is not among them — `set -o
+          # pipefail` settles that above, so a test that ran and failed never reaches here.
+          #
+          # The two are sequential, not independent: question 2 rescans the lines question 1
+          # matched. That is a known and deliberate compromise. Broadening question 1 to survive
+          # interleaved child output means arbitrary server stderr can end up inside the string
+          # question 2 searches, so a log line containing the word "ignored" can trip it. The
+          # alternative — anchoring question 2 to the status field — is more precise but inverts
+          # the failure direction: a shape it fails to anchor passes the guard, and the step goes
+          # green on an invariant nobody ran. Being noisily wrong beats being quietly wrong here,
+          # so this stays until someone has a form that is precise AND fails closed.
+          #
+          # 1. Did the runner report this test at all? Deliberately broad, because the shapes are
+          #    many: at --test-threads=1 libtest prints `test NAME ... ` before running, so this
+          #    test's own inherited stderr lands between the name and the status word; a
+          #    `- should panic` suffix or a module path shifts it further; nextest has its own
+          #    vocabulary entirely. Matching the name rather than the outcome survives all of them.
+          reported=$(grep -E '^test .*test_no_passthrough_e2e|^ *(PASS|FAIL|TRY|FLAKY|LEAK|SLOW|TIMEOUT).*test_no_passthrough_e2e([[:space:]]|$)' \
+            "$RUNNER_TEMP/e6a3.log" || true)
+          if [ -z "$reported" ]; then
+            echo "::error::E6a.3 no-pass-through test did not run, so the invariant was never exercised. Either the test-outbound gate is misconfigured, or the test is skipped under a runner that reports skips without naming them (nextest counts them and moves on)."
+            exit 1
+          fi
+          # 2. Was it reported as skipped? `#[ignore]` prints a result line and exits 0, so being
+          #    reported is not the same as having executed. This is the routine answer to a flaky
+          #    spawn-a-server test on the OS legs this step just added, and it has to be loud.
+          case "$reported" in
+            *ignored*)
+              echo "::error::E6a.3 no-pass-through test was reported as ignored, not executed. The invariant was never exercised."
+              exit 1
+              ;;
+          esac
 
       # Non-Linux: Exclude OS-specific crates (assay-monitor, assay-cli)
       # Windows/macOS automatically use bundled sqlite via cfg() in Cargo.toml
