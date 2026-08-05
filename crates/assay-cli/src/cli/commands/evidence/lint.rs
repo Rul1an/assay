@@ -17,7 +17,7 @@ pub struct LintArgs {
     pub bundle: Option<std::path::PathBuf>,
 
     /// Output format: json, sarif, or text
-    #[arg(long, default_value = "text")]
+    #[arg(long, default_value = "text", value_parser = ["json", "sarif", "text"])]
     pub format: String,
 
     /// Fail (exit 1) if findings at or above this severity exist

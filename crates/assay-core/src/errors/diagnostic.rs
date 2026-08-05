@@ -100,7 +100,8 @@ impl std::error::Error for Diagnostic {}
 
 // Common error codes
 pub mod codes {
-    // Errors (Exit 2)
+    // Errors. Their exit class is declared once, in `ERROR_EXIT_CLASSES` below — not here, and
+    // never by how a code is spelled.
     pub const E_CFG_PARSE: &str = "E_CFG_PARSE";
     pub const E_CFG_SCHEMA: &str = "E_CFG_SCHEMA";
     pub const E_PATH_NOT_FOUND: &str = "E_PATH_NOT_FOUND";
@@ -111,13 +112,124 @@ pub mod codes {
     pub const E_EMB_DIMS: &str = "E_EMB_DIMS";
     pub const E_POLICY_VIOLATION: &str = "E_POLICY_VIOLATION";
 
-    // Warnings (Exit 0)
+    // Warnings. These carry `severity: "warn"`, which is what keeps a run of them at exit 0, so
+    // they are deliberately absent from `ERROR_EXIT_CLASSES`.
     /// A test that asserts nothing: no `expected:` block and no `assertions:`, so it
     /// passes for any response. An `expected:` block written out as empty is rejected
     /// at parse time as `E_CFG_PARSE` instead.
     pub const W_CFG_VACUOUS_EXPECTED: &str = "W_CFG_VACUOUS_EXPECTED";
     pub const W_BASE_FINGERPRINT: &str = "W_BASE_FINGERPRINT";
     pub const W_CACHE_CONFUSION: &str = "W_CACHE_CONFUSION";
+}
+
+/// How an error diagnostic classifies for process exit.
+///
+/// The registry owns this. An exit decision must never be inferred from how a code is spelled: the
+/// CLI used to match code prefixes, and that list had drifted until `E_TRACE_MISS` exited 1 while
+/// `E_PATH_NOT_FOUND` exited 2 for the same missing-trace condition, and a fourth prefix
+/// (`E_TRACE_SCHEMA`) matched no code that has ever existed.
+///
+/// The variants name a class, not an exit number. Which number a class maps to belongs to whichever
+/// binary is exiting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitClass {
+    /// The run could not be evaluated as specified: config, paths, traces, baselines, embeddings.
+    Config,
+    /// The subject under test failed a check.
+    Test,
+    /// Not a code in [`codes`]. This is a variant rather than a default so that an unclassified
+    /// code is a state a caller can see and test for, instead of the silent result of no match.
+    Unregistered,
+}
+
+/// The exit class of every registered error code — the single place the `// Errors (Exit 2)`
+/// comment above used to state in prose.
+///
+/// Warning codes are absent by design: severity already decides that a run of warnings exits 0, so
+/// a warning never reaches a class lookup.
+pub const ERROR_EXIT_CLASSES: &[(&str, ExitClass)] = &[
+    (codes::E_CFG_PARSE, ExitClass::Config),
+    (codes::E_CFG_SCHEMA, ExitClass::Config),
+    (codes::E_PATH_NOT_FOUND, ExitClass::Config),
+    (codes::E_TRACE_MISS, ExitClass::Config),
+    (codes::E_TRACE_INVALID, ExitClass::Config),
+    (codes::E_BASE_MISMATCH, ExitClass::Config),
+    (codes::E_REPLAY_STRICT_MISSING, ExitClass::Config),
+    (codes::E_EMB_DIMS, ExitClass::Config),
+    // Currently constructed nowhere. Classified per the registry's own declaration rather than per
+    // what the name suggests; whether a policy violation is a config or a test outcome is a
+    // question for the registry ADR, not for this table.
+    (codes::E_POLICY_VIOLATION, ExitClass::Config),
+];
+
+/// The exit class of `code`, or [`ExitClass::Unregistered`] when the registry does not know it.
+///
+/// Codes reach this from outside the registry — `assay_core::validate` forwards policy-engine
+/// verdict codes verbatim, and an unexpected trace error is reported as a bare `E_UNKNOWN`. Those
+/// are unregistered rather than misclassified, and the caller decides what that means.
+pub fn exit_class(code: &str) -> ExitClass {
+    ERROR_EXIT_CLASSES
+        .iter()
+        .find(|(registered, _)| *registered == code)
+        .map(|(_, class)| *class)
+        .unwrap_or(ExitClass::Unregistered)
+}
+
+#[cfg(test)]
+mod exit_class_tests {
+    use super::*;
+
+    #[test]
+    fn unknown_codes_are_unregistered_not_defaulted() {
+        assert_eq!(exit_class("E_UNKNOWN"), ExitClass::Unregistered);
+        assert_eq!(exit_class("E_ARG_SCHEMA"), ExitClass::Unregistered);
+        // Never a code, only ever a prefix in the CLI's old match.
+        assert_eq!(exit_class("E_TRACE_SCHEMA"), ExitClass::Unregistered);
+    }
+
+    #[test]
+    fn no_code_is_classified_twice() {
+        let mut seen: Vec<&str> = ERROR_EXIT_CLASSES.iter().map(|(c, _)| *c).collect();
+        let before = seen.len();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), before, "duplicate entry in ERROR_EXIT_CLASSES");
+    }
+
+    /// Pins every error constant to a class. A tenth constant added to `codes` without an entry
+    /// here is not caught — the table is `&str`-keyed, so nothing forces exhaustiveness at compile
+    /// time. Making that impossible needs the code enum tracked in #2028; this test holds the nine
+    /// that exist today.
+    #[test]
+    fn every_error_constant_has_a_class() {
+        for code in [
+            codes::E_CFG_PARSE,
+            codes::E_CFG_SCHEMA,
+            codes::E_PATH_NOT_FOUND,
+            codes::E_TRACE_MISS,
+            codes::E_TRACE_INVALID,
+            codes::E_BASE_MISMATCH,
+            codes::E_REPLAY_STRICT_MISSING,
+            codes::E_EMB_DIMS,
+            codes::E_POLICY_VIOLATION,
+        ] {
+            assert_eq!(
+                exit_class(code),
+                ExitClass::Config,
+                "{code} is unclassified"
+            );
+        }
+    }
+
+    /// Warning codes are deliberately absent: severity decides that a run of warnings exits 0, so a
+    /// warning never reaches a class lookup. If one ever did, unregistered is the honest answer.
+    #[test]
+    fn warning_codes_are_not_in_the_table() {
+        assert_eq!(
+            exit_class(codes::W_CFG_VACUOUS_EXPECTED),
+            ExitClass::Unregistered
+        );
+    }
 }
 
 #[cfg(test)]
