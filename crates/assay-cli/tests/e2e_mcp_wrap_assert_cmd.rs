@@ -1,20 +1,27 @@
 use anyhow::Context;
 
 use serde_json::{json, Value};
-use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdout, Command, ExitStatus, Stdio};
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::process::{Command, Stdio};
 use std::sync::OnceLock;
-use std::thread;
-use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 mod common;
 use common::{cargo_bin, strip_cargo_crate_env};
 
-/// How long a single JSON-RPC response may take before the proxy is declared wedged.
-const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+/// The timeout-bounded JSON-RPC-over-stdio plumbing, shared with the `assay-mcp-server` e2e tests
+/// that #1995 moved onto it, rather than reimplemented here.
+///
+/// This file had its own copy: `JsonLines`, `read_json_line`, `send_line` and
+/// `wait_child_with_timeout`, plus a flood regression test for the same deadline property
+/// `jsonrpc_conn_selftest.rs` now covers in two shapes rather than one. Two implementations of one
+/// timeout drift, and the one that drifts is the one nobody is watching. The module is a `tests/`
+/// SUBDIRECTORY, so cargo builds it as no crate's own test target; reaching across is a coupling
+/// these tests already had by building and spawning the `assay-mcp-server` binary.
+#[path = "../../assay-mcp-server/tests/jsonrpc_conn/mod.rs"]
+mod jsonrpc_conn;
+
+use jsonrpc_conn::Conn;
 
 /// Path to the `assay` binary under test.
 ///
@@ -218,185 +225,6 @@ fn build_assay_mcp_server() -> anyhow::Result<PathBuf> {
     Ok(executable)
 }
 
-/// Write one JSON line to stdin (newline delimited JSON-RPC).
-fn send_line(stdin: &mut dyn Write, v: &Value) -> anyhow::Result<()> {
-    let s = serde_json::to_string(v)?;
-    stdin.write_all(s.as_bytes())?;
-    stdin.write_all(b"\n")?;
-    stdin.flush()?;
-    Ok(())
-}
-
-/// Line reader for the proxy's stdout whose timeout survives a proxy that never answers.
-///
-/// `BufRead::read_line` blocks until a newline, EOF, or error, so a deadline checked around it is
-/// only ever evaluated once a line has already arrived. The blocking read therefore runs on a
-/// worker thread and the test waits on a channel instead, which bounds the wait whether or not the
-/// proxy writes anything. (A read timeout on the pipe itself would do as well, but `ChildStdout`
-/// is not a socket, so that needs platform-specific code on both Unix and Windows.)
-///
-/// The worker exits on EOF, on a read error, or once the receiver is gone. If the proxy is wedged
-/// it stays parked in `read_line`; killing the child closes the pipe and releases it, which is why
-/// [`read_json_line`] kills on timeout rather than leaving the process behind.
-struct JsonLines {
-    rx: mpsc::Receiver<io::Result<String>>,
-}
-
-impl JsonLines {
-    fn new(stdout: ChildStdout) -> Self {
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            let mut reader = BufReader::new(stdout);
-            loop {
-                let mut line = String::new();
-                match reader.read_line(&mut line) {
-                    // EOF: dropping `tx` is what reports it to the receiver.
-                    Ok(0) => break,
-                    // A send error means the test has moved on; stop reading.
-                    Ok(_) => {
-                        if tx.send(Ok(line)).is_err() {
-                            break;
-                        }
-                    }
-                    Err(err) => {
-                        let _ = tx.send(Err(err));
-                        break;
-                    }
-                }
-            }
-        });
-        Self { rx }
-    }
-
-    /// Wait up to `timeout` for the next JSON line.
-    ///
-    /// `what` names the thing being awaited, so a timeout points at the request that went
-    /// unanswered instead of reporting a bare "timeout".
-    ///
-    /// The deadline is checked explicitly at the top of each iteration and not left to
-    /// `recv_timeout` alone. `recv_timeout` attempts an optimistic `try_recv` first, so it returns
-    /// an already-queued line even when the remaining duration is zero; a child that writes
-    /// non-JSON faster than this loop skips it therefore keeps the channel non-empty and runs
-    /// unbounded past the deadline. `json_lines_deadline_holds_against_a_flood_of_non_json_lines`
-    /// covers that case.
-    fn next_json(&mut self, timeout: Duration, what: &str) -> anyhow::Result<Value> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            let now = Instant::now();
-            if now >= deadline {
-                anyhow::bail!(
-                    "timed out after {timeout:?} waiting for {what}: no JSON response line arrived"
-                );
-            }
-            let remaining = deadline.saturating_duration_since(now);
-            let line = match self.rx.recv_timeout(remaining) {
-                Ok(Ok(line)) => line,
-                Ok(Err(err)) => {
-                    return Err(anyhow::Error::new(err)
-                        .context(format!("read error while waiting for {what}")))
-                }
-                Err(RecvTimeoutError::Timeout) => anyhow::bail!(
-                    "timed out after {timeout:?} waiting for {what}: the proxy wrote no response line"
-                ),
-                Err(RecvTimeoutError::Disconnected) => {
-                    anyhow::bail!("EOF from proxy while waiting for {what}")
-                }
-            };
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            // Ignore log lines if any
-            if !line.starts_with('{') {
-                continue;
-            }
-            return serde_json::from_str::<Value>(line)
-                .with_context(|| format!("malformed JSON line while waiting for {what}: {line}"));
-        }
-    }
-}
-
-/// Read one JSON line from the proxy, killing it if the response does not arrive in time.
-///
-/// A timed-out read means the proxy is wedged, and leaving it running orphans it (and the server
-/// it wrapped) onto the inherited stderr for as long as the test binary lives.
-fn read_json_line(
-    child: &mut Child,
-    lines: &mut JsonLines,
-    timeout: Duration,
-    what: &str,
-) -> anyhow::Result<Value> {
-    lines.next_json(timeout, what).inspect_err(|_| {
-        let _ = child.kill();
-        let _ = child.wait();
-    })
-}
-
-/// A child that floods stdout with non-JSON must not be able to outrun the deadline.
-///
-/// The silent-child case and this one fail differently: there, no line ever arrives and
-/// `recv_timeout` reports `Timeout`; here lines arrive faster than they are skipped, so the
-/// channel is never empty when the receive is attempted, and `recv_timeout`'s optimistic
-/// `try_recv` hands back a queued line even at zero remaining duration. Only the explicit deadline
-/// check in `next_json` ends this run.
-///
-/// `yes` and not a shell `while` loop on purpose: a shell loop produces more slowly than this
-/// consumer skips, so the channel drains, the receive finds it empty, and the run bounds itself
-/// even without the deadline check. Reproducing the defect needs a producer that outruns the
-/// consumer, which is what makes this a regression test rather than a test that happens to pass.
-#[cfg(unix)]
-#[test]
-fn json_lines_deadline_holds_against_a_flood_of_non_json_lines() -> anyhow::Result<()> {
-    let timeout = Duration::from_secs(1);
-    let mut child = Command::new("yes")
-        .arg("not-json")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let mut lines = JsonLines::new(child.stdout.take().expect("stdout"));
-
-    let start = Instant::now();
-    let err = lines
-        .next_json(timeout, "a response that never comes")
-        .expect_err("a flood of non-JSON lines must not satisfy the read");
-    let elapsed = start.elapsed();
-
-    let _ = child.kill();
-    let _ = child.wait();
-
-    // Generous headroom over the 1s deadline: this asserts the deadline is enforced at all, not
-    // that it is precise, so a loaded CI machine does not turn a real bound into a flaky one.
-    assert!(
-        elapsed < timeout * 5,
-        "the deadline did not bound the read: gave up only after {elapsed:?} (timeout was {timeout:?})"
-    );
-    assert!(
-        err.to_string().contains("timed out"),
-        "expected a timeout failure, got: {err}"
-    );
-    Ok(())
-}
-
-fn wait_child_with_timeout(child: &mut Child, timeout: Duration) -> anyhow::Result<ExitStatus> {
-    let start = Instant::now();
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Ok(status);
-        }
-
-        if start.elapsed() > timeout {
-            let _ = child.kill();
-            let status = child.wait()?;
-            anyhow::bail!(
-                "child did not exit within {:?}; killed with status {status}",
-                timeout
-            );
-        }
-
-        std::thread::sleep(Duration::from_millis(25));
-    }
-}
-
 fn extract_structured_contract(resp: &Value) -> Option<&Value> {
     resp.get("result")
         .and_then(|r| {
@@ -501,14 +329,15 @@ enforcement:
 /// stand-in upstreams (`sh -c 'sleep 30'`, `/bin/cat`, `/usr/bin/true`) were driven through this
 /// exact request sequence out-of-band: none satisfies (2). `cat` is the interesting one, since it
 /// echoes the request and so does carry the probe's id, but has no `result.content[0].text`.
-fn assert_upstream_is_the_real_server(
-    child: &mut Child,
-    stdin: &mut dyn Write,
-    lines: &mut JsonLines,
-) -> anyhow::Result<()> {
-    send_line(
-        stdin,
-        &json!({
+fn assert_upstream_is_the_real_server(conn: &mut Conn) -> anyhow::Result<()> {
+    // `Conn` remembers the request it wrote, so a stalled probe names itself.
+    //
+    // `read_json`, not `read_response`: the latter skips frames carrying a `method`, and the
+    // property below is about the VERY NEXT frame. A proxy that forwarded the denied call and
+    // an upstream that answered with a notification would both be skipped past, turning the
+    // assertion into one that cannot fail for the reason it exists. The reader this replaced
+    // took the next frame, so this is also the faithful port.
+    conn.send(json!({
             "jsonrpc": "2.0",
             "id": UPSTREAM_PROBE_ID,
             "method": "tools/call",
@@ -520,14 +349,8 @@ fn assert_upstream_is_the_real_server(
                     "policy": PROBE_INNER_POLICY
                 }
             }
-        }),
-    )?;
-    let resp = read_json_line(
-        child,
-        lines,
-        RESPONSE_TIMEOUT,
-        "the wrapped assay-mcp-server's answer to the allowed upstream probe",
-    )?;
+    }));
+    let resp = conn.read_json();
 
     assert_eq!(
         resp.get("id").and_then(|v| v.as_str()),
@@ -603,7 +426,7 @@ enforcement:
 "#,
     )?;
 
-    let mut child = Command::new(&assay)
+    let child = Command::new(&assay)
         .args([
             "mcp",
             "wrap",
@@ -626,9 +449,9 @@ enforcement:
         .spawn()
         .with_context(|| format!("failed to spawn {}", assay.display()))?;
 
-    let mut stdin = child.stdin.take().expect("stdin");
-    let stdout = child.stdout.take().expect("stdout");
-    let mut lines = JsonLines::new(stdout);
+    // Declared after `tmp`, so it drops first: the child is reaped before TempDir teardown removes
+    // the --policy-root the wrapped server canonicalizes.
+    let mut conn = Conn::attach(child);
     let secret = "ghp_assay_fixture_DO_NOT_LEAK_0123456789";
 
     // Both calls carry the same token-like argument. The first resolves its policy and is actually
@@ -652,25 +475,11 @@ enforcement:
         })
     };
 
-    send_line(&mut stdin, &call("token-log-allowed", "read-file.yaml"))?;
-    let allowed_resp = read_json_line(
-        &mut child,
-        &mut lines,
-        RESPONSE_TIMEOUT,
-        "the tools/call response to request token-log-allowed (the normal, policy-resolving path)",
-    )?;
-    send_line(
-        &mut stdin,
-        &call("token-log-missing", "does-not-exist.yaml"),
-    )?;
-    let error_resp = read_json_line(
-        &mut child,
-        &mut lines,
-        RESPONSE_TIMEOUT,
-        "the tools/call response to request token-log-missing (the unresolvable-policy path)",
-    )?;
-    drop(stdin);
-    let status = wait_child_with_timeout(&mut child, Duration::from_secs(5))?;
+    conn.send(call("token-log-allowed", "read-file.yaml"));
+    let allowed_resp = conn.read_json();
+    conn.send(call("token-log-missing", "does-not-exist.yaml"));
+    let error_resp = conn.read_json();
+    let status = conn.shutdown();
     assert!(status.success(), "proxy exited with status {status}");
 
     // Normal path: the policy was found and evaluated, so redaction below is asserted on a
@@ -775,7 +584,7 @@ enforcement:
     )?;
 
     // Spawn the proxy wrap, pointing to the server binary directly (no PATH).
-    let mut child = Command::new(&assay)
+    let child = Command::new(&assay)
         .args([
             "mcp",
             "wrap",
@@ -792,9 +601,9 @@ enforcement:
         .spawn()
         .with_context(|| format!("failed to spawn {}", assay.display()))?;
 
-    let mut stdin = child.stdin.take().expect("stdin");
-    let stdout = child.stdout.take().expect("stdout");
-    let mut lines = JsonLines::new(stdout);
+    // Declared after `tmp`, so it drops first: the child is reaped before TempDir teardown removes
+    // the --policy-root the wrapped server canonicalizes.
+    let mut conn = Conn::attach(child);
 
     // tools/call -> "skill_check" should match *kill* and be denied by proxy
     let req = json!({
@@ -804,13 +613,8 @@ enforcement:
         "params": { "name": "skill_check", "arguments": {} }
     });
 
-    send_line(&mut stdin, &req)?;
-    let resp = read_json_line(
-        &mut child,
-        &mut lines,
-        RESPONSE_TIMEOUT,
-        "the tools/call response to the denied skill_check request",
-    )?;
+    conn.send(req);
+    let resp = conn.read_json();
 
     // Accept both transitional codes (old/new) while you converge
     let code = extract_error_code(&resp).unwrap_or_default();
@@ -821,13 +625,12 @@ enforcement:
 
     // The deny above is reached before the proxy dispatches upstream, so on its own it says
     // nothing about what is on the other end. Make the wrapped server answer for itself.
-    assert_upstream_is_the_real_server(&mut child, &mut stdin, &mut lines)?;
+    assert_upstream_is_the_real_server(&mut conn)?;
 
     // Close stdin and reap the proxy instead of killing it: a kill only reaches the `assay`
     // parent, orphaning the wrapped assay-mcp-server, which then races TempDir teardown and fails
     // its own --policy-root canonicalization on a directory that has just been deleted.
-    drop(stdin);
-    let status = wait_child_with_timeout(&mut child, Duration::from_secs(5))?;
+    let status = conn.shutdown();
     assert!(status.success(), "proxy exited with status {status}");
     Ok(())
 }
@@ -886,7 +689,7 @@ enforcement:
 "#,
     )?;
 
-    let mut child = Command::new(&assay)
+    let child = Command::new(&assay)
         .args([
             "mcp",
             "wrap",
@@ -902,9 +705,9 @@ enforcement:
         .stderr(Stdio::inherit())
         .spawn()?;
 
-    let mut stdin = child.stdin.take().expect("stdin");
-    let stdout = child.stdout.take().expect("stdout");
-    let mut lines = JsonLines::new(stdout);
+    // Declared after `tmp`, so it drops first: the child is reaped before TempDir teardown removes
+    // the --policy-root the wrapped server canonicalizes.
+    let mut conn = Conn::attach(child);
 
     // Violating path -> should be denied by schema
     let req = json!({
@@ -914,13 +717,8 @@ enforcement:
         "params": { "name": "read_file", "arguments": { "path": "/etc/passwd" } }
     });
 
-    send_line(&mut stdin, &req)?;
-    let resp = read_json_line(
-        &mut child,
-        &mut lines,
-        RESPONSE_TIMEOUT,
-        "the tools/call response to the schema-violating read_file request",
-    )?;
+    conn.send(req);
+    let resp = conn.read_json();
 
     let code = extract_error_code(&resp).unwrap_or_default();
     assert!(
@@ -930,13 +728,12 @@ enforcement:
 
     // The deny above is reached before the proxy dispatches upstream, so on its own it says
     // nothing about what is on the other end. Make the wrapped server answer for itself.
-    assert_upstream_is_the_real_server(&mut child, &mut stdin, &mut lines)?;
+    assert_upstream_is_the_real_server(&mut conn)?;
 
     // Close stdin and reap the proxy instead of killing it: a kill only reaches the `assay`
     // parent, orphaning the wrapped assay-mcp-server, which then races TempDir teardown and fails
     // its own --policy-root canonicalization on a directory that has just been deleted.
-    drop(stdin);
-    let status = wait_child_with_timeout(&mut child, Duration::from_secs(5))?;
+    let status = conn.shutdown();
     assert!(status.success(), "proxy exited with status {status}");
     Ok(())
 }
