@@ -613,11 +613,12 @@ jobs:
       # So assert the test actually executed rather than trusting the exit code.
       - name: Test MCP no-pass-through E2E (E6a.3)
         shell: bash
-        # Load-bearing, and measured rather than assumed: on the runner cargo colours its own
-        # `Running` line (`ESC[1mESC[92m     RunningESC[0m tests/...`), which is the line the guard
-        # below keys its per-binary block on. Without this pin the block is never entered, the
-        # tally comes back empty, and the step fails a passing test. libtest's own lines are plain
-        # either way — this is about cargo's, not libtest's.
+        # Defence in depth, not the guarantee — the awk below strips colour itself, and was
+        # measured green against the real coloured log from the run that failed without it. What
+        # this pin buys is a readable log and one less thing to reason about. The colour is real
+        # though: `Swatinem/rust-cache` exports CARGO_TERM_COLOR=always into $GITHUB_ENV, so cargo
+        # writes `ESC[1mESC[92m     RunningESC[0m tests/...` in every job using that action.
+        # libtest's own lines are plain regardless; this only ever concerned cargo's.
         env:
           CARGO_TERM_COLOR: never
         run: |
@@ -625,36 +626,40 @@ jobs:
           cargo test --locked -p assay-mcp-server --features test-outbound --no-fail-fast no_passthrough \
             2>&1 | tee "$RUNNER_TEMP/e6a3.log"
           # `cargo test` exits 0 when zero tests match, so the exit code above proves nothing ran
-          # wrong — not that anything ran. This asserts execution, and it asks libtest's own tally
-          # for this binary rather than reading the per-test line.
+          # wrong — not that anything ran. Two checks assert execution, and both must pass. Each
+          # can only add a failure, so neither can rescue the other into a false green.
           #
-          # Reading the per-test line is what five earlier versions of this guard did, and each
-          # got it wrong in one direction or the other. The reason is structural: libtest flushes
-          # `test NAME ... ` and its status separately, so anything this test's inherited server
-          # stderr writes in between lands on that line. Match the name loosely enough to survive
-          # that and you have taken arbitrary child output into the string you then search for a
-          # skip word; match it tightly and a split line reads as absence. The tally has neither
-          # problem — it is one line, written after the run, in a fixed shape.
+          # 1. A test by this NAME was reported. The tally in check 2 carries no test names, so on
+          #    its own it would accept any passing test the `no_passthrough` filter selects —
+          #    including a replacement that no longer proves the invariant. Presence only, never
+          #    the status word: libtest flushes `test NAME ... ` and its status separately, so this
+          #    test's inherited server stderr can land between them, and five earlier versions of
+          #    this guard died on exactly that. The name survives the split; the status does not.
+          if ! grep -qE '^test .*test_no_passthrough_e2e' "$RUNNER_TEMP/e6a3.log"; then
+            echo "::error::E6a.3: libtest reported no test named test_no_passthrough_e2e, so the invariant was never exercised. Either the test-outbound gate is misconfigured, or the test was renamed or removed."
+            exit 1
+          fi
+          # 2. That binary's own tally says everything ran and nothing was skipped. Default-deny,
+          #    so a shape this does not recognise cannot certify anything — including nextest,
+          #    which prints no such line, so migrating this step turns it red rather than quietly
+          #    stopping the check. `exit` after the first match keeps the value single-line: the
+          #    glob below is greedy across newlines, so a two-line tally could otherwise satisfy it
+          #    by taking the count from one line and the zeros from the next.
           #
-          # Default-deny: anything that is not positively "some passed, none failed, none ignored"
-          # is a failure, so a shape this does not recognise cannot certify the invariant. That
-          # includes nextest, which prints no such line; migrating this step means replacing this
-          # check, and it will go red until someone does rather than silently stop checking.
-          # Colour is stripped before matching rather than tolerated in the patterns. The pin above
-          # should already keep these lines plain; this is the second lock, because the failure it
-          # prevents is not symmetric. An escape ahead of `Running` that stops the block from
-          # OPENING just fails a passing test, but one that stops it from CLOSING hands this check
-          # the next binary's tally — the single way it could pass without the test running.
+          #    Colour is stripped here rather than relied on being absent upstream. Both awk rules
+          #    key on `Running`, and cargo colours every such line or none, so in practice an
+          #    escape stops the block opening and closing together and the result is an empty
+          #    tally — red, the safe direction. The strip removes even that noise.
           tally=$(awk '
             { gsub(/\033\[[0-9;]*m/, "") }
             /Running[[:space:]]+[^[:space:]]*no_passthrough_e2e/ { inblk = 1; next }
             /Running[[:space:]]/                                 { inblk = 0 }
-            inblk && /^test result:/                             { print }
+            inblk && /^test result:/                             { print; exit }
           ' "$RUNNER_TEMP/e6a3.log")
           case "$tally" in
             "test result: ok. "[1-9]*" passed; 0 failed; 0 ignored;"*) ;;
             *)
-              echo "::error::E6a.3 no-pass-through test did not execute, so the invariant was never exercised. libtest reported: ${tally:-<no result line for no_passthrough_e2e>}. Either the test-outbound gate is misconfigured, or the test is #[ignore]d, or this step no longer runs under libtest."
+              echo "::error::E6a.3 no-pass-through test did not execute, so the invariant was never exercised. libtest reported: ${tally:-<no result line for no_passthrough_e2e>}. Either the test is #[ignore]d, or this step no longer runs under libtest."
               exit 1
               ;;
           esac
