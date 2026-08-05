@@ -72,7 +72,10 @@ cleanup and checkout.
    tree OIDs. A pack in which any recorded gate is not `passed` is rejected,
    so `gates=all` means five gates ran rather than that the label said so. During the transition, recording the workflow
    run URL, commit SHA, selected gate, and result in the PR body or a PR comment
-   remains a compatibility fallback.
+   remains a compatibility fallback -- but only where no attested evidence was
+   available. A proof pack that was obtained and rejected on its contents is not
+   credited by the fallback, so failing verification is not equivalent to never
+   having been verified.
 4. Do not treat a delegated skip as success. In the delegated lane, exit `40`
    means the runner contract has drifted.
 5. Do not bypass required repository checks for runner-impacting changes.

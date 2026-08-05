@@ -337,7 +337,7 @@ def read_zip_member(
     return bytes(body), None
 
 
-def load_proof_pack_zip(data: bytes) -> tuple[ProofPackArtifact | None, tuple[str, ...]]:
+def load_proof_pack_zip(data: bytes) -> tuple[ProofPackArtifact | None, tuple[str, ...], bool]:
     if len(data) > PROOF_PACK_ARCHIVE_MAX_BYTES:
         return None, (
             f"proof artifact archive size {len(data)} exceeds limit "
@@ -412,12 +412,12 @@ def download_proof_pack_artifact(
     try:
         response = api.request("GET", f"/actions/runs/{run_id}/artifacts")
     except TRANSIENT_REQUEST_ERRORS as exc:
-        return None, (f"run {run_id}: could not list artifacts ({exc})",)
+        return None, (f"run {run_id}: could not list artifacts ({exc})",), False
     if not isinstance(response, dict):
-        return None, (f"run {run_id}: artifacts response is not an object",)
+        return None, (f"run {run_id}: artifacts response is not an object",), False
     raw_artifacts = response.get("artifacts")
     if not isinstance(raw_artifacts, list):
-        return None, (f"run {run_id}: artifacts response missing artifacts list",)
+        return None, (f"run {run_id}: artifacts response missing artifacts list",), False
 
     expected_name = proof_pack_artifact_name(run_id)
     candidates = [
@@ -428,20 +428,24 @@ def download_proof_pack_artifact(
         and artifact.get("expired") is not True
     ]
     if not candidates:
-        return None, (f"run {run_id}: proof artifact {expected_name!r} not found or expired",)
+        return None, (f"run {run_id}: proof artifact {expected_name!r} not found or expired",), False
 
     artifact = dict(candidates[0])
     download_url = artifact.get("archive_download_url")
     if not isinstance(download_url, str) or not download_url:
-        return None, (f"run {run_id}: proof artifact missing archive_download_url",)
+        return None, (f"run {run_id}: proof artifact missing archive_download_url",), False
     try:
         data = api.download(download_url, max_bytes=PROOF_PACK_ARCHIVE_MAX_BYTES)
     except DownloadLimitExceeded as exc:
-        return None, (f"run {run_id}: proof artifact exceeds size limit ({exc})",)
+        return None, (f"run {run_id}: proof artifact exceeds size limit ({exc})",), False
     except TRANSIENT_REQUEST_ERRORS as exc:
-        return None, (f"run {run_id}: could not download proof artifact ({exc})",)
+        return None, (f"run {run_id}: could not download proof artifact ({exc})",), False
+    # Reaching here means the bytes arrived. Anything load_proof_pack_zip
+    # refuses is evidence obtained and rejected, not evidence unavailable --
+    # the distinction fallback_applies keys on. Returned as a flag rather
+    # than inferred from diagnostic wording, which is not a contract.
     pack, diagnostics = load_proof_pack_zip(data)
-    return pack, tuple(f"run {run_id}: {line}" for line in diagnostics)
+    return pack, tuple(f"run {run_id}: {line}" for line in diagnostics), True
 
 
 def decode_dsse_statement(bundle: dict[str, object]) -> tuple[dict[str, object] | None, tuple[str, ...]]:
@@ -1559,9 +1563,18 @@ def find_valid_attested_proof(
             diagnostics.append(basic)
             continue
 
-        pack, pack_diagnostics = download_proof_pack_artifact(api, run_id)
+        pack, pack_diagnostics, pack_downloaded = download_proof_pack_artifact(api, run_id)
         if pack is None:
             diagnostics.extend(pack_diagnostics)
+            # An artifact that downloaded but would not parse is evidence that
+            # was obtained and rejected, not evidence that was unavailable.
+            # `load_proof_pack_zip` refuses nine content shapes -- not a zip,
+            # missing members, unreadable or oversized members, undecodable
+            # JSON -- and bucketing those as absence left the cheapest bypass
+            # open: emit an unparsable pack and be credited by the path that
+            # parses nothing.
+            if pack_downloaded:
+                evidence_rejected = True
             continue
 
         statement, statement_diagnostics = validate_attestation_statement(pack)
@@ -1591,7 +1604,15 @@ def find_valid_attested_proof(
         verification, verify_diagnostics = run_gh_attestation_verify(api, pack)
         if verification is None:
             diagnostics.extend(f"run {run_id}: {line}" for line in verify_diagnostics)
-            evidence_rejected = True
+            # `gh` missing, unable to exec, or unable to reach the attestation
+            # API is verification that could not be performed -- the case the
+            # fallback exists for. Only a verdict counts as rejection.
+            if not any(
+                marker in line
+                for line in verify_diagnostics
+                for marker in ("not available", "could not run", "no such host", "Timeout")
+            ):
+                evidence_rejected = True
             continue
         claim_diagnostics = validate_gh_attestation_claims(verification, pack.manifest, api)
         if claim_diagnostics:
@@ -1845,6 +1866,12 @@ def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) ->
     elif fallback_passed and valid_run is not None:
         details.append(f"Matched legacy delegated run proof: {valid_run.get('html_url')}")
 
+    if fallback_eligible and attested.evidence_rejected:
+        details.append(
+            "A recorded delegated run matches this head, but its attested proof pack\n"
+            "was rejected on its contents. The compatibility fallback is not applied\n"
+            "to a rejected pack; see the attested diagnostics above."
+        )
     detail = "\n\n".join(details)
     body = comment_body(classification, pr, passed, detail)
     maybe_comment(api, pr.number, comments, body, comment=comment)
@@ -1854,12 +1881,7 @@ def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) ->
         status_description = f"legacy delegated proof accepted: gates={classification.gate.label}"
     else:
         status_description = f"delegated proof required: gates={classification.gate.label}"
-        if fallback_eligible and attested.evidence_rejected:
-            details.append(
-                "A recorded delegated run matches this head, but its attested proof\n"
-                "pack was rejected on its contents. The compatibility fallback is not\n"
-                "applied to a rejected pack -- see the attested diagnostics above."
-            )
+
     maybe_status(api, pr.head_sha, passed, status_description, status=status)
 
     if passed:
@@ -1972,6 +1994,7 @@ def self_test() -> None:
     assert uncovered_content_provenance_files(["crates/assay-runner-core/src/lib.rs"]) == ()
     assert uncovered_content_provenance_files(["Cargo.lock"]) == ("Cargo.lock",)
     _test_gating_rule_count_is_derived()
+    _test_evidence_rejection_is_constructed_not_only_decided()
     _test_rejected_evidence_does_not_fall_back()
     _test_gate_execution_is_verified()
     _test_gate_selections_match_the_workflow()
@@ -2053,6 +2076,76 @@ def _test_gating_rule_count_is_derived() -> None:
     the number goes stale. That is exactly how "eleven" survived.
     """
     assert gating_rule_count() == 14, gating_rule_count()
+
+
+def _test_evidence_rejection_is_constructed_not_only_decided() -> None:
+    """`evidence_rejected` is set by the sites that mean rejection.
+
+    An earlier revision tested `fallback_applies` alone, with the flag
+    hardcoded in the fixture. Every one of the five sites that set it -- and all
+    five at once -- could then be deleted with the suite green: the decision was
+    covered and its construction was not. This drives the real
+    `find_valid_attested_proof` so the classification itself is pinned.
+    """
+    manifest_bad = {
+        "schema": PROOF_PACK_SCHEMA,
+        "kind": PROOF_PACK_KIND,
+        "claim_ceiling": PROOF_PACK_CLAIM_CEILING,
+        "inputs": {"gates": "all", "build_ebpf": "true"},
+        "gates": [{"gate": "kernel-only", "status": "missing"}],
+        "source": {},
+    }
+    pr = PullRequest(
+        number=1, title="", body="", author_login="x", head_sha="abc123", files=()
+    )
+
+    class _Api:
+        repo = "Rul1an/assay"
+
+        def __init__(self, artifacts: object, blob: bytes = b"") -> None:
+            self._artifacts = artifacts
+            self._blob = blob
+
+        def download(self, url: str, max_bytes: int | None = None) -> bytes:
+            return self._blob
+
+        def request(self, method: str, path: str, payload: object = None) -> object:
+            if "/artifacts" in path:
+                return self._artifacts
+            return {
+                "name": DELEGATED_WORKFLOW_NAME,
+                "event": "workflow_dispatch",
+                "head_sha": "abc123",
+                "conclusion": "success",
+                "id": 1,
+                "html_url": "u",
+            }
+
+    present = {
+        "artifacts": [
+            {
+                "name": "assay-runner-delegated-proof-pack-1",
+                "archive_download_url": "x",
+                "size_in_bytes": 10,
+            }
+        ]
+    }
+
+    # Nothing to download is absence: the fallback keeps its purpose.
+    absent = find_valid_attested_proof(_Api({"artifacts": []}), ["1"], pr, Gate.ALL)
+    assert absent.accepted is False
+    assert absent.evidence_rejected is False, absent.diagnostics
+    assert fallback_applies(absent, True) is True
+
+    # Downloaded and unparsable is evidence obtained and rejected. This was the
+    # cheapest bypass: emit a pack that will not parse and be credited by the
+    # path that parses nothing.
+    broken = find_valid_attested_proof(
+        _Api(present, b"not a zip"), ["1"], pr, Gate.ALL
+    )
+    assert broken.accepted is False
+    assert broken.evidence_rejected is True, broken.diagnostics
+    assert fallback_applies(broken, True) is False
 
 
 def _test_rejected_evidence_does_not_fall_back() -> None:
