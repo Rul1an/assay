@@ -958,6 +958,37 @@ runs:
         echo "pack_status=success" >> $GITHUB_OUTPUT
         echo "pack_error_kind=" >> $GITHUB_OUTPUT
 
+        # Gate on compliance-pack findings.
+        #
+        # The lint loop above passes --fail-on none deliberately, so that a non-zero exit there
+        # means a pack-loading or runtime fault and never a policy finding. That left pack findings
+        # gating nothing at all: the ERRORS/WARNS counters feeding the fail_on case are computed by
+        # an un-packed lint, so a compliance finding never reached a threshold.
+        #
+        # This runs after the outputs above so a gate failure still leaves pack_score, pack_applied
+        # and pack_status readable by later steps, and exits 1 -- a policy failure, distinct from
+        # the exit 3 this step uses for pack faults.
+        #
+        # $FAIL_ON goes to the CLI unmodified. The CLI accepts "warning" as an alias of "warn";
+        # the bash case earlier in this file does not, which is tracked separately.
+        if [ "$FAIL_ON" != "none" ]; then
+          PACK_GATE_HITS=0
+          while IFS= read -r bundle || [ -n "$bundle" ]; do
+            [ -z "$bundle" ] && continue
+            set +e
+            assay evidence lint --fail-on "$FAIL_ON" --pack "$PACKS" "$bundle" >/dev/null 2>&1
+            GATE_CODE=$?
+            set -e
+            if [ "$GATE_CODE" -eq 1 ]; then
+              echo "::error::Compliance pack findings at or above '$FAIL_ON' in $bundle"
+              PACK_GATE_HITS=$((PACK_GATE_HITS + 1))
+            fi
+          done < "$BUNDLES_FILE"
+          if [ "$PACK_GATE_HITS" -gt 0 ]; then
+            exit 1
+          fi
+        fi
+
         # Store disclaimer for Job Summary (multiline safe)
         if [ -n "$DISCLAIMER" ]; then
           {
