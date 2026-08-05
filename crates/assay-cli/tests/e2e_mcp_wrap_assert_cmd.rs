@@ -60,101 +60,99 @@ fn assay_mcp_server_bin() -> PathBuf {
 /// if there is one, and the profile directory.
 ///
 /// Build the nested binary into the same place, so `cargo test --release` does
-/// not trigger a second full dependency build in the other profile.
+/// not trigger a second full dependency build in the other profile, and a
+/// cross-compiled parent does not get a host binary on the other end of the pipe.
 ///
-/// `CARGO_BIN_EXE_assay` is `<target-dir>/<profile-dir>/assay`, or
-/// `<target-dir>/<triple>/<profile-dir>/assay` when the parent passed `--target`.
-/// Reading the parent directory name alone cannot tell those apart — under
-/// `--target` it still yields `debug`, and the nested build would then quietly
-/// produce a *host* binary, in a different artifact tree from the one under
-/// test. Stripping the target directory shows which shape it is.
+/// The artifact root comes from `CARGO_TARGET_TMPDIR`, which Cargo sets to
+/// `<target-dir>/[<triple>/]tmp` for integration tests. Its parent is therefore
+/// exactly the directory holding the profile directories: absolute, and — the
+/// property that matters here — independent of any current working directory.
 ///
-/// The target directory comes from `cargo metadata`, not from reading
-/// `CARGO_TARGET_DIR`, and both paths are canonicalised before comparing, because
-/// `strip_prefix` is lexical. Two ways the env var alone gets this wrong, both
-/// verified against real Cargo output: a *relative* value is resolved by Cargo
-/// against the directory cargo was invoked from, not the package root a test runs
-/// in, so `target/wt` would canonicalise here to `crates/assay-cli/target/wt` and
-/// never match; and a symlinked one may be reported canonicalised by Cargo (on
-/// macOS `/tmp` is `/private/tmp`) while the env var still holds the symlink. A
-/// `build.target-dir` in `.cargo/config.toml` is invisible to the env var
-/// entirely. Each of those silently dropped the triple.
+/// Two earlier attempts got this wrong in opposite directions, so the reason is
+/// worth writing down. Reading `CARGO_TARGET_DIR` and canonicalising it resolves
+/// a relative value against *this test's* cwd, the package root. Asking
+/// `cargo metadata` resolves it against whatever cwd that call is made from.
+/// Each is correct only when the parent cargo happened to be invoked from the
+/// matching directory, and each silently drops the triple when it was not —
+/// building a host binary while the test runs a cross-compiled one, which is the
+/// exact failure this function exists to prevent. `CARGO_TARGET_TMPDIR` carries
+/// no such precondition, and it also reflects `--target-dir`, a per-invocation
+/// flag that `cargo metadata` cannot see at all.
 ///
-/// Falls back to the profile-dir-only reading if even that does not line up.
-/// That reading is correct whenever `--target` is absent, which is every
-/// invocation in this repo today, and wrong only under `--target`, where it
-/// would build a host binary while the test runs a cross-compiled one. The
-/// fallback is therefore stated rather than hidden — but asking Cargo removes
-/// the cases that actually reached it.
-fn target_and_profile(workspace_root: &Path) -> (Option<String>, String) {
-    let bin_exe_raw = Path::new(env!("CARGO_BIN_EXE_assay"));
-    let dir_name = |p: Option<&Path>| {
-        p.and_then(|p| p.file_name())
-            .and_then(|n| n.to_str())
-            .map(str::to_owned)
-    };
+/// Whether the last component of that root is a triple is settled against
+/// `rustc --print target-list`, not by pattern-matching a directory name. The
+/// only false positive is a target directory named exactly like a rustc target.
+fn target_and_profile() -> (Option<String>, String) {
+    let bin_exe = Path::new(env!("CARGO_BIN_EXE_assay"));
     // `debug` is the fallback rather than an error: a wrong profile costs build
-    // time, and there is no reading of this path that should fail a test.
+    // time, and no reading of this path should turn into a test failure.
     let profile_only = || {
         (
             None,
-            dir_name(bin_exe_raw.parent()).unwrap_or_else(|| "debug".into()),
+            bin_exe
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .unwrap_or("debug")
+                .to_owned(),
         )
     };
 
-    // Ask Cargo where the target directory is, rather than reading the env var
-    // and hoping. A relative `CARGO_TARGET_DIR` is resolved by Cargo against the
-    // directory *cargo* was invoked from, which is not the package root a test
-    // runs in — so reading it here and canonicalising against our own cwd turns
-    // `target/wt` into `crates/assay-cli/target/wt` and the prefix never matches.
-    // `cargo metadata` reports an absolute `target_directory` and settles it,
-    // including a `build.target-dir` set in config.toml, which the env var alone
-    // never sees. It is one extra process per test binary, inside the cached
-    // build, and this is a file about not guessing at Cargo's layout.
-    let target_dir =
-        resolved_target_dir(workspace_root).unwrap_or_else(|| workspace_root.join("target"));
-    // Canonicalising needs the paths to exist. They do: the binary is what Cargo
-    // just built, and the target dir contains it. Fall back rather than fail.
+    let Some(artifact_root) = Path::new(env!("CARGO_TARGET_TMPDIR")).parent() else {
+        return profile_only();
+    };
+    // Both paths come from Cargo in the same run, so they already agree;
+    // canonicalise anyway rather than let a lexical mismatch drop the triple.
     let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-    let (bin_exe, target_dir) = (canon(bin_exe_raw), canon(&target_dir));
-    let Ok(rel) = bin_exe.strip_prefix(&target_dir) else {
+    let (canon_bin, canon_root) = (canon(bin_exe), canon(artifact_root));
+    let Ok(rel) = canon_bin.strip_prefix(&canon_root) else {
         return profile_only();
     };
 
-    // rel is `<profile>/assay` or `<triple>/<profile>/assay`.
+    // `rel` is `<profile>/assay`: the artifact root has already absorbed the triple.
     let mut components: Vec<_> = rel
         .components()
         .filter_map(|c| c.as_os_str().to_str())
         .collect();
     components.pop(); // the file name
-    match components[..] {
-        [profile] => (None, profile.to_owned()),
-        [triple, profile] => (Some(triple.to_owned()), profile.to_owned()),
-        _ => profile_only(),
-    }
+    let [profile] = components[..] else {
+        return profile_only();
+    };
+
+    let triple = artifact_root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .filter(|n| is_rustc_target(n))
+        .map(str::to_owned);
+    (triple, profile.to_owned())
 }
 
-/// Cargo's own answer for where build artifacts go, absolute and already
-/// accounting for `CARGO_TARGET_DIR` and `build.target-dir`.
-///
-/// Returns `None` rather than failing: a wrong target directory costs a rebuild
-/// in the wrong place, and no reading of this should turn into a test failure.
-fn resolved_target_dir(workspace_root: &Path) -> Option<PathBuf> {
-    let mut cmd = Command::new(cargo_bin());
-    cmd.current_dir(workspace_root).args([
-        "metadata",
-        "--format-version",
-        "1",
-        "--no-deps",
-        "--offline",
-    ]);
-    strip_cargo_crate_env(&mut cmd);
-    let out = cmd.output().ok()?;
-    if !out.status.success() {
-        return None;
+/// Whether `name` is a target triple rustc knows, rather than someone's choice of
+/// directory name. One `rustc --print target-list` per test process, and only
+/// when the name could plausibly be a triple at all.
+fn is_rustc_target(name: &str) -> bool {
+    if !name.contains('-') {
+        return false;
     }
-    let meta: Value = serde_json::from_slice(&out.stdout).ok()?;
-    meta.get("target_directory")?.as_str().map(PathBuf::from)
+    static TARGETS: OnceLock<Vec<String>> = OnceLock::new();
+    TARGETS
+        .get_or_init(|| {
+            let rustc = option_env!("RUSTC").unwrap_or("rustc");
+            Command::new(rustc)
+                .args(["--print", "target-list"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| {
+                    String::from_utf8_lossy(&o.stdout)
+                        .lines()
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .iter()
+        .any(|t| t == name)
 }
 
 fn build_assay_mcp_server() -> anyhow::Result<PathBuf> {
@@ -164,7 +162,7 @@ fn build_assay_mcp_server() -> anyhow::Result<PathBuf> {
         .and_then(|p| p.parent())
         .context("failed to resolve workspace root from CARGO_MANIFEST_DIR")?;
 
-    let (target_triple, profile_dir) = target_and_profile(workspace_root);
+    let (target_triple, profile_dir) = target_and_profile();
 
     let cargo = cargo_bin();
     let mut cmd = Command::new(cargo);
@@ -496,8 +494,10 @@ enforcement:
 /// of this file got wrong. Against the real test binary: renaming the server's `assay_check_args`
 /// arm fails both fixtures on (2), and making the server exit immediately fails them on the read;
 /// removing the proxy's skip-the-forward on a blocked call fails them on (1), and on nothing else
-/// in this file. Substituting a fake at the binary's *path* proves nothing either way — the nested
-/// build in [`assay_mcp_server_bin`] restores the real binary before the test spawns it — so the
+/// in this file. Substituting a fake at the binary's *path* works only if its mtime is preserved:
+/// [`assay_mcp_server_bin`] asks Cargo, and Cargo's freshness check reads the fingerprint rather
+/// than the artifact, so a same-mtime fake survives and a naive `cp` is silently overwritten. That
+/// is a trap for the next person mutation-testing this file, which is why the
 /// stand-in upstreams (`sh -c 'sleep 30'`, `/bin/cat`, `/usr/bin/true`) were driven through this
 /// exact request sequence out-of-band: none satisfies (2). `cat` is the interesting one, since it
 /// echoes the request and so does carry the probe's id, but has no `result.content[0].text`.
