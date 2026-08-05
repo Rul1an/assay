@@ -104,9 +104,13 @@ The workflow keeps `pull-requests: write` while the transition comment channel
 exists. Empirically, `issues: write` plus `pull-requests: read` is not enough to
 post or update PR comments on this repository.
 
-The executable path mapping lives in
-`scripts/ci/assay_runner_lane_check.py` and must mirror the decision table on
-this page. Changes to this contract and changes to the classifier must land in
+The executable path mapping lives in `classify_file` in
+`scripts/ci/assay_runner_lane_check.py`, which is the source of truth for gating
+and must mirror the decision table on this page. `assay_runner_gated_paths.json`
+declares two of its fourteen rules and is not the contract. For the complete
+current answer run `python3 scripts/ci/assay_runner_lane_check.py
+--explain-gating`; `scripts/ci/assay_runner_gating_map.txt` is the generated
+per-file map that a pre-commit hook keeps in step. Changes to this contract and changes to the classifier must land in
 the same PR; the helper's `--self-test` is the drift canary for the known
 runner-impacting surfaces.
 

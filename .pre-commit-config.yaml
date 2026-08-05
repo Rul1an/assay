@@ -122,6 +122,16 @@ repos:
         # The Rust producer's parity tests read `derivation-parity.json`, so the emitter and the
         # committed vectors have to stay in step; nothing else regenerates them.
         files: ^(scripts/experiments/aee_landlock_seal_fixture\.py|scripts/experiments/fixtures/aee-landlock-seal/.*|scripts/ci/check-aee-seal-fixture-drift\.sh|crates/assay-cli/src/aee_seal\.rs|\.pre-commit-config\.yaml)$
+      - id: runner-gating-map-drift
+        name: Runner gating map drift
+        entry: bash scripts/ci/check-runner-gating-map-drift.sh
+        language: system
+        pass_filenames: false
+        # No `files:` filter on purpose. The map is derived from `git ls-files`,
+        # so its input set is the whole tree while any trigger list is a handful
+        # of paths -- adding a file under `runner-fixtures/` changed the map and
+        # skipped the hook. The check costs ~0.2s, which is cheaper than a
+        # trigger list that has to be kept in step with the gated surface.
       - id: fuzz-lane-contract-self-test
         name: Fuzz lane contract
         entry: bash scripts/ci/test-fuzz-lane-contract.sh
