@@ -214,6 +214,10 @@ jobs:
             echo "=== runner-spike delegated gate: ${label} ==="
             rm -rf "$gate_dir"
             mkdir -p "$gate_dir"
+            # Record which command this gate runs, as data the pack can attest.
+            # Without it the gate key binds to a script only through this file's
+            # case branch, which the proof cannot speak about (#2041).
+            printf '%s\n' "${script#"$PWD/"}" > "$gate_dir/script.txt"
             set +e
             sudo -E env \
               "PATH=$PATH" \

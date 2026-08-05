@@ -1029,6 +1029,52 @@ def gate_selections() -> dict[str, tuple[str, ...]]:
     return dict(_gate_selections_cached())
 
 
+def gate_command_diagnostics(manifest: dict[str, object]) -> tuple[str, ...]:
+    """Reject a proof whose gates ran something other than their pinned script.
+
+    #2038 pinned gate key to script name in `GATE_SCRIPTS` and asserted it
+    against the workflow's `case` branch -- parity between two files a PR can
+    edit, checked by a third that has to move in step. The proof itself, the
+    thing that is signed, said nothing about which command ran.
+
+    The pack now records the script each gate executed, so this checks the pin
+    against attested evidence instead of against workflow text.
+
+    Path only. Verifying the recorded digest against the blob at the head is a
+    content-provenance question and lives with the tree comparison, which is
+    where the code that resolves refs already is; doing it here would put a git
+    lookup inside manifest-shape validation.
+
+    A pack without the field is rejected rather than tolerated: every pack
+    predating this change is already refused by the tree comparison, since this
+    change touches `scripts/ci` and the delegated workflow.
+    """
+    raw = manifest.get("gates")
+    if not isinstance(raw, list):
+        return ()
+
+    diagnostics: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        gate = str(entry.get("gate") or "")
+        expected = GATE_SCRIPTS.get(gate)
+        if expected is None:
+            continue
+        script = entry.get("script")
+        if not isinstance(script, dict) or not script.get("path"):
+            diagnostics.append(f"proof manifest gate {gate!r} records no script")
+            continue
+        recorded = str(script["path"])
+        if recorded.rsplit("/", 1)[-1] != expected:
+            diagnostics.append(
+                f"proof manifest gate {gate!r} ran {recorded!r}, pinned as {expected!r}"
+            )
+        elif not str(script.get("sha256") or ""):
+            diagnostics.append(f"proof manifest gate {gate!r} records {recorded!r} with no digest")
+    return tuple(diagnostics)
+
+
 def gate_execution_diagnostics(manifest: dict[str, object], label: str) -> tuple[str, ...]:
     """Reject a proof whose recorded gates did not all pass.
 
@@ -1524,6 +1570,7 @@ def validate_proof_manifest_semantics(
             )
         else:
             diagnostics.extend(gate_execution_diagnostics(manifest, gate))
+            diagnostics.extend(gate_command_diagnostics(manifest))
         if inputs.get("build_ebpf") != "true":
             diagnostics.append("proof manifest inputs.build_ebpf must be 'true'")
 
@@ -1972,6 +2019,7 @@ def self_test() -> None:
     assert uncovered_content_provenance_files(["crates/assay-runner-core/src/lib.rs"]) == ()
     assert uncovered_content_provenance_files(["Cargo.lock"]) == ("Cargo.lock",)
     _test_gating_rule_count_is_derived()
+    _test_gate_commands_are_bound_to_their_scripts()
     _test_rejected_evidence_does_not_fall_back()
     _test_gate_execution_is_verified()
     _test_gate_selections_match_the_workflow()
@@ -2053,6 +2101,31 @@ def _test_gating_rule_count_is_derived() -> None:
     the number goes stale. That is exactly how "eleven" survived.
     """
     assert gating_rule_count() == 14, gating_rule_count()
+
+
+def _test_gate_commands_are_bound_to_their_scripts() -> None:
+    """A gate is credited only for running the script it is pinned to.
+
+    Calls the production function, so removing the rule fails here.
+    """
+    def diagnose(script: object) -> tuple[str, ...]:
+        return gate_command_diagnostics(
+            {"gates": [{"gate": "kernel-only", "status": "passed", "script": script}]}
+        )
+
+    good = {"path": f"scripts/ci/{GATE_SCRIPTS['kernel-only']}", "sha256": "sha256:" + "b" * 64}
+    assert diagnose(good) == ()
+
+    assert "records no script" in diagnose(None)[0]
+    assert "records no script" in diagnose({})[0]
+    assert "records no script" in diagnose("scripts/ci/whatever.sh")[0]
+    assert "pinned as" in diagnose(
+        {"path": f"scripts/ci/{GATE_SCRIPTS['kernel-policy']}", "sha256": "sha256:" + "b" * 64}
+    )[0]
+    assert "no digest" in diagnose({"path": good["path"]})[0]
+
+    # A gate the pin does not know is left to gate_execution_diagnostics.
+    assert gate_command_diagnostics({"gates": [{"gate": "unknown", "script": None}]}) == ()
 
 
 def _test_rejected_evidence_does_not_fall_back() -> None:
@@ -2353,7 +2426,15 @@ def _test_attested_proof_pack_helpers() -> None:
         },
         "inputs": {"gates": "all", "build_ebpf": "true"},
         "gates": [
-            {"gate": name, "status": "passed"} for name in gate_selections()["all"]
+            {
+                "gate": name,
+                "status": "passed",
+                "script": {
+                    "path": f"scripts/ci/{GATE_SCRIPTS[name]}",
+                    "sha256": "sha256:" + "b" * 64,
+                },
+            }
+            for name in gate_selections()["all"]
         ],
         "content_provenance": {"path_trees": {}},
         "proof_pack": {

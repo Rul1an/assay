@@ -107,12 +107,38 @@ def gate_status(gate_dir: Path) -> str:
     return "incomplete"
 
 
+def gate_script(gate_dir: Path, proof_root: Path) -> dict[str, Any] | None:
+    """Which command this gate ran, and the digest of that file as it ran.
+
+    `run_gate` writes the repo-relative script path into the gate directory
+    before executing it. Recording it here makes the pack state what each gate
+    name executed, instead of leaving that binding in a workflow file the proof
+    cannot speak about (#2041).
+
+    The digest is of the file on the delegated host at execution time, so a
+    verifier can tie the gate to a blob rather than to a path that may since
+    have changed.
+    """
+    marker = gate_dir / "script.txt"
+    if not marker.exists():
+        return None
+    relative = marker.read_text(encoding="utf-8").strip()
+    if not relative:
+        return None
+    entry: dict[str, Any] = {"path": relative}
+    source = script_repo_root() / relative
+    if source.is_file():
+        entry["sha256"] = sha256_file(source)
+    return entry
+
+
 def collect_gate(gate: str, proof_root: Path, output_root: Path) -> dict[str, Any]:
     gate_dir = proof_root / "gates" / gate
     status = gate_status(gate_dir)
     entry: dict[str, Any] = {
         "gate": gate,
         "status": status,
+        "script": gate_script(gate_dir, proof_root),
         "archives": [],
         "selected_json": [],
         "pass_lines": [],
