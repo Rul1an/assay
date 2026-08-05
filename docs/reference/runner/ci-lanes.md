@@ -70,20 +70,14 @@ cleanup and checkout.
    the GitHub artifact attestation, the proof-pack subjects, the selected gate,
    and the gated-path tree OIDs. During the transition, recording the workflow
    run URL, commit SHA, selected gate, and result in the PR body or a PR comment
-   remains a compatibility fallback -- but only where GitHub's artifact listing
-   shows no live proof pack. Once the listing names one, every later failure is
-   a verdict about that evidence and the fallback does not apply, so failing
-   verification is not equivalent to never having been verified. A Sigstore or
-   attestation-API outage therefore fails closed rather than falling back; that
-   is deliberate, and matches `ErrorClass`, which has no "could not check"
-   class.
-
-   What this catches and what it does not: a proof pack that was presented and
-   did not hold up is no longer credited. An author who never presents one still
-   reaches the fallback, because the upload step uses `if-no-files-found: warn`
-   and the delegated workflow runs the definition on the dispatched ref. That
-   case is bound by the lane classification requiring a delegated gate at all,
-   and by review of the diff to the upload step.
+   is no longer sufficient on its own. Absence of evidence is not inferred from
+   text the author writes: the delegated workflow uploads with
+   `if-no-files-found: warn` and runs the definition on the dispatched ref, so
+   producing no artifact is free. If verification genuinely could not be
+   performed -- retention expired, an attestation outage, a run predating the
+   attested lane -- dispatch `Assay-Runner Lane Check` with `override_reason`.
+   That records who decided and why in the commit status. It does not make
+   proceeding without evidence safe; it makes it attributable.
 4. Do not treat a delegated skip as success. In the delegated lane, exit `40`
    means the runner contract has drifted.
 5. Do not bypass required repository checks for runner-impacting changes.

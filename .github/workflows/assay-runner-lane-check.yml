@@ -12,6 +12,14 @@ on:
         description: "Pull request number to classify"
         required: true
         type: number
+      override_reason:
+        description: >-
+          Record that verification could not be performed, and why. Credits the
+          PR without a proof pack. Honoured only on this privileged dispatch,
+          which runs from main and requires write access, so the decision is
+          attributable to the actor who made it.
+        required: false
+        type: string
       expected_head_sha:
         description: "Expected PR head SHA"
         required: false
@@ -79,6 +87,10 @@ jobs:
         shell: bash
         env:
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+          # Only from workflow_dispatch. A pull_request run has no inputs, so a
+          # PR cannot set this for itself.
+          LANE_OVERRIDE_REASON: ${{ github.event_name == 'workflow_dispatch' && inputs.override_reason || '' }}
+          LANE_OVERRIDE_ACTOR: ${{ github.event_name == 'workflow_dispatch' && github.actor || '' }}
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ steps.pr.outputs.pr_number }}

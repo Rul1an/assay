@@ -119,11 +119,6 @@ class AttestedProofCheck:
     accepted: bool
     run: dict[str, object] | None
     diagnostics: tuple[str, ...]
-    # True when GitHub's artifact listing showed a live proof pack for one of
-    # the runs considered. The legacy fallback exists for evidence that is not
-    # there; once the substrate says it is there, every later failure is a
-    # verdict about evidence rather than a report of its absence.
-    evidence_existed: bool = False
 
 
 @dataclass(frozen=True)
@@ -412,12 +407,12 @@ def download_proof_pack_artifact(
     try:
         response = api.request("GET", f"/actions/runs/{run_id}/artifacts")
     except TRANSIENT_REQUEST_ERRORS as exc:
-        return None, (f"run {run_id}: could not list artifacts ({exc})",), False
+        return None, (f"run {run_id}: could not list artifacts ({exc})",)
     if not isinstance(response, dict):
-        return None, (f"run {run_id}: artifacts response is not an object",), False
+        return None, (f"run {run_id}: artifacts response is not an object",)
     raw_artifacts = response.get("artifacts")
     if not isinstance(raw_artifacts, list):
-        return None, (f"run {run_id}: artifacts response missing artifacts list",), False
+        return None, (f"run {run_id}: artifacts response missing artifacts list",)
 
     expected_name = proof_pack_artifact_name(run_id)
     candidates = [
@@ -428,23 +423,20 @@ def download_proof_pack_artifact(
         and artifact.get("expired") is not True
     ]
     if not candidates:
-        return None, (f"run {run_id}: proof artifact {expected_name!r} not found or expired",), False
+        return None, (f"run {run_id}: proof artifact {expected_name!r} not found or expired",)
 
     artifact = dict(candidates[0])
     download_url = artifact.get("archive_download_url")
     if not isinstance(download_url, str) or not download_url:
-        return None, (f"run {run_id}: proof artifact missing archive_download_url",), True
+        return None, (f"run {run_id}: proof artifact missing archive_download_url",)
     try:
         data = api.download(download_url, max_bytes=PROOF_PACK_ARCHIVE_MAX_BYTES)
     except DownloadLimitExceeded as exc:
-        return None, (f"run {run_id}: proof artifact exceeds size limit ({exc})",), True
+        return None, (f"run {run_id}: proof artifact exceeds size limit ({exc})",)
     except TRANSIENT_REQUEST_ERRORS as exc:
-        return None, (f"run {run_id}: could not download proof artifact ({exc})",), True
-    # GitHub's listing named a live artifact, so evidence existed for this run
-    # whatever happens to it from here. That answer comes from the substrate,
-    # not from parsing bytes the pull request author supplied.
+        return None, (f"run {run_id}: could not download proof artifact ({exc})",)
     pack, diagnostics = load_proof_pack_zip(data)
-    return pack, tuple(f"run {run_id}: {line}" for line in diagnostics), True
+    return pack, tuple(f"run {run_id}: {line}" for line in diagnostics)
 
 
 def decode_dsse_statement(bundle: dict[str, object]) -> tuple[dict[str, object] | None, tuple[str, ...]]:
@@ -1460,7 +1452,6 @@ def find_valid_attested_proof(
     expected: Gate,
 ) -> AttestedProofCheck:
     diagnostics: list[str] = []
-    evidence_existed = False
     for run_id in run_ids:
         try:
             run = dict(api.request("GET", f"/actions/runs/{run_id}"))
@@ -1472,8 +1463,7 @@ def find_valid_attested_proof(
             diagnostics.append(basic)
             continue
 
-        pack, pack_diagnostics, artifact_existed = download_proof_pack_artifact(api, run_id)
-        evidence_existed = evidence_existed or artifact_existed
+        pack, pack_diagnostics = download_proof_pack_artifact(api, run_id)
         if pack is None:
             diagnostics.extend(pack_diagnostics)
             continue
@@ -1508,8 +1498,8 @@ def find_valid_attested_proof(
             diagnostics.extend(f"run {run_id}: {line}" for line in claim_diagnostics)
             continue
 
-        return AttestedProofCheck(True, run, tuple(diagnostics), evidence_existed)
-    return AttestedProofCheck(False, None, tuple(diagnostics), evidence_existed)
+        return AttestedProofCheck(True, run, tuple(diagnostics))
+    return AttestedProofCheck(False, None, tuple(diagnostics))
 
 
 def recorded_gate_ok(text: str, expected: Gate) -> bool:
@@ -1672,43 +1662,31 @@ def maybe_status(
         raise
 
 
-def fallback_applies(attested: AttestedProofCheck, eligible: bool) -> bool:
-    """Whether the legacy fallback may credit this PR.
+def recorded_override() -> tuple[str, str] | None:
+    """A maintainer's recorded decision to proceed without a proof pack.
 
-    The fallback exists for evidence that is not there: retention expired, a run
-    predating the attested lane, the artifacts API unreachable. It must not
-    cover evidence that is there and did not hold up, or failing verification
-    becomes no worse than never being verified (#2040).
+    The compatibility fallback used to be an inference: the code concluded that
+    no evidence was available, partly from the PR body. That inference cannot be
+    made safely. GitHub's artifact listing is the only substrate signal about
+    whether evidence exists, and while it cannot be forged *positive*, an author
+    needs it *negative* -- and negative is free, because the delegated workflow
+    uploads with `if-no-files-found: warn` and runs the definition on the
+    dispatched ref. Measured before this replaced it.
 
-    The line is GitHub's artifact listing, and it is drawn once. An earlier
-    attempt set a flag at six separate failure sites and classified two of them
-    by matching words in `gh`'s stderr -- which echoes the malformed value out
-    of the pack, so a pull request author could put a marker string in their own
-    bundle and buy the fallback. Anything the interested party writes is the
-    wrong input for this decision. The listing is not: it comes from the
-    substrate, it carries `expired`, and it answers the only question that
-    matters here -- was there evidence at all.
+    So absence stops being deduced and becomes authorized. `override_reason` is
+    an input on the privileged `workflow_dispatch`, which runs from `main`, holds
+    `statuses: write`, and never executes helper code from the PR ref. A
+    `pull_request` run carries no inputs, so a PR cannot set it for itself.
 
-    Consequence, stated because it is a real cost: once the listing names a live
-    artifact, a Sigstore outage fails closed rather than falling back. That is
-    the current guidance for an unreachable verifier, and it matches this
-    repository's own `ErrorClass`, which has no "could not check" class -- in
-    the evidence path every failure is a verdict.
-
-    Bound, stated because it limits what this can claim: the listing cannot be
-    forged *positive*, but an author needs it *negative*, and negative is free.
-    The delegated workflow uploads with `if-no-files-found: warn` and is
-    `workflow_dispatch`-only, so it runs the definition on the dispatched ref --
-    the author's branch. Not producing an artifact leaves the run successful and
-    the listing empty. This therefore catches a proof that was presented and did
-    not hold up; it does not catch an author who never presents one. What binds
-    that case is `classify_file` requiring a delegated gate at all, and review of
-    the diff to the upload step, which is content-addressed.
-
-    Related bound: `run_ids` comes from the PR body and comments, so the set this
-    accumulates over is author-chosen. Dropping a run link drops its evidence.
+    This does not make proceeding without evidence safe. It makes it
+    attributable: retention expiry, a Sigstore outage and a run predating the
+    attested lane all still have a path, and that path now names who took it and
+    why.
     """
-    return eligible and not attested.evidence_existed
+    reason = os.environ.get("LANE_OVERRIDE_REASON", "").strip()
+    if not reason:
+        return None
+    return os.environ.get("LANE_OVERRIDE_ACTOR", "").strip() or "unknown", reason
 
 
 def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) -> int:
@@ -1745,11 +1723,8 @@ def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) ->
 
     attested = find_valid_attested_proof(api, run_ids, pr, classification.gate)
     valid_run, run_diagnostics = find_valid_delegated_run(api, run_ids, pr.head_sha)
-    sha_ok = text_mentions_head_sha(text, pr.head_sha)
-    gate_ok = recorded_gate_ok(text, classification.gate)
-    fallback_eligible = valid_run is not None and sha_ok and gate_ok
-    fallback_passed = fallback_applies(attested, fallback_eligible)
-    passed = attested.accepted or fallback_passed
+    override = recorded_override()
+    passed = attested.accepted or override is not None
 
     details: list[str] = []
     if not run_ids:
@@ -1758,12 +1733,13 @@ def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) ->
         details.append("No attested delegated proof pack matched this PR's gated content.")
     if valid_run is None and not attested.accepted:
         details.append("No legacy delegated run URL matched the PR head SHA.")
-    if not sha_ok and not attested.accepted:
-        details.append("The PR body/comments do not record the current PR head SHA or its 12-character prefix.")
-    if not gate_ok and not attested.accepted:
+    if not attested.accepted and override is None:
         details.append(
-            f"The PR body/comments do not record `gate: {classification.gate.label}`"
-            + (" or `gate: all`." if classification.gate != Gate.ALL else ".")
+            "A delegated proof pack is required. A recorded run URL in the PR body no\n"
+            "longer credits the PR on its own: absence of evidence is not inferred from\n"
+            "text the author writes. If verification genuinely could not be performed,\n"
+            "dispatch `Assay-Runner Lane Check` with `override_reason`, which records who\n"
+            "decided and why."
         )
     if attested.diagnostics and not attested.accepted:
         details.append(
@@ -1774,16 +1750,19 @@ def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) ->
         details.append("Legacy run diagnostics:\n" + "\n".join(f"- {line}" for line in run_diagnostics[:8]))
     if attested.accepted and attested.run is not None:
         details.append(f"Matched attested delegated proof pack: {attested.run.get('html_url')}")
-    elif fallback_passed and valid_run is not None:
-        details.append(f"Matched legacy delegated run proof: {valid_run.get('html_url')}")
+    elif override is not None:
+        details.append(f"Verification waived by {override[0]}: {override[1]}")
 
     detail = "\n\n".join(details)
     body = comment_body(classification, pr, passed, detail)
     maybe_comment(api, pr.number, comments, body, comment=comment)
     if attested.accepted:
         status_description = f"attested delegated proof accepted: gates={classification.gate.label}"
-    elif fallback_passed:
-        status_description = f"legacy delegated proof accepted: gates={classification.gate.label}"
+    elif override is not None:
+        actor, reason = override
+        status_description = (
+            f"verification waived by {actor}: {reason}"[:140]
+        )
     else:
         status_description = f"delegated proof required: gates={classification.gate.label}"
     maybe_status(api, pr.head_sha, passed, status_description, status=status)
@@ -1901,8 +1880,8 @@ def self_test() -> None:
     _test_gating_map_is_current()
     _test_prefix_gated_surfaces_keep_their_coverage()
     _test_declared_gate_surfaces_exist()
-    _test_run_check_consults_the_predicate()
-    _test_fallback_keyed_on_the_substrate_not_the_pack()
+    _test_run_check_executes()
+    _test_run_check_consults_the_override()
     _test_content_tree_comparison()
 
     valid_run = {
@@ -2069,87 +2048,91 @@ def _test_declared_gate_surfaces_exist() -> None:
     assert not dead, f"declared gate surfaces matching no tracked file: {dead}"
 
 
-def _test_run_check_consults_the_predicate() -> None:
-    """`run_check` credits through `fallback_applies`, not around it.
+def _test_run_check_executes(monkeypatched: bool = True) -> None:
+    """`run_check` runs end to end, with and without an override.
 
-    The first revision of this change added the predicate, the flag and a test
-    for both, and never wired the predicate into `run_check` -- which stayed
-    byte-identical to main. The suite was green because the only caller of
-    `fallback_applies` was its own test. No test touched `run_check` at all,
-    which is why nothing noticed.
-
-    This asserts the connection: a proof pack that exists and fails must not be
-    credited, whatever the PR body records.
-    """
-    source = inspect.getsource(run_check)
-    assert "fallback_applies(" in source, "run_check does not consult the predicate"
-    assert "valid_run is not None and sha_ok and gate_ok\n    passed" not in source
-
-
-def _test_fallback_keyed_on_the_substrate_not_the_pack() -> None:
-    """The fallback turns on GitHub's artifact listing, and on nothing else.
-
-    Drives the real `find_valid_attested_proof`, so the construction of
-    `evidence_existed` is covered and not only the decision that reads it. Two
-    earlier attempts pinned the decision alone; every site that produced the
-    input stayed deletable with the suite green.
+    Reading the source is not enough. An earlier revision left `fallback_passed`,
+    `sha_ok` and `gate_ok` referenced after their assignments were removed -- a
+    `NameError` on every production call -- and the suite stayed green because no
+    test *executed* `run_check`. Source inspection cannot see an unbound name.
     """
     pr = PullRequest(
-        number=1, title="", body="", author_login="x", head_sha="abc123", files=()
+        number=1,
+        title="t",
+        body="",
+        author_login="x",
+        head_sha="a" * 40,
+        files=("crates/assay-ebpf/src/lib.rs",),
     )
-    run = {
-        "name": DELEGATED_WORKFLOW_NAME,
-        "event": "workflow_dispatch",
-        "head_sha": "abc123",
-        "conclusion": "success",
-        "id": 1,
-        "html_url": "u",
-    }
-    listed = {
-        "artifacts": [
-            {
-                "name": "assay-runner-delegated-proof-pack-1",
-                "archive_download_url": "x",
-                "size_in_bytes": 10,
-                "expired": False,
-            }
-        ]
-    }
 
     class _Api:
         repo = "Rul1an/assay"
 
-        def __init__(self, artifacts: object, blob: bytes = b"", exc: Exception | None = None):
-            self._artifacts = artifacts
-            self._blob = blob
-            self._exc = exc
-
         def request(self, method: str, path: str, payload: object = None) -> object:
-            return self._artifacts if "/artifacts" in path else run
+            if path.endswith("/comments"):
+                return []
+            if "/pulls/" in path and "/files" in path:
+                return []
+            if "/pulls/" in path:
+                return {
+                    "number": 1,
+                    "title": "t",
+                    "body": "",
+                    "user": {"login": "x"},
+                    "head": {"sha": "a" * 40},
+                }
+            if "/artifacts" in path:
+                return {"artifacts": []}
+            return {}
 
-        def download(self, url: str, max_bytes: int | None = None) -> bytes:
-            if self._exc is not None:
-                raise self._exc
-            return self._blob
+        def paginated(self, path: str) -> list[object]:
+            # A gated file, so the PR genuinely requires a delegated proof.
+            if path.endswith("/files"):
+                return [{"filename": "crates/assay-ebpf/src/lib.rs", "status": "modified"}]
+            return []
 
-    def fallback_for(api: object) -> bool:
-        return fallback_applies(find_valid_attested_proof(api, ["1"], pr, Gate.ALL), True)
+    old = {k: os.environ.get(k) for k in ("LANE_OVERRIDE_REASON", "LANE_OVERRIDE_ACTOR")}
+    old_fetch = globals()["fetch_ref_for_diff"]
+    globals()["fetch_ref_for_diff"] = lambda *a, **k: None
+    try:
+        os.environ.pop("LANE_OVERRIDE_REASON", None)
+        assert run_check(_Api(), 1, comment=False, status=False) == 1
 
-    # Substrate says no evidence: the fallback keeps its purpose.
-    assert fallback_for(_Api({"artifacts": []})) is True
-    assert (
-        fallback_for(
-            _Api({"artifacts": [{"name": "assay-runner-delegated-proof-pack-1", "expired": True}]})
-        )
-        is True
-    )
+        os.environ["LANE_OVERRIDE_REASON"] = "artifact retention expired"
+        os.environ["LANE_OVERRIDE_ACTOR"] = "maintainer"
+        assert run_check(_Api(), 1, comment=False, status=False) == 0
+    finally:
+        globals()["fetch_ref_for_diff"] = old_fetch
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
-    # Substrate says evidence exists: every later failure is a verdict.
-    assert fallback_for(_Api(listed, b"not a zip")) is False
-    assert fallback_for(_Api(listed, b"")) is False
-    # Oversize was the bypass the previous attempt left open: bytes arrived and
-    # were refused on their size, which is a property of the evidence.
-    assert fallback_for(_Api(listed, exc=DownloadLimitExceeded("too large"))) is False
+
+def _test_run_check_consults_the_override() -> None:
+    """The override is the only path that credits without a pack."""
+    source = inspect.getsource(run_check)
+    assert "recorded_override()" in source, "run_check does not consult the override"
+    assert "recorded_gate_ok(" not in source, "run_check still infers absence from the PR body"
+
+    old = {k: os.environ.get(k) for k in ("LANE_OVERRIDE_REASON", "LANE_OVERRIDE_ACTOR")}
+    try:
+        os.environ.pop("LANE_OVERRIDE_REASON", None)
+        assert recorded_override() is None
+        os.environ["LANE_OVERRIDE_REASON"] = "   "
+        assert recorded_override() is None, "whitespace is not a reason"
+        os.environ["LANE_OVERRIDE_REASON"] = "retention expired"
+        os.environ["LANE_OVERRIDE_ACTOR"] = "someone"
+        assert recorded_override() == ("someone", "retention expired")
+        del os.environ["LANE_OVERRIDE_ACTOR"]
+        assert recorded_override() == ("unknown", "retention expired")
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 def _test_content_tree_comparison() -> None:
