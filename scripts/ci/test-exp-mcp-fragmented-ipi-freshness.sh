@@ -12,7 +12,8 @@
 # worth anything, and a real driver handed a non-MCP host blocks forever on a response that never
 # comes. They assert the wrapper's exit status too -- recording what cargo was ASKED to do while
 # ignoring whether it succeeded would be intent, not result.
-# Case M is the end-to-end property: a stale binary is actually rebuilt.
+# Case M is the end-to-end property: a stale binary is actually rebuilt. Case N covers what the
+# wrappers say they do NOT cover, which is the other half of being honest about a guarantee.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -160,20 +161,6 @@ echo "[freshness] K: cross-session combined builds both"
 MODE=combined OUT_DIR="$TMP/k" record K bash "$EXP/cross_session/run_cross_session_decay.sh"
 succeeded; built "assay-cli"; built "assay-mcp-server"
 
-echo "[freshness] N: the ASSAY_CMD warning fires on a foreign binary, not on supported syntax"
-# ASSAY_CMD legitimately carries argv and may be written relatively; both still name the binary the
-# wrapper just built. A string comparison calls them foreign, and a warning that cries wolf on the
-# documented syntax is one the operator learns to ignore.
-RUNS_ATTACK=1 RUNS_LEGIT=1 RUN_LIVE=1 MCP_HOST_CMD=true ASSAY_CMD="$ROOT/target/debug/assay --verbose" \
-  record N1 bash "$EXP/run_baseline.sh" "$TMP/n1"
-not_warned "ASSAY_CMD is not"
-RUNS_ATTACK=1 RUNS_LEGIT=1 RUN_LIVE=1 MCP_HOST_CMD=true ASSAY_CMD="$ROOT/./target/debug/assay" \
-  record N2 bash "$EXP/run_baseline.sh" "$TMP/n2"
-not_warned "ASSAY_CMD is not"
-RUNS_ATTACK=1 RUNS_LEGIT=1 RUN_LIVE=1 MCP_HOST_CMD=true ASSAY_CMD="/usr/bin/true" \
-  record N3 bash "$EXP/run_baseline.sh" "$TMP/n3"
-warned "ASSAY_CMD is not"
-
 echo "[freshness] L: what the wrappers build is what the driver opens"
 # The other half of the invariant. Cases A-K only prove cargo was asked for the right thing; if
 # the driver were pointed at target/release or any other tree they would all still pass.
@@ -217,6 +204,20 @@ fi
 # Leave the tree as found: touching main.rs would force an unrelated rebuild for the next caller.
 touch -t "$(date -r "$MAIN_MTIME_BEFORE" +%Y%m%d%H%M.%S 2>/dev/null || date -d "@$MAIN_MTIME_BEFORE" +%Y%m%d%H%M.%S)" \
   "$MAIN_RS" 2>/dev/null || true
+
+echo "[freshness] N: the ASSAY_CMD warning fires on a foreign binary, not on supported syntax"
+# ASSAY_CMD legitimately carries argv and may be written relatively; both still name the binary the
+# wrapper just built. A string comparison calls them foreign, and a warning that cries wolf on the
+# documented syntax is one the operator learns to ignore.
+RUNS_ATTACK=1 RUNS_LEGIT=1 RUN_LIVE=1 MCP_HOST_CMD=true ASSAY_CMD="$ROOT/target/debug/assay --verbose" \
+  record N1 bash "$EXP/run_baseline.sh" "$TMP/n1"
+not_warned "ASSAY_CMD is not"
+RUNS_ATTACK=1 RUNS_LEGIT=1 RUN_LIVE=1 MCP_HOST_CMD=true ASSAY_CMD="$ROOT/./target/debug/assay" \
+  record N2 bash "$EXP/run_baseline.sh" "$TMP/n2"
+not_warned "ASSAY_CMD is not"
+RUNS_ATTACK=1 RUNS_LEGIT=1 RUN_LIVE=1 MCP_HOST_CMD=true ASSAY_CMD="/usr/bin/true" \
+  record N3 bash "$EXP/run_baseline.sh" "$TMP/n3"
+warned "ASSAY_CMD is not"
 
 echo
 if (( FAILURES > 0 )); then
