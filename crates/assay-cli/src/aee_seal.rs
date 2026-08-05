@@ -28,6 +28,19 @@ pub const DROP_PROOF_SYNCHRONOUS_PROBE: &str = "synchronous-probe";
 /// simply not listening, which is indistinguishable from enforcement that was never armed.
 const BLOCKING_ERRNO: &str = "EACCES";
 
+/// `LANDLOCK_ACCESS_NET_CONNECT_TCP` was introduced in Landlock ABI 4 (Linux 6.7). A kernel below
+/// that cannot express a TCP-connect restriction at all.
+const LANDLOCK_ABI_NET_CONNECT_TCP: u32 = 4;
+
+/// The operator-facing label for what this probe observed.
+fn observed_label(probe: &Probe) -> String {
+    if probe.listener_reached {
+        "no_connect_block".to_string()
+    } else {
+        "connect_blocked".to_string()
+    }
+}
+
 /// Why a run cannot carry a production seal.
 ///
 /// Each variant names one seal-eligibility condition from ADR-045. They are separate variants
@@ -50,6 +63,19 @@ pub enum NotSealEligible {
     /// A probe ran but reported a signal that does not distinguish enforcement from an absent
     /// listener.
     ProbeSignalTooWeak { errno: String },
+    /// The probe carries no run-phase challenge, so it is indistinguishable from one taken at
+    /// arming time. RFC 9334 freshness: without a challenge there is nothing to narrow recentness.
+    ProbePhaseUnproven,
+    /// The probe's challenge is not the one this run issued after corpus injection.
+    ProbeChallengeMismatch,
+    /// The kernel cannot express the restriction whose denial is being claimed, so an `EACCES`
+    /// here did not come from Landlock. `LANDLOCK_ACCESS_NET_CONNECT_TCP` exists from ABI 4.
+    AbiCannotExpressRestriction { abi: u32 },
+    /// The record's own consistency is broken: it reports an applied ruleset and a failure, or
+    /// claims a restriction it also reports as unsupported.
+    RecordSelfContradictory { detail: String },
+    /// A run-context value the seal would carry is not a value this run proved.
+    UnprovenContextValue { field: &'static str },
 }
 
 impl NotSealEligible {
@@ -63,6 +89,11 @@ impl NotSealEligible {
             Self::NoRunEndProbe => "no-run-end-probe",
             Self::ProbeReachedListener => "probe-reached-listener",
             Self::ProbeSignalTooWeak { .. } => "probe-signal-too-weak",
+            Self::ProbePhaseUnproven => "probe-phase-unproven",
+            Self::ProbeChallengeMismatch => "probe-challenge-mismatch",
+            Self::AbiCannotExpressRestriction { .. } => "abi-cannot-express-restriction",
+            Self::RecordSelfContradictory { .. } => "record-self-contradictory",
+            Self::UnprovenContextValue { .. } => "unproven-context-value",
         }
     }
 }
@@ -76,6 +107,11 @@ impl std::fmt::Display for NotSealEligible {
             Self::NoRunEndProbe => write!(f, "no run-end probe: a start-time restrict_self confirmation proves the ruleset was applied, not that it was still applied at run end"),
             Self::ProbeReachedListener => write!(f, "the run-end probe reached the listener, so the connect was not blocked"),
             Self::ProbeSignalTooWeak { errno } => write!(f, "the run-end probe reported {errno:?}, which does not distinguish enforcement from an absent listener"),
+            Self::ProbePhaseUnproven => write!(f, "the probe carries no run-phase challenge, so it is indistinguishable from one taken at arming time"),
+            Self::ProbeChallengeMismatch => write!(f, "the probe's challenge is not the one this run issued"),
+            Self::AbiCannotExpressRestriction { abi } => write!(f, "Landlock ABI {abi} predates LANDLOCK_ACCESS_NET_CONNECT_TCP (ABI 4), so this denial did not come from Landlock"),
+            Self::RecordSelfContradictory { detail } => write!(f, "health record contradicts itself: {detail}"),
+            Self::UnprovenContextValue { field } => write!(f, "run-context field {field} is not a value this run proved"),
         }
     }
 }
@@ -94,6 +130,35 @@ pub struct RunContext {
     pub seal_scope: String,
     /// RFC 3339 UTC instant the seal commits to, checked against the signing key's validity window.
     pub sealed_at: String,
+    /// The run-phase challenge this run issued after corpus injection. The probe must carry it.
+    ///
+    /// This is the freshness handle from RFC 9334 (RATS) §10, in its challenge/response form: the
+    /// appraiser supplies a value, the attester echoes it, and recentness is narrowed without
+    /// either side needing a synchronised clock. An arming-time probe cannot carry it because it
+    /// did not exist yet.
+    pub expected_challenge: String,
+}
+
+/// Lowercase SHA-256 hex, the shape the #2001 field contract requires of every digest member.
+fn is_sha256_hex(v: &str) -> bool {
+    v.len() == 64
+        && v.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// `YYYY-MM-DDTHH:MM:SSZ`, the shape the ADR-045 checker's validity-window check parses.
+fn is_rfc3339_utc(v: &str) -> bool {
+    let b = v.as_bytes();
+    b.len() == 20
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[10] == b'T'
+        && b[13] == b':'
+        && b[16] == b':'
+        && b[19] == b'Z'
+        && [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18]
+            .iter()
+            .all(|&i| b[i].is_ascii_digit())
 }
 
 /// The ADR-045 sealed payload, assembled but **not signed**.
@@ -159,7 +224,10 @@ fn payload_non_claims() -> Vec<String> {
 /// Only the conditions decidable from the health record are evaluated here. Run binding, posture
 /// digest and observed set are supplied through [`RunContext`]; whether *they* are derivable is the
 /// caller's precondition, not something this function can check.
-pub fn seal_eligibility(health: &EnforcementHealthV1) -> Result<&Probe, NotSealEligible> {
+pub fn seal_eligibility<'a>(
+    health: &'a EnforcementHealthV1,
+    ctx: &RunContext,
+) -> Result<&'a Probe, NotSealEligible> {
     if health.status != Status::Active {
         return Err(NotSealEligible::NotArmed {
             status: health.status,
@@ -175,10 +243,38 @@ pub fn seal_eligibility(health: &EnforcementHealthV1) -> Result<&Probe, NotSealE
             found: health.scope.clone(),
         });
     }
-    // The still-armed rule, and the whole reason this function is not a boolean on the health
-    // record: `restrict_self_confirmed` is set at arming time and stays set in the record whatever
-    // happened afterwards, so reading it as run-end state would turn a start-time fact into an
-    // end-time claim.
+    // The seal states a scope of its own. Nothing downstream compares it: the ADR-045 checker has
+    // no rule on `assaySealScope` at all, so an unchecked value here is credited end to end.
+    if ctx.seal_scope != health.scope {
+        return Err(NotSealEligible::ScopeMismatch {
+            found: ctx.seal_scope.clone(),
+        });
+    }
+
+    // `LANDLOCK_ACCESS_NET_CONNECT_TCP` exists from ABI 4. Below that the kernel cannot express the
+    // restriction whose denial is claimed, so an EACCES came from somewhere else and crediting it
+    // would seal a run that Landlock never governed.
+    if health.landlock.abi < LANDLOCK_ABI_NET_CONNECT_TCP {
+        return Err(NotSealEligible::AbiCannotExpressRestriction {
+            abi: health.landlock.abi,
+        });
+    }
+    if health.landlock.net_connect_tcp_supported == Some(false) {
+        return Err(NotSealEligible::RecordSelfContradictory {
+            detail: "claims a TCP-connect restriction the record reports as unsupported".into(),
+        });
+    }
+    if health.failure.is_some() {
+        return Err(NotSealEligible::RecordSelfContradictory {
+            detail: "status is active and a failure is recorded".into(),
+        });
+    }
+    if !health.landlock.no_new_privs_confirmed || !health.landlock.restrict_self_confirmed {
+        return Err(NotSealEligible::RecordSelfContradictory {
+            detail: "status is active but the ruleset was never confirmed applied".into(),
+        });
+    }
+
     let probe = health
         .probe
         .as_ref()
@@ -189,6 +285,35 @@ pub fn seal_eligibility(health: &EnforcementHealthV1) -> Result<&Probe, NotSealE
     if probe.blocked_errno != BLOCKING_ERRNO {
         return Err(NotSealEligible::ProbeSignalTooWeak {
             errno: probe.blocked_errno.clone(),
+        });
+    }
+    // The phase question, and the reason this module exists. Every field above is equally true of a
+    // probe taken at arming time; only the challenge distinguishes them.
+    let challenge = probe
+        .challenge
+        .as_deref()
+        .ok_or(NotSealEligible::ProbePhaseUnproven)?;
+    if challenge.is_empty() || challenge != ctx.expected_challenge {
+        return Err(NotSealEligible::ProbeChallengeMismatch);
+    }
+
+    // Values the seal will carry verbatim. A seal is the strongest record in a statement; carrying
+    // an unvalidated digest into one is the guessing this module refuses elsewhere.
+    for (field, value) in [
+        ("run_binding", &ctx.run_binding),
+        ("posture_digest", &ctx.posture_digest),
+        ("observed_set", &ctx.observed_set),
+    ] {
+        if !is_sha256_hex(value) {
+            return Err(NotSealEligible::UnprovenContextValue { field });
+        }
+    }
+    if !is_rfc3339_utc(&ctx.sealed_at) {
+        return Err(NotSealEligible::UnprovenContextValue { field: "sealed_at" });
+    }
+    if ctx.expected_challenge.is_empty() {
+        return Err(NotSealEligible::UnprovenContextValue {
+            field: "expected_challenge",
         });
     }
     Ok(probe)
@@ -204,7 +329,7 @@ pub fn build_seal_payload(
     health: &EnforcementHealthV1,
     ctx: &RunContext,
 ) -> Result<SealPayload, NotSealEligible> {
-    let _probe = seal_eligibility(health)?;
+    let probe = seal_eligibility(health, ctx)?;
     Ok(SealPayload {
         aee_kind: "sealed".to_string(),
         aee_version: AEE_VERSION.to_string(),
@@ -216,10 +341,13 @@ pub fn build_seal_payload(
         aee_drop_bound: 0,
         aee_observed_set: ctx.observed_set.clone(),
         aee_observed_attacks: Vec::new(),
-        assay_observed_labels: vec!["connect_blocked".to_string()],
+        // Derived from the observation, not asserted. A constant here would state a label the
+        // record never carried.
+        assay_observed_labels: vec![observed_label(probe)],
         assay_collection_path: COLLECTION_PATH_LANDLOCK_TCP_CONNECT.to_string(),
         assay_sealed_at: ctx.sealed_at.clone(),
-        assay_source_schema: crate::enforcement_health_v1::SCHEMA_V1.to_string(),
+        // The record's own schema, not a constant: a constant would relabel a v0 artifact as v1.
+        assay_source_schema: health.schema.clone(),
         assay_seal_scope: ctx.seal_scope.clone(),
         assay_drop_proof_model: DROP_PROOF_SYNCHRONOUS_PROBE.to_string(),
         // Assembly-plane, not substrate-runner: this signer observed a blocked connect, it did not
@@ -242,8 +370,11 @@ mod tests {
             blocked_port: 9,
             blocked_errno: errno.to_string(),
             listener_reached,
+            challenge: Some(CHALLENGE.to_string()),
         }
     }
+
+    const CHALLENGE: &str = "run-phase-challenge-0001";
 
     fn ctx() -> RunContext {
         RunContext {
@@ -252,6 +383,7 @@ mod tests {
             observed_set: "c".repeat(64),
             seal_scope: "tcp_connect_landlock_port".to_string(),
             sealed_at: "2026-08-05T00:00:00Z".to_string(),
+            expected_challenge: CHALLENGE.to_string(),
         }
     }
 
@@ -330,7 +462,7 @@ mod tests {
             EnforcementHealthV1::landlock_active(4, vec![443], Some(probe(false, "ECONNREFUSED"))),
         ];
         for h in cases {
-            assert!(seal_eligibility(&h).is_err());
+            assert!(seal_eligibility(&h, &ctx()).is_err());
             assert!(
                 build_seal_payload(&h, &ctx()).is_err(),
                 "builder must not outrun the predicate"
@@ -387,6 +519,7 @@ mod checker_parity {
                 blocked_port: 9,
                 blocked_errno: "EACCES".to_string(),
                 listener_reached: false,
+                challenge: Some("parity-challenge".to_string()),
             }),
         );
         let ctx = RunContext {
@@ -395,6 +528,7 @@ mod checker_parity {
             observed_set: "c".repeat(64),
             seal_scope: "tcp_connect_landlock_port".to_string(),
             sealed_at: "2026-08-05T00:00:00Z".to_string(),
+            expected_challenge: "parity-challenge".to_string(),
         };
         let seal = build_seal_payload(&health, &ctx).expect("eligible");
         let value = serde_json::to_value(&seal).expect("payload serializes");
@@ -425,6 +559,7 @@ mod checker_parity {
                 blocked_port: 9,
                 blocked_errno: "EACCES".to_string(),
                 listener_reached: false,
+                challenge: Some("parity-challenge".to_string()),
             }),
         );
         let ctx = RunContext {
@@ -433,6 +568,7 @@ mod checker_parity {
             observed_set: "c".repeat(64),
             seal_scope: "tcp_connect_landlock_port".to_string(),
             sealed_at: "2026-08-05T00:00:00Z".to_string(),
+            expected_challenge: "parity-challenge".to_string(),
         };
         let s = build_seal_payload(&health, &ctx).expect("eligible");
 
@@ -471,5 +607,191 @@ mod checker_parity {
                 "missing non-claim: {required}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod refusals {
+    use super::*;
+    use crate::enforcement_health_v1::{EnforcementHealthV1, Failure, ReasonCode};
+
+    const CH: &str = "post-injection-challenge";
+
+    fn probe_with(challenge: Option<&str>) -> Probe {
+        Probe {
+            kind: "real_block".to_string(),
+            transport: "ipv4".to_string(),
+            blocked_action: "tcp_connect".to_string(),
+            blocked_port: 4444,
+            blocked_errno: "EACCES".to_string(),
+            listener_reached: false,
+            challenge: challenge.map(str::to_string),
+        }
+    }
+
+    fn healthy() -> EnforcementHealthV1 {
+        EnforcementHealthV1::landlock_active(4, vec![443], Some(probe_with(Some(CH))))
+    }
+
+    fn good_ctx() -> RunContext {
+        RunContext {
+            run_binding: "a".repeat(64),
+            posture_digest: "b".repeat(64),
+            observed_set: "c".repeat(64),
+            seal_scope: "tcp_connect_landlock_port".to_string(),
+            sealed_at: "2026-08-05T00:00:00Z".to_string(),
+            expected_challenge: CH.to_string(),
+        }
+    }
+
+    fn refusal(h: &EnforcementHealthV1, c: &RunContext) -> &'static str {
+        build_seal_payload(h, c).expect_err("must refuse").code()
+    }
+
+    /// The defect the commit title claimed to close and did not.
+    ///
+    /// Every other probe field is equally true of a probe taken at arming time. Without a challenge
+    /// the record cannot answer "was enforcement still applied at the end", which is the only
+    /// question a run-end seal asks. RFC 9334 (RATS) §10: a challenge narrows recentness without
+    /// requiring the attesting environment to hold a trustworthy clock.
+    #[test]
+    fn a_probe_without_a_run_phase_challenge_is_refused() {
+        let h = EnforcementHealthV1::landlock_active(4, vec![443], Some(probe_with(None)));
+        assert_eq!(refusal(&h, &good_ctx()), "probe-phase-unproven");
+    }
+
+    #[test]
+    fn a_probe_carrying_another_runs_challenge_is_refused() {
+        let h = EnforcementHealthV1::landlock_active(
+            4,
+            vec![443],
+            Some(probe_with(Some("some-other-run"))),
+        );
+        assert_eq!(refusal(&h, &good_ctx()), "probe-challenge-mismatch");
+    }
+
+    /// `LANDLOCK_ACCESS_NET_CONNECT_TCP` arrived in ABI 4. Below it the kernel cannot express the
+    /// restriction, so the EACCES came from something that is not Landlock.
+    #[test]
+    fn an_abi_that_cannot_express_the_restriction_is_refused() {
+        for abi in [1, 2, 3] {
+            let h =
+                EnforcementHealthV1::landlock_active(abi, vec![443], Some(probe_with(Some(CH))));
+            assert_eq!(
+                refusal(&h, &good_ctx()),
+                "abi-cannot-express-restriction",
+                "abi {abi}"
+            );
+        }
+        assert!(
+            build_seal_payload(&healthy(), &good_ctx()).is_ok(),
+            "abi 4 is the floor, not a wall"
+        );
+    }
+
+    #[test]
+    fn a_record_that_contradicts_itself_is_refused() {
+        let mut h = healthy();
+        h.failure = Some(Failure {
+            reason_code: ReasonCode::RestrictSelfFailed,
+            detail: "x".into(),
+        });
+        assert_eq!(refusal(&h, &good_ctx()), "record-self-contradictory");
+
+        let mut h = healthy();
+        h.landlock.restrict_self_confirmed = false;
+        assert_eq!(refusal(&h, &good_ctx()), "record-self-contradictory");
+
+        let mut h = healthy();
+        h.landlock.net_connect_tcp_supported = Some(false);
+        assert_eq!(refusal(&h, &good_ctx()), "record-self-contradictory");
+    }
+
+    /// The seal states a scope of its own, and the ADR-045 checker has no rule on it, so an
+    /// unchecked value here is credited end to end.
+    #[test]
+    fn a_seal_scope_the_record_does_not_support_is_refused() {
+        let mut c = good_ctx();
+        c.seal_scope = "filesystem_write_all".to_string();
+        assert_eq!(refusal(&healthy(), &c), "scope-mismatch");
+    }
+
+    /// A seal is the strongest record in a statement. Carrying an unvalidated digest into one is
+    /// the same guessing this module refuses for still-armed state.
+    #[test]
+    fn context_values_that_are_not_the_shapes_they_claim_are_refused() {
+        for (field, mutate) in [
+            (
+                "run_binding",
+                (|c: &mut RunContext| c.run_binding = String::new()) as fn(&mut RunContext),
+            ),
+            ("posture_digest", |c: &mut RunContext| {
+                c.posture_digest = "NOT-A-DIGEST".into()
+            }),
+            ("observed_set", |c: &mut RunContext| {
+                c.observed_set = "../../etc/passwd".into()
+            }),
+            ("run_binding", |c: &mut RunContext| {
+                c.run_binding = "A".repeat(64)
+            }),
+            ("sealed_at", |c: &mut RunContext| {
+                c.sealed_at = "yesterday afternoon".into()
+            }),
+        ] {
+            let mut c = good_ctx();
+            mutate(&mut c);
+            assert_eq!(
+                refusal(&healthy(), &c),
+                "unproven-context-value",
+                "field {field}"
+            );
+        }
+    }
+
+    /// Kills the mutant that swapped and emptied the digest fields: every context value must land
+    /// in its own payload member, and the suite must notice when it does not.
+    #[test]
+    fn every_context_value_reaches_its_own_payload_field() {
+        let c = RunContext {
+            run_binding: "1".repeat(64),
+            posture_digest: "2".repeat(64),
+            observed_set: "3".repeat(64),
+            seal_scope: "tcp_connect_landlock_port".to_string(),
+            sealed_at: "2026-08-05T12:34:56Z".to_string(),
+            expected_challenge: CH.to_string(),
+        };
+        let s = build_seal_payload(&healthy(), &c).expect("eligible");
+        assert_eq!(s.aee_run_binding, c.run_binding);
+        assert_eq!(s.aee_posture_digest, c.posture_digest);
+        assert_eq!(s.aee_observed_set, c.observed_set);
+        assert_eq!(s.assay_seal_scope, c.seal_scope);
+        assert_eq!(s.assay_sealed_at, c.sealed_at);
+    }
+
+    /// Kills the hardcoded-constant mutants: both were values the record never carried.
+    #[test]
+    fn derived_fields_come_from_the_record_not_from_constants() {
+        let mut h = healthy();
+        h.schema = "assay.enforcement_health.v0".to_string();
+        let s = build_seal_payload(&h, &good_ctx()).expect("eligible");
+        assert_eq!(
+            s.assay_source_schema, "assay.enforcement_health.v0",
+            "must not relabel the artifact"
+        );
+        assert_eq!(s.assay_observed_labels, vec!["connect_blocked".to_string()]);
+    }
+
+    /// The committed carrier fixture is an applied-ruleset shape from June with no run phase. It
+    /// used to be seal-eligible, which is how this defect was found.
+    #[test]
+    fn the_committed_applied_ruleset_fixture_is_not_seal_eligible() {
+        let raw = include_str!("../tests/fixtures/enforcement_health/v1/active_with_probe.json");
+        let h: EnforcementHealthV1 = serde_json::from_str(raw).expect("fixture parses");
+        assert!(h.probe.is_some(), "the fixture does carry a probe");
+        assert_eq!(
+            refusal(&h, &good_ctx()),
+            "probe-phase-unproven",
+            "an applied-ruleset fixture must not be able to seal a run"
+        );
     }
 }
