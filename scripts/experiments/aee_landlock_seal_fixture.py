@@ -27,6 +27,7 @@ import copy
 import hashlib
 import hmac
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -40,7 +41,9 @@ FIXTURE_KEY_PREFIX = "assay-aee-spike-fixture-key"
 UNTRUSTED_KEY = "assay-test-observation-key-landlock-unenrolled-v0"
 SECRET = b"assay-aee-landlock-seal-fixture-key-not-production"
 ROOT = Path(__file__).resolve().parent
-FIXTURE_ROOT = ROOT / "fixtures" / "aee-landlock-seal"
+# Overridable so the drift check can emit into a scratch directory instead of rewriting the tree it
+# is auditing.
+FIXTURE_ROOT = Path(os.environ.get("ASSAY_AEE_FIXTURE_ROOT", ROOT / "fixtures" / "aee-landlock-seal"))
 NEGATIVE_ROOT = FIXTURE_ROOT / "negative-controls"
 
 SUBSTRATE_NAME = "assay-landlock-fixture-substrate"

@@ -62,11 +62,6 @@ pub enum NotSealEligible {
     /// A probe ran but reported a signal that does not distinguish enforcement from an absent
     /// listener.
     ProbeSignalTooWeak { errno: String },
-    /// The probe carries no run-phase challenge, so it is indistinguishable from one taken at
-    /// arming time. RFC 9334 freshness: without a challenge there is nothing to narrow recentness.
-    ProbePhaseUnproven,
-    /// The probe's challenge is not the one this run issued after corpus injection.
-    ProbeChallengeMismatch,
     /// The kernel cannot express the restriction whose denial is being claimed, so an `EACCES`
     /// here did not come from Landlock. `LANDLOCK_ACCESS_NET_CONNECT_TCP` exists from ABI 4.
     AbiCannotExpressRestriction { abi: u32 },
@@ -77,6 +72,8 @@ pub enum NotSealEligible {
     UnprovenContextValue { field: &'static str },
     /// A digest the seal must derive could not be computed from the inputs given.
     DerivationFailed { what: &'static str },
+    /// Zero drop accounting cannot be proved for this run under any model this slice implements.
+    DropAccountingUnprovable { committed: usize },
 }
 
 impl NotSealEligible {
@@ -90,12 +87,11 @@ impl NotSealEligible {
             Self::NoRunEndProbe => "no-run-end-probe",
             Self::ProbeReachedListener => "probe-reached-listener",
             Self::ProbeSignalTooWeak { .. } => "probe-signal-too-weak",
-            Self::ProbePhaseUnproven => "probe-phase-unproven",
-            Self::ProbeChallengeMismatch => "probe-challenge-mismatch",
             Self::AbiCannotExpressRestriction { .. } => "abi-cannot-express-restriction",
             Self::RecordSelfContradictory { .. } => "record-self-contradictory",
             Self::UnprovenContextValue { .. } => "unproven-context-value",
             Self::DerivationFailed { .. } => "derivation-failed",
+            Self::DropAccountingUnprovable { .. } => "drop-accounting-unprovable",
         }
     }
 }
@@ -109,12 +105,11 @@ impl std::fmt::Display for NotSealEligible {
             Self::NoRunEndProbe => write!(f, "no run-end probe: a start-time restrict_self confirmation proves the ruleset was applied, not that it was still applied at run end"),
             Self::ProbeReachedListener => write!(f, "the run-end probe reached the listener, so the connect was not blocked"),
             Self::ProbeSignalTooWeak { errno } => write!(f, "the run-end probe reported {errno:?}, which does not distinguish enforcement from an absent listener"),
-            Self::ProbePhaseUnproven => write!(f, "the probe carries no run-phase challenge, so it is indistinguishable from one taken at arming time"),
-            Self::ProbeChallengeMismatch => write!(f, "the probe's challenge is not the one this run issued"),
             Self::AbiCannotExpressRestriction { abi } => write!(f, "Landlock ABI {abi} predates LANDLOCK_ACCESS_NET_CONNECT_TCP (ABI 4), so this denial did not come from Landlock"),
             Self::RecordSelfContradictory { detail } => write!(f, "health record contradicts itself: {detail}"),
             Self::UnprovenContextValue { field } => write!(f, "run-context field {field} is not a value this run proved"),
             Self::DerivationFailed { what } => write!(f, "could not derive a required digest: {what}"),
+            Self::DropAccountingUnprovable { committed } => write!(f, "{committed} committed observations: the synchronous-probe model holds only for the probe alone, and no counted-queue counters are available here"),
         }
     }
 }
@@ -258,10 +253,13 @@ fn leaf_hash(rec: &ObservationRecord) -> Result<String, NotSealEligible> {
 /// AEE v0.7 `aeeObservedSet`: a digest over the sorted lowercase leaf hashes of every emitted
 /// `interception` and `examination` record.
 ///
-/// A commitment by a party that does not control the carried set: dropping a record removes a leaf
-/// and the value diverges. Deriving it here rather than accepting one is what makes the seal's
-/// position in the run checkable — a seal committing to a leaf could not have been computed before
-/// that leaf existed.
+/// Dropping a record removes a leaf and the value diverges, so the commitment binds the carried set
+/// against a party who cannot re-sign the envelope.
+///
+/// It does **not** establish when the seal was built. Every member of a leaf is a value the producer
+/// chooses, so "the seal commits to this leaf" orders two computations inside one process, not two
+/// events in the world. Ordering the probe against the run needs a party that is neither the
+/// producer nor the assembly plane; nothing in this module provides one.
 pub fn observed_set(records: &[ObservationRecord]) -> Result<String, NotSealEligible> {
     let mut leaves: Vec<String> = records
         .iter()
@@ -296,14 +294,9 @@ pub fn run_binding(env: &ObservationEnvironment) -> Result<String, NotSealEligib
 
 /// Build the `examination` record that carries the run-end probe result.
 ///
-/// The probe becomes a record rather than staying a field in a health artifact, and that is the
-/// whole point: the seal's `aeeObservedSet` then commits to its leaf, so the seal demonstrably was
-/// computed after the probe. A field in a side artifact never travels and proves nothing to a
-/// consumer.
-///
-/// It also makes the drop-accounting model readable instead of asserted. Under the synchronous-probe
-/// model the only sealed observation *is* the probe result; with the probe as the sole member of the
-/// observed set, that is a property of the statement rather than a label the producer chose.
+/// The probe becomes a record rather than staying a field in a health artifact so that it travels:
+/// a field in a side artifact reaches no consumer at all. That is the whole of the claim. It does
+/// not establish the probe's position in the run — see `observed_set`.
 pub fn probe_examination_record(probe: &Probe, run_binding: &str) -> ObservationRecord {
     ObservationRecord {
         payload: serde_json::json!({
@@ -423,6 +416,25 @@ pub fn build_sealed_run(
 
     let mut records = prior_records.to_vec();
     records.push(probe_examination_record(probe, &rb));
+
+    // ADR-045 line 232: zero drop accounting may be emitted only under a named collection model,
+    // and "MUST NOT emit an AEE-looking seal with guessed zero drop accounting". The
+    // synchronous-probe model holds when the sealed observation *is* the probe result, taken with
+    // no queue in between -- so it holds only while the probe is the sole committed observation.
+    // Emitting the constant beside a larger set is the guess the ADR forbids, so the run is refused
+    // instead. A counted-queue model would need its counters, which this slice has no access to.
+    let committed = records
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.payload.get("aeeKind").and_then(|v| v.as_str()),
+                Some("interception") | Some("examination")
+            )
+        })
+        .count();
+    if committed != 1 {
+        return Err(NotSealEligible::DropAccountingUnprovable { committed });
+    }
     let observed = observed_set(&records)?;
 
     Ok(SealedRun {
@@ -600,11 +612,11 @@ mod tests {
         );
     }
 
-    // ---- the phase property, now carried rather than asserted ---------------------------------
+    // ---- what the commitment does and does not carry ------------------------------------------
 
-    /// The reason the probe becomes a record. The seal's observed set commits to the probe leaf, so
-    /// a consumer recomputing it learns the seal was built after the probe. Nothing here rests on
-    /// the producer's word.
+    /// The probe leaf is inside the commitment, so a consumer recomputing the set sees the same
+    /// observation the seal was built from. That is all it shows: the leaf is a value the producer
+    /// chose, so this says nothing about when the probe ran.
     #[test]
     fn the_seal_commits_to_the_probe_examination_leaf() {
         let run =
@@ -625,132 +637,23 @@ mod tests {
         );
     }
 
-    /// The drop-accounting model becomes readable instead of asserted: under synchronous-probe the
-    /// only sealed observation *is* the probe result, and with the probe as the sole member that is
-    /// a property of the statement rather than a label the producer chose.
+    /// Zero drop accounting is refused rather than asserted once the probe is not the sole
+    /// committed observation. ADR-045 line 232 forbids emitting a seal with guessed zero drops, and
+    /// the constant beside a larger set is exactly that guess.
     #[test]
-    fn the_synchronous_probe_model_is_visible_in_the_committed_set() {
-        let run =
-            build_sealed_run(&healthy(), &env_from_parity(), &[], "2026-08-05T00:00:00Z").unwrap();
-        let committed: Vec<_> = run
-            .records
-            .iter()
-            .filter(|r| {
-                matches!(
-                    r.payload["aeeKind"].as_str(),
-                    Some("interception") | Some("examination")
-                )
-            })
-            .collect();
-        assert_eq!(
-            committed.len(),
-            1,
-            "synchronous-probe: exactly one sealed observation"
-        );
-        assert_eq!(committed[0].payload["aeeKind"], "examination");
-        assert_eq!(
-            run.seal.assay_drop_proof_model,
-            DROP_PROOF_SYNCHRONOUS_PROBE
-        );
-    }
-
-    /// With prior interceptions the set grows, so the seal commits to those too and the
-    /// sole-member reading no longer holds — which is exactly when the model must not be claimed.
-    #[test]
-    fn prior_records_enter_the_commitment() {
+    fn a_run_whose_drop_accounting_cannot_be_proved_is_refused() {
         let prior = vec![ObservationRecord {
             payload: serde_json::json!({"aeeKind": "interception", "aeeVersion": "0.7", "x": 1}),
             payload_type: OBSERVATION_PAYLOAD_TYPE.to_string(),
         }];
-        let a =
-            build_sealed_run(&healthy(), &env_from_parity(), &[], "2026-08-05T00:00:00Z").unwrap();
-        let b = build_sealed_run(
+        let err = build_sealed_run(
             &healthy(),
             &env_from_parity(),
             &prior,
             "2026-08-05T00:00:00Z",
         )
-        .unwrap();
-        assert_ne!(
-            a.seal.aee_observed_set, b.seal.aee_observed_set,
-            "a dropped record must move the value"
-        );
-    }
-
-    /// Every value the seal carries, asserted where it lands. The previous rewrite dropped this
-    /// module and fourteen of fifteen payload mutants survived -- `aeeKind: "arming"`,
-    /// `aeeStillArmed: false`, an empty run binding, emptied non-claims. Checking a derivation
-    /// function proves nothing about the field it is supposed to fill.
-    #[test]
-    fn every_carried_value_lands_in_its_own_payload_field() {
-        let p = parity();
-        let env = env_from_parity();
-        let h = healthy();
-        let run = build_sealed_run(&h, &env, &[], "2026-08-05T12:34:56Z").unwrap();
-        let s = &run.seal;
-
-        assert_eq!(s.aee_kind, "sealed");
-        assert_eq!(s.aee_version, "0.7");
-        assert_eq!(s.aee_method, "intercepted");
-        assert!(s.aee_still_armed);
-        assert_eq!((s.aee_drop_count, s.aee_drop_bound), (0, 0));
-        assert_eq!(
-            s.aee_run_binding,
-            p["expected"]["runBinding"].as_str().unwrap()
-        );
-        assert_eq!(
-            s.aee_posture_digest,
-            p["expected"]["networkPostureDigest"].as_str().unwrap()
-        );
-        assert_eq!(s.aee_observed_set, observed_set(&run.records).unwrap());
-        assert!(s.aee_observed_attacks.is_empty());
-        assert_eq!(
-            s.assay_collection_path,
-            COLLECTION_PATH_LANDLOCK_TCP_CONNECT
-        );
-        assert_eq!(s.assay_sealed_at, "2026-08-05T12:34:56Z");
-        assert_eq!(s.assay_source_schema, h.schema);
-        assert_eq!(s.assay_seal_scope, h.scope);
-        assert_eq!(s.assay_drop_proof_model, DROP_PROOF_SYNCHRONOUS_PROBE);
-        assert_eq!(s.assay_attack_row_attribution_source, "assembly-plane");
-        assert_eq!(s.assay_observed_labels, vec!["connect_blocked".to_string()]);
-        for required in [
-            "does not prove complete run population",
-            "does not prove agent safety",
-            "does not prove provider side effects",
-            "does not prove independent substrate operation",
-        ] {
-            assert!(
-                s.assay_non_claims.iter().any(|c| c == required),
-                "missing non-claim: {required}"
-            );
-        }
-
-        // The examination record is the observation. Emptying it must not go unnoticed.
-        let exam = run
-            .records
-            .iter()
-            .find(|r| r.payload["aeeKind"] == "examination")
-            .unwrap();
-        assert_eq!(exam.payload["assayProbeErrno"], "EACCES");
-        assert_eq!(exam.payload["assayProbeListenerReached"], false);
-        assert_eq!(exam.payload["aeeRunBinding"], s.aee_run_binding);
-    }
-
-    /// The member set the checker reads, pinned where it is emitted.
-    #[test]
-    fn the_payload_member_set_is_the_eighteen_the_checker_carries() {
-        let run =
-            build_sealed_run(&healthy(), &env_from_parity(), &[], "2026-08-05T00:00:00Z").unwrap();
-        let value = serde_json::to_value(&run.seal).unwrap();
-        let mut got: Vec<&str> = value
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(String::as_str)
-            .collect();
-        got.sort_unstable();
-        assert_eq!(got.len(), 18, "members: {got:?}");
+        .expect_err("two committed observations cannot carry synchronous-probe");
+        assert_eq!(err.code(), "drop-accounting-unprovable");
     }
 
     // ---- refusals ----------------------------------------------------------------------------

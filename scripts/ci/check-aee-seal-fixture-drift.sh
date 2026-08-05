@@ -2,39 +2,37 @@
 # ADR-045 seal fixtures and derivation-parity vectors are generated, not hand-written.
 #
 # The Rust producer in `crates/assay-cli/src/aee_seal.rs` derives `aeeRunBinding` and
-# `aeeObservedSet` itself and its tests compare against `derivation-parity.json`. That comparison is
-# only a gate while the committed vectors match what the emitter produces today; without this check
-# a change to the Python derivation leaves stale vectors on disk and the Rust tests green, which is
-# the exact drift the parity file exists to catch.
+# `aeeObservedSet` itself and its tests compare against `derivation-parity.json`. That comparison
+# gates anything only while the committed vectors match what the emitter produces today; without
+# this check a change to the Python derivation leaves stale vectors on disk and the Rust tests
+# green, which is the drift the parity file exists to catch.
 #
-# Regenerating in a temporary worktree copy keeps the check read-only: a hook that rewrites the
-# files it is checking would turn a failure into a silent fix.
+# The emitter writes into a scratch directory and nothing here touches the committed tree. An
+# earlier version of this script ran `--emit` in place while its own header claimed otherwise, and
+# destroyed uncommitted edits in the fixtures it was auditing.
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 fixture_dir="scripts/experiments/fixtures/aee-landlock-seal"
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
 
-before="$(git status --porcelain -- "$fixture_dir")"
-python3 scripts/experiments/aee_landlock_seal_fixture.py --emit >/dev/null
+cp -R "$fixture_dir" "$scratch/committed"
+ASSAY_AEE_FIXTURE_ROOT="$scratch/emitted" \
+  python3 scripts/experiments/aee_landlock_seal_fixture.py --emit >/dev/null
 
-if ! git diff --quiet -- "$fixture_dir"; then
-  echo "error: ADR-045 seal fixtures are stale." >&2
-  echo "The emitter produces different bytes than the committed files:" >&2
-  git --no-pager diff --stat -- "$fixture_dir" >&2
+# Compare both directions. `--emit` only writes, so a case removed from CASES leaves its fixture on
+# disk unmodified: `git diff` stays clean and the retired control looks authoritative while nothing
+# tests it. Only a set comparison sees that.
+if ! diff -r -q "$scratch/committed" "$scratch/emitted" >"$scratch/delta" 2>&1; then
+  echo "error: ADR-045 seal fixtures do not match the emitter." >&2
+  sed 's/^/  /' "$scratch/delta" >&2
   echo >&2
-  echo "Run: python3 scripts/experiments/aee_landlock_seal_fixture.py --emit" >&2
-  echo "then commit the result." >&2
+  echo "Regenerate:  python3 scripts/experiments/aee_landlock_seal_fixture.py --emit" >&2
+  echo "A file the emitter no longer writes belongs deleted, not regenerated." >&2
   exit 1
 fi
 
-# Untracked output would also be drift: a new case emitted but never committed.
-after="$(git status --porcelain -- "$fixture_dir")"
-if [[ "$before" != "$after" ]]; then
-  echo "error: --emit produced files that are not committed:" >&2
-  git status --porcelain -- "$fixture_dir" >&2
-  exit 1
-fi
-
-echo "ADR-045 seal fixtures reproduce from the emitter."
+echo "ADR-045 seal fixtures reproduce from the emitter, with no extra files."
