@@ -39,20 +39,14 @@ fn assay_bin() -> PathBuf {
 /// such as `assay-core` that an mtime comparison against `assay-mcp-server/src`
 /// would miss. On an already-current tree this is a no-op freshness check.
 ///
-/// What this does and does not buy, because the difference is easy to overstate:
-/// it guarantees the binary these tests spawn is built from the current source.
-/// It does *not* make the tests fail when it would not be. Only
-/// `owasp_mcp01_token_args_do_not_leak_to_proxy_logs` depends on the server
-/// answering at all; `e2e_wrap_denies_wildcard_contains` and
-/// `e2e_wrap_denies_schema_violation` assert verdicts the proxy reaches before
-/// dispatching upstream. They pass against anything that spawns and then exits
-/// when its stdin closes — `/usr/bin/true` included, so the upstream need not
-/// speak the protocol, or read a byte, to satisfy them. (#1981 added an
-/// exit-status assert, which does make a server that hangs past five seconds
-/// fail them; that bounds how the upstream *terminates*, not what it answers.)
-/// Detecting a wrong server in those two needs an assertion only a correct
-/// server can satisfy, which is a change to what they test rather than to how
-/// the binary is found, and is what #1988 is for.
+/// Building the current binary is only half of it: a test also has to *notice*
+/// when the wrong one is on the other end. It used not to. The deny fixtures
+/// asserted verdicts the proxy reaches before dispatching upstream, so they
+/// passed against anything spawnable, `/usr/bin/true` included — the upstream
+/// needed neither to speak the protocol nor to read a byte. Every test in this
+/// file now makes the wrapped server answer for itself, the deny fixtures via
+/// [`assert_upstream_is_the_real_server`], which is where that argument is
+/// written down. A stale or wrong binary now fails here.
 ///
 /// Panics (never skips) if the build fails: a skipped e2e test that reads as
 /// green is a worse failure than a loud one.
@@ -412,6 +406,119 @@ fn extract_tool_payload(resp: &Value) -> anyhow::Result<Value> {
         .with_context(|| format!("result.content[0].text is not JSON: {text}"))
 }
 
+/// Request id of the upstream probe the two deny fixtures send after their deny.
+const UPSTREAM_PROBE_ID: &str = "upstream-probe";
+
+/// Policy the probe asks the wrapped server to evaluate, relative to its `--policy-root`.
+const PROBE_INNER_POLICY: &str = "probe-inner.yaml";
+
+/// Write the policy the upstream probe evaluates into the wrapped server's `--policy-root`.
+///
+/// Both deny fixtures already created this directory and passed it to the server, but left it
+/// empty and never made the server read anything out of it. The probe gives that argument a job:
+/// resolving this file is work only the real server does.
+fn write_probe_inner_policy(policy_root: &Path) -> anyhow::Result<()> {
+    std::fs::write(
+        policy_root.join(PROBE_INNER_POLICY),
+        r#"
+version: "2.0"
+name: "upstream-probe-inner"
+tools:
+  allow: ["read_file"]
+enforcement:
+  unconstrained_tools: allow
+"#,
+    )?;
+    Ok(())
+}
+
+/// Assert that the process on the far side of the proxy is a working `assay-mcp-server`.
+///
+/// Call this from a deny fixture *after* reading its deny response, on the same proxy process. It
+/// sends one call the fixture's policy allows, so the proxy forwards it, and the answer can only
+/// come from upstream.
+///
+/// Two things are checked, and they are not the same thing:
+///
+/// 1. **The response is the probe's.** The proxy answers a denied call itself and skips the
+///    forward, so a correct proxy produces exactly one frame for it. Were it forwarded instead,
+///    the server would answer it — the denied names here are ones the server does not implement,
+///    and it replies `Unknown tool: <name>` rather than staying silent — and because the server
+///    writes to a single ordered pipe, that frame would necessarily arrive before the probe's.
+///    Reading the very next frame and finding the probe's id is therefore evidence the denied call
+///    was never dispatched, which is the property a proxy deny is actually for and which asserting
+///    on the deny response alone cannot show. It rests on this server answering unknown tools; an
+///    upstream that received the call and said nothing would not be caught.
+///
+/// 2. **The payload is a real policy verdict.** The server resolves [`PROBE_INNER_POLICY`] under
+///    its `--policy-root`, evaluates the arguments against it, and reports `allowed` in the text
+///    block. Nothing but `assay-mcp-server` produces that.
+///
+/// Together these are what makes the fixtures' `e2e`, and their spawn of a real server, honest.
+/// Before this, both asserted only verdicts `assay mcp wrap` reaches *before* dispatching
+/// upstream, so they passed against any spawnable executable, `/usr/bin/true` included.
+///
+/// Established by mutation rather than by argument, since an argument is what an earlier revision
+/// of this file got wrong. Against the real test binary: renaming the server's `assay_check_args`
+/// arm fails both fixtures on (2), and making the server exit immediately fails them on the read;
+/// removing the proxy's skip-the-forward on a blocked call fails them on (1), and on nothing else
+/// in this file. Substituting a fake at the binary's *path* proves nothing either way — the nested
+/// build in [`assay_mcp_server_bin`] restores the real binary before the test spawns it — so the
+/// stand-in upstreams (`sh -c 'sleep 30'`, `/bin/cat`, `/usr/bin/true`) were driven through this
+/// exact request sequence out-of-band: none satisfies (2). `cat` is the interesting one, since it
+/// echoes the request and so does carry the probe's id, but has no `result.content[0].text`.
+fn assert_upstream_is_the_real_server(
+    child: &mut Child,
+    stdin: &mut dyn Write,
+    lines: &mut JsonLines,
+) -> anyhow::Result<()> {
+    send_line(
+        stdin,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": UPSTREAM_PROBE_ID,
+            "method": "tools/call",
+            "params": {
+                "name": "assay_check_args",
+                "arguments": {
+                    "tool": "read_file",
+                    "arguments": { "path": "/workspace/report.md" },
+                    "policy": PROBE_INNER_POLICY
+                }
+            }
+        }),
+    )?;
+    let resp = read_json_line(
+        child,
+        lines,
+        RESPONSE_TIMEOUT,
+        "the wrapped assay-mcp-server's answer to the allowed upstream probe",
+    )?;
+
+    assert_eq!(
+        resp.get("id").and_then(|v| v.as_str()),
+        Some(UPSTREAM_PROBE_ID),
+        "expected the next frame to answer the probe; a frame for the denied call means the proxy \
+         forwarded it upstream instead of blocking it. resp={resp}"
+    );
+
+    let payload = extract_tool_payload(&resp)?;
+    assert_eq!(
+        payload.get("allowed"),
+        Some(&Value::Bool(true)),
+        "expected the wrapped assay-mcp-server to evaluate {PROBE_INNER_POLICY} and allow the \
+         probe; got payload={payload} from resp={resp}"
+    );
+    assert_eq!(
+        resp.get("result")
+            .and_then(|r| r.get("isError"))
+            .and_then(|v| v.as_bool()),
+        Some(false),
+        "expected a non-error result from upstream, got {resp}"
+    );
+    Ok(())
+}
+
 /// Mask the fixture's token-like argument in an assertion's failure message.
 ///
 /// Only the rendered text is masked; every assertion still compares against the raw value, so a
@@ -614,8 +721,12 @@ fn e2e_wrap_denies_wildcard_contains() -> anyhow::Result<()> {
     let policy_path = tmp.path().join("proxy-policy.yaml");
     let policy_root = tmp.path().join("policy-root");
     std::fs::create_dir_all(&policy_root)?;
+    write_probe_inner_policy(&policy_root)?;
 
-    // Proxy policy: wildcard deny *kill*
+    // Proxy policy: wildcard deny *kill*. `assay_check_args` needs no entry of its own: `allow:
+    // ["*"]` covers it, it matches none of the deny patterns, and `unconstrained_tools: allow`
+    // lets it through without a schema — so the upstream probe below runs against the fixture's
+    // policy unchanged.
     std::fs::write(
         &policy_path,
         r#"
@@ -674,6 +785,10 @@ enforcement:
         "expected deny-ish error_code, got '{code}'. resp={resp}"
     );
 
+    // The deny above is reached before the proxy dispatches upstream, so on its own it says
+    // nothing about what is on the other end. Make the wrapped server answer for itself.
+    assert_upstream_is_the_real_server(&mut child, &mut stdin, &mut lines)?;
+
     // Close stdin and reap the proxy instead of killing it: a kill only reaches the `assay`
     // parent, orphaning the wrapped assay-mcp-server, which then races TempDir teardown and fails
     // its own --policy-root canonicalization on a directory that has just been deleted.
@@ -692,15 +807,25 @@ fn e2e_wrap_denies_schema_violation() -> anyhow::Result<()> {
     let policy_path = tmp.path().join("proxy-policy.yaml");
     let policy_root = tmp.path().join("policy-root");
     std::fs::create_dir_all(&policy_root)?;
+    write_probe_inner_policy(&policy_root)?;
 
-    // Proxy policy: schema for read_file must be /workspace/*
+    // Proxy policy: schema for read_file must be /workspace/*.
+    //
+    // `assay_check_args` is admitted alongside it purely to carry the upstream probe. It needs
+    // both an allowlist entry and a schema: `unconstrained_tools: deny` denies an allowed tool
+    // that has no schema of its own. The probe cannot instead be a `tools/list`, which this
+    // policy denies — the proxy evaluates every request, and a method that names no tool
+    // evaluates as the empty name, which is not in the allowlist.
+    //
+    // This leaves the deny under test untouched: `read_file` keeps the same schema, and
+    // `/etc/passwd` still fails the same `pattern` and reports the same E_ARG_SCHEMA below.
     std::fs::write(
         &policy_path,
         r#"
 version: "2.0"
 name: "e2e-schema"
 tools:
-  allow: ["read_file"]
+  allow: ["read_file", "assay_check_args"]
 schemas:
   read_file:
     type: object
@@ -712,6 +837,16 @@ schemas:
         minLength: 1
         maxLength: 4096
     required: ["path"]
+  assay_check_args:
+    type: object
+    properties:
+      tool:
+        type: string
+        minLength: 1
+      policy:
+        type: string
+        minLength: 1
+    required: ["tool", "arguments", "policy"]
 enforcement:
   unconstrained_tools: deny
 "#,
@@ -758,6 +893,10 @@ enforcement:
         code == "E_ARG_SCHEMA" || code == "MCP_ARG_CONSTRAINT",
         "expected schema/constraint error_code, got '{code}'. resp={resp}"
     );
+
+    // The deny above is reached before the proxy dispatches upstream, so on its own it says
+    // nothing about what is on the other end. Make the wrapped server answer for itself.
+    assert_upstream_is_the_real_server(&mut child, &mut stdin, &mut lines)?;
 
     // Close stdin and reap the proxy instead of killing it: a kill only reaches the `assay`
     // parent, orphaning the wrapped assay-mcp-server, which then races TempDir teardown and fails
