@@ -108,6 +108,11 @@ repos:
         # Each mutation names the test that must catch it. Run by hand this went wrong four times in
         # one session; mechanised it has not. Restores from a scratch copy, never from git, so it is
         # safe on a dirty tree and needs no commit first.
+        #
+        # pre-push, not pre-commit: fourteen `cargo test` runs cost ~56s warm, and a gate that taxes
+        # every intermediate commit is a gate people learn to pass `--no-verify` to. The question it
+        # answers -- does this suite still have teeth -- is a push-time question.
+        stages: [pre-push]
         files: ^(crates/assay-cli/src/aee_seal\.rs|scripts/ci/test_aee_seal_producer_mutations\.py|\.pre-commit-config\.yaml)$
       - id: aee-seal-fixture-drift
         name: ADR-045 seal fixture drift
