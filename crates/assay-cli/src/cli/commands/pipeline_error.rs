@@ -7,7 +7,16 @@ use std::path::Path;
 use std::time::Instant;
 
 pub(crate) enum PipelineError {
-    Classified { run_error: RunError },
+    Classified {
+        run_error: RunError,
+        /// A diagnostic an upstream classifier already produced for this failure.
+        ///
+        /// Its code has no `ReasonCode` counterpart, so it cannot become the reported
+        /// code without giving stderr a code table `run.json` does not share. It is kept
+        /// for what it does know -- its context and its fix steps -- which are folded into
+        /// the reported diagnostic rather than printed as a second one.
+        upstream: Option<Box<Diagnostic>>,
+    },
     Fatal(anyhow::Error),
 }
 
@@ -93,27 +102,71 @@ pub(crate) fn emit_operator_diagnostic(diagnostic: &Diagnostic) {
     let _ = stderr.lock().write_all(rendered.as_bytes());
 }
 
+/// Fold what an upstream classifier knew into the diagnostic that gets reported.
+///
+/// The upstream code travels as context rather than as the diagnostic's code: the reported
+/// code has to stay the one `run.json` carries, or the two channels start disagreeing about
+/// what failed.
+fn fold_upstream(mut reported: Diagnostic, upstream: Diagnostic) -> Diagnostic {
+    if let Some(target) = reported.context.as_object_mut() {
+        if let Some(source) = upstream.context.as_object() {
+            for (key, value) in source {
+                target.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
+        target
+            .entry("classifier_code".to_string())
+            .or_insert_with(|| upstream.code.clone().into());
+    }
+
+    for step in upstream.fix_steps {
+        if !reported.fix_steps.contains(&step) {
+            reported.fix_steps.push(step);
+        }
+    }
+
+    reported
+}
+
 impl PipelineError {
     pub(crate) fn cfg_parse(path: impl Into<String>, msg: impl Into<String>) -> Self {
         Self::Classified {
             run_error: RunError::config_parse(Some(path.into()), msg.into()),
+            upstream: None,
         }
     }
 
     pub(crate) fn missing_cfg(path: impl Into<String>, msg: impl Into<String>) -> Self {
         Self::Classified {
             run_error: RunError::missing_config(path.into(), msg.into()),
+            upstream: None,
         }
     }
 
     pub(crate) fn invalid_args(msg: impl Into<String>) -> Self {
         Self::Classified {
             run_error: RunError::invalid_args(msg.into()),
+            upstream: None,
         }
     }
 
     pub(crate) fn from_run_error(run_error: RunError) -> Self {
-        Self::Classified { run_error }
+        Self::Classified {
+            run_error,
+            upstream: None,
+        }
+    }
+
+    /// A config failure that an upstream classifier already turned into a `Diagnostic`.
+    ///
+    /// The message is the diagnostic's message, not its rendering. Storing the rendering --
+    /// which is what this site used to do -- meant the reported diagnostic framed an already
+    /// framed diagnostic, and put a block of terminal output inside a JSON string field.
+    pub(crate) fn from_diagnostic(path: impl Into<String>, diag: &Diagnostic) -> Self {
+        Self::Classified {
+            run_error: RunError::config_parse(Some(path.into()), diag.message.clone()),
+            upstream: Some(Box::new(diag.clone())),
+        }
     }
 
     pub(crate) fn into_exit_code(
@@ -123,10 +176,19 @@ impl PipelineError {
         run_json_path: &Path,
     ) -> anyhow::Result<i32> {
         match self {
-            Self::Classified { run_error } => {
+            Self::Classified {
+                run_error,
+                upstream,
+            } => {
                 let reason =
                     reason_code_from_run_error(&run_error).unwrap_or(ReasonCode::ECfgParse);
-                emit_operator_diagnostic(&diagnostic_for(&run_error, reason));
+                let reported = match upstream {
+                    Some(up) => fold_upstream(diagnostic_for(&run_error, reason), *up),
+                    None => diagnostic_for(&run_error, reason),
+                };
+                // Exactly one report per failure. Sites that also printed for themselves
+                // produced two, in two different wordings, for one condition.
+                emit_operator_diagnostic(&reported);
                 // Both channels get the same context. `next_step()` interpolates the
                 // path, so withholding it here is what made run.json print
                 // `<config.yaml>` while stderr named the real file.
@@ -354,5 +416,53 @@ mod tests {
         assert!(rendered.starts_with("[E_CFG_PARSE]"));
         assert!(!rendered.contains('\u{274c}'));
         assert!(rendered.contains('\u{e9}'), "the message is preserved");
+    }
+
+    /// An upstream classifier's knowledge is folded in, not printed as a second diagnostic.
+    #[test]
+    fn folding_an_upstream_diagnostic_keeps_its_context_and_fix_steps() {
+        let run_error =
+            RunError::config_parse(Some("assay.yaml".to_string()), "Baseline incompatible");
+        let upstream = Diagnostic::new("E_BASE_MISMATCH", "Baseline incompatible")
+            .with_context(serde_json::json!({ "raw_error": "schema version 99" }))
+            .with_fix_step("Regenerate baseline on main branch");
+
+        let folded = fold_upstream(diagnostic_for(&run_error, ReasonCode::ECfgParse), upstream);
+
+        // The reported code stays the one run.json carries; the classifier's own code
+        // travels as context so it is recorded without becoming a second code table.
+        assert_eq!(folded.code, "E_CFG_PARSE");
+        assert_eq!(folded.context["classifier_code"], "E_BASE_MISMATCH");
+        assert_eq!(folded.context["raw_error"], "schema version 99");
+        assert!(folded
+            .fix_steps
+            .iter()
+            .any(|s| s.contains("Regenerate baseline")));
+        assert!(
+            folded.fix_steps.iter().any(|s| s.contains("assay doctor")),
+            "the reason's own next step survives too: {:?}",
+            folded.fix_steps
+        );
+
+        let rendered = folded.format_plain();
+        assert_eq!(
+            rendered.matches("Baseline incompatible").count(),
+            1,
+            "the diagnostic must not be rendered inside itself:\n{}",
+            rendered
+        );
+    }
+
+    /// Folding must not let the upstream diagnostic overwrite what the reported one knows.
+    #[test]
+    fn folding_does_not_overwrite_reported_context() {
+        let run_error =
+            RunError::config_parse(Some("real.yaml".to_string()), "something went wrong");
+        let upstream = Diagnostic::new("E_EMB_DIMS", "something went wrong")
+            .with_context(serde_json::json!({ "path": "impostor.yaml" }));
+
+        let folded = fold_upstream(diagnostic_for(&run_error, ReasonCode::ECfgParse), upstream);
+
+        assert_eq!(folded.context["path"], "real.yaml");
     }
 }
