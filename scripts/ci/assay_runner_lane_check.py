@@ -1745,19 +1745,25 @@ def self_test() -> None:
 
 
 def _test_content_provenance_coverage_is_decided() -> None:
-    """Every gated path is either content-addressed or knowingly not.
+    """Every gated path and gated prefix is content-addressed or knowingly not.
 
     This asserts the set derived from `assay_runner_gated_paths.json` rather
-    than restating it, so adding a gate path fails here until someone answers
-    whether it belongs under a `content_provenance_paths` prefix. A path that
-    is not content-addressed cannot be proven by tree OID, so any change to it
-    forces a fresh delegated dispatch instead of proof reuse.
+    than restating it, so adding gated coverage fails here until someone
+    answers whether it belongs under a `content_provenance_paths` prefix. A
+    path that is not content-addressed cannot be proven by tree OID, so any
+    change to it forces a fresh delegated dispatch instead of proof reuse.
+
+    Both axes are checked. Gating arrives either as an exact entry in
+    `all_gate_paths` or as an `all_gate_prefixes` entry that gates everything
+    beneath it, and a prefix added without matching content provenance is the
+    same silent drift as a path added without it.
 
     `crates/assay-cli` is deliberately outside the content-provenance
     prefixes: only the runner crates, monitor, ebpf and xtask are covered.
     """
     config = load_gated_path_config()
-    assert sorted(uncovered_content_provenance_files(config.all_gate_paths)) == [
+    gated = sorted(set(config.all_gate_paths) | set(config.all_gate_prefixes))
+    assert sorted(uncovered_content_provenance_files(gated)) == [
         "Cargo.lock",
         "Cargo.toml",
         "crates/assay-cli/src/cgroup.rs",

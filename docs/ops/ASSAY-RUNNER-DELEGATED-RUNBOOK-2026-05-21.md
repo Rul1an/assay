@@ -194,7 +194,7 @@ That is deliberate rebuild avoidance, and it is guarded: four gated paths sit
 outside the content-provenance prefixes and are therefore not provable by tree
 OID at all.
 
-```
+```text
 Cargo.toml
 Cargo.lock
 crates/assay-cli/src/cgroup.rs

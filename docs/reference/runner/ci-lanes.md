@@ -108,7 +108,7 @@ delegated host actually exercised.
 Four gated paths sit outside the `content_provenance_paths` prefixes and are
 therefore not provable by tree OID at all:
 
-```
+```text
 Cargo.toml
 Cargo.lock
 crates/assay-cli/src/cgroup.rs
