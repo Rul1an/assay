@@ -1,9 +1,22 @@
 #!/usr/bin/env python3
 """ADR-045 Landlock run-end seal fixture/checker harness.
 
-This is the first implementation slice for issue #1998: fixtures and checker
-semantics before producer code. It deliberately does not add a production AEE
-exporter or production signing primitive.
+This is the fixture/checker slice for issue #1998, hardened in #2006: fixtures
+and checker semantics before producer code. It deliberately does not add a
+production AEE exporter or production signing primitive.
+
+Three outcomes stay distinguishable, because ADR-043's rule that integrity never
+upgrades meaning only exists if a consumer can tell them apart:
+
+  malformed                        not structurally valid
+  structurally-valid-not-credited  signature verifies, key is untrusted, out of
+                                   scope, wrong role, or outside its window
+  credited                         structurally valid and trusted for this scope
+
+Fixture policy (#2006 item 1): the positive fixture is a full on-disk artifact,
+because it is what a producer gets checked against and the bytes it commits to
+are the signing surface. Negative controls are marker-only, because each is
+defined by the single field it breaks and the marker already names it.
 """
 
 from __future__ import annotations
@@ -14,8 +27,9 @@ import copy
 import hashlib
 import hmac
 import json
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 AEE_PREDICATE_TYPE = "https://in-toto.io/attestation/adversarial-execution-evidence/v0.7"
 AEE_VERSION = "0.7"
@@ -23,23 +37,71 @@ PAYLOAD_TYPE = "application/vnd.assay.aee-landlock-seal.fixture.v0+json"
 STRUCTURAL_KEY = "assay-test-observation-key-landlock-v0"
 FIXTURE_KEY = "assay-aee-spike-fixture-key-v0"
 FIXTURE_KEY_PREFIX = "assay-aee-spike-fixture-key"
+UNTRUSTED_KEY = "assay-test-observation-key-landlock-unenrolled-v0"
 SECRET = b"assay-aee-landlock-seal-fixture-key-not-production"
 ROOT = Path(__file__).resolve().parent
 FIXTURE_ROOT = ROOT / "fixtures" / "aee-landlock-seal"
 NEGATIVE_ROOT = FIXTURE_ROOT / "negative-controls"
 
-CASES = [
-    "valid-landlock-seal",
-    "missing-seal",
-    "bad-run-binding",
-    "not-still-armed",
-    "bad-drop-accounting",
-    "uncounted-channel-without-eligible-seal",
-    "bad-observed-set",
-    "unsupported-observed-attack",
-    "substrate-runner-observed-attacks-mismatch",
-    "fixture-key-production-scope",
-]
+SUBSTRATE_NAME = "assay-landlock-fixture-substrate"
+COLLECTION_PATH = "landlock-tcp-connect"
+OBSERVATION_ROLE = "substrate-observation"
+SOURCE_SCHEMA = "assay.enforcement_health.v1"
+
+# Fixed instants. A validity window needs something to be checked against, and a
+# wall clock would make the drift check flaky, which is how a gate gets disabled.
+SEALED_AT = "2026-08-05T00:00:00Z"
+KEY_VALID_FROM = "2026-01-01T00:00:00Z"
+KEY_VALID_UNTIL = "2027-01-01T00:00:00Z"
+KEY_EXPIRED_UNTIL = "2026-08-04T00:00:00Z"
+
+SIGNED_KINDS = {"arming", "interception", "examination", "sealed"}
+
+PHASE_MALFORMED = "malformed"
+PHASE_NOT_CREDITED = "not-credited"
+
+OUTCOME_MALFORMED = "malformed"
+OUTCOME_NOT_CREDITED = "structurally-valid-not-credited"
+OUTCOME_CREDITED = "credited"
+
+
+class Finding(NamedTuple):
+    """A rejection with a stable reason code.
+
+    The code is what a negative control asserts. A control that only asserts a
+    non-zero exit reports coverage it does not have, because it cannot tell
+    "rejected for the reason I built" from "rejected because I broke the JSON".
+    """
+
+    code: str
+    phase: str
+    message: str
+
+
+POSITIVE_CASE = "valid-landlock-seal"
+
+# Each negative control names the one reason code it exists to produce. The
+# meta-test disables exactly that code and asserts the control then passes; if it
+# still fails, the control was failing for some other reason.
+NEGATIVE_CONTROLS: dict[str, str] = {
+    "missing-seal": "substrate-row-missing-sealed-coverage",
+    "bad-run-binding": "run-binding-mismatch",
+    "not-still-armed": "seal-not-still-armed",
+    "bad-drop-accounting": "drop-accounting-nonzero",
+    "uncounted-channel-without-eligible-seal": "drop-proof-model-ineligible",
+    "bad-observed-set": "observed-set-mismatch",
+    "unsupported-observed-attack": "observed-attack-unsupported",
+    "substrate-runner-observed-attacks-mismatch": "substrate-runner-observed-attacks-mismatch",
+    "fixture-key-production-scope": "fixture-key-in-production-path",
+    "untrusted-signing-key": "untrusted-signing-key",
+    "wrong-key-role": "wrong-key-role",
+    "key-scope-collection-path-mismatch": "key-scope-collection-path-mismatch",
+    "key-scope-substrate-mismatch": "key-scope-substrate-mismatch",
+    "key-outside-validity-window": "key-outside-validity-window",
+    "unsupported-envelope-shape": "unsupported-envelope-shape",
+}
+
+CASES = [POSITIVE_CASE, *NEGATIVE_CONTROLS]
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -55,16 +117,16 @@ def pae(payload_type: str, payload: bytes) -> bytes:
     return b"DSSEv1 " + str(len(pt)).encode("ascii") + b" " + pt + b" " + str(len(payload)).encode("ascii") + b" " + payload
 
 
-def sign(payload: dict[str, Any], keyid: str) -> str:
-    return base64.b64encode(hmac.new(SECRET + keyid.encode("utf-8"), pae(PAYLOAD_TYPE, canonical_bytes(payload)), hashlib.sha256).digest()).decode("ascii")
+def sign(payload: dict[str, Any], keyid: str, payload_type: str = PAYLOAD_TYPE) -> str:
+    return base64.b64encode(hmac.new(SECRET + keyid.encode("utf-8"), pae(payload_type, canonical_bytes(payload)), hashlib.sha256).digest()).decode("ascii")
 
 
-def record(payload: dict[str, Any], seq: int, keyid: str = STRUCTURAL_KEY) -> dict[str, Any]:
+def record(payload: dict[str, Any], seq: int, keyid: str = STRUCTURAL_KEY, payload_type: str = PAYLOAD_TYPE) -> dict[str, Any]:
     return {
         "payload": payload,
-        "payloadType": PAYLOAD_TYPE,
+        "payloadType": payload_type,
         "seq": seq,
-        "signatures": [{"keyid": keyid, "sig": sign(payload, keyid)}],
+        "signatures": [{"keyid": keyid, "sig": sign(payload, keyid, payload_type)}],
     }
 
 
@@ -75,6 +137,15 @@ def leaf_hash(rec: dict[str, Any]) -> str:
 def observed_set(records: list[dict[str, Any]]) -> str:
     leaves = sorted({leaf_hash(rec) for rec in records if rec["payload"].get("aeeKind") in {"interception", "examination"}})
     return hashlib.sha256(canonical_bytes(leaves)).hexdigest()
+
+
+def parse_instant(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return None
 
 
 def run_binding_input(statement: dict[str, Any]) -> dict[str, str]:
@@ -95,9 +166,22 @@ def run_binding(statement: dict[str, Any]) -> str:
     return digest_json(run_binding_input(statement))
 
 
+def trusted_scope(keyid: str, **overrides: Any) -> dict[str, Any]:
+    scope = {
+        "keyid": keyid,
+        "role": OBSERVATION_ROLE,
+        "collectionPaths": [COLLECTION_PATH],
+        "substrate": SUBSTRATE_NAME,
+        "validFrom": KEY_VALID_FROM,
+        "validUntil": KEY_VALID_UNTIL,
+    }
+    scope.update(overrides)
+    return scope
+
+
 def base_statement() -> dict[str, Any]:
     subject = {"name": "assay-aee-landlock-seal-fixture-subject", "digest": {"sha256": digest_json({"artifact": "landlock-seal", "v": 1})}}
-    substrate_descriptor = {"name": "assay-landlock-fixture-substrate", "collectionPaths": ["landlock-tcp-connect"]}
+    substrate_descriptor = {"name": SUBSTRATE_NAME, "collectionPaths": [COLLECTION_PATH]}
     corpus_manifest = {"classes": {"NET": ["NET-CONNECT-BLOCK-001"]}, "expectedPayloads": {"NET-CONNECT-BLOCK-001": [digest_json({"probe": "denied-connect", "port": 443})]}}
     catch_policy = {"name": "deny-default-landlock-probe", "scope": "tcp_connect_landlock_port", "allowedPorts": []}
     network_posture = {"mode": "deny-default", "mechanism": "landlock", "scope": "tcp_connect_landlock_port"}
@@ -121,30 +205,33 @@ def base_statement() -> dict[str, Any]:
             "coverage": {"assessedClasses": ["NET"], "outOfScope": {}, "routedElsewhere": {}},
             "attackResults": [{"attackId": "NET-CONNECT-BLOCK-001", "containmentObserved": "connect_blocked", "basis": "substrate", "method": "intercepted", "attribution": "pinned", "actualLayer": "landlock", "observationRefs": [0, 1, 2]}],
             "doesNotAssert": ["production AEE support", "stable AEE export", "complete run population", "agent safety", "provider side effects"],
-            "_ext": {"assayLandlockSeal": {"productionPath": False, "trustedKeyScopes": [{"keyid": STRUCTURAL_KEY, "role": "substrate-observation", "collectionPaths": ["landlock-tcp-connect"], "substrate": substrate_descriptor["name"]}]}},
+            "_ext": {"assayLandlockSeal": {"productionPath": False, "trustedKeyScopes": [trusted_scope(STRUCTURAL_KEY)]}},
         },
     }
     rb = run_binding(stmt)
     env = stmt["predicate"]["observationEnvironment"]
-    interception = {"aeeKind": "interception", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePayloadCommitment": corpus_manifest["expectedPayloads"]["NET-CONNECT-BLOCK-001"][0], "assayCollectionPath": "landlock-tcp-connect", "assaySourceSchema": "assay.enforcement_health.v1.probe"}
-    arming = {"aeeKind": "arming", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "assayCollectionPath": "landlock-tcp-connect"}
+    interception = {"aeeKind": "interception", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePayloadCommitment": corpus_manifest["expectedPayloads"]["NET-CONNECT-BLOCK-001"][0], "assayCollectionPath": COLLECTION_PATH, "assaySourceSchema": "assay.enforcement_health.v1.probe"}
+    arming = {"aeeKind": "arming", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "assayCollectionPath": COLLECTION_PATH}
     records = [record(interception, 1), record(arming, 2)]
-    sealed = {"aeeKind": "sealed", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "aeeStillArmed": True, "aeeDropCount": 0, "aeeDropBound": 0, "assayDropProofModel": "synchronous-probe", "aeeObservedSet": observed_set(records), "aeeObservedAttacks": [], "assayObservedLabels": ["connect_blocked"], "assayCollectionPath": "landlock-tcp-connect", "assaySourceSchema": "assay.enforcement_health.v1", "assaySealScope": "tcp_connect_landlock_port", "assayAttackRowAttributionSource": "assembly-plane", "assayNonClaims": ["does not prove complete run population", "does not prove agent safety", "does not prove provider side effects", "does not prove independent substrate operation"]}
+    sealed = {"aeeKind": "sealed", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "aeeStillArmed": True, "aeeDropCount": 0, "aeeDropBound": 0, "assayDropProofModel": "synchronous-probe", "aeeObservedSet": observed_set(records), "aeeObservedAttacks": [], "assayObservedLabels": ["connect_blocked"], "assayCollectionPath": COLLECTION_PATH, "assaySealedAt": SEALED_AT, "assaySourceSchema": SOURCE_SCHEMA, "assaySealScope": "tcp_connect_landlock_port", "assayAttackRowAttributionSource": "assembly-plane", "assayNonClaims": ["does not prove complete run population", "does not prove agent safety", "does not prove provider side effects", "does not prove independent substrate operation"]}
     records.append(record(sealed, 3))
     stmt["predicate"]["observationRecords"] = records
-    stmt["predicate"]["batchRoot"] = digest_json([rec["seq"] for rec in records])
     return stmt
 
 
-def replace_payload(statement: dict[str, Any], idx: int, payload: dict[str, Any], keyid: str = STRUCTURAL_KEY) -> None:
-    statement["predicate"]["observationRecords"][idx] = record(payload, idx + 1, keyid)
+def replace_payload(statement: dict[str, Any], idx: int, payload: dict[str, Any], keyid: str = STRUCTURAL_KEY, payload_type: str = PAYLOAD_TYPE) -> None:
+    statement["predicate"]["observationRecords"][idx] = record(payload, idx + 1, keyid, payload_type)
+
+
+def set_scopes(statement: dict[str, Any], scopes: list[dict[str, Any]]) -> None:
+    statement["predicate"]["_ext"]["assayLandlockSeal"]["trustedKeyScopes"] = scopes
 
 
 def case_statement(name: str) -> dict[str, Any]:
     stmt = base_statement()
     pred = stmt["predicate"]
     seal = copy.deepcopy(pred["observationRecords"][2]["payload"])
-    if name == "valid-landlock-seal":
+    if name == POSITIVE_CASE:
         return stmt
     if name == "missing-seal":
         pred["observationRecords"] = pred["observationRecords"][:2]
@@ -173,126 +260,288 @@ def case_statement(name: str) -> dict[str, Any]:
         replace_payload(stmt, 2, seal)
     elif name == "fixture-key-production-scope":
         pred["_ext"]["assayLandlockSeal"]["productionPath"] = True
-        pred["_ext"]["assayLandlockSeal"]["trustedKeyScopes"] = [{"keyid": FIXTURE_KEY, "role": "substrate-observation", "collectionPaths": ["landlock-tcp-connect"], "substrate": "assay-landlock-fixture-substrate"}]
+        set_scopes(stmt, [trusted_scope(FIXTURE_KEY)])
         for idx, rec in enumerate(list(pred["observationRecords"])):
             replace_payload(stmt, idx, rec["payload"], FIXTURE_KEY)
+    elif name == "untrusted-signing-key":
+        # Signature verifies. The key is simply not in the consumer trust set, so
+        # no scope is found and every scope-dependent check stays silent.
+        for idx, rec in enumerate(list(pred["observationRecords"])):
+            replace_payload(stmt, idx, rec["payload"], UNTRUSTED_KEY)
+    elif name == "wrong-key-role":
+        set_scopes(stmt, [trusted_scope(STRUCTURAL_KEY, role="policy-decision")])
+    elif name == "key-scope-collection-path-mismatch":
+        set_scopes(stmt, [trusted_scope(STRUCTURAL_KEY, collectionPaths=["landlock-udp-send"])])
+    elif name == "key-scope-substrate-mismatch":
+        set_scopes(stmt, [trusted_scope(STRUCTURAL_KEY, substrate="assay-some-other-substrate")])
+    elif name == "key-outside-validity-window":
+        set_scopes(stmt, [trusted_scope(STRUCTURAL_KEY, validUntil=KEY_EXPIRED_UNTIL)])
+    elif name == "unsupported-envelope-shape":
+        # Self-consistent envelope, signed over its own declared payload type.
+        # Nothing here is malformed; the checker simply does not implement this
+        # shape, and must say so rather than pass it through.
+        replace_payload(stmt, 2, seal, STRUCTURAL_KEY, "application/vnd.assay.aee-landlock-seal.unimplemented.v9+json")
     else:
         raise ValueError(f"unknown fixture case: {name}")
     return stmt
 
 
+# Every fixture path this harness will ever touch, built once from the case list
+# and looked up by name. Nothing joins a caller-supplied string onto a directory.
+#
+# `argparse(choices=CASES)` already constrains the CLI, but `fixture_path` and
+# `load_case` are library-shaped: a second caller would not come through argparse,
+# and a path boundary that holds only because of a framework detail stops holding
+# the moment someone adds one.
+FIXTURE_PATHS: dict[str, Path] = {
+    name: (FIXTURE_ROOT if name == POSITIVE_CASE else NEGATIVE_ROOT) / f"{name}.json" for name in CASES
+}
+
+
 def fixture_path(name: str) -> Path:
-    if name == "valid-landlock-seal":
-        return FIXTURE_ROOT / "valid-landlock-seal.json"
-    return NEGATIVE_ROOT / f"{name}.json"
+    try:
+        return FIXTURE_PATHS[name]
+    except KeyError:
+        raise SystemExit(f"unknown fixture case: {name}") from None
+
+
+def marker_body(name: str) -> dict[str, Any]:
+    return {
+        "_type": "https://in-toto.io/Statement/v1",
+        "case": name,
+        "note": "Marker fixture for a negative control. The control is defined by the single field it breaks, which this name states; the body is generated by aee_landlock_seal_fixture.py so emitter and checker cannot drift.",
+        "predicateType": AEE_PREDICATE_TYPE,
+        "rejectsWith": NEGATIVE_CONTROLS[name],
+    }
 
 
 def emit_fixtures() -> None:
+    """Write fixtures per the #2006 policy: full body positive, markers negative."""
     for name in CASES:
         path = fixture_path(name)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(case_statement(name), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        body = case_statement(name) if name == POSITIVE_CASE else marker_body(name)
+        path.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"wrote {path}")
 
 
 def load_case(name: str) -> dict[str, Any]:
-    # The committed JSON files are review markers for the fixture names. The
-    # canonical fixture bodies are generated here so the checker and emitter
-    # cannot drift in this first slice.
-    return case_statement(name)
+    """Load the positive fixture from disk; generate the negative controls.
+
+    The positive fixture is what a producer gets checked against, so the bytes on
+    disk are the artifact under review and are read back rather than regenerated.
+    Negative controls are generated from their marker so a control and the check
+    it targets cannot drift apart in a hand-edited file.
+    """
+    if name != POSITIVE_CASE:
+        return case_statement(name)
+    path = fixture_path(name)
+    if not path.is_file():
+        raise SystemExit(f"missing positive fixture {path}; run --emit to materialize it")
+    body = json.loads(path.read_text(encoding="utf-8"))
+    if "predicate" not in body:
+        raise SystemExit(f"positive fixture {path} is a marker, not a full artifact; run --emit")
+    return body
 
 
-def validate(statement: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
+def validate(statement: dict[str, Any], disabled: frozenset[str] = frozenset()) -> list[Finding]:
+    findings: list[Finding] = []
+
+    def add(code: str, phase: str, message: str) -> None:
+        if code not in disabled:
+            findings.append(Finding(code, phase, message))
+
     pred = statement.get("predicate", {})
     env = pred.get("observationEnvironment", {})
     rows = pred.get("attackResults", [])
     records = pred.get("observationRecords", [])
-    production_path = pred.get("_ext", {}).get("assayLandlockSeal", {}).get("productionPath") is True
+    ext = pred.get("_ext", {}).get("assayLandlockSeal", {})
+    production_path = ext.get("productionPath") is True
+    scopes = {scope.get("keyid"): scope for scope in ext.get("trustedKeyScopes", []) if isinstance(scope, dict)}
+    substrate_name = env.get("substrate", {}).get("name")
+
     try:
         rb = run_binding(statement)
     except Exception as exc:  # noqa: BLE001
-        errors.append(f"run binding cannot be derived: {exc}")
+        add("run-binding-underivable", PHASE_MALFORMED, f"run binding cannot be derived: {exc}")
         rb = None
-    payloads = []
+
+    payloads: list[dict[str, Any]] = []
+    credit_eligible: list[int] = []
     for idx, rec in enumerate(records):
         payload = rec.get("payload")
         if not isinstance(payload, dict):
-            errors.append(f"record {idx} payload is not a JSON object")
+            add("payload-not-object", PHASE_MALFORMED, f"record {idx} payload is not a JSON object")
             payload = {}
         payloads.append(payload)
+
+        payload_type = rec.get("payloadType")
+        if payload_type != PAYLOAD_TYPE and "unsupported-envelope-shape" not in disabled:
+            # Reject as unsupported, never skip. A "we did not check this" path
+            # that returns success is how an unverified record reads as verified.
+            add("unsupported-envelope-shape", PHASE_MALFORMED, f"record {idx} payload type {payload_type!r} is not implemented by this checker")
+            continue
+
         sigs = rec.get("signatures", [])
         if len(sigs) != 1:
-            errors.append(f"record {idx} must carry exactly one fixture signature")
+            add("signature-count", PHASE_MALFORMED, f"record {idx} must carry exactly one fixture signature")
             continue
         keyid = sigs[0].get("keyid", "")
-        if sigs[0].get("sig") != sign(payload, keyid):
-            errors.append(f"record {idx} fixture signature does not verify")
+        if sigs[0].get("sig") != sign(payload, keyid, payload_type if isinstance(payload_type, str) else PAYLOAD_TYPE):
+            add("signature-invalid", PHASE_MALFORMED, f"record {idx} fixture signature does not verify")
+            continue
+        if rb and payload.get("aeeKind") in SIGNED_KINDS and payload.get("aeeRunBinding") != rb:
+            add("run-binding-mismatch", PHASE_MALFORMED, f"record {idx} aeeRunBinding mismatch")
+
+        # Credited-evidence phase. The signature is an envelope fact; whether the
+        # record counts as attested substrate evidence is a separate question.
         if production_path and keyid.startswith(FIXTURE_KEY_PREFIX):
-            errors.append(f"record {idx} uses fixture key in production path")
-        if rb and payload.get("aeeKind") in {"arming", "interception", "examination", "sealed"} and payload.get("aeeRunBinding") != rb:
-            errors.append(f"record {idx} aeeRunBinding mismatch")
+            add("fixture-key-in-production-path", PHASE_NOT_CREDITED, f"record {idx} uses fixture key in production path")
+        scope = scopes.get(keyid)
+        if scope is None:
+            add("untrusted-signing-key", PHASE_NOT_CREDITED, f"record {idx} key {keyid!r} is not in the consumer trust set")
+            continue
+        if scope.get("role") != OBSERVATION_ROLE:
+            add("wrong-key-role", PHASE_NOT_CREDITED, f"record {idx} key role {scope.get('role')!r} is not {OBSERVATION_ROLE!r}")
+        path = payload.get("assayCollectionPath")
+        if path is not None and path not in scope.get("collectionPaths", []):
+            add("key-scope-collection-path-mismatch", PHASE_NOT_CREDITED, f"record {idx} collection path {path!r} is outside the key's trusted scope")
+        if scope.get("substrate") != substrate_name:
+            add("key-scope-substrate-mismatch", PHASE_NOT_CREDITED, f"record {idx} key scope substrate {scope.get('substrate')!r} does not match statement substrate {substrate_name!r}")
+        credit_eligible.append(idx)
+
     seals = [idx for idx, payload in enumerate(payloads) if payload.get("aeeKind") == "sealed"]
+
+    # Validity window, checked against the run-end instant the seal commits to. A
+    # checker with no window silently keeps crediting a retired key.
+    sealed_at = parse_instant(payloads[seals[0]].get("assaySealedAt")) if seals else None
+    if seals and sealed_at is None:
+        add("seal-instant-invalid", PHASE_MALFORMED, f"sealed record {seals[0]} assaySealedAt is not an RFC 3339 UTC instant")
+    for idx in credit_eligible:
+        scope = scopes[records[idx]["signatures"][0]["keyid"]]
+        valid_from = parse_instant(scope.get("validFrom"))
+        valid_until = parse_instant(scope.get("validUntil"))
+        if sealed_at is None or valid_from is None or valid_until is None:
+            continue
+        if not (valid_from <= sealed_at <= valid_until):
+            add("key-outside-validity-window", PHASE_NOT_CREDITED, f"record {idx} seal instant {SEALED_AT} is outside the key window {scope.get('validFrom')}..{scope.get('validUntil')}")
+
     if any(row.get("basis") == "substrate" for row in rows) and not seals:
-        errors.append("substrate row lacks required sealed coverage")
+        add("substrate-row-missing-sealed-coverage", PHASE_MALFORMED, "substrate row lacks required sealed coverage")
     caught = set(env.get("observationVocabulary", {}).get("caught", []))
     caught_attacks = sorted({row.get("attackId") for row in rows if row.get("containmentObserved") in caught})
     for idx in seals:
         seal = payloads[idx]
+        # Payload-only rules (#2006 item 4).
+        source_schema = seal.get("assaySourceSchema")
+        if not isinstance(source_schema, str) or not source_schema:
+            add("payload-source-schema-invalid", PHASE_MALFORMED, f"sealed record {idx} assaySourceSchema must be a non-empty string")
+        observed_attacks = seal.get("aeeObservedAttacks")
+        if not isinstance(observed_attacks, list) or not all(isinstance(item, str) for item in observed_attacks):
+            add("payload-observed-attacks-invalid", PHASE_MALFORMED, f"sealed record {idx} aeeObservedAttacks must be an array of strings")
+            observed_attacks = []
+
         if seal.get("aeePostureDigest") != env.get("networkPosture", {}).get("digest", {}).get("sha256"):
-            errors.append(f"sealed record {idx} aeePostureDigest mismatch")
+            add("posture-digest-mismatch", PHASE_MALFORMED, f"sealed record {idx} aeePostureDigest mismatch")
         if seal.get("aeeStillArmed") is not True:
-            errors.append(f"sealed record {idx} is not still armed")
+            add("seal-not-still-armed", PHASE_MALFORMED, f"sealed record {idx} is not still armed")
         if seal.get("aeeDropCount") != 0 or seal.get("aeeDropBound") != 0:
-            errors.append(f"sealed record {idx} has non-zero or inconsistent drop accounting")
+            add("drop-accounting-nonzero", PHASE_MALFORMED, f"sealed record {idx} has non-zero or inconsistent drop accounting")
         if seal.get("assayDropProofModel") not in {"synchronous-probe", "counted-queue-zero"}:
-            errors.append(f"sealed record {idx} has no eligible drop-accounting proof model")
+            add("drop-proof-model-ineligible", PHASE_MALFORMED, f"sealed record {idx} has no eligible drop-accounting proof model")
         if seal.get("aeeObservedSet") != observed_set(records):
-            errors.append(f"sealed record {idx} aeeObservedSet mismatch")
-        for attack_id in seal.get("aeeObservedAttacks", []):
+            add("observed-set-mismatch", PHASE_MALFORMED, f"sealed record {idx} aeeObservedSet mismatch")
+        for attack_id in observed_attacks:
             if attack_id not in caught_attacks:
-                errors.append(f"sealed record {idx} names attack not supported by caught rows: {attack_id}")
-        if seal.get("assayAttackRowAttributionSource") == "substrate-runner" and sorted(seal.get("aeeObservedAttacks", [])) != caught_attacks:
-            errors.append(f"sealed record {idx} substrate-runner observed attacks mismatch")
+                add("observed-attack-unsupported", PHASE_MALFORMED, f"sealed record {idx} names attack not supported by caught rows: {attack_id}")
+        if seal.get("assayAttackRowAttributionSource") == "substrate-runner" and sorted(observed_attacks) != caught_attacks:
+            add("substrate-runner-observed-attacks-mismatch", PHASE_MALFORMED, f"sealed record {idx} substrate-runner observed attacks mismatch")
+
     for row_idx, row in enumerate(rows):
         refs = row.get("observationRefs", [])
         ref_kinds = {payloads[ref].get("aeeKind") for ref in refs if isinstance(ref, int) and 0 <= ref < len(payloads)}
         if row.get("basis") == "substrate" and "arming" not in ref_kinds:
-            errors.append(f"substrate row {row_idx} lacks arming coverage")
+            add("substrate-row-missing-arming-coverage", PHASE_MALFORMED, f"substrate row {row_idx} lacks arming coverage")
         if row.get("basis") == "substrate" and "sealed" not in ref_kinds:
-            errors.append(f"substrate row {row_idx} lacks sealed coverage")
+            add("substrate-row-missing-sealed-coverage", PHASE_MALFORMED, f"substrate row {row_idx} lacks sealed coverage")
         if row.get("basis") == "substrate" and row.get("containmentObserved") in caught and "interception" not in ref_kinds:
-            errors.append(f"caught substrate row {row_idx} lacks interception coverage")
-    return errors
+            add("substrate-row-missing-interception-coverage", PHASE_MALFORMED, f"caught substrate row {row_idx} lacks interception coverage")
+    return findings
+
+
+def outcome_of(findings: list[Finding]) -> str:
+    if any(finding.phase == PHASE_MALFORMED for finding in findings):
+        return OUTCOME_MALFORMED
+    if any(finding.phase == PHASE_NOT_CREDITED for finding in findings):
+        return OUTCOME_NOT_CREDITED
+    return OUTCOME_CREDITED
+
+
+def report(case: str, findings: list[Finding]) -> str:
+    outcome = outcome_of(findings)
+    lines = [f"{outcome}: {case}"]
+    lines.extend(f"- [{finding.code}] {finding.message}" for finding in findings)
+    return "\n".join(lines)
+
+
+def run_meta_test() -> int:
+    """Assert every negative control fails for the reason it was built for.
+
+    For each control, disable exactly the code it targets and require the case to
+    become credited. A control that still fails was failing for another reason,
+    and reported coverage that did not exist.
+    """
+    failures = 0
+    for name, code in NEGATIVE_CONTROLS.items():
+        findings = validate(load_case(name))
+        codes = {finding.code for finding in findings}
+        if code not in codes:
+            print(f"FAIL {name}: expected reason {code!r}, got {sorted(codes) or 'no findings'}")
+            failures += 1
+            continue
+        residual = validate(load_case(name), disabled=frozenset({code}))
+        if residual:
+            print(f"FAIL {name}: with {code!r} disabled it still fails: {sorted({f.code for f in residual})}")
+            failures += 1
+            continue
+        print(f"ok {name}: rejects with {code}, and only that")
+    if failures:
+        print(f"{failures} negative control(s) do not isolate their reason")
+        return 1
+    print(f"all {len(NEGATIVE_CONTROLS)} negative controls isolate their reason")
+    return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("case", nargs="?", choices=CASES, help="Named fixture case to check")
     parser.add_argument("--emit", action="store_true", help="Write all named fixtures to scripts/experiments/fixtures/aee-landlock-seal")
-    parser.add_argument("--expect-invalid", action="store_true", help="Exit 0 only when validation fails")
+    parser.add_argument("--expect-invalid", action="store_true", help="Exit 0 only when validation rejects")
+    parser.add_argument("--expect-reason", help="Require this reason code among the findings")
+    parser.add_argument("--disable-check", action="append", default=[], metavar="CODE", help="Harness-only: suppress a reason code (used by --meta-test)")
+    parser.add_argument("--meta-test", action="store_true", help="Assert each negative control fails for its own reason and no other")
     args = parser.parse_args()
+
     if args.emit:
         emit_fixtures()
         return 0
+    if args.meta_test:
+        return run_meta_test()
     if not args.case:
-        parser.error("case is required unless --emit is used")
-    errors = validate(load_case(args.case))
+        parser.error("case is required unless --emit or --meta-test is used")
+
+    findings = validate(load_case(args.case), disabled=frozenset(args.disable_check))
+    print(report(args.case, findings))
+
+    if args.expect_reason and args.expect_reason not in {finding.code for finding in findings}:
+        print(f"expected reason {args.expect_reason!r} not among findings")
+        return 1
     if args.expect_invalid:
-        if errors:
-            print(f"invalid as expected: {args.case}")
-            for error in errors:
-                print(f"- {error}")
+        if findings:
             return 0
-        print(f"expected invalid but passed: {args.case}")
+        print(f"expected rejection but {args.case} was credited")
         return 1
-    if errors:
-        print(f"invalid: {args.case}")
-        for error in errors:
-            print(f"- {error}")
-        return 1
-    print(f"valid ADR-045 Landlock seal fixture: {args.case}")
-    return 0
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":
