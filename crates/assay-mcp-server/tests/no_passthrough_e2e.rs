@@ -41,10 +41,12 @@
 #![cfg(feature = "test-outbound")]
 
 use assay_mcp_server::auth::SENSITIVE_HEADER_NAMES;
-use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+mod jsonrpc_conn;
+use jsonrpc_conn::Conn;
 
 fn sensitive_names_lower() -> std::collections::HashSet<String> {
     SENSITIVE_HEADER_NAMES
@@ -95,7 +97,7 @@ async fn test_no_passthrough_e2e() {
 
     // This test only compiles under `test-outbound`, so the binary Cargo built for it carries the
     // feature too — no separate build step, and no second feature variant to thrash against.
-    let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+    let child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
         .args(["--policy-root", policy_root])
         .env("ASSAY_TEST_OUTBOUND_URL", outbound_url.as_str())
         .stdin(Stdio::piped())
@@ -104,9 +106,7 @@ async fn test_no_passthrough_e2e() {
         .spawn()
         .expect("Failed to spawn server");
 
-    let mut stdin = child.stdin.take().expect("stdin");
-    let stdout = child.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
+    let mut conn = Conn::attach(child);
 
     // 1. Initialize with credential-shaped fields. The server must neither interpret them as
     // authentication nor forward them downstream.
@@ -124,21 +124,9 @@ async fn test_no_passthrough_e2e() {
         },
         "id": 1
     });
-    writeln!(stdin, "{}", req_init).unwrap();
-    stdin.flush().unwrap();
+    conn.send(req_init);
 
-    let mut line = String::new();
-    for _ in 0..10 {
-        line.clear();
-        let n = reader.read_line(&mut line).expect("read init response");
-        if n == 0 {
-            break;
-        }
-        if !line.trim().is_empty() {
-            break;
-        }
-    }
-    let resp: serde_json::Value = serde_json::from_str(line.trim()).expect("Parse init response");
+    let resp: serde_json::Value = conn.read_json();
     assert!(resp.get("result").is_some(), "Init failed: {:?}", resp);
 
     // 2. Call test-only outbound tool (single callsite uses build_downstream_headers only)
@@ -148,16 +136,12 @@ async fn test_no_passthrough_e2e() {
         "params": { "name": "assay_test_outbound", "arguments": {} },
         "id": 2
     });
-    writeln!(stdin, "{}", req_call).unwrap();
-    stdin.flush().unwrap();
+    conn.send(req_call);
 
-    line.clear();
-    reader.read_line(&mut line).unwrap();
-    let resp: serde_json::Value = serde_json::from_str(line.trim()).expect("Parse tool response");
+    let resp: serde_json::Value = conn.read_json();
     assert!(resp.get("result").is_some(), "Tool call failed: {:?}", resp);
 
-    drop(stdin);
-    let status = child.wait().expect("failed to wait on child process");
+    let status = conn.shutdown();
     assert!(
         status.success(),
         "server process did not exit successfully: {status:?}"
