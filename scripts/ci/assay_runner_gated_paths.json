@@ -6,14 +6,14 @@
     "crates/assay-runner-linux/",
     "crates/assay-monitor/",
     "crates/assay-ebpf/",
-    "crates/assay-xtask/"
+    "crates/assay-xtask/",
+    "crates/assay-cli/src/cli/commands/runner_spike/"
   ],
   "all_gate_paths": [
     ".github/workflows/runner-spike-delegated.yml",
     ".github/workflows/runner-spike-sdk.yml",
     ".github/actions/canonical-ebpf-build/action.yml",
     "crates/assay-cli/src/cli/commands/runner_spike.rs",
-    "crates/assay-cli/src/cgroup.rs",
     "Cargo.toml",
     "Cargo.lock",
     "scripts/ci/assay_runner_delegated_proof_pack.py",
