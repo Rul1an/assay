@@ -38,8 +38,14 @@ if find "$fixture_dir" -type l -print -quit | grep -q .; then
 fi
 
 cp -RP "$fixture_dir" "$scratch/committed"
-ASSAY_AEE_FIXTURE_ROOT="$scratch/emitted" \
-  python3 scripts/experiments/aee_landlock_seal_fixture.py --emit >/dev/null
+
+# Run a *copy* of the emitter rather than redirecting the real one. The emitter derives its output
+# root from `__file__`, so a copy writes under the copy with nothing to pass it -- and the override
+# that used to do this was an arbitrary-write primitive in a script this hook invokes.
+cp -RP scripts/experiments "$scratch/experiments"
+rm -rf "$scratch/experiments/fixtures/aee-landlock-seal"
+python3 "$scratch/experiments/aee_landlock_seal_fixture.py" --emit >/dev/null
+mv "$scratch/experiments/fixtures/aee-landlock-seal" "$scratch/emitted"
 
 # Compare both directions. `--emit` only writes, so a case removed from CASES leaves its fixture on
 # disk unmodified: `git diff` stays clean and the retired control looks authoritative while nothing

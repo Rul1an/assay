@@ -27,8 +27,6 @@ import copy
 import hashlib
 import hmac
 import json
-import os
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -42,33 +40,14 @@ FIXTURE_KEY_PREFIX = "assay-aee-spike-fixture-key"
 UNTRUSTED_KEY = "assay-test-observation-key-landlock-unenrolled-v0"
 SECRET = b"assay-aee-landlock-seal-fixture-key-not-production"
 ROOT = Path(__file__).resolve().parent
-DEFAULT_FIXTURE_ROOT = ROOT / "fixtures" / "aee-landlock-seal"
-
-
-def _fixture_root() -> Path:
-    """Where `--emit` writes. Overridable so the drift check emits into a scratch directory instead
-    of rewriting the tree it is auditing.
-
-    The override is validated rather than trusted. It reaches a `write_text`, so an unchecked value
-    is an arbitrary-write primitive in a script that runs from a pre-push hook -- which is what
-    CodeQL flagged when the override was first added. Two containments, and the path must satisfy
-    one: the committed fixture directory, or a directory under the system temp root, which is the
-    only other place this is meant to be used.
-    """
-    raw = os.environ.get("ASSAY_AEE_FIXTURE_ROOT")
-    if raw is None:
-        return DEFAULT_FIXTURE_ROOT
-    candidate = Path(raw).resolve()
-    allowed = (DEFAULT_FIXTURE_ROOT.resolve(), Path(tempfile.gettempdir()).resolve())
-    if not any(candidate == base or base in candidate.parents for base in allowed):
-        raise SystemExit(
-            f"ASSAY_AEE_FIXTURE_ROOT={raw!r} resolves outside the fixture directory and the temp root; "
-            "refusing to write there"
-        )
-    return candidate
-
-
-FIXTURE_ROOT = _fixture_root()
+# No override. An earlier version read the output root from an environment variable so the drift
+# check could emit elsewhere; CodeQL flagged it as an arbitrary-write primitive and was right, since
+# the value reached `write_text` in a script that runs from a pre-push hook. Validating it still left
+# tainted data flowing into a path -- a containment comparison is not a barrier the dataflow
+# recognises, and CodeQL flagged the validator too. So the capability is gone rather than guarded:
+# the drift check copies this directory to a scratch tree and runs the copy, where `ROOT` resolves
+# under the copy by itself.
+FIXTURE_ROOT = ROOT / "fixtures" / "aee-landlock-seal"
 NEGATIVE_ROOT = FIXTURE_ROOT / "negative-controls"
 
 SUBSTRATE_NAME = "assay-landlock-fixture-substrate"
