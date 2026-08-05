@@ -44,7 +44,7 @@ pub struct CoverageArgs {
     /// - `--format md|json` for `--input` mode
     /// - `--input` mode: json|md (text aliases to json; markdown/github alias to md)
     /// - legacy mode: text|json|markdown|github
-    #[arg(long, default_value = "text")]
+    #[arg(long, default_value = "text", value_parser = ["text", "json", "md", "markdown", "github"])]
     pub format: String,
 
     /// Number of top routes to include in markdown output (default: 10).
