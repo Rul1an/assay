@@ -1,6 +1,5 @@
 use assay_mcp_server::manifest_observed::{build_observed, Completeness};
 use serde_json::Value;
-use std::io::BufReader;
 use std::path::PathBuf;
 
 use crate::support::*;
@@ -16,7 +15,7 @@ fn complete_manifest_allow_emits_conformance_record() {
     let decisions = dir.path().join("decisions.ndjson");
     let conformance = dir.path().join("conformance.ndjson");
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child = spawn_enforce_conformance(
+    let mut out = Conn::attach(spawn_enforce_conformance(
         &log,
         &policy,
         &approved_baseline_path(),
@@ -24,21 +23,16 @@ fn complete_manifest_allow_emits_conformance_record() {
         &decisions,
         Some(&conformance),
         None,
-    );
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    ));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let _ = read_response(&mut out);
-    send(&mut stdin, deploy_key_call());
-    let r = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let _ = out.read_response();
+    out.send(deploy_key_call());
+    let r = out.read_response();
     assert_eq!(r["result"]["content"][0]["text"], "forwarded-ok");
-    shutdown(child, stdin);
+    let _ = out.shutdown();
 
     let recs = read_conformance_records(&conformance);
     assert_eq!(recs.len(), 1, "one conformance record per tools/call");
@@ -63,7 +57,7 @@ fn incomplete_manifest_emits_inconclusive_conformance() {
     let decisions = dir.path().join("decisions.ndjson");
     let conformance = dir.path().join("conformance.ndjson");
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child = spawn_enforce_conformance(
+    let mut out = Conn::attach(spawn_enforce_conformance(
         &log,
         &policy,
         &approved_baseline_path(),
@@ -71,19 +65,17 @@ fn incomplete_manifest_emits_inconclusive_conformance() {
         &decisions,
         Some(&conformance),
         Some(300),
-    );
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    ));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(&mut stdin, deploy_key_call());
-    let r = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(deploy_key_call());
+    let r = out.read_response();
     assert_eq!(
         r["error"]["data"]["reason"],
         "manifest_current_observation_incomplete"
     );
-    shutdown(child, stdin);
+    let _ = out.shutdown();
 
     let recs = read_conformance_records(&conformance);
     assert_eq!(recs.len(), 1);
@@ -100,7 +92,7 @@ fn conformance_flag_off_writes_no_file() {
     let decisions = dir.path().join("decisions.ndjson");
     let conformance = dir.path().join("conformance.ndjson");
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child = spawn_enforce_conformance(
+    let mut out = Conn::attach(spawn_enforce_conformance(
         &log,
         &policy,
         &approved_baseline_path(),
@@ -108,20 +100,15 @@ fn conformance_flag_off_writes_no_file() {
         &decisions,
         None,
         None,
-    );
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    ));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let _ = read_response(&mut out);
-    send(&mut stdin, deploy_key_call());
-    let _ = read_response(&mut out);
-    shutdown(child, stdin);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let _ = out.read_response();
+    out.send(deploy_key_call());
+    let _ = out.read_response();
+    let _ = out.shutdown();
 
     assert!(
         !conformance.exists(),
@@ -137,7 +124,7 @@ fn conformance_write_failure_on_allow_fails_closed() {
     let conformance_dir = dir.path().join("conformance_is_a_dir");
     std::fs::create_dir(&conformance_dir).unwrap();
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child = spawn_enforce_conformance(
+    let mut out = Conn::attach(spawn_enforce_conformance(
         &log,
         &policy,
         &approved_baseline_path(),
@@ -145,25 +132,20 @@ fn conformance_write_failure_on_allow_fails_closed() {
         &decisions,
         Some(&conformance_dir),
         None,
-    );
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    ));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let _ = read_response(&mut out);
-    send(&mut stdin, deploy_key_call());
-    let r = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let _ = out.read_response();
+    out.send(deploy_key_call());
+    let r = out.read_response();
     assert_eq!(r["error"]["data"]["origin"], "assay-proxy");
     assert_eq!(
         r["error"]["data"]["reason"],
         "enforcement_record_write_failed"
     );
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let methods = read_methods(&log);
     assert!(
         !methods.contains(&"tools/call".to_string()),
@@ -258,7 +240,7 @@ fn live_conformance_mismatch_is_emitted_while_verdict_allows() {
     let decisions = dir.path().join("decisions.ndjson");
     let conformance = dir.path().join("conformance.ndjson");
     let policy = write_file(dir.path(), "enforce.yaml", ALLOW_ACME);
-    let mut child = spawn_enforce_conformance(
+    let mut out = Conn::attach(spawn_enforce_conformance(
         &log,
         &policy,
         &readonly_annotation_baseline_path(),
@@ -266,28 +248,23 @@ fn live_conformance_mismatch_is_emitted_while_verdict_allows() {
         &decisions,
         Some(&conformance),
         None,
-    );
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    ));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let lst = read_response(&mut out);
+    out.send(init());
+    let _ = out.read_response();
+    out.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let lst = out.read_response();
     assert!(lst["result"]["tools"].is_array(), "tools/list relayed");
 
-    send(&mut stdin, deploy_key_call());
-    let r = read_response(&mut out);
+    out.send(deploy_key_call());
+    let r = out.read_response();
     assert_eq!(r["id"], DEPLOY_KEY_CALL_ID);
     assert!(
         r.get("error").is_none(),
         "the call is allowed despite the read-only annotation; got {r}"
     );
     assert_eq!(r["result"]["content"][0]["text"], "forwarded-ok");
-    shutdown(child, stdin);
+    let _ = out.shutdown();
 
     assert!(read_methods(&log).contains(&"tools/call".to_string()));
 

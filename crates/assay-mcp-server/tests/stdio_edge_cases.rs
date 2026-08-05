@@ -10,16 +10,14 @@
 //! changed between them; the second run recompiled 14 crates before the tests even started.
 
 use serde_json::Value;
-use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 
-fn spawn_server() -> (
-    std::process::Child,
-    std::process::ChildStdin,
-    BufReader<std::process::ChildStdout>,
-) {
+mod jsonrpc_conn;
+use jsonrpc_conn::Conn;
+
+fn spawn_server() -> Conn {
     let policy_root = "../../tests/fixtures/mcp";
-    let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+    let child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
         .args(["--policy-root", policy_root])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -27,21 +25,12 @@ fn spawn_server() -> (
         .spawn()
         .expect("Failed to spawn server");
 
-    let stdin = child.stdin.take().expect("Failed to open stdin");
-    let stdout = child.stdout.take().expect("Failed to open stdout");
-    (child, stdin, BufReader::new(stdout))
+    Conn::attach(child)
 }
 
-fn spawn_server_with_env(
-    env_key: &str,
-    env_val: &str,
-) -> (
-    std::process::Child,
-    std::process::ChildStdin,
-    BufReader<std::process::ChildStdout>,
-) {
+fn spawn_server_with_env(env_key: &str, env_val: &str) -> Conn {
     let policy_root = "../../tests/fixtures/mcp";
-    let mut child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+    let child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
         .args(["--policy-root", policy_root])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -50,59 +39,22 @@ fn spawn_server_with_env(
         .spawn()
         .expect("Failed to spawn server");
 
-    let stdin = child.stdin.take().expect("Failed to open stdin");
-    let stdout = child.stdout.take().expect("Failed to open stdout");
-    (child, stdin, BufReader::new(stdout))
-}
-
-fn send_req(
-    stdin: &mut std::process::ChildStdin,
-    reader: &mut BufReader<std::process::ChildStdout>,
-    method: &str,
-    params: Value,
-    id: u64,
-) -> Value {
-    let req = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params,
-        "id": id
-    });
-    writeln!(stdin, "{}", req).unwrap();
-
-    let mut line = String::new();
-    loop {
-        line.clear();
-        let n = reader.read_line(&mut line).unwrap();
-        if n == 0 {
-            panic!("Server sent EOF (crashed?) waiting for response id={}", id);
-        }
-        if !line.trim().is_empty() {
-            // Check if it's a log line (heuristic) - currently server logs to stderr, so stdout should be pure JSON
-            if let Ok(val) = serde_json::from_str::<Value>(&line) {
-                return val;
-            }
-        }
-    }
+    Conn::attach(child)
 }
 
 #[test]
 fn test_edge_cases() {
-    let (mut child, mut stdin, mut reader) = spawn_server();
+    let mut conn = spawn_server();
 
     // 1. Initialize
-    send_req(
-        &mut stdin,
-        &mut reader,
+    conn.request(
         "initialize",
         serde_json::json!({"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "test", "version": "1.0"}}),
         1,
     );
 
     // Case 1: Missing Policy File (check_args)
-    let resp = send_req(
-        &mut stdin,
-        &mut reader,
+    let resp = conn.request(
         "tools/call",
         serde_json::json!({
             "name": "assay_check_args",
@@ -130,9 +82,7 @@ fn test_edge_cases() {
     }
 
     // Case 2: Malformed Policy File (check_args)
-    let resp = send_req(
-        &mut stdin,
-        &mut reader,
+    let resp = conn.request(
         "tools/call",
         serde_json::json!({
             "name": "assay_check_args",
@@ -167,9 +117,7 @@ fn test_edge_cases() {
     );
 
     // Case 3: Strict Schema Violation (check_args)
-    let resp = send_req(
-        &mut stdin,
-        &mut reader,
+    let resp = conn.request(
         "tools/call",
         serde_json::json!({
             "name": "assay_check_args",
@@ -199,9 +147,7 @@ fn test_edge_cases() {
     );
 
     // Case 4: Sequence - First tool requires predecessor
-    let resp = send_req(
-        &mut stdin,
-        &mut reader,
+    let resp = conn.request(
         "tools/call",
         serde_json::json!({
             "name": "assay_check_sequence",
@@ -224,9 +170,7 @@ fn test_edge_cases() {
 
     // Case 5: Policy Decide - Partial match (Security check)
     // blocklist has "dangerous_tool". "dangerous_tool_suffix" should be allowed?
-    let resp = send_req(
-        &mut stdin,
-        &mut reader,
+    let resp = conn.request(
         "tools/call",
         serde_json::json!({
             "name": "assay_policy_decide",
@@ -246,28 +190,23 @@ fn test_edge_cases() {
         "Should allow partial match if exact match is required"
     );
 
-    drop(stdin);
-    let _ = child.wait();
+    let _ = conn.shutdown();
 }
 
 #[test]
 fn test_timeout() {
     // Set extremely short timeout (1ms)
-    let (mut child, mut stdin, mut reader) = spawn_server_with_env("ASSAY_MCP_TIMEOUT_MS", "1");
+    let mut conn = spawn_server_with_env("ASSAY_MCP_TIMEOUT_MS", "1");
 
     // Initialize
-    send_req(
-        &mut stdin,
-        &mut reader,
+    conn.request(
         "initialize",
         serde_json::json!({"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "test", "version": "1.0"}}),
         1,
     );
 
     // Call check_args which involves IO (policy read) - should timeout
-    let resp = send_req(
-        &mut stdin,
-        &mut reader,
+    let resp = conn.request(
         "tools/call",
         serde_json::json!({
             "name": "assay_check_args",
@@ -295,6 +234,5 @@ fn test_timeout() {
         );
     }
 
-    drop(stdin);
-    let _ = child.wait();
+    let _ = conn.shutdown();
 }
