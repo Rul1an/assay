@@ -286,10 +286,23 @@ def case_statement(name: str) -> dict[str, Any]:
     return stmt
 
 
+# Every fixture path this harness will ever touch, built once from the case list
+# and looked up by name. Nothing joins a caller-supplied string onto a directory.
+#
+# `argparse(choices=CASES)` already constrains the CLI, but `fixture_path` and
+# `load_case` are library-shaped: a second caller would not come through argparse,
+# and a path boundary that holds only because of a framework detail stops holding
+# the moment someone adds one.
+FIXTURE_PATHS: dict[str, Path] = {
+    name: (FIXTURE_ROOT if name == POSITIVE_CASE else NEGATIVE_ROOT) / f"{name}.json" for name in CASES
+}
+
+
 def fixture_path(name: str) -> Path:
-    if name == POSITIVE_CASE:
-        return FIXTURE_ROOT / f"{name}.json"
-    return NEGATIVE_ROOT / f"{name}.json"
+    try:
+        return FIXTURE_PATHS[name]
+    except KeyError:
+        raise SystemExit(f"unknown fixture case: {name}") from None
 
 
 def marker_body(name: str) -> dict[str, Any]:
