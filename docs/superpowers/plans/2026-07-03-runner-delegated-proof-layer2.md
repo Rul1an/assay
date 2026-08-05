@@ -35,8 +35,9 @@ primary proof path becomes attested and content-addressed:
 
 Layer 1 already gives Layer 2 the pieces it should reuse:
 
-- `scripts/ci/assay_runner_gated_paths.json` is the single source for gated
-  prefixes and content-provenance paths.
+- `scripts/ci/assay_runner_gated_paths.json` declares content-provenance paths
+  and two of the gating rules. It is not the gating contract; `classify_file`
+  is (#2020).
 - `.github/actions/canonical-ebpf-build` emits
   `target/assay-ebpf.provenance.json`, including every configured path-tree
   entry, and fails closed if a required tree is absent.
