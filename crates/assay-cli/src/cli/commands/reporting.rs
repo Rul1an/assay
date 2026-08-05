@@ -6,11 +6,12 @@ use std::path::{Path, PathBuf};
 pub(crate) fn write_error_artifacts(
     reason: ReasonCode,
     message: String,
+    context: Option<&str>,
     version: ExitCodeVersion,
     verify_enabled: bool,
     run_json_path: &Path,
 ) -> anyhow::Result<i32> {
-    let mut o = RunOutcome::from_reason(reason, Some(message), None);
+    let mut o = RunOutcome::from_reason(reason, Some(message), context);
     o.exit_code = reason.exit_code_for(version);
     if let Err(e) = write_run_json_minimal(&o, run_json_path) {
         eprintln!("WARNING: failed to write run.json: {}", e);
