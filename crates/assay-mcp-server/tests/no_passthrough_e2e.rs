@@ -29,7 +29,9 @@
 //! the test actually ran; see the E6a.3 step in .github/workflows/ci.yml.
 //!
 //! Absence has a cost worth knowing before you edit this file: no gate that omits
-//! `--features test-outbound` compiles it, and none of them carry `--all-features`. That includes
+//! `--features test-outbound` compiles it, and no gate anywhere passes `--all-features` for
+//! *this* package — split-wave0-gates.yml does so for assay-core, assay-cli, assay-registry and
+//! assay-evidence, but never for assay-mcp-server. That includes
 //! `cargo clippy --workspace --all-targets` in CI, which is why a dedicated feature-enabled clippy
 //! step sits beside the test step, but it also includes both pre-push hooks
 //! (`scripts/precommit/cargo-clippy.sh`, `scripts/ci/check-linux.sh`) and a plain
