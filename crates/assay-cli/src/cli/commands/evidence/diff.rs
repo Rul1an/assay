@@ -15,7 +15,7 @@ pub struct DiffArgs {
     pub candidate: Option<std::path::PathBuf>,
 
     /// Output format: human or json
-    #[arg(long, default_value = "human")]
+    #[arg(long, default_value = "human", value_parser = ["human", "json"])]
     pub format: String,
 
     /// Baseline directory (look for {dir}/{key}.tar.gz)

@@ -137,7 +137,7 @@ pub struct DiscoverArgs {
     pub local: bool,
 
     /// Output format (table, json, yaml)
-    #[clap(long, default_value = "table")]
+    #[clap(long, default_value = "table", value_parser = ["table", "json", "yaml"])]
     pub format: String,
 
     /// Write output to file

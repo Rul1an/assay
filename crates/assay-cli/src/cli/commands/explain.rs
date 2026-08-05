@@ -28,7 +28,7 @@ pub struct ExplainArgs {
     pub policy: PathBuf,
 
     /// Output format: terminal, markdown, html, json
-    #[arg(short, long, default_value = "terminal")]
+    #[arg(short, long, default_value = "terminal", value_parser = ["terminal", "markdown", "md", "html", "json"])]
     pub format: String,
 
     /// Output file (default: stdout)

@@ -207,7 +207,7 @@ pub struct SandboxArgs {
     pub profile: Option<PathBuf>,
 
     /// Profile output format: yaml | json (default: yaml)
-    #[arg(long, default_value = "yaml")]
+    #[arg(long, default_value = "yaml", value_parser = ["yaml", "json"])]
     pub profile_format: String,
 
     /// Optional path for human-readable profile report

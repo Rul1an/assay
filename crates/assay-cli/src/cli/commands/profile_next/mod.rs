@@ -90,7 +90,7 @@ pub struct ShowArgs {
     pub profile: PathBuf,
 
     /// Output format: summary, yaml, json
-    #[arg(long, default_value = "summary")]
+    #[arg(long, default_value = "summary", value_parser = ["summary", "json", "yaml"])]
     pub format: String,
 
     /// Show top N entries per category
