@@ -124,16 +124,35 @@ fn is_sha256_hex(v: &str) -> bool {
 /// `YYYY-MM-DDTHH:MM:SSZ`, the shape the ADR-045 checker's validity-window check parses.
 fn is_rfc3339_utc(v: &str) -> bool {
     let b = v.as_bytes();
-    b.len() == 20
-        && b[4] == b'-'
-        && b[7] == b'-'
-        && b[10] == b'T'
-        && b[13] == b':'
-        && b[16] == b':'
-        && b[19] == b'Z'
-        && [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18]
+    if b.len() != 20
+        || b[4] != b'-'
+        || b[7] != b'-'
+        || b[10] != b'T'
+        || b[13] != b':'
+        || b[16] != b':'
+        || b[19] != b'Z'
+        || ![0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18]
             .iter()
             .all(|&i| b[i].is_ascii_digit())
+    {
+        return false;
+    }
+    // Shape alone accepted `2026-02-30`, `9999-99-99` and `24:00:00`, which the checker's `strptime`
+    // refuses. An unparsable instant is worse than a mismatched one: it makes the checker skip the
+    // whole key-validity-window loop, so the bad value ends up named in a message about a check that
+    // did not run.
+    let num = |a: usize, z: usize| v[a..z].parse::<u32>().unwrap_or(u32::MAX);
+    let (year, month, day) = (num(0, 4), num(5, 7), num(8, 10));
+    let (hour, minute, second) = (num(11, 13), num(14, 16), num(17, 19));
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=days_in_month).contains(&day) && hour < 24 && minute < 60 && second < 60
 }
 
 /// The ADR-045 sealed payload, assembled but **not signed**.
@@ -654,6 +673,146 @@ mod tests {
         )
         .expect_err("two committed observations cannot carry synchronous-probe");
         assert_eq!(err.code(), "drop-accounting-unprovable");
+    }
+
+    /// Every value the seal carries, asserted where it lands. Checking a derivation function proves
+    /// nothing about the field it is supposed to fill; that is how the wrong posture digest reached
+    /// the wire.
+    #[test]
+    fn every_carried_value_lands_in_its_own_payload_field() {
+        let p = parity();
+        let h = healthy();
+        let run = build_sealed_run(&h, &env_from_parity(), &[], "2026-08-05T12:34:56Z").unwrap();
+        let s = &run.seal;
+        assert_eq!(s.aee_kind, "sealed");
+        assert_eq!(s.aee_version, "0.7");
+        assert_eq!(s.aee_method, "intercepted");
+        assert!(s.aee_still_armed);
+        assert_eq!((s.aee_drop_count, s.aee_drop_bound), (0, 0));
+        assert_eq!(
+            s.aee_run_binding,
+            p["expected"]["runBinding"].as_str().unwrap()
+        );
+        assert_eq!(
+            s.aee_posture_digest,
+            p["expected"]["networkPostureDigest"].as_str().unwrap()
+        );
+        assert_eq!(s.aee_observed_set, observed_set(&run.records).unwrap());
+        assert!(s.aee_observed_attacks.is_empty());
+        assert_eq!(
+            s.assay_collection_path,
+            COLLECTION_PATH_LANDLOCK_TCP_CONNECT
+        );
+        assert_eq!(s.assay_sealed_at, "2026-08-05T12:34:56Z");
+        assert_eq!(s.assay_source_schema, h.schema);
+        assert_eq!(s.assay_seal_scope, h.scope);
+        assert_eq!(s.assay_drop_proof_model, DROP_PROOF_SYNCHRONOUS_PROBE);
+        assert_eq!(s.assay_attack_row_attribution_source, "assembly-plane");
+        assert_eq!(s.assay_observed_labels, vec!["connect_blocked".to_string()]);
+        for required in [
+            "does not prove complete run population",
+            "does not prove agent safety",
+            "does not prove provider side effects",
+            "does not prove independent substrate operation",
+        ] {
+            assert!(
+                s.assay_non_claims.iter().any(|c| c == required),
+                "missing non-claim: {required}"
+            );
+        }
+    }
+
+    /// The wire names the checker reads. A count cannot see a rename, and every member could be
+    /// renamed at once while the checker read none of them.
+    #[test]
+    fn the_payload_member_names_are_the_ones_the_checker_reads() {
+        let run =
+            build_sealed_run(&healthy(), &env_from_parity(), &[], "2026-08-05T00:00:00Z").unwrap();
+        let value = serde_json::to_value(&run.seal).unwrap();
+        let mut got: Vec<&str> = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        got.sort_unstable();
+        assert_eq!(
+            got,
+            [
+                "aeeDropBound",
+                "aeeDropCount",
+                "aeeKind",
+                "aeeMethod",
+                "aeeObservedAttacks",
+                "aeeObservedSet",
+                "aeePostureDigest",
+                "aeeRunBinding",
+                "aeeStillArmed",
+                "aeeVersion",
+                "assayAttackRowAttributionSource",
+                "assayCollectionPath",
+                "assayDropProofModel",
+                "assayNonClaims",
+                "assayObservedLabels",
+                "assaySealScope",
+                "assaySealedAt",
+                "assaySourceSchema",
+            ]
+        );
+    }
+
+    /// The examination record is the observation, and its members travel inside the leaf the seal
+    /// commits to. `assayCollectionPath` is the one that bites: the checker reads it on every record
+    /// for the key-scope check, so a wrong value is a `key-scope-collection-path-mismatch`. The
+    /// payload type is asserted too -- it is an argument to `build_pae`, so it silently changes
+    /// every leaf hash.
+    #[test]
+    fn the_examination_record_carries_the_probe_it_was_built_from() {
+        let h = healthy();
+        let probe = h.probe.as_ref().unwrap().clone();
+        let run = build_sealed_run(&h, &env_from_parity(), &[], "2026-08-05T00:00:00Z").unwrap();
+        let e = run
+            .records
+            .iter()
+            .find(|r| r.payload["aeeKind"] == "examination")
+            .unwrap();
+        assert_eq!(e.payload_type, OBSERVATION_PAYLOAD_TYPE);
+        assert_eq!(e.payload["aeeMethod"], "intercepted");
+        assert_eq!(
+            e.payload["assayCollectionPath"],
+            COLLECTION_PATH_LANDLOCK_TCP_CONNECT
+        );
+        assert_eq!(e.payload["assayProbeTransport"], probe.transport);
+        assert_eq!(e.payload["assayProbeAction"], probe.blocked_action);
+        assert_eq!(e.payload["assayProbePort"], probe.blocked_port);
+        assert_eq!(e.payload["assayProbeErrno"], probe.blocked_errno);
+        assert_eq!(
+            e.payload["assayProbeListenerReached"],
+            probe.listener_reached
+        );
+    }
+
+    /// Calendar-invalid instants the shape check used to accept and the checker's `strptime`
+    /// refuses. Each is 20 chars ending in Z, so none dies on the length check.
+    #[test]
+    fn a_calendar_invalid_instant_is_refused() {
+        for bad in [
+            "2026-02-30T00:00:00Z",
+            "9999-99-99T99:99:99Z",
+            "2026-08-05T24:00:00Z",
+            "2027-02-29T00:00:00Z",
+            "2026-00-05T00:00:00Z",
+            "2026-08-00T00:00:00Z",
+        ] {
+            assert!(
+                build_sealed_run(&healthy(), &env_from_parity(), &[], bad).is_err(),
+                "sealed_at {bad:?} must be refused"
+            );
+        }
+        assert!(
+            build_sealed_run(&healthy(), &env_from_parity(), &[], "2028-02-29T23:59:59Z").is_ok(),
+            "a real leap day must still seal"
+        );
     }
 
     // ---- refusals ----------------------------------------------------------------------------
