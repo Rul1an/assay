@@ -9,9 +9,11 @@
 //! the latest-complete-wins rule is checked together with the observation-health context.
 
 use serde_json::Value;
-use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Command, Stdio};
+
+mod jsonrpc_conn;
+use jsonrpc_conn::Conn;
 
 const PROXY_UNSUPPORTED: i64 = -32040;
 
@@ -27,13 +29,7 @@ fn mock_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/proxy/mock_upstream.py")
 }
 
-struct Proxy {
-    child: Child,
-    stdin: Option<ChildStdin>,
-    out: BufReader<ChildStdout>,
-}
-
-fn spawn(mode: &str, manifest_out: Option<&Path>, health_out: Option<&Path>) -> Proxy {
+fn spawn(mode: &str, manifest_out: Option<&Path>, health_out: Option<&Path>) -> Conn {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"));
     cmd.arg("proxy")
         .args(["--upstream-command", python()])
@@ -49,39 +45,7 @@ fn spawn(mode: &str, manifest_out: Option<&Path>, health_out: Option<&Path>) -> 
     if let Some(p) = health_out {
         cmd.args(["--proxy-observation-health-out", p.to_str().unwrap()]);
     }
-    let mut child = cmd.spawn().expect("spawn proxy (is python installed?)");
-    let stdin = child.stdin.take().unwrap();
-    let out = BufReader::new(child.stdout.take().unwrap());
-    Proxy {
-        child,
-        stdin: Some(stdin),
-        out,
-    }
-}
-
-fn send(p: &mut Proxy, v: Value) {
-    let s = p.stdin.as_mut().unwrap();
-    writeln!(s, "{v}").unwrap();
-    s.flush().unwrap();
-}
-
-/// Read the next JSON-RPC RESPONSE (has an id, no method); skip notifications/requests from upstream.
-fn read_response(p: &mut Proxy) -> Value {
-    let mut line = String::new();
-    loop {
-        line.clear();
-        let n = p.out.read_line(&mut line).expect("read");
-        assert!(n > 0, "proxy closed stdout before responding");
-        let t = line.trim();
-        if t.is_empty() {
-            continue;
-        }
-        let v: Value = serde_json::from_str(t).expect("parse JSON");
-        if v.get("method").is_some() {
-            continue; // a notification or upstream-initiated request; not our response
-        }
-        return v;
-    }
+    Conn::attach(cmd.spawn().expect("spawn proxy (is python installed?)"))
 }
 
 fn init() -> Value {
@@ -92,36 +56,27 @@ fn init() -> Value {
 }
 
 /// Send initialize and consume its response, so subsequent reads line up with the tools/list traffic.
-fn handshake(p: &mut Proxy) {
-    send(p, init());
-    let _ = read_response(p);
+fn handshake(p: &mut Conn) {
+    p.send(init());
+    let _ = p.read_response();
 }
 
 /// Drive a tools/list chain from a cursorless start, following nextCursor to the terminal page.
-fn drive_full_list(p: &mut Proxy, mut next_id: i64) {
-    send(
-        p,
-        serde_json::json!({"jsonrpc": "2.0", "id": next_id, "method": "tools/list"}),
-    );
+fn drive_full_list(p: &mut Conn, mut next_id: i64) {
+    p.send(serde_json::json!({"jsonrpc": "2.0", "id": next_id, "method": "tools/list"}));
     loop {
-        let r = read_response(p);
+        let r = p.read_response();
         let cursor = r["result"]["nextCursor"].as_str().map(|s| s.to_string());
         match cursor {
             Some(c) => {
                 next_id += 1;
-                send(
-                    p,
+                p.send(
                     serde_json::json!({"jsonrpc": "2.0", "id": next_id, "method": "tools/list", "params": {"cursor": c}}),
                 );
             }
             None => break,
         }
     }
-}
-
-fn shutdown(mut p: Proxy) -> std::process::ExitStatus {
-    drop(p.stdin.take()); // client EOF
-    p.child.wait().expect("wait")
 }
 
 fn read_artifact(path: &Path) -> Value {
@@ -136,15 +91,14 @@ fn tools_call_still_not_forwarded_in_manifest_mode() {
     let manifest = dir.path().join("m.json");
     let mut p = spawn("normal", Some(&manifest), None);
     handshake(&mut p);
-    send(
-        &mut p,
+    p.send(
         serde_json::json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
                            "params": {"name": "echo", "arguments": {}}}),
     );
-    let r = read_response(&mut p);
+    let r = p.read_response();
     assert_eq!(r["error"]["code"], PROXY_UNSUPPORTED);
     assert_eq!(r["error"]["data"]["origin"], "assay-proxy");
-    shutdown(p);
+    let _ = p.shutdown();
 }
 
 #[test]
@@ -164,7 +118,7 @@ fn p60a_digest_anchor() {
     let mut p = spawn("p60a", Some(&manifest), None);
     handshake(&mut p);
     drive_full_list(&mut p, 2);
-    shutdown(p);
+    let _ = p.shutdown();
 
     let m = read_artifact(&manifest);
     assert_eq!(m["schema"], "assay.mcp_manifest_observed.v0");
@@ -186,7 +140,7 @@ fn single_non_paginated_list_is_complete() {
     let mut p = spawn("normal", Some(&manifest), None);
     handshake(&mut p);
     drive_full_list(&mut p, 2);
-    shutdown(p);
+    let _ = p.shutdown();
     let m = read_artifact(&manifest);
     assert_eq!(m["status"], "observed");
     assert_eq!(m["observed"]["tools_list_complete"], "complete");
@@ -200,7 +154,7 @@ fn multi_page_chain_is_complete_and_accumulates() {
     let mut p = spawn("paginated", Some(&manifest), None);
     handshake(&mut p);
     drive_full_list(&mut p, 2); // follows c1 to the terminal page
-    shutdown(p);
+    let _ = p.shutdown();
     let m = read_artifact(&manifest);
     assert_eq!(m["observed"]["tools_list_complete"], "complete");
     assert_eq!(m["observed"]["tool_count"], 2, "both pages accumulated");
@@ -214,13 +168,10 @@ fn unfinished_chain_at_shutdown_is_partial() {
     let mut p = spawn("partial", Some(&manifest), Some(&health));
     handshake(&mut p);
     // Start the chain but do NOT follow the advertised nextCursor.
-    send(
-        &mut p,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let r = read_response(&mut p);
+    p.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let r = p.read_response();
     assert!(r["result"]["nextCursor"].is_string());
-    shutdown(p);
+    let _ = p.shutdown();
     let m = read_artifact(&manifest);
     assert_eq!(m["observed"]["tools_list_complete"], "partial");
     assert_ne!(m["status"], "not_observed");
@@ -238,12 +189,11 @@ fn mid_stream_join_is_unknown() {
     let mut p = spawn("normal", Some(&manifest), None);
     handshake(&mut p);
     // First observed tools/list already carries a cursor: the chain start was never observed.
-    send(
-        &mut p,
+    p.send(
         serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {"cursor": "joined-midway"}}),
     );
-    let _ = read_response(&mut p);
-    shutdown(p);
+    let _ = p.read_response();
+    let _ = p.shutdown();
     let m = read_artifact(&manifest);
     assert_eq!(m["observed"]["tools_list_complete"], "unknown");
 }
@@ -254,7 +204,7 @@ fn no_tools_list_writes_not_observed_artifact() {
     let manifest = dir.path().join("m.json");
     let mut p = spawn("normal", Some(&manifest), None);
     handshake(&mut p);
-    shutdown(p); // never sent tools/list
+    let _ = p.shutdown(); // never sent tools/list
     let m = read_artifact(&manifest);
     assert_eq!(m["status"], "not_observed", "artifact present, not absent");
     assert!(m["observed"]["manifest_digest"].is_null());
@@ -268,7 +218,7 @@ fn duplicate_tool_names_is_ambiguous() {
     let mut p = spawn("duplicate", Some(&manifest), Some(&health));
     handshake(&mut p);
     drive_full_list(&mut p, 2);
-    shutdown(p);
+    let _ = p.shutdown();
     let m = read_artifact(&manifest);
     assert_eq!(m["status"], "ambiguous");
     assert!(m["observed"]["manifest_digest"].is_null());
@@ -287,20 +237,14 @@ fn complete_then_later_partial_keeps_latest_complete_with_health_context() {
     let mut p = spawn("complete_then_partial", Some(&manifest), Some(&health));
     handshake(&mut p);
     // First chain: cursorless, terminal -> complete.
-    send(
-        &mut p,
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-    );
-    let r1 = read_response(&mut p);
+    p.send(serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    let r1 = p.read_response();
     assert!(r1["result"]["nextCursor"].is_null());
     // Second chain: cursorless start that advertises a next page; do not follow it.
-    send(
-        &mut p,
-        serde_json::json!({"jsonrpc": "2.0", "id": 3, "method": "tools/list"}),
-    );
-    let r2 = read_response(&mut p);
+    p.send(serde_json::json!({"jsonrpc": "2.0", "id": 3, "method": "tools/list"}));
+    let r2 = p.read_response();
     assert!(r2["result"]["nextCursor"].is_string());
-    shutdown(p);
+    let _ = p.shutdown();
 
     let m = read_artifact(&manifest);
     assert_eq!(
@@ -328,7 +272,7 @@ fn list_changed_notification_is_observed_in_health() {
     let mut p = spawn("changed", Some(&manifest), Some(&health));
     handshake(&mut p);
     drive_full_list(&mut p, 2);
-    shutdown(p);
+    let _ = p.shutdown();
     let h = read_artifact(&health);
     assert_eq!(
         h["manifest_observation"]["tools_list_changed_observed"],
@@ -344,7 +288,7 @@ fn artifact_write_failure_exits_nonzero() {
     let mut p = spawn("normal", Some(&manifest), None);
     handshake(&mut p);
     drive_full_list(&mut p, 2);
-    let status = shutdown(p);
+    let status = p.shutdown();
     assert!(
         !status.success(),
         "a requested-artifact write failure must yield a non-zero exit"

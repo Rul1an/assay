@@ -1,7 +1,9 @@
 use serde_json::Value;
-use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, Command, Stdio};
+
+// Re-exported so the sibling modules pick it up through their `use crate::support::*;`.
+pub(crate) use crate::jsonrpc_conn::Conn;
 
 pub(crate) const PROXY_DENIED: i64 = -32042;
 
@@ -189,29 +191,6 @@ pub(crate) fn spawn_enforce_conformance(
         .expect("spawn enforce proxy (is python installed?)")
 }
 
-pub(crate) fn send(stdin: &mut ChildStdin, v: Value) {
-    writeln!(stdin, "{v}").expect("write");
-    stdin.flush().expect("flush");
-}
-
-pub(crate) fn read_response(reader: &mut BufReader<ChildStdout>) -> Value {
-    let mut line = String::new();
-    loop {
-        line.clear();
-        let n = reader.read_line(&mut line).expect("read");
-        assert!(n > 0, "proxy closed stdout before responding");
-        let t = line.trim();
-        if t.is_empty() {
-            continue;
-        }
-        let v: Value = serde_json::from_str(t).expect("parse JSON");
-        if v.get("method").is_some() {
-            continue;
-        }
-        return v;
-    }
-}
-
 pub(crate) fn init() -> Value {
     serde_json::json!({
         "jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -227,28 +206,25 @@ pub(crate) fn read_methods(log: &Path) -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn shutdown(mut child: Child, stdin: ChildStdin) {
-    drop(stdin);
-    let _ = child.wait();
-}
-
 /// init -> tools/call (NO tools/list first), with the approved baseline. Returns the deny reason and
 /// the upstream method log. Asserts proxy_denied and that tools/call never reached the upstream.
 pub(crate) fn deny_reason_for(policy_yaml: &str, call_params: Value) -> (String, Vec<String>) {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("methods.log");
     let policy = write_file(dir.path(), "enforce.yaml", policy_yaml);
-    let mut child = spawn_enforce(&log, &policy, &approved_baseline_path(), "normal");
-    let mut stdin = child.stdin.take().unwrap();
-    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut out = Conn::attach(spawn_enforce(
+        &log,
+        &policy,
+        &approved_baseline_path(),
+        "normal",
+    ));
 
-    send(&mut stdin, init());
-    let _ = read_response(&mut out);
-    send(
-        &mut stdin,
+    out.send(init());
+    let _ = out.read_response();
+    out.send(
         serde_json::json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": call_params}),
     );
-    let r = read_response(&mut out);
+    let r = out.read_response();
     assert_eq!(r["id"], 9);
     assert_eq!(
         r["error"]["code"], PROXY_DENIED,
@@ -260,7 +236,7 @@ pub(crate) fn deny_reason_for(policy_yaml: &str, call_params: Value) -> (String,
         .expect("reason string")
         .to_string();
 
-    shutdown(child, stdin);
+    let _ = out.shutdown();
     let methods = read_methods(&log);
     assert!(
         !methods.contains(&"tools/call".to_string()),
@@ -274,25 +250,6 @@ pub(crate) fn deploy_key_call() -> Value {
         "jsonrpc": "2.0", "id": DEPLOY_KEY_CALL_ID, "method": "tools/call",
         "params": {"name": "github.add_deploy_key", "arguments": {"owner": "acme", "repo": "prod-app"}}
     })
-}
-
-/// Read every remaining stdout line to EOF (used to prove nothing leaked to the client).
-pub(crate) fn drain_stdout(reader: &mut BufReader<ChildStdout>) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut buf = String::new();
-    loop {
-        buf.clear();
-        match reader.read_line(&mut buf) {
-            Ok(0) | Err(_) => break,
-            Ok(_) => {
-                let t = buf.trim();
-                if !t.is_empty() {
-                    lines.push(t.to_string());
-                }
-            }
-        }
-    }
-    lines
 }
 
 pub(crate) fn read_establish_records(path: &Path) -> Vec<Value> {
