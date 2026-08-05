@@ -122,6 +122,14 @@ repos:
         # The Rust producer's parity tests read `derivation-parity.json`, so the emitter and the
         # committed vectors have to stay in step; nothing else regenerates them.
         files: ^(scripts/experiments/aee_landlock_seal_fixture\.py|scripts/experiments/fixtures/aee-landlock-seal/.*|scripts/ci/check-aee-seal-fixture-drift\.sh|crates/assay-cli/src/aee_seal\.rs|\.pre-commit-config\.yaml)$
+      - id: runner-gating-map-drift
+        name: Runner gating map drift
+        entry: bash scripts/ci/check-runner-gating-map-drift.sh
+        language: system
+        pass_filenames: false
+        # classify_file decides gating; the map is the only complete statement of
+        # what it currently gates, and nothing else regenerates it.
+        files: ^(scripts/ci/assay_runner_lane_check\.py|scripts/ci/assay_runner_gated_paths\.json|scripts/ci/assay_runner_gating_map\.txt|scripts/ci/check-runner-gating-map-drift\.sh|\.pre-commit-config\.yaml)$
       - id: fuzz-lane-contract-self-test
         name: Fuzz lane contract
         entry: bash scripts/ci/test-fuzz-lane-contract.sh
