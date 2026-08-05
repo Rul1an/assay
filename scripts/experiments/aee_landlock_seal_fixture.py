@@ -28,6 +28,7 @@ import hashlib
 import hmac
 import json
 import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -41,9 +42,33 @@ FIXTURE_KEY_PREFIX = "assay-aee-spike-fixture-key"
 UNTRUSTED_KEY = "assay-test-observation-key-landlock-unenrolled-v0"
 SECRET = b"assay-aee-landlock-seal-fixture-key-not-production"
 ROOT = Path(__file__).resolve().parent
-# Overridable so the drift check can emit into a scratch directory instead of rewriting the tree it
-# is auditing.
-FIXTURE_ROOT = Path(os.environ.get("ASSAY_AEE_FIXTURE_ROOT", ROOT / "fixtures" / "aee-landlock-seal"))
+DEFAULT_FIXTURE_ROOT = ROOT / "fixtures" / "aee-landlock-seal"
+
+
+def _fixture_root() -> Path:
+    """Where `--emit` writes. Overridable so the drift check emits into a scratch directory instead
+    of rewriting the tree it is auditing.
+
+    The override is validated rather than trusted. It reaches a `write_text`, so an unchecked value
+    is an arbitrary-write primitive in a script that runs from a pre-push hook -- which is what
+    CodeQL flagged when the override was first added. Two containments, and the path must satisfy
+    one: the committed fixture directory, or a directory under the system temp root, which is the
+    only other place this is meant to be used.
+    """
+    raw = os.environ.get("ASSAY_AEE_FIXTURE_ROOT")
+    if raw is None:
+        return DEFAULT_FIXTURE_ROOT
+    candidate = Path(raw).resolve()
+    allowed = (DEFAULT_FIXTURE_ROOT.resolve(), Path(tempfile.gettempdir()).resolve())
+    if not any(candidate == base or base in candidate.parents for base in allowed):
+        raise SystemExit(
+            f"ASSAY_AEE_FIXTURE_ROOT={raw!r} resolves outside the fixture directory and the temp root; "
+            "refusing to write there"
+        )
+    return candidate
+
+
+FIXTURE_ROOT = _fixture_root()
 NEGATIVE_ROOT = FIXTURE_ROOT / "negative-controls"
 
 SUBSTRATE_NAME = "assay-landlock-fixture-substrate"
