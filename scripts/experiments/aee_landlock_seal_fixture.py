@@ -342,10 +342,22 @@ def emit_parity_vectors() -> None:
             "networkPosture": env["networkPosture"],
         },
         "records": [{"payload": r["payload"], "payloadType": r["payloadType"]} for r in records],
+        # Two leaves whose emission order is deliberately not their sorted order. With a single
+        # leaf, sorting is a no-op and a second implementation that omits it still matches -- which
+        # is exactly the divergence the spec's "sorted ascending by UTF-16 code unit" exists to
+        # prevent. This vector is what makes the sort observable.
+        "orderingRecords": [
+            {"payload": {"aeeKind": "interception", "aeeVersion": AEE_VERSION, "assayOrderProbe": "zzz"}, "payloadType": PAYLOAD_TYPE},
+            {"payload": {"aeeKind": "examination", "aeeVersion": AEE_VERSION, "assayOrderProbe": "aaa"}, "payloadType": PAYLOAD_TYPE},
+        ],
         "expected": {
             "runBinding": run_binding(stmt),
             "networkPostureDigest": digest_json(env["networkPosture"]),
             "observedSet": observed_set(stmt["predicate"]["observationRecords"]),
+            "orderingObservedSet": observed_set([
+                {"payload": {"aeeKind": "interception", "aeeVersion": AEE_VERSION, "assayOrderProbe": "zzz"}, "payloadType": PAYLOAD_TYPE},
+                {"payload": {"aeeKind": "examination", "aeeVersion": AEE_VERSION, "assayOrderProbe": "aaa"}, "payloadType": PAYLOAD_TYPE},
+            ]),
         },
     }
     PARITY_PATH.parent.mkdir(parents=True, exist_ok=True)

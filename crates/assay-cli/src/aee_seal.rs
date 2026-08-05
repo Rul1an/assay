@@ -315,7 +315,7 @@ pub fn probe_examination_record(probe: &Probe, run_binding: &str) -> Observation
     }
 }
 
-pub fn seal_eligibility<'a>(health: &'a EnforcementHealthV1) -> Result<&'a Probe, NotSealEligible> {
+pub fn seal_eligibility(health: &EnforcementHealthV1) -> Result<&Probe, NotSealEligible> {
     if health.status != Status::Active {
         return Err(NotSealEligible::NotArmed {
             status: health.status,
@@ -508,6 +508,36 @@ mod tests {
         );
     }
 
+    /// The sort is only observable with more than one leaf, and the single-leaf vector above cannot
+    /// see it: an implementation that omits `sort` matches on one element. AEE v0.7 specifies the
+    /// observed set as leaf hashes "sorted ascending by UTF-16 code unit", so a producer emitting in
+    /// arrival order matches on one observation and diverges on two -- silently, and only once a
+    /// real run has more than one.
+    #[test]
+    fn the_leaf_sort_is_observable_and_matches_the_checker() {
+        let p = parity();
+        let records: Vec<ObservationRecord> = p["orderingRecords"]
+            .as_array()
+            .expect("ordering vector present")
+            .iter()
+            .map(|r| ObservationRecord {
+                payload: r["payload"].clone(),
+                payload_type: r["payloadType"].as_str().unwrap().to_string(),
+            })
+            .collect();
+        let leaves: Vec<String> = records.iter().map(|r| leaf_hash(r).unwrap()).collect();
+        let mut sorted = leaves.clone();
+        sorted.sort_unstable();
+        assert_ne!(
+            leaves, sorted,
+            "the vector must emit out of sorted order, or this test proves nothing"
+        );
+        assert_eq!(
+            observed_set(&records).unwrap(),
+            p["expected"]["orderingObservedSet"].as_str().unwrap()
+        );
+    }
+
     // ---- the phase property, now carried rather than asserted ---------------------------------
 
     /// The reason the probe becomes a record. The seal's observed set commits to the probe leaf, so
@@ -524,7 +554,7 @@ mod tests {
             .expect("the probe is emitted as an examination record");
         assert_eq!(
             run.seal.aee_observed_set,
-            observed_set(&[probe_rec.clone()]).unwrap()
+            observed_set(std::slice::from_ref(probe_rec)).unwrap()
         );
         assert_ne!(
             run.seal.aee_observed_set,
