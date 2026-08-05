@@ -23,7 +23,7 @@ pub(crate) fn elapsed_ms(start: Instant) -> u64 {
 /// Where the operator should go looking, derived from the error kind rather than
 /// from the message text.
 fn source_for(run_error: &RunError) -> String {
-    match run_error.kind {
+    match &run_error.kind {
         RunErrorKind::ConfigParse | RunErrorKind::MissingConfig => "config".to_string(),
         RunErrorKind::TraceNotFound => "trace".to_string(),
         RunErrorKind::InvalidArgs => "cli".to_string(),
@@ -127,9 +127,13 @@ impl PipelineError {
                 let reason =
                     reason_code_from_run_error(&run_error).unwrap_or(ReasonCode::ECfgParse);
                 emit_operator_diagnostic(&diagnostic_for(&run_error, reason));
+                // Both channels get the same context. `next_step()` interpolates the
+                // path, so withholding it here is what made run.json print
+                // `<config.yaml>` while stderr named the real file.
                 write_error_artifacts(
                     reason,
-                    run_error.message,
+                    run_error.message.clone(),
+                    run_error.path.as_deref(),
                     version,
                     verify_enabled,
                     run_json_path,
@@ -157,6 +161,16 @@ mod tests {
         ]
     }
 
+    /// Mirrors exactly what `into_exit_code` hands to `write_error_artifacts`, so
+    /// these tests fail if the two channels are ever fed different context again.
+    fn outcome_as_written(run_error: &RunError, reason: ReasonCode) -> RunOutcome {
+        RunOutcome::from_reason(
+            reason,
+            Some(run_error.message.clone()),
+            run_error.path.as_deref(),
+        )
+    }
+
     /// The property this issue exists to establish: an operator grepping stderr and
     /// a CI job parsing run.json see the same code for the same failure.
     #[test]
@@ -165,27 +179,72 @@ mod tests {
             let reason =
                 reason_code_from_run_error(&run_error).expect("typed constructors classify");
             let diagnostic = diagnostic_for(&run_error, reason);
-            let outcome = RunOutcome::from_reason(reason, Some(run_error.message.clone()), None);
 
             assert_eq!(diagnostic.code, reason.as_str());
-            assert_eq!(diagnostic.code, outcome.reason_code);
+            assert_eq!(
+                diagnostic.code,
+                outcome_as_written(&run_error, reason).reason_code
+            );
         }
     }
 
     /// The fix step is not retyped for stderr; it is the one already in run.json.
+    ///
+    /// This test previously built the expected outcome with `None` for context,
+    /// which is what the buggy production path passed, so it compared the bug
+    /// against itself and passed while the two channels printed different steps.
     #[test]
     fn fix_step_matches_run_json_next_step() {
         for run_error in cases() {
             let reason = reason_code_from_run_error(&run_error).unwrap();
             let diagnostic = diagnostic_for(&run_error, reason);
-            let outcome = RunOutcome::from_reason(
-                reason,
-                Some(run_error.message.clone()),
-                run_error.path.as_deref(),
-            );
+            let outcome = outcome_as_written(&run_error, reason);
 
             assert_eq!(diagnostic.fix_steps, vec![outcome.next_step.unwrap()]);
         }
+    }
+
+    /// The two codes that interpolate context must name the real file on both
+    /// channels, not the placeholder.
+    #[test]
+    fn path_bearing_errors_name_the_real_path_on_both_channels() {
+        let config = RunError::config_parse(Some("suites/prod.yaml".to_string()), "bad indent");
+        let diagnostic = diagnostic_for(&config, ReasonCode::ECfgParse);
+        assert_eq!(
+            diagnostic.fix_steps[0],
+            "Run: assay doctor --config suites/prod.yaml"
+        );
+        assert_eq!(
+            outcome_as_written(&config, ReasonCode::ECfgParse).next_step,
+            Some(diagnostic.fix_steps[0].clone())
+        );
+
+        let trace = RunError::trace_not_found("traces/run.jsonl", "missing");
+        let diagnostic = diagnostic_for(&trace, ReasonCode::ETraceNotFound);
+        assert_eq!(
+            diagnostic.fix_steps[0],
+            "Check trace file exists: traces/run.jsonl"
+        );
+        assert_eq!(
+            outcome_as_written(&trace, ReasonCode::ETraceNotFound).next_step,
+            Some(diagnostic.fix_steps[0].clone())
+        );
+    }
+
+    /// With no path there is nothing to interpolate, and the placeholder is what
+    /// both channels should show.
+    #[test]
+    fn pathless_config_error_falls_back_to_the_placeholder_on_both_channels() {
+        let run_error = RunError::config_parse(None, "could not locate a config");
+        let diagnostic = diagnostic_for(&run_error, ReasonCode::ECfgParse);
+        assert_eq!(
+            diagnostic.fix_steps[0],
+            "Run: assay doctor --config <config.yaml>"
+        );
+        assert_eq!(
+            outcome_as_written(&run_error, ReasonCode::ECfgParse).next_step,
+            Some(diagnostic.fix_steps[0].clone())
+        );
     }
 
     #[test]
@@ -251,15 +310,46 @@ mod tests {
         );
     }
 
-    /// Non-TTY rendering goes into CI logs, so it has to stay greppable.
+    /// `RunErrorKind::Other` has no reason code, so `into_exit_code` substitutes
+    /// `ECfgParse`. That substitution predates this change and already shapes the
+    /// exit code and run.json; pinning the stderr line here so #2010 can see what a
+    /// unified registry has to improve. `source: unknown` is the honest part.
     #[test]
-    fn plain_rendering_is_ascii_and_leads_with_the_code() {
+    fn unclassified_errors_inherit_the_config_parse_fallback() {
+        let run_error = RunError::other("something unexpected happened");
+        assert!(reason_code_from_run_error(&run_error).is_none());
+
+        let diagnostic = diagnostic_for(&run_error, ReasonCode::ECfgParse);
+        assert_eq!(diagnostic.code, "E_CFG_PARSE");
+        assert_eq!(diagnostic.source, "unknown");
+    }
+
+    /// Non-TTY rendering goes into CI logs, so the code has to lead the line and the
+    /// icon has to be gone.
+    #[test]
+    fn plain_rendering_leads_with_the_code_and_drops_the_icon() {
         let run_error = RunError::config_parse(
             Some("assay.yaml".to_string()),
             "mapping values are not allowed here",
         );
         let rendered = diagnostic_for(&run_error, ReasonCode::ECfgParse).format_plain();
-        assert!(rendered.is_ascii(), "{rendered:?}");
         assert!(rendered.starts_with("[E_CFG_PARSE]"));
+        assert!(!rendered.contains('\u{274c}'));
+        assert!(!rendered.contains('\u{26a0}'));
+    }
+
+    /// A parser quoting a non-ASCII source line must not stop the code from leading
+    /// the line, and must not smuggle the icon back in. An `is_ascii` assertion here
+    /// would only be testing the fixture.
+    #[test]
+    fn non_ascii_messages_still_render_plain() {
+        let run_error = RunError::config_parse(
+            Some("assay.yaml".to_string()),
+            "found character '\u{e9}' that cannot start any token",
+        );
+        let rendered = diagnostic_for(&run_error, ReasonCode::ECfgParse).format_plain();
+        assert!(rendered.starts_with("[E_CFG_PARSE]"));
+        assert!(!rendered.contains('\u{274c}'));
+        assert!(rendered.contains('\u{e9}'), "the message is preserved");
     }
 }
