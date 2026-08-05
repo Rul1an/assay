@@ -15,9 +15,6 @@ FIXTURE_ROOT="$ROOT/scripts/ci/fixtures/exp-mcp-fragmented-ipi"
 POLICY="$FIXTURE_ROOT/policies/baseline_wrap.yaml"
 mkdir -p "$OUT_DIR"
 
-test -x "$ROOT/target/debug/assay" || { echo "Missing $ROOT/target/debug/assay; build assay-cli first"; exit 1; }
-test -x "$ROOT/target/debug/assay-mcp-server" || { echo "Missing $ROOT/target/debug/assay-mcp-server; build assay-mcp-server first"; exit 1; }
-
 echo "ABLATION_MODE=$ABLATION_MODE"
 echo "RUN_LIVE=$RUN_LIVE"
 case "$RUN_LIVE" in
@@ -31,6 +28,17 @@ case "$RUN_LIVE" in
     exit 2
     ;;
 esac
+
+# Build rather than assert existence: an existence test passes against a stale artifact, and
+# these summaries get published in docs/ops/EXPERIMENT-MCP-FRAGMENTED-IPI-*-RESULTS.md against
+# a git SHA, so a stale binary attributes a measurement to source that never ran it. Cargo
+# re-checks rather than rebuilds on an up-to-date tree, so callers that already build pay ~3s.
+# assay-cli only: RUN_LIVE=1 drives $ASSAY_CMD instead, and baseline never reaches the
+# assay-mcp-server sequence guard (drive_fragmented_ipi.py spawns it only for --mode protected
+# with --sequence-policy-root). --manifest-path because this script deliberately never cd's.
+if [[ "$RUN_LIVE" == "0" ]]; then
+  cargo build -q --manifest-path "$ROOT/Cargo.toml" -p assay-cli
+fi
 
 python3 "$ROOT/scripts/ci/exp-mcp-fragmented-ipi/drive_fragmented_ipi.py" \
   --repo-root "$ROOT" \

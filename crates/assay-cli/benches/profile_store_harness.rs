@@ -52,17 +52,10 @@ fn selected_workloads() -> Vec<Workload> {
 }
 
 fn assay_bin() -> PathBuf {
-    if let Some(p) = option_env!("CARGO_BIN_EXE_assay") {
-        return PathBuf::from(p);
-    }
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let release = manifest.join("../../target/release/assay");
-    let debug = manifest.join("../../target/debug/assay");
-    if release.exists() {
-        release
-    } else {
-        debug
-    }
+    // Cargo sets CARGO_BIN_EXE_<name> for bench targets and builds that binary from the
+    // current source first, so this path cannot resolve to a stale artifact. The value is
+    // baked in at compile time, so it also holds when the bench binary is run directly.
+    PathBuf::from(env!("CARGO_BIN_EXE_assay"))
 }
 
 fn run_cmd(bin: &Path, cwd: &Path, args: &[String]) {

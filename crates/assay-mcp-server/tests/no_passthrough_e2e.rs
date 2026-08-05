@@ -4,12 +4,48 @@
 //! must never appear on any Assay-originated outbound HTTP request. We send a sentinel field,
 //! trigger the test-only outbound call, then assert the mock received no sensitive headers or
 //! sentinel values. Run with: cargo test -p assay-mcp-server --features test-outbound no_passthrough
+//!
+//! This file is gated on `test-outbound` because `CARGO_BIN_EXE_assay-mcp-server` names one
+//! uplift slot, not a per-feature one — `target/debug/assay-mcp-server` for the usual dev build,
+//! relocated by `--target` or a non-dev profile and suffixed `.exe` on Windows — and its contents
+//! are whichever variant Cargo last put there. The gate is what makes the invocation that runs
+//! this test also be one that asked for the feature, so the variant Cargo uplifts on the way in
+//! is the one the test needs.
+//!
+//! That is narrower than it may read, and the narrowness was measured rather than assumed: Cargo
+//! releases the build lock when compilation finishes, before test binaries execute, so a
+//! concurrent `cargo build -p assay-mcp-server` in another shell can re-uplift the feature-less
+//! variant mid-run. Reproduced; the test then fails on `received.len() == 1` below, because a
+//! binary without the feature has no `assay_test_outbound` to call. It fails closed, never green,
+//! but it is a real flake if you build this crate in a second terminal while this test runs.
+//!
+//! Previously the file compiled unconditionally and shelled out to `cargo build --features
+//! test-outbound`, whose inherited CARGO_MANIFEST_DIR dirtied the shared stack like every other
+//! nested Cargo here. Note the dependency stack itself never had two variants to thrash between:
+//! `test-outbound = []` enables no dependency features, so only this crate's own units differ.
+//!
+//! Gating trades a rebuild for an absence, which is the more dangerous failure: `cargo test` exits
+//! 0 when zero tests match. So the CI job that owns this invariant enables the feature and asserts
+//! the test actually ran; see the E6a.3 step in .github/workflows/ci.yml.
+//!
+//! Absence has a cost worth knowing before you edit this file: no gate that omits
+//! `--features test-outbound` compiles it, and no gate anywhere passes `--all-features` for
+//! *this* package — split-wave0-gates.yml does so for assay-core, assay-cli, assay-registry and
+//! assay-evidence, but never for assay-mcp-server. That includes
+//! `cargo clippy --workspace --all-targets` in CI, which is why a dedicated feature-enabled clippy
+//! step sits beside the test step, but it also includes both pre-push hooks
+//! (`scripts/precommit/cargo-clippy.sh`, `scripts/ci/check-linux.sh`) and a plain
+//! `cargo test -p assay-mcp-server`. A syntax or type error here passes every local check and only
+//! surfaces on CI. Run the documented command above before pushing changes to this file.
+#![cfg(feature = "test-outbound")]
 
 use assay_mcp_server::auth::SENSITIVE_HEADER_NAMES;
-use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+mod jsonrpc_conn;
+use jsonrpc_conn::Conn;
 
 fn sensitive_names_lower() -> std::collections::HashSet<String> {
     SENSITIVE_HEADER_NAMES
@@ -58,30 +94,10 @@ async fn test_no_passthrough_e2e() {
     let policy_root = "../../tests/fixtures/mcp";
     let outbound_url = mock_server.uri();
 
-    let status = Command::new("cargo")
-        .args([
-            "build",
-            "-p",
-            "assay-mcp-server",
-            "--features",
-            "test-outbound",
-        ])
-        .status()
-        .expect("Failed to build server");
-    assert!(status.success(), "Build with test-outbound must succeed");
-
-    let mut child = Command::new("cargo")
-        .args([
-            "run",
-            "-q",
-            "-p",
-            "assay-mcp-server",
-            "--features",
-            "test-outbound",
-            "--",
-            "--policy-root",
-            policy_root,
-        ])
+    // This test only compiles under `test-outbound`, so the binary Cargo built for it carries the
+    // feature too — no separate build step, and no second feature variant to thrash against.
+    let child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+        .args(["--policy-root", policy_root])
         .env("ASSAY_TEST_OUTBOUND_URL", outbound_url.as_str())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -89,9 +105,7 @@ async fn test_no_passthrough_e2e() {
         .spawn()
         .expect("Failed to spawn server");
 
-    let mut stdin = child.stdin.take().expect("stdin");
-    let stdout = child.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
+    let mut conn = Conn::attach(child);
 
     // 1. Initialize with credential-shaped fields. The server must neither interpret them as
     // authentication nor forward them downstream.
@@ -109,21 +123,9 @@ async fn test_no_passthrough_e2e() {
         },
         "id": 1
     });
-    writeln!(stdin, "{}", req_init).unwrap();
-    stdin.flush().unwrap();
+    conn.send(req_init);
 
-    let mut line = String::new();
-    for _ in 0..10 {
-        line.clear();
-        let n = reader.read_line(&mut line).expect("read init response");
-        if n == 0 {
-            break;
-        }
-        if !line.trim().is_empty() {
-            break;
-        }
-    }
-    let resp: serde_json::Value = serde_json::from_str(line.trim()).expect("Parse init response");
+    let resp: serde_json::Value = conn.read_json();
     assert!(resp.get("result").is_some(), "Init failed: {:?}", resp);
 
     // 2. Call test-only outbound tool (single callsite uses build_downstream_headers only)
@@ -133,16 +135,12 @@ async fn test_no_passthrough_e2e() {
         "params": { "name": "assay_test_outbound", "arguments": {} },
         "id": 2
     });
-    writeln!(stdin, "{}", req_call).unwrap();
-    stdin.flush().unwrap();
+    conn.send(req_call);
 
-    line.clear();
-    reader.read_line(&mut line).unwrap();
-    let resp: serde_json::Value = serde_json::from_str(line.trim()).expect("Parse tool response");
+    let resp: serde_json::Value = conn.read_json();
     assert!(resp.get("result").is_some(), "Tool call failed: {:?}", resp);
 
-    drop(stdin);
-    let status = child.wait().expect("failed to wait on child process");
+    let status = conn.shutdown();
     assert!(
         status.success(),
         "server process did not exit successfully: {status:?}"

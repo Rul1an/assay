@@ -1,38 +1,29 @@
 use serde_json::Value;
-use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
+
+mod jsonrpc_conn;
+use jsonrpc_conn::Conn;
 
 #[test]
 fn test_stdio_flow() {
     let policy_root = "../../tests/fixtures/mcp"; // Relative to crates/assay-mcp-server CWD
 
-    // Ensure binary is built
-    let status = Command::new("cargo")
-        .args(["build", "-p", "assay-mcp-server"])
-        .status()
-        .expect("Failed to build server");
-    assert!(status.success());
-
-    // Spawn server
-    let mut child = Command::new("cargo")
-        .args([
-            "run",
-            "-q",
-            "-p",
-            "assay-mcp-server",
-            "--",
-            "--policy-root",
-            policy_root,
-        ])
+    // Cargo builds this crate's bin target before running its integration tests and hands us the
+    // path, so there is nothing to build here. Spawning `cargo run` instead would inherit the
+    // Cargo environment, whose CARGO_MANIFEST_DIR is tracked by ring's build script and so marks
+    // the whole rustls/reqwest stack dirty on every alternation with a shell build.
+    let child = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"))
+        .args(["--policy-root", policy_root])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
         .expect("Failed to spawn server");
 
-    let mut stdin = child.stdin.take().expect("Failed to open stdin");
-    let stdout = child.stdout.take().expect("Failed to open stdout");
-    let mut reader = BufReader::new(stdout);
+    // No startup allowance: the binary is already built, so the first exchange is as fast as the
+    // rest. The longer budget this used to carry existed only because `cargo run` could still be
+    // compiling.
+    let mut conn = Conn::attach(child);
 
     // Initial log line (Assay MCP Server starting...) - stderr?
     // main.rs uses eprintln! so it goes to stderr (inherited).
@@ -45,19 +36,9 @@ fn test_stdio_flow() {
         "params": { "protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "test", "version": "1.0"} },
         "id": 1
     });
-    writeln!(stdin, "{}", req_init).unwrap();
+    conn.send(req_init);
 
-    let mut line = String::new();
-    reader
-        .read_line(&mut line)
-        .expect("Failed to read init response");
-    if line.trim().is_empty() {
-        reader
-            .read_line(&mut line)
-            .expect("Failed to read init response (retry)");
-    }
-
-    let resp: Value = serde_json::from_str(&line).expect("Failed to parse init response");
+    let resp: Value = conn.read_json();
     assert!(resp.get("result").is_some(), "Init failed: {:?}", resp);
 
     // The unit tests in `server.rs` pin `initialize_result()`, but the original defect was an
@@ -102,11 +83,9 @@ fn test_stdio_flow() {
         "params": {},
         "id": 2
     });
-    writeln!(stdin, "{}", req_list).unwrap();
+    conn.send(req_list);
 
-    line.clear();
-    reader.read_line(&mut line).unwrap();
-    let resp: Value = serde_json::from_str(&line).unwrap();
+    let resp: Value = conn.read_json();
     let tools = resp["result"]["tools"]
         .as_array()
         .expect("Tools list missing");
@@ -128,19 +107,15 @@ fn test_stdio_flow() {
         },
         "id": 3
     });
-    writeln!(stdin, "{}", req_check_args).unwrap();
+    conn.send(req_check_args);
 
-    line.clear();
-    reader.read_line(&mut line).unwrap();
-    let resp: Value = serde_json::from_str(&line).unwrap();
+    let resp: Value = conn.read_json();
     let content_text = resp["result"]["content"][0]["text"]
         .as_str()
         .expect("Missing content text in MCP response");
     let tool_res: Value = serde_json::from_str(content_text).unwrap();
     assert_eq!(tool_res["allowed"], true);
 
-    // 4. Kill server
-    // Dropping stdin typically signals EOF, but we can kill explicitly.
-    drop(stdin);
-    let _ = child.wait();
+    // 4. Shut the server down: stdin EOF, then a bounded reap.
+    let _ = conn.shutdown();
 }
