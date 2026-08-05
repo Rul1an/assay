@@ -36,7 +36,7 @@ trap 'rm -rf "$scratch"' EXIT
 # silently agreed". The reference script carries the same warning for the same
 # reason; this one earned it independently.
 python3 scripts/ci/assay_runner_lane_check.py \
-  --emit-gating-map --gating-map-output "$scratch/emitted" >/dev/null
+  --emit-gating-map --gating-map-stdout > "$scratch/emitted"
 
 if ! diff -u "$map" "$scratch/emitted" >"$scratch/delta" 2>&1; then
   echo "error: the committed gating map does not match classify_file." >&2

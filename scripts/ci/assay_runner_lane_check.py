@@ -716,7 +716,7 @@ def gating_map_text() -> str:
     return "\n".join(lines) + "\n"
 
 
-def emit_gating_map(output: str | None = None) -> int:
+def emit_gating_map(to_stdout: bool = False) -> int:
     """Write every gated tracked file and the gate it requires.
 
     A snapshot, not an assertion. Three attempts to pin this surface with a
@@ -729,12 +729,19 @@ def emit_gating_map(output: str | None = None) -> int:
     Churn is the point. A gated file appearing or disappearing is a change to
     the gated surface, and the diff is where that decision gets reviewed.
     """
-    root = Path(__file__).resolve().parents[2]
-    target = Path(output) if output else root / GATING_MAP_DOC
     text = gating_map_text()
+    if to_stdout:
+        # No path from user input: the caller redirects. An earlier version took
+        # --gating-map-output and CodeQL flagged it py/path-injection, correctly --
+        # the drift script only ever needs 'somewhere else', which a shell
+        # redirect expresses without handing this process an arbitrary write.
+        sys.stdout.write(text)
+        return 0
+    root = Path(__file__).resolve().parents[2]
+    target = root / GATING_MAP_DOC
     target.write_text(text, encoding="utf-8")
     gated = sum(1 for line in text.splitlines() if not line.startswith("#"))
-    print(f"wrote {gated} gated files to {target}")
+    print(f"wrote {gated} gated files to {GATING_MAP_DOC}")
     return 0
 
 
@@ -2777,7 +2784,7 @@ def main() -> int:
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--explain-gating", action="store_true")
     parser.add_argument("--emit-gating-map", action="store_true")
-    parser.add_argument("--gating-map-output", default=None)
+    parser.add_argument("--gating-map-stdout", action="store_true")
     parser.add_argument("--resolve-pr-from-event", action="store_true")
     parser.add_argument("--pr-number", type=int, default=int(os.environ.get("PR_NUMBER", "0") or "0"))
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
@@ -2794,7 +2801,7 @@ def main() -> int:
         return explain_gating()
 
     if args.emit_gating_map:
-        return emit_gating_map(args.gating_map_output)
+        return emit_gating_map(args.gating_map_stdout)
 
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
