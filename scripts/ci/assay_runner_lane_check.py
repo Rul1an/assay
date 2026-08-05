@@ -988,7 +988,7 @@ def content_tree_proof_accepts_head(
 
 
 @lru_cache(maxsize=1)
-def gate_selections() -> dict[str, tuple[str, ...]]:
+def _gate_selections_cached() -> tuple[tuple[str, tuple[str, ...]], ...]:
     """Which gate keys each `inputs.gates` label is supposed to produce.
 
     Imported from the producer rather than restated. The proof pack builder
@@ -1003,37 +1003,59 @@ def gate_selections() -> dict[str, tuple[str, ...]]:
 
     sibling = Path(__file__).resolve().parent / "assay_runner_delegated_proof_pack.py"
     spec = importlib.util.spec_from_file_location("_assay_proof_pack", sibling)
-    if spec is None or spec.loader is None:  # pragma: no cover - packaging fault
+    if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load {sibling}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return dict(module.GATE_SELECTIONS)
+    try:
+        spec.loader.exec_module(module)
+        selections = module.GATE_SELECTIONS
+    except (OSError, SyntaxError, AttributeError) as exc:
+        # spec_from_file_location does not stat, so a missing or broken sibling
+        # surfaces here rather than above. Fail closed with the path named: the
+        # bare FileNotFoundError this replaced said nothing about why lane-check
+        # needs a file it never used to read.
+        raise RuntimeError(f"cannot read GATE_SELECTIONS from {sibling}: {exc}") from exc
+    return tuple((k, tuple(v)) for k, v in selections.items())
+
+
+def gate_selections() -> dict[str, tuple[str, ...]]:
+    """A fresh copy per call; the cache holds an immutable one."""
+    return dict(_gate_selections_cached())
 
 
 def gate_execution_diagnostics(manifest: dict[str, object], label: str) -> tuple[str, ...]:
-    """Reject a proof whose gates did not all run and pass.
+    """Reject a proof whose recorded gates did not all pass.
 
     `inputs.gates` is a label. It says which set was requested, not which set
     executed: the workflow's `all` branch and the builder's `GATE_SELECTIONS`
-    are separate lists, so a gate can be dropped from the branch and the run
-    still reports success, with the pack recording that gate as `missing`.
-    Until this check existed nothing read those per-gate statuses, and such a
-    pack was credited as `gates=all`.
+    are separate lists, so a gate can be dropped from the branch while the run
+    still reports success and the pack records that gate as `missing`. Until
+    this check existed nothing read those per-gate statuses and such a pack was
+    credited as `gates=all`.
 
-    Fail closed on absence, which is the harder half. A signature cannot
-    guarantee that a record arrives, so a gate that is simply not in the array
-    must be rejected rather than ignored.
+    Every recorded gate must be `passed`. A duplicate key is a rejection rather
+    than a last-wins overwrite, because otherwise a `missing` entry followed by
+    a `passed` entry for the same gate reads as success.
+
+    **The size of the selection is deliberately not checked here.**
+    `assay-runner-lane-check.yml` checks out the PR base, so that a PR can never
+    run its own gatekeeper, while the pack is built by the delegated workflow at
+    the PR head. Comparing the recorded set against this process's
+    `GATE_SELECTIONS` would therefore compare two refs, and any PR that adds or
+    retires a gate would produce a pack its own verifier rejects — in both
+    directions, with no escape, since `assay_runner_delegated_proof_pack.py` is
+    `Gate.ALL` and so requires a delegated proof to change. Measured before this
+    was dropped. What guards the selection's size instead is that the builder
+    derives the array from `GATE_SELECTIONS` at its own head, and that file is
+    content-addressed: shrinking it forces a fresh dispatch and shows up in the
+    diff.
     """
-    diagnostics: list[str] = []
-    expected = gate_selections().get(label)
-    if expected is None:
-        return (f"proof manifest inputs.gates={label!r} is not a known selection",)
-
     raw = manifest.get("gates")
-    if not isinstance(raw, list):
-        return ("proof manifest missing gates array",)
+    if not isinstance(raw, list) or not raw:
+        return ("proof manifest has no gates array",)
 
-    recorded: dict[str, str] = {}
+    diagnostics: list[str] = []
+    seen: set[str] = set()
     for entry in raw:
         if not isinstance(entry, dict):
             diagnostics.append("proof manifest gates entry is not an object")
@@ -1042,17 +1064,13 @@ def gate_execution_diagnostics(manifest: dict[str, object], label: str) -> tuple
         if not name:
             diagnostics.append("proof manifest gates entry has no gate name")
             continue
-        recorded[name] = str(entry.get("status") or "")
-
-    for gate in expected:
-        status = recorded.get(gate)
-        if status is None:
-            diagnostics.append(f"proof manifest records no result for gate {gate!r}")
-        elif status != "passed":
-            diagnostics.append(f"proof manifest gate {gate!r} is {status!r}, expected 'passed'")
-
-    for gate in sorted(set(recorded) - set(expected)):
-        diagnostics.append(f"proof manifest records gate {gate!r}, which {label!r} does not select")
+        if name in seen:
+            diagnostics.append(f"proof manifest records gate {name!r} more than once")
+            continue
+        seen.add(name)
+        status = str(entry.get("status") or "")
+        if status != "passed":
+            diagnostics.append(f"proof manifest gate {name!r} is {status!r}, expected 'passed'")
 
     return tuple(diagnostics)
 
@@ -1919,6 +1937,7 @@ def self_test() -> None:
     assert uncovered_content_provenance_files(["crates/assay-runner-core/src/lib.rs"]) == ()
     assert uncovered_content_provenance_files(["Cargo.lock"]) == ("Cargo.lock",)
     _test_gating_rule_count_is_derived()
+    _test_gate_execution_is_verified()
     _test_gate_selections_match_the_workflow()
     _test_gating_map_is_current()
     _test_prefix_gated_surfaces_keep_their_coverage()
@@ -2000,6 +2019,74 @@ def _test_gating_rule_count_is_derived() -> None:
     assert gating_rule_count() == 14, gating_rule_count()
 
 
+def _test_gate_execution_is_verified() -> None:
+    """A proof is credited only when every recorded gate passed.
+
+    Committed rather than run by hand. An earlier revision of this check shipped
+    with nine cases exercised interactively and none of them here, and replacing
+    the function body with `return ()` left the suite green — the fix was
+    unprotected against its own removal.
+    """
+    full = [{"gate": g, "status": "passed"} for g in gate_selections()["all"]]
+
+    def diagnose(gates: object) -> tuple[str, ...]:
+        return gate_execution_diagnostics({"inputs": {"gates": "all"}, "gates": gates}, "all")
+
+    # Accepted: a complete run, and a narrower selection carrying only its own gate.
+    assert diagnose(full) == ()
+    assert diagnose([{"gate": "kernel-only", "status": "passed"}]) == ()
+
+    # Rejected: the reported case -- a gate the workflow never ran.
+    missing = [dict(e) for e in full]
+    missing[-1]["status"] = "missing"
+    assert "is 'missing'" in diagnose(missing)[0]
+
+    # Rejected: every other non-passing status the producer can record.
+    for status in ("failed", "incomplete", "skipped", ""):
+        one = [dict(e) for e in full]
+        one[0]["status"] = status
+        assert diagnose(one), f"{status!r} was accepted"
+
+    # Rejected: a duplicate key cannot launder a missing gate into a passed one.
+    name = full[0]["gate"]
+    for pair in (("missing", "passed"), ("passed", "missing")):
+        found = diagnose([{"gate": name, "status": s} for s in pair])
+        # Order-independent: which complaint lands first depends on which entry
+        # is out of order, and both orders must reject.
+        assert any("more than once" in d for d in found), (pair, found)
+
+    # Rejected: shapes that carry no usable result at all.
+    for shape in (None, {}, [], "all passed", [{"status": "passed"}], ["kernel-only"]):
+        assert diagnose(shape), f"{shape!r} was accepted"
+
+    # Rejected: a status that is not the string 'passed', however it is spelled.
+    for status in (True, 1, None, "PASSED", "passed ", ["passed"]):
+        one = [dict(e) for e in full]
+        one[0]["status"] = status
+        assert diagnose(one), f"{status!r} was accepted"
+
+
+# Which script each gate key runs, pinned rather than derived. The key and the
+# script name have no reliable relationship -- `gemini-google-genai-kernel-policy`
+# runs a script whose name contains neither "kernel" nor "policy" -- so a naming
+# rule cannot stand in for the mapping. Without this, a gate key can be rewired
+# to a weaker script with every check green, which is the one drift the parity
+# assertion below is supposed to see.
+GATE_SCRIPTS = {
+    "kernel-only": "runner-spike-kernel-only-three-run-determinism.sh",
+    "kernel-policy": "runner-spike-kernel-policy-three-run-determinism.sh",
+    "openai-agents-kernel-policy": (
+        "runner-spike-openai-agents-kernel-policy-three-run-determinism.sh"
+    ),
+    "openai-agents-hidden-write": (
+        "runner-spike-openai-agents-kernel-policy-hidden-write-three-run-determinism.sh"
+    ),
+    "gemini-google-genai-kernel-policy": (
+        "runner-spike-gemini-google-genai-three-run-determinism.sh"
+    ),
+}
+
+
 def _test_gate_selections_match_the_workflow() -> None:
     """`GATE_SELECTIONS` and the delegated workflow's case branch agree.
 
@@ -2012,20 +2099,38 @@ def _test_gate_selections_match_the_workflow() -> None:
 
     Parity rather than derivation: the branch is shell inside YAML, and parsing
     it to drive production would be a worse dependency than asserting on it.
+
+    Not caught, measured: a `run_gate` call left in place but wrapped in a
+    condition that never fires. The text still names the gate and the script,
+    so this reads it as running. Detecting that needs the pack's recorded
+    gates, which `gate_execution_diagnostics` checks separately -- a gate that
+    did not run is recorded `missing` there.
     """
     root = Path(__file__).resolve().parents[2]
     workflow = (root / DELEGATED_WORKFLOW_PATH).read_text(encoding="utf-8")
     selections = gate_selections()
     for label, expected in selections.items():
-        marker = f'\n            {label})\n' if label != "all" else '\n            all)\n'
+        marker = f"\n            {label})\n"
         start = workflow.find(marker)
         assert start != -1, f"no case branch for {label!r} in {DELEGATED_WORKFLOW_PATH}"
         end = workflow.find(";;", start)
         branch = workflow[start:end]
-        ran = tuple(re.findall(r'run_gate "([^"]+)"', branch))
-        assert ran == tuple(expected), (
-            f"{label!r}: workflow runs {ran}, GATE_SELECTIONS says {tuple(expected)}"
+        # Strip comments first. The regex is text matching, so a commented-out
+        # `run_gate` line otherwise counts as a gate that runs -- which is the
+        # natural way to disable one, and was invisible here until measured.
+        live = "\n".join(
+            line for line in branch.splitlines() if not line.lstrip().startswith("#")
         )
+        ran = tuple(re.findall(r'run_gate "([^"]+)"[^\n]*\n\s*"([^"]+)"', live))
+        assert tuple(k for k, _ in ran) == tuple(expected), (
+            f"{label!r}: workflow runs {tuple(k for k, _ in ran)}, "
+            f"GATE_SELECTIONS says {tuple(expected)}"
+        )
+        for key, script in ran:
+            stem = script.rsplit("/", 1)[-1]
+            assert GATE_SCRIPTS.get(key) == stem, (
+                f"{label!r}: gate {key!r} runs {stem!r}, pinned as {GATE_SCRIPTS.get(key)!r}"
+            )
 
 
 def _test_gating_map_is_current() -> None:
