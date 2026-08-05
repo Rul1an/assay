@@ -201,6 +201,12 @@ pub struct SealPayload {
     pub assay_seal_scope: String,
     #[serde(rename = "assayDropProofModel")]
     pub assay_drop_proof_model: String,
+    /// `checked` or `declared` -- whether anything was verified about the model above.
+    #[serde(rename = "assayDropProofBasis")]
+    pub assay_drop_proof_basis: String,
+    /// `name=lost` per channel, empty when the basis is `declared`. The readings the claim rests on.
+    #[serde(rename = "assayDropChannels")]
+    pub assay_drop_channels: Vec<String>,
     #[serde(rename = "assayAttackRowAttributionSource")]
     pub assay_attack_row_attribution_source: String,
     #[serde(rename = "assayNonClaims")]
@@ -416,10 +422,57 @@ pub enum DropAccounting {
     SynchronousProbe,
     /// Every channel between capture and this builder exposes a loss counter, and each was read at
     /// run end. Checkable: a non-zero counter refuses.
+    ///
+    /// The counter has to come from the producing program. A BPF ring buffer has **no built-in
+    /// lost-samples counter**: `BPF_RB_AVAIL_DATA` and the consumer/producer positions are the only
+    /// introspection available, and the kernel documentation says they are momentary snapshots "to
+    /// be used only for debugging/reporting reasons or for implementing various heuristics". Reading
+    /// them as a loss count would carry zero on a channel that lost events. The usable source is a
+    /// counter the BPF program increments itself when a reservation fails.
+    ///
+    /// Completeness is the caller's obligation and is not checkable here: a list that omits the
+    /// lossy channel passes. Naming it rather than implying it.
     CountedQueue { channels: Vec<(String, u64)> },
 }
 
+/// Whether the drop-accounting claim was checked here or declared by the caller.
+///
+/// SLSA v1.2 splits `externalParameters` -- the values passed through the interface -- from
+/// `resolvedDependencies`, where the metadata about those values goes. `DropAccounting` is the
+/// parameter; whether anything was verified about it is metadata, and a consumer cannot recover it
+/// from the model name alone.
+///
+/// Proof-or-Stop (arXiv 2607.14890) states the rule this encodes: a report that "provides neither
+/// verified integrity nor attested execution and carries no binding" is not admissible evidence. A
+/// caller-declared model is exactly that, and marking it is the difference between a consumer
+/// knowing it and a consumer assuming otherwise. It is the same `observed`/`unknown` split
+/// observed-effect v0 already carries on `basis`.
+pub const DROP_BASIS_CHECKED: &str = "checked";
+pub const DROP_BASIS_DECLARED: &str = "declared";
+
 impl DropAccounting {
+    fn basis(&self) -> &'static str {
+        match self {
+            Self::SynchronousProbe => DROP_BASIS_DECLARED,
+            Self::CountedQueue { .. } => DROP_BASIS_CHECKED,
+        }
+    }
+
+    /// The readings the claim rests on, for the variant that has any.
+    ///
+    /// Checking a counter and then discarding it leaves a consumer told that a check passed and
+    /// given nothing to recheck -- the shape this module already rejected once, when a run-phase
+    /// challenge was verified inside the producer and never travelled.
+    fn channel_readings(&self) -> Vec<String> {
+        match self {
+            Self::SynchronousProbe => Vec::new(),
+            Self::CountedQueue { channels } => channels
+                .iter()
+                .map(|(name, lost)| format!("{name}={lost}"))
+                .collect(),
+        }
+    }
+
     fn model(&self) -> &'static str {
         match self {
             Self::SynchronousProbe => DROP_PROOF_SYNCHRONOUS_PROBE,
@@ -513,6 +566,8 @@ pub fn build_sealed_run(
             assay_source_schema: health.schema.clone(),
             assay_seal_scope: health.scope.clone(),
             assay_drop_proof_model: drop_accounting.model().to_string(),
+            assay_drop_proof_basis: drop_accounting.basis().to_string(),
+            assay_drop_channels: drop_accounting.channel_readings(),
             assay_attack_row_attribution_source: "assembly-plane".to_string(),
             assay_non_claims: payload_non_claims(),
         },
@@ -794,6 +849,13 @@ mod tests {
             run.seal.assay_drop_proof_model, DROP_PROOF_COUNTED_QUEUE_ZERO,
             "the payload names the model the caller proved, not a constant"
         );
+        assert_eq!(run.seal.assay_drop_proof_basis, DROP_BASIS_CHECKED);
+        // The readings travel. Checking a counter and discarding it leaves a consumer told that a
+        // check passed with nothing to recheck -- the defect this module already fixed once.
+        assert_eq!(
+            run.seal.assay_drop_channels,
+            vec!["probe-ring=0".to_string()]
+        );
     }
 
     /// Every value the seal carries, asserted where it lands.
@@ -833,6 +895,14 @@ mod tests {
         assert_eq!(s.assay_source_schema, h.schema);
         assert_eq!(s.assay_seal_scope, h.scope);
         assert_eq!(s.assay_drop_proof_model, DROP_PROOF_SYNCHRONOUS_PROBE);
+        assert_eq!(
+            s.assay_drop_proof_basis, DROP_BASIS_DECLARED,
+            "a caller declaration is not a check, and the payload must say which it was"
+        );
+        assert!(
+            s.assay_drop_channels.is_empty(),
+            "nothing was read, so nothing is carried"
+        );
         assert_eq!(s.assay_attack_row_attribution_source, "assembly-plane");
         assert_eq!(s.assay_observed_labels, vec!["connect_blocked".to_string()]);
         // Exact, not subset: `.any()` licenses any addition to a signed field, and ADR-042's stop
@@ -882,6 +952,8 @@ mod tests {
                 "aeeVersion",
                 "assayAttackRowAttributionSource",
                 "assayCollectionPath",
+                "assayDropChannels",
+                "assayDropProofBasis",
                 "assayDropProofModel",
                 "assayNonClaims",
                 "assayObservedLabels",
