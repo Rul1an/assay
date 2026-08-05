@@ -305,22 +305,31 @@ pub async fn validate(
 ///
 /// This check reads only the config, so `assay validate` can sweep a suite for
 /// always-green tests without running it.
-fn check_vacuous_expected(cfg: &EvalConfig) -> Vec<Diagnostic> {
+/// Every assertion in the config that cannot fail, located in the suite.
+///
+/// Two callers need this answer and they must not each derive it: `assay validate` reports it as a
+/// warning, and `load_config` refuses the config outright when the caller opted into
+/// `deny_ineffective_assertions`. Two implementations of one rule drift; the fix is one
+/// implementation with two callers, which is also why the "cannot fail" decision itself stays in
+/// `agent_assertions::matchers::ineffective_reason` — the evaluator's own code — rather than being
+/// restated here.
+///
+/// The diagnostics carry the evaluator's context, which names the variant and the responsible
+/// field, plus `test_id` and `assertion_index`, which only a sweep over the config can supply.
+pub fn ineffective_assertions(cfg: &EvalConfig) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
-
     for tc in &cfg.tests {
-        let assertions = tc.assertions.as_deref().unwrap_or_default();
-        let has_assertions = !assertions.is_empty();
-
-        // An assertion that cannot fail is reported here rather than only when a run reaches it,
-        // so a suite can be swept for always-green tests without executing anything.
-        for (index, assertion) in assertions.iter().enumerate() {
+        for (index, assertion) in tc
+            .assertions
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
             let Some(mut reason) = crate::agent_assertions::matchers::ineffective_reason(assertion)
             else {
                 continue;
             };
-            // Keep the evaluator's own context — it names the variant and the responsible field —
-            // and add where in the suite it was found, which is what a sweep has to supply.
             if let Some(obj) = reason.context.as_object_mut() {
                 obj.insert("test_id".into(), serde_json::json!(tc.id));
                 obj.insert("assertion_index".into(), serde_json::json!(index));
@@ -331,6 +340,17 @@ fn check_vacuous_expected(cfg: &EvalConfig) -> Vec<Diagnostic> {
                 ),
             );
         }
+    }
+    diags
+}
+
+fn check_vacuous_expected(cfg: &EvalConfig) -> Vec<Diagnostic> {
+    // An assertion that cannot fail is reported here rather than only when a run reaches it,
+    // so a suite can be swept for always-green tests without executing anything.
+    let mut diags = ineffective_assertions(cfg);
+
+    for tc in &cfg.tests {
+        let has_assertions = !tc.assertions.as_deref().unwrap_or_default().is_empty();
 
         if has_assertions {
             continue;
