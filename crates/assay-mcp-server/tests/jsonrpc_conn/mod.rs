@@ -34,9 +34,10 @@ const REAP_TIMEOUT: Duration = Duration::from_secs(10);
 ///
 /// The channel is bounded because the deadline bounds time, not memory. A child writing lines
 /// faster than the caller skips them fills an unbounded channel for the whole budget: measured at
-/// ~110 MB/s against `yes`, which is ~3.3 GB at [`DEFAULT_TIMEOUT`] and ~8 GB at
-/// [`CARGO_RUN_TIMEOUT`]. With a bound the reader thread stops draining stdout, the child blocks on
-/// its own pipe, and the test keeps control of the deadline.
+/// ~110 MB/s against `yes`, which is ~3.3 GB at [`DEFAULT_TIMEOUT`] and grows with any longer
+/// budget a caller sets through [`Conn::with_startup_timeout`]. With a bound the reader thread
+/// stops draining stdout, the child blocks on its own pipe, and the test keeps control of the
+/// deadline.
 ///
 /// The bound is large rather than minimal on purpose. Backpressure introduces a deadlock the
 /// unbounded channel could not have: a test that writes several requests before reading any could,
