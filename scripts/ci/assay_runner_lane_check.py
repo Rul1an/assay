@@ -679,7 +679,16 @@ GATING_MAP_DOC = "scripts/ci/assay_runner_gating_map.txt"
 
 
 def gating_map_text() -> str:
-    """The gating map as it should be on disk, derived from classify_file."""
+    """The gating map as it should be on disk, derived from classify_file.
+
+    Four columns: the gate, whether the file is content-addressed, the rule that
+    assigned the gate, and the path. Gate and path alone were not enough. A rule
+    reordering that assigns the same gate through a different rule left the map
+    byte-identical, and withdrawing a `content_provenance_paths` entry cannot
+    move it at all, because `classify_file` never reads that field. Both are
+    changes to what a delegated proof means, so both belong in the snapshot.
+    """
+    config = load_gated_path_config()
     root = Path(__file__).resolve().parents[2]
     tracked = [
         path
@@ -688,18 +697,22 @@ def gating_map_text() -> str:
         ).split("\0")
         if path
     ]
-    rows = sorted(
-        (gate.label, path)
-        for path, gate in ((p, classify_file(p)[0]) for p in tracked)
-        if gate is not Gate.NONE
-    )
+    rows = []
+    for path in sorted(tracked):
+        gate, reason = classify_file(path)
+        if gate is Gate.NONE:
+            continue
+        rule = reason[len(path) + 2 :] if reason.startswith(path + ": ") else str(reason)
+        covered = "addressed" if content_provenance_covers_path(path, config) else "unaddressed"
+        rows.append((gate.label, covered, rule, path))
+    rows.sort()
     lines = [
         "# Generated: python3 scripts/ci/assay_runner_lane_check.py --emit-gating-map",
-        "# Every tracked file classify_file gates, and the gate it requires.",
+        "# gate<TAB>content-provenance<TAB>rule<TAB>path, for every file classify_file gates.",
         "# Regenerate after any change to classify_file or assay_runner_gated_paths.json.",
-        "# A file the emitter no longer writes belongs deleted, not regenerated.",
+        "# A line that disappeared is a file that stopped being gated. Read the diff.",
     ]
-    lines += [f"{gate}\t{path}" for gate, path in rows]
+    lines += ["\t".join(row) for row in rows]
     return "\n".join(lines) + "\n"
 
 
