@@ -254,7 +254,10 @@ mod tests {
             "mapping values are not allowed here",
         );
         // The constructor sets detail == message; the diagnostic must not print both.
-        assert_eq!(run_error.detail.as_deref(), Some(run_error.message.as_str()));
+        assert_eq!(
+            run_error.detail.as_deref(),
+            Some(run_error.message.as_str())
+        );
 
         let diagnostic = diagnostic_for(&run_error, ReasonCode::ECfgParse);
         let context = diagnostic.context.as_object().unwrap();
