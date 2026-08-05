@@ -376,6 +376,14 @@ pub fn seal_eligibility(health: &EnforcementHealthV1) -> Result<&Probe, NotSealE
 }
 
 /// What a sealed run produces: the seal, and the records its observed set commits to.
+///
+/// **Not a complete statement.** `observed_set` counts `interception` and `examination` alike, but
+/// the checker's row-coverage rule requires at least one `interception` in the refs of a caught
+/// `basis: substrate` row. The probe is an examination, so a statement assembled from this output
+/// alone yields a valid `aeeObservedSet` *and* a `substrate-row-missing-interception-coverage`
+/// rejection. That is not a choice between the two kinds: the examination may sit beside an
+/// interception, and the interception has to come from the corpus attack path, which this slice
+/// does not build. Named here so the gap does not silently move from the seal to the row.
 #[derive(Debug, Clone)]
 pub struct SealedRun {
     pub seal: SealPayload,
