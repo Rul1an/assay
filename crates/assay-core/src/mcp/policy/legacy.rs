@@ -82,7 +82,7 @@ fn emit_deprecation_warning() {
              \x1b[33m   The 'constraints:' syntax is deprecated and will be removed in Assay v2.0.0.\x1b[0m\n\
              \x1b[33m   Migrate now:\x1b[0m\n\
              \x1b[33m     assay policy migrate --input <file>\x1b[0m\n\
-             \x1b[33m   See: https://docs.assay.dev/migration/v1-to-v2\x1b[0m\n"
+             \x1b[33m   See: https://docs.getassay.dev/migration/v1-to-v2\x1b[0m\n"
         );
     });
 }

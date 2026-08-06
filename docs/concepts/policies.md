@@ -371,7 +371,7 @@ When validation fails, Assay provides actionable feedback:
 
    Suggestion: Use percent <= 30
 
-   Docs: https://docs.assay.dev/config/policies
+   Docs: https://docs.getassay.dev/concepts/policies/
 ```
 
 ---
