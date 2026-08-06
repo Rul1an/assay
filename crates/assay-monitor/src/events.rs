@@ -272,3 +272,141 @@ mod tests {
         assert!(decode_blocked_socket_payload(&data).is_none());
     }
 }
+
+/// A connect destination decoded from the RAW kernel `sockaddr` that `EVENT_CONNECT` carries.
+///
+/// **NOT a sound source for effect refutation, and deliberately not wired to one.** The
+/// `sys_enter_connect` tracepoint copies the sockaddr out of *userspace memory* at syscall entry,
+/// before the kernel has taken its own copy, so a process can present one address to the probe and
+/// another to the kernel. For observability that is a fair trade; for a refutation it is fatal,
+/// because the claim being made is "nothing went to X" and the input is attacker-influenced.
+///
+/// The sound source is the `cgroup_sock_addr(connect4/connect6)` hook, which reads `user_ip4` /
+/// `user_ip6` from the kernel's own `bpf_sock_addr` context. That hook is already attached for
+/// enforcement but currently emits only on the DENY path, so allowed connects — the ones a
+/// refutation actually needs — are not observable yet.
+///
+/// Deliberately separate from [`decode_blocked_socket_payload`], which parses the *projected*
+/// layout `socket_lsm` writes for `EVENT_CONNECT_BLOCKED` (`cgroup_id@0, family@8, port@10`).
+/// The connect tracepoint copies the sockaddr the process passed to the kernel verbatim, so the
+/// offsets are the ones from `sockaddr_in`/`sockaddr_in6` and nothing else. Using the wrong decoder
+/// for either shape yields `None` on every event, silently, which is exactly how a peer set can be
+/// empty on a run that saw traffic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectDestination {
+    pub family: u16,
+    pub port: u16,
+    pub destination: String,
+}
+
+impl ConnectDestination {
+    /// Render `destination:port`, bracketing IPv6 like [`std::net::SocketAddr`].
+    #[must_use]
+    pub fn endpoint(&self) -> String {
+        if self.family == AF_INET6 {
+            format!("[{}]:{}", self.destination, self.port)
+        } else {
+            format!("{}:{}", self.destination, self.port)
+        }
+    }
+}
+
+/// Decode the raw `sockaddr` payload written by the connect/sendto/sendmsg tracepoints.
+///
+/// `sockaddr_in`  : `sin_family u16 @0 | sin_port u16 BE @2 | sin_addr [u8;4] @4`
+/// `sockaddr_in6` : `sin6_family u16 @0 | sin6_port u16 BE @2 | sin6_flowinfo @4 | sin6_addr @8`
+///
+/// The port is **big-endian** here, unlike the projected payload whose port the eBPF side copies in
+/// native order. Reading it natively is a silent corruption rather than a parse failure, which is
+/// why it is stated rather than left to the offsets.
+///
+/// Returns `None` on a short buffer or a family this monitor does not observe, matching the
+/// fail-closed contract of the other decoders.
+#[must_use]
+pub fn decode_connect_sockaddr(data: &[u8]) -> Option<ConnectDestination> {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    let family = u16::from_ne_bytes(data.get(0..2)?.try_into().ok()?);
+    let port = u16::from_be_bytes(data.get(2..4)?.try_into().ok()?);
+
+    let destination = match family {
+        AF_INET => {
+            let a = data.get(4..8)?;
+            Ipv4Addr::new(a[0], a[1], a[2], a[3]).to_string()
+        }
+        AF_INET6 => Ipv6Addr::from(<[u8; 16]>::try_from(data.get(8..24)?).ok()?).to_string(),
+        _ => return None,
+    };
+
+    Some(ConnectDestination {
+        family,
+        port,
+        destination,
+    })
+}
+
+#[cfg(test)]
+mod connect_sockaddr_tests {
+    use super::*;
+
+    fn sockaddr_in(port: u16, octets: [u8; 4]) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&AF_INET.to_ne_bytes());
+        v.extend_from_slice(&port.to_be_bytes()); // network byte order, as the kernel receives it
+        v.extend_from_slice(&octets);
+        v.resize(32, 0);
+        v
+    }
+
+    #[test]
+    fn decodes_an_ipv4_connect_destination() {
+        let d = decode_connect_sockaddr(&sockaddr_in(443, [93, 184, 216, 34])).unwrap();
+        assert_eq!(d.endpoint(), "93.184.216.34:443");
+    }
+
+    #[test]
+    fn reads_the_port_as_big_endian() {
+        // 443 is 0x01BB. Read natively on a little-endian host it would be 0xBB01 = 47873, a
+        // plausible-looking port that would silently produce wrong endpoints rather than failing.
+        let d = decode_connect_sockaddr(&sockaddr_in(443, [1, 2, 3, 4])).unwrap();
+        assert_eq!(d.port, 443, "port must be decoded big-endian");
+    }
+
+    #[test]
+    fn decodes_an_ipv6_connect_destination() {
+        let mut v = Vec::new();
+        v.extend_from_slice(&AF_INET6.to_ne_bytes());
+        v.extend_from_slice(&443u16.to_be_bytes());
+        v.extend_from_slice(&0u32.to_ne_bytes()); // flowinfo
+        let mut addr = [0u8; 16];
+        addr[0] = 0x20;
+        addr[1] = 0x01;
+        addr[15] = 0x01;
+        v.extend_from_slice(&addr);
+        v.resize(32, 0);
+
+        let d = decode_connect_sockaddr(&v).unwrap();
+        assert_eq!(d.endpoint(), "[2001::1]:443");
+    }
+
+    #[test]
+    fn rejects_a_short_buffer_and_an_unobserved_family() {
+        assert!(decode_connect_sockaddr(&[2, 0]).is_none());
+        let mut unix = vec![1u8, 0]; // AF_UNIX
+        unix.resize(32, 0);
+        assert!(decode_connect_sockaddr(&unix).is_none());
+    }
+
+    #[test]
+    fn the_projected_decoder_and_this_one_are_not_interchangeable() {
+        // The bug this decoder exists to fix: a raw sockaddr fed to the projected decoder does not
+        // fail loudly, it just yields nothing, so a peer set silently stays empty on a run that saw
+        // real traffic. Asserting the asymmetry keeps anyone from "simplifying" them back together.
+        let raw = sockaddr_in(443, [93, 184, 216, 34]);
+        assert!(decode_connect_sockaddr(&raw).is_some());
+        assert!(
+            decode_blocked_socket_payload(&raw).is_none_or(|b| b.endpoint() != "93.184.216.34:443"),
+            "the projected decoder must not accidentally read a raw sockaddr correctly"
+        );
+    }
+}

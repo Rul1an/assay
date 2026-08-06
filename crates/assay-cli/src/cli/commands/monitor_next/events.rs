@@ -48,3 +48,19 @@ pub(crate) async fn handle_event(
 
     output::log_monitor_event(event, args);
 }
+
+/// The connect endpoint an event observed, if it is one.
+///
+/// Both allowed and blocked connects count as observations: the question a refutation asks is
+/// whether the kernel saw the workload try to reach that peer at all, and a blocked attempt is a
+/// sighting, not an absence. Whether the connection then succeeded is a different question this
+/// surface cannot answer, which is why `EgressRefutation::Refuted` names the surface it watched
+/// rather than the world.
+pub(crate) fn observed_peer(event: &assay_common::MonitorEvent) -> Option<String> {
+    match event.event_type {
+        assay_common::EVENT_CONNECT | assay_common::EVENT_CONNECT_BLOCKED => {
+            assay_monitor::events::decode_blocked_socket_payload(&event.data).map(|s| s.endpoint())
+        }
+        _ => None,
+    }
+}

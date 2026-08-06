@@ -381,6 +381,9 @@ pub fn build_decision(call: &ObservedCall<'_>) -> Value {
     // A side effect is *asserted* only when the tool was allowed and returned success. It is never
     // *verified* by the proxy.
     let side_effect_asserted = matches!(call.effect, Effect::Allow) && call.status == "success";
+    // Every decision leaves this function at `asserted`. Nothing here can promote: a level above
+    // asserted requires evidence this function does not have and must never invent.
+    let side_effect = crate::side_effect::SideEffect::asserted(side_effect_asserted);
     let c = classify(call.tool_name, call.args);
     let mut decision = json!({
         "server": { "id": sanitize(call.server_id), "transport": "mcp" },
@@ -411,7 +414,11 @@ pub fn build_decision(call: &ObservedCall<'_>) -> Value {
         "response": {
             "status": sanitize(call.status),
             "side_effect_asserted": side_effect_asserted,
-            "side_effect_verified": false
+            // Kept for compatibility, and now derived from the level rather than hardcoded, so the
+            // boolean and the ladder can never disagree. The producer always emits `asserted`;
+            // promotion happens downstream and only against evidence (see `side_effect.rs`).
+            "side_effect_verified": side_effect.verified_flag(),
+            "side_effect": side_effect
         },
         "redaction": {
             "arguments_redacted": true,
