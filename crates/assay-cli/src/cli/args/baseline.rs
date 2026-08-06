@@ -86,7 +86,20 @@ pub struct BaselineReportArgs {
     #[arg(long, default_value = "hygiene.json")]
     pub out: PathBuf,
 
-    /// Output format: json | md
+    /// Output format.
     #[arg(long, default_value = "json")]
-    pub format: String,
+    pub format: BaselineReportFormat,
+}
+
+/// The shapes `baseline report` can write.
+///
+/// It was a bare `String` matched with `==`, and the final `else` wrote JSON with a
+/// `// Default to JSON` comment -- so `--format mdd` produced a JSON file at `hygiene.md`, at
+/// exit 0, with no note that the spelling was not honoured. That is the class #2039 exists to
+/// close: a fixed set of meanings carried as a string and enumerated at the point of use.
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BaselineReportFormat {
+    #[default]
+    Json,
+    Md,
 }
