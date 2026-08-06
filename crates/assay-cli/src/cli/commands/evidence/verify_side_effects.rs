@@ -19,6 +19,7 @@
 //! that failed a check and a record that was never imported must never look the same, which is the
 //! failure this ladder exists to prevent.
 
+use super::effect_refutation::{refute_egress, EgressRefutation};
 use crate::exit_codes;
 use anyhow::{Context, Result};
 use assay_evidence::bundle::BundleReader;
@@ -49,6 +50,18 @@ pub struct VerifySideEffectsArgs {
     #[arg(long = "audit-import", value_name = "DIR")]
     pub audit_import: Option<PathBuf>,
 
+    /// An `assay.runner.observation_health.v0` artifact from a below-harness observer. When present,
+    /// a call whose claimed egress was watched and not seen is REFUTED. Absent means no refutation
+    /// is attempted, which is different from a refutation that failed.
+    #[arg(long = "observation-health", value_name = "PATH")]
+    pub observation_health: Option<PathBuf>,
+
+    /// Peer endpoints the observer actually recorded for this workload, comma separated. Only read
+    /// alongside --observation-health, because peers without a coverage descriptor cannot support
+    /// an absence claim.
+    #[arg(long = "observed-peer", value_delimiter = ',')]
+    pub observed_peers: Vec<String>,
+
     /// Output format
     #[arg(long, value_enum, default_value_t = SideEffectFormat::Table)]
     pub format: SideEffectFormat,
@@ -74,6 +87,9 @@ struct CallRow {
     /// rule. `occurrence` asks "did this effect happen"; `bounded_negative` asks "did it not".
     occurrence_claim: CodingAgentGateDecision,
     bounded_negative_claim: CodingAgentGateDecision,
+    /// What a below-harness observer could say about the claimed egress, when one was supplied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    egress: Option<EgressRefutation>,
 }
 
 #[derive(Debug, Serialize)]
@@ -174,6 +190,17 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
         .events_vec()
         .context("cannot read bundle events")?;
 
+    let observation_health: Option<Value> = match &args.observation_health {
+        Some(path) => Some(
+            serde_json::from_str(
+                &std::fs::read_to_string(path)
+                    .with_context(|| format!("cannot read {}", path.display()))?,
+            )
+            .with_context(|| format!("{} is not valid JSON", path.display()))?,
+        ),
+        None => None,
+    };
+
     let records = match &args.audit_import {
         Some(dir) => load_audit_records(dir)?,
         None => Vec::new(),
@@ -206,6 +233,7 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                 binding: None,
                 occurrence_claim: CodingAgentGateDecision::Blocked,
                 bounded_negative_claim: CodingAgentGateDecision::Blocked,
+                egress: None,
             };
 
             if asserted {
@@ -227,8 +255,29 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                     }
                 }
             }
+            // A below-harness observer contradicts the record only when it was demonstrably
+            // watching. `refute_egress` refuses on every blind state rather than reading silence
+            // as evidence, so an absent or degraded observer leaves the level untouched.
+            if asserted {
+                let expected = decision["action"]["target"]["provider"].as_str();
+                row.egress = Some(refute_egress(
+                    observation_health.as_ref(),
+                    &args.observed_peers,
+                    expected,
+                ));
+            }
             row.occurrence_claim =
                 claim_decision_for(row.level, CodingAgentClaimKind::PositiveExistence);
+
+            // A refutation overrides the ladder, including `verified`. If an imported audit record
+            // says the call happened and a watching kernel observer says nothing left the cgroup,
+            // those genuinely disagree, and the honest response is to block the occurrence claim and
+            // show both rather than silently prefer whichever rung is higher. Preferring the audit
+            // record would make the observer decorative; preferring the observer would let a probe
+            // gap overturn real corroboration. The conflict is the finding.
+            if row.egress.as_ref().is_some_and(EgressRefutation::refutes) {
+                row.occurrence_claim = CodingAgentGateDecision::Blocked;
+            }
             row.bounded_negative_claim =
                 claim_decision_for(row.level, CodingAgentClaimKind::BoundedNegative);
             calls.push(row);
@@ -263,6 +312,9 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                     c.occurrence_claim,
                     c.bounded_negative_claim
                 );
+                if let Some(e) = &c.egress {
+                    println!("      egress: {}", serde_json::to_string(e)?);
+                }
                 if let Some(b) = &c.binding {
                     if !b.is_bound() {
                         println!("      not promoted: {}", serde_json::to_string(b)?);

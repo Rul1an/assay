@@ -228,3 +228,126 @@ fn no_level_ever_supports_an_absence_claim() {
         );
     }
 }
+
+// ---------------------------------------------------------------- Ec: refutation from below
+
+fn health(dir: &std::path::Path, coverage: &str, correlation: &str) -> std::path::PathBuf {
+    let p = dir.join("observation_health.json");
+    fs::write(
+        &p,
+        serde_json::to_string(&json!({
+            "schema": "assay.runner.observation_health.v0",
+            "kernel_layer": "complete",
+            "ringbuf_drops": 0,
+            "network_protocol_coverage": coverage,
+            "cgroup_correlation": correlation,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    p
+}
+
+fn run_with_health(
+    bundle: &std::path::Path,
+    import: Option<&std::path::Path>,
+    oh: &std::path::Path,
+) -> Value {
+    let mut cmd = Command::cargo_bin("assay").unwrap();
+    cmd.arg("evidence")
+        .arg("verify-side-effects")
+        .arg(bundle)
+        .arg("--observation-health")
+        .arg(oh)
+        .arg("--format")
+        .arg("json");
+    if let Some(d) = import {
+        cmd.arg("--audit-import").arg(d);
+    }
+    let out = cmd.assert().success().get_output().stdout.clone();
+    serde_json::from_slice(&out).unwrap()
+}
+
+#[test]
+fn a_watching_observer_that_saw_nothing_refutes_the_egress() {
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_asserted_decision(&bundle);
+    let oh = health(dir.path(), "connect_only", "clean");
+
+    let report = run_with_health(&bundle, None, &oh);
+    assert_eq!(report["calls"][0]["egress"]["outcome"], json!("refuted"));
+    assert_eq!(
+        report["calls"][0]["egress"]["watched_surface"],
+        json!("cgroup_sock_addr:connect4"),
+        "a refutation names the surface it watched, not the world"
+    );
+}
+
+#[test]
+fn a_blind_observer_does_not_refute_anything() {
+    // The property Ec exists for. Same empty peer set, no coverage: silence stays silence.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_asserted_decision(&bundle);
+    let oh = health(dir.path(), "absent", "clean");
+
+    let report = run_with_health(&bundle, None, &oh);
+    assert_eq!(
+        report["calls"][0]["egress"]["outcome"],
+        json!("no_coverage")
+    );
+}
+
+#[test]
+fn a_refutation_blocks_the_occurrence_claim_even_when_an_audit_record_verified_it() {
+    // The conflict case, and the sharpest thing this command does. An imported audit record says the
+    // call happened; a watching kernel observer says nothing left the cgroup. They disagree, so the
+    // occurrence claim is blocked and BOTH are shown. Silently preferring the higher rung would make
+    // the observer decorative.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_asserted_decision(&bundle);
+    let import = import_dir(dir.path(), "audit_record_github_deploy_key.json");
+    let oh = health(dir.path(), "connect_only", "clean");
+
+    let report = run_with_health(&bundle, Some(&import), &oh);
+    let call = &report["calls"][0];
+
+    assert_eq!(
+        call["level"],
+        json!("verified"),
+        "the audit record still bound"
+    );
+    assert_eq!(
+        call["egress"]["outcome"],
+        json!("refuted"),
+        "and the kernel still disagrees"
+    );
+    assert_eq!(
+        call["occurrence_claim"],
+        json!("blocked"),
+        "a contradicted occurrence must not be claimable from either side"
+    );
+}
+
+#[test]
+fn partial_correlation_cannot_overturn_a_verified_record() {
+    // The inverse guard: a probe gap must not be able to refute real corroboration.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_asserted_decision(&bundle);
+    let import = import_dir(dir.path(), "audit_record_github_deploy_key.json");
+    let oh = health(dir.path(), "connect_only", "partial");
+
+    let report = run_with_health(&bundle, Some(&import), &oh);
+    assert_eq!(
+        report["calls"][0]["egress"]["outcome"],
+        json!("coverage_degraded")
+    );
+    assert_eq!(
+        report["calls"][0]["occurrence_claim"],
+        json!("allowed"),
+        "a degraded observer must not overturn an audit record that bound"
+    );
+}
