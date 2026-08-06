@@ -93,6 +93,33 @@ repos:
         pass_filenames: false
         files: ^(scripts/ci/assay_runner_lane_check\.py|scripts/ci/assay_runner_gated_paths\.json|\.github/workflows/assay-runner-lane-check\.yml|\.pre-commit-config\.yaml)$
 
+      - id: docs-generated-drift-self-test
+        name: Generated-docs drift check self-test
+        entry: bash scripts/ci/test-check-docs-generated-drift.sh
+        language: system
+        pass_filenames: false
+        # Both properties this pins have failed here before: `check-aee-seal-fixture-drift.sh`
+        # documents an earlier version that ran its emitter in place and destroyed the fixtures it
+        # audited, and `check-linux.sh` returned 0 on every failure (#2076).
+        stages: [pre-push]
+        files: ^scripts/ci/(check-docs-generated-drift|test-check-docs-generated-drift)\.sh$
+
+      - id: docs-generated-drift
+        name: Generated docs match their generators
+        entry: bash scripts/ci/check-docs-generated-drift.sh
+        language: system
+        pass_filenames: false
+        # The drift used to be found *after* a merge, by `docs-auto-update.yml`, which then opened a
+        # PR from `docs/auto-update` that could never be checked: `create-pull-request` signs it with
+        # the default GITHUB_TOKEN, and GitHub does not run workflows for that token's events. #2021
+        # sat blocked for a day with fifteen `action_required` runs and nothing to approve them
+        # (#2080).
+        #
+        # Caught here instead, the diagram edge lands in the pull request that added the dependency,
+        # where a reviewer can see why it moved. It also makes the bot's `has_changes` false by
+        # construction, so the un-mergeable PR is never created.
+        files: ^(Cargo\.toml|crates/.*/Cargo\.toml|scripts/docs/.*\.sh|docs/generated/.*|docs/AIcontext/architecture-diagrams\.md|scripts/ci/check-docs-generated-drift\.sh|\.pre-commit-config\.yaml)$
+
       - id: docs-auto-update-reconcile-self-test
         name: Docs auto-update reconciliation self-test
         entry: bash scripts/ci/test-reconcile-docs-auto-pr.sh
@@ -114,6 +141,28 @@ repos:
         # answers -- does this suite still have teeth -- is a push-time question.
         stages: [pre-push]
         files: ^(crates/assay-cli/src/aee_seal\.rs|scripts/ci/test_aee_seal_producer_mutations\.py|\.pre-commit-config\.yaml)$
+      - id: aee-seal-checker-coverage
+        name: ADR-045 seal checker coverage
+        entry: bash -c 'f=scripts/experiments/aee_landlock_seal_fixture.py; python3 $f --meta-test && python3 $f --required-field-test && python3 $f --rule-coverage-test'
+        language: system
+        pass_filenames: false
+        # Three properties the checker claims and nothing was checking.
+        #
+        # `--meta-test` says every negative control rejects for its own reason and no other; without
+        # it a rule that fires on every control would read as broad coverage instead of one
+        # indiscriminate rejection.
+        #
+        # `--required-field-test` says every field the contract marks required is refused when
+        # absent, which is what the #2060 sweep found five gaps in.
+        #
+        # `--rule-coverage-test` says every reason code the checker can produce has a control that
+        # produces it. The first two say nothing about a rule with no control at all, and there were
+        # nine -- including the one #1998 requires by name. A rule can exist, be believed, and never
+        # be shown to fire.
+        #
+        # pre-commit, not pre-push: all three run in well under a second, and they are the tests
+        # that tell you a rule you just wrote does not isolate.
+        files: ^(scripts/experiments/aee_landlock_seal_fixture\.py|scripts/experiments/fixtures/aee-landlock-seal/.*|\.pre-commit-config\.yaml)$
       - id: aee-seal-fixture-drift
         name: ADR-045 seal fixture drift
         entry: bash scripts/ci/check-aee-seal-fixture-drift.sh
@@ -122,6 +171,20 @@ repos:
         # The Rust producer's parity tests read `derivation-parity.json`, so the emitter and the
         # committed vectors have to stay in step; nothing else regenerates them.
         files: ^(scripts/experiments/aee_landlock_seal_fixture\.py|scripts/experiments/fixtures/aee-landlock-seal/.*|scripts/ci/check-aee-seal-fixture-drift\.sh|crates/assay-cli/src/aee_seal\.rs|\.pre-commit-config\.yaml)$
+      - id: wildcard-expectations
+        name: Wildcard suppressions still needed
+        entry: bash scripts/ci/check-wildcard-expectations.sh
+        language: system
+        pass_filenames: false
+        # `wildcard_enum_match_arm` is a restriction lint and stays off by default -- #2055 measured
+        # why: it fires on foreign enums too, and `KeyCode` alone would need ~25 arms that do
+        # nothing. But with it off, `unfulfilled_lint_expectations` never fires either, so every
+        # `#[expect]` documents a decision that nothing re-checks. This runs the lint just long
+        # enough to evaluate the expectations, and fails only on one that has gone stale.
+        #
+        # pre-push: a workspace clippy run is too slow to tax every intermediate commit.
+        stages: [pre-push]
+        files: ^(crates/.*\.rs|scripts/ci/check-wildcard-expectations\.sh|\.pre-commit-config\.yaml)$
       - id: runner-gating-map-drift
         name: Runner gating map drift
         entry: bash scripts/ci/check-runner-gating-map-drift.sh
@@ -219,11 +282,28 @@ repos:
         stages: [pre-push]
         pass_filenames: false
 
+      - id: linux-gate-self-test
+        name: Linux compile gate self-test
+        entry: bash scripts/ci/test-check-linux.sh
+        language: system
+        pass_filenames: false
+        # The gate could not fail (#2076): every branch ended in `return 0`, so a timeout, a
+        # third-party build script and a real Linux compile error were one outcome. #2074 pushed
+        # four E0425s through it and the delegated host found them.
+        #
+        # This plants a deliberate `cfg(target_os = "linux")` error and requires a non-zero exit --
+        # the property the gate exists for and could not previously demonstrate.
+        stages: [pre-push]
+        files: ^scripts/ci/(check-linux|test-check-linux)\.sh$
       - id: linux-check
-        name: linux compile gate (target/multipass)
+        name: linux compile gate (cross-target)
         entry: bash scripts/ci/check-linux.sh
         language: system
         stages: [pre-push]
         pass_filenames: false
-        # Default: cross-compile only (ASSAY_LINUX_CHECK_MODE=target), with timeout so pre-push does not hang.
-        # ASSAY_LINUX_TARGET_TIMEOUT=300 (default). Set =multipass for full VM clippy.
+        # Cross-compile only. The `multipass` VM mode this used to name is gone (#2077): its clippy
+        # run ended in `return 0` on failure, so like the cross-target path it could not fail, and
+        # keeping a second fail-open path would have meant fixing the defect in one of two places.
+        #
+        # ASSAY_LINUX_TARGET_TIMEOUT=300 (default) bounds each crate's check.
+        # ASSAY_LINUX_CHECK_REQUIRE_FULL=1 makes incomplete coverage a failure rather than a warning.

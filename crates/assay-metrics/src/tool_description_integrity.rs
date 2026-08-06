@@ -61,9 +61,13 @@ impl Metric for ToolDescriptionIntegrityMetric {
         expected: &Expected,
         resp: &LlmResponse,
     ) -> anyhow::Result<MetricResult> {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "a metric declines every Expected variant but its own, and now says so with not_applicable() rather than a vacuous pass (#1949 layer 2)"
+        )]
         let pinned_tools = match expected {
             Expected::ToolDescriptionIntegrity { pinned_tools } => pinned_tools,
-            _ => return Ok(MetricResult::pass(1.0)),
+            _ => return Ok(MetricResult::not_applicable()),
         };
 
         let mut violations: Vec<serde_json::Value> = Vec::new();
@@ -72,7 +76,9 @@ impl Metric for ToolDescriptionIntegrityMetric {
             // Snapshot mode: compare multiple tools/list responses for mutations.
             let snaps = snapshots(resp);
             if snaps.len() < 2 {
-                return Ok(MetricResult::pass(1.0)); // Single snapshot — nothing to compare.
+                return Ok(MetricResult::not_exercised(
+                    "single tool-definition snapshot: nothing to compare against",
+                )); // Single snapshot — nothing to compare.
             }
 
             // Baseline: snapshot 0.
@@ -116,7 +122,9 @@ impl Metric for ToolDescriptionIntegrityMetric {
             // Pinned mode: verify tool definitions in meta match operator-supplied pins.
             let defs = tool_defs(resp);
             if defs.is_empty() {
-                return Ok(MetricResult::pass(1.0)); // No definitions in trace — N/A.
+                return Ok(MetricResult::not_exercised(
+                    "no tool definitions in the trace",
+                )); // No definitions in trace — N/A.
             }
 
             let by_name: HashMap<String, &serde_json::Value> = defs
@@ -174,6 +182,7 @@ impl Metric for ToolDescriptionIntegrityMetric {
             Ok(MetricResult::pass(1.0))
         } else {
             Ok(MetricResult {
+                exercised: assay_core::metrics_api::Exercised::Exercised,
                 passed: false,
                 score: 0.0,
                 unstable: false,

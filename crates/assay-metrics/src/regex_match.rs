@@ -18,12 +18,16 @@ impl Metric for RegexMatchMetric {
         expected: &Expected,
         resp: &LlmResponse,
     ) -> anyhow::Result<MetricResult> {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "a metric declines every Expected variant but its own, and now says so with not_applicable() rather than a vacuous pass (#1949 layer 2)"
+        )]
         let (pattern, flags, negate) = match expected {
             Expected::RegexMatch { pattern, flags } => (pattern.as_str(), flags.as_slice(), false),
             Expected::RegexNotMatch { pattern, flags } => {
                 (pattern.as_str(), flags.as_slice(), true)
             }
-            _ => return Ok(MetricResult::pass(1.0)),
+            _ => return Ok(MetricResult::not_applicable()),
         };
 
         let mut b = RegexBuilder::new(pattern);

@@ -7,6 +7,8 @@ use assay_common::{
     MONITOR_STAT_LSM_EVENTS_EMITTED, MONITOR_STAT_LSM_RINGBUF_DROPPED,
     MONITOR_STAT_OPENAT2_EVENTS_EMITTED, MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
     MONITOR_STAT_OPENAT_EVENTS_EMITTED, MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
+    MONITOR_STAT_SENDMSG_EVENTS_EMITTED, MONITOR_STAT_SENDMSG_RINGBUF_DROPPED,
+    MONITOR_STAT_SENDTO_EVENTS_EMITTED, MONITOR_STAT_SENDTO_RINGBUF_DROPPED,
     MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
     SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR, SOCKET_STAT_BLOCKED_PORT, SOCKET_STAT_CHECKS,
     SOCKET_STAT_EVENTS_EMITTED, SOCKET_STAT_RINGBUF_DROPPED,
@@ -474,6 +476,23 @@ impl LinuxMonitor {
             .unwrap_or(0);
         stats.connect_ringbuf_dropped = array
             .get(&MONITOR_STAT_CONNECT_RINGBUF_DROPPED, 0)
+            .unwrap_or(0);
+        // The eBPF side has always incremented these (connect_events.rs), and userspace never read
+        // them back, so the snapshot reported 0 for two of the seven tracepoint hooks. Not a gate
+        // defect -- `tracepoint_ringbuf_dropped` is bumped alongside every per-hook counter, so the
+        // ring total was right -- but a drop on `sendto` or `sendmsg` could not be attributed to
+        // the hook that lost it, which is the whole job of the per-hook counters.
+        stats.sendto_events_emitted = array
+            .get(&MONITOR_STAT_SENDTO_EVENTS_EMITTED, 0)
+            .unwrap_or(0);
+        stats.sendto_ringbuf_dropped = array
+            .get(&MONITOR_STAT_SENDTO_RINGBUF_DROPPED, 0)
+            .unwrap_or(0);
+        stats.sendmsg_events_emitted = array
+            .get(&MONITOR_STAT_SENDMSG_EVENTS_EMITTED, 0)
+            .unwrap_or(0);
+        stats.sendmsg_ringbuf_dropped = array
+            .get(&MONITOR_STAT_SENDMSG_RINGBUF_DROPPED, 0)
             .unwrap_or(0);
 
         let map = bpf.map("SOCKET_STATS").ok_or(MonitorError::MapNotFound {

@@ -39,6 +39,10 @@ pub(in crate::attacks::memory_poison) fn make_result(
         outcome: outcome.clone(),
         hypothesis_tags: tags,
     };
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "as the other attack matrices: a new activation-shaped outcome scores as passed unless named"
+    )]
     let status = match &outcome {
         PoisonOutcome::ActivationWithMisclassification
         | PoisonOutcome::ActivationWithPolicyShift => AttackStatus::Bypassed,

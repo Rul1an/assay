@@ -19,13 +19,17 @@ impl Metric for SequenceValidMetric {
         expected: &Expected,
         resp: &LlmResponse,
     ) -> anyhow::Result<MetricResult> {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "a metric declines every Expected variant but its own, and now says so with not_applicable() rather than a vacuous pass (#1949 layer 2)"
+        )]
         let (policy_path, inline_sequence, inline_rules) = match expected {
             Expected::SequenceValid {
                 policy,
                 sequence,
                 rules,
             } => (policy, sequence, rules),
-            _ => return Ok(MetricResult::pass(1.0)),
+            _ => return Ok(MetricResult::not_applicable()),
         };
 
         // 1. Resolve Rules & Sequence from Policy File (if any)
@@ -67,7 +71,9 @@ impl Metric for SequenceValidMetric {
         let effective_rules = inline_rules.as_ref().or(file_rules.as_ref());
 
         if effective_sequence.is_none() && effective_rules.is_none() {
-            return Ok(MetricResult::pass(1.0));
+            return Ok(MetricResult::not_exercised(
+                "no sequence and no rules configured",
+            ));
         }
 
         // Parse Tool Calls
@@ -92,6 +98,10 @@ impl Metric for SequenceValidMetric {
         // 2. Validate Rules (DSL)
         if let Some(rules) = effective_rules {
             for rule in rules {
+                #[expect(
+                    clippy::wildcard_enum_match_arm,
+                    reason = "the guarded arms above are the failing cases; a rule that does not match them passed, and a new rule kind must be named or it silently passes -- the direction that hides a violation"
+                )]
                 match rule {
                     assay_core::model::SequenceRule::Require { tool }
                         if !actual_names.contains(tool) =>

@@ -18,9 +18,13 @@ impl Metric for ToolBlocklistMetric {
         expected: &Expected,
         resp: &LlmResponse,
     ) -> anyhow::Result<MetricResult> {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "a metric declines every Expected variant but its own, and now says so with not_applicable() rather than a vacuous pass (#1949 layer 2)"
+        )]
         let blocked = match expected {
             Expected::ToolBlocklist { blocked } => blocked,
-            _ => return Ok(MetricResult::pass(1.0)), // N/A
+            _ => return Ok(MetricResult::not_applicable()), // N/A
         };
 
         let tool_calls: Vec<ToolCallRecord> = match extract_tool_calls_canonical(resp) {

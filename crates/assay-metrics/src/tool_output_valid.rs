@@ -19,13 +19,18 @@ impl Metric for ToolOutputValidMetric {
         expected: &Expected,
         resp: &LlmResponse,
     ) -> anyhow::Result<MetricResult> {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "a metric declines every Expected variant but its own, and now says so with not_applicable() rather than a vacuous pass (#1949 layer 2)"
+        )]
         let schemas = match expected {
             Expected::ToolOutputValid { schemas } => schemas,
-            _ => return Ok(MetricResult::pass(1.0)),
+            _ => return Ok(MetricResult::not_applicable()),
         };
 
         let Some(schemas_value) = schemas else {
-            return Ok(MetricResult::pass(1.0)); // N/A — no schemas configured.
+            return Ok(MetricResult::not_exercised("no output schemas configured"));
+            // N/A — no schemas configured.
         };
 
         // Validate that schemas is a JSON object; return a config error otherwise
@@ -106,6 +111,7 @@ impl Metric for ToolOutputValidMetric {
             Ok(MetricResult::pass(1.0))
         } else {
             Ok(MetricResult {
+                exercised: assay_core::metrics_api::Exercised::Exercised,
                 passed: false,
                 score: 0.0,
                 unstable: false,

@@ -185,6 +185,10 @@ impl PackResolver {
     pub async fn prefetch(&self, reference: &str) -> RegistryResult<()> {
         let pack_ref = PackRef::parse(reference)?;
 
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "only a registry ref can be prefetched; local, bundled and byos refs have nothing to fetch"
+        )]
         match &pack_ref {
             PackRef::Registry { name, version, .. } => {
                 // Fetch and cache

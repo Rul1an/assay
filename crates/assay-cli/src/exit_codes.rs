@@ -152,6 +152,10 @@ impl ReasonCode {
 
     fn exit_code_v1(&self) -> i32 {
         // Legacy mapping (V1)
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "the V1 compat mapping names the codes whose exit differed under V1 and lets the rest fall to their V2 code; a new code is V2-only until someone decides it had a V1 meaning"
+        )]
         match self {
             ReasonCode::Success => EXIT_SUCCESS,
 

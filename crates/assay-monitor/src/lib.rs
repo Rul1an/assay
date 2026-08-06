@@ -48,7 +48,65 @@ pub struct MonitorStatsSnapshot {
     pub event_size_mismatch: u64,
 }
 
+/// Per-hook attribution of drops on the tracepoint ring, and the part nothing claims.
+///
+/// #1271 asks the diagnostic projection to distinguish loss layers, because "conflating them into
+/// one ring-buffer drops number is precisely what makes future failures hard to triage". This is
+/// that split for the tracepoint ring.
+///
+/// `unattributed` is not padding. Every hook bumps `MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED`, and
+/// only some bump a per-hook counter as well -- `sched_process_fork` (`fork_events.rs:46`) does
+/// not. A breakdown that reported only the five it can name would silently understate the ring,
+/// and a reader comparing it against `ringbuf_drops` would find a gap with nothing to explain it.
+/// Reporting the remainder is what makes the attribution safe to read.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TracepointDropAttribution {
+    pub openat: u32,
+    pub openat2: u32,
+    pub connect: u32,
+    pub sendto: u32,
+    pub sendmsg: u32,
+    /// Drops on the tracepoint ring that no per-hook counter claims.
+    pub unattributed: u64,
+}
+
+impl TracepointDropAttribution {
+    /// The part of the ring total this breakdown can name.
+    pub fn attributed(&self) -> u64 {
+        u64::from(self.openat)
+            + u64::from(self.openat2)
+            + u64::from(self.connect)
+            + u64::from(self.sendto)
+            + u64::from(self.sendmsg)
+    }
+
+    /// Attributed plus unattributed. Equals `tracepoint_ringbuf_dropped` by construction.
+    pub fn total(&self) -> u64 {
+        self.attributed() + self.unattributed
+    }
+}
+
 impl MonitorStatsSnapshot {
+    /// Split this snapshot's tracepoint-ring drops by the hook that lost the record.
+    ///
+    /// `saturating_sub` rather than an assertion: the counters are read from a live kernel map in
+    /// no particular order, so a per-hook counter can be observed after the ring counter it was
+    /// bumped alongside. A transient negative remainder is a read artefact, not a violated
+    /// invariant, and clamping it reports zero unattributed rather than a nonsense number.
+    pub fn tracepoint_drop_attribution(&self) -> TracepointDropAttribution {
+        let mut attribution = TracepointDropAttribution {
+            openat: self.openat_ringbuf_dropped,
+            openat2: self.openat2_ringbuf_dropped,
+            connect: self.connect_ringbuf_dropped,
+            sendto: self.sendto_ringbuf_dropped,
+            sendmsg: self.sendmsg_ringbuf_dropped,
+            unattributed: 0,
+        };
+        attribution.unattributed =
+            u64::from(self.tracepoint_ringbuf_dropped).saturating_sub(attribution.attributed());
+        attribution
+    }
+
     pub fn total_ringbuf_dropped(&self) -> u64 {
         u64::from(self.tracepoint_ringbuf_dropped)
             + u64::from(self.lsm_ringbuf_dropped)
@@ -376,6 +434,95 @@ mod tests {
             err.to_string()
                 .contains("1 IPv6 allow CIDR rule(s) and 1 IPv6 deny CIDR rule(s)"),
             "the refusal must account for both unsupported rule classes: {err}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tracepoint_attribution_tests {
+    use super::*;
+
+    fn snapshot() -> MonitorStatsSnapshot {
+        MonitorStatsSnapshot::default()
+    }
+
+    /// The attribution and the remainder reconstruct the ring counter exactly. Without this the
+    /// breakdown is a set of numbers with no stated relationship to the one the gate reads.
+    #[test]
+    fn attribution_and_remainder_reconstruct_the_ring_total() {
+        let mut s = snapshot();
+        s.tracepoint_ringbuf_dropped = 17;
+        s.openat_ringbuf_dropped = 3;
+        s.openat2_ringbuf_dropped = 1;
+        s.connect_ringbuf_dropped = 4;
+        s.sendto_ringbuf_dropped = 2;
+        s.sendmsg_ringbuf_dropped = 5;
+
+        let a = s.tracepoint_drop_attribution();
+        assert_eq!(a.attributed(), 15);
+        assert_eq!(a.unattributed, 2, "the fork hook has no per-hook counter");
+        assert_eq!(a.total(), u64::from(s.tracepoint_ringbuf_dropped));
+    }
+
+    /// A drop on a hook with no per-hook counter is reported as unattributed, not as absent.
+    ///
+    /// `sched_process_fork` bumps the ring counter and nothing else (`fork_events.rs:46`), so a
+    /// breakdown that named only the five hooks it can attribute would show all-zeros against a
+    /// non-zero `ringbuf_drops` — a gap with nothing to explain it, which is exactly the triage
+    /// problem #1271 exists to remove.
+    #[test]
+    fn a_drop_no_hook_claims_is_reported_rather_than_lost() {
+        let mut s = snapshot();
+        s.tracepoint_ringbuf_dropped = 6;
+        let a = s.tracepoint_drop_attribution();
+        assert_eq!(a.attributed(), 0);
+        assert_eq!(a.unattributed, 6);
+        assert_eq!(a.total(), 6);
+    }
+
+    /// The two hooks whose counters userspace never read.
+    ///
+    /// Before they were wired, a `sendto`/`sendmsg` drop landed in `unattributed` and looked like a
+    /// fork drop. The attribution was not wrong about the total; it was wrong about the cause,
+    /// which is the only thing a breakdown is for.
+    #[test]
+    fn sendto_and_sendmsg_drops_are_attributed() {
+        let mut s = snapshot();
+        s.tracepoint_ringbuf_dropped = 9;
+        s.sendto_ringbuf_dropped = 4;
+        s.sendmsg_ringbuf_dropped = 5;
+        let a = s.tracepoint_drop_attribution();
+        assert_eq!((a.sendto, a.sendmsg), (4, 5));
+        assert_eq!(a.unattributed, 0, "both are now claimed by their own hook");
+    }
+
+    /// A per-hook counter read after the ring counter it was bumped alongside must not underflow.
+    #[test]
+    fn a_transient_over_read_clamps_rather_than_wrapping() {
+        let mut s = snapshot();
+        s.tracepoint_ringbuf_dropped = 1;
+        s.openat_ringbuf_dropped = 5;
+        let a = s.tracepoint_drop_attribution();
+        assert_eq!(a.unattributed, 0);
+        assert!(a.attributed() >= u64::from(s.tracepoint_ringbuf_dropped));
+    }
+
+    /// The attribution never changes what the gate reads. `ringbuf_drops` is the ring total, and a
+    /// breakdown that could move it would be changing acceptance rather than explaining it.
+    #[test]
+    fn attribution_does_not_touch_the_acceptance_total() {
+        let mut s = snapshot();
+        s.tracepoint_ringbuf_dropped = 2;
+        s.lsm_ringbuf_dropped = 3;
+        s.socket_ringbuf_dropped = 4;
+        s.openat_ringbuf_dropped = 1;
+        s.sendto_ringbuf_dropped = 1;
+        let before = s.total_ringbuf_dropped();
+        let _ = s.tracepoint_drop_attribution();
+        assert_eq!(s.total_ringbuf_dropped(), before);
+        assert_eq!(
+            before, 9,
+            "tracepoint + lsm + socket, the three actual rings"
         );
     }
 }

@@ -17,7 +17,7 @@ impl Metric for MustContainMetric {
         resp: &LlmResponse,
     ) -> anyhow::Result<MetricResult> {
         let Expected::MustContain { must_contain } = expected else {
-            return Ok(MetricResult::pass(1.0));
+            return Ok(MetricResult::not_applicable());
         };
         for s in must_contain {
             if !resp.text.contains(s) {

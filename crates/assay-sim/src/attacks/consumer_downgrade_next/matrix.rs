@@ -65,6 +65,10 @@ pub(super) fn make_consumer_result(
         outcome: outcome.clone(),
         hypothesis_tags: tags,
     };
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "outcomes that are neither a bypass nor a correct detection are a pass; a new bypass-shaped outcome must be named above or it scores as passed, which is the direction that hides a finding"
+    )]
     let status = match &outcome {
         ConsumerOutcome::SilentDowngrade | ConsumerOutcome::SilentTrustUpgrade => {
             AttackStatus::Bypassed

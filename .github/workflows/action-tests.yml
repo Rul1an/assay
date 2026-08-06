@@ -32,6 +32,11 @@ jobs:
       - name: Verify software and conformance release channels stay separate
         run: bash scripts/ci/test-release-channel-separation.sh
 
+      # The release-blocking gate's only test used to be cutting a release. This is where it stops
+      # being that.
+      - name: Exercise the release-blocking gate
+        run: bash scripts/ci/test-release-blocking-gate.sh
+
       - name: Build CLI once
         run: cargo build --release --workspace --exclude assay-ebpf
 

@@ -24,9 +24,13 @@ impl Metric for ArgsValidMetric {
         expected: &Expected,
         resp: &LlmResponse,
     ) -> anyhow::Result<MetricResult> {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "a metric declines every Expected variant but its own, and now says so with not_applicable() rather than a vacuous pass (#1949 layer 2)"
+        )]
         let (policy_path, inline_schema) = match expected {
             Expected::ArgsValid { policy, schema } => (policy, schema),
-            _ => return Ok(MetricResult::pass(1.0)),
+            _ => return Ok(MetricResult::not_applicable()),
         };
         if policy_path.is_none() && inline_schema.is_none() {
             anyhow::bail!("config error: args_valid requires `policy` or `schema`");
@@ -47,7 +51,7 @@ impl Metric for ArgsValidMetric {
 
             load_policy_source(Path::new(path))?
         } else {
-            return Ok(MetricResult::pass(1.0));
+            return Ok(MetricResult::not_exercised("no args policy configured"));
         };
 
         // No calls -> valid args (vacuously true)
@@ -179,6 +183,7 @@ impl Metric for ArgsValidMetric {
             details.insert("violations".to_string(), serde_json::Value::Array(errors));
 
             Ok(MetricResult {
+                exercised: assay_core::metrics_api::Exercised::Exercised,
                 passed: false,
                 score: 0.0,
                 details: serde_json::Value::Object(details),

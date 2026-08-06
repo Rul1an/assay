@@ -4,6 +4,10 @@ use std::path::Path;
 
 pub fn resolve_policies(mut config: EvalConfig, base_dir: &Path) -> Result<EvalConfig> {
     for test in &mut config.tests {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "only variants carrying a policy reference need resolving; a new one that carries a path must be added above or its path is never resolved"
+        )]
         match &mut test.expected {
             Expected::ArgsValid {
                 ref mut policy,
@@ -97,6 +101,10 @@ fn resolve_nested_expected_paths(expected: &mut Expected, reference_path: &Path)
             *path = base.join(candidate).to_string_lossy().into_owned();
         }
     };
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "nested resolution applies to the variants that hold a nested path; the rest have nothing to walk"
+    )]
     match expected {
         Expected::JsonSchema {
             schema_file: Some(path),
