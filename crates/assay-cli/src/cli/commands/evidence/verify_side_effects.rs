@@ -22,6 +22,10 @@
 use crate::exit_codes;
 use anyhow::{Context, Result};
 use assay_evidence::bundle::BundleReader;
+use assay_evidence::{
+    coding_agent_claim_decision, CodingAgentClaimKind, CodingAgentCoverageState,
+    CodingAgentGateDecision, CodingAgentSourceClass,
+};
 use assay_mcp_server::side_effect::{
     check_audit_record, AuditBinding, SideEffectLevel, PROVIDER_AUDIT_RECORD_SCHEMA,
 };
@@ -66,6 +70,10 @@ struct CallRow {
     /// Why a record did not bind. Present whenever an import was considered and rejected.
     #[serde(skip_serializing_if = "Option::is_none")]
     binding: Option<AuditBinding>,
+    /// What this level lets a consumer claim, from the existing claim gate rather than a second
+    /// rule. `occurrence` asks "did this effect happen"; `bounded_negative` asks "did it not".
+    occurrence_claim: CodingAgentGateDecision,
+    bounded_negative_claim: CodingAgentGateDecision,
 }
 
 #[derive(Debug, Serialize)]
@@ -86,6 +94,48 @@ const CLAIMS_NOT_MADE: &[&str] = &[
     "audit_record_authenticity_beyond_its_own_signature",
     "effect_persistence_after_the_observed_call",
 ];
+
+/// The source class a side-effect level earns.
+///
+/// This is where Eb.5 composes rather than restates. The question "may this evidence carry an
+/// occurrence claim about the world" is already answered by the coding-agent claim gate, and that
+/// gate already encodes the occurrence-versus-absence asymmetry. Writing a second ladder-specific
+/// rule here would be two implementations of one rule, which always drift.
+///
+/// The mapping is placed in the CLI on purpose: `assay-mcp-server` does not depend on
+/// `assay-evidence` and must not start to for this. The CLI already depends on both, so composition
+/// belongs here and a new crate edge stays an ADR question rather than a side effect of wiring.
+fn source_class_for(level: SideEffectLevel) -> CodingAgentSourceClass {
+    match level {
+        // The provider said so. Nothing outside the producer corroborates it.
+        SideEffectLevel::Asserted => CodingAgentSourceClass::ProducerReported,
+        // Our own later read, at our own vantage. Real evidence, and still ours.
+        SideEffectLevel::ObservedConfirmed => CodingAgentSourceClass::BoundaryObserved,
+        // An independently produced record from the system that would know.
+        SideEffectLevel::Verified => CodingAgentSourceClass::ThirdPartyObserved,
+    }
+}
+
+/// What a level lets a consumer claim about the world.
+///
+/// Coverage is `SelfReported` for `asserted` and **`Partial`** above it.
+///
+/// Never `Observed`, and a test caught the first version getting this wrong. A side-effect level is
+/// evidence about ONE CALL; it is never coverage of a dimension. `Observed` told the gate the whole
+/// surface had been watched, which let `verified` license "and nothing else happened" — a claim an
+/// audit record for a single call cannot support. `Partial` says exactly what is true: this
+/// occurrence is corroborated, the dimension is not covered, so occurrence claims pass and absence
+/// claims are blocked by `partial_coverage_blocks_absence_claim`.
+fn claim_decision_for(
+    level: SideEffectLevel,
+    kind: CodingAgentClaimKind,
+) -> CodingAgentGateDecision {
+    let coverage = match level {
+        SideEffectLevel::Asserted => CodingAgentCoverageState::SelfReported,
+        _ => CodingAgentCoverageState::Partial,
+    };
+    coding_agent_claim_decision(source_class_for(level), coverage, kind).decision
+}
 
 /// Load `assay.provider_audit_record.v0` files from an import directory.
 ///
@@ -154,6 +204,8 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                 level: SideEffectLevel::Asserted,
                 subject_digest: None,
                 binding: None,
+                occurrence_claim: CodingAgentGateDecision::Blocked,
+                bounded_negative_claim: CodingAgentGateDecision::Blocked,
             };
 
             if asserted {
@@ -175,6 +227,10 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                     }
                 }
             }
+            row.occurrence_claim =
+                claim_decision_for(row.level, CodingAgentClaimKind::PositiveExistence);
+            row.bounded_negative_claim =
+                claim_decision_for(row.level, CodingAgentClaimKind::BoundedNegative);
             calls.push(row);
         }
     }
@@ -200,10 +256,12 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
             for c in &report.calls {
                 let level = serde_json::to_value(c.level)?;
                 println!(
-                    "  {:40} asserted={:5} level={}",
+                    "  {:40} asserted={:5} level={:18} occurrence={:?} absence={:?}",
                     c.tool,
                     c.asserted,
-                    level.as_str().unwrap_or("?")
+                    level.as_str().unwrap_or("?"),
+                    c.occurrence_claim,
+                    c.bounded_negative_claim
                 );
                 if let Some(b) = &c.binding {
                     if !b.is_bound() {

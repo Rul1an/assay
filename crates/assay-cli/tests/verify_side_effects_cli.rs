@@ -176,3 +176,55 @@ fn the_table_render_path_works_and_names_the_rejection() {
     assert!(text.contains("binds_different_call"), "{text}");
     assert!(text.contains("promoted to verified: 0"), "{text}");
 }
+
+// ---------------------------------------------------------------- Eb.5: the gate binds
+
+#[test]
+fn an_asserted_side_effect_cannot_carry_an_occurrence_claim() {
+    // The point of the whole ladder. The provider said success; that is the provider's word, and it
+    // must not license "this effect happened" downstream.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_asserted_decision(&bundle);
+
+    let report = run(&bundle, None);
+    assert_eq!(report["calls"][0]["level"], json!("asserted"));
+    assert_ne!(
+        report["calls"][0]["occurrence_claim"],
+        json!("allowed"),
+        "producer-reported evidence must not license an occurrence claim"
+    );
+}
+
+#[test]
+fn a_verified_side_effect_can_carry_an_occurrence_claim() {
+    // And the converse, or the ladder buys nothing: an independently produced record that binds is
+    // exactly the evidence an occurrence claim needs.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_asserted_decision(&bundle);
+    let import = import_dir(dir.path(), "audit_record_github_deploy_key.json");
+
+    let report = run(&bundle, Some(&import));
+    assert_eq!(report["calls"][0]["level"], json!("verified"));
+    assert_eq!(report["calls"][0]["occurrence_claim"], json!("allowed"));
+}
+
+#[test]
+fn no_level_ever_supports_an_absence_claim() {
+    // The asymmetry the runner gate already encodes, inherited here rather than restated: seeing a
+    // write happen says nothing about what else did or did not. Even `verified` cannot say "and
+    // nothing else occurred", because an audit record for one call is not coverage of a dimension.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_asserted_decision(&bundle);
+    let import = import_dir(dir.path(), "audit_record_github_deploy_key.json");
+
+    for report in [run(&bundle, None), run(&bundle, Some(&import))] {
+        assert_ne!(
+            report["calls"][0]["bounded_negative_claim"],
+            json!("allowed"),
+            "no side-effect level is coverage of a dimension"
+        );
+    }
+}
