@@ -7,6 +7,7 @@ import gzip
 import hashlib
 import io
 import json
+import re
 import os
 import shlex
 import subprocess
@@ -21,6 +22,14 @@ from unittest import mock
 
 CORPUS_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = CORPUS_DIR.parents[1]
+
+# A synthetic string carrying one instance of each thing the canonicalization vectors must never
+# contain. Used only to prove the leak patterns in `test_pack_ships_the_canonicalization_vectors...`
+# actually match; it is never packed and never read by anything else.
+LEAKY_FIXTURE = (
+    'see case-07 for the shape; ok-privileged-call is an accept and '
+    'bad-arg-drift is a reject; expected_outcome=accept; verdict: pass'
+)
 BUILD_SCRIPT = CORPUS_DIR / "scripts" / "build_clean_room_pack.py"
 SCORE_SCRIPT = CORPUS_DIR / "scripts" / "score_candidate.py"
 VALIDATE_SCRIPT = CORPUS_DIR / "scripts" / "validate_run_record.py"
@@ -213,6 +222,78 @@ class CleanRoomPackTests(unittest.TestCase):
                 b"bad-108",
             ):
                 self.assertNotIn(forbidden, public_inputs)
+
+    def test_pack_ships_the_canonicalization_vectors_without_leaking_answers(self) -> None:
+        """The RFC 8785 vectors ship, and shipping them does not make the pack less clean-room.
+
+        A reproducer hits canonicalization before anything else -- the one completed cross-language
+        attempt failed there first -- and a wrong canonicalizer makes every later result
+        uninterpretable. The vectors are derived from a published RFC, not from this implementation,
+        so they remove that wall without answering anything about the profile (#1990).
+
+        What this asserts is the second half of that claim, because the first half is easy to
+        believe and the second is the one that could quietly stop being true.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            pack = Path(tmp) / "pack.tar.gz"
+            self.build(pack)
+            files = read_archive(pack)
+
+            vectors_name = "privileged-mcp-action-v0/canonicalization/rfc8785-vectors.json"
+            note_name = "privileged-mcp-action-v0/canonicalization/README.md"
+            self.assertIn(vectors_name, files)
+            self.assertIn(note_name, files)
+
+            # Byte-identical to the file this workspace tests against. If the pack carried a
+            # re-serialized copy, a reproducer and this repo would be checking their canonicalizers
+            # against two different files, which is the failure the vectors exist to prevent.
+            in_repo = (
+                REPO_ROOT / "crates/assay-canonical/tests/vectors/rfc8785.json"
+            ).read_bytes()
+            self.assertEqual(files[vectors_name], in_repo)
+
+            vectors = json.loads(files[vectors_name])
+            self.assertGreater(len(vectors), 20, "the vector set shrank")
+
+            # The clean-room property. The vectors describe byte formation and must not name a
+            # profile case, an outcome, or a stage.
+            #
+            # Anchored patterns, not substrings. A bare "case-" matches "case-insensitive" in a
+            # vector's own description of code-unit ordering, which is a false positive that would
+            # either be suppressed or would make someone edit a correct vector to appease a test.
+            blob = json.dumps(vectors)
+            leak_patterns = (
+                (r"\bcase-\d", "a profile case id"),
+                (r"\b(ok|bad)-[a-z0-9-]{3,}", "a corpus vector name"),
+                (r"expected_outcome|\bverdict\b", "an outcome field"),
+            )
+
+            # The patterns are self-tested, because a leak check that has never been shown to fire
+            # is indistinguishable from one that matches nothing. Planting a leak in the working
+            # tree does not exercise them: the pack reads the file from the pinned commit, so the
+            # byte-identity assertion above catches that first and these never run.
+            for pattern, _ in leak_patterns:
+                self.assertIsNotNone(
+                    re.search(pattern, LEAKY_FIXTURE),
+                    f"leak pattern {pattern!r} matches nothing, so it protects nothing",
+                )
+            # And it does not fire on the vectors' own prose. "case-insensitive" appears in a
+            # description of code-unit ordering and is not a profile case id.
+            self.assertIsNotNone(re.search(r"case-insensitive", blob))
+
+            for pattern, what in leak_patterns:
+                self.assertIsNone(
+                    re.search(pattern, blob),
+                    f"vectors leak {what} (matched {pattern!r})",
+                )
+
+            note = files[note_name].decode()
+            for required in (
+                "not progress on the profile",
+                "not conformance",
+                "derive every profile result yourself",
+            ):
+                self.assertIn(required, note)
 
     def test_candidate_release_is_bound_to_the_current_corpus(self) -> None:
         candidate = json.loads(CANDIDATE_RELEASE.read_text())

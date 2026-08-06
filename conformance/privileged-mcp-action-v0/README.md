@@ -27,15 +27,35 @@ repinned to verified release bytes.
 
 ### Clean-room path
 
-The active release target is `privileged-mcp-action-v0-candidate.3`. Once its GitHub
+The active release target is `privileged-mcp-action-v0-candidate.4`. Once its GitHub
 [Releases](https://github.com/Rul1an/assay/releases) entry is published, it contains a
-deterministic, attested clean-room pack with `spec.md`, `descriptor.json`, and fourteen opaque
-cases. It omits expected outcomes, semantic case names, the vector generator, and Assay's
-implementation. `candidate.2` remains unchanged historical input for the superseded 13-case
-digest; do not use it for a new attempt against the current corpus.
+deterministic, attested clean-room pack with `spec.md`, `descriptor.json`, fourteen opaque
+cases, and the RFC 8785 canonicalization vectors. It omits expected outcomes, semantic case names,
+the vector generator, and Assay's implementation. `candidate.2` remains unchanged historical input
+for the superseded 13-case digest; do not use it for a new attempt against the current corpus.
+
+`candidate.4` re-releases the **same corpus** as `candidate.3` — identical digest, identical
+fourteen cases — and adds only onboarding. A reproduction against `candidate.3` remains valid and
+in scope; there is nothing to redo.
+
+#### Start with the canonicalization vectors
+
+The pack's `canonicalization/` directory carries the 31 RFC 8785 vectors this workspace tests its
+own canonicalizer against, byte-identical, plus a note. Run them before implementing any stage.
+
+The reason is empirical rather than tidy: the one completed cross-language reproduction in this
+ecosystem failed on its first attempt because native insertion-order serialization produced a
+different digest. Content ids, mandate ids and the bundle run root are all sha256 over canonical
+bytes, so a canonicalizer that is wrong makes every later result uninterpretable, and you find out
+fourteen bundles later.
+
+**Passing them is not progress on the profile and agreement with them is not conformance.** They
+describe byte formation under a published RFC that `descriptor.json` already requires
+(`canon: jcs-rfc8785`); they say nothing about what any bundle verifies to. Every profile outcome is
+still yours to derive.
 
 ```bash
-tag=privileged-mcp-action-v0-candidate.3
+tag=privileged-mcp-action-v0-candidate.4
 source_digest="$(gh api "repos/Rul1an/assay/commits/$tag" --jq .sha)"
 gh release download "$tag" --repo Rul1an/assay \
   --pattern privileged-mcp-action-v0-clean-room.tar.gz \
