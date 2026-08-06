@@ -7,10 +7,14 @@
 //! because they report different enforcement domains: v0 carries connect4 attach/count truth, v1
 //! carries the Landlock ruleset/`restrict_self`/real-block truth.
 //!
-//! Scope: this is the CARRIER and its committed fixtures only. No producer wires it up yet — the
-//! Landlock sandbox enforcement that emits it is a later, gated step. The fixtures pin the exact
-//! bytes a consumer (e.g. an external review tool) reconstructs against, the same producer-agnostic
-//! discipline the rest of the project uses.
+//! Scope: the carrier, its committed fixtures, and the Landlock sandbox producer. The fixtures pin
+//! the exact bytes a consumer (e.g. an external review tool) reconstructs against, the same
+//! producer-agnostic discipline the rest of the project uses, and the producer in
+//! `cli::commands::sandbox::child` emits it on both the active and failed paths.
+//!
+//! This header read "No producer wires it up yet" until 2026-08-06, long after `child.rs` began
+//! emitting it. It was believed on sight while compiling a spec-ahead-of-implementation list and the
+//! row it produced was false, which is why that list warns that a stale entry is worse than none.
 //!
 //! Honesty rules baked into the shape:
 //! - `status` is `active` or `failed` only. There is no `not_applicable`, and no `absent`: the

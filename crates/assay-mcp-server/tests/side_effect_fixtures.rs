@@ -1,7 +1,12 @@
 //! Ea guard: the side-effect receipt reference fixtures must hold the honesty-ladder invariants
 //! (docs/reference/side-effect-receipt.md) and the binding must be reproducible from committed bytes
-//! by the canonical JCS digest the future verifier (Eb) will use. There is no producer/verifier yet;
-//! this keeps the vectors honest and proves the binding math is sound.
+//! by the canonical JCS digest the verifier uses.
+//!
+//! Eb has since landed: `side_effect::check_audit_record` recomputes the binding and
+//! `promote_with_audit_record` applies it, reachable from the CLI via
+//! `assay evidence verify-side-effects --audit-import`. These fixtures are now the shared reference
+//! both the guard and the verifier are held to, rather than a stand-in for a verifier that does not
+//! exist. The header said otherwise until 2026-08-06, which is what a spec-ahead list is for.
 
 use assay_core::mcp::jcs;
 use serde_json::Value;
