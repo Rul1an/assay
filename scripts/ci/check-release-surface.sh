@@ -26,6 +26,11 @@
 #   2. The `assay --version` sample output in the installation guide, compared against what the
 #      binary actually prints, so the expectation comes from the program rather than from a
 #      hard-coded string.
+#   3. Every tracked `Cargo.lock` that pins a workspace crate. The root lock is the obvious one and
+#      `fuzz/Cargo.lock` is the one that was missed: it is a separate workspace, so a release bump
+#      that touched only the root lock left it pinning the previous version, and the fuzz job failed
+#      on `--locked` after the release PR was already open. The set is discovered with `git ls-files`
+#      rather than listed, so a third lockfile is covered the day it appears.
 #
 # Nothing is excluded by pattern. Lines that must stay historical are out of scope because they are
 # not derived from the current version in the first place.
@@ -110,6 +115,53 @@ fi
 # Derived from the binary rather than compared to a literal, so this cannot drift into asserting a
 # version the program does not print.
 # ---------------------------------------------------------------------------
+note ""
+note "workspace lockfiles:"
+
+# A lockfile that pins a workspace crate at the previous version is not cosmetic: any job running
+# with `--locked` refuses outright. `fuzz/Cargo.lock` is a separate workspace, so the root bump does
+# not reach it, and nothing else in this script would have looked.
+#
+# Discovered, not listed. Only locks that actually pin one of our crates are considered, so the
+# vendored upstream reference lock under scripts/ci/fixtures is out of scope by construction rather
+# than by an exclusion someone has to maintain.
+# The crates this workspace publishes, read from their own manifests. `assay-fuzz` is deliberately
+# excluded by this derivation rather than by name: it lives outside `crates/`, pins itself at 0.0.0
+# and is never published, so a name-prefix match would have flagged it forever.
+WORKSPACE_MEMBERS="$(
+  for manifest in crates/*/Cargo.toml assay-python-sdk/Cargo.toml; do
+    [ -f "$manifest" ] || continue
+    grep -q '^version\.workspace = true' "$manifest" || continue
+    awk -F' *= *' '/^name *=/ { gsub(/"/, "", $2); print $2; exit }' "$manifest"
+  done | tr '\n' ' '
+)"
+[ -n "$WORKSPACE_MEMBERS" ] || fail "could not derive the workspace member set; the manifest shape moved"
+
+locks_checked=0
+while IFS= read -r lock; do
+  [ -f "$lock" ] || continue
+  pinned="$(awk -v members="$WORKSPACE_MEMBERS" '
+    BEGIN { split(members, m, " "); for (i in m) is_member[m[i]] = 1 }
+    /^\[\[package\]\]/ { name = ""; next }
+    /^name = / { n = $3; gsub(/"/, "", n); if (n in is_member) name = n; next }
+    name != "" && /^version = / {
+      v = $3; gsub(/"/, "", v)
+      printf "%s\t%s\n", name, v
+      name = ""
+    }
+  ' "$lock")"
+  [ -n "$pinned" ] || continue
+  locks_checked=$((locks_checked + 1))
+  while IFS=$'\t' read -r name version; do
+    [ -n "$name" ] || continue
+    if [ "$version" != "$WORKSPACE_VERSION" ]; then
+      fail "$lock: $name pinned at \"$version\", workspace is \"$WORKSPACE_VERSION\""
+    fi
+  done <<< "$pinned"
+done < <(git ls-files '*Cargo.lock')
+
+note "  checked ${locks_checked} lockfile(s) pinning workspace crates"
+
 note ""
 note "documented CLI version output:"
 

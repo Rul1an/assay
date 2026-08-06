@@ -4,6 +4,77 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-08-06
+
+The first major since the 3.x line, for one field. Everything else here is
+gate-hardening and defect repair.
+
+### Breaking
+- `MetricResult` carries a fifth public field, `exercised`, so a struct-literal
+  construction that compiled against 3.38.0 no longer does
+  (`error[E0063]: missing field 'exercised'`). Every constructor —
+  `pass`, `fail`, `unstable`, `not_applicable`, `not_exercised` — is unchanged,
+  so callers using those are unaffected. The field is what lets a consumer tell
+  a metric that ran and passed from one that returned 1.0 without evaluating
+  anything, which was previously indistinguishable (#2068).
+
+  This break reached `main` unnoticed because the `cargo-semver-checks` job is
+  in a `workflow_dispatch`-only workflow and has never run on a pull request.
+  Tracked as #2088.
+
+### Added
+- Metrics and assertions now report whether they were actually exercised, not
+  only whether they passed. Assertion-based verification calls this a companion
+  cover: an assert with zero attempts is a coverage hole, not a pass.
+  - `Exercised { NotApplicable, NotExercised, Exercised }` on `MetricResult`,
+    with 22 sites across `assay-metrics` reclassified from a vacuous `pass(1.0)`
+    (#2068).
+  - A test whose named metric evaluated nothing is reported in the console
+    summary, in `run.json`'s `warnings`, and in the `ci` job summary, under
+    `W_METRIC_NOT_EXERCISED`. It never changes a status, a count or an exit
+    code (#2083).
+  - The same for the `assertions:` surface, under
+    `W_ASSERTION_NOT_EXERCISED`. A `trace_must_not_call_tool` naming a tool the
+    agent was never offered held on every trace and could not have failed;
+    availability is now the antecedent, and an unrecorded tool list reports
+    nothing rather than guessing (#2085).
+  - The baseline treats an `Exercised → NotExercised` drop between runs as a
+    coverage regression. Without it a metric that stopped running made the
+    baseline look *better*, because its score rises to 1.0 (#2082).
+
+### Fixed
+- A test's score is no longer whichever metric ran last. `final_score` was
+  assigned unconditionally per metric, and `semantic` is fifth of thirteen, so a
+  semantic test scoring 0.87 reported 1.0 in `run.json` and SARIF — a number
+  from a metric that was never asked to run (#2068).
+- Five `--format` arguments accepted any string and fell through to a default.
+  `assay doctor --format totally-invalid` printed the text report at exit 0;
+  `policy generate --format jsom` wrote a YAML policy into whatever path was
+  named. The check that should have caught them compared against a hand-kept
+  table that never listed them, and now derives the set from the command tree
+  (#2086).
+- The Linux compile gate returned 0 on failure, so it could not catch the
+  `cfg(target_os = "linux")` errors it exists for (#2076).
+- The docs bot opened pull requests whose required checks could never run,
+  because `create-pull-request` signs them with the default `GITHUB_TOKEN` and
+  GitHub does not trigger workflows for that token. The drift is now checked on
+  the change that causes it (#2080).
+- `normalize_severity` downgraded an unrecognized severity to `note`, which
+  could turn a failing run into exit 0; `assay-core` carried a second copy, and
+  that was the one reaching GitHub Code Scanning (#2025, #2033).
+- `decide_exit` classified by string prefix, so one missing trace produced two
+  different exit codes. The exit class is now a table the registry owns (#2024).
+
+### Changed
+- ADR-046 records that the two reason-code registries stay separate, after
+  measuring that the collision #2010 was filed on does not exist: the two SARIF
+  producers write different `tool.driver.name`, so GitHub keys them in separate
+  namespaces (#2028).
+- `docs/architecture/REASON-CODE-VOCABULARIES.md` inventories every
+  reason-code-shaped vocabulary by the artifact field it writes to, with four
+  machine-checked blocks (#2026, #2027).
+
+
 ## [3.38.0] - 2026-08-04
 
 ### Changed
