@@ -28,8 +28,13 @@ pub fn infer_policy_path(assay_yaml: &Path) -> Option<PathBuf> {
 ///
 /// The class of each code comes from the registry that defines it. This function used to infer the
 /// class by matching code prefixes, which made a code's spelling load-bearing for exit semantics
-/// and had already drifted: `E_TRACE_MISS` and `E_PATH_NOT_FOUND` describe one missing-trace
-/// condition and exited 1 and 2 respectively.
+/// and had already drifted: `E_TRACE_MISS` and `E_PATH_NOT_FOUND` exited 1 and 2 respectively.
+///
+/// That pairing named the wrong two codes, and ADR-046 corrects it. `E_TRACE_MISS` is a coverage
+/// miss -- `providers/trace.rs:37` builds it with "prompt not found in loaded traces", so the file
+/// loaded and a prompt is absent from it. The pair that genuinely describes one condition is
+/// `E_PATH_NOT_FOUND` and `E_TRACE_NOT_FOUND`, and they stay two codes because they land in two
+/// artifacts; what the class table fixes is that they now exit the same way.
 pub fn decide_exit(diags: &[Diagnostic]) -> i32 {
     let mut saw_error = false;
     let mut saw_config = false;
