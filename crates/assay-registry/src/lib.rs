@@ -51,6 +51,7 @@ pub mod canonicalize;
 pub mod client;
 mod digest;
 pub mod dsse;
+mod dsse_limits;
 pub mod error;
 pub mod lockfile;
 pub mod reference;

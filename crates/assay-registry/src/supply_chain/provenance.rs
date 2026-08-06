@@ -41,9 +41,18 @@ fn verify_dsse_signature(envelope: &DsseEnvelope, trust_store: &TrustStore) -> C
     if envelope.payload_type != DSSE_PAYLOAD_TYPE {
         return CheckStatus::UnsupportedFormat;
     }
-    let payload_bytes = match BASE64.decode(&envelope.payload) {
-        Ok(b) => b,
-        Err(_) => return CheckStatus::Failed,
+    // Bounded before the allocation; see `dsse_limits`.
+    //
+    // Oversize is `UnsupportedFormat`, not `Failed`, and the distinction is load-bearing in two
+    // ways. It is more honest -- `Failed` says the signature did not verify, and here nothing was
+    // verified at all, which is the "we did not check this" outcome this codebase refuses to report
+    // as anything else. It is also the only thing that makes the ceiling testable on this path: an
+    // oversized payload of valid base64 fails signature verification whether or not the bound
+    // exists, so a test asserting `Failed` would pass with the bound removed.
+    let payload_bytes = match crate::dsse_limits::decode_bounded(envelope.payload.as_bytes()) {
+        Ok(Some(b)) => b,
+        Ok(None) => return CheckStatus::Failed,
+        Err(_) => return CheckStatus::UnsupportedFormat,
     };
     if envelope.signatures.is_empty() {
         return CheckStatus::NotPresent;
@@ -76,7 +85,7 @@ fn verify_dsse_signature(envelope: &DsseEnvelope, trust_store: &TrustStore) -> C
 }
 
 fn decode_statement(envelope: &DsseEnvelope) -> Option<InTotoStatement> {
-    let payload = BASE64.decode(&envelope.payload).ok()?;
+    let payload = crate::dsse_limits::decode_bounded(envelope.payload.as_bytes()).ok()??;
     serde_json::from_slice::<InTotoStatement>(&payload).ok()
 }
 

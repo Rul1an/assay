@@ -132,6 +132,42 @@ fn valid_pinned_key_slsa_provenance_is_verified_and_clean() {
     assert!(is_clean(&report));
 }
 
+/// The ceiling is reached through `verify_supply_chain`, not through `decode_bounded`.
+///
+/// #1969's defect was three flows that each decoded before checking anything. A helper that no
+/// flow calls leaves all three exactly as they were, so each flow is driven with an oversized
+/// payload through its own real entry point.
+#[test]
+fn an_oversized_provenance_payload_is_refused_before_it_is_decoded() {
+    let sk = SigningKey::from_bytes(&[7u8; 32]);
+    let (store, key_id) = trust_with(&sk.verifying_key());
+    let mut env = signed_dsse(
+        &sk,
+        &key_id,
+        &statement_json(hex_of(ARTIFACT_DIGEST), SLSA_PROVENANCE_PREDICATE, BUILDER),
+    );
+    // Two megabytes of base64, over the one-megabyte ceiling. The signature is left intact so the
+    // only thing that changed is the size.
+    env.payload = "A".repeat(2 * 1024 * 1024);
+    let report = verify_supply_chain(VerifyInput {
+        subject: subject(),
+        expected_artifact_digest: Some(ARTIFACT_DIGEST.to_string()),
+        provenance: ProvenanceInput::Dsse(env),
+        pinning: clean_pinning(),
+        policy: policy(2),
+        trust_store: &store,
+    });
+    assert_eq!(
+        report.checks.provenance.dsse_signature,
+        CheckStatus::UnsupportedFormat,
+        "an oversized payload must be refused as unsupported, not reported as a failed signature. \
+         `Failed` would be true with the bound removed too -- 2 MiB of 'A' is valid base64 and its \
+         signature does not verify -- so asserting it would prove nothing about the ceiling"
+    );
+    assert_ne!(report.policy_result, PolicyResult::Pass);
+    assert!(!is_clean(&report));
+}
+
 #[test]
 fn missing_provenance_is_not_present_never_clean() {
     let store = crate::trust::TrustStore::new();
