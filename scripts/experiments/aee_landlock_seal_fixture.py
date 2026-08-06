@@ -27,6 +27,7 @@ import copy
 import hashlib
 import hmac
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -164,6 +165,15 @@ NEGATIVE_CONTROLS: dict[str, str] = {
     "incomplete-non-claims": "payload-non-claims-incomplete",
     "seal-collection-path-other": "payload-collection-path-mismatch",
     "digest-field-not-a-digest": "payload-digest-shape-invalid",
+    "row-missing-arming-coverage": "substrate-row-missing-arming-coverage",
+    "row-missing-interception-coverage": "substrate-row-missing-interception-coverage",
+    "payload-not-an-object": "payload-not-object",
+    "run-binding-underivable": "run-binding-underivable",
+    "two-signatures-on-one-record": "signature-count",
+    "corrupt-signature": "signature-invalid",
+    "seal-instant-not-rfc3339": "seal-instant-invalid",
+    "empty-source-schema": "payload-source-schema-invalid",
+    "observed-attacks-not-a-list": "payload-observed-attacks-invalid",
 }
 
 CASES = [POSITIVE_CASE, *NEGATIVE_CONTROLS]
@@ -200,7 +210,19 @@ def leaf_hash(rec: dict[str, Any]) -> str:
 
 
 def observed_set(records: list[dict[str, Any]]) -> str:
-    leaves = sorted({leaf_hash(rec) for rec in records if rec["payload"].get("aeeKind") in {"interception", "examination"}})
+    # A non-object payload contributes no leaf rather than raising. `validate` already reports it as
+    # `payload-not-object` and then keeps going, so a raise here made that rule unreachable: the
+    # checker crashed before it could return the finding it had just recorded. Two representations
+    # of one record -- `validate`'s normalized `payloads` and the raw `records` this walks -- is what
+    # let them disagree, and the guard is on this side because the emitter calls it too.
+    leaves = sorted(
+        {
+            leaf_hash(rec)
+            for rec in records
+            if isinstance(rec.get("payload"), dict)
+            and rec["payload"].get("aeeKind") in {"interception", "examination"}
+        }
+    )
     return hashlib.sha256(canonical_bytes(leaves)).hexdigest()
 
 
@@ -399,6 +421,49 @@ def case_statement(name: str) -> dict[str, Any]:
         # Uppercase hex of the right length. Well-formed enough to survive a careless check and not
         # a SHA-256 digest, since every consumer that compares bytes sees a different string.
         seal["aeePostureDigest"] = seal["aeePostureDigest"].upper()
+        replace_payload(stmt, 2, seal)
+    elif name == "row-missing-arming-coverage":
+        # The arming record is still emitted and still signed; the row simply stops referencing it.
+        # That is the "defective unreferenced covering-kind record" #1998 requires be rejected: the
+        # evidence exists and the row does not claim it, so nothing binds the row to armed state.
+        pred["attackResults"][0]["observationRefs"] = [0, 2]
+    elif name == "row-missing-interception-coverage":
+        pred["attackResults"][0]["observationRefs"] = [1, 2]
+    elif name == "payload-not-an-object":
+        # A scalar where a payload object belongs, on a *fourth* record that no attack row
+        # references. Corrupting one of the three carried records would also break the observed set
+        # and the row's coverage, so the control would prove three rules at once and none of them on
+        # its own. An unreferenced malformed record is also the realistic shape: a producer emitting
+        # something the assembler did not expect.
+        #
+        # The signature is recomputed over the empty object the checker substitutes for a non-object
+        # payload, so this isolates the shape rejection rather than also tripping
+        # `signature-invalid`.
+        pred["observationRecords"].append({
+            "payload": "not-an-object",
+            "payloadType": PAYLOAD_TYPE,
+            "seq": 4,
+            "signatures": [{"keyid": STRUCTURAL_KEY, "sig": sign({}, STRUCTURAL_KEY)}],
+        })
+    elif name == "run-binding-underivable":
+        # The derivation input is gone, so the binding cannot be computed at all. The checker must
+        # say that rather than report a mismatch against a value it never derived.
+        del stmt["subject"][0]["digest"]
+    elif name == "two-signatures-on-one-record":
+        rec = pred["observationRecords"][0]
+        rec["signatures"] = [rec["signatures"][0], dict(rec["signatures"][0])]
+    elif name == "corrupt-signature":
+        # Valid base64 of the right length, signed over nothing. The envelope is well-formed and the
+        # signature does not verify, which is a different finding from a malformed envelope.
+        pred["observationRecords"][0]["signatures"][0]["sig"] = base64.b64encode(b"\x00" * 32).decode("ascii")
+    elif name == "seal-instant-not-rfc3339":
+        seal["assaySealedAt"] = "yesterday"
+        replace_payload(stmt, 2, seal)
+    elif name == "empty-source-schema":
+        seal["assaySourceSchema"] = ""
+        replace_payload(stmt, 2, seal)
+    elif name == "observed-attacks-not-a-list":
+        seal["aeeObservedAttacks"] = "NET-CONNECT-BLOCK-001"
         replace_payload(stmt, 2, seal)
     elif name == "unsupported-envelope-shape":
         # Self-consistent envelope, signed over its own declared payload type.
@@ -696,6 +761,38 @@ def report(case: str, findings: list[Finding]) -> str:
     return "\n".join(lines)
 
 
+def run_rule_coverage_test() -> int:
+    """Every reason code the checker can produce has a negative control that produces it.
+
+    `--meta-test` proves each control fails for its own reason. It says nothing about a rule with no
+    control at all, and there were nine: a rule can exist, be believed, and never be shown to fire.
+    One of them was `substrate-row-missing-arming-coverage`, which #1998 requires the checker reject
+    by name -- so the acceptance criterion was met in code and unproven in the suite.
+
+    Writing the missing controls also found `payload-not-object` to be unreachable: the checker
+    recorded the finding and then crashed in `observed_set` before returning it.
+
+    Parsed from the source rather than from a hand-kept list, for the same reason the gating map is:
+    a list beside the rules is one more thing to drift.
+    """
+    src = Path(__file__).read_text(encoding="utf-8")
+    rules = set(re.findall(r'add\("([a-z0-9-]+)"', src))
+    covered = set(NEGATIVE_CONTROLS.values())
+
+    uncovered = sorted(rules - covered)
+    for code in uncovered:
+        print(f"FAIL {code}: the checker can produce this and no negative control does")
+    unused = sorted(covered - rules)
+    for code in unused:
+        print(f"FAIL {code}: a control targets this and no rule produces it")
+
+    if uncovered or unused:
+        print(f"\n{len(uncovered) + len(unused)} rule/control mismatch(es)")
+        return 1
+    print(f"\nall {len(rules)} reason codes have a negative control")
+    return 0
+
+
 def run_required_field_test() -> int:
     """Every required field, removed one at a time, must be rejected by some rule.
 
@@ -779,6 +876,7 @@ def main() -> int:
     parser.add_argument("--disable-check", action="append", default=[], metavar="CODE", help="Harness-only: suppress a reason code (used by --meta-test)")
     parser.add_argument("--meta-test", action="store_true", help="Assert each negative control fails for its own reason and no other")
     parser.add_argument("--required-field-test", action="store_true", help="Assert every required payload field is rejected when absent")
+    parser.add_argument("--rule-coverage-test", action="store_true", help="Assert every reason code the checker can produce has a negative control")
     args = parser.parse_args()
 
     if args.emit:
@@ -789,8 +887,10 @@ def main() -> int:
         return run_meta_test()
     if args.required_field_test:
         return run_required_field_test()
+    if args.rule_coverage_test:
+        return run_rule_coverage_test()
     if not args.case:
-        parser.error("case is required unless --emit, --meta-test or --required-field-test is used")
+        parser.error("case is required unless --emit or one of the --*-test flags is used")
 
     findings = validate(load_case(args.case), disabled=frozenset(args.disable_check))
     print(report(args.case, findings))
