@@ -146,6 +146,17 @@ fn string_literal(s: &str) -> Option<String> {
 /// for the same reason: a second `pub const` added beside the first would otherwise reach a
 /// published artifact with nothing recording it.
 fn run_json_warning_codes() -> BTreeSet<String> {
+    // `pub const` strings in that module that are deliberately not codes.
+    //
+    // An allow-list rather than a pattern-only filter. A pattern alone ("looks like `W_…`") would
+    // let a code with an unforeseen prefix slip past unrecorded, which is the exact drift this file
+    // exists to catch. So every `pub const` string must be either a recorded code or named here.
+    const NOT_A_CODE: &[&str] = &[
+        // A `details` key, not a vocabulary member: it names the field the runner writes assertion
+        // covers to, and it never appears in the `warnings` array.
+        "assertions_not_exercised",
+    ];
+
     let src = read("crates/assay-core/src/report/exercised.rs");
     let mut found = BTreeSet::new();
     for line in src.lines() {
@@ -156,14 +167,18 @@ fn run_json_warning_codes() -> BTreeSet<String> {
         let Some((_, value)) = rest.split_once('=') else {
             continue;
         };
-        // Only string-valued constants are codes. A numeric bound is not a vocabulary member, and
-        // treating one as a missing entry would make this check noise.
-        if let Some(value) = string_literal(value) {
-            assert!(
-                found.insert(value.clone()),
-                "duplicate warning code value {value:?}"
-            );
+        // Only string-valued constants can be codes. A numeric bound is not a vocabulary member,
+        // and treating one as a missing entry would make this check noise.
+        let Some(value) = string_literal(value) else {
+            continue;
+        };
+        if NOT_A_CODE.contains(&value.as_str()) {
+            continue;
         }
+        assert!(
+            found.insert(value.clone()),
+            "duplicate warning code value {value:?}"
+        );
     }
     assert!(
         !found.is_empty(),

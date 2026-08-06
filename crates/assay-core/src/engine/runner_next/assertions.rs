@@ -1,21 +1,44 @@
 use super::super::Runner;
-use crate::model::{TestCase, TestResultRow, TestStatus};
+use crate::model::{LlmResponse, TestCase, TestResultRow, TestStatus};
+
+use crate::report::exercised::ASSERTIONS_NOT_EXERCISED;
 
 pub(crate) fn apply_agent_assertions_impl(
     runner: &Runner,
     run_id: i64,
     tc: &TestCase,
+    resp: &LlmResponse,
     final_row: &mut TestResultRow,
 ) -> anyhow::Result<()> {
     if let Some(assertions) = &tc.assertions {
         if !assertions.is_empty() {
-            match crate::agent_assertions::verify_assertions(
+            match crate::agent_assertions::verify_assertions_with_meta(
                 &runner.store,
                 run_id,
                 &tc.id,
                 assertions,
+                &resp.meta,
             ) {
-                Ok(diags) => {
+                Ok(outcome) => {
+                    // Recorded before the pass/fail branch below, so a test that both failed one
+                    // assertion and never exercised another reports both. The failure is the
+                    // louder finding; it is not the only one.
+                    if !outcome.not_exercised.is_empty() {
+                        final_row.details[ASSERTIONS_NOT_EXERCISED] = serde_json::Value::Array(
+                            outcome
+                                .not_exercised
+                                .iter()
+                                .map(|c| {
+                                    serde_json::json!({
+                                        "assertion": c.assertion,
+                                        "reason": c.reason,
+                                    })
+                                })
+                                .collect(),
+                        );
+                    }
+
+                    let diags = outcome.diagnostics;
                     if !diags.is_empty() {
                         final_row.status = TestStatus::Fail;
 
