@@ -61,6 +61,10 @@ impl Metric for ToolDescriptionIntegrityMetric {
         expected: &Expected,
         resp: &LlmResponse,
     ) -> anyhow::Result<MetricResult> {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "a metric declines every Expected variant but its own, and now says so with not_applicable() rather than a vacuous pass (#1949 layer 2)"
+        )]
         let pinned_tools = match expected {
             Expected::ToolDescriptionIntegrity { pinned_tools } => pinned_tools,
             _ => return Ok(MetricResult::not_applicable()),

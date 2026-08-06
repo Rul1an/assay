@@ -64,6 +64,10 @@ pub(crate) async fn enrich_judge_impl(
 ) -> anyhow::Result<()> {
     use crate::model::Expected;
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "only judge variants carry a rubric; a new judge-like variant would enrich with no rubric id"
+    )]
     let (rubric_id, rubric_version) = match &tc.expected {
         Expected::Faithfulness { rubric_version, .. } => {
             ("faithfulness", rubric_version.as_deref())

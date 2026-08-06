@@ -29,6 +29,10 @@ pub(crate) fn is_default_settings(s: &Settings) -> bool {
 /// explicitly inert assertion. Serialization deliberately uses a narrower
 /// predicate: only the synthetic omitted-key sentinel may disappear on write.
 pub(crate) fn vacuous_expected_field(e: &Expected) -> Option<&'static str> {
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "a variant with no collection to be empty cannot be vacuous in this sense; a new one that can must be named above or its vacuous form goes unreported (#1949 layer 1)"
+    )]
     match e {
         Expected::MustContain { must_contain } if must_contain.iter().all(String::is_empty) => {
             Some("must_contain")
@@ -436,6 +440,10 @@ fn is_known_format(value: &serde_json::Value) -> bool {
 
 /// Explain an `Expected` shape that the current metric set cannot execute as written.
 pub(crate) fn non_executable_expected_reason(e: &Expected) -> Option<&'static str> {
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "only sequence-bearing variants can be non-executable; the rest have no rule set to be unreachable"
+    )]
     match e {
         Expected::JudgeCriteria { .. } => Some("judge_criteria has no registered evaluator"),
         Expected::SequenceValid {
@@ -465,6 +473,10 @@ pub(crate) fn non_executable_expected_reason(e: &Expected) -> Option<&'static st
 }
 
 pub(crate) fn ineffective_expected_reason(e: &Expected) -> Option<&'static str> {
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "only the variants named above can be ineffective from their config alone; layer 2 covers what the config cannot decide"
+    )]
     match e {
         Expected::MustNotContain { must_not_contain }
             if must_not_contain.iter().any(String::is_empty) =>
@@ -508,6 +520,10 @@ pub(crate) fn validate_expected_for_execution(e: &Expected) -> anyhow::Result<()
 }
 
 fn validate_static_inputs(e: &Expected) -> anyhow::Result<()> {
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "only variants carrying a policy path have static inputs to validate"
+    )]
     match e {
         Expected::RegexMatch { pattern, flags } | Expected::RegexNotMatch { pattern, flags } => {
             let mut builder = regex::RegexBuilder::new(pattern);
@@ -577,6 +593,10 @@ fn validate_static_inputs(e: &Expected) -> anyhow::Result<()> {
 /// evaluation must all consume. This prevents incremental-cache drift and avoids
 /// a second file read after provider dispatch.
 pub(crate) fn bind_external_expected_inputs(e: &mut Expected) -> anyhow::Result<()> {
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "only variants carrying an external reference need binding"
+    )]
     match e {
         Expected::JsonSchema {
             json_schema,
@@ -1026,6 +1046,10 @@ impl EvalConfig {
 
 impl Expected {
     pub fn get_policy_path(&self) -> Option<&str> {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "only ArgsValid and SequenceValid carry a policy path"
+        )]
         match self {
             Expected::ArgsValid { policy, .. } => policy.as_deref(),
             Expected::SequenceValid { policy, .. } => policy.as_deref(),

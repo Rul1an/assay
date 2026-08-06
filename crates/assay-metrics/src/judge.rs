@@ -18,6 +18,10 @@ impl Metric for FaithfulnessMetric {
         expected: &Expected,
         output: &LlmResponse,
     ) -> anyhow::Result<MetricResult> {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "a metric declines every Expected variant but its own, and now says so with not_applicable() rather than a vacuous pass (#1949 layer 2)"
+        )]
         let (min_score, rubric_version) = match expected {
             Expected::Faithfulness {
                 min_score,
@@ -45,6 +49,10 @@ impl Metric for RelevanceMetric {
         expected: &Expected,
         output: &LlmResponse,
     ) -> anyhow::Result<MetricResult> {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "a metric declines every Expected variant but its own, and now says so with not_applicable() rather than a vacuous pass (#1949 layer 2)"
+        )]
         let (min_score, rubric_version) = match expected {
             Expected::Relevance {
                 min_score,

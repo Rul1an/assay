@@ -136,6 +136,20 @@ repos:
         # The Rust producer's parity tests read `derivation-parity.json`, so the emitter and the
         # committed vectors have to stay in step; nothing else regenerates them.
         files: ^(scripts/experiments/aee_landlock_seal_fixture\.py|scripts/experiments/fixtures/aee-landlock-seal/.*|scripts/ci/check-aee-seal-fixture-drift\.sh|crates/assay-cli/src/aee_seal\.rs|\.pre-commit-config\.yaml)$
+      - id: wildcard-expectations
+        name: Wildcard suppressions still needed
+        entry: bash scripts/ci/check-wildcard-expectations.sh
+        language: system
+        pass_filenames: false
+        # `wildcard_enum_match_arm` is a restriction lint and stays off by default -- #2055 measured
+        # why: it fires on foreign enums too, and `KeyCode` alone would need ~25 arms that do
+        # nothing. But with it off, `unfulfilled_lint_expectations` never fires either, so every
+        # `#[expect]` documents a decision that nothing re-checks. This runs the lint just long
+        # enough to evaluate the expectations, and fails only on one that has gone stale.
+        #
+        # pre-push: a workspace clippy run is too slow to tax every intermediate commit.
+        stages: [pre-push]
+        files: ^(crates/.*\.rs|scripts/ci/check-wildcard-expectations\.sh|\.pre-commit-config\.yaml)$
       - id: runner-gating-map-drift
         name: Runner gating map drift
         entry: bash scripts/ci/check-runner-gating-map-drift.sh
