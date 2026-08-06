@@ -62,6 +62,48 @@ SOURCE_SCHEMA = "assay.enforcement_health.v1"
 # here observed.
 SEAL_SCOPE = "tcp_connect_landlock_port"
 
+# The remaining payload-only constants from the #2001 field contract. They were declared in the
+# sketch and unimplemented here (#2060), found by mutating one field at a time and watching the
+# checker credit the result.
+SEAL_METHOD = "intercepted"
+ATTRIBUTION_SOURCES = ("assembly-plane", "substrate-runner")
+
+# `assayNonClaims` MUST include at least these. A producer that drops one is claiming more than the
+# seal supports, which is the failure the field exists to prevent, so a subset is a rejection rather
+# than a warning.
+SEAL_DIGEST_FIELDS = ("aeeRunBinding", "aeePostureDigest", "aeeObservedSet")
+
+MINIMUM_NON_CLAIMS = (
+    "does not prove complete run population",
+    "does not prove agent safety",
+    "does not prove provider side effects",
+    "does not prove independent substrate operation",
+)
+
+# Every field the contract marks required. `_test_every_required_field_is_checked` removes each in
+# turn and requires the checker to reject, which is how "required field present" is enforced here:
+# each field is covered by the rule that owns it, and this list is what proves none was forgotten.
+# A generic presence rule would fire alongside those and stop every control isolating its reason.
+REQUIRED_SEAL_FIELDS = (
+    "aeeKind",
+    "aeeVersion",
+    "aeeRunBinding",
+    "aeeMethod",
+    "aeePostureDigest",
+    "aeeStillArmed",
+    "aeeDropCount",
+    "aeeDropBound",
+    "assayDropProofModel",
+    "aeeObservedSet",
+    "aeeObservedAttacks",
+    "assayCollectionPath",
+    "assaySealedAt",
+    "assaySourceSchema",
+    "assaySealScope",
+    "assayAttackRowAttributionSource",
+    "assayNonClaims",
+)
+
 # Fixed instants. A validity window needs something to be checked against, and a
 # wall clock would make the drift check flaky, which is how a gate gets disabled.
 SEALED_AT = "2026-08-05T00:00:00Z"
@@ -116,6 +158,12 @@ NEGATIVE_CONTROLS: dict[str, str] = {
     "posture-digest-is-run-binding-input": "posture-digest-mismatch",
     "seal-scope-absent": "seal-scope-missing",
     "seal-scope-other-boundary": "seal-scope-mismatch",
+    "unsupported-aee-version": "payload-aee-version-unsupported",
+    "unsupported-seal-method": "payload-method-unsupported",
+    "unknown-attribution-source": "payload-attribution-source-unknown",
+    "incomplete-non-claims": "payload-non-claims-incomplete",
+    "seal-collection-path-other": "payload-collection-path-mismatch",
+    "digest-field-not-a-digest": "payload-digest-shape-invalid",
 }
 
 CASES = [POSITIVE_CASE, *NEGATIVE_CONTROLS]
@@ -154,6 +202,12 @@ def leaf_hash(rec: dict[str, Any]) -> str:
 def observed_set(records: list[dict[str, Any]]) -> str:
     leaves = sorted({leaf_hash(rec) for rec in records if rec["payload"].get("aeeKind") in {"interception", "examination"}})
     return hashlib.sha256(canonical_bytes(leaves)).hexdigest()
+
+
+def is_sha256_hex(value: Any) -> bool:
+    """Lowercase SHA-256 hex, as the field contract requires. Uppercase is a different string and
+    therefore a different digest to every consumer that compares bytes."""
+    return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
 
 
 def parse_instant(value: Any) -> datetime | None:
@@ -313,6 +367,38 @@ def case_statement(name: str) -> dict[str, Any]:
         # TCP-connect observation, which is the point: the seal claims a reach
         # the observation records do not cover.
         seal["assaySealScope"] = "filesystem_write_all"
+        replace_payload(stmt, 2, seal)
+    elif name == "unsupported-aee-version":
+        # A seal from a later slice, read by a checker with this slice's rules. Accepting it would
+        # mean applying 0.7 rules to a payload that does not claim to be 0.7.
+        seal["aeeVersion"] = "0.8"
+        replace_payload(stmt, 2, seal)
+    elif name == "unsupported-seal-method":
+        # `inferred` is a method this slice has no rules for. The seal would still carry every other
+        # field, which is what makes it worth refusing by name.
+        seal["aeeMethod"] = "inferred"
+        replace_payload(stmt, 2, seal)
+    elif name == "unknown-attribution-source":
+        # Neither assembly-plane nor substrate-runner. The substrate-runner equality rule is keyed on
+        # that exact string, so an unknown value slips past it and attributes nothing.
+        seal["assayAttackRowAttributionSource"] = "hearsay"
+        replace_payload(stmt, 2, seal)
+    elif name == "incomplete-non-claims":
+        # One non-claim dropped. The seal then reads as making a claim it never supported.
+        seal["assayNonClaims"] = [c for c in seal["assayNonClaims"] if c != MINIMUM_NON_CLAIMS[3]]
+        replace_payload(stmt, 2, seal)
+    elif name == "seal-collection-path-other":
+        # The key scope is widened to trust both paths, so `key-scope-collection-path-mismatch`
+        # stays silent and this control isolates the payload rule. Without that, the two would fire
+        # together and neither would be shown to work on its own -- which is precisely why the
+        # trust-scope rule catching this today is not the same as a payload rule existing.
+        set_scopes(stmt, [trusted_scope(STRUCTURAL_KEY, collectionPaths=[COLLECTION_PATH, "landlock-udp-send"])])
+        seal["assayCollectionPath"] = "landlock-udp-send"
+        replace_payload(stmt, 2, seal)
+    elif name == "digest-field-not-a-digest":
+        # Uppercase hex of the right length. Well-formed enough to survive a careless check and not
+        # a SHA-256 digest, since every consumer that compares bytes sees a different string.
+        seal["aeePostureDigest"] = seal["aeePostureDigest"].upper()
         replace_payload(stmt, 2, seal)
     elif name == "unsupported-envelope-shape":
         # Self-consistent envelope, signed over its own declared payload type.
@@ -533,13 +619,41 @@ def validate(statement: dict[str, Any], disabled: frozenset[str] = frozenset()) 
         # the seal speaks for, so an unchecked one lets the strongest record in
         # the statement claim a boundary nothing observed (#2014). The two
         # branches are mutually exclusive so each isolates under `--meta-test`.
+        # Digest shape, checked before the equality rules that consume these fields. A value that is
+        # not a digest at all and a digest that does not match are different producer errors, and
+        # only the first is decidable without the assembled statement -- which is the line the
+        # sketch's payload-only phase draws. The equality rules below skip a field that failed here,
+        # so each control isolates one reason.
+        malformed_digests = [f for f in SEAL_DIGEST_FIELDS if not is_sha256_hex(seal.get(f))]
+        if malformed_digests:
+            add("payload-digest-shape-invalid", PHASE_MALFORMED, f"sealed record {idx} has non-SHA-256-hex digest fields: {malformed_digests}")
+
+        # The rest of the #2001 payload-only contract (#2060). Each rule owns one field and skips a
+        # field it does not own, so every control isolates the reason it was built for.
+        aee_version = seal.get("aeeVersion")
+        if aee_version != AEE_VERSION:
+            add("payload-aee-version-unsupported", PHASE_MALFORMED, f"sealed record {idx} aeeVersion {aee_version!r} is not {AEE_VERSION!r}, the version this checker implements")
+        method = seal.get("aeeMethod")
+        if method != SEAL_METHOD:
+            add("payload-method-unsupported", PHASE_MALFORMED, f"sealed record {idx} aeeMethod {method!r} is not {SEAL_METHOD!r}, the only method this slice observes")
+        attribution = seal.get("assayAttackRowAttributionSource")
+        if attribution not in ATTRIBUTION_SOURCES:
+            add("payload-attribution-source-unknown", PHASE_MALFORMED, f"sealed record {idx} assayAttackRowAttributionSource {attribution!r} is not one of {ATTRIBUTION_SOURCES}")
+        non_claims = seal.get("assayNonClaims")
+        if not isinstance(non_claims, list) or not set(MINIMUM_NON_CLAIMS).issubset(non_claims):
+            missing = [c for c in MINIMUM_NON_CLAIMS if not isinstance(non_claims, list) or c not in non_claims]
+            add("payload-non-claims-incomplete", PHASE_MALFORMED, f"sealed record {idx} assayNonClaims omits the payload-local minimum: {missing}")
+        collection_path = seal.get("assayCollectionPath")
+        if collection_path != COLLECTION_PATH:
+            add("payload-collection-path-mismatch", PHASE_MALFORMED, f"sealed record {idx} assayCollectionPath {collection_path!r} is not {COLLECTION_PATH!r}, the path this slice collects on")
+
         seal_scope = seal.get("assaySealScope")
         if not isinstance(seal_scope, str) or not seal_scope:
             add("seal-scope-missing", PHASE_MALFORMED, f"sealed record {idx} assaySealScope must be a non-empty string naming the sealed enforcement scope")
         elif seal_scope != SEAL_SCOPE:
             add("seal-scope-mismatch", PHASE_MALFORMED, f"sealed record {idx} assaySealScope {seal_scope!r} is not the scope this checker implements ({SEAL_SCOPE!r})")
 
-        if seal.get("aeePostureDigest") != env.get("networkPosture", {}).get("digest", {}).get("sha256"):
+        if "aeePostureDigest" not in malformed_digests and seal.get("aeePostureDigest") != env.get("networkPosture", {}).get("digest", {}).get("sha256"):
             add("posture-digest-mismatch", PHASE_MALFORMED, f"sealed record {idx} aeePostureDigest mismatch")
         if seal.get("aeeStillArmed") is not True:
             add("seal-not-still-armed", PHASE_MALFORMED, f"sealed record {idx} is not still armed")
@@ -547,7 +661,7 @@ def validate(statement: dict[str, Any], disabled: frozenset[str] = frozenset()) 
             add("drop-accounting-nonzero", PHASE_MALFORMED, f"sealed record {idx} has non-zero or inconsistent drop accounting")
         if seal.get("assayDropProofModel") not in {"synchronous-probe", "counted-queue-zero"}:
             add("drop-proof-model-ineligible", PHASE_MALFORMED, f"sealed record {idx} has no eligible drop-accounting proof model")
-        if seal.get("aeeObservedSet") != observed_set(records):
+        if "aeeObservedSet" not in malformed_digests and seal.get("aeeObservedSet") != observed_set(records):
             add("observed-set-mismatch", PHASE_MALFORMED, f"sealed record {idx} aeeObservedSet mismatch")
         for attack_id in observed_attacks:
             if attack_id not in caught_attacks:
@@ -580,6 +694,52 @@ def report(case: str, findings: list[Finding]) -> str:
     lines = [f"{outcome}: {case}"]
     lines.extend(f"- [{finding.code}] {finding.message}" for finding in findings)
     return "\n".join(lines)
+
+
+def run_required_field_test() -> int:
+    """Every required field, removed one at a time, must be rejected by some rule.
+
+    #2060 asked for a "required field present" rule. There is deliberately not one. Nearly every
+    required field already has a rule that owns it, and a generic presence rule would fire alongside
+    those -- so no control could isolate its own reason any more, which is the property `--meta-test`
+    exists to hold.
+
+    What was actually missing was proof that the set of owned fields covers the contract. That is
+    this: remove each required field from the positive fixture and require the checker to reject.
+    Adding a field to `REQUIRED_SEAL_FIELDS` without a rule that catches its absence fails here.
+    """
+    base = load_case(POSITIVE_CASE)
+    failures = 0
+    for field in REQUIRED_SEAL_FIELDS:
+        stmt = json.loads(json.dumps(base))
+        seal = json.loads(json.dumps(stmt["predicate"]["observationRecords"][2]["payload"]))
+        if field not in seal:
+            print(f"FAIL {field}: not present in the positive fixture, so the contract and the fixture disagree")
+            failures += 1
+            continue
+        del seal[field]
+        replace_payload(stmt, 2, seal)
+        findings = validate(stmt)
+        if outcome_of(findings) == OUTCOME_CREDITED:
+            print(f"FAIL {field}: removed, and the seal was still credited")
+            failures += 1
+        else:
+            print(f"ok   {field}: absence is rejected [{findings[0].code}]")
+
+    # The other half: the fixture must not carry a field the contract does not require, or the list
+    # above stops being a statement about the contract and becomes a description of the fixture.
+    seal = base["predicate"]["observationRecords"][2]["payload"]
+    optional = {"assayObservedLabels"}
+    unlisted = sorted(set(seal) - set(REQUIRED_SEAL_FIELDS) - optional)
+    if unlisted:
+        print(f"FAIL fixture carries fields that are neither required nor known-optional: {unlisted}")
+        failures += 1
+
+    if failures:
+        print(f"\n{failures} required-field check(s) failed")
+        return 1
+    print(f"\nall {len(REQUIRED_SEAL_FIELDS)} required fields are rejected when absent")
+    return 0
 
 
 def run_meta_test() -> int:
@@ -618,6 +778,7 @@ def main() -> int:
     parser.add_argument("--expect-reason", help="Require this reason code among the findings")
     parser.add_argument("--disable-check", action="append", default=[], metavar="CODE", help="Harness-only: suppress a reason code (used by --meta-test)")
     parser.add_argument("--meta-test", action="store_true", help="Assert each negative control fails for its own reason and no other")
+    parser.add_argument("--required-field-test", action="store_true", help="Assert every required payload field is rejected when absent")
     args = parser.parse_args()
 
     if args.emit:
@@ -626,8 +787,10 @@ def main() -> int:
         return 0
     if args.meta_test:
         return run_meta_test()
+    if args.required_field_test:
+        return run_required_field_test()
     if not args.case:
-        parser.error("case is required unless --emit or --meta-test is used")
+        parser.error("case is required unless --emit, --meta-test or --required-field-test is used")
 
     findings = validate(load_case(args.case), disabled=frozenset(args.disable_check))
     print(report(args.case, findings))
