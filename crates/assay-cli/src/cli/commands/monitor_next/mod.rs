@@ -23,6 +23,8 @@ pub(crate) mod normalize;
 // constructors are unused outside the unit tests.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) mod enforcement_health;
+#[cfg(all(target_os = "linux", feature = "runner"))]
+pub(crate) mod observation_health;
 pub(crate) mod output;
 #[cfg(target_os = "linux")]
 pub(crate) mod rules;
@@ -539,6 +541,7 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     // Enforcement block/allow counts for the enforcement_health artifact (from the kernel stats).
     let mut blocked_count = 0u64;
     let mut allowed_count = 0u64;
+    let mut observed_ringbuf_drops = 0u64;
     match monitor.snapshot_stats() {
         Ok(stats) => {
             emit_err!("Monitor summary:");
@@ -581,6 +584,7 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
             );
             blocked_count = stats.socket_blocked_port + stats.socket_blocked_cidr;
             allowed_count = stats.socket_allowed;
+            observed_ringbuf_drops = stats.total_ringbuf_dropped();
             if stats.has_ringbuf_pressure() {
                 emit_err!(
                     "  ⚠️  Ring buffer pressure detected: {} dropped event(s)",
@@ -595,6 +599,30 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     // attached; absent when it was not requested. The `failed` case is written on the fail-closed abort
     // Network-enforcement validation, installation, and attach failures above write `failed`
     // before their handled nonzero exits.
+    // observation_health.v0: what was watched, and what was not. Separate carrier from
+    // enforcement_health by design — a run can observe completely and enforce nothing, or the
+    // reverse. Coverage comes from probe ATTACHMENT, never from emitted counts; see the module.
+    #[cfg(feature = "runner")]
+    if let Some(path) = args.observation_health.as_ref() {
+        let attachment = monitor.probe_attachment();
+        let run_id =
+            observation_health::run_id(&attachment, observed_ringbuf_drops, args.policy.is_some());
+        let health = observation_health::build(
+            &run_id,
+            &attachment,
+            observed_ringbuf_drops,
+            args.policy.is_some(),
+        );
+        if !observation_health::write_to(&health, path) {
+            // Same fail-closed rule as enforcement_health: a consumer reads a missing artifact as
+            // "not requested", which would misreport a run that did observe.
+            emit_err!(
+                "FATAL: observation_health artifact was requested but could not be written; refusing exit 0 so a missing artifact is never read as not-requested"
+            );
+            return Ok(exit_codes::EXIT_INFRA_ERROR);
+        }
+    }
+
     if args.enforcement_health.is_some() {
         let health = if enforcement_active {
             EnforcementHealth::active(SCOPE_IPV4_TCP_CONNECT, blocked_count, allowed_count)
