@@ -14,6 +14,7 @@
 //! archives remain consumable through the existing Assay evidence path.
 
 mod archive;
+pub mod diagnostics;
 mod kernel;
 mod path_projection;
 mod policy;
@@ -23,7 +24,9 @@ mod run;
 mod sdk;
 
 pub use archive::{RunnerSpikeArchive, RunnerSpikeArchiveError};
-pub use kernel::{KernelLayerBuilder, KernelLayerCapture, KernelLayerError, KERNEL_EVENT_SCHEMA};
+pub use kernel::{
+    DropLayers, KernelLayerBuilder, KernelLayerCapture, KernelLayerError, KERNEL_EVENT_SCHEMA,
+};
 pub use path_projection::{
     project_filesystem_paths, DeclaredPathProjectionRules, DeclaredPathRule, PathProjection,
     PathProjectionMapping, UnmatchedPathSummary, PATH_PROJECTION_SCHEMA,

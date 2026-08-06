@@ -39,6 +39,7 @@ all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/as
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-monitor/src/tree/tracker.rs
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-runner-core/Cargo.toml
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-runner-core/src/archive.rs
+all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-runner-core/src/diagnostics.rs
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-runner-core/src/kernel.rs
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-runner-core/src/kernel/decode.rs
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-runner-core/src/kernel/health.rs
