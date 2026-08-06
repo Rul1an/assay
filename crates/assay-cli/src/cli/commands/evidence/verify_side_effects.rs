@@ -20,6 +20,9 @@
 //! failure this ladder exists to prevent.
 
 use super::effect_refutation::{refute_egress, EgressRefutation};
+use crate::cli::commands::monitor::monitor_next::observed_peers::{
+    ObservedPeers, OBSERVED_PEERS_SCHEMA,
+};
 use crate::exit_codes;
 use anyhow::{Context, Result};
 use assay_evidence::bundle::BundleReader;
@@ -207,22 +210,25 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
     // The peer set is only usable against the coverage descriptor of the run that produced it.
     let (observed_peers, peers_run_mismatch) = match (&args.observed_peers, &observation_health) {
         (Some(path), Some(oh)) => {
-            let doc: Value = serde_json::from_str(
+            // Deserialized into the producer's own type rather than read field by field, so a
+            // malformed or mislabelled artifact fails here instead of silently yielding an empty
+            // peer set that would look like "watched and saw nothing".
+            let doc: ObservedPeers = serde_json::from_str(
                 &std::fs::read_to_string(path)
                     .with_context(|| format!("cannot read {}", path.display()))?,
             )
-            .with_context(|| format!("{} is not valid JSON", path.display()))?;
-            let same_run = doc.get("run_id") == oh.get("run_id");
-            let peers: Vec<String> = doc
-                .get("peers")
-                .and_then(Value::as_array)
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
-            (peers, !same_run)
+            .with_context(|| {
+                format!("{} is not a valid {OBSERVED_PEERS_SCHEMA}", path.display())
+            })?;
+            if doc.schema != OBSERVED_PEERS_SCHEMA {
+                anyhow::bail!(
+                    "{} declares schema {}, expected {OBSERVED_PEERS_SCHEMA}",
+                    path.display(),
+                    doc.schema
+                );
+            }
+            let same_run = oh.get("run_id").and_then(Value::as_str) == Some(doc.run_id.as_str());
+            (doc.peers, !same_run)
         }
         _ => (Vec::new(), false),
     };

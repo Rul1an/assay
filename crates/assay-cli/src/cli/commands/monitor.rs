@@ -2,7 +2,7 @@ use clap::Args;
 use std::path::PathBuf;
 
 #[path = "monitor_next/mod.rs"]
-mod monitor_next;
+pub(crate) mod monitor_next;
 
 #[derive(Args, Debug, Clone)]
 #[command(

@@ -25,6 +25,10 @@ pub(crate) mod normalize;
 pub(crate) mod enforcement_health;
 #[cfg(all(target_os = "linux", feature = "runner"))]
 pub(crate) mod observation_health;
+// Same split as enforcement_health above: the record is cross-platform so its invariants stay
+// testable on a developer machine, while the producer that fills it from connect events is
+// Linux-and-runner gated, leaving `new`/`write_to` unused elsewhere.
+#[cfg_attr(not(all(target_os = "linux", feature = "runner")), allow(dead_code))]
 pub(crate) mod observed_peers;
 pub(crate) mod output;
 #[cfg(target_os = "linux")]
