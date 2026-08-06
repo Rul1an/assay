@@ -56,11 +56,14 @@ pub struct VerifySideEffectsArgs {
     #[arg(long = "observation-health", value_name = "PATH")]
     pub observation_health: Option<PathBuf>,
 
-    /// Peer endpoints the observer actually recorded for this workload, comma separated. Only read
-    /// alongside --observation-health, because peers without a coverage descriptor cannot support
-    /// an absence claim.
-    #[arg(long = "observed-peer", value_delimiter = ',')]
-    pub observed_peers: Vec<String>,
+    /// An `assay.monitor.observed_peers.v0` artifact from the SAME run as --observation-health.
+    ///
+    /// Read from the artifact rather than typed on the command line, because a hand-supplied peer
+    /// set makes the refutation only as good as what someone remembered to pass, and because peers
+    /// from one run checked against another run's coverage would let a well-covered run vouch for a
+    /// blind one. The run ids must match or nothing is refuted.
+    #[arg(long = "observed-peers", value_name = "PATH")]
+    pub observed_peers: Option<PathBuf>,
 
     /// Output format
     #[arg(long, value_enum, default_value_t = SideEffectFormat::Table)]
@@ -201,6 +204,29 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
         None => None,
     };
 
+    // The peer set is only usable against the coverage descriptor of the run that produced it.
+    let (observed_peers, peers_run_mismatch) = match (&args.observed_peers, &observation_health) {
+        (Some(path), Some(oh)) => {
+            let doc: Value = serde_json::from_str(
+                &std::fs::read_to_string(path)
+                    .with_context(|| format!("cannot read {}", path.display()))?,
+            )
+            .with_context(|| format!("{} is not valid JSON", path.display()))?;
+            let same_run = doc.get("run_id") == oh.get("run_id");
+            let peers: Vec<String> = doc
+                .get("peers")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            (peers, !same_run)
+        }
+        _ => (Vec::new(), false),
+    };
+
     let records = match &args.audit_import {
         Some(dir) => load_audit_records(dir)?,
         None => Vec::new(),
@@ -260,11 +286,17 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
             // as evidence, so an absent or degraded observer leaves the level untouched.
             if asserted {
                 let expected = decision["action"]["target"]["provider"].as_str();
-                row.egress = Some(refute_egress(
-                    observation_health.as_ref(),
-                    &args.observed_peers,
-                    expected,
-                ));
+                row.egress = Some(if peers_run_mismatch {
+                    // Refusing here rather than comparing is the point: a peer set from a different
+                    // run has no relationship to this run's coverage, and pairing them would be the
+                    // borrowed-denominator version of the false GREEN.
+                    EgressRefutation::NoCoverage {
+                        reason: "observed_peers.run_id does not match observation_health.run_id: \
+                                 a peer set only means anything against its own run's coverage",
+                    }
+                } else {
+                    refute_egress(observation_health.as_ref(), &observed_peers, expected)
+                });
             }
             row.occurrence_claim =
                 claim_decision_for(row.level, CodingAgentClaimKind::PositiveExistence);

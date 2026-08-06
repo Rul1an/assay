@@ -351,3 +351,62 @@ fn partial_correlation_cannot_overturn_a_verified_record() {
         "a degraded observer must not overturn an audit record that bound"
     );
 }
+
+#[test]
+fn a_peer_set_from_a_different_run_cannot_refute() {
+    // The invariant the shared run identity exists for. Peers from run A checked against run B's
+    // coverage would let a well-covered run vouch for a blind one, so a mismatched pair refuses
+    // rather than compares.
+    let dir = tempdir().unwrap();
+    let bundle = dir.path().join("b.tar.gz");
+    bundle_with_asserted_decision(&bundle);
+
+    let oh = dir.path().join("oh.json");
+    fs::write(
+        &oh,
+        serde_json::to_string(&json!({
+            "schema": "assay.runner.observation_health.v0",
+            "run_id": "run-A",
+            "kernel_layer": "complete", "ringbuf_drops": 0,
+            "network_protocol_coverage": "connect_only", "cgroup_correlation": "clean",
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let peers = dir.path().join("peers.json");
+    fs::write(
+        &peers,
+        serde_json::to_string(&json!({
+            "schema": "assay.monitor.observed_peers.v0",
+            "run_id": "run-B",
+            "peers": [],
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let out = Command::cargo_bin("assay")
+        .unwrap()
+        .arg("evidence")
+        .arg("verify-side-effects")
+        .arg(&bundle)
+        .arg("--observation-health")
+        .arg(&oh)
+        .arg("--observed-peers")
+        .arg(&peers)
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: Value = serde_json::from_slice(&out).unwrap();
+
+    assert_eq!(
+        report["calls"][0]["egress"]["outcome"],
+        json!("no_coverage"),
+        "a mismatched run pair must refuse, not refute"
+    );
+}

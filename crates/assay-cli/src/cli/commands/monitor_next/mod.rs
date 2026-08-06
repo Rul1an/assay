@@ -25,6 +25,7 @@ pub(crate) mod normalize;
 pub(crate) mod enforcement_health;
 #[cfg(all(target_os = "linux", feature = "runner"))]
 pub(crate) mod observation_health;
+pub(crate) mod observed_peers;
 pub(crate) mod output;
 #[cfg(target_os = "linux")]
 pub(crate) mod rules;
@@ -506,6 +507,8 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
         }
     };
 
+    let mut observed_peers: Vec<String> = Vec::new();
+
     let mut timeout = match args.duration {
         Some(d) => tokio::time::sleep(d.into()).boxed(),
         None => std::future::pending().boxed(),
@@ -524,6 +527,11 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
             event_res = stream.next() => {
                 match event_res {
                     Some(Ok(event)) => {
+                        // Record the connect endpoints this run actually saw, so a later refutation
+                        // reads an artifact rather than trusting an operator to retype them.
+                        if let Some(peer) = events::observed_peer(&event) {
+                            observed_peers.push(peer);
+                        }
                         events::handle_event(&event, &args, &rules, kill_config.as_ref()).await;
                     }
                     Some(Err(e)) => {
@@ -602,6 +610,27 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     // observation_health.v0: what was watched, and what was not. Separate carrier from
     // enforcement_health by design — a run can observe completely and enforce nothing, or the
     // reverse. Coverage comes from probe ATTACHMENT, never from emitted counts; see the module.
+    // Both artifacts are written here, from ONE run identity, on purpose. A refutation pairs a peer
+    // set with a coverage descriptor, and that pairing is only meaningful within a single run: peers
+    // from one run checked against another run's coverage would let a well-covered run vouch for a
+    // blind one. Sharing `run_id` at the point of writing is what lets the consumer detect that.
+    #[cfg(feature = "runner")]
+    if args.observation_health.is_some() || args.observed_peers.is_some() {
+        let attachment = monitor.probe_attachment();
+        let run_id =
+            observation_health::run_id(&attachment, observed_ringbuf_drops, args.policy.is_some());
+
+        if let Some(path) = args.observed_peers.as_ref() {
+            let record = observed_peers::ObservedPeers::new(&run_id, observed_peers);
+            if record.write_to(path).is_err() {
+                emit_err!(
+                    "FATAL: observed_peers artifact was requested but could not be written; refusing exit 0 so a missing artifact is never read as an empty peer set"
+                );
+                return Ok(exit_codes::EXIT_INFRA_ERROR);
+            }
+        }
+    }
+
     #[cfg(feature = "runner")]
     if let Some(path) = args.observation_health.as_ref() {
         let attachment = monitor.probe_attachment();
