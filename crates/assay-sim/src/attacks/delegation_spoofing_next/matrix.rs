@@ -67,6 +67,10 @@ pub(super) fn make_delegation_result(
         outcome: outcome.clone(),
         hypothesis_tags: tags,
     };
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "as consumer_downgrade_next: a new activation-shaped outcome scores as passed unless named, and passed is the direction that hides a finding"
+    )]
     let status = match &outcome {
         DelegationOutcome::ActivationWithTrustUpgrade
         | DelegationOutcome::ActivationWithSelectionManipulation => AttackStatus::Bypassed,

@@ -198,6 +198,10 @@ impl CheckDefinition {
 
     /// Get normalized JSON Pointer paths for EventFieldPresent.
     pub fn get_field_paths(&self) -> Vec<String> {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "only the field-bearing check kinds have paths to collect; a new kind that carries fields must be named above or its paths go uncollected"
+        )]
         match self {
             CheckDefinition::EventFieldPresent {
                 paths_any_of,

@@ -24,6 +24,16 @@
 #
 # ASSAY_LINUX_CHECK_REQUIRE_FULL=1 promotes incomplete coverage to a failure, for a host that can
 # cross-compile everything and wants the stronger guarantee.
+#
+# The `multipass` VM mode this script used to carry is gone, and it is worth saying why rather than
+# leaving a reader to wonder. Its clippy invocation ended the same way:
+#
+#     cargo clippy --locked --workspace --all-targets -- -D warnings || {
+#       echo "WARN: Linux check timed out or failed. Relying on CI."; return 0; }
+#
+# so it could not fail either, and the `target` case wrapped it in a second fail-open on top. Two
+# paths with one defect means fixing it in one of them leaves the other. The cross-target path is
+# the one that runs by default and needs no VM, so it is the one that was kept and repaired.
 
 set -uo pipefail
 
