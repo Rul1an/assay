@@ -48,7 +48,13 @@ async fn build_and_validate_generated_coverage_report(
     Ok(report_value)
 }
 
-pub(super) async fn cmd_coverage_generate(args: &CoverageArgs) -> Result<i32> {
+/// `output_format` is narrowed by `cmd_coverage`, which is where both modes' rules live. Taking
+/// the narrowed type rather than `args.format` means no arm in here has to answer for a spelling
+/// this mode does not honour.
+pub(super) async fn cmd_coverage_generate(
+    args: &CoverageArgs,
+    output_format: CoverageOutputFormat,
+) -> Result<i32> {
     use crate::exit_codes::EXIT_CONFIG_ERROR;
 
     if args.declared_tools.iter().any(|t| t.trim().is_empty()) {
@@ -77,8 +83,6 @@ pub(super) async fn cmd_coverage_generate(args: &CoverageArgs) -> Result<i32> {
         Ok(v) => v,
         Err(code) => return Ok(code),
     };
-
-    let output_format = CoverageOutputFormat::narrow(args.format);
 
     let primary_format = if args.out_md.is_some() {
         CoverageOutputFormat::Json
