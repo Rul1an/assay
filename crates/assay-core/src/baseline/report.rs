@@ -116,7 +116,7 @@ pub fn report_from_db(store: &Store, suite: &str, last_runs: u32) -> anyhow::Res
                             attempt.details.get("metrics").and_then(|m| m.as_object())
                         {
                             for (metric_name, mv) in obj {
-                                if let Some(score) = mv.get("score").and_then(|s| s.as_f64()) {
+                                if let Some(score) = exercised_score(mv) {
                                     scores.entry(metric_name.clone()).or_default().push(score);
                                 }
                             }
@@ -128,7 +128,7 @@ pub fn report_from_db(store: &Store, suite: &str, last_runs: u32) -> anyhow::Res
                     // But for safety:
                     if let Some(obj) = r.details.get("metrics").and_then(|m| m.as_object()) {
                         for (metric_name, mv) in obj {
-                            if let Some(score) = mv.get("score").and_then(|s| s.as_f64()) {
+                            if let Some(score) = exercised_score(mv) {
                                 scores.entry(metric_name.clone()).or_default().push(score);
                             }
                         }
@@ -138,7 +138,7 @@ pub fn report_from_db(store: &Store, suite: &str, last_runs: u32) -> anyhow::Res
                 // Fallback for old records without attempts
                 if let Some(obj) = r.details.get("metrics").and_then(|m| m.as_object()) {
                     for (metric_name, mv) in obj {
-                        if let Some(score) = mv.get("score").and_then(|s| s.as_f64()) {
+                        if let Some(score) = exercised_score(mv) {
                             scores.entry(metric_name.clone()).or_default().push(score);
                         }
                     }
@@ -262,4 +262,62 @@ pub fn report_from_db(store: &Store, suite: &str, last_runs: u32) -> anyhow::Res
         tests,
         notes,
     })
+}
+
+/// A metric's score, but only when the metric actually evaluated something.
+///
+/// The three collection sites above (attempts, the attempts fallback, and pre-attempts records)
+/// each read the same object, so the rule lives here once. Three copies of one rule is how the
+/// baseline and the runner would come to disagree about what counts as a score.
+///
+/// A record without an `exercised` field predates #1949 layer 2 and is counted, because treating
+/// silence as "not exercised" would drop every historical score at once.
+fn exercised_score(metric: &serde_json::Value) -> Option<f64> {
+    let exercised = metric.get("exercised").and_then(|v| v.as_str());
+    if exercised.is_some_and(|e| e != "exercised") {
+        return None;
+    }
+    metric.get("score").and_then(|s| s.as_f64())
+}
+
+#[cfg(test)]
+mod exercised_score_tests {
+    use super::exercised_score;
+    use serde_json::json;
+
+    /// A metric that declined the test's `Expected` variant reports `passed` with score 1.0
+    /// (#1949 layer 2). That number is not evidence about quality and must not enter the statistics.
+    #[test]
+    fn a_not_applicable_metric_contributes_no_score() {
+        assert_eq!(
+            exercised_score(&json!({"score": 1.0, "exercised": "not_applicable"})),
+            None
+        );
+        assert_eq!(
+            exercised_score(&json!({"score": 1.0, "exercised": "not_exercised"})),
+            None
+        );
+    }
+
+    #[test]
+    fn an_exercised_metric_contributes_its_score() {
+        assert_eq!(
+            exercised_score(&json!({"score": 0.87, "exercised": "exercised"})),
+            Some(0.87)
+        );
+    }
+
+    /// A record written before the dimension existed says nothing either way, and is counted.
+    ///
+    /// Reading silence as "not exercised" would drop every historical score at once, which would
+    /// look like the baseline improving and is the direction that hides a change.
+    #[test]
+    fn a_record_predating_the_dimension_is_counted() {
+        assert_eq!(exercised_score(&json!({"score": 0.5})), Some(0.5));
+    }
+
+    #[test]
+    fn a_record_without_a_score_contributes_nothing() {
+        assert_eq!(exercised_score(&json!({"exercised": "exercised"})), None);
+    }
 }
