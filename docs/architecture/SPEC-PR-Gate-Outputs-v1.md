@@ -184,6 +184,7 @@ Reason codes are **stable, machine-readable** strings. CI and scripts MAY branch
 | E_BASELINE_INVALID  | Baseline file invalid or missing. |
 | E_POLICY_PARSE      | Policy file parse error. |
 | E_REPLAY_MISSING_DEPENDENCY | Replay missing required offline dependency (e.g. uncached judge/cassette input). |
+| E_INVALID_ARGS      | Command-line arguments are invalid or mutually inconsistent. Registered late: the code has been emitted since before this registry existed and is asserted by `crates/assay-cli/tests/contract_run_ci_parity.rs`, so its absence here was a gap in the spec, not a new code. |
 | E_REPLAY_LIMIT_EXCEEDED | Replay bundle refused by an ingest ceiling during bounded ingest, before replay execution. The source, decode, member, path, entry-count and manifest-depth ceilings apply at different points of the read, so this is not a claim that nothing was parsed. It establishes only that a configured budget was exceeded; whether the bundle is otherwise valid is unresolved, because the read stopped. Adjusting the budget or supplying a smaller bundle is a legitimate response. Distinct from `E_CFG_PARSE`, which is a malformed-input finding. Carries no verdict: no test ran. |
 
 ### 5.2 Infra / Judge Unavailable (exit_code 3)
@@ -194,12 +195,62 @@ Reason codes are **stable, machine-readable** strings. CI and scripts MAY branch
 | E_RATE_LIMIT        | Judge/provider rate limit hit. |
 | E_PROVIDER_5XX      | Judge/provider returned 5xx. |
 | E_TIMEOUT           | Judge or dependency timed out. |
+| E_NETWORK_ERROR     | Connection refused, DNS failure, or other transport-level failure reaching a provider. Registered late for the same reason as `E_INVALID_ARGS`. |
 
 ### 5.3 Test Failure (exit_code 1)
 
-Test-level failures MAY use existing policy/metric codes (e.g. E_ARG_SCHEMA, E_SEQUENCE_VIOLATION) or a generic E_TEST_FAILED. The summary.json reason_code for the run MAY be E_TEST_FAILED when at least one test failed and no single dominant reason is reported.
+| Code                | Description |
+|---------------------|-------------|
+| E_TEST_FAILED       | One or more tests failed and no single dominant reason is reported. |
+| E_JUDGE_UNCERTAIN   | The judge abstained. Whether that fails the run is policy-dependent per ADR-004. |
+| E_POLICY_VIOLATION  | A policy check blocked a tool call. Also a member of `assay_core::errors::diagnostic::codes`, where it reaches a SARIF `ruleId`; see `REASON-CODE-VOCABULARIES.md` surface 1. |
+| E_ARG_SCHEMA        | Argument schema validation failed. |
+| E_SEQUENCE_VIOLATION | A sequence assertion failed. |
+
+This section used to be prose naming `E_ARG_SCHEMA`, `E_SEQUENCE_VIOLATION` and `E_TEST_FAILED` as examples. The normative rule below requires `reason_code` to be *one of the registered values*, and an example in prose is not a registration -- so `E_JUDGE_UNCERTAIN` and `E_POLICY_VIOLATION`, both emittable, were unregistered while the rule said they could not be. The table is the registration.
 
 **Normative:** When exit_code ≠ 0, summary.json MUST set `reason_code` to one of the registered values (or a documented extension). Implementations MUST NOT leave reason_code empty when exit_code ≠ 0.
+
+### 5.4 Reserved
+
+Declared somewhere in the implementation and currently constructed by nothing. They are listed rather than deleted, because §175 above forbids removing a registered code without a `schema_version` bump and migration notes -- and a code that a consumer once saw is a code a consumer may still branch on.
+
+Reserved means: an implementation MAY begin emitting it without a version bump, because it is registered here; and a consumer MUST NOT assume it will never appear.
+
+| Code | Declared in | Note |
+|------|-------------|------|
+| E_BASELINE_INVALID | `ReasonCode::EBaselineInvalid` | Registered in §5.1. Nothing constructs the variant. |
+| E_POLICY_PARSE | `ReasonCode::EPolicyParse` | Registered in §5.1. Nothing constructs the variant. |
+| E_ARG_SCHEMA | `ReasonCode::EArgSchema` | The *variant* is dead; the string is live, originated by `assay_core::policy_engine:102` and forwarded into a `Diagnostic`. Two producers, one code. |
+| E_SEQUENCE_VIOLATION | `ReasonCode::ESequenceViolation` | As above, originated at `policy_engine:302`. |
+| W_BASE_FINGERPRINT | `codes::W_BASE_FINGERPRINT` | Warning severity, so it never reaches `reason_code`. Constructed nowhere. |
+| W_CACHE_CONFUSION | `codes::W_CACHE_CONFUSION` | As above. |
+| E_CFG_SCHEMA_UNKNOWN_FIELD, E_POLICY_SCHEMA_UNKNOWN_FIELD, E_CFG_REF_MISSING, E_BASELINE_NOT_FOUND, E_BASELINE_SUITE_MISMATCH, E_ARG_PATTERN_BLOCKED, E_CONSTRAINT_MISSING, E_EXEC_DENIED, E_PATH_SCOPE_VIOLATION, E_SIGNATURES_DISABLED, E_TOOL_DESC_SUSPICIOUS, E_TOOL_POISONING_PATTERN, E_TRACE_LEGACY_FUNCTION_CALL, E_TRACE_SCHEMA_DRIFT, E_TRACE_SCHEMA_INVALID, UNKNOWN_TOOL | matched in `assay_core::agentic::builder` | Remediation branches keyed on codes no producer in this workspace constructs. Measured: zero production construction sites each, outside the builder's own tests. |
+| E_TOOL_DENIED, E_TOOL_NOT_ALLOWED, MCP_TOOL_DENIED, MCP_TOOL_NOT_ALLOWED | matched in `assay_core::agentic::builder` | The first two are live, but on another surface: `assay_core::mcp::policy` and `assay_metrics::args_valid_next` write them into MCP decision records and metric details, neither of which becomes a `Diagnostic`. The `MCP_`-prefixed pair is constructed nowhere. |
+
+`codes::E_POLICY_VIOLATION` is dead as a constant while `E_POLICY_VIOLATION` the string is live and registered in §5.3, reachable through `ReasonCode::EPolicyViolation`.
+
+A remediation matcher keyed on a reserved code is a branch that cannot fire today. Recording it here is not an endorsement of keeping it -- it makes the dead branch visible so #2028 can decide, rather than leaving it to be rediscovered.
+
+The scale is worth stating plainly, because it was measured rather than estimated. `agentic::builder` matches 20 codes that are not `codes::` members. Two of them -- `E_ARG_SCHEMA` and `E_SEQUENCE_VIOLATION` -- can reach it, forwarded from the policy engine. The other 18 cannot: nothing in the workspace constructs them as a `Diagnostic.code`. The remediation surface is keyed on a vocabulary that was planned and never wired up.
+
+`E_POLICY_MISSING_TOOL`, `E_POLICY_REGEX_INVALID` and `E_SCHEMA_COMPILE` are **not** reserved: they are live, constructed by `assay_core::policy_engine`, and reach a published SARIF artifact. They are registered in §5.5.
+
+### 5.5 Policy-Engine Verdict Codes
+
+`assay_core::policy_engine` builds a `Verdict.reason_code`, and `assay_core::validate` forwards it verbatim into a `Diagnostic` whose `code` becomes a SARIF `ruleId`. They are therefore public identifiers on a published artifact, and were registered nowhere.
+
+| Code | Description |
+|------|-------------|
+| E_ARG_SCHEMA | Tool arguments failed their JSON Schema. Also §5.3. |
+| E_SEQUENCE_VIOLATION | A tool-call sequence assertion failed. Also §5.3. |
+| E_POLICY_MISSING_TOOL | The policy has no entry for the tool being called. |
+| E_POLICY_REGEX_INVALID | A policy constraint's regular expression failed to compile. |
+| E_SCHEMA_COMPILE | A policy's JSON Schema failed to compile. |
+
+`OK` is the `reason_code` of a non-blocked verdict. It never reaches a `Diagnostic`, because only `VerdictStatus::Blocked` is forwarded, and it is not a reason code in the sense of this registry.
+
+The MCP policy engine has its own `E_`-prefixed vocabulary (`E_TOOL_NOT_ALLOWED`, `E_TOOL_DENIED`, `E_TOOL_DRIFT`, `E_RATE_LIMIT`) that reaches MCP decision records rather than `summary.json` or SARIF. It is out of scope for this registry; see `REASON-CODE-VOCABULARIES.md` surface 6.
 
 ---
 
