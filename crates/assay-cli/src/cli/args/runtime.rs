@@ -1,3 +1,4 @@
+use super::common::OutputFormat;
 use clap::Parser;
 use std::path::PathBuf;
 
@@ -44,8 +45,13 @@ pub struct DoctorArgs {
     #[arg(long, default_value = "false")]
     pub replay_strict: bool,
 
-    #[arg(long, default_value = "text")]
-    pub format: String, // text|json
+    // Typed rather than a `String` with a `== "json"` test downstream (#2039). The declaration
+    // here used to read `// text|json` while `--format totally-invalid` silently produced text and
+    // exited 0 — a documented set that nothing enforced. A `//` comment, not a doc comment: this
+    // is why the type is what it is, and `--help` is not where that belongs.
+    /// Output format for the report.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub format: OutputFormat,
 
     #[arg(long)]
     pub out: Option<std::path::PathBuf>,

@@ -81,6 +81,7 @@ const FORMAT_ARGS: &[(&[&str], &str, &[&str])] = &[
     // JSON with a `// Default to JSON` comment, so a typo'd spelling produced a JSON file at the
     // markdown path at exit 0.
     (&["baseline", "report"], "--format", &["json", "md"]),
+    (&["doctor"], "--format", &["text", "json"]),
 ];
 
 /// Aliases that parse without appearing in the value list, as `(command, flag, alias)`.

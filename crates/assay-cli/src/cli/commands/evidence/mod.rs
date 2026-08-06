@@ -123,9 +123,9 @@ pub struct EvidenceShowArgs {
     #[arg(long)]
     pub no_verify: bool,
 
-    /// Output format: 'table' or 'json' (raw dump)
-    #[arg(long, default_value = "table")]
-    pub format: String,
+    /// Output format for the bundle listing.
+    #[arg(long, value_enum, default_value_t = crate::cli::args::common::ShowFormat::Table)]
+    pub format: crate::cli::args::common::ShowFormat,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -297,7 +297,7 @@ fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
     let verified = !args.no_verify; // If open() succeeded above, it IS verified.
     let manifest = br.manifest();
 
-    if args.format == "json" {
+    if args.format == crate::cli::args::common::ShowFormat::Json {
         // Output complete bundle as JSON: manifest + events
         let events = br.events().collect::<Result<Vec<_>>>()?;
         let bundle_json = serde_json::json!({
