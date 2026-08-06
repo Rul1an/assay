@@ -27,6 +27,10 @@ impl Metric for ToolCollisionDetectMetric {
         expected: &Expected,
         resp: &LlmResponse,
     ) -> anyhow::Result<MetricResult> {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "a metric declines every Expected variant but its own, and now says so with not_applicable() rather than a vacuous pass (#1949 layer 2)"
+        )]
         let trusted_servers = match expected {
             Expected::ToolCollisionDetect { trusted_servers } => trusted_servers,
             _ => return Ok(MetricResult::not_applicable()),

@@ -113,6 +113,10 @@ pub async fn precompute_judge(
 
         if let Some(tc) = matching_tc {
             use crate::model::Expected;
+            #[expect(
+                clippy::wildcard_enum_match_arm,
+                reason = "same rubric set as scoring.rs; a new judge-like variant would precompute under rubric \"none\""
+            )]
             let (rubric_id, rubric_version) = match &tc.expected {
                 Expected::Faithfulness { rubric_version, .. } => {
                     ("faithfulness", rubric_version.as_deref())
