@@ -403,6 +403,10 @@ fn validate_strict_requirements(
 
     // Check Judge -> Need Judge Results
     // Only if expected is Faithfulness or Relevance
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "only judge variants require judge meta; a new one would report no missing requirement"
+    )]
     match &tc.expected {
         Expected::Faithfulness { .. }
             if resp.meta.pointer("/assay/judge/faithfulness").is_none() =>
