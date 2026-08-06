@@ -21,8 +21,10 @@ pub use bundle::{
     VerifyLimitsOverrides, VerifyResult,
 };
 pub use coding_agent::{
-    coding_agent_evidence_event, CodingAgentCoverage, CodingAgentCoverageState,
-    CodingAgentDeclaredScope, CodingAgentEvidencePayload, CodingAgentNetworkPolicy,
+    coding_agent_claim_ceiling, coding_agent_dimension_conclusion, coding_agent_evidence_event,
+    CodingAgentClaimCeiling, CodingAgentCoverage, CodingAgentCoverageGap,
+    CodingAgentCoverageReport, CodingAgentCoverageState, CodingAgentDeclaredScope,
+    CodingAgentDimensionConclusion, CodingAgentEvidencePayload, CodingAgentNetworkPolicy,
     CodingAgentObservedEffects, CodingAgentSourceClass, CODING_AGENT_EVIDENCE_EVENT_TYPE,
     CODING_AGENT_EVIDENCE_SOURCE,
 };
