@@ -20,7 +20,7 @@ impl Metric for ToolBlocklistMetric {
     ) -> anyhow::Result<MetricResult> {
         let blocked = match expected {
             Expected::ToolBlocklist { blocked } => blocked,
-            _ => return Ok(MetricResult::pass(1.0)), // N/A
+            _ => return Ok(MetricResult::not_applicable()), // N/A
         };
 
         let tool_calls: Vec<ToolCallRecord> = match extract_tool_calls_canonical(resp) {

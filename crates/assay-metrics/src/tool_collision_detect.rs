@@ -29,12 +29,14 @@ impl Metric for ToolCollisionDetectMetric {
     ) -> anyhow::Result<MetricResult> {
         let trusted_servers = match expected {
             Expected::ToolCollisionDetect { trusted_servers } => trusted_servers,
-            _ => return Ok(MetricResult::pass(1.0)),
+            _ => return Ok(MetricResult::not_applicable()),
         };
 
         let defs = tool_defs(resp);
         if defs.is_empty() {
-            return Ok(MetricResult::pass(1.0)); // N/A — no tool definitions in meta.
+            return Ok(MetricResult::not_exercised(
+                "no tool definitions in the response metadata",
+            )); // N/A — no tool definitions in meta.
         }
 
         // Build: tool_name → list of server_ids that registered it.
@@ -107,6 +109,7 @@ impl Metric for ToolCollisionDetectMetric {
             Ok(MetricResult::pass(1.0))
         } else {
             Ok(MetricResult {
+                exercised: assay_core::metrics_api::Exercised::Exercised,
                 passed: false,
                 score: 0.0,
                 unstable: false,

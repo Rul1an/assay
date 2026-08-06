@@ -22,7 +22,7 @@ impl Metric for JsonSchemaMetric {
             schema_file,
         } = expected
         else {
-            return Ok(MetricResult::pass(1.0));
+            return Ok(MetricResult::not_applicable());
         };
 
         let schema_str = if let Some(path) = schema_file {
@@ -78,6 +78,7 @@ impl Metric for JsonSchemaMetric {
                 .map(|e| e.to_string())
                 .collect();
             Ok(MetricResult {
+                exercised: assay_core::metrics_api::Exercised::Exercised,
                 score: 0.0,
                 passed: false,
                 unstable: false,

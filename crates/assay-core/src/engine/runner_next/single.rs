@@ -149,9 +149,19 @@ pub(crate) async fn run_test_once_impl(
         };
 
         details["metrics"][metric_name] = serde_json::json!({
-            "score": r.score, "passed": r.passed, "unstable": r.unstable, "details": r.details
+            "score": r.score,
+            "passed": r.passed,
+            "unstable": r.unstable,
+            "exercised": exercised_label(r.exercised),
+            "details": r.details
         });
-        final_score = Some(r.score);
+        // Only a metric that actually evaluated something may set the test's score.
+        //
+        // This used to be unconditional, so the score belonged to whichever metric ran last. All
+        // thirteen registered metrics run against every test and eleven of them return a
+        // not-applicable 1.0, so a semantic test that scored 0.87 reported 1.0 -- the number came
+        // from a metric that was never asked to run. `pass_rate_masking_is_reported` pins it.
+        final_score = score_after(final_score, &r);
 
         if r.unstable {
             final_status = TestStatus::Warn;
@@ -198,4 +208,101 @@ pub(crate) async fn run_test_once_impl(
     row.details["prompt"] = serde_json::Value::String(tc.input.prompt.clone());
 
     Ok((row, resp))
+}
+
+/// The test's score after folding in one metric result.
+///
+/// A metric that evaluated nothing does not get to set the score. Extracted rather than written
+/// inline so the loop above and the tests below apply the same rule -- two implementations of one
+/// rule drift, and this one decides a number that reaches `run.json` and SARIF.
+fn score_after(current: Option<f64>, r: &crate::metrics_api::MetricResult) -> Option<f64> {
+    if r.is_exercised() {
+        Some(r.score)
+    } else {
+        current
+    }
+}
+
+/// The stable string for an `Exercised` value in `details["metrics"][…]`.
+///
+/// A vocabulary, not a `Debug` rendering: this reaches `run.json`, so it is an interface.
+fn exercised_label(e: crate::metrics_api::Exercised) -> &'static str {
+    match e {
+        crate::metrics_api::Exercised::Exercised => "exercised",
+        crate::metrics_api::Exercised::NotApplicable => "not_applicable",
+        crate::metrics_api::Exercised::NotExercised => "not_exercised",
+    }
+}
+
+#[cfg(test)]
+mod exercised_tests {
+    use super::*;
+    use crate::metrics_api::{Exercised, MetricResult};
+
+    /// Folds with `score_after`, the same function the runner's loop calls. A test that reimplemented
+    /// the rule would assert its own copy and stay green while the loop drifted away from it.
+    fn fold_score(results: &[MetricResult]) -> Option<f64> {
+        results.iter().fold(None, score_after)
+    }
+
+    #[test]
+    fn a_not_applicable_metric_does_not_set_the_score() {
+        // The shape that made this issue: one metric evaluates and scores 0.87, then eight metrics
+        // that do not handle the variant return a not-applicable 1.0 after it.
+        let mut results = vec![MetricResult::pass(0.87)];
+        results.extend((0..8).map(|_| MetricResult::not_applicable()));
+        assert_eq!(
+            fold_score(&results),
+            Some(0.87),
+            "the score came from a metric that was never asked to run"
+        );
+    }
+
+    #[test]
+    fn a_not_exercised_metric_does_not_set_the_score() {
+        let results = vec![
+            MetricResult::pass(0.62),
+            MetricResult::not_exercised("no tool definitions in the trace"),
+        ];
+        assert_eq!(fold_score(&results), Some(0.62));
+    }
+
+    #[test]
+    fn a_test_with_no_exercised_metric_has_no_score() {
+        // Not 1.0. A test nothing evaluated has no score, and saying so is the point of the
+        // dimension -- a 1.0 here is the vacuous pass the issue is about.
+        let results = vec![
+            MetricResult::not_applicable(),
+            MetricResult::not_exercised("no output schemas configured"),
+        ];
+        assert_eq!(fold_score(&results), None);
+    }
+
+    #[test]
+    fn a_real_evaluation_still_sets_the_score() {
+        assert_eq!(fold_score(&[MetricResult::pass(0.5)]), Some(0.5));
+        assert_eq!(fold_score(&[MetricResult::fail(0.1, "nope")]), Some(0.1));
+    }
+
+    #[test]
+    fn the_label_vocabulary_is_stable() {
+        // These strings land in run.json, so they are an interface rather than a rendering.
+        assert_eq!(exercised_label(Exercised::Exercised), "exercised");
+        assert_eq!(exercised_label(Exercised::NotApplicable), "not_applicable");
+        assert_eq!(exercised_label(Exercised::NotExercised), "not_exercised");
+    }
+
+    #[test]
+    fn not_applicable_and_not_exercised_never_fail_a_test() {
+        // Over-eager vacuity detection earns a suppression and takes real findings with it, so
+        // these report and never decide.
+        for r in [
+            MetricResult::not_applicable(),
+            MetricResult::not_exercised("nothing to check"),
+        ] {
+            assert!(r.passed, "a non-exercised metric must not fail the test");
+            assert!(!r.unstable);
+            assert!(!r.is_exercised());
+        }
+    }
 }

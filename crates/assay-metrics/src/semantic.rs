@@ -18,7 +18,7 @@ impl Metric for SemanticSimilarityMetric {
         resp: &LlmResponse,
     ) -> anyhow::Result<MetricResult> {
         let Expected::SemanticSimilarityTo { min_score, .. } = expected else {
-            return Ok(MetricResult::pass(1.0));
+            return Ok(MetricResult::not_applicable());
         };
 
         let a = resp
@@ -63,6 +63,7 @@ impl Metric for SemanticSimilarityMetric {
         let passed = score + SEMANTIC_SIMILARITY_EPSILON >= *min_score;
 
         Ok(MetricResult {
+            exercised: assay_core::metrics_api::Exercised::Exercised,
             score,
             passed,
             unstable: false,
