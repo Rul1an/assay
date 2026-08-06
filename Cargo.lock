@@ -367,6 +367,7 @@ dependencies = [
  "anyhow",
  "assay-canonical",
  "assay-common",
+ "assay-runner-schema",
  "assert_fs",
  "async-trait",
  "base64",

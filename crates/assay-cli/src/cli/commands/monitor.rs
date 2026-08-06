@@ -63,6 +63,15 @@ pub struct MonitorArgs {
     /// block counts) to this path. Explicit artifact, not parsed from stdout.
     #[arg(long)]
     pub enforcement_health: Option<PathBuf>,
+
+    /// Write an `assay.runner.observation_health.v0` artifact (observation truth: which probes
+    /// attached, what was lost) to this path. Explicit artifact, not parsed from stdout.
+    ///
+    /// Deliberately separate from `--enforcement-health`: that one answers "was enforcement active
+    /// and did it block?", this one answers "how complete was observation?". A run can have
+    /// complete observation and absent enforcement, or the reverse.
+    #[arg(long = "observation-health")]
+    pub observation_health: Option<PathBuf>,
 }
 
 pub async fn run(args: MonitorArgs) -> anyhow::Result<i32> {
