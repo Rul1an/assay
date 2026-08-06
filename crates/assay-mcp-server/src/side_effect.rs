@@ -68,6 +68,51 @@ pub enum VerificationSource {
     ProviderAuditImport,
 }
 
+/// How much the world minds if this effect happened when it should not have.
+///
+/// Adopted from the Agent Action Capsule profile (`draft-mih-scitt-agent-action-capsule-02`), value
+/// names included, so a record is legible to anyone already reading that draft rather than carrying a
+/// private synonym.
+///
+/// # Why this is not `OperationClass`, and must not be merged into it
+///
+/// `assay_evidence::mandate::OperationClass` is `read < write < commit` with subsumption semantics —
+/// an authorization lattice, where a mandate for a class authorizes every lower class. This is a
+/// consequence scale, and the two are orthogonal: a `write` that deletes the only copy of something
+/// is `one_way_terminal`, while a `commit` of a refundable charge is `two_way`. Its `Commit` variant
+/// is documented as "financial, irreversible", which conflates the operation's kind with its
+/// consequence; that conflation is why this needs its own type instead of a reused ordinal.
+///
+/// # What it is for
+///
+/// It is the multiplier on every other verdict in this module. `incomplete` on a `two_way` effect is
+/// a shrug; `incomplete` on a `one_way_terminal` effect is the finding. The level says how well
+/// evidenced the claim is, and this says how much that evidence needs to be worth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IrreversibilityClass {
+    /// Undoable by the same actor with the same authority. A created draft, a settable flag.
+    TwoWay = 0,
+    /// Undoable, but by a different path: a restore, a rollback, a support ticket.
+    OneWayRecoverable = 1,
+    /// Not undoable, and someone is materially affected. A sent message, a posted charge.
+    OneWayConsequential = 2,
+    /// Not undoable and not compensable. A destroyed key, a published secret, a purged backup.
+    OneWayTerminal = 3,
+}
+
+impl IrreversibilityClass {
+    /// Whether an unproven claim about this effect is worth escalating.
+    ///
+    /// Deliberately a method rather than a caller-side comparison: the threshold is a property of the
+    /// scale, and duplicating `>= OneWayConsequential` across call sites is how two answers to one
+    /// question start.
+    #[must_use]
+    pub fn demands_evidence(self) -> bool {
+        self >= Self::OneWayConsequential
+    }
+}
+
 /// The `response.side_effect` block.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SideEffect {
@@ -78,6 +123,14 @@ pub struct SideEffect {
     pub verification_source: Option<VerificationSource>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verification_subject_digest: Option<String>,
+    /// How costly it is if this effect happened when it should not have.
+    ///
+    /// Optional because a producer that cannot classify an action honestly says so by omission. An
+    /// absent class is "unknown", never a default of `two_way`: defaulting to the cheapest value
+    /// would let an unclassified terminal action read as harmless, which is the phantom-grade
+    /// failure the Capsule carves out for exactly this reason.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub irreversibility_class: Option<IrreversibilityClass>,
 }
 
 impl SideEffect {
@@ -89,7 +142,29 @@ impl SideEffect {
             level: SideEffectLevel::Asserted,
             verification_source: None,
             verification_subject_digest: None,
+            irreversibility_class: None,
         }
+    }
+
+    /// Attach the consequence class. Separate from the constructor because classification comes from
+    /// the action, while the level comes from the evidence, and the two arrive from different places.
+    #[must_use]
+    pub fn with_irreversibility(mut self, class: IrreversibilityClass) -> Self {
+        self.irreversibility_class = Some(class);
+        self
+    }
+
+    /// An effect that matters and is not evidenced beyond the tool's own claim.
+    ///
+    /// The single question this axis exists to answer. Unknown classification returns `false`: an
+    /// unclassified effect is not evidence of a harmless one, and this must not become a way to
+    /// manufacture findings from missing metadata.
+    #[must_use]
+    pub fn unevidenced_and_consequential(&self) -> bool {
+        self.level == SideEffectLevel::Asserted
+            && self
+                .irreversibility_class
+                .is_some_and(IrreversibilityClass::demands_evidence)
     }
 
     /// The compat boolean. True for `verified` only: `observed_confirmed` is in-run sequence
@@ -302,4 +377,82 @@ pub fn promote_with_observed_read(
         VerificationSource::ObservedReadFollowup,
         digest,
     )
+}
+
+#[cfg(test)]
+mod irreversibility_tests {
+    use super::*;
+
+    #[test]
+    fn the_scale_orders_from_undoable_to_unrecoverable() {
+        assert!(IrreversibilityClass::TwoWay < IrreversibilityClass::OneWayRecoverable);
+        assert!(
+            IrreversibilityClass::OneWayRecoverable < IrreversibilityClass::OneWayConsequential
+        );
+        assert!(IrreversibilityClass::OneWayConsequential < IrreversibilityClass::OneWayTerminal);
+    }
+
+    #[test]
+    fn only_the_top_two_demand_evidence() {
+        assert!(!IrreversibilityClass::TwoWay.demands_evidence());
+        assert!(!IrreversibilityClass::OneWayRecoverable.demands_evidence());
+        assert!(IrreversibilityClass::OneWayConsequential.demands_evidence());
+        assert!(IrreversibilityClass::OneWayTerminal.demands_evidence());
+    }
+
+    #[test]
+    fn an_unclassified_effect_is_never_treated_as_harmless() {
+        // The phantom-grade carve. Absent must mean unknown, not two_way, or an unclassified
+        // terminal action reads as a shrug.
+        let unclassified = SideEffect::asserted(true);
+        assert_eq!(unclassified.irreversibility_class, None);
+        assert!(
+            !unclassified.unevidenced_and_consequential(),
+            "unknown must not manufacture a finding either"
+        );
+    }
+
+    #[test]
+    fn an_asserted_terminal_effect_is_the_finding() {
+        let e =
+            SideEffect::asserted(true).with_irreversibility(IrreversibilityClass::OneWayTerminal);
+        assert!(e.unevidenced_and_consequential());
+    }
+
+    #[test]
+    fn evidence_clears_a_consequential_effect() {
+        let mut e = SideEffect::asserted(true)
+            .with_irreversibility(IrreversibilityClass::OneWayConsequential);
+        assert!(e.unevidenced_and_consequential());
+        e.level = SideEffectLevel::Verified;
+        assert!(
+            !e.unevidenced_and_consequential(),
+            "the axis grades the gap between consequence and evidence, not consequence alone"
+        );
+    }
+
+    #[test]
+    fn a_cheap_effect_is_not_a_finding_however_thin_the_evidence() {
+        let e = SideEffect::asserted(true).with_irreversibility(IrreversibilityClass::TwoWay);
+        assert_eq!(e.level, SideEffectLevel::Asserted);
+        assert!(!e.unevidenced_and_consequential());
+    }
+
+    #[test]
+    fn the_class_survives_a_round_trip_and_serialises_snake_case() {
+        let e = SideEffect::asserted(true)
+            .with_irreversibility(IrreversibilityClass::OneWayRecoverable);
+        let json = serde_json::to_string(&e).unwrap();
+        assert!(
+            json.contains(r#""irreversibility_class":"one_way_recoverable""#),
+            "{json}"
+        );
+        assert_eq!(serde_json::from_str::<SideEffect>(&json).unwrap(), e);
+    }
+
+    #[test]
+    fn an_absent_class_is_omitted_from_the_wire_not_defaulted() {
+        let json = serde_json::to_string(&SideEffect::asserted(true)).unwrap();
+        assert!(!json.contains("irreversibility_class"), "{json}");
+    }
 }
