@@ -135,6 +135,47 @@ Not machine-checked here. `ReasonCode` is an enum with an exhaustive `as_str`,
 so the compiler already fails on an unhandled variant — the drift this file
 guards against is the kind a compiler cannot see.
 
+### Surface 3b — the `warnings` array of the same two artifacts
+
+`reason_code` is not the only field in `run.json` that carries an identifier.
+`warnings` is a free-text `Vec<String>` on `RunOutcome`, written to `run.json`
+(`run_output.rs:263`) and to the `ci` job summary. It carried only report-writing
+failures until #1949's layer 2, which gave it a code-prefixed member.
+
+| Source | Members | Reaches it via |
+|---|---|---|
+| `assay_core::report::exercised` | 1, listed below | `exercised::warnings` → `decide_run_outcome` → `RunOutcome::warnings` |
+
+<!-- machine-checked: run-json-warning-codes -->
+```text
+W_METRIC_NOT_EXERCISED
+```
+
+**Why this is not in `codes::`.** It is a `W_` code, and every other `W_` code
+lives in the surface-1 registry, so the natural move is to put it there. That
+would be wrong by this file's own rule. `codes::` is inventoried as *the
+vocabulary reaching a SARIF `ruleId` under driver `"assay"`*, via
+`Diagnostic.code` → `build_sarif_diagnostics` — and that function has exactly
+one non-test caller, `assay validate --format sarif` (`validate.rs:68`).
+
+The `run` path is not diagnostic-free, and an earlier draft of this entry said
+it was. `providers/trace.rs:36` builds one inside the trace LLM client,
+`agent_assertions/matchers.rs:558` builds them into
+`details["assertions"]`, and `pipeline_error.rs:83` builds one for every
+classified `assay run` failure. What none of them does is reach
+`build_sarif_diagnostics`. That is the distinction the surface rule turns on: a
+code added to `codes::` for the run path would be recorded on a field it never
+appears in.
+
+Two tests hold that: one checks this block against the parsed constants, the
+other asserts the two sets stay disjoint, so tidying the constant into `codes::`
+fails rather than quietly falsifying surface 1. If a run-path diagnostic ever
+gains a route to `build_sarif_diagnostics`, the constant moves and this entry
+moves with it.
+
+Separately from the surface question, a warning here does not affect
+`exit_code`, which is what makes it a review signal rather than a gate.
+
 ## Surface 4 — evidence-block serde fields
 
 These are snake_case values inside evidence JSON. None reaches a SARIF
@@ -190,8 +231,12 @@ construct a `Diagnostic`.
    `assay_core::policy_engine`, and the parse **fails** on a `reason_code:`
    whose value is not a string literal rather than skipping it.
 3. The `lint-rule-ids` block equals `RULES[].id`, read at runtime.
-4. Surfaces 1 and 2 are disjoint, and neither contains the generic `"assay"`
+4. The `run-json-warning-codes` block equals the `pub const` string set parsed
+   out of `assay_core::report::exercised`.
+5. Surfaces 1 and 2 are disjoint, and neither contains the generic `"assay"`
    id that `write_sarif` emits into the same driver namespace.
+6. Surface 3b is disjoint from surface 1, so a `W_` code cannot be moved into
+   `codes::` without the inventory objecting.
 
-Adding a code to any of the three machine-checked vocabularies fails the test
+Adding a code to any of the four machine-checked vocabularies fails the test
 until this file is updated. Updating this file is the recorded decision.
