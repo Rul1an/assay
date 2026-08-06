@@ -96,6 +96,40 @@ pub struct SocketEvent {
     pub action: u32,
 }
 
+/// Tier-1 rule actions, as encoded by the policy compiler, branched on by the
+/// `connect4` / `connect6` hooks, and reported in [`SocketEvent::action`].
+pub const RULE_ACTION_ALLOW: u32 = 1;
+pub const RULE_ACTION_DENY: u32 = 2;
+
+/// Value stored in the `CIDR_RULES_V4` / `CIDR_RULES_V6` LPM tries.
+///
+/// # Why both fields
+///
+/// The tries hold allow *and* deny entries, so the kernel needs `action` to decide
+/// whether a longest-prefix match blocks the connect. It separately needs `rule_id`
+/// to report *which* policy rule matched: `SocketEvent::rule_id` is surfaced to
+/// users by the monitor live view and recorded in runner evidence, so a value that
+/// merely repeats the action would attribute every CIDR block to the same
+/// nonexistent rule. Keeping both in one map value is what lets the hook answer
+/// "blocked" and "by which rule" from a single lookup.
+///
+/// `#[repr(C)]` and used across the eBPF/userspace boundary, so the layout must
+/// stay in sync on both sides; [`CIDR_RULE_VALUE_SIZE`] pins it.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CidrRuleValue {
+    /// [`RULE_ACTION_ALLOW`] or [`RULE_ACTION_DENY`].
+    pub action: u32,
+    /// Compiler-assigned id of the policy rule this entry came from. Ids start at
+    /// 1, so 0 means "no rule" and never identifies a real rule.
+    pub rule_id: u32,
+}
+
+/// Wire size of [`CidrRuleValue`]. Asserted against the real layout below so a
+/// field added on one side of the boundary fails the build rather than shifting
+/// how the other side reads the map.
+pub const CIDR_RULE_VALUE_SIZE: usize = 8;
+
 /// Key used to identify an inode in BPF maps.
 ///
 /// # ABI and kernel assumptions
@@ -167,6 +201,9 @@ unsafe impl aya::Pod for InodeKeyMap {}
 unsafe impl aya::Pod for InodeKey {}
 
 #[cfg(all(target_os = "linux", feature = "user"))]
+unsafe impl aya::Pod for CidrRuleValue {}
+
+#[cfg(all(target_os = "linux", feature = "user"))]
 const _: () = {
     fn _assert_pod<T: aya::Pod>() {}
     fn _check() {
@@ -208,6 +245,11 @@ const _: [(); 8] = [(); core::mem::align_of::<MonitorEvent>()];
 // Size: 4 + 4 + 8 + 8 + 2 + 2 + 4 + 16 + 4 + 4 = 56 bytes.
 const _: [(); 56] = [(); core::mem::size_of::<SocketEvent>()];
 const _: [(); 8] = [(); core::mem::align_of::<SocketEvent>()];
+
+// CidrRuleValue is the CIDR-trie map value shared by the hooks and the loader.
+// Size: 4 + 4 = 8 bytes, no padding, so the kernel and userspace views agree.
+const _: [(); CIDR_RULE_VALUE_SIZE] = [(); core::mem::size_of::<CidrRuleValue>()];
+const _: [(); 4] = [(); core::mem::align_of::<CidrRuleValue>()];
 
 #[cfg(all(target_os = "linux", feature = "std"))]
 pub fn get_inode_generation(fd: std::os::fd::RawFd) -> std::io::Result<u32> {
