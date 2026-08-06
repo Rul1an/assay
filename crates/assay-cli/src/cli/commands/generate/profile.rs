@@ -227,7 +227,7 @@ mod tests {
             profile: None,
             output: PathBuf::from("policy.yaml"),
             name: "".into(),
-            format: "yaml".into(),
+            format: crate::cli::args::common::PolicyOutputFormat::Yaml,
             dry_run: false,
             diff: false,
             heuristics: false,

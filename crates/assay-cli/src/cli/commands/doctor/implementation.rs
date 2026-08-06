@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use assay_core::config::{load_config, path_resolver::PathResolver};
 
+use crate::cli::args::common::OutputFormat;
 use crate::cli::args::DoctorArgs;
 use crate::cli::helpers::normalize_severity;
 use crate::diagnostics;
@@ -11,7 +12,7 @@ use super::fixes::run_doctor_fix;
 use super::parse_error::try_fix_parse_error;
 
 pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
-    if args.fix && args.format == "json" {
+    if args.fix && args.format == OutputFormat::Json {
         eprintln!("doctor --fix currently supports text output only; use --format text");
         return Ok(1);
     }
@@ -38,7 +39,7 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         (None, None)
     };
 
-    if args.format == "json" {
+    if args.format == OutputFormat::Json {
         let timestamp = chrono::Utc::now().to_rfc3339();
         let mut json_out = serde_json::to_value(&report)?;
 

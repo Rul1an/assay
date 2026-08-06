@@ -232,8 +232,9 @@ pub async fn cmd_trace(args: TraceArgs, legacy_mode: bool) -> anyhow::Result<i32
             test_id,
             prompt,
         } => {
-            let format_enum = assay_core::mcp::McpInputFormat::from_cli_label(&format)
-                .ok_or_else(|| anyhow::anyhow!("unknown format: {}", format))?;
+            // Clap rejected anything outside the vocabulary before this point, so the
+            // conversion is total; `to_core` panics rather than defaulting if the two ever drift.
+            let format_enum = format.to_core();
 
             import_mcp::run(import_mcp::ImportMcpArgs {
                 input,

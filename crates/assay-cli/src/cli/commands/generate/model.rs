@@ -1,3 +1,4 @@
+use crate::cli::args::common::PolicyOutputFormat;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -61,9 +62,14 @@ pub enum Entry {
     },
 }
 
-pub fn serialize(policy: &Policy, format: &str) -> Result<String> {
+/// Render a policy in the requested format.
+///
+/// Takes the enum, not a `&str`. The `&str` version's `_` arm wrote YAML, so `--format jsom`
+/// produced a YAML policy at exit 0 — into whatever path the user named, `.json` included. With
+/// the enum there is no arm left for a value nobody chose.
+pub fn serialize(policy: &Policy, format: PolicyOutputFormat) -> Result<String> {
     Ok(match format {
-        "json" => serde_json::to_string_pretty(policy)?,
-        _ => serde_yaml::to_string(policy)?,
+        PolicyOutputFormat::Json => serde_json::to_string_pretty(policy)?,
+        PolicyOutputFormat::Yaml => serde_yaml::to_string(policy)?,
     })
 }

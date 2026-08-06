@@ -105,7 +105,7 @@ pub fn run(args: GenerateArgs) -> Result<i32> {
         allow_count, review_count, deny_count
     );
 
-    let output = serialize(&policy, &args.format)?;
+    let output = serialize(&policy, args.format)?;
 
     if args.dry_run {
         println!("{}", output);

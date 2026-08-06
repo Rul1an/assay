@@ -1,3 +1,4 @@
+use super::common::McpTranscriptFormat;
 use clap::Parser;
 use std::path::PathBuf;
 
@@ -43,9 +44,9 @@ pub struct ImportArgs {
     /// Input file (MCP transcript or Inspector JSON)
     pub input: std::path::PathBuf,
 
-    /// Input format: inspector | jsonrpc | streamable-http | http-sse (alias: sse-legacy)
-    #[arg(long, default_value = "inspector")]
-    pub format: String,
+    /// Input format for the transcript.
+    #[arg(long, value_enum, default_value_t = McpTranscriptFormat::Inspector)]
+    pub format: McpTranscriptFormat,
 
     /// Generate initial eval config and policy
     #[arg(long)]

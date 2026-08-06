@@ -222,8 +222,30 @@ The empty `aeeObservedAttacks` in this example is deliberate. It is the safe def
 | `aeePostureDigest` | yes | Must equal `observationEnvironment.networkPosture.digest.sha256` |
 | `assayObservedLabels` | no | Assay-readable label summary for operators/debugging |
 | `assayCollectionPath` | no | Assay producer collection path |
+| `assaySealedAt` | no | RFC 3339 UTC instant the seal was signed |
+| `assaySourceSchema` | no | The Assay record schema the observation came from |
+| `assaySealScope` | no | The enforcement boundary this seal speaks for |
+| `assayDropProofModel` | no | Which named model licenses the drop accounting |
+| `assayDropProofBasis` | no | `checked` or `declared`, per the model above |
+| `assayDropChannels` | no | Per-channel loss counters, under the counted-queue model |
 | `assayAttackRowAttributionSource` | no | Assay explanation of row attribution source |
 | `assayNonClaims` | no | Assay payload-local non-claims |
+
+This table listed four members while `SealPayload` declared ten, for as long as the struct has
+existed. It was written against the design and never re-read against the code, which is the drift a
+hand-kept table beside a type always develops. Two of the missing six are the drop-proof pair, so
+the omission hid the one member that says whether the drop count was verified or asserted.
+
+Two counts still differ from this one, deliberately and not:
+
+- `REQUIRED_SEAL_FIELDS` in the fixture checker names **seven** of the ten. `assayObservedLabels`
+  is a debugging aid, and the drop-proof pair is not required because the checker predates it.
+- The fixture checker's own positive payload carries **eight**, omitting `assayDropProofBasis` and
+  `assayDropChannels` entirely. The Rust producer emits them unconditionally. So a real run would
+  carry two members the checker has never seen, one of which is `checked`-versus-`declared`.
+
+Recorded rather than repaired here, because closing it means deciding whether the checker requires
+the pair or the producer stops emitting it, and that is a contract question rather than an edit.
 
 Fields beginning with `assay` in the sealed payload are Assay producer vocabulary. AEE consumers may ignore them unless their own policy understands them. They MUST NOT alter AEE structural validity. Any future AEE statement exporter MUST also carry predicate-level `doesNotAssert` for statement-level non-claims; `assayNonClaims` inside the sealed payload is only producer vocabulary and does not weaken required AEE checks.
 

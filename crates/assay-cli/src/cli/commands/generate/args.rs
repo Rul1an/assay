@@ -19,8 +19,9 @@ pub struct GenerateArgs {
     #[arg(long, default_value = "Generated Policy")]
     pub name: String,
 
-    #[arg(long, default_value = "yaml")]
-    pub format: String,
+    /// Output format for the generated policy.
+    #[arg(long, value_enum, default_value_t = crate::cli::args::common::PolicyOutputFormat::Yaml)]
+    pub format: crate::cli::args::common::PolicyOutputFormat,
 
     #[arg(long)]
     pub dry_run: bool,
@@ -115,7 +116,7 @@ mod tests {
             profile: None,
             output: PathBuf::from("policy.yaml"),
             name: "Generated Policy".to_string(),
-            format: "yaml".to_string(),
+            format: crate::cli::args::common::PolicyOutputFormat::Yaml,
             dry_run: false,
             diff: false,
             heuristics: false,
