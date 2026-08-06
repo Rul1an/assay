@@ -16,12 +16,23 @@ pub(crate) enum CoverageOutputFormat {
 }
 
 impl CoverageOutputFormat {
-    /// What `--input` mode makes of a spelling. It has no text output, so `text` names the
-    /// canonical JSON report here; that is why the argument's shared default is accepted at all.
-    pub(crate) fn narrow(format: CoverageFormat) -> Self {
+    /// What this mode is asked for by default when `--format` is absent.
+    pub(crate) const DEFAULT: CoverageFormat = CoverageFormat::Json;
+
+    /// `Err` carries the message for the one spelling this mode does not honour.
+    ///
+    /// `text` used to be accepted here and silently mean the canonical JSON report. That was not a
+    /// chosen alias: the argument's shared default was `text`, so the mode had to accept it, and
+    /// meaning JSON by it was the only thing left to do. The default now belongs to the mode, so
+    /// the spelling can be refused the way `md` already is in legacy mode.
+    pub(crate) fn narrow(format: CoverageFormat) -> std::result::Result<Self, &'static str> {
         match format {
-            CoverageFormat::Text | CoverageFormat::Json => Self::Json,
-            CoverageFormat::Md | CoverageFormat::Markdown => Self::Markdown,
+            CoverageFormat::Json => Ok(Self::Json),
+            CoverageFormat::Md | CoverageFormat::Markdown => Ok(Self::Markdown),
+            CoverageFormat::Text => Err(
+                "--format text is only supported without --input mode; --input mode writes \
+                     json or md",
+            ),
         }
     }
 }
@@ -39,6 +50,9 @@ pub(crate) enum LegacyOutputFormat {
 }
 
 impl LegacyOutputFormat {
+    /// What this mode is asked for by default when `--format` is absent.
+    pub(crate) const DEFAULT: CoverageFormat = CoverageFormat::Text;
+
     /// `Err` carries the message for the one spelling legacy mode does not honour. It used to fall
     /// through a `_` arm and print text, which is the defect this narrowing removes.
     pub(crate) fn narrow(format: CoverageFormat) -> std::result::Result<Self, &'static str> {
@@ -97,13 +111,23 @@ pub async fn cmd_coverage(args: CoverageArgs) -> Result<i32> {
         return Ok(crate::exit_codes::EXIT_CONFIG_ERROR);
     }
 
+    // Both mode rules sit here: each applies its own default and each refuses by name the spelling
+    // it cannot honour, rather than reinterpreting it. Neither mode accepts a value only because
+    // the other mode's default requires it.
     if args.input.is_some() {
-        return generate::cmd_coverage_generate(&args).await;
+        let requested = args.format.unwrap_or(CoverageOutputFormat::DEFAULT);
+        let output = match CoverageOutputFormat::narrow(requested) {
+            Ok(output) => output,
+            Err(message) => {
+                eprintln!("Measurement error: {message}");
+                return Ok(crate::exit_codes::EXIT_CONFIG_ERROR);
+            }
+        };
+        return generate::cmd_coverage_generate(&args, output).await;
     }
 
-    // Both mode rules sit here, and both refuse an argument this mode cannot honour instead of
-    // reinterpreting it.
-    let output = match LegacyOutputFormat::narrow(args.format) {
+    let requested = args.format.unwrap_or(LegacyOutputFormat::DEFAULT);
+    let output = match LegacyOutputFormat::narrow(requested) {
         Ok(output) => output,
         Err(message) => {
             eprintln!("Measurement error: {message}");

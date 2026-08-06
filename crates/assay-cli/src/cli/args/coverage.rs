@@ -63,11 +63,19 @@ pub struct CoverageArgs {
     #[arg(long)]
     pub export_baseline: Option<PathBuf>,
 
-    /// Output format. With `--input`: `json` or `md`, and `text` names the canonical JSON.
-    /// Without it: `text`, `json` or `markdown`, and `md` is rejected in favour of `markdown`.
+    // Deliberately without an inline default, and the rationale is a plain comment because clap
+    // renders a doc comment into `--help` and this is not something a user needs to read.
+    //
+    // `coverage` is two commands behind one name, and the modes do not share an output kind:
+    // legacy has a text output and `--input` mode does not. One shared `default_value = "text"`
+    // forced `--input` mode to accept `text` and mean JSON by it, which it did at exit 0 with no
+    // note that the spelling was not honoured. The default belongs to the mode, so each mode
+    // applies its own in `cmd_coverage`, next to the narrowing it already does.
+    /// Output format. With `--input`: `json` (the default) or `md`. Without it: `text` (the
+    /// default), `json` or `markdown`. Each mode rejects by name the spelling it cannot honour.
     /// `github` is accepted as an alias of `markdown`.
-    #[arg(long, default_value = "text")]
-    pub format: CoverageFormat,
+    #[arg(long)]
+    pub format: Option<CoverageFormat>,
 
     /// Number of top routes to include in markdown output (default: 10).
     #[arg(long = "routes-top", default_value_t = 10)]

@@ -1,18 +1,18 @@
 use crate::exit_codes;
-use assay_core::errors::diagnostic::{exit_class, Diagnostic, ExitClass};
+use assay_core::errors::diagnostic::{exit_class, Diagnostic, ExitClass, Severity};
 use std::path::{Path, PathBuf};
 
+/// The CLI spelling of a diagnostic severity.
+///
+/// An unrecognized value becomes `error`, not `note`. The previous fallback was
+/// the least severe level, so a misspelled or newly introduced severity dropped
+/// out of the set `decide_exit` inspects and could turn a failing run into exit
+/// 0 (#2025). The vocabulary itself lives in `assay-core` beside `Diagnostic`,
+/// because a second copy of it had already drifted (#2033).
 pub fn normalize_severity(s: &str) -> &'static str {
-    if s.eq_ignore_ascii_case("error") {
-        return "error";
-    }
-    if s.eq_ignore_ascii_case("warn") || s.eq_ignore_ascii_case("warning") {
-        return "warn";
-    }
-    if s.eq_ignore_ascii_case("note") || s.eq_ignore_ascii_case("info") {
-        return "note";
-    }
-    "note"
+    Severity::parse(s)
+        .map(Severity::as_cli_str)
+        .unwrap_or("error")
 }
 
 pub fn infer_policy_path(assay_yaml: &Path) -> Option<PathBuf> {
@@ -146,5 +146,35 @@ mod decide_exit_tests {
             decide_exit(&[err("E_CFG_INVENTED")]),
             exit_codes::TEST_FAILED
         );
+    }
+}
+
+#[cfg(test)]
+mod severity_exit_tests {
+    use super::{decide_exit, normalize_severity};
+    use assay_core::errors::diagnostic::Diagnostic;
+
+    #[test]
+    fn an_unknown_severity_does_not_silently_pass() {
+        // Previously `normalize_severity` returned "note" here, `decide_exit`
+        // saw no error, and the command exited 0 on a diagnostic nobody could
+        // classify (#2025).
+        assert_eq!(normalize_severity("cirtical"), "error");
+        let diag = Diagnostic {
+            code: "E_CFG_PARSE".into(),
+            severity: "cirtical".into(),
+            source: "test".into(),
+            message: "unclassifiable".into(),
+            context: serde_json::Value::Null,
+            fix_steps: vec![],
+        };
+        assert_ne!(decide_exit(&[diag]), 0, "an unknown severity exited 0");
+    }
+
+    #[test]
+    fn known_severities_are_unchanged() {
+        assert_eq!(normalize_severity("Warning"), "warn");
+        assert_eq!(normalize_severity("INFO"), "note");
+        assert_eq!(normalize_severity("error"), "error");
     }
 }

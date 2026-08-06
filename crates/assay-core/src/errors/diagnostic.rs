@@ -15,6 +15,59 @@ pub struct Diagnostic {
 const ICON_ERROR: &str = "\u{274c} ";
 const ICON_WARN: &str = "\u{26a0}\u{fe0f} ";
 
+/// The severity vocabulary a `Diagnostic` may carry.
+///
+/// One definition, because there were two and they disagreed: `assay-cli` matched
+/// case-insensitively and emitted `warn`, `assay-core`'s SARIF builder matched
+/// exactly and emitted `warning` (#2033). A value spelled `Warning` reached exit
+/// classification as a warning and Code Scanning as a note.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Severity {
+    Error,
+    Warning,
+    Note,
+}
+
+impl Severity {
+    /// Parse a severity, or `None` when the value is not in the vocabulary.
+    ///
+    /// `None` rather than a default on purpose. Both previous implementations
+    /// ended in an unconditional fallback to the *least* severe level, so a
+    /// misspelled or newly introduced severity dropped out of the error set and
+    /// could turn a failing run into exit 0 (#2025). An unrecognized severity is
+    /// not a note; it is unknown, and callers must decide deliberately.
+    pub fn parse(value: &str) -> Option<Self> {
+        if value.eq_ignore_ascii_case("error") {
+            return Some(Self::Error);
+        }
+        if value.eq_ignore_ascii_case("warn") || value.eq_ignore_ascii_case("warning") {
+            return Some(Self::Warning);
+        }
+        if value.eq_ignore_ascii_case("note") || value.eq_ignore_ascii_case("info") {
+            return Some(Self::Note);
+        }
+        None
+    }
+
+    /// The spelling the CLI uses in its own output and comparisons.
+    pub fn as_cli_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warn",
+            Self::Note => "note",
+        }
+    }
+
+    /// The SARIF `level`, which spells warnings differently from the CLI.
+    pub fn as_sarif_level(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+            Self::Note => "note",
+        }
+    }
+}
+
 impl Diagnostic {
     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
@@ -281,5 +334,55 @@ mod tests {
         assert!(plain.contains("source: config"));
         assert!(plain.contains("assay.yaml"));
         assert!(plain.contains("1. Run: assay doctor --config assay.yaml"));
+    }
+}
+
+#[cfg(test)]
+mod severity_tests {
+    use super::Severity;
+
+    #[test]
+    fn an_unrecognized_severity_is_unknown_rather_than_a_note() {
+        // The defect this replaces: both implementations ended in an
+        // unconditional fallback to the least severe level, so a value nobody
+        // recognized dropped out of the error set and could turn a failing run
+        // into exit 0. `None` forces callers to decide.
+        assert_eq!(Severity::parse("cirtical"), None);
+        assert_eq!(Severity::parse(""), None);
+        assert_eq!(Severity::parse("fatal"), None);
+    }
+
+    #[test]
+    fn one_vocabulary_for_both_spellings() {
+        // assay-cli matched case-insensitively; the SARIF builder matched
+        // exactly. `Warning` reached exit classification as a warning and Code
+        // Scanning as a note.
+        for spelling in ["warn", "warning", "WARN", "Warning", "WARNING"] {
+            assert_eq!(
+                Severity::parse(spelling),
+                Some(Severity::Warning),
+                "{spelling}"
+            );
+        }
+        for spelling in ["error", "ERROR", "Error"] {
+            assert_eq!(
+                Severity::parse(spelling),
+                Some(Severity::Error),
+                "{spelling}"
+            );
+        }
+        for spelling in ["note", "info", "INFO"] {
+            assert_eq!(
+                Severity::parse(spelling),
+                Some(Severity::Note),
+                "{spelling}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_two_surfaces_spell_warnings_differently_on_purpose() {
+        assert_eq!(Severity::Warning.as_cli_str(), "warn");
+        assert_eq!(Severity::Warning.as_sarif_level(), "warning");
     }
 }
