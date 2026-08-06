@@ -23,7 +23,11 @@ pub(crate) mod normalize;
 // constructors are unused outside the unit tests.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) mod enforcement_health;
-#[cfg(all(target_os = "linux", feature = "runner"))]
+// Same split as enforcement_health above, and for the same reason: the carrier and its rules are
+// plain data, so they stay testable on a developer machine, while only the emitter that fills them
+// from a live run is Linux-and-runner gated. Gating the whole module meant these tests never ran
+// off Linux, which is how a coverage claim keyed on the wrong probe survived to a live run.
+#[cfg_attr(not(all(target_os = "linux", feature = "runner")), allow(dead_code))]
 pub(crate) mod observation_health;
 // Same split as enforcement_health above: the record is cross-platform so its invariants stay
 // testable on a developer machine, while the producer that fills it from connect events is
@@ -496,6 +500,15 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                     compiled.tier1.network_deny_cidrs.len()
                 );
             }
+        }
+    }
+
+    // Ask the kernel for allowed-connect events only when this run wants a peer set. Off by
+    // default, so a run that never asked pays nothing and reports an honestly empty set.
+    if args.observed_peers.is_some() {
+        if let Err(e) = monitor.set_emit_observed_connect(true) {
+            emit_err!("FATAL: --observed-peers was requested but the observed-connect emit could not be enabled: {e}");
+            return Ok(exit_codes::EXIT_INFRA_ERROR);
         }
     }
 

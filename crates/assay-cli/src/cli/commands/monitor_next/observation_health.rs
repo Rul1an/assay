@@ -36,6 +36,16 @@ use std::path::Path;
 /// The probe whose attachment decides whether connect-time peers were observable at all.
 const CONNECT_PROBE: &str = "sys_enter_connect";
 
+/// The cgroup hook that supplies the peer set, which is NOT the probe above.
+///
+/// `sys_enter_connect` is a tracepoint that fires on every connect attempt and is always attached;
+/// `cgroup_sock_addr:connect4` only attaches when a policy is loaded, and is the only source whose
+/// address comes from the kernel's own `bpf_sock_addr`. Deriving the coverage claim from the
+/// tracepoint while the peers come from the hook is what let a run report `connect_only` coverage
+/// with a structurally empty peer set — a combination a consumer reads as "watched and saw nothing",
+/// which is precisely the false refutation the coverage denominator exists to prevent.
+const EGRESS_PEER_PROBE: &str = "cgroup_sock_addr:connect4";
+
 /// A deterministic run id over what the run observed, matching the sandbox convention
 /// (`sandbox_<digest-prefix>`): the same observation produces the same id, and nothing is invented
 /// from a clock or a random source that a reader could not recompute.
@@ -73,7 +83,8 @@ pub(crate) fn build(
     ringbuf_drops: u64,
     policy_declared: bool,
 ) -> ObservationHealth {
-    let network_protocol_coverage = if attachment.attached_probes().contains(&CONNECT_PROBE) {
+    // Keyed on the probe that actually supplies peers, not on the one that merely sees connects.
+    let network_protocol_coverage = if attachment.attached_probes().contains(&EGRESS_PEER_PROBE) {
         // Connect-time peers only. The monitor attaches no sendto/sendmsg probe, so a datagram peer
         // set is not observable and must not be claimed.
         NetworkProtocolCoverageStatus::ConnectOnly
@@ -161,11 +172,26 @@ mod tests {
     }
 
     #[test]
+    fn the_connect_tracepoint_alone_does_not_earn_network_coverage() {
+        // Regression guard for a defect found only by a live run. The tracepoint `sys_enter_connect`
+        // is always attached, but it is NOT the peer source: peers come from the cgroup hook, which
+        // attaches only when a policy is loaded. Keying coverage on the tracepoint made a run report
+        // `connect_only` while its peer set was structurally empty — and a consumer reads that pair
+        // as "watched and saw nothing", which is a false refutation.
+        let health = build("run1", &attachment(&[CONNECT_PROBE], &[]), 0, false);
+        assert_eq!(
+            health.network_protocol_coverage,
+            NetworkProtocolCoverageStatus::Absent,
+            "the tracepoint sees connects but supplies no peers, so it cannot ground an absence claim"
+        );
+    }
+
+    #[test]
     fn an_attached_but_silent_connect_probe_still_reports_coverage() {
         // The defect this artifact exists to avoid. Deriving from emitted counts, a run where the
         // connect probe attached and correctly saw nothing reports `absent` coverage — and absent
         // coverage blocks an absence claim the run can actually support.
-        let health = build("run1", &attachment(&[CONNECT_PROBE], &[]), 0, false);
+        let health = build("run1", &attachment(&[EGRESS_PEER_PROBE], &[]), 0, false);
         assert_eq!(
             health.network_protocol_coverage,
             NetworkProtocolCoverageStatus::ConnectOnly

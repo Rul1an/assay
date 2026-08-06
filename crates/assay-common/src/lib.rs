@@ -25,10 +25,26 @@ pub const EVENT_SENDMSG: u32 = 7;
 
 pub const KEY_MONITOR_ALL: u32 = 100;
 pub const KEY_EMIT_INODE_RESOLVED: u32 = 101;
+/// Emit an observed-connect event for every ALLOWED connect, not just blocked ones.
+///
+/// Off by default and set only when a run asks for a peer set, because the allow path is the hot
+/// one: a monitored workload makes far more permitted connections than denied ones, and an
+/// unconditional emit would charge every existing user ring-buffer bandwidth for evidence they did
+/// not ask for. When it is off, `observed_peers` is honestly empty rather than quietly partial.
+pub const KEY_EMIT_OBSERVED_CONNECT: u32 = 102;
 pub const KEY_DEDUP_OPEN_PATHS: u32 = 102;
 
 pub const EVENT_FILE_BLOCKED: u32 = 10;
 pub const EVENT_CONNECT_BLOCKED: u32 = 20;
+/// An ALLOWED connect, observed at the cgroup hook.
+///
+/// Carries the same projected payload as [`EVENT_CONNECT_BLOCKED`], so one decoder reads both, and
+/// deliberately NOT the raw-sockaddr shape the `sys_enter_connect` tracepoint emits. The tracepoint
+/// reads the address out of userspace memory before the kernel copies it, which a process can change
+/// underneath; this hook reads `user_ip4`/`user_ip6` from the kernel's own `bpf_sock_addr`. For
+/// observability either would do. For refuting a claim of the form "nothing went to X" only this one
+/// is sound, because there the input is attacker-influenced.
+pub const EVENT_CONNECT_OBSERVED: u32 = 21;
 
 pub const DATA_LEN: usize = 512;
 

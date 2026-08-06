@@ -291,6 +291,19 @@ impl Monitor {
         }
     }
 
+    /// Emit an event for every allowed connect. See [`loader::LinuxMonitor::set_emit_observed_connect`].
+    pub fn set_emit_observed_connect(&mut self, enabled: bool) -> Result<(), MonitorError> {
+        #[cfg(target_os = "linux")]
+        {
+            self.inner.set_emit_observed_connect(enabled)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = enabled;
+            Ok(())
+        }
+    }
+
     pub fn set_emit_inode_resolved(&mut self, enabled: bool) -> Result<(), MonitorError> {
         #[cfg(target_os = "linux")]
         return self.inner.set_emit_inode_resolved(enabled);

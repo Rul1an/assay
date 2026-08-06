@@ -1,5 +1,7 @@
+use crate::CONFIG;
 use assay_common::{
-    CidrRuleValue, SocketEvent, RULE_ACTION_DENY, SOCKET_STATS_LEN, SOCKET_STAT_ALLOWED,
+    CidrRuleValue, SocketEvent, EVENT_CONNECT_OBSERVED, KEY_EMIT_OBSERVED_CONNECT,
+    RULE_ACTION_ALLOW, RULE_ACTION_DENY, SOCKET_STATS_LEN, SOCKET_STAT_ALLOWED,
     SOCKET_STAT_BLOCKED_CIDR, SOCKET_STAT_BLOCKED_PORT, SOCKET_STAT_CHECKS,
     SOCKET_STAT_EVENTS_EMITTED, SOCKET_STAT_RINGBUF_DROPPED,
 };
@@ -55,6 +57,44 @@ pub fn connect4_hook(ctx: SockAddrContext) -> i32 {
     }
 }
 
+/// Emit an observed-connect event for an ALLOWED connect, when the run asked for one.
+///
+/// Gated on `KEY_EMIT_OBSERVED_CONNECT` because this is the hot path: permitted connections vastly
+/// outnumber denied ones, so an unconditional emit would cost every run ring-buffer bandwidth for
+/// evidence most of them never read.
+///
+/// `rule_id` is the rule that permitted the connect where one did, and 0 where the connect was
+/// allowed by no rule matching at all. Those are different facts and the event keeps them apart.
+#[inline(always)]
+fn emit_observed_connect(
+    cgroup_id: u64,
+    family: u16,
+    dst_port: u16,
+    addr_v4: u32,
+    addr_v6: &[u8; 16],
+    rule_id: u32,
+) {
+    // SAFETY: CONFIG is an eBPF map owned by this program. A missing key means the feature was not
+    // requested, which is the safe default: no events rather than unasked-for cost.
+    let enabled = unsafe { CONFIG.get(&KEY_EMIT_OBSERVED_CONNECT) }
+        .copied()
+        .unwrap_or(0)
+        != 0;
+    if !enabled {
+        return;
+    }
+    emit_socket_event(
+        EVENT_CONNECT_OBSERVED,
+        cgroup_id,
+        family,
+        dst_port,
+        addr_v4,
+        addr_v6,
+        rule_id,
+        RULE_ACTION_ALLOW,
+    );
+}
+
 #[inline(always)]
 fn try_connect4(ctx: &SockAddrContext) -> Result<bool, i64> {
     inc_stat(SOCKET_STAT_CHECKS);
@@ -88,7 +128,15 @@ fn try_connect4(ctx: &SockAddrContext) -> Result<bool, i64> {
 
     // SAFETY: ALLOW_PORTS is an eBPF map owned by this program. A missing key
     // means no explicit allow rule matched this destination port.
-    if unsafe { ALLOW_PORTS.get(&dst_port).is_some() } {
+    if let Some(&rule_id) = unsafe { ALLOW_PORTS.get(&dst_port) } {
+        emit_observed_connect(
+            cgroup_id,
+            2,
+            dst_port,
+            sock_addr.user_ip4,
+            &[0u8; 16],
+            u32::from(rule_id),
+        );
         inc_stat(SOCKET_STAT_ALLOWED);
         return Ok(true);
     }
@@ -115,6 +163,7 @@ fn try_connect4(ctx: &SockAddrContext) -> Result<bool, i64> {
         }
     }
 
+    emit_observed_connect(cgroup_id, 2, dst_port, sock_addr.user_ip4, &[0u8; 16], 0);
     inc_stat(SOCKET_STAT_ALLOWED);
     Ok(true)
 }
@@ -169,7 +218,15 @@ fn try_connect6(ctx: &SockAddrContext) -> Result<bool, i64> {
 
     // SAFETY: ALLOW_PORTS is an eBPF map owned by this program. A missing key
     // means no explicit allow rule matched this destination port.
-    if unsafe { ALLOW_PORTS.get(&dst_port).is_some() } {
+    if let Some(&rule_id) = unsafe { ALLOW_PORTS.get(&dst_port) } {
+        emit_observed_connect(
+            cgroup_id,
+            2,
+            dst_port,
+            sock_addr.user_ip4,
+            &[0u8; 16],
+            u32::from(rule_id),
+        );
         inc_stat(SOCKET_STAT_ALLOWED);
         return Ok(true);
     }

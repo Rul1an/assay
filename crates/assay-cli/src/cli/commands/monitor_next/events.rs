@@ -58,7 +58,12 @@ pub(crate) async fn handle_event(
 /// rather than the world.
 pub(crate) fn observed_peer(event: &assay_common::MonitorEvent) -> Option<String> {
     match event.event_type {
-        assay_common::EVENT_CONNECT | assay_common::EVENT_CONNECT_BLOCKED => {
+        // Both carry the PROJECTED payload the cgroup hook writes, read from the kernel's own
+        // `bpf_sock_addr`, so one decoder serves both. EVENT_CONNECT is deliberately NOT here: the
+        // tracepoint emits a raw sockaddr copied out of userspace before the kernel takes it, which
+        // a process can change underneath, and a peer set that grounds a refutation cannot rest on
+        // an input the subject controls.
+        assay_common::EVENT_CONNECT_OBSERVED | assay_common::EVENT_CONNECT_BLOCKED => {
             assay_monitor::events::decode_blocked_socket_payload(&event.data).map(|s| s.endpoint())
         }
         _ => None,
