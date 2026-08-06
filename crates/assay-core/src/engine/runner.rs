@@ -59,9 +59,10 @@ impl Runner {
         &self,
         run_id: i64,
         tc: &TestCase,
+        resp: &crate::model::LlmResponse,
         final_row: &mut TestResultRow,
     ) -> anyhow::Result<()> {
-        runner_next::assertions::apply_agent_assertions_impl(self, run_id, tc, final_row)
+        runner_next::assertions::apply_agent_assertions_impl(self, run_id, tc, resp, final_row)
     }
 
     async fn run_test_once(

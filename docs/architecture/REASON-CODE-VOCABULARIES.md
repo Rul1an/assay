@@ -144,12 +144,20 @@ failures until #1949's layer 2, which gave it a code-prefixed member.
 
 | Source | Members | Reaches it via |
 |---|---|---|
-| `assay_core::report::exercised` | 1, listed below | `exercised::warnings` → `decide_run_outcome` → `RunOutcome::warnings` |
+| `assay_core::report::exercised` | 2, listed below | `exercised::warnings` → `decide_run_outcome` → `RunOutcome::warnings` |
 
 <!-- machine-checked: run-json-warning-codes -->
 ```text
+W_ASSERTION_NOT_EXERCISED
 W_METRIC_NOT_EXERCISED
 ```
+
+Two codes for one condition on two config surfaces: `expected:` and
+`assertions:`. They are found by different means — a metric declares its own
+`Exercised` value, an assertion is judged by a companion cover in
+`agent_assertions::cover` — and a name can belong to both (`sequence_valid` is a
+metric *and* an assertion type), so a single code would make a CI-log filter
+ambiguous about which surface it matched.
 
 **Why this is not in `codes::`.** It is a `W_` code, and every other `W_` code
 lives in the surface-1 registry, so the natural move is to put it there. That
