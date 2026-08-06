@@ -23,6 +23,7 @@ pub mod skill_supply_chain_capture;
 pub mod store_status;
 pub mod tool_decision_truth;
 pub mod verify_privileged_mcp_action;
+pub mod verify_side_effects;
 pub mod verify_skill_supply_chain;
 pub mod verify_tool_decision_truth;
 
@@ -51,6 +52,9 @@ pub enum EvidenceCmd {
     /// Verify experimental tool-decision-truth recipe rows against their carriers in a bundle
     #[command(name = "verify-tool-decision-truth")]
     VerifyToolDecisionTruth(verify_tool_decision_truth::VerifyToolDecisionTruthArgs),
+    /// Promote side-effect levels against imported provider audit records (import + recompute, never a query)
+    #[command(name = "verify-side-effects")]
+    VerifySideEffects(verify_side_effects::VerifySideEffectsArgs),
     /// Verify a bundle against the privileged-mcp-action/v0 open profile (claim matrix output)
     #[command(name = "verify-privileged-mcp-action")]
     VerifyPrivilegedMcpAction(verify_privileged_mcp_action::VerifyPrivilegedMcpActionArgs),
@@ -177,6 +181,7 @@ pub async fn run(args: crate::cli::args::EvidenceArgs) -> Result<i32> {
         EvidenceCmd::VerifyToolDecisionTruth(a) => {
             verify_tool_decision_truth::cmd_verify_tool_decision_truth(a)
         }
+        EvidenceCmd::VerifySideEffects(a) => verify_side_effects::cmd_verify_side_effects(&a),
         EvidenceCmd::VerifyPrivilegedMcpAction(a) => {
             verify_privileged_mcp_action::cmd_verify_privileged_mcp_action(a)
         }
