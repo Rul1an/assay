@@ -29,6 +29,10 @@ impl EstablishRunOutcome {
     /// Map the detailed run result to the coarse carrier outcome. Only `Complete` is an establish
     /// success; everything else fails closed.
     pub(super) fn to_carrier(self) -> establish::EstablishOutcome {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "every outcome that is not Complete is a failed establish; a new partial-success variant would need naming, and until then it fails rather than passes"
+        )]
         match self {
             EstablishRunOutcome::Complete => establish::EstablishOutcome::EstablishedComplete,
             _ => establish::EstablishOutcome::EstablishFailed,

@@ -23,6 +23,10 @@ pub fn verify_assertions(
             // FALLBACK 1: Unit Test Mode (Policy Validation)
             // If assertions have explicit `test_args`, `test_trace`, etc., we don't need a real episode.
             // Check if ALL assertions are unit tests.
+            #[expect(
+                clippy::wildcard_enum_match_arm,
+                reason = "an assertion kind with no test-input field cannot be a unit test; a new kind that carries one must be named above or its unit-test form is not recognised"
+            )]
             let is_unit_test = assertions.iter().all(|a| match a {
                 model::TraceAssertion::ArgsValid { test_args, .. } => test_args.is_some(),
                 model::TraceAssertion::SequenceValid {

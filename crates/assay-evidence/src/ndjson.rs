@@ -92,6 +92,10 @@ impl<R: BufRead> Iterator for NdjsonEvents<R> {
                     // Phase 1: Strict validation (duplicate keys, lone surrogates)
                     // Maps to ErrorClass::Contract / ErrorCode::ContractInvalidJson
                     if let Err(e) = validate_json_strict(line) {
+                        #[expect(
+                            clippy::wildcard_enum_match_arm,
+                            reason = "the named errors carry fields worth rendering; the rest use their Display, which is why the fallback is a formatting choice rather than a decision"
+                        )]
                         let reason = match &e {
                             StrictJsonError::DuplicateKey { key, path } => {
                                 format!("duplicate key '{}' at path '{}'", key, path)

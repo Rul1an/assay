@@ -149,6 +149,10 @@ impl Inventory {
     }
 
     /// Convenience for `assay mcp kill --all`
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "only a running process has a pid and cmdline to project; other sources carry neither. On the fn rather than the match: the match sits inside a `.filter_map` closure mid-chain, where an attribute is not a valid position"
+    )]
     pub fn running_process_servers(&self) -> Vec<RunningProcessServer> {
         let mut out: Vec<RunningProcessServer> = self
             .servers
@@ -174,6 +178,10 @@ impl Inventory {
 }
 
 impl DiscoveredServer {
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "only a running process has a pid"
+    )]
     pub fn pid_if_running_process(&self) -> Option<u32> {
         match self.source {
             DiscoverySource::RunningProcess { pid, .. } => Some(pid),
