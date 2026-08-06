@@ -247,6 +247,19 @@ repos:
         stages: [pre-push]
         pass_filenames: false
 
+      - id: linux-gate-self-test
+        name: Linux compile gate self-test
+        entry: bash scripts/ci/test-check-linux.sh
+        language: system
+        pass_filenames: false
+        # The gate could not fail (#2076): every branch ended in `return 0`, so a timeout, a
+        # third-party build script and a real Linux compile error were one outcome. #2074 pushed
+        # four E0425s through it and the delegated host found them.
+        #
+        # This plants a deliberate `cfg(target_os = "linux")` error and requires a non-zero exit --
+        # the property the gate exists for and could not previously demonstrate.
+        stages: [pre-push]
+        files: ^scripts/ci/(check-linux|test-check-linux)\.sh$
       - id: linux-check
         name: linux compile gate (target/multipass)
         entry: bash scripts/ci/check-linux.sh
