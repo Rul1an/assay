@@ -76,6 +76,7 @@ fn monitor_args_with_health(
         policy: None,
         monitor_all: false,
         enforcement_health: Some(path),
+        observation_health: None,
     }
 }
 
