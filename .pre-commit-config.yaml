@@ -261,10 +261,14 @@ repos:
         stages: [pre-push]
         files: ^scripts/ci/(check-linux|test-check-linux)\.sh$
       - id: linux-check
-        name: linux compile gate (target/multipass)
+        name: linux compile gate (cross-target)
         entry: bash scripts/ci/check-linux.sh
         language: system
         stages: [pre-push]
         pass_filenames: false
-        # Default: cross-compile only (ASSAY_LINUX_CHECK_MODE=target), with timeout so pre-push does not hang.
-        # ASSAY_LINUX_TARGET_TIMEOUT=300 (default). Set =multipass for full VM clippy.
+        # Cross-compile only. The `multipass` VM mode this used to name is gone (#2077): its clippy
+        # run ended in `return 0` on failure, so like the cross-target path it could not fail, and
+        # keeping a second fail-open path would have meant fixing the defect in one of two places.
+        #
+        # ASSAY_LINUX_TARGET_TIMEOUT=300 (default) bounds each crate's check.
+        # ASSAY_LINUX_CHECK_REQUIRE_FULL=1 makes incomplete coverage a failure rather than a warning.
