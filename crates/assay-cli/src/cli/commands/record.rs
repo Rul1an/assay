@@ -125,7 +125,7 @@ pub async fn run(args: RecordArgs) -> Result<i32> {
         profile: None,
         output: args.output.clone(),
         name: args.name,
-        format: "yaml".to_string(),
+        format: crate::cli::args::common::PolicyOutputFormat::Yaml,
         dry_run: false,
         diff: false,
         heuristics: true, // Enable heuristics for record mode

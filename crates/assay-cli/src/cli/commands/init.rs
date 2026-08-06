@@ -192,7 +192,8 @@ fn run_from_trace(args: &InitArgs, trace_path: &std::path::Path) -> anyhow::Resu
     // 2. Generate policy
     let heur_cfg = HeuristicsConfig::default();
     let policy = generate::generate_from_trace("generated", &agg, args.heuristics, &heur_cfg);
-    let policy_yaml = generate::serialize(&policy, "yaml")?;
+    let policy_yaml =
+        generate::serialize(&policy, crate::cli::args::common::PolicyOutputFormat::Yaml)?;
 
     // Count entries for summary
     let allow_count = policy.files.allow.len()

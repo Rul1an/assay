@@ -193,3 +193,63 @@ fn sim_soak_parses_explicit_values() {
         _ => panic!("expected Command::Sim"),
     }
 }
+
+/// Every argument whose name ends in `format` advertises the values it accepts.
+///
+/// `tests/format_value_parser.rs` checks the same property against a hand-kept table, and that is
+/// exactly how `doctor --format` escaped: it was a bare `String` with `// text|json` beside it,
+/// `--format totally-invalid` printed the text report and exited 0, and every test there passed
+/// because the table never named it. A list beside the thing it describes drifts silently, and in
+/// the dangerous direction — the argument nobody listed is the one nobody checked.
+///
+/// So this derives the set from clap instead of listing it. It lives here rather than beside its
+/// sibling because `assay-cli` has no library target, so only an in-crate test can walk the real
+/// command tree. Adding a `--format` to a new command fails here until it carries a `value_enum`.
+#[test]
+fn every_format_argument_advertises_its_accepted_values() {
+    use clap::CommandFactory;
+
+    fn walk(cmd: &clap::Command, path: &[String], untyped: &mut Vec<String>) {
+        for arg in cmd.get_arguments() {
+            let Some(long) = arg.get_long() else { continue };
+            if !long.ends_with("format") {
+                continue;
+            }
+            if arg.get_possible_values().is_empty() {
+                untyped.push(format!("assay {} --{long}", path.join(" ")));
+            }
+        }
+        for sub in cmd.get_subcommands() {
+            let mut child = path.to_vec();
+            child.push(sub.get_name().to_string());
+            walk(sub, &child, untyped);
+        }
+    }
+
+    let cli = super::Cli::command();
+    let mut untyped = Vec::new();
+    walk(&cli, &[], &mut untyped);
+
+    // A walk that finds nothing would pass silently, so prove it reached the arguments first.
+    let mut total = 0usize;
+    fn count(cmd: &clap::Command, total: &mut usize) {
+        *total += cmd
+            .get_arguments()
+            .filter(|a| a.get_long().is_some_and(|l| l.ends_with("format")))
+            .count();
+        for sub in cmd.get_subcommands() {
+            count(sub, total);
+        }
+    }
+    count(&cli, &mut total);
+    assert!(
+        total > 5,
+        "the walk found only {total} format arguments; it is not reaching them"
+    );
+
+    assert!(
+        untyped.is_empty(),
+        "these format arguments accept any string, so a typo selects a fallback silently:\n  {}",
+        untyped.join("\n  ")
+    );
+}
