@@ -347,7 +347,13 @@ pub(crate) fn export_baseline(
                         test_id: r.test_id.clone(),
                         metric: metric_name.clone(),
                         score,
-                        meta: None,
+                        // Carried so a later run can tell "this metric scored worse" from "this
+                        // metric stopped being evaluated". Without it the two are the same row.
+                        // `meta` is an existing optional field, so an older baseline still loads
+                        // and simply reports no prior coverage.
+                        meta: m_val
+                            .get("exercised")
+                            .map(|e| serde_json::json!({ "exercised": e })),
                     });
                 }
             }
