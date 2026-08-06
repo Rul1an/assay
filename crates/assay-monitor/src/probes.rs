@@ -20,7 +20,7 @@ pub const EXPECTED_PROBES: &[&str] = &[
     "sys_exit_openat",
     "sys_exit_openat2",
     "sys_enter_connect",
-    "sched_process_fork",
+    "sys_enter_fork",
     "lsm:file_open",
 ];
 
@@ -103,10 +103,7 @@ mod tests {
     fn reconciliation_catches_silent_paths_the_sites_never_recorded() {
         // The defect this guards: a guard skips without recording, so only reconciliation sees it.
         let mut attachment = ProbeAttachment::default();
-        for probe in EXPECTED_PROBES
-            .iter()
-            .filter(|p| **p != "sched_process_fork")
-        {
+        for probe in EXPECTED_PROBES.iter().filter(|p| **p != "sys_enter_fork") {
             attachment.attached(probe);
         }
         assert!(
@@ -115,7 +112,7 @@ mod tests {
         );
 
         attachment.reconcile(EXPECTED_PROBES);
-        assert_eq!(attachment.skipped_probes(), ["sched_process_fork"]);
+        assert_eq!(attachment.skipped_probes(), ["sys_enter_fork"]);
     }
 
     #[test]

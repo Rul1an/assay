@@ -270,13 +270,13 @@ impl LinuxMonitor {
                 match tp.attach("syscalls", "sys_enter_fork") {
                     Ok(link_id) => {
                         if let Ok(link) = tp.take_link(link_id) {
-                            self.probe_attachment.attached("sched_process_fork");
+                            self.probe_attachment.attached("sys_enter_fork");
                             self.links.push(MonitorLink::TracePoint(link));
                             println!("DEBUG: Attached Tracepoint sys_enter_fork");
                         }
                     }
                     Err(e) => {
-                        self.probe_attachment.skipped("sched_process_fork");
+                        self.probe_attachment.skipped("sys_enter_fork");
                         eprintln!("WARN: Failed to attach sys_enter_fork: {}", e);
                     }
                 }
