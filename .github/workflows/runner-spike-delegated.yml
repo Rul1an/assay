@@ -195,80 +195,77 @@ jobs:
             python3 -m json.tool "$ebpf_provenance"
           fi
 
-      - name: Run delegated Phase 1 gates
+      - name: Prepare delegated gate root
         shell: bash
-        env:
-          GATES: ${{ inputs.gates }}
         run: |
           set -euo pipefail
-          assay_bin="$PWD/target/debug/assay"
-          ebpf_path="$PWD/target/assay-ebpf.o"
           rm -rf "$ASSAY_RUNNER_DELEGATED_PROOF_ROOT" "$ASSAY_RUNNER_DELEGATED_PROOF_UPLOAD"
           mkdir -p "$ASSAY_RUNNER_DELEGATED_PROOF_ROOT/gates"
 
-          run_gate() {
-            local key="$1"
-            local label="$2"
-            local script="$3"
-            local gate_dir="$ASSAY_RUNNER_DELEGATED_PROOF_ROOT/gates/$key"
-            echo "=== runner-spike delegated gate: ${label} ==="
-            rm -rf "$gate_dir"
-            mkdir -p "$gate_dir"
-            set +e
-            sudo -E env \
-              "PATH=$PATH" \
-              "ASSAY_BIN=$assay_bin" \
-              "ASSAY_EBPF_PATH=$ebpf_path" \
-              "ASSAY_RUNNER_DELEGATED_PROOF_GATE_DIR=$gate_dir" \
-              bash "$script" 2>&1 | tee "$gate_dir/gate.log"
-            local status="${PIPESTATUS[0]}"
-            sudo chown -R "$(id -u):$(id -g)" "$gate_dir" 2>/dev/null || true
-            set -e
-            if [ "$status" -eq 0 ]; then
-              echo "passed" > "$gate_dir/status.txt"
-            else
-              echo "failed" > "$gate_dir/status.txt"
-              return "$status"
-            fi
-            echo "- ${label}: passed" >> "$GITHUB_STEP_SUMMARY"
-          }
+      # One step per gate, named `Gate: <key>`. GitHub records which steps ran
+      # and how each concluded, and the gate cannot write that record -- it is
+      # the observation side of the binding in #2041. Renaming a step breaks the
+      # verifier deliberately.
+      - name: "Gate: kernel-only"
+        if: inputs.gates == 'all' || inputs.gates == 'kernel-only'
+        shell: bash
+        run: |
+          bash scripts/ci/runner-spike-run-gate.sh \
+            "kernel-only" \
+            "kernel-only three-run determinism" \
+            "$PWD/scripts/ci/runner-spike-kernel-only-three-run-determinism.sh"
 
-          case "$GATES" in
-            all)
-              run_gate "kernel-only" "kernel-only three-run determinism" \
-                "$PWD/scripts/ci/runner-spike-kernel-only-three-run-determinism.sh"
-              run_gate "kernel-policy" "kernel+policy three-run determinism" \
-                "$PWD/scripts/ci/runner-spike-kernel-policy-three-run-determinism.sh"
-              run_gate "openai-agents-kernel-policy" "OpenAI Agents kernel+policy+SDK three-run determinism" \
-                "$PWD/scripts/ci/runner-spike-openai-agents-kernel-policy-three-run-determinism.sh"
-              run_gate "openai-agents-hidden-write" "OpenAI Agents hidden_write semantic-gap determinism" \
-                "$PWD/scripts/ci/runner-spike-openai-agents-kernel-policy-hidden-write-three-run-determinism.sh"
-              # Gemini Python google-genai second-runtime gate. Runs under
-              # the existing `all` umbrella per #1307 non-goal: do not
-              # introduce a new narrower delegated gate name. If a narrower
-              # gate is later coordinated, this run_gate call moves into
-              # its own case branch and a new enum value is added to
-              # inputs.gates.options as a separate decision PR.
-              run_gate "gemini-google-genai-kernel-policy" "Gemini google-genai kernel+policy+SDK three-run determinism" \
-                "$PWD/scripts/ci/runner-spike-gemini-google-genai-three-run-determinism.sh"
-              ;;
-            kernel-only)
-              run_gate "kernel-only" "kernel-only three-run determinism" \
-                "$PWD/scripts/ci/runner-spike-kernel-only-three-run-determinism.sh"
-              ;;
-            kernel-policy)
-              run_gate "kernel-policy" "kernel+policy three-run determinism" \
-                "$PWD/scripts/ci/runner-spike-kernel-policy-three-run-determinism.sh"
-              ;;
-            openai-agents-kernel-policy)
-              run_gate "openai-agents-kernel-policy" "OpenAI Agents kernel+policy+SDK three-run determinism" \
-                "$PWD/scripts/ci/runner-spike-openai-agents-kernel-policy-three-run-determinism.sh"
-              ;;
-            *)
-              echo "ERROR: unsupported delegated gate selection: $GATES" >&2
-              exit 1
-              ;;
-          esac
+      # One step per gate, named `Gate: <key>`. GitHub records which steps ran
+      # and how each concluded, and the gate cannot write that record -- it is
+      # the observation side of the binding in #2041. Renaming a step breaks the
+      # verifier deliberately.
+      - name: "Gate: kernel-policy"
+        if: inputs.gates == 'all' || inputs.gates == 'kernel-policy'
+        shell: bash
+        run: |
+          bash scripts/ci/runner-spike-run-gate.sh \
+            "kernel-policy" \
+            "kernel+policy three-run determinism" \
+            "$PWD/scripts/ci/runner-spike-kernel-policy-three-run-determinism.sh"
+
+      # One step per gate, named `Gate: <key>`. GitHub records which steps ran
+      # and how each concluded, and the gate cannot write that record -- it is
+      # the observation side of the binding in #2041. Renaming a step breaks the
+      # verifier deliberately.
+      - name: "Gate: openai-agents-kernel-policy"
+        if: inputs.gates == 'all' || inputs.gates == 'openai-agents-kernel-policy'
+        shell: bash
+        run: |
+          bash scripts/ci/runner-spike-run-gate.sh \
+            "openai-agents-kernel-policy" \
+            "OpenAI Agents kernel+policy+SDK three-run determinism" \
+            "$PWD/scripts/ci/runner-spike-openai-agents-kernel-policy-three-run-determinism.sh"
+
+      # One step per gate, named `Gate: <key>`. GitHub records which steps ran
+      # and how each concluded, and the gate cannot write that record -- it is
+      # the observation side of the binding in #2041. Renaming a step breaks the
+      # verifier deliberately.
+      - name: "Gate: openai-agents-hidden-write"
+        if: inputs.gates == 'all'
+        shell: bash
+        run: |
+          bash scripts/ci/runner-spike-run-gate.sh \
+            "openai-agents-hidden-write" \
+            "OpenAI Agents hidden_write semantic-gap determinism" \
+            "$PWD/scripts/ci/runner-spike-openai-agents-kernel-policy-hidden-write-three-run-determinism.sh"
+
+      # One step per gate, named `Gate: <key>`. GitHub records which steps ran
+      # and how each concluded, and the gate cannot write that record -- it is
+      # the observation side of the binding in #2041. Renaming a step breaks the
+      # verifier deliberately.
+      - name: "Gate: gemini-google-genai-kernel-policy"
+        if: inputs.gates == 'all'
+        shell: bash
+        run: |
+          bash scripts/ci/runner-spike-run-gate.sh \
+            "gemini-google-genai-kernel-policy" \
+            "Gemini google-genai kernel+policy+SDK three-run determinism" \
+            "$PWD/scripts/ci/runner-spike-gemini-google-genai-three-run-determinism.sh"
 
       - name: Build delegated proof pack
         if: always()

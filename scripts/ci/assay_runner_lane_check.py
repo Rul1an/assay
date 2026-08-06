@@ -2119,50 +2119,76 @@ GATE_SCRIPTS = {
 }
 
 
+WORKFLOW_READ_MAX_BYTES = 256 * 1024
+
+
+def selection_labels(condition: str) -> tuple[str, ...] | None:
+    """The labels a gate step's `if:` runs for, or None if the shape is unknown.
+
+    Parsed as a whole rather than searched for substrings. `false && (inputs.gates
+    == 'all')` contains the substring and runs for nothing; keying on containment
+    would read that step as live. Anything this cannot parse in full is refused
+    rather than guessed at, so an expression that grows a condition the assertion
+    does not understand fails loudly instead of silently passing.
+    """
+    labels: list[str] = []
+    for term in condition.split("||"):
+        match = re.fullmatch(r"\s*inputs\.gates == '([a-z0-9-]+)'\s*", term)
+        if match is None:
+            return None
+        labels.append(match.group(1))
+    return tuple(labels)
+
+
 def _test_gate_selections_match_the_workflow() -> None:
-    """`GATE_SELECTIONS` and the delegated workflow's case branch agree.
+    """`GATE_SELECTIONS` and the delegated workflow's gate steps agree.
 
-    `gate_execution_diagnostics` rejects a proof whose recorded gates do not
-    match the selection, and it takes that selection from the pack builder. The
-    workflow's `case` branch is a third copy of the same mapping, and it is the
-    one that actually decides which scripts run. If it drifts, the builder
-    collects gates the workflow never ran -- which this verification would
-    report as a defective proof rather than as the drift it is.
+    The workflow used to select gates with a shell `case` branch inside one
+    step; it now runs one step per gate, named `Gate: <key>`, with the selection
+    in each step's `if:`. That split exists so GitHub's job record witnesses
+    which gates ran -- an observation the gate itself does not write (#2041).
 
-    Parity rather than derivation: the branch is shell inside YAML, and parsing
-    it to drive production would be a worse dependency than asserting on it.
+    This assertion follows the new shape. Its purpose is unchanged: the builder
+    collects gates from `GATE_SELECTIONS`, the workflow decides which ones
+    actually run, and a pack whose two disagree is a pack whose label means
+    nothing.
 
-    Not caught, measured: a `run_gate` call left in place but wrapped in a
-    condition that never fires. The text still names the gate and the script,
-    so this reads it as running. Detecting that needs the pack's recorded
-    gates, which `gate_execution_diagnostics` checks separately -- a gate that
-    did not run is recorded `missing` there.
+    Parsing `if:` expressions rather than shell is also strictly less fragile
+    than the version this replaces, which sliced to the first `;;` before
+    stripping comments and so lost every gate after a `;;` in a comment.
     """
     root = Path(__file__).resolve().parents[2]
-    workflow = (root / DELEGATED_WORKFLOW_PATH).read_text(encoding="utf-8")
-    selections = gate_selections()
-    for label, expected in selections.items():
-        marker = f"\n            {label})\n"
-        start = workflow.find(marker)
-        assert start != -1, f"no case branch for {label!r} in {DELEGATED_WORKFLOW_PATH}"
-        end = workflow.find(";;", start)
-        branch = workflow[start:end]
-        # Strip comments first. The regex is text matching, so a commented-out
-        # `run_gate` line otherwise counts as a gate that runs -- which is the
-        # natural way to disable one, and was invisible here until measured.
-        live = "\n".join(
-            line for line in branch.splitlines() if not line.lstrip().startswith("#")
+    source = root / DELEGATED_WORKFLOW_PATH
+    size = source.stat().st_size
+    assert size <= WORKFLOW_READ_MAX_BYTES, (
+        f"{DELEGATED_WORKFLOW_PATH} is {size} bytes, above the "
+        f"{WORKFLOW_READ_MAX_BYTES}-byte ceiling; refusing to materialize it"
+    )
+    # Strip comment lines first. The pattern is text matching, so a commented-out
+    # step otherwise counts as a step that runs -- the natural way to disable
+    # one, and the same defect the `case`-branch version of this assertion had.
+    workflow = "\n".join(
+        line
+        for line in source.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    steps = re.findall(r'- name: "Gate: ([^"]+)"\n *if: ([^\n]+)', workflow)
+    assert steps, f"no `Gate:` steps in {DELEGATED_WORKFLOW_PATH}"
+
+    for key, condition in steps:
+        labels = selection_labels(condition)
+        assert labels is not None, (
+            f"step {key!r} has condition {condition!r}, which is not a disjunction of "
+            "`inputs.gates == '<label>'` terms; this assertion cannot read it"
         )
-        ran = tuple(re.findall(r'run_gate "([^"]+)"[^\n]*\n\s*"([^"]+)"', live))
-        assert tuple(k for k, _ in ran) == tuple(expected), (
-            f"{label!r}: workflow runs {tuple(k for k, _ in ran)}, "
-            f"GATE_SELECTIONS says {tuple(expected)}"
+
+    for label, expected in gate_selections().items():
+        runs = tuple(
+            key for key, condition in steps if label in (selection_labels(condition) or ())
         )
-        for key, script in ran:
-            stem = script.rsplit("/", 1)[-1]
-            assert GATE_SCRIPTS.get(key) == stem, (
-                f"{label!r}: gate {key!r} runs {stem!r}, pinned as {GATE_SCRIPTS.get(key)!r}"
-            )
+        assert runs == tuple(expected), (
+            f"{label!r}: workflow steps run {runs}, GATE_SELECTIONS says {tuple(expected)}"
+        )
 
 
 def _test_gating_map_is_current() -> None:
