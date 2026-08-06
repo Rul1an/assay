@@ -136,9 +136,9 @@ pub enum TraceSub {
         #[arg(long)]
         out_trace: PathBuf,
 
-        /// Input format: inspector | jsonrpc | streamable-http | http-sse | sse-legacy (alias for http-sse)
-        #[arg(long, default_value = "inspector")]
-        format: String,
+        /// Input format for the transcript.
+        #[arg(long, value_enum, default_value_t = crate::cli::args::common::McpTranscriptFormat::Inspector)]
+        format: crate::cli::args::common::McpTranscriptFormat,
 
         #[arg(long)]
         episode_id: Option<String>,
