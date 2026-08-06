@@ -17,6 +17,82 @@ fn next_rid() -> String {
     format!("r-{n:06}")
 }
 
+/// The modern, stateless protocol revision (final since 2026-07-28).
+///
+/// Under it there is no handshake: every request carries its version in `_meta`, `server/discover`
+/// is a mandatory RPC, and a version this server does not implement is an
+/// `UnsupportedProtocolVersionError` rather than a silent best-effort.
+pub const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
+
+/// The reserved `_meta` key a modern request carries its revision in.
+const PROTOCOL_VERSION_META_KEY: &str = "io.modelcontextprotocol/protocolVersion";
+
+/// Every revision this server implements, newest last.
+///
+/// One list, read by `server/discover` and by the version check, so the two cannot advertise and
+/// accept different sets -- which would let a client discover a version it is then refused.
+const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2024-11-05", "2025-11-25", MODERN_PROTOCOL_VERSION];
+
+/// `UnsupportedProtocolVersionError`, per the 2026-07-28 versioning spec.
+const ERROR_UNSUPPORTED_PROTOCOL_VERSION: i32 = -32022;
+
+/// How a request declared its era, if it declared one.
+///
+/// A modern request is served statelessly and pins nothing: the spec allows a dual-era server to
+/// serve both concurrently, and a per-request revision is the whole point of the modern era. Only
+/// `initialize` establishes anything that outlives one request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RequestEra {
+    /// No `_meta` revision. Legacy semantics, as before.
+    Unstated,
+    /// A modern `_meta` revision this server implements.
+    Modern,
+}
+
+/// Read the era a request declares, or refuse a revision this server does not implement.
+///
+/// `Err` carries the JSON-RPC error data the spec requires: what was requested and what is
+/// supported, so a client can fall forward without a second round trip.
+fn request_era(params: Option<&Value>) -> Result<RequestEra, Value> {
+    let Some(requested) = params
+        .and_then(Value::as_object)
+        .and_then(|p| p.get("_meta"))
+        .and_then(Value::as_object)
+        .and_then(|m| m.get(PROTOCOL_VERSION_META_KEY))
+        .and_then(Value::as_str)
+    else {
+        return Ok(RequestEra::Unstated);
+    };
+    if requested == MODERN_PROTOCOL_VERSION {
+        return Ok(RequestEra::Modern);
+    }
+    // A legacy revision named in `_meta` is not a modern request; the handshake still owns those.
+    // Anything else is refused by name rather than served on a best-effort basis, which is the
+    // behaviour the spec replaced.
+    if SUPPORTED_PROTOCOL_VERSIONS.contains(&requested) {
+        return Ok(RequestEra::Unstated);
+    }
+    Err(serde_json::json!({
+        "requested": requested,
+        "supported": SUPPORTED_PROTOCOL_VERSIONS,
+    }))
+}
+
+/// The `server/discover` result: which revisions, which capabilities, which server.
+///
+/// Mandatory for a modern server. Its absence is what a dual-era client probes for, so returning it
+/// is what moves this proxy from legacy-only to dual-era.
+fn discover_result() -> Value {
+    serde_json::json!({
+        "protocolVersions": SUPPORTED_PROTOCOL_VERSIONS,
+        "capabilities": { "tools": {} },
+        "serverInfo": {
+            "name": "assay-mcp-server",
+            "version": env!("CARGO_PKG_VERSION")
+        }
+    })
+}
+
 #[derive(Clone, Copy)]
 enum LegacyProtocolVersion {
     V2024_11_05,
@@ -127,6 +203,23 @@ impl JsonRpcResponse {
         }
     }
 
+    /// A JSON-RPC error carrying structured `data`.
+    ///
+    /// `UnsupportedProtocolVersionError` is only useful with it: the spec requires the requested
+    /// and supported versions so a client can fall forward without a second round trip.
+    fn error_with_data(id: Option<Value>, code: i32, message: String, data: Value) -> Self {
+        Self {
+            jsonrpc: "2.0".to_string(),
+            result: None,
+            error: Some(JsonRpcError {
+                code,
+                message,
+                data: Some(data),
+            }),
+            id,
+        }
+    }
+
     fn error(id: Option<Value>, code: i32, message: String) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
@@ -210,8 +303,36 @@ impl Server {
                 }
             };
 
+            // Era before dispatch. A revision this server does not implement is refused by name,
+            // with the supported set in `data`, rather than served as whatever the method happens
+            // to do -- which is the silent best-effort the 2026-07-28 spec replaced.
+            let era = match request_era(req.params.as_ref()) {
+                Ok(era) => era,
+                Err(data) => {
+                    let resp = JsonRpcResponse::error_with_data(
+                        req.id.clone(),
+                        ERROR_UNSUPPORTED_PROTOCOL_VERSION,
+                        "unsupported protocol version".to_string(),
+                        data,
+                    );
+                    let resp_json = serde_json::to_string(&resp)?;
+                    writeln!(stdout, "{}", resp_json)?;
+                    stdout.flush()?;
+                    continue;
+                }
+            };
+            // Nothing branches on the era yet, and that is the finding rather than an omission: the
+            // methods this proxy serves -- `tools/list` and `tools/call` -- are already stateless,
+            // so modern semantics are what they always did. The era is read so an unimplemented
+            // revision is refused by name instead of served on a best-effort basis, and bound so
+            // the next method that *does* need to branch has somewhere to branch from.
+            debug_assert!(matches!(era, RequestEra::Unstated | RequestEra::Modern));
+
             // Dispatch
             let resp = match req.method.as_str() {
+                // Mandatory for a modern server, and the probe a dual-era client sends first.
+                // Answering it is what makes this proxy dual-era rather than legacy-only.
+                "server/discover" => JsonRpcResponse::ok(req.id.clone(), discover_result()),
                 "initialize" => match LegacyProtocolVersion::negotiate(req.params.as_ref()) {
                     Ok(version) => JsonRpcResponse::ok(req.id.clone(), initialize_result(version)),
                     Err(()) => JsonRpcResponse::error(
