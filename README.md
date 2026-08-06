@@ -129,6 +129,7 @@ Generate one from observed behaviour with `assay init --from-trace trace.jsonl`,
 | **Deterministic** | Same input, same decision — not probabilistic. |
 | **Bounded claims** | Explicit about **verified** vs **visible** vs **absent** — no score-first UX. |
 | **Offline-first** | No backend required for core enforcement and bundle verification. |
+| **Checkable provenance** | Which piece of the source-class and coverage model shipped when, as commits you can `git log` rather than claims you have to take — [provenance](docs/PROVENANCE-SOURCE-CLASS.md), prior art credited first. |
 
 ## Learn more
 

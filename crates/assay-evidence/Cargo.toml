@@ -55,6 +55,13 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+# DEV-ONLY, and deliberately not a production edge. `assay-runner-schema` is a leaf (serde +
+# thiserror), so this cannot cycle. It exists for tests/claim_gate_parity.rs: the runner substrate has
+# gated claims by kind since 2026-06-01 and this crate re-states the same rule over a different
+# vocabulary, so the two are pinned against each other rather than left to drift. Per
+# [[one-rule-one-function]] a parity test is the sanctioned fallback when one rule cannot simply call
+# the other; promoting this to a real dependency is an ADR question, not a test fixture.
+assay-runner-schema = { workspace = true }
 getrandom = { version = "0.4", features = ["sys_rng"] }
 jsonschema.workspace = true
 tempfile = "3"

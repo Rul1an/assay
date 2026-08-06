@@ -119,7 +119,7 @@ assay-mcp-server -> assay-core, assay-common, assay-metrics
 assay-monitor -> assay-common, assay-policy
 assay-metrics -> assay-core, assay-common
 assay-core -> assay-adapter-api, assay-common
-assay-evidence -> assay-canonical, assay-common
+assay-evidence -> assay-canonical, assay-common  (+ assay-runner-schema, DEV-ONLY)
 assay-registry -> assay-common
 assay-adapter-api -> assay-evidence
 assay-adapter-{a2a,acp,ucp} -> assay-adapter-api, assay-evidence
@@ -131,6 +131,14 @@ assay-ebpf -> assay-common
 Leaf crates (no internal dependencies): `assay-common`, `assay-canonical`, `assay-policy`, `assay-runner-schema`, `assay-runner-linux`, `gateway-evidence-replay`, `assay-xtask`.
 
 No circular dependencies. All dependencies flow in one direction.
+
+The one dev-only edge is marked as such above and is deliberately not a production dependency.
+`assay-evidence`'s claim gate re-states, over a different vocabulary, the occurrence-versus-absence rule
+`assay-runner-schema::RunnerClaimGate` has enforced since 2026-06-01, so the two are pinned against each
+other by `tests/claim_gate_parity.rs` rather than left to drift. Per one-rule-one-function a parity test
+is the sanctioned fallback when one rule cannot simply call the other; promoting it to a real dependency
+is an ADR question, not a test fixture. Note `docs/generated/crate-deps.mermaid` draws dependency edges
+without distinguishing kind, so that edge appears there as if it were architectural.
 
 `assay-evidence -> assay-common` carries two shared primitives, and the test for admitting one
 is the same in both cases: a mechanism whose second implementation would silently mean something
