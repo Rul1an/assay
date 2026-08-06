@@ -13,6 +13,7 @@ all	addressed	shared runner-spike script requires gates=all	scripts/ci/runner-sp
 all	addressed	shared runner-spike script requires gates=all	scripts/ci/runner-spike-openai-agents-sdk-policy-mismatch-three-run-determinism.sh
 all	addressed	shared runner-spike script requires gates=all	scripts/ci/runner-spike-openai-agents-sdk-policy-mismatch.sh
 all	addressed	shared runner-spike script requires gates=all	scripts/ci/runner-spike-openai-agents-sdk-policy-three-run-determinism.sh
+all	addressed	shared runner-spike script requires gates=all	scripts/ci/runner-spike-run-gate.sh
 all	addressed	shared runner-spike script requires gates=all	scripts/ci/runner-spike-sdk-contract-acceptance.sh
 all	addressed	shared runner-spike script requires gates=all	scripts/ci/runner-spike-sdk-policy-correlation.sh
 all	addressed	shared runner-spike script requires gates=all	scripts/ci/runner-spike-sdk-policy-mismatch-three-run-determinism.sh
