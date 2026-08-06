@@ -1,5 +1,13 @@
-//! Companion-cover reporting: the metrics a test asked for that evaluated nothing (#1949, layer 2
-//! slice 4).
+//! Companion-cover reporting: the checks a test asked for that evaluated nothing (#1949, layer 2).
+//!
+//! Two config surfaces reach this, and they are found by different means:
+//!
+//! - **`expected:`** — a metric declares its own `Exercised` value and `single.rs` writes it into
+//!   `details["metrics"][…]["exercised"]`. Read here.
+//! - **`assertions:`** — an assertion has no such dimension to declare, because
+//!   `matchers::check_one` returns `Option<Diagnostic>` where `None` is a pass. A separate cover in
+//!   `agent_assertions::cover` judges it, and the runner writes the verdict to
+//!   [`ASSERTIONS_NOT_EXERCISED`]. Read here too, and folded into the same output.
 //!
 //! # The condition
 //!
@@ -70,17 +78,58 @@ use std::collections::BTreeMap;
 /// rather than in that registry, for the reason in the module docs.
 pub const W_METRIC_NOT_EXERCISED: &str = "W_METRIC_NOT_EXERCISED";
 
+/// The same observation for the `assertions:` surface.
+///
+/// A separate code rather than a broader spelling of the first. The two are found differently — a
+/// metric declares its own `exercised` value, an assertion is judged by a companion cover in
+/// `agent_assertions::cover` — and they name different things in a config. A reader filtering their
+/// CI log for one should not silently get the other.
+pub const W_ASSERTION_NOT_EXERCISED: &str = "W_ASSERTION_NOT_EXERCISED";
+
+/// The `details` key the runner writes assertion covers to, and this module reads back.
+///
+/// Beside `details["assertions"]` rather than inside it, because that field already holds two
+/// different shapes — an array of diagnostics when something failed, `{"passed": true}` when
+/// nothing did — and a reader that had to branch on which one it got would break the first time a
+/// third shape appeared.
+///
+/// Declared here, in the reader, and imported by the writer. The other way round is not reachable:
+/// `engine::runner_next` is private to its parent, and a second copy of the string in this module
+/// would be a reader that silently stops finding anything the day the writer's spelling changes.
+pub const ASSERTIONS_NOT_EXERCISED: &str = "assertions_not_exercised";
+
 /// How many test ids a single warning names before it stops and counts the rest.
 const MAX_NAMED_TESTS: usize = 3;
 
-/// One metric that evaluated nothing, and the tests that asked it to.
+/// Which config surface a finding came from.
 ///
-/// Folded by `(metric, reason)` rather than emitted per test: a coverage hole is a property of the
-/// check, and a suite where sixty tests all fail to exercise `sequence_valid` has one hole, not
-/// sixty.
+/// Carried rather than inferred from the name: `sequence_valid` is both a metric under `expected:`
+/// and an assertion under `assertions:`, so the string alone cannot say which was meant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Surface {
+    Metric,
+    Assertion,
+}
+
+impl Surface {
+    fn code(self) -> &'static str {
+        match self {
+            Self::Metric => W_METRIC_NOT_EXERCISED,
+            Self::Assertion => W_ASSERTION_NOT_EXERCISED,
+        }
+    }
+}
+
+/// One check that evaluated nothing, and the tests that asked for it.
+///
+/// Folded by `(surface, check, reason)` rather than emitted per test: a coverage hole is a property
+/// of the check, and a suite where sixty tests all fail to exercise `sequence_valid` has one hole,
+/// not sixty.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotExercised {
-    pub metric: String,
+    pub surface: Surface,
+    /// The metric's name, or the assertion's `type:` tag.
+    pub check: String,
     pub reason: String,
     /// Sorted, so the same run reports the same order regardless of how the tests were scheduled.
     pub test_ids: Vec<String>,
@@ -104,8 +153,8 @@ impl NotExercised {
         };
         format!(
             "{}: {} was requested by {} test(s) and evaluated nothing ({}) — {}",
-            W_METRIC_NOT_EXERCISED,
-            self.metric,
+            self.surface.code(),
+            self.check,
             self.test_ids.len(),
             self.reason,
             tail
@@ -120,31 +169,53 @@ impl NotExercised {
 /// finding is that the check did not run and that is true either way.
 const UNRECORDED_REASON: &str = "no reason recorded";
 
-/// Collect the not-exercised findings from a finished run.
+/// Collect the not-exercised findings from a finished run, across both config surfaces.
 ///
-/// Reads `details["metrics"][…]["exercised"]`, the field `single.rs` writes, rather than taking a
-/// second path from `MetricResult`. One producer, one consumer, one spelling: the comparison uses
-/// [`Exercised::label`], the same function that wrote the value, so the two cannot drift into
-/// disagreeing about what `not_exercised` is called.
+/// Reads the fields the runner writes — `details["metrics"][…]["exercised"]` from `single.rs` and
+/// `details["assertions_not_exercised"]` from `runner_next::assertions` — rather than taking a
+/// second path from `MetricResult` or re-running the cover. One producer, one consumer, one
+/// spelling: the metric comparison uses [`Exercised::label`], the same function that wrote the
+/// value, so the two cannot drift into disagreeing about what `not_exercised` is called.
 pub fn collect(results: &[TestResultRow]) -> Vec<NotExercised> {
-    let mut folded: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+    let mut folded: BTreeMap<(Surface, String, String), Vec<String>> = BTreeMap::new();
 
     for row in results {
-        let Some(metrics) = row.details.get("metrics").and_then(|m| m.as_object()) else {
-            continue;
-        };
-        for (metric_name, metric) in metrics {
-            let label = metric.get("exercised").and_then(|e| e.as_str());
-            if label != Some(Exercised::NotExercised.label()) {
-                continue;
+        if let Some(metrics) = row.details.get("metrics").and_then(|m| m.as_object()) {
+            for (metric_name, metric) in metrics {
+                let label = metric.get("exercised").and_then(|e| e.as_str());
+                if label != Some(Exercised::NotExercised.label()) {
+                    continue;
+                }
+                let reason = metric
+                    .get("details")
+                    .and_then(|d| d.get("reason"))
+                    .and_then(|r| r.as_str())
+                    .unwrap_or(UNRECORDED_REASON);
+                folded
+                    .entry((Surface::Metric, metric_name.clone(), reason.to_string()))
+                    .or_default()
+                    .push(row.test_id.clone());
             }
-            let reason = metric
-                .get("details")
-                .and_then(|d| d.get("reason"))
+        }
+
+        let covers = row
+            .details
+            .get(ASSERTIONS_NOT_EXERCISED)
+            .and_then(|c| c.as_array());
+        for cover in covers.into_iter().flatten() {
+            let Some(assertion) = cover.get("assertion").and_then(|a| a.as_str()) else {
+                continue;
+            };
+            let reason = cover
+                .get("reason")
                 .and_then(|r| r.as_str())
                 .unwrap_or(UNRECORDED_REASON);
             folded
-                .entry((metric_name.clone(), reason.to_string()))
+                .entry((
+                    Surface::Assertion,
+                    assertion.to_string(),
+                    reason.to_string(),
+                ))
                 .or_default()
                 .push(row.test_id.clone());
         }
@@ -152,10 +223,11 @@ pub fn collect(results: &[TestResultRow]) -> Vec<NotExercised> {
 
     folded
         .into_iter()
-        .map(|((metric, reason), mut test_ids)| {
+        .map(|((surface, check, reason), mut test_ids)| {
             test_ids.sort();
             NotExercised {
-                metric,
+                surface,
+                check,
                 reason,
                 test_ids,
             }
@@ -216,7 +288,8 @@ mod tests {
         )];
         let found = collect(&rows);
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].metric, "sequence_valid");
+        assert_eq!(found[0].surface, Surface::Metric);
+        assert_eq!(found[0].check, "sequence_valid");
         assert_eq!(found[0].reason, "no tool calls in the trace");
         assert_eq!(found[0].test_ids, vec!["t1"]);
     }
@@ -293,7 +366,8 @@ mod tests {
     #[test]
     fn the_rendered_warning_names_the_code_metric_count_and_reason() {
         let f = NotExercised {
-            metric: "sequence_valid".into(),
+            surface: Surface::Metric,
+            check: "sequence_valid".into(),
             reason: "no tool calls in the trace".into(),
             test_ids: vec!["t1".into(), "t2".into()],
         };
@@ -310,13 +384,68 @@ mod tests {
     #[test]
     fn a_long_test_list_is_bounded_and_counts_the_remainder() {
         let f = NotExercised {
-            metric: "seq".into(),
+            surface: Surface::Metric,
+            check: "seq".into(),
             reason: "no tool calls".into(),
             test_ids: (1..=10).map(|i| format!("t{i:02}")).collect(),
         };
         let line = f.render();
         assert!(line.contains("t01, t02, t03 and 7 more"), "{line}");
         assert_eq!(line.lines().count(), 1, "one hole is one line");
+    }
+
+    /// An assertion cover reaches the same output as a metric, under its own code.
+    #[test]
+    fn an_assertion_cover_is_collected_under_the_assertion_code() {
+        let mut r = row("t1", serde_json::json!({}));
+        r.details[ASSERTIONS_NOT_EXERCISED] = serde_json::json!([{
+            "assertion": "trace_must_not_call_tool",
+            "reason": "the agent was never offered `delete_repository`, so no trace could have called it"
+        }]);
+        let found = collect(&[r]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].surface, Surface::Assertion);
+        assert_eq!(found[0].check, "trace_must_not_call_tool");
+        assert!(found[0].render().starts_with("W_ASSERTION_NOT_EXERCISED: "));
+    }
+
+    /// The two surfaces stay apart even when they share a name.
+    ///
+    /// `sequence_valid` is both a metric under `expected:` and an assertion type under
+    /// `assertions:`. Folding on the name alone would merge two different holes into one line and
+    /// report a test id under a check it never ran.
+    #[test]
+    fn a_name_shared_by_both_surfaces_does_not_fold_together() {
+        let mut r = row(
+            "t1",
+            serde_json::json!({
+                "sequence_valid": metric(Exercised::NotExercised, Some("no sequence configured"))
+            }),
+        );
+        r.details[ASSERTIONS_NOT_EXERCISED] = serde_json::json!([{
+            "assertion": "sequence_valid",
+            "reason": "no sequence configured"
+        }]);
+        let found = collect(&[r]);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert_eq!(found[0].surface, Surface::Metric);
+        assert_eq!(found[1].surface, Surface::Assertion);
+        assert_ne!(found[0].render(), found[1].render());
+    }
+
+    /// A cover with no `assertion` name is skipped rather than reported as an empty check.
+    #[test]
+    fn a_nameless_cover_is_skipped() {
+        let mut r = row("t1", serde_json::json!({}));
+        r.details[ASSERTIONS_NOT_EXERCISED] = serde_json::json!([{ "reason": "something" }]);
+        assert!(collect(&[r]).is_empty());
+    }
+
+    /// The key is absent on almost every row, and that is not a finding.
+    #[test]
+    fn a_row_without_assertion_covers_reports_nothing() {
+        let r = row("t1", serde_json::json!({}));
+        assert!(collect(&[r]).is_empty());
     }
 
     /// The reader compares against the writer's own vocabulary rather than a second copy of the

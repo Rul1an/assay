@@ -161,7 +161,7 @@ pub(crate) async fn run_test_with_policy_impl(
     let output = last_output.unwrap_or_else(|| empty_output_for_model_impl(runner, cfg));
 
     final_row.attempts = Some(attempts.clone());
-    runner.apply_agent_assertions(run_id, tc, &mut final_row)?;
+    runner.apply_agent_assertions(run_id, tc, &output, &mut final_row)?;
 
     runner
         .store
