@@ -24,7 +24,7 @@ impl Metric for FaithfulnessMetric {
                 rubric_version,
                 ..
             } => (*min_score, rubric_version),
-            _ => return Ok(MetricResult::pass(1.0)),
+            _ => return Ok(MetricResult::not_applicable()),
         };
 
         evaluate_judge_result("faithfulness", min_score, rubric_version.as_deref(), output)
@@ -51,7 +51,7 @@ impl Metric for RelevanceMetric {
                 rubric_version,
                 ..
             } => (*min_score, rubric_version),
-            _ => return Ok(MetricResult::pass(1.0)),
+            _ => return Ok(MetricResult::not_applicable()),
         };
 
         evaluate_judge_result("relevance", min_score, rubric_version.as_deref(), output)
@@ -69,6 +69,7 @@ fn evaluate_judge_result(
     let Some(data) = judge_data else {
         // Judge result missing
         return Ok(MetricResult {
+            exercised: assay_core::metrics_api::Exercised::Exercised,
             passed: false,
             score: 0.0,
             details: serde_json::json!({
@@ -108,6 +109,7 @@ fn evaluate_judge_result(
     }
 
     Ok(MetricResult {
+        exercised: assay_core::metrics_api::Exercised::Exercised,
         passed,
         score,
         details,

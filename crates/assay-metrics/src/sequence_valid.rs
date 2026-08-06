@@ -25,7 +25,7 @@ impl Metric for SequenceValidMetric {
                 sequence,
                 rules,
             } => (policy, sequence, rules),
-            _ => return Ok(MetricResult::pass(1.0)),
+            _ => return Ok(MetricResult::not_applicable()),
         };
 
         // 1. Resolve Rules & Sequence from Policy File (if any)
@@ -67,7 +67,9 @@ impl Metric for SequenceValidMetric {
         let effective_rules = inline_rules.as_ref().or(file_rules.as_ref());
 
         if effective_sequence.is_none() && effective_rules.is_none() {
-            return Ok(MetricResult::pass(1.0));
+            return Ok(MetricResult::not_exercised(
+                "no sequence and no rules configured",
+            ));
         }
 
         // Parse Tool Calls

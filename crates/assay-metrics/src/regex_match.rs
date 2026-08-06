@@ -23,7 +23,7 @@ impl Metric for RegexMatchMetric {
             Expected::RegexNotMatch { pattern, flags } => {
                 (pattern.as_str(), flags.as_slice(), true)
             }
-            _ => return Ok(MetricResult::pass(1.0)),
+            _ => return Ok(MetricResult::not_applicable()),
         };
 
         let mut b = RegexBuilder::new(pattern);
