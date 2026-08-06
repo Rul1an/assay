@@ -16,6 +16,18 @@
 //! So refutation is gated on positive coverage, and every way of lacking it is a distinct outcome
 //! that says which. A run cannot refute by being blind.
 //!
+//! # A refutation requires an ENFORCING run
+//!
+//! Verified on a live kernel, and it is a structural constraint rather than a configuration detail.
+//! The only TOCTOU-safe peer source is `cgroup_sock_addr:connect4`, and that hook attaches only when
+//! the policy compiles to tier-1 network deny rules — which in turn requires a rule whose `action` is
+//! an enforcing one, since `action` defaults to `log`. So a pure-observation run cannot refute
+//! anything. It reports `NoCoverage`, which is the honest answer and exactly what such a run produced
+//! before this was understood.
+//!
+//! The consequence worth stating: refutation is available to deployments that already enforce, not to
+//! passive monitoring. That narrows the claim and is better than discovering it in the field.
+//!
 //! # What a refutation is and is not
 //!
 //! It says a claimed egress did not leave on a watched surface. It does not say the effect failed:
