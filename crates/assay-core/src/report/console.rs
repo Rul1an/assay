@@ -268,6 +268,33 @@ pub fn print_summary(results: &[TestResultRow], explain_skip: bool) {
         "Summary: {} passed, {} failed, {} skipped{}, {} flaky, {} unstable, {} warn, {} error",
         pass, fail, skipped, skip_hint, flaky, unstable, warn, error
     );
+
+    print_not_exercised(results);
+}
+
+/// The companion cover, printed under the summary (#1949 layer 2, slice 4).
+///
+/// Below the counts rather than beside a test, because it is a property of the suite's coverage
+/// and not of any one result. Nothing here touches a status or a count: a suite whose metrics all
+/// passed still says "passed", and this says what was never checked to get there.
+///
+/// Derived from the same [`crate::report::exercised::collect`] the `warnings` array uses, so the
+/// console and `run.json` cannot report different holes.
+fn print_not_exercised(results: &[TestResultRow]) {
+    let findings = crate::report::exercised::collect(results);
+    if findings.is_empty() {
+        return;
+    }
+    eprintln!(
+        "\nNot exercised: {} metric(s) were requested and evaluated nothing.",
+        findings.len()
+    );
+    for f in &findings {
+        eprintln!("  ⚪ {}", safe_msg(&f.render()));
+    }
+    eprintln!(
+        "  A metric that did not run is a coverage hole, not a pass. This does not fail the run."
+    );
 }
 
 #[cfg(test)]

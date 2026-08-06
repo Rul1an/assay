@@ -139,6 +139,39 @@ fn string_literal(s: &str) -> Option<String> {
     Some(s[start..end].to_owned())
 }
 
+/// Every `pub const` string in `assay_core::report::exercised`.
+///
+/// These reach the `warnings` array of `run.json` / `summary.json`, which is a different field from
+/// `reason_code` and a different surface from a SARIF `ruleId`. Parsed the same way as `codes::` and
+/// for the same reason: a second `pub const` added beside the first would otherwise reach a
+/// published artifact with nothing recording it.
+fn run_json_warning_codes() -> BTreeSet<String> {
+    let src = read("crates/assay-core/src/report/exercised.rs");
+    let mut found = BTreeSet::new();
+    for line in src.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("pub const ") else {
+            continue;
+        };
+        let Some((_, value)) = rest.split_once('=') else {
+            continue;
+        };
+        // Only string-valued constants are codes. A numeric bound is not a vocabulary member, and
+        // treating one as a missing entry would make this check noise.
+        if let Some(value) = string_literal(value) {
+            assert!(
+                found.insert(value.clone()),
+                "duplicate warning code value {value:?}"
+            );
+        }
+    }
+    assert!(
+        !found.is_empty(),
+        "parsed no run.json warning codes; the module shape moved"
+    );
+    found
+}
+
 fn lint_rule_ids() -> BTreeSet<String> {
     assay_evidence::lint::rules::RULES
         .iter()
@@ -174,6 +207,38 @@ fn inventory_records_every_lint_rule_id() {
         lint_rule_ids(),
         recorded("lint-rule-ids"),
         "`assay_evidence::lint::rules::RULES` and the inventory disagree."
+    );
+}
+
+#[test]
+fn inventory_records_every_run_json_warning_code() {
+    assert_eq!(
+        run_json_warning_codes(),
+        recorded("run-json-warning-codes"),
+        "`assay_core::report::exercised` and the inventory disagree. A code reaching the \
+         `warnings` array of run.json is a published id and belongs in \
+         docs/architecture/REASON-CODE-VOCABULARIES.md."
+    );
+}
+
+/// The `warnings` codes are deliberately not in `codes::`, and that must stay a decision.
+///
+/// `codes::` is inventoried as the SARIF `ruleId` vocabulary under `tool.driver.name = "assay"`.
+/// The `run` path does build `Diagnostic`s — the trace client, the assertion matchers, the pipeline
+/// error classifier — but none of them reaches `build_sarif_diagnostics`, whose only non-test caller
+/// is `assay validate --format sarif`. So a code moved into that registry to tidy it up would be
+/// recorded on a surface it never reaches: the inventory would state something false, and this file
+/// is the reason the inventory is trusted. If a run-path diagnostic ever gains a route to
+/// `build_sarif_diagnostics`, move the constant and delete this test in the same change.
+#[test]
+fn the_run_json_warning_codes_are_not_in_the_sarif_registry() {
+    let warnings = run_json_warning_codes();
+    let sarif = diagnostic_codes();
+    let overlap: Vec<&String> = warnings.intersection(&sarif).collect();
+    assert!(
+        overlap.is_empty(),
+        "these codes are in both `report::exercised` and `codes::`, so the inventory records them \
+         on a SARIF surface they do not reach: {overlap:?}"
     );
 }
 

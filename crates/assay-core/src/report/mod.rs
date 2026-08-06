@@ -1,4 +1,5 @@
 pub mod console;
+pub mod exercised;
 pub mod json;
 pub mod junit;
 pub mod progress;

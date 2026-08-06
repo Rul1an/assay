@@ -236,3 +236,121 @@ fn test_decide_outcome_uses_typed_details_before_legacy_message_fallback() {
         ReasonCode::EInvalidArgs.exit_code_for(ExitCodeVersion::V2)
     );
 }
+
+/// A passing row whose named metric evaluated nothing, shaped as `single.rs` writes it.
+fn not_exercised_row(test_id: &str, metric: &str, reason: &str) -> TestResultRow {
+    TestResultRow {
+        test_id: test_id.into(),
+        status: TestStatus::Pass,
+        score: None,
+        cached: false,
+        message: "ok".into(),
+        details: serde_json::json!({
+            "metrics": {
+                metric: {
+                    "score": 1.0,
+                    "passed": true,
+                    "unstable": false,
+                    "exercised": "not_exercised",
+                    "details": { "reason": reason }
+                }
+            }
+        }),
+        duration_ms: Some(1),
+        fingerprint: None,
+        skip_reason: None,
+        attempts: None,
+        error_policy_applied: None,
+    }
+}
+
+/// The success path is the one that matters, and it is the one an early `return` would have missed.
+///
+/// `decide_run_outcome` has six early returns; a not-exercised metric appears on a *green* run by
+/// definition, so the warning must survive the path that returns first and reports nothing else.
+#[test]
+fn a_not_exercised_metric_warns_on_a_passing_run_without_changing_the_exit_code() {
+    let rows = vec![not_exercised_row(
+        "t1",
+        "sequence_valid",
+        "no tool calls in the trace",
+    )];
+    let outcome = decide_run_outcome(&rows, false, ExitCodeVersion::default());
+
+    assert_eq!(outcome.exit_code, 0, "a coverage observation is not a gate");
+    assert_eq!(outcome.reason_code, ReasonCode::Success.as_str());
+    assert!(
+        outcome
+            .warnings
+            .iter()
+            .any(|w| w.contains("W_METRIC_NOT_EXERCISED") && w.contains("sequence_valid")),
+        "warnings: {:?}",
+        outcome.warnings
+    );
+}
+
+/// And on a failing run too — the early return at priority 1/2 must not swallow it.
+#[test]
+fn a_failing_run_still_reports_what_was_never_exercised() {
+    let mut fail = not_exercised_row("t2", "tool_output_valid", "no output schemas configured");
+    fail.status = TestStatus::Fail;
+    fail.message = "failed: must_contain".into();
+    let rows = vec![
+        not_exercised_row("t1", "tool_output_valid", "no output schemas configured"),
+        fail,
+    ];
+    let outcome = decide_run_outcome(&rows, false, ExitCodeVersion::default());
+
+    assert_ne!(outcome.exit_code, 0, "the failure still decides the exit");
+    assert!(
+        outcome.warnings.iter().any(|w| w.contains("2 test(s)")),
+        "the failing run lost its coverage warning: {:?}",
+        outcome.warnings
+    );
+}
+
+/// `--strict` promotes Warn/Flaky/Unstable *statuses* to a violation. A not-exercised metric is not
+/// a status, so strict mode must not turn a coverage observation into a failing build — that is
+/// precisely the over-eager detection that earns a suppression.
+#[test]
+fn strict_mode_does_not_promote_a_coverage_observation_to_a_violation() {
+    let rows = vec![not_exercised_row("t1", "seq", "no tool calls")];
+    let outcome = decide_run_outcome(&rows, true, ExitCodeVersion::default());
+    assert_eq!(outcome.exit_code, 0, "strict mode failed a green suite");
+    assert!(!outcome.warnings.is_empty());
+}
+
+/// The warning reaches the artifact, not just the struct.
+#[test]
+fn the_warning_lands_in_run_json() {
+    let artifacts = RunArtifacts {
+        run_id: 1,
+        suite: "s".into(),
+        results: vec![not_exercised_row("t1", "seq", "no tool calls in the trace")],
+        order_seed: None,
+        runner_clone_ms: None,
+    };
+    let outcome = decide_run_outcome(&artifacts.results, false, ExitCodeVersion::default());
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("run.json");
+    write_extended_run_json(&artifacts, &outcome, &path, None).unwrap();
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let warnings = parsed["warnings"].as_array().expect("warnings array");
+    assert!(
+        warnings.iter().any(|w| w
+            .as_str()
+            .is_some_and(|s| s.contains("W_METRIC_NOT_EXERCISED"))),
+        "run.json: {parsed}"
+    );
+}
+
+/// A run with nothing to say adds no `warnings` key at all.
+#[test]
+fn a_fully_exercised_run_adds_no_warnings() {
+    let mut row = not_exercised_row("t1", "semantic", "n/a");
+    row.details["metrics"]["semantic"]["exercised"] = serde_json::json!("exercised");
+    let outcome = decide_run_outcome(&[row], false, ExitCodeVersion::default());
+    assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
+}

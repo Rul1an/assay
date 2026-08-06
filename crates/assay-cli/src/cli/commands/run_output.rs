@@ -59,7 +59,31 @@ pub(crate) fn reason_code_from_error_message(message: &str) -> Option<ReasonCode
     reason_code_from_run_error(&classified)
 }
 
+/// Decide the run's outcome, then attach the observations that do not decide it.
+///
+/// A wrapper rather than a line at the end of the body below, because that body has six early
+/// returns. An observation appended on one of them would be missing from the other five, and the
+/// path it would be missing from most often is the one that matters here: success. A metric that
+/// evaluated nothing shows up on a green run by definition.
+///
+/// Both `assay run` and `assay ci` reach this through `execute_pipeline`, so the two commands
+/// cannot report different coverage.
 pub(crate) fn decide_run_outcome(
+    results: &[assay_core::model::TestResultRow],
+    strict: bool,
+    version: crate::exit_codes::ExitCodeVersion,
+) -> crate::exit_codes::RunOutcome {
+    let mut outcome = decide_run_outcome_impl(results, strict, version);
+    // Appended, never assigned: `warnings` already carries report-writing failures, and this must
+    // not displace them. It does not participate in `exit_code` — that is what makes it a review
+    // signal instead of a gate (#1949 layer 2, slice 4).
+    outcome
+        .warnings
+        .extend(assay_core::report::exercised::warnings(results));
+    outcome
+}
+
+fn decide_run_outcome_impl(
     results: &[assay_core::model::TestResultRow],
     strict: bool,
     version: crate::exit_codes::ExitCodeVersion,
