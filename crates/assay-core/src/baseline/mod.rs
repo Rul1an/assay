@@ -137,6 +137,21 @@ impl Baseline {
             .map(|e| e.score)
     }
 
+    /// Whether the baseline run actually evaluated this metric.
+    ///
+    /// `None` means the baseline predates the `exercised` dimension (#1949 layer 2) and says
+    /// nothing either way — which is not the same as saying the metric was not exercised, and is
+    /// why the coverage check treats it as no evidence rather than as a drop.
+    pub fn was_exercised(&self, test_id: &str, metric: &str) -> Option<bool> {
+        self.entries
+            .iter()
+            .find(|e| e.test_id == test_id && e.metric == metric)
+            .and_then(|e| e.meta.as_ref())
+            .and_then(|m| m.get("exercised"))
+            .and_then(|v| v.as_str())
+            .map(|s| s == "exercised")
+    }
+
     pub fn diff(&self, candidate: &Baseline) -> BaselineDiff {
         let mut regressions = Vec::new();
         let mut improvements = Vec::new();
@@ -251,5 +266,58 @@ pub fn compute_config_fingerprint(config_path: &Path) -> String {
         format!("md5:{:x}", digest)
     } else {
         "md5:unknown".to_string()
+    }
+}
+
+#[cfg(test)]
+mod was_exercised_tests {
+    use super::*;
+
+    fn baseline_with(meta: Option<serde_json::Value>) -> Baseline {
+        Baseline {
+            schema_version: 1,
+            suite: "s".into(),
+            assay_version: "test".into(),
+            created_at: "2026-08-06T00:00:00Z".into(),
+            config_fingerprint: "fp".into(),
+            git_info: None,
+            entries: vec![BaselineEntry {
+                test_id: "t1".into(),
+                metric: "semantic".into(),
+                score: 0.87,
+                meta,
+            }],
+        }
+    }
+
+    #[test]
+    fn an_exercised_baseline_entry_reads_as_exercised() {
+        let b = baseline_with(Some(serde_json::json!({"exercised": "exercised"})));
+        assert_eq!(b.was_exercised("t1", "semantic"), Some(true));
+    }
+
+    #[test]
+    fn a_not_applicable_baseline_entry_reads_as_not_exercised() {
+        let b = baseline_with(Some(serde_json::json!({"exercised": "not_applicable"})));
+        assert_eq!(b.was_exercised("t1", "semantic"), Some(false));
+    }
+
+    /// A baseline written before the dimension existed says nothing either way.
+    ///
+    /// `None` rather than `Some(false)` is the whole point: treating silence as "was not exercised"
+    /// would make every pre-existing baseline look like it had no coverage, and the coverage check
+    /// would then never fire because there is nothing to have lost.
+    #[test]
+    fn a_baseline_predating_the_dimension_says_nothing() {
+        assert_eq!(baseline_with(None).was_exercised("t1", "semantic"), None);
+        let b = baseline_with(Some(serde_json::json!({"other": "field"})));
+        assert_eq!(b.was_exercised("t1", "semantic"), None);
+    }
+
+    #[test]
+    fn an_absent_entry_says_nothing() {
+        let b = baseline_with(Some(serde_json::json!({"exercised": "exercised"})));
+        assert_eq!(b.was_exercised("t1", "nosuch"), None);
+        assert_eq!(b.was_exercised("nosuch", "semantic"), None);
     }
 }
