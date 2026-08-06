@@ -1,4 +1,5 @@
 use crate::events::{self, EventStream};
+use crate::probes::{ProbeAttachment, EXPECTED_PROBES};
 use crate::{MonitorError, MonitorStatsSnapshot};
 use assay_common::{
     KEY_DEDUP_OPEN_PATHS, KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL,
@@ -36,6 +37,16 @@ further mismatches are not logged individually.";
 pub struct LinuxMonitor {
     bpf: Arc<Mutex<Ebpf>>,
     links: Vec<MonitorLink>,
+    /// Which probes actually attached, and which were skipped.
+    ///
+    /// `links` alone cannot answer this: `MonitorLink` records the program *kind*, and the handles
+    /// are held for RAII only, never inspected. Every attach site here is guarded by
+    /// `if let Some(prog)` / `if let Ok(tp)`, so a program that is missing from the object or fails
+    /// to convert is skipped without a trace — which means an unattached probe and a probe that
+    /// attached and saw nothing were previously indistinguishable. Any coverage artifact built on
+    /// that would report silence as coverage, which is the failure the coverage descriptor exists to
+    /// prevent.
+    probe_attachment: ProbeAttachment,
     /// Userspace counter for ring-buffer records whose length did not match the pinned
     /// `MonitorEvent` size (almost always a stale eBPF object). Shared with the consumer thread
     /// spawned in `listen()` and read back in `snapshot_stats`.
@@ -54,6 +65,10 @@ enum MonitorLink {
     CgroupSockAddr(#[allow(dead_code)] aya::programs::cgroup_sock_addr::CgroupSockAddrLink),
 }
 
+/// What the loader actually managed to attach, recorded at the attach sites themselves.
+///
+/// Names are the eBPF program names, so a reader can map an entry back to a source file in
+/// `assay-ebpf` without guessing.
 #[cfg(target_os = "linux")]
 impl LinuxMonitor {
     pub fn new(ebpf_data: &[u8]) -> Result<Self, MonitorError> {
@@ -61,6 +76,7 @@ impl LinuxMonitor {
         Ok(Self {
             bpf: Arc::new(Mutex::new(bpf)),
             links: Vec::new(),
+            probe_attachment: ProbeAttachment::default(),
             event_size_mismatch: Arc::new(AtomicU64::new(0)),
         })
     }
@@ -164,6 +180,15 @@ impl LinuxMonitor {
         Ok(())
     }
 
+    /// What actually attached this run, and what did not.
+    ///
+    /// This is the input a coverage descriptor needs: a surface with no attached probe is
+    /// `not_observed`, and silence on it is not evidence of absence.
+    #[must_use]
+    pub fn probe_attachment(&self) -> &ProbeAttachment {
+        &self.probe_attachment
+    }
+
     pub fn attach(&mut self) -> Result<(), MonitorError> {
         let mut bpf = self.bpf.lock().unwrap();
 
@@ -178,6 +203,7 @@ impl LinuxMonitor {
                 tp.load()?;
                 let link_id = tp.attach("syscalls", "sys_enter_openat")?;
                 let link = tp.take_link(link_id)?;
+                self.probe_attachment.attached("sys_enter_openat");
                 self.links.push(MonitorLink::TracePoint(link));
                 println!("DEBUG: Attached Tracepoint sys_enter_openat");
             }
@@ -187,6 +213,7 @@ impl LinuxMonitor {
                 tp.load()?;
                 let link_id = tp.attach("syscalls", "sys_enter_openat2")?;
                 let link = tp.take_link(link_id)?;
+                self.probe_attachment.attached("sys_enter_openat2");
                 self.links.push(MonitorLink::TracePoint(link));
                 println!("DEBUG: Attached Tracepoint sys_enter_openat2");
             }
@@ -197,11 +224,15 @@ impl LinuxMonitor {
                 match tp.attach("syscalls", "sys_exit_openat") {
                     Ok(link_id) => {
                         if let Ok(link) = tp.take_link(link_id) {
+                            self.probe_attachment.attached("sys_exit_openat");
                             self.links.push(MonitorLink::TracePoint(link));
                             println!("DEBUG: Attached Tracepoint sys_exit_openat");
                         }
                     }
-                    Err(e) => eprintln!("WARN: Failed to attach sys_exit_openat: {}", e),
+                    Err(e) => {
+                        self.probe_attachment.skipped("sys_exit_openat");
+                        eprintln!("WARN: Failed to attach sys_exit_openat: {}", e);
+                    }
                 }
             }
         }
@@ -211,11 +242,15 @@ impl LinuxMonitor {
                 match tp.attach("syscalls", "sys_exit_openat2") {
                     Ok(link_id) => {
                         if let Ok(link) = tp.take_link(link_id) {
+                            self.probe_attachment.attached("sys_exit_openat2");
                             self.links.push(MonitorLink::TracePoint(link));
                             println!("DEBUG: Attached Tracepoint sys_exit_openat2");
                         }
                     }
-                    Err(e) => eprintln!("WARN: Failed to attach sys_exit_openat2: {}", e),
+                    Err(e) => {
+                        self.probe_attachment.skipped("sys_exit_openat2");
+                        eprintln!("WARN: Failed to attach sys_exit_openat2: {}", e);
+                    }
                 }
             }
         }
@@ -224,6 +259,7 @@ impl LinuxMonitor {
                 tp.load()?;
                 let link_id = tp.attach("syscalls", "sys_enter_connect")?;
                 let link = tp.take_link(link_id)?;
+                self.probe_attachment.attached("sys_enter_connect");
                 self.links.push(MonitorLink::TracePoint(link));
                 println!("DEBUG: Attached Tracepoint sys_enter_connect");
             }
@@ -234,11 +270,15 @@ impl LinuxMonitor {
                 match tp.attach("syscalls", "sys_enter_fork") {
                     Ok(link_id) => {
                         if let Ok(link) = tp.take_link(link_id) {
+                            self.probe_attachment.attached("sched_process_fork");
                             self.links.push(MonitorLink::TracePoint(link));
                             println!("DEBUG: Attached Tracepoint sys_enter_fork");
                         }
                     }
-                    Err(e) => eprintln!("WARN: Failed to attach sys_enter_fork: {}", e),
+                    Err(e) => {
+                        self.probe_attachment.skipped("sched_process_fork");
+                        eprintln!("WARN: Failed to attach sys_enter_fork: {}", e);
+                    }
                 }
             }
         }
@@ -251,12 +291,15 @@ impl LinuxMonitor {
                     lsm.load("file_open", &btf)?;
                     let link_id = lsm.attach()?;
                     let link = lsm.take_link(link_id)?;
+                    self.probe_attachment.attached("lsm:file_open");
                     self.links.push(MonitorLink::Lsm(link));
                     println!("DEBUG: Attached LSM file_open");
                 }
             }
         }
 
+        // Anything expected that did not attach is a named blind spot, not silence.
+        self.probe_attachment.reconcile(EXPECTED_PROBES);
         Ok(())
     }
 
@@ -392,6 +435,7 @@ impl LinuxMonitor {
         csa.load()?;
         let link_id = csa.attach(cgroup_file, CgroupAttachMode::Single)?;
         let link = csa.take_link(link_id)?;
+        self.probe_attachment.attached("cgroup_sock_addr:connect4");
         self.links.push(MonitorLink::CgroupSockAddr(link));
         println!("DEBUG: Attached cgroup connect4 egress enforcement");
         Ok(())

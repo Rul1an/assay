@@ -2,6 +2,7 @@ mod error;
 pub use error::MonitorError;
 
 pub mod events;
+pub mod probes;
 pub mod tree;
 
 #[cfg(target_os = "linux")]
@@ -130,6 +131,37 @@ impl Monitor {
     }
 
     /// Configure monitored PIDs by writing to MONITORED_PIDS map.
+    /// Which probes attached this run, and which did not.
+    ///
+    /// The input a coverage descriptor needs. A surface with no attached probe is unobserved, and
+    /// silence on it is not evidence of absence — an unattached probe and a probe that attached and
+    /// saw nothing produce the same empty event stream.
+    ///
+    /// On non-Linux targets nothing attaches, so every expected probe is reported as a blind spot
+    /// rather than the record being absent: "no observation" is a fact, not a missing field.
+    /// The no-attachment baseline, so the non-Linux branch of `probe_attachment` is exercised by
+    /// tests that can actually run on a developer machine.
+    #[cfg(test)]
+    pub(crate) fn probe_attachment_for_tests() -> probes::ProbeAttachment {
+        let mut attachment = probes::ProbeAttachment::default();
+        attachment.reconcile(probes::EXPECTED_PROBES);
+        attachment
+    }
+
+    #[must_use]
+    pub fn probe_attachment(&self) -> probes::ProbeAttachment {
+        #[cfg(target_os = "linux")]
+        {
+            self.inner.probe_attachment().clone()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let mut attachment = probes::ProbeAttachment::default();
+            attachment.reconcile(probes::EXPECTED_PROBES);
+            attachment
+        }
+    }
+
     pub fn set_monitored_pids(&mut self, pids: &[u32]) -> Result<(), MonitorError> {
         #[cfg(target_os = "linux")]
         return self.inner.set_monitored_pids(pids);

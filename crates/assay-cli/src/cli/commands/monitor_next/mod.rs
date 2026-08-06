@@ -542,6 +542,24 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
     match monitor.snapshot_stats() {
         Ok(stats) => {
             emit_err!("Monitor summary:");
+            // Which probes actually attached. An unattached probe and a probe that attached and saw
+            // nothing produce the same empty event stream, so the difference has to be stated: a
+            // surface with no probe is unobserved, and silence on it is not evidence of absence.
+            let attachment = monitor.probe_attachment();
+            emit_err!(
+                "  • Probes attached:    {}",
+                if attachment.attached_probes().is_empty() {
+                    "none".to_string()
+                } else {
+                    attachment.attached_probes().join(", ")
+                }
+            );
+            if !attachment.is_complete() {
+                emit_err!(
+                    "  ⚠️  Unobserved surfaces (no probe attached): {}",
+                    attachment.skipped_probes().join(", ")
+                );
+            }
             emit_err!(
                 "  • Tracepoint ringbuf: emitted={} dropped={}",
                 stats.tracepoint_events_emitted,
