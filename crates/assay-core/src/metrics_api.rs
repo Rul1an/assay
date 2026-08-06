@@ -28,6 +28,22 @@ pub enum Exercised {
     Exercised,
 }
 
+impl Exercised {
+    /// The stable string for this value in `details["metrics"][…]["exercised"]`.
+    ///
+    /// A vocabulary, not a `Debug` rendering: it reaches `run.json`, so it is an interface. It
+    /// lives on the enum rather than beside the writer because there is now a reader —
+    /// [`crate::report::exercised`] — and a reader with its own copy of `"not_exercised"` would
+    /// match nothing the day the spelling moved, reporting a clean run instead of a broken one.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Exercised => "exercised",
+            Self::NotApplicable => "not_applicable",
+            Self::NotExercised => "not_exercised",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MetricResult {
     pub score: f64,

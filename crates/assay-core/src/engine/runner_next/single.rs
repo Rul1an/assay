@@ -225,13 +225,11 @@ fn score_after(current: Option<f64>, r: &crate::metrics_api::MetricResult) -> Op
 
 /// The stable string for an `Exercised` value in `details["metrics"][…]`.
 ///
-/// A vocabulary, not a `Debug` rendering: this reaches `run.json`, so it is an interface.
+/// Delegates to [`crate::metrics_api::Exercised::label`], which is where the vocabulary moved once
+/// it acquired a reader (`report::exercised`). Kept as a named function because the tests below
+/// pin the mapping at the point the runner uses it.
 fn exercised_label(e: crate::metrics_api::Exercised) -> &'static str {
-    match e {
-        crate::metrics_api::Exercised::Exercised => "exercised",
-        crate::metrics_api::Exercised::NotApplicable => "not_applicable",
-        crate::metrics_api::Exercised::NotExercised => "not_exercised",
-    }
+    e.label()
 }
 
 #[cfg(test)]
