@@ -33,12 +33,20 @@ pub(crate) fn verify_dsse_signature_bytes_impl(
         });
     }
 
-    let payload_bytes =
-        BASE64
-            .decode(&envelope.payload)
-            .map_err(|e| RegistryError::SignatureInvalid {
-                reason: format!("invalid base64 payload: {}", e),
-            })?;
+    // Bounded before the allocation; see `dsse_limits`.
+    let payload_bytes = match crate::dsse_limits::decode_bounded(envelope.payload.as_bytes()) {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => {
+            return Err(RegistryError::SignatureInvalid {
+                reason: "invalid base64 payload".to_string(),
+            })
+        }
+        Err(too_large) => {
+            return Err(RegistryError::SignatureInvalid {
+                reason: too_large.reason(),
+            })
+        }
+    };
 
     if payload_bytes != canonical_bytes {
         return Err(RegistryError::DigestMismatch {
