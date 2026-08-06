@@ -77,6 +77,10 @@ const FORMAT_ARGS: &[(&[&str], &str, &[&str])] = &[
         "--format",
         &["text", "json", "md", "markdown"],
     ),
+    // Typed last (#2039). It was a bare `String` compared with `==`, and the final `else` wrote
+    // JSON with a `// Default to JSON` comment, so a typo'd spelling produced a JSON file at the
+    // markdown path at exit 0.
+    (&["baseline", "report"], "--format", &["json", "md"]),
 ];
 
 /// Aliases that parse without appearing in the value list, as `(command, flag, alias)`.
