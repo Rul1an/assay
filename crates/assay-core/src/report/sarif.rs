@@ -183,12 +183,15 @@ pub fn build_sarif_diagnostics(
     diagnostics: &[crate::errors::diagnostic::Diagnostic],
     exit_code: i32,
 ) -> serde_json::Value {
+    /// An unrecognized severity becomes `error`, not `note`.
+    ///
+    /// SARIF requires a level, so something must be chosen; choosing the least
+    /// severe one is what let an unknown value disappear from Code Scanning
+    /// while also dropping out of the exit set (#2025, #2033). Fail closed.
     fn normalize_severity(s: &str) -> &str {
-        match s {
-            "error" | "ERROR" => "error",
-            "warn" | "warning" | "WARN" | "WARNING" => "warning",
-            _ => "note",
-        }
+        crate::errors::diagnostic::Severity::parse(s)
+            .map(|severity| severity.as_sarif_level())
+            .unwrap_or("error")
     }
 
     let sarif_results: Vec<serde_json::Value> = diagnostics
@@ -333,5 +336,48 @@ mod tests {
         // Should use the synthetic location URI
         let uri = &locations[0]["physicalLocation"]["artifactLocation"]["uri"];
         assert_eq!(uri, SYNTHETIC_LOCATION_URI);
+    }
+}
+
+#[cfg(test)]
+mod severity_level_tests {
+    use crate::errors::diagnostic::Diagnostic;
+
+    fn diag(severity: &str) -> Diagnostic {
+        Diagnostic {
+            code: "E_CFG_PARSE".into(),
+            severity: severity.into(),
+            source: "test".into(),
+            message: "m".into(),
+            context: serde_json::Value::Null,
+            fix_steps: vec![],
+        }
+    }
+
+    fn level_of(severity: &str) -> String {
+        let sarif = super::build_sarif_diagnostics("assay", &[diag(severity)], 1);
+        sarif["runs"][0]["results"][0]["level"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    #[test]
+    fn an_unknown_severity_reaches_code_scanning_as_an_error() {
+        // It used to arrive as `note`, the least severe level, so a value nobody
+        // recognized was also the one least likely to be looked at (#2033).
+        assert_eq!(level_of("cirtical"), "error");
+        assert_eq!(level_of(""), "error");
+    }
+
+    #[test]
+    fn casing_no_longer_changes_the_level() {
+        // This builder matched exactly, so `Warning` fell through to `note`
+        // while the CLI classified the same value as a warning.
+        for spelling in ["warn", "warning", "Warning", "WARNING"] {
+            assert_eq!(level_of(spelling), "warning", "{spelling}");
+        }
+        assert_eq!(level_of("Error"), "error");
+        assert_eq!(level_of("INFO"), "note");
     }
 }
