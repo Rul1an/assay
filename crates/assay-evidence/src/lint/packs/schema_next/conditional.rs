@@ -31,6 +31,10 @@ impl CheckDefinition {
 
     /// Parse the narrow conditional subset supported in engine v1.1.
     pub fn supported_conditional(&self) -> Result<SupportedConditionalCheck, String> {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "only the Conditional variant carries a condition and a then-check; every other check kind has neither, and the Err path says so by name"
+        )]
         let (condition, then_check) = match self {
             CheckDefinition::Conditional {
                 condition,

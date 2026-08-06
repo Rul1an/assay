@@ -1022,6 +1022,10 @@ pub(crate) fn fold_envelope(
     }
     let mut seen: Option<&str> = None;
     for o in &observations {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "anything that is not a single consistent Present observation is malformed, including Absent and NotApplicable; folding them to malformed is the fail-closed direction and a new variant inherits it"
+        )]
         match o {
             EnvelopeObservation::Present(v) => match seen {
                 Some(prev) if prev != v => return EnvelopeObservation::Malformed,

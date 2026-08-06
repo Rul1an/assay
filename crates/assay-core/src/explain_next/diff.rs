@@ -390,6 +390,10 @@ impl ExplainerState {
 
         // Update rule-specific state
         for (rule_idx, rule) in policy.sequences.iter().enumerate() {
+            #[expect(
+                clippy::wildcard_enum_match_arm,
+                reason = "only the rules with a trigger are advanced on a tool call; the rest are evaluated at end of trace"
+            )]
             match rule {
                 SequenceRule::NeverAfter { trigger, .. }
                     if self.matches(tool, trigger)
@@ -424,6 +428,10 @@ impl ExplainerState {
         let mut violations = Vec::new();
 
         for (rule_idx, rule) in policy.sequences.iter().enumerate() {
+            #[expect(
+                clippy::wildcard_enum_match_arm,
+                reason = "only the rules that can fail with no further input are checked at end of trace; the rest were decided during it"
+            )]
             match rule {
                 SequenceRule::Require { tool } => {
                     let requirements = self.resolve_alias(tool);

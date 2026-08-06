@@ -28,6 +28,10 @@ pub fn write_junit(suite: &str, results: &[TestResultRow], out: &Path) -> anyhow
             )),
             TestStatus::Warn | TestStatus::Flaky | TestStatus::Unstable => {
                 // Use clear warning label in system-out
+                #[expect(
+                    clippy::wildcard_enum_match_arm,
+                    reason = "JUnit has no richer label than WARNING for the remaining statuses; Pass and Skipped never reach here because the caller filters them"
+                )]
                 let label = match r.status {
                     TestStatus::Flaky => "FLAKY",
                     TestStatus::Unstable => "UNSTABLE",
