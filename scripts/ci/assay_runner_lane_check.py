@@ -1024,6 +1024,102 @@ def gate_selections() -> dict[str, tuple[str, ...]]:
     return dict(_gate_selections_cached())
 
 
+GATE_STEP_PREFIX = "Gate: "
+
+
+def step_witnessed_gates(api: GitHubApi, run_id: str) -> tuple[dict[str, str] | None, tuple[str, ...]]:
+    """Which gates GitHub recorded as having run, and how each concluded.
+
+    The observation side of the binding in #2041, and the first one in this lane
+    the gate does not write. `/actions/runs/{id}/jobs` returns per-step `name`
+    and `conclusion`: the author writes the workflow, GitHub writes the record of
+    which steps executed.
+
+    Two earlier attempts failed for want of exactly this. One recorded the script
+    on the delegated host, where gates run as root and are handed their own proof
+    directory -- self-attested. The other moved the *expectation* to the attested
+    commit and left the observation on the host, comparing two values that both
+    came from that commit. ADR-045 names the rule: a record the verified party
+    synthesized cannot carry the weight.
+
+    Returns `{gate_key: conclusion}` for every step named `Gate: <key>`. A step
+    that was not selected reports `skipped`, so absence from the map means the
+    workflow has no such step at all -- a different fact from "did not run".
+    """
+    try:
+        payload = api.request("GET", f"/actions/runs/{run_id}/jobs?per_page=100")
+    except TRANSIENT_REQUEST_ERRORS as exc:
+        return None, (f"could not read jobs ({exc})",)
+    if not isinstance(payload, dict):
+        return None, ("jobs response is not an object",)
+    jobs = payload.get("jobs")
+    if not isinstance(jobs, list):
+        return None, ("jobs response has no jobs list",)
+
+    witnessed: dict[str, str] = {}
+    for job in jobs:
+        steps = job.get("steps") if isinstance(job, dict) else None
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            name = str(step.get("name") or "")
+            if not name.startswith(GATE_STEP_PREFIX):
+                continue
+            witnessed[name[len(GATE_STEP_PREFIX) :]] = str(step.get("conclusion") or "")
+    if not witnessed:
+        return None, (
+            f"no {GATE_STEP_PREFIX!r} steps recorded; the delegated workflow "
+            "predates per-gate steps",
+        )
+    return witnessed, ()
+
+
+def gate_witness_diagnostics(
+    manifest: dict[str, object], witnessed: dict[str, str]
+) -> tuple[str, ...]:
+    """The pack's claims must match what GitHub recorded, in both directions.
+
+    They are different defects. A gate the pack calls `passed` that GitHub never
+    ran successfully is the producer overclaiming. A gate GitHub ran successfully
+    that the pack does not record is the collector dropping evidence. Reading one
+    side only hides whichever it is.
+    """
+    raw = manifest.get("gates")
+    if not isinstance(raw, list):
+        return ("proof manifest has no gates array",)
+
+    diagnostics: list[str] = []
+    claimed: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        key = str(entry.get("gate") or "")
+        if not key or str(entry.get("status") or "") != "passed":
+            continue
+        claimed.add(key)
+        conclusion = witnessed.get(key)
+        if conclusion is None:
+            diagnostics.append(
+                f"proof manifest claims gate {key!r} passed, but the run records no "
+                f"{GATE_STEP_PREFIX}{key} step"
+            )
+        elif conclusion != "success":
+            diagnostics.append(
+                f"proof manifest claims gate {key!r} passed, but the run recorded "
+                f"that step as {conclusion!r}"
+            )
+
+    for key, conclusion in sorted(witnessed.items()):
+        if conclusion == "success" and key not in claimed:
+            diagnostics.append(
+                f"the run recorded gate {key!r} as successful, but the proof "
+                "manifest does not record it as passed"
+            )
+    return tuple(diagnostics)
+
+
 def gate_execution_diagnostics(manifest: dict[str, object], label: str) -> tuple[str, ...]:
     """Reject a proof whose recorded gates did not all pass.
 
@@ -1574,6 +1670,15 @@ def find_valid_attested_proof(
             diagnostics.extend(f"run {run_id}: {line}" for line in semantic_diagnostics)
             continue
 
+        witnessed, witness_diagnostics = step_witnessed_gates(api, run_id)
+        if witnessed is None:
+            diagnostics.extend(f"run {run_id}: {line}" for line in witness_diagnostics)
+            continue
+        witness_mismatch = gate_witness_diagnostics(pack.manifest, witnessed)
+        if witness_mismatch:
+            diagnostics.extend(f"run {run_id}: {line}" for line in witness_mismatch)
+            continue
+
         predicate_diagnostics = validate_attestation_predicate(statement, pack.manifest, run, api)
         if predicate_diagnostics:
             diagnostics.extend(f"run {run_id}: {line}" for line in predicate_diagnostics)
@@ -1968,6 +2073,7 @@ def self_test() -> None:
     assert uncovered_content_provenance_files(["Cargo.lock"]) == ("Cargo.lock",)
     _test_gating_rule_count_is_derived()
     _test_gate_execution_is_verified()
+    _test_pack_claims_match_the_step_witness()
     _test_gate_selections_match_the_workflow()
     _test_gating_map_is_current()
     _test_prefix_gated_surfaces_keep_their_coverage()
@@ -2138,6 +2244,47 @@ def selection_labels(condition: str) -> tuple[str, ...] | None:
             return None
         labels.append(match.group(1))
     return tuple(labels)
+
+
+def _test_pack_claims_match_the_step_witness() -> None:
+    """The pack's gate claims are checked against GitHub's own step record.
+
+    Both directions, because they are different defects: a claimed pass GitHub
+    never recorded is the producer overclaiming; a successful step the pack omits
+    is the collector dropping evidence.
+
+    This is the first observation in this lane that the gate does not write. Two
+    earlier attempts compared values that both originated on the delegated host,
+    or both from one attested commit, and could not detect anything.
+    """
+    gates = list(gate_selections()["all"])
+    good = {g: "success" for g in gates}
+
+    def diagnose(manifest_gates: object, witnessed: dict[str, str]) -> tuple[str, ...]:
+        return gate_witness_diagnostics({"gates": manifest_gates}, witnessed)
+
+    passed = [{"gate": g, "status": "passed"} for g in gates]
+    assert diagnose(passed, good) == ()
+
+    # Producer overclaims: a pass with no step, and a pass whose step failed.
+    assert "records no" in diagnose(passed, {g: "success" for g in gates[:-1]})[0]
+    failed_step = dict(good)
+    failed_step[gates[0]] = "failure"
+    assert "recorded that step as 'failure'" in diagnose(passed, failed_step)[0]
+    skipped_step = dict(good)
+    skipped_step[gates[0]] = "skipped"
+    assert "'skipped'" in diagnose(passed, skipped_step)[0]
+
+    # Collector drops evidence: a successful step the pack does not record.
+    assert "does not record it as passed" in diagnose(passed[:-1], good)[0]
+
+    # A gate recorded as anything but passed is not claimed, so no mismatch from
+    # this check -- gate_execution_diagnostics owns that rejection.
+    not_passed = [dict(e) for e in passed]
+    not_passed[0]["status"] = "missing"
+    skipped = dict(good)
+    skipped[gates[0]] = "skipped"
+    assert diagnose(not_passed, skipped) == ()
 
 
 def _test_gate_selections_match_the_workflow() -> None:
@@ -2626,6 +2773,19 @@ def _test_attested_proof_pack_helpers() -> None:
                         }
                     ]
                 }
+            if path.startswith("/actions/runs/12345/jobs"):
+                # The substrate witness: GitHub's record of which gate steps ran.
+                # The fixture describes a run in which every selected gate did.
+                return {
+                    "jobs": [
+                        {
+                            "steps": [
+                                {"name": f"{GATE_STEP_PREFIX}{name}", "conclusion": "success"}
+                                for name in gate_selections()["all"]
+                            ]
+                        }
+                    ]
+                }
             raise AssertionError(f"unexpected request path {path!r}")
 
         def download(self, path_or_url: str, *, max_bytes: int | None = None) -> bytes:
@@ -2675,10 +2835,45 @@ def _test_attested_proof_pack_helpers() -> None:
             ),
             Gate.ALL,
         )
+        # Same pack, a witness that disagrees: GitHub records only four of the
+        # five gate steps. This drives the wiring, not just the predicate -- an
+        # earlier revision in this arc had a correct predicate that production
+        # never called, and the suite stayed green.
+        class _ShortWitnessApi(_FakeAttestedApi):
+            def request(self, method: str, path: str, payload: object | None = None) -> object:
+                if path.startswith("/actions/runs/12345/jobs"):
+                    keys = list(gate_selections()["all"])[:-1]
+                    return {
+                        "jobs": [
+                            {
+                                "steps": [
+                                    {"name": f"{GATE_STEP_PREFIX}{k}", "conclusion": "success"}
+                                    for k in keys
+                                ]
+                            }
+                        ]
+                    }
+                return super().request(method, path, payload)
+
+        short = find_valid_attested_proof(
+            _ShortWitnessApi(),
+            ["12345"],
+            PullRequest(
+                number=7,
+                title="witness disagrees",
+                body="",
+                author_login="Rul1an",
+                head_sha="abc123",
+                files=(".github/workflows/runner-spike-delegated.yml",),
+            ),
+            Gate.ALL,
+        )
     finally:
         globals()["content_tree_proof_accepts_head"] = old_tree_accepts
         globals()["run_gh_attestation_verify"] = old_gh_verify
     assert accepted.accepted, accepted.diagnostics
+    assert not short.accepted, "a pack claiming a gate the run never recorded was accepted"
+    assert any("records no" in line for line in short.diagnostics), short.diagnostics
 
     old_name = os.environ.get("GITHUB_EVENT_NAME")
     old_run_id = os.environ.get("DELEGATED_WORKFLOW_RUN_ID")
