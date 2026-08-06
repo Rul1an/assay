@@ -154,6 +154,22 @@ The production seal MUST define its signing surface explicitly before any stable
 
 Until those details are implemented and tested, this ADR authorizes only the primitive design and fixture/checker work, not stable production AEE export.
 
+**Status (2026-08-06): implemented in `crates/assay-cli/src/aee_seal_envelope.rs`.** The choices above resolve as:
+
+| requirement | choice |
+|---|---|
+| envelope format | DSSE, named explicitly, over `assay_common::dsse::build_pae` — the workspace's one PAE |
+| payload type | `application/vnd.assay.aee-landlock-seal.v1+json` |
+| payload bytes | RFC 8785 via `assay_canonical::jcs`, duplicate members rejected by `parse_strict` before signing and before verification |
+| signature algorithm | Ed25519; the fixture harness's HMAC key shape cannot verify here |
+| verification rule | signature over the PAE of the exact transmitted bytes, then key role, keyid and collection-path scope; no refusal path returns a payload |
+
+RFC 8785 is required even though DSSE's PAE does not need it: the checker *recomputes* `aeeRunBinding` and `aeeObservedSet` from the payload, and a recomputation over non-canonical bytes is not reproducible. Signature stability and recomputability are two requirements, and PAE answers only the first.
+
+This closes production gate 1. Gates 2, 3 and 4 were closed by the shared derivation function, the checker's 24 negative controls, and the enforced payload-local non-claims. Gate 5 — fixture signing cannot be mistaken for production — is structural rather than documentary: the payload type differs, and PAE binds it, so the two sign different bytes for an identical payload.
+
+Still out of scope, and named here rather than left implicit: **key rotation and compromise handling**, which this ADR already requires be named before any stable AEE export is exposed, and **multi-signature envelopes**, which the verifier refuses by count rather than crediting whichever entry it looked at first.
+
 Illustrative shape:
 
 ```jsonc
