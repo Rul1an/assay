@@ -109,6 +109,18 @@ names are ever unified the invariant is already held rather than discovered.
 `toolExecutionNotifications[].descriptor.id`, a different field, and it is
 deliberately not a rule.
 
+## The one condition that has two codes
+
+`E_PATH_NOT_FOUND` (surface 1) and `E_TRACE_NOT_FOUND` (surface 3) mark the same condition — a
+trace file that is not there — reported by different commands into different artifacts. ADR-046
+decides they stay two codes, because unifying a string across two artifacts is the registry merge
+that ADR rejects, and records that they now exit the same way, which is what made the duplication
+harmful.
+
+`E_TRACE_MISS` is **not** part of that pair, despite being counted into it by #2010 and by an
+earlier comment on `decide_exit`. `providers/trace.rs:37` builds it with "prompt not found in
+loaded traces": the file loaded, and a prompt is absent from it. Coverage, not existence.
+
 ## Surface 3 — `reason_code` in `run.json` and `summary.json`
 
 | Source | Reaches it via |
