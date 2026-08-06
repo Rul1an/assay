@@ -52,6 +52,10 @@ pub fn blocking_rank(status: TestStatus) -> u8 {
 /// The `_ => 2` branch is reserved for future eligible severities (e.g. note-level); currently all eligible statuses map to 0 or 1.
 #[inline]
 pub fn severity_rank(status: TestStatus) -> u8 {
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "Pass, Skipped and AllowedOnError rank last; a new non-failing status ranks with them, and a new failing one must be named above or it sorts below real failures"
+    )]
     match status {
         TestStatus::Fail | TestStatus::Error => 0,
         TestStatus::Warn | TestStatus::Flaky | TestStatus::Unstable => 1,
@@ -95,6 +99,7 @@ pub fn write_sarif_with_limit(
     let sarif_results: Vec<serde_json::Value> = kept
         .iter()
         .map(|r| {
+            #[expect(clippy::wildcard_enum_match_arm, reason = "Pass, Skipped and AllowedOnError are notes; a new failing status must be named above or it reaches Code Scanning as a note, which is the level least likely to be looked at")]
             let level = match r.status {
                 TestStatus::Warn | TestStatus::Flaky | TestStatus::Unstable => "warning",
                 TestStatus::Fail | TestStatus::Error => "error",

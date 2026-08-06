@@ -152,6 +152,10 @@ pub(super) async fn handle_tools_call<W: AsyncWriteExt + Unpin>(
             let declared = annotation_conformance::extract_declared_annotations(
                 eff_annotations.as_ref().unwrap_or(&Value::Null),
             );
+            #[expect(
+                clippy::wildcard_enum_match_arm,
+                reason = "only a Present digest is a digest; NoCompleteManifest, Ambiguous and CompleteButToolAbsent are all absence of one, which the None expresses"
+            )]
             let digest = match &eff_digest {
                 enforce::ObservedToolDigest::Present(d) => Some(d.as_str()),
                 _ => None,

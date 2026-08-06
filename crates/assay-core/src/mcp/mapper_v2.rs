@@ -121,6 +121,10 @@ pub fn mcp_events_to_v2_trace(
         // Read before the match, which consumes the payload.
         let correlation = payload_correlation_id(&e.payload);
 
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "only the payload kinds that carry trace-visible steps are mapped; the rest contribute no step, and a new kind that should would have to be named"
+        )]
         match e.payload {
             McpPayload::ToolsListRequest { .. } => {
                 out.push(TraceEvent::Step(StepEntry {

@@ -106,6 +106,10 @@ impl HttpBackend {
                 Err(e) if e.is_retryable() && retries < max_retries => {
                     retries += 1;
 
+                    #[expect(
+                        clippy::wildcard_enum_match_arm,
+                        reason = "only a rate limit carries a retry-after to honour; every other error uses the default backoff"
+                    )]
                     let backoff = match &e {
                         RegistryError::RateLimited {
                             retry_after: Some(retry_after),

@@ -98,6 +98,10 @@ impl Metric for SequenceValidMetric {
         // 2. Validate Rules (DSL)
         if let Some(rules) = effective_rules {
             for rule in rules {
+                #[expect(
+                    clippy::wildcard_enum_match_arm,
+                    reason = "the guarded arms above are the failing cases; a rule that does not match them passed, and a new rule kind must be named or it silently passes -- the direction that hides a violation"
+                )]
                 match rule {
                     assay_core::model::SequenceRule::Require { tool }
                         if !actual_names.contains(tool) =>

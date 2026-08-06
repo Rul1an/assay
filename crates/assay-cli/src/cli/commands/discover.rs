@@ -45,7 +45,23 @@ pub async fn run(args: DiscoverArgs) -> anyhow::Result<i32> {
                 assay_core::mcp::policy::DiscoveryMethod::Processes => {
                     servers.extend(scan_processes());
                 }
-                _ => {} // Network/DNS/WellKnown not implemented yet
+                // Named rather than caught by `_`, because these are not a fallback: they are a
+                // published policy surface. `DiscoveryMethod` derives `Deserialize` and
+                // `JsonSchema`, so a policy saying `methods: [network]` parses cleanly, and this
+                // arm used to accept it and scan nothing -- no output, exit 0. An operator would
+                // read that as "discovery found nothing" rather than "discovery never ran".
+                //
+                // A warning rather than a refusal: a policy may list one of these beside a method
+                // that does work, and failing the whole run would punish the working half.
+                assay_core::mcp::policy::DiscoveryMethod::Network
+                | assay_core::mcp::policy::DiscoveryMethod::Dns
+                | assay_core::mcp::policy::DiscoveryMethod::WellKnown => {
+                    eprintln!(
+                        "warning: discovery method {:?} is configured but not implemented; \
+                         nothing was scanned for it",
+                        method
+                    );
+                }
             }
         }
     }
