@@ -121,13 +121,19 @@ pub enum SealVerifyError {
     /// The signature does not verify over the PAE of the exact transmitted bytes.
     SignatureInvalid,
     /// The signing key is not the key consumer policy names.
-    KeyNotTrusted { keyid: String },
+    KeyNotTrusted {
+        keyid: String,
+    },
     /// A policy-decision key signed a substrate observation.
     WrongKeyRole,
     /// The key is trusted, but not for the collection path this payload claims.
-    CollectionPathOutOfScope { path: String },
+    CollectionPathOutOfScope {
+        path: String,
+    },
     /// The key is trusted, but not for this substrate.
-    SubstrateOutOfScope { substrate: String },
+    SubstrateOutOfScope {
+        substrate: String,
+    },
     /// The bytes verified, but they do not deserialize into a seal payload.
     PayloadNotASeal(String),
 }
@@ -218,9 +224,10 @@ pub fn verify_seal(
 
     // Strict parse before anything trusts these bytes. A duplicate member would let a signature
     // cover one reading while a consumer resolves another, and RFC 8785 treats it as invalid.
-    let value = parse_strict(std::str::from_utf8(&bytes).map_err(|e| {
-        SealVerifyError::PayloadNotStrictJson(e.to_string())
-    })?)
+    let value = parse_strict(
+        std::str::from_utf8(&bytes)
+            .map_err(|e| SealVerifyError::PayloadNotStrictJson(e.to_string()))?,
+    )
     .map_err(|e| SealVerifyError::PayloadNotStrictJson(e.to_string()))?;
 
     if entry.keyid != trusted.keyid {
@@ -253,7 +260,7 @@ pub fn verify_seal(
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
-    if !trusted.collection_paths.iter().any(|p| *p == path) {
+    if !trusted.collection_paths.contains(&path) {
         return Err(SealVerifyError::CollectionPathOutOfScope { path });
     }
 
@@ -344,8 +351,13 @@ mod tests {
 
     fn signed() -> (SealEnvelope, SigningKey) {
         let k = key();
-        let env = sign_seal(&sealed_payload(), &k, "observer-1", KeyRole::SubstrateObservation)
-            .expect("signs");
+        let env = sign_seal(
+            &sealed_payload(),
+            &k,
+            "observer-1",
+            KeyRole::SubstrateObservation,
+        )
+        .expect("signs");
         (env, k)
     }
 
@@ -422,8 +434,13 @@ mod tests {
 
     #[test]
     fn a_policy_decision_key_may_not_sign() {
-        let err = sign_seal(&sealed_payload(), &key(), "policy-1", KeyRole::PolicyDecision)
-            .expect_err("must refuse");
+        let err = sign_seal(
+            &sealed_payload(),
+            &key(),
+            "policy-1",
+            KeyRole::PolicyDecision,
+        )
+        .expect_err("must refuse");
         assert_eq!(err, SealSignError::WrongKeyRole);
     }
 
@@ -459,8 +476,8 @@ mod tests {
     #[test]
     fn a_key_outside_its_substrate_is_not_credited() {
         let k = key();
-        let err = check_substrate_scope(&trusted(&k), "some-other-substrate")
-            .expect_err("must refuse");
+        let err =
+            check_substrate_scope(&trusted(&k), "some-other-substrate").expect_err("must refuse");
         assert_eq!(err.code(), "seal-envelope-substrate-out-of-scope");
         check_substrate_scope(&trusted(&k), "assay-landlock-substrate").expect("in scope");
     }
@@ -473,12 +490,16 @@ mod tests {
         let only = envelope.signatures[0].clone();
         envelope.signatures = vec![only.clone(), only];
         assert_eq!(
-            verify_seal(&envelope, &trusted(&k)).expect_err("must refuse").code(),
+            verify_seal(&envelope, &trusted(&k))
+                .expect_err("must refuse")
+                .code(),
             "seal-envelope-signature-count"
         );
         envelope.signatures.clear();
         assert_eq!(
-            verify_seal(&envelope, &trusted(&k)).expect_err("must refuse").code(),
+            verify_seal(&envelope, &trusted(&k))
+                .expect_err("must refuse")
+                .code(),
             "seal-envelope-signature-count"
         );
     }
