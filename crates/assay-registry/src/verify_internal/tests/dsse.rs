@@ -218,3 +218,51 @@ fn test_dsse_invalid_signature_rejected() {
         result
     );
 }
+
+/// The ceiling is reached through the sign-off verifier, not through `decode_bounded`.
+///
+/// #1969's defect was three flows that each decoded before checking anything. A helper no flow
+/// calls leaves all three exactly as they were, so each flow is driven with an oversized payload
+/// through its own real entry point. This is the third.
+#[test]
+fn an_oversized_payload_is_refused_by_the_signoff_verifier() {
+    let signing_key = keypair_from_seed([0x11; 32]);
+    let content = "name: test-pack\nversion: \"1.0.0\"\nrules: []";
+    let (mut envelope, key_id) = create_signed_envelope(&signing_key, content);
+
+    use ed25519_dalek::pkcs8::EncodePublicKey;
+    let spki_der = signing_key.verifying_key().to_public_key_der().unwrap();
+    let trusted_key = crate::types::TrustedKey {
+        key_id,
+        algorithm: "Ed25519".to_string(),
+        public_key: BASE64.encode(spki_der.as_bytes()),
+        description: Some("Test key".to_string()),
+        added_at: None,
+        expires_at: None,
+        revoked: false,
+    };
+    let trust_store = TrustStore::new();
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(trust_store.add_pinned_key(&trusted_key))
+        .unwrap();
+
+    let canonical = crate::canonicalize::to_canonical_jcs_bytes(
+        &crate::canonicalize::parse_yaml_strict(content).unwrap(),
+    )
+    .unwrap();
+    let content_str = String::from_utf8(canonical).unwrap();
+
+    // Two megabytes of base64, over the one-megabyte ceiling. Everything else is a valid envelope,
+    // so size is the only difference from the passing case above.
+    envelope.payload = "A".repeat(2 * 1024 * 1024);
+
+    let err = verify_dsse_signature_legacy_for_tests(&content_str, &envelope, &trust_store)
+        .expect_err("an oversized payload must be refused");
+    let reason = format!("{err:?}");
+    assert!(
+        reason.contains("ceiling"),
+        "the refusal must name the size ceiling rather than reading as a generic decode failure: \
+         {reason}"
+    );
+}
