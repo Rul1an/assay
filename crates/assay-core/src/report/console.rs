@@ -286,14 +286,14 @@ fn print_not_exercised(results: &[TestResultRow]) {
         return;
     }
     eprintln!(
-        "\nNot exercised: {} metric(s) were requested and evaluated nothing.",
+        "\nNot exercised: {} check(s) were requested and evaluated nothing.",
         findings.len()
     );
     for f in &findings {
         eprintln!("  ⚪ {}", safe_msg(&f.render()));
     }
     eprintln!(
-        "  A metric that did not run is a coverage hole, not a pass. This does not fail the run."
+        "  A check that did not run is a coverage hole, not a pass. This does not fail the run."
     );
 }
 
