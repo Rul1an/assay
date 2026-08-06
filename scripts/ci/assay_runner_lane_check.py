@@ -12,6 +12,7 @@ import base64
 import hashlib
 import http.client
 import io
+import inspect
 import json
 import os
 import re
@@ -1751,6 +1752,33 @@ def maybe_status(
         raise
 
 
+def recorded_override() -> tuple[str, str] | None:
+    """A maintainer's recorded decision to proceed without a proof pack.
+
+    The compatibility fallback used to be an inference: the code concluded that
+    no evidence was available, partly from the PR body. That inference cannot be
+    made safely. GitHub's artifact listing is the only substrate signal about
+    whether evidence exists, and while it cannot be forged *positive*, an author
+    needs it *negative* -- and negative is free, because the delegated workflow
+    uploads with `if-no-files-found: warn` and runs the definition on the
+    dispatched ref. Measured before this replaced it.
+
+    So absence stops being deduced and becomes authorized. `override_reason` is
+    an input on the privileged `workflow_dispatch`, which runs from `main`, holds
+    `statuses: write`, and never executes helper code from the PR ref. A
+    `pull_request` run carries no inputs, so a PR cannot set it for itself.
+
+    This does not make proceeding without evidence safe. It makes it
+    attributable: retention expiry, a Sigstore outage and a run predating the
+    attested lane all still have a path, and that path now names who took it and
+    why.
+    """
+    reason = os.environ.get("LANE_OVERRIDE_REASON", "").strip()
+    if not reason:
+        return None
+    return os.environ.get("LANE_OVERRIDE_ACTOR", "").strip() or "unknown", reason
+
+
 def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) -> int:
     pr = load_pr(api, pr_number)
     classification = classify_files(pr.files)
@@ -1785,10 +1813,8 @@ def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) ->
 
     attested = find_valid_attested_proof(api, run_ids, pr, classification.gate)
     valid_run, run_diagnostics = find_valid_delegated_run(api, run_ids, pr.head_sha)
-    sha_ok = text_mentions_head_sha(text, pr.head_sha)
-    gate_ok = recorded_gate_ok(text, classification.gate)
-    fallback_passed = valid_run is not None and sha_ok and gate_ok
-    passed = attested.accepted or fallback_passed
+    override = recorded_override()
+    passed = attested.accepted or override is not None
 
     details: list[str] = []
     if not run_ids:
@@ -1797,12 +1823,13 @@ def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) ->
         details.append("No attested delegated proof pack matched this PR's gated content.")
     if valid_run is None and not attested.accepted:
         details.append("No legacy delegated run URL matched the PR head SHA.")
-    if not sha_ok and not attested.accepted:
-        details.append("The PR body/comments do not record the current PR head SHA or its 12-character prefix.")
-    if not gate_ok and not attested.accepted:
+    if not attested.accepted and override is None:
         details.append(
-            f"The PR body/comments do not record `gate: {classification.gate.label}`"
-            + (" or `gate: all`." if classification.gate != Gate.ALL else ".")
+            "A delegated proof pack is required. A recorded run URL in the PR body no\n"
+            "longer credits the PR on its own: absence of evidence is not inferred from\n"
+            "text the author writes. If verification genuinely could not be performed,\n"
+            "dispatch `Assay-Runner Lane Check` with `override_reason`, which records who\n"
+            "decided and why."
         )
     if attested.diagnostics and not attested.accepted:
         details.append(
@@ -1813,16 +1840,19 @@ def run_check(api: GitHubApi, pr_number: int, *, comment: bool, status: bool) ->
         details.append("Legacy run diagnostics:\n" + "\n".join(f"- {line}" for line in run_diagnostics[:8]))
     if attested.accepted and attested.run is not None:
         details.append(f"Matched attested delegated proof pack: {attested.run.get('html_url')}")
-    elif fallback_passed and valid_run is not None:
-        details.append(f"Matched legacy delegated run proof: {valid_run.get('html_url')}")
+    elif override is not None:
+        details.append(f"Verification waived by {override[0]}: {override[1]}")
 
     detail = "\n\n".join(details)
     body = comment_body(classification, pr, passed, detail)
     maybe_comment(api, pr.number, comments, body, comment=comment)
     if attested.accepted:
         status_description = f"attested delegated proof accepted: gates={classification.gate.label}"
-    elif fallback_passed:
-        status_description = f"legacy delegated proof accepted: gates={classification.gate.label}"
+    elif override is not None:
+        actor, reason = override
+        status_description = (
+            f"verification waived by {actor}: {reason}"[:140]
+        )
     else:
         status_description = f"delegated proof required: gates={classification.gate.label}"
     maybe_status(api, pr.head_sha, passed, status_description, status=status)
@@ -1942,6 +1972,8 @@ def self_test() -> None:
     _test_gating_map_is_current()
     _test_prefix_gated_surfaces_keep_their_coverage()
     _test_declared_gate_surfaces_exist()
+    _test_run_check_executes()
+    _test_run_check_consults_the_override()
     _test_content_tree_comparison()
 
     valid_run = {
@@ -2087,50 +2119,76 @@ GATE_SCRIPTS = {
 }
 
 
+WORKFLOW_READ_MAX_BYTES = 256 * 1024
+
+
+def selection_labels(condition: str) -> tuple[str, ...] | None:
+    """The labels a gate step's `if:` runs for, or None if the shape is unknown.
+
+    Parsed as a whole rather than searched for substrings. `false && (inputs.gates
+    == 'all')` contains the substring and runs for nothing; keying on containment
+    would read that step as live. Anything this cannot parse in full is refused
+    rather than guessed at, so an expression that grows a condition the assertion
+    does not understand fails loudly instead of silently passing.
+    """
+    labels: list[str] = []
+    for term in condition.split("||"):
+        match = re.fullmatch(r"\s*inputs\.gates == '([a-z0-9-]+)'\s*", term)
+        if match is None:
+            return None
+        labels.append(match.group(1))
+    return tuple(labels)
+
+
 def _test_gate_selections_match_the_workflow() -> None:
-    """`GATE_SELECTIONS` and the delegated workflow's case branch agree.
+    """`GATE_SELECTIONS` and the delegated workflow's gate steps agree.
 
-    `gate_execution_diagnostics` rejects a proof whose recorded gates do not
-    match the selection, and it takes that selection from the pack builder. The
-    workflow's `case` branch is a third copy of the same mapping, and it is the
-    one that actually decides which scripts run. If it drifts, the builder
-    collects gates the workflow never ran -- which this verification would
-    report as a defective proof rather than as the drift it is.
+    The workflow used to select gates with a shell `case` branch inside one
+    step; it now runs one step per gate, named `Gate: <key>`, with the selection
+    in each step's `if:`. That split exists so GitHub's job record witnesses
+    which gates ran -- an observation the gate itself does not write (#2041).
 
-    Parity rather than derivation: the branch is shell inside YAML, and parsing
-    it to drive production would be a worse dependency than asserting on it.
+    This assertion follows the new shape. Its purpose is unchanged: the builder
+    collects gates from `GATE_SELECTIONS`, the workflow decides which ones
+    actually run, and a pack whose two disagree is a pack whose label means
+    nothing.
 
-    Not caught, measured: a `run_gate` call left in place but wrapped in a
-    condition that never fires. The text still names the gate and the script,
-    so this reads it as running. Detecting that needs the pack's recorded
-    gates, which `gate_execution_diagnostics` checks separately -- a gate that
-    did not run is recorded `missing` there.
+    Parsing `if:` expressions rather than shell is also strictly less fragile
+    than the version this replaces, which sliced to the first `;;` before
+    stripping comments and so lost every gate after a `;;` in a comment.
     """
     root = Path(__file__).resolve().parents[2]
-    workflow = (root / DELEGATED_WORKFLOW_PATH).read_text(encoding="utf-8")
-    selections = gate_selections()
-    for label, expected in selections.items():
-        marker = f"\n            {label})\n"
-        start = workflow.find(marker)
-        assert start != -1, f"no case branch for {label!r} in {DELEGATED_WORKFLOW_PATH}"
-        end = workflow.find(";;", start)
-        branch = workflow[start:end]
-        # Strip comments first. The regex is text matching, so a commented-out
-        # `run_gate` line otherwise counts as a gate that runs -- which is the
-        # natural way to disable one, and was invisible here until measured.
-        live = "\n".join(
-            line for line in branch.splitlines() if not line.lstrip().startswith("#")
+    source = root / DELEGATED_WORKFLOW_PATH
+    size = source.stat().st_size
+    assert size <= WORKFLOW_READ_MAX_BYTES, (
+        f"{DELEGATED_WORKFLOW_PATH} is {size} bytes, above the "
+        f"{WORKFLOW_READ_MAX_BYTES}-byte ceiling; refusing to materialize it"
+    )
+    # Strip comment lines first. The pattern is text matching, so a commented-out
+    # step otherwise counts as a step that runs -- the natural way to disable
+    # one, and the same defect the `case`-branch version of this assertion had.
+    workflow = "\n".join(
+        line
+        for line in source.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    steps = re.findall(r'- name: "Gate: ([^"]+)"\n *if: ([^\n]+)', workflow)
+    assert steps, f"no `Gate:` steps in {DELEGATED_WORKFLOW_PATH}"
+
+    for key, condition in steps:
+        labels = selection_labels(condition)
+        assert labels is not None, (
+            f"step {key!r} has condition {condition!r}, which is not a disjunction of "
+            "`inputs.gates == '<label>'` terms; this assertion cannot read it"
         )
-        ran = tuple(re.findall(r'run_gate "([^"]+)"[^\n]*\n\s*"([^"]+)"', live))
-        assert tuple(k for k, _ in ran) == tuple(expected), (
-            f"{label!r}: workflow runs {tuple(k for k, _ in ran)}, "
-            f"GATE_SELECTIONS says {tuple(expected)}"
+
+    for label, expected in gate_selections().items():
+        runs = tuple(
+            key for key, condition in steps if label in (selection_labels(condition) or ())
         )
-        for key, script in ran:
-            stem = script.rsplit("/", 1)[-1]
-            assert GATE_SCRIPTS.get(key) == stem, (
-                f"{label!r}: gate {key!r} runs {stem!r}, pinned as {GATE_SCRIPTS.get(key)!r}"
-            )
+        assert runs == tuple(expected), (
+            f"{label!r}: workflow steps run {runs}, GATE_SELECTIONS says {tuple(expected)}"
+        )
 
 
 def _test_gating_map_is_current() -> None:
@@ -2220,6 +2278,93 @@ def _test_declared_gate_surfaces_exist() -> None:
         ]
     )
     assert not dead, f"declared gate surfaces matching no tracked file: {dead}"
+
+
+def _test_run_check_executes(monkeypatched: bool = True) -> None:
+    """`run_check` runs end to end, with and without an override.
+
+    Reading the source is not enough. An earlier revision left `fallback_passed`,
+    `sha_ok` and `gate_ok` referenced after their assignments were removed -- a
+    `NameError` on every production call -- and the suite stayed green because no
+    test *executed* `run_check`. Source inspection cannot see an unbound name.
+    """
+    pr = PullRequest(
+        number=1,
+        title="t",
+        body="",
+        author_login="x",
+        head_sha="a" * 40,
+        files=("crates/assay-ebpf/src/lib.rs",),
+    )
+
+    class _Api:
+        repo = "Rul1an/assay"
+
+        def request(self, method: str, path: str, payload: object = None) -> object:
+            if path.endswith("/comments"):
+                return []
+            if "/pulls/" in path and "/files" in path:
+                return []
+            if "/pulls/" in path:
+                return {
+                    "number": 1,
+                    "title": "t",
+                    "body": "",
+                    "user": {"login": "x"},
+                    "head": {"sha": "a" * 40},
+                }
+            if "/artifacts" in path:
+                return {"artifacts": []}
+            return {}
+
+        def paginated(self, path: str) -> list[object]:
+            # A gated file, so the PR genuinely requires a delegated proof.
+            if path.endswith("/files"):
+                return [{"filename": "crates/assay-ebpf/src/lib.rs", "status": "modified"}]
+            return []
+
+    old = {k: os.environ.get(k) for k in ("LANE_OVERRIDE_REASON", "LANE_OVERRIDE_ACTOR")}
+    old_fetch = globals()["fetch_ref_for_diff"]
+    globals()["fetch_ref_for_diff"] = lambda *a, **k: None
+    try:
+        os.environ.pop("LANE_OVERRIDE_REASON", None)
+        assert run_check(_Api(), 1, comment=False, status=False) == 1
+
+        os.environ["LANE_OVERRIDE_REASON"] = "artifact retention expired"
+        os.environ["LANE_OVERRIDE_ACTOR"] = "maintainer"
+        assert run_check(_Api(), 1, comment=False, status=False) == 0
+    finally:
+        globals()["fetch_ref_for_diff"] = old_fetch
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def _test_run_check_consults_the_override() -> None:
+    """The override is the only path that credits without a pack."""
+    source = inspect.getsource(run_check)
+    assert "recorded_override()" in source, "run_check does not consult the override"
+    assert "recorded_gate_ok(" not in source, "run_check still infers absence from the PR body"
+
+    old = {k: os.environ.get(k) for k in ("LANE_OVERRIDE_REASON", "LANE_OVERRIDE_ACTOR")}
+    try:
+        os.environ.pop("LANE_OVERRIDE_REASON", None)
+        assert recorded_override() is None
+        os.environ["LANE_OVERRIDE_REASON"] = "   "
+        assert recorded_override() is None, "whitespace is not a reason"
+        os.environ["LANE_OVERRIDE_REASON"] = "retention expired"
+        os.environ["LANE_OVERRIDE_ACTOR"] = "someone"
+        assert recorded_override() == ("someone", "retention expired")
+        del os.environ["LANE_OVERRIDE_ACTOR"]
+        assert recorded_override() == ("unknown", "retention expired")
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 def _test_content_tree_comparison() -> None:
