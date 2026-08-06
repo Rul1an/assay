@@ -81,6 +81,58 @@ pub struct KernelLayerCapture {
     filtered_loader_top: Vec<(String, u64)>,
 }
 
+/// Read-only views for the diagnostic projection (#1271).
+///
+/// The breakdowns were already collected and stored privately, so nothing could read them: the
+/// capture knew which hook lost a record and had no way to say so. These expose them without
+/// widening the fields, so the projection is the only consumer and no writer appears.
+impl KernelLayerCapture {
+    /// Per-ring and per-hook drop counts, plus the part no hook claims.
+    pub fn drop_layers(&self) -> DropLayers {
+        DropLayers {
+            tracepoint: self.drop_breakdown.tracepoint,
+            lsm: self.drop_breakdown.lsm,
+            socket: self.drop_breakdown.socket,
+            openat: self.tracepoint_hook_breakdown.openat_dropped,
+            openat2: self.tracepoint_hook_breakdown.openat2_dropped,
+            connect: self.tracepoint_hook_breakdown.connect_dropped,
+            sendto: self.tracepoint_hook_breakdown.sendto_dropped,
+            sendmsg: self.tracepoint_hook_breakdown.sendmsg_dropped,
+            unattributed: self.drop_breakdown.tracepoint.saturating_sub(
+                self.tracepoint_hook_breakdown.openat_dropped
+                    + self.tracepoint_hook_breakdown.openat2_dropped
+                    + self.tracepoint_hook_breakdown.connect_dropped
+                    + self.tracepoint_hook_breakdown.sendto_dropped
+                    + self.tracepoint_hook_breakdown.sendmsg_dropped,
+            ),
+        }
+    }
+
+    /// Filtered count, retained count, and the top filtered values.
+    pub fn filtering_layers(&self) -> (u64, u64, Vec<(String, u64)>) {
+        (
+            self.filtered_loader_events,
+            self.event_count,
+            self.filtered_loader_top.clone(),
+        )
+    }
+}
+
+/// Kernel-side loss, split by ring and by hook.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DropLayers {
+    pub tracepoint: u64,
+    pub lsm: u64,
+    pub socket: u64,
+    pub openat: u64,
+    pub openat2: u64,
+    pub connect: u64,
+    pub sendto: u64,
+    pub sendmsg: u64,
+    /// Tracepoint-ring drops no per-hook counter claims.
+    pub unattributed: u64,
+}
+
 #[derive(Debug, Error)]
 pub enum KernelLayerError {
     #[error("kernel layer run_id must not be empty")]
