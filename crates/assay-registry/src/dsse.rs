@@ -124,12 +124,21 @@ pub fn verify_dsse_envelope_offline(
         );
     }
 
-    let payload = match BASE64.decode(payload_b64.as_bytes()) {
-        Ok(b) => b,
-        Err(_) => {
+    // Bounded before the allocation, not after: see `dsse_limits`. An oversized payload is a
+    // refusal in its own right, distinct from malformed base64, because the two are different
+    // things for an operator to act on.
+    let payload = match crate::dsse_limits::decode_bounded(payload_b64.as_bytes()) {
+        Ok(Some(b)) => b,
+        Ok(None) => {
             return DsseOutcome::new(
                 CheckStatus::UnsupportedFormat,
                 "DSSE payload is not valid base64",
+            )
+        }
+        Err(_) => {
+            return DsseOutcome::new(
+                CheckStatus::UnsupportedFormat,
+                crate::dsse_limits::OVERSIZED_REASON,
             )
         }
     };
@@ -259,6 +268,32 @@ mod tests {
         let env = envelope(IN_TOTO_PAYLOAD_TYPE, &tampered, &sig);
         let out = verify_dsse_envelope_offline(&leaf, &env, ARTIFACT_SHA256);
         assert_eq!(out.status, CheckStatus::Failed, "{}", out.reason);
+    }
+
+    /// The ceiling is reached through the real entry point, not through `decode_bounded`.
+    ///
+    /// A unit test on the helper proves the helper works. It says nothing about whether this flow
+    /// calls it, which is the only question that matters -- the defect in #1969 was three flows
+    /// that each decoded first, and a helper nobody reached would leave all three exactly as they
+    /// were.
+    #[test]
+    fn an_oversized_payload_is_refused_by_the_offline_verifier() {
+        let (leaf, key) = leaf_with_key();
+        let payload = statement(ARTIFACT_SHA256);
+        let sig = sign(&key, &dsse_pae(IN_TOTO_PAYLOAD_TYPE, &payload));
+        let oversized = "A".repeat(crate::dsse_limits::MAX_DSSE_PAYLOAD_BYTES * 2);
+        let env = format!(
+            r#"{{"payloadType":"{IN_TOTO_PAYLOAD_TYPE}","payload":"{oversized}","signatures":[{{"sig":"{}"}}]}}"#,
+            BASE64.encode(&sig)
+        );
+        let out = verify_dsse_envelope_offline(&leaf, env.as_bytes(), ARTIFACT_SHA256);
+        assert_eq!(out.status, CheckStatus::UnsupportedFormat, "{}", out.reason);
+        assert_eq!(
+            out.reason,
+            crate::dsse_limits::OVERSIZED_REASON,
+            "an oversized payload must be refused as oversized, not as malformed base64 -- they \
+             are different things for an operator to act on"
+        );
     }
 
     #[test]
