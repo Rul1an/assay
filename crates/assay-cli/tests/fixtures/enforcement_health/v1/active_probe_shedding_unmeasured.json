@@ -13,8 +13,7 @@
       443
     ],
     "no_new_privs_confirmed": true,
-    "restrict_self_confirmed": true,
-    "restriction_shedding": "restrictions_held"
+    "restrict_self_confirmed": true
   },
   "probe": {
     "kind": "real_block",
