@@ -178,10 +178,11 @@ mod tests {
             agg,
         };
         let command = vec!["echo".to_string(), "hi".to_string()];
-        let out = std::env::temp_dir().join(format!(
-            "assay-sbx-bundle-test-{}.tar.gz",
-            std::process::id()
-        ));
+        // `tempfile::tempdir()` rather than `std::env::temp_dir()`: it is what the rest of this
+        // crate's tests use, it cleans up on drop instead of relying on a PID-suffixed name, and it
+        // keeps `TMPDIR` out of the path expression that reaches `File::open`.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let out = dir.path().join("assay-sbx-bundle-test.tar.gz");
 
         emit_bundle(&report, &command, "sandbox_testrun", &out).expect("emit bundle");
 
@@ -208,7 +209,7 @@ mod tests {
             events.iter().map(|e| e.type_.as_str()).collect::<Vec<_>>()
         );
 
-        std::fs::remove_file(&out).ok();
+        // No explicit cleanup: `dir` removes the tree on drop.
     }
 }
 
