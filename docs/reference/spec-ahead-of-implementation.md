@@ -22,7 +22,6 @@ writing dead code and cannot tell.
 
 | mechanism | where | what is missing | closed by |
 |---|---|---|---|
-| `IrreversibilityClass` | `assay-mcp-server/src/side_effect.rs` | The type, the ordering, `demands_evidence` and `unevidenced_and_consequential` are implemented and unit-tested, and **no producer populates the field**. Every emitted side-effect record leaves it absent, which the type correctly reads as *unknown* rather than as `two_way` | a classifier mapping an action to a class at the point the decision record is built |
 | `decode_connect_sockaddr` | `assay-monitor/src/events.rs` | Implemented and tested, and **deliberately not wired**. It decodes the `sys_enter_connect` tracepoint payload, which is read from userspace memory and therefore unsound as a refutation input. Documented at the definition | nothing — this is intentional, and the entry exists so the gap is not mistaken for an oversight |
 | connect6 egress enforcement | `assay-ebpf/src/socket_lsm.rs` | The IPv6 hook mirrors connect4 and is correct by construction, but `loader.rs` populates only `CIDR_RULES_V4` and the monitor refuses IPv6 policies outright, so the path has never executed | populating the v6 map, or removing the hook |
 | `NetworkEnforcement::NotApplicable` | `assay-cli/src/cli/commands/monitor_next/enforcement_health.rs` | Reserved, never emitted by the connect4 producer. A consumer cannot distinguish "reserved" from "possible but unseen" | a producer whose scope makes the variant reachable |
@@ -36,6 +35,7 @@ writing dead code and cannot tell.
 |---|---|---|
 | Side-effect ladder verifier (Eb) | `side_effect_fixtures.rs` declared *"no producer/verifier yet"* | 2026-08-06 — `check_audit_record` + `promote_with_audit_record`, reachable via `assay evidence verify-side-effects --audit-import`. **The header still said otherwise for hours after it shipped**, which is the argument for keeping this file |
 | `SideEffectLevel::Verified` from the CLI | reachable only from library code | 2026-08-06 — `--audit-import`, three CLI tests |
+| `IrreversibilityClass` producer | typed and tested with no producer populating the field | 2026-08-06 — `tool_decision::irreversibility_for(category)` mirrors `required_scope_for`, attached in `build_decision`. Unclassified tools still omit the field, and a test pins the two category tables against each other so adding to one and not the other fails |
 | Probe attachment record | the monitor could not report which probes attached | 2026-08-06 — `ProbeAttachment` reconciled against `EXPECTED_PROBES`, verified on a live kernel |
 | `assay.enforcement_health.v1` producer | header said *"No producer wires it up yet"* | **already closed before this list existed.** `sandbox/child.rs` emits it on both the active and failed Landlock paths. Header corrected |
 | tool-decision establish path | header says items are *"not yet wired into the binary's run path"* with `allow(dead_code)` | **already closed.** All three public functions — `establish_action`, `establish_path`, `build_manifest_establish_record` — have production callers. What remains deferred to Increment 2 is narrower than the header implies |
