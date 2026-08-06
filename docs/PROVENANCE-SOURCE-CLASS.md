@@ -27,7 +27,7 @@ result applied to evidence records, not an invention.
 | **2026-06-01** | `RunnerClaimGate` — **occurrence and absence gated separately**: under partial coverage `measured_positive_claims` is `Degraded` while `bounded_negative_claims` is `Blocked` | `d16a1f97` |
 | **2026-06-04** | the runner **coverage-descriptor gate** — a missing or malformed descriptor blocks all claim kinds; partial coverage allows positive claims and blocks absence | `035d0fe3` (PR #1487) |
 | **2026-06-24** | `CodingAgentSourceClass` — a typed observation-position axis with six values: `boundary_observed`, `independently_observed`, `third_party_observed`, `producer_reported`, `issuer_attested`, `receiver_receipt`. Plus `CodingAgentCoverageState` (`observed`, `unavailable`, `self_reported`, `absent`, `partial`) | `56c965bf` (PR #1754) |
-| **2026-08-06** | `coding_agent_dimension_conclusion` and `coding_agent_claim_ceiling` — the two axes combined, coverage evaluated first, against the published five-rung ladder; `CodingAgentCoverageReport::weakest_ceiling()`, `meets()`, `gaps()` | this commit |
+| **2026-08-06** | `coding_agent_claim_decision` and `coding_agent_claim_ceiling` — coverage, source class and **claim kind** combined against the five-rung ladder, mirroring the runner substrate's gate rather than restating it; pinned by `tests/claim_gate_parity.rs` | this commit |
 
 Sibling repositories, same axis:
 
@@ -49,6 +49,11 @@ Concretely, in `crates/assay-evidence/src/coding_agent.rs`:
 - The four unobserved states keep distinct reasons — `not_observed`, `observer_unavailable`,
   `self_reported_only`, `partial_only` — because collapsing them loses why the conclusion is
   unavailable.
+- **Partial coverage still supports saying what was seen.** A positive-existence claim is `Allowed`
+  under partial coverage; only exhaustiveness degrades and only absence is blocked. This is the
+  runner substrate's rule since 2026-06-01, and the first draft of this module contradicted it by
+  ignoring the claim kind — a second implementation that silently meant something different, which is
+  exactly the failure the parity test now prevents.
 - A source class that looked resolves to its rung on the published ladder, unchanged from
   `rge-bench`'s: `asserted` < `asserted_signed` < `observed_at_receiver` < `observed_in_path` <
   `independently_confirmed`. A `receiver_receipt` that watched caps at `observed_at_receiver` and is

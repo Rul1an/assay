@@ -109,15 +109,45 @@ pub enum CodingAgentClaimCeiling {
     IndependentlyConfirmed,
 }
 
-/// What a consumer may conclude about one dimension.
+/// What kind of claim a consumer wants to make about one dimension.
+///
+/// Mirrors `assay_runner_schema::CoverageClaimKind` deliberately. The runner substrate has gated
+/// claims by kind since 2026-06-01 (`RunnerClaimGate`) and by coverage descriptor since 2026-06-04.
+/// The first draft of this module ignored the kind entirely, which made it **contradict** that rule
+/// rather than merely duplicate it: a positive claim under partial coverage is `Allowed` there and
+/// was `Incomplete` here. Keeping the vocabularies parallel is what lets
+/// `tests/claim_gate_parity.rs` assert the two agree.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case", tag = "conclusion")]
-pub enum CodingAgentDimensionConclusion {
-    /// Something watched this dimension. `ceiling` is the strongest claim the observing position can
-    /// support — never more, however the record is signed or anchored.
-    Supported { ceiling: CodingAgentClaimCeiling },
-    /// Nobody watched this dimension. Never a clean pass, whatever the source class.
-    Incomplete { gap: CodingAgentCoverageGap },
+#[serde(rename_all = "snake_case")]
+pub enum CodingAgentClaimKind {
+    /// "this effect happened" — seeing part of a run is enough to say what was seen.
+    PositiveExistence,
+    /// "these are all of them" — needs coverage of the whole dimension.
+    ExhaustiveSet,
+    /// "this did not happen" — the claim a blind spot silently destroys.
+    BoundedNegative,
+}
+
+/// Mirrors `assay_runner_schema::ClaimGateDecision`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CodingAgentGateDecision {
+    Allowed,
+    Degraded,
+    Blocked,
+}
+
+/// What a consumer may conclude about one dimension, for one kind of claim.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodingAgentClaimDecision {
+    pub decision: CodingAgentGateDecision,
+    /// The strongest claim the observing position supports. `None` exactly when `Blocked`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ceiling: Option<CodingAgentClaimCeiling>,
+    /// What is missing, when something is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gap: Option<CodingAgentCoverageGap>,
+    pub rule: String,
 }
 
 /// The strongest claim a source class can support, independent of whether it looked.
@@ -136,122 +166,173 @@ pub fn coding_agent_claim_ceiling(source_class: CodingAgentSourceClass) -> Codin
 }
 
 /// The rule this primitive exists to keep: a source class says *where an observer sat*, coverage says
-/// *whether it looked*, and neither alone licenses a conclusion.
+/// *whether it looked*, and the kind of claim decides how much looking is enough.
 ///
-/// A boundary observer configured not to watch the network is well-positioned and blind; a
-/// producer-reported account of the network is present and interested. Both yield less than a clean
-/// pass, for different reasons, and collapsing them loses the reason.
+/// Coverage is evaluated before the source class: an observer that did not watch has nothing to be
+/// right or wrong about, however well positioned it is. But *did not watch everything* is not *did
+/// not watch* — partial coverage still supports saying what **was** seen, and stops supporting only
+/// exhaustiveness and absence. That asymmetry is the point, and it is the runner substrate's rule
+/// (`assay_runner_schema`, 2026-06-01/06-04), mirrored here rather than reinvented.
 ///
 /// ```
 /// use assay_evidence::{
-///     coding_agent_dimension_conclusion, CodingAgentClaimCeiling, CodingAgentCoverageGap,
-///     CodingAgentCoverageState, CodingAgentDimensionConclusion, CodingAgentSourceClass,
+///     coding_agent_claim_decision, CodingAgentClaimCeiling, CodingAgentClaimKind,
+///     CodingAgentCoverageState, CodingAgentGateDecision, CodingAgentSourceClass,
 /// };
 ///
-/// // Top-tier vantage, but it was not watching this dimension.
-/// assert_eq!(
-///     coding_agent_dimension_conclusion(
-///         CodingAgentSourceClass::IndependentlyObserved,
-///         CodingAgentCoverageState::Absent,
-///     ),
-///     CodingAgentDimensionConclusion::Incomplete { gap: CodingAgentCoverageGap::NotObserved },
+/// // Partial coverage still supports "this happened". Refusing it would be the defect.
+/// let seen = coding_agent_claim_decision(
+///     CodingAgentSourceClass::BoundaryObserved,
+///     CodingAgentCoverageState::Partial,
+///     CodingAgentClaimKind::PositiveExistence,
 /// );
+/// assert_eq!(seen.decision, CodingAgentGateDecision::Allowed);
+/// assert_eq!(seen.ceiling, Some(CodingAgentClaimCeiling::ObservedInPath));
 ///
-/// // A receiver watched, and a receiver's ceiling is what a receiver can see.
-/// assert_eq!(
-///     coding_agent_dimension_conclusion(
-///         CodingAgentSourceClass::ReceiverReceipt,
-///         CodingAgentCoverageState::Observed,
-///     ),
-///     CodingAgentDimensionConclusion::Supported {
-///         ceiling: CodingAgentClaimCeiling::ObservedAtReceiver
-///     },
+/// // The same partial coverage cannot support "this did not happen".
+/// let absent = coding_agent_claim_decision(
+///     CodingAgentSourceClass::BoundaryObserved,
+///     CodingAgentCoverageState::Partial,
+///     CodingAgentClaimKind::BoundedNegative,
 /// );
+/// assert_eq!(absent.decision, CodingAgentGateDecision::Blocked);
+/// assert_eq!(absent.ceiling, None);
 /// ```
-pub fn coding_agent_dimension_conclusion(
+pub fn coding_agent_claim_decision(
     source_class: CodingAgentSourceClass,
     coverage: CodingAgentCoverageState,
-) -> CodingAgentDimensionConclusion {
+    claim_kind: CodingAgentClaimKind,
+) -> CodingAgentClaimDecision {
+    use CodingAgentClaimKind as Kind;
     use CodingAgentCoverageGap as Gap;
     use CodingAgentCoverageState as Cov;
-    use CodingAgentDimensionConclusion as Conclusion;
+    use CodingAgentGateDecision as Decision;
 
-    // Coverage first, on its own. An observer that did not watch has nothing to be right or wrong
-    // about, however well positioned it is.
-    let gap = match coverage {
-        Cov::Observed => None,
-        Cov::Absent => Some(Gap::NotObserved),
-        Cov::Unavailable => Some(Gap::ObserverUnavailable),
-        Cov::SelfReported => Some(Gap::SelfReportedOnly),
-        Cov::Partial => Some(Gap::PartialOnly),
+    let blocked = |gap, rule: &str| CodingAgentClaimDecision {
+        decision: Decision::Blocked,
+        ceiling: None,
+        gap: Some(gap),
+        rule: rule.to_string(),
     };
-    match gap {
-        Some(gap) => Conclusion::Incomplete { gap },
-        None => Conclusion::Supported {
-            ceiling: coding_agent_claim_ceiling(source_class),
-        },
+
+    // Nothing watched: no claim kind survives. Mirrors the runner's missing-descriptor gate.
+    match coverage {
+        Cov::Absent => return blocked(Gap::NotObserved, "coverage_absent_blocks_claim"),
+        Cov::Unavailable => {
+            return blocked(
+                Gap::ObserverUnavailable,
+                "observer_unavailable_blocks_claim",
+            )
+        }
+        // Watched, but by the subject. The account exists; it cannot establish its own completeness.
+        Cov::SelfReported => {
+            return match claim_kind {
+                Kind::PositiveExistence => CodingAgentClaimDecision {
+                    decision: Decision::Degraded,
+                    // A self-reported account caps at `asserted` however the run is otherwise
+                    // classed: the weaker of the two axes binds.
+                    ceiling: Some(
+                        CodingAgentClaimCeiling::Asserted
+                            .min(coding_agent_claim_ceiling(source_class)),
+                    ),
+                    gap: Some(Gap::SelfReportedOnly),
+                    rule: "self_reported_degrades_positive_claim".to_string(),
+                },
+                Kind::ExhaustiveSet | Kind::BoundedNegative => blocked(
+                    Gap::SelfReportedOnly,
+                    "self_reported_blocks_completeness_claim",
+                ),
+            };
+        }
+        Cov::Partial | Cov::Observed => {}
+    }
+
+    let ceiling = coding_agent_claim_ceiling(source_class);
+
+    if coverage == Cov::Partial {
+        return match claim_kind {
+            Kind::PositiveExistence => CodingAgentClaimDecision {
+                decision: Decision::Allowed,
+                ceiling: Some(ceiling),
+                gap: None,
+                rule: "partial_coverage_allows_positive_claim".to_string(),
+            },
+            Kind::ExhaustiveSet => CodingAgentClaimDecision {
+                decision: Decision::Degraded,
+                ceiling: Some(ceiling),
+                gap: Some(Gap::PartialOnly),
+                rule: "partial_coverage_degrades_exhaustive_claim".to_string(),
+            },
+            Kind::BoundedNegative => {
+                blocked(Gap::PartialOnly, "partial_coverage_blocks_absence_claim")
+            }
+        };
+    }
+
+    CodingAgentClaimDecision {
+        decision: Decision::Allowed,
+        ceiling: Some(ceiling),
+        gap: None,
+        rule: "observed_coverage_allows_claim".to_string(),
     }
 }
 
-/// Per-dimension conclusions for one evidence payload.
+/// Per-dimension decisions for one evidence payload, for one kind of claim.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CodingAgentCoverageReport {
-    pub files: CodingAgentDimensionConclusion,
-    pub commands: CodingAgentDimensionConclusion,
-    pub network: CodingAgentDimensionConclusion,
-    pub mcp_tools: CodingAgentDimensionConclusion,
+    pub claim_kind: CodingAgentClaimKind,
+    pub files: CodingAgentClaimDecision,
+    pub commands: CodingAgentClaimDecision,
+    pub network: CodingAgentClaimDecision,
+    pub mcp_tools: CodingAgentClaimDecision,
     /// `None` when the run declared no test command: a dimension nobody claimed is not a gap.
-    pub test: Option<CodingAgentDimensionConclusion>,
+    pub test: Option<CodingAgentClaimDecision>,
 }
 
 impl CodingAgentCoverageReport {
-    /// The strongest claim this report as a whole can support: the **weakest** rung across every
-    /// dimension the run claims. `None` when any claimed dimension is `Incomplete` — a gap binds
+    /// The strongest claim this report as a whole supports: the **weakest** rung across every
+    /// dimension the run claims. `None` when any claimed dimension is `Blocked` — a block binds
     /// harder than any rung, because there is no rung to take a minimum with.
     pub fn weakest_ceiling(&self) -> Option<CodingAgentClaimCeiling> {
         let mut weakest: Option<CodingAgentClaimCeiling> = None;
-        for conclusion in self.claimed() {
-            match conclusion {
-                CodingAgentDimensionConclusion::Incomplete { .. } => return None,
-                CodingAgentDimensionConclusion::Supported { ceiling } => {
-                    weakest = Some(weakest.map_or(ceiling, |w| w.min(ceiling)));
-                }
-            }
+        for decision in self.claimed() {
+            let ceiling = decision.ceiling?;
+            weakest = Some(weakest.map_or(ceiling, |w| w.min(ceiling)));
         }
         weakest
     }
 
-    /// Whether every claimed dimension supports at least `required`.
+    /// Whether every claimed dimension supports at least `required` without degradation.
     pub fn meets(&self, required: CodingAgentClaimCeiling) -> bool {
-        self.weakest_ceiling().is_some_and(|c| c >= required)
+        self.claimed()
+            .into_iter()
+            .all(|d| d.decision == CodingAgentGateDecision::Allowed)
+            && self.weakest_ceiling().is_some_and(|c| c >= required)
     }
 
-    /// Every dimension that cannot support a conclusion at all, with the reason, in declaration order.
-    pub fn gaps(&self) -> Vec<(&'static str, CodingAgentCoverageGap)> {
+    /// Every dimension that is not cleanly `Allowed`, with its reason, in declaration order.
+    pub fn gaps(&self) -> Vec<(&'static str, CodingAgentClaimDecision)> {
         self.named()
             .into_iter()
-            .filter_map(|(name, c)| match c {
-                CodingAgentDimensionConclusion::Incomplete { gap } => Some((name, gap)),
-                CodingAgentDimensionConclusion::Supported { .. } => None,
-            })
+            .filter(|(_, d)| d.decision != CodingAgentGateDecision::Allowed)
             .collect()
     }
 
-    fn named(&self) -> Vec<(&'static str, CodingAgentDimensionConclusion)> {
+    fn named(&self) -> Vec<(&'static str, CodingAgentClaimDecision)> {
         [
-            ("files", Some(self.files)),
-            ("commands", Some(self.commands)),
-            ("network", Some(self.network)),
-            ("mcp_tools", Some(self.mcp_tools)),
-            ("test", self.test),
+            ("files", Some(self.files.clone())),
+            ("commands", Some(self.commands.clone())),
+            ("network", Some(self.network.clone())),
+            ("mcp_tools", Some(self.mcp_tools.clone())),
+            ("test", self.test.clone()),
         ]
         .into_iter()
-        .filter_map(|(name, c)| c.map(|c| (name, c)))
+        .filter_map(|(name, d)| d.map(|d| (name, d)))
         .collect()
     }
 
-    fn claimed(&self) -> Vec<CodingAgentDimensionConclusion> {
-        self.named().into_iter().map(|(_, c)| c).collect()
+    fn claimed(&self) -> Vec<CodingAgentClaimDecision> {
+        self.named().into_iter().map(|(_, d)| d).collect()
     }
 }
 
@@ -301,26 +382,26 @@ impl CodingAgentEvidencePayload {
         }
     }
 
-    /// Per-dimension conclusions for this payload, combining the source class with what was
-    /// actually watched.
+    /// Per-dimension decisions for this payload and one kind of claim.
     ///
     /// `test` is reported only when the run declared an expected test command — a dimension the run
-    /// never claimed is out of scope, not a gap. That distinction is the whole point: an absent
-    /// claim and an unmet one are different facts.
-    pub fn coverage_report(&self) -> CodingAgentCoverageReport {
-        let conclude = |coverage: CodingAgentCoverageState| {
-            coding_agent_dimension_conclusion(self.source_class, coverage)
+    /// never claimed is out of scope, not a gap. An absent claim and an unmet one are different
+    /// facts.
+    pub fn coverage_report(&self, claim_kind: CodingAgentClaimKind) -> CodingAgentCoverageReport {
+        let decide = |coverage: CodingAgentCoverageState| {
+            coding_agent_claim_decision(self.source_class, coverage, claim_kind)
         };
         CodingAgentCoverageReport {
-            files: conclude(self.coverage.files),
-            commands: conclude(self.coverage.commands),
-            network: conclude(self.coverage.network),
-            mcp_tools: conclude(self.coverage.mcp_tools),
+            claim_kind,
+            files: decide(self.coverage.files),
+            commands: decide(self.coverage.commands),
+            network: decide(self.coverage.network),
+            mcp_tools: decide(self.coverage.mcp_tools),
             test: self
                 .declared_scope
                 .expected_test_command
                 .is_some()
-                .then(|| conclude(self.coverage.test)),
+                .then(|| decide(self.coverage.test)),
         }
     }
 }
