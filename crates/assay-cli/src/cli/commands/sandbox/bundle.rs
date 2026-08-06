@@ -192,7 +192,14 @@ mod tests {
 
         // Name the pack rather than only counting, so a future event addition cannot quietly stand
         // in for it. The pack is what carries source class and coverage; the rest are observations.
-        let events = read_events(&out);
+        // Read the events back inline rather than through a helper taking a path: the helper made
+        // the temp path cross a function boundary, which taint analysis reads as an uncontrolled
+        // path expression. Same assertion, one less indirection.
+        let events =
+            assay_evidence::bundle::BundleReader::open(File::open(&out).expect("reopen bundle"))
+                .expect("open bundle reader")
+                .events_vec()
+                .expect("read bundle events");
         assert!(
             events
                 .iter()
@@ -202,14 +209,6 @@ mod tests {
         );
 
         std::fs::remove_file(&out).ok();
-    }
-
-    fn read_events(path: &std::path::Path) -> Vec<EvidenceEvent> {
-        let file = File::open(path).expect("open bundle");
-        assay_evidence::bundle::BundleReader::open(file)
-            .expect("open bundle")
-            .events_vec()
-            .expect("read bundle events")
     }
 }
 
