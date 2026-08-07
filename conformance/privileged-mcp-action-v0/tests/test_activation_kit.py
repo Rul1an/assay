@@ -253,7 +253,20 @@ class CleanRoomPackTests(unittest.TestCase):
             self.assertEqual(files[vectors_name], in_repo)
 
             vectors = json.loads(files[vectors_name])
-            self.assertGreater(len(vectors), 20, "the vector set shrank")
+            # Exactly the 31 vectors #1982 landed, with `_about` excluded because it is metadata and
+            # not a vector -- that key is also what made the count ambiguous when this was first
+            # measured, since the file has 32 keys and 31 vectors.
+            #
+            # `> 20` was the first version and is too loose. The byte-identity assertion above
+            # already catches the pack drifting from the repo, so the case this one owns is the
+            # other one: both shrinking together. Ten vectors deleted from the source file would
+            # keep the pack byte-identical to it and pass every other check here.
+            cases = {k: v for k, v in vectors.items() if k != "_about"}
+            self.assertEqual(
+                len(cases),
+                31,
+                f"expected the 31 RFC 8785 vectors, packed {len(cases)}",
+            )
 
             # The clean-room property. The vectors describe byte formation and must not name a
             # profile case, an outcome, or a stage.
