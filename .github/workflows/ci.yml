@@ -458,6 +458,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           components: rustfmt
+      # Pins the PRs that alerted on benchmarks they could not affect (#2119, #2114, #2074)
+      # so the perf_pr.yml relevance gate cannot regress back to matching all of crates/.
+      - name: Test perf benchmark relevance gate
+        run: python3 scripts/ci/test_perf_bench_relevance.py
+      # Runs both groups: sw/* (shipped durability) and swc/* (code cost). The pragma
+      # assertion in make_store() fails here if swc/* silently reverts to measuring fsync.
       - name: Criterion (store_write_heavy)
         env:
           QUICK: "1"
