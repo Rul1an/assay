@@ -17,7 +17,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  WAVE0_SEMVER_BASELINE_SHA: "9cc23b4c684be7cfd81f170c4f66d59903dd76eb"
 
 jobs:
   detect-changes:
@@ -396,29 +395,51 @@ jobs:
       - name: Install cargo-semver-checks
         run: cargo install --locked cargo-semver-checks
 
-      - name: Ensure semver baseline commit is available
+
+      # The baseline is the last release, resolved now, not a SHA pinned in this file.
+      #
+      # It used to be `9cc23b4c`, which is `chore: release v2.18.0` from 2026-02-11. `check-release`
+      # does not ask "is there a breaking change"; it asks whether the declared version increment
+      # covers the changes it finds. Against a 2.x baseline the manifest already declared 3.x, a
+      # major, which licenses any break -- so the job had been structurally unable to fail for the
+      # whole 3.x line. #2068 added a public field to `MetricResult` and this job reported success
+      # (#2088).
+      #
+      # Against the last release tag the question becomes the one that matters: does THIS branch's
+      # version cover what THIS branch changed. A break with no bump fails; a release PR that bumps
+      # to cover it passes.
+      - name: Resolve semver baseline from the last release tag
+        id: baseline
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if git cat-file -e "${WAVE0_SEMVER_BASELINE_SHA}^{commit}" 2>/dev/null; then
-            echo "Baseline commit present: ${WAVE0_SEMVER_BASELINE_SHA}"
-          else
-            echo "Baseline commit missing locally, fetching explicitly..."
-            AUTH_HEADER="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
-            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
-              fetch --no-tags origin "${WAVE0_SEMVER_BASELINE_SHA}" || \
-              git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
-                fetch --no-tags origin "${WAVE0_SEMVER_BASELINE_SHA}:refs/temp/wave0-baseline"
-            git cat-file -e "${WAVE0_SEMVER_BASELINE_SHA}^{commit}"
+          git fetch --tags --quiet origin || true
+          tag="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1)"
+          if [ -z "${tag}" ]; then
+            echo "::error::no v* release tag found, so there is nothing to compare against."
+            echo "A missing baseline is a 'could not check', and this job must not report success"
+            echo "for a comparison it did not make."
+            exit 1
           fi
-          # Cleanup fallback ref if created by the alternate fetch path.
-          git update-ref -d refs/temp/wave0-baseline || true
+          git cat-file -e "${tag}^{commit}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Semver baseline: ${tag} ($(git rev-parse --short "${tag}^{commit}"))"
+
+      # Prove the gate can fail before trusting what it says about this branch.
+      #
+      # It could not, for the whole 3.x line, and nothing noticed because a gate that skips every
+      # check is indistinguishable from a gate that finds nothing. This plants a public field on a
+      # public struct -- the same shape as the break that got through -- and requires both a
+      # non-zero exit and the right lint name.
+      - name: Self-test the semver gate
+        env:
+          ASSAY_SEMVER_GATE_FULL: "1"
+        run: bash scripts/ci/test-semver-gate.sh
 
       - name: Run semver checks (allowlist)
         shell: bash
         env:
+          BASELINE_TAG: ${{ steps.baseline.outputs.tag }}
           RUN_ALL: ${{ needs.detect-changes.outputs.run_all }}
           GLOBAL_CHANGED: ${{ needs.detect-changes.outputs.global_changed }}
           CORE_CHANGED: ${{ needs.detect-changes.outputs.assay_core_changed }}
@@ -433,12 +454,12 @@ jobs:
           run_semver_for() {
             local crate="$1"
             echo "- ${crate}" >> "$GITHUB_STEP_SUMMARY"
-            cargo semver-checks check-release -p "${crate}" --baseline-rev "${WAVE0_SEMVER_BASELINE_SHA}"
+            cargo semver-checks check-release -p "${crate}" --baseline-rev "${BASELINE_TAG}"
           }
 
           {
             echo "## Semver checks"
-            echo "- Baseline SHA: ${WAVE0_SEMVER_BASELINE_SHA}"
+            echo "- Baseline: ${BASELINE_TAG} (last release tag)"
             echo "- Crates checked:"
           } >> "$GITHUB_STEP_SUMMARY"
 
