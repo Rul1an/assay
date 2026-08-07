@@ -2,7 +2,7 @@ use clap::Args;
 use std::path::PathBuf;
 
 #[path = "monitor_next/mod.rs"]
-mod monitor_next;
+pub(crate) mod monitor_next;
 
 #[derive(Args, Debug, Clone)]
 #[command(
@@ -63,6 +63,12 @@ pub struct MonitorArgs {
     /// block counts) to this path. Explicit artifact, not parsed from stdout.
     #[arg(long)]
     pub enforcement_health: Option<PathBuf>,
+
+    /// Write an `assay.monitor.observed_peers.v0` artifact (the connect endpoints this run actually
+    /// saw) to this path. Pair it with `--observation-health` from the same run: a peer set only
+    /// means anything against the coverage descriptor of the run that produced it.
+    #[arg(long = "observed-peers")]
+    pub observed_peers: Option<PathBuf>,
 
     /// Write an `assay.runner.observation_health.v0` artifact (observation truth: which probes
     /// attached, what was lost) to this path. Explicit artifact, not parsed from stdout.

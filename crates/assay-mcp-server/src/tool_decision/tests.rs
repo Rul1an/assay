@@ -306,3 +306,23 @@ fn extra_and_secret_args_are_ignored_not_copied() {
     let text = serde_json::to_string(&d).unwrap();
     assert!(!text.contains("ignore-me") && !text.contains("sk-xyz"));
 }
+
+#[test]
+fn the_emitted_decision_carries_the_side_effect_block_at_asserted() {
+    // Eb.1 end to end: the producer emits the ladder block, it starts at `asserted`, and the compat
+    // boolean is derived from the level rather than hardcoded, so the two cannot disagree.
+    let a = json!({});
+    let d = build_decision(&call("github.add_deploy_key", &a, Effect::Allow, "success"));
+    let se = &d["response"]["side_effect"];
+    assert_eq!(se["level"], json!("asserted"));
+    assert_eq!(se["asserted"], json!(true));
+    assert_eq!(d["response"]["side_effect_verified"], json!(false));
+    assert_eq!(
+        d["response"]["side_effect_asserted"], se["asserted"],
+        "the legacy boolean and the block must agree"
+    );
+    assert!(
+        se.get("verification_source").is_none(),
+        "nothing promotes at emit time"
+    );
+}
