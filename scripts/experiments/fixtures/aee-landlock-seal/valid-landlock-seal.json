@@ -155,6 +155,8 @@
           "aeeVersion": "0.7",
           "assayAttackRowAttributionSource": "assembly-plane",
           "assayCollectionPath": "landlock-tcp-connect",
+          "assayDropChannels": [],
+          "assayDropProofBasis": "declared",
           "assayDropProofModel": "synchronous-probe",
           "assayNonClaims": [
             "does not prove complete run population",
@@ -174,7 +176,7 @@
         "signatures": [
           {
             "keyid": "assay-test-observation-key-landlock-v0",
-            "sig": "J6HbgtNNUfzWJFiqk7ZX8sGHRcQIATvHOEgMb+fXbNc="
+            "sig": "Ho03TFj/cBE/8DBB0J8HzTjoIQC0SDm3iomVvi5Unm0="
           }
         ]
       }

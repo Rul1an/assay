@@ -123,11 +123,19 @@ REQUIRED_SEAL_FIELDS = (
 # `assay`. Upstream has since said the same thing: a producer-defined member must not affect
 # structural validity whether or not its values can be ordered. Both rules now require this tuple.
 #
-# This tuple is now every producer member any rule in `validate` reads. The other three
-# (`assayObservedLabels`, `assayDropProofBasis`, `assayDropChannels`) are inert by having no rule at
-# all, which needs no entry here and no test: nothing can demote what nothing consults.
+# This tuple is now every producer member any rule in `validate` reads. `assayObservedLabels` is
+# the one remaining inert member, which needs no entry here and no test: nothing can demote what
+# nothing consults.
+#
+# `assayDropProofBasis` and `assayDropChannels` were inert until #2093 and are not any more. The
+# issue framed the choice as requiring them or dropping them, and both are wrong: requiring them
+# would make an Assay member decide AEE structural validity, which ADR-045 forbids in the sentence
+# quoted above, and dropping them would discard the only record of whether a drop count was verified
+# or asserted. Credit is the third answer, and it is the one `assayDropProofModel` already took.
 PRODUCER_CREDIT_FIELDS = (
     "assayDropProofModel",
+    "assayDropProofBasis",
+    "assayDropChannels",
     "assaySourceSchema",
     "assaySealScope",
     "assayCollectionPath",
@@ -161,8 +169,22 @@ PRODUCER_CREDIT_ALTERNATE_VALUES: dict[str, tuple[str, ...]] = {
 # `None` and a member that is absent are different payloads and this test needs both to be sayable.
 _POP = object()
 
-# Values of `assayDropProofModel` that license the zero drop accounting this slice credits.
-DROP_PROOF_MODELS_ELIGIBLE = ("synchronous-probe", "counted-queue-zero")
+
+# The basis each eligible model implies, from `DropAccounting::basis` in
+# `crates/assay-cli/src/aee_seal.rs`. A synchronous probe is the observation itself and nothing was
+# verified about a queue, so its accounting is `declared`; a counted queue read every channel at run
+# end, so its accounting is `checked`.
+#
+# Cross-checked rather than merely present, because the failure worth catching is a payload that
+# claims `checked` over a model that verified nothing. That is the case Proof-or-Stop
+# (arXiv 2607.14890) rules inadmissible, and it is invisible if each member is only read alone.
+DROP_PROOF_BASIS_FOR_MODEL = {"synchronous-probe": "declared", "counted-queue-zero": "checked"}
+
+# Values of `assayDropProofModel` that license the zero drop accounting this slice credits, derived
+# rather than restated. These were two hand-kept collections until an adversarial review pointed out
+# that adding a model to one and forgetting the other subscripts the dict with a key it does not
+# have -- a crash rather than a finding. One rule, one place.
+DROP_PROOF_MODELS_ELIGIBLE = tuple(DROP_PROOF_BASIS_FOR_MODEL)
 
 # Fixed instants. A validity window needs something to be checked against, and a
 # wall clock would make the drift check flaky, which is how a gate gets disabled.
@@ -205,6 +227,10 @@ NEGATIVE_CONTROLS: dict[str, str] = {
     "not-still-armed": "seal-not-still-armed",
     "bad-drop-accounting": "drop-accounting-nonzero",
     "uncounted-channel-without-eligible-seal": "drop-proof-model-ineligible",
+    "drop-basis-contradicts-model": "drop-proof-basis-mismatch",
+    "drop-channels-contradict-basis": "drop-proof-channels-mismatch",
+    "drop-channels-not-a-list": "drop-proof-channels-malformed",
+    "counted-queue-basis-declared": "drop-proof-basis-mismatch",
     "bad-observed-set": "observed-set-mismatch",
     "unsupported-observed-attack": "observed-attack-unsupported",
     "substrate-runner-observed-attacks-mismatch": "substrate-runner-observed-attacks-mismatch",
@@ -365,7 +391,7 @@ def base_statement() -> dict[str, Any]:
     interception = {"aeeKind": "interception", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePayloadCommitment": corpus_manifest["expectedPayloads"]["NET-CONNECT-BLOCK-001"][0], "assayCollectionPath": COLLECTION_PATH, "assaySourceSchema": "assay.enforcement_health.v1.probe"}
     arming = {"aeeKind": "arming", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "assayCollectionPath": COLLECTION_PATH}
     records = [record(interception, 1), record(arming, 2)]
-    sealed = {"aeeKind": "sealed", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "aeeStillArmed": True, "aeeDropCount": 0, "aeeDropBound": 0, "assayDropProofModel": "synchronous-probe", "aeeObservedSet": observed_set(records), "aeeObservedAttacks": [], "assayObservedLabels": ["connect_blocked"], "assayCollectionPath": COLLECTION_PATH, "assaySealedAt": SEALED_AT, "assaySourceSchema": SOURCE_SCHEMA, "assaySealScope": SEAL_SCOPE, "assayAttackRowAttributionSource": "assembly-plane", "assayNonClaims": ["does not prove complete run population", "does not prove agent safety", "does not prove provider side effects", "does not prove independent substrate operation"]}
+    sealed = {"aeeKind": "sealed", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "aeeStillArmed": True, "aeeDropCount": 0, "aeeDropBound": 0, "assayDropProofModel": "synchronous-probe", "assayDropProofBasis": "declared", "assayDropChannels": [], "aeeObservedSet": observed_set(records), "aeeObservedAttacks": [], "assayObservedLabels": ["connect_blocked"], "assayCollectionPath": COLLECTION_PATH, "assaySealedAt": SEALED_AT, "assaySourceSchema": SOURCE_SCHEMA, "assaySealScope": SEAL_SCOPE, "assayAttackRowAttributionSource": "assembly-plane", "assayNonClaims": ["does not prove complete run population", "does not prove agent safety", "does not prove provider side effects", "does not prove independent substrate operation"]}
     records.append(record(sealed, 3))
     stmt["predicate"]["observationRecords"] = records
     return stmt
@@ -399,6 +425,29 @@ def case_statement(name: str) -> dict[str, Any]:
         replace_payload(stmt, 2, seal)
     elif name == "uncounted-channel-without-eligible-seal":
         seal["assayDropProofModel"] = "uncounted-queue"
+        replace_payload(stmt, 2, seal)
+    elif name == "drop-basis-contradicts-model":
+        # The failure this pair exists to make visible: a synchronous probe verified nothing about
+        # a queue, and this payload says its drop accounting was checked anyway.
+        seal["assayDropProofBasis"] = "checked"
+        replace_payload(stmt, 2, seal)
+    elif name == "drop-channels-contradict-basis":
+        # A declared basis resting on channel readings it cannot have taken.
+        seal["assayDropChannels"] = ["ringbuf:0"]
+        replace_payload(stmt, 2, seal)
+    elif name == "counted-queue-basis-declared":
+        # The other row of DROP_PROOF_BASIS_FOR_MODEL. Without this case that row was unpinned:
+        # flipping `counted-queue-zero` to "declared" left every gate in this file green, because
+        # nothing here had ever exercised a counted-queue payload. A table with one row under test
+        # is a table half of which is a comment.
+        seal["assayDropProofModel"] = "counted-queue-zero"
+        seal["assayDropProofBasis"] = "declared"
+        seal["assayDropChannels"] = ["ringbuf:0"]
+        replace_payload(stmt, 2, seal)
+    elif name == "drop-channels-not-a-list":
+        # Ill-typed rather than contradictory. Withholds credit like its siblings; a producer member
+        # cannot make the envelope malformed however wrong it is.
+        seal["assayDropChannels"] = "ringbuf:0"
         replace_payload(stmt, 2, seal)
     elif name == "bad-observed-set":
         seal["aeeObservedSet"] = "0" * 64
@@ -811,6 +860,18 @@ def validate(statement: dict[str, Any], disabled: frozenset[str] = frozenset()) 
         # shares. See `PRODUCER_CREDIT_FIELDS` for the rule and its bounds.
         if seal.get("assayDropProofModel") not in DROP_PROOF_MODELS_ELIGIBLE:
             add("drop-proof-model-ineligible", PHASE_NOT_CREDITED, f"sealed record {idx} has no eligible drop-accounting proof model")
+        # Same phase and the same reason: producer vocabulary this checker's own policy reads.
+        # ADR-045 forbids an `assay` member from deciding AEE structural validity, so a basis that
+        # disagrees with its model withholds credit and leaves the envelope well formed.
+        else:
+            expected_basis = DROP_PROOF_BASIS_FOR_MODEL[seal["assayDropProofModel"]]
+            basis = seal.get("assayDropProofBasis")
+            if basis != expected_basis:
+                add("drop-proof-basis-mismatch", PHASE_NOT_CREDITED, f"sealed record {idx} claims drop basis {basis!r} under model {seal['assayDropProofModel']!r}, which implies {expected_basis!r}")
+            elif not isinstance(seal.get("assayDropChannels"), list):
+                add("drop-proof-channels-malformed", PHASE_NOT_CREDITED, f"sealed record {idx} assayDropChannels is not a list")
+            elif bool(seal["assayDropChannels"]) != (basis == "checked"):
+                add("drop-proof-channels-mismatch", PHASE_NOT_CREDITED, f"sealed record {idx} basis {basis!r} disagrees with {len(seal['assayDropChannels'])} channel reading(s): a checked basis rests on readings and a declared one has none")
         if "aeeObservedSet" not in malformed_digests and seal.get("aeeObservedSet") != observed_set(records):
             add("observed-set-mismatch", PHASE_MALFORMED, f"sealed record {idx} aeeObservedSet mismatch")
         for attack_id in observed_attacks:
@@ -931,6 +992,8 @@ def run_required_field_test() -> int:
         "assayDropProofBasis",
         "assayDropChannels",
     }
+    # Still optional rather than required, deliberately: these are read by policy and may withhold
+    # credit, never structural validity.
     unlisted = sorted(set(seal) - set(REQUIRED_SEAL_FIELDS) - optional)
     if unlisted:
         print(f"FAIL fixture carries fields that are neither required nor known-optional: {unlisted}")
