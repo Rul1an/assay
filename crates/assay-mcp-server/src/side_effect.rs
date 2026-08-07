@@ -233,9 +233,9 @@ pub fn binding_digest(subject: &Value) -> Option<String> {
 /// Project an observed decision's `action` into the canonical binding subject.
 ///
 /// `{action_class, verb, target}` where `action_class` is the decision's `resource_type` and `target`
-/// is narrowed to [`TARGET_SUBJECT_FIELDS`]. Returns `None` when the decision is unclassified: a null
-/// verb or resource_type means there is nothing to bind, and inventing a subject from an
-/// unclassified action would mint bindings that match nothing on purpose.
+/// is narrowed to `owner`, `repo` and `key_title_hash`. Returns `None` when the decision is
+/// unclassified: a null verb or resource_type means there is nothing to bind, and inventing a
+/// subject from an unclassified action would mint bindings that match nothing on purpose.
 #[must_use]
 pub fn subject_from_action(action: &Value) -> Option<Value> {
     let action_class = action.get("resource_type")?.as_str()?;
