@@ -460,3 +460,65 @@ fn extract_tool_calls_best_effort_distinguishes_missing_from_non_array() {
     };
     assert!(extract_tool_calls_best_effort(&non_array).is_err());
 }
+
+/// A `deny` entry with an interior `*` blocks nothing, through this crate's real evaluator.
+///
+/// This is the documented behaviour (`docs/reference/config/policies.md`): a `*` that is neither
+/// the first nor the last character is a literal asterisk, so `exec*sh` names a tool that does not
+/// exist. In `allow` that fails closed and is visible; here in `deny` it fails **open** and is not.
+///
+/// Pinned here rather than only in `assay_common`, because until this test the whole tool-pattern
+/// path of `args_valid_next` had no coverage at all: breaking the matcher outright left all 62
+/// tests in this crate green. A shared function the consumer never exercises is not yet a
+/// consumer of it.
+///
+/// The second half is what makes the first half mean anything. Asserting only that the call
+/// passes would hold if the policy failed to load, if the tool were never extracted, or if deny
+/// were ignored entirely. Swapping in the exact-match pattern must deny the same call.
+#[tokio::test]
+async fn an_interior_star_in_deny_blocks_nothing_here_too() {
+    let schema = r#"
+schemas:
+  exec_bash:
+    type: object
+    required: ["command"]
+    properties:
+      command:
+        type: string
+"#;
+
+    let inert = write_temp_policy(&format!(
+        "version: \"2.0\"\ntools:\n  allow: [\"*\"]\n  deny: [\"exec*sh\"]\n{schema}"
+    ));
+    let metric = ArgsValidMetric;
+    let tc = make_test_case();
+    let expected = make_expected_with_policy(&inert);
+    let resp = make_response_with_tool("exec_bash", serde_json::json!({"command":"ls"}));
+    let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+    assert!(
+        !result.details.to_string().contains("E_TOOL_DENIED"),
+        "`deny: [\"exec*sh\"]` is a literal name and must not match `exec_bash`; details={}",
+        result.details
+    );
+    assert!(
+        result.passed,
+        "and with nothing else objecting the call is permitted: details={}",
+        result.details
+    );
+    let _ = std::fs::remove_file(inert);
+
+    // Same call, same tool, deny spelled exactly: this one must fire. Without it the assertions
+    // above would hold for any reason at all, including the policy never being read.
+    let exact = write_temp_policy(&format!(
+        "version: \"2.0\"\ntools:\n  allow: [\"*\"]\n  deny: [\"exec_bash\"]\n{schema}"
+    ));
+    let expected = make_expected_with_policy(&exact);
+    let resp = make_response_with_tool("exec_bash", serde_json::json!({"command":"ls"}));
+    let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
+    assert!(
+        result.details.to_string().contains("E_TOOL_DENIED"),
+        "an exact deny must block the very call the interior-star deny let through; details={}",
+        result.details
+    );
+    let _ = std::fs::remove_file(exact);
+}
