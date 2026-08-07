@@ -35,7 +35,14 @@ fn docs_showing_rules(root: &Path) -> Vec<String> {
             } else if p.extension().is_some_and(|x| x == "md")
                 // `docs/archive/` is kept deliberately as a record of superseded reference text.
                 // Holding it to the current schema would be asking history to be current.
-                && !p.to_string_lossy().contains("/archive/")
+                //
+                // Compared by path component, not by substring. `contains("/archive/")` is a
+                // separator assumption: on Windows the path reads `docs\archive\...`, the
+                // exclusion missed, and the legacy reference was held to the current schema.
+                // Only the Windows leg of the matrix caught it.
+                && !p
+                    .components()
+                    .any(|c| c.as_os_str() == std::ffi::OsStr::new("archive"))
             {
                 if let Ok(text) = std::fs::read_to_string(&p) {
                     if text.contains("- type:") {
@@ -136,10 +143,12 @@ fn every_documented_sequence_rule_parses() {
     let docs = docs_showing_rules(&root);
     for doc in &docs {
         let path = std::path::PathBuf::from(doc);
-        let rel = doc
-            .strip_prefix(&format!("{}/", root.display()))
-            .unwrap_or(doc)
-            .to_string();
+        // Relative for the message, via `Path` so the separator is not assumed, then normalised
+        // to `/` so a failure reads the same on every platform.
+        let rel = path
+            .strip_prefix(&root)
+            .map(|r| r.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|_| doc.clone());
         let md = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
 
