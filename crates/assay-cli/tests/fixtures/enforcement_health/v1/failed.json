@@ -4,6 +4,7 @@
   "mechanism": "landlock",
   "scope": "tcp_connect_landlock_port",
   "policy_semantics": "allowlist",
+  "enforcement_class": "basic",
   "failure": {
     "reason_code": "landlock_abi_too_old",
     "detail": "Landlock ABI 4 is required for TCP connect port allowlists"

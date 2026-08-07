@@ -2,8 +2,8 @@ use crate::events::{self, EventStream};
 use crate::probes::{ProbeAttachment, EXPECTED_PROBES};
 use crate::{MonitorError, MonitorStatsSnapshot};
 use assay_common::{
-    KEY_DEDUP_OPEN_PATHS, KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL,
-    MONITOR_STAT_CONNECT_EVENTS_EMITTED, MONITOR_STAT_CONNECT_RINGBUF_DROPPED,
+    CidrRuleValue, KEY_DEDUP_OPEN_PATHS, KEY_EMIT_INODE_RESOLVED, KEY_EMIT_OBSERVED_CONNECT,
+    KEY_MONITOR_ALL, MONITOR_STAT_CONNECT_EVENTS_EMITTED, MONITOR_STAT_CONNECT_RINGBUF_DROPPED,
     MONITOR_STAT_LSM_EVENTS_EMITTED, MONITOR_STAT_LSM_RINGBUF_DROPPED,
     MONITOR_STAT_OPENAT2_EVENTS_EMITTED, MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
     MONITOR_STAT_OPENAT_EVENTS_EMITTED, MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
@@ -139,6 +139,17 @@ impl LinuxMonitor {
     pub fn set_monitor_all(&mut self, enabled: bool) -> Result<(), MonitorError> {
         let val = if enabled { 1 } else { 0 };
         let config = std::collections::HashMap::from([(KEY_MONITOR_ALL, val)]);
+        self.set_config(&config)
+    }
+
+    /// Ask the kernel to emit an event for every ALLOWED connect, not only blocked ones.
+    ///
+    /// Off unless a run wants a peer set. The allow path is the hot one, so this is opt-in rather
+    /// than default: a run that does not ask pays nothing, and its peer set is honestly empty
+    /// instead of quietly partial.
+    pub fn set_emit_observed_connect(&mut self, enabled: bool) -> Result<(), MonitorError> {
+        let val = u32::from(enabled);
+        let config = std::collections::HashMap::from([(KEY_EMIT_OBSERVED_CONNECT, val)]);
         self.set_config(&config)
     }
 
@@ -390,10 +401,21 @@ impl LinuxMonitor {
             }
         }
 
+        // CIDR rules -> CIDR_RULES_V4. The value carries the action the hook branches
+        // on and the id of the rule that produced it; the hook reports that id as the
+        // matched rule, so both must cross the boundary. This is the one place the
+        // compiler's u8 action is widened to the shared eBPF ABI type.
         if let Some(map) = bpf.map_mut("CIDR_RULES_V4") {
-            let mut trie: LpmTrie<_, [u8; 4], u32> = LpmTrie::try_from(map)?;
-            for (prefix_len, addr, action) in compiled.tier1.cidr_v4_entries() {
-                trie.insert(&Key::new(prefix_len, addr), action as u32, 0)?;
+            let mut trie: LpmTrie<_, [u8; 4], CidrRuleValue> = LpmTrie::try_from(map)?;
+            for entry in compiled.tier1.cidr_v4_entries() {
+                trie.insert(
+                    &Key::new(entry.prefix_len, entry.addr),
+                    CidrRuleValue {
+                        action: u32::from(entry.action),
+                        rule_id: entry.rule_id,
+                    },
+                    0,
+                )?;
             }
         }
 
