@@ -1,10 +1,16 @@
-//! In-toto / DSSE attestation over an evidence bundle manifest (ADR-039).
+//! In-toto / DSSE attestation over a finished evidence bundle (ADR-039, subject shape per ADR-044).
 //!
-//! Wraps a bundle [`Manifest`] as an in-toto v1 Statement and signs it as a DSSE
+//! Wraps the completed `.tar.gz` as an in-toto v1 Statement and signs it as a DSSE
 //! envelope, reusing the mandate DSSE primitives (PAE + Ed25519). The anchor
 //! (a transparency log or timestamp) stays pluggable and external.
 //!
-//! Honest boundary: an attestation binds who-said-it and the *semantic event chain*.
+//! These two paragraphs used to say the statement wrapped a [`Manifest`], which is the v0 shape
+//! this module now exists partly to refuse — while the paragraph four below described the ADR-044
+//! subject correctly. A reader who stopped at the header got the superseded answer, and at least
+//! one did: it was cited as the current shape in a design decision on #2105. The header is the
+//! part people read, so it is the part that has to be right.
+//!
+//! Honest boundary: an attestation binds who-said-it and the bytes of one archive.
 //! It does NOT upgrade observed support, and provides no trust root or transparency
 //! log on its own.
 //!
