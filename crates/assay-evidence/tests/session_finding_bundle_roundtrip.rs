@@ -16,7 +16,7 @@
 //! writer, a payload filter in the reader — fails this test rather than being invisible to it.
 
 use assay_evidence::bundle::{verify_bundle_with_limits, BundleWriter, ErrorClass, VerifyLimits};
-use assay_evidence::types::{EvidenceEvent, Payload};
+use assay_evidence::types::{EvidenceEvent, PayloadSessionFinding};
 use serde_json::json;
 use std::io::Cursor;
 
@@ -65,16 +65,13 @@ fn a_session_finding_round_trips_through_the_writer_and_the_verifier() {
         .expect("a bundle carrying a session finding verifies");
     assert_eq!(result.event_count, 2, "both events survived the round trip");
 
-    // The payload is still readable as the kind it was written as, through the typed view rather
-    // than as raw JSON -- which is the half `Payload::SessionFinding` adds.
-    let typed: Payload = serde_json::from_value(json!({
-        "type": "assay.session.finding",
-        "payload": finding_payload("violated"),
-    }))
-    .expect("the written payload parses as the typed variant");
-    let Payload::SessionFinding(f) = typed else {
-        panic!("a session finding must read back as one");
-    };
+    // The payload is readable as a typed record rather than as loose JSON, which is what
+    // `PayloadSessionFinding` adds. It is parsed directly rather than through `Payload`: wiring the
+    // variant into that enum is a semver major (see ADR-047), so the struct ships first and the
+    // convenience view follows. A consumer reading `EvidenceEvent::payload` -- a raw `Value` --
+    // does exactly this.
+    let f: PayloadSessionFinding = serde_json::from_value(finding_payload("violated"))
+        .expect("the written payload parses as the typed record");
     assert_eq!(f.spanned, vec![1, 2]);
     assert_eq!(f.outcome, "violated");
 }

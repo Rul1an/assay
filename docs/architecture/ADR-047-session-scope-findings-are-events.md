@@ -28,7 +28,20 @@ What is ours is the measurement against this tree, at `f842bbab5`, and three dec
 
 ## Decision 1 — a session-scope finding is its own payload kind, carried in the event stream
 
-`assay.session.finding`, a variant of `Payload`.
+`assay.session.finding`, carried by `PayloadSessionFinding`.
+
+**Shipped in two steps, and the reason is a gate rather than a preference.** The record type ships
+now; wiring it into the `Payload` enum does not. `cargo semver-checks` refuses the variant against
+the `v4.0.0` baseline — `enum_variant_added: enum variant added on exhaustive enum` — while the
+struct alone reports "no semver update required". `Payload` is `pub` in a published crate and is
+exhaustive, so **every future event kind costs a major version**, which is a poor property for the
+enum of a format designed to grow.
+
+So the next major takes both at once: the variant and `#[non_exhaustive]` on `Payload`. That pays
+the break once for every kind that follows rather than once per kind. Until then the wire is
+unaffected — `EvidenceEvent::payload` is a raw `Value`, a consumer parses `PayloadSessionFinding`
+from it directly, and the enum was already documented as a convenience view rather than the
+contract.
 
 **Why a distinct kind rather than a field on `assay.tool.decision`.** The defining property of this
 record is that it *spans* calls. A per-call payload has no honest place to put a span: whichever
@@ -144,9 +157,10 @@ by what today's producer happens to emit.
 
 ## Consequences
 
-- `Payload` gains one variant. Nothing in the workspace matches it exhaustively today, so nothing
-  breaks; the one existing match is in a test and has a wildcard arm. `Unknown` is unaffected —
-  it never absorbed this class, as Decision 1 records.
+- `PayloadSessionFinding` is additive; `Payload` is unchanged until the next major, when it gains
+  the variant and `#[non_exhaustive]` together. Nothing in the workspace matches `Payload`
+  exhaustively today anyway — the one existing match is in a test and has a wildcard arm — and
+  `Unknown` never absorbed this class, as Decision 1 records.
 - Findings enter `run_root`, so they are covered by bundle verification with no new file and no
   change to `ALLOWED_FILES`.
 - The span is expressed as `u64` indices into the evaluated call sequence, which is what the

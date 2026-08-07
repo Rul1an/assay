@@ -235,45 +235,35 @@ fn sandbox_degraded_payload_serde_shape_is_stable() {
 
 // -- ADR-047: session-scope findings --
 
-/// The kind reads back as itself, which is the whole point of admitting it.
+/// The record parses as a typed struct, and `Unknown` is not the fallback it looks like.
 ///
-/// The control matters more than the positive case here, and it corrected a claim ADR-047 was
-/// originally written on. `Unknown(serde_json::Value)` reads like a catch-all and is not one: on
-/// an adjacently-tagged enum with no `#[serde(other)]`, it matches the literal tag `"Unknown"` and
-/// nothing else. So an unregistered kind is not absorbed untyped, it is a hard deserialisation
-/// error. Registering the variant is therefore the difference between a consumer reading this
-/// record and a consumer failing on it, not between reading it well and reading it loosely.
+/// `PayloadSessionFinding` ships without a `Payload` variant: adding one to that exhaustive public
+/// enum is a semver major (`cargo semver-checks`: `enum_variant_added`), which ADR-047 records as
+/// deferred to the next major together with `#[non_exhaustive]`, so the break is paid once for
+/// every kind that follows rather than once per kind.
 ///
-/// The wire is unaffected either way -- `EvidenceEvent::payload` is a raw `Value` and this enum is
-/// documented as a convenience view rather than the contract. The break is confined to consumers
-/// using the typed view, which is all of ours.
+/// The control is what makes this worth pinning. `Unknown(serde_json::Value)` reads like a
+/// catch-all and is not one: adjacently tagged with no `#[serde(other)]`, it matches the literal
+/// tag `"Unknown"` and nothing else, so an unregistered kind is a hard deserialisation error rather
+/// than an untyped landing. That is why the wire stays raw `Value` and why the deferral above costs
+/// consumers nothing today.
 #[test]
-fn a_session_finding_reads_as_itself_and_an_unregistered_kind_does_not_parse() {
-    let json = serde_json::json!({
-        "type": "assay.session.finding",
-        "payload": {
-            "rule_id": "after:read_credentials->http_post",
-            "kind": "after",
-            "outcome": "violated",
-            "spanned": [1, 2],
-            "extent": "complete",
-            "reason": "credential read at 1 followed by egress at 2"
-        }
+fn a_session_finding_parses_as_a_typed_record_and_unknown_is_not_a_fallback() {
+    let payload = serde_json::json!({
+        "rule_id": "after:read_credentials->http_post",
+        "kind": "after",
+        "outcome": "violated",
+        "spanned": [1, 2],
+        "extent": "complete",
+        "reason": "credential read at 1 followed by egress at 2"
     });
-
-    let parsed: Payload = serde_json::from_value(json.clone()).expect("typed payload parses");
-    let Payload::SessionFinding(f) = &parsed else {
-        panic!("landed in the wrong variant: {parsed:?}");
-    };
+    let f: PayloadSessionFinding =
+        serde_json::from_value(payload.clone()).expect("typed record parses");
     assert_eq!(f.rule_id, "after:read_credentials->http_post");
-    assert_eq!(f.outcome, "violated");
     assert_eq!(f.spanned, vec![1, 2]);
     assert_eq!(f.extent, "complete");
-    assert_eq!(serde_json::to_value(&parsed).unwrap(), json, "round trip");
+    assert_eq!(serde_json::to_value(&f).unwrap(), payload, "round trip");
 
-    // Control, and the reason this test is not decorative: an unregistered kind does not parse at
-    // all. Asserting only the positive case above would hold just as well if the enum accepted
-    // everything, and the failure mode this variant prevents would be invisible.
     let stranger = serde_json::json!({
         "type": "assay.not.a.registered.kind",
         "payload": {"whatever": true}
@@ -285,8 +275,6 @@ fn a_session_finding_reads_as_itself_and_an_unregistered_kind_does_not_parse() {
         "expected a variant error, got: {err}"
     );
 
-    // And `Unknown` is reachable only by its literal tag, which no producer emits. Pinned so the
-    // next reader does not repeat the assumption that it is a fallback.
     let literal = serde_json::json!({"type": "Unknown", "payload": {"anything": 1}});
     assert!(
         matches!(

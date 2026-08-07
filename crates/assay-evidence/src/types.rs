@@ -301,8 +301,6 @@ pub enum Payload {
     ProfileFinished(PayloadProfileFinished),
     #[serde(rename = "assay.policy.suggested")]
     PolicySuggested(PayloadPolicySuggested),
-    #[serde(rename = "assay.session.finding")]
-    SessionFinding(PayloadSessionFinding),
     Unknown(serde_json::Value),
 }
 
