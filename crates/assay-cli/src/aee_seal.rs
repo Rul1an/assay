@@ -121,7 +121,7 @@ impl std::fmt::Display for NotSealEligible {
 }
 
 /// Lowercase SHA-256 hex, the shape the #2001 field contract requires of every digest member.
-fn is_sha256_hex(v: &str) -> bool {
+pub(crate) fn is_sha256_hex(v: &str) -> bool {
     v.len() == 64
         && v.bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
@@ -406,8 +406,9 @@ pub fn seal_eligibility(health: &EnforcementHealthV1) -> Result<&Probe, NotSealE
 
 /// How the caller proves the drop accounting the seal will carry.
 ///
-/// ADR-045 line 232 permits `aeeDropCount = 0` and `aeeDropBound = 0` only under a named collection
-/// model, and forbids "an AEE-looking seal with guessed zero drop accounting". This module cannot
+/// Under ADR-045 "Drop accounting decision for first slice", zero counts "may be emitted only under
+/// one of these explicitly named collection models", and the ADR forbids emitting
+/// "an AEE-looking seal with guessed zero drop accounting". This module cannot
 /// observe the collection path, so the model is the caller's to declare -- but it is a required
 /// argument rather than a default, because a value that can be omitted is a value that gets guessed.
 ///
@@ -526,11 +527,14 @@ pub fn build_sealed_run(
         return Err(NotSealEligible::UnprovenContextValue { field: "sealed_at" });
     }
     let rb = run_binding(env)?;
-    // ADR-045 line 192, and its line 476 negative fixture: `aeePostureDigest` is the digest the
-    // posture object *declares*, not the digest *of* that object. They differ by construction --
-    // the declared value is computed before the `digest` member is inserted, so hashing the carried
-    // object hashes a strictly larger thing. Two plausible readings, and the ADR names the wrong one
-    // by name because it is the one an implementer reaches for.
+    // ADR-045 "Field interpretation" pins `aeePostureDigest` to the carried posture digest and says
+    // "It is distinct from the AEE v0.7 run-binding" input taken over the whole object. So this is
+    // the digest the posture object *declares*, not the digest *of* that object. They differ by
+    // construction -- the declared value is computed before the `digest` member is inserted, so
+    // hashing the carried object hashes a strictly larger thing. Two plausible readings, and the ADR
+    // requires a negative fixture for the wrong one by name,
+    // "`aeePostureDigest` confused with the run-binding digest of the full `networkPosture` object",
+    // because it is the one an implementer reaches for.
     let posture_digest = env
         .network_posture
         .get("digest")
@@ -646,8 +650,9 @@ mod tests {
     }
 
     /// The seal must carry the digest the posture object *declares*, not the digest *of* that
-    /// object. ADR-045 line 476 names this confusion as a required negative fixture, and the two
-    /// values differ by construction because the declared one is computed before the `digest`
+    /// object. ADR-045 requires a negative fixture for
+    /// "`aeePostureDigest` confused with the run-binding digest of the full `networkPosture` object",
+    /// and the two values differ by construction because the declared one is computed before the `digest`
     /// member is inserted. Asserted on the payload rather than on a helper: a test that checks the
     /// function and not where its result lands is how the wrong quantity reached the wire.
     #[test]
@@ -778,7 +783,7 @@ mod tests {
 
     /// A run carrying attack evidence must still be sealable. The previous gate counted committed
     /// observations and refused anything but a lone probe, which forbade exactly the statements
-    /// ADR-045 line 425 allows ("zero or more interception records per run") and the checker
+    /// ADR-045 allows -- "zero or more interception records per run" -- and the checker
     /// requires for a caught substrate row.
     #[test]
     fn a_run_carrying_an_interception_can_still_seal() {
