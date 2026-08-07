@@ -413,7 +413,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git fetch --tags --quiet origin || true
+          # No `|| true`. A failed fetch leaves whatever tags the checkout happens to have, and
+          # `git tag --list` would then pick a stale baseline and compare against the wrong release
+          # while reporting success. That is the exact failure this job exists to stop, so it must
+          # not be the way this job fails.
+          git fetch --tags --quiet origin
           tag="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1)"
           if [ -z "${tag}" ]; then
             echo "::error::no v* release tag found, so there is nothing to compare against."
