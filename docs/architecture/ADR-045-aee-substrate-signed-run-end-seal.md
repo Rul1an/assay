@@ -266,6 +266,20 @@ The counts that follow from it: `REQUIRED_SEAL_FIELDS` names **six** of the ten 
 the checker's known-optional set names the other four. The positive payload carried **eight** when
 this was written; it carries all ten as of the decision below.
 
+**`aeeVersion` stays 0.7, decided 2026-08-08 (#2093).** in-toto/attestation#570 is still open at
+v0.7, and the predicate author proposed shipping 0.7 as it stands and repairing the referencedness
+defect — which she rates Major — in 0.8. Pointing the constant at a version that does not exist
+upstream would be a conformance claim about an unpublished document.
+
+The migration trigger, recorded so it is not rediscovered: **0.8 is adopted when it exists upstream,
+not when it is proposed.** The constant lives in two places, `aee_seal.rs` and the fixture checker,
+pinned against each other by `crates/assay-cli/tests/aee_version_parity.rs`.
+
+This is recorded here rather than only on the constant because the other half of the same
+acceptance item is, and a decision recorded one notch weaker than its sibling is the asymmetry an
+adversarial review flagged on #2125 for the drop-proof half. The doc comment survives a reader who
+opens the file; an ADR survives the constant being moved.
+
 **The drop-proof pair, decided 2026-08-08 (#2093).** The paragraph above left `assayDropProofBasis`
 and `assayDropChannels` permitted rather than fixtured, and #2093 recorded the open question as a
 binary: the checker requires the pair, or the producer stops emitting it.
