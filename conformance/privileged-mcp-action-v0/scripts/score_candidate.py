@@ -47,7 +47,10 @@ EXPECTED_CASE_COUNT = 14
 # spec.md, descriptor.json, cases.json, README.md. Derived rather than written out again:
 # the pack member count and the case count are one fact, and holding them as two numbers is
 # how the corpus grew to fourteen while a constant still said thirteen.
-EXPECTED_PACK_MEMBERS = EXPECTED_CASE_COUNT + 4
+# README, cases.json, descriptor.json, spec.md, plus the two canonicalization members added in
+# candidate.4 (#1990). Counted rather than derived so a pack that grew a member fails here instead
+# of being accepted because the scorer was taught to expect whatever it was handed.
+EXPECTED_PACK_MEMBERS = EXPECTED_CASE_COUNT + 6
 MAX_PACK_ARCHIVE_BYTES = 32 * 1024 * 1024
 MAX_MEMBER_NAME_BYTES = 512
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -142,6 +145,8 @@ def load_pack(pack: Path, destination: Path) -> dict[str, Any]:
         f"{PACK_ROOT}/cases.json",
         f"{PACK_ROOT}/descriptor.json",
         f"{PACK_ROOT}/spec.md",
+        f"{PACK_ROOT}/canonicalization/README.md",
+        f"{PACK_ROOT}/canonicalization/rfc8785-vectors.json",
     }
     seen_ids: set[str] = set()
     seen_hashes: set[str] = set()

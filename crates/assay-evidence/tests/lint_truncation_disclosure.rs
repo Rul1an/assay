@@ -122,33 +122,35 @@ fn truncation_is_announced_in_a_tool_execution_notification() {
         "the notice must carry how many were dropped: {text}"
     );
     // OWASP agentic-skills #49 review point: a disclosed truncation is only actionable if the
-    // consumer can see the ceiling, not just the overflow. The cap travels as a machine-readable
-    // field and in the message, so a consumer reconstructs both without parsing prose.
+    // consumer can see the ceiling, not just the overflow. The prose still names it, for a human
+    // reading the notice alone.
     assert!(
         text.contains(&report.applied_cap.to_string()),
         "the notice must name the cap the count was measured against: {text}"
     );
-    assert_eq!(notifications[0]["properties"]["appliedCap"], 3);
-    // The notification speaks the cross-emitter vocabulary; `run.properties` keeps this tool's
-    // published names. See `both_carriers_disclose_the_same_two_values`.
+    // The machine-readable ceiling is NOT here. It is on the run, unconditionally, so it is
+    // resolvable from every report including the ones with no notification at all. See
+    // `the_cap_is_declared_once_at_run_level`.
+    assert!(
+        notifications[0]["properties"].get("appliedCap").is_none(),
+        "the cap is configuration and belongs on the run, not duplicated per event: {}",
+        notifications[0]["properties"]
+    );
     assert_eq!(
         notifications[0]["properties"]["droppedCount"],
         report.truncated_count
     );
 }
 
-/// One cap firing, said the same way in both places it is said. The notification used to call the
-/// suppressed count `droppedCount` where `run.properties` called it `truncatedCount`, so a consumer
-/// reading both saw two names for one number. Pinned as equality rather than key-by-key, because
-/// the point is that neither carrier can grow a truncation key the other lacks. Equality is exact
-/// The two carriers name the cap differently on purpose, so the invariant is that they disclose
-/// the same two values rather than the same two strings. `run.properties` keeps this tool's
-/// published names; the notification carries the cross-emitter pair that
-/// aliksir/claude-code-skill-security-check#24 is settling. Asserting string equality here would
-/// pin the wrong thing and would break the moment either vocabulary moved, which is exactly what
-/// is expected to happen to one of them.
+/// Each fact in exactly one carrier, split by what kind of fact it is.
+///
+/// This used to assert that both carriers disclosed the same two values, which was the best
+/// available answer while the cap lived in both places: the names differed, so the invariant had to
+/// be on the numbers. The split makes the question go away. The cap is configuration and is stated
+/// once, on the run; the drop is an event and is stated once, in the notification. Nothing is
+/// duplicated, so nothing can disagree.
 #[test]
-fn both_carriers_disclose_the_same_two_values() {
+fn each_fact_travels_in_exactly_one_carrier() {
     let bundle = bundle_with_many_findings(10);
     let report = lint_capped(&bundle, Some(3));
     let sarif = to_sarif(&report);
@@ -156,17 +158,18 @@ fn both_carriers_disclose_the_same_two_values() {
     let note = &sarif["runs"][0]["invocations"][0]["toolExecutionNotifications"][0]["properties"];
     let run = &sarif["runs"][0]["properties"];
 
+    assert_eq!(run["appliedCap"], 3, "the ceiling is on the run: {run}");
     assert_eq!(
-        note["appliedCap"], run["appliedCap"],
-        "the cap must be one number: notification {note}, run {run}"
+        note["droppedCount"], report.truncated_count,
+        "the drop is on the event: {note}"
     );
-    assert_eq!(
-        note["droppedCount"], run["truncatedCount"],
-        "the suppressed count must be one number under either name: \
-         notification {note}, run {run}"
+
+    // Neither carrier may grow the other's fact back. A future edit that "helpfully" restores the
+    // cap to the notification fails here rather than on someone else's consumer.
+    assert!(
+        note.get("appliedCap").is_none(),
+        "the cap is not duplicated per event: {note}"
     );
-    // And each carrier must actually use its own vocabulary, so a future edit that quietly
-    // unifies them fails here rather than surfacing on someone else's consumer.
     assert!(
         note.get("truncatedCount").is_none(),
         "the notification carries the cross-emitter name only: {note}"
@@ -174,6 +177,31 @@ fn both_carriers_disclose_the_same_two_values() {
     assert!(
         run.get("droppedCount").is_none(),
         "run.properties carries this tool's published names only: {run}"
+    );
+}
+
+/// The reason the split is worth the churn: silence has to mean something.
+///
+/// `engine.rs` resolves `max_results.unwrap_or(5000)`, so every run is bounded. While the cap was
+/// gated on truncation, a clean report said nothing about it, and a consumer could not tell an
+/// unbounded run from a bounded one that did not fire. Since the default path is always bounded,
+/// that silence was always misleading in the same direction.
+#[test]
+fn the_cap_is_declared_once_at_run_level() {
+    let bundle = bundle_with_many_findings(3);
+    let report = lint_capped(&bundle, Some(5000));
+    let sarif = to_sarif(&report);
+
+    assert!(!report.truncated, "precondition: nothing was dropped");
+
+    let run = &sarif["runs"][0]["properties"];
+    assert_eq!(
+        run["appliedCap"], 5000,
+        "a run that stayed under its ceiling still had one: {run}"
+    );
+    assert!(
+        run.get("truncated").is_none() && run.get("truncatedCount").is_none(),
+        "declaring the cap must not imply a drop that did not happen: {run}"
     );
 }
 
