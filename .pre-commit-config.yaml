@@ -143,10 +143,10 @@ repos:
         files: ^(crates/assay-cli/src/aee_seal\.rs|scripts/ci/test_aee_seal_producer_mutations\.py|\.pre-commit-config\.yaml)$
       - id: aee-seal-checker-coverage
         name: ADR-045 seal checker coverage
-        entry: bash -c 'f=scripts/experiments/aee_landlock_seal_fixture.py; python3 $f --meta-test && python3 $f --required-field-test && python3 $f --rule-coverage-test'
+        entry: bash -c 'f=scripts/experiments/aee_landlock_seal_fixture.py; python3 $f --meta-test && python3 $f --required-field-test && python3 $f --rule-coverage-test && python3 $f --producer-vocabulary-test'
         language: system
         pass_filenames: false
-        # Three properties the checker claims and nothing was checking.
+        # Four properties the checker claims and nothing was checking.
         #
         # `--meta-test` says every negative control rejects for its own reason and no other; without
         # it a rule that fires on every control would read as broad coverage instead of one
@@ -160,7 +160,12 @@ repos:
         # nine -- including the one #1998 requires by name. A rule can exist, be believed, and never
         # be shown to fire.
         #
-        # pre-commit, not pre-push: all three run in well under a second, and they are the tests
+        # `--producer-vocabulary-test` says an Assay producer member withholds credit and never
+        # voids the record. The other three are blind to it: a phase is one word passed to `add`,
+        # so `assayDropProofModel` decided AEE structural validity for two slices while all three
+        # stayed green.
+        #
+        # pre-commit, not pre-push: all four run in well under a second, and they are the tests
         # that tell you a rule you just wrote does not isolate.
         files: ^(scripts/experiments/aee_landlock_seal_fixture\.py|scripts/experiments/fixtures/aee-landlock-seal/.*|\.pre-commit-config\.yaml)$
       - id: aee-seal-fixture-drift

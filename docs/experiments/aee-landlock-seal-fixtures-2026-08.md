@@ -50,31 +50,38 @@ had never been run.
 ```sh
 python3 scripts/experiments/aee_landlock_seal_fixture.py --emit
 python3 scripts/experiments/aee_landlock_seal_fixture.py valid-landlock-seal
-for name in \
-  missing-seal \
-  bad-run-binding \
-  not-still-armed \
-  bad-drop-accounting \
-  uncounted-channel-without-eligible-seal \
-  bad-observed-set \
-  unsupported-observed-attack \
-  substrate-runner-observed-attacks-mismatch \
-  fixture-key-production-scope \
-  untrusted-signing-key \
-  wrong-key-role \
-  key-scope-collection-path-mismatch \
-  key-scope-substrate-mismatch \
-  key-outside-validity-window \
-  unsupported-envelope-shape
- do
+while read -r name reason; do
   python3 scripts/experiments/aee_landlock_seal_fixture.py "$name" \
-    --expect-invalid --expect-reason "$name"
- done
+    --expect-invalid --expect-reason "$reason"
+done <<'PAIRS'
+missing-seal substrate-row-missing-sealed-coverage
+bad-run-binding run-binding-mismatch
+not-still-armed seal-not-still-armed
+bad-drop-accounting drop-accounting-nonzero
+uncounted-channel-without-eligible-seal drop-proof-model-ineligible
+bad-observed-set observed-set-mismatch
+unsupported-observed-attack observed-attack-unsupported
+substrate-runner-observed-attacks-mismatch substrate-runner-observed-attacks-mismatch
+fixture-key-production-scope fixture-key-in-production-path
+untrusted-signing-key untrusted-signing-key
+wrong-key-role wrong-key-role
+key-scope-collection-path-mismatch key-scope-collection-path-mismatch
+key-scope-substrate-mismatch key-scope-substrate-mismatch
+key-outside-validity-window key-outside-validity-window
+unsupported-envelope-shape unsupported-envelope-shape
+PAIRS
 ```
 
 `--expect-reason` is the part that matters. A control asserted only on a non-zero
 exit reports coverage it does not have, because it cannot distinguish "rejected
 for the reason I built" from "rejected because I broke the JSON".
+
+Case name and reason code are separate columns because they are separate things,
+and this block used to pass the case name as the reason. Eight of the fifteen
+cases then asserted a code no rule emits, so eight lines of a snippet published as
+the way to check this slice had never been run. `--meta-test` is the maintained
+form of the same property and is what a gate should call; this block is here to be
+read.
 
 Fixture drift:
 
@@ -94,6 +101,18 @@ case to become credited. If it still fails, the control was failing for some
 other reason and its coverage was imaginary. `--disable-check` exists for that
 test and for nothing else.
 
+Producer vocabulary never voids a record:
+
+```sh
+python3 scripts/experiments/aee_landlock_seal_fixture.py --producer-vocabulary-test
+```
+
+Each member in `PRODUCER_CREDIT_FIELDS` is removed, given an ineligible value, and
+given the wrong type, and every mutation must land on
+`structurally-valid-not-credited`. The three tests above are blind to this: a phase
+is one word passed to `add`, so a rule can move between outcomes without changing a
+reason code, a control, or a required field.
+
 ## Three outcomes
 
 The checker distinguishes three outcomes, because ADR-043's rule that integrity
@@ -102,7 +121,7 @@ never upgrades meaning only exists if a consumer can tell them apart:
 | Outcome | Meaning |
 |---|---|
 | `malformed` | Not structurally valid. |
-| `structurally-valid-not-credited` | The signature verifies, but the key is untrusted, out of scope, wrong role, or outside its validity window. |
+| `structurally-valid-not-credited` | The record is well formed, and this consumer's policy withholds credit — an untrusted key, one out of scope, in the wrong role, outside its validity window, or an Assay producer member whose value this policy reads and does not accept. |
 | `credited` | Structurally valid, and the key is trusted for this scope. |
 
 If the middle outcome rendered identically to the first, the distinction would
@@ -115,7 +134,6 @@ Structural rejections (`malformed`):
 - a substrate row has no sealed, arming, or interception coverage;
 - a seal carries a bad run binding;
 - `aeeStillArmed` is not true;
-- zero drop accounting is asserted without an eligible proof model;
 - `aeeObservedSet` does not recompute over emitted interception/examination record leaves;
 - `aeeObservedAttacks` names attacks unsupported by caught rows;
 - substrate-runner attribution requires equality and the lower-bound set does not match;
@@ -132,7 +150,18 @@ Trust rejections (`structurally-valid-not-credited`):
 - the key's trusted scope excludes the payload's `assayCollectionPath`;
 - the key's trusted scope names a different substrate than the statement;
 - the seal instant falls outside the key's validity window;
-- a fixture key is used in a production-like path.
+- a fixture key is used in a production-like path;
+- `assayDropProofModel` names no eligible proof model for the zero drop accounting,
+  or is absent.
+
+That last one is a policy verdict, not a structural one, and it used to be filed
+above. ADR-045 states that `assay`-prefixed members are producer vocabulary and
+must not alter AEE structural validity, and the checker was breaking its own rule:
+a value only Assay defines decided whether an AEE record was well formed. This
+consumer's policy does read the member, so it may withhold credit; a consumer whose
+policy does not read it must still see a verifiable seal. The correction is
+recorded in ADR-045 and was committed to publicly in
+[in-toto/attestation#570](https://github.com/in-toto/attestation/pull/570#issuecomment-5216879286).
 
 The validity window is not key management. This slice checks that a window handed
 to the checker is honoured; rotation, revocation, and distribution belong with the

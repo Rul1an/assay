@@ -107,7 +107,7 @@ Illustrative JSON shape:
 | `aeeStillArmed` | yes | boolean | MUST be `true` for a successful Landlock seal. Unknown or failed state is invalid. | Claims run-end still-armed state only under ADR-045 proof rules. |
 | `aeeDropCount` | yes | integer | First slice MUST be `0`. | Counts observation drops/losses, not blocked policy events. |
 | `aeeDropBound` | yes | integer | First slice MUST be `0`. | Bounds unobserved/lost observations under the named proof model only. |
-| `assayDropProofModel` | yes | string | First slice MUST be `synchronous-probe` or `counted-queue-zero`. | Identifies the proof model that makes zero-drop accounting creditable. |
+| `assayDropProofModel` | yes | string | Producer MUST emit `synchronous-probe` or `counted-queue-zero` in the first slice. A consumer reading it MUST withhold credit for any other value and MUST NOT treat the record as structurally invalid, per ADR-045's producer-vocabulary resolution. | Identifies the proof model that makes zero-drop accounting creditable. |
 | `aeeObservedSet` | yes | string | Payload-only: MUST be lowercase SHA-256 hex. Post-assembly: MUST recompute over emitted interception/examination record leaves. | Digest commitment; not a label array. |
 | `aeeObservedAttacks` | yes | array of strings | Payload-only: MUST be an array whose every member is a string. Post-assembly: each named attack MUST be supported by a caught row unless validating standalone before statement assembly. | Lower-bound substrate attribution, not completeness. Empty is valid for pure Landlock assembly-plane attribution. |
 | `assayObservedLabels` | no | array of strings | If present, MUST NOT substitute for `aeeObservedSet`. | Operator/debug vocabulary only. |
@@ -152,7 +152,10 @@ field constraints:
 7. `aeeMethod` equals `intercepted` for the first slice.
 8. `aeeStillArmed` is true.
 9. `aeeDropCount` and `aeeDropBound` are both zero.
-10. `assayDropProofModel` is `synchronous-probe` or `counted-queue-zero`.
+10. `assayDropProofModel` is `synchronous-probe` or `counted-queue-zero`. This is
+    the one item on this list that withholds credit rather than voiding the
+    payload: it is Assay producer vocabulary, and ADR-045 records that such a
+    member never alters AEE structural validity.
 11. `assayCollectionPath` equals `landlock-tcp-connect` for the first slice.
 12. `assaySealScope` equals `tcp_connect_landlock_port` for the first slice.
 13. `assayAttackRowAttributionSource` is `assembly-plane` or
