@@ -11,7 +11,7 @@ Tracked work items that are marked in code with `// TODO(tag):` and documented h
 | **landlock-abi-v5** | assay-cli | `backend.rs` | ABI v5 (IOCTL), v6 (Scoping), v7 (Audit) when landlock crate or raw syscalls support them (SOTA 2026). |
 | **landlock-net** | assay-cli | `backend.rs` | Add NET rules (ABI V4) when `abi_level >= 4`; currently FS-only. |
 | **validate-v13** | assay-core | `validate/mod.rs` | Full policy-engine context for detailed arg enforcement in trace validation (v1.3). |
-| **sequence-v11** | assay-core | `sequence_eval.rs` | ~~Implement v1.1 sequence operators~~ **Done.** All eight variants live in `assay_core::sequence_eval`; `sequence_valid` delegates. Remaining: `assay-mcp-server::check_sequence` still carries its own copy and is guarded by a parity test rather than calling through. |
+| **sequence-v11** | assay-mcp-server | `tools/check_sequence.rs` | ~~Implement v1.1 sequence operators~~ **Done.** All eight variants live in `assay_core::sequence_eval`; `sequence_valid` delegates. Remaining: `assay-mcp-server::check_sequence` still carries its own copy and is guarded by a parity test rather than calling through. |
 
 ## Placement in roadmap and implementation plan
 

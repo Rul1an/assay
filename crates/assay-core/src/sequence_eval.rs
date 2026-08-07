@@ -15,7 +15,9 @@
 //! are guarded by `assay-mcp-server/tests/sequence_eval_parity.rs` rather than by a shared call,
 //! which is the fallback CLAUDE.md sanctions and the weaker of the two options. What that test
 //! guards is not hypothetical: a differential over every trace of length <= 5 on a three-symbol
-//! alphabet found 213 `after` disagreements between the copies before [`TraceExtent`] existed.
+//! alphabet found 213 `after` disagreements between the copies at this module's first commit.
+//! Those were closed by the `after` rewrite, not by [`TraceExtent`]; the extent parameter creates
+//! divergences of its own, by design, which is why the parity test pins the proxy's reading.
 //!
 //! **A record, not a verdict.** Each rule yields a [`RuleEvaluation`] naming the rule, the
 //! call indices it read, and what it found. A consumer recomputes the conclusion from the
@@ -277,13 +279,9 @@ fn evaluate_rule(
             let id = format!("max_calls:{tool}<={max}");
             let targets = resolve(policy, tool);
             let hits = indices_matching(names, &targets);
-            if hits.is_empty() {
-                return RuleEvaluation::not_exercised(
-                    id,
-                    "max_calls",
-                    format!("'{tool}' never appeared, so no ceiling was tested"),
-                );
-            }
+            // No calls is a ceiling that held, not a rule that did not run. `max_calls` has no
+            // antecedent: like `blocklist` it reads the whole trace and compares a count. The
+            // rules that earn `NotExercised` are the ones with a trigger that must fire first.
             let count = hits.len() as u32;
             if count > *max {
                 RuleEvaluation::violated(
@@ -310,7 +308,7 @@ fn evaluate_rule(
                     ),
                 ),
                 Some(idx) => RuleEvaluation::held(id, "eventually", vec![idx]),
-                None if (names.len() as u32) > *within => RuleEvaluation::violated(
+                None if (names.len() as u32) >= *within => RuleEvaluation::violated(
                     id,
                     "eventually",
                     (0..names.len()).collect(),
@@ -348,73 +346,61 @@ fn evaluate_rule(
             let id = format!("after:{trigger}->{then}@{within}");
             let trig_t = resolve(policy, trigger);
             let then_t = resolve(policy, then);
-            // Every trigger arms its own deadline, and a later trigger re-arms after an
-            // earlier one was satisfied. An earlier version of this arm took only the first
-            // trigger, which reported `held` for `[t, a, t, x, x]` at `within: 1`: the second
-            // `t` is never answered and the trace runs two calls past its deadline. One
-            // satisfied obligation does not discharge the next one.
-            let mut spanned = Vec::new();
-            let mut pending: Option<(usize, usize)> = None; // (trigger index, deadline)
-            for (idx, name) in names.iter().enumerate() {
-                if let Some((trig_idx, deadline)) = pending {
-                    if matches_any(name, &then_t) {
-                        spanned.push(idx);
-                        pending = None;
-                    } else if idx > deadline {
-                        spanned.push(idx);
-                        return RuleEvaluation::violated(
-                            id,
-                            "after",
-                            spanned,
-                            format!(
-                                "tool '{then}' required within {within} calls after '{trigger}' (triggered at index {trig_idx}) but was not called by index {deadline}"
-                            ),
-                        );
-                    }
-                }
-                if matches_any(name, &trig_t) {
-                    spanned.push(idx);
-                    pending = Some((idx, idx + (*within as usize)));
-                }
+
+            // Each trigger is its own obligation, checked against its own window. Two earlier
+            // versions of this arm carried a single mutable `pending` slot and both leaked a
+            // violation through it: the first took only the first trigger, so a later one was
+            // never armed; the second overwrote an unsatisfied obligation whenever a new trigger
+            // arrived, and cleared it on a `then` that landed one call past the deadline, because
+            // the deadline test sat in the `else` of the then-match. Enumerating the obligations
+            // removes the slot they both mismanaged.
+            let triggers = indices_matching(names, &trig_t);
+            if triggers.is_empty() {
+                return RuleEvaluation::not_exercised(
+                    id,
+                    "after",
+                    format!("'{trigger}' never appeared, so no deadline started"),
+                );
             }
-            match pending {
-                Some((trig_idx, deadline)) if names.len() > deadline => {
-                    RuleEvaluation::violated(
+
+            let mut spanned = triggers.clone();
+            for &ti in &triggers {
+                let deadline = ti + (*within as usize);
+                let answered = names
+                    .iter()
+                    .enumerate()
+                    .skip(ti + 1)
+                    .take_while(|(j, _)| *j <= deadline)
+                    .find(|(_, n)| matches_any(n, &then_t));
+                if let Some((j, _)) = answered {
+                    spanned.push(j);
+                    continue;
+                }
+                // Unanswered. On a finished run that is decided. On a partial one it is decided
+                // only once the window has closed, because a later call could still answer it.
+                if extent == TraceExtent::Complete || names.len() > deadline {
+                    spanned.sort_unstable();
+                    spanned.dedup();
+                    return RuleEvaluation::violated(
                         id,
                         "after",
                         spanned,
                         format!(
-                            "tool '{then}' required within {within} calls after '{trigger}' (triggered at index {trig_idx}) but trace exceeded deadline"
+                            "tool '{then}' required within {within} calls after '{trigger}' (triggered at index {ti}) and no call answered it by index {deadline}"
                         ),
-                    )
+                    );
                 }
-                // A trigger fired but the trace has not yet reached its deadline, so the rule
-                // has not been able to decide. Distinct from a trace with no trigger at all.
-                // A trigger fired and `then` never followed. On a finished run that is the
-                // violation the rule names: no later call can satisfy it. Only a trace that may
-                // still grow leaves it undecided.
-                Some((trig_idx, _)) if extent == TraceExtent::Complete => RuleEvaluation::violated(
-                    id,
-                    "after",
-                    spanned,
-                    format!(
-                        "tool '{then}' required within {within} calls after '{trigger}' (triggered at index {trig_idx}) and the run ended without it"
-                    ),
-                ),
-                Some((trig_idx, _)) => RuleEvaluation::not_exercised(
+                return RuleEvaluation::not_exercised(
                     id,
                     "after",
                     format!(
-                        "'{trigger}' fired at index {trig_idx} and the trace may still satisfy the {within}-call deadline"
+                        "'{trigger}' fired at index {ti} and the trace may still satisfy the {within}-call deadline"
                     ),
-                ),
-                None if spanned.is_empty() => RuleEvaluation::not_exercised(
-                    id,
-                    "after",
-                    format!("'{trigger}' never appeared, so no deadline started"),
-                ),
-                None => RuleEvaluation::held(id, "after", spanned),
+                );
             }
+            spanned.sort_unstable();
+            spanned.dedup();
+            RuleEvaluation::held(id, "after", spanned)
         }
 
         SequenceRule::Sequence { tools, strict } => {
@@ -610,14 +596,81 @@ mod tests {
         assert_eq!(ev[1].outcome, RuleOutcome::Held);
     }
 
+    /// No calls is a ceiling that held. `max_calls` has no antecedent that must fire, so it is
+    /// a universal over the trace exactly as `blocklist` is, and the two must not disagree on
+    /// the same shape: `blocklist` with no match already reported `Held`.
     #[test]
-    fn max_calls_without_the_tool_is_not_exercised() {
+    fn max_calls_with_no_matching_call_is_held() {
         let rules = vec![SequenceRule::MaxCalls {
             tool: "spend".into(),
             max: 2,
         }];
         let ev = evaluate_rules(&rules, &names(&["read"]), None, TraceExtent::Complete);
-        assert_eq!(ev[0].outcome, RuleOutcome::NotExercised);
+        assert_eq!(ev[0].outcome, RuleOutcome::Held);
+    }
+
+    /// A `then` arriving one call past the window does not answer the obligation. The deadline
+    /// test used to sit in the `else` of the then-match, so this cleared it and read as `held`.
+    #[test]
+    fn after_rejects_a_then_that_arrives_past_the_deadline() {
+        let rules = vec![SequenceRule::After {
+            trigger: "T".into(),
+            then: "A".into(),
+            within: 1,
+        }];
+        let ev = evaluate_rules(
+            &rules,
+            &names(&["T", "X", "A"]),
+            None,
+            TraceExtent::Complete,
+        );
+        assert_eq!(ev[0].outcome, RuleOutcome::Violated);
+    }
+
+    /// A second trigger does not discharge the first one's unanswered obligation. A single
+    /// mutable slot overwrote it, so this read as `held` while T@0 was never answered.
+    #[test]
+    fn after_does_not_let_a_new_trigger_clear_an_unanswered_one() {
+        let rules = vec![SequenceRule::After {
+            trigger: "T".into(),
+            then: "A".into(),
+            within: 1,
+        }];
+        let ev = evaluate_rules(
+            &rules,
+            &names(&["T", "T", "A"]),
+            None,
+            TraceExtent::Complete,
+        );
+        assert_eq!(ev[0].outcome, RuleOutcome::Violated);
+    }
+
+    /// `require` reports a violation on a partial trace, matching the proxy copy.
+    ///
+    /// Arguably it should not: it is `eventually` with an unbounded window, and `eventually`
+    /// defers. But the copy has reported it as decided since it shipped, and making the shared
+    /// evaluator the lenient one is the single direction never worth taking on an argument.
+    /// Recorded here so the next person to reach for it finds the reason rather than the gap.
+    #[test]
+    fn require_reports_on_a_partial_trace_as_the_proxy_does() {
+        let rules = vec![SequenceRule::Require { tool: "A".into() }];
+        let trace = names(&["B"]);
+        assert_eq!(
+            evaluate_rules(&rules, &trace, None, TraceExtent::Partial)[0].outcome,
+            RuleOutcome::Violated
+        );
+    }
+
+    /// The window is indices `0..within-1`, so it closes when the trace reaches `within`, not
+    /// one call later. At `within: 2` a two-call trace has already spent both chances.
+    #[test]
+    fn eventually_window_closes_when_the_trace_reaches_within() {
+        let rules = vec![SequenceRule::Eventually {
+            tool: "A".into(),
+            within: 2,
+        }];
+        let ev = evaluate_rules(&rules, &names(&["X", "X"]), None, TraceExtent::Partial);
+        assert_eq!(ev[0].outcome, RuleOutcome::Violated);
     }
 
     #[test]
@@ -689,7 +742,7 @@ mod tests {
             .reason
             .as_deref()
             .unwrap()
-            .contains("run ended without it"));
+            .contains("no call answered it"));
     }
 
     /// A finished run that never called the tool missed its window, however long the window was.

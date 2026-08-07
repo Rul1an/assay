@@ -122,6 +122,8 @@ pub fn validate_rules_for_parity(
         .unwrap_or(false)
 }
 
+// TODO(sequence-v11): call `assay_core::sequence_eval::evaluate_rules` instead of this copy.
+// Blocked on preserving the JSON violation shape, which is a published tool contract.
 fn validate_rules(
     rules: &[assay_core::model::SequenceRule],
     actual_names: &[String],

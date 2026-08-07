@@ -11,6 +11,11 @@
 //! shared copy reported as `held` with a span that omitted the failing call, and violations it
 //! invented that the proxy allows. Both are fixed; this is what stops them coming back.
 //!
+//! Parity is **directional**. The shared evaluator may be stricter than the copy — it has fixes
+//! the copy cannot take without changing its published JSON — but it must never be more lenient,
+//! because it is the one `assay run` reports from. The stricter cases are counted so that the
+//! count moving is itself a signal.
+//!
 //! Parity is on the **verdict**, not the prose. The copies phrase their messages differently and
 //! always have, and pinning text here would fail on a wording change that breaks nothing.
 //!
@@ -94,7 +99,8 @@ fn both_evaluators_agree_on_whether_a_rule_is_violated() {
     let traces = all_traces(&["A", "B", "C"], 4);
     let rules = rules_under_test();
 
-    let mut disagreements = Vec::new();
+    let mut permissive = Vec::new();
+    let mut stricter = 0usize;
     for rule in &rules {
         for trace in &traces {
             let shared = evaluate_rules(
@@ -104,32 +110,42 @@ fn both_evaluators_agree_on_whether_a_rule_is_violated() {
                 TraceExtent::Partial,
             );
             let shared_violates = shared[0].is_violation();
-
             let copy = assay_mcp_server::tools::check_sequence::validate_rules_for_parity(
                 std::slice::from_ref(rule),
                 trace,
                 Some(&policy),
             );
 
-            if shared_violates != copy {
-                disagreements.push(format!(
-                    "{:?} on {trace:?}: shared={shared_violates} copy={copy} ({:?})",
-                    rule, shared[0].outcome
-                ));
+            match (shared_violates, copy) {
+                // The direction that is always a bug: the copy finds a violation the shared
+                // evaluator misses. Whatever the two disagree about, the shared one must never
+                // be the lenient side, because it is the one `assay run` reports from.
+                (false, true) => permissive.push(format!(
+                    "{rule:?} on {trace:?}: copy=violation shared={:?}",
+                    shared[0].outcome
+                )),
+                // The shared evaluator is deliberately stricter in two places, both defects in
+                // the copy that this crate cannot fix without changing its published JSON:
+                // `after` accepted a `then` one call past its deadline and let a new trigger
+                // discharge an unanswered one, and `eventually` treated a window as open for one
+                // call after it closed. Counted rather than enumerated so the number moving is
+                // itself the signal.
+                (true, false) => stricter += 1,
+                _ => {}
             }
         }
     }
 
     assert!(
-        disagreements.is_empty(),
-        "the two sequence evaluators disagree on {} of {} cases:\n{}",
-        disagreements.len(),
-        rules.len() * traces.len(),
-        disagreements
-            .iter()
-            .take(20)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n")
+        permissive.is_empty(),
+        "the shared evaluator is more lenient than the proxy copy on {} case(s):\n{}",
+        permissive.len(),
+        permissive.join("\n")
+    );
+    assert_eq!(
+        stricter, 48,
+        "the shared evaluator is stricter than the copy on {stricter} cases, expected 48. \
+         A change here means either a new copy defect was fixed (raise this) or a fix was \
+         lost (lower it) -- both need saying out loud."
     );
 }

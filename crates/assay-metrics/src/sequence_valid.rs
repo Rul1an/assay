@@ -161,10 +161,11 @@ impl Metric for SequenceValidMetric {
 
         // Every configured rule declined to decide. Reporting that as a pass would say the
         // policy held when nothing tested it, which is the vacuity this record exists to end.
-        // Gating this on "no exact sequence configured" silenced the signal for every suite
-        // that sets both, which is the common shape. The exact-sequence check below still runs.
-        if effective_sequence.is_none()
-            && !evaluations.is_empty()
+        // Not gated on "no exact sequence configured". An earlier version was, which silenced
+        // the signal for every suite setting both -- the common shape -- and the comment here
+        // claimed the gate had been removed while the condition beneath it still carried it.
+        // The exact-sequence check below still runs; this only reports that no rule decided.
+        if !evaluations.is_empty()
             && evaluations
                 .iter()
                 .all(|e| e.outcome == assay_core::sequence_eval::RuleOutcome::NotExercised)
@@ -486,5 +487,117 @@ mod tests {
             !result.is_exercised(),
             "but it must not read as an exercised pass"
         );
+    }
+    /// The record must survive every return path. Both exact-sequence branches returned early
+    /// and dropped it, so a suite setting `sequence:` and `rules:` together got `details = {}`.
+    #[tokio::test]
+    async fn rule_evaluations_survive_the_exact_sequence_paths() {
+        let rules = Some(vec![SequenceRule::Blocklist {
+            pattern: "danger".to_string(),
+        }]);
+
+        // exact sequence matches
+        let (tc, resp) = make_test_case(vec!["a"]);
+        let expected = Expected::SequenceValid {
+            policy: None,
+            sequence: Some(vec!["a".to_string()]),
+            rules: rules.clone(),
+        };
+        let ok = SequenceValidMetric
+            .evaluate(&tc, &expected, &resp)
+            .await
+            .unwrap();
+        assert!(ok.passed);
+        assert!(
+            ok.details.get("rule_evaluations").is_some(),
+            "match path dropped the record"
+        );
+
+        // exact sequence mismatches
+        let expected = Expected::SequenceValid {
+            policy: None,
+            sequence: Some(vec!["b".to_string()]),
+            rules,
+        };
+        let bad = SequenceValidMetric
+            .evaluate(&tc, &expected, &resp)
+            .await
+            .unwrap();
+        assert!(!bad.passed);
+        assert!(
+            bad.details.get("rule_evaluations").is_some(),
+            "mismatch path dropped the record"
+        );
+    }
+
+    /// The metric evaluates a finished run, so an unmet `require` is decided. Passing `Partial`
+    /// would report it as undecided and the suite would pass.
+    #[tokio::test]
+    async fn the_metric_evaluates_a_finished_run() {
+        let (tc, resp) = make_test_case(vec!["b"]);
+        let expected = Expected::SequenceValid {
+            policy: None,
+            sequence: None,
+            rules: Some(vec![SequenceRule::Require {
+                tool: "a".to_string(),
+            }]),
+        };
+        let result = SequenceValidMetric
+            .evaluate(&tc, &expected, &resp)
+            .await
+            .unwrap();
+        assert!(
+            !result.passed,
+            "a finished run that never called 'a' violates require"
+        );
+    }
+
+    /// The message a reader has matched on since before this metric delegated.
+    #[tokio::test]
+    async fn require_keeps_its_message() {
+        let (tc, resp) = make_test_case(vec!["b"]);
+        let expected = Expected::SequenceValid {
+            policy: None,
+            sequence: None,
+            rules: Some(vec![SequenceRule::Require {
+                tool: "a".to_string(),
+            }]),
+        };
+        let result = SequenceValidMetric
+            .evaluate(&tc, &expected, &resp)
+            .await
+            .unwrap();
+        assert_eq!(
+            result.details["message"].as_str().unwrap(),
+            "sequence_valid rule failed: required tool 'a' not found in trace"
+        );
+    }
+
+    /// The vacuity signal is not gated on the absence of an exact sequence. It was, which
+    /// silenced it for every suite configuring both.
+    #[tokio::test]
+    async fn vacuity_is_reported_even_when_an_exact_sequence_is_configured() {
+        let (tc, resp) = make_test_case(vec!["read"]);
+        let expected = Expected::SequenceValid {
+            policy: None,
+            sequence: Some(vec!["read".to_string()]),
+            rules: Some(vec![SequenceRule::Before {
+                first: "auth".to_string(),
+                then: "write".to_string(),
+            }]),
+        };
+        let result = SequenceValidMetric
+            .evaluate(&tc, &expected, &resp)
+            .await
+            .unwrap();
+        // The record reads `not_exercised` whether or not the gate is present, so asserting on
+        // it proves nothing about the gate. What the gate decides is the metric's own status.
+        assert!(
+            !result.is_exercised(),
+            "a wholly vacuous ruleset must not read as an exercised pass merely because an \
+             exact sequence is configured alongside it"
+        );
+        let evals = result.details["rule_evaluations"].as_array().unwrap();
+        assert_eq!(evals[0]["outcome"], "not_exercised");
     }
 }
