@@ -25,6 +25,20 @@ use crate::enforcement_health_v1::{EnforcementHealthV1, Mechanism, Probe, Status
 /// producer could only ever name one. That asymmetry was a capability gap, not a design position.
 pub const COLLECTION_PATH_LANDLOCK_TCP_CONNECT: &str = "landlock-tcp-connect";
 /// AEE draft version this payload is shape-compatible with. Not a conformance claim.
+///
+/// **Stays at 0.7, decided in #2093.** in-toto/attestation#570 is still open at v0.7, and the
+/// predicate author has proposed shipping 0.7 as it stands and repairing the referencedness defect
+/// — which she rates Major — in 0.8. Pointing this at 0.8 would name a version that does not exist
+/// upstream, which is a conformance claim about an unpublished document.
+///
+/// The migration trigger, stated so it is not rediscovered: **0.8 is adopted when it exists
+/// upstream, not when it is proposed.** Moving the constant is a one-line change today and a
+/// migration once runs emit sealed records, which is why #2093 resolved it before the producer
+/// lands rather than after.
+///
+/// `tests/aee_version_parity.rs` pins this against the fixture checker's own copy. Two literals
+/// for one version drift silently, and a bump that reaches only one side would leave a producer
+/// emitting a version its own checker rejects.
 pub const AEE_VERSION: &str = "0.7";
 /// The only drop-accounting proof model the Landlock-first slice can honestly carry.
 pub const DROP_PROOF_SYNCHRONOUS_PROBE: &str = "synchronous-probe";
