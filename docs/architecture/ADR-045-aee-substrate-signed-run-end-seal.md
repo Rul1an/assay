@@ -361,7 +361,10 @@ wrong value straight through.
 Where this leaves the prefix rule: **seven** of the ten producer members are read by some rule in the
 checker, all seven are enforced inert by test, and the remaining three are inert by having no rule.
 Every rule that can still return `malformed` reads an `aee*` member, the envelope, or the predicate
-structure.
+structure, where reads means interprets. A producer member mutated inside an interception record
+still changes `aeeObservedSet`, which is a digest over payload bytes and commits to them opaquely.
+That is not a breach: a consumer ignoring Assay vocabulary recomputes the identical digest and
+reaches the identical verdict, so no two consumers disagree, which is the harm this rule names.
 
 Fields beginning with `assay` in the sealed payload are Assay producer vocabulary. AEE consumers may ignore them unless their own policy understands them. They MUST NOT alter AEE structural validity. Any future AEE statement exporter MUST also carry predicate-level `doesNotAssert` for statement-level non-claims; `assayNonClaims` inside the sealed payload is only producer vocabulary and does not weaken required AEE checks.
 
