@@ -94,7 +94,6 @@ REQUIRED_SEAL_FIELDS = (
     "aeeStillArmed",
     "aeeDropCount",
     "aeeDropBound",
-    "assayDropProofModel",
     "aeeObservedSet",
     "aeeObservedAttacks",
     "assayCollectionPath",
@@ -104,6 +103,28 @@ REQUIRED_SEAL_FIELDS = (
     "assayAttackRowAttributionSource",
     "assayNonClaims",
 )
+
+# Producer members this checker's own policy reads, and which therefore may withhold credit and
+# nothing else. ADR-045 says of the `assay` prefix: "They MUST NOT alter AEE structural validity."
+# `assayDropProofModel` was in the required list above and gated on a closed value set, and the
+# finding it raised was structural -- so an Assay producer member decided whether an AEE record was
+# well formed at all, which is the thing that sentence forbids.
+#
+# It is a member whose values rank: an eligible proof model is worth more than an ineligible one.
+# That is the shape in-toto/attestation#570 now rules on, and the resolution here is the one that
+# rule implies -- an ineligible model withholds credit rather than voiding the record, because a
+# consumer that cannot read this vocabulary must still see a structurally valid seal.
+#
+# Scoped to the members whose values rank, deliberately. Six sibling producer members
+# (`assayCollectionPath`, `assaySealedAt`, `assaySourceSchema`, `assaySealScope`,
+# `assayAttackRowAttributionSource`, `assayNonClaims`) still raise structural findings. They carry
+# identities and instants rather than an ordered axis, so the upstream paragraph does not reach
+# them; the local prefix rule does, and that gap is recorded in the ADR rather than closed by an
+# edit here. Adding one to this tuple is what `--producer-vocabulary-test` then enforces.
+PRODUCER_CREDIT_FIELDS = ("assayDropProofModel",)
+
+# Values of `assayDropProofModel` that license the zero drop accounting this slice credits.
+DROP_PROOF_MODELS_ELIGIBLE = ("synchronous-probe", "counted-queue-zero")
 
 # Fixed instants. A validity window needs something to be checked against, and a
 # wall clock would make the drift check flaky, which is how a gate gets disabled.
@@ -726,8 +747,12 @@ def validate(statement: dict[str, Any], disabled: frozenset[str] = frozenset()) 
             add("seal-not-still-armed", PHASE_MALFORMED, f"sealed record {idx} is not still armed")
         if seal.get("aeeDropCount") != 0 or seal.get("aeeDropBound") != 0:
             add("drop-accounting-nonzero", PHASE_MALFORMED, f"sealed record {idx} has non-zero or inconsistent drop accounting")
-        if seal.get("assayDropProofModel") not in {"synchronous-probe", "counted-queue-zero"}:
-            add("drop-proof-model-ineligible", PHASE_MALFORMED, f"sealed record {idx} has no eligible drop-accounting proof model")
+        # Not-credited, not malformed. This is producer vocabulary, and this checker's own policy is
+        # what reads it -- so an ineligible model withholds credit, which is a policy verdict, and
+        # leaves the record structurally valid, which is a fact about the envelope every consumer
+        # shares. See `PRODUCER_CREDIT_FIELDS` for the rule and its bounds.
+        if seal.get("assayDropProofModel") not in DROP_PROOF_MODELS_ELIGIBLE:
+            add("drop-proof-model-ineligible", PHASE_NOT_CREDITED, f"sealed record {idx} has no eligible drop-accounting proof model")
         if "aeeObservedSet" not in malformed_digests and seal.get("aeeObservedSet") != observed_set(records):
             add("observed-set-mismatch", PHASE_MALFORMED, f"sealed record {idx} aeeObservedSet mismatch")
         for attack_id in observed_attacks:
@@ -828,7 +853,19 @@ def run_required_field_test() -> int:
     # The other half: the fixture must not carry a field the contract does not require, or the list
     # above stops being a statement about the contract and becomes a description of the fixture.
     seal = base["predicate"]["observationRecords"][2]["payload"]
-    optional = {"assayObservedLabels"}
+    # `assayObservedLabels` is a debugging aid. The drop-proof trio is producer vocabulary the
+    # producer in `crates/assay-cli/src/aee_seal.rs` emits unconditionally: `assayDropProofBasis`
+    # and `assayDropChannels` were never listed here at all, so a real producer payload -- as
+    # opposed to this fixture, which omits them -- would be reported as carrying unlisted members
+    # by a check meant to catch the opposite mistake. `assayDropProofModel` is listed here rather
+    # than as required because requiring it is what made a producer member load-bearing for
+    # structural validity; see `PRODUCER_CREDIT_FIELDS`.
+    optional = {
+        "assayObservedLabels",
+        "assayDropProofModel",
+        "assayDropProofBasis",
+        "assayDropChannels",
+    }
     unlisted = sorted(set(seal) - set(REQUIRED_SEAL_FIELDS) - optional)
     if unlisted:
         print(f"FAIL fixture carries fields that are neither required nor known-optional: {unlisted}")
@@ -838,6 +875,55 @@ def run_required_field_test() -> int:
         print(f"\n{failures} required-field check(s) failed")
         return 1
     print(f"\nall {len(REQUIRED_SEAL_FIELDS)} required fields are rejected when absent")
+    return 0
+
+
+def run_producer_vocabulary_test() -> int:
+    """No producer member in `PRODUCER_CREDIT_FIELDS` can make a record structurally invalid.
+
+    Absent, ineligible, wrong type: each must land on `structurally-valid-not-credited`, never on
+    `malformed`. Credit is withheld, because this checker's own policy does read the member; the
+    record stays well formed, because a consumer whose policy does not read it must still be able to
+    verify the seal.
+
+    A phase is a one-word argument to `add`, invisible to every other test here: `--meta-test` reads
+    reason codes, `--rule-coverage-test` greps `add("...` out of the source, and neither would
+    notice this moving back. So the property gets a test of its own.
+    """
+    base = load_case(POSITIVE_CASE)
+    if outcome_of(validate(base)) != OUTCOME_CREDITED:
+        print(f"FAIL {POSITIVE_CASE}: not credited before mutation, so nothing below isolates")
+        return 1
+
+    failures = 0
+    for field in PRODUCER_CREDIT_FIELDS:
+        for label, mutate in (
+            ("absent", lambda seal, f: seal.pop(f)),
+            ("ineligible", lambda seal, f: seal.__setitem__(f, "uncounted-queue")),
+            ("wrong type", lambda seal, f: seal.__setitem__(f, 7)),
+        ):
+            stmt = json.loads(json.dumps(base))
+            seal = stmt["predicate"]["observationRecords"][2]["payload"]
+            if field not in seal:
+                print(f"FAIL {field}: not present in the positive fixture, so it cannot be mutated")
+                failures += 1
+                break
+            mutate(seal, field)
+            replace_payload(stmt, 2, seal)
+            outcome = outcome_of(validate(stmt))
+            if outcome == OUTCOME_MALFORMED:
+                print(f"FAIL {field} {label}: a producer member voided the record")
+                failures += 1
+            elif outcome == OUTCOME_CREDITED:
+                print(f"FAIL {field} {label}: credit was not withheld")
+                failures += 1
+            else:
+                print(f"ok   {field} {label}: {outcome}")
+
+    if failures:
+        print(f"\n{failures} producer-vocabulary check(s) failed")
+        return 1
+    print(f"\nall {len(PRODUCER_CREDIT_FIELDS)} producer credit field(s) are inert to structural validity")
     return 0
 
 
@@ -879,6 +965,7 @@ def main() -> int:
     parser.add_argument("--meta-test", action="store_true", help="Assert each negative control fails for its own reason and no other")
     parser.add_argument("--required-field-test", action="store_true", help="Assert every required payload field is rejected when absent")
     parser.add_argument("--rule-coverage-test", action="store_true", help="Assert every reason code the checker can produce has a negative control")
+    parser.add_argument("--producer-vocabulary-test", action="store_true", help="Assert Assay producer members withhold credit and never void structural validity")
     args = parser.parse_args()
 
     if args.emit:
@@ -891,6 +978,8 @@ def main() -> int:
         return run_required_field_test()
     if args.rule_coverage_test:
         return run_rule_coverage_test()
+    if args.producer_vocabulary_test:
+        return run_producer_vocabulary_test()
     if not args.case:
         parser.error("case is required unless --emit or one of the --*-test flags is used")
 

@@ -103,10 +103,13 @@ fn the_adr_table_names_every_producer_member_the_payload_carries() {
 
 /// The checker's required set is a subset of what the payload declares.
 ///
-/// Not equality: `assayObservedLabels` is a debugging aid and the drop-proof pair postdates the
-/// checker, so three members are legitimately unrequired. What must never happen is the checker
-/// requiring a field the producer does not emit, because then every real seal fails for a reason
-/// that is the checker's fault.
+/// Not equality, and four members are legitimately unrequired: `assayObservedLabels` is a debugging
+/// aid, `assayDropProofBasis` and `assayDropChannels` postdate the checker, and
+/// `assayDropProofModel` was deliberately removed — requiring a producer member is what made one
+/// load-bearing for structural validity, which ADR-045's prefix rule forbids.
+///
+/// What must never happen is the checker requiring a field the producer does not emit, because then
+/// every real seal fails for a reason that is the checker's fault.
 #[test]
 fn the_checker_requires_nothing_the_payload_does_not_carry() {
     let src = read("scripts/experiments/aee_landlock_seal_fixture.py");

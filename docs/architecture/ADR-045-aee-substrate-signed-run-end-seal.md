@@ -236,16 +236,47 @@ existed. It was written against the design and never re-read against the code, w
 hand-kept table beside a type always develops. Two of the missing six are the drop-proof pair, so
 the omission hid the one member that says whether the drop count was verified or asserted.
 
-Two counts still differ from this one, deliberately and not:
+**Decided 2026-08-07.** This passage previously recorded two count mismatches and parked them as a
+contract question: does the fixture checker require the drop-proof members, or does the producer
+stop emitting them? Neither. Both readings take for granted that an Assay producer member may be
+load-bearing for whether an AEE record is well formed, and the prefix rule below says it may not.
 
-- `REQUIRED_SEAL_FIELDS` in the fixture checker names **seven** of the ten. `assayObservedLabels`
-  is a debugging aid, and the drop-proof pair is not required because the checker predates it.
-- The fixture checker's own positive payload carries **eight**, omitting `assayDropProofBasis` and
-  `assayDropChannels` entirely. The Rust producer emits them unconditionally. So a real run would
-  carry two members the checker has never seen, one of which is `checked`-versus-`declared`.
+The checker did not obey that rule. `assayDropProofModel` sat in `REQUIRED_SEAL_FIELDS`, was gated
+against a closed value set, and the finding it raised was a structural one — so a value only Assay
+defines decided AEE structural validity, in the one tool we point at fixtures to prove the
+opposite. The resolution now in force:
 
-Recorded rather than repaired here, because closing it means deciding whether the checker requires
-the pair or the producer stops emitting it, and that is a contract question rather than an edit.
+- **Producer vocabulary never contributes to structural validity.** `assayDropProofModel` is out of
+  `REQUIRED_SEAL_FIELDS`, and an absent, ineligible, or wrongly typed value now yields
+  `structurally-valid-not-credited` instead of `malformed`. Withholding credit is a verdict this
+  consumer's own policy is entitled to reach, because it does read the member; the record stays
+  verifiable for a consumer that does not read it at all. That split is the whole point of keeping
+  the three outcomes distinguishable.
+- **The producer's full payload is now describable.** `assayDropProofBasis` and `assayDropChannels`
+  are known-optional to the checker rather than unlisted, so the twenty members a real run emits no
+  longer read as two members the contract has never heard of. The producer keeps emitting them
+  unconditionally, and `assayDropProofBasis` — the `checked`-versus-`declared` member — is the one
+  worth not losing.
+- **The rule has a test.** `aee_landlock_seal_fixture.py --producer-vocabulary-test` mutates the
+  positive fixture and asserts the outcome. A phase is one word passed to `add`, invisible to the
+  reason-code, rule-coverage, and required-field tests, all of which stayed green for two slices
+  while this was wrong.
+
+The counts that follow from it: `REQUIRED_SEAL_FIELDS` names **six** of the ten producer members,
+the checker's known-optional set names the other four, and the checker's positive payload still
+carries **eight** — the drop-proof basis and channels are permitted rather than fixtured, since the
+Rust producer's key-set test is what pins their emission.
+
+Bounded deliberately, and the bound is the honest part. Six sibling producer members —
+`assayCollectionPath`, `assaySealedAt`, `assaySourceSchema`, `assaySealScope`,
+`assayAttackRowAttributionSource`, `assayNonClaims` — still raise structural findings in this same
+checker, so the prefix rule below is enforced for one member and stated for eleven. They carry
+identities, instants, and paths rather than a rankable axis, which is why the normative paragraph
+in in-toto/attestation#570 reaches `assayDropProofModel` and not them, and each has a reason for
+being structural that predates this decision (`assaySealScope` carries #2014's rule that a seal
+must not claim a boundary nothing observed). Moving them is six contract questions, not one edit.
+They are named here so the decision is not read as wider than it is, and so the next pass has a
+list rather than a rediscovery.
 
 Fields beginning with `assay` in the sealed payload are Assay producer vocabulary. AEE consumers may ignore them unless their own policy understands them. They MUST NOT alter AEE structural validity. Any future AEE statement exporter MUST also carry predicate-level `doesNotAssert` for statement-level non-claims; `assayNonClaims` inside the sealed payload is only producer vocabulary and does not weaken required AEE checks.
 
