@@ -282,6 +282,20 @@ repos:
         stages: [pre-push]
         pass_filenames: false
 
+      - id: semver-gate-self-test
+        name: Semver gate self-test
+        entry: bash scripts/ci/test-semver-gate.sh
+        language: system
+        pass_filenames: false
+        # The gate could not fail (#2088). Its baseline was pinned to `chore: release v2.18.0`, so
+        # `check-release` saw a declared major and skipped all 254 checks -- reporting success while
+        # #2068's `MetricResult` break went through and was found by hand at release prep.
+        #
+        # The cheap cases run here: no pinned SHA, the baseline comes from the newest release tag,
+        # and a missing tag fails rather than skips. The planted-break case costs a rustdoc build per
+        # crate, so it runs under ASSAY_SEMVER_GATE_FULL=1 and in the workflow's own CI job.
+        stages: [pre-push]
+        files: ^(scripts/ci/test-semver-gate\.sh|\.github/workflows/split-wave0-gates\.yml)$
       - id: linux-gate-self-test
         name: Linux compile gate self-test
         entry: bash scripts/ci/test-check-linux.sh

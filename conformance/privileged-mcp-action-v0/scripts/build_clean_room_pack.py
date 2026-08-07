@@ -28,6 +28,11 @@ CORPUS_PATH = "conformance/privileged-mcp-action-v0"
 SPEC_PATH = "docs/profiles/privileged-mcp-action/v0.md"
 DESCRIPTOR_PATH = f"{CORPUS_PATH}/descriptor.json"
 MANIFEST_PATH = f"{CORPUS_PATH}/MANIFEST.json"
+# RFC 8785 conformance vectors (#1982), shipped in the pack since candidate.4 (#1990).
+#
+# Read from the same pinned commit as the spec and descriptor, so the pack stays reproducible from
+# a commit rather than from whatever happens to be in the working tree.
+JCS_VECTORS_PATH = "crates/assay-canonical/tests/vectors/rfc8785.json"
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 MAX_GIT_BLOB_BYTES = 32 * 1024 * 1024
 MAX_GIT_ERROR_BYTES = 64 * 1024
@@ -48,6 +53,52 @@ inputs.
 `cases.json` binds each opaque case to its bytes and records the declared source
 commit, source-corpus digest, and rendered-set digest. It does not contain expected
 results. Verify the release attestation separately before relying on pack provenance.
+
+Start with `canonicalization/`. A canonicalizer that is wrong makes every later
+result uninterpretable, and it is the first thing a cross-language attempt has
+been observed to fail on. Read `canonicalization/README.md` before the spec.
+"""
+
+
+JCS_README = """\
+# RFC 8785 conformance vectors
+
+## What these are
+
+Thirty-one vectors pinning byte formation under RFC 8785 (JCS): number
+reformatting, both ES6 exponent boundaries, UTF-16 code-unit key ordering, and
+the absence of Unicode normalization. Each carries the exact expected bytes and
+names the property it pins.
+
+The profile's `descriptor.json` already requires `canon: jcs-rfc8785`. These let
+you check that requirement before you have anything else to check it with.
+
+## What they are not
+
+**Passing them is not progress on the profile.** They say nothing about what any
+bundle should verify to, which stages exist, or what any case's outcome is. You
+still have to derive every profile result yourself from `spec.md` and
+`descriptor.json`, and this pack still omits the expected outcomes, the semantic
+case names, the vector generator, and Assay's implementation.
+
+**Agreement with them is not conformance.** It is the absence of one specific
+way to be wrong.
+
+## Why they are in a clean-room pack at all
+
+Because the expectations are derived from a published RFC rather than from this
+implementation, and because the one cross-language reproduction anyone in this
+ecosystem has completed failed on its first attempt for exactly this reason:
+native insertion-order serialization produced a different digest.
+
+Shipping them removes a wall that has nothing to do with the profile. It does
+not lower the independence bar, because a canonicalizer is not an answer.
+
+## Running them
+
+Each entry maps an input JSON value to the exact bytes RFC 8785 requires. Feed
+the input to your canonicalizer and compare bytes, not parsed values. The
+`_about` key is metadata and is not a vector.
 """
 
 
@@ -79,6 +130,10 @@ def build_pack(repo_root: Path, source_commit: str) -> bytes:
     descriptor = clean_room_descriptor(
         git_bytes(repo_root, source_commit, DESCRIPTOR_PATH)
     )
+    # Unchanged bytes, deliberately: the vectors are shipped as they are tested here, so a
+    # reproducer and this workspace are checking their canonicalizers against the same file.
+    jcs_vectors = git_bytes(repo_root, source_commit, JCS_VECTORS_PATH)
+
     manifest_bytes = git_bytes(repo_root, source_commit, MANIFEST_PATH)
     manifest = json.loads(manifest_bytes)
 
@@ -127,6 +182,8 @@ def build_pack(repo_root: Path, source_commit: str) -> bytes:
     }
     files = {
         "README.md": README.encode(),
+        "canonicalization/README.md": JCS_README.encode(),
+        "canonicalization/rfc8785-vectors.json": jcs_vectors,
         "cases.json": (
             json.dumps(case_index, indent=2, sort_keys=True) + "\n"
         ).encode(),

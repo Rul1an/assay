@@ -18,6 +18,16 @@ set -euo pipefail
 # unpublishable
 # (see CHANGELOG entries for v3.11.0, v3.11.1, v3.11.2, v3.11.3).
 #
+# `assay-adapter-api` is registered here as of v4.0.0, for the same reason
+# and by the same argument as the runner crates above. It sat in
+# `non_crates_io_crates` while `assay-core` and `assay-sim` -- both public --
+# carried it in `[dependencies]`. That only ever resolved because a historical
+# 3.x predates the `publish = false` flag, so every published `assay-core`
+# resolved an abandoned 3.2.3 rather than the source it was built against. The
+# v4.0.0 publish had no stale version to fall back on and stopped, which is the
+# first time the configuration was tested. The protocol adapters (acp, a2a, ucp)
+# stay unpublished: no public crate depends on them, so ADR-026's freeze holds.
+#
 # Adding any new public crate here is a deliberate public-surface
 # decision; the PR that does so must update package descriptions and
 # (when relevant) docs/contributing/WAVE0-GATES.md.
@@ -26,6 +36,7 @@ public_crates=(
   assay-registry
   assay-canonical
   assay-evidence
+  assay-adapter-api
   assay-core
   assay-metrics
   assay-policy
@@ -39,7 +50,6 @@ public_crates=(
 )
 
 non_crates_io_crates=(
-  assay-adapter-api
   assay-adapter-acp
   assay-adapter-a2a
   assay-adapter-ucp
