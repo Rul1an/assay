@@ -33,8 +33,8 @@
 //!
 //! **Ed25519.** Asymmetric, as the ADR requires, and already a workspace dependency. The fixture
 //! harness signs with HMAC over the same PAE; that key shape cannot verify here, which is the
-//! ADR's "fixture-only signing cannot be mistaken for production observation signing" made
-//! structural rather than documentary.
+//! ADR's "fixture keys are rejected by construction in production paths" made structural rather
+//! than documentary.
 //!
 //! # The ordering that matters
 //!
@@ -419,7 +419,8 @@ mod tests {
         assert_eq!(err.code(), "seal-envelope-payload-not-strict-json");
     }
 
-    /// The ADR's "fixture-only signing cannot be mistaken for production" gate, made structural.
+    /// The ADR's "fixture keys are rejected by construction in production paths" gate, made
+    /// structural.
     ///
     /// The PAE binds the payload type, so a fixture envelope signs different bytes than a
     /// production one even for an identical payload -- and this verifier refuses the type outright,
