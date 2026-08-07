@@ -232,3 +232,55 @@ fn sandbox_degraded_payload_serde_shape_is_stable() {
         serde_json::from_value(value).expect("payload should deserialize");
     assert_eq!(roundtrip, payload);
 }
+
+// -- ADR-047: session-scope findings --
+
+/// The record parses as a typed struct, and `Unknown` is not the fallback it looks like.
+///
+/// `PayloadSessionFinding` ships without a `Payload` variant: adding one to that exhaustive public
+/// enum is a semver major (`cargo semver-checks`: `enum_variant_added`), which ADR-047 records as
+/// deferred to the next major together with `#[non_exhaustive]`, so the break is paid once for
+/// every kind that follows rather than once per kind.
+///
+/// The control is what makes this worth pinning. `Unknown(serde_json::Value)` reads like a
+/// catch-all and is not one: adjacently tagged with no `#[serde(other)]`, it matches the literal
+/// tag `"Unknown"` and nothing else, so an unregistered kind is a hard deserialisation error rather
+/// than an untyped landing. That is why the wire stays raw `Value` and why the deferral above costs
+/// consumers nothing today.
+#[test]
+fn a_session_finding_parses_as_a_typed_record_and_unknown_is_not_a_fallback() {
+    let payload = serde_json::json!({
+        "rule_id": "after:read_credentials->http_post",
+        "kind": "after",
+        "outcome": "violated",
+        "spanned": [1, 2],
+        "extent": "complete",
+        "reason": "credential read at 1 followed by egress at 2"
+    });
+    let f: PayloadSessionFinding =
+        serde_json::from_value(payload.clone()).expect("typed record parses");
+    assert_eq!(f.rule_id, "after:read_credentials->http_post");
+    assert_eq!(f.spanned, vec![1, 2]);
+    assert_eq!(f.extent, "complete");
+    assert_eq!(serde_json::to_value(&f).unwrap(), payload, "round trip");
+
+    let stranger = serde_json::json!({
+        "type": "assay.not.a.registered.kind",
+        "payload": {"whatever": true}
+    });
+    let err = serde_json::from_value::<Payload>(stranger)
+        .expect_err("an unregistered kind is a hard error, not an Unknown");
+    assert!(
+        err.to_string().contains("unknown variant"),
+        "expected a variant error, got: {err}"
+    );
+
+    let literal = serde_json::json!({"type": "Unknown", "payload": {"anything": 1}});
+    assert!(
+        matches!(
+            serde_json::from_value::<Payload>(literal).expect("the literal tag parses"),
+            Payload::Unknown(_)
+        ),
+        "Unknown matches its own name and nothing else"
+    );
+}
