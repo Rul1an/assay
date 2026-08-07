@@ -56,6 +56,9 @@ case "$1 $2" in
   "pr list")
     printf '%s\n' "$FAKE_LIST_JSON"
     ;;
+  "pr close")
+    # Recorded in FAKE_GH_LOG by the printf above, so a case can assert it happened.
+    ;;
   "pr view")
     count="$(cat "$FAKE_VIEW_COUNT")"
     count=$((count + 1))
@@ -349,6 +352,35 @@ DOCS_WORKFLOW="${ROOT}/.github/workflows/docs-auto-update.yml"
 CI_WORKFLOW="${ROOT}/.github/workflows/ci.yml"
 LANE_WORKFLOW="${ROOT}/.github/workflows/assay-runner-lane-check.yml"
 HOST_WORKFLOW="${ROOT}/.github/workflows/host-capability-check.yml"
+
+# --- an empty docs PR is finished, not broken ------------------------------------------------
+#
+# The reconciler used to reject this as "an invalid or empty files response" and exit 2, so
+# `Auto-Update Docs` failed on every merge to main for eight consecutive runs while the system was
+# working correctly: #2081 moved the drift check onto the PR that causes the drift, which is exactly
+# what makes the bot's PR empty.
+run_case "empty docs PR closes and succeeds" \
+  '[{"number":42}]' \
+  "$(valid_view 42 head-current CLEAN)" \
+  '[[]]' \
+  true
+
+if grep -q "pr close 42" "${CASE_DIR}/gh.log"; then
+  echo "ok    an empty docs PR is closed"
+else
+  echo "FAIL  an empty docs PR was not closed"
+  FAILURES=$((FAILURES + 1))
+fi
+
+# --- a malformed response still refuses --------------------------------------------------------
+#
+# The distinction the old check collapsed: this one means the reconciler cannot see what it is
+# reconciling, and refusing is correct.
+run_case "malformed files response refuses" \
+  '[{"number":42}]' \
+  "$(valid_view 42 head-current CLEAN)" \
+  '{"message":"Not Found"}' \
+  false
 
 check_workflow_contract \
   "$DOCS_WORKFLOW" \
