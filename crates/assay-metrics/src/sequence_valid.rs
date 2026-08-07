@@ -7,6 +7,19 @@ use crate::tool_calls::extract_tool_calls_canonical;
 
 pub struct SequenceValidMetric;
 
+/// Attach the per-rule record to a result.
+///
+/// Every return path carries it. Two of them used to not: the exact-sequence branches returned
+/// early, so a suite setting both `sequence:` and `rules:` got `details = {}` and lost the record
+/// this metric exists to produce. A helper rather than a fourth copy of the merge, because the
+/// paths that forgot it were the two that were added last.
+fn with_rule_record(mut result: MetricResult, record: &serde_json::Value) -> MetricResult {
+    if let (Some(obj), Some(extra)) = (result.details.as_object_mut(), record.as_object()) {
+        obj.extend(extra.clone());
+    }
+    result
+}
+
 #[async_trait]
 impl Metric for SequenceValidMetric {
     fn name(&self) -> &'static str {
@@ -33,6 +46,7 @@ impl Metric for SequenceValidMetric {
         };
 
         // 1. Resolve Rules & Sequence from Policy File (if any)
+        let mut file_policy: Option<assay_core::model::Policy> = None;
         let (file_sequence, file_rules) = if let Some(path) = policy_path {
             if should_emit_deprecated_policy_warning(self.name(), path) {
                 eprintln!(
@@ -56,7 +70,12 @@ impl Metric for SequenceValidMetric {
             if let Ok(seq) = serde_yaml::from_str::<Vec<String>>(&content) {
                 (Some(seq), None)
             } else if let Ok(pol) = serde_yaml::from_str::<assay_core::model::Policy>(&content) {
-                (None, Some(pol.sequences))
+                // Keep the policy. An earlier version took `pol.sequences` and dropped the rest,
+                // which discarded `aliases` -- so a rule naming an alias read the literal name,
+                // matched nothing, and reported `held` on a trace the alias covers.
+                let rules = pol.sequences.clone();
+                file_policy = Some(pol);
+                (None, Some(rules))
             } else {
                 // Try parsing as list of rules
                 let rules = serde_yaml::from_str::<Vec<assay_core::model::SequenceRule>>(&content)
@@ -104,7 +123,15 @@ impl Metric for SequenceValidMetric {
         // implementations rather than a parity test.
         let mut evaluations = Vec::new();
         if let Some(rules) = effective_rules {
-            evaluations = assay_core::sequence_eval::evaluate_rules(rules, &actual_names, None);
+            // The metric evaluates a finished run, so an unmet deadline is a violation rather
+            // than a window still open. The proxy that also owns this language asks the other
+            // question, which is why the extent is stated rather than assumed.
+            evaluations = assay_core::sequence_eval::evaluate_rules(
+                rules,
+                &actual_names,
+                file_policy.as_ref(),
+                assay_core::sequence_eval::TraceExtent::Complete,
+            );
         }
         let details = serde_json::json!({
             "rule_evaluations": evaluations
@@ -134,11 +161,13 @@ impl Metric for SequenceValidMetric {
 
         // Every configured rule declined to decide. Reporting that as a pass would say the
         // policy held when nothing tested it, which is the vacuity this record exists to end.
-        if !evaluations.is_empty()
+        // Gating this on "no exact sequence configured" silenced the signal for every suite
+        // that sets both, which is the common shape. The exact-sequence check below still runs.
+        if effective_sequence.is_none()
+            && !evaluations.is_empty()
             && evaluations
                 .iter()
                 .all(|e| e.outcome == assay_core::sequence_eval::RuleOutcome::NotExercised)
-            && effective_sequence.is_none()
         {
             let mut result = MetricResult::not_exercised(
                 "every configured sequence rule was vacuous for this trace",
@@ -153,7 +182,7 @@ impl Metric for SequenceValidMetric {
         // 3. Validate Exact Sequence (Legacy / Strict)
         if let Some(expected_sequence) = effective_sequence {
             if actual_names == *expected_sequence {
-                return Ok(MetricResult::pass(1.0));
+                return Ok(with_rule_record(MetricResult::pass(1.0), &details));
             } else {
                 let mut diff_context = String::new();
                 let limit = std::cmp::min(actual_names.len(), expected_sequence.len());
@@ -181,25 +210,24 @@ impl Metric for SequenceValidMetric {
                         );
                     }
                 }
-                return Ok(MetricResult::fail(
-                    0.0,
-                    &format!(
-                        "sequence_valid mismatch. {}, (Expected {}: {:?}, Actual {}: {:?})",
-                        diff_context,
-                        expected_sequence.len(),
-                        expected_sequence,
-                        actual_names.len(),
-                        actual_names
+                return Ok(with_rule_record(
+                    MetricResult::fail(
+                        0.0,
+                        &format!(
+                            "sequence_valid mismatch. {}, (Expected {}: {:?}, Actual {}: {:?})",
+                            diff_context,
+                            expected_sequence.len(),
+                            expected_sequence,
+                            actual_names.len(),
+                            actual_names
+                        ),
                     ),
+                    &details,
                 ));
             }
         }
 
-        let mut result = MetricResult::pass(1.0);
-        if let (Some(obj), Some(extra)) = (result.details.as_object_mut(), details.as_object()) {
-            obj.extend(extra.clone());
-        }
-        Ok(result)
+        Ok(with_rule_record(MetricResult::pass(1.0), &details))
     }
 }
 

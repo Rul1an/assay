@@ -2,13 +2,20 @@
 //!
 //! Two things live here, and the second is the reason the first moved.
 //!
-//! **One implementation.** The rule language had two evaluators. `assay-metrics`'
+//! **One implementation, most of the way.** The rule language had two evaluators. `assay-metrics`'
 //! `sequence_valid` handled `Require`, `Before` and `Blocklist` and resolved no aliases;
 //! `assay-mcp-server`'s `check_sequence` handled all eight variants and did resolve them.
 //! The same suite YAML therefore got two answers, and the silent one was the pass: a
 //! `never_after` rule, which is the shape a credential-read-then-egress policy is written
 //! in, fell through the metric's `_` arm and reported a clean run. `assay-metrics` cannot
 //! call `assay-mcp-server` (the dependency runs the other way), so the shared home is here.
+//!
+//! `assay-mcp-server` has not called through yet: its JSON violation shape is a published tool
+//! contract and porting it means preserving message text field by field. Until it does the two
+//! are guarded by `assay-mcp-server/tests/sequence_eval_parity.rs` rather than by a shared call,
+//! which is the fallback CLAUDE.md sanctions and the weaker of the two options. What that test
+//! guards is not hypothetical: a differential over every trace of length <= 5 on a three-symbol
+//! alphabet found 213 `after` disagreements between the copies before [`TraceExtent`] existed.
 //!
 //! **A record, not a verdict.** Each rule yields a [`RuleEvaluation`] naming the rule, the
 //! call indices it read, and what it found. A consumer recomputes the conclusion from the
@@ -24,6 +31,22 @@
 //! now, for the same reason [`crate::metrics_api::Exercised`] exists one layer down.
 
 use crate::model::{Policy, SequenceRule};
+
+/// Whether more calls may still arrive.
+///
+/// The rule language was first evaluated by a live proxy checking history-so-far, where a
+/// deadline not yet met may still be met by the next call. A metric evaluates a finished run,
+/// where it cannot. The two readings disagree on every rule with a window, and the difference is
+/// invisible in the rules and the trace -- it is only in who is asking. So the caller states it
+/// rather than the evaluator assuming it. Porting the proxy's reading into the metric silently is
+/// what made completed runs with an unmet deadline report as undecided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceExtent {
+    /// The run is over. An unmet deadline is a violation, because nothing further is coming.
+    Complete,
+    /// More calls may follow. An unmet deadline whose window is still open has not decided.
+    Partial,
+}
 
 /// What one rule found. Deliberately three values: a rule that did not run is not a rule
 /// that passed, and folding them loses the distinction this module exists to keep.
@@ -132,14 +155,20 @@ pub fn evaluate_rules(
     rules: &[SequenceRule],
     actual_names: &[String],
     policy: Option<&Policy>,
+    extent: TraceExtent,
 ) -> Vec<RuleEvaluation> {
     rules
         .iter()
-        .map(|r| evaluate_rule(r, actual_names, policy))
+        .map(|r| evaluate_rule(r, actual_names, policy, extent))
         .collect()
 }
 
-fn evaluate_rule(rule: &SequenceRule, names: &[String], policy: Option<&Policy>) -> RuleEvaluation {
+fn evaluate_rule(
+    rule: &SequenceRule,
+    names: &[String],
+    policy: Option<&Policy>,
+    extent: TraceExtent,
+) -> RuleEvaluation {
     match rule {
         SequenceRule::Require { tool } => {
             let id = format!("require:{tool}");
@@ -150,7 +179,7 @@ fn evaluate_rule(rule: &SequenceRule, names: &[String], policy: Option<&Policy>)
                     id,
                     "require",
                     Vec::new(),
-                    format!("required tool '{tool}' not found"),
+                    format!("required tool '{tool}' not found in trace"),
                 )
             } else {
                 RuleEvaluation::held(id, "require", hits)
@@ -290,7 +319,16 @@ fn evaluate_rule(rule: &SequenceRule, names: &[String], policy: Option<&Policy>)
                         names.len()
                     ),
                 ),
-                // The deadline has not passed yet, so the rule has not been able to decide.
+                None if extent == TraceExtent::Complete => RuleEvaluation::violated(
+                    id,
+                    "eventually",
+                    (0..names.len()).collect(),
+                    format!(
+                        "tool '{tool}' required within the first {within} calls but the run ended after {} without it",
+                        names.len()
+                    ),
+                ),
+                // Only a trace that may still grow leaves this undecided.
                 None => RuleEvaluation::not_exercised(
                     id,
                     "eventually",
@@ -352,11 +390,22 @@ fn evaluate_rule(rule: &SequenceRule, names: &[String], policy: Option<&Policy>)
                 }
                 // A trigger fired but the trace has not yet reached its deadline, so the rule
                 // has not been able to decide. Distinct from a trace with no trigger at all.
+                // A trigger fired and `then` never followed. On a finished run that is the
+                // violation the rule names: no later call can satisfy it. Only a trace that may
+                // still grow leaves it undecided.
+                Some((trig_idx, _)) if extent == TraceExtent::Complete => RuleEvaluation::violated(
+                    id,
+                    "after",
+                    spanned,
+                    format!(
+                        "tool '{then}' required within {within} calls after '{trigger}' (triggered at index {trig_idx}) and the run ended without it"
+                    ),
+                ),
                 Some((trig_idx, _)) => RuleEvaluation::not_exercised(
                     id,
                     "after",
                     format!(
-                        "'{trigger}' fired at index {trig_idx} but the trace has not passed the {within}-call deadline"
+                        "'{trigger}' fired at index {trig_idx} and the trace may still satisfy the {within}-call deadline"
                     ),
                 ),
                 None if spanned.is_empty() => RuleEvaluation::not_exercised(
@@ -425,6 +474,20 @@ fn evaluate_rule(rule: &SequenceRule, names: &[String], policy: Option<&Policy>)
                     );
                 }
             }
+            if !spanned.is_empty() && seq_idx < targets.len() && extent == TraceExtent::Complete {
+                // Some members ran and the rest never did. `Held` would say the ordering was
+                // satisfied; it was only untested past where the trace stopped.
+                return RuleEvaluation::violated(
+                    id,
+                    "sequence",
+                    spanned,
+                    format!(
+                        "sequence reached '{}' and the run ended before '{}'",
+                        tools[seq_idx.saturating_sub(1)],
+                        tools[seq_idx]
+                    ),
+                );
+            }
             if spanned.is_empty() {
                 // Nothing in the sequence appeared at all; the ordering was never tested.
                 RuleEvaluation::not_exercised(
@@ -456,7 +519,7 @@ mod tests {
             forbidden: "http_post".into(),
         }];
         let seq = names(&["list_dir", "read_credentials", "http_post"]);
-        let ev = evaluate_rules(&rules, &seq, None);
+        let ev = evaluate_rules(&rules, &seq, None, TraceExtent::Complete);
 
         assert_eq!(ev.len(), 1);
         assert_eq!(ev[0].outcome, RuleOutcome::Violated);
@@ -473,7 +536,12 @@ mod tests {
             trigger: "read_credentials".into(),
             forbidden: "http_post".into(),
         }];
-        let ev = evaluate_rules(&rules, &names(&["http_post", "read_credentials"]), None);
+        let ev = evaluate_rules(
+            &rules,
+            &names(&["http_post", "read_credentials"]),
+            None,
+            TraceExtent::Complete,
+        );
         assert_eq!(ev[0].outcome, RuleOutcome::Held);
         assert_eq!(ev[0].spanned, vec![1]);
     }
@@ -485,7 +553,12 @@ mod tests {
             trigger: "read_credentials".into(),
             forbidden: "http_post".into(),
         }];
-        let ev = evaluate_rules(&rules, &names(&["list_dir", "http_post"]), None);
+        let ev = evaluate_rules(
+            &rules,
+            &names(&["list_dir", "http_post"]),
+            None,
+            TraceExtent::Complete,
+        );
         assert_eq!(ev[0].outcome, RuleOutcome::NotExercised);
         assert!(ev[0].spanned.is_empty());
         assert!(ev[0].reason.as_deref().unwrap().contains("never appeared"));
@@ -498,7 +571,12 @@ mod tests {
             first: "auth".into(),
             then: "write".into(),
         }];
-        let ev = evaluate_rules(&rules, &names(&["auth", "read"]), None);
+        let ev = evaluate_rules(
+            &rules,
+            &names(&["auth", "read"]),
+            None,
+            TraceExtent::Complete,
+        );
         assert_eq!(ev[0].outcome, RuleOutcome::NotExercised);
     }
 
@@ -509,7 +587,7 @@ mod tests {
         let rules = vec![SequenceRule::Blocklist {
             pattern: "danger".into(),
         }];
-        let ev = evaluate_rules(&rules, &names(&["a", "b"]), None);
+        let ev = evaluate_rules(&rules, &names(&["a", "b"]), None, TraceExtent::Complete);
         assert_eq!(ev[0].outcome, RuleOutcome::Held);
         assert_eq!(ev[0].spanned, vec![0, 1]);
     }
@@ -526,7 +604,7 @@ mod tests {
                 pattern: "danger".into(),
             },
         ];
-        let ev = evaluate_rules(&rules, &names(&["a"]), None);
+        let ev = evaluate_rules(&rules, &names(&["a"]), None, TraceExtent::Complete);
         assert_eq!(ev.len(), 2);
         assert_eq!(ev[0].outcome, RuleOutcome::Violated);
         assert_eq!(ev[1].outcome, RuleOutcome::Held);
@@ -538,7 +616,7 @@ mod tests {
             tool: "spend".into(),
             max: 2,
         }];
-        let ev = evaluate_rules(&rules, &names(&["read"]), None);
+        let ev = evaluate_rules(&rules, &names(&["read"]), None, TraceExtent::Complete);
         assert_eq!(ev[0].outcome, RuleOutcome::NotExercised);
     }
 
@@ -548,7 +626,12 @@ mod tests {
             tool: "spend".into(),
             max: 1,
         }];
-        let ev = evaluate_rules(&rules, &names(&["spend", "read", "spend"]), None);
+        let ev = evaluate_rules(
+            &rules,
+            &names(&["spend", "read", "spend"]),
+            None,
+            TraceExtent::Complete,
+        );
         assert_eq!(ev[0].outcome, RuleOutcome::Violated);
         assert_eq!(ev[0].spanned, vec![0, 2]);
     }
@@ -564,6 +647,7 @@ mod tests {
             }],
             &names(&["audit"]),
             None,
+            TraceExtent::Complete,
         );
         assert_eq!(ev[0].rule_id, "eventually:audit@3");
     }
@@ -577,25 +661,150 @@ mod tests {
             then: "a".into(),
             within: 1,
         }];
-        let ev = evaluate_rules(&rules, &names(&["t", "a", "t", "x", "x"]), None);
+        let ev = evaluate_rules(
+            &rules,
+            &names(&["t", "a", "t", "x", "x"]),
+            None,
+            TraceExtent::Complete,
+        );
         assert_eq!(ev[0].outcome, RuleOutcome::Violated);
     }
 
-    /// A trigger that fired but whose window has not closed has not decided anything, and is
-    /// a different state from a trace where the trigger never fired at all.
+    /// The same trace read two ways. A live proxy checking history-so-far cannot yet say the
+    /// deadline was missed; a finished run can, because nothing further is coming. Rules and
+    /// trace are identical here -- only the extent differs, which is why the caller states it.
     #[test]
-    fn after_inside_its_window_is_not_exercised() {
+    fn after_decides_differently_on_a_finished_run_than_a_partial_one() {
         let rules = vec![SequenceRule::After {
             trigger: "t".into(),
             then: "a".into(),
             within: 5,
         }];
-        let ev = evaluate_rules(&rules, &names(&["x", "t"]), None);
-        assert_eq!(ev[0].outcome, RuleOutcome::NotExercised);
+        let trace = names(&["x", "t"]);
+        let partial = evaluate_rules(&rules, &trace, None, TraceExtent::Partial);
+        assert_eq!(partial[0].outcome, RuleOutcome::NotExercised);
+        let complete = evaluate_rules(&rules, &trace, None, TraceExtent::Complete);
+        assert_eq!(complete[0].outcome, RuleOutcome::Violated);
+        assert!(complete[0]
+            .reason
+            .as_deref()
+            .unwrap()
+            .contains("run ended without it"));
+    }
+
+    /// A finished run that never called the tool missed its window, however long the window was.
+    #[test]
+    fn eventually_violates_on_a_finished_run_that_never_called_it() {
+        let rules = vec![SequenceRule::Eventually {
+            tool: "audit".into(),
+            within: 10,
+        }];
+        let trace = names(&["a", "b", "c", "d"]);
+        assert_eq!(
+            evaluate_rules(&rules, &trace, None, TraceExtent::Complete)[0].outcome,
+            RuleOutcome::Violated
+        );
+        assert_eq!(
+            evaluate_rules(&rules, &trace, None, TraceExtent::Partial)[0].outcome,
+            RuleOutcome::NotExercised
+        );
+    }
+
+    /// Half a sequence is not a held sequence. `Held` would say the ordering was satisfied.
+    #[test]
+    fn truncated_sequence_is_not_held_on_a_finished_run() {
+        let rules = vec![SequenceRule::Sequence {
+            tools: vec!["auth".into(), "validate".into(), "commit".into()],
+            strict: true,
+        }];
+        let ev = evaluate_rules(&rules, &names(&["auth"]), None, TraceExtent::Complete);
+        assert_eq!(ev[0].outcome, RuleOutcome::Violated);
         assert!(ev[0]
             .reason
             .as_deref()
             .unwrap()
-            .contains("fired at index 1"));
+            .contains("run ended before"));
+    }
+
+    /// Aliases are resolved when a policy is supplied. Without one an aliased rule reads the
+    /// literal name and misses the call it means, so the caller must pass its policy through.
+    #[test]
+    fn aliases_are_resolved_when_a_policy_is_supplied() {
+        let policy: Policy = serde_yaml::from_str(
+            "version: \"1\"\naliases:\n  Egress: [http_post, curl]\nsequences: []\n",
+        )
+        .expect("policy parses");
+        let rules = vec![SequenceRule::NeverAfter {
+            trigger: "read_credentials".into(),
+            forbidden: "Egress".into(),
+        }];
+        let trace = names(&["read_credentials", "curl"]);
+        let with = evaluate_rules(&rules, &trace, Some(&policy), TraceExtent::Complete);
+        assert_eq!(
+            with[0].outcome,
+            RuleOutcome::Violated,
+            "curl is an Egress member"
+        );
+        let without = evaluate_rules(&rules, &trace, None, TraceExtent::Complete);
+        assert_eq!(
+            without[0].outcome,
+            RuleOutcome::Held,
+            "the literal name never appears"
+        );
+    }
+
+    /// The labels reach `details` and every projection over it, so they are interface.
+    #[test]
+    fn outcome_labels_are_pinned() {
+        assert_eq!(RuleOutcome::Held.label(), "held");
+        assert_eq!(RuleOutcome::Violated.label(), "violated");
+        assert_eq!(RuleOutcome::NotExercised.label(), "not_exercised");
+    }
+
+    /// Rule ids are operand-derived for every kind, not only the two spot-checked elsewhere.
+    #[test]
+    fn every_rule_id_carries_its_operands() {
+        let cases: Vec<(SequenceRule, &str)> = vec![
+            (SequenceRule::Require { tool: "t".into() }, "require:t"),
+            (
+                SequenceRule::Blocklist {
+                    pattern: "p".into(),
+                },
+                "blocklist:p",
+            ),
+            (
+                SequenceRule::Before {
+                    first: "a".into(),
+                    then: "b".into(),
+                },
+                "before:a->b",
+            ),
+            (
+                SequenceRule::MaxCalls {
+                    tool: "t".into(),
+                    max: 2,
+                },
+                "max_calls:t<=2",
+            ),
+            (
+                SequenceRule::After {
+                    trigger: "a".into(),
+                    then: "b".into(),
+                    within: 3,
+                },
+                "after:a->b@3",
+            ),
+            (
+                SequenceRule::Sequence {
+                    tools: vec!["a".into(), "b".into()],
+                    strict: true,
+                },
+                "sequence:strict:a>b",
+            ),
+        ];
+        for (rule, want) in cases {
+            let ev = evaluate_rules(&[rule], &names(&["z"]), None, TraceExtent::Complete);
+            assert_eq!(ev[0].rule_id, want);
+        }
     }
 }
