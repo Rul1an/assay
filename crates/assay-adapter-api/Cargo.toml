@@ -7,7 +7,17 @@ repository.workspace = true
 authors.workspace = true
 description = "Protocol adapter API contracts for Assay evidence translation."
 readme.workspace = true
-publish = false
+# Published from v4.0.0. It was `publish = false` while `assay-core` and `assay-sim` -- both
+# published -- carried a hard `[dependencies]` edge to it. That only resolved because a historical
+# 3.x sits on crates.io from before the flag was set, so every published `assay-core` since has
+# resolved an abandoned 3.2.3 rather than the source it was built against. At 4.0.0 there is no 4.x
+# to fall back to and `cargo publish` refused, which is the first time the configuration was
+# actually tested.
+#
+# ADR-026's distribution freeze covers the protocol adapters (a2a, acp, ucp), which stay unpublished
+# and carry no published dependent. This crate is the shared trait surface they and `assay-core`
+# share, so it is not in the same position.
+publish = true
 
 [dependencies]
 assay-evidence = { path = "../assay-evidence", version = "4.0.0" }
