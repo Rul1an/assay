@@ -15,6 +15,12 @@ pub mod limits;
 #[cfg(feature = "std")]
 pub mod dsse;
 
+/// MCP policy tool-name patterns. Shared for the same reason as `dsse`: a pattern language
+/// answers "what does this policy permit", so two constructions of it are two answers, and a
+/// policy file cannot show which one is being applied to it. Not std-gated — every operation is
+/// a `&str` method and nothing allocates.
+pub mod tool_pattern;
+
 pub const EVENT_OPENAT: u32 = 1;
 pub const EVENT_CONNECT: u32 = 2;
 pub const EVENT_FORK: u32 = 3;
