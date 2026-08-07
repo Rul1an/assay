@@ -4,6 +4,7 @@
   "mechanism": "landlock",
   "scope": "tcp_connect_landlock_port",
   "policy_semantics": "allowlist",
+  "enforcement_class": "strong",
   "landlock": {
     "abi": 4,
     "handled_access_net": [
