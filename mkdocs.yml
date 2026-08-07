@@ -222,6 +222,8 @@ nav:
     - tool_blocklist: metrics/tool-blocklist.md
     - Custom Metrics: metrics/custom.md
 
+  - Lint Rules: lint/index.md
+
   - Use Cases:
     - use-cases/index.md
     - Promptfoo JSONL Receipts: use-cases/evidence-receipts-from-promptfoo-jsonl.md
