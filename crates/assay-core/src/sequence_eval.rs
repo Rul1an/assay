@@ -310,47 +310,61 @@ fn evaluate_rule(rule: &SequenceRule, names: &[String], policy: Option<&Policy>)
             let id = format!("after:{trigger}->{then}@{within}");
             let trig_t = resolve(policy, trigger);
             let then_t = resolve(policy, then);
-            let Some(trig_idx) = names.iter().position(|n| matches_any(n, &trig_t)) else {
-                return RuleEvaluation::not_exercised(
+            // Every trigger arms its own deadline, and a later trigger re-arms after an
+            // earlier one was satisfied. An earlier version of this arm took only the first
+            // trigger, which reported `held` for `[t, a, t, x, x]` at `within: 1`: the second
+            // `t` is never answered and the trace runs two calls past its deadline. One
+            // satisfied obligation does not discharge the next one.
+            let mut spanned = Vec::new();
+            let mut pending: Option<(usize, usize)> = None; // (trigger index, deadline)
+            for (idx, name) in names.iter().enumerate() {
+                if let Some((trig_idx, deadline)) = pending {
+                    if matches_any(name, &then_t) {
+                        spanned.push(idx);
+                        pending = None;
+                    } else if idx > deadline {
+                        spanned.push(idx);
+                        return RuleEvaluation::violated(
+                            id,
+                            "after",
+                            spanned,
+                            format!(
+                                "tool '{then}' required within {within} calls after '{trigger}' (triggered at index {trig_idx}) but was not called by index {deadline}"
+                            ),
+                        );
+                    }
+                }
+                if matches_any(name, &trig_t) {
+                    spanned.push(idx);
+                    pending = Some((idx, idx + (*within as usize)));
+                }
+            }
+            match pending {
+                Some((trig_idx, deadline)) if names.len() > deadline => {
+                    RuleEvaluation::violated(
+                        id,
+                        "after",
+                        spanned,
+                        format!(
+                            "tool '{then}' required within {within} calls after '{trigger}' (triggered at index {trig_idx}) but trace exceeded deadline"
+                        ),
+                    )
+                }
+                // A trigger fired but the trace has not yet reached its deadline, so the rule
+                // has not been able to decide. Distinct from a trace with no trigger at all.
+                Some((trig_idx, _)) => RuleEvaluation::not_exercised(
+                    id,
+                    "after",
+                    format!(
+                        "'{trigger}' fired at index {trig_idx} but the trace has not passed the {within}-call deadline"
+                    ),
+                ),
+                None if spanned.is_empty() => RuleEvaluation::not_exercised(
                     id,
                     "after",
                     format!("'{trigger}' never appeared, so no deadline started"),
-                );
-            };
-            let deadline = trig_idx + (*within as usize);
-            match names
-                .iter()
-                .enumerate()
-                .skip(trig_idx + 1)
-                .find(|(_, n)| matches_any(n, &then_t))
-            {
-                Some((idx, _)) if idx <= deadline => {
-                    RuleEvaluation::held(id, "after", vec![trig_idx, idx])
-                }
-                Some((idx, _)) => RuleEvaluation::violated(
-                    id,
-                    "after",
-                    vec![trig_idx, idx],
-                    format!(
-                        "tool '{then}' required within {within} calls after '{trigger}' (triggered at index {trig_idx}), found at index {idx}"
-                    ),
                 ),
-                None if names.len() > deadline => RuleEvaluation::violated(
-                    id,
-                    "after",
-                    vec![trig_idx],
-                    format!(
-                        "tool '{then}' required within {within} calls after '{trigger}' (triggered at index {trig_idx}) but trace exceeded deadline"
-                    ),
-                ),
-                // Trace is still inside the window; nothing decided yet.
-                None => RuleEvaluation::not_exercised(
-                    id,
-                    "after",
-                    format!(
-                        "'{then}' has not appeared but the trace has not passed the {within}-call deadline after '{trigger}'"
-                    ),
-                ),
+                None => RuleEvaluation::held(id, "after", spanned),
             }
         }
 
@@ -552,5 +566,36 @@ mod tests {
             None,
         );
         assert_eq!(ev[0].rule_id, "eventually:audit@3");
+    }
+    /// Every trigger arms its own deadline. An earlier version took only the first trigger
+    /// and reported `held` here: the second `t` is never answered and the trace runs two
+    /// calls past its deadline. One satisfied obligation does not discharge the next.
+    #[test]
+    fn after_re_arms_on_every_trigger() {
+        let rules = vec![SequenceRule::After {
+            trigger: "t".into(),
+            then: "a".into(),
+            within: 1,
+        }];
+        let ev = evaluate_rules(&rules, &names(&["t", "a", "t", "x", "x"]), None);
+        assert_eq!(ev[0].outcome, RuleOutcome::Violated);
+    }
+
+    /// A trigger that fired but whose window has not closed has not decided anything, and is
+    /// a different state from a trace where the trigger never fired at all.
+    #[test]
+    fn after_inside_its_window_is_not_exercised() {
+        let rules = vec![SequenceRule::After {
+            trigger: "t".into(),
+            then: "a".into(),
+            within: 5,
+        }];
+        let ev = evaluate_rules(&rules, &names(&["x", "t"]), None);
+        assert_eq!(ev[0].outcome, RuleOutcome::NotExercised);
+        assert!(ev[0]
+            .reason
+            .as_deref()
+            .unwrap()
+            .contains("fired at index 1"));
     }
 }
