@@ -1,7 +1,4 @@
 pub(in crate::mcp::policy) fn matches_tool_pattern(tool_name: &str, pattern: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
     if !pattern.contains('*') {
         return tool_name == pattern;
     }
@@ -31,11 +28,10 @@ pub(in crate::mcp::policy) fn matches_tool_pattern(tool_name: &str, pattern: &st
 #[cfg(test)]
 mod tests {
     use super::matches_tool_pattern;
-    use crate::runtime::authorizer::authorizer_internal::policy::glob_matches_impl;
+    use crate::runtime::glob_matches_impl;
 
     /// The five behaviours `docs/reference/config/policies.md` promises, pinned so the doc and the
-    /// matcher cannot drift apart silently. The reference has been accurate since it was written;
-    /// nothing was checking that it stayed so.
+    /// matcher cannot drift apart silently. Nothing was checking that they agreed.
     #[test]
     fn the_documented_wildcard_forms_behave_as_documented() {
         assert!(
@@ -70,7 +66,7 @@ mod tests {
         );
     }
 
-    /// A `*` anywhere but the first or last position is a literal character, and the doc did not
+    /// A `*` that is neither the first nor the last character is a literal, and the doc did not
     /// say so. `read_*_file` does not match `read_config_file`; it matches only a tool literally
     /// named `read_*_file`, because the pattern falls through to the exact-match arm with the
     /// asterisk still in it.
@@ -78,6 +74,10 @@ mod tests {
     /// The consequence runs the dangerous way. In `allow`, such a pattern matches nothing and the
     /// tool is refused -- fail-closed, visible. In `deny`, it matches nothing and the tool is
     /// **permitted**, silently, by a line whose author believed it was blocking something.
+    ///
+    /// It is not only the exact-match arm. A pattern that is a wildcard at both ends carries its
+    /// interior stars into the substring it searches for, so `*a*b*` looks for the three
+    /// characters `a*b` and finds them only in a tool name that really contains an asterisk.
     #[test]
     fn a_star_in_the_middle_is_a_literal_not_a_wildcard() {
         assert!(
@@ -92,9 +92,23 @@ mod tests {
             !matches_tool_pattern("abc", "a*b*c"),
             "multiple interior stars are literal too"
         );
+        assert!(
+            !matches_tool_pattern("axbc", "*a*b*"),
+            "an interior star inside the substring form is literal as well"
+        );
+        assert!(
+            matches_tool_pattern("a*b", "*a*b*"),
+            "which is to say the substring searched for is `a*b`, asterisk and all"
+        );
     }
 
     /// Only-stars and the empty pattern, so the corners are stated rather than discovered.
+    ///
+    /// The first version of this test asserted `!matches_tool_pattern("anything", "")` under the
+    /// message "an empty pattern matches nothing". The assertion held and the message was false:
+    /// an empty pattern has no star, so it takes the exact-match arm and matches the empty tool
+    /// name. A corner stated wrongly is worse than a corner left undocumented, and this test
+    /// exists to state corners.
     #[test]
     fn degenerate_patterns_have_stated_answers() {
         assert!(
@@ -107,7 +121,11 @@ mod tests {
         );
         assert!(
             !matches_tool_pattern("anything", ""),
-            "an empty pattern matches nothing"
+            "an empty pattern is an exact match against the empty name, so it matches no real tool"
+        );
+        assert!(
+            matches_tool_pattern("", ""),
+            "and it does match the empty name, which is what makes it exact rather than inert"
         );
         assert!(
             matches_tool_pattern("", "*"),
@@ -115,25 +133,34 @@ mod tests {
         );
     }
 
-    /// Two matchers, one character, two meanings — and the difference is deliberate.
+    /// Two matchers, one character, several meanings — and the differences are deliberate.
     ///
     /// `matches_tool_pattern` serves the MCP policy's `tools.allow` / `tools.deny`, where a name is
     /// flat and `*` is unbounded. `glob_matches_impl` serves mandate `tool_patterns`, where names
     /// are hierarchical and `*` stops at a `.` while `**` crosses it, the way a filesystem glob
     /// treats `/`.
     ///
-    /// Pinned because an undocumented segment rule is the defect itself, whichever way it goes:
-    /// AWS documented that a wildcard could not span ARN segments while the implementation spanned
-    /// them, it was reported as a security concern, and the issue was archived unresolved
-    /// (`awsdocs/iam-user-guide#175`). Two matchers that differ by accident converge by accident.
-    /// This test makes the difference a decision.
+    /// Neither is uniformly stricter, which is the part worth pinning. At a dot the mandate
+    /// matcher refuses what the policy matcher admits; at an interior star or a backslash escape
+    /// it admits what the policy matcher refuses, because the policy matcher has no such syntax.
+    ///
+    /// Pinned because an unstated segment rule is the defect itself, whichever way it goes. AWS's
+    /// resource-ARN reference says a wildcard "cannot span segments", meaning the colon-delimited
+    /// parts of an ARN. A reader took `segment` in its other common sense — the slash-delimited
+    /// parts of a path — checked `arn:aws:s3:::my-bucket/foo/*/bar` in the policy simulator, found
+    /// it spanning slashes, and filed it as a security concern with a worked misconfiguration
+    /// (`awsdocs/iam-user-guide#175`, 2020). The documentation was correct; he withdrew the same
+    /// day. What survives the correction is the hazard: the rule was stated in a vocabulary the
+    /// reader did not share, so he inferred one and reasoned about the breadth of real policies
+    /// from it. Two matchers that differ by accident converge by accident. This test makes the
+    /// difference a decision.
     #[test]
-    fn the_two_tool_pattern_languages_differ_deliberately_at_a_dot() {
-        // Flat name: the two agree.
+    fn the_two_tool_pattern_languages_differ_deliberately() {
+        // Flat name, no interior syntax: the two agree.
         assert!(matches_tool_pattern("read_file", "read_*"));
         assert!(glob_matches_impl("read_*", "read_file"));
 
-        // Hierarchical name: they do not, and this is the whole difference.
+        // A dot: the mandate matcher is the stricter one.
         assert!(
             matches_tool_pattern("fs.read_file", "*"),
             "the policy matcher's `*` is unbounded"
@@ -147,6 +174,29 @@ mod tests {
             "`**` crosses, which is why it exists"
         );
 
+        // An interior star: the mandate matcher is the more permissive one. Stated in this
+        // direction because "they disagree about `.`" was the whole claim before, and it is only
+        // half of the disagreement -- the half where the policy matcher is safe by accident.
+        assert!(
+            glob_matches_impl("read_*_file", "read_config_file"),
+            "the mandate matcher expands an interior star"
+        );
+        assert!(
+            !matches_tool_pattern("read_config_file", "read_*_file"),
+            "the policy matcher reads it as a literal asterisk"
+        );
+
+        // An escape: the mandate matcher has one and the policy matcher has no notion of it, so
+        // `\` is just a character to match.
+        assert!(
+            glob_matches_impl(r"file\*name", "file*name"),
+            r"`\*` is a literal asterisk to the mandate matcher"
+        );
+        assert!(
+            !matches_tool_pattern("file*name", r"file\*name"),
+            "to the policy matcher the backslash is part of the name it is looking for"
+        );
+
         // `**` means nothing special to the policy matcher: leading and trailing star is the
         // substring form, so it matches for a different reason than a reader might assume.
         assert!(matches_tool_pattern("fs.read_file", "**"));
@@ -154,9 +204,15 @@ mod tests {
 
     /// An unbounded `*` over-blocks in `deny` and over-permits in `allow`. Only the second is
     /// dangerous, and the asymmetry is invisible in a policy file, which is why the reference
-    /// states it. Azure RBAC measured the cost of the permissive direction: roughly 39% of actions
-    /// reach across Resource Providers under non-obvious wildcards (arXiv 2506.10755), and its
-    /// recommendation is explicit enumeration rather than a cleverer pattern language.
+    /// states it. Azure RBAC measured the cost of the permissive direction: about half of the
+    /// 15,481 catalogued actions reach across Resource Providers under non-obvious wildcards
+    /// (arXiv 2506.10755v3), and the recommendation is explicit enumeration rather than a
+    /// cleverer pattern language.
+    ///
+    /// Note what this test cannot show. `*` reaches the same answer through the empty-inner
+    /// substring arm, so no branch is uniquely its own -- an earlier version of this file carried
+    /// a `pattern == "*"` guard clause above the match, and deleting it changed nothing. A test
+    /// named for a pattern is not a test of a branch.
     #[test]
     fn a_star_in_allow_admits_every_tool_including_ones_not_yet_written() {
         for tool in ["read_file", "exec", "shell", "a.tool.added.next.week"] {
