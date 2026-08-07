@@ -570,7 +570,7 @@ Als je alles wat al geïmplementeerd is meerekent (store_metrics, pragmas, wal_c
 | 1 | **Doc alignen met realiteit** | Inventaris- en status-tabellen up-to-date houden (zoals in dit doc bijgewerkt); anders misleiden reviewers zich op “Nee”/“ontbreekt”-tekst. |
 | 2 | **Semantic/judge VCR-workload** (fixture ✅, middleware open) | Fixture: `tests/fixtures/perf/semantic_vcr/` (eval, trace, cassettes/). Env: `ASSAY_VCR_MODE`, `ASSAY_VCR_DIR`; CI = replay only. **Open:** VCR-middleware (reqwest record/replay) in code. Zie sectie “Semantic/judge VCR-workload”. |
 | 3 | **Hyperfine e2e als blessed flow** | ✅ **Blessed script:** `scripts/perf_e2e.sh` — small / file_backed / ci; `--warmup`, `--export-json`, median+p95 uit JSON. Zie “Hyperfine e2e: blessed flow” in dit doc. |
-| 4 | ✅ **CI baseline-vergelijking + regressie-policy** | **Gedaan:** perf_main.yml (baseline) + perf_pr.yml (PR compare); Bencher reports met `sw/50x400b`, `sw/12xlarge`, `sr/wc`; thresholds (percentage test, upper_boundary 0.50 = 50%); alerts are warnings only (no --err). **Note:** GitHub Actions runners have high variance (20-40%+); alerts provide visibility without blocking CI. |
+| 4 | ✅ **CI baseline-vergelijking + regressie-policy** | **Gedaan:** perf_main.yml (baseline) + perf_pr.yml (PR compare); Bencher reports met `swc/500x400b`, `swc/120xlarge` (code cost, gate), `sw/50x400b`, `sw/12xlarge` (geshipte durability, main-only trend) en `sr/wc`. Threshold-modellen per testbed: `t_test` 0.99, `iqr` 3.0, `percentage` 0.50; alerts are warnings only (no --err). Zie “Bencher threshold mapping” en “Why `sw/*` is not a gate”. |
 | 5 | **Busy handler/timeout in doc** | ✅ In dit doc toegevoegd: sectie “Busy handler en checkpoint” — PRAGMA vs custom handler, één per connection, waarom PRAGMA 0 kan zijn; onze keuze + hoe we loggen. |
 | 6 | **CI cache voor perf jobs** | ✅ Perf-job in ci.yml logt **cache-hit** (rust-cache) in job summary; sectie “CI cache voor perf jobs” in dit doc. Norm: waar cache leeft (.assay vs target/) en wat gecached wordt. |
 
@@ -659,40 +659,112 @@ Gebaseerd op forensic baseline (jan 2026):
 
 ### Bencher threshold mapping
 
-Bencher thresholds afgestemd op forensic baseline (jan 2026):
+Een Bencher **Threshold** hoort bij een unieke combinatie van (Branch, Testbed, Measure) en
+geldt voor *alle* benchmarks in die scope. Er bestaat geen per-benchmark threshold; het enige
+per-benchmark mechanisme dat Bencher biedt is een `_bencher_ignore`-suffix in de naam, en dat
+is onderdrukken in plaats van meten. Daarom is **testbed** hier de as waarlangs alert-modellen
+gescheiden worden. De testbed-namen beschrijven *wat* gekarakteriseerd wordt, niet welke
+machine draait — alle drie draaien in dezelfde `ubuntu-latest` job.
 
-| Measure | Test | upper_boundary | Workflow |
-|---------|------|----------------|----------|
-| **latency** | percentage | 0.25 (25%) | perf_main, perf_pr |
-| **tail_ratio** | static | 2.0 | perf_nightly |
-| **sqlite_busy_count** | static | 0 | perf_nightly |
+| Testbed | Benchmarks | Test | upper_boundary | Workflow |
+|---------|-----------|------|----------------|----------|
+| `ubuntu-latest-store-code` | `swc/500x400b`, `swc/120xlarge` | t_test | 0.99 | perf_main, perf_pr |
+| `ubuntu-latest-store-fsync` | `sw/50x400b`, `sw/12xlarge` | iqr | 3.0 | perf_main (alleen main) |
+| `ubuntu-latest` | `sr/wc` | percentage | 0.50 | perf_main, perf_pr |
+| — (`tail_ratio`) | forensic | static | 2.0 | perf_nightly |
+| — (`sqlite_busy_count`) | forensic | static | 0 | perf_nightly |
 
-**Bencher flags (productie configuratie):**
-```yaml
-# perf_main.yml (baseline)
---threshold-measure latency
---threshold-test percentage       # Drift vs baseline
---threshold-max-sample-size 64    # Statistical stability
---threshold-upper-boundary 0.25   # 25% = fail
---thresholds-reset                # Only this threshold active
---err                             # Fail on alert
+Geen `--err` in perf_main/perf_pr: alerts zijn waarschuwingen, niet blokkerend.
+`--thresholds-reset` is gescoped op (Branch, Testbed), dus de drie `bencher run`-aanroepen
+op main wissen elkaars modellen niet.
 
-# perf_pr.yml (PR compare)
---start-point-clone-thresholds    # Clone from main
---start-point-reset               # Prevent drift
---err                             # Fail on alert
+#### Why `sw/*` is not a gate
 
-# perf_nightly.yml (forensic)
---adapter json                    # BMF JSON input
---threshold-measure tail_ratio
---threshold-test static           # Absolute limit
---threshold-upper-boundary 2.0    # tail_ratio > 2.0 = alert
-```
+`store_write_heavy` draait de store precies zoals `Store::open` hem oplevert: die zet alleen
+`PRAGMA foreign_keys=ON`, dus SQLite valt terug op `journal_mode=delete` +
+`synchronous=FULL`. `insert_result_embedded` doet twee impliciete transacties per rij, dus één
+`50x400b`-iteratie commit ~110 keer, en elke rollback-journal commit maakt én verwijdert een
+journal-bestand. Dat zijn directory-metadata-operaties: precies wat op gedeelde cloud-opslag
+het sterkst varieert.
+
+**Gemeten aandeel van filesystem-werk** — zelfde workload (`50x400b`), alleen de
+durability-configuratie verschilt, `n=21` iteraties per configuratie:
+
+| Configuratie | median |
+|---|---|
+| `delete` + `FULL` (zoals geshipt, = `sw/*`) | 41.1 ms |
+| `synchronous=OFF` | 21.7 ms |
+| `WAL` + `synchronous=NORMAL` | 6.6 ms |
+| in-memory | 0.74 ms |
+
+- **98.2%** van de wall time is filesystem-werk (file vs in-memory).
+- **47.2%** is fsync alleen (default vs `synchronous=OFF`).
+
+**Run-to-run spread** is echter de grootheid die een Bencher-threshold ziet — niet de spreiding
+bínnen één criterion-run. Vijf volledige `cargo bench`-runs achter elkaar, zelfde machine,
+idle:
+
+| Benchmark | median | run-to-run spread |
+|---|---|---|
+| `sw/50x400b` (geshipt) | 32–42 ms | **1.31x** |
+| `swc/*` met `WAL`+`synchronous=OFF` | 5.6–11.4 ms | **2.03x** |
+| `swc/*` met `journal_mode=MEMORY` (50 rijen) | 2.53 ms | **1.05x** |
+| `swc/*` met `journal_mode=MEMORY` (500 rijen) | 17.47 ms | **1.03x** |
+
+Twee dingen die tegen de verwachting in gingen en het ontwerp bijstuurden:
+
+1. **WAL maakte het slechter, niet beter.** Ondanks een lagere median was de run-to-run
+   spread 2.03x — erger dan de geshipte configuratie. WAL schrijft nog steeds `-wal`/`-shm`
+   sidecar-bestanden, en `NamedTempFile` ruimt die niet op: één lokale sweep liet 37.254
+   paren en ~12 GB achter tot SQLite faalde met een `xShmMap` I/O-error. Deze bench opent per
+   iteratie een verse database, dus WAL is er structureel ongeschikt voor.
+   `journal_mode=MEMORY` haalt zowel de fsync als het per-commit aanmaken/verwijderen van het
+   journal-bestand weg — dat laatste is directory-metadata-werk, wat per host het sterkst
+   varieert — en maakt zelf geen bestanden aan.
+2. **Kleiner is niet stabieler.** Bij 2.5 ms zit de meting in de buurt van een
+   scheduler-quantum; op een gedeelde runner zou hij vooral zijn eigen scheduling timen. De
+   spread vlakt lokaal af rond 500 rijen (1.03x), dus `swc/*` draait 10x de rijen van `sw/*`.
+
+*Provenance:* worktree `.claude/worktrees/nifty-tesla-53fc6b` @ `83fbcc035`, Darwin 25.6.0
+arm64 (APFS), rustc 1.96.0 (ac68faa20 2026-05-25), `QUICK=1` (criterion `sample_size=10`),
+gemeten 2026-08-07. Dit zijn *lokale* cijfers: de variantie op `ubuntu-latest` is hiermee
+**niet** vastgesteld, en dat is precies waarom `swc/*` een `t_test` krijgt — die schaalt de
+boundary op de waargenomen spreiding van de runner zelf, in plaats van een percentage dat
+off-runner geraden zou zijn.
+
+**Gevolg voor het alert-model.** Een percentage-van-het-gemiddelde over `sw/*` alerteert op
+welke schijf de runner toevallig trok. Waargenomen: Rul1an/assay#2119 wijzigde alleen
+`assay-runner-schema` — een crate waar `assay-core` niet van afhangt — en alerteerde op
++1,782% (`sw/12xlarge`, 907.69 ms vs 48.23 ms) en +1,960% (`sw/50x400b`, 3,132.20 ms vs
+152.03 ms). Beide benchmarks schaalden uniform ~19x mee, wat de signatuur is van een trage
+host en niet van een code-regressie. Sinds 2026-06-13 verschenen Bencher-alerts op minstens 12
+PR's.
+
+`sw/*` blijft bestaan en blijft gemeten: het is de prijs die gebruikers echt betalen. Het is
+alleen verplaatst naar een main-only trend onder `iqr` (mediaan + interkwartielafstand), dat
+bestand is tegen de bimodale host-verdeling waar `percentage` (gemiddelde) op stukloopt.
+
+`swc/*` is hetzelfde code-pad met het journal in geheugen, zodat de resterende variantie van
+ons is. De pragma's worden in `make_store()` **geassert**, niet aangenomen: als ze stil niet
+toegepast worden, wordt `swc/*` ongemerkt een tweede kopie van `sw/*` en meet het weer de
+schijf terwijl het als code-signaal gelezen wordt.
+
+#### Welke PR's welke benchmark draaien
+
+De relevance-gate in `perf_pr.yml` matchte `^crates/`, oftewel alle 21 workspace-crates. De
+compilation unit van `store_write_heavy` is `assay-core` plus vier workspace-dependencies, dus
+PR's die crates buiten die closure raakten draaiden en alerteerden er toch op (#2119, #2114,
+#2074). `scripts/ci/perf_bench_relevance.py` leidt de relevante set nu per bench af uit
+`cargo metadata` — een handgeschreven lijst is een tweede formulering van de dependency-graph
+en die twee driften uit elkaar. De gate faalt open: als de graph niet leesbaar is, wordt alles
+als relevant gerapporteerd, want stil stoppen met benchmarken is de ergere fout.
+`scripts/ci/test_perf_bench_relevance.py` pint de drie PR's hierboven als fixtures.
 
 **CI Gate Logic:**
-- **Main baseline:** Elke push naar main update Bencher baseline met 25% threshold
-- **PR compare:** Vergelijk tegen main baseline, fail bij >25% regressie
-- **Nightly:** Forensic metrics (tail_ratio, sqlite_busy_count) met static thresholds
+- **Main baseline:** elke push naar main update de Bencher-baseline op drie testbeds
+- **PR compare:** vergelijk tegen main-baseline; alleen `swc/*` en `sr/wc`, en alleen voor
+  PR's die de betreffende compilation unit raken
+- **Nightly:** forensic metrics (tail_ratio, sqlite_busy_count) met static thresholds
 
 ### Nightly forensic trend
 

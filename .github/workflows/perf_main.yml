@@ -2,9 +2,30 @@
 # Vereist: Repository secrets BENCHER_PROJECT (project slug), BENCHER_API_TOKEN.
 # Zie https://bencher.dev/docs/how-to/github-actions/
 #
-# Thresholds (jan 2026):
-# - percentage test: upper_boundary 0.50 (50%)
-#   Note: GitHub Actions runners have high variance (20-40%+); alerts are warnings only.
+# Thresholds (aug 2026). A Bencher Threshold is scoped to (Branch, Testbed, Measure) and
+# applies to every benchmark in that scope — there is no per-benchmark threshold, and the
+# only per-benchmark control Bencher offers is a `_bencher_ignore` name suffix, which is
+# suppression rather than measurement. Testbed is therefore used here to scope alert
+# models, and these testbed names describe what is characterised, not which machine runs
+# it (all three run on the same ubuntu-latest job):
+#
+#   ubuntu-latest-store-code   swc/*  t_test 0.99   code cost; gates PRs
+#   ubuntu-latest-store-fsync  sw/*   iqr 3.0       shipped durability; main-only trend
+#   ubuntu-latest              sr/wc  percentage    unchanged
+#
+# Why the split: `sw/*` runs the store exactly as `Store::open` ships it
+# (journal_mode=delete, synchronous=FULL), which commits ~110 times per iteration. 98.2%
+# of its wall time is filesystem work, so a percentage-of-mean model over it alerts on
+# whichever disk the runner drew — #2119 changed only assay-runner-schema, a crate
+# assay-core does not depend on, and alerted at +1,782%. Its distribution is bimodal
+# across hosts, which is what `iqr` (median + interquartile range) tolerates and
+# `percentage` (mean) does not. `swc/*` is the same workload with the per-commit write
+# barrier held constant, so its remaining variance is ours; `t_test` sizes the boundary
+# from the runner's own observed spread instead of a percentage guessed off-runner.
+#
+# --thresholds-reset is scoped to (Branch, Testbed), so these three invocations do not
+# clear one another's models. See docs/PERFORMANCE-ASSESSMENT.md, "Why `sw/*` is not a gate".
+#
 # - NO --err: alerts don't fail the workflow (visibility without blocking CI)
 # - max_sample_size 64: statistical stability
 name: Perf (main baseline)
@@ -47,7 +68,9 @@ jobs:
       - uses: bencherdev/bencher@0f8f620172ccd6225d40a7590598eb7b41718af8 # v0.6.2
       # stdin/pipe mode: cargo bench output piped to bencher run (no command after --)
       # This is more reliable than exec mode for capturing Criterion output.
-      - name: Criterion (store_write_heavy)
+      # Code cost: same workload as sw/*, write barrier held constant. This is the group
+      # a pull request can regress, and the one perf_pr.yml compares.
+      - name: Criterion (store_write_heavy, code cost)
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
           BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
@@ -55,19 +78,50 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then echo "Bencher not configured, skipping."; exit 0; fi
-          cargo bench -p assay-core --bench store_write_heavy 2>&1 \
+          cargo bench -p assay-core --bench store_write_heavy -- '^swc/' 2>&1 \
             | grep -v "Gnuplot not found" \
             | bencher run \
                 --project "$BENCHER_PROJECT" \
                 --token "$BENCHER_API_TOKEN" \
                 --branch main \
-                --testbed ubuntu-latest \
+                --testbed ubuntu-latest-store-code \
                 --adapter rust_criterion \
-                --ci-id store_write_heavy \
+                --ci-id store_write_heavy_code \
                 --threshold-measure latency \
-                --threshold-test percentage \
+                --threshold-test t_test \
+                --threshold-min-sample-size 8 \
                 --threshold-max-sample-size 64 \
-                --threshold-upper-boundary 0.50 \
+                --threshold-upper-boundary 0.99 \
+                --thresholds-reset \
+                --github-actions "$GITHUB_TOKEN"
+          test -d target/criterion
+          find target/criterion -name estimates.json -print -quit | grep -q .
+
+      # Shipped durability: what a run actually costs on this host. Kept, because dropping
+      # it would stop measuring the cost users pay — but scoped to main under an
+      # outlier-robust model, because per-PR it reports the runner's disk.
+      - name: Criterion (store_write_heavy, shipped durability)
+        env:
+          BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then echo "Bencher not configured, skipping."; exit 0; fi
+          cargo bench -p assay-core --bench store_write_heavy -- '^sw/' 2>&1 \
+            | grep -v "Gnuplot not found" \
+            | bencher run \
+                --project "$BENCHER_PROJECT" \
+                --token "$BENCHER_API_TOKEN" \
+                --branch main \
+                --testbed ubuntu-latest-store-fsync \
+                --adapter rust_criterion \
+                --ci-id store_write_heavy_fsync \
+                --threshold-measure latency \
+                --threshold-test iqr \
+                --threshold-min-sample-size 8 \
+                --threshold-max-sample-size 64 \
+                --threshold-upper-boundary 3.0 \
                 --thresholds-reset \
                 --github-actions "$GITHUB_TOKEN"
           test -d target/criterion
