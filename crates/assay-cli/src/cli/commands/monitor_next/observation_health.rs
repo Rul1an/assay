@@ -33,7 +33,14 @@ use assay_runner_schema::{
 };
 use std::path::Path;
 
-/// The probe whose attachment decides whether connect-time peers were observable at all.
+/// The tracepoint that used to decide the coverage claim, kept only for the tests that pin why it
+/// no longer does.
+///
+/// `#[cfg(test)]` because this commit is what stopped production code reading it: deriving coverage
+/// from `sys_enter_connect` while the peers came from the hook below is the defect being fixed. The
+/// constant stays because the tests need to name the wrong probe to show it is not consulted, and
+/// the doc on `EGRESS_PEER_PROBE` refers to it by name.
+#[cfg(test)]
 const CONNECT_PROBE: &str = "sys_enter_connect";
 
 /// The cgroup hook that supplies the peer set, which is NOT the probe above.
