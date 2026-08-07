@@ -5,6 +5,7 @@ pub mod aee_run_context;
 pub mod aee_seal;
 pub mod aee_seal_envelope;
 pub mod aee_seal_key;
+pub mod aee_trust_set;
 pub mod backend;
 pub mod caps;
 mod cli;
