@@ -73,23 +73,6 @@ rules:
 
 ---
 
-### `immediately_before` — Strict Adjacency
-
-Tool A must be called *immediately* before Tool B (no other calls in between).
-
-```yaml
-rules:
-  - type: immediately_before
-    first: ValidateInput
-    then: ExecuteAction
-```
-
-| Trace | Result |
-|-------|--------|
-| `[ValidateInput, ExecuteAction]` | ✅ Pass |
-| `[ValidateInput, LogEvent, ExecuteAction]` | ❌ Fail |
-
----
 
 ### `blocklist` — Forbidden Tools
 
@@ -122,25 +105,6 @@ rules:
 
 ---
 
-### `allowlist` — Only These Tools
-
-Only the specified tools are allowed. Everything else fails.
-
-```yaml
-rules:
-  - type: allowlist
-    tools:
-      - GetCustomer
-      - UpdateCustomer
-      - SendEmail
-```
-
-| Trace | Result |
-|-------|--------|
-| `[GetCustomer, UpdateCustomer]` | ✅ Pass |
-| `[GetCustomer, DeleteCustomer]` | ❌ Fail (DeleteCustomer not in allowlist) |
-
----
 
 ### `max_calls` — Call Frequency Limit
 
@@ -212,6 +176,32 @@ rules:
 |-------|--------|
 | `[OpenFile, Read, CloseFile]` | ✅ Pass |
 | `[OpenFile, ..., (10 steps), ...]` | ❌ Fail |
+
+---
+
+### `sequence` — Exact Ordering
+
+The named tools must appear in the given order. With `strict: false` (the default) other
+tools may appear between them; with `strict: true` they must be consecutive.
+
+```yaml
+rules:
+  - type: sequence
+    tools:
+      - Authenticate
+      - LoadRecord
+      - WriteRecord
+    strict: false   # optional
+```
+
+| Trace | `strict: false` | `strict: true` |
+|-------|-----------------|----------------|
+| `[Authenticate, LoadRecord, WriteRecord]` | ✅ Pass | ✅ Pass |
+| `[Authenticate, Audit, LoadRecord, WriteRecord]` | ✅ Pass | ❌ Fail |
+| `[LoadRecord, Authenticate, WriteRecord]` | ❌ Fail | ❌ Fail |
+
+A trace that never calls any named tool does not exercise this rule; a trace that starts the
+sequence and ends part-way through fails it, because the ordering it asserts was not completed.
 
 ---
 
