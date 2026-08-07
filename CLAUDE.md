@@ -286,9 +286,29 @@ cargo bench -p assay-core --bench store_write_heavy
 cargo bench -p assay-cli --bench suite_run_worstcase
 ```
 
-Benches: `sw/50x400b`, `sw/12xlarge`, `sr/wc`
+Benches: `swc/500x400b`, `swc/120xlarge`, `sw/50x400b`, `sw/12xlarge`, `sr/wc`
 
-See `docs/PERFORMANCE-ASSESSMENT.md` for full documentation.
+`store_write_heavy` measures one code path twice. `swc/*` runs it with `journal_mode=MEMORY`,
+so no commit waits on the device and none creates or unlinks a journal file; that measures
+what our code costs, and it is the group compared on pull requests. `sw/*` runs the store
+exactly as `Store::open` ships it (`journal_mode=delete`, `synchronous=FULL`), where 98.2% of
+wall time is filesystem work — it stays a main-only trend under an outlier-robust model,
+because per-PR it reports which disk the runner drew. Measured run-to-run spread across five
+consecutive local runs: 1.31x for `sw/*`, 1.03x for `swc/*`.
+
+Do not switch `swc/*` to WAL. It looked faster and measured worse (2.03x spread), and its
+untracked `-wal`/`-shm` sidecars leaked 37k file pairs in one sweep until SQLite failed.
+
+A Bencher Threshold is scoped to (Branch, Testbed, Measure) and covers every benchmark in that
+scope; there is no per-benchmark threshold. Testbed is therefore used to separate alert models
+(`ubuntu-latest-store-code`, `ubuntu-latest-store-fsync`, `ubuntu-latest`) even though all
+three run on the same machine.
+
+Which benchmarks a PR runs is derived from the `cargo metadata` dependency closure by
+`scripts/ci/perf_bench_relevance.py`, not from a path pattern — `^crates/` matched all 21
+crates and alerted on changes outside the benchmark's compilation unit.
+
+See `docs/PERFORMANCE-ASSESSMENT.md` for full documentation, including measurement provenance.
 
 ## Conventions
 

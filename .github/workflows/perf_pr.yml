@@ -4,9 +4,23 @@
 # Alleen same-repo PRs (secrets niet beschikbaar op forks).
 # Vereist: BENCHER_PROJECT, BENCHER_API_TOKEN.
 #
-# Thresholds (jan 2026):
-# - Cloned from main baseline (--start-point-clone-thresholds)
-# - NO --err: alerts are warnings only (runner variance is too high)
+# Thresholds (aug 2026):
+# - Cloned from the main baseline (--start-point-clone-thresholds)
+# - NO --err: alerts are warnings only
+#
+# A Bencher Threshold is scoped to (Branch, Testbed, Measure) and applies to *every*
+# benchmark in that scope; there is no per-benchmark threshold. Testbed is therefore the
+# only dimension available for giving two benchmarks different alert models, and these
+# testbed names describe what is being characterised, not which machine runs it:
+#
+#   ubuntu-latest-store-code   swc/*  code cost, write barrier held constant  -> gates PRs
+#   ubuntu-latest-store-fsync  sw/*   shipped durability, host-dominated      -> main trend
+#   ubuntu-latest              sr/wc  full `assay run` subprocess             -> unchanged
+#
+# Only the code-cost group is compared on pull requests. `sw/*` measures the runner's
+# write barrier (98.2% of its wall time is filesystem work), so a PR comparison of it
+# reports host luck; it stays a main-branch trend under a variance-robust IQR model.
+# See docs/PERFORMANCE-ASSESSMENT.md, "Why `sw/*` is not a gate".
 name: Perf (PR compare)
 
 on:
@@ -25,13 +39,19 @@ jobs:
     permissions:
       contents: read
     outputs:
-      relevant: ${{ steps.detect.outputs.relevant }}
+      store: ${{ steps.detect.outputs.store_relevant }}
+      suite: ${{ steps.detect.outputs.suite_relevant }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           fetch-depth: 0
 
+      # The previous gate matched `^crates/`, i.e. all 21 workspace crates, so
+      # store_write_heavy ran and alerted for changes outside assay-core's compilation
+      # unit (#2119, #2114, #2074). Relevance is now derived per bench from the
+      # cargo-metadata dependency closure; scripts/ci/test_perf_bench_relevance.py pins
+      # those three PRs as regression fixtures.
       - name: Detect benchmark-relevant paths
         id: detect
         shell: bash
@@ -40,24 +60,13 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          git diff --name-only "${BASE_SHA}...${HEAD_SHA}" > changed_files.txt
-          if grep -Eq '^(Cargo\.toml|Cargo\.lock|crates/|benches/|\.github/workflows/perf_pr\.yml)' changed_files.txt; then
-            relevant=true
-          else
-            relevant=false
-          fi
-          echo "relevant=${relevant}" >> "$GITHUB_OUTPUT"
-          {
-            echo "## Perf PR relevance"
-            echo "- relevant: ${relevant}"
-            echo "- changed files:"
-            sed 's/^/  - /' changed_files.txt
-          } >> "$GITHUB_STEP_SUMMARY"
+          git diff --name-only "${BASE_SHA}...${HEAD_SHA}" \
+            | python3 scripts/ci/perf_bench_relevance.py
 
   benches:
     name: Criterion compare (PR vs main)
     needs: detect-benchmark-relevance
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.action != 'closed' && needs.detect-benchmark-relevance.outputs.relevant == 'true'
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.action != 'closed' && (needs.detect-benchmark-relevance.outputs.store == 'true' || needs.detect-benchmark-relevance.outputs.suite == 'true')
     runs-on: ubuntu-latest
     # Bencher 404 (e.g. main baseline not found) should not block PR merge
     continue-on-error: true
@@ -82,7 +91,13 @@ jobs:
           components: rustfmt
       - uses: bencherdev/bencher@0f8f620172ccd6225d40a7590598eb7b41718af8 # v0.6.2
       # stdin/pipe mode: cargo bench output piped to bencher run (no command after --)
-      - name: Criterion (store_write_heavy)
+      #
+      # `-- '^swc/'` is a Criterion benchmark filter: only the code-cost group is measured
+      # and reported on pull requests. The shipped-durability group (`sw/*`) is not run
+      # here at all, because comparing it PR-to-main reports the runner's write-barrier
+      # latency rather than the change under review.
+      - name: Criterion (store_write_heavy, code cost)
+        if: needs.detect-benchmark-relevance.outputs.store == 'true'
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
           BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
@@ -90,7 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$BENCHER_PROJECT" ] || [ -z "$BENCHER_API_TOKEN" ]; then echo "Bencher not configured, skipping."; exit 0; fi
-          cargo bench -p assay-core --bench store_write_heavy 2>&1 \
+          cargo bench -p assay-core --bench store_write_heavy -- '^swc/' 2>&1 \
             | grep -v "Gnuplot not found" \
             | bencher run \
                 --project "$BENCHER_PROJECT" \
@@ -99,7 +114,7 @@ jobs:
                 --start-point main \
                 --start-point-clone-thresholds \
                 --start-point-reset \
-                --testbed ubuntu-latest \
+                --testbed ubuntu-latest-store-code \
                 --adapter rust_criterion \
                 --ci-id store_write_heavy \
                 --github-actions "$GITHUB_TOKEN"
@@ -107,6 +122,7 @@ jobs:
           find target/criterion -name estimates.json -print -quit | grep -q .
 
       - name: Criterion (suite_run_worstcase)
+        if: needs.detect-benchmark-relevance.outputs.suite == 'true'
         env:
           BENCHER_PROJECT: ${{ secrets.BENCHER_PROJECT }}
           BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
