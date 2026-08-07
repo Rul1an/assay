@@ -130,6 +130,18 @@ pub struct LandlockBlock {
     pub no_new_privs_confirmed: bool,
     /// Whether `landlock_restrict_self` was confirmed (by the enforcing child, not assumed by parent).
     pub restrict_self_confirmed: bool,
+    /// Whether this kernel lets a restricted process shed its own Landlock restrictions, measured.
+    ///
+    /// `restrictions_held` | `restrictions_shed` | `inconclusive`, absent when the probe was not run.
+    ///
+    /// This exists because ADR-045 permits `aeeStillArmed` to rest on Landlock's irrevocability, and
+    /// that invariant has a documented exception: CVE-2024-42318 let a process with `fork()` and
+    /// `keyctl()` drop every Landlock restriction on itself, from 5.13 until the fix in v6.11-rc1.
+    /// `abi` cannot stand in for it -- ABI 4 arrives at kernel 6.7, four releases before the fix --
+    /// and a kernel-version comparison cannot see a distribution backport, so the property is
+    /// measured on the running kernel instead of inferred. See `backend::landlock_shedding_probe`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restriction_shedding: Option<String>,
 }
 
 /// The optional real-block probe. Its presence upgrades the claim from "ruleset applied" to "a denied
@@ -190,7 +202,12 @@ impl EnforcementHealthV1 {
     /// `restrict_self` confirmed). `probe` is `Some` only when a real-block probe was actually run;
     /// `None` records "ruleset applied, no real-block claim".
     #[must_use]
-    pub fn landlock_active(abi: u32, allowed_ports: Vec<u16>, probe: Option<Probe>) -> Self {
+    pub fn landlock_active(
+        abi: u32,
+        allowed_ports: Vec<u16>,
+        probe: Option<Probe>,
+        restriction_shedding: Option<String>,
+    ) -> Self {
         Self {
             schema: SCHEMA_V1.to_string(),
             status: Status::Active,
@@ -208,6 +225,7 @@ impl EnforcementHealthV1 {
                 allowed_connect_tcp_ports: Some(allowed_ports),
                 no_new_privs_confirmed: true,
                 restrict_self_confirmed: true,
+                restriction_shedding,
             },
             probe,
             non_claims: landlock_non_claims(),
@@ -245,6 +263,10 @@ impl EnforcementHealthV1 {
                 allowed_connect_tcp_ports: None,
                 no_new_privs_confirmed,
                 restrict_self_confirmed: false,
+                // Nothing was armed, so there is nothing to shed. Absent rather than
+                // "inconclusive": the probe was not attempted, and a record that says
+                // "could not tell" implies it tried.
+                restriction_shedding: None,
             },
             probe: None,
             non_claims: landlock_non_claims(),
@@ -297,6 +319,7 @@ mod fixture_values {
                 allowed_connect_tcp_ports: Some(vec![443]),
                 no_new_privs_confirmed: true,
                 restrict_self_confirmed: true,
+                restriction_shedding: Some("restrictions_held".to_string()),
             },
             probe: Some(Probe {
                 kind: "real_block".to_string(),
@@ -339,6 +362,7 @@ mod fixture_values {
                 allowed_connect_tcp_ports: None,
                 no_new_privs_confirmed: false,
                 restrict_self_confirmed: false,
+                restriction_shedding: None,
             },
             probe: None,
             non_claims: base_non_claims(),

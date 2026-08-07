@@ -33,6 +33,12 @@ const BLOCKING_ERRNO: &str = "EACCES";
 /// that cannot express a TCP-connect restriction at all.
 const LANDLOCK_ABI_NET_CONNECT_TCP: u32 = 4;
 
+/// The one `restriction_shedding` value that lets a seal claim `aeeStillArmed`.
+///
+/// Same spelling as `backend::SheddingProbeOutcome::label`, and only that value: `inconclusive`
+/// means the probe found nothing, which is not the same as finding that restrictions hold.
+const RESTRICTIONS_HELD: &str = "restrictions_held";
+
 /// The operator-facing label for what this probe observed.
 fn observed_label(probe: &Probe) -> String {
     if probe.listener_reached {
@@ -74,6 +80,14 @@ pub enum NotSealEligible {
     UnprovenContextValue { field: &'static str },
     /// A digest the seal must derive could not be computed from the inputs given.
     DerivationFailed { what: &'static str },
+    /// The run did not establish that Landlock restrictions cannot be shed on this kernel, so
+    /// `aeeStillArmed` would rest on an invariant this run has no evidence for.
+    ///
+    /// ADR-045 lets still-armed rest on "a documented kernel-level invariant showing the applied
+    /// Landlock restrictions cannot be relaxed". CVE-2024-42318 is that invariant's exception --
+    /// `keyctl(KEYCTL_SESSION_TO_PARENT)` shed every restriction from 5.13 until v6.11-rc1 -- and
+    /// `abi >= 4` does not exclude it, because ABI 4 arrives four releases earlier at 6.7.
+    RestrictionSheddingNotEstablished { found: String },
     /// A counted-queue channel reported lost observations, so zero cannot be carried.
     ObservationsLost { channel: String, lost: u64 },
     /// A counted-queue model was declared with no channels, which proves nothing.
@@ -95,6 +109,9 @@ impl NotSealEligible {
             Self::RecordSelfContradictory { .. } => "record-self-contradictory",
             Self::UnprovenContextValue { .. } => "unproven-context-value",
             Self::DerivationFailed { .. } => "derivation-failed",
+            Self::RestrictionSheddingNotEstablished { .. } => {
+                "restriction-shedding-not-established"
+            }
             Self::ObservationsLost { .. } => "observations-lost",
             Self::DropAccountingUnnamed => "drop-accounting-unnamed",
         }
@@ -114,6 +131,10 @@ impl std::fmt::Display for NotSealEligible {
             Self::RecordSelfContradictory { detail } => write!(f, "health record contradicts itself: {detail}"),
             Self::UnprovenContextValue { field } => write!(f, "run-context field {field} is not a value this run proved"),
             Self::DerivationFailed { what } => write!(f, "could not derive a required digest: {what}"),
+            Self::RestrictionSheddingNotEstablished { found } => write!(
+                f,
+                "restriction-shedding was not established for this kernel ({found}); aeeStillArmed would rest on an invariant CVE-2024-42318 shows has an exception, and the Landlock ABI does not exclude it"
+            ),
             Self::ObservationsLost { channel, lost } => write!(f, "channel {channel} lost {lost} observations, so zero drop accounting cannot be carried"),
             Self::DropAccountingUnnamed => write!(f, "a counted-queue model with no channels names no proof at all"),
         }
@@ -262,6 +283,28 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 /// RFC 8785 canonical bytes, then SHA-256. The one canonicalizer, from `assay-canonical`.
+/// The declared digest of a carried object, for a producer building a posture.
+///
+/// Public because the producer lives in `sandbox/child.rs` and must compute the posture's *declared*
+/// digest with the same canonicalization the seal derives its own digests with. A second
+/// implementation there would be a second answer to "what is this object's digest", which is the
+/// one question a run binding cannot have two answers to.
+///
+/// Falls back to the empty-object digest only if canonicalization fails, which cannot happen for a
+/// posture built from literals; `build_sealed_run` rejects a posture whose declared digest is not
+/// 64 hex characters, so a degenerate value is refused rather than sealed.
+pub fn digest_json_public(value: &serde_json::Value) -> String {
+    digest_json(value).unwrap_or_default()
+}
+
+/// The current instant in the shape `is_rfc3339_utc` accepts.
+///
+/// Seconds precision, `Z`, no fractional part: the ADR-045 checker's validity-window check parses
+/// exactly `YYYY-MM-DDTHH:MM:SSZ`, and an instant it cannot parse is refused rather than compared.
+pub fn now_rfc3339_utc() -> String {
+    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
 fn digest_json(value: &serde_json::Value) -> Result<String, NotSealEligible> {
     let bytes =
         assay_canonical::jcs::to_vec(value).map_err(|_| NotSealEligible::DerivationFailed {
@@ -388,6 +431,19 @@ pub fn seal_eligibility(health: &EnforcementHealthV1) -> Result<&Probe, NotSealE
         return Err(NotSealEligible::RecordSelfContradictory {
             detail: "status is active but the ruleset was never confirmed applied".into(),
         });
+    }
+    // Measured, not inferred. `restrict_self_confirmed` above says the child was armed at start;
+    // still-armed at end follows only if this kernel cannot shed restrictions, and that is a
+    // property of the running kernel rather than of the ABI number.
+    // `backend::landlock_shedding_probe` asks it directly, so no per-distribution backport table
+    // has to be kept correct here -- and a table of backport facts is a thing that rots silently.
+    match health.landlock.restriction_shedding.as_deref() {
+        Some(RESTRICTIONS_HELD) => {}
+        other => {
+            return Err(NotSealEligible::RestrictionSheddingNotEstablished {
+                found: other.unwrap_or("not measured").to_string(),
+            })
+        }
     }
     let probe = health
         .probe
@@ -600,7 +656,12 @@ mod tests {
     }
 
     fn healthy() -> EnforcementHealthV1 {
-        EnforcementHealthV1::landlock_active(4, vec![443], Some(probe(false, "EACCES")))
+        EnforcementHealthV1::landlock_active(
+            4,
+            vec![443],
+            Some(probe(false, "EACCES")),
+            Some("restrictions_held".to_string()),
+        )
     }
 
     fn parity() -> serde_json::Value {
@@ -1063,7 +1124,12 @@ mod tests {
 
     #[test]
     fn a_run_without_a_run_end_probe_is_refused() {
-        let h = EnforcementHealthV1::landlock_active(4, vec![443], None);
+        let h = EnforcementHealthV1::landlock_active(
+            4,
+            vec![443],
+            None,
+            Some("restrictions_held".to_string()),
+        );
         assert!(
             h.landlock.restrict_self_confirmed,
             "the start-time fact is present"
@@ -1074,8 +1140,12 @@ mod tests {
     #[test]
     fn an_abi_that_cannot_express_the_restriction_is_refused() {
         for abi in [1, 2, 3] {
-            let h =
-                EnforcementHealthV1::landlock_active(abi, vec![443], Some(probe(false, "EACCES")));
+            let h = EnforcementHealthV1::landlock_active(
+                abi,
+                vec![443],
+                Some(probe(false, "EACCES")),
+                Some("restrictions_held".to_string()),
+            );
             assert_eq!(refusal(&h), "abi-cannot-express-restriction", "abi {abi}");
         }
     }
@@ -1083,10 +1153,20 @@ mod tests {
     #[test]
     fn weak_and_absent_block_signals_are_refused() {
         for errno in ["ECONNREFUSED", "ETIMEDOUT", "", "eacces", "EACCES "] {
-            let h = EnforcementHealthV1::landlock_active(4, vec![443], Some(probe(false, errno)));
+            let h = EnforcementHealthV1::landlock_active(
+                4,
+                vec![443],
+                Some(probe(false, errno)),
+                Some("restrictions_held".to_string()),
+            );
             assert_eq!(refusal(&h), "probe-signal-too-weak", "errno {errno:?}");
         }
-        let h = EnforcementHealthV1::landlock_active(4, vec![443], Some(probe(true, "EACCES")));
+        let h = EnforcementHealthV1::landlock_active(
+            4,
+            vec![443],
+            Some(probe(true, "EACCES")),
+            Some("restrictions_held".to_string()),
+        );
         assert_eq!(refusal(&h), "probe-reached-listener");
     }
 
@@ -1152,6 +1232,51 @@ mod tests {
             run.seal.assay_seal_scope, h.scope,
             "the seal scope is the record's, not a constant"
         );
+    }
+
+    /// A record from before the shedding measurement existed does not seal.
+    ///
+    /// This is the whole point of the gate and it is deliberately a *fixture*, not a hand-built
+    /// struct: every enforcement-health record written before this field existed looks exactly like
+    /// this, and each one would otherwise have sealed with `aeeStillArmed: true` resting on an
+    /// invariant CVE-2024-42318 shows has an exception.
+    #[test]
+    fn a_record_that_never_measured_shedding_does_not_seal() {
+        let raw = include_str!(
+            "../tests/fixtures/enforcement_health/v1/active_probe_shedding_unmeasured.json"
+        );
+        let h: EnforcementHealthV1 = serde_json::from_str(raw).expect("fixture parses");
+        let err = build_sealed_run(
+            &h,
+            &env_from_parity(),
+            &[],
+            "2026-08-05T00:00:00Z",
+            &DropAccounting::SynchronousProbe,
+        )
+        .expect_err("a record with no measurement must not seal");
+        assert_eq!(err.code(), "restriction-shedding-not-established");
+        assert!(err.to_string().contains("not measured"), "{err}");
+    }
+
+    /// The two non-held outcomes are refused for their own reasons, and `inconclusive` is the one
+    /// that matters: a probe that could not run has found nothing, which is not a finding that
+    /// restrictions hold. Treating it as one is the fail-open the three-valued outcome exists for.
+    #[test]
+    fn a_shed_or_inconclusive_measurement_does_not_seal() {
+        for value in ["restrictions_shed", "inconclusive"] {
+            let mut h = healthy();
+            h.landlock.restriction_shedding = Some(value.to_string());
+            let err = build_sealed_run(
+                &h,
+                &env_from_parity(),
+                &[],
+                "2026-08-05T00:00:00Z",
+                &DropAccounting::SynchronousProbe,
+            )
+            .expect_err("must not seal");
+            assert_eq!(err.code(), "restriction-shedding-not-established");
+            assert!(err.to_string().contains(value), "{err}");
+        }
     }
 
     /// The committed June carrier fixture is an applied-ruleset shape, and it seals. That is the

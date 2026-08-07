@@ -133,10 +133,47 @@ pub(super) async fn run_child(
                 } else {
                     None
                 };
+                // Measured only when a seal is being asked for. The probe forks twice and runs the
+                // CVE-2024-42318 sequence against a throwaway pair; there is no reason to pay for
+                // it on a run that will not carry the answer, and a field nobody reads is a field
+                // that drifts.
+                let shedding = if args.aee_seal.is_some() {
+                    match crate::backend::landlock_shedding_probe() {
+                        Ok(outcome) => {
+                            if !args.quiet
+                                && outcome != crate::backend::SheddingProbeOutcome::RestrictionsHeld
+                            {
+                                eprintln!(
+                                    "WARN: aee-seal: restriction-shedding probe returned {:?}; this run cannot claim still-armed",
+                                    outcome
+                                );
+                            }
+                            Some(outcome.label().to_string())
+                        }
+                        Err(e) => {
+                            if !args.quiet {
+                                eprintln!(
+                                    "WARN: aee-seal: restriction-shedding probe could not run: {e}"
+                                );
+                            }
+                            Some(
+                                crate::backend::SheddingProbeOutcome::Inconclusive("probe_error")
+                                    .label()
+                                    .to_string(),
+                            )
+                        }
+                    }
+                } else {
+                    None
+                };
                 let health = crate::enforcement_health_v1::EnforcementHealthV1::landlock_active(
-                    abi, ports, probe,
+                    abi,
+                    ports.clone(),
+                    probe,
+                    shedding,
                 );
                 write_enforcement_health_v1(args, &health)?;
+                maybe_emit_aee_seal(args, &health, &ports);
             }
             Err(_) => {
                 let health = crate::enforcement_health_v1::EnforcementHealthV1::landlock_failed(
@@ -225,6 +262,120 @@ pub(super) async fn run_child(
 /// Write the `assay.enforcement_health.v1` artifact when `--enforcement-health` is set. Fail-closed:
 /// a requested artifact that cannot be written is an error so the caller does not exit successfully
 /// in a state where the evidence is absent on disk (the same rule v0 enforces).
+/// Build the network-posture object the seal binds to, with its declared digest.
+///
+/// The order is the trap ADR-045 names under *Field interpretation*: `aeePostureDigest` must equal
+/// the digest the posture object *declares*, which is computed over the object **before** the
+/// `digest` member is inserted. `run_binding` then hashes the whole object *including* that member.
+/// Two different digests over the same object, and building them in the wrong order yields a seal
+/// that is refused for a reason bearing no resemblance to its cause.
+#[cfg(target_os = "linux")]
+fn build_network_posture(allowed_ports: &[u16]) -> serde_json::Value {
+    let mut posture = serde_json::json!({
+        "mode": "deny-default",
+        "mechanism": "landlock",
+        "scope": crate::enforcement_health_v1::SCOPE_TCP_CONNECT_LANDLOCK_PORT,
+        "allowedConnectTcpPorts": allowed_ports,
+    });
+    let declared = crate::aee_seal::digest_json_public(&posture);
+    posture["digest"] = serde_json::json!({ "sha256": declared });
+    posture
+}
+
+/// Emit the substrate-signed run-end seal, if the caller asked for one.
+///
+/// Called from the enforcing process at the moment the health record is written, which is the only
+/// place `aeeStillArmed` can mean anything: a later command signing a health artifact off disk would
+/// be claiming a property of a moment that has passed.
+///
+/// Every failure here is loud and non-fatal to the workload. A run that could not seal is a run
+/// without a seal, never a run with a weaker one.
+#[cfg(target_os = "linux")]
+fn maybe_emit_aee_seal(
+    args: &SandboxArgs,
+    health: &crate::enforcement_health_v1::EnforcementHealthV1,
+    allowed_ports: &[u16],
+) {
+    let (Some(ctx_path), Some(key_path), Some(out_path)) = (
+        args.aee_run_context.as_ref(),
+        args.aee_seal_key.as_ref(),
+        args.aee_seal.as_ref(),
+    ) else {
+        return;
+    };
+
+    let warn = |what: &str| {
+        if !args.quiet {
+            eprintln!("WARN: aee-seal: {what}; no seal was written");
+        }
+    };
+
+    let ctx_raw = match std::fs::read_to_string(ctx_path) {
+        Ok(r) => r,
+        Err(e) => return warn(&format!("run context unreadable: {e}")),
+    };
+    let context = match crate::aee_run_context::AeeRunContext::parse(&ctx_raw) {
+        Ok(c) => c,
+        Err(e) => return warn(&e.to_string()),
+    };
+
+    let key_raw = match std::fs::read_to_string(key_path) {
+        Ok(r) => r,
+        Err(e) => return warn(&format!("key descriptor unreadable: {e}")),
+    };
+    let key = match crate::aee_seal_key::load(key_path, &key_raw) {
+        Ok(k) => k,
+        Err(e) => return warn(&e.to_string()),
+    };
+
+    let env = context.into_environment(build_network_posture(allowed_ports));
+    let sealed_at = crate::aee_seal::now_rfc3339_utc();
+
+    // `SynchronousProbe`: the only sealed observation is the run-end probe itself, obtained with no
+    // queue between capture and the seal builder. Its basis is `declared`, not `checked`, and the
+    // payload says so -- the zero is this producer asserting its topology has no lossy channel.
+    let run = match crate::aee_seal::build_sealed_run(
+        health,
+        &env,
+        &[],
+        &sealed_at,
+        &crate::aee_seal::DropAccounting::SynchronousProbe,
+    ) {
+        Ok(r) => r,
+        Err(e) => return warn(&format!("not seal-eligible: {e}")),
+    };
+
+    let envelope = match crate::aee_seal_envelope::sign_seal(
+        &run.seal,
+        key.signing_key(),
+        key.keyid(),
+        key.role(),
+    ) {
+        Ok(e) => e,
+        Err(e) => return warn(&format!("signing failed: {e}")),
+    };
+
+    let doc = match serde_json::to_string_pretty(&envelope) {
+        Ok(d) => d,
+        Err(e) => return warn(&format!("envelope not serializable: {e}")),
+    };
+    if let Some(parent) = out_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match std::fs::write(out_path, doc + "\n") {
+        Ok(()) => {
+            if !args.quiet {
+                eprintln!(
+                    "aee-seal: wrote {} (keyid {})",
+                    out_path.display(),
+                    key.keyid()
+                );
+            }
+        }
+        Err(e) => warn(&format!("could not write {}: {e}", out_path.display())),
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn write_enforcement_health_v1(
     args: &SandboxArgs,

@@ -208,6 +208,30 @@ pub struct SandboxArgs {
     #[arg(long = "enforcement-health")]
     pub enforcement_health: Option<PathBuf>,
 
+    // Six digests -- subject, substrate, corpus, catch policy, observation vocabulary, run entropy
+    // -- supplied by whoever owns the AEE run. The sandbox is one enforcement episode inside a run,
+    // not the run, and it cannot derive them; the seventh input, the network posture, is the one it
+    // genuinely observes and is built here rather than carried (#2093).
+    //
+    // `//`, not `///`. A long doc comment here flips clap into multi-line help for the whole
+    // command, which moves `[possible values]` onto its own line and breaks `--profile-format`'s
+    // advertisement. That is the same mistake this repo made on `doctor --format` earlier the same
+    // day: why a flag exists belongs next to the code, not in `--help`.
+    /// AEE run context for the seal
+    #[arg(long, requires = "aee_seal_key", requires = "aee_seal")]
+    pub aee_run_context: Option<PathBuf>,
+
+    // The key signs the run-end seal inside this process, at the moment enforcement is still in
+    // force. A later command signing a health artifact off disk would claim a past moment.
+    /// Substrate observation key descriptor
+    #[arg(long, requires = "aee_run_context")]
+    pub aee_seal_key: Option<PathBuf>,
+
+    // Absent, no seal is emitted and the run is unchanged.
+    /// Where to write the signed seal envelope
+    #[arg(long, requires = "aee_run_context")]
+    pub aee_seal: Option<PathBuf>,
+
     /// Strict env mode: only safe base vars + explicit allows
     #[arg(long = "env-strict")]
     pub env_strict: bool,
