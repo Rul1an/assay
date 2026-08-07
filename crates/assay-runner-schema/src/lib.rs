@@ -12,12 +12,16 @@
 //!   archive member yet)
 //! - `assay.runner.archive_manifest.v0` (manifest semantics only; archive
 //!   assembly mechanics live in `assay-runner-core` since Phase 2D Slice 2)
+//! - `assay.runner.claim_support_parity.v0` (the fidelity gate's decisions per
+//!   claim kind, published as a table so a rule in another language can be
+//!   pinned against it rather than approximate it)
 //!
 //! The crate is `publish = false` until Slice 7 (repository extraction). It
 //! has no eBPF, monitor, CLI, fixture, filesystem-I/O, or projection-logic
 //! code; it is the data half of the runner v0 contract layer.
 
 mod archive_manifest;
+mod claim_parity;
 mod correlation;
 mod coverage;
 mod fidelity;
@@ -29,6 +33,11 @@ pub use archive_manifest::{
     ArchiveFile, ArchiveManifest, ARCHIVE_MANIFEST_SCHEMA, CAPABILITY_SURFACE_PATH,
     CORRELATION_REPORT_PATH, EVENTS_PATH, KERNEL_LAYER_PATH, MANIFEST_PATH,
     OBSERVATION_HEALTH_PATH, POLICY_LAYER_PATH, SDK_LAYER_PATH,
+};
+pub use claim_parity::{
+    all_claim_kinds, all_verdicts, claim_support, claim_support_table, permissiveness,
+    ClaimSupport, ClaimSupportParityTable, ClaimSupportRow, ClaimSupportScope,
+    CLAIM_SUPPORT_PARITY_SCHEMA,
 };
 pub use correlation::{
     BindingWindow, CorrelationBinding, CorrelationReport, CorrelationReportError,
