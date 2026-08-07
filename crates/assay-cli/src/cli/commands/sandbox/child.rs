@@ -340,6 +340,10 @@ fn maybe_emit_aee_seal(
         &[],
         &sealed_at,
         &crate::aee_seal::DropAccounting::SynchronousProbe,
+        // The one path this command observes from. Passed rather than assumed inside the builder,
+        // because the consumer has always treated the path as one of a set -- a second vantage is
+        // now another argument here, not an edit to the seal library.
+        crate::aee_seal::COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
     ) {
         Ok(r) => r,
         Err(e) => return warn(&format!("not seal-eligible: {e}")),
