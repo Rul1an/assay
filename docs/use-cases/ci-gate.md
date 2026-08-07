@@ -100,7 +100,7 @@ tests:
         tool: authenticate
       - type: before
         first: authenticate
-        then: [get_data, update_data]
+        then: get_data
 
   # Block dangerous tools
   - id: safety

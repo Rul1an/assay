@@ -137,3 +137,43 @@ Limits the number of steps in the trace.
 - type: trace_max_steps
   max: 8
 ```
+
+#### `args_valid`
+Checks arguments against a policy. Note what this does **not** do: it evaluates the `test_args`
+you supply here, not the recorded trace. The evaluator calls this unit-test mode and hands it an
+empty episode. To assert over a real trace, use the `args_valid` metric under `expected:`.
+```yaml
+- type: args_valid
+  tool: "transfer_funds"
+  test_args: { amount: 100 }   # optional
+  policy: { ... }              # optional
+  expect: "pass"               # optional
+```
+
+#### `sequence_valid`
+Checks a supplied tool-call ordering against a sequence policy. Like `args_valid` above it reads
+`test_trace_raw`, not the recorded trace. `policy` must carry a non-empty `regex`, or the
+assertion cannot fail and is refused. A `test_trace` field also exists and is **not** evaluated;
+use `test_trace_raw`.
+```yaml
+- type: sequence_valid
+  test_trace_raw:              # optional
+    - tool: "Authenticate"
+      args: {}
+  policy: { ... }              # optional
+  expect: "pass"               # optional
+```
+
+#### `tool_blocklist`
+Checks the supplied `test_tool_calls` against a blocklist policy, not the recorded trace.
+`policy` must carry a `blocked` array of strings, or the assertion cannot fail and is refused.
+```yaml
+- type: tool_blocklist
+  test_tool_calls: ["delete_all"]   # optional
+  policy: { ... }                   # optional
+  expect: "pass"                    # optional
+```
+
+> Every field above marked optional is optional to the parser, not to the check. An assertion
+> whose fields leave it unable to fail is refused by `assay validate`, and by `assay run
+> --deny-ineffective-assertions` at load. See #1949.
