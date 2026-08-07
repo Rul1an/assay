@@ -370,15 +370,29 @@ pub struct PayloadSessionFinding {
     pub kind: String,
     /// `held`, `violated` or `not_exercised`. Three values rather than a boolean, because a rule
     /// that never got to decide is not a rule that passed.
+    ///
+    /// The strings are `assay_core::sequence_eval::RuleOutcome::label()`, which is documented there
+    /// as an interface rather than a `Debug` view. This crate cannot call it -- `assay-core`
+    /// depends on `assay-evidence` through `assay-adapter-api`, so the edge would cycle -- so
+    /// `tests/session_finding_vocabulary_parity.rs` is the sanctioned fallback, the same shape
+    /// `tests/claim_gate_parity.rs` already uses for the claim gate.
+    ///
+    /// The type is `String` rather than an enum here on purpose: an evidence reader must be able to
+    /// deserialise a record written by a newer producer that added a fourth outcome, rather than
+    /// failing on it. The parity test is what keeps the three known spellings honest.
     pub outcome: String,
     /// The call indices this finding ranges over.
+    ///
+    /// `u64` rather than the producer's `usize`: those are in-memory indices, and this is a wire
+    /// format re-read by third parties on other machines, where platform width is not a property
+    /// worth inheriting.
     ///
     /// Meaningful relative to the call sequence the finding was computed over, and stated here
     /// rather than implied: these are positions, not content addresses, so they identify calls
     /// only alongside the run this event belongs to. Binding a span to event content hashes would
     /// make the record self-contained and is deliberately not done yet — the producer does not
     /// know those hashes at evaluation time, and inventing the link would outrun the layer.
-    pub spanned: Vec<usize>,
+    pub spanned: Vec<u64>,
     /// Whether the trace this was evaluated against was finished (`complete`) or may still grow
     /// (`partial`).
     ///
@@ -386,6 +400,10 @@ pub struct PayloadSessionFinding {
     /// on a finished run and undecided on a live one, and #2112 established that the difference is
     /// invisible in the rules and the trace — it is only in who is asking. A consumer that cannot
     /// see this field would have to guess.
+    ///
+    /// The strings are `assay_core::sequence_eval::TraceExtent::label()`, added with this ADR
+    /// because the enum had no rendering before it, and pinned by the same parity test as
+    /// `outcome`.
     pub extent: String,
     /// Why, in the producer's words. Present for `violated` and `not_exercised`; a held rule needs
     /// no prose, and inventing one would invite readers to parse it.
