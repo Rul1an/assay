@@ -22,6 +22,7 @@ pub mod providers;
 pub mod quarantine;
 pub mod redaction;
 pub mod render_safety;
+pub mod sequence_eval;
 
 pub mod doctor;
 pub mod validate;
