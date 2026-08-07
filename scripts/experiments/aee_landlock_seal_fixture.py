@@ -370,7 +370,9 @@ def case_statement(name: str) -> dict[str, Any]:
     elif name == "key-outside-validity-window":
         set_scopes(stmt, [trusted_scope(STRUCTURAL_KEY, validUntil=KEY_EXPIRED_UNTIL)])
     elif name == "posture-digest-is-run-binding-input":
-        # ADR-045 line 476 requires this control by name. `aeePostureDigest` must equal the carried
+        # ADR-045 requires this control by name:
+        # "`aeePostureDigest` confused with the run-binding digest of the full `networkPosture` object".
+        # `aeePostureDigest` must equal the carried
         # `networkPosture.digest.sha256`; the run-binding input is the digest of the whole carried
         # object, which -- because the digest member is inserted after that member is computed -- is
         # a strictly larger object and a different value. Two plausible readings, one correct, and
