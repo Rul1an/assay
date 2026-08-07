@@ -19,18 +19,71 @@ CRATES=(
   "assay-common"
   "assay-registry"
   "assay-canonical"
+  # Before assay-evidence, not after it. `assay-evidence` dev-depends on this crate for
+  # `tests/claim_gate_parity.rs` (#2084), and `cargo publish` resolves dev-dependencies from the
+  # registry like any other. With this crate at position 10, v4.0.0 failed here with "failed to
+  # select a version for the requirement `assay-runner-schema = ^4.0.0`" -- and because this script
+  # is `set -e`, the nine crates after it never published at all.
+  "assay-runner-schema"
   "assay-evidence"
   "assay-core"
   "assay-metrics"
   "assay-policy"
   "assay-mcp-server"
   "assay-monitor"
-  "assay-runner-schema"
   "assay-runner-linux"
   "assay-runner-core"
   "assay-sim"
   "assay-cli"
 )
+
+# The list above is hand-kept, so it is checked against the manifests before anything is published.
+#
+# A publish order is a topological sort someone wrote by hand, and v4.0.0 is what happens when the
+# graph moves and the list does not: a dev-dependency added in #2084 put `assay-runner-schema` ahead
+# of `assay-evidence` in the graph while it stayed six places behind it here. CLAUDE.md documents
+# that edge. Nothing compared the two.
+#
+# Dev-dependencies count, and that is the point: the edge that broke this was dev-only, and
+# `cargo publish` does not care -- a versioned dev-dependency must resolve from the registry.
+#
+# Checked before the first upload, because publishing is not reversible. An order discovered to be
+# wrong at crate three has already put two crates on crates.io that cannot be taken back.
+validate_publish_order() {
+  python3 - "${CRATES[@]}" <<'ORDER_CHECK'
+import pathlib, re, sys
+
+order = sys.argv[1:]
+position = {name: i for i, name in enumerate(order)}
+problems = []
+
+for name in order:
+    manifest = pathlib.Path("crates") / name / "Cargo.toml"
+    if not manifest.is_file():
+        problems.append(f"{name}: no crates/{name}/Cargo.toml")
+        continue
+    text = manifest.read_text(encoding="utf-8")
+    # Every internal dependency this manifest names, in any dependency table. A mention in a comment
+    # cannot match: the name has to start a key.
+    for dep in sorted(set(re.findall(r"^(assay-[a-z0-9-]+)\s*=", text, re.M))):
+        if dep == name or dep not in position:
+            continue
+        if position[dep] > position[name]:
+            problems.append(
+                f"{name} (position {position[name]}) depends on {dep} "
+                f"(position {position[dep]}), which publishes later and will not resolve"
+            )
+
+if problems:
+    print("publish order does not respect the dependency graph:", file=sys.stderr)
+    for p in problems:
+        print(f"  - {p}", file=sys.stderr)
+    sys.exit(1)
+print(f"publish order respects the dependency graph ({len(order)} crates).")
+ORDER_CHECK
+}
+
+validate_publish_order
 
 CRATESIO_PUBLISH_WAIT_ATTEMPTS="${CRATESIO_PUBLISH_WAIT_ATTEMPTS:-36}"
 CRATESIO_PUBLISH_WAIT_DELAY_SECONDS="${CRATESIO_PUBLISH_WAIT_DELAY_SECONDS:-10}"
