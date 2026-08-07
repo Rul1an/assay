@@ -676,6 +676,62 @@ def derive_gating_inventory() -> tuple[tuple[str, str, int, int], ...]:
     )
 
 
+# The raw syscall interface and the Landlock crate, which is narrower than "calls libc" and is
+# meant to be. A file calling `libc::open` or `libc::kill` is invoking a syscall too, so this does
+# not find every syscall in the tree; it finds the ones with no libc wrapper, which in this
+# repository is where the kernel-version-dependent security mechanisms live -- Landlock, `openat2`,
+# `pidfd_*`. `libc::major` and `libc::makedev` are arithmetic on `dev_t` and would be gated for
+# nothing.
+#
+# `SYS_` is matched on a word boundary rather than as `libc::SYS_` because
+# `use libc::{syscall, SYS_landlock_restrict_self};` then calls both unqualified, which is this
+# repository's own import style and defeated the qualified form in one rustfmt-clean line. The
+# boundary is spelled as a character class: `\b` matches nothing under the `git grep -E` on macOS
+# while working under GNU grep in CI, so a `\b` here would make this assertion silently vacuous
+# in the pre-commit hook and only bite after merge.
+KERNEL_SYSCALL_MARKER = r"libc::syscall\(|(^|[^A-Za-z0-9_])SYS_[A-Za-z]|(^|[^A-Za-z0-9_])landlock::"
+
+
+def derive_kernel_surface() -> tuple[str, ...]:
+    """Tracked Rust files that reach the kernel through the raw syscall interface.
+
+    Derived, not listed, for the reason the fix for CVE-2024-42318 gives. Landlock
+    lost its restrictions on `KEYCTL_SESSION_TO_PARENT` because it implemented
+    `cred_prepare` and not `cred_transfer`, and the accepted fix (`39705a6c29f8`)
+    did not add a second implementation -- it made `hook_cred_prepare()` call
+    `hook_cred_transfer()` so the two were less likely to diverge later. A hand-kept
+    list of kernel-touching paths beside the actual kernel surface is that same
+    shape. It is also not expressible as a crate-level prefix: this surface crosses
+    `assay-cli`, `assay-common` and `assay-runner-linux`, and no set of directory
+    prefixes selects it without swallowing three whole crates. The gate itself is
+    still exact paths in `all_gate_paths`; what is derived is the completeness
+    check over them, which is the part a list cannot do for itself.
+
+    Read from the index rather than the working tree, so this answers the same
+    question as `git ls-files` and `--emit-gating-map` stays reproducible.
+
+    Scope, stated because the marker is doing real work and reads narrower than it
+    sounds. Files calling `libc::open`, `libc::kill` or `libc::ioctl` invoke
+    syscalls too and are not found here: `monitor_next/syscall_linux.rs` is the
+    live example, and it is ungated. What this finds is the syscalls with no libc
+    wrapper, plus the Landlock crate, which is where the kernel-version-dependent
+    security mechanisms sit in this repository. A floor under the gating map, and
+    a low one -- not a proof that the map is complete.
+    """
+    root = Path(__file__).resolve().parents[2]
+    completed = subprocess.run(
+        ["git", "-C", str(root), "grep", "--cached", "-l", "-I", "-E", KERNEL_SYSCALL_MARKER, "--", "*.rs"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    # `git grep` exits 1 when nothing matches, which is a real answer and not an error.
+    if completed.returncode not in (0, 1):
+        raise RuntimeError(f"git grep failed: {completed.stderr.strip()}")
+    return tuple(sorted(path for path in completed.stdout.split("\n") if path))
+
+
 GATING_MAP_DOC = "scripts/ci/assay_runner_gating_map.txt"
 
 
@@ -2078,6 +2134,7 @@ def self_test() -> None:
     _test_gating_map_is_current()
     _test_prefix_gated_surfaces_keep_their_coverage()
     _test_declared_gate_surfaces_exist()
+    _test_the_syscall_surface_is_gated()
     _test_run_check_executes()
     _test_run_check_consults_the_override()
     _test_content_tree_comparison()
@@ -2378,6 +2435,40 @@ def _test_prefix_gated_surfaces_keep_their_coverage() -> None:
     assert uncovered == [
         "crates/assay-cli/src/cli/commands/runner_spike/",
     ], uncovered
+
+
+def _test_the_syscall_surface_is_gated() -> None:
+    """No file that invokes a syscall directly may classify `Gate.NONE`.
+
+    This is the check the gating map cannot perform on itself. The map lists only
+    files it gates -- `backend.rs` appeared in it zero times while holding the
+    Landlock wrappers -- so a kernel-calling file that classifies `NONE` produces
+    no line, changes no byte, and passes the drift check by construction. The map's
+    own header says a line that disappeared is a file that stopped being gated,
+    which catches removal from the gated set and cannot catch never having been
+    added to it.
+
+    So this asserts over the derived surface rather than over the map: the
+    denominator comes from the code, and the map has to cover it. An empty list is
+    the whole assertion. When it fails, the fix is to gate the named file in
+    `assay_runner_gated_paths.json`, not to add it here.
+
+    What this does not buy is content provenance. Gating a path requires a
+    delegated proof to exist; it does not bind that proof to the path's bytes,
+    which is `content_provenance_paths` and a separate list the proof-pack producer
+    also reads. Before this check, 34 of 118 gated files were already `unaddressed`
+    in the map; the paths gated alongside it are the same kind, so this is the
+    existing state of that surface rather than a new hole. Two consequences follow
+    and neither is hypothetical: a gate and a content binding are different claims
+    and only the first is made here, and an uncovered gated path means a reused
+    proof pack no longer credits a PR that touches it -- it needs one built at its
+    own head SHA, exactly as `Cargo.lock` already behaves.
+    """
+    ungated = [path for path in derive_kernel_surface() if classify_file(path)[0] is Gate.NONE]
+    assert ungated == [], (
+        "these files invoke a syscall directly and carry no delegated gate, so a change to "
+        f"kernel behaviour in them can merge without a proof on a real kernel: {ungated}"
+    )
 
 
 def _test_declared_gate_surfaces_exist() -> None:

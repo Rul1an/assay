@@ -91,7 +91,14 @@ repos:
         entry: python3 scripts/ci/assay_runner_lane_check.py --self-test
         language: system
         pass_filenames: false
-        files: ^(scripts/ci/assay_runner_lane_check\.py|scripts/ci/assay_runner_gated_paths\.json|\.github/workflows/assay-runner-lane-check\.yml|\.pre-commit-config\.yaml)$
+        # No `files:` filter, same reason as `runner-gating-map-drift` below. This
+        # used to list the four files that define the classifier, which was right
+        # while every assertion here read only those files. `_test_the_syscall_
+        # surface_is_gated` reads the whole tree, so the trigger list made it blind
+        # to the case it exists for: staging a new `.rs` that calls the kernel
+        # skipped the hook entirely. The CI leg cannot cover that either -- the lane
+        # workflow checks out the PR base on purpose, so a PR never runs this
+        # against its own tree.
 
       - id: docs-generated-drift-self-test
         name: Generated-docs drift check self-test
