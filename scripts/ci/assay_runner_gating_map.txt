@@ -99,8 +99,11 @@ all	unaddressed	runner workflow, CLI, cgroup, or workspace dependency surface re
 all	unaddressed	runner workflow, CLI, cgroup, or workspace dependency surface requires gates=all	Cargo.toml
 all	unaddressed	runner workflow, CLI, cgroup, or workspace dependency surface requires gates=all	crates/assay-cli/src/backend.rs
 all	unaddressed	runner workflow, CLI, cgroup, or workspace dependency surface requires gates=all	crates/assay-cli/src/cli/commands/runner_spike.rs
+all	unaddressed	runner workflow, CLI, cgroup, or workspace dependency surface requires gates=all	crates/assay-cli/src/cli/commands/sandbox/child.rs
 all	unaddressed	runner workflow, CLI, cgroup, or workspace dependency surface requires gates=all	crates/assay-cli/src/diagnostics/landlock_net_smoke.rs
 all	unaddressed	runner workflow, CLI, cgroup, or workspace dependency surface requires gates=all	crates/assay-cli/src/diagnostics/probes.rs
+all	unaddressed	runner workflow, CLI, cgroup, or workspace dependency surface requires gates=all	crates/assay-cli/src/landlock_check.rs
+all	unaddressed	runner workflow, CLI, cgroup, or workspace dependency surface requires gates=all	crates/assay-cli/src/landlock_net.rs
 all	unaddressed	runner workflow, CLI, cgroup, or workspace dependency surface requires gates=all	crates/assay-common/src/lib.rs
 all	unaddressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-cli/src/cli/commands/runner_spike/args.rs
 all	unaddressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-cli/src/cli/commands/runner_spike/cgroup.rs

@@ -155,6 +155,13 @@ Every rule that can still return `malformed` reads an `aee*` member, the envelop
 or the predicate structure. That is the property, not a coincidence of the current
 list.
 
+Read means interprets. Mutating a producer member inside an interception record
+does change `aeeObservedSet` and so can return `malformed`, because the observed
+set is a digest over payload bytes and commits to them opaquely. That is not a
+breach of the prefix rule: a consumer that ignores Assay vocabulary recomputes the
+identical digest and reaches the identical verdict, so there is no disagreement
+between consumers, which is the harm the rule names.
+
 Trust rejections (`structurally-valid-not-credited`):
 
 - the signing key is not in the consumer trust set;
@@ -175,7 +182,9 @@ Trust rejections (`structurally-valid-not-credited`):
 - `assaySealedAt` is not an RFC 3339 UTC instant.
 
 Everything from `assayDropProofModel` down is a policy verdict rather than a
-structural one, and all of it used to be filed above. ADR-045 states that
+structural one. Three of them used to be filed above; the rest were structural
+in the checker without this document ever saying so, and `assaySealScope` and
+`assayNonClaims` appear here for the first time. ADR-045 states that
 `assay`-prefixed members are producer vocabulary and must not alter AEE structural
 validity, and the checker was breaking its own rule: values only Assay defines
 decided whether an AEE record was well formed. This consumer's policy does read

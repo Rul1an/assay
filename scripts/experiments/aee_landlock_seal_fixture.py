@@ -146,8 +146,15 @@ PRODUCER_CREDIT_FIELDS = (
 # attack IDs is required under `substrate-runner` and not under `assembly-plane` (ADR-045, attack
 # attribution rules 2 and 3). Flipping the positive fixture from one legal value to the other, with
 # no other edit, used to turn a credited record into a malformed one.
+#
+# `assaySealScope` is here for a duller reason and was the gap this table shipped with. Its rule is
+# an `elif`: the `if` above it catches absent, empty and ill-typed alike and raises
+# `seal-scope-missing`, so all three generic mutations stop one branch short and the mismatch arm
+# below it is never reached. Reverting that arm to `PHASE_MALFORMED` left all four modes green.
+# Any non-empty string other than `SEAL_SCOPE` reaches it; the value here is arbitrary and legal.
 PRODUCER_CREDIT_ALTERNATE_VALUES: dict[str, tuple[str, ...]] = {
     "assayAttackRowAttributionSource": ("substrate-runner",),
+    "assaySealScope": ("filesystem_write_all",),
 }
 
 # Removal, distinguishable from setting the member to any value including `None`. A member set to
@@ -1000,10 +1007,17 @@ def run_producer_vocabulary_test() -> int:
 
     # The mutations above only reach members already in the tuple, so a producer member that gets a
     # new rule and no decision about its phase is invisible to them -- which is how six members sat
-    # structural for four slices. `validate` is therefore read back: every `assay`-prefixed member it
+    # structural for three slices. `validate` is therefore read back: every `assay`-prefixed member it
     # consults must be one this file has decided.
+    #
+    # Both quote styles, and digits and underscores in the name. The first version matched
+    # double-quoted literals only, which reads as a checked property and is not one: no formatter
+    # runs on this file, so quote style is a matter of what the last author typed, and switching one
+    # reference to single quotes walked a re-malformed rule straight past this guard. What it still
+    # does not cover is a member reached through a variable, a constant, or a callee --
+    # `inspect.getsource` returns this function's own body and nothing it calls.
     body = inspect.getsource(validate)
-    consulted = {name for name in re.findall(r'"(assay[A-Z][A-Za-z]*)"', body)} - set(PRODUCER_CREDIT_FIELDS)
+    consulted = {name for name in re.findall(r"""["'](assay[A-Z][A-Za-z0-9_]*)["']""", body)} - set(PRODUCER_CREDIT_FIELDS)
     # Not a payload member: the `_ext` block is consumer trust configuration carried beside the
     # records, not producer vocabulary inside a signed payload, so the prefix rule does not reach it.
     consulted -= {"assayLandlockSeal"}

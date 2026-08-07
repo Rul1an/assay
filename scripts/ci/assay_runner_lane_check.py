@@ -676,16 +676,24 @@ def derive_gating_inventory() -> tuple[tuple[str, str, int, int], ...]:
     )
 
 
-# A raw syscall invocation. Narrower than "calls libc" on purpose: `libc::major`, `libc::makedev`
-# and `libc::geteuid` are arithmetic and identity, and gating them would buy a delegated run for
-# code whose answer cannot vary by kernel. What is left is the surface where it can -- `libc::SYS_`
-# names a syscall number, and `libc::syscall(` is how this repository reaches Landlock and
-# `openat2`, both of which mean different things on different kernels.
-KERNEL_SYSCALL_MARKER = r"libc::syscall\(|libc::SYS_"
+# The raw syscall interface and the Landlock crate, which is narrower than "calls libc" and is
+# meant to be. A file calling `libc::open` or `libc::kill` is invoking a syscall too, so this does
+# not find every syscall in the tree; it finds the ones with no libc wrapper, which in this
+# repository is where the kernel-version-dependent security mechanisms live -- Landlock, `openat2`,
+# `pidfd_*`. `libc::major` and `libc::makedev` are arithmetic on `dev_t` and would be gated for
+# nothing.
+#
+# `SYS_` is matched on a word boundary rather than as `libc::SYS_` because
+# `use libc::{syscall, SYS_landlock_restrict_self};` then calls both unqualified, which is this
+# repository's own import style and defeated the qualified form in one rustfmt-clean line. The
+# boundary is spelled as a character class: `\b` matches nothing under the `git grep -E` on macOS
+# while working under GNU grep in CI, so a `\b` here would make this assertion silently vacuous
+# in the pre-commit hook and only bite after merge.
+KERNEL_SYSCALL_MARKER = r"libc::syscall\(|(^|[^A-Za-z0-9_])SYS_[A-Za-z]|(^|[^A-Za-z0-9_])landlock::"
 
 
 def derive_kernel_surface() -> tuple[str, ...]:
-    """Tracked Rust files that invoke a syscall directly.
+    """Tracked Rust files that reach the kernel through the raw syscall interface.
 
     Derived, not listed, for the reason the fix for CVE-2024-42318 gives. Landlock
     lost its restrictions on `KEYCTL_SESSION_TO_PARENT` because it implemented
@@ -693,17 +701,22 @@ def derive_kernel_surface() -> tuple[str, ...]:
     did not add a second implementation -- it made `hook_cred_prepare()` call
     `hook_cred_transfer()` so the two were less likely to diverge later. A hand-kept
     list of kernel-touching paths beside the actual kernel surface is that same
-    shape, and `classify_file` is prefix-shaped while this surface crosses crates:
-    `assay-cli`, `assay-common` and `assay-runner-linux` all reach the kernel, and
-    no set of prefixes selects them without swallowing three whole crates.
+    shape. It is also not expressible as a crate-level prefix: this surface crosses
+    `assay-cli`, `assay-common` and `assay-runner-linux`, and no set of directory
+    prefixes selects it without swallowing three whole crates. The gate itself is
+    still exact paths in `all_gate_paths`; what is derived is the completeness
+    check over them, which is the part a list cannot do for itself.
 
     Read from the index rather than the working tree, so this answers the same
     question as `git ls-files` and `--emit-gating-map` stays reproducible.
 
-    Scope, stated because the marker is doing real work: this finds direct syscall
-    invocation and nothing else. Landlock reached through a helper crate, or an
-    `ioctl` behind a wrapper, is kernel behaviour this will not see. It is a floor
-    under the gating map, not a proof that the map is complete.
+    Scope, stated because the marker is doing real work and reads narrower than it
+    sounds. Files calling `libc::open`, `libc::kill` or `libc::ioctl` invoke
+    syscalls too and are not found here: `monitor_next/syscall_linux.rs` is the
+    live example, and it is ungated. What this finds is the syscalls with no libc
+    wrapper, plus the Landlock crate, which is where the kernel-version-dependent
+    security mechanisms sit in this repository. A floor under the gating map, and
+    a low one -- not a proof that the map is complete.
     """
     root = Path(__file__).resolve().parents[2]
     completed = subprocess.run(
@@ -2443,10 +2456,13 @@ def _test_the_syscall_surface_is_gated() -> None:
     What this does not buy is content provenance. Gating a path requires a
     delegated proof to exist; it does not bind that proof to the path's bytes,
     which is `content_provenance_paths` and a separate list the proof-pack producer
-    also reads. The four files gated alongside this check join the 38 of 122
-    already-gated files that are `unaddressed` in the map, so this is the existing
-    state of that surface rather than a new hole -- but a gate and a content
-    binding are different claims and only the first is made here.
+    also reads. Before this check, 34 of 118 gated files were already `unaddressed`
+    in the map; the paths gated alongside it are the same kind, so this is the
+    existing state of that surface rather than a new hole. Two consequences follow
+    and neither is hypothetical: a gate and a content binding are different claims
+    and only the first is made here, and an uncovered gated path means a reused
+    proof pack no longer credits a PR that touches it -- it needs one built at its
+    own head SHA, exactly as `Cargo.lock` already behaves.
     """
     ungated = [path for path in derive_kernel_surface() if classify_file(path)[0] is Gate.NONE]
     assert ungated == [], (
