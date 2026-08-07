@@ -35,7 +35,6 @@ The `sequence_valid` metric checks that tools are called in the correct order. I
 |------|-------------|
 | `require` | Tool must be called at least once |
 | `before` | Tool A must precede Tool B |
-| `immediately_before` | Tool A must directly precede Tool B |
 | `blocklist` | These tools must never be called |
 | `allowlist` | Only these tools are allowed |
 | `count` | Limit call frequency |
@@ -61,34 +60,12 @@ rules:
     then: update_customer
 ```
 
-### Immediately Before
-
-```yaml
-rules:
-  - type: immediately_before
-    first: validate_input
-    then: execute_action
-```
-
 ### Blocklist
 
 ```yaml
 rules:
   - type: blocklist
-    tools:
-      - admin_delete
-      - system_reset
-```
-
-### Allowlist
-
-```yaml
-rules:
-  - type: allowlist
-    tools:
-      - get_customer
-      - update_customer
-      - send_email
+    pattern: admin_
 ```
 
 ### Count

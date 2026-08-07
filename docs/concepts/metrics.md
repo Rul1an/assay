@@ -183,7 +183,6 @@ tests:
 |------|-------------|
 | `require` | Tool must be called at least once |
 | `before` | Tool A must precede Tool B |
-| `immediately_before` | Tool A must directly precede Tool B |
 | `blocklist` | These tools must never be called |
 | `allowlist` | Only these tools are allowed |
 | `count` | Limit how many times a tool can be called |

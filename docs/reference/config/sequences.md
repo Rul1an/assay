@@ -81,10 +81,7 @@ These tools must never be called.
 ```yaml
 rules:
   - type: blocklist
-    tools:
-      - admin_delete
-      - system_reset
-      - drop_database
+    pattern: admin_delete
 ```
 
 | Trace | Result |
@@ -97,10 +94,7 @@ rules:
 ```yaml
 rules:
   - type: blocklist
-    tools:
-      - admin_*
-      - system_*
-      - *_dangerous
+    pattern: admin_
 ```
 
 ---
@@ -292,13 +286,14 @@ rules:
     then: GetPatientRecord
 
   # Log all access
-  - type: immediately_before
-    first: GetPatientRecord
+  - type: after
+    trigger: GetPatientRecord
     then: LogAccess
+    within: 1
 
   # No admin tools
   - type: blocklist
-    tools: [admin_*, system_override]
+    pattern: admin_
 ```
 
 ### Agent Handoffs: Multi-Agent
@@ -308,7 +303,7 @@ rules:
   # Router must run first
   - type: before
     first: RouterAgent
-    then: [SpecialistA, SpecialistB, SpecialistC]
+    then: SpecialistA
 
   # Only one specialist per request
   - type: count
@@ -373,7 +368,7 @@ Begin with `blocklist` and `require`, then add `before` rules.
 ```yaml
 rules:
   - type: blocklist
-    tools: [admin_*, dangerous_*]
+    pattern: admin_
   - type: require
     tool: Authenticate
 ```
@@ -402,9 +397,7 @@ Create traces that *should* fail to verify your rules catch violations.
 |-----------|-----------------|-----------------|
 | `require` | `tool` | — |
 | `before` | `first`, `then` | — |
-| `immediately_before` | `first`, `then` | — |
 | `blocklist` | `pattern` | — |
-| `allowlist` | `tools` | — |
 | `max_calls` | `tool`, `max` | — |
 | `eventually` | `tool`, `within` | — |
 | `never_after` | `trigger`, `forbidden` | — |
