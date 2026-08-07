@@ -347,6 +347,7 @@ mod tests {
             &[],
             "2026-08-05T00:00:00Z",
             &DropAccounting::SynchronousProbe,
+            crate::aee_seal::COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
         )
         .expect("seal-eligible")
         .seal

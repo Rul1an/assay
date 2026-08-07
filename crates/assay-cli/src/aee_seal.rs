@@ -16,6 +16,13 @@
 use crate::enforcement_health_v1::{EnforcementHealthV1, Mechanism, Probe, Status};
 
 /// The collection path this slice covers. ADR-045 chose Option C: Landlock first, proxy later.
+/// The Landlock connect path. One value of a set, not the set.
+///
+/// This is what `assay sandbox` passes today. It is a constant rather than a literal so a caller
+/// names a path this crate recognises, and it is no longer read inside the emit functions: the
+/// consumer side has always treated the path as one of a set — `TrustedObservationKey` carries
+/// `collection_paths: Vec<String>` and `check_substrate_scope` asks `contains(&path)` — while the
+/// producer could only ever name one. That asymmetry was a capability gap, not a design position.
 pub const COLLECTION_PATH_LANDLOCK_TCP_CONNECT: &str = "landlock-tcp-connect";
 /// AEE draft version this payload is shape-compatible with. Not a conformance claim.
 pub const AEE_VERSION: &str = "0.7";
@@ -376,14 +383,18 @@ pub fn run_binding(env: &ObservationEnvironment) -> Result<String, NotSealEligib
 /// The probe becomes a record rather than staying a field in a health artifact so that it travels:
 /// a field in a side artifact reaches no consumer at all. That is the whole of the claim. It does
 /// not establish the probe's position in the run — see `observed_set`.
-pub fn probe_examination_record(probe: &Probe, run_binding: &str) -> ObservationRecord {
+pub fn probe_examination_record(
+    probe: &Probe,
+    run_binding: &str,
+    collection_path: &str,
+) -> ObservationRecord {
     ObservationRecord {
         payload: serde_json::json!({
             "aeeKind": "examination",
             "aeeVersion": AEE_VERSION,
             "aeeRunBinding": run_binding,
             "aeeMethod": "intercepted",
-            "assayCollectionPath": COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
+            "assayCollectionPath": collection_path,
             "assayProbeTransport": probe.transport,
             "assayProbeAction": probe.blocked_action,
             "assayProbePort": probe.blocked_port,
@@ -577,6 +588,7 @@ pub fn build_sealed_run(
     prior_records: &[ObservationRecord],
     sealed_at: &str,
     drop_accounting: &DropAccounting,
+    collection_path: &str,
 ) -> Result<SealedRun, NotSealEligible> {
     let probe = seal_eligibility(health)?;
     if !is_rfc3339_utc(sealed_at) {
@@ -603,7 +615,10 @@ pub fn build_sealed_run(
         .to_string();
 
     let mut records = prior_records.to_vec();
-    records.push(probe_examination_record(probe, &rb));
+    // The seal's path, not a constant: the examination record and the seal it is sealed into
+    // describe the same vantage, so one value flows to both. Passing them separately would let a
+    // producer emit a record and a seal that disagree about which path observed the run.
+    records.push(probe_examination_record(probe, &rb, collection_path));
 
     drop_accounting.check()?;
     let observed = observed_set(&records)?;
@@ -621,7 +636,7 @@ pub fn build_sealed_run(
             aee_observed_set: observed,
             aee_observed_attacks: Vec::new(),
             assay_observed_labels: vec![observed_label(probe)],
-            assay_collection_path: COLLECTION_PATH_LANDLOCK_TCP_CONNECT.to_string(),
+            assay_collection_path: collection_path.to_string(),
             assay_sealed_at: sealed_at.to_string(),
             assay_source_schema: health.schema.clone(),
             assay_seal_scope: health.scope.clone(),
@@ -690,6 +705,7 @@ mod tests {
             &[],
             "2026-08-05T00:00:00Z",
             &DropAccounting::SynchronousProbe,
+            COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
         )
         .expect_err("must refuse")
         .code()
@@ -726,6 +742,7 @@ mod tests {
             &[],
             "2026-08-05T00:00:00Z",
             &DropAccounting::SynchronousProbe,
+            COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
         )
         .unwrap();
         assert_eq!(
@@ -755,7 +772,8 @@ mod tests {
                     &env,
                     &[],
                     "2026-08-05T00:00:00Z",
-                    &DropAccounting::SynchronousProbe
+                    &DropAccounting::SynchronousProbe,
+                    COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
                 )
                 .is_err(),
                 "a posture that declares no usable digest must not seal"
@@ -824,6 +842,7 @@ mod tests {
             &[],
             "2026-08-05T00:00:00Z",
             &DropAccounting::SynchronousProbe,
+            COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
         )
         .unwrap();
         let probe_rec = run
@@ -858,6 +877,7 @@ mod tests {
             &prior,
             "2026-08-05T00:00:00Z",
             &DropAccounting::SynchronousProbe,
+            COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
         )
         .expect("an interception must not block the seal");
         assert_eq!(run.records.len(), 2);
@@ -882,6 +902,7 @@ mod tests {
             &[],
             "2026-08-05T00:00:00Z",
             &lossy,
+            COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
         )
         .expect_err("a lost observation cannot carry zero");
         assert_eq!(err.code(), "observations-lost");
@@ -893,7 +914,8 @@ mod tests {
                 &env_from_parity(),
                 &[],
                 "2026-08-05T00:00:00Z",
-                &empty
+                &empty,
+                COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
             )
             .expect_err("no channels proves nothing")
             .code(),
@@ -909,6 +931,7 @@ mod tests {
             &[],
             "2026-08-05T00:00:00Z",
             &clean,
+            COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
         )
         .expect("all counters zero");
         assert_eq!(
@@ -935,6 +958,7 @@ mod tests {
             &[],
             "2026-08-05T12:34:56Z",
             &DropAccounting::SynchronousProbe,
+            COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
         )
         .unwrap();
         let s = &run.seal;
@@ -993,6 +1017,7 @@ mod tests {
             &[],
             "2026-08-05T00:00:00Z",
             &DropAccounting::SynchronousProbe,
+            COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
         )
         .unwrap();
         let value = serde_json::to_value(&run.seal).unwrap();
@@ -1043,6 +1068,7 @@ mod tests {
             &[],
             "2026-08-05T00:00:00Z",
             &DropAccounting::SynchronousProbe,
+            COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
         )
         .unwrap();
         let e = run
@@ -1099,7 +1125,8 @@ mod tests {
                     &env_from_parity(),
                     &[],
                     bad,
-                    &DropAccounting::SynchronousProbe
+                    &DropAccounting::SynchronousProbe,
+                    COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
                 )
                 .is_err(),
                 "sealed_at {bad:?} must be refused"
@@ -1112,7 +1139,8 @@ mod tests {
                     &env_from_parity(),
                     &[],
                     good,
-                    &DropAccounting::SynchronousProbe
+                    &DropAccounting::SynchronousProbe,
+                    COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
                 )
                 .is_ok(),
                 "{good:?} is a real leap day and must still seal"
@@ -1202,7 +1230,8 @@ mod tests {
                     &env_from_parity(),
                     &[],
                     bad,
-                    &DropAccounting::SynchronousProbe
+                    &DropAccounting::SynchronousProbe,
+                    COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
                 )
                 .is_err(),
                 "sealed_at {bad:?} must be refused"
@@ -1222,6 +1251,7 @@ mod tests {
             &[],
             "2026-08-05T00:00:00Z",
             &DropAccounting::SynchronousProbe,
+            COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
         )
         .unwrap();
         assert_eq!(
@@ -1252,6 +1282,7 @@ mod tests {
             &[],
             "2026-08-05T00:00:00Z",
             &DropAccounting::SynchronousProbe,
+            COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
         )
         .expect_err("a record with no measurement must not seal");
         assert_eq!(err.code(), "restriction-shedding-not-established");
@@ -1272,6 +1303,7 @@ mod tests {
                 &[],
                 "2026-08-05T00:00:00Z",
                 &DropAccounting::SynchronousProbe,
+                COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
             )
             .expect_err("must not seal");
             assert_eq!(err.code(), "restriction-shedding-not-established");
@@ -1293,6 +1325,7 @@ mod tests {
             &[],
             "2026-08-05T00:00:00Z",
             &DropAccounting::SynchronousProbe,
+            COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
         )
         .expect("eligible");
         assert_eq!(
