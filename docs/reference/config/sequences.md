@@ -73,23 +73,6 @@ rules:
 
 ---
 
-### `immediately_before` — Strict Adjacency
-
-Tool A must be called *immediately* before Tool B (no other calls in between).
-
-```yaml
-rules:
-  - type: immediately_before
-    first: ValidateInput
-    then: ExecuteAction
-```
-
-| Trace | Result |
-|-------|--------|
-| `[ValidateInput, ExecuteAction]` | ✅ Pass |
-| `[ValidateInput, LogEvent, ExecuteAction]` | ❌ Fail |
-
----
 
 ### `blocklist` — Forbidden Tools
 
@@ -98,10 +81,7 @@ These tools must never be called.
 ```yaml
 rules:
   - type: blocklist
-    tools:
-      - admin_delete
-      - system_reset
-      - drop_database
+    pattern: admin_delete
 ```
 
 | Trace | Result |
@@ -109,38 +89,17 @@ rules:
 | `[GetCustomer, UpdateCustomer]` | ✅ Pass |
 | `[GetCustomer, admin_delete]` | ❌ Fail |
 
-**Glob patterns** are supported:
+Matching is by plain substring, so a prefix blocks every tool that starts with it. A `*` is
+matched literally, not as a wildcard:
 
 ```yaml
 rules:
   - type: blocklist
-    tools:
-      - admin_*
-      - system_*
-      - *_dangerous
+    pattern: admin_
 ```
 
 ---
 
-### `allowlist` — Only These Tools
-
-Only the specified tools are allowed. Everything else fails.
-
-```yaml
-rules:
-  - type: allowlist
-    tools:
-      - GetCustomer
-      - UpdateCustomer
-      - SendEmail
-```
-
-| Trace | Result |
-|-------|--------|
-| `[GetCustomer, UpdateCustomer]` | ✅ Pass |
-| `[GetCustomer, DeleteCustomer]` | ❌ Fail (DeleteCustomer not in allowlist) |
-
----
 
 ### `max_calls` — Call Frequency Limit
 
@@ -215,6 +174,32 @@ rules:
 
 ---
 
+### `sequence` — Exact Ordering
+
+The named tools must appear in the given order. With `strict: false` (the default) other
+tools may appear between them; with `strict: true` they must be consecutive.
+
+```yaml
+rules:
+  - type: sequence
+    tools:
+      - Authenticate
+      - LoadRecord
+      - WriteRecord
+    strict: false   # optional
+```
+
+| Trace | `strict: false` | `strict: true` |
+|-------|-----------------|----------------|
+| `[Authenticate, LoadRecord, WriteRecord]` | ✅ Pass | ✅ Pass |
+| `[Authenticate, Audit, LoadRecord, WriteRecord]` | ✅ Pass | ❌ Fail |
+| `[LoadRecord, Authenticate, WriteRecord]` | ❌ Fail | ❌ Fail |
+
+A trace that never calls any named tool does not exercise this rule; a trace that starts the
+sequence and ends part-way through fails it, because the ordering it asserts was not completed.
+
+---
+
 ## Combining Rules
 
 Rules are evaluated with **AND** logic. All rules must pass.
@@ -235,10 +220,10 @@ tests:
 
       # Never call admin tools
       - type: blocklist
-        tools: [admin_*]
+        pattern: admin_
 
       # Max 5 API calls
-      - type: count
+      - type: max_calls
         tool: ExternalAPI
         max: 5
 ```
@@ -283,7 +268,7 @@ rules:
     then: ProcessPayment
 
   # Never refund more than once
-  - type: count
+  - type: max_calls
     tool: ProcessRefund
     max: 1
 ```
@@ -302,13 +287,14 @@ rules:
     then: GetPatientRecord
 
   # Log all access
-  - type: immediately_before
-    first: GetPatientRecord
+  - type: after
+    trigger: GetPatientRecord
     then: LogAccess
+    within: 1
 
   # No admin tools
   - type: blocklist
-    tools: [admin_*, system_override]
+    pattern: admin_
 ```
 
 ### Agent Handoffs: Multi-Agent
@@ -318,13 +304,13 @@ rules:
   # Router must run first
   - type: before
     first: RouterAgent
-    then: [SpecialistA, SpecialistB, SpecialistC]
+    then: SpecialistA
 
   # Only one specialist per request
-  - type: count
+  - type: max_calls
     tool: SpecialistA
     max: 1
-  - type: count
+  - type: max_calls
     tool: SpecialistB
     max: 1
 ```
@@ -383,7 +369,7 @@ Begin with `blocklist` and `require`, then add `before` rules.
 ```yaml
 rules:
   - type: blocklist
-    tools: [admin_*, dangerous_*]
+    pattern: admin_
   - type: require
     tool: Authenticate
 ```
@@ -412,9 +398,7 @@ Create traces that *should* fail to verify your rules catch violations.
 |-----------|-----------------|-----------------|
 | `require` | `tool` | — |
 | `before` | `first`, `then` | — |
-| `immediately_before` | `first`, `then` | — |
 | `blocklist` | `pattern` | — |
-| `allowlist` | `tools` | — |
 | `max_calls` | `tool`, `max` | — |
 | `eventually` | `tool`, `within` | — |
 | `never_after` | `trigger`, `forbidden` | — |
