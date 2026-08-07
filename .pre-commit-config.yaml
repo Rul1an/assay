@@ -163,7 +163,7 @@ repos:
         # `--producer-vocabulary-test` says an Assay producer member withholds credit and never
         # voids the record. The other three are blind to it: a phase is one word passed to `add`,
         # so `assayDropProofModel` decided AEE structural validity for two slices while all three
-        # stayed green, and six sibling members did for four. It also reads `validate` back, so a
+        # stayed green, and six sibling members did for three. It also reads `validate` back, so a
         # producer member that acquires a rule cannot acquire a phase by default.
         #
         # pre-commit, not pre-push: all four run in well under a second, and they are the tests
