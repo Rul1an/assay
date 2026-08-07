@@ -7,15 +7,19 @@ verifier logic, interpret the profile, or establish that an implementation is in
 ## Authorship order
 
 1. Obtain the clean-room pack.
-2. Read `spec.md` and `descriptor.json`.
-3. Implement a command that consumes one bundle path and emits the profile report.
-4. Freeze the implementation commit and record all materials consulted.
-5. Run the scorer. It snapshots the canonical oracle into scorer-private memory for tamper resistance,
+2. Run `canonicalization/rfc8785-vectors.json` against your canonicalizer before anything else. It
+   is a prerequisite check, not profile work: passing it is not progress and agreement with it is
+   not conformance. It is here because a wrong canonicalizer makes every later result
+   uninterpretable, and because that is what broke the one completed cross-language attempt.
+3. Read `spec.md` and `descriptor.json`.
+4. Implement a command that consumes one bundle path and emits the profile report.
+5. Freeze the implementation commit and record all materials consulted.
+6. Run the scorer. It snapshots the canonical oracle into scorer-private memory for tamper resistance,
    executes every opaque case without passing that oracle to the candidate, and only then compares.
-6. Publish the implementation source, run record, and completed implementation report.
+7. Publish the implementation source, run record, and completed implementation report.
 
 Reading Assay's verifier, `gen_vectors.py`, the canonical `MANIFEST.json`, or a prior scored report
-before step 4 changes the methodological classification. Disclose that access rather than describing
+before step 5 changes the methodological classification. Disclose that access rather than describing
 the run as blind.
 
 ## Candidate command
@@ -102,7 +106,7 @@ steps:
     env:
       GH_TOKEN: ${{ github.token }}
     run: |
-      tag=privileged-mcp-action-v0-candidate.3
+      tag=privileged-mcp-action-v0-candidate.4
       source_digest="$(gh api "repos/Rul1an/assay/commits/$tag" --jq .sha)"
       gh release download "$tag" \
         --repo Rul1an/assay \
@@ -133,7 +137,7 @@ The release controller runs only from `main`, validates `candidate-release.json`
 checked-out corpus, and creates the annotated tag after the pack, transformation check, and
 attestation succeed. Pack verification resolves that tag to the attested source commit. The
 composite action is pinned separately to the full commit carrying the action implementation; the
-`candidate.3` release-preparation change does not alter the invoked scoring path. Keep full-commit
+`candidate.4` release-preparation change does not alter the invoked scoring path. Keep full-commit
 pinning when updating the action used by a long-lived workflow.
 
 ## Claim ceiling

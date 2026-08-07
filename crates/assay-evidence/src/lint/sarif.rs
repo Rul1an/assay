@@ -322,12 +322,20 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
     // Truncation is read off the report rather than the pack metadata. Both carry it and both are
     // set from the same values, but pack metadata is absent whenever no packs are configured, so
     // keying on it meant a default-path run disclosed nothing here at all.
+    //
+    // `appliedCap` is declared on every run, including runs where nothing was dropped. The cap is
+    // configuration: `engine.rs` resolves `max_results.unwrap_or(5000)`, so a ceiling is always in
+    // force and a run that stayed under it was still bounded. Gating this on `report.truncated`
+    // (which is what this code did until 2026-08-06) left a clean report unable to distinguish
+    // "no bound exists" from "a bound exists and did not fire" — and since the default path always
+    // has a bound, the honest reading of that silence was always the second one.
     let mut run_props = serde_json::Map::new();
     if let Some(ref meta) = options.pack_meta {
         if let Some(ref disclaimer) = meta.disclaimer {
             run_props.insert("disclaimer".into(), json!(disclaimer));
         }
     }
+    run_props.append(&mut cap_declaration(report));
     if report.truncated {
         run_props.append(&mut truncation_properties(report));
     }
@@ -356,12 +364,22 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
     // comment claimed SARIF had no home for a reporting cap; that was wrong, and the correction is
     // that SARIF has a position instead of a gap.
     //
-    // Until the cap goes, disclose it in both available places and claim neither as a blessing.
-    // `run.properties` is the machine-readable carrier. The notification is a human-readable aid at
-    // `warning`, which 3.58.6 defines as covering the case where "the analysis might be incomplete
-    // but the results that were generated are probably valid". It stays below Appendix I's `error`
-    // gate deliberately: 3.20.21 makes an error-level notification mean the run failed, and a cap
-    // is not a failed run.
+    // Until the cap goes, disclose it, and claim the disclosure as no kind of blessing.
+    //
+    // The two facts are split by kind rather than duplicated, which is the shape ratified in
+    // `aliksir/claude-code-skill-security-check#24` across four emitters. The cap is configuration:
+    // true of the whole run whether or not it ever bit, so it belongs in `run.properties`. The drop
+    // is an event: it happened, it is specific to this run, and it is what a consumer following the
+    // OWASP agentic-skills rule already reads, so it belongs in the notification. An earlier version
+    // of this code put `appliedCap` in both, on the reasoning that a count without its ceiling is
+    // not actionable. That concern is real and the split answers it better: the ceiling is now on
+    // every run, so a consumer holding any notification can always resolve the cap it was measured
+    // against, including on the runs that carry no notification at all.
+    //
+    // The notification stays at `warning`, which 3.58.6 defines as covering the case where "the
+    // analysis might be incomplete but the results that were generated are probably valid". It
+    // stays below Appendix I's `error` gate deliberately: 3.20.21 makes an error-level notification
+    // mean the run failed, and a cap is not a failed run.
     let mut invocation = json!({
         "executionSuccessful": true
     });
@@ -380,8 +398,8 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
                         report.truncated_count, report.applied_cap
                     )
                 },
-                // The same keys the run properties carry, from the same builder — see
-                // The cross-emitter names, not this tool's; see `truncation_properties`.
+                // The drop only. The ceiling it was measured against is on the run — see
+                // `cap_declaration`.
                 "properties": truncation_notification_properties(report)
             }]),
         );
@@ -392,7 +410,7 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
         "name": "assay-evidence-lint",
         "version": report.tool_version,
         "semanticVersion": report.tool_version,
-        "informationUri": "https://docs.assay.dev/lint",
+        "informationUri": "https://docs.getassay.dev/lint/",
         "rules": rules
     });
     if !driver_props.is_empty() {
@@ -429,54 +447,64 @@ pub fn to_sarif_with_options(report: &LintReport, options: SarifOptions) -> serd
     })
 }
 
-/// The truncation disclosure, built from one pair of values for two carriers that name them
-/// differently on purpose.
+/// The truncation disclosure: what was dropped, in this tool's own vocabulary.
 ///
-/// The names used to disagree by accident, which is a real defect and is what a consumer reading
-/// two names for one number cannot resolve. The fix is not to pick one, because the two bags
-/// address different readers.
+/// One number used to live in two carriers under two names, which is a real defect and is what a
+/// consumer reading two spellings of one fact cannot resolve. The resolution is the split in
+/// [`cap_declaration`] rather than a rename: the two carriers were not saying the same thing
+/// twice, they were conflating a configured bound with an event.
 ///
-/// `run.properties` is this tool's own carrier. `truncated` and `truncatedCount` are the names the
-/// pack-engine spec and the changelog publish, so renaming them would break consumers to settle an
-/// internal inconsistency.
+/// `truncated` and `truncatedCount` stay here because they are the names the pack-engine spec and
+/// the changelog publish. Renaming them would break consumers to settle an inconsistency that the
+/// split already settles.
 ///
-/// The notification is where a consumer following the OWASP agentic-skills rule reads, and
-/// `appliedCap` / `droppedCount` is the pair a second emitter already carries and that
-/// `aliksir/claude-code-skill-security-check#24` is settling as the cross-emitter shape, citing
-/// this emitter for those keys. Renaming away from a vocabulary while it is being standardised,
-/// and while this producer is named in it, buys internal tidiness and pays for it in interop.
+/// Worth knowing for whoever revisits this, and corrected here on 2026-08-06 after the earlier
+/// version of this paragraph asserted the opposite: **SARIF property-bag names are not flat.**
+/// 2.1.0 §3.8.1 says "the property names are hierarchical strings (§3.5.4)", and §3.5.4.1 defines
+/// a hierarchical string as forward-slash-separated components. `oasis-tcs/sarif-spec#181`
+/// proposed exactly that in 2018 with `semmle/query-path` as the example, and it was closed
+/// `resolved-fixed` under the `CSD.1` label. It landed. The 2.2 draft carries the same sentence.
 ///
-/// So the invariant is on the values rather than on the strings: both bags are derived from
-/// `applied_cap` and `truncated_count`, and the test asserts the carriers agree on what they
-/// disclose rather than on how they spell it. If the RFC pins a different pair, one function
-/// changes.
+/// What 2.1.0 does not do is *require* a producer to use the mechanism: the grammar admits a
+/// single component, so a bare `appliedCap` is conformant. So the shared namespace this code has
+/// to live with is a choice made here rather than a limitation of the format, and the honest
+/// reading is that the spec has offered a namespace since 2.1.0 and this producer has not taken
+/// it. That is the condition that let one fact acquire two names.
 ///
-/// Worth knowing for whoever revisits this: SARIF property-bag names are flat. Making them
-/// hierarchical was proposed as `oasis-tcs/sarif-spec#181` in 2018, with `semmle/query-path` as
-/// the example, and closed without discussion, so 2.1.0 requires nothing. Every bare key shares
-/// one namespace with every other producer's, which is the condition that lets one fact acquire
-/// two names.
+/// Do not repeat the flat claim. Zero comments on a closed OASIS TC issue is not evidence of no
+/// discussion, because TC deliberation lives in meeting minutes rather than the tracker; the
+/// labels are the state that travels.
 ///
-/// `appliedCap` travels with the count rather than only near it: without the ceiling a consumer
-/// sees how many findings fell past a bound but not what the bound was (OWASP agentic-skills #49
-/// review point).
-///
-/// Callers gate on `report.truncated`; these return the disclosure for a run already known to be
+/// Callers gate on `report.truncated`; this returns the disclosure for a run already known to be
 /// truncated.
 fn truncation_properties(report: &LintReport) -> serde_json::Map<String, serde_json::Value> {
     let mut props = serde_json::Map::new();
     props.insert("truncated".into(), json!(true));
     props.insert("truncatedCount".into(), json!(report.truncated_count));
+    props
+}
+
+/// The ceiling in force, declared on **every** run.
+///
+/// Not gated on whether it fired. `engine.rs` resolves `max_results.unwrap_or(5000)`, so there is
+/// always a bound, and an emitter that only mentions it after it bites leaves a clean report
+/// ambiguous between "unbounded" and "bounded, did not fire". Declaring it unconditionally is what
+/// makes the silence of a notification-free run mean something.
+///
+/// `appliedCap` is the cross-emitter spelling settled in
+/// `aliksir/claude-code-skill-security-check#24`, where this producer is cited by name for it.
+fn cap_declaration(report: &LintReport) -> serde_json::Map<String, serde_json::Value> {
+    let mut props = serde_json::Map::new();
     props.insert("appliedCap".into(), json!(report.applied_cap));
     props
 }
 
-/// The same two values in the cross-emitter vocabulary. See [`truncation_properties`].
+/// The drop, in the cross-emitter vocabulary. The ceiling lives on the run — see
+/// [`cap_declaration`].
 fn truncation_notification_properties(
     report: &LintReport,
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut props = serde_json::Map::new();
-    props.insert("appliedCap".into(), json!(report.applied_cap));
     props.insert("droppedCount".into(), json!(report.truncated_count));
     props
 }

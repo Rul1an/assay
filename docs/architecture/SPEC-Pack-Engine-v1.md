@@ -498,7 +498,7 @@ owes a consumer; it is not a construct the format provides for capping.
         "name": "assay-evidence-lint",
         "version": "2.9.0",
         "semanticVersion": "2.9.0",
-        "informationUri": "https://docs.assay.dev/lint",
+        "informationUri": "https://docs.getassay.dev/lint/",
         "properties": {
           "assayPacks": [
             {
@@ -906,7 +906,7 @@ Error: Pack './my-pack.yaml' validation failed:
   - Line 12: Rule 'MY-001' missing required field 'check'
   - Line 18: Unknown check type 'custom_check'
 
-See: https://docs.assay.dev/packs/schema
+See: https://docs.getassay.dev/architecture/SPEC-Pack-Engine-v1/
 ```
 
 ### Disclaimer Missing
