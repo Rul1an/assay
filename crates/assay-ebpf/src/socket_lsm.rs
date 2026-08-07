@@ -1,7 +1,9 @@
+use crate::CONFIG;
 use assay_common::{
-    SocketEvent, SOCKET_STATS_LEN, SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR,
-    SOCKET_STAT_BLOCKED_PORT, SOCKET_STAT_CHECKS, SOCKET_STAT_EVENTS_EMITTED,
-    SOCKET_STAT_RINGBUF_DROPPED,
+    CidrRuleValue, SocketEvent, EVENT_CONNECT_OBSERVED, KEY_EMIT_OBSERVED_CONNECT,
+    RULE_ACTION_ALLOW, RULE_ACTION_DENY, SOCKET_STATS_LEN, SOCKET_STAT_ALLOWED,
+    SOCKET_STAT_BLOCKED_CIDR, SOCKET_STAT_BLOCKED_PORT, SOCKET_STAT_CHECKS,
+    SOCKET_STAT_EVENTS_EMITTED, SOCKET_STAT_RINGBUF_DROPPED,
 };
 use aya_ebpf::{
     bindings::bpf_sock_addr,
@@ -18,13 +20,16 @@ const MAX_PORT_RULES: u32 = 256;
 
 const EVENT_CONNECT_BLOCKED: u32 = 20;
 
-const ACTION_DENY: u8 = 2;
+/// CIDR rules carry the action to enforce and the id of the policy rule that
+/// produced them; see [`CidrRuleValue`] for why the value needs both. Populated
+/// from userspace by `assay_monitor::loader::set_tier1_rules`.
+#[map]
+static CIDR_RULES_V4: LpmTrie<[u8; 4], CidrRuleValue> =
+    LpmTrie::with_max_entries(MAX_CIDR_RULES, 0);
 
 #[map]
-static CIDR_RULES_V4: LpmTrie<[u8; 4], u32> = LpmTrie::with_max_entries(MAX_CIDR_RULES, 0);
-
-#[map]
-static CIDR_RULES_V6: LpmTrie<[u8; 16], u32> = LpmTrie::with_max_entries(MAX_CIDR_RULES, 0);
+static CIDR_RULES_V6: LpmTrie<[u8; 16], CidrRuleValue> =
+    LpmTrie::with_max_entries(MAX_CIDR_RULES, 0);
 
 #[map]
 static DENY_PORTS: HashMap<u16, u32> = HashMap::with_max_entries(MAX_PORT_RULES, 0);
@@ -52,6 +57,44 @@ pub fn connect4_hook(ctx: SockAddrContext) -> i32 {
     }
 }
 
+/// Emit an observed-connect event for an ALLOWED connect, when the run asked for one.
+///
+/// Gated on `KEY_EMIT_OBSERVED_CONNECT` because this is the hot path: permitted connections vastly
+/// outnumber denied ones, so an unconditional emit would cost every run ring-buffer bandwidth for
+/// evidence most of them never read.
+///
+/// `rule_id` is the rule that permitted the connect where one did, and 0 where the connect was
+/// allowed by no rule matching at all. Those are different facts and the event keeps them apart.
+#[inline(always)]
+fn emit_observed_connect(
+    cgroup_id: u64,
+    family: u16,
+    dst_port: u16,
+    addr_v4: u32,
+    addr_v6: &[u8; 16],
+    rule_id: u32,
+) {
+    // SAFETY: CONFIG is an eBPF map owned by this program. A missing key means the feature was not
+    // requested, which is the safe default: no events rather than unasked-for cost.
+    let enabled = unsafe { CONFIG.get(&KEY_EMIT_OBSERVED_CONNECT) }
+        .copied()
+        .unwrap_or(0)
+        != 0;
+    if !enabled {
+        return;
+    }
+    emit_socket_event(
+        EVENT_CONNECT_OBSERVED,
+        cgroup_id,
+        family,
+        dst_port,
+        addr_v4,
+        addr_v6,
+        rule_id,
+        RULE_ACTION_ALLOW,
+    );
+}
+
 #[inline(always)]
 fn try_connect4(ctx: &SockAddrContext) -> Result<bool, i64> {
     inc_stat(SOCKET_STAT_CHECKS);
@@ -75,7 +118,9 @@ fn try_connect4(ctx: &SockAddrContext) -> Result<bool, i64> {
             sock_addr.user_ip4,
             &[0u8; 16],
             rule_id,
-            0,
+            // Membership in DENY_PORTS is itself the deny decision; the map stores
+            // only the rule id, so the action is implied rather than looked up.
+            RULE_ACTION_DENY,
         );
         inc_stat(SOCKET_STAT_BLOCKED_PORT);
         return Ok(false);
@@ -83,66 +128,42 @@ fn try_connect4(ctx: &SockAddrContext) -> Result<bool, i64> {
 
     // SAFETY: ALLOW_PORTS is an eBPF map owned by this program. A missing key
     // means no explicit allow rule matched this destination port.
-    if unsafe { ALLOW_PORTS.get(&dst_port).is_some() } {
+    if let Some(&rule_id) = unsafe { ALLOW_PORTS.get(&dst_port) } {
+        emit_observed_connect(
+            cgroup_id,
+            2,
+            dst_port,
+            sock_addr.user_ip4,
+            &[0u8; 16],
+            u32::from(rule_id),
+        );
         inc_stat(SOCKET_STAT_ALLOWED);
         return Ok(true);
     }
 
+    // Longest-prefix match against the compiled CIDR rules. A match carries the
+    // action to enforce and the id of the rule that produced it, so the emitted
+    // event attributes the block to that specific policy rule rather than to a
+    // constant. An allow match falls through to the same allow path as no match.
     let key = Key::new(32, sock_addr.user_ip4.to_ne_bytes());
-    if let Some(&action) = CIDR_RULES_V4.get(&key) {
-        if action == ACTION_DENY as u32 {
-            // Retrieve rule ID from DENY_CIDR_RULES (if we had it separately)
-            // But here we only have action. Wait, CIDR_RULES_V4 stores ACTION (u8).
-            // We need to store rule_id if we want to report it.
-            // Copilot points out we use magic numbers 200/300.
-            // But the map value is u8 (action).
-            // To support rule_id, we need to change map value type to u32 or struct { action, rule_id }.
-            // FOR NOW: We can't change map layout easily without update userspace.
-            // Let's assume for this fix, we will stick to magic number 200 but verify if we can pass rule_id.
-            // Userspace populates this map.
-            // Ah, the user space code populates `trie.insert(..., action)`.
-            // Wait, look at `loader.rs`: `hm.insert(hash, [len, rule_id])` for prefix.
-            // But for CIDR: `trie.insert(&Key::new(prefix_len, addr), action, 0)?`
-            // So we ONLY store action (u8).
-            // So we DON'T have the rule_id available in the kernel with current map structure!
-            // I will use `action as u32` if it helps, but action is just 2 (DENY).
-            // The feedback says "This should use the actual rule_id".
-            // This implies I need to change the map type?
-            // "The rule_id is hardcoded ... use the actual rule_id from the matched CIDR rule"
-            // This requires modifying the map value to be u32 (rule_id) or struct.
-            // Let's check `CIDR_RULES_V4` definition.
-            // Line 20: `static CIDR_RULES_V4: LpmTrie<[u8; 4], u8>`.
-            // REQUIRED CHANGE: Change value type to u32 (rule_id).
-            // But `loader.rs` uses `trie.insert(..., action)`.
-            // I need to change `loader.rs` as well.
-
-            // Wait, I can only edit one file at a time or simple edits.
-            // Changing map definition is multi-file.
-            // I will start by updating the map definition in THIS file and updating the logic.
-            // Then I will update loader.rs in the next step.
-
-            // Actually, I can do it in parallel if I am careful.
-            // But `socket_lsm.rs` defines the usage.
-
-            // Let's change the map to store u32 (rule_id).
-            // And assumes userspace sends rule_id.
-
+    if let Some(&rule) = CIDR_RULES_V4.get(&key) {
+        if rule.action == RULE_ACTION_DENY {
             emit_socket_event(
                 EVENT_CONNECT_BLOCKED,
                 cgroup_id,
-                2,
+                2, // IPv4
                 dst_port,
                 sock_addr.user_ip4,
                 &[0u8; 16],
-                action, // Use the value from map as rule_id (assuming we change map to store rule_id)
-                0,
+                rule.rule_id,
+                rule.action,
             );
             inc_stat(SOCKET_STAT_BLOCKED_CIDR);
             return Ok(false);
         }
     }
 
-    // Correctly close try_connect4
+    emit_observed_connect(cgroup_id, 2, dst_port, sock_addr.user_ip4, &[0u8; 16], 0);
     inc_stat(SOCKET_STAT_ALLOWED);
     Ok(true)
 }
@@ -188,7 +209,8 @@ fn try_connect6(ctx: &SockAddrContext) -> Result<bool, i64> {
             0,
             &dst_addr_bytes,
             rule_id,
-            0,
+            // See the connect4 port path: DENY_PORTS membership implies the action.
+            RULE_ACTION_DENY,
         );
         inc_stat(SOCKET_STAT_BLOCKED_PORT);
         return Ok(false);
@@ -196,7 +218,15 @@ fn try_connect6(ctx: &SockAddrContext) -> Result<bool, i64> {
 
     // SAFETY: ALLOW_PORTS is an eBPF map owned by this program. A missing key
     // means no explicit allow rule matched this destination port.
-    if unsafe { ALLOW_PORTS.get(&dst_port).is_some() } {
+    if let Some(&rule_id) = unsafe { ALLOW_PORTS.get(&dst_port) } {
+        emit_observed_connect(
+            cgroup_id,
+            2,
+            dst_port,
+            sock_addr.user_ip4,
+            &[0u8; 16],
+            u32::from(rule_id),
+        );
         inc_stat(SOCKET_STAT_ALLOWED);
         return Ok(true);
     }
@@ -205,17 +235,17 @@ fn try_connect6(ctx: &SockAddrContext) -> Result<bool, i64> {
     // pattern is valid for `u8`; the bytes are used immediately as an LPM key.
     let ip6_bytes = unsafe { core::mem::transmute::<[u32; 4], [u8; 16]>(dst_addr) };
     let key = Key::new(128, ip6_bytes);
-    if let Some(&action) = CIDR_RULES_V6.get(&key) {
-        if action == ACTION_DENY as u32 {
+    if let Some(&rule) = CIDR_RULES_V6.get(&key) {
+        if rule.action == RULE_ACTION_DENY {
             emit_socket_event(
                 EVENT_CONNECT_BLOCKED,
                 cgroup_id,
-                10,
+                10, // IPv6
                 dst_port,
                 0,
                 &ip6_bytes,
-                action, // Use rule_id
-                0,
+                rule.rule_id,
+                rule.action,
             );
             inc_stat(SOCKET_STAT_BLOCKED_CIDR);
             return Ok(false);

@@ -15,6 +15,7 @@
 //! which is deliberately never read as clean.
 
 use crate::cache::sha256_hex;
+use crate::side_effect::IrreversibilityClass;
 use serde_json::{json, Value};
 
 pub const SCHEMA: &str = "assay.tool_decision_surface.v0";
@@ -138,6 +139,35 @@ pub fn required_scope_for(category: Option<&str>) -> Option<&'static str> {
         Some("github_deploy_key") => Some("repo:deploy_key:write"),
         Some("slack_add_member") => Some("conversations:members:write"),
         Some("workspace_admin") => Some("workspace:admin"),
+        _ => None,
+    }
+}
+
+/// How costly it is if a classified action happened when it should not have, derived deterministically
+/// from the action category — the same shape and the same discipline as [`required_scope_for`] above.
+///
+/// `None` for an unclassified tool, and the consumer reads that as *unknown*, never as `two_way`.
+/// Defaulting an unrecognised action to the cheapest class would let an unclassified terminal action
+/// read as harmless, which is precisely the phantom-grade failure
+/// [`crate::side_effect::IrreversibilityClass`] carves out. Note this differs from
+/// `mandate::policy::classify_tool`, which defaults an unmatched tool to `Read`: that default is safe
+/// on an *authorization* lattice, where claiming less authority is conservative, and unsafe here,
+/// where claiming less consequence is the overclaim.
+///
+/// These are Assay's static claims about the action class, not provider-verified facts. Each is the
+/// honest reading of what the category does:
+///
+/// - `github_deploy_key` — a key grants standing access to a repository. Removing it does not undo
+///   what was cloned or pushed while it existed, and there is no compensating action, so this is
+///   consequential rather than merely irreversible.
+/// - `slack_add_member` — the member saw the channel history. Removal does not unsee it.
+/// - `workspace_admin` — an admin grant is the authority to make further changes, including ones
+///   that outlive the grant.
+pub fn irreversibility_for(category: Option<&str>) -> Option<IrreversibilityClass> {
+    match category {
+        Some("github_deploy_key") => Some(IrreversibilityClass::OneWayConsequential),
+        Some("slack_add_member") => Some(IrreversibilityClass::OneWayConsequential),
+        Some("workspace_admin") => Some(IrreversibilityClass::OneWayConsequential),
         _ => None,
     }
 }
@@ -381,7 +411,17 @@ pub fn build_decision(call: &ObservedCall<'_>) -> Value {
     // A side effect is *asserted* only when the tool was allowed and returned success. It is never
     // *verified* by the proxy.
     let side_effect_asserted = matches!(call.effect, Effect::Allow) && call.status == "success";
+    // Every decision leaves this function at `asserted`. Nothing here can promote: a level above
+    // asserted requires evidence this function does not have and must never invent.
     let c = classify(call.tool_name, call.args);
+    // Consequence comes from the action's category; the level comes from the evidence. Attaching it
+    // here means an unclassified tool leaves the field absent rather than defaulted, and the record
+    // says "unknown consequence" instead of implying a cheap one.
+    let side_effect = match irreversibility_for(c.category) {
+        Some(class) => crate::side_effect::SideEffect::asserted(side_effect_asserted)
+            .with_irreversibility(class),
+        None => crate::side_effect::SideEffect::asserted(side_effect_asserted),
+    };
     let mut decision = json!({
         "server": { "id": sanitize(call.server_id), "transport": "mcp" },
         "tool": {
@@ -411,7 +451,11 @@ pub fn build_decision(call: &ObservedCall<'_>) -> Value {
         "response": {
             "status": sanitize(call.status),
             "side_effect_asserted": side_effect_asserted,
-            "side_effect_verified": false
+            // Kept for compatibility, and now derived from the level rather than hardcoded, so the
+            // boolean and the ladder can never disagree. The producer always emits `asserted`;
+            // promotion happens downstream and only against evidence (see `side_effect.rs`).
+            "side_effect_verified": side_effect.verified_flag(),
+            "side_effect": side_effect
         },
         "redaction": {
             "arguments_redacted": true,
@@ -441,3 +485,93 @@ pub fn surface(decisions: Vec<Value>) -> Value {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod irreversibility_producer_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn decision_for(tool: &str, args: Value) -> Value {
+        build_decision(&ObservedCall {
+            server_id: "github",
+            tool_name: tool,
+            args: &args,
+            effect: Effect::Allow,
+            status: "success",
+            rule_id: None,
+            traceparent: None,
+        })
+    }
+
+    #[test]
+    fn a_classified_action_carries_its_consequence() {
+        let d = decision_for(
+            "github.add_deploy_key",
+            json!({"owner": "org", "repo": "prod-repo", "title": "ci"}),
+        );
+        assert_eq!(
+            d["response"]["side_effect"]["irreversibility_class"],
+            json!("one_way_consequential")
+        );
+    }
+
+    #[test]
+    fn an_unclassified_tool_leaves_the_field_absent_not_cheap() {
+        // The rule this producer exists to honour. An unrecognised tool is unknown consequence, and
+        // must not serialise as two_way — that would let anything the classifier does not know about
+        // read as harmless.
+        let d = decision_for("some.unknown_tool", json!({}));
+        assert_eq!(
+            d["tool"]["category"],
+            Value::Null,
+            "precondition: unclassified"
+        );
+        assert!(
+            d["response"]["side_effect"]
+                .get("irreversibility_class")
+                .is_none(),
+            "unclassified must omit the field, got {}",
+            d["response"]["side_effect"]
+        );
+    }
+
+    #[test]
+    fn consequence_is_attached_even_when_the_call_was_blocked() {
+        // The class describes the action, not the outcome. A blocked call still has a consequence
+        // class, and a consumer auditing "what would have happened" needs it. `asserted` is what
+        // varies with the outcome.
+        let d = build_decision(&ObservedCall {
+            server_id: "github",
+            tool_name: "github.add_deploy_key",
+            args: &json!({"owner": "org", "repo": "prod-repo"}),
+            effect: Effect::Deny,
+            status: "blocked",
+            rule_id: Some("r1"),
+            traceparent: None,
+        });
+        assert_eq!(d["response"]["side_effect"]["asserted"], json!(false));
+        assert_eq!(
+            d["response"]["side_effect"]["irreversibility_class"],
+            json!("one_way_consequential")
+        );
+    }
+
+    #[test]
+    fn the_table_covers_exactly_the_categories_that_have_a_required_scope() {
+        // Both tables are keyed on the same category vocabulary, so a category with a declared scope
+        // and no declared consequence is an omission rather than a decision. This catches the next
+        // category being added to one table and not the other.
+        for cat in ["github_deploy_key", "slack_add_member", "workspace_admin"] {
+            assert!(
+                required_scope_for(Some(cat)).is_some(),
+                "{cat} lost its scope"
+            );
+            assert!(
+                irreversibility_for(Some(cat)).is_some(),
+                "{cat} has a required scope but no consequence class"
+            );
+        }
+        assert!(irreversibility_for(None).is_none());
+        assert!(irreversibility_for(Some("not_a_category")).is_none());
+    }
+}

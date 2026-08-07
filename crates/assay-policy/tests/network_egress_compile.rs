@@ -31,16 +31,69 @@ fn deny_cidr_compiles_to_action_deny_entry() {
 
     let deny = entries
         .iter()
-        .find(|(_, addr, _)| *addr == [203, 0, 113, 0])
+        .find(|e| e.addr == [203, 0, 113, 0])
         .expect("deny CIDR must produce a CIDR_RULES_V4 entry");
-    assert_eq!(deny.0, 24, "prefix length must be preserved");
-    assert_eq!(deny.2, ACTION_DENY, "deny CIDR must carry ACTION_DENY");
+    assert_eq!(deny.prefix_len, 24, "prefix length must be preserved");
+    assert_eq!(deny.action, ACTION_DENY, "deny CIDR must carry ACTION_DENY");
 
     let allow = entries
         .iter()
-        .find(|(_, addr, _)| *addr == [10, 0, 0, 0])
+        .find(|e| e.addr == [10, 0, 0, 0])
         .expect("allow CIDR must produce a CIDR_RULES_V4 entry");
-    assert_eq!(allow.2, ACTION_ALLOW, "allow CIDR must carry ACTION_ALLOW");
+    assert_eq!(
+        allow.action, ACTION_ALLOW,
+        "allow CIDR must carry ACTION_ALLOW"
+    );
+}
+
+/// A map entry must carry the id of the rule it came from, not its action.
+///
+/// The kernel hook reports this id as `SocketEvent::rule_id`, which the monitor
+/// live view and runner evidence present as the matched policy rule. Dropping the
+/// id here and reusing the action in its place is the regression this pins: every
+/// CIDR block then reported rule 2, a value inside the legitimate id range (ids
+/// start at 1), so the misattribution was indistinguishable from a real rule.
+#[test]
+fn cidr_entries_carry_matching_rule_id_not_action() {
+    let compiled = compile(&egress_policy());
+    let entries = compiled.tier1.cidr_v4_entries();
+
+    let deny = entries
+        .iter()
+        .find(|e| e.addr == [203, 0, 113, 0])
+        .expect("deny CIDR must produce a CIDR_RULES_V4 entry");
+    let allow = entries
+        .iter()
+        .find(|e| e.addr == [10, 0, 0, 0])
+        .expect("allow CIDR must produce a CIDR_RULES_V4 entry");
+
+    // Every entry must be traceable to a compiled rule of its own kind.
+    let deny_rule = compiled
+        .tier1
+        .network_deny_cidrs
+        .iter()
+        .find(|r| r.rule_id == deny.rule_id)
+        .expect("deny entry rule_id must name a compiled deny rule");
+    assert_eq!(deny_rule.cidr, "203.0.113.0/24");
+
+    let allow_rule = compiled
+        .tier1
+        .network_allow_cidrs
+        .iter()
+        .find(|r| r.rule_id == allow.rule_id)
+        .expect("allow entry rule_id must name a compiled allow rule");
+    assert_eq!(allow_rule.cidr, "10.0.0.0/8");
+
+    // Distinct rules must get distinct ids: an id that merely echoed the action
+    // would collide across every rule sharing that action.
+    assert_ne!(
+        deny.rule_id, allow.rule_id,
+        "distinct CIDR rules must carry distinct rule ids"
+    );
+    assert_ne!(
+        deny.rule_id, 0,
+        "rule ids start at 1, so 0 never identifies a real rule"
+    );
 }
 
 #[test]
@@ -68,6 +121,6 @@ fn empty_network_policy_produces_no_egress_rules() {
         .tier1
         .cidr_v4_entries()
         .iter()
-        .all(|(_, _, action)| *action != ACTION_DENY));
+        .all(|e| e.action != ACTION_DENY));
     assert!(compiled.tier1.port_deny_entries().is_empty());
 }

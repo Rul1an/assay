@@ -7,10 +7,14 @@
 //! because they report different enforcement domains: v0 carries connect4 attach/count truth, v1
 //! carries the Landlock ruleset/`restrict_self`/real-block truth.
 //!
-//! Scope: this is the CARRIER and its committed fixtures only. No producer wires it up yet — the
-//! Landlock sandbox enforcement that emits it is a later, gated step. The fixtures pin the exact
-//! bytes a consumer (e.g. an external review tool) reconstructs against, the same producer-agnostic
-//! discipline the rest of the project uses.
+//! Scope: the carrier, its committed fixtures, and the Landlock sandbox producer. The fixtures pin
+//! the exact bytes a consumer (e.g. an external review tool) reconstructs against, the same
+//! producer-agnostic discipline the rest of the project uses, and the producer in
+//! `cli::commands::sandbox::child` emits it on both the active and failed paths.
+//!
+//! This header read "No producer wires it up yet" until 2026-08-06, long after `child.rs` began
+//! emitting it. It was believed on sight while compiling a spec-ahead-of-implementation list and the
+//! row it produced was false, which is why that list warns that a stale entry is worse than none.
 //!
 //! Honesty rules baked into the shape:
 //! - `status` is `active` or `failed` only. There is no `not_applicable`, and no `absent`: the
@@ -41,6 +45,34 @@ pub enum Status {
     Active,
     /// Enforcement was requested but could not be installed (carries `failure.reason_code`).
     Failed,
+}
+
+/// How hard the enforcement point is to route around. Same axis and same value names as the v0
+/// carrier's `EnforcementClass`, which is deliberate: a consumer comparing a v0 and a v1 artifact is
+/// comparing two enforcement domains and must not have to learn two vocabularies to do it.
+///
+/// Adopted from `draft-schrock-ep-authorization-receipts-07` §9, with its rule: a record MUST NOT
+/// state a stronger class than deployed.
+///
+/// **Landlock earns `Strong` for a reason worth stating.** `restrict_self` is applied by the process
+/// to itself under `no_new_privs` and cannot afterwards be removed — not by the process, not by
+/// regaining privilege. So unlike an interception layer, there is no "call it another way" for a
+/// subject already inside the restriction. What remains is never entering it, which is a producer
+/// question rather than a bypass.
+///
+/// **Deliberately not keyed to the probe.** `active` with a probe additionally demonstrates a real
+/// block, and that is a stronger *evidentiary* statement — but this axis grades the architecture,
+/// not the run. The probe carries demonstration on its own field, and folding two questions into one
+/// value is how a field starts meaning two things.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnforcementClass {
+    /// No enforcement claim. Nothing was installed, so nothing was refused.
+    Basic = 0,
+    /// An interception layer a subject can reach past by taking another route.
+    Standard = 1,
+    /// An enforcement point the subject cannot route around from inside it.
+    Strong = 2,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,6 +171,8 @@ pub struct EnforcementHealthV1 {
     pub mechanism: Mechanism,
     pub scope: String,
     pub policy_semantics: PolicySemantics,
+    /// What the enforcement is worth, derived from whether the ruleset actually applied.
+    pub enforcement_class: EnforcementClass,
     /// Present only on the failed path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<Failure>,
@@ -180,6 +214,9 @@ impl EnforcementHealthV1 {
             mechanism: Mechanism::Landlock,
             scope: SCOPE_TCP_CONNECT_LANDLOCK_PORT.to_string(),
             policy_semantics: PolicySemantics::Allowlist,
+            // Derived from the constructor that recorded the install, never passed in, so a caller
+            // cannot state a stronger class than deployed.
+            enforcement_class: EnforcementClass::Strong,
             failure: None,
             landlock: LandlockBlock {
                 abi,
@@ -211,6 +248,10 @@ impl EnforcementHealthV1 {
             mechanism: Mechanism::Landlock,
             scope: SCOPE_TCP_CONNECT_LANDLOCK_PORT.to_string(),
             policy_semantics: PolicySemantics::Allowlist,
+            // Requested and not installed. On this axis that is indistinguishable from never asking:
+            // nothing attached, so nothing was refused. The distinction lives in `status` and
+            // `failure.reason_code`, which is where a consumer should read it.
+            enforcement_class: EnforcementClass::Basic,
             failure: Some(Failure {
                 reason_code,
                 detail: detail.into(),
@@ -267,6 +308,9 @@ mod fixture_values {
             mechanism: Mechanism::Landlock,
             scope: SCOPE_TCP_CONNECT_LANDLOCK_PORT.to_string(),
             policy_semantics: PolicySemantics::Allowlist,
+            // Derived from the constructor that recorded the install, never passed in, so a caller
+            // cannot state a stronger class than deployed.
+            enforcement_class: EnforcementClass::Strong,
             failure: None,
             landlock: LandlockBlock {
                 abi: 4,
@@ -303,6 +347,10 @@ mod fixture_values {
             mechanism: Mechanism::Landlock,
             scope: SCOPE_TCP_CONNECT_LANDLOCK_PORT.to_string(),
             policy_semantics: PolicySemantics::Allowlist,
+            // Requested and not installed. On this axis that is indistinguishable from never asking:
+            // nothing attached, so nothing was refused. The distinction lives in `status` and
+            // `failure.reason_code`, which is where a consumer should read it.
+            enforcement_class: EnforcementClass::Basic,
             failure: Some(Failure {
                 reason_code: ReasonCode::LandlockAbiTooOld,
                 detail: "Landlock ABI 4 is required for TCP connect port allowlists".to_string(),
@@ -378,6 +426,58 @@ mod tests {
             "fixture {name} is not byte-stable through the typed carrier"
         );
         value
+    }
+
+    #[test]
+    fn an_applied_ruleset_earns_strong_and_a_failed_one_earns_nothing() {
+        // Schrock's rule: a record MUST NOT state a stronger class than deployed. Derived inside the
+        // constructor from the install truth, so there is no argument to overstate it through.
+        assert_eq!(
+            fixture_values::active_no_probe().enforcement_class,
+            EnforcementClass::Strong
+        );
+        assert_eq!(
+            fixture_values::failed().enforcement_class,
+            EnforcementClass::Basic,
+            "requested and not installed refuses nothing, so it claims nothing"
+        );
+    }
+
+    #[test]
+    fn the_probe_does_not_change_the_class() {
+        // The decision this axis needed. `active` with a probe additionally demonstrates a real
+        // block, which is a stronger EVIDENTIARY statement — but the class grades the architecture,
+        // not the run. Landlock is equally unroutable-around whether or not this run happened to
+        // prove it. Folding demonstration into the class is how one field starts meaning two things,
+        // and `probe` already carries it.
+        assert_eq!(
+            fixture_values::active_with_probe().enforcement_class,
+            fixture_values::active_no_probe().enforcement_class
+        );
+        assert_ne!(
+            fixture_values::active_with_probe().probe,
+            fixture_values::active_no_probe().probe,
+            "the demonstration distinction must still be visible, on its own field"
+        );
+    }
+
+    #[test]
+    fn v0_and_v1_grade_the_same_axis_with_the_same_names() {
+        // Two enforcement domains, one vocabulary. A consumer comparing a connect4 artifact with a
+        // Landlock artifact should not have to learn two spellings of the same idea. This asserts the
+        // wire values, which is what a consumer actually reads, rather than the Rust types, which are
+        // deliberately separate per carrier.
+        let v1 = serde_json::to_value(fixture_values::active_no_probe()).unwrap();
+        assert_eq!(v1["enforcement_class"], serde_json::json!("strong"));
+        let v0 = serde_json::to_value(
+            crate::cli::commands::monitor::monitor_next::enforcement_health::EnforcementHealth::active(
+                crate::cli::commands::monitor::monitor_next::enforcement_health::SCOPE_IPV4_TCP_CONNECT,
+                0,
+                0,
+            ),
+        )
+        .unwrap();
+        assert_eq!(v0["enforcement_class"], v1["enforcement_class"]);
     }
 
     #[test]
