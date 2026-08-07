@@ -262,10 +262,32 @@ opposite. The resolution now in force:
   reason-code, rule-coverage, and required-field tests, all of which stayed green for two slices
   while this was wrong.
 
-The counts that follow from it: `REQUIRED_SEAL_FIELDS` names **six** of the ten producer members,
-the checker's known-optional set names the other four, and the checker's positive payload still
-carries **eight** — the drop-proof basis and channels are permitted rather than fixtured, since the
-Rust producer's key-set test is what pins their emission.
+The counts that follow from it: `REQUIRED_SEAL_FIELDS` names **six** of the ten producer members and
+the checker's known-optional set names the other four. The positive payload carried **eight** when
+this was written; it carries all ten as of the decision below.
+
+**The drop-proof pair, decided 2026-08-08 (#2093).** The paragraph above left `assayDropProofBasis`
+and `assayDropChannels` permitted rather than fixtured, and #2093 recorded the open question as a
+binary: the checker requires the pair, or the producer stops emitting it.
+
+Both are refused, and the first is refused by this ADR's own rule. Requiring them puts them in
+`REQUIRED_SEAL_FIELDS`, whose absence check raises at `PHASE_MALFORMED` — so an `assay` member would
+decide AEE structural validity, which is what "They MUST NOT alter AEE structural validity" forbids
+and what the six siblings above were moved out of for the same reason. Dropping them discards the
+`checked`-versus-`declared` distinction, which is the only record of whether a drop count was
+verified or asserted.
+
+The third answer is the one `assayDropProofModel` already took: **credit**. Both members are now in
+`PRODUCER_CREDIT_FIELDS` (nine), fixtured in the positive payload (ten), and read by rules that
+withhold credit and leave the envelope well formed. `--producer-vocabulary-test` proves the
+inertness rather than asserting it.
+
+The rules cross-check rather than requiring presence. `DROP_PROOF_BASIS_FOR_MODEL` derives the basis
+each model implies from `DropAccounting::basis`, so a payload claiming `checked` over a synchronous
+probe that verified nothing withholds credit — a failure presence alone cannot see. Note the
+consequence honestly: because an absent member fails its own cross-check, the pair is in practice
+required, at a phase that cannot make a record malformed. What was refused is requiring them
+*structurally*, not requiring them.
 
 **The six siblings, decided 2026-08-07.** The passage above bounded itself to `assayDropProofModel`
 and parked six sibling producer members — `assaySourceSchema`, `assaySealScope`,
