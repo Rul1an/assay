@@ -267,16 +267,101 @@ the checker's known-optional set names the other four, and the checker's positiv
 carries **eight** — the drop-proof basis and channels are permitted rather than fixtured, since the
 Rust producer's key-set test is what pins their emission.
 
-Bounded deliberately, and the bound is the honest part. Six sibling producer members —
-`assayCollectionPath`, `assaySealedAt`, `assaySourceSchema`, `assaySealScope`,
-`assayAttackRowAttributionSource`, `assayNonClaims` — still raise structural findings in this same
-checker, so the prefix rule below is enforced for one member and stated for eleven. They carry
-identities, instants, and paths rather than a rankable axis, which is why the normative paragraph
-in in-toto/attestation#570 reaches `assayDropProofModel` and not them, and each has a reason for
-being structural that predates this decision (`assaySealScope` carries #2014's rule that a seal
-must not claim a boundary nothing observed). Moving them is six contract questions, not one edit.
-They are named here so the decision is not read as wider than it is, and so the next pass has a
-list rather than a rediscovery.
+**The six siblings, decided 2026-08-07.** The passage above bounded itself to `assayDropProofModel`
+and parked six sibling producer members — `assaySourceSchema`, `assaySealScope`,
+`assayCollectionPath`, `assayAttackRowAttributionSource`, `assayNonClaims`, `assaySealedAt` — as six
+contract questions rather than one edit. They are decided here, and all six move.
+
+The reason they were parked does not survive being written out. It was that the normative paragraph
+in in-toto/attestation#570 governed members whose values a reader might rank, and these carry
+identities, instants and paths instead. That was true of the upstream paragraph as it stood at
+`35ca6f899`, and beside the point either way: the prefix rule below is not scoped to rankable
+members. It says *fields beginning with `assay`*, all of them, and has said so since this ADR was
+written. So six local decisions were being held against an upstream sentence that could only ever be
+narrower than the rule we already had.
+
+That sentence is no longer narrower, and the tense above is load-bearing. The question we left open
+at in-toto/attestation#570 — whether a producer member is inert whether or not its values rank — was
+answered upstream at `237f83b9f`, sixteen minutes after we asked it, in a commit titled *make
+producer territory inert, not merely unrankable*. The paragraph now reads that a producer-defined
+member "MUST NOT affect structural validity, MUST NOT affect `result`, and MUST NOT affect the
+evidence tier, whether or not its values can be ordered". The upstream rule and the local prefix rule
+now say the same thing, and this decision is what the two of them jointly require rather than what
+one of them permitted. Nothing below changes as a result — the reasoning never rested on the upstream
+paragraph — but a decision recorded as unconfirmed when it is in fact confirmed reads as weaker
+evidence than it is.
+
+One boundary this does not settle, named so it is not read as settled. The new paragraph opens with a
+verifier reading *nothing* in producer territory, and the three obligations it then states are
+structural validity, `result`, and the evidence tier. The not-credited verdict this checker reaches
+is none of those three: it is a consumer trust decision of the same class as an untrusted signing
+key, which the key-scope section above already treats as a consumer's own to make, and AEE's `result`
+is a predicate field this checker does not emit. So this reading holds that withholding credit is
+outside the three obligations. It is a reading, not a quotation, and it is the one to re-check if the
+opening sentence acquires normative weight of its own.
+
+What was worth checking per member was never whether the rule reaches them. It was whether moving
+each one gives up something the structural phase was buying.
+
+- **`assaySourceSchema`** (`payload-source-schema-invalid`). A non-empty-string gate on a member the
+  table above marks non-normative, and no other rule reads the value. Nothing attached, nothing lost.
+- **`assaySealScope`** (`seal-scope-missing`, `seal-scope-mismatch`). #2014 is why this rule exists,
+  and reading it settles the question rather than blocking it. The harm #2014 names is that the
+  checker "credits it as attested substrate evidence", and the rule it holds up as the model to copy
+  is `key-scope-collection-path-mismatch`, which is a not-credited rule. Withholding credit is the
+  whole of what was asked for. A seal naming `filesystem_write_all` is still refused; it is refused
+  as one this consumer will not credit rather than as a record no consumer can parse.
+- **`assayCollectionPath`** (`payload-collection-path-mismatch`). This member was already being read
+  at both phases in one file. `key-scope-collection-path-mismatch` withholds credit and
+  `payload-collection-path-mismatch` voided the record, and the key-scope side is the one this ADR
+  specifies itself: a credited signature requires that "the key's trusted scope includes the
+  payload's `assayCollectionPath`", and a key outside scope "is structurally valid but not credited".
+  #2106 reached the same place from the producer side — a path types a vantage, and must not rank one
+  above another.
+- **`assayAttackRowAttributionSource`** (`payload-attribution-source-unknown`, and
+  `substrate-runner-observed-attacks-mismatch`). Two rules, and the second is why this member was the
+  worst of the six rather than one more of them. It is not only gated against a closed set; its value
+  *selects how strictly an AEE member is checked*. Under the attack-attribution rules below, equality
+  between `aeeObservedAttacks` and the caught row attack IDs is required when the value is
+  `substrate-runner` and not when it is `assembly-plane`. Changing the positive fixture from one of
+  its two legal values to the other, with no other edit, turned a credited record into a malformed
+  one. Both rules move. The baseline — every named attack must be supported by a caught row — reads
+  only AEE members and stays structural; only the tightening is Assay policy, and only the tightening
+  withholds credit.
+- **`assayNonClaims`** (`payload-non-claims-incomplete`). The prefix paragraph below already rules on
+  this member by name: it "is only producer vocabulary and does not weaken required AEE checks". A
+  rule that lets an incomplete list void the record does the converse, letting producer vocabulary
+  strengthen a required check into a rejection every consumer must honour. The checker's own comment
+  asks that a subset be "a rejection rather than a warning", and it still is — not-credited is a
+  rejection carrying a reason code, not a warning.
+- **`assaySealedAt`** (`seal-instant-invalid`). The one with a real entanglement, and so the one to
+  check rather than assume. The parsed instant is the input to `key-outside-validity-window`, and an
+  unparsable value makes that check skip its record — so the structural finding was load-bearing for
+  a bad instant not bypassing key expiry. It survives the move because the finding it raises is
+  itself a not-credited finding: a seal whose instant will not parse cannot reach `credited` by any
+  path, whether or not the window check ran. The window is not weakened. The record merely stops
+  being called unreadable *by every consumer* on the strength of an Assay member.
+
+Two things deliberately unchanged. The six stay in `REQUIRED_SEAL_FIELDS`, because that list states
+what the Assay producer contract obliges a seal to carry, and the test over it asserts that absence
+is not credited rather than that absence is malformed — so "required" reads as required-for-credit
+for a producer member, which is the strongest thing the prefix rule permits it to mean. And
+`assayObservedLabels`, `assayDropProofBasis` and `assayDropChannels` needed no decision at all: no
+rule reads them, and nothing can demote what nothing consults.
+
+Two checks were added with the move, because the existing ones could not see it.
+`--producer-vocabulary-test` now also mutates a member to a *legal* alternate value, which is the
+only mutation that reaches the selector case above — absent, ineligible and ill-typed are all
+values `substrate-runner` is not. And it reads `validate` back, requiring every `assay`-prefixed member the
+function consults to be one this file has decided, so the next producer member to acquire a rule
+cannot acquire a phase by default. The generic ineligible value is now `""` rather than a borrowed
+one, since `assaySourceSchema` accepts any non-empty string and would have passed a plausible
+wrong value straight through.
+
+Where this leaves the prefix rule: **seven** of the ten producer members are read by some rule in the
+checker, all seven are enforced inert by test, and the remaining three are inert by having no rule.
+Every rule that can still return `malformed` reads an `aee*` member, the envelope, or the predicate
+structure.
 
 Fields beginning with `assay` in the sealed payload are Assay producer vocabulary. AEE consumers may ignore them unless their own policy understands them. They MUST NOT alter AEE structural validity. Any future AEE statement exporter MUST also carry predicate-level `doesNotAssert` for statement-level non-claims; `assayNonClaims` inside the sealed payload is only producer vocabulary and does not weaken required AEE checks.
 

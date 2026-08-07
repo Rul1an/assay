@@ -113,6 +113,16 @@ given the wrong type, and every mutation must land on
 is one word passed to `add`, so a rule can move between outcomes without changing a
 reason code, a control, or a required field.
 
+Two mutations are not of that shape. A member listed in
+`PRODUCER_CREDIT_ALTERNATE_VALUES` is also set to one of its own *legal* values,
+and that mutation asserts only that the record is not voided — a legal value may
+well leave it credited. This is what catches a member whose permitted value
+decides how strictly some other rule runs, which absent, ineligible and ill-typed
+mutations cannot reach. The test then reads `validate` back and requires every
+`assay`-prefixed member the function consults to appear in
+`PRODUCER_CREDIT_FIELDS`, so a producer member that acquires a rule cannot acquire
+a phase by default.
+
 ## Three outcomes
 
 The checker distinguishes three outcomes, because ADR-043's rule that integrity
@@ -136,12 +146,14 @@ Structural rejections (`malformed`):
 - `aeeStillArmed` is not true;
 - `aeeObservedSet` does not recompute over emitted interception/examination record leaves;
 - `aeeObservedAttacks` names attacks unsupported by caught rows;
-- substrate-runner attribution requires equality and the lower-bound set does not match;
-- `assaySourceSchema` is absent or not a non-empty string;
 - `aeeObservedAttacks` is not an array of strings;
 - the envelope's payload type is one this checker does not implement — rejected
   as unsupported, never skipped, because a "we did not check this" path that
   returns success is how an unverified record comes to read as verified.
+
+Every rule that can still return `malformed` reads an `aee*` member, the envelope,
+or the predicate structure. That is the property, not a coincidence of the current
+list.
 
 Trust rejections (`structurally-valid-not-credited`):
 
@@ -152,16 +164,34 @@ Trust rejections (`structurally-valid-not-credited`):
 - the seal instant falls outside the key's validity window;
 - a fixture key is used in a production-like path;
 - `assayDropProofModel` names no eligible proof model for the zero drop accounting,
-  or is absent.
+  or is absent;
+- `assaySourceSchema` is absent or not a non-empty string;
+- `assaySealScope` is absent, or names a boundary other than the one this slice
+  observes;
+- the seal's `assayCollectionPath` is not the path this slice collects on;
+- `assayAttackRowAttributionSource` is outside its closed set, or is
+  `substrate-runner` while `aeeObservedAttacks` and the caught rows disagree;
+- `assayNonClaims` omits one of the payload-local minimum non-claims;
+- `assaySealedAt` is not an RFC 3339 UTC instant.
 
-That last one is a policy verdict, not a structural one, and it used to be filed
-above. ADR-045 states that `assay`-prefixed members are producer vocabulary and
-must not alter AEE structural validity, and the checker was breaking its own rule:
-a value only Assay defines decided whether an AEE record was well formed. This
-consumer's policy does read the member, so it may withhold credit; a consumer whose
-policy does not read it must still see a verifiable seal. The correction is
-recorded in ADR-045 and was committed to publicly in
-[in-toto/attestation#570](https://github.com/in-toto/attestation/pull/570#issuecomment-5216879286).
+Everything from `assayDropProofModel` down is a policy verdict rather than a
+structural one, and all of it used to be filed above. ADR-045 states that
+`assay`-prefixed members are producer vocabulary and must not alter AEE structural
+validity, and the checker was breaking its own rule: values only Assay defines
+decided whether an AEE record was well formed. This consumer's policy does read
+those members, so it may withhold credit; a consumer whose policy does not read
+them must still see a verifiable seal. `assayDropProofModel` was corrected first
+and committed to publicly in
+[in-toto/attestation#570](https://github.com/in-toto/attestation/pull/570#issuecomment-5216879286);
+the six siblings follow it, each decided on its own in ADR-045.
+
+The attribution entry is two rules, and the second is the one worth knowing about.
+`assayAttackRowAttributionSource` does not merely carry a gated value — its value
+*selects* whether `aeeObservedAttacks` must equal the caught rows or may be a
+lower bound. So flipping that one member between its two legal values used to move
+the record between `credited` and `malformed`, which is the prefix rule's failure
+mode in its purest form: two consumers disagreeing about whether a record is well
+formed, because one of them reads Assay vocabulary and the other does not.
 
 The validity window is not key management. This slice checks that a window handed
 to the checker is honoured; rotation, revocation, and distribution belong with the

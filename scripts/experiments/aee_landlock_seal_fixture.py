@@ -26,6 +26,7 @@ import base64
 import copy
 import hashlib
 import hmac
+import inspect
 import json
 import re
 from datetime import datetime
@@ -115,13 +116,43 @@ REQUIRED_SEAL_FIELDS = (
 # rule implies -- an ineligible model withholds credit rather than voiding the record, because a
 # consumer that cannot read this vocabulary must still see a structurally valid seal.
 #
-# Scoped to the members whose values rank, deliberately. Six sibling producer members
-# (`assayCollectionPath`, `assaySealedAt`, `assaySourceSchema`, `assaySealScope`,
-# `assayAttackRowAttributionSource`, `assayNonClaims`) still raise structural findings. They carry
-# identities and instants rather than an ordered axis, so the upstream paragraph does not reach
-# them; the local prefix rule does, and that gap is recorded in the ADR rather than closed by an
-# edit here. Adding one to this tuple is what `--producer-vocabulary-test` then enforces.
-PRODUCER_CREDIT_FIELDS = ("assayDropProofModel",)
+# The six siblings this was once scoped away from are here now, decided one at a time in ADR-045.
+# The scoping argument was that the upstream paragraph reached members whose values rank and these
+# carry identities, instants and paths -- true of that paragraph as it stood, and beside the point,
+# since the local prefix rule is not scoped to rankable members. It says fields beginning with
+# `assay`. Upstream has since said the same thing: a producer-defined member must not affect
+# structural validity whether or not its values can be ordered. Both rules now require this tuple.
+#
+# This tuple is now every producer member any rule in `validate` reads. The other three
+# (`assayObservedLabels`, `assayDropProofBasis`, `assayDropChannels`) are inert by having no rule at
+# all, which needs no entry here and no test: nothing can demote what nothing consults.
+PRODUCER_CREDIT_FIELDS = (
+    "assayDropProofModel",
+    "assaySourceSchema",
+    "assaySealScope",
+    "assayCollectionPath",
+    "assayAttackRowAttributionSource",
+    "assayNonClaims",
+    "assaySealedAt",
+)
+
+# Legal values of a producer member that change what this checker checks. The generic mutations in
+# `--producer-vocabulary-test` cannot reach these: they are neither absent, nor ill-typed, nor
+# outside the member's own value set, so a member that stays structural for one of its own permitted
+# values passes that test while the property is false.
+#
+# `assayAttackRowAttributionSource` is the case that made this necessary. Its value selects how
+# strictly an *AEE* member is checked -- equality between `aeeObservedAttacks` and the caught row
+# attack IDs is required under `substrate-runner` and not under `assembly-plane` (ADR-045, attack
+# attribution rules 2 and 3). Flipping the positive fixture from one legal value to the other, with
+# no other edit, used to turn a credited record into a malformed one.
+PRODUCER_CREDIT_ALTERNATE_VALUES: dict[str, tuple[str, ...]] = {
+    "assayAttackRowAttributionSource": ("substrate-runner",),
+}
+
+# Removal, distinguishable from setting the member to any value including `None`. A member set to
+# `None` and a member that is absent are different payloads and this test needs both to be sayable.
+_POP = object()
 
 # Values of `assayDropProofModel` that license the zero drop accounting this slice credits.
 DROP_PROOF_MODELS_ELIGIBLE = ("synchronous-probe", "counted-queue-zero")
@@ -678,7 +709,12 @@ def validate(statement: dict[str, Any], disabled: frozenset[str] = frozenset()) 
     # checker with no window silently keeps crediting a retired key.
     sealed_at = parse_instant(payloads[seals[0]].get("assaySealedAt")) if seals else None
     if seals and sealed_at is None:
-        add("seal-instant-invalid", PHASE_MALFORMED, f"sealed record {seals[0]} assaySealedAt is not an RFC 3339 UTC instant")
+        # Not-credited, and this is the one of the seven where the phase was load-bearing for
+        # something other than itself: an unparsable instant makes the window check below `continue`,
+        # so the structural finding was what stopped a bad instant from bypassing key expiry. It
+        # survives the move because *this* finding already withholds credit -- a seal whose instant
+        # will not parse cannot reach `credited` by any path, whether or not the window check ran.
+        add("seal-instant-invalid", PHASE_NOT_CREDITED, f"sealed record {seals[0]} assaySealedAt is not an RFC 3339 UTC instant")
     for idx in credit_eligible:
         scope = scopes[records[idx]["signatures"][0]["keyid"]]
         valid_from = parse_instant(scope.get("validFrom"))
@@ -695,9 +731,13 @@ def validate(statement: dict[str, Any], disabled: frozenset[str] = frozenset()) 
     for idx in seals:
         seal = payloads[idx]
         # Payload-only rules (#2006 item 4).
+        # Every `assay`-prefixed rule below is not-credited, per the prefix rule in ADR-045. The
+        # phase is the only thing separating a claim that no consumer can verify this record from a
+        # claim that this consumer's policy declines it, and a member only Assay defines cannot
+        # speak for the first.
         source_schema = seal.get("assaySourceSchema")
         if not isinstance(source_schema, str) or not source_schema:
-            add("payload-source-schema-invalid", PHASE_MALFORMED, f"sealed record {idx} assaySourceSchema must be a non-empty string")
+            add("payload-source-schema-invalid", PHASE_NOT_CREDITED, f"sealed record {idx} assaySourceSchema must be a non-empty string")
         observed_attacks = seal.get("aeeObservedAttacks")
         if not isinstance(observed_attacks, list) or not all(isinstance(item, str) for item in observed_attacks):
             add("payload-observed-attacks-invalid", PHASE_MALFORMED, f"sealed record {idx} aeeObservedAttacks must be an array of strings")
@@ -726,20 +766,31 @@ def validate(statement: dict[str, Any], disabled: frozenset[str] = frozenset()) 
             add("payload-method-unsupported", PHASE_MALFORMED, f"sealed record {idx} aeeMethod {method!r} is not {SEAL_METHOD!r}, the only method this slice observes")
         attribution = seal.get("assayAttackRowAttributionSource")
         if attribution not in ATTRIBUTION_SOURCES:
-            add("payload-attribution-source-unknown", PHASE_MALFORMED, f"sealed record {idx} assayAttackRowAttributionSource {attribution!r} is not one of {ATTRIBUTION_SOURCES}")
+            add("payload-attribution-source-unknown", PHASE_NOT_CREDITED, f"sealed record {idx} assayAttackRowAttributionSource {attribution!r} is not one of {ATTRIBUTION_SOURCES}")
+        # A subset is still a rejection rather than a warning, which is what `MINIMUM_NON_CLAIMS`
+        # exists to make true. Not-credited is a rejection with a reason code; the prefix rule below
+        # names this member and says it "does not weaken required AEE checks", and a rule that voids
+        # the record does the converse -- it lets producer vocabulary strengthen one.
         non_claims = seal.get("assayNonClaims")
         if not isinstance(non_claims, list) or not set(MINIMUM_NON_CLAIMS).issubset(non_claims):
             missing = [c for c in MINIMUM_NON_CLAIMS if not isinstance(non_claims, list) or c not in non_claims]
-            add("payload-non-claims-incomplete", PHASE_MALFORMED, f"sealed record {idx} assayNonClaims omits the payload-local minimum: {missing}")
+            add("payload-non-claims-incomplete", PHASE_NOT_CREDITED, f"sealed record {idx} assayNonClaims omits the payload-local minimum: {missing}")
+        # The sibling rule `key-scope-collection-path-mismatch` reads this same member and has always
+        # been not-credited, which is what ADR-045's key-scope section specifies: a signature outside
+        # the key's trusted collection path is "structurally valid but not credited". One member was
+        # being read at both phases in one file.
         collection_path = seal.get("assayCollectionPath")
         if collection_path != COLLECTION_PATH:
-            add("payload-collection-path-mismatch", PHASE_MALFORMED, f"sealed record {idx} assayCollectionPath {collection_path!r} is not {COLLECTION_PATH!r}, the path this slice collects on")
+            add("payload-collection-path-mismatch", PHASE_NOT_CREDITED, f"sealed record {idx} assayCollectionPath {collection_path!r} is not {COLLECTION_PATH!r}, the path this slice collects on")
 
+        # #2014 asked that a seal not claim a boundary nothing observed, and named the harm as the
+        # checker "credits it as attested substrate evidence". Withholding credit is the whole of
+        # what it asked for; the model it cites one field over is the not-credited rule above.
         seal_scope = seal.get("assaySealScope")
         if not isinstance(seal_scope, str) or not seal_scope:
-            add("seal-scope-missing", PHASE_MALFORMED, f"sealed record {idx} assaySealScope must be a non-empty string naming the sealed enforcement scope")
+            add("seal-scope-missing", PHASE_NOT_CREDITED, f"sealed record {idx} assaySealScope must be a non-empty string naming the sealed enforcement scope")
         elif seal_scope != SEAL_SCOPE:
-            add("seal-scope-mismatch", PHASE_MALFORMED, f"sealed record {idx} assaySealScope {seal_scope!r} is not the scope this checker implements ({SEAL_SCOPE!r})")
+            add("seal-scope-mismatch", PHASE_NOT_CREDITED, f"sealed record {idx} assaySealScope {seal_scope!r} is not the scope this checker implements ({SEAL_SCOPE!r})")
 
         if "aeePostureDigest" not in malformed_digests and seal.get("aeePostureDigest") != env.get("networkPosture", {}).get("digest", {}).get("sha256"):
             add("posture-digest-mismatch", PHASE_MALFORMED, f"sealed record {idx} aeePostureDigest mismatch")
@@ -758,8 +809,15 @@ def validate(statement: dict[str, Any], disabled: frozenset[str] = frozenset()) 
         for attack_id in observed_attacks:
             if attack_id not in caught_attacks:
                 add("observed-attack-unsupported", PHASE_MALFORMED, f"sealed record {idx} names attack not supported by caught rows: {attack_id}")
+        # The strictest case of the prefix rule, and the reason `PRODUCER_CREDIT_ALTERNATE_VALUES`
+        # exists. This rule is not gated on a producer member's validity; it is *selected* by one of
+        # its two legal values, and it tightens a rule about an AEE member. So a consumer that reads
+        # the vocabulary applies it and a consumer that ignores the member does not, and before this
+        # they would have disagreed about whether the record was well formed. The baseline rule above
+        # -- every named attack must be supported by a caught row -- is consumer-independent and stays
+        # structural. Only the tightening is Assay policy, so only the tightening withholds credit.
         if seal.get("assayAttackRowAttributionSource") == "substrate-runner" and sorted(observed_attacks) != caught_attacks:
-            add("substrate-runner-observed-attacks-mismatch", PHASE_MALFORMED, f"sealed record {idx} substrate-runner observed attacks mismatch")
+            add("substrate-runner-observed-attacks-mismatch", PHASE_NOT_CREDITED, f"sealed record {idx} substrate-runner observed attacks mismatch")
 
     for row_idx, row in enumerate(rows):
         refs = row.get("observationRefs", [])
@@ -889,6 +947,14 @@ def run_producer_vocabulary_test() -> int:
     A phase is a one-word argument to `add`, invisible to every other test here: `--meta-test` reads
     reason codes, `--rule-coverage-test` greps `add("...` out of the source, and neither would
     notice this moving back. So the property gets a test of its own.
+
+    Two kinds of mutation, and the second was added because the first kind cannot see a whole class
+    of violation. The three generic ones -- absent, ineligible, ill-typed -- must withhold credit,
+    since a member this checker's policy reads and cannot make sense of is a member it declines.
+    A value from `PRODUCER_CREDIT_ALTERNATE_VALUES` is *legal*, so it may well leave the record
+    credited; all that is asserted of it is that it does not void the record. That is the weaker
+    assertion and the one that catches the selector case, where a member's permitted value decides
+    how strictly some other rule runs.
     """
     base = load_case(POSITIVE_CASE)
     if outcome_of(validate(base)) != OUTCOME_CREDITED:
@@ -897,33 +963,59 @@ def run_producer_vocabulary_test() -> int:
 
     failures = 0
     for field in PRODUCER_CREDIT_FIELDS:
-        for label, mutate in (
-            ("absent", lambda seal, f: seal.pop(f)),
-            ("ineligible", lambda seal, f: seal.__setitem__(f, "uncounted-queue")),
-            ("wrong type", lambda seal, f: seal.__setitem__(f, 7)),
-        ):
+        # `""` rather than a plausible-looking wrong value, because the seven members do not share a
+        # shape: two gate a closed set, two require equality with a constant, one requires an RFC 3339
+        # instant, one a list, and `assaySourceSchema` accepts any non-empty string at all. A
+        # borrowed value from one member's vocabulary is legal for that last one, so the mutation
+        # would pass it through and the check would read as "credit was not withheld". The empty
+        # string is the one value none of the seven accepts.
+        mutations: list[tuple[str, Any, bool]] = [
+            ("absent", _POP, True),
+            ("ineligible", "", True),
+            ("wrong type", 7, True),
+        ]
+        mutations += [(f"legal value {value!r}", value, False) for value in PRODUCER_CREDIT_ALTERNATE_VALUES.get(field, ())]
+
+        for label, value, must_withhold_credit in mutations:
             stmt = json.loads(json.dumps(base))
             seal = stmt["predicate"]["observationRecords"][2]["payload"]
             if field not in seal:
                 print(f"FAIL {field}: not present in the positive fixture, so it cannot be mutated")
                 failures += 1
                 break
-            mutate(seal, field)
+            if value is _POP:
+                del seal[field]
+            else:
+                seal[field] = value
             replace_payload(stmt, 2, seal)
             outcome = outcome_of(validate(stmt))
             if outcome == OUTCOME_MALFORMED:
                 print(f"FAIL {field} {label}: a producer member voided the record")
                 failures += 1
-            elif outcome == OUTCOME_CREDITED:
+            elif must_withhold_credit and outcome == OUTCOME_CREDITED:
                 print(f"FAIL {field} {label}: credit was not withheld")
                 failures += 1
             else:
                 print(f"ok   {field} {label}: {outcome}")
 
+    # The mutations above only reach members already in the tuple, so a producer member that gets a
+    # new rule and no decision about its phase is invisible to them -- which is how six members sat
+    # structural for four slices. `validate` is therefore read back: every `assay`-prefixed member it
+    # consults must be one this file has decided.
+    body = inspect.getsource(validate)
+    consulted = {name for name in re.findall(r'"(assay[A-Z][A-Za-z]*)"', body)} - set(PRODUCER_CREDIT_FIELDS)
+    # Not a payload member: the `_ext` block is consumer trust configuration carried beside the
+    # records, not producer vocabulary inside a signed payload, so the prefix rule does not reach it.
+    consulted -= {"assayLandlockSeal"}
+    for name in sorted(consulted):
+        print(f"FAIL {name}: `validate` reads this producer member and it is not in PRODUCER_CREDIT_FIELDS")
+        failures += 1
+
     if failures:
         print(f"\n{failures} producer-vocabulary check(s) failed")
         return 1
-    print(f"\nall {len(PRODUCER_CREDIT_FIELDS)} producer credit field(s) are inert to structural validity")
+    print(f"\nall {len(PRODUCER_CREDIT_FIELDS)} producer credit field(s) are inert to structural validity,")
+    print("and `validate` reads no producer member outside that tuple")
     return 0
 
 
