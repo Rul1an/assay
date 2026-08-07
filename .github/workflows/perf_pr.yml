@@ -60,8 +60,20 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          # The script writes only to stdout and never opens $GITHUB_OUTPUT or
+          # $GITHUB_STEP_SUMMARY itself: opening a path read from the environment is an
+          # uncontrolled-path sink (CodeQL py/path-injection). Routing happens here.
           git diff --name-only "${BASE_SHA}...${HEAD_SHA}" \
-            | python3 scripts/ci/perf_bench_relevance.py
+            | python3 scripts/ci/perf_bench_relevance.py \
+            | tee relevance.txt
+          grep -E '^(store|suite)_relevant=(true|false)$' relevance.txt >> "$GITHUB_OUTPUT"
+          {
+            echo "## Perf benchmark relevance"
+            echo
+            echo '```'
+            cat relevance.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   benches:
     name: Criterion compare (PR vs main)

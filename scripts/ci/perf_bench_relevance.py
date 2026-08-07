@@ -16,7 +16,8 @@ drift; this reads the graph itself.
 Usage:
     git diff --name-only BASE...HEAD | scripts/ci/perf_bench_relevance.py
 
-Writes `<bench>_relevant=true|false` lines to stdout (and to $GITHUB_OUTPUT when set).
+Writes `<bench>_relevant=true|false` lines to stdout, plus `#`-prefixed commentary. The
+caller routes them; this script never opens a path taken from the environment.
 
 Fail-open by design: if the graph cannot be read, every benchmark is reported
 relevant. A gate that silently stops benchmarking is a worse failure than one that
@@ -26,7 +27,6 @@ benchmarks too much.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -141,28 +141,23 @@ def emit(
     detail: dict[str, str] | None = None,
     reason: str | None = None,
 ) -> None:
-    lines = [f"{bench}_relevant={str(v).lower()}" for bench, v in sorted(results.items())]
-    for line in lines:
-        print(line)
+    """Write everything to stdout; the caller routes it.
 
-    out = os.environ.get("GITHUB_OUTPUT")
-    if out:
-        with open(out, "a", encoding="utf-8") as fh:
-            fh.write("\n".join(lines) + "\n")
-
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a", encoding="utf-8") as fh:
-            fh.write("## Perf benchmark relevance\n\n")
-            if reason:
-                fh.write(f"> {reason}\n\n")
-            for bench, value in sorted(results.items()):
-                why = (detail or {}).get(bench, "")
-                fh.write(f"- **{bench}**: `{value}` — {why}\n")
-            fh.write("\n<details><summary>changed files</summary>\n\n")
-            for path in changed:
-                fh.write(f"- `{path}`\n")
-            fh.write("\n</details>\n")
+    This deliberately does not open `$GITHUB_OUTPUT` or `$GITHUB_STEP_SUMMARY`. Opening a
+    path read from the environment is an uncontrolled-path sink (CodeQL py/path-injection),
+    and the workflow can do the redirection itself with no path expression in here at all.
+    Machine-readable lines match `^(store|suite)_relevant=(true|false)$`; everything else is
+    commentary prefixed with `#`.
+    """
+    if reason:
+        print(f"# {reason}")
+    for bench, value in sorted(results.items()):
+        why = (detail or {}).get(bench, "")
+        print(f"# {bench}: {value}{f' — {why}' if why else ''}")
+    for path in changed:
+        print(f"#   changed: {path}")
+    for bench, value in sorted(results.items()):
+        print(f"{bench}_relevant={str(value).lower()}")
 
 
 if __name__ == "__main__":
