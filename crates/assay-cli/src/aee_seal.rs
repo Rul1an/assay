@@ -514,6 +514,37 @@ pub enum DropAccounting {
     ///
     /// Completeness is the caller's obligation and is not checkable here: a list that omits the
     /// lossy channel passes. Naming it rather than implying it.
+    ///
+    /// # The adversary this exists for
+    ///
+    /// Dropped events are not only an overload symptom, they are an attack. The super producer
+    /// threat is a systematic study of exactly this: attackers "may try to compromise the system
+    /// auditing frameworks to conceal their malicious activities", and the threat "enables attackers
+    /// to either corrupt the auditing framework or paralyze the entire system", with the root cause
+    /// identified as "the lack of data isolation in the centralized architecture of existing
+    /// solutions" (arXiv 2307.15895, USENIX Security). Follow-on work restates it as provenance
+    /// generation being used "to overload a system to force the system to drop security-relevant
+    /// events and allow an attacker to hide their actions" (arXiv 2510.08479).
+    ///
+    /// That sharpens what the omission above costs. A zero count over a **complete** channel list
+    /// is evidence that nothing was hidden this way. A zero count over an **incomplete** one is the
+    /// attacker's preferred outcome: the seal reports no loss while the unenumerated channel is
+    /// where the evidence went. The gap is not a documentation nicety, it is the surface the threat
+    /// aims at, so a caller adding a collection path owes an argument for why its list is closed.
+    ///
+    /// # Why this is recorded rather than solved
+    ///
+    /// Neither of those papers claims completeness is achievable. 2510.08479 notes that resource
+    /// isolation — NODROP's answer — "does not fully solve the problems resulting from hardware
+    /// dependencies and performance limitations", and offers a scheduler that "significantly
+    /// improves" completeness rather than guaranteeing it. If the state of the art cannot promise a
+    /// complete audit trail, an evidence format that *claimed* one would be asserting more than the
+    /// field can support.
+    ///
+    /// So the seal records whether the claim was checked instead of asserting that it holds, which
+    /// is what [`DROP_BASIS_CHECKED`] and [`DROP_BASIS_DECLARED`] carry. A consumer can then price
+    /// the difference. That is the honest shape for a property the literature says is approximated,
+    /// and it is why the basis travels with the count rather than the count travelling alone.
     CountedQueue { channels: Vec<(String, u64)> },
 }
 
