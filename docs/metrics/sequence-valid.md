@@ -36,8 +36,6 @@ The `sequence_valid` metric checks that tools are called in the correct order. I
 | `require` | Tool must be called at least once |
 | `before` | Tool A must precede Tool B |
 | `blocklist` | These tools must never be called |
-| `allowlist` | Only these tools are allowed |
-| `count` | Limit call frequency |
 
 ---
 
@@ -72,7 +70,7 @@ rules:
 
 ```yaml
 rules:
-  - type: count
+  - type: max_calls
     tool: send_email
     max: 3
 ```
@@ -102,7 +100,7 @@ tests:
         tools: [admin_*, system_*]
 
       # Max 5 API calls
-      - type: count
+      - type: max_calls
         tool: external_api
         max: 5
 ```

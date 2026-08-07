@@ -222,7 +222,7 @@ tests:
         tools: [admin_*]
 
       # Max 5 API calls
-      - type: count
+      - type: max_calls
         tool: ExternalAPI
         max: 5
 ```
@@ -267,7 +267,7 @@ rules:
     then: ProcessPayment
 
   # Never refund more than once
-  - type: count
+  - type: max_calls
     tool: ProcessRefund
     max: 1
 ```
@@ -306,10 +306,10 @@ rules:
     then: SpecialistA
 
   # Only one specialist per request
-  - type: count
+  - type: max_calls
     tool: SpecialistA
     max: 1
-  - type: count
+  - type: max_calls
     tool: SpecialistB
     max: 1
 ```

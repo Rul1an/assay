@@ -139,8 +139,9 @@ Limits the number of steps in the trace.
 ```
 
 #### `args_valid`
-Checks a tool's arguments against a policy. Distinct from the `args_valid` **metric** under
-`expected:` — this one asserts over the trace, that one over the response.
+Checks arguments against a policy. Note what this does **not** do: it evaluates the `test_args`
+you supply here, not the recorded trace. The evaluator calls this unit-test mode and hands it an
+empty episode. To assert over a real trace, use the `args_valid` metric under `expected:`.
 ```yaml
 - type: args_valid
   tool: "transfer_funds"
@@ -150,8 +151,10 @@ Checks a tool's arguments against a policy. Distinct from the `args_valid` **met
 ```
 
 #### `sequence_valid`
-Checks a tool-call ordering against a sequence policy. Distinct from the `sequence_valid`
-**metric** under `expected:`, which is documented above.
+Checks a supplied tool-call ordering against a sequence policy. Like `args_valid` above it reads
+`test_trace_raw`, not the recorded trace. `policy` must carry a non-empty `regex`, or the
+assertion cannot fail and is refused. A `test_trace` field also exists and is **not** evaluated;
+use `test_trace_raw`.
 ```yaml
 - type: sequence_valid
   test_trace_raw:              # optional
@@ -162,7 +165,8 @@ Checks a tool-call ordering against a sequence policy. Distinct from the `sequen
 ```
 
 #### `tool_blocklist`
-Checks tool calls against a blocklist policy.
+Checks the supplied `test_tool_calls` against a blocklist policy, not the recorded trace.
+`policy` must carry a `blocked` array of strings, or the assertion cannot fail and is refused.
 ```yaml
 - type: tool_blocklist
   test_tool_calls: ["delete_all"]   # optional

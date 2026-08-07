@@ -184,8 +184,6 @@ tests:
 | `require` | Tool must be called at least once |
 | `before` | Tool A must precede Tool B |
 | `blocklist` | These tools must never be called |
-| `allowlist` | Only these tools are allowed |
-| `count` | Limit how many times a tool can be called |
 
 ### Example
 
@@ -233,7 +231,7 @@ tests:
         then: [read_data, write_data, delete_data]
       - type: blocklist
         tools: [admin_*, debug_*]
-      - type: count
+      - type: max_calls
         tool: api_call
         max: 10
 ```
