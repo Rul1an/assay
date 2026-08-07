@@ -93,13 +93,46 @@ The `tools` section handles both filtering and extra controls.
 
 ### Wildcards
 
-Assay uses simple `*` wildcards:
+Assay uses simple `*` wildcards, and the language has exactly five forms:
 
 - `"*"` matches all tools
 - `"read_*"` matches by prefix
 - `"*_file"` matches by suffix
 - `"*search*"` matches by substring
 - patterns without `*` are exact matches
+
+In the four wildcard forms a `*` is unbounded: it crosses any character, including the `.` or
+`__` a server may use to namespace its tools. `"*"` therefore admits tools that do not exist yet,
+including ones a future upstream adds.
+
+**A `*` that is neither the first nor the last character is a literal asterisk.** There is no
+fifth wildcard form. `read_*_file` does not match `read_config_file`; it matches only a tool
+literally named `read_*_file`. The same goes for several interior stars, such as `a*b*c`, and for
+interior stars inside the substring form: `*a*b*` searches for the three characters `a*b`.
+
+**That one fails in the dangerous direction.** In `allow`, an interior-star pattern matches
+nothing and the tool is refused, which is visible. In `deny`, it matches nothing and the tool is
+**permitted** -- by a line whose author believed it was blocking something. If a `deny` entry
+looks like a glob and is not one of the five forms above, it is not blocking what it names.
+
+For the four forms that do expand, **the risk is one-sided and a policy file does not show it.**
+A wildcard in `deny` over-blocks, which fails visibly and safely. The same wildcard in `allow`
+over-permits, which fails silently. Azure RBAC measured this direction: about half of the 15,481
+catalogued actions reach across Resource Providers under non-obvious wildcards, and the
+recommendation there was explicit enumeration rather than a more careful pattern language
+([arXiv 2506.10755v3](https://arxiv.org/abs/2506.10755)). Prefer naming the tools you mean in
+`allow`, and keep `"*"` for the cases where admitting the unknown is the intent rather than the
+default.
+
+Two corners, so they are stated rather than discovered. `"**"` (and any longer run of stars) is
+the substring form with an empty substring, so it matches everything, exactly as `"*"` does — it
+is not the mandate surface's crossing operator. An empty pattern `""` has no star, so it is an
+exact match against the empty name and matches no real tool.
+
+> A different pattern language applies to mandate `tool_patterns`, where `*` stops at a `.` and
+> `**` crosses it, the way a filesystem glob treats `/`. The two are deliberately different and
+> pinned against each other by a test; do not carry a pattern from one surface to the other
+> without re-reading it.
 
 ## JSON Schema in `schemas:`
 
