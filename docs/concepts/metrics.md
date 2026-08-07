@@ -183,10 +183,7 @@ tests:
 |------|-------------|
 | `require` | Tool must be called at least once |
 | `before` | Tool A must precede Tool B |
-| `immediately_before` | Tool A must directly precede Tool B |
 | `blocklist` | These tools must never be called |
-| `allowlist` | Only these tools are allowed |
-| `count` | Limit how many times a tool can be called |
 
 ### Example
 
@@ -231,10 +228,10 @@ tests:
         tool: authenticate
       - type: before
         first: authenticate
-        then: [read_data, write_data, delete_data]
+        then: read_data
       - type: blocklist
-        tools: [admin_*, debug_*]
-      - type: count
+        pattern: admin_
+      - type: max_calls
         tool: api_call
         max: 10
 ```
@@ -257,18 +254,19 @@ tests:
       - admin_override
 ```
 
-### Glob Patterns
+### Exact Names
 
-Use wildcards to match multiple tools:
+`tool_blocklist` compares each call against the list by exact name. Wildcards are not
+interpreted -- `admin_*` matches only a tool literally called `admin_*`.
 
 ```yaml
 tests:
   - id: no_admin_tools
     metric: tool_blocklist
     blocklist:
-      - admin_*        # Matches admin_delete, admin_create, etc.
-      - *_dangerous    # Matches delete_dangerous, run_dangerous
-      - debug_*        # Matches debug_mode, debug_dump
+      - admin_delete
+      - admin_create
+      - run_dangerous
 ```
 
 ### Example
@@ -320,7 +318,7 @@ tests:
         tool: authenticate_user
       - type: before
         first: authenticate_user
-        then: [get_customer, update_customer]
+        then: get_customer
 
   # Block dangerous operations
   - id: no_destructive
