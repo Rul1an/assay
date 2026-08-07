@@ -180,6 +180,11 @@ Trust rejections (`structurally-valid-not-credited`):
   `substrate-runner` while `aeeObservedAttacks` and the caught rows disagree;
 - `assayNonClaims` omits one of the payload-local minimum non-claims;
 - `assaySealedAt` is not an RFC 3339 UTC instant.
+- `assayDropProofBasis` disagrees with the basis `assayDropProofModel` implies — a payload claiming
+  `checked` over a model that verified nothing (#2093).
+- `assayDropChannels` disagrees with the basis: a `checked` basis rests on readings and a `declared`
+  one has none.
+- `assayDropChannels` is not a list.
 
 Everything from `assayDropProofModel` down is a policy verdict rather than a
 structural one. Three of them used to be filed above; the rest were structural
