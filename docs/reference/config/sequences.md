@@ -219,7 +219,7 @@ tests:
 
       # Never call admin tools
       - type: blocklist
-        tools: [admin_*]
+        pattern: admin_
 
       # Max 5 API calls
       - type: max_calls

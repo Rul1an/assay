@@ -93,11 +93,11 @@ tests:
       # Auth before data access
       - type: before
         first: authenticate
-        then: [get_data, update_data, delete_data]
+        then: get_data
 
       # No admin tools
       - type: blocklist
-        tools: [admin_*, system_*]
+        pattern: admin_
 
       # Max 5 API calls
       - type: max_calls
@@ -169,10 +169,7 @@ Blocklist and allowlist support globs:
 ```yaml
 rules:
   - type: blocklist
-    tools:
-      - admin_*       # admin_delete, admin_create, etc.
-      - *_dangerous   # delete_dangerous, run_dangerous
-      - debug_*       # debug_mode, debug_dump
+    pattern: debug_*       # debug_mode, debug_dump
 ```
 
 ---

@@ -52,24 +52,20 @@ fn yaml_blocks(md: &str) -> Vec<(usize, String)> {
     out
 }
 
-/// The rule mappings inside one block, as YAML values.
+/// The rule mappings inside one block, as YAML values, at any depth.
 ///
-/// Blocks appear in two shapes: a bare `rules:` list, or a fragment that is already a list of
-/// rules. Anything that is neither is not a rule example and is skipped rather than failed —
-/// these documents also contain suite-level and policy-level yaml.
+/// An earlier version looked only for a top-level `rules:` key or a top-level sequence, and the
+/// documents nest: `metric:` → `rules:`, `tests:` → `rules:`. Eight blocks were invisible, two of
+/// them carrying a `blocklist` rule written with `tools:` — the exact defect this test was added
+/// to catch, sitting in the half it could not see. Depth is not a property of a rule, so it must
+/// not be a property of the search.
 fn rules_in(block: &str) -> Vec<serde_yaml::Value> {
     let Ok(v) = serde_yaml::from_str::<serde_yaml::Value>(block) else {
         return Vec::new();
     };
-    let seq = match &v {
-        serde_yaml::Value::Mapping(m) => m
-            .get(serde_yaml::Value::String("rules".into()))
-            .and_then(|r| r.as_sequence())
-            .cloned(),
-        serde_yaml::Value::Sequence(s) => Some(s.clone()),
-        _ => None,
-    };
-    seq.unwrap_or_default()
+    let mut found = Vec::new();
+    collect_rules(&v, &mut found);
+    found
         .into_iter()
         // A rule is a mapping carrying `type`. Other list entries in these docs are not rules.
         .filter(|e| {
@@ -77,6 +73,29 @@ fn rules_in(block: &str) -> Vec<serde_yaml::Value> {
                 .is_some_and(|m| m.contains_key(serde_yaml::Value::String("type".into())))
         })
         .collect()
+}
+
+/// Every `rules:` sequence anywhere in the value, plus a bare top-level sequence.
+fn collect_rules(v: &serde_yaml::Value, out: &mut Vec<serde_yaml::Value>) {
+    match v {
+        serde_yaml::Value::Mapping(m) => {
+            for (k, val) in m {
+                if k.as_str() == Some("rules") {
+                    if let Some(seq) = val.as_sequence() {
+                        out.extend(seq.iter().cloned());
+                        continue;
+                    }
+                }
+                collect_rules(val, out);
+            }
+        }
+        serde_yaml::Value::Sequence(s) => {
+            for e in s {
+                collect_rules(e, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[test]
@@ -95,15 +114,10 @@ fn every_documented_sequence_rule_parses() {
                 // Only rules the loader would see: a `type` this crate owns. A block describing a
                 // different schema that happens to use `type` is not this test's business.
                 let printed = serde_yaml::to_string(&rule).unwrap_or_default();
-                let ty = rule
-                    .as_mapping()
-                    .and_then(|m| m.get(serde_yaml::Value::String("type".into())))
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                if !SEQUENCE_RULE_TYPES.contains(&ty.as_str()) && !ty.is_empty() {
-                    continue;
-                }
+                // No type allowlist. Everything under a `rules:` key is a sequence rule by
+                // construction, and a hand-kept list of "types this crate owns" was a second
+                // place to forget: it omitted `count`, so every broken `count` example was
+                // skipped as though it belonged to some other schema.
                 checked += 1;
                 if let Err(e) = serde_yaml::from_value::<SequenceRule>(rule) {
                     failures.push(format!(
@@ -120,9 +134,9 @@ fn every_documented_sequence_rule_parses() {
     }
 
     assert!(
-        checked >= 10,
-        "found only {checked} documented rules to check, which means the extractor stopped \
-         matching rather than that the docs are clean"
+        checked >= 40,
+        "found only {checked} documented rules to check. The four documents carry far more than \
+         that, so this means the extractor stopped matching rather than that the docs are clean."
     );
     assert!(
         failures.is_empty(),
@@ -131,21 +145,3 @@ fn every_documented_sequence_rule_parses() {
         failures.join("\n\n")
     );
 }
-
-/// The types this crate owns, so a yaml block describing some other `type:` is skipped rather
-/// than reported. Kept deliberately loose: an unknown `type` that *looks* like a sequence rule
-/// still reaches the parser and fails there, which is the case worth catching.
-const SEQUENCE_RULE_TYPES: &[&str] = &[
-    "require",
-    "eventually",
-    "max_calls",
-    "before",
-    "after",
-    "never_after",
-    "sequence",
-    "blocklist",
-    // Historical spellings the documentation used to carry. Listed so that a reappearance is
-    // reported by the parser rather than silently skipped as "some other schema".
-    "immediately_before",
-    "allowlist",
-];

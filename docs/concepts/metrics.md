@@ -228,9 +228,9 @@ tests:
         tool: authenticate
       - type: before
         first: authenticate
-        then: [read_data, write_data, delete_data]
+        then: read_data
       - type: blocklist
-        tools: [admin_*, debug_*]
+        pattern: admin_
       - type: max_calls
         tool: api_call
         max: 10
@@ -317,7 +317,7 @@ tests:
         tool: authenticate_user
       - type: before
         first: authenticate_user
-        then: [get_customer, update_customer]
+        then: get_customer
 
   # Block dangerous operations
   - id: no_destructive
