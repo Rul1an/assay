@@ -95,16 +95,20 @@ suite: my-agent
 
 ### Sequence Rules
 
+Before (v0):
+
 ```yaml
-# Before (v0)
 tests:
   - id: order_check
     metric: sequence_valid
     sequences:
       - [get_customer, update_customer]
       - [verify_identity, delete_customer]
+```
 
-# After (v1)
+After (v1):
+
+```yaml
 tests:
   - id: order_check
     metric: sequence_valid

@@ -89,7 +89,8 @@ rules:
 | `[GetCustomer, UpdateCustomer]` | ✅ Pass |
 | `[GetCustomer, admin_delete]` | ❌ Fail |
 
-**Glob patterns** are supported:
+Matching is by plain substring, so a prefix blocks every tool that starts with it. A `*` is
+matched literally, not as a wildcard:
 
 ```yaml
 rules:

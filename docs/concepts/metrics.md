@@ -254,18 +254,19 @@ tests:
       - admin_override
 ```
 
-### Glob Patterns
+### Exact Names
 
-Use wildcards to match multiple tools:
+`tool_blocklist` compares each call against the list by exact name. Wildcards are not
+interpreted -- `admin_*` matches only a tool literally called `admin_*`.
 
 ```yaml
 tests:
   - id: no_admin_tools
     metric: tool_blocklist
     blocklist:
-      - admin_*        # Matches admin_delete, admin_create, etc.
-      - *_dangerous    # Matches delete_dangerous, run_dangerous
-      - debug_*        # Matches debug_mode, debug_dump
+      - admin_delete
+      - admin_create
+      - run_dangerous
 ```
 
 ### Example

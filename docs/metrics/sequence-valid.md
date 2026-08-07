@@ -66,7 +66,7 @@ rules:
     pattern: admin_
 ```
 
-### Count
+### Max Calls
 
 ```yaml
 rules:
@@ -162,14 +162,15 @@ tests:
 
 ---
 
-## Glob Patterns
+## Substring Matching
 
-Blocklist and allowlist support globs:
+`blocklist` matches by plain substring, not by glob. A `*` is matched literally and will
+usually match nothing:
 
 ```yaml
 rules:
   - type: blocklist
-    pattern: debug_*       # debug_mode, debug_dump
+    pattern: debug_        # matches debug_mode, debug_dump
 ```
 
 ---
