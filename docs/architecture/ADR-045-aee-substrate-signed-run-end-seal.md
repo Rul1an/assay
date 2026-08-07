@@ -273,14 +273,32 @@ and parked six sibling producer members — `assaySourceSchema`, `assaySealScope
 contract questions rather than one edit. They are decided here, and all six move.
 
 The reason they were parked does not survive being written out. It was that the normative paragraph
-in in-toto/attestation#570 governs members whose values a reader might rank, and these carry
-identities, instants and paths instead. That is true of the upstream paragraph and beside the point
-for us: the prefix rule below is not scoped to rankable members. It says *fields beginning with
-`assay`*, all of them, and has said so since this ADR was written. So six local decisions were being
-held against an upstream sentence that could only ever be narrower than the rule we already had. The
-question left open at in-toto/attestation#570 — whether a producer member is inert whether or not
-its values rank — is still unanswered upstream as of this decision, and is not load-bearing here. An
-answer would confirm the local rule, not extend it.
+in in-toto/attestation#570 governed members whose values a reader might rank, and these carry
+identities, instants and paths instead. That was true of the upstream paragraph as it stood at
+`35ca6f899`, and beside the point either way: the prefix rule below is not scoped to rankable
+members. It says *fields beginning with `assay`*, all of them, and has said so since this ADR was
+written. So six local decisions were being held against an upstream sentence that could only ever be
+narrower than the rule we already had.
+
+That sentence is no longer narrower, and the tense above is load-bearing. The question we left open
+at in-toto/attestation#570 — whether a producer member is inert whether or not its values rank — was
+answered upstream at `237f83b9f`, sixteen minutes after we asked it, in a commit titled *make
+producer territory inert, not merely unrankable*. The paragraph now reads that a producer-defined
+member "MUST NOT affect structural validity, MUST NOT affect `result`, and MUST NOT affect the
+evidence tier, whether or not its values can be ordered". The upstream rule and the local prefix rule
+now say the same thing, and this decision is what the two of them jointly require rather than what
+one of them permitted. Nothing below changes as a result — the reasoning never rested on the upstream
+paragraph — but a decision recorded as unconfirmed when it is in fact confirmed reads as weaker
+evidence than it is.
+
+One boundary this does not settle, named so it is not read as settled. The new paragraph opens with a
+verifier reading *nothing* in producer territory, and the three obligations it then states are
+structural validity, `result`, and the evidence tier. The not-credited verdict this checker reaches
+is none of those three: it is a consumer trust decision of the same class as an untrusted signing
+key, which the key-scope section above already treats as a consumer's own to make, and AEE's `result`
+is a predicate field this checker does not emit. So this reading holds that withholding credit is
+outside the three obligations. It is a reading, not a quotation, and it is the one to re-check if the
+opening sentence acquires normative weight of its own.
 
 What was worth checking per member was never whether the rule reaches them. It was whether moving
 each one gives up something the structural phase was buying.

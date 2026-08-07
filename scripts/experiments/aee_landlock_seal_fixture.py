@@ -117,9 +117,11 @@ REQUIRED_SEAL_FIELDS = (
 # consumer that cannot read this vocabulary must still see a structurally valid seal.
 #
 # The six siblings this was once scoped away from are here now, decided one at a time in ADR-045.
-# The scoping argument was that the upstream paragraph reaches members whose values rank and these
-# carry identities, instants and paths -- true of the upstream paragraph, and beside the point, since
-# the local prefix rule is not scoped to rankable members. It says fields beginning with `assay`.
+# The scoping argument was that the upstream paragraph reached members whose values rank and these
+# carry identities, instants and paths -- true of that paragraph as it stood, and beside the point,
+# since the local prefix rule is not scoped to rankable members. It says fields beginning with
+# `assay`. Upstream has since said the same thing: a producer-defined member must not affect
+# structural validity whether or not its values can be ordered. Both rules now require this tuple.
 #
 # This tuple is now every producer member any rule in `validate` reads. The other three
 # (`assayObservedLabels`, `assayDropProofBasis`, `assayDropChannels`) are inert by having no rule at
