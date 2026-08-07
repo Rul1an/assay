@@ -291,7 +291,18 @@ impl Monitor {
         }
     }
 
-    /// Emit an event for every allowed connect. See [`loader::LinuxMonitor::set_emit_observed_connect`].
+    /// Ask the kernel to emit an event for every ALLOWED connect, not only blocked ones.
+    ///
+    /// Off unless a run wants a peer set. The allow path is the hot one, so this is opt-in rather
+    /// than default: a run that does not ask pays nothing, and its peer set is honestly empty
+    /// instead of quietly partial.
+    ///
+    /// On a non-Linux host this is accepted and does nothing, because there is no kernel to ask.
+    //
+    // The doc used to read "See [`loader::LinuxMonitor::set_emit_observed_connect`]", which
+    // rustdoc rejects under `--deny warnings`: `mod loader` is private, so the link pointed at
+    // something a consumer of this crate cannot open. Deferring public documentation to a private
+    // item is not a broken link to be re-spelled -- it is a doc that says nothing to its reader.
     pub fn set_emit_observed_connect(&mut self, enabled: bool) -> Result<(), MonitorError> {
         #[cfg(target_os = "linux")]
         {

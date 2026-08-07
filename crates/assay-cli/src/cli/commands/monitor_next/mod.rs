@@ -28,6 +28,12 @@ pub(crate) mod enforcement_health;
 // from a live run is Linux-and-runner gated. Gating the whole module meant these tests never ran
 // off Linux, which is how a coverage claim keyed on the wrong probe survived to a live run.
 #[cfg_attr(not(all(target_os = "linux", feature = "runner")), allow(dead_code))]
+// Gated to match its own dependency and its only callers. `observation_health` imports
+// `assay_runner_schema`, which is an optional dep behind the `runner` feature, and both call sites
+// below already carry `#[cfg(feature = "runner")]`. The module declaration did not, so any build
+// without `runner` -- which is what the Wave 0 feature matrix builds -- failed on the import while
+// the default build passed.
+#[cfg(feature = "runner")]
 pub(crate) mod observation_health;
 // Same split as enforcement_health above: the record is cross-platform so its invariants stay
 // testable on a developer machine, while the producer that fills it from connect events is
