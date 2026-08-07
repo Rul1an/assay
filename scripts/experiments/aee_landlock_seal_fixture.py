@@ -169,8 +169,6 @@ PRODUCER_CREDIT_ALTERNATE_VALUES: dict[str, tuple[str, ...]] = {
 # `None` and a member that is absent are different payloads and this test needs both to be sayable.
 _POP = object()
 
-# Values of `assayDropProofModel` that license the zero drop accounting this slice credits.
-DROP_PROOF_MODELS_ELIGIBLE = ("synchronous-probe", "counted-queue-zero")
 
 # The basis each eligible model implies, from `DropAccounting::basis` in
 # `crates/assay-cli/src/aee_seal.rs`. A synchronous probe is the observation itself and nothing was
@@ -181,6 +179,12 @@ DROP_PROOF_MODELS_ELIGIBLE = ("synchronous-probe", "counted-queue-zero")
 # claims `checked` over a model that verified nothing. That is the case Proof-or-Stop
 # (arXiv 2607.14890) rules inadmissible, and it is invisible if each member is only read alone.
 DROP_PROOF_BASIS_FOR_MODEL = {"synchronous-probe": "declared", "counted-queue-zero": "checked"}
+
+# Values of `assayDropProofModel` that license the zero drop accounting this slice credits, derived
+# rather than restated. These were two hand-kept collections until an adversarial review pointed out
+# that adding a model to one and forgetting the other subscripts the dict with a key it does not
+# have -- a crash rather than a finding. One rule, one place.
+DROP_PROOF_MODELS_ELIGIBLE = tuple(DROP_PROOF_BASIS_FOR_MODEL)
 
 # Fixed instants. A validity window needs something to be checked against, and a
 # wall clock would make the drift check flaky, which is how a gate gets disabled.
@@ -226,6 +230,7 @@ NEGATIVE_CONTROLS: dict[str, str] = {
     "drop-basis-contradicts-model": "drop-proof-basis-mismatch",
     "drop-channels-contradict-basis": "drop-proof-channels-mismatch",
     "drop-channels-not-a-list": "drop-proof-channels-malformed",
+    "counted-queue-basis-declared": "drop-proof-basis-mismatch",
     "bad-observed-set": "observed-set-mismatch",
     "unsupported-observed-attack": "observed-attack-unsupported",
     "substrate-runner-observed-attacks-mismatch": "substrate-runner-observed-attacks-mismatch",
@@ -428,6 +433,15 @@ def case_statement(name: str) -> dict[str, Any]:
         replace_payload(stmt, 2, seal)
     elif name == "drop-channels-contradict-basis":
         # A declared basis resting on channel readings it cannot have taken.
+        seal["assayDropChannels"] = ["ringbuf:0"]
+        replace_payload(stmt, 2, seal)
+    elif name == "counted-queue-basis-declared":
+        # The other row of DROP_PROOF_BASIS_FOR_MODEL. Without this case that row was unpinned:
+        # flipping `counted-queue-zero` to "declared" left every gate in this file green, because
+        # nothing here had ever exercised a counted-queue payload. A table with one row under test
+        # is a table half of which is a comment.
+        seal["assayDropProofModel"] = "counted-queue-zero"
+        seal["assayDropProofBasis"] = "declared"
         seal["assayDropChannels"] = ["ringbuf:0"]
         replace_payload(stmt, 2, seal)
     elif name == "drop-channels-not-a-list":

@@ -41,8 +41,15 @@ fn declared_version(src: &str) -> String {
     let line = src
         .lines()
         .find(|l| {
-            let t = l.trim_start();
-            t.starts_with("AEE_VERSION") || t.starts_with("pub const AEE_VERSION")
+            // Whole declaration, not a prefix. `starts_with("AEE_VERSION")` also matches
+            // `AEE_VERSION_PREVIOUS` and `AEE_VERSIONS_SUPPORTED`, and since the extractor takes the
+            // first hit it would return a plausible version from the wrong constant -- silently, and
+            // on both sides at once if the two files gain agreeing siblings. Found by adversarial
+            // review, which is the edit the migration trigger recorded on `AEE_VERSION` invites.
+            let t = l.trim_start().trim_start_matches("pub const ");
+            t.strip_prefix("AEE_VERSION").is_some_and(|rest| {
+                rest.starts_with('=') || rest.starts_with(':') || rest.starts_with(" =")
+            })
         })
         .expect("AEE_VERSION is declared in this file");
     let after = line
@@ -95,5 +102,17 @@ fn the_version_extractor_reads_the_value_and_not_the_line() {
         declared_version("OTHER = \"x\"\nAEE_VERSION = \"0.7\"  # why\n"),
         "0.7",
         "a trailing comment must not be read as part of the version"
+    );
+    assert_eq!(
+        declared_version("AEE_VERSION_PREVIOUS = \"0.6\"\nAEE_VERSION = \"0.7\"\n"),
+        "0.7",
+        "a sibling constant sharing the prefix must not be read instead"
+    );
+    assert_eq!(
+        declared_version(
+            "pub const AEE_VERSION_PREVIOUS: &str = \"0.6\";\npub const AEE_VERSION: &str = \"0.7\";\n"
+        ),
+        "0.7",
+        "and the same in the Rust form"
     );
 }
