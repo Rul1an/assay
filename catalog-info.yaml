@@ -19,7 +19,7 @@ metadata:
     - url: https://github.com/Rul1an/assay
       title: Repository
       icon: github
-    - url: https://docs.assay.dev
+    - url: https://docs.getassay.dev
       title: Documentation Site
     - url: https://github.com/Rul1an/assay/tree/main/docs/architecture/ADR-032-MCP-Policy-Obligations-and-Evidence-v2.md
       title: ADR-032

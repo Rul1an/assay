@@ -43,6 +43,22 @@ gate-hardening and defect repair.
     baseline look *better*, because its score rises to 1.0 (#2082).
 
 ### Fixed
+- Every SARIF report pointed its help links at a domain that is not ours.
+  `docs.assay.dev` does not resolve, and `assay.dev` belongs to an unrelated
+  third party; six rule `helpUri`s and the driver `informationUri` shipped in
+  every report, and a seventh reference printed to the terminal. They now point
+  at a lint rules reference under `docs/lint/`, with anchors pinned explicitly
+  rather than derived, and a test asserts every emitted fragment resolves
+  against the committed page. The repo's link checker could not have caught
+  this: it triggers only on `docs/**`, so a change to Rust source never fires
+  it, it skips anything starting with `http`, and it reads only files changed
+  in the pull request (#2091).
+- The lint truncation disclosure named the cap only once the cap had fired.
+  Since `max_results` defaults to 5000 there is always a ceiling, so a clean
+  report was indistinguishable from an unbounded one. `appliedCap` is now
+  declared on every run and `droppedCount` only when a drop occurred, which is
+  the split ratified across four emitters in the SARIF envelope RFC and which
+  this producer's own defect report is cited in (#2091).
 - A test's score is no longer whichever metric ran last. `final_score` was
   assigned unconditionally per metric, and `semantic` is fifth of thirteen, so a
   semantic test scoring 0.87 reported 1.0 in `run.json` and SARIF — a number

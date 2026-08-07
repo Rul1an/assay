@@ -79,7 +79,7 @@ pub static RULES: &[RuleDefinition] = &[
         id: "ASSAY-W001",
         default_severity: Severity::Warn,
         description: "Subject may contain a secret (API key, token, password pattern)",
-        help_uri: Some("https://docs.assay.dev/lint/ASSAY-W001"),
+        help_uri: Some("https://docs.getassay.dev/lint/#assay-w001"),
         tags: &["security", "secrets"],
         security_severity: Some("7.0"),
         check: check_secret_in_subject,
@@ -88,7 +88,7 @@ pub static RULES: &[RuleDefinition] = &[
         id: "ASSAY-W002",
         default_severity: Severity::Warn,
         description: "Event flagged as containing PII but subject is non-empty",
-        help_uri: Some("https://docs.assay.dev/lint/ASSAY-W002"),
+        help_uri: Some("https://docs.getassay.dev/lint/#assay-w002"),
         tags: &["privacy", "pii"],
         security_severity: Some("4.0"),
         check: check_pii_flag_consistency,
@@ -97,7 +97,7 @@ pub static RULES: &[RuleDefinition] = &[
         id: "ASSAY-I001",
         default_severity: Severity::Info,
         description: "Source format does not follow URN convention",
-        help_uri: Some("https://docs.assay.dev/lint/ASSAY-I001"),
+        help_uri: Some("https://docs.getassay.dev/lint/#assay-i001"),
         tags: &["convention", "format"],
         security_severity: None,
         check: check_source_format,
@@ -106,7 +106,7 @@ pub static RULES: &[RuleDefinition] = &[
         id: "ASSAY-W003",
         default_severity: Severity::Warn,
         description: "Event flagged as containing secrets but secrets flag is false",
-        help_uri: Some("https://docs.assay.dev/lint/ASSAY-W003"),
+        help_uri: Some("https://docs.getassay.dev/lint/#assay-w003"),
         tags: &["security", "secrets"],
         security_severity: Some("6.5"),
         check: check_secrets_flag_consistency,
@@ -116,7 +116,7 @@ pub static RULES: &[RuleDefinition] = &[
         default_severity: Severity::Warn,
         description:
             "Observed enforcement marker is not supported by a bound enforcement decision record",
-        help_uri: Some("https://docs.assay.dev/lint/ASSAY-W004"),
+        help_uri: Some("https://docs.getassay.dev/lint/#assay-w004"),
         tags: &["security", "enforcement", "attribution"],
         security_severity: Some("4.0"),
         check: check_enforcement_attribution_binding,
@@ -127,7 +127,7 @@ pub static RULES: &[RuleDefinition] = &[
         description:
             "Approval basis declares an opaque or unknown retained view — content-review claims \
              over it cap at incomplete",
-        help_uri: Some("https://docs.assay.dev/lint/ASSAY-W005"),
+        help_uri: Some("https://docs.getassay.dev/lint/#assay-w005"),
         tags: &["retention", "review", "sufficiency"],
         security_severity: None,
         check: check_retained_view_readability,
@@ -172,7 +172,7 @@ fn check_secret_in_subject(event: &EvidenceEvent, ctx: &LintContext<'_>) -> Opti
                     }),
                     vec!["security".into(), "secrets".into()],
                 )
-                .with_help_uri("https://docs.assay.dev/lint/ASSAY-W001"),
+                .with_help_uri("https://docs.getassay.dev/lint/#assay-w001"),
             );
         }
     }
@@ -193,7 +193,7 @@ fn check_pii_flag_consistency(event: &EvidenceEvent, ctx: &LintContext<'_>) -> O
                 }),
                 vec!["privacy".into(), "pii".into()],
             )
-            .with_help_uri("https://docs.assay.dev/lint/ASSAY-W002"),
+            .with_help_uri("https://docs.getassay.dev/lint/#assay-w002"),
         );
     }
     None
@@ -217,7 +217,7 @@ fn check_source_format(event: &EvidenceEvent, ctx: &LintContext<'_>) -> Option<L
                 }),
                 vec!["convention".into(), "format".into()],
             )
-            .with_help_uri("https://docs.assay.dev/lint/ASSAY-I001"),
+            .with_help_uri("https://docs.getassay.dev/lint/#assay-i001"),
         );
     }
     None
@@ -247,7 +247,7 @@ fn check_secrets_flag_consistency(
                     }),
                     vec!["security".into(), "secrets".into()],
                 )
-                .with_help_uri("https://docs.assay.dev/lint/ASSAY-W003"),
+                .with_help_uri("https://docs.getassay.dev/lint/#assay-w003"),
             );
         }
     }
@@ -293,7 +293,7 @@ fn check_enforcement_attribution_binding(
                 "attribution".into(),
             ],
         )
-        .with_help_uri("https://docs.assay.dev/lint/ASSAY-W004"),
+        .with_help_uri("https://docs.getassay.dev/lint/#assay-w004"),
     )
 }
 
@@ -374,7 +374,7 @@ fn check_retained_view_readability(
             }),
             vec!["retention".into(), "review".into(), "sufficiency".into()],
         )
-        .with_help_uri("https://docs.assay.dev/lint/ASSAY-W005"),
+        .with_help_uri("https://docs.getassay.dev/lint/#assay-w005"),
     )
 }
 
