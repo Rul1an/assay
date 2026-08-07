@@ -136,14 +136,33 @@ files_json="$(
     --slurp \
     "repos/${REPO}/pulls/${pr_number}/files?per_page=100"
 )"
-if ! jq -e '
-  type == "array" and
-  length > 0 and
-  all(.[]; type == "array") and
-  ([.[][]] | length > 0)
-' >/dev/null <<<"$files_json"; then
-  echo "docs PR #${pr_number} returned an invalid or empty files response" >&2
+# Malformed and empty are different answers and need different handling.
+#
+# This used to require `length > 0` and reject anything else as "an invalid or empty files
+# response" -- naming both conditions in one breath, which is the tell. A malformed response means
+# the reconciler cannot see what it is reconciling and must refuse. An EMPTY one means the docs PR
+# changes nothing, which is not a fault: it is what a docs PR looks like once the drift it existed
+# for has been fixed at the source.
+#
+# #2081 moved the drift check onto the pull request that causes the drift, so #2021's diff became
+# empty. `Auto-Update Docs` then failed on every merge to `main` -- eight consecutive runs -- for a
+# condition that meant the system had done its job. Nobody noticed, because it runs post-merge where
+# a red tick has nobody waiting on it.
+if ! jq -e 'type == "array" and all(.[]; type == "array")' >/dev/null <<<"$files_json"; then
+  echo "docs PR #${pr_number} returned a malformed files response" >&2
   exit 2
+fi
+
+if [[ "$(jq '[.[][]] | length' <<<"$files_json")" -eq 0 ]]; then
+  echo "docs PR #${pr_number} changes no files, so there is no drift left to reconcile."
+  echo "Closing it: an empty docs PR is a finished one, not a broken one."
+  gh pr close "$pr_number" \
+    --repo "$REPO" \
+    --comment "Closed by the reconciler: this PR changes no files, so the drift it was opened for is already resolved on the base branch." >&2 || {
+    echo "could not close docs PR #${pr_number}" >&2
+    exit 2
+  }
+  exit 0
 fi
 
 non_docs="$(jq -c '[.[][] | .filename | select(startswith("docs/") | not)]' <<<"$files_json")"
