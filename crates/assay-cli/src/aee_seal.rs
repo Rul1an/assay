@@ -121,7 +121,7 @@ impl std::fmt::Display for NotSealEligible {
 }
 
 /// Lowercase SHA-256 hex, the shape the #2001 field contract requires of every digest member.
-fn is_sha256_hex(v: &str) -> bool {
+pub(crate) fn is_sha256_hex(v: &str) -> bool {
     v.len() == 64
         && v.bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
