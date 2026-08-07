@@ -11,7 +11,7 @@ Tracked work items that are marked in code with `// TODO(tag):` and documented h
 | **landlock-abi-v5** | assay-cli | `backend.rs` | ABI v5 (IOCTL), v6 (Scoping), v7 (Audit) when landlock crate or raw syscalls support them (SOTA 2026). |
 | **landlock-net** | assay-cli | `backend.rs` | Add NET rules (ABI V4) when `abi_level >= 4`; currently FS-only. |
 | **validate-v13** | assay-core | `validate/mod.rs` | Full policy-engine context for detailed arg enforcement in trace validation (v1.3). |
-| **sequence-v11** | assay-metrics | `sequence_valid.rs` | Implement v1.1 sequence operators (Eventually, MaxCalls, etc.); consider delegating to `assay-core::explain::TraceExplainer` when stable. |
+| **sequence-v11** | assay-mcp-server | `tools/check_sequence.rs` | ~~Implement v1.1 sequence operators~~ **Done.** All eight variants live in `assay_core::sequence_eval`; `sequence_valid` delegates. Remaining: `assay-mcp-server::check_sequence` still carries its own copy and is guarded by a parity test rather than calling through. |
 
 ## Placement in roadmap and implementation plan
 
@@ -24,11 +24,11 @@ Where each TODO should be fixed, with priority, value, urgency, and dependencies
 | **landlock-abi-v5** | **ROADMAP Backlog:** “Runtime Extensions (Epic G): ABI 6/7”. | Backlog | Medium | Later | Landlock crate or kernel support for ABI v5/v6/v7. |
 | **landlock-net** | **ROADMAP Foundation** completion: full ABI V4 (NET). Currently FS-only. | P2 / Backlog | Medium | Later | Landlock crate NET (ABI V4) support. |
 | **validate-v13** | **Backlog.** Trace validation v1.3 with full policy context. | Backlog | Medium | Later | Policy engine context available in validate path. |
-| **sequence-v11** | **Backlog.** Metrics/sequence DSL v1.1 operators. | Backlog | Medium | Later | Optional: `assay-core::explain::TraceExplainer` stable API. |
+| **sequence-v11** | **Partly done.** Operators shipped in `assay-core::sequence_eval`; the MCP copy has not called through yet. | In progress | Medium | Next | None. |
 
 ### Suggested fix order (by plan phase)
 
-1. **Later / Backlog:** `sandbox-scrub` (after scrubbing), `sim-verify-limits`, `landlock-net`, `landlock-abi-v5`, `validate-v13`, `sequence-v11`.
+1. **Later / Backlog:** `sandbox-scrub` (after scrubbing), `sim-verify-limits`, `landlock-net`, `landlock-abi-v5`, `validate-v13`.
 
 **Done:** `cli-verify` (P0); `monitor-strict-warn` (P1); `mcp-deny-code` (P1); `mcp-op-class` (P1); `init-provider-template` (P1); `runner-metric-override` (P1 — `Expected::thresholding_for_metric` + per-test max_drop in baseline regression).
 

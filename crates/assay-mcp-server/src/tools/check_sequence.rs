@@ -101,6 +101,29 @@ pub async fn check_sequence(ctx: &ToolContext, args: &Value) -> Result<Value> {
     }
 }
 
+/// Whether this evaluator finds any violation. Exists only for `tests/sequence_eval_parity.rs`.
+///
+/// This copy of the rule language has not called through to `assay_core::sequence_eval` yet,
+/// because its JSON violation shape is a published tool contract. Until it does, the parity test
+/// is what keeps the two from drifting, and it needs a verdict it can compare. Deliberately
+/// narrow: a bool, not the violation payload, so nothing outside this crate grows a dependency
+/// on the shape while the port is pending.
+pub fn validate_rules_for_parity(
+    rules: &[assay_core::model::SequenceRule],
+    actual_names: &[String],
+    policy_context: Option<&assay_core::model::Policy>,
+) -> bool {
+    validate_rules(rules, actual_names, policy_context)
+        .ok()
+        .and_then(|v| {
+            v.get("violations")
+                .map(|x| !x.as_array().is_none_or(|a| a.is_empty()))
+        })
+        .unwrap_or(false)
+}
+
+// TODO(sequence-v11): call `assay_core::sequence_eval::evaluate_rules` instead of this copy.
+// Blocked on preserving the JSON violation shape, which is a published tool contract.
 fn validate_rules(
     rules: &[assay_core::model::SequenceRule],
     actual_names: &[String],
