@@ -20,7 +20,10 @@
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 
-mod authorizer;
+// `pub(crate)` so the tool-pattern matcher below it is reachable from the divergence test in
+// `mcp::policy::matcher`. Its `authorizer_internal::policy::glob_matches_impl` was already marked
+// `pub(crate)`, which meant nothing behind a private parent; this makes that marker true.
+pub(crate) mod authorizer;
 mod mandate_store;
 mod schema;
 

@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 #[path = "authorizer_internal/mod.rs"]
-mod authorizer_internal;
+pub(crate) mod authorizer_internal;
 
 /// Default clock skew tolerance in seconds.
 pub const DEFAULT_CLOCK_SKEW_SECONDS: i64 = 30;

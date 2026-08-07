@@ -101,6 +101,32 @@ Assay uses simple `*` wildcards:
 - `"*search*"` matches by substring
 - patterns without `*` are exact matches
 
+**A `*` anywhere but the first or last position is a literal character.** `read_*_file` does not
+match `read_config_file`; it matches only a tool literally named `read_*_file`. So is a pattern
+with several interior stars, such as `a*b*c`. The four forms above are the whole language.
+
+This one fails in the dangerous direction. In `allow`, an interior-star pattern matches nothing
+and the tool is refused, which is visible. In `deny`, it matches nothing and the tool is
+**permitted** -- by a line whose author believed it was blocking something. If a `deny` entry ever
+looks like a glob and is not one of the four forms above, it is not blocking what it names.
+
+These are unbounded: a `*` crosses any character, including the `.` or `__` a server may use to
+namespace its tools. `"*"` therefore admits tools that do not exist yet, including ones a future
+upstream adds.
+
+**The risk is one-sided, and a policy file does not show it.** A wildcard in `deny` over-blocks,
+which fails visibly and safely. The same wildcard in `allow` over-permits, which fails silently.
+Azure RBAC measured this direction: roughly 39% of actions reach across Resource Providers under
+non-obvious wildcards, and the recommendation there was explicit enumeration rather than a more
+careful pattern language ([arXiv 2506.10755](https://arxiv.org/html/2506.10755v1)). Prefer naming
+the tools you mean in `allow`, and keep `"*"` for the cases where admitting the unknown is the
+intent rather than the default.
+
+> A different pattern language applies to mandate `tool_patterns`, where `*` stops at a `.` and
+> `**` crosses it, the way a filesystem glob treats `/`. The two are deliberately different and
+> pinned against each other by a test; do not carry a pattern from one surface to the other
+> without re-reading it.
+
 ## JSON Schema in `schemas:`
 
 Each tool can have a full JSON Schema for its argument object:
