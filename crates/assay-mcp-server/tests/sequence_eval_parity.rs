@@ -124,12 +124,10 @@ fn both_evaluators_agree_on_whether_a_rule_is_violated() {
                     "{rule:?} on {trace:?}: copy=violation shared={:?}",
                     shared[0].outcome
                 )),
-                // The shared evaluator is deliberately stricter in two places, both defects in
-                // the copy that this crate cannot fix without changing its published JSON:
-                // `after` accepted a `then` one call past its deadline and let a new trigger
-                // discharge an unanswered one, and `eventually` treated a window as open for one
-                // call after it closed. Counted rather than enumerated so the number moving is
-                // itself the signal.
+                // Zero, since the copy carries the same three fixes. It briefly did not: the
+                // `after` obligations and the `eventually` window closed 48 cases, and this
+                // count is kept as an assertion rather than deleted so that the next divergence
+                // announces itself instead of accumulating.
                 (true, false) => stricter += 1,
                 _ => {}
             }
@@ -143,8 +141,8 @@ fn both_evaluators_agree_on_whether_a_rule_is_violated() {
         permissive.join("\n")
     );
     assert_eq!(
-        stricter, 48,
-        "the shared evaluator is stricter than the copy on {stricter} cases, expected 48. \
+        stricter, 0,
+        "the shared evaluator is stricter than the copy on {stricter} cases, expected 0. \
          A change here means either a new copy defect was fixed (raise this) or a fix was \
          lost (lower it) -- both need saying out loud."
     );

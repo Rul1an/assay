@@ -189,7 +189,10 @@ fn validate_rules(
                     }
                 } else {
                     // Not found. If trace length > within, we've missed the deadline.
-                    if (actual_names.len() as u32) > *within {
+                    // `>=`, not `>`. The window is indices `0..within-1`, so it is spent once the
+                    // trace reaches `within` calls -- not one call later. At `within: 2` a
+                    // two-call trace has already used both chances.
+                    if (actual_names.len() as u32) >= *within {
                         violations.push(serde_json::json!({
                             "rule_type": "eventually",
                             "tool": tool,
@@ -298,74 +301,61 @@ fn validate_rules(
                 let trigger_targets = resolve(trigger);
                 let then_targets = resolve(then);
 
-                // Track: after each trigger, we need 'then' within 'within' calls
-                let mut pending_deadline: Option<(usize, usize)> = None; // (trigger_idx, deadline_idx)
+                // Each trigger is its own obligation, checked against its own window.
+                //
+                // This used to carry one mutable `pending_deadline` slot, and leaked a violation
+                // through it two ways. The satisfy-check ran before the deadline check, so a
+                // `then` arriving one call past the window cleared the obligation instead of
+                // failing it: `[T, X, A]` at `within: 1` reported no violation. And a new trigger
+                // overwrote an unsatisfied one, so `[T, T, A]` reported none either, while the
+                // trigger at index 0 was never answered. This is the enforcing path, so both were
+                // permissive: the proxy allowed a call sequence the policy forbids.
+                //
+                // The JSON below is unchanged -- same keys, same two message forms, same
+                // conditions for choosing between them -- because it is a published tool contract.
+                let trigger_indices: Vec<usize> = actual_names
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, n)| matches_any(n, &trigger_targets))
+                    .map(|(i, _)| i)
+                    .collect();
 
-                for (idx, name) in actual_names.iter().enumerate() {
-                    // Check if this is a 'then' call that satisfies pending
-                    if pending_deadline.is_some() && matches_any(name, &then_targets) {
-                        pending_deadline = None; // Satisfied
+                for trigger_idx in trigger_indices {
+                    let deadline = trigger_idx + (*within as usize);
+                    let answered = actual_names
+                        .iter()
+                        .enumerate()
+                        .skip(trigger_idx + 1)
+                        .take_while(|(j, _)| *j <= deadline)
+                        .any(|(_, n)| matches_any(n, &then_targets));
+                    if answered {
+                        continue;
                     }
 
-                    // Check if we've passed the deadline
-                    if let Some((trigger_idx, deadline)) = pending_deadline {
-                        if idx > deadline {
-                            violations.push(serde_json::json!({
-                                "rule_type": "after",
-                                "tool": then,
-                                "event_index": idx,
-                                "constraint": "after",
-                                "message": format!(
-                                    "tool '{}' required within {} calls after '{}' (triggered at index {})",
-                                    then, within, trigger, trigger_idx
-                                ),
-                                "context": {
-                                    "trigger": trigger,
-                                    "trigger_index": trigger_idx,
-                                    "within": within
-                                }
-                            }));
-                            pending_deadline = None; // Clear to avoid duplicate violations
-                        }
-                    }
-
-                    // Check if this is a trigger (after checking deadline to handle same-index)
-                    if matches_any(name, &trigger_targets) {
-                        // New trigger resets/sets the deadline
-                        let deadline = idx + (*within as usize);
-                        pending_deadline = Some((idx, deadline));
-                    }
-                }
-
-                // Check if there's an unsatisfied pending at trace end
-                if let Some((trigger_idx, deadline)) = pending_deadline {
-                    // We're past the deadline or trace ended without satisfaction
-                    // Note: actual_names includes next_tool, so last idx is len-1.
-                    // If len <= deadline, we might still have time IF next calls happen.
-                    // But check_sequence validates SO FAR.
-                    // If we are strictly checking "trace so far", pending is fine unless deadline passed.
-                    // However, RFC example: Trace C: [Create, Search, Update] -> FAIL (no Audit within 2)
-                    // If Update is at index 2, deadline was 2 (create at 0 + 2 = 2).
-                    // So at index 3 (next tool), if we pass deadline.
-                    // If actual_names.len() > deadline, we failed.
                     if actual_names.len() > deadline {
+                        // The window closed inside the trace.
                         violations.push(serde_json::json!({
                             "rule_type": "after",
                             "tool": then,
-                            "event_index": actual_names.len() - 1,
+                            "event_index": deadline + 1,
                             "constraint": "after",
                             "message": format!(
-                                "tool '{}' required within {} calls after '{}' (triggered at index {}) but trace exceeded deadline",
+                                "tool '{}' required within {} calls after '{}' (triggered at index {})",
                                 then, within, trigger, trigger_idx
                             ),
                             "context": {
                                 "trigger": trigger,
                                 "trigger_index": trigger_idx,
-                                "within": within,
-                                "trace_ended": true
+                                "within": within
                             }
                         }));
                     }
+                    // No `else`. A trace that ended inside the window has not missed the
+                    // deadline: this evaluator validates history-so-far, and the next call can
+                    // still answer the obligation. The original guarded its end-of-trace
+                    // violation on `len > deadline` for exactly this reason, and an earlier
+                    // version of this rewrite dropped the guard -- which made the proxy stricter
+                    // than the shared evaluator and tripped the parity test in #2112 on 58 cases.
                 }
             }
 
@@ -520,5 +510,55 @@ fn validate_rules(
         Ok(serde_json::json!({ "allowed": true, "violations": [], "suggested_fix": null }))
     } else {
         Ok(serde_json::json!({ "allowed": false, "violations": violations, "suggested_fix": null }))
+    }
+}
+
+#[cfg(test)]
+mod after_obligation_tests {
+    use assay_core::model::SequenceRule;
+
+    fn n(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+    fn violates(trace: &[&str], within: u32) -> bool {
+        let rules = vec![SequenceRule::After {
+            trigger: "T".into(),
+            then: "A".into(),
+            within,
+        }];
+        let v = super::validate_rules(&rules, &n(trace), None).unwrap();
+        !v["violations"].as_array().unwrap().is_empty()
+    }
+
+    /// A `then` one call past the window does not answer the obligation. The satisfy-check ran
+    /// before the deadline check, so this cleared it and the proxy allowed the sequence.
+    #[test]
+    fn a_late_then_does_not_answer_the_obligation() {
+        assert!(violates(&["T", "X", "A"], 1));
+    }
+
+    /// A second trigger does not discharge the first one's unanswered obligation.
+    #[test]
+    fn a_new_trigger_does_not_clear_an_unanswered_one() {
+        assert!(violates(&["T", "T", "A"], 1));
+    }
+
+    /// The case that distinguishes "check every obligation" from "check the first".
+    ///
+    /// `[T, A, T, X]` answers the trigger at 0 and leaves the one at 2 unanswered past its
+    /// window. Checking only the first trigger reports clean here, and the previous test
+    /// cannot see that -- its first trigger is already unanswered, so truncating to one
+    /// obligation still produces a violation and the test stays green on broken code.
+    #[test]
+    fn a_later_obligation_is_checked_even_when_the_first_was_answered() {
+        assert!(violates(&["T", "A", "T", "X"], 1));
+    }
+
+    /// The cases that were already right stay right.
+    #[test]
+    fn answered_within_the_window_still_holds() {
+        assert!(!violates(&["T", "A"], 1));
+        assert!(!violates(&["T", "X", "A"], 2));
+        assert!(!violates(&["X", "Y"], 1));
     }
 }
