@@ -456,6 +456,177 @@ pub fn self_probe_denied_connect(
     Ok(SelfProbeOutcome::ProbeInfraError("not linux"))
 }
 
+/// Whether this kernel lets a restricted process shed its own Landlock restrictions.
+///
+/// # Why this is measured rather than inferred from a version
+///
+/// ADR-045 lets `aeeStillArmed` rest on "a documented kernel-level invariant showing the applied
+/// Landlock restrictions cannot be relaxed". That invariant is real -- restrictions are irrevocable
+/// for the process lifetime, preserved across `execve`, inherited by children -- and it has a
+/// documented exception.
+///
+/// CVE-2024-42318 ("Landlock Houdini", Jann Horn, 2024-07-24): Landlock implemented the
+/// `cred_prepare` LSM hook but not `cred_transfer`, and `keyctl(KEYCTL_SESSION_TO_PARENT)` uses the
+/// latter. A process with `fork()` and `keyctl()` could therefore drop every Landlock restriction on
+/// itself. Present from 5.13; fixed in v6.11-rc1, commit `39705a6c29f8`, and backported.
+///
+/// The version route is a dead end. `LANDLOCK_ACCESS_NET_CONNECT_TCP` arrives at ABI 4 (kernel 6.7)
+/// and the fix lands in 6.11, so every kernel in 6.7..6.11 passes an ABI-4 gate while the workload
+/// child -- which by definition runs the code under test -- could shed its sandbox with two
+/// syscalls. Closing that by kernel version needs a per-distribution backport table, and a table of
+/// backport facts is a thing that rots silently: Ubuntu Noble carries the fix at `6.8.0-50.51`,
+/// which no version comparison against 6.11 would ever discover.
+///
+/// So this asks the kernel. It is the same shape as [`self_probe_denied_connect`]: a throwaway
+/// process, a capability question, an outcome that is never assumed.
+///
+/// # Structure, and why it needs two forks
+///
+/// `KEYCTL_SESSION_TO_PARENT` replaces the *parent's* credentials, so the process under test has to
+/// be the parent of the caller:
+///
+/// ```text
+/// this process        forks ->  restricted child   applies Landlock, confirms EACCES
+///                                     forks ->     grandchild   calls KEYCTL_SESSION_TO_PARENT
+///                               restricted child   re-tests: still EACCES?
+/// ```
+///
+/// The calling process is never a target, so running the exploit deliberately does not weaken it.
+#[cfg(target_os = "linux")]
+pub fn landlock_shedding_probe() -> anyhow::Result<SheddingProbeOutcome> {
+    use std::os::fd::AsRawFd;
+
+    const PR_SET_NO_NEW_PRIVS: libc::c_int = 38;
+    const KEYCTL_SESSION_TO_PARENT: libc::c_int = 18;
+    // Deliberately outside errno range so an infrastructure failure can never be read as a verdict.
+    const EXIT_HELD: i32 = 0;
+    const EXIT_SHED: i32 = 42;
+    const EXIT_NNP_FAILED: i32 = 200;
+    const EXIT_RESTRICT_FAILED: i32 = 201;
+    const EXIT_NOT_BLOCKED_BEFORE: i32 = 202;
+
+    // An empty allowlist: every TCP connect is denied, so the probe needs no free port and cannot
+    // race one.
+    let created = landlock_impl::build_net_ruleset(&[])?;
+    let owned: Option<std::os::fd::OwnedFd> = created.into();
+    let Some(fd) = owned.as_ref() else {
+        return Ok(SheddingProbeOutcome::Inconclusive("no_net_ruleset"));
+    };
+    let raw_fd = fd.as_raw_fd();
+
+    // SAFETY: between fork and `_exit` the children run only async-signal-safe syscalls (prctl,
+    // landlock_restrict_self, socket, connect, keyctl, fork, waitpid, _exit). No allocation, no
+    // destructors. The parent only waitpid.
+    let code = unsafe {
+        let child = libc::fork();
+        if child == 0 {
+            if libc::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+                libc::_exit(EXIT_NNP_FAILED);
+            }
+            if libc::syscall(libc::SYS_landlock_restrict_self, raw_fd, 0) != 0 {
+                libc::_exit(EXIT_RESTRICT_FAILED);
+            }
+            // The restriction must be in force before the attempt, or "still blocked after" proves
+            // nothing about shedding.
+            if connect_errno_raw() != libc::EACCES {
+                libc::_exit(EXIT_NOT_BLOCKED_BEFORE);
+            }
+            let grandchild = libc::fork();
+            if grandchild == 0 {
+                libc::syscall(
+                    libc::SYS_keyctl,
+                    KEYCTL_SESSION_TO_PARENT as libc::c_long,
+                    0,
+                    0,
+                    0,
+                    0,
+                );
+                libc::_exit(0);
+            }
+            let mut st: libc::c_int = 0;
+            libc::waitpid(grandchild, &mut st, 0);
+            if connect_errno_raw() == libc::EACCES {
+                libc::_exit(EXIT_HELD);
+            }
+            libc::_exit(EXIT_SHED);
+        }
+        let mut st: libc::c_int = 0;
+        libc::waitpid(child, &mut st, 0);
+        if libc::WIFEXITED(st) {
+            libc::WEXITSTATUS(st)
+        } else {
+            -1
+        }
+    };
+
+    Ok(match code {
+        EXIT_HELD => SheddingProbeOutcome::RestrictionsHeld,
+        EXIT_SHED => SheddingProbeOutcome::RestrictionsShed,
+        EXIT_NNP_FAILED => SheddingProbeOutcome::Inconclusive("no_new_privs_failed"),
+        EXIT_RESTRICT_FAILED => SheddingProbeOutcome::Inconclusive("restrict_self_failed"),
+        EXIT_NOT_BLOCKED_BEFORE => SheddingProbeOutcome::Inconclusive("not_blocked_before_attempt"),
+        _ => SheddingProbeOutcome::Inconclusive("probe_child_did_not_exit_normally"),
+    })
+}
+
+/// A loopback TCP connect to a port nothing is listening on, returning the raw errno.
+///
+/// Async-signal-safe: raw syscalls only. Port 9 (discard) is used because the allowlist is empty, so
+/// the ruleset denies the connect before anything about the port matters.
+#[cfg(target_os = "linux")]
+unsafe fn connect_errno_raw() -> libc::c_int {
+    let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
+    if fd < 0 {
+        return -1;
+    }
+    let mut addr: libc::sockaddr_in = std::mem::zeroed();
+    addr.sin_family = libc::AF_INET as libc::sa_family_t;
+    addr.sin_port = 9u16.to_be();
+    addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
+    let rc = libc::connect(
+        fd,
+        &addr as *const libc::sockaddr_in as *const libc::sockaddr,
+        std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+    );
+    let e = if rc == 0 {
+        0
+    } else {
+        *libc::__errno_location()
+    };
+    libc::close(fd);
+    e
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn landlock_shedding_probe() -> anyhow::Result<SheddingProbeOutcome> {
+    Ok(SheddingProbeOutcome::Inconclusive("not linux"))
+}
+
+/// What the shedding probe found.
+///
+/// Three outcomes, not two. `Inconclusive` is the one that matters: a probe that could not run has
+/// found nothing, and reporting that as "held" is the fail-open this whole feature exists to avoid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SheddingProbeOutcome {
+    /// The restriction survived `KEYCTL_SESSION_TO_PARENT`. The irrevocability invariant holds here.
+    RestrictionsHeld,
+    /// The restriction was shed. This kernel is vulnerable to CVE-2024-42318.
+    RestrictionsShed,
+    /// The probe could not reach a verdict, and says why.
+    Inconclusive(&'static str),
+}
+
+impl SheddingProbeOutcome {
+    /// The stable string for the enforcement-health record.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::RestrictionsHeld => "restrictions_held",
+            Self::RestrictionsShed => "restrictions_shed",
+            Self::Inconclusive(_) => "inconclusive",
+        }
+    }
+}
+
 // =============================================================================
 // Non-Linux stubs (no-op)
 // =============================================================================

@@ -167,6 +167,22 @@ pub enum SealSignError {
     WrongKeyRole,
 }
 
+impl std::fmt::Display for SealSignError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotCanonicalizable(detail) => {
+                write!(f, "seal payload does not canonicalize: {detail}")
+            }
+            Self::WrongKeyRole => write!(
+                f,
+                "the signing key is not a substrate observation key; ADR-045 forbids a policy-decision key from signing a substrate observation"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SealSignError {}
+
 /// The exact bytes a seal signature covers: RFC 8785 canonical JSON, UTF-8.
 ///
 /// One function, called by both [`sign_seal`] and [`verify_seal`], so the producer and the verifier
@@ -323,6 +339,7 @@ mod tests {
                 blocked_errno: "EACCES".into(),
                 listener_reached: false,
             }),
+            Some("restrictions_held".to_string()),
         );
         build_sealed_run(
             &health,

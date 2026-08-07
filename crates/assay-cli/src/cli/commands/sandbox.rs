@@ -300,6 +300,9 @@ mod tests {
 
     fn sandbox_args() -> SandboxArgs {
         SandboxArgs {
+            aee_run_context: None,
+            aee_seal_key: None,
+            aee_seal: None,
             command: vec!["true".into()],
             policy: None,
             workdir: None,
