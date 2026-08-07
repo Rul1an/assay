@@ -16,6 +16,10 @@ use thiserror::Error;
 #[path = "authorizer_internal/mod.rs"]
 mod authorizer_internal;
 
+/// See `runtime::glob_matches_impl` for why this is a re-export and not a wider `mod`.
+#[cfg(test)]
+pub(crate) use authorizer_internal::policy::glob_matches_impl;
+
 /// Default clock skew tolerance in seconds.
 pub const DEFAULT_CLOCK_SKEW_SECONDS: i64 = 30;
 
