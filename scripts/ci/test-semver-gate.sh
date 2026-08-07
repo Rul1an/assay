@@ -101,7 +101,7 @@ if [ "${ASSAY_SEMVER_GATE_FULL:-0}" = "1" ]; then
       cp "$backup" "$subject"
       cp "$manifest_backup/root.toml" "$ROOT/Cargo.toml"
       (cd "$ROOT" && for m in crates/*/Cargo.toml; do cp "$manifest_backup/$m" "$m"; done)
-      rm -rf "$backup" "$manifest_backup"
+      rm -rf "$backup" "$manifest_backup" "${scratch_target:-}"
     }
     trap restore EXIT
 
@@ -126,7 +126,12 @@ assert anchor in t, "MetricResult moved; update the self-test"
 t = t.replace(anchor, anchor + "\n    pub deliberately_planted_for_the_gate_test: bool,", 1)
 open(p, "w").write(t)
 PY
-    out="$(cd "$ROOT" && cargo semver-checks check-release -p assay-core --baseline-rev "$resolved" 2>&1)"
+    # Its own target directory. This check downgrades the workspace version and plants a breaking
+    # change; artifacts built from that tree are keyed to a version and a source that do not exist,
+    # and writing them into the shared target dir would leave them there for the next build.
+    scratch_target="$(mktemp -d)"
+    out="$(cd "$ROOT" && CARGO_TARGET_DIR="$scratch_target" \
+      cargo semver-checks check-release -p assay-core --baseline-rev "$resolved" 2>&1)"
     status=$?
     restore
     trap - EXIT
@@ -147,6 +152,7 @@ PY
   fi
 else
   echo "skip  planted-break check (set ASSAY_SEMVER_GATE_FULL=1 to run it)"
+  PLANTED_BREAK_RAN=0
 fi
 
 if [ "$FAILURES" -ne 0 ]; then
@@ -155,4 +161,11 @@ if [ "$FAILURES" -ne 0 ]; then
   exit 1
 fi
 echo
-echo "semver gate: all cases pass"
+if [ "${PLANTED_BREAK_RAN:-1}" = "1" ]; then
+  echo "semver gate: all cases pass"
+else
+  # Not "all cases pass". The cheap cases check the gate's SHAPE; the planted break is the only one
+  # that shows it reaches a verdict, and it did not run. Saying "all cases pass" here would be a
+  # green line standing in for a check nobody performed, which is the defect this file exists for.
+  echo "semver gate: shape cases pass; the planted-break case was NOT run"
+fi
