@@ -305,7 +305,7 @@ pub fn check_substrate_scope(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aee_seal::{build_sealed_run, DropAccounting, ObservationEnvironment};
+    use crate::aee_seal::{build_sealed_run, DropAccounting, ObservationEnvironment, Vantage};
     use crate::enforcement_health_v1::{EnforcementHealthV1, Probe};
 
     const PARITY: &str = include_str!(
@@ -342,7 +342,7 @@ mod tests {
             Some("restrictions_held".to_string()),
         );
         build_sealed_run(
-            &health,
+            Vantage::Landlock(&health),
             &env_from_parity(),
             &[],
             "2026-08-05T00:00:00Z",

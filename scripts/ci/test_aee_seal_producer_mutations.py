@@ -38,7 +38,12 @@ MUTATIONS: list[tuple[str, str, str, str]] = [
     ("seal kind", 'aee_kind: "sealed".to_string(),', 'aee_kind: "arming".to_string(),', "every_carried_value_lands"),
     ("still armed", "aee_still_armed: true,", "aee_still_armed: false,", "every_carried_value_lands"),
     ("drop counts", "aee_drop_count: 0,", "aee_drop_count: 7,", "every_carried_value_lands"),
-    ("non-claims", "assay_non_claims: payload_non_claims(),", "assay_non_claims: Vec::new(),", "every_carried_value_lands"),
+    # The standing non-claims, now assembled per vantage (#2093). Dropping the base list is the
+    # mutation that matters; the proxy's extra non-claim has its own mutation below, because the two
+    # fail differently -- losing the standing list understates every seal, losing the extra
+    # understates only the vantage that owes it.
+    ("non-claims", "let mut n = payload_non_claims();", "let mut n = Vec::new();", "every_carried_value_lands"),
+    ("vantage non-claims", "n.extend(vantage.extra_non_claims());", "let _ = &vantage;", "the_proxy_vantage_declines_the_claim_the_kernel_vantage_can_make"),
     ("wire name", 'rename = "aeeKind"', 'rename = "aeeKindX"', "the_payload_member_names"),
     ("examination probe field", '"assayProbeErrno": probe.blocked_errno,', '"assayProbeErrno": "",', "the_examination_record_carries"),
     ("calendar day bound", "(1..=days_in_month).contains(&day)", "true", "a_calendar_invalid_instant"),
@@ -46,7 +51,11 @@ MUTATIONS: list[tuple[str, str, str, str]] = [
     ("counted-queue loss", "*lost != 0", "*lost > 9999", "a_counted_queue_that_lost"),
     ("drop basis", 'Self::SynchronousProbe => DROP_BASIS_ASSERTED,', 'Self::SynchronousProbe => DROP_BASIS_CHECKED,', "every_carried_value_lands"),
     ("drop channel readings", 'format!("{name}={lost}")', 'format!("{name}")', "a_counted_queue_that_lost"),
-    ("source schema derivation", "assay_source_schema: health.schema.clone(),", 'assay_source_schema: "assay.enforcement_health.v1".to_string(),', "derived_fields_come_from_the_record"),
+    # Derived from the vantage since #2093, so the mutation moved with it. Hard-coding the kernel
+    # schema is exactly the failure a second vantage introduces: a proxy seal that reports the
+    # Landlock carrier as what established it.
+    ("source schema derivation", "assay_source_schema: vantage.source_schema(),", 'assay_source_schema: "assay.enforcement_health.v1".to_string(),', "derived_fields_come_from_the_record"),
+    ("vantage scope", "assay_seal_scope: vantage.scope(),", 'assay_seal_scope: "tcp_connect:landlock_port".to_string(),', "the_proxy_is_a_second_vantage_under_the_same_key_and_substrate"),
 ]
 
 
