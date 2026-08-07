@@ -50,6 +50,22 @@ pub enum TraceExtent {
     Partial,
 }
 
+impl TraceExtent {
+    /// The stable string for this value.
+    ///
+    /// Added with ADR-047, which carries the extent into evidence: `assay.session.finding` reports
+    /// whether the run it judged was finished, because a violation on a partial trace and one on a
+    /// finished run are different claims. Before that this enum had no rendering at all, so the
+    /// evidence payload would have invented its spellings -- worse than duplicating a vocabulary,
+    /// because there is no source to drift from. Like `RuleOutcome::label`, this is an interface.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Partial => "partial",
+        }
+    }
+}
+
 /// What one rule found. Deliberately three values: a rule that did not run is not a rule
 /// that passed, and folding them loses the distinction this module exists to keep.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
