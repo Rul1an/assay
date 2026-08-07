@@ -5,6 +5,8 @@ pub mod aee_run_context;
 pub mod aee_seal;
 pub mod aee_seal_envelope;
 pub mod aee_seal_key;
+#[cfg(test)]
+mod aee_seal_round_trip;
 pub mod aee_trust_set;
 pub mod backend;
 pub mod caps;
