@@ -2,10 +2,14 @@
 name = "assay-adapter-api"
 version.workspace = true
 edition.workspace = true
+# Declared because this crate is public as of v4.0.0 and the MSRV gate holds every public crate to
+# the 1.89 floor. It had no `rust-version` while it was `publish = false`, which was correct then
+# and is not now: a consumer resolving it from crates.io needs to know what it compiles on.
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Protocol adapter API contracts for Assay evidence translation."
+description = "Internal/experimental substrate for Assay evidence translation. The shared trait surface the Assay protocol adapters implement, published because `assay-core` depends on it and cargo requires every `[dependencies]` entry of a published crate to resolve from crates.io. No standalone product guarantee; semver tracks the Assay workspace."
 readme.workspace = true
 # Published from v4.0.0. It was `publish = false` while `assay-core` and `assay-sim` -- both
 # published -- carried a hard `[dependencies]` edge to it. That only resolved because a historical
