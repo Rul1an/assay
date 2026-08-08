@@ -43,7 +43,11 @@ mod tests {
         assert_eq!(SUMMARY_SCHEMA, "assay.run_summary.v1");
         assert_eq!(value["schema"], SUMMARY_SCHEMA);
         assert_eq!(value["schema_version"], 1);
-        assert_eq!(rendered.lines().nth(1), Some("  \"schema_version\": 1,"));
+        assert_eq!(
+            rendered.lines().nth(1),
+            Some("  \"schema_version\": 1,"),
+            "serde_json preserve_order must retain the historical first summary key"
+        );
     }
 
     #[test]

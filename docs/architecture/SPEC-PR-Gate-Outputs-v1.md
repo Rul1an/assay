@@ -114,6 +114,8 @@ When the run had judge evaluations, a top-level **`judge_metrics`** object MAY b
 
 ### 3.4 Example (Minimal)
 
+JSON object key order in these examples is illustrative, not normative.
+
 ```json
 {
   "schema": "assay.run_summary.v1",
@@ -305,8 +307,8 @@ For every non-zero exit, the implementation MUST provide **at least one suggeste
 ## 8. Conformance
 
 - **Producers:** `assay ci` and any code path that writes `summary.json`, `junit.xml`, or `sarif.json` for the PR gate MUST follow §2–§7.
-- **Consumers:** CI workflows and the GitHub Action MAY rely on schema_version, exit_code, reason_code, and next_step as defined above. Unknown summary fields MUST be ignored.
-- **Contract tests:** Implementations MUST include tests that (1) validate summary.json schema_version and required fields, (2) validate that every SARIF result has at least one location, (3) optionally validate SARIF against the official 2.1.0 schema and/or a minimal upload-smoke test.
+- **Consumers:** CI workflows and the GitHub Action MAY rely on `schema` when present, plus `schema_version`, `exit_code`, `reason_code`, and `next_step` as defined above. Consumers MUST apply the pre-identity compatibility rule in §3.1. Unknown summary fields MUST be ignored.
+- **Contract tests:** Implementations MUST include tests that (1) validate `schema`, `schema_version`, and required fields on newly produced `summary.json`, while accepting a pre-identity version-1 summary without `schema`, (2) validate that every SARIF result has at least one location, (3) optionally validate SARIF against the official 2.1.0 schema and/or a minimal upload-smoke test.
 
 ---
 

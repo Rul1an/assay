@@ -7,15 +7,15 @@ pub const RUN_REPORT_SCHEMA_VERSION: u32 = 1;
 
 /// Render the run results report as a pretty-printed JSON string.
 ///
-/// Single source of truth for the JSON report shape: both the file writer
-/// ([`write_json`]) and stdout emission (`assay run --format json`) use it,
-/// so the on-disk and piped representations never diverge.
+/// Single source of truth for the detailed run-results report emitted by
+/// `assay run --format json` and by the [`write_json`] helper. The CLI's
+/// extended `run.json` artifact is a separate envelope and writer.
 ///
 /// Render-safety (MCP01a): the untrusted model / agent / tool content carried in result `message`
 /// and `details.*` is rendered through the render-safety pipeline before serialization, so a raw
-/// credential / PII / terminal-control value never reaches `run.json`. As a record sink it redacts
-/// and control-strips but does NOT truncate (`usize::MAX`): the eval record keeps full, redacted
-/// content. Assay-owned keys (ids, status, score, fingerprint, skip.*) stay byte-stable.
+/// credential / PII / terminal-control value never reaches this rendered report. As a record sink
+/// it redacts and control-strips but does NOT truncate (`usize::MAX`): the eval record keeps full,
+/// redacted content. Assay-owned keys (ids, status, score, fingerprint, skip.*) stay byte-stable.
 pub fn render_json(artifacts: &RunArtifacts) -> anyhow::Result<String> {
     let v = serde_json::json!({
         "schema": RUN_REPORT_SCHEMA,

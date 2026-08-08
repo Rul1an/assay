@@ -66,7 +66,8 @@ silently reorder every summary artifact.
 
 - `validate.rs` defines the validate schema id beside its sole JSON builder.
 - `report/json.rs` defines the run-results schema id and version beside the
-  one renderer used by stdout and its file writer.
+  renderer used by stdout and the public `write_json` helper. The CLI's
+  extended `run.json` artifact remains a separate writer and envelope.
 - `summary/writer.rs` defines the summary schema id beside the one renderer
   used by summary files and early-failure stdout.
 
@@ -98,10 +99,10 @@ Core tests pin:
 
 - the run-results renderer's schema id and integer version;
 - the summary renderer's schema id;
-- the existing summary key order before the appended field;
+- the historical first summary key before the appended field;
 - old direct-serialized summaries and new rendered summaries both
   deserializing into `Summary`;
-- a render-read-render round trip retaining exactly one schema field.
+- render-read-render idempotence through the shared summary renderer.
 
 Targeted mutations must prove that changing each of the three schema ids makes
 its owning test fail.
