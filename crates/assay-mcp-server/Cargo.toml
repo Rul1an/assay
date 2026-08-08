@@ -7,6 +7,8 @@ license.workspace = true
 repository.workspace = true
 readme.workspace = true
 description = "MCP server integration for Assay"
+# Workspace-only contract: reads generated docs and shared test support outside this package.
+exclude = ["tests/agent_golden_path_contract.rs"]
 
 [lints]
 workspace = true

@@ -34,6 +34,7 @@ repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 GENERATORS=(
+  scripts/docs/generate-agent-golden-path.py
   scripts/docs/generate-crate-deps.sh
   scripts/docs/generate-module-map.sh
   scripts/docs/update-architecture-docs.sh
@@ -42,9 +43,11 @@ GENERATORS=(
 # The files the generators own. Anything outside this list is not compared, so a hand-written doc
 # living beside a generated one is not held to the generator's output.
 GENERATED=(
+  docs/generated/agent-golden-path.json
   docs/generated/crate-deps.mermaid
   docs/generated/module-map.mermaid
   docs/AIcontext/architecture-diagrams.md
+  docs/guides/agent-golden-path.md
 )
 
 scratch="$(mktemp -d)"
@@ -63,7 +66,12 @@ mkdir -p "$scratch/repo"
 git ls-files -z | tar -cf - --null -T - | (cd "$scratch/repo" && tar -xf -)
 
 for generator in "${GENERATORS[@]}"; do
-  if ! (cd "$scratch/repo" && bash "$generator" >/dev/null 2>&1); then
+  if [[ "$generator" == *.py ]]; then
+    runner=(python3)
+  else
+    runner=(bash)
+  fi
+  if ! (cd "$scratch/repo" && "${runner[@]}" "$generator" >/dev/null 2>&1); then
     echo "error: $generator failed inside the scratch copy, so no comparison was made." >&2
     echo "       This is a 'could not check', not a pass." >&2
     exit 1
@@ -90,7 +98,11 @@ if [ ${#drifted[@]} -gt 0 ]; then
   echo >&2
   echo "Regenerate and commit:" >&2
   for generator in "${GENERATORS[@]}"; do
-    echo "  bash $generator" >&2
+    if [[ "$generator" == *.py ]]; then
+      echo "  python3 $generator" >&2
+    else
+      echo "  bash $generator" >&2
+    fi
   done
   echo >&2
   echo "The diagram belongs in the change that moved it. A dependency edge added in one PR and" >&2
