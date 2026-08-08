@@ -112,3 +112,39 @@ fn a_missing_impl_fails_loudly() {
         "a renamed or deleted impl must fail rather than compare empty vectors"
     );
 }
+
+/// The constructor accepts the vocabulary it documents, and the event type is the registered tag.
+///
+/// `PayloadSessionFinding::new` exists so a producer that can see both crates does not restate the
+/// field order, and `EVENT_TYPE` so it does not respell the tag. Both are only worth having if they
+/// agree with the enum that owns them, which is what the rest of this file already checks for the
+/// strings; this checks that the constructor is wired to the same ones and that the tag is the one
+/// `Payload` actually maps.
+#[test]
+fn the_constructor_and_the_event_type_agree_with_the_registered_variant() {
+    use assay_evidence::types::{Payload, PayloadSessionFinding};
+
+    assert_eq!(PayloadSessionFinding::EVENT_TYPE, "assay.session.finding");
+
+    let f = PayloadSessionFinding::new(
+        "never_after:bash[command]->bash[command]",
+        "never_after",
+        "violated",
+        vec![1, 2],
+        "complete",
+        Some("credential read at 1 followed by egress at 2".to_string()),
+    );
+    assert_eq!(f.spanned, vec![1, 2]);
+    assert_eq!(f.outcome, "violated");
+
+    // The tag round-trips into the variant, so `EVENT_TYPE` is the name a reader will meet rather
+    // than a constant that merely looks right.
+    let tagged = serde_json::json!({
+        "type": PayloadSessionFinding::EVENT_TYPE,
+        "payload": serde_json::to_value(&f).expect("payload serialises"),
+    });
+    match serde_json::from_value::<Payload>(tagged).expect("the tag resolves to the variant") {
+        Payload::SessionFinding(back) => assert_eq!(back, f, "round trip is lossless"),
+        other => panic!("expected the session-finding variant, got {other:?}"),
+    }
+}

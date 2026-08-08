@@ -155,6 +155,17 @@ from a proxy correlator, or from an external system such as the one @blitzcrieg1
 the record shape hostage to our own detector's reach would be the same error as deciding the format
 by what today's producer happens to emit.
 
+**Update, 2026-08-08: the gap is closed and this decision's premise no longer holds.** #2124 landed
+`CallSelector`, so a rule step is a tool name *and* optionally a constraint on the call's arguments,
+and `evaluate_rules` now reads calls rather than names. The motivating correlation is expressible in
+our own rule language: the three `bash` calls are distinguished by `args_match`, and the rule spans
+the two that constitute the finding rather than the first pair sharing a tool name.
+
+The reasoning above is left standing rather than rewritten, because it is the argument for why the
+carrier shipped first and it is still the right argument. What changed is only the fact it was
+reasoning about. Deciding the format by our detector's reach would have delayed the carrier for
+work that took one predicate.
+
 ## Consequences
 
 - `PayloadSessionFinding` is additive; `Payload` is unchanged until the next major, when it gains
