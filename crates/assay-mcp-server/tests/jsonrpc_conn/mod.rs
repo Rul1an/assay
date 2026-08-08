@@ -189,6 +189,18 @@ impl Conn {
         }
     }
 
+    /// [`Conn::read_response`], but also skips responses for other numeric request IDs.
+    pub fn read_response_for_id(&mut self, expected_id: u64) -> Value {
+        let deadline = Instant::now() + self.take_budget();
+        loop {
+            let v = self.read_json_by(deadline);
+            if v.get("method").is_none() && v.get("id").and_then(Value::as_u64) == Some(expected_id)
+            {
+                return v;
+            }
+        }
+    }
+
     /// Every remaining stdout line up to EOF, used to prove nothing further reached the client.
     ///
     /// Named for its precondition because it has one: the returned lines are accumulated in memory,

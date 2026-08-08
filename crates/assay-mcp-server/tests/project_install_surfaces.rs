@@ -5,9 +5,11 @@
 //! a syntactically correct manifest cannot advertise the wrong binary or tools.
 
 use serde_json::Value;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+mod jsonrpc_conn;
+use jsonrpc_conn::Conn;
 
 #[derive(Clone, Copy)]
 enum ProjectFile {
@@ -70,7 +72,7 @@ fn project_surfaces_launch_the_five_production_tools() {
     let codex_entry = r#"[mcp_servers.assay]
 command = "assay-mcp-server"
 args = ["--policy-root", "."]"#;
-    let guide = read_project_file(ProjectFile::EditorGuide);
+    let guide = read_project_file(ProjectFile::EditorGuide).replace("\r\n", "\n");
     assert!(
         guide.contains(codex_entry),
         "Codex guide does not carry the manifest invocation"
@@ -82,41 +84,32 @@ args = ["--policy-root", "."]"#;
         .iter()
         .map(|arg| arg.as_str().expect("manifest string arg"))
         .collect();
-    let mut child = clean_server_command()
+    let child = clean_server_command()
         .args(args)
         .current_dir(workspace_root())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("spawn assay-mcp-server from project manifest");
 
-    {
-        let mut stdin = child.stdin.take().expect("server stdin");
-        writeln!(
-            stdin,
-            "{}",
-            serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/list"
-            })
-        )
-        .expect("write tools/list request");
-    }
-
-    let output = child.wait_with_output().expect("wait for server");
+    let mut conn = Conn::attach(child);
+    conn.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list"
+    }));
+    conn.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list"
+    }));
+    let response = conn.read_response_for_id(1);
+    let status = conn.shutdown();
     assert!(
-        output.status.success(),
-        "manifest invocation failed: {}",
-        String::from_utf8_lossy(&output.stderr)
+        status.success(),
+        "manifest invocation failed with status {status}"
     );
-    let response: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
-        panic!(
-            "parse tools/list response: {error}; stdout={}",
-            String::from_utf8_lossy(&output.stdout)
-        )
-    });
     let mut actual: Vec<&str> = response["result"]["tools"]
         .as_array()
         .expect("tools/list result array")

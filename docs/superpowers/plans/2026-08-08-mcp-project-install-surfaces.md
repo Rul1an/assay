@@ -26,6 +26,7 @@
 - Create: `.cursor/mcp.json`
 - Modify: `.gitignore`
 - Modify: `docs/guides/editor-mcp-recipe.md`
+- Modify: `docs/superpowers/plans/2026-08-08-mcp-project-install-surfaces.md`
 - Modify: `docs/superpowers/specs/2026-08-08-mcp-project-install-surfaces-design.md`
 
 **Interfaces:**
