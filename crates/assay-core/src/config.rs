@@ -11,26 +11,36 @@ pub const SUPPORTED_CONFIG_VERSION: u32 = 1;
 /// What a caller wants the loader to refuse, rather than merely parse.
 ///
 /// Each field is a separate axis on purpose. `strict_unknown_fields` and
-/// `deny_ineffective_assertions` refuse different things — a key the schema does not know versus an
-/// assertion that no trace could ever fail — and folding them into one flag would mean a caller who
-/// wanted one silently acquired the other.
+/// `allow_ineffective_assertions` decide different things — a key the schema does not know versus
+/// an assertion that no trace could ever fail — and folding them into one flag would mean a caller
+/// who wanted one silently acquired the other.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LoadOptions {
     /// Treat a v0 config as v0 rather than trusting its declared version.
     pub legacy_mode: bool,
     /// Refuse a config carrying keys this version does not understand.
     pub strict_unknown_fields: bool,
-    /// Refuse a config whose `assertions:` include one that cannot fail.
+    /// Accept a config whose `assertions:` include one that cannot fail.
     ///
-    /// Opt-in, and deliberately not on by default: `assay validate` has reported these as a
-    /// warning since #1983, and turning that into a load-time error for every caller at once would
-    /// break suites that are running today. The phased route in #1949 is warning, then opt-in here,
-    /// then default at a major after an announced window.
-    pub deny_ineffective_assertions: bool,
+    /// **Refusing is the default, and this is the escape hatch.** The phased route in #1949 was
+    /// warning, then opt-in, then default at a major: `assay validate` has warned since #1983, the
+    /// opt-in landed as `--deny-ineffective-assertions`, and 5.0.0 is the major that carries the
+    /// flip (#1949).
+    ///
+    /// The polarity is inverted rather than the default being overridden, so that
+    /// `#[derive(Default)]` still produces the intended behaviour. A `deny_*` field defaulting to
+    /// `true` needs a hand-written `Default`, and every `..Default::default()` in the tree would
+    /// then depend on that impl being right. `false` meaning "do not allow" is the same fact with
+    /// nothing to keep in sync.
+    pub allow_ineffective_assertions: bool,
 }
 
-/// Backwards-compatible loader. Every existing caller keeps its behaviour, and the new refusal is
-/// reachable only through [`load_config_with`], which is what makes it opt-in.
+/// Convenience loader for the two older axes.
+///
+/// It no longer preserves the pre-5.0.0 behaviour and is not meant to: `..Default::default()` now
+/// carries the ineffective-assertion refusal, so a caller on this path gets it too. That is the
+/// point of the flip in #1949 rather than an oversight, and a caller who needs the old behaviour
+/// asks for it through [`load_config_with`] with `allow_ineffective_assertions: true`.
 pub fn load_config(
     path: &Path,
     legacy_mode: bool,
@@ -50,7 +60,7 @@ pub fn load_config_with(path: &Path, opts: LoadOptions) -> Result<EvalConfig, Co
     let LoadOptions {
         legacy_mode,
         strict_unknown_fields: strict,
-        deny_ineffective_assertions,
+        allow_ineffective_assertions,
     } = opts;
     let raw = std::fs::read_to_string(path)
         .map_err(|e| ConfigError(format!("failed to read config {}: {}", path.display(), e)))?;
@@ -121,7 +131,7 @@ pub fn load_config_with(path: &Path, opts: LoadOptions) -> Result<EvalConfig, Co
     // the same code `assay validate` sweeps with, so this cannot drift away from what the warning
     // says. Diagnostics stay value-free: they name the test, the index, the variant and the
     // responsible field, never the configured value.
-    if deny_ineffective_assertions {
+    if !allow_ineffective_assertions {
         let ineffective = crate::validate::ineffective_assertions(&cfg);
         if !ineffective.is_empty() {
             let detail = ineffective
@@ -143,7 +153,9 @@ pub fn load_config_with(path: &Path, opts: LoadOptions) -> Result<EvalConfig, Co
                 .collect::<Vec<_>>()
                 .join("; ");
             return Err(ConfigError(format!(
-                "{} assertion(s) cannot fail and were refused because --deny-ineffective-assertions is set ({}): {}",
+                "{} assertion(s) cannot fail and were refused ({}): {} \
+                 An assertion that cannot fail reports a pass carrying no information. \
+                 Fix the assertion, or pass --allow-ineffective-assertions to run anyway.",
                 ineffective.len(),
                 path.display(),
                 detail

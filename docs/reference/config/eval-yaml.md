@@ -175,5 +175,6 @@ Checks the supplied `test_tool_calls` against a blocklist policy, not the record
 ```
 
 > Every field above marked optional is optional to the parser, not to the check. An assertion
-> whose fields leave it unable to fail is refused by `assay validate`, and by `assay run
-> --deny-ineffective-assertions` at load. See #1949.
+> whose fields leave it unable to fail is refused at load by `assay run` and `assay ci`, and
+> reported by `assay validate`. Both use the same code, so `validate` tells you in advance exactly
+> what a run will refuse. Pass `--allow-ineffective-assertions` to run one anyway. See #1949.
