@@ -302,7 +302,7 @@ plan for 0.8.** The repair had already landed on that branch as `c0c4da6` on 4 A
 "docs(aee): constrain every carried record, not only the referenced ones" — placed inside the 0.7
 changelog rather than behind a version bump, on the reasoning that a reject family a single edit
 empties is not something anyone should have to pin a version against. She names the ambiguity in
-her earlier sentence as hers, and our reading as the one her words invited.
+his earlier sentence as his, and our reading as the one his words invited.
 
 So the trigger above is void, and planning a 0.8 migration is the thing the placement was designed
 to avoid. What replaces it: the constant tracks whatever version #570 carries, and the pin to watch
