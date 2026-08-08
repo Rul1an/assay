@@ -335,7 +335,7 @@ fn maybe_emit_aee_seal(
     // queue between capture and the seal builder. Its basis is `declared`, not `checked`, and the
     // payload says so -- the zero is this producer asserting its topology has no lossy channel.
     let run = match crate::aee_seal::build_sealed_run(
-        health,
+        crate::aee_seal::Vantage::Landlock(health),
         &env,
         &[],
         &sealed_at,

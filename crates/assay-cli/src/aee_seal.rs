@@ -24,6 +24,12 @@ use crate::enforcement_health_v1::{EnforcementHealthV1, Mechanism, Probe, Status
 /// `collection_paths: Vec<String>` and `check_substrate_scope` asks `contains(&path)` — while the
 /// producer could only ever name one. That asymmetry was a capability gap, not a design position.
 pub const COLLECTION_PATH_LANDLOCK_TCP_CONNECT: &str = "landlock-tcp-connect";
+/// The second collection path (#2093): the JSON-RPC enforcing proxy.
+pub const COLLECTION_PATH_JSONRPC_PROXY: &str = "jsonrpc-proxy";
+/// The carrier profile that establishes proxy enforcement, reported as `assaySourceSchema`.
+pub const PROXY_SOURCE_SCHEMA: &str = "assay.enforcement_decision.v0";
+/// What a proxy seal covers.
+pub const PROXY_SEAL_SCOPE: &str = "tool_call:mcp_proxy_policy";
 /// AEE draft version this payload is shape-compatible with. Not a conformance claim.
 ///
 /// **Stays at 0.7, and there is no 0.8 to wait for.** Decided in #2093; the reason was corrected
@@ -450,12 +456,124 @@ pub fn probe_examination_record(
     }
 }
 
-pub fn seal_eligibility(health: &EnforcementHealthV1) -> Result<&Probe, NotSealEligible> {
-    if health.status != Status::Active {
-        return Err(NotSealEligible::NotArmed {
-            status: health.status,
+/// The proxy vantage: what the JSON-RPC enforcing proxy can establish at run end.
+///
+/// The second collection path #2093 asks for. It is deliberately *not* an `EnforcementHealthV1`:
+/// that type's `Mechanism` has one variant, and `seal_eligibility` gates on `health.landlock`, an
+/// ABI number and a kernel shedding probe. A proxy has none of those, and shaping a Landlock record
+/// to fit would be the exact class of claim this seal exists to refuse.
+///
+/// The inputs are the carriers the enforcing proxy already ships under the `privileged-mcp-action/v0`
+/// profile: `assay.enforcement_decision.v0` says the proxy was deciding, and
+/// `assay.denied_call_observation.v0` is the run-end refusal — the proxy's analogue of the Landlock
+/// probe's `EACCES`.
+#[derive(Debug, Clone)]
+pub struct ProxyEnforcement {
+    /// The proxy was loaded and deciding when the run ended.
+    pub enforcing: bool,
+    /// A failure the record itself carries. Present alongside `enforcing` is self-contradictory.
+    pub failure: Option<String>,
+    /// The run-end refusal, absent when the proxy denied nothing.
+    pub denial: Option<ProxyDenial>,
+}
+
+/// One caller-visible denial observed by the proxy.
+#[derive(Debug, Clone)]
+pub struct ProxyDenial {
+    /// The tool whose call was refused.
+    pub tool: String,
+    /// The reason code the proxy returned to the caller.
+    pub reason_code: String,
+    /// Whether the call nevertheless reached the upstream server. True refutes the denial, the way
+    /// `listener_reached` refutes a Landlock block.
+    pub upstream_reached: bool,
+}
+
+/// What the seal requires of *any* vantage, stated once.
+///
+/// Extracted because it is the rule, and the rule is not about Landlock: enforcement was armed at
+/// run end, the record does not contradict itself, and something was actually refused. Each vantage
+/// adapts its own evidence into these three questions and adds whatever else its mechanism can
+/// establish. Landlock adds an ABI capability check and a kernel shedding probe; the proxy cannot,
+/// and says so rather than implying otherwise.
+fn armed_and_self_consistent(
+    armed: bool,
+    status: Status,
+    failure_recorded: bool,
+) -> Result<(), NotSealEligible> {
+    if !armed {
+        return Err(NotSealEligible::NotArmed { status });
+    }
+    if failure_recorded {
+        return Err(NotSealEligible::RecordSelfContradictory {
+            detail: "status is active and a failure is recorded".into(),
         });
     }
+    Ok(())
+}
+
+/// Is this proxy run sealable?
+///
+/// The three shared questions, and no more. What it deliberately does **not** assert is the property
+/// `restriction_shedding` establishes for Landlock: that enforcement could not be shed between
+/// arming and run end. A kernel ruleset survives the process that installed it; an in-process proxy
+/// is bypassed by not going through it. That asymmetry is real, it is not fixable by more checks
+/// here, and the seal carries it as a non-claim on this path rather than letting a reader assume the
+/// two vantages establish the same thing.
+pub fn proxy_seal_eligibility(e: &ProxyEnforcement) -> Result<&ProxyDenial, NotSealEligible> {
+    armed_and_self_consistent(
+        e.enforcing,
+        if e.enforcing {
+            Status::Active
+        } else {
+            Status::Failed
+        },
+        e.failure.is_some(),
+    )?;
+    let denial = e.denial.as_ref().ok_or(NotSealEligible::NoRunEndProbe)?;
+    if denial.upstream_reached {
+        return Err(NotSealEligible::ProbeReachedListener);
+    }
+    if denial.reason_code.is_empty() {
+        return Err(NotSealEligible::ProbeSignalTooWeak {
+            errno: "<empty reason code>".to_string(),
+        });
+    }
+    Ok(denial)
+}
+
+/// The proxy's examination record.
+///
+/// A separate constructor rather than a generalised one, because the Landlock payload is pinned
+/// byte-for-byte by `derivation-parity.json` and the fixture checker: generalising the shared
+/// builder would put those under a refactor for no gain. The two records answer the same question
+/// in their own vocabularies, which is what `assayCollectionPath` exists to distinguish.
+pub fn proxy_examination_record(
+    denial: &ProxyDenial,
+    run_binding: &str,
+    collection_path: &str,
+) -> ObservationRecord {
+    ObservationRecord {
+        payload: serde_json::json!({
+            "aeeKind": "examination",
+            "aeeVersion": AEE_VERSION,
+            "aeeRunBinding": run_binding,
+            "aeeMethod": "intercepted",
+            "assayCollectionPath": collection_path,
+            "assayDeniedTool": denial.tool,
+            "assayDenialReasonCode": denial.reason_code,
+            "assayDenialUpstreamReached": denial.upstream_reached,
+        }),
+        payload_type: OBSERVATION_PAYLOAD_TYPE.to_string(),
+    }
+}
+
+pub fn seal_eligibility(health: &EnforcementHealthV1) -> Result<&Probe, NotSealEligible> {
+    armed_and_self_consistent(
+        health.status == Status::Active,
+        health.status,
+        health.failure.is_some(),
+    )?;
     if health.mechanism != Mechanism::Landlock {
         return Err(NotSealEligible::WrongMechanism {
             mechanism: health.mechanism,
@@ -476,11 +594,6 @@ pub fn seal_eligibility(health: &EnforcementHealthV1) -> Result<&Probe, NotSealE
     if health.landlock.net_connect_tcp_supported == Some(false) {
         return Err(NotSealEligible::RecordSelfContradictory {
             detail: "claims a TCP-connect restriction the record reports as unsupported".into(),
-        });
-    }
-    if health.failure.is_some() {
-        return Err(NotSealEligible::RecordSelfContradictory {
-            detail: "status is active and a failure is recorded".into(),
         });
     }
     if !health.landlock.no_new_privs_confirmed || !health.landlock.restrict_self_confirmed {
@@ -668,19 +781,121 @@ pub struct SealedRun {
     pub records: Vec<ObservationRecord>,
 }
 
+/// Which vantage observed the run.
+///
+/// The second collection path (#2093) goes into one substrate under one key, on the predicate
+/// author's constraint recorded there: two keys make two substrates and the run binding stops
+/// resolving. So the vantage is data in the payload, not an identity in the key.
+///
+/// That is how SLSA arranges the same problem. Its provenance spec keeps the builder distinct from
+/// the signer "in order to support the case where one signer generates attestations for more than
+/// one builder", and requires that field "even if it is implicit from the signer, to aid readability
+/// and debugging". `assayCollectionPath` is that field here: one observation key covers both paths,
+/// and each seal names the vantage that produced it rather than leaving a verifier to infer it from
+/// who signed.
+pub enum Vantage<'a> {
+    /// The kernel path: Landlock TCP-connect, established by an `enforcement_health.v1` record.
+    Landlock(&'a EnforcementHealthV1),
+    /// The proxy path: the JSON-RPC enforcing proxy, established by its own carriers.
+    JsonRpcProxy(&'a ProxyEnforcement),
+}
+
+/// A vantage's run-end proof, once its eligibility has been established.
+enum RunEndProof<'a> {
+    Landlock(&'a Probe),
+    Proxy(&'a ProxyDenial),
+}
+
+// The key model, and why it is one key rather than per-path keys. Kept as a plain comment block
+// because ADR-045 is named here and the quotations below are the ADR's own words; the quotations
+// from #2093 and from the SLSA provenance spec live in the doc comment underneath, where they are
+// not read as the ADR's. `tests/adr045_citations.rs` enforces that separation.
+//
+// ADR-045 weighed both arrangements. Its per-path-key option is listed with "stronger evidence-tier
+// semantics"; the single-key option carries "weak independence story" and "compromise of one key
+// affects all collection paths".
+//
+// Both readings are right, and they stop competing once the claim is stated. This arrangement does
+// not support an independence claim, and #2093 already refuses one on the ground that a single
+// operator running both paths cannot support it. A weaker independence story costs nothing that was
+// being claimed, and the run binding is worth more than a claim we decline to make.
+impl<'a> Vantage<'a> {
+    /// The eligibility questions, asked in the vantage's own vocabulary.
+    fn check(&self) -> Result<RunEndProof<'a>, NotSealEligible> {
+        match self {
+            Self::Landlock(h) => seal_eligibility(h).map(RunEndProof::Landlock),
+            Self::JsonRpcProxy(e) => proxy_seal_eligibility(e).map(RunEndProof::Proxy),
+        }
+    }
+
+    /// The schema that established enforcement, reported as `assaySourceSchema`.
+    fn source_schema(&self) -> String {
+        match self {
+            Self::Landlock(h) => h.schema.clone(),
+            Self::JsonRpcProxy(_) => PROXY_SOURCE_SCHEMA.to_string(),
+        }
+    }
+
+    /// What this vantage covers, reported as `assaySealScope`.
+    fn scope(&self) -> String {
+        match self {
+            Self::Landlock(h) => h.scope.clone(),
+            Self::JsonRpcProxy(_) => PROXY_SEAL_SCOPE.to_string(),
+        }
+    }
+
+    /// The non-claims this vantage owes on top of the standing ones.
+    ///
+    /// The proxy owes one the kernel path does not, and it is the honest difference between them.
+    /// Landlock's `restriction_shedding` probe measures that the ruleset could not be shed between
+    /// arming and run end; a ruleset outlives the process that installed it. An in-process proxy is
+    /// bypassed by not going through it, and no check here can establish otherwise. Recording that
+    /// is the difference between two vantages that agree and two vantages a reader can tell apart.
+    fn extra_non_claims(&self) -> Vec<String> {
+        match self {
+            Self::Landlock(_) => Vec::new(),
+            Self::JsonRpcProxy(_) => vec![
+                "does not prove enforcement could not be bypassed rather than shed".to_string(),
+            ],
+        }
+    }
+}
+
+impl RunEndProof<'_> {
+    fn examination(&self, rb: &str, collection_path: &str) -> ObservationRecord {
+        match self {
+            Self::Landlock(p) => probe_examination_record(p, rb, collection_path),
+            Self::Proxy(d) => proxy_examination_record(d, rb, collection_path),
+        }
+    }
+
+    fn label(&self) -> String {
+        match self {
+            Self::Landlock(p) => observed_label(p),
+            Self::Proxy(d) => {
+                if d.upstream_reached {
+                    "no_call_block".to_string()
+                } else {
+                    "call_blocked".to_string()
+                }
+            }
+        }
+    }
+}
+
 /// Assemble the sealed payload for a seal-eligible run, deriving every digest it carries.
 ///
 /// `prior_records` are the interception/examination records already emitted for this run. The probe
 /// examination is appended, so the seal commits to a set that includes it.
 pub fn build_sealed_run(
-    health: &EnforcementHealthV1,
+    vantage: Vantage<'_>,
     env: &ObservationEnvironment,
     prior_records: &[ObservationRecord],
     sealed_at: &str,
     drop_accounting: &DropAccounting,
     collection_path: &str,
 ) -> Result<SealedRun, NotSealEligible> {
-    let probe = seal_eligibility(health)?;
+    let proof = vantage.check()?;
     if !is_rfc3339_utc(sealed_at) {
         return Err(NotSealEligible::UnprovenContextValue { field: "sealed_at" });
     }
@@ -708,7 +923,7 @@ pub fn build_sealed_run(
     // The seal's path, not a constant: the examination record and the seal it is sealed into
     // describe the same vantage, so one value flows to both. Passing them separately would let a
     // producer emit a record and a seal that disagree about which path observed the run.
-    records.push(probe_examination_record(probe, &rb, collection_path));
+    records.push(proof.examination(&rb, collection_path));
 
     drop_accounting.check()?;
     let observed = observed_set(&records)?;
@@ -725,16 +940,20 @@ pub fn build_sealed_run(
             aee_drop_bound: 0,
             aee_observed_set: observed,
             aee_observed_attacks: Vec::new(),
-            assay_observed_labels: vec![observed_label(probe)],
+            assay_observed_labels: vec![proof.label()],
             assay_collection_path: collection_path.to_string(),
             assay_sealed_at: sealed_at.to_string(),
-            assay_source_schema: health.schema.clone(),
-            assay_seal_scope: health.scope.clone(),
+            assay_source_schema: vantage.source_schema(),
+            assay_seal_scope: vantage.scope(),
             assay_drop_proof_model: drop_accounting.model().to_string(),
             assay_drop_proof_basis: drop_accounting.basis().to_string(),
             assay_drop_channels: drop_accounting.channel_readings(),
             assay_attack_row_attribution_source: "assembly-plane".to_string(),
-            assay_non_claims: payload_non_claims(),
+            assay_non_claims: {
+                let mut n = payload_non_claims();
+                n.extend(vantage.extra_non_claims());
+                n
+            },
         },
         records,
     })
@@ -790,7 +1009,7 @@ mod tests {
 
     fn refusal(h: &EnforcementHealthV1) -> &'static str {
         build_sealed_run(
-            h,
+            Vantage::Landlock(h),
             &env_from_parity(),
             &[],
             "2026-08-05T00:00:00Z",
@@ -827,7 +1046,7 @@ mod tests {
         let p = parity();
         let env = env_from_parity();
         let run = build_sealed_run(
-            &healthy(),
+            Vantage::Landlock(&healthy()),
             &env,
             &[],
             "2026-08-05T00:00:00Z",
@@ -858,7 +1077,7 @@ mod tests {
             env.network_posture = posture;
             assert!(
                 build_sealed_run(
-                    &healthy(),
+                    Vantage::Landlock(&healthy()),
                     &env,
                     &[],
                     "2026-08-05T00:00:00Z",
@@ -927,7 +1146,7 @@ mod tests {
     #[test]
     fn the_seal_commits_to_the_probe_examination_leaf() {
         let run = build_sealed_run(
-            &healthy(),
+            Vantage::Landlock(&healthy()),
             &env_from_parity(),
             &[],
             "2026-08-05T00:00:00Z",
@@ -962,7 +1181,7 @@ mod tests {
             payload_type: OBSERVATION_PAYLOAD_TYPE.to_string(),
         }];
         let run = build_sealed_run(
-            &healthy(),
+            Vantage::Landlock(&healthy()),
             &env_from_parity(),
             &prior,
             "2026-08-05T00:00:00Z",
@@ -987,7 +1206,7 @@ mod tests {
             channels: vec![("probe-ring".into(), 0), ("event-ring".into(), 1)],
         };
         let err = build_sealed_run(
-            &healthy(),
+            Vantage::Landlock(&healthy()),
             &env_from_parity(),
             &[],
             "2026-08-05T00:00:00Z",
@@ -1000,7 +1219,7 @@ mod tests {
         let empty = DropAccounting::CountedQueue { channels: vec![] };
         assert_eq!(
             build_sealed_run(
-                &healthy(),
+                Vantage::Landlock(&healthy()),
                 &env_from_parity(),
                 &[],
                 "2026-08-05T00:00:00Z",
@@ -1016,7 +1235,7 @@ mod tests {
             channels: vec![("probe-ring".into(), 0)],
         };
         let run = build_sealed_run(
-            &healthy(),
+            Vantage::Landlock(&healthy()),
             &env_from_parity(),
             &[],
             "2026-08-05T00:00:00Z",
@@ -1043,7 +1262,7 @@ mod tests {
         let p = parity();
         let h = healthy();
         let run = build_sealed_run(
-            &h,
+            Vantage::Landlock(&h),
             &env_from_parity(),
             &[],
             "2026-08-05T12:34:56Z",
@@ -1103,7 +1322,7 @@ mod tests {
     #[test]
     fn the_payload_member_names_are_the_ones_the_checker_reads() {
         let run = build_sealed_run(
-            &healthy(),
+            Vantage::Landlock(&healthy()),
             &env_from_parity(),
             &[],
             "2026-08-05T00:00:00Z",
@@ -1154,7 +1373,7 @@ mod tests {
         let h = healthy();
         let probe = h.probe.as_ref().unwrap().clone();
         let run = build_sealed_run(
-            &h,
+            Vantage::Landlock(&h),
             &env_from_parity(),
             &[],
             "2026-08-05T00:00:00Z",
@@ -1212,7 +1431,7 @@ mod tests {
         ] {
             assert!(
                 build_sealed_run(
-                    &healthy(),
+                    Vantage::Landlock(&healthy()),
                     &env_from_parity(),
                     &[],
                     bad,
@@ -1226,7 +1445,7 @@ mod tests {
         for good in ["2028-02-29T23:59:59Z", "2000-02-29T23:59:59Z"] {
             assert!(
                 build_sealed_run(
-                    &healthy(),
+                    Vantage::Landlock(&healthy()),
                     &env_from_parity(),
                     &[],
                     good,
@@ -1317,7 +1536,7 @@ mod tests {
         ] {
             assert!(
                 build_sealed_run(
-                    &healthy(),
+                    Vantage::Landlock(&healthy()),
                     &env_from_parity(),
                     &[],
                     bad,
@@ -1337,7 +1556,7 @@ mod tests {
         let mut h = healthy();
         h.schema = "assay.enforcement_health.v0".into();
         let run = build_sealed_run(
-            &h,
+            Vantage::Landlock(&h),
             &env_from_parity(),
             &[],
             "2026-08-05T00:00:00Z",
@@ -1368,7 +1587,7 @@ mod tests {
         );
         let h: EnforcementHealthV1 = serde_json::from_str(raw).expect("fixture parses");
         let err = build_sealed_run(
-            &h,
+            Vantage::Landlock(&h),
             &env_from_parity(),
             &[],
             "2026-08-05T00:00:00Z",
@@ -1389,7 +1608,7 @@ mod tests {
             let mut h = healthy();
             h.landlock.restriction_shedding = Some(value.to_string());
             let err = build_sealed_run(
-                &h,
+                Vantage::Landlock(&h),
                 &env_from_parity(),
                 &[],
                 "2026-08-05T00:00:00Z",
@@ -1411,7 +1630,7 @@ mod tests {
         let raw = include_str!("../tests/fixtures/enforcement_health/v1/active_with_probe.json");
         let h: EnforcementHealthV1 = serde_json::from_str(raw).expect("fixture parses");
         let run = build_sealed_run(
-            &h,
+            Vantage::Landlock(&h),
             &env_from_parity(),
             &[],
             "2026-08-05T00:00:00Z",
