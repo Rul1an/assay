@@ -138,14 +138,37 @@ fn assay_contract(cwd: &Path, expected: &Value, replacements: &[(&str, &str)]) -
     assay(cwd, &argv)
 }
 
-fn stdout_json(output: &Output, context: &str) -> Value {
-    serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+fn assert_stdout_kind(expected: &Value, kind: &str) {
+    assert_eq!(
+        expected["stdout"]["kind"], kind,
+        "the observed stdout path drifted from the contract kind"
+    );
+}
+
+fn stdout_text(output: &Output, expected: &Value, context: &str) -> String {
+    assert_stdout_kind(expected, "text");
+    assert!(expected["stdout"]["document"].is_null());
+    String::from_utf8(output.stdout.clone())
+        .unwrap_or_else(|error| panic!("{context} stdout is not UTF-8: {error}"))
+}
+
+fn assert_empty_stdout(output: &Output, expected: &Value, context: &str) {
+    assert_stdout_kind(expected, "empty");
+    assert!(expected["stdout"]["document"].is_null());
+    assert!(output.stdout.is_empty(), "{context} stdout is not empty");
+}
+
+fn stdout_json(output: &Output, expected: &Value, context: &str) -> Value {
+    assert_stdout_kind(expected, "json");
+    let document = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(
             "{context} stdout is not JSON: {error}\nstdout:\n{}\nstderr:\n{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         )
-    })
+    });
+    assert_document(&document, expected, context);
+    document
 }
 
 fn assert_document(document: &Value, expected: &Value, context: &str) {
@@ -181,7 +204,7 @@ fn installed_binary_reports_a_version_on_stdout() {
     let expected = expected_outcome("install-check", "success");
     let output = assay_contract(dir.path(), &expected, &[]);
     assert_exit(&output, &expected, "version");
-    let version = String::from_utf8(output.stdout).expect("version stdout is UTF-8");
+    let version = stdout_text(&output, &expected, "version");
     let components: Vec<_> = version.trim().split('.').collect();
     assert_eq!(components.len(), 3, "version is not semver: {version:?}");
     assert!(
@@ -190,7 +213,6 @@ fn installed_binary_reports_a_version_on_stdout() {
             .all(|component| component.parse::<u64>().is_ok()),
         "version is not numeric semver: {version:?}"
     );
-    assert_eq!(expected["stdout"]["kind"], "text");
 }
 
 #[test]
@@ -199,8 +221,7 @@ fn doctor_json_exposes_its_current_success_and_failure_surface() {
     let expected_success = expected_outcome("preflight", "success");
     let success = assay_contract(dir.path(), &expected_success, &[]);
     assert_exit(&success, &expected_success, "doctor success");
-    let success_json = stdout_json(&success, "doctor success");
-    assert_document(&success_json, &expected_success, "doctor success");
+    stdout_json(&success, &expected_success, "doctor success");
 
     let missing = dir.path().join("missing.yaml");
     let expected_failure = expected_outcome("preflight", "invalid-config");
@@ -210,8 +231,7 @@ fn doctor_json_exposes_its_current_success_and_failure_surface() {
         &[("<config>", missing.to_str().expect("UTF-8 path"))],
     );
     assert_exit(&failure, &expected_failure, "doctor failure");
-    let failure_json = stdout_json(&failure, "doctor failure");
-    assert_document(&failure_json, &expected_failure, "doctor failure");
+    let failure_json = stdout_json(&failure, &expected_failure, "doctor failure");
     assert_eq!(
         failure_json["config_error"]["code"],
         expected_failure["config_error_code"]
@@ -226,7 +246,7 @@ fn init_stdout_records_success_but_not_the_failure_diagnosis() {
     let expected_success = expected_outcome("starter-files", "success");
     let success = assay_contract(success_dir.path(), &expected_success, &[]);
     assert_exit(&success, &expected_success, "init success");
-    let success_stdout = String::from_utf8(success.stdout).expect("init stdout is UTF-8");
+    let success_stdout = stdout_text(&success, &expected_success, "init success");
     assert!(success_stdout.contains("Next: assay validate"));
     assert!(success_dir.path().join("policy.yaml").is_file());
     assert!(success_dir.path().join("eval.yaml").is_file());
@@ -236,7 +256,7 @@ fn init_stdout_records_success_but_not_the_failure_diagnosis() {
     let expected_failure = expected_outcome("starter-files", "unknown-preset");
     let failure = assay_contract(failure_dir.path(), &expected_failure, &[]);
     assert_exit(&failure, &expected_failure, "init failure");
-    let failure_stdout = String::from_utf8(failure.stdout).expect("init stdout is UTF-8");
+    let failure_stdout = stdout_text(&failure, &expected_failure, "init failure");
     assert!(
         !failure_stdout.contains("unknown preset"),
         "the actionable diagnosis unexpectedly moved to stdout; update the contract"
@@ -258,7 +278,7 @@ fn policy_validation_stdout_is_currently_empty_on_both_paths() {
         &[("<policy>", valid_policy.to_str().expect("UTF-8 path"))],
     );
     assert_exit(&success, &expected_success, "policy validation success");
-    assert!(success.stdout.is_empty());
+    assert_empty_stdout(&success, &expected_success, "policy validation success");
 
     let malformed_policy = dir.path().join("malformed.yaml");
     std::fs::write(&malformed_policy, "version: [\n").expect("write malformed policy");
@@ -269,7 +289,7 @@ fn policy_validation_stdout_is_currently_empty_on_both_paths() {
         &[("<policy>", malformed_policy.to_str().expect("UTF-8 path"))],
     );
     assert_exit(&failure, &expected_failure, "policy validation failure");
-    assert!(failure.stdout.is_empty());
+    assert_empty_stdout(&failure, &expected_failure, "policy validation failure");
     assert_gap(&expected_failure, 2162);
 }
 
@@ -284,8 +304,7 @@ fn completed_test_failure_is_a_run_report_not_a_diagnosis() {
     let expected_success = expected_outcome("evaluation-result", "success");
     let success = assay_contract(success_dir.path(), &expected_success, &[]);
     assert_exit(&success, &expected_success, "completed run success");
-    let success_json = stdout_json(&success, "completed run success");
-    assert_document(&success_json, &expected_success, "completed run success");
+    stdout_json(&success, &expected_success, "completed run success");
 
     let failure_dir = tempfile::tempdir().expect("failure tempdir");
     let failing_suite = workspace_root().join("tests/fixtures/contract/fail.yaml");
@@ -296,8 +315,7 @@ fn completed_test_failure_is_a_run_report_not_a_diagnosis() {
         &[("<config>", failing_suite.to_str().expect("UTF-8 path"))],
     );
     assert_exit(&failure, &expected_failure, "completed test failure");
-    let failure_json = stdout_json(&failure, "completed test failure");
-    assert_document(&failure_json, &expected_failure, "completed test failure");
+    let failure_json = stdout_json(&failure, &expected_failure, "completed test failure");
     assert_eq!(failure_json["results"][0]["status"], "fail");
     assert_no_diagnosis(&expected_failure, &failure_json);
 }
@@ -313,7 +331,7 @@ fn bundle_inspection_json_disappears_on_integrity_failure() {
         &[("<bundle>", valid.to_str().expect("UTF-8 path"))],
     );
     assert_exit(&success, &expected_success, "evidence show success");
-    let success_json = stdout_json(&success, "evidence show success");
+    let success_json = stdout_json(&success, &expected_success, "evidence show success");
     assert_eq!(success_json["manifest"]["event_count"], 2);
     assert!(success_json["events"].is_array());
 
@@ -325,7 +343,7 @@ fn bundle_inspection_json_disappears_on_integrity_failure() {
         &[("<bundle>", tampered.to_str().expect("UTF-8 path"))],
     );
     assert_exit(&failure, &expected_failure, "evidence show failure");
-    assert!(failure.stdout.is_empty());
+    assert_empty_stdout(&failure, &expected_failure, "evidence show failure");
     assert_gap(&expected_failure, 2164);
 }
 
@@ -340,8 +358,7 @@ fn offline_profile_verifier_keeps_both_outcomes_on_stdout() {
         &[("<bundle>", valid.to_str().expect("UTF-8 path"))],
     );
     assert_exit(&success, &expected_success, "profile verify success");
-    let success_json = stdout_json(&success, "profile verify success");
-    assert_document(&success_json, &expected_success, "profile verify success");
+    let success_json = stdout_json(&success, &expected_success, "profile verify success");
     assert_eq!(success_json["bundle_integrity"], "pass");
     assert_eq!(success_json["verdict"], "valid");
 
@@ -353,8 +370,7 @@ fn offline_profile_verifier_keeps_both_outcomes_on_stdout() {
         &[("<bundle>", tampered.to_str().expect("UTF-8 path"))],
     );
     assert_exit(&failure, &expected_failure, "profile verify failure");
-    let failure_json = stdout_json(&failure, "profile verify failure");
-    assert_document(&failure_json, &expected_failure, "profile verify failure");
+    let failure_json = stdout_json(&failure, &expected_failure, "profile verify failure");
     assert_eq!(failure_json["bundle_integrity"], "fail");
     let findings = failure_json["findings"].as_array().expect("findings array");
     assert_eq!(findings.len(), 1, "integrity failure must stay bounded");

@@ -111,6 +111,35 @@ fn contract_argv(expected: &Value, replacements: &[(&str, &str)]) -> Vec<String>
         .collect()
 }
 
+fn assert_stdout_contract(expected: &Value, kind: &str, document: Option<&str>) {
+    assert_eq!(
+        expected["stdout"]["kind"], kind,
+        "the observed stdout path drifted from the contract kind"
+    );
+    match document {
+        Some(document) => assert_eq!(expected["stdout"]["document"], document),
+        None => assert!(expected["stdout"]["document"].is_null()),
+    }
+}
+
+fn assert_empty_stdout(output: &Output, expected: &Value, context: &str) {
+    assert_stdout_contract(expected, "empty", None);
+    assert!(output.stdout.is_empty(), "{context} stdout is not empty");
+}
+
+fn stdout_json(output: &Output, expected: &Value, context: &str) -> Value {
+    assert_eq!(
+        expected["stdout"]["kind"], "json",
+        "the observed stdout path drifted from the contract kind"
+    );
+    serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "{context} stdout is not JSON: {error}\nstdout:\n{}",
+            String::from_utf8_lossy(&output.stdout)
+        )
+    })
+}
+
 fn clean_server_command() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_assay-mcp-server"));
     for (name, _) in std::env::vars_os() {
@@ -243,7 +272,7 @@ fn enforcing_proxy_denial_is_structured_but_startup_failure_is_not() {
         }),
         9,
     );
-    assert_eq!(denied_expected["stdout"]["document"], "jsonrpc-2.0");
+    assert_stdout_contract(&denied_expected, "json_lines", Some("jsonrpc-2.0"));
     assert_eq!(denied_expected["exit_code"], 0);
     assert_eq!(
         denied["error"]["code"],
@@ -261,7 +290,7 @@ fn enforcing_proxy_denial_is_structured_but_startup_failure_is_not() {
     let startup_argv = contract_argv(&startup_expected, &[("<python>", python)]);
     let startup_failure = run_server(&example, &startup_argv, b"");
     assert_exit(&startup_failure, &startup_expected, "proxy startup failure");
-    assert!(startup_failure.stdout.is_empty());
+    assert_empty_stdout(&startup_failure, &startup_expected, "proxy startup failure");
     assert_gap(&startup_expected, 2163);
 }
 
@@ -284,7 +313,7 @@ fn sarif_projection_currently_turns_malformed_input_into_clean_output() {
     let success_argv = contract_argv(&expected_success, &[]);
     let success = run_server(dir.path(), &success_argv, valid_input.as_bytes());
     assert_exit(&success, &expected_success, "SARIF projection success");
-    let success_json: Value = serde_json::from_slice(&success.stdout).expect("valid SARIF stdout");
+    let success_json = stdout_json(&success, &expected_success, "valid SARIF");
     assert_eq!(
         format!("sarif-{}", success_json["version"].as_str().unwrap()),
         expected_success["stdout"]["document"]
@@ -298,8 +327,7 @@ fn sarif_projection_currently_turns_malformed_input_into_clean_output() {
     let malformed_argv = contract_argv(&expected_malformed, &[]);
     let malformed = run_server(dir.path(), &malformed_argv, b"not-json\n");
     assert_exit(&malformed, &expected_malformed, "SARIF malformed input");
-    let malformed_json: Value =
-        serde_json::from_slice(&malformed.stdout).expect("malformed-input SARIF stdout");
+    let malformed_json = stdout_json(&malformed, &expected_malformed, "malformed-input SARIF");
     assert_eq!(
         format!("sarif-{}", malformed_json["version"].as_str().unwrap()),
         expected_malformed["stdout"]["document"]
