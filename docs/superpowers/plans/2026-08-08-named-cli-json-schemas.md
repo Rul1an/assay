@@ -76,8 +76,8 @@ Pin the run-report id/version, summary id, first summary key, legacy/new
 deserialization, and render-read-render idempotence. Run:
 
 ```bash
-CARGO_TARGET_DIR=/tmp/assay-target-2159 \
-  cargo test -p assay-core report::json::tests report::summary::writer::tests
+CARGO_TARGET_DIR=/tmp/assay-target-2159 cargo test -p assay-core report::json::tests
+CARGO_TARGET_DIR=/tmp/assay-target-2159 cargo test -p assay-core report::summary::writer::tests
 ```
 
 Expected: compile/test failure because the constants and summary renderer do
@@ -94,8 +94,8 @@ and `reporting.rs`.
 - [x] **Step 3: Run focused tests and verify GREEN**
 
 ```bash
-CARGO_TARGET_DIR=/tmp/assay-target-2159 \
-  cargo test -p assay-core report::json::tests report::summary::writer::tests
+CARGO_TARGET_DIR=/tmp/assay-target-2159 cargo test -p assay-core report::json::tests
+CARGO_TARGET_DIR=/tmp/assay-target-2159 cargo test -p assay-core report::summary::writer::tests
 CARGO_TARGET_DIR=/tmp/assay-target-2159 \
   cargo test -p assay-cli --test named_json_envelopes -- --nocapture
 ```

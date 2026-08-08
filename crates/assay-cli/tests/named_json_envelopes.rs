@@ -137,6 +137,13 @@ fn validate_and_run_json_documents_name_the_contract_they_follow() {
     );
     assert_schema(&run_failure, RUN_SUMMARY_SCHEMA, "run failure");
 
+    let failure_summary: Value = serde_json::from_slice(
+        &std::fs::read(failure_project.path().join("summary.json"))
+            .expect("read failure summary.json"),
+    )
+    .expect("failure summary.json parses");
+    assert_schema(&failure_summary, RUN_SUMMARY_SCHEMA, "failure summary.json");
+
     let identities = [
         validate_success["schema"].as_str(),
         run_success["schema"].as_str(),
