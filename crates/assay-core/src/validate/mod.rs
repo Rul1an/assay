@@ -309,7 +309,7 @@ pub async fn validate(
 ///
 /// Two callers need this answer and they must not each derive it: `assay validate` reports it as a
 /// warning, and `load_config` refuses the config outright when the caller opted into
-/// `deny_ineffective_assertions`. Two implementations of one rule drift; the fix is one
+/// `allow_ineffective_assertions`. Two implementations of one rule drift; the fix is one
 /// implementation with two callers, which is also why the "cannot fail" decision itself stays in
 /// `agent_assertions::matchers::ineffective_reason` — the evaluator's own code — rather than being
 /// restated here.
