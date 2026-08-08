@@ -29,7 +29,7 @@
 - Consumes: `CARGO_BIN_EXE_assay`, `init --preset dev --hello-trace`, validate/run JSON output, and `summary.json`.
 - Produces: one failing integration contract over the three schema identities.
 
-- [ ] **Step 1: Write the failing binary test**
+- [x] **Step 1: Write the failing binary test**
 
 Create a temporary initialized project, drive validate success/failure and run
 success/failure, parse stdout, and assert:
@@ -45,7 +45,7 @@ assert_eq!(summary_file["schema"], "assay.run_summary.v1");
 Require integer `schema_version == 1` on all paths and require the three ids to
 be distinct.
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 ```bash
 CARGO_TARGET_DIR=/tmp/assay-target-2159 \
@@ -70,7 +70,7 @@ Expected: FAIL because every `schema` key is absent and run-success also lacks
 - Produces: `VALIDATE_REPORT_SCHEMA`, `RUN_REPORT_SCHEMA`, `RUN_REPORT_SCHEMA_VERSION`, `SUMMARY_SCHEMA`, and `render_summary_json(&Summary) -> anyhow::Result<String>`.
 - Consumes: unchanged `Summary`, existing `render_json(&RunArtifacts)`, and existing validate JSON builder.
 
-- [ ] **Step 1: Add focused core tests and verify RED**
+- [x] **Step 1: Add focused core tests and verify RED**
 
 Pin the run-report id/version, summary id, first summary key, legacy/new
 deserialization, and render-read-render idempotence. Run:
@@ -83,7 +83,7 @@ CARGO_TARGET_DIR=/tmp/assay-target-2159 \
 Expected: compile/test failure because the constants and summary renderer do
 not exist.
 
-- [ ] **Step 2: Implement the minimal rendering changes**
+- [x] **Step 2: Implement the minimal rendering changes**
 
 Add schema constants beside each renderer. Add `schema` and integer
 `schema_version` to the run-results JSON object. Add `schema` to validate's
@@ -91,7 +91,7 @@ JSON object. Implement the summary renderer by serializing the unchanged
 struct, inserting `schema`, and pretty-printing; call it from `write_summary`
 and `reporting.rs`.
 
-- [ ] **Step 3: Run focused tests and verify GREEN**
+- [x] **Step 3: Run focused tests and verify GREEN**
 
 ```bash
 CARGO_TARGET_DIR=/tmp/assay-target-2159 \
@@ -114,13 +114,13 @@ Expected: all focused tests pass.
 - Consumes: the three exact schema ids from Task 2.
 - Produces: public documentation that distinguishes run success, run early failure, and summary artifacts.
 
-- [ ] **Step 1: Update documentation**
+- [x] **Step 1: Update documentation**
 
 Add `assay.run_summary.v1` to the normative summary table/examples/history;
 add validate and run identity sections; name success/failure behavior exactly;
 record #2167 and #2168 only as bounded follow-ups where needed.
 
-- [ ] **Step 2: Verify literals and public claims**
+- [x] **Step 2: Verify literals and public claims**
 
 ```bash
 rg -n 'assay\.(validate_report|run_report|run_summary)\.v1' \
@@ -142,7 +142,7 @@ Expected: each id appears only in its constant/tests/docs; no expanded claim.
 - Consumes: completed code, tests, and docs.
 - Produces: a verified exact-head PR that closes #2159 and unblocks #2154.
 
-- [ ] **Step 1: Run affected verification**
+- [x] **Step 1: Run affected verification**
 
 ```bash
 CARGO_TARGET_DIR=/tmp/assay-target-2159 cargo test -p assay-core
@@ -153,7 +153,7 @@ cargo fmt --all -- --check
 git diff --check
 ```
 
-- [ ] **Step 2: Kill the three schema mutations**
+- [x] **Step 2: Kill the three schema mutations**
 
 On reversible copies, change each schema id in its production renderer and
 require the focused owning test to fail for that exact mismatch. Restore the

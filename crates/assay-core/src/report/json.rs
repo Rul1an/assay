@@ -2,6 +2,9 @@ use crate::render_safety::{render_details_safe, Sink};
 use crate::report::RunArtifacts;
 use std::path::Path;
 
+pub const RUN_REPORT_SCHEMA: &str = "assay.run_report.v1";
+pub const RUN_REPORT_SCHEMA_VERSION: u32 = 1;
+
 /// Render the run results report as a pretty-printed JSON string.
 ///
 /// Single source of truth for the JSON report shape: both the file writer
@@ -15,6 +18,8 @@ use std::path::Path;
 /// content. Assay-owned keys (ids, status, score, fingerprint, skip.*) stay byte-stable.
 pub fn render_json(artifacts: &RunArtifacts) -> anyhow::Result<String> {
     let v = serde_json::json!({
+        "schema": RUN_REPORT_SCHEMA,
+        "schema_version": RUN_REPORT_SCHEMA_VERSION,
         "run_id": artifacts.run_id,
         "suite": artifacts.suite,
         "results": artifacts.results,
@@ -26,4 +31,30 @@ pub fn render_json(artifacts: &RunArtifacts) -> anyhow::Result<String> {
 pub fn write_json(artifacts: &RunArtifacts, out: &Path) -> anyhow::Result<()> {
     std::fs::write(out, render_json(artifacts)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::report::RunArtifacts;
+
+    #[test]
+    fn rendered_run_report_has_named_integer_versioned_schema() {
+        let artifacts = RunArtifacts {
+            run_id: 1,
+            suite: "schema-contract".to_string(),
+            results: Vec::new(),
+            order_seed: None,
+            runner_clone_ms: None,
+        };
+
+        let rendered: serde_json::Value =
+            serde_json::from_str(&render_json(&artifacts).expect("render run report"))
+                .expect("parse run report");
+
+        assert_eq!(RUN_REPORT_SCHEMA, "assay.run_report.v1");
+        assert_eq!(RUN_REPORT_SCHEMA_VERSION, 1);
+        assert_eq!(rendered["schema"], RUN_REPORT_SCHEMA);
+        assert_eq!(rendered["schema_version"], RUN_REPORT_SCHEMA_VERSION);
+    }
 }

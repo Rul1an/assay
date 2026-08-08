@@ -41,6 +41,7 @@ When `assay ci` (or the equivalent run invoked by the blessed workflow) complete
 
 | Field                 | Type    | Required | Description |
 |-----------------------|---------|----------|-------------|
+| `schema`             | string  | **Yes**  | Stable document identity. MUST be `assay.run_summary.v1` for `summary.json`. |
 | `schema_version`     | integer | **Yes**  | Version of this summary schema. MUST be `1` for this spec. Increment when adding or changing fields in a backward-incompatible way. |
 | `reason_code_version`| integer | **Yes**  | Version of the reason code registry. MUST be present. MUST equal `1` in Outputs-v1. Future changes to the reason code set use this version. Consumers MUST branch on `(reason_code_version, reason_code)` for semantics; exit code is coarse transport only. Consumers MUST treat unknown versions as "compat required" (fail closed or fallback parsing). |
 | `exit_code`           | integer | **Yes**  | Process exit code: 0 = pass, 1 = test failure, 2 = config/user error, 3 = infra/judge unavailable. See §4. |
@@ -115,6 +116,7 @@ When the run had judge evaluations, a top-level **`judge_metrics`** object MAY b
 
 ```json
 {
+  "schema": "assay.run_summary.v1",
   "schema_version": 1,
   "reason_code_version": 1,
   "exit_code": 0,
@@ -138,6 +140,7 @@ When the run had judge evaluations, a top-level **`judge_metrics`** object MAY b
 
 ```json
 {
+  "schema": "assay.run_summary.v1",
   "schema_version": 1,
   "reason_code_version": 1,
   "exit_code": 2,
@@ -316,6 +319,7 @@ For every non-zero exit, the implementation MUST provide **at least one suggeste
 | 1              | 2026-02  | E2.3: SARIF truncation metadata (§6.3): properties.assay (truncated, omitted_count) in SARIF run; sarif.omitted in summary.json and run.json when truncated. Deterministic truncation order. |
 | 1              | 2026-02  | E9c alignment draft: replay provenance keys in `provenance` (`replay`, `bundle_digest`, `replay_mode`, `source_run_id`) and `E_REPLAY_MISSING_DEPENDENCY` reason code. |
 | 1              | 2026-07  | Added `E_REPLAY_LIMIT_EXCEEDED` (§5.1). Backward compatible: a new registry string under the existing `reason_code_version` 1, so consumers branching on `(reason_code_version, reason_code)` treat it as an unknown code under a known version and fall back as they already must. No version bump. |
+| 1              | 2026-08  | Added the stable `assay.run_summary.v1` document identity. This is additive; the existing integer `schema_version` remains `1`. |
 
 ---
 

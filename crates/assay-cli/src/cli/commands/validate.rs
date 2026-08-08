@@ -7,6 +7,8 @@ use crate::cli::args::{ValidateArgs, ValidateOutputFormat};
 use crate::cli::util::{decide_exit, infer_policy_path, normalize_severity};
 use crate::exit_codes;
 
+const VALIDATE_REPORT_SCHEMA: &str = "assay.validate_report.v1";
+
 pub async fn run(args: ValidateArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     if args.deny_deprecations {
         std::env::set_var("ASSAY_STRICT_DEPRECATIONS", "1");
@@ -206,6 +208,7 @@ fn build_validate_json(
     );
 
     json!({
+        "schema": VALIDATE_REPORT_SCHEMA,
         "schema_version": 1,
         "ok": error_count == 0,
         "exit_code": exit_code,
