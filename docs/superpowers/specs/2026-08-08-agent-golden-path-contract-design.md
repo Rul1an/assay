@@ -124,8 +124,9 @@ owner, and exit `1` for a completed run whose stdout remains
 Before writing either generated artifact, the generator compares every contract
 `(step id, outcome name)` pair with the literal `expected_outcome` drivers in
 both integration tests. Generation refuses an undriven outcome or a stale test
-driver; the drift self-test mutates in an eighteenth outcome to prove this gate
-fails.
+driver, and requires exactly one literal driver per outcome. The drift self-test
+mutates in an eighteenth outcome and a duplicate driver to prove both gates
+fail.
 
 ## Non-Goals
 

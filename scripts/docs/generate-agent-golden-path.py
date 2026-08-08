@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from pathlib import Path
 
 
@@ -423,18 +424,23 @@ def validate_test_drivers() -> None:
         for step in STEPS
         for item in step["outcomes"]
     }
-    driven_outcomes: set[tuple[str, str]] = set()
+    driver_calls: list[tuple[str, str]] = []
     for path in TEST_SOURCES:
-        driven_outcomes.update(EXPECTED_OUTCOME_CALL.findall(path.read_text(encoding="utf-8")))
+        driver_calls.extend(EXPECTED_OUTCOME_CALL.findall(path.read_text(encoding="utf-8")))
 
+    driver_counts = Counter(driver_calls)
+    driven_outcomes = set(driver_counts)
     missing = sorted(contract_outcomes - driven_outcomes)
     stale = sorted(driven_outcomes - contract_outcomes)
-    if missing or stale:
+    duplicates = sorted(item for item, count in driver_counts.items() if count != 1)
+    if missing or stale or duplicates:
         details = []
         if missing:
             details.append(f"undriven contract outcomes: {missing}")
         if stale:
             details.append(f"test drivers without contract outcomes: {stale}")
+        if duplicates:
+            details.append(f"contract outcomes with duplicate test drivers: {duplicates}")
         raise SystemExit("; ".join(details))
 
 

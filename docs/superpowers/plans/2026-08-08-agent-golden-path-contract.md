@@ -157,6 +157,7 @@ tree:
 2. Hand-edit `docs/generated/agent-golden-path.json`.
 3. Hand-edit the rendered table in `docs/guides/agent-golden-path.md`.
 4. Add an outcome without a matching integration-test driver.
+5. Add a duplicate integration-test driver for one outcome.
 
 After restoration, rerun both focused tests and require green.
 

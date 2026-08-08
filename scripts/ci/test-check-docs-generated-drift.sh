@@ -14,24 +14,28 @@ SUBJECT="$ROOT/docs/generated/crate-deps.mermaid"
 GOLDEN_PATH_JSON="$ROOT/docs/generated/agent-golden-path.json"
 GOLDEN_PATH_GUIDE="$ROOT/docs/guides/agent-golden-path.md"
 GOLDEN_PATH_GENERATOR="$ROOT/scripts/docs/generate-agent-golden-path.py"
+GOLDEN_PATH_CLI_TEST="$ROOT/crates/assay-cli/tests/agent_golden_path_contract.rs"
 FAILURES=0
 BACKUP="$(mktemp)"
 JSON_BACKUP="$(mktemp)"
 GUIDE_BACKUP="$(mktemp)"
 GENERATOR_BACKUP="$(mktemp)"
+CLI_TEST_BACKUP="$(mktemp)"
 
 cleanup() {
   [ -f "$BACKUP" ] && cp "$BACKUP" "$SUBJECT"
   [ -f "$JSON_BACKUP" ] && cp "$JSON_BACKUP" "$GOLDEN_PATH_JSON"
   [ -f "$GUIDE_BACKUP" ] && cp "$GUIDE_BACKUP" "$GOLDEN_PATH_GUIDE"
   [ -f "$GENERATOR_BACKUP" ] && cp "$GENERATOR_BACKUP" "$GOLDEN_PATH_GENERATOR"
-  rm -f "$BACKUP" "$JSON_BACKUP" "$GUIDE_BACKUP" "$GENERATOR_BACKUP"
+  [ -f "$CLI_TEST_BACKUP" ] && cp "$CLI_TEST_BACKUP" "$GOLDEN_PATH_CLI_TEST"
+  rm -f "$BACKUP" "$JSON_BACKUP" "$GUIDE_BACKUP" "$GENERATOR_BACKUP" "$CLI_TEST_BACKUP"
 }
 trap cleanup EXIT
 cp "$SUBJECT" "$BACKUP"
 cp "$GOLDEN_PATH_JSON" "$JSON_BACKUP"
 cp "$GOLDEN_PATH_GUIDE" "$GUIDE_BACKUP"
 cp "$GOLDEN_PATH_GENERATOR" "$GENERATOR_BACKUP"
+cp "$GOLDEN_PATH_CLI_TEST" "$CLI_TEST_BACKUP"
 
 check() {
   local name="$1" want="$2"
@@ -75,6 +79,15 @@ path.write_text(source.replace(needle, replacement))
 PY
 check "an undriven contract outcome fails generation" 1
 cp "$GENERATOR_BACKUP" "$GOLDEN_PATH_GENERATOR"
+
+cat >> "$GOLDEN_PATH_CLI_TEST" <<'RS'
+
+fn duplicate_driver_mutation() {
+    let _ = expected_outcome("install-check", "success");
+}
+RS
+check "a duplicate contract outcome driver fails generation" 1
+cp "$CLI_TEST_BACKUP" "$GOLDEN_PATH_CLI_TEST"
 
 # --- the check does not edit what it audits ----------------------------------------------------
 #

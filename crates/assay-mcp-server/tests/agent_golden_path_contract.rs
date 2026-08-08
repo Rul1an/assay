@@ -273,6 +273,13 @@ fn enforcing_proxy_denial_is_structured_but_startup_failure_is_not() {
         9,
     );
     assert_stdout_contract(&denied_expected, "json_lines", Some("jsonrpc-2.0"));
+    assert_eq!(
+        format!(
+            "jsonrpc-{}",
+            denied["jsonrpc"].as_str().expect("JSON-RPC version string")
+        ),
+        denied_expected["stdout"]["document"]
+    );
     assert_eq!(denied_expected["exit_code"], 0);
     assert_eq!(
         denied["error"]["code"],
