@@ -1,0 +1,313 @@
+{
+  "schema": "assay.agent_golden_path.v1",
+  "schema_version": 1,
+  "generated_by": "scripts/docs/generate-agent-golden-path.py",
+  "source_issue": 2154,
+  "journey_issue": 1975,
+  "non_claims": [
+    "The contract records current behavior; gap rows are not clean results.",
+    "Schema identity conventions outside this narrow contract remain owned by issue #2167.",
+    "A passing evidence integrity check does not prove an external side effect."
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "id": "install-check",
+      "label": "Install check",
+      "command": "assay version",
+      "outcomes": [
+        {
+          "name": "success",
+          "label": "Success",
+          "exit_code": 0,
+          "stdout": {
+            "kind": "text",
+            "document": null
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        }
+      ],
+      "stdout_summary": "One `MAJOR.MINOR.PATCH` line.",
+      "failure_summary": "A missing or unstartable binary is a host spawn failure: no Assay process runs, so Assay produces no stdout or exit code."
+    },
+    {
+      "step": 2,
+      "id": "preflight",
+      "label": "Preflight",
+      "command": "assay doctor --format json",
+      "outcomes": [
+        {
+          "name": "success",
+          "label": "Success",
+          "exit_code": 0,
+          "stdout": {
+            "kind": "json",
+            "document": "assay.doctor_report.v0"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        },
+        {
+          "name": "invalid-config",
+          "label": "invalid explicit config",
+          "exit_code": 1,
+          "stdout": {
+            "kind": "json",
+            "document": "assay.doctor_report.v0"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": 2160,
+          "config_error_code": "E_CFG_PARSE"
+        }
+      ],
+      "stdout_summary": "Parses as `assay.doctor_report.v0`. A config failure remains JSON and carries `config_error.code: E_CFG_PARSE`.",
+      "failure_summary": "`reason_code` and `next_step` are absent, and the exit is outside the frozen config/usage class: [gap #2160](https://github.com/Rul1an/assay/issues/2160)."
+    },
+    {
+      "step": 3,
+      "id": "starter-files",
+      "label": "Starter files",
+      "command": "assay init --preset dev --hello-trace",
+      "outcomes": [
+        {
+          "name": "success",
+          "label": "Success",
+          "exit_code": 0,
+          "stdout": {
+            "kind": "text",
+            "document": null
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        },
+        {
+          "name": "unknown-preset",
+          "label": "unknown preset",
+          "exit_code": 2,
+          "stdout": {
+            "kind": "text",
+            "document": null
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": 2161
+        }
+      ],
+      "stdout_summary": "Human progress text; success ends with `Next: assay validate --config eval.yaml --trace-file traces/hello.jsonl`. A failing run writes partial progress text, not the fatal diagnosis.",
+      "failure_summary": "No machine report, `reason_code`, or `next_step` on stdout: [gap #2161](https://github.com/Rul1an/assay/issues/2161)."
+    },
+    {
+      "step": 4,
+      "id": "policy-validation",
+      "label": "Policy validation",
+      "command": "assay policy validate --input policy.yaml",
+      "outcomes": [
+        {
+          "name": "valid",
+          "label": "Valid",
+          "exit_code": 0,
+          "stdout": {
+            "kind": "empty",
+            "document": null
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        },
+        {
+          "name": "malformed",
+          "label": "malformed",
+          "exit_code": 2,
+          "stdout": {
+            "kind": "empty",
+            "document": null
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": 2162
+        }
+      ],
+      "stdout_summary": "Empty on both paths.",
+      "failure_summary": "The diagnosis, registered reason, and next step are absent from stdout: [gap #2162](https://github.com/Rul1an/assay/issues/2162)."
+    },
+    {
+      "step": 5,
+      "id": "evaluation-result",
+      "label": "Evaluation result",
+      "command": "assay run --config eval.yaml --format json",
+      "outcomes": [
+        {
+          "name": "success",
+          "label": "All tests pass",
+          "exit_code": 0,
+          "stdout": {
+            "kind": "json",
+            "document": "assay.run_report.v1"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        },
+        {
+          "name": "completed-test-failure",
+          "label": "completed run with failed tests",
+          "exit_code": 1,
+          "stdout": {
+            "kind": "json",
+            "document": "assay.run_report.v1"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null,
+          "classification": "completed_test_failure"
+        }
+      ],
+      "stdout_summary": "Both completed outcomes parse as `assay.run_report.v1`; failed results carry `status: fail` inside `results`.",
+      "failure_summary": "Exit `1` is a completed results report, not an early-failure diagnosis; `reason_code` and `next_step` are absent by design."
+    },
+    {
+      "step": 6,
+      "id": "protected-action",
+      "label": "Protected action",
+      "command": "assay-mcp-server proxy-enforce <args>",
+      "outcomes": [
+        {
+          "name": "policy-denied",
+          "label": "Policy-denied call after stdin closes",
+          "exit_code": 0,
+          "stdout": {
+            "kind": "json_lines",
+            "document": "jsonrpc-2.0"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null,
+          "jsonrpc_error_code": -32042,
+          "origin": "assay-proxy",
+          "reason": "no_declared_allowance"
+        },
+        {
+          "name": "startup-failure",
+          "label": "startup input failure",
+          "exit_code": 1,
+          "stdout": {
+            "kind": "empty",
+            "document": null
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": 2163
+        }
+      ],
+      "stdout_summary": "The denied `tools/call` response pins `error.code: -32042`, `error.data.origin: assay-proxy`, and `error.data.reason: no_declared_allowance`.",
+      "failure_summary": "Policy denial is not a process failure. A missing enforcement policy fails startup with empty stdout and no stable reason/next-step object: [gap #2163](https://github.com/Rul1an/assay/issues/2163)."
+    },
+    {
+      "step": 7,
+      "id": "evidence-inspection",
+      "label": "Evidence inspection",
+      "command": "assay evidence show <bundle> --format json",
+      "outcomes": [
+        {
+          "name": "valid",
+          "label": "Valid",
+          "exit_code": 0,
+          "stdout": {
+            "kind": "json",
+            "document": null
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        },
+        {
+          "name": "tampered",
+          "label": "integrity failure",
+          "exit_code": 2,
+          "stdout": {
+            "kind": "empty",
+            "document": null
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": 2164
+        }
+      ],
+      "stdout_summary": "Success parses as an object containing `manifest` and `events`. Integrity failure produces no stdout.",
+      "failure_summary": "No JSON failure report, `reason_code`, or `next_step`: [gap #2164](https://github.com/Rul1an/assay/issues/2164)."
+    },
+    {
+      "step": 8,
+      "id": "offline-profile-verification",
+      "label": "Offline profile verification",
+      "command": "assay evidence verify-privileged-mcp-action <bundle> --format json",
+      "outcomes": [
+        {
+          "name": "valid",
+          "label": "Valid",
+          "exit_code": 0,
+          "stdout": {
+            "kind": "json",
+            "document": "assay.privileged_mcp_action.verify.report.v0"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        },
+        {
+          "name": "tampered",
+          "label": "integrity or profile failure",
+          "exit_code": 2,
+          "stdout": {
+            "kind": "json",
+            "document": "assay.privileged_mcp_action.verify.report.v0"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": 2165
+        }
+      ],
+      "stdout_summary": "Both paths parse as `assay.privileged_mcp_action.verify.report.v0`. Success has `bundle_integrity: pass` and `verdict: valid`; tamper has `bundle_integrity: fail`, a bounded finding, and no verdict.",
+      "failure_summary": "The failure report has no registered `reason_code` or actionable `next_step`: [gap #2165](https://github.com/Rul1an/assay/issues/2165)."
+    },
+    {
+      "step": 9,
+      "id": "sarif-projection",
+      "label": "SARIF projection",
+      "command": "assay-mcp-server enforcement-sarif --input <decisions.ndjson> --output -",
+      "outcomes": [
+        {
+          "name": "valid",
+          "label": "Valid input",
+          "exit_code": 0,
+          "stdout": {
+            "kind": "json",
+            "document": "sarif-2.1.0"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null
+        },
+        {
+          "name": "malformed",
+          "label": "malformed non-empty NDJSON",
+          "exit_code": 0,
+          "stdout": {
+            "kind": "json",
+            "document": "sarif-2.1.0"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": 2166
+        }
+      ],
+      "stdout_summary": "Valid input produces SARIF `2.1.0`. Malformed lines are currently discarded and can produce a clean report with zero results.",
+      "failure_summary": "This is fail-open, not a successful empty projection: [gap #2166](https://github.com/Rul1an/assay/issues/2166). No reason or next step is emitted."
+    }
+  ]
+}

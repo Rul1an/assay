@@ -11,12 +11,23 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GATE="$ROOT/scripts/ci/check-docs-generated-drift.sh"
 SUBJECT="$ROOT/docs/generated/crate-deps.mermaid"
+GOLDEN_PATH_JSON="$ROOT/docs/generated/agent-golden-path.json"
+GOLDEN_PATH_GUIDE="$ROOT/docs/guides/agent-golden-path.md"
 FAILURES=0
 BACKUP="$(mktemp)"
+JSON_BACKUP="$(mktemp)"
+GUIDE_BACKUP="$(mktemp)"
 
-cleanup() { [ -f "$BACKUP" ] && cp "$BACKUP" "$SUBJECT"; rm -f "$BACKUP"; }
+cleanup() {
+  [ -f "$BACKUP" ] && cp "$BACKUP" "$SUBJECT"
+  [ -f "$JSON_BACKUP" ] && cp "$JSON_BACKUP" "$GOLDEN_PATH_JSON"
+  [ -f "$GUIDE_BACKUP" ] && cp "$GUIDE_BACKUP" "$GOLDEN_PATH_GUIDE"
+  rm -f "$BACKUP" "$JSON_BACKUP" "$GUIDE_BACKUP"
+}
 trap cleanup EXIT
 cp "$SUBJECT" "$BACKUP"
+cp "$GOLDEN_PATH_JSON" "$JSON_BACKUP"
+cp "$GOLDEN_PATH_GUIDE" "$GUIDE_BACKUP"
 
 check() {
   local name="$1" want="$2"
@@ -32,6 +43,16 @@ check "a tree in sync passes" 0
 printf '\n%%%% drift planted by the drift-check self-test\n' >> "$SUBJECT"
 check "a hand-edited generated file fails" 1
 cp "$BACKUP" "$SUBJECT"
+
+printf '\n' >> "$GOLDEN_PATH_JSON"
+check "a hand-edited machine contract fails" 1
+cp "$JSON_BACKUP" "$GOLDEN_PATH_JSON"
+
+sed 's/| 1\. Install check |/| 1. Drifted install check |/' \
+  "$GOLDEN_PATH_GUIDE" > "$GOLDEN_PATH_GUIDE.tmp"
+mv "$GOLDEN_PATH_GUIDE.tmp" "$GOLDEN_PATH_GUIDE"
+check "a hand-edited rendered table fails" 1
+cp "$GUIDE_BACKUP" "$GOLDEN_PATH_GUIDE"
 
 # --- the check does not edit what it audits ----------------------------------------------------
 #
