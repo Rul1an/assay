@@ -17,18 +17,18 @@ fn make_policy(rules: Vec<SequenceRule>) -> Policy {
 #[test]
 fn test_explain_simple_trace() {
     let policy = make_policy(vec![SequenceRule::Before {
-        first: "Search".to_string(),
-        then: "Create".to_string(),
+        first: "Search".into(),
+        then: "Create".into(),
     }]);
 
     let explainer = TraceExplainer::new(policy);
     let trace = vec![
         ToolCall {
-            tool: "Search".to_string(),
+            tool: "Search".into(),
             args: None,
         },
         ToolCall {
-            tool: "Create".to_string(),
+            tool: "Create".into(),
             args: None,
         },
     ];
@@ -43,13 +43,13 @@ fn test_explain_simple_trace() {
 #[test]
 fn test_explain_blocked_trace() {
     let policy = make_policy(vec![SequenceRule::Before {
-        first: "Search".to_string(),
-        then: "Create".to_string(),
+        first: "Search".into(),
+        then: "Create".into(),
     }]);
 
     let explainer = TraceExplainer::new(policy);
     let trace = vec![ToolCall {
-        tool: "Create".to_string(),
+        tool: "Create".into(),
         args: None,
     }];
 
@@ -63,22 +63,22 @@ fn test_explain_blocked_trace() {
 #[test]
 fn test_explain_max_calls() {
     let policy = make_policy(vec![SequenceRule::MaxCalls {
-        tool: "API".to_string(),
+        tool: "API".into(),
         max: 2,
     }]);
 
     let explainer = TraceExplainer::new(policy);
     let trace = vec![
         ToolCall {
-            tool: "API".to_string(),
+            tool: "API".into(),
             args: None,
         },
         ToolCall {
-            tool: "API".to_string(),
+            tool: "API".into(),
             args: None,
         },
         ToolCall {
-            tool: "API".to_string(),
+            tool: "API".into(),
             args: None,
         },
     ];
@@ -95,7 +95,7 @@ fn test_terminal_output() {
     let policy = make_policy(vec![]);
     let explainer = TraceExplainer::new(policy);
     let trace = vec![ToolCall {
-        tool: "Search".to_string(),
+        tool: "Search".into(),
         args: None,
     }];
 

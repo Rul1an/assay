@@ -148,7 +148,7 @@ fn validate_rules(
         match rule {
             // ===== REQUIRE (v1.0 legacy) =====
             assay_core::model::SequenceRule::Require { tool } => {
-                let targets = resolve(tool);
+                let targets = resolve(tool.tool());
                 // Requirement: At least ONE of the alias members must be present in history
                 let found = targets.iter().any(|t| actual_names.contains(t));
                 if !found {
@@ -170,7 +170,7 @@ fn validate_rules(
 
             // ===== EVENTUALLY: tool must appear within first N calls =====
             assay_core::model::SequenceRule::Eventually { tool, within } => {
-                let targets = resolve(tool);
+                let targets = resolve(tool.tool());
                 let found_idx = actual_names.iter().position(|n| matches_any(n, &targets));
 
                 if let Some(idx) = found_idx {
@@ -209,7 +209,7 @@ fn validate_rules(
 
             // ===== MAX_CALLS: tool can be called at most N times =====
             assay_core::model::SequenceRule::MaxCalls { tool, max } => {
-                let targets = resolve(tool);
+                let targets = resolve(tool.tool());
                 let mut count = 0u32;
                 let mut violation_idx = None;
 
@@ -242,8 +242,8 @@ fn validate_rules(
 
             // ===== BEFORE: first must be called before then =====
             assay_core::model::SequenceRule::Before { first, then } => {
-                let first_targets = resolve(first);
-                let then_targets = resolve(then);
+                let first_targets = resolve(first.tool());
+                let then_targets = resolve(then.tool());
 
                 // Check positions
                 let first_idx = actual_names
@@ -298,8 +298,8 @@ fn validate_rules(
                 then,
                 within,
             } => {
-                let trigger_targets = resolve(trigger);
-                let then_targets = resolve(then);
+                let trigger_targets = resolve(trigger.tool());
+                let then_targets = resolve(then.tool());
 
                 // Each trigger is its own obligation, checked against its own window.
                 //
@@ -361,8 +361,8 @@ fn validate_rules(
 
             // ===== NEVER_AFTER: after trigger, forbidden is permanently denied =====
             assay_core::model::SequenceRule::NeverAfter { trigger, forbidden } => {
-                let trigger_targets = resolve(trigger);
-                let forbidden_targets = resolve(forbidden);
+                let trigger_targets = resolve(trigger.tool());
+                let forbidden_targets = resolve(forbidden.tool());
 
                 let mut triggered = false;
                 let mut trigger_idx = 0usize;
@@ -402,7 +402,8 @@ fn validate_rules(
             // ===== SEQUENCE: exact ordering (with optional strict mode) =====
             assay_core::model::SequenceRule::Sequence { tools, strict } => {
                 // Resolve all tools through aliases
-                let tool_targets: Vec<Vec<String>> = tools.iter().map(|t| resolve(t)).collect();
+                let tool_targets: Vec<Vec<String>> =
+                    tools.iter().map(|t| resolve(t.tool())).collect();
 
                 if *strict {
                     // Strict mode: tools must appear consecutively in exact order

@@ -277,7 +277,7 @@ mod tests {
         with_branch_context(false, |context, emitter, deny_response| {
             let outcome = handle_policy_decision(
                 PolicyDecision::AllowWithWarning {
-                    tool: "read_file".to_string(),
+                    tool: "read_file".into(),
                     code: "W_UNCONSTRAINED".to_string(),
                     reason: "missing schema".to_string(),
                 },
@@ -304,7 +304,7 @@ mod tests {
         with_branch_context(false, |context, emitter, deny_response| {
             let outcome = handle_policy_decision(
                 PolicyDecision::Deny {
-                    tool: "read_file".to_string(),
+                    tool: "read_file".into(),
                     code: "E_TOOL_DENIED".to_string(),
                     reason: "tool denied".to_string(),
                     contract: json!({"policy": "test"}),
@@ -332,7 +332,7 @@ mod tests {
         with_branch_context(true, |context, emitter, deny_response| {
             let outcome = handle_policy_decision(
                 PolicyDecision::Deny {
-                    tool: "read_file".to_string(),
+                    tool: "read_file".into(),
                     code: "E_TOOL_DENIED".to_string(),
                     reason: "tool denied".to_string(),
                     contract: json!({"policy": "test"}),

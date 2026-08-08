@@ -103,9 +103,15 @@ fn both_evaluators_agree_on_whether_a_rule_is_violated() {
     let mut stricter = 0usize;
     for rule in &rules {
         for trace in &traces {
+            // The shared evaluator reads calls, the copy under test still reads names. Both see the
+            // same trace; only the record shape differs (#2124).
+            let as_calls: Vec<assay_core::sequence_eval::SequenceCall> = trace
+                .iter()
+                .map(|n| assay_core::sequence_eval::SequenceCall::named(n.clone()))
+                .collect();
             let shared = evaluate_rules(
                 std::slice::from_ref(rule),
-                trace,
+                &as_calls,
                 Some(&policy),
                 TraceExtent::Partial,
             );

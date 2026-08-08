@@ -20,11 +20,11 @@ fn make_policy() -> Policy {
         },
         sequences: vec![
             SequenceRule::Before {
-                first: "SearchKnowledgeBase".to_string(),
-                then: "CreateTicket".to_string(),
+                first: "SearchKnowledgeBase".into(),
+                then: "CreateTicket".into(),
             },
             SequenceRule::MaxCalls {
-                tool: "GetCustomerInfo".to_string(),
+                tool: "GetCustomerInfo".into(),
                 max: 3,
             },
         ],
@@ -115,7 +115,7 @@ fn test_github_annotation_format() {
             total_tools_in_policy: 4,
             tools_seen_in_traces: 2,
             coverage_pct: 50.0,
-            unseen_tools: vec!["CreateTicket".to_string()],
+            unseen_tools: vec!["CreateTicket".into()],
             unexpected_tools: vec![],
         },
         rule_coverage: RuleCoverage {
@@ -125,7 +125,7 @@ fn test_github_annotation_format() {
             untriggered_rules: vec!["max_calls_api_3".to_string()],
         },
         high_risk_gaps: vec![HighRiskGap {
-            tool: "DeleteAccount".to_string(),
+            tool: "DeleteAccount".into(),
             reason: "Never tested".to_string(),
             severity: "high".to_string(),
         }],

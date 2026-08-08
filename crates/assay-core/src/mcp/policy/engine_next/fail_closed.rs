@@ -42,7 +42,7 @@ pub(in crate::mcp::policy) fn check_rate_limits(
         if let Some(max) = limits.max_requests_total {
             if state.requests_count > max {
                 return Some(PolicyDecision::Deny {
-                    tool: "ALL".to_string(),
+                    tool: "ALL".into(),
                     code: "E_RATE_LIMIT".to_string(),
                     reason: "Rate limit exceeded (total requests)".to_string(),
                     contract: json!({ "status": "deny", "error_code": "E_RATE_LIMIT" }),
@@ -53,7 +53,7 @@ pub(in crate::mcp::policy) fn check_rate_limits(
         if let Some(max) = limits.max_tool_calls_total {
             if state.tool_calls_count > max {
                 return Some(PolicyDecision::Deny {
-                    tool: "ALL".to_string(),
+                    tool: "ALL".into(),
                     code: "E_RATE_LIMIT".to_string(),
                     reason: "Rate limit exceeded (tool calls)".to_string(),
                     contract: json!({ "status": "deny", "error_code": "E_RATE_LIMIT" }),

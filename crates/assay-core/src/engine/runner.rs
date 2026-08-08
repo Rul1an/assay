@@ -319,7 +319,7 @@ mod tests {
             anyhow::ensure!(policy.is_none(), "policy path survived binding");
             anyhow::ensure!(sequence.as_deref() == Some(&[]), "inline sequence changed");
             anyhow::ensure!(
-                matches!(rules.as_deref(), Some([crate::model::SequenceRule::Require { tool }]) if tool == "Search"),
+                matches!(rules.as_deref(), Some([crate::model::SequenceRule::Require { tool }]) if tool.tool() == "Search"),
                 "file-backed rules were not merged into the snapshot"
             );
             Ok(MetricResult::pass(1.0))

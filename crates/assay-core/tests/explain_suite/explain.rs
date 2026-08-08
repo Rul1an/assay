@@ -82,8 +82,8 @@ fn test_explain_all_allowed() {
 #[test]
 fn test_explain_before_pass() {
     let policy = make_policy(vec![SequenceRule::Before {
-        first: "Auth".to_string(),
-        then: "Access".to_string(),
+        first: "Auth".into(),
+        then: "Access".into(),
     }]);
     let explainer = TraceExplainer::new(policy);
 
@@ -107,8 +107,8 @@ fn test_explain_before_pass() {
 #[test]
 fn test_explain_before_fail() {
     let policy = make_policy(vec![SequenceRule::Before {
-        first: "Auth".to_string(),
-        then: "Access".to_string(),
+        first: "Auth".into(),
+        then: "Access".into(),
     }]);
     let explainer = TraceExplainer::new(policy);
 
@@ -134,7 +134,7 @@ fn test_explain_before_fail() {
 #[test]
 fn test_explain_max_calls_counting() {
     let policy = make_policy(vec![SequenceRule::MaxCalls {
-        tool: "API".to_string(),
+        tool: "API".into(),
         max: 3,
     }]);
     let explainer = TraceExplainer::new(policy);
@@ -173,7 +173,7 @@ fn test_explain_max_calls_counting() {
 #[test]
 fn test_explain_eventually_progress() {
     let policy = make_policy(vec![SequenceRule::Eventually {
-        tool: "Validate".to_string(),
+        tool: "Validate".into(),
         within: 3,
     }]);
     let explainer = TraceExplainer::new(policy);
@@ -196,7 +196,7 @@ fn test_explain_eventually_progress() {
 #[test]
 fn test_explain_eventually_fail() {
     let policy = make_policy(vec![SequenceRule::Eventually {
-        tool: "Validate".to_string(),
+        tool: "Validate".into(),
         within: 2,
     }]);
     let explainer = TraceExplainer::new(policy);
@@ -213,8 +213,8 @@ fn test_explain_eventually_fail() {
 #[test]
 fn test_explain_never_after_triggered() {
     let policy = make_policy(vec![SequenceRule::NeverAfter {
-        trigger: "Archive".to_string(),
-        forbidden: "Delete".to_string(),
+        trigger: "Archive".into(),
+        forbidden: "Delete".into(),
     }]);
     let explainer = TraceExplainer::new(policy);
 
@@ -238,8 +238,8 @@ fn test_explain_never_after_triggered() {
 #[test]
 fn test_explain_never_after_before_trigger() {
     let policy = make_policy(vec![SequenceRule::NeverAfter {
-        trigger: "Archive".to_string(),
-        forbidden: "Delete".to_string(),
+        trigger: "Archive".into(),
+        forbidden: "Delete".into(),
     }]);
     let explainer = TraceExplainer::new(policy);
 
@@ -254,7 +254,7 @@ fn test_explain_never_after_before_trigger() {
 #[test]
 fn test_explain_sequence_progress() {
     let policy = make_policy(vec![SequenceRule::Sequence {
-        tools: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+        tools: vec!["A".into(), "B".into(), "C".into()],
         strict: false,
     }]);
     let explainer = TraceExplainer::new(policy);
@@ -276,7 +276,7 @@ fn test_explain_sequence_progress() {
 #[test]
 fn test_explain_sequence_strict_violation() {
     let policy = make_policy(vec![SequenceRule::Sequence {
-        tools: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+        tools: vec!["A".into(), "B".into(), "C".into()],
         strict: true,
     }]);
     let explainer = TraceExplainer::new(policy);
@@ -316,7 +316,7 @@ fn test_explain_deny_list() {
 #[test]
 fn test_terminal_output_format() {
     let policy = make_policy(vec![SequenceRule::MaxCalls {
-        tool: "API".to_string(),
+        tool: "API".into(),
         max: 2,
     }]);
     let explainer = TraceExplainer::new(policy);
@@ -365,15 +365,15 @@ fn test_html_output_format() {
 fn test_explain_multiple_rules() {
     let policy = make_policy(vec![
         SequenceRule::Before {
-            first: "Auth".to_string(),
-            then: "Access".to_string(),
+            first: "Auth".into(),
+            then: "Access".into(),
         },
         SequenceRule::MaxCalls {
-            tool: "Access".to_string(),
+            tool: "Access".into(),
             max: 2,
         },
         SequenceRule::Eventually {
-            tool: "Logout".to_string(),
+            tool: "Logout".into(),
             within: 5,
         },
     ]);
@@ -394,11 +394,11 @@ fn test_explain_first_failure_stops_not_evaluation() {
     // Even if first rule blocks, we should still see all rules evaluated
     let policy = make_policy(vec![
         SequenceRule::Before {
-            first: "Auth".to_string(),
-            then: "Access".to_string(),
+            first: "Auth".into(),
+            then: "Access".into(),
         },
         SequenceRule::MaxCalls {
-            tool: "Access".to_string(),
+            tool: "Access".into(),
             max: 2,
         },
     ]);
@@ -421,7 +421,7 @@ fn test_explain_first_failure_stops_not_evaluation() {
 #[test]
 fn test_require_end_of_trace_violation() {
     let policy = make_policy(vec![SequenceRule::Require {
-        tool: "Audit".to_string(),
+        tool: "Audit".into(),
     }]);
     let explainer = TraceExplainer::new(policy);
 
@@ -447,8 +447,8 @@ fn test_require_end_of_trace_violation() {
 #[test]
 fn test_after_end_of_trace_violation() {
     let policy = make_policy(vec![SequenceRule::After {
-        trigger: "Create".to_string(),
-        then: "Notify".to_string(),
+        trigger: "Create".into(),
+        then: "Notify".into(),
         within: 2,
     }]);
     let explainer = TraceExplainer::new(policy);

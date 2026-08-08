@@ -13,7 +13,7 @@ fn complete_payload() -> CodingAgentEvidencePayload {
             allowed_files: vec!["src/foo.py".to_string()],
             allowed_commands: vec!["pytest".to_string()],
             network: CodingAgentNetworkPolicy::Denied,
-            allowed_mcp_tools: vec!["fs.read".to_string()],
+            allowed_mcp_tools: vec!["fs.read".into()],
             expected_test_command: Some("pytest".to_string()),
             authorized: true,
         },

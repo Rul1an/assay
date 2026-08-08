@@ -223,8 +223,8 @@ mod tests {
         let tc = test_case();
         let expected = Expected::ToolDescriptionIntegrity {
             pinned_tools: vec![PinnedTool {
-                name: "read_file".to_string(),
-                description: Some("Reads a file".to_string()),
+                name: "read_file".into(),
+                description: Some("Reads a file".into()),
                 schema_sha256: None,
             }],
         };
@@ -245,8 +245,8 @@ mod tests {
         let tc = test_case();
         let expected = Expected::ToolDescriptionIntegrity {
             pinned_tools: vec![PinnedTool {
-                name: "read_file".to_string(),
-                description: Some("Reads a file".to_string()),
+                name: "read_file".into(),
+                description: Some("Reads a file".into()),
                 schema_sha256: None,
             }],
         };
@@ -268,8 +268,8 @@ mod tests {
         let tc = test_case();
         let expected = Expected::ToolDescriptionIntegrity {
             pinned_tools: vec![PinnedTool {
-                name: "read_file".to_string(),
-                description: Some("Reads a file".to_string()),
+                name: "read_file".into(),
+                description: Some("Reads a file".into()),
                 schema_sha256: None,
             }],
         };
@@ -346,8 +346,8 @@ mod tests {
         let tc = test_case();
         let expected = Expected::ToolDescriptionIntegrity {
             pinned_tools: vec![PinnedTool {
-                name: "missing_tool".to_string(),
-                description: Some("Should be here".to_string()),
+                name: "missing_tool".into(),
+                description: Some("Should be here".into()),
                 schema_sha256: None,
             }],
         };

@@ -70,7 +70,7 @@ fn test_commit_tool_no_mandate_emits_deny() {
     let config = ToolCallHandlerConfig {
         event_source: "assay://test".to_string(),
         require_mandate_for_commit: true,
-        commit_tools: vec!["purchase_*".to_string()],
+        commit_tools: vec!["purchase_*".into()],
         write_tools: vec![],
         ..Default::default()
     };

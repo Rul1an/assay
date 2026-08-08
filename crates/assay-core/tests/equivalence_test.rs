@@ -140,7 +140,7 @@ tests:
         let r = rules.as_ref().expect("rules should be populated");
         match &r[0] {
             assay_core::model::SequenceRule::Require { tool } => {
-                assert_eq!(tool, "tool_c");
+                assert_eq!(tool.tool(), "tool_c");
             }
             _ => panic!("wrong rule type"),
         }

@@ -84,7 +84,7 @@ mod tests {
     #[test]
     fn typed_contract_maps_allow_with_warning_to_legacy_warning_obligation() {
         let decision = PolicyDecision::AllowWithWarning {
-            tool: "tool_a".to_string(),
+            tool: "tool_a".into(),
             code: "E_TOOL_UNCONSTRAINED".to_string(),
             reason: "Tool allowed but has no schema".to_string(),
         };
@@ -98,7 +98,7 @@ mod tests {
     #[test]
     fn typed_contract_maps_tool_drift_to_deny_with_alert_obligation() {
         let decision = PolicyDecision::Deny {
-            tool: "tool_a".to_string(),
+            tool: "tool_a".into(),
             code: "E_TOOL_DRIFT".to_string(),
             reason: "Tool drifted".to_string(),
             contract: json!({ "status": "deny" }),
@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn typed_contract_maps_regular_deny_without_obligations() {
         let decision = PolicyDecision::Deny {
-            tool: "tool_a".to_string(),
+            tool: "tool_a".into(),
             code: "E_TOOL_DENIED".to_string(),
             reason: "Denied".to_string(),
             contract: json!({ "status": "deny" }),

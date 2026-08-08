@@ -14,7 +14,7 @@ fn test_commit_tool_without_mandate_denied() {
     let config = ToolCallHandlerConfig {
         event_source: "assay://test".to_string(),
         require_mandate_for_commit: true,
-        commit_tools: vec!["purchase_*".to_string()],
+        commit_tools: vec!["purchase_*".into()],
         write_tools: vec![],
         ..Default::default()
     };
@@ -35,7 +35,7 @@ fn test_commit_tool_without_mandate_denied() {
 #[test]
 fn test_is_commit_tool_matching() {
     let config = ToolCallHandlerConfig {
-        commit_tools: vec!["purchase_*".to_string(), "delete_account".to_string()],
+        commit_tools: vec!["purchase_*".into(), "delete_account".into()],
         ..Default::default()
     };
 
@@ -56,8 +56,8 @@ fn test_is_commit_tool_matching() {
 #[test]
 fn test_operation_class_for_tool() {
     let config = ToolCallHandlerConfig {
-        commit_tools: vec!["purchase_*".to_string()],
-        write_tools: vec!["update_*".to_string(), "create_item".to_string()],
+        commit_tools: vec!["purchase_*".into()],
+        write_tools: vec!["update_*".into(), "create_item".into()],
         ..Default::default()
     };
     let handler = ToolCallHandler::new(

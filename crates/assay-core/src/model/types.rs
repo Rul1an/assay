@@ -256,39 +256,118 @@ pub struct ToolsPolicy {
     >,
 }
 
+/// Which calls in a trace a rule step refers to.
+///
+/// Sequence rules used to name a tool and nothing else, so the correlation class that motivated
+/// ADR-047 could not be written: "credential read followed by egress" is not a statement about two
+/// tool names, it is a statement about two calls, one of which is identified by what it was given
+/// (#2124). Both halves of that pair are ordinary `bash` in the trace that prompted it.
+///
+/// Untagged, so a bare string keeps meaning exactly what it meant before, including alias
+/// resolution through the policy. Every existing config parses unchanged; the object form is the
+/// new capability rather than a migration.
+///
+/// ```yaml
+/// - type: never_after
+///   trigger: { tool: bash, args_match: { command: "\\.aws/credentials" } }
+///   forbidden: { tool: bash, args_match: { command: "^curl .*-d" } }
+/// ```
+///
+/// `args_match` is a conjunction: every named argument must be present and its value must match
+/// the regex. Values are matched against their JSON rendering, so a non-string argument is
+/// matchable without a separate syntax, and a missing argument fails the match rather than being
+/// skipped, because a rule that silently stops constraining is the failure this whole area exists
+/// to prevent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum CallSelector {
+    /// A tool name, resolved through policy aliases. The shape every pre-5.0.0 config uses.
+    Tool(String),
+    /// A tool name plus a constraint on the call's arguments.
+    Matching {
+        tool: String,
+        args_match: std::collections::BTreeMap<String, String>,
+    },
+}
+
+impl CallSelector {
+    /// The tool name this selector names, for alias resolution and diagnostics.
+    pub fn tool(&self) -> &str {
+        match self {
+            CallSelector::Tool(t) => t,
+            CallSelector::Matching { tool, .. } => tool,
+        }
+    }
+
+    /// The argument constraints, empty for a bare tool name.
+    pub fn args_match(&self) -> Option<&std::collections::BTreeMap<String, String>> {
+        match self {
+            CallSelector::Tool(_) => None,
+            CallSelector::Matching { args_match, .. } => Some(args_match),
+        }
+    }
+}
+
+impl std::fmt::Display for CallSelector {
+    /// Stable rule ids: a bare tool renders as itself, so ids of existing rules do not change.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CallSelector::Tool(t) => write!(f, "{t}"),
+            CallSelector::Matching { tool, args_match } => {
+                write!(f, "{tool}[")?;
+                for (i, k) in args_match.keys().enumerate() {
+                    if i > 0 {
+                        write!(f, ",")?;
+                    }
+                    write!(f, "{k}")?;
+                }
+                write!(f, "]")
+            }
+        }
+    }
+}
+
+impl From<&str> for CallSelector {
+    fn from(s: &str) -> Self {
+        CallSelector::Tool(s.to_string())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SequenceRule {
     Require {
-        tool: String,
+        tool: CallSelector,
     },
     Eventually {
-        tool: String,
+        tool: CallSelector,
         within: u32,
     },
     MaxCalls {
-        tool: String,
+        tool: CallSelector,
         max: u32,
     },
     Before {
-        first: String,
-        then: String,
+        first: CallSelector,
+        then: CallSelector,
     },
     After {
-        trigger: String,
-        then: String,
+        trigger: CallSelector,
+        then: CallSelector,
         #[serde(default = "crate::model::validation::default_one")]
         within: u32,
     },
     NeverAfter {
-        trigger: String,
-        forbidden: String,
+        trigger: CallSelector,
+        forbidden: CallSelector,
     },
     Sequence {
-        tools: Vec<String>,
+        tools: Vec<CallSelector>,
         #[serde(default)]
         strict: bool,
     },
+    /// A substring match on the tool name. Deliberately not a selector: this rule is about names
+    /// as text, and an argument constraint on a substring pattern would be two ideas in one field.
     Blocklist {
         pattern: String,
     },
