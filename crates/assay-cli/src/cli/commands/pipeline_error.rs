@@ -174,6 +174,7 @@ impl PipelineError {
         version: ExitCodeVersion,
         verify_enabled: bool,
         run_json_path: &Path,
+        json_stdout: bool,
     ) -> anyhow::Result<i32> {
         match self {
             Self::Classified {
@@ -199,6 +200,7 @@ impl PipelineError {
                     version,
                     verify_enabled,
                     run_json_path,
+                    json_stdout,
                 )
             }
             Self::Fatal(err) => Err(err),

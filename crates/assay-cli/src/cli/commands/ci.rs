@@ -15,7 +15,7 @@ pub(crate) async fn run(args: CiArgs, legacy_mode: bool) -> anyhow::Result<i32> 
     let input = PipelineInput::from_ci(&args);
     let execution = match execute_pipeline(&input, legacy_mode).await {
         Ok(ok) => ok,
-        Err(e) => return e.into_exit_code(version, !args.no_verify, &run_json_path),
+        Err(e) => return e.into_exit_code(version, !args.no_verify, &run_json_path, false),
     };
 
     if execution.cfg.version > 0 {
