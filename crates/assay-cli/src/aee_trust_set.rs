@@ -371,7 +371,7 @@ mod tests {
             assay_source_schema: "assay.enforcement_health.v1".into(),
             assay_seal_scope: "tcp_connect_landlock_port".into(),
             assay_drop_proof_model: "synchronous-probe".into(),
-            assay_drop_proof_basis: "declared".into(),
+            assay_drop_proof_basis: "asserted".into(),
             assay_drop_channels: vec![],
             assay_attack_row_attribution_source: "assembly-plane".into(),
             assay_non_claims: vec!["does not prove complete run population".into()],

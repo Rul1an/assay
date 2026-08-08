@@ -178,7 +178,7 @@ _POP = object()
 # Cross-checked rather than merely present, because the failure worth catching is a payload that
 # claims `checked` over a model that verified nothing. That is the case Proof-or-Stop
 # (arXiv 2607.14890) rules inadmissible, and it is invisible if each member is only read alone.
-DROP_PROOF_BASIS_FOR_MODEL = {"synchronous-probe": "declared", "counted-queue-zero": "checked"}
+DROP_PROOF_BASIS_FOR_MODEL = {"synchronous-probe": "asserted", "counted-queue-zero": "checked"}
 
 # Values of `assayDropProofModel` that license the zero drop accounting this slice credits, derived
 # rather than restated. These were two hand-kept collections until an adversarial review pointed out
@@ -230,7 +230,7 @@ NEGATIVE_CONTROLS: dict[str, str] = {
     "drop-basis-contradicts-model": "drop-proof-basis-mismatch",
     "drop-channels-contradict-basis": "drop-proof-channels-mismatch",
     "drop-channels-not-a-list": "drop-proof-channels-malformed",
-    "counted-queue-basis-declared": "drop-proof-basis-mismatch",
+    "counted-queue-basis-asserted": "drop-proof-basis-mismatch",
     "bad-observed-set": "observed-set-mismatch",
     "unsupported-observed-attack": "observed-attack-unsupported",
     "substrate-runner-observed-attacks-mismatch": "substrate-runner-observed-attacks-mismatch",
@@ -391,7 +391,7 @@ def base_statement() -> dict[str, Any]:
     interception = {"aeeKind": "interception", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePayloadCommitment": corpus_manifest["expectedPayloads"]["NET-CONNECT-BLOCK-001"][0], "assayCollectionPath": COLLECTION_PATH, "assaySourceSchema": "assay.enforcement_health.v1.probe"}
     arming = {"aeeKind": "arming", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "assayCollectionPath": COLLECTION_PATH}
     records = [record(interception, 1), record(arming, 2)]
-    sealed = {"aeeKind": "sealed", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "aeeStillArmed": True, "aeeDropCount": 0, "aeeDropBound": 0, "assayDropProofModel": "synchronous-probe", "assayDropProofBasis": "declared", "assayDropChannels": [], "aeeObservedSet": observed_set(records), "aeeObservedAttacks": [], "assayObservedLabels": ["connect_blocked"], "assayCollectionPath": COLLECTION_PATH, "assaySealedAt": SEALED_AT, "assaySourceSchema": SOURCE_SCHEMA, "assaySealScope": SEAL_SCOPE, "assayAttackRowAttributionSource": "assembly-plane", "assayNonClaims": ["does not prove complete run population", "does not prove agent safety", "does not prove provider side effects", "does not prove independent substrate operation"]}
+    sealed = {"aeeKind": "sealed", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "aeeStillArmed": True, "aeeDropCount": 0, "aeeDropBound": 0, "assayDropProofModel": "synchronous-probe", "assayDropProofBasis": "asserted", "assayDropChannels": [], "aeeObservedSet": observed_set(records), "aeeObservedAttacks": [], "assayObservedLabels": ["connect_blocked"], "assayCollectionPath": COLLECTION_PATH, "assaySealedAt": SEALED_AT, "assaySourceSchema": SOURCE_SCHEMA, "assaySealScope": SEAL_SCOPE, "assayAttackRowAttributionSource": "assembly-plane", "assayNonClaims": ["does not prove complete run population", "does not prove agent safety", "does not prove provider side effects", "does not prove independent substrate operation"]}
     records.append(record(sealed, 3))
     stmt["predicate"]["observationRecords"] = records
     return stmt
@@ -435,13 +435,13 @@ def case_statement(name: str) -> dict[str, Any]:
         # A declared basis resting on channel readings it cannot have taken.
         seal["assayDropChannels"] = ["ringbuf:0"]
         replace_payload(stmt, 2, seal)
-    elif name == "counted-queue-basis-declared":
+    elif name == "counted-queue-basis-asserted":
         # The other row of DROP_PROOF_BASIS_FOR_MODEL. Without this case that row was unpinned:
-        # flipping `counted-queue-zero` to "declared" left every gate in this file green, because
+        # flipping `counted-queue-zero` to "asserted" left every gate in this file green, because
         # nothing here had ever exercised a counted-queue payload. A table with one row under test
         # is a table half of which is a comment.
         seal["assayDropProofModel"] = "counted-queue-zero"
-        seal["assayDropProofBasis"] = "declared"
+        seal["assayDropProofBasis"] = "asserted"
         seal["assayDropChannels"] = ["ringbuf:0"]
         replace_payload(stmt, 2, seal)
     elif name == "drop-channels-not-a-list":
@@ -871,7 +871,7 @@ def validate(statement: dict[str, Any], disabled: frozenset[str] = frozenset()) 
             elif not isinstance(seal.get("assayDropChannels"), list):
                 add("drop-proof-channels-malformed", PHASE_NOT_CREDITED, f"sealed record {idx} assayDropChannels is not a list")
             elif bool(seal["assayDropChannels"]) != (basis == "checked"):
-                add("drop-proof-channels-mismatch", PHASE_NOT_CREDITED, f"sealed record {idx} basis {basis!r} disagrees with {len(seal['assayDropChannels'])} channel reading(s): a checked basis rests on readings and a declared one has none")
+                add("drop-proof-channels-mismatch", PHASE_NOT_CREDITED, f"sealed record {idx} basis {basis!r} disagrees with {len(seal['assayDropChannels'])} channel reading(s): a checked basis rests on readings and an asserted one has none")
         if "aeeObservedSet" not in malformed_digests and seal.get("aeeObservedSet") != observed_set(records):
             add("observed-set-mismatch", PHASE_MALFORMED, f"sealed record {idx} aeeObservedSet mismatch")
         for attack_id in observed_attacks:
