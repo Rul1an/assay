@@ -262,3 +262,42 @@ fn a_second_collection_path_verifies_under_the_same_key_and_substrate() {
     let narrow = trusted(&k, &[COLLECTION_PATH_LANDLOCK_TCP_CONNECT]);
     verify_seal(&second, &narrow).expect_err("a path outside the key's scope must be refused");
 }
+
+/// The ceiling travels with every seal, on both vantages.
+///
+/// A consumer reading a seal must be able to see that it cannot separate withdrawn coverage from
+/// coverage never held, because that is the one limit no better producer removes. The other four
+/// standing non-claims name things this slice did not establish; this one names something nothing
+/// can, which is why it is worded as a failure to distinguish rather than a failure to prove.
+///
+/// Asserted on both vantages deliberately. The proxy owes an extra non-claim of its own, and a
+/// reader who saw the lists differ might reasonably conclude the differences are the whole story.
+/// This one is not a difference: it is the floor under both.
+#[test]
+fn every_seal_carries_the_coverage_indistinguishability_ceiling() {
+    const CEILING: &str = "does not distinguish withdrawn coverage from coverage never held";
+    let k = signing_key();
+
+    let landlock = verify_seal(
+        &seal_and_sign(&armed_run(), COLLECTION_PATH_LANDLOCK_TCP_CONNECT, &k),
+        &trusted(&k, &[COLLECTION_PATH_LANDLOCK_TCP_CONNECT]),
+    )
+    .expect("verifies");
+    assert!(
+        landlock.assay_non_claims.iter().any(|c| c == CEILING),
+        "the kernel seal must carry the ceiling: {:?}",
+        landlock.assay_non_claims
+    );
+
+    // And it is a floor rather than a per-vantage decision: the producer builds it from the standing
+    // list, so a vantage cannot opt out by supplying its own.
+    assert_eq!(
+        landlock
+            .assay_non_claims
+            .iter()
+            .filter(|c| c.as_str() == CEILING)
+            .count(),
+        1,
+        "carried once, not appended twice by two paths"
+    );
+}

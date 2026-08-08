@@ -266,6 +266,30 @@ The counts that follow from it: `REQUIRED_SEAL_FIELDS` names **six** of the ten 
 the checker's known-optional set names the other four. The positive payload carried **eight** when
 this was written; it carries all ten as of the decision below.
 
+**What covers the arm-to-seal interval, recorded 2026-08-08 (#2133).** The predicate author
+rejected an end-of-run probe by name on #570: a point check at run end covers an instant, and the
+arm-to-seal interval is what needs covering. Measured against this design, that critique does not
+land here, and the reason is worth stating because it lives only in a source comment today.
+
+`seal_eligibility` does not rest on the probe. It requires `restrict_self_confirmed` — armed at
+start — **and** `restriction_shedding == restrictions_held`, measured by asking the running kernel
+directly rather than inferring it from an ABI number. Armed at start, plus a kernel that cannot shed
+the restriction, gives the interval from its endpoints. The run-end probe corroborates; it is not
+the basis.
+
+RFC 9334 §10 is why that distinction matters rather than being a nicety. The RATS architecture says
+of freshness that "there is, however, always a race condition possible in that the state of the
+Attester and the appraisal policies might change immediately after the Evidence or Attestation
+Result was generated", and that "the goal is merely to narrow their recentness to something the
+Verifier ... can tolerate". A point check can only narrow the window. Establishing a property of the
+environment is a different claim shape, and it is the one that carries an interval.
+
+**This does not generalise to the proxy vantage.** A kernel ruleset outlives the process that
+installed it; an in-process proxy is bypassed by not going through it, so there is no
+`restriction_shedding` analogue and no interval argument. The proxy seal carries an extra non-claim
+for exactly that reason. Two vantages, two claim shapes — and the asymmetry is the thing that would
+be lost if the interval argument stayed where it was.
+
 **`aeeVersion` stays 0.7, decided 2026-08-08 (#2093), and there is no 0.8 to wait for.**
 
 The outcome stands; the reason it was first recorded on does not, and the correction is worth
