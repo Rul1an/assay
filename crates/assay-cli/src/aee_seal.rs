@@ -251,10 +251,10 @@ pub struct SealPayload {
     pub assay_seal_scope: String,
     #[serde(rename = "assayDropProofModel")]
     pub assay_drop_proof_model: String,
-    /// `checked` or `declared` -- whether anything was verified about the model above.
+    /// `checked` or `asserted` -- whether anything was verified about the model above.
     #[serde(rename = "assayDropProofBasis")]
     pub assay_drop_proof_basis: String,
-    /// `name=lost` per channel, empty when the basis is `declared`. The readings the claim rests on.
+    /// `name=lost` per channel, empty when the basis is `asserted`. The readings the claim rests on.
     #[serde(rename = "assayDropChannels")]
     pub assay_drop_channels: Vec<String>,
     #[serde(rename = "assayAttackRowAttributionSource")]
