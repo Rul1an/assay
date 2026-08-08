@@ -34,6 +34,22 @@ fn workspace_root() -> PathBuf {
         .expect("workspace root")
 }
 
+/// A directory entry resolved and proven to sit inside `root`, or `None`.
+///
+/// Every path below is built from a `read_dir` entry, which is untrusted input to a static
+/// analyser and is a symlink away from being untrusted in fact: a link under `crates/` pointing
+/// outside the workspace would have this test read, and report on, a file that is not ours.
+/// Canonicalising first and then requiring containment resolves `..` and follows the link before
+/// the decision is made, so the check is on the real target rather than on the spelling.
+///
+/// This mirrors the path-containment rule the bundle reader and `validate_baseline_key()` already
+/// apply to archive members. It is the same class of input and gets the same treatment, rather
+/// than an exemption because this one happens to be a test.
+fn contained(root: &Path, candidate: &Path) -> Option<PathBuf> {
+    let resolved = candidate.canonicalize().ok()?;
+    resolved.starts_with(root).then_some(resolved)
+}
+
 /// Crates that can break a downstream consumer: published, and carrying a library target.
 ///
 /// `publish = false` crates have no downstream. `assay-cli` is published but is a binary with no
@@ -43,11 +59,15 @@ fn crates_with_public_api(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let dir = root.join("crates");
     for entry in fs::read_dir(&dir).expect("crates/ is readable") {
-        let path = entry.expect("dir entry").path();
-        let manifest = path.join("Cargo.toml");
-        if !manifest.is_file() || !path.join("src/lib.rs").is_file() {
+        let Some(path) = contained(root, &entry.expect("dir entry").path()) else {
             continue;
-        }
+        };
+        let (Some(manifest), Some(_lib)) = (
+            contained(root, &path.join("Cargo.toml")),
+            contained(root, &path.join("src/lib.rs")),
+        ) else {
+            continue;
+        };
         let text = fs::read_to_string(&manifest).expect("manifest is readable");
         if text
             .lines()
@@ -66,14 +86,16 @@ fn crates_with_public_api(root: &Path) -> Vec<PathBuf> {
     out
 }
 
-fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
+fn rust_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
-        let p = entry.path();
+        let Some(p) = contained(root, &entry.path()) else {
+            continue;
+        };
         if p.is_dir() {
-            rust_files(&p, out);
+            rust_files(root, &p, out);
         } else if p.extension().is_some_and(|e| e == "rs") {
             out.push(p);
         }
@@ -130,7 +152,7 @@ fn every_public_error_enum_is_non_exhaustive() {
 
     for krate in crates_with_public_api(&root) {
         let mut files = Vec::new();
-        rust_files(&krate.join("src"), &mut files);
+        rust_files(&root, &krate.join("src"), &mut files);
         for f in files {
             let text = fs::read_to_string(&f).expect("source is readable");
             checked += text
