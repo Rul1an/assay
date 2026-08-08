@@ -258,12 +258,41 @@ pub struct SealPayload {
 }
 
 /// The payload-local minimum non-claims from the #2001 payload contract.
+/// The standing non-claims every seal carries.
+///
+/// # The fifth one is a ceiling, not a coverage gap
+///
+/// "does not distinguish withdrawn coverage from coverage never held" breaks the `does not prove`
+/// pattern of its four siblings on purpose. Those name things this seal did not establish and a
+/// better producer might. This one names something **no** producer can establish, and phrasing it
+/// as a proof gap would understate it as work someone could do.
+///
+/// The measurement is the predicate author's, reported on in-toto/attestation#570: a completed
+/// coverage withdrawal is byte-identical to an honest producer with no coverage, across 27 of 27
+/// baselines on three independent rails, and the honest form of the hedge is that it is not
+/// detectable by any check anyone can write.
+///
+/// It looks like log truncation and the analogy is worth following until it breaks. Against a
+/// tag-in-the-clear scheme an adversary emits a prefix with that prefix's own valid tag, which no
+/// verifier can tell from an honest shorter log (arXiv 2509.03821 gives the game). The defence
+/// there is to make the earlier tag unrecoverable -- which works because the adversary is not the
+/// tag holder. **Here the producer holds the signing key.** An operator emitting less coverage
+/// forges nothing; every seal is validly signed. No integrity mechanism inside the artifact can
+/// separate an authorised signer emitting less from an authorised signer with less to emit.
+///
+/// So this is our own occurrence-versus-absence rule, met at its boundary.
+/// `assay_runner_schema::claim_parity` states it as "absence is never looser than occurrence", and
+/// `partial_coverage_blocks_absence_claim` enforces it elsewhere in the tree. A seal is occurrence
+/// evidence: it reports that a run was armed and that something was refused. This non-claim is the
+/// formal reason it can never be read as absence evidence, and it is stated here rather than
+/// invented as a new hedge because the seal is an instance of a rule we already hold.
 fn payload_non_claims() -> Vec<String> {
     [
         "does not prove complete run population",
         "does not prove agent safety",
         "does not prove provider side effects",
         "does not prove independent substrate operation",
+        "does not distinguish withdrawn coverage from coverage never held",
     ]
     .iter()
     .map(|s| (*s).to_string())
@@ -1065,6 +1094,7 @@ mod tests {
                 "does not prove agent safety".to_string(),
                 "does not prove provider side effects".to_string(),
                 "does not prove independent substrate operation".to_string(),
+                "does not distinguish withdrawn coverage from coverage never held".to_string(),
             ]
         );
     }

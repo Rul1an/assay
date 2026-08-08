@@ -80,6 +80,12 @@ MINIMUM_NON_CLAIMS = (
     "does not prove agent safety",
     "does not prove provider side effects",
     "does not prove independent substrate operation",
+    # A ceiling rather than a coverage gap, which is why it does not say "does not prove". A
+    # completed coverage withdrawal is byte-identical to an honest producer with no coverage
+    # (measured 27/27 on three rails, in-toto/attestation#570), and the producer holds the signing
+    # key, so no artifact-internal check can separate the two. See `payload_non_claims` for why this
+    # is the occurrence-versus-absence rule met at its boundary rather than a new hedge.
+    "does not distinguish withdrawn coverage from coverage never held",
 )
 
 # Every field the contract marks required. `_test_every_required_field_is_checked` removes each in
@@ -391,7 +397,7 @@ def base_statement() -> dict[str, Any]:
     interception = {"aeeKind": "interception", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePayloadCommitment": corpus_manifest["expectedPayloads"]["NET-CONNECT-BLOCK-001"][0], "assayCollectionPath": COLLECTION_PATH, "assaySourceSchema": "assay.enforcement_health.v1.probe"}
     arming = {"aeeKind": "arming", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "assayCollectionPath": COLLECTION_PATH}
     records = [record(interception, 1), record(arming, 2)]
-    sealed = {"aeeKind": "sealed", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "aeeStillArmed": True, "aeeDropCount": 0, "aeeDropBound": 0, "assayDropProofModel": "synchronous-probe", "assayDropProofBasis": "asserted", "assayDropChannels": [], "aeeObservedSet": observed_set(records), "aeeObservedAttacks": [], "assayObservedLabels": ["connect_blocked"], "assayCollectionPath": COLLECTION_PATH, "assaySealedAt": SEALED_AT, "assaySourceSchema": SOURCE_SCHEMA, "assaySealScope": SEAL_SCOPE, "assayAttackRowAttributionSource": "assembly-plane", "assayNonClaims": ["does not prove complete run population", "does not prove agent safety", "does not prove provider side effects", "does not prove independent substrate operation"]}
+    sealed = {"aeeKind": "sealed", "aeeVersion": AEE_VERSION, "aeeRunBinding": rb, "aeeMethod": "intercepted", "aeePostureDigest": env["networkPosture"]["digest"]["sha256"], "aeeStillArmed": True, "aeeDropCount": 0, "aeeDropBound": 0, "assayDropProofModel": "synchronous-probe", "assayDropProofBasis": "asserted", "assayDropChannels": [], "aeeObservedSet": observed_set(records), "aeeObservedAttacks": [], "assayObservedLabels": ["connect_blocked"], "assayCollectionPath": COLLECTION_PATH, "assaySealedAt": SEALED_AT, "assaySourceSchema": SOURCE_SCHEMA, "assaySealScope": SEAL_SCOPE, "assayAttackRowAttributionSource": "assembly-plane", "assayNonClaims": list(MINIMUM_NON_CLAIMS)}
     records.append(record(sealed, 3))
     stmt["predicate"]["observationRecords"] = records
     return stmt

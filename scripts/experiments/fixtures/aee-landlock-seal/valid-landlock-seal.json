@@ -162,7 +162,8 @@
             "does not prove complete run population",
             "does not prove agent safety",
             "does not prove provider side effects",
-            "does not prove independent substrate operation"
+            "does not prove independent substrate operation",
+            "does not distinguish withdrawn coverage from coverage never held"
           ],
           "assayObservedLabels": [
             "connect_blocked"
@@ -176,7 +177,7 @@
         "signatures": [
           {
             "keyid": "assay-test-observation-key-landlock-v0",
-            "sig": "VJcPiaE2DGSG+sdj+q+sHEUIIfyoB/EPxG2qoJ+fPB4="
+            "sig": "IMY2RHkrzVAa/vx23rZwTFqdoBe5iBwbaqedPWx/loY="
           }
         ]
       }
