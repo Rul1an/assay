@@ -5,11 +5,14 @@
 //! a syntactically correct manifest cannot advertise the wrong binary or tools.
 
 use serde_json::Value;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 mod jsonrpc_conn;
 use jsonrpc_conn::Conn;
+
+const MAX_PROJECT_FILE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Copy)]
 enum ProjectFile {
@@ -37,8 +40,22 @@ fn workspace_root() -> PathBuf {
 
 fn read_project_file(file: ProjectFile) -> String {
     let path = workspace_root().join(file.relative_path());
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("read checked project file {}: {error}", path.display()))
+    let mut source = std::fs::File::open(&path)
+        .unwrap_or_else(|error| panic!("open checked project file {}: {error}", path.display()));
+    let bytes = source
+        .metadata()
+        .unwrap_or_else(|error| panic!("stat checked project file {}: {error}", path.display()))
+        .len();
+    assert!(
+        bytes <= MAX_PROJECT_FILE_BYTES,
+        "checked project file exceeds {MAX_PROJECT_FILE_BYTES} bytes: {} ({bytes} bytes)",
+        path.display()
+    );
+    let mut contents = String::with_capacity(bytes as usize);
+    source
+        .read_to_string(&mut contents)
+        .unwrap_or_else(|error| panic!("read checked project file {}: {error}", path.display()));
+    contents
 }
 
 fn manifest_entry(file: ProjectFile) -> Value {
