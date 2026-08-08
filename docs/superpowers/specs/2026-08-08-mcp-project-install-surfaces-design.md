@@ -110,9 +110,8 @@ fail for the named assertion before the original content is restored:
 | Remove `--policy-root` from the Codex TOML block | `Codex guide does not carry the manifest invocation` |
 
 This mutation check was run against committed baseline
-`fdcf2c878aa0c115772064591f2faf233787c3a2` in worktree
-`/Users/roelschuurkes/.config/superpowers/worktrees/assay/2152-mcp-manifest`,
-using the test binary built by Cargo with
+`fdcf2c878aa0c115772064591f2faf233787c3a2` in an isolated mutation-check
+worktree, using the test binary built by Cargo with
 `CARGO_TARGET_DIR=/tmp/assay-target-2152`. All three mutations were killed by
 their required assertion, then the original tree was restored and the focused
 test passed again.

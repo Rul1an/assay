@@ -183,7 +183,7 @@ impl Conn {
         let deadline = Instant::now() + self.take_budget();
         loop {
             let v = self.read_json_by(deadline);
-            if v.get("method").is_none() {
+            if is_response(&v) {
                 return v;
             }
         }
@@ -194,8 +194,7 @@ impl Conn {
         let deadline = Instant::now() + self.take_budget();
         loop {
             let v = self.read_json_by(deadline);
-            if v.get("method").is_none() && v.get("id").and_then(Value::as_u64) == Some(expected_id)
-            {
+            if is_response(&v) && v.get("id").and_then(Value::as_u64) == Some(expected_id) {
                 return v;
             }
         }
@@ -370,4 +369,8 @@ fn describe(v: &Value) -> String {
         Some(id) => format!("id={id} method={method}"),
         None => format!("notification method={method}"),
     }
+}
+
+fn is_response(value: &Value) -> bool {
+    value.get("method").is_none()
 }
