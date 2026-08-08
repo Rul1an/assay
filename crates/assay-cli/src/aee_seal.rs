@@ -35,7 +35,7 @@ pub const PROXY_SEAL_SCOPE: &str = "tool_call:mcp_proxy_policy";
 /// **Stays at 0.7, and there is no 0.8 to wait for.** Decided in #2093; the reason was corrected
 /// after the predicate author answered on in-toto/attestation#570 (2026-08-07).
 ///
-/// This first read her earlier sentence as an offer to ship 0.7 and repair the referencedness
+/// This first read his earlier sentence as an offer to ship 0.7 and repair the referencedness
 /// defect in 0.8, and recorded a migration trigger accordingly. She has since said to pin 0.7 and
 /// not plan for 0.8: the repair already landed on that branch as `c0c4da6` on 4 August, inside the
 /// 0.7 changelog rather than behind a bump, so that nobody has to pin a version whose reject family
@@ -737,8 +737,8 @@ pub enum DropAccounting {
 /// # Why `asserted` and not `declared`
 ///
 /// This value was `declared` until the predicate author pointed out a collision on
-/// in-toto/attestation#570: her `declared` names the weakest **evidence tier**, ours named a
-/// **drop-proof basis**. One word doing two jobs in one thread, and she noted renaming costs less
+/// in-toto/attestation#570: his `declared` names the weakest **evidence tier**, ours named a
+/// **drop-proof basis**. One word doing two jobs in one thread, and he noted renaming costs less
 /// before producer code reads it than after. Measuring it found a third job -- our own
 /// `annotation_conformance` records use `declared` for the declared-versus-observed annotation
 /// split -- so the word was already overloaded inside this tree.
