@@ -16,7 +16,8 @@
 - Pin schemas, registered codes, JSON-RPC fields, and gap issue ids; do not pin timestamps, host paths, platform values, ANSI output, or free-form prose.
 - Preserve the distinction between policy denial, process failure, observed evidence, and verified claims.
 - Keep the broader JSON identity convention explicitly deferred to #2167.
-- Use `CARGO_TARGET_DIR=/tmp/assay-target-2154` for all Rust verification.
+- Export one worktree-unique `CARGO_TARGET_DIR` with `mktemp` and reuse it for all
+  Rust verification in this worktree.
 
 ---
 
@@ -54,8 +55,8 @@ verification so each row has both sides where reachable.
 - [x] **Step 2: Run the CLI test and verify RED**
 
 ```bash
-CARGO_TARGET_DIR=/tmp/assay-target-2154 \
-  cargo test -p assay-cli --test agent_golden_path_contract -- --nocapture
+export CARGO_TARGET_DIR="$(mktemp -d "${TMPDIR:-/tmp}/assay-target-2154.XXXXXX")"
+cargo test -p assay-cli --test agent_golden_path_contract -- --nocapture
 ```
 
 Expected: FAIL because `docs/generated/agent-golden-path.json` does not exist; the
@@ -107,8 +108,7 @@ empty/fail-open outputs.
 - [x] **Step 2: Run the MCP test and verify RED**
 
 ```bash
-CARGO_TARGET_DIR=/tmp/assay-target-2154 \
-  cargo test -p assay-mcp-server --test agent_golden_path_contract -- --nocapture
+cargo test -p assay-mcp-server --test agent_golden_path_contract -- --nocapture
 ```
 
 Expected: FAIL because the machine contract is absent.
@@ -130,16 +130,17 @@ Run both commands from Tasks 1 and 2. Expected: all tests pass.
 
 **Interfaces:**
 - Consumes: the completed contract and both focused integration tests.
-- Produces: verified commit, exact-head Claude Code review, and PR linked to #2154.
+- Produces: verified commit, exact-head review quorum, and PR linked to #2154.
 
 - [x] **Step 1: Run affected verification**
 
 ```bash
-CARGO_TARGET_DIR=/tmp/assay-target-2154 cargo test -p assay-cli --test agent_golden_path_contract
-CARGO_TARGET_DIR=/tmp/assay-target-2154 cargo test -p assay-mcp-server --test agent_golden_path_contract
-CARGO_TARGET_DIR=/tmp/assay-target-2154 cargo test -p assay-cli --test conformance_privileged_mcp_action --test json_format_reports_failures_on_stdout
-CARGO_TARGET_DIR=/tmp/assay-target-2154 cargo test -p assay-mcp-server
-CARGO_TARGET_DIR=/tmp/assay-target-2154 cargo clippy -p assay-cli -p assay-mcp-server --all-targets -- -D warnings
+export CARGO_TARGET_DIR="$(mktemp -d "${TMPDIR:-/tmp}/assay-target-2154.XXXXXX")"
+cargo test -p assay-cli --test agent_golden_path_contract
+cargo test -p assay-mcp-server --test agent_golden_path_contract
+cargo test -p assay-cli --test conformance_privileged_mcp_action --test json_format_reports_failures_on_stdout
+cargo test -p assay-mcp-server
+cargo clippy -p assay-cli -p assay-mcp-server --all-targets -- -D warnings
 cargo fmt --all -- --check
 git diff --check
 ```
@@ -156,7 +157,7 @@ tree:
 
 After restoration, rerun both focused tests and require green.
 
-- [ ] **Step 3: Commit with an exact pathspec**
+- [x] **Step 3: Commit with an exact pathspec**
 
 ```bash
 git add -A \
@@ -173,14 +174,17 @@ git add -A \
 git commit -m "test(cli): pin the agent golden-path contract"
 ```
 
-- [ ] **Step 4: Obtain Claude Code review on the exact commit**
+- [ ] **Step 4: Satisfy the exact-head review quorum**
 
 Run Claude Code in plan/read-only mode against the full SHA and the
-`origin/main...<sha>` diff. Fix every actionable finding, then repeat the
-review on the new exact head.
+`origin/main...<sha>` diff, and obtain CodeRabbit or Copilot review on that
+same head. Fix or technically disposition every actionable finding, then
+repeat both reviews after any push that changes the head. Record the reviewed
+SHA and both verdicts; the builder's self-review does not count.
 
 - [ ] **Step 5: Push and open the PR**
 
 Push `codex/2154-stdout-exit-contract`, open a ready PR linked to #2154, and
-record the branch, exact head, verification, reviews, non-claims, and open gap
-issues in #2154.
+enable auto-merge only after required checks are green, the exact-head review
+quorum is satisfied, and all findings have a disposition. Record the branch,
+exact head, verification, reviews, non-claims, and open gap issues in #2154.

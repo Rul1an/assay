@@ -45,12 +45,12 @@ angle brackets are replaced with temporary files or committed fixtures.
 From the repository root:
 
 ```bash
-CARGO_TARGET_DIR=/tmp/assay-target-2154 \
-  cargo test -p assay-cli --test agent_golden_path_contract
-CARGO_TARGET_DIR=/tmp/assay-target-2154 \
-  cargo test -p assay-mcp-server --test agent_golden_path_contract
+export CARGO_TARGET_DIR="$(mktemp -d "${TMPDIR:-/tmp}/assay-target-2154.XXXXXX")"
+cargo test -p assay-cli --test agent_golden_path_contract
+cargo test -p assay-mcp-server --test agent_golden_path_contract
 ```
 
 These tests run the Cargo-built binaries through `CARGO_BIN_EXE_*`; they do not
 read an unrelated Assay executable from `PATH`. The reference upstream remains
-the committed Python fixture used by the protected-action scenario.
+the committed Python fixture used by the protected-action scenario, which
+requires `python3` on Unix-like hosts or `python` on Windows.

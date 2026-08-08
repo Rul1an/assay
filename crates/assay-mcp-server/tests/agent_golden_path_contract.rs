@@ -59,9 +59,17 @@ fn expected_outcome(step_id: &str, outcome_name: &str) -> Value {
 }
 
 fn assert_exit(output: &Output, expected: &Value, context: &str) {
+    let expected_exit = expected["exit_code"]
+        .as_i64()
+        .expect("contract exit_code must be an integer");
+    let actual_exit = output
+        .status
+        .code()
+        .map(i64::from)
+        .expect("assay-mcp-server terminated without an exit code");
     assert_eq!(
-        output.status.code().map(i64::from),
-        expected["exit_code"].as_i64(),
+        actual_exit,
+        expected_exit,
         "{context} exit differed; stdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
@@ -102,13 +110,18 @@ fn run_server(cwd: &Path, args: &[&str], stdin: &[u8]) -> Output {
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
     let mut child = command.spawn().expect("spawn assay-mcp-server");
-    child
-        .stdin
-        .take()
-        .expect("child stdin")
-        .write_all(stdin)
+    let mut child_stdin = child.stdin.take().expect("child stdin");
+    let stdin = stdin.to_vec();
+    let writer = std::thread::spawn(move || {
+        child_stdin.write_all(&stdin)?;
+        Ok::<(), std::io::Error>(())
+    });
+    let output = wait_bounded(child);
+    writer
+        .join()
+        .expect("join stdin writer")
         .expect("write child stdin");
-    wait_bounded(child)
+    output
 }
 
 fn wait_bounded(mut child: Child) -> Output {
@@ -155,16 +168,32 @@ fn python() -> &'static str {
     }
 }
 
+fn required_python() -> &'static str {
+    let interpreter = python();
+    let output = Command::new(interpreter)
+        .arg("--version")
+        .output()
+        .unwrap_or_else(|error| {
+            panic!("the protected-action reference fixture requires {interpreter} on PATH: {error}")
+        });
+    assert!(
+        output.status.success(),
+        "the protected-action reference fixture requires a working {interpreter}"
+    );
+    interpreter
+}
+
 #[test]
 fn enforcing_proxy_denial_is_structured_but_startup_failure_is_not() {
     let example = workspace_root().join("examples/privileged-action-gate");
+    let python = required_python();
     let mut command = clean_server_command();
     let child = command
         .current_dir(&example)
         .args([
             "proxy-enforce",
             "--upstream-command",
-            python(),
+            python,
             "--upstream-arg",
             "-u",
             "--upstream-arg",
@@ -190,6 +219,8 @@ fn enforcing_proxy_denial_is_structured_but_startup_failure_is_not() {
         1,
     );
     assert_eq!(initialize["jsonrpc"], "2.0");
+    assert!(initialize.get("result").is_some());
+    assert!(initialize.get("error").is_none());
     let denied = connection.request(
         "tools/call",
         serde_json::json!({
@@ -219,7 +250,7 @@ fn enforcing_proxy_denial_is_structured_but_startup_failure_is_not() {
         &[
             "proxy-enforce",
             "--upstream-command",
-            python(),
+            python,
             "--enforce-policy",
             "missing.yaml",
             "--declared-mcp-manifest",

@@ -303,12 +303,13 @@ def render_markdown(current: str) -> str:
 
 
 def main() -> None:
+    current = MARKDOWN_OUTPUT.read_text(encoding="utf-8")
+    rendered_markdown = render_markdown(current)
     JSON_OUTPUT.write_text(
         json.dumps(CONTRACT, indent=2, ensure_ascii=True) + "\n",
         encoding="utf-8",
     )
-    current = MARKDOWN_OUTPUT.read_text(encoding="utf-8")
-    MARKDOWN_OUTPUT.write_text(render_markdown(current), encoding="utf-8")
+    MARKDOWN_OUTPUT.write_text(rendered_markdown, encoding="utf-8")
 
 
 if __name__ == "__main__":

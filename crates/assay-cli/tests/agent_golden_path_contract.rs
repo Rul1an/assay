@@ -51,9 +51,17 @@ fn expected_outcome(step_id: &str, outcome_name: &str) -> Value {
 }
 
 fn assert_exit(output: &Output, expected: &Value, context: &str) {
+    let expected_exit = expected["exit_code"]
+        .as_i64()
+        .expect("contract exit_code must be an integer");
+    let actual_exit = output
+        .status
+        .code()
+        .map(i64::from)
+        .expect("assay process terminated without an exit code");
     assert_eq!(
-        output.status.code().map(i64::from),
-        expected["exit_code"].as_i64(),
+        actual_exit,
+        expected_exit,
         "{context} exit differed; stdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
@@ -115,6 +123,11 @@ fn assert_document(document: &Value, expected: &Value, context: &str) {
     let identity = expected["stdout"]["document"].as_str();
     if let Some(identity) = identity {
         assert_eq!(document["schema"], identity, "{context} document identity");
+    } else if expected["stdout"]["kind"] == "json" {
+        assert!(
+            document.get("schema").is_none(),
+            "{context} unexpectedly exposed an unpinned schema identity"
+        );
     }
 }
 
