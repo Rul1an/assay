@@ -31,8 +31,9 @@ The identifiers name documents, not commands. A caller branches on `schema`
 before interpreting document-specific fields. `schema_version` remains `1`
 and is scoped by that name.
 
-The broader repository convention is intentionally separate. Coverage and
-session-state-window currently put string identities in `schema_version`;
+The broader repository convention is intentionally separate. Coverage,
+session-state-window, and soak reports currently put string identities in
+`schema_version`;
 [#2167](https://github.com/Rul1an/assay/issues/2167) owns inventory and
 migration of that cross-command convention. It does not block naming the
 three documents required by #2154.
@@ -118,7 +119,9 @@ its owning test fail.
 
 - No shared envelope or payload wrapper.
 - No removal or repurposing of `schema_version`.
-- No migration of coverage or session-state-window; #2167 owns that.
+- No identity for the separately written `run.json` artifact; #2167 owns that.
+- No migration of coverage, session-state-window, or soak reports; #2167 owns
+  that.
 - No provenance expansion.
 - No summary render-safety behavior change; #2168 owns that decision.
 - No change to exit codes, reason codes, result semantics, or output channels.
