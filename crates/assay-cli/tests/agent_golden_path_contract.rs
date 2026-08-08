@@ -1,5 +1,8 @@
 //! The #1975 journey as observed by a caller that reads only stdout and the exit status.
 
+#[path = "../../../tests/support/agent_golden_path.rs"]
+mod runtime_coverage;
+
 use serde_json::Value;
 use std::ffi::OsStr;
 use std::path::Path;
@@ -49,6 +52,7 @@ fn expected_outcome(step_id: &str, outcome_name: &str) -> Value {
         .clone();
     outcome["command"] = step["command"].clone();
     outcome["binary"] = step["binary"].clone();
+    runtime_coverage::record_outcome(step_id, outcome_name);
     outcome
 }
 
@@ -378,4 +382,21 @@ fn offline_profile_verifier_keeps_both_outcomes_on_stdout() {
     assert!(failure_json.get("verdict").is_none());
     assert_no_diagnosis(&expected_failure, &failure_json);
     assert_gap(&expected_failure, 2165);
+}
+
+#[test]
+fn every_cli_contract_outcome_is_executed_once() {
+    runtime_coverage::assert_exact(
+        &contract(),
+        "assay",
+        &[
+            installed_binary_reports_a_version_on_stdout,
+            doctor_json_exposes_its_current_success_and_failure_surface,
+            init_stdout_records_success_but_not_the_failure_diagnosis,
+            policy_validation_stdout_is_currently_empty_on_both_paths,
+            completed_test_failure_is_a_run_report_not_a_diagnosis,
+            bundle_inspection_json_disappears_on_integrity_failure,
+            offline_profile_verifier_keeps_both_outcomes_on_stdout,
+        ],
+    );
 }

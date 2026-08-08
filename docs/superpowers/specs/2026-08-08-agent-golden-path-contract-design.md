@@ -120,13 +120,13 @@ Its self-test proves that the gate rejects at least:
 
 The tests separately pin the verifier identity, proxy denial fields, every gap
 owner, and exit `1` for a completed run whose stdout remains
-`assay.run_report.v1` rather than becoming a diagnosis document.
-Before writing either generated artifact, the generator compares every contract
-`(step id, outcome name)` pair with the literal `expected_outcome` drivers in
-both integration tests. Generation refuses an undriven outcome or a stale test
-driver, and requires exactly one literal driver per outcome. The drift self-test
-mutates in an eighteenth outcome and a duplicate driver to prove both gates
-fail.
+`assay.run_report.v1` rather than becoming a diagnosis document. Each crate also
+has one runtime coverage test. It clears a thread-local driver registry, invokes
+all of that binary's scenario functions, and compares the observed
+`(step id, outcome name)` counts with the contract. Missing, stale, duplicate,
+or variable-derived drivers fail because only executed `expected_outcome` calls
+count; comments and dead code cannot satisfy the gate. The generator therefore
+does not parse or otherwise depend on Rust test source.
 
 ## Non-Goals
 

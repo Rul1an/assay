@@ -1,6 +1,8 @@
 //! MCP-owned rows of the #1975 stdout-and-exit-code journey contract.
 
 mod jsonrpc_conn;
+#[path = "../../../tests/support/agent_golden_path.rs"]
+mod runtime_coverage;
 
 use jsonrpc_conn::Conn;
 use serde_json::Value;
@@ -57,6 +59,7 @@ fn expected_outcome(step_id: &str, outcome_name: &str) -> Value {
         .clone();
     outcome["command"] = step["command"].clone();
     outcome["binary"] = step["binary"].clone();
+    runtime_coverage::record_outcome(step_id, outcome_name);
     outcome
 }
 
@@ -344,4 +347,16 @@ fn sarif_projection_currently_turns_malformed_input_into_clean_output() {
         .unwrap()
         .is_empty());
     assert_gap(&expected_malformed, 2166);
+}
+
+#[test]
+fn every_mcp_contract_outcome_is_executed_once() {
+    runtime_coverage::assert_exact(
+        &contract(),
+        "assay-mcp-server",
+        &[
+            enforcing_proxy_denial_is_structured_but_startup_failure_is_not,
+            sarif_projection_currently_turns_malformed_input_into_clean_output,
+        ],
+    );
 }

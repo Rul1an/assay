@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import json
-import re
-from collections import Counter
 from pathlib import Path
 
 
@@ -14,13 +12,6 @@ JSON_OUTPUT = ROOT / "docs/generated/agent-golden-path.json"
 MARKDOWN_OUTPUT = ROOT / "docs/guides/agent-golden-path.md"
 TABLE_START = "<!-- agent-golden-path-table:start -->"
 TABLE_END = "<!-- agent-golden-path-table:end -->"
-TEST_SOURCES = (
-    ROOT / "crates/assay-cli/tests/agent_golden_path_contract.rs",
-    ROOT / "crates/assay-mcp-server/tests/agent_golden_path_contract.rs",
-)
-EXPECTED_OUTCOME_CALL = re.compile(
-    r'expected_outcome\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)', re.MULTILINE
-)
 
 
 def stdout(kind: str, document: str | None = None) -> dict[str, object]:
@@ -418,34 +409,7 @@ def render_markdown(current: str) -> str:
     return f"{before}{TABLE_START}\n{render_table()}\n{TABLE_END}{after}"
 
 
-def validate_test_drivers() -> None:
-    contract_outcomes = {
-        (str(step["id"]), str(item["name"]))
-        for step in STEPS
-        for item in step["outcomes"]
-    }
-    driver_calls: list[tuple[str, str]] = []
-    for path in TEST_SOURCES:
-        driver_calls.extend(EXPECTED_OUTCOME_CALL.findall(path.read_text(encoding="utf-8")))
-
-    driver_counts = Counter(driver_calls)
-    driven_outcomes = set(driver_counts)
-    missing = sorted(contract_outcomes - driven_outcomes)
-    stale = sorted(driven_outcomes - contract_outcomes)
-    duplicates = sorted(item for item, count in driver_counts.items() if count != 1)
-    if missing or stale or duplicates:
-        details = []
-        if missing:
-            details.append(f"undriven contract outcomes: {missing}")
-        if stale:
-            details.append(f"test drivers without contract outcomes: {stale}")
-        if duplicates:
-            details.append(f"contract outcomes with duplicate test drivers: {duplicates}")
-        raise SystemExit("; ".join(details))
-
-
 def main() -> None:
-    validate_test_drivers()
     current = MARKDOWN_OUTPUT.read_text(encoding="utf-8")
     rendered_markdown = render_markdown(current)
     JSON_OUTPUT.write_text(

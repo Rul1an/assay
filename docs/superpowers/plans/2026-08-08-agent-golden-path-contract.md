@@ -18,6 +18,8 @@
 - Keep the broader JSON identity convention explicitly deferred to #2167.
 - Export one worktree-unique `CARGO_TARGET_DIR` with `mktemp` and reuse it for all
   Rust verification in this worktree.
+- Keep the same shell open for Tasks 1 through 3; do not rerun the export and
+  silently split the measurement across target directories.
 
 ---
 
@@ -25,6 +27,7 @@
 
 **Files:**
 - Create: `crates/assay-cli/tests/agent_golden_path_contract.rs`
+- Create: `tests/support/agent_golden_path.rs`
 - Create: `docs/generated/agent-golden-path.json`
 - Create: `scripts/docs/generate-agent-golden-path.py`
 - Create: `docs/guides/agent-golden-path.md`
@@ -36,7 +39,9 @@
 
 - [x] **Step 1: Write the failing CLI integration test**
 
-Add seven tests that run the binary and assert:
+Add seven scenario tests plus one runtime coverage test. The coverage test
+executes all seven scenarios and requires every CLI contract outcome exactly
+once. The scenarios run the binary and assert:
 
 ```text
 version success: exit 0, non-empty semver stdout
@@ -105,7 +110,8 @@ Drive `proxy-enforce` over the existing timeout-bounded `jsonrpc_conn::Conn` and
 
 Then drive a missing-policy startup failure and SARIF projection with valid and
 malformed NDJSON. Require the guide to link #2163 and #2166 for the measured
-empty/fail-open outputs.
+empty/fail-open outputs. Add one runtime coverage test that executes both MCP
+scenarios and requires every MCP-owned contract outcome exactly once.
 
 - [x] **Step 2: Run the MCP test and verify RED**
 
@@ -137,7 +143,6 @@ Run both commands from Tasks 1 and 2. Expected: all tests pass.
 - [x] **Step 1: Run affected verification**
 
 ```bash
-export CARGO_TARGET_DIR="$(mktemp -d "${TMPDIR:-/tmp}/assay-target-2154.XXXXXX")"
 cargo test -p assay-cli --test agent_golden_path_contract
 cargo test -p assay-mcp-server --test agent_golden_path_contract
 cargo test -p assay-cli --test conformance_privileged_mcp_action --test json_format_reports_failures_on_stdout
@@ -156,8 +161,11 @@ tree:
 1. Hand-edit an existing generated diagram.
 2. Hand-edit `docs/generated/agent-golden-path.json`.
 3. Hand-edit the rendered table in `docs/guides/agent-golden-path.md`.
-4. Add an outcome without a matching integration-test driver.
-5. Add a duplicate integration-test driver for one outcome.
+
+Separately mutate the contract with an undriven outcome and a scenario with a
+duplicate runtime lookup. Require the crate-local runtime coverage tests to
+reject both mutations. This proves the driver gate from execution rather than
+from source-text matching.
 
 After restoration, rerun both focused tests and require green.
 
@@ -167,6 +175,7 @@ After restoration, rerun both focused tests and require green.
 git add -A \
   crates/assay-cli/tests/agent_golden_path_contract.rs \
   crates/assay-mcp-server/tests/agent_golden_path_contract.rs \
+  tests/support/agent_golden_path.rs \
   docs/generated/agent-golden-path.json \
   docs/guides/agent-golden-path.md \
   scripts/docs/generate-agent-golden-path.py \
