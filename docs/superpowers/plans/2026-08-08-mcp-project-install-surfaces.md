@@ -22,6 +22,7 @@
 
 **Files:**
 - Create: `crates/assay-mcp-server/tests/project_install_surfaces.rs`
+- Modify: `crates/assay-mcp-server/tests/jsonrpc_conn/mod.rs`
 - Create: `.mcp.json`
 - Create: `.cursor/mcp.json`
 - Modify: `.gitignore`
@@ -125,7 +126,7 @@ After restoring all three mutations, rerun the focused test and require green.
 
 - [x] **Step 7: Commit the implementation**
 
-Stage only the seven paths named under **Files** above, including this plan and
+Stage only the eight paths named under **Files** above, including this plan and
 the reviewed design correction, then commit with:
 
 ```bash

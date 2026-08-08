@@ -91,6 +91,10 @@ command = "assay-mcp-server"
 args = ["--policy-root", "."]"#;
     let guide = read_project_file(ProjectFile::EditorGuide).replace("\r\n", "\n");
     assert!(
+        guide.contains("cargo install --path crates/assay-mcp-server --locked"),
+        "editor guide install must use the reviewed checkout"
+    );
+    assert!(
         guide.contains(codex_entry),
         "Codex guide does not carry the manifest invocation"
     );

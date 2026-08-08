@@ -12,7 +12,7 @@ standalone `assay-mcp-server` binary. Install that binary on `PATH`, then open t
 repository in your client:
 
 ```bash
-cargo install assay-mcp-server --locked
+cargo install --path crates/assay-mcp-server --locked
 ```
 
 - Claude Code reads `.mcp.json` from the repository root.
