@@ -9,4 +9,4 @@ mod writer;
 
 pub use metrics::judge_metrics_from_results;
 pub use types::*;
-pub use writer::write_summary;
+pub use writer::{render_summary_json, write_summary, SUMMARY_SCHEMA};
