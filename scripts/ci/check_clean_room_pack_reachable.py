@@ -178,12 +178,25 @@ def check_pack_carries_what_the_protocol_demands() -> None:
     print(f"ok: the pack carries all {len(required)} path(s) the protocol names")
 
 
-def self_test() -> None:
-    """Prove both checks can fail, since a check that cannot is worse than none."""
+def self_test(allow_offline: bool) -> None:
+    """Prove both checks can fail, since a check that cannot is worse than none.
+
+    A skip here is a failure unless it is asked for. The first CI wiring of this file set the token
+    on the real check and not on this step, so the self-test reported `SKIP ... releases API
+    unreachable` and exited zero two seconds before the real check reached the same API and passed.
+    Green, and it had verified nothing about check 1. That is the exact shape this file exists to
+    catch, and a self-test allowed to pass while skipping its own assertion is the worst place to
+    have it.
+    """
     # Check 1: a tag nobody published.
     tags = published_tags()
     if tags is None:
-        print("SKIP self-test of check 1: releases API unreachable")
+        if not allow_offline:
+            fail(
+                "the self-test could not reach the releases API, so it did not prove check 1 can "
+                "fail. Provide GH_TOKEN, or pass --allow-offline to state the gap deliberately."
+            )
+        print("SKIP self-test of check 1: releases API unreachable (asked for)")
     else:
         assert "privileged-mcp-action-v0-candidate.99999" not in tags
         print("ok self-test: an unpublished tag is not in the published set")
@@ -217,7 +230,7 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.self_test:
-        self_test()
+        self_test(args.allow_offline)
         return 0
 
     check_descriptor_names_a_published_release(args.allow_offline)

@@ -56,6 +56,8 @@ jobs:
             conformance/privileged-mcp-action-v0/descriptor.json >/dev/null
 
       - name: Prove the check can fail before trusting what it says
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci/check_clean_room_pack_reachable.py --self-test
 
       - name: The obtainable pack exists and carries what the protocol demands
