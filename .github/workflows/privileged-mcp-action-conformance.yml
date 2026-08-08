@@ -7,6 +7,7 @@ on:
       - ".github/actions/privileged-mcp-action-conformance/**"
       - ".github/workflows/privileged-mcp-action-conformance.yml"
       - ".github/workflows/privileged-mcp-action-pack-release.yml"
+      - "scripts/ci/check_clean_room_pack_reachable.py"
   push:
     branches:
       - main
@@ -15,6 +16,7 @@ on:
       - ".github/actions/privileged-mcp-action-conformance/**"
       - ".github/workflows/privileged-mcp-action-conformance.yml"
       - ".github/workflows/privileged-mcp-action-pack-release.yml"
+      - "scripts/ci/check_clean_room_pack_reachable.py"
   workflow_dispatch:
 
 permissions:
@@ -52,6 +54,16 @@ jobs:
             conformance/privileged-mcp-action-v0/report.schema.json >/dev/null
           python3 -m json.tool \
             conformance/privileged-mcp-action-v0/descriptor.json >/dev/null
+
+      - name: Prove the check can fail before trusting what it says
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/check_clean_room_pack_reachable.py --self-test
+
+      - name: The obtainable pack exists and carries what the protocol demands
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/check_clean_room_pack_reachable.py
 
       - name: Prove deterministic pack build
         run: |
