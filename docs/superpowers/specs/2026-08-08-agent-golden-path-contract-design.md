@@ -121,6 +121,11 @@ Its self-test proves that the gate rejects at least:
 The tests separately pin the verifier identity, proxy denial fields, every gap
 owner, and exit `1` for a completed run whose stdout remains
 `assay.run_report.v1` rather than becoming a diagnosis document.
+Before writing either generated artifact, the generator compares every contract
+`(step id, outcome name)` pair with the literal `expected_outcome` drivers in
+both integration tests. Generation refuses an undriven outcome or a stale test
+driver; the drift self-test mutates in an eighteenth outcome to prove this gate
+fails.
 
 ## Non-Goals
 

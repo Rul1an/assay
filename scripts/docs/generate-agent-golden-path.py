@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 
@@ -12,6 +13,13 @@ JSON_OUTPUT = ROOT / "docs/generated/agent-golden-path.json"
 MARKDOWN_OUTPUT = ROOT / "docs/guides/agent-golden-path.md"
 TABLE_START = "<!-- agent-golden-path-table:start -->"
 TABLE_END = "<!-- agent-golden-path-table:end -->"
+TEST_SOURCES = (
+    ROOT / "crates/assay-cli/tests/agent_golden_path_contract.rs",
+    ROOT / "crates/assay-mcp-server/tests/agent_golden_path_contract.rs",
+)
+EXPECTED_OUTCOME_CALL = re.compile(
+    r'expected_outcome\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)', re.MULTILINE
+)
 
 
 def stdout(kind: str, document: str | None = None) -> dict[str, object]:
@@ -409,7 +417,29 @@ def render_markdown(current: str) -> str:
     return f"{before}{TABLE_START}\n{render_table()}\n{TABLE_END}{after}"
 
 
+def validate_test_drivers() -> None:
+    contract_outcomes = {
+        (str(step["id"]), str(item["name"]))
+        for step in STEPS
+        for item in step["outcomes"]
+    }
+    driven_outcomes: set[tuple[str, str]] = set()
+    for path in TEST_SOURCES:
+        driven_outcomes.update(EXPECTED_OUTCOME_CALL.findall(path.read_text(encoding="utf-8")))
+
+    missing = sorted(contract_outcomes - driven_outcomes)
+    stale = sorted(driven_outcomes - contract_outcomes)
+    if missing or stale:
+        details = []
+        if missing:
+            details.append(f"undriven contract outcomes: {missing}")
+        if stale:
+            details.append(f"test drivers without contract outcomes: {stale}")
+        raise SystemExit("; ".join(details))
+
+
 def main() -> None:
+    validate_test_drivers()
     current = MARKDOWN_OUTPUT.read_text(encoding="utf-8")
     rendered_markdown = render_markdown(current)
     JSON_OUTPUT.write_text(
