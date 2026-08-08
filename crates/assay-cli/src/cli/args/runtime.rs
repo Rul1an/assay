@@ -232,6 +232,15 @@ pub struct SandboxArgs {
     #[arg(long, requires = "aee_run_context")]
     pub aee_seal: Option<PathBuf>,
 
+    // The seal's `aeeObservedSet` is a digest over the interception and examination records the run
+    // built. Emitting the digest without them leaves a member only this producer can re-derive,
+    // which is the party it exists to constrain (#2135). Optional rather than implied by
+    // `--aee-seal`, because a caller who wants only the signed payload should not silently get a
+    // second file; asking for the commitment's inputs is a separate decision.
+    /// Where to write the observation records the seal commits to (NDJSON)
+    #[arg(long, requires = "aee_seal")]
+    pub aee_records: Option<PathBuf>,
+
     /// Strict env mode: only safe base vars + explicit allows
     #[arg(long = "env-strict")]
     pub env_strict: bool,

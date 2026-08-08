@@ -359,6 +359,21 @@ fn maybe_emit_aee_seal(
         Err(e) => return warn(&format!("signing failed: {e}")),
     };
 
+    // Written before the seal, so a reader that finds a seal always finds its inputs beside it. The
+    // other order leaves a window where the commitment exists and the committed-to material does not.
+    if let Some(records_path) = args.aee_records.as_ref() {
+        let lines = match crate::aee_seal::records_ndjson(&run.records) {
+            Ok(l) => l,
+            Err(e) => return warn(&format!("observation record not serializable: {e}")),
+        };
+        if let Some(parent) = records_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(e) = std::fs::write(records_path, lines) {
+            return warn(&format!("could not write {}: {e}", records_path.display()));
+        }
+    }
+
     let doc = match serde_json::to_string_pretty(&envelope) {
         Ok(d) => d,
         Err(e) => return warn(&format!("envelope not serializable: {e}")),
