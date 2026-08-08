@@ -12,6 +12,7 @@ pub struct SdkLayerCapture {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum SdkLayerError {
     #[error("sdk layer run_id must not be empty")]
     EmptyRunId,

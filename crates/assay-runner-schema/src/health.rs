@@ -139,6 +139,7 @@ pub struct ObservationHealth {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum ObservationHealthError {
     #[error("observation health schema must be {OBSERVATION_HEALTH_SCHEMA}")]
     InvalidSchema,

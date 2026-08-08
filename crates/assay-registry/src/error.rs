@@ -4,6 +4,7 @@ use std::time::Duration;
 
 /// Registry errors.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum RegistryError {
     /// Pack not found in registry.
     #[error("pack not found: {name}@{version}")]

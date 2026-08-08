@@ -17,6 +17,7 @@ pub type SetPath = Vec<String>;
 
 /// Why a record could not be set-normalized.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum SetPathError {
     /// A registry entry had no keys; a set-path must name at least one field.
     #[error("empty set-path in registry")]

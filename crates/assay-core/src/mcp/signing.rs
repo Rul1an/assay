@@ -56,6 +56,7 @@ pub struct VerifyResult {
 
 /// Verification errors with exit codes.
 #[derive(Debug, Clone, thiserror::Error)]
+#[non_exhaustive]
 pub enum VerifyError {
     #[error("tool is not signed")]
     NoSignature,

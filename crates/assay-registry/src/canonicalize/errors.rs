@@ -22,6 +22,7 @@ pub const MIN_SAFE_INTEGER: i64 = -9_007_199_254_740_992; // -2^53
 
 /// Errors specific to canonicalization.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CanonicalizeError {
     /// YAML contains anchors (forbidden).
     AnchorFound { position: String },

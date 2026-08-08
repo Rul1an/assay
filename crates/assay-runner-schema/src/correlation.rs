@@ -37,6 +37,7 @@ pub struct CorrelationReport {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum CorrelationReportError {
     #[error("correlation report schema must be {CORRELATION_REPORT_SCHEMA}")]
     InvalidSchema,

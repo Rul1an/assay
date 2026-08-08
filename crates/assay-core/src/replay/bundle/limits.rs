@@ -66,6 +66,7 @@ impl Default for ReplayLimits {
 /// Refusal raised by the bounded replay reader. Callers match the variant; the rendered
 /// message is a diagnostic, never a contract.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ReplayIngestError {
     #[error("replay bundle exceeded {kind} limit of {limit}")]
     SourceCeiling { kind: LimitKind, limit: u64 },
@@ -103,6 +104,7 @@ pub enum ReplayIngestError {
 /// it hands an attacker a channel into the operator's terminal and into every log that ingests
 /// the message, while telling the reader nothing they can act on.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ReplayContractError {
     /// Two entries normalize to the same path. Last-wins is undefined, and silently keeping one
     /// lets an archive present different bytes to a verifier than to a consumer.

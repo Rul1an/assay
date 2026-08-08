@@ -29,6 +29,7 @@ pub struct AuthzReceipt {
 
 /// Authorization errors.
 #[derive(Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum AuthzError {
     #[error("Mandate not found: {mandate_id}")]
     MandateNotFound { mandate_id: String },

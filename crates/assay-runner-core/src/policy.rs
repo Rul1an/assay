@@ -29,6 +29,7 @@ pub struct PolicyLayerCapture {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum PolicyLayerError {
     #[error("policy layer run_id must not be empty")]
     EmptyRunId,

@@ -151,6 +151,7 @@ fn create_event(seq: u64) -> EvidenceEvent {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum IntegrityError {
     BudgetExceeded,
     Other(anyhow::Error),

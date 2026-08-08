@@ -117,6 +117,7 @@ pub struct ToolCallData {
 
 /// Policy-level authorization errors (before DB).
 #[derive(Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PolicyError {
     #[error("Mandate expired: expires_at={expires_at}, now={now}")]
     Expired {
@@ -151,6 +152,7 @@ pub enum PolicyError {
 
 /// Combined authorization error.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum AuthorizeError {
     #[error("Policy error: {0}")]
     Policy(#[from] PolicyError),

@@ -54,6 +54,7 @@ impl LoadedPack {
 
 /// Pack loading error.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum PackError {
     #[error("Pack '{reference}' not found. {suggestion}")]
     NotFound {

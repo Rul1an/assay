@@ -27,6 +27,7 @@ pub struct RunnerSpikeArchive {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum RunnerSpikeArchiveError {
     #[error("run_id must not be empty")]
     EmptyRunId,

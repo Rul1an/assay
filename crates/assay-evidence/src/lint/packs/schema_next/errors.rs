@@ -1,5 +1,6 @@
 /// Pack validation error.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum PackValidationError {
     #[error("Pack '{pack}' is kind 'compliance' but missing 'disclaimer'")]
     MissingDisclaimer { pack: String },
