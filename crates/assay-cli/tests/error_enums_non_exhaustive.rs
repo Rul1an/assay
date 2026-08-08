@@ -34,20 +34,36 @@ fn workspace_root() -> PathBuf {
         .expect("workspace root")
 }
 
-/// A directory entry resolved and proven to sit inside `root`, or `None`.
+/// One path component, admitted only if it is an ordinary name.
 ///
-/// Every path below is built from a `read_dir` entry, which is untrusted input to a static
-/// analyser and is a symlink away from being untrusted in fact: a link under `crates/` pointing
-/// outside the workspace would have this test read, and report on, a file that is not ours.
-/// Canonicalising first and then requiring containment resolves `..` and follows the link before
-/// the decision is made, so the check is on the real target rather than on the spelling.
+/// Paths here start at a `read_dir` entry, which is untrusted input to a static analyser and is a
+/// symlink away from being untrusted in fact: a link under `crates/` pointing outside the workspace
+/// would have this test read, and report on, a file that is not ours.
 ///
-/// This mirrors the path-containment rule the bundle reader and `validate_baseline_key()` already
-/// apply to archive members. It is the same class of input and gets the same treatment, rather
-/// than an exemption because this one happens to be a test.
-fn contained(root: &Path, candidate: &Path) -> Option<PathBuf> {
-    let resolved = candidate.canonicalize().ok()?;
-    resolved.starts_with(root).then_some(resolved)
+/// The first fix canonicalised and then required containment under the root. That is a correct
+/// check and CodeQL still flagged the read, which is fair: it is a check applied *after* an
+/// arbitrary path exists. This admits the component instead, so a traversal cannot be spelled in
+/// the first place. `.`, `..`, separators, and anything not in the allowed set are refused, and
+/// every path below is then built from `root` plus fixed segments plus admitted names.
+///
+/// Same rule the bundle reader and `validate_baseline_key()` apply to archive members. Being a
+/// test is not a reason for an exemption.
+fn safe_component(name: &std::ffi::OsStr) -> Option<String> {
+    let s = name.to_str()?;
+    let ordinary = !s.is_empty()
+        && s != "."
+        && s != ".."
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    ordinary.then(|| s.to_string())
+}
+
+/// True when `p` resolves to something inside `root`, so a symlink cannot lead the walk out.
+///
+/// Kept alongside the component rule rather than instead of it: the allowlist stops a traversal
+/// being written, and this stops one being followed.
+fn resolves_inside(root: &Path, p: &Path) -> bool {
+    p.canonicalize().is_ok_and(|r| r.starts_with(root))
 }
 
 /// Crates that can break a downstream consumer: published, and carrying a library target.
@@ -59,15 +75,15 @@ fn crates_with_public_api(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let dir = root.join("crates");
     for entry in fs::read_dir(&dir).expect("crates/ is readable") {
-        let Some(path) = contained(root, &entry.expect("dir entry").path()) else {
+        let Some(name) = safe_component(&entry.expect("dir entry").file_name()) else {
             continue;
         };
-        let (Some(manifest), Some(_lib)) = (
-            contained(root, &path.join("Cargo.toml")),
-            contained(root, &path.join("src/lib.rs")),
-        ) else {
+        // Rebuilt from the root and an admitted name, so this path cannot express a traversal.
+        let path = dir.join(&name);
+        let manifest = path.join("Cargo.toml");
+        if !resolves_inside(root, &manifest) || !resolves_inside(root, &path.join("src/lib.rs")) {
             continue;
-        };
+        }
         let text = fs::read_to_string(&manifest).expect("manifest is readable");
         if text
             .lines()
@@ -91,9 +107,13 @@ fn rust_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
         return;
     };
     for entry in entries.flatten() {
-        let Some(p) = contained(root, &entry.path()) else {
+        let Some(name) = safe_component(&entry.file_name()) else {
             continue;
         };
+        let p = dir.join(&name);
+        if !resolves_inside(root, &p) {
+            continue;
+        }
         if p.is_dir() {
             rust_files(root, &p, out);
         } else if p.extension().is_some_and(|e| e == "rs") {
@@ -185,6 +205,26 @@ fn every_public_error_enum_is_non_exhaustive() {
          `#[non_exhaustive]` at the declaration, per the decision in #2140:\n  {}",
         offenders.join("\n  ")
     );
+}
+
+/// The component allowlist, which is now the load-bearing half of the path handling.
+#[test]
+fn the_component_rule_refuses_anything_that_could_leave_the_directory() {
+    use std::ffi::OsStr;
+    for ok in ["assay-core", "assay_evidence", "mod.rs", "a.b-c_1"] {
+        assert_eq!(
+            safe_component(OsStr::new(ok)).as_deref(),
+            Some(ok),
+            "{ok} is an ordinary name"
+        );
+    }
+    for bad in ["", ".", "..", "../etc", "a/b", "a\\b", "a b", "naïve"] {
+        assert_eq!(
+            safe_component(OsStr::new(bad)),
+            None,
+            "{bad:?} must not be admitted as a component"
+        );
+    }
 }
 
 /// The detector, against fixture text.
