@@ -297,11 +297,11 @@ keeping rather than overwriting. This ADR said the predicate author had proposed
 repairing the referencedness defect in 0.8, so the migration trigger read "0.8 is adopted when it
 exists upstream, not when it is proposed."
 
-She has since answered that plainly (in-toto/attestation#570, 2026-08-07): **pin 0.7, and do not
+He has since answered that plainly (in-toto/attestation#570, 2026-08-07): **pin 0.7, and do not
 plan for 0.8.** The repair had already landed on that branch as `c0c4da6` on 4 August — verified,
 "docs(aee): constrain every carried record, not only the referenced ones" — placed inside the 0.7
 changelog rather than behind a version bump, on the reasoning that a reject family a single edit
-empties is not something anyone should have to pin a version against. She names the ambiguity in
+empties is not something anyone should have to pin a version against. He names the ambiguity in
 his earlier sentence as his, and our reading as the one his words invited.
 
 So the trigger above is void, and planning a 0.8 migration is the thing the placement was designed

@@ -36,7 +36,7 @@ pub const PROXY_SEAL_SCOPE: &str = "tool_call:mcp_proxy_policy";
 /// after the predicate author answered on in-toto/attestation#570 (2026-08-07).
 ///
 /// This first read his earlier sentence as an offer to ship 0.7 and repair the referencedness
-/// defect in 0.8, and recorded a migration trigger accordingly. She has since said to pin 0.7 and
+/// defect in 0.8, and recorded a migration trigger accordingly. He has since said to pin 0.7 and
 /// not plan for 0.8: the repair already landed on that branch as `c0c4da6` on 4 August, inside the
 /// 0.7 changelog rather than behind a bump, so that nobody has to pin a version whose reject family
 /// one edit empties.
