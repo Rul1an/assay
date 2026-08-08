@@ -90,7 +90,7 @@ command = "assay-mcp-server"
 args = ["--policy-root", "."]
 ```
 
-It includes `cargo install assay-mcp-server --locked`, distinguishes the
+It includes `cargo install --path crates/assay-mcp-server --locked`, distinguishes the
 standalone five-tool evaluator from `assay mcp wrap`, and says the server does
 not invoke or enforce the target MCP tool call. `.gitignore` adds `mcp.json` to
 the existing `.cursor/` allowlist while preserving its Bugbot exception.
