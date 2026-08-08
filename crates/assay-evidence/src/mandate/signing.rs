@@ -27,6 +27,7 @@ use sha2::{Digest, Sha256};
 
 /// Verification errors with exit codes per SPEC-Mandate-v1 §5.5.
 #[derive(Debug, Clone, thiserror::Error)]
+#[non_exhaustive]
 pub enum VerifyError {
     #[error("mandate is not signed")]
     Unsigned,

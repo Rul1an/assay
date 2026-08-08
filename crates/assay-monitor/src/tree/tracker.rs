@@ -27,6 +27,7 @@ impl Default for TrackerConfig {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum TrackerError {
     #[error("PID {0} already tracked")]
     AlreadyTracked(u32),

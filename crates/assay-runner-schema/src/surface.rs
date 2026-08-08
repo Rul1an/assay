@@ -20,6 +20,7 @@ pub struct CapabilitySurface {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum CapabilitySurfaceError {
     #[error("capability surface schema must be {CAPABILITY_SURFACE_SCHEMA}")]
     InvalidSchema,

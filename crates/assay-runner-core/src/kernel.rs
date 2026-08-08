@@ -134,6 +134,7 @@ pub struct DropLayers {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum KernelLayerError {
     #[error("kernel layer run_id must not be empty")]
     EmptyRunId,

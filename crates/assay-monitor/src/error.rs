@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum MonitorError {
     #[error("failed to load BPF object: {0}")]
     LoadError(String),

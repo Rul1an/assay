@@ -258,6 +258,7 @@ impl PolicyValidationResult {
 
 /// Policy validation error.
 #[derive(Debug, Clone, thiserror::Error)]
+#[non_exhaustive]
 pub enum PolicyValidationError {
     #[error("mandate is not signed but require_signed is true")]
     NotSigned,

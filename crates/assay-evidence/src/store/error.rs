@@ -7,6 +7,7 @@ pub type StoreResult<T> = Result<T, StoreError>;
 
 /// Errors that can occur during bundle storage operations.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum StoreError {
     /// Bundle already exists (conditional write failed).
     /// This is not necessarily an error—it means the bundle was already uploaded.

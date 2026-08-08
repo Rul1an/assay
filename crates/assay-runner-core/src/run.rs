@@ -20,6 +20,7 @@ pub struct RunSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum RunSpecError {
     #[error("command must not be empty")]
     EmptyCommand,
@@ -36,6 +37,7 @@ pub enum RunSpecError {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum RunExecutionError {
     #[error(transparent)]
     Spec(#[from] RunSpecError),
