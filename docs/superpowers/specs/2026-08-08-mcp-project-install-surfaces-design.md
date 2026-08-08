@@ -40,8 +40,10 @@ outside this slice.
 
 The explicit policy root is required. The binary default is `policies/`, which
 does not exist in this repository and is not a safe assumption for downstream
-projects. `.` exists when the client starts the project-scoped server and makes
-tool-supplied policy paths relative to the project root.
+projects. `.` always names the server process's current directory. Treating it
+as the project root assumes the host starts a project-scoped server there; if a
+host chooses another working directory, tool-supplied policy paths resolve
+against that directory instead.
 
 ## Manifest Shape
 
