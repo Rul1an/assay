@@ -282,8 +282,28 @@ impl EvidenceEvent {
 // -- Strongly Typed Payload Helpers --
 
 /// Typed payload variants (for convenience, not enforced by contract)
+///
+/// `#[non_exhaustive]` so that admitting an event kind is a minor release rather than a major one.
+/// Without it `cargo semver-checks` reports `enum_variant_added` against the published baseline,
+/// and because the workspace shares one version in the root `Cargo.toml`, that major is paid by
+/// every published crate. This is the enum of an evidence format designed to grow: ADR-047 admits
+/// one kind and #2124 motivates more, so the shape that charges a major per kind is the wrong one
+/// to keep. Marking it costs one major, once (#2126).
+///
+/// **Visibility decision, recorded because #2126 asks for it either way: this type stays `pub`.**
+/// The tempting alternative is `pub(crate)`, which would remove this class of gate outright rather
+/// than widen it, and it looked cheap because there are no production consumers: the raw wire is
+/// `serde_json::Value` on `EvidenceEvent::payload`, and `lint/`, `diff/` and
+/// `trust_basis/classifiers.rs` all read that value rather than this view. What that argument
+/// misses is where the consumers actually are. `tests/session_finding_bundle_roundtrip.rs` and
+/// `tests/coding_agent_evidence_pack.rs` live in `tests/`, so they link against this crate from
+/// outside and are external consumers in exactly the sense `pub(crate)` excludes. Narrowing the
+/// type would either break them or push them into the crate as unit tests, where they would stop
+/// exercising the public surface a reader of a bundle actually meets. Removing the gate by
+/// removing the only place the gate is tried is not a simplification.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "payload")]
+#[non_exhaustive]
 pub enum Payload {
     #[serde(rename = "assay.coding_agent.evidence_pack.v0")]
     CodingAgentEvidencePack(crate::coding_agent::CodingAgentEvidencePayload),
@@ -301,6 +321,12 @@ pub enum Payload {
     ProfileFinished(PayloadProfileFinished),
     #[serde(rename = "assay.policy.suggested")]
     PolicySuggested(PayloadPolicySuggested),
+    /// A finding about the session rather than about one call (ADR-047).
+    ///
+    /// Deferred out of #2122 because on an exhaustive enum this single variant cost a major
+    /// version; it lands here with `#[non_exhaustive]` so that the next one does not.
+    #[serde(rename = "assay.session.finding")]
+    SessionFinding(PayloadSessionFinding),
     Unknown(serde_json::Value),
 }
 
