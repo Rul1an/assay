@@ -100,6 +100,23 @@ documentation exist, then prove the completed behavior:
    production tool names.
 6. Assert the process exits successfully after stdin closes.
 
+After the green run, three temporary mutations must each make the contract test
+fail for the named assertion before the original content is restored:
+
+| Mutation | Required failure |
+|---|---|
+| Change `args` in one JSON manifest only | `Claude and Cursor entries drifted` |
+| Rename one tool emitted by `list_tools()` | `release tool surface changed` |
+| Remove `--policy-root` from the Codex TOML block | `Codex guide does not carry the manifest invocation` |
+
+This mutation check was run against committed baseline
+`fdcf2c878aa0c115772064591f2faf233787c3a2` in worktree
+`/Users/roelschuurkes/.config/superpowers/worktrees/assay/2152-mcp-manifest`,
+using the test binary built by Cargo with
+`CARGO_TARGET_DIR=/tmp/assay-target-2152`. All three mutations were killed by
+their required assertion, then the original tree was restored and the focused
+test passed again.
+
 The test uses `CARGO_BIN_EXE_assay-mcp-server`, so it exercises the binary built
 for the same test run rather than an unrelated executable on the developer's
 `PATH`.

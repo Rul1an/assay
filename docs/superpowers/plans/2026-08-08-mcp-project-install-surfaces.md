@@ -109,10 +109,23 @@ git diff --check
 
 Expected: all pass with no warnings.
 
-- [ ] **Step 6: Commit the implementation**
+- [x] **Step 6: Kill the three targeted mutations**
 
-Stage only the six touched implementation/test/document paths plus this plan
-and the reviewed design correction, then commit with:
+Against committed baseline `fdcf2c878aa0c115772064591f2faf233787c3a2`,
+temporarily make each change below, run the focused test, verify the named
+failure, and restore the original content before continuing:
+
+1. Change one manifest's `args`: `Claude and Cursor entries drifted`.
+2. Rename one `list_tools()` tool: `release tool surface changed`.
+3. Remove `--policy-root` from the Codex block:
+   `Codex guide does not carry the manifest invocation`.
+
+After restoring all three mutations, rerun the focused test and require green.
+
+- [x] **Step 7: Commit the implementation**
+
+Stage only the seven paths named under **Files** above, including this plan and
+the reviewed design correction, then commit with:
 
 ```bash
 git commit -m "feat(mcp): publish project install manifests"
