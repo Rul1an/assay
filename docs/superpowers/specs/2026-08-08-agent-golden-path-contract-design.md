@@ -128,6 +128,12 @@ or variable-derived drivers fail because only executed `expected_outcome` calls
 count; comments and dead code cannot satisfy the gate. The generator therefore
 does not parse or otherwise depend on Rust test source.
 
+The two integration-test targets are workspace-only. They read the root-level
+generated contract and include one root-level shared test helper, so both are
+explicitly excluded from their crates.io package tarballs. Repository CI still
+builds and runs them; downstream `cargo test` never receives a target whose
+source dependencies are outside the package.
+
 ## Non-Goals
 
 - No new command, flag, output format, or production behavior.

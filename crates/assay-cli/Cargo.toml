@@ -17,7 +17,11 @@ categories = ["command-line-utilities", "development-tools::testing"]
 # could never run from a tarball anyway: it shells out to `cargo build -p assay-mcp-server`, which
 # needs the workspace. `cargo publish`'s own verification builds lib and bins only, so this was not
 # a release blocker either way — it is the downstream `cargo test` that this protects.
-exclude = ["tests/e2e_mcp_wrap_assert_cmd.rs"]
+exclude = [
+    "tests/e2e_mcp_wrap_assert_cmd.rs",
+    # Workspace-only contract: reads generated docs and shared test support outside this package.
+    "tests/agent_golden_path_contract.rs",
+]
 
 [lints]
 workspace = true

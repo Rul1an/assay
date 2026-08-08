@@ -28,6 +28,8 @@
 **Files:**
 - Create: `crates/assay-cli/tests/agent_golden_path_contract.rs`
 - Create: `tests/support/agent_golden_path.rs`
+- Modify: `crates/assay-cli/Cargo.toml`
+- Modify: `crates/assay-mcp-server/Cargo.toml`
 - Create: `docs/generated/agent-golden-path.json`
 - Create: `scripts/docs/generate-agent-golden-path.py`
 - Create: `docs/guides/agent-golden-path.md`
@@ -175,6 +177,8 @@ After restoration, rerun both focused tests and require green.
 git add -A \
   crates/assay-cli/tests/agent_golden_path_contract.rs \
   crates/assay-mcp-server/tests/agent_golden_path_contract.rs \
+  crates/assay-cli/Cargo.toml \
+  crates/assay-mcp-server/Cargo.toml \
   tests/support/agent_golden_path.rs \
   docs/generated/agent-golden-path.json \
   docs/guides/agent-golden-path.md \
