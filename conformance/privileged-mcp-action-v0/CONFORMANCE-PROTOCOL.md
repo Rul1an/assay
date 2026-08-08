@@ -62,6 +62,72 @@ The implementation report self-declares one mode:
 These are provenance descriptions, not scores. The scorer records the selected label but cannot
 verify it.
 
+## Authorship method
+
+A second provenance axis, orthogonal to the mode above. The mode says what was read and when; this
+says what wrote it. Both are self-declared, neither is a score, and the scorer cannot verify either.
+
+The labels are not ours. They are the trailers open source projects already converged on, so a
+contributor does not learn a private vocabulary to report here:
+
+| Label | Meaning |
+|---|---|
+| `Authored-By: human` | No generative assistance in the implementation. |
+| `Assisted-By: <system> <version>` | A human directed the work and used a generative system for part of it. |
+| `Generated-By: <system> <version>` | The implementation was produced end to end by a generative system from the profile text. |
+
+`Assisted-By:` and `Generated-By:` sit at two points on an autonomy spectrum; Apache originated the
+generated form and OpenInfra added the assisted one and made disclosure mandatory. Where assistance
+was used, the report states the system and version, which parts of the implementation it produced,
+and how the output was checked. That is the shape IEEE asks for, plus the verification note that
+recent policy guidance adds, and it is the part a reader actually needs.
+
+### Why this axis exists here
+
+Not for attribution. It changes what a matching run licenses, and the reason is measured rather than
+assumed.
+
+Ron, Baudry and Monperrus re-ran the Knight-Leveson experiment with contemporary coding agents
+(*N-Version Programming with Coding Agents*, arXiv:2606.20158, June 2026): 48 agent-generated
+implementations of one specification, one million randomized inputs. Agreement was not independent.
+The campaign produced **429 coincident-failure cases where the independence model predicts 115.36**,
+and the concentration is the part that matters for a conformance corpus:
+
+> Failures overwhelmingly concentrate in LICs 9 and 14, indicating that the failures are driven by a
+> small number of difficult or ambiguous parts of the specification.
+
+Their diagnosis is that specification ambiguity and underspecification are the primary drivers of
+shared failure. Those are exactly the regions a corpus exists to probe, so agreement between two
+generatively-written implementations is weakest evidence precisely where a vector carries the most
+information.
+
+The same paper is why this is a disclosure rather than a restriction. Diversity from coding agents
+still helped: majority voting over three-version units dropped mean failures from 387.44 to 130.99,
+and 11,844 units showed no observed failure. Independence is a degree to be measured, not a property
+to be assumed or a gate to be passed.
+
+### How to read a result under it
+
+Agreement is cheapest where the profile is unambiguous, so an aggregate score is the least
+informative summary available. Two consequences:
+
+- **Divergence is the informative event.** A candidate that disagrees on a vector has found either
+  its own defect or an ambiguity in the profile, and both are worth more than another agreeing run.
+  Report per vector; the scorer already does.
+- **The interpretation decisions should be declared in advance, and are not yet.** Where the profile
+  required a reading rather than a transcription, naming those points before a candidate runs would
+  make a candidate's answers there the measured signal instead of an aggregate that hides them. No
+  such list exists for this profile today. Stating the obligation here rather than implying the
+  property: until it is written, a divergence has to be diagnosed after the fact, which is weaker
+  and slower but not unusable.
+
+### The symmetric obligation
+
+This applies to the profile authors before it applies to anyone else. Where an Assay-side
+implementation or checker was written with generative assistance, that is disclosed in the same
+terms, in the same place as its materials-consulted record. A project asking third parties for a
+disclosure it does not make itself is asking for deference rather than evidence.
+
 ## Scoring
 
 Run from an Assay source checkout at the pinned activation-kit revision:
@@ -145,3 +211,9 @@ pinning when updating the action used by a long-lived workflow.
 A matching run demonstrates agreement on the pinned 14-case corpus. It does not establish
 implementation independence, security, compliance, complete profile determinacy, or any provider
 outcome. Those claims require separate evidence.
+
+Nor does it establish independence of failure. Where either implementation was generatively written,
+a match is bounded further by the result cited under Authorship method: agreement is expected to be
+correlated on the profile's ambiguous regions, which is where a corpus carries its information. A
+report may state agreement; it may not state that agreement was reached independently unless the
+authorship methods make that a claim someone can check.
