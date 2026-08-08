@@ -242,13 +242,13 @@ fn sandbox_degraded_payload_serde_shape_is_stable() {
 /// deferred to the next major together with `#[non_exhaustive]`, so the break is paid once for
 /// every kind that follows rather than once per kind.
 ///
-/// The control is what makes this worth pinning. `Unknown(serde_json::Value)` reads like a
-/// catch-all and is not one: adjacently tagged with no `#[serde(other)]`, it matches the literal
-/// tag `"Unknown"` and nothing else, so an unregistered kind is a hard deserialisation error rather
-/// than an untyped landing. That is why the wire stays raw `Value` and why the deferral above costs
-/// consumers nothing today.
+/// The control is what makes this worth pinning: **there is no fallback member at all**, so an
+/// unregistered kind is a deserialisation error and not an untyped landing. `Unknown(Value)` used
+/// to sit here reading like a catch-all while matching only the literal tag `"Unknown"`, which no
+/// producer emits; #2123 removed it rather than renaming it, because the thing the name described
+/// should not exist. Forward compatibility is `EvidenceEvent::payload` staying a raw `Value`.
 #[test]
-fn a_session_finding_parses_as_a_typed_record_and_unknown_is_not_a_fallback() {
+fn a_session_finding_parses_as_a_typed_record_and_there_is_no_fallback_member() {
     let payload = serde_json::json!({
         "rule_id": "after:read_credentials->http_post",
         "kind": "after",
@@ -275,12 +275,21 @@ fn a_session_finding_parses_as_a_typed_record_and_unknown_is_not_a_fallback() {
         "expected a variant error, got: {err}"
     );
 
+    // The old shape's own tag is now just another unregistered kind. This is the assertion that
+    // fails if a fallback member is ever reintroduced under any name: nothing may absorb a tag the
+    // enum does not list.
     let literal = serde_json::json!({"type": "Unknown", "payload": {"anything": 1}});
+    let err = serde_json::from_value::<Payload>(literal)
+        .expect_err("no member absorbs an unlisted tag, including the one this used to have");
     assert!(
-        matches!(
-            serde_json::from_value::<Payload>(literal).expect("the literal tag parses"),
-            Payload::Unknown(_)
-        ),
-        "Unknown matches its own name and nothing else"
+        err.to_string().contains("unknown variant"),
+        "expected a variant error, got: {err}"
     );
+
+    // And the layer that does carry forward compatibility still does: the raw wire keeps the bytes
+    // of a kind this build has never heard of, which is why removing the member costs nothing.
+    let raw: serde_json::Value =
+        serde_json::from_str(r#"{"type":"assay.from.the.future","payload":{"kept":[1,2]}}"#)
+            .expect("the wire is untyped and parses regardless");
+    assert_eq!(raw["payload"]["kept"], serde_json::json!([1, 2]));
 }

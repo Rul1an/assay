@@ -25,7 +25,7 @@ pub(crate) struct PipelineInput {
     pub judge: JudgeArgs,
     pub replay_strict: bool,
     pub deny_deprecations: bool,
-    pub deny_ineffective_assertions: bool,
+    pub allow_ineffective_assertions: bool,
     pub redact_prompts: bool,
     pub exit_codes: ExitCodeVersion,
     pub require_config_exists: bool,
@@ -53,7 +53,7 @@ impl PipelineInput {
             judge: args.judge.clone(),
             replay_strict: args.replay_strict,
             deny_deprecations: args.deny_deprecations,
-            deny_ineffective_assertions: args.deny_ineffective_assertions,
+            allow_ineffective_assertions: args.allow_ineffective_assertions,
             redact_prompts: args.redact_prompts,
             exit_codes: args.exit_codes,
             require_config_exists: false,
@@ -81,7 +81,7 @@ impl PipelineInput {
             judge: args.judge.clone(),
             replay_strict: args.replay_strict,
             deny_deprecations: args.deny_deprecations,
-            deny_ineffective_assertions: args.deny_ineffective_assertions,
+            allow_ineffective_assertions: args.allow_ineffective_assertions,
             redact_prompts: args.redact_prompts,
             exit_codes: args.exit_codes,
             require_config_exists: true,
@@ -139,7 +139,7 @@ pub(crate) async fn execute_pipeline(
             assay_core::config::LoadOptions {
                 legacy_mode,
                 strict_unknown_fields: input.deny_deprecations,
-                deny_ineffective_assertions: input.deny_ineffective_assertions,
+                allow_ineffective_assertions: input.allow_ineffective_assertions,
             },
         ) {
             Ok(c) => {

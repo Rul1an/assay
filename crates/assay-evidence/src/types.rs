@@ -301,6 +301,21 @@ impl EvidenceEvent {
 /// type would either break them or push them into the crate as unit tests, where they would stop
 /// exercising the public surface a reader of a bundle actually meets. Removing the gate by
 /// removing the only place the gate is tried is not a simplification.
+///
+/// **There is no fallback member, and an unregistered `type` is a deserialisation error.** That is
+/// the contract, stated here because the previous shape stated the opposite by accident: an
+/// `Unknown(Value)` variant read like a catch-all while being adjacently tagged with no
+/// `#[serde(other)]`, so it matched the literal tag `"Unknown"`, which no producer emits, and
+/// every other unregistered kind still failed to parse. It promised forward compatibility the type
+/// did not provide, so it was removed rather than renamed (#2123).
+///
+/// Forward compatibility lives one layer down, where it already works. `EvidenceEvent::payload` is
+/// a raw `serde_json::Value`, so a consumer meeting a newer producer keeps the bytes and can skip
+/// what it does not recognise. That is the same split protocol buffers makes, where unknown data is
+/// preserved on the wire rather than given a named member, and `UNSPECIFIED` answers a different
+/// question: the default of a scalar field, not the identity of a message. Naming a member for
+/// "everything else" also implies the set is otherwise closed, which `#[non_exhaustive]` above
+/// already says structurally and more accurately.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "payload")]
 #[non_exhaustive]
@@ -327,7 +342,6 @@ pub enum Payload {
     /// version; it lands here with `#[non_exhaustive]` so that the next one does not.
     #[serde(rename = "assay.session.finding")]
     SessionFinding(PayloadSessionFinding),
-    Unknown(serde_json::Value),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

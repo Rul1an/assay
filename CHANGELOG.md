@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Breaking
+- **An assertion that cannot fail is now refused at load.** `assay run` and `assay ci` stop before
+  execution when a config carries an assertion no trace could fail, such as
+  `trace_must_call_tool` with `min_calls: 0` or `trace_must_not_call_tool` with an empty tool name.
+  The escape hatch is `--allow-ineffective-assertions`, and the refusal names it, along with the
+  test, the assertion index and the responsible field. Diagnostics stay value-free and never echo
+  suite content.
+
+  This is the last step of the route #1949 set out: `assay validate` has reported these as a
+  warning since #1983, `--deny-ineffective-assertions` made the refusal available as an opt-in, and
+  a major is where a config-breaking default belongs. The opt-in flag is replaced rather than kept
+  alongside its inverse, so there is one name for the axis.
+
+  Library callers are affected too, and by construction: `LoadOptions` now carries
+  `allow_ineffective_assertions` (default `false`), so `load_config` and every
+  `..Default::default()` acquire the refusal. A caller that needs the old behaviour asks for it
+  explicitly with `allow_ineffective_assertions: true`.
+
+  **Migration:** run `assay validate` first. It reports the same set, using the same code, so it
+  tells you exactly what will be refused before you upgrade.
+- `Payload::Unknown` is removed. It read like a catch-all while matching only the literal tag
+  `"Unknown"`, which no producer emits, so it promised forward compatibility the type did not
+  provide (#2123). Unrecognised kinds were already a deserialisation error and still are; forward
+  compatibility lives on the wire, where `EvidenceEvent::payload` stays a raw `serde_json::Value`.
+- `assay_evidence::types::Payload` is `#[non_exhaustive]` and carries `SessionFinding`, so admitting
+  a future event kind is a minor rather than a major (#2126).
+- The 27 public error enums are `#[non_exhaustive]`, so a new failure mode is a minor (#2140).
+
 ## [4.0.0] - 2026-08-06
 
 The first major since the 3.x line, for one field. Everything else here is
