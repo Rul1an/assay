@@ -3,6 +3,18 @@ use super::run_output::{export_baseline, summary_from_outcome, write_run_json_mi
 use crate::exit_codes::{ExitCodeVersion, ReasonCode, RunOutcome};
 use std::path::{Path, PathBuf};
 
+/// Write the early-exit artifacts, and put the diagnosis on stdout when the caller asked for
+/// machine-readable output.
+///
+/// `json_stdout` exists because `--format json` documents "machine-readable report on stdout" and
+/// the failure path wrote nothing there: the diagnosis went to `summary.json` and to a
+/// human-formatted block on stderr. A caller that captures stdout, which is what a non-interactive
+/// consumer has along with the exit code, saw an empty stream from a run that had in fact produced
+/// a complete answer including a `next_step` (#2150).
+///
+/// The object emitted is the same `Summary` that goes to disk rather than a second shape built for
+/// the occasion. Two renderings of one diagnosis is the drift this repository keeps paying for
+/// elsewhere, and the artifact is the one consumers already depend on.
 pub(crate) fn write_error_artifacts(
     reason: ReasonCode,
     message: String,
@@ -10,6 +22,7 @@ pub(crate) fn write_error_artifacts(
     version: ExitCodeVersion,
     verify_enabled: bool,
     run_json_path: &Path,
+    json_stdout: bool,
 ) -> anyhow::Result<i32> {
     let mut o = RunOutcome::from_reason(reason, Some(message), context);
     o.exit_code = reason.exit_code_for(version);
@@ -24,6 +37,14 @@ pub(crate) fn write_error_artifacts(
     let summary = summary_from_outcome(&o, verify_enabled).with_seeds(None, None);
     if let Err(e) = assay_core::report::summary::write_summary(&summary, &summary_path) {
         eprintln!("WARNING: failed to write summary.json: {}", e);
+    }
+    if json_stdout {
+        match serde_json::to_string_pretty(&summary) {
+            Ok(rendered) => println!("{rendered}"),
+            // A failure to render is reported and does not change the exit code: the code is the
+            // classification of the run, not of our ability to describe it.
+            Err(e) => eprintln!("WARNING: failed to render summary for stdout: {e}"),
+        }
     }
     Ok(o.exit_code)
 }

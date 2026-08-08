@@ -15,7 +15,14 @@ pub(crate) async fn run(args: RunArgs, legacy_mode: bool) -> anyhow::Result<i32>
     let input = PipelineInput::from_run(&args);
     let execution = match execute_pipeline(&input, legacy_mode).await {
         Ok(ok) => ok,
-        Err(e) => return e.into_exit_code(version, !args.no_verify, &run_json_path),
+        Err(e) => {
+            return e.into_exit_code(
+                version,
+                !args.no_verify,
+                &run_json_path,
+                matches!(args.format, super::super::args::OutputFormat::Json),
+            )
+        }
     };
 
     let cfg = execution.cfg;
