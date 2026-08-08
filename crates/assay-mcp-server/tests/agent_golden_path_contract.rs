@@ -4,6 +4,7 @@ mod jsonrpc_conn;
 
 use jsonrpc_conn::Conn;
 use serde_json::Value;
+use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
@@ -55,6 +56,7 @@ fn expected_outcome(step_id: &str, outcome_name: &str) -> Value {
         .unwrap_or_else(|| panic!("contract outcome {step_id}/{outcome_name} is missing"))
         .clone();
     outcome["command"] = step["command"].clone();
+    outcome["binary"] = step["binary"].clone();
     outcome
 }
 
@@ -80,11 +82,33 @@ fn assert_gap(expected: &Value, issue: u64) {
     assert_eq!(expected["gap_issue"].as_u64(), Some(issue));
 }
 
-fn assert_command(expected: &Value, command: &str) {
-    assert_eq!(
-        expected["command"], command,
-        "the driven invocation drifted from the machine contract"
-    );
+fn contract_argv(expected: &Value, replacements: &[(&str, &str)]) -> Vec<String> {
+    assert_eq!(expected["binary"], "assay-mcp-server");
+    let argv = expected["argv"]
+        .as_array()
+        .expect("contract outcome argv array");
+    for (placeholder, _) in replacements {
+        assert!(
+            argv.iter().any(|argument| argument == *placeholder),
+            "replacement {placeholder:?} is not present in contract argv"
+        );
+    }
+    argv.iter()
+        .map(|argument| {
+            let argument = argument.as_str().expect("contract argv string");
+            if argument.starts_with('<') && argument.ends_with('>') {
+                replacements
+                    .iter()
+                    .find_map(|(placeholder, value)| (*placeholder == argument).then_some(*value))
+                    .unwrap_or_else(|| {
+                        panic!("contract argv placeholder {argument:?} is unresolved")
+                    })
+                    .to_string()
+            } else {
+                argument.to_string()
+            }
+        })
+        .collect()
 }
 
 fn clean_server_command() -> Command {
@@ -101,7 +125,7 @@ fn clean_server_command() -> Command {
     command
 }
 
-fn run_server(cwd: &Path, args: &[&str], stdin: &[u8]) -> Output {
+fn run_server<S: AsRef<OsStr>>(cwd: &Path, args: &[S], stdin: &[u8]) -> Output {
     let mut command = clean_server_command();
     command
         .current_dir(cwd)
@@ -187,22 +211,12 @@ fn required_python() -> &'static str {
 fn enforcing_proxy_denial_is_structured_but_startup_failure_is_not() {
     let example = workspace_root().join("examples/privileged-action-gate");
     let python = required_python();
+    let denied_expected = expected_outcome("protected-action", "policy-denied");
+    let denied_argv = contract_argv(&denied_expected, &[("<python>", python)]);
     let mut command = clean_server_command();
     let child = command
         .current_dir(&example)
-        .args([
-            "proxy-enforce",
-            "--upstream-command",
-            python,
-            "--upstream-arg",
-            "-u",
-            "--upstream-arg",
-            "mock_github_mcp.py",
-            "--enforce-policy",
-            "policies/no-allowance.yaml",
-            "--declared-mcp-manifest",
-            "baseline-approved.json",
-        ])
+        .args(&denied_argv)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -229,8 +243,6 @@ fn enforcing_proxy_denial_is_structured_but_startup_failure_is_not() {
         }),
         9,
     );
-    let denied_expected = expected_outcome("protected-action", "policy-denied");
-    assert_command(&denied_expected, "assay-mcp-server proxy-enforce <args>");
     assert_eq!(denied_expected["stdout"]["document"], "jsonrpc-2.0");
     assert_eq!(denied_expected["exit_code"], 0);
     assert_eq!(
@@ -245,20 +257,9 @@ fn enforcing_proxy_denial_is_structured_but_startup_failure_is_not() {
         denied_expected["exit_code"].as_i64()
     );
 
-    let startup_failure = run_server(
-        &example,
-        &[
-            "proxy-enforce",
-            "--upstream-command",
-            python,
-            "--enforce-policy",
-            "missing.yaml",
-            "--declared-mcp-manifest",
-            "missing.json",
-        ],
-        b"",
-    );
     let startup_expected = expected_outcome("protected-action", "startup-failure");
+    let startup_argv = contract_argv(&startup_expected, &[("<python>", python)]);
+    let startup_failure = run_server(&example, &startup_argv, b"");
     assert_exit(&startup_failure, &startup_expected, "proxy startup failure");
     assert!(startup_failure.stdout.is_empty());
     assert_gap(&startup_expected, 2163);
@@ -279,16 +280,9 @@ fn sarif_projection_currently_turns_malformed_input_into_clean_output() {
         "drift_state": "not_evaluated"
     });
     let valid_input = format!("{deny}\n");
-    let success = run_server(
-        dir.path(),
-        &["enforcement-sarif", "--input", "-", "--output", "-"],
-        valid_input.as_bytes(),
-    );
     let expected_success = expected_outcome("sarif-projection", "valid");
-    assert_command(
-        &expected_success,
-        "assay-mcp-server enforcement-sarif --input <decisions.ndjson> --output -",
-    );
+    let success_argv = contract_argv(&expected_success, &[]);
+    let success = run_server(dir.path(), &success_argv, valid_input.as_bytes());
     assert_exit(&success, &expected_success, "SARIF projection success");
     let success_json: Value = serde_json::from_slice(&success.stdout).expect("valid SARIF stdout");
     assert_eq!(
@@ -300,12 +294,9 @@ fn sarif_projection_currently_turns_malformed_input_into_clean_output() {
         1
     );
 
-    let malformed = run_server(
-        dir.path(),
-        &["enforcement-sarif", "--input", "-", "--output", "-"],
-        b"not-json\n",
-    );
     let expected_malformed = expected_outcome("sarif-projection", "malformed");
+    let malformed_argv = contract_argv(&expected_malformed, &[]);
+    let malformed = run_server(dir.path(), &malformed_argv, b"not-json\n");
     assert_exit(&malformed, &expected_malformed, "SARIF malformed input");
     let malformed_json: Value =
         serde_json::from_slice(&malformed.stdout).expect("malformed-input SARIF stdout");

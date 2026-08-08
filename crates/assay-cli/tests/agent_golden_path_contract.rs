@@ -1,6 +1,7 @@
 //! The #1975 journey as observed by a caller that reads only stdout and the exit status.
 
 use serde_json::Value;
+use std::ffi::OsStr;
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -47,6 +48,7 @@ fn expected_outcome(step_id: &str, outcome_name: &str) -> Value {
         .unwrap_or_else(|| panic!("contract outcome {step_id}/{outcome_name} is missing"))
         .clone();
     outcome["command"] = step["command"].clone();
+    outcome["binary"] = step["binary"].clone();
     outcome
 }
 
@@ -76,11 +78,32 @@ fn assert_gap(expected: &Value, issue: u64) {
     );
 }
 
-fn assert_command(expected: &Value, command: &str) {
-    assert_eq!(
-        expected["command"], command,
-        "the driven invocation drifted from the machine contract"
-    );
+fn contract_argv(expected: &Value, replacements: &[(&str, &str)]) -> Vec<String> {
+    let argv = expected["argv"]
+        .as_array()
+        .expect("contract outcome argv array");
+    for (placeholder, _) in replacements {
+        assert!(
+            argv.iter().any(|argument| argument == *placeholder),
+            "replacement {placeholder:?} is not present in contract argv"
+        );
+    }
+    argv.iter()
+        .map(|argument| {
+            let argument = argument.as_str().expect("contract argv string");
+            if argument.starts_with('<') && argument.ends_with('>') {
+                replacements
+                    .iter()
+                    .find_map(|(placeholder, value)| (*placeholder == argument).then_some(*value))
+                    .unwrap_or_else(|| {
+                        panic!("contract argv placeholder {argument:?} is unresolved")
+                    })
+                    .to_string()
+            } else {
+                argument.to_string()
+            }
+        })
+        .collect()
 }
 
 fn assert_no_diagnosis(expected: &Value, document: &Value) {
@@ -90,7 +113,7 @@ fn assert_no_diagnosis(expected: &Value, document: &Value) {
     assert!(document.get("next_step").is_none());
 }
 
-fn assay(cwd: &Path, args: &[&str]) -> Output {
+fn assay<S: AsRef<OsStr>>(cwd: &Path, args: &[S]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_assay"));
     for (name, _) in std::env::vars_os() {
         if name
@@ -107,6 +130,12 @@ fn assay(cwd: &Path, args: &[&str]) -> Output {
         .args(args)
         .output()
         .expect("run assay binary")
+}
+
+fn assay_contract(cwd: &Path, expected: &Value, replacements: &[(&str, &str)]) -> Output {
+    assert_eq!(expected["binary"], "assay");
+    let argv = contract_argv(expected, replacements);
+    assay(cwd, &argv)
 }
 
 fn stdout_json(output: &Output, context: &str) -> Value {
@@ -149,9 +178,8 @@ fn corpus_vector(vector: CorpusVector) -> std::path::PathBuf {
 #[test]
 fn installed_binary_reports_a_version_on_stdout() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let output = assay(dir.path(), &["version"]);
     let expected = expected_outcome("install-check", "success");
-    assert_command(&expected, "assay version");
+    let output = assay_contract(dir.path(), &expected, &[]);
     assert_exit(&output, &expected, "version");
     let version = String::from_utf8(output.stdout).expect("version stdout is UTF-8");
     let components: Vec<_> = version.trim().split('.').collect();
@@ -168,25 +196,19 @@ fn installed_binary_reports_a_version_on_stdout() {
 #[test]
 fn doctor_json_exposes_its_current_success_and_failure_surface() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let success = assay(dir.path(), &["doctor", "--format", "json"]);
     let expected_success = expected_outcome("preflight", "success");
-    assert_command(&expected_success, "assay doctor --format json");
+    let success = assay_contract(dir.path(), &expected_success, &[]);
     assert_exit(&success, &expected_success, "doctor success");
     let success_json = stdout_json(&success, "doctor success");
     assert_document(&success_json, &expected_success, "doctor success");
 
     let missing = dir.path().join("missing.yaml");
-    let failure = assay(
-        dir.path(),
-        &[
-            "doctor",
-            "--format",
-            "json",
-            "--config",
-            missing.to_str().expect("UTF-8 path"),
-        ],
-    );
     let expected_failure = expected_outcome("preflight", "invalid-config");
+    let failure = assay_contract(
+        dir.path(),
+        &expected_failure,
+        &[("<config>", missing.to_str().expect("UTF-8 path"))],
+    );
     assert_exit(&failure, &expected_failure, "doctor failure");
     let failure_json = stdout_json(&failure, "doctor failure");
     assert_document(&failure_json, &expected_failure, "doctor failure");
@@ -201,12 +223,8 @@ fn doctor_json_exposes_its_current_success_and_failure_surface() {
 #[test]
 fn init_stdout_records_success_but_not_the_failure_diagnosis() {
     let success_dir = tempfile::tempdir().expect("success tempdir");
-    let success = assay(
-        success_dir.path(),
-        &["init", "--preset", "dev", "--hello-trace"],
-    );
     let expected_success = expected_outcome("starter-files", "success");
-    assert_command(&expected_success, "assay init --preset dev --hello-trace");
+    let success = assay_contract(success_dir.path(), &expected_success, &[]);
     assert_exit(&success, &expected_success, "init success");
     let success_stdout = String::from_utf8(success.stdout).expect("init stdout is UTF-8");
     assert!(success_stdout.contains("Next: assay validate"));
@@ -215,8 +233,8 @@ fn init_stdout_records_success_but_not_the_failure_diagnosis() {
     assert!(success_dir.path().join("traces/hello.jsonl").is_file());
 
     let failure_dir = tempfile::tempdir().expect("failure tempdir");
-    let failure = assay(failure_dir.path(), &["init", "--preset", "not-a-preset"]);
     let expected_failure = expected_outcome("starter-files", "unknown-preset");
+    let failure = assay_contract(failure_dir.path(), &expected_failure, &[]);
     assert_exit(&failure, &expected_failure, "init failure");
     let failure_stdout = String::from_utf8(failure.stdout).expect("init stdout is UTF-8");
     assert!(
@@ -233,35 +251,23 @@ fn policy_validation_stdout_is_currently_empty_on_both_paths() {
     assert_eq!(init.status.code(), Some(0));
 
     let valid_policy = dir.path().join("policy.yaml");
-    let success = assay(
-        dir.path(),
-        &[
-            "policy",
-            "validate",
-            "--input",
-            valid_policy.to_str().expect("UTF-8 path"),
-        ],
-    );
     let expected_success = expected_outcome("policy-validation", "valid");
-    assert_command(
+    let success = assay_contract(
+        dir.path(),
         &expected_success,
-        "assay policy validate --input policy.yaml",
+        &[("<policy>", valid_policy.to_str().expect("UTF-8 path"))],
     );
     assert_exit(&success, &expected_success, "policy validation success");
     assert!(success.stdout.is_empty());
 
     let malformed_policy = dir.path().join("malformed.yaml");
     std::fs::write(&malformed_policy, "version: [\n").expect("write malformed policy");
-    let failure = assay(
-        dir.path(),
-        &[
-            "policy",
-            "validate",
-            "--input",
-            malformed_policy.to_str().expect("UTF-8 path"),
-        ],
-    );
     let expected_failure = expected_outcome("policy-validation", "malformed");
+    let failure = assay_contract(
+        dir.path(),
+        &expected_failure,
+        &[("<policy>", malformed_policy.to_str().expect("UTF-8 path"))],
+    );
     assert_exit(&failure, &expected_failure, "policy validation failure");
     assert!(failure.stdout.is_empty());
     assert_gap(&expected_failure, 2162);
@@ -275,40 +281,20 @@ fn completed_test_failure_is_a_run_report_not_a_diagnosis() {
         &["init", "--preset", "dev", "--hello-trace"],
     );
     assert_eq!(init.status.code(), Some(0));
-    let success = assay(
-        success_dir.path(),
-        &[
-            "run",
-            "--config",
-            "eval.yaml",
-            "--trace-file",
-            "traces/hello.jsonl",
-            "--format",
-            "json",
-        ],
-    );
     let expected_success = expected_outcome("evaluation-result", "success");
-    assert_command(
-        &expected_success,
-        "assay run --config eval.yaml --format json",
-    );
+    let success = assay_contract(success_dir.path(), &expected_success, &[]);
     assert_exit(&success, &expected_success, "completed run success");
     let success_json = stdout_json(&success, "completed run success");
     assert_document(&success_json, &expected_success, "completed run success");
 
     let failure_dir = tempfile::tempdir().expect("failure tempdir");
     let failing_suite = workspace_root().join("tests/fixtures/contract/fail.yaml");
-    let failure = assay(
-        failure_dir.path(),
-        &[
-            "run",
-            "--config",
-            failing_suite.to_str().expect("UTF-8 path"),
-            "--format",
-            "json",
-        ],
-    );
     let expected_failure = expected_outcome("evaluation-result", "completed-test-failure");
+    let failure = assay_contract(
+        failure_dir.path(),
+        &expected_failure,
+        &[("<config>", failing_suite.to_str().expect("UTF-8 path"))],
+    );
     assert_exit(&failure, &expected_failure, "completed test failure");
     let failure_json = stdout_json(&failure, "completed test failure");
     assert_document(&failure_json, &expected_failure, "completed test failure");
@@ -320,20 +306,11 @@ fn completed_test_failure_is_a_run_report_not_a_diagnosis() {
 fn bundle_inspection_json_disappears_on_integrity_failure() {
     let dir = tempfile::tempdir().expect("tempdir");
     let valid = corpus_vector(CorpusVector::Valid);
-    let success = assay(
-        dir.path(),
-        &[
-            "evidence",
-            "show",
-            valid.to_str().expect("UTF-8 path"),
-            "--format",
-            "json",
-        ],
-    );
     let expected_success = expected_outcome("evidence-inspection", "valid");
-    assert_command(
+    let success = assay_contract(
+        dir.path(),
         &expected_success,
-        "assay evidence show <bundle> --format json",
+        &[("<bundle>", valid.to_str().expect("UTF-8 path"))],
     );
     assert_exit(&success, &expected_success, "evidence show success");
     let success_json = stdout_json(&success, "evidence show success");
@@ -341,17 +318,12 @@ fn bundle_inspection_json_disappears_on_integrity_failure() {
     assert!(success_json["events"].is_array());
 
     let tampered = corpus_vector(CorpusVector::Tampered);
-    let failure = assay(
-        dir.path(),
-        &[
-            "evidence",
-            "show",
-            tampered.to_str().expect("UTF-8 path"),
-            "--format",
-            "json",
-        ],
-    );
     let expected_failure = expected_outcome("evidence-inspection", "tampered");
+    let failure = assay_contract(
+        dir.path(),
+        &expected_failure,
+        &[("<bundle>", tampered.to_str().expect("UTF-8 path"))],
+    );
     assert_exit(&failure, &expected_failure, "evidence show failure");
     assert!(failure.stdout.is_empty());
     assert_gap(&expected_failure, 2164);
@@ -361,20 +333,11 @@ fn bundle_inspection_json_disappears_on_integrity_failure() {
 fn offline_profile_verifier_keeps_both_outcomes_on_stdout() {
     let dir = tempfile::tempdir().expect("tempdir");
     let valid = corpus_vector(CorpusVector::Valid);
-    let success = assay(
-        dir.path(),
-        &[
-            "evidence",
-            "verify-privileged-mcp-action",
-            valid.to_str().expect("UTF-8 path"),
-            "--format",
-            "json",
-        ],
-    );
     let expected_success = expected_outcome("offline-profile-verification", "valid");
-    assert_command(
+    let success = assay_contract(
+        dir.path(),
         &expected_success,
-        "assay evidence verify-privileged-mcp-action <bundle> --format json",
+        &[("<bundle>", valid.to_str().expect("UTF-8 path"))],
     );
     assert_exit(&success, &expected_success, "profile verify success");
     let success_json = stdout_json(&success, "profile verify success");
@@ -383,17 +346,12 @@ fn offline_profile_verifier_keeps_both_outcomes_on_stdout() {
     assert_eq!(success_json["verdict"], "valid");
 
     let tampered = corpus_vector(CorpusVector::Tampered);
-    let failure = assay(
-        dir.path(),
-        &[
-            "evidence",
-            "verify-privileged-mcp-action",
-            tampered.to_str().expect("UTF-8 path"),
-            "--format",
-            "json",
-        ],
-    );
     let expected_failure = expected_outcome("offline-profile-verification", "tampered");
+    let failure = assay_contract(
+        dir.path(),
+        &expected_failure,
+        &[("<bundle>", tampered.to_str().expect("UTF-8 path"))],
+    );
     assert_exit(&failure, &expected_failure, "profile verify failure");
     let failure_json = stdout_json(&failure, "profile verify failure");
     assert_document(&failure_json, &expected_failure, "profile verify failure");

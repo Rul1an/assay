@@ -64,8 +64,10 @@ binary-driving setup must otherwise compile.
 
 - [x] **Step 3: Add the canonical machine outcomes and render the guide**
 
-Write one structured entry per journey step, with exact invocations and only
-stable stdout semantics. Link #2160, #2161, #2162, #2164, and #2165 in the
+Write one structured entry per journey step, with outcome-specific `argv` and
+only stable stdout semantics. Resolve declared fixture placeholders in tests,
+drive the binary with the resulting vector, and derive each rendered command
+from the primary outcome. Link #2160, #2161, #2162, #2164, and #2165 in the
 relevant outcomes and render the table from the same definitions.
 
 - [x] **Step 4: Rerun the CLI test and verify GREEN**

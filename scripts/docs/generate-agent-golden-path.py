@@ -23,6 +23,7 @@ def outcome(
     label: str,
     exit_code: int,
     stdout_contract: dict[str, object],
+    argv: list[str],
     *,
     gap_issue: int | None = None,
     **details: object,
@@ -31,6 +32,7 @@ def outcome(
         "name": name,
         "label": label,
         "exit_code": exit_code,
+        "argv": argv,
         "stdout": stdout_contract,
         "reason_code": None,
         "next_step": None,
@@ -44,8 +46,8 @@ STEPS: list[dict[str, object]] = [
         "step": 1,
         "id": "install-check",
         "label": "Install check",
-        "command": "assay version",
-        "outcomes": [outcome("success", "Success", 0, stdout("text"))],
+        "binary": "assay",
+        "outcomes": [outcome("success", "Success", 0, stdout("text"), ["version"])],
         "stdout_summary": "One `MAJOR.MINOR.PATCH` line.",
         "failure_summary": (
             "A missing or unstartable binary is a host spawn failure: no Assay process "
@@ -56,14 +58,21 @@ STEPS: list[dict[str, object]] = [
         "step": 2,
         "id": "preflight",
         "label": "Preflight",
-        "command": "assay doctor --format json",
+        "binary": "assay",
         "outcomes": [
-            outcome("success", "Success", 0, stdout("json", "assay.doctor_report.v0")),
+            outcome(
+                "success",
+                "Success",
+                0,
+                stdout("json", "assay.doctor_report.v0"),
+                ["doctor", "--format", "json"],
+            ),
             outcome(
                 "invalid-config",
                 "invalid explicit config",
                 1,
                 stdout("json", "assay.doctor_report.v0"),
+                ["doctor", "--format", "json", "--config", "<config>"],
                 gap_issue=2160,
                 config_error_code="E_CFG_PARSE",
             ),
@@ -81,14 +90,21 @@ STEPS: list[dict[str, object]] = [
         "step": 3,
         "id": "starter-files",
         "label": "Starter files",
-        "command": "assay init --preset dev --hello-trace",
+        "binary": "assay",
         "outcomes": [
-            outcome("success", "Success", 0, stdout("text")),
+            outcome(
+                "success",
+                "Success",
+                0,
+                stdout("text"),
+                ["init", "--preset", "dev", "--hello-trace"],
+            ),
             outcome(
                 "unknown-preset",
                 "unknown preset",
                 2,
                 stdout("text"),
+                ["init", "--preset", "not-a-preset"],
                 gap_issue=2161,
             ),
         ],
@@ -106,10 +122,23 @@ STEPS: list[dict[str, object]] = [
         "step": 4,
         "id": "policy-validation",
         "label": "Policy validation",
-        "command": "assay policy validate --input policy.yaml",
+        "binary": "assay",
         "outcomes": [
-            outcome("valid", "Valid", 0, stdout("empty")),
-            outcome("malformed", "malformed", 2, stdout("empty"), gap_issue=2162),
+            outcome(
+                "valid",
+                "Valid",
+                0,
+                stdout("empty"),
+                ["policy", "validate", "--input", "<policy>"],
+            ),
+            outcome(
+                "malformed",
+                "malformed",
+                2,
+                stdout("empty"),
+                ["policy", "validate", "--input", "<policy>"],
+                gap_issue=2162,
+            ),
         ],
         "stdout_summary": "Empty on both paths.",
         "failure_summary": (
@@ -121,14 +150,29 @@ STEPS: list[dict[str, object]] = [
         "step": 5,
         "id": "evaluation-result",
         "label": "Evaluation result",
-        "command": "assay run --config eval.yaml --format json",
+        "binary": "assay",
         "outcomes": [
-            outcome("success", "All tests pass", 0, stdout("json", "assay.run_report.v1")),
+            outcome(
+                "success",
+                "All tests pass",
+                0,
+                stdout("json", "assay.run_report.v1"),
+                [
+                    "run",
+                    "--config",
+                    "eval.yaml",
+                    "--trace-file",
+                    "traces/hello.jsonl",
+                    "--format",
+                    "json",
+                ],
+            ),
             outcome(
                 "completed-test-failure",
                 "completed run with failed tests",
                 1,
                 stdout("json", "assay.run_report.v1"),
+                ["run", "--config", "<config>", "--format", "json"],
                 classification="completed_test_failure",
             ),
         ],
@@ -145,13 +189,26 @@ STEPS: list[dict[str, object]] = [
         "step": 6,
         "id": "protected-action",
         "label": "Protected action",
-        "command": "assay-mcp-server proxy-enforce <args>",
+        "binary": "assay-mcp-server",
         "outcomes": [
             outcome(
                 "policy-denied",
                 "Policy-denied call after stdin closes",
                 0,
                 stdout("json_lines", "jsonrpc-2.0"),
+                [
+                    "proxy-enforce",
+                    "--upstream-command",
+                    "<python>",
+                    "--upstream-arg",
+                    "-u",
+                    "--upstream-arg",
+                    "mock_github_mcp.py",
+                    "--enforce-policy",
+                    "policies/no-allowance.yaml",
+                    "--declared-mcp-manifest",
+                    "baseline-approved.json",
+                ],
                 jsonrpc_error_code=-32042,
                 origin="assay-proxy",
                 reason="no_declared_allowance",
@@ -161,6 +218,15 @@ STEPS: list[dict[str, object]] = [
                 "startup input failure",
                 1,
                 stdout("empty"),
+                [
+                    "proxy-enforce",
+                    "--upstream-command",
+                    "<python>",
+                    "--enforce-policy",
+                    "missing.yaml",
+                    "--declared-mcp-manifest",
+                    "missing.json",
+                ],
                 gap_issue=2163,
             ),
         ],
@@ -179,10 +245,23 @@ STEPS: list[dict[str, object]] = [
         "step": 7,
         "id": "evidence-inspection",
         "label": "Evidence inspection",
-        "command": "assay evidence show <bundle> --format json",
+        "binary": "assay",
         "outcomes": [
-            outcome("valid", "Valid", 0, stdout("json")),
-            outcome("tampered", "integrity failure", 2, stdout("empty"), gap_issue=2164),
+            outcome(
+                "valid",
+                "Valid",
+                0,
+                stdout("json"),
+                ["evidence", "show", "<bundle>", "--format", "json"],
+            ),
+            outcome(
+                "tampered",
+                "integrity failure",
+                2,
+                stdout("empty"),
+                ["evidence", "show", "<bundle>", "--format", "json"],
+                gap_issue=2164,
+            ),
         ],
         "stdout_summary": (
             "Success parses as an object containing `manifest` and `events`. Integrity "
@@ -197,19 +276,33 @@ STEPS: list[dict[str, object]] = [
         "step": 8,
         "id": "offline-profile-verification",
         "label": "Offline profile verification",
-        "command": "assay evidence verify-privileged-mcp-action <bundle> --format json",
+        "binary": "assay",
         "outcomes": [
             outcome(
                 "valid",
                 "Valid",
                 0,
                 stdout("json", "assay.privileged_mcp_action.verify.report.v0"),
+                [
+                    "evidence",
+                    "verify-privileged-mcp-action",
+                    "<bundle>",
+                    "--format",
+                    "json",
+                ],
             ),
             outcome(
                 "tampered",
                 "integrity or profile failure",
                 2,
                 stdout("json", "assay.privileged_mcp_action.verify.report.v0"),
+                [
+                    "evidence",
+                    "verify-privileged-mcp-action",
+                    "<bundle>",
+                    "--format",
+                    "json",
+                ],
                 gap_issue=2165,
             ),
         ],
@@ -227,14 +320,21 @@ STEPS: list[dict[str, object]] = [
         "step": 9,
         "id": "sarif-projection",
         "label": "SARIF projection",
-        "command": "assay-mcp-server enforcement-sarif --input <decisions.ndjson> --output -",
+        "binary": "assay-mcp-server",
         "outcomes": [
-            outcome("valid", "Valid input", 0, stdout("json", "sarif-2.1.0")),
+            outcome(
+                "valid",
+                "Valid input",
+                0,
+                stdout("json", "sarif-2.1.0"),
+                ["enforcement-sarif", "--input", "-", "--output", "-"],
+            ),
             outcome(
                 "malformed",
                 "malformed non-empty NDJSON",
                 0,
                 stdout("json", "sarif-2.1.0"),
+                ["enforcement-sarif", "--input", "-", "--output", "-"],
                 gap_issue=2166,
             ),
         ],
@@ -249,6 +349,13 @@ STEPS: list[dict[str, object]] = [
         ),
     },
 ]
+
+for step in STEPS:
+    primary_outcome = step["outcomes"][0]
+    assert isinstance(primary_outcome, dict)
+    primary_argv = primary_outcome["argv"]
+    assert isinstance(primary_argv, list)
+    step["command"] = " ".join([str(step["binary"]), *map(str, primary_argv)])
 
 
 CONTRACT: dict[str, object] = {

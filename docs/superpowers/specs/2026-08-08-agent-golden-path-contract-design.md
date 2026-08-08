@@ -96,9 +96,12 @@ Two integration tests own the commands of their package:
 Both tests read the generated JSON through a workspace root derived with
 `Path::parent()`, select outcomes by stable step and outcome ids, and compare
 the driven process with the corresponding exit, stdout identity, stable fields,
-and linked gap issue. Each process assertion consumes stdout and the exit
-status; stderr is included only in assertion diagnostics and is never used to
-decide that a row passed.
+and linked gap issue. Each outcome carries structured `argv`; tests resolve only
+declared fixture placeholders and pass that resulting vector to the Cargo-built
+binary. The rendered command is derived from the primary outcome's `argv`, so
+display and execution cannot drift independently. Each process assertion
+consumes stdout and the exit status; stderr is included only in assertion
+diagnostics and is never used to decide that a row passed.
 
 The enforcing-proxy exchange reuses the crate's bounded `jsonrpc_conn::Conn`:
 30 seconds for a response and 10 seconds to reap after stdin EOF. The upstream
