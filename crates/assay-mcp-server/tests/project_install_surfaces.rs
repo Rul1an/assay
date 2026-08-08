@@ -96,6 +96,22 @@ args = ["--policy-root", "."]"#;
     let mut conn = Conn::attach(child);
     conn.send(serde_json::json!({
         "jsonrpc": "2.0",
+        "id": 0,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "project-install-contract", "version": "1.0"}
+        }
+    }));
+    let initialize = conn.read_response_for_id(0);
+    assert_eq!(initialize["result"]["protocolVersion"], "2024-11-05");
+    conn.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+    }));
+    conn.send(serde_json::json!({
+        "jsonrpc": "2.0",
         "id": 2,
         "method": "tools/list"
     }));
