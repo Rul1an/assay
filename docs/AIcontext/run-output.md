@@ -10,7 +10,7 @@
 After a run, Assay writes:
 
 1. **run.json** — Exit outcome, reason code, seeds, and judge metrics (extended or minimal on early-exit).
-2. **summary.json** — Full `Summary` with schema_version, reason_code_version, seeds, judge_metrics, results, performance.
+2. **summary.json** — Full `Summary` with `schema: "assay.run_summary.v1"`, schema_version, reason_code_version, seeds, judge_metrics, results, performance.
 3. **Console footer** (stderr) — One line: `Seeds: seed_version=1 order_seed=… judge_seed=…`; then a judge metrics line when present.
 
 Consumers should branch on **`(reason_code_version, reason_code)`** for semantics; exit code is coarse transport only.
@@ -36,6 +36,7 @@ Contains all run.json outcome fields plus:
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `schema` | string | Stable document identity; `assay.run_summary.v1` |
 | `schema_version` | integer | Summary schema version |
 | `reason_code_version` | integer | Reason code registry version |
 | `seeds` | object | Required; `{ "seed_version": 1, "order_seed": string|null, "judge_seed": string|null }` |
@@ -89,7 +90,8 @@ When **SARIF was truncated** (e.g. more than 25k eligible results), both run.jso
 On config error, missing trace, or similar early-exit:
 
 - **run.json** (minimal): exit_code, reason_code, reason_code_version, seed_version present; **order_seed** and **judge_seed** may be **null**.
-- **summary.json**: Same; seeds object present with seed_version; order_seed/judge_seed null when unknown.
+- **summary.json**: Uses `schema: "assay.run_summary.v1"`; seeds object present with seed_version; order_seed/judge_seed null when unknown.
+- **`assay run --format json` stdout**: uses `assay.run_report.v1` after a completed run, but emits the same `assay.run_summary.v1` diagnosis as `summary.json` when the run fails before results exist.
 
 Replay-specific note (E9d hardening): for replay early-exit paths (missing dependency, verify fail, parse/open fail), seeds are intentionally written as `null` to indicate that no new deterministic replay execution occurred.
 

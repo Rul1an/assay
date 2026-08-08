@@ -39,7 +39,7 @@ pub(crate) fn write_error_artifacts(
         eprintln!("WARNING: failed to write summary.json: {}", e);
     }
     if json_stdout {
-        match serde_json::to_string_pretty(&summary) {
+        match assay_core::report::summary::render_summary_json(&summary) {
             Ok(rendered) => println!("{rendered}"),
             // A failure to render is reported and does not change the exit code: the code is the
             // classification of the run, not of our ability to describe it.

@@ -46,8 +46,12 @@ Designed for CI pipelines:
 
 Use `--format json` to get a structured, machine-parsable report that follows the **Assay Agentic Contract**. This allows AI agents to read the report and self-correct their policies.
 
+Both successful and failing JSON reports use `schema: "assay.validate_report.v1"` with integer `schema_version: 1`. Consumers should branch on both fields rather than treating every version `1` document as the same shape.
+
 ```json
 {
+  "schema": "assay.validate_report.v1",
+  "schema_version": 1,
   "ok": false,
   "exit_code": 1,
   "diagnostics": [

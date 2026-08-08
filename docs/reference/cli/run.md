@@ -66,8 +66,19 @@ assay ci \
 
 `assay run` writes:
 - `run.json` (exit/status/reason metadata)
-- `summary.json` (machine-readable summary including seeds and optional judge metrics)
+- `summary.json` (`assay.run_summary.v1`; machine-readable summary including seeds and optional judge metrics)
 - Console summary + footer
+
+### JSON document identities
+
+`--format json` has two documented stdout shapes:
+
+| Path | `schema` | `schema_version` | Meaning |
+|------|----------|------------------|---------|
+| Completed run | `assay.run_report.v1` | `1` | Results report containing `run_id`, `suite`, and `results`. |
+| Early failure before a run report exists | `assay.run_summary.v1` | `1` | The same diagnosis shape written to `summary.json`, including `exit_code`, `reason_code`, and `next_step`. |
+
+The `summary.json` artifact always uses `assay.run_summary.v1`. These identities are intentionally distinct even though both documents currently carry integer version `1`.
 
 ---
 
