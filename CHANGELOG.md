@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-08-08
+
+A major spent deliberately rather than paid by accident. Two of these breaks were
+waiting for a major to exist: the ineffective-assertion default was phased to one
+in #1949, and the `Payload` variant was deferred out of #2122 for the same reason.
+The other three rode it rather than motivating one of their own. Grouping them is
+the point: after this, a new event kind, a new failure mode and a new rule step
+are all minors.
+
 ### Breaking
 - **An assertion that cannot fail is now refused at load.** `assay run` and `assay ci` stop before
   execution when a config carries an assertion no trace could fail, such as
@@ -31,6 +40,25 @@ All notable changes to this project will be documented in this file.
 - `assay_evidence::types::Payload` is `#[non_exhaustive]` and carries `SessionFinding`, so admitting
   a future event kind is a minor rather than a major (#2126).
 - The 27 public error enums are `#[non_exhaustive]`, so a new failure mode is a minor (#2140).
+- Sequence rules read calls rather than names. `SequenceRule`'s tool fields are `CallSelector`,
+  which deserialises from a bare string exactly as before, so **every existing YAML parses
+  unchanged**; the object form is new capability. A step may now constrain the call's arguments:
+
+  ```yaml
+  - type: never_after
+    trigger:   { tool: bash, args_match: { command: "\\.aws/credentials" } }
+    forbidden: { tool: bash, args_match: { command: "^curl\\b.*-d" } }
+  ```
+
+  This is what makes "credential read followed by egress" writable at all: in the recorded
+  demonstration that motivated it, all three calls are `bash` and only the arguments separate them.
+  `evaluate_rules` takes `&[SequenceCall]` instead of `&[String]`, and `assay-metrics` no longer
+  discards `args` before evaluation (#2124).
+
+### Added
+- `PayloadSessionFinding::new` and `EVENT_TYPE` are added so a producer does not restate the field
+  order or respell the tag. No command emits a session finding yet; the kind is admitted to the
+  format and wiring a producer is separate work (ADR-047, #2105).
 
 ## [4.0.0] - 2026-08-06
 
