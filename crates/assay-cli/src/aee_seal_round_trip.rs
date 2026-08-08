@@ -163,7 +163,7 @@ fn a_run_emits_a_signed_seal_and_a_consumer_verifies_it() {
         COLLECTION_PATH_LANDLOCK_TCP_CONNECT
     );
     assert_eq!(
-        payload.assay_drop_proof_basis, "declared",
+        payload.assay_drop_proof_basis, "asserted",
         "a synchronous probe verified nothing about a queue, and says so"
     );
 }

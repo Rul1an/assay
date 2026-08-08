@@ -44,7 +44,7 @@ MUTATIONS: list[tuple[str, str, str, str]] = [
     ("calendar day bound", "(1..=days_in_month).contains(&day)", "true", "a_calendar_invalid_instant"),
     ("year floor", "if year < 1 {", "if year < 0 {", "a_calendar_invalid_instant"),
     ("counted-queue loss", "*lost != 0", "*lost > 9999", "a_counted_queue_that_lost"),
-    ("drop basis", 'Self::SynchronousProbe => DROP_BASIS_DECLARED,', 'Self::SynchronousProbe => DROP_BASIS_CHECKED,', "every_carried_value_lands"),
+    ("drop basis", 'Self::SynchronousProbe => DROP_BASIS_ASSERTED,', 'Self::SynchronousProbe => DROP_BASIS_CHECKED,', "every_carried_value_lands"),
     ("drop channel readings", 'format!("{name}={lost}")', 'format!("{name}")', "a_counted_queue_that_lost"),
     ("source schema derivation", "assay_source_schema: health.schema.clone(),", 'assay_source_schema: "assay.enforcement_health.v1".to_string(),', "derived_fields_come_from_the_record"),
 ]
