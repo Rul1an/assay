@@ -52,7 +52,7 @@ fn trace(tools: &[&str]) -> Vec<ToolCall> {
 #[test]
 fn test_strict_sequence_interrupted() {
     let policy = make_policy(vec![SequenceRule::Sequence {
-        tools: vec!["A".to_string(), "B".to_string()],
+        tools: vec!["A".into(), "B".into()],
         strict: true,
     }]);
     let explainer = TraceExplainer::new(policy);
@@ -90,8 +90,8 @@ fn test_alias_resolution() {
 
     let policy = make_policy_with_aliases(
         vec![SequenceRule::Before {
-            first: "Auth".to_string(),
-            then: "Write".to_string(),
+            first: "Auth".into(),
+            then: "Write".into(),
         }],
         aliases,
     );
@@ -119,7 +119,7 @@ fn test_alias_resolution() {
 #[test]
 fn test_zero_max_calls() {
     let policy = make_policy(vec![SequenceRule::MaxCalls {
-        tool: "Dangerous".to_string(),
+        tool: "Dangerous".into(),
         max: 0,
     }]);
     let explainer = TraceExplainer::new(policy);
@@ -140,7 +140,7 @@ fn test_zero_max_calls() {
 #[test]
 fn test_eventually_boundary() {
     let policy = make_policy(vec![SequenceRule::Eventually {
-        tool: "Target".to_string(),
+        tool: "Target".into(),
         within: 3,
     }]);
     let explainer = TraceExplainer::new(policy);
@@ -227,7 +227,7 @@ fn test_eventually_boundary() {
 fn test_multiple_violations() {
     let policy = make_policy(vec![
         SequenceRule::MaxCalls {
-            tool: "A".to_string(),
+            tool: "A".into(),
             max: 1,
         },
         // A is NOT in this blocklist, but let's add rules that conflict
@@ -288,8 +288,8 @@ fn test_multiple_violations() {
 fn test_undefined_tools() {
     // Policy has rules for A and B.
     let policy = make_policy(vec![SequenceRule::Before {
-        first: "A".to_string(),
-        then: "B".to_string(),
+        first: "A".into(),
+        then: "B".into(),
     }]);
     let explainer = TraceExplainer::new(policy);
 
@@ -304,8 +304,8 @@ fn test_undefined_tools() {
 #[test]
 fn test_after_trigger_boundary() {
     let policy = make_policy(vec![SequenceRule::After {
-        trigger: "Start".to_string(),
-        then: "Stop".to_string(),
+        trigger: "Start".into(),
+        then: "Stop".into(),
         within: 2,
     }]);
     let explainer = TraceExplainer::new(policy);

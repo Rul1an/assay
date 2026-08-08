@@ -109,9 +109,16 @@ impl Metric for SequenceValidMetric {
         // Sort by index
         let mut actual_sequence = tool_calls.clone();
         actual_sequence.sort_by_key(|k| k.index);
-        let actual_names: Vec<String> = actual_sequence
+        // Arguments travel with the name. Reducing to names here is what made the correlation
+        // class in ADR-047 unwritable: "credential read then egress" is a statement about two
+        // calls, one identified by what it was given, and both are `bash` in the motivating
+        // trace (#2124).
+        let actual_calls: Vec<assay_core::sequence_eval::SequenceCall> = actual_sequence
             .iter()
-            .map(|c| c.tool_name.clone())
+            .map(|c| assay_core::sequence_eval::SequenceCall {
+                name: c.tool_name.clone(),
+                args: c.args.clone(),
+            })
             .collect();
 
         // 2. Validate Rules (DSL)
@@ -128,7 +135,7 @@ impl Metric for SequenceValidMetric {
             // question, which is why the extent is stated rather than assumed.
             evaluations = assay_core::sequence_eval::evaluate_rules(
                 rules,
-                &actual_names,
+                &actual_calls,
                 file_policy.as_ref(),
                 assay_core::sequence_eval::TraceExtent::Complete,
             );
@@ -182,6 +189,7 @@ impl Metric for SequenceValidMetric {
 
         // 3. Validate Exact Sequence (Legacy / Strict)
         if let Some(expected_sequence) = effective_sequence {
+            let actual_names: Vec<String> = actual_calls.iter().map(|c| c.name.clone()).collect();
             if actual_names == *expected_sequence {
                 return Ok(with_rule_record(MetricResult::pass(1.0), &details));
             } else {
@@ -286,8 +294,8 @@ mod tests {
             policy: None,
             sequence: None,
             rules: Some(vec![SequenceRule::Before {
-                first: "B".to_string(),
-                then: "C".to_string(),
+                first: "B".into(),
+                then: "C".into(),
             }]),
         };
 
@@ -345,9 +353,7 @@ mod tests {
         let expected = Expected::SequenceValid {
             policy: None,
             sequence: None,
-            rules: Some(vec![SequenceRule::Require {
-                tool: "B".to_string(),
-            }]),
+            rules: Some(vec![SequenceRule::Require { tool: "B".into() }]),
         };
 
         let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
@@ -366,8 +372,8 @@ mod tests {
             policy: None,
             sequence: None,
             rules: Some(vec![SequenceRule::Before {
-                first: "B".to_string(),
-                then: "C".to_string(),
+                first: "B".into(),
+                then: "C".into(),
             }]),
         };
 
@@ -420,9 +426,7 @@ mod tests {
         let expected = Expected::SequenceValid {
             policy: None,
             sequence: None,
-            rules: Some(vec![SequenceRule::Require {
-                tool: "A".to_string(),
-            }]),
+            rules: Some(vec![SequenceRule::Require { tool: "A".into() }]),
         };
 
         let result = metric.evaluate(&tc, &expected, &resp).await.unwrap();
@@ -443,8 +447,8 @@ mod tests {
             policy: None,
             sequence: None,
             rules: Some(vec![SequenceRule::NeverAfter {
-                trigger: "read_credentials".to_string(),
-                forbidden: "http_post".to_string(),
+                trigger: "read_credentials".into(),
+                forbidden: "http_post".into(),
             }]),
         };
         let result = SequenceValidMetric
@@ -474,8 +478,8 @@ mod tests {
             policy: None,
             sequence: None,
             rules: Some(vec![SequenceRule::Before {
-                first: "auth".to_string(),
-                then: "write".to_string(),
+                first: "auth".into(),
+                then: "write".into(),
             }]),
         };
         let result = SequenceValidMetric
@@ -538,9 +542,7 @@ mod tests {
         let expected = Expected::SequenceValid {
             policy: None,
             sequence: None,
-            rules: Some(vec![SequenceRule::Require {
-                tool: "a".to_string(),
-            }]),
+            rules: Some(vec![SequenceRule::Require { tool: "a".into() }]),
         };
         let result = SequenceValidMetric
             .evaluate(&tc, &expected, &resp)
@@ -559,9 +561,7 @@ mod tests {
         let expected = Expected::SequenceValid {
             policy: None,
             sequence: None,
-            rules: Some(vec![SequenceRule::Require {
-                tool: "a".to_string(),
-            }]),
+            rules: Some(vec![SequenceRule::Require { tool: "a".into() }]),
         };
         let result = SequenceValidMetric
             .evaluate(&tc, &expected, &resp)
@@ -582,8 +582,8 @@ mod tests {
             policy: None,
             sequence: Some(vec!["read".to_string()]),
             rules: Some(vec![SequenceRule::Before {
-                first: "auth".to_string(),
-                then: "write".to_string(),
+                first: "auth".into(),
+                then: "write".into(),
             }]),
         };
         let result = SequenceValidMetric

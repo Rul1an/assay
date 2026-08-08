@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::model::{Policy, SequenceRule};
+use crate::model::{CallSelector, Policy, SequenceRule};
 
 use super::model::RuleEvaluation;
 
@@ -49,9 +49,15 @@ impl ExplainerState {
         }
     }
 
-    fn matches(&self, tool: &str, target: &str) -> bool {
-        let targets = self.resolve_alias(target);
-        targets.contains(&tool.to_string())
+    /// Does an observed tool name satisfy a rule step.
+    ///
+    /// The step is a `CallSelector` since #2124. This view works from names alone, so it can only
+    /// answer the tool half; an argument constraint narrows the real evaluation further, never
+    /// wider, so treating the step as its tool name here over-reports rather than under-reports.
+    /// That direction matters: this is the explanation view, and a step it claims was reached but
+    /// was not is visible, while the reverse would hide one.
+    fn matches(&self, tool: &str, target: &CallSelector) -> bool {
+        self.resolve_alias(target.tool()).iter().any(|t| t == tool)
     }
 
     pub(crate) fn evaluate_rule(
@@ -65,7 +71,7 @@ impl ExplainerState {
             SequenceRule::Require { tool: req_tool } => {
                 // Require is checked at end of trace, always passes during
                 RuleEvaluation {
-                    rule_id: format!("require_{}", req_tool.to_lowercase()),
+                    rule_id: format!("require_{}", req_tool.tool().to_lowercase()),
                     rule_type: "require".to_string(),
                     passed: true,
                     explanation: format!("Require '{}' (checked at end)", req_tool),
@@ -77,7 +83,7 @@ impl ExplainerState {
                 tool: ev_tool,
                 within,
             } => {
-                let targets = self.resolve_alias(ev_tool);
+                let targets = self.resolve_alias(ev_tool.tool());
                 let seen = self.tools_seen.iter().any(|t| targets.contains(t))
                     || targets.contains(&tool.to_string());
 
@@ -99,7 +105,7 @@ impl ExplainerState {
                 };
 
                 RuleEvaluation {
-                    rule_id: format!("eventually_{}_{}", ev_tool.to_lowercase(), within),
+                    rule_id: format!("eventually_{}_{}", ev_tool.tool().to_lowercase(), within),
                     rule_type: "eventually".to_string(),
                     passed,
                     explanation,
@@ -116,7 +122,7 @@ impl ExplainerState {
                 tool: max_tool,
                 max,
             } => {
-                let targets = self.resolve_alias(max_tool);
+                let targets = self.resolve_alias(max_tool.tool());
                 let current_count = if targets.contains(&tool.to_string()) {
                     self.call_counts.get(tool).copied().unwrap_or(0) + 1
                 } else {
@@ -138,7 +144,7 @@ impl ExplainerState {
                 };
 
                 RuleEvaluation {
-                    rule_id: format!("max_calls_{}_{}", max_tool.to_lowercase(), max),
+                    rule_id: format!("max_calls_{}_{}", max_tool.tool().to_lowercase(), max),
                     rule_type: "max_calls".to_string(),
                     passed,
                     explanation,
@@ -152,7 +158,11 @@ impl ExplainerState {
 
             SequenceRule::Before { first, then } => {
                 let is_then = self.matches(tool, then);
-                let first_seen = self.tool_seen_flags.get(first).copied().unwrap_or(false)
+                let first_seen = self
+                    .tool_seen_flags
+                    .get(first.tool())
+                    .copied()
+                    .unwrap_or(false)
                     || self.tools_seen.iter().any(|t| self.matches(t, first));
 
                 let passed = !is_then || first_seen;
@@ -168,8 +178,8 @@ impl ExplainerState {
                 RuleEvaluation {
                     rule_id: format!(
                         "before_{}_then_{}",
-                        first.to_lowercase(),
-                        then.to_lowercase()
+                        first.tool().to_lowercase(),
+                        then.tool().to_lowercase()
                     ),
                     rule_type: "before".to_string(),
                     passed,
@@ -231,8 +241,8 @@ impl ExplainerState {
                 RuleEvaluation {
                     rule_id: format!(
                         "after_{}_then_{}",
-                        trigger.to_lowercase(),
-                        then.to_lowercase()
+                        trigger.tool().to_lowercase(),
+                        then.tool().to_lowercase()
                     ),
                     rule_type: "after".to_string(),
                     passed,
@@ -273,8 +283,8 @@ impl ExplainerState {
                 RuleEvaluation {
                     rule_id: format!(
                         "never_after_{}_forbidden_{}",
-                        trigger.to_lowercase(),
-                        forbidden.to_lowercase()
+                        trigger.tool().to_lowercase(),
+                        forbidden.tool().to_lowercase()
                     ),
                     rule_type: "never_after".to_string(),
                     passed,
@@ -349,7 +359,14 @@ impl ExplainerState {
                 }
 
                 RuleEvaluation {
-                    rule_id: format!("sequence_{}", tools.join("_").to_lowercase()),
+                    rule_id: format!(
+                        "sequence_{}",
+                        tools
+                            .iter()
+                            .map(|t| t.tool().to_lowercase())
+                            .collect::<Vec<_>>()
+                            .join("_")
+                    ),
                     rule_type: "sequence".to_string(),
                     passed,
                     explanation,
@@ -434,12 +451,12 @@ impl ExplainerState {
             )]
             match rule {
                 SequenceRule::Require { tool } => {
-                    let requirements = self.resolve_alias(tool);
+                    let requirements = self.resolve_alias(tool.tool());
                     let ok = self.tools_seen.iter().any(|t| requirements.contains(t));
 
                     if !ok {
                         violations.push(RuleEvaluation {
-                            rule_id: format!("require_{}", tool.to_lowercase()),
+                            rule_id: format!("require_{}", tool.tool().to_lowercase()),
                             rule_type: "require".to_string(),
                             passed: false,
                             explanation: format!("Required tool '{}' never called", tool),
@@ -457,7 +474,7 @@ impl ExplainerState {
                         // Check if we saw 'then' AFTER the trigger
                         // Note: self.tools_seen contains all calls.
                         // We need to see if 'then' appeared between trigger_idx+1 and end (or deadline).
-                        let then_targets = self.resolve_alias(then);
+                        let then_targets = self.resolve_alias(then.tool());
                         let seen_after = self
                             .tools_seen
                             .iter()
@@ -468,8 +485,8 @@ impl ExplainerState {
                             violations.push(RuleEvaluation {
                                 rule_id: format!(
                                     "after_{}_then_{}",
-                                    trigger.to_lowercase(),
-                                    then.to_lowercase()
+                                    trigger.tool().to_lowercase(),
+                                    then.tool().to_lowercase()
                                 ),
                                 rule_type: "after".to_string(),
                                 passed: false,

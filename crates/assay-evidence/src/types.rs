@@ -449,6 +449,45 @@ pub struct PayloadSessionFinding {
     pub reason: Option<String>,
 }
 
+impl PayloadSessionFinding {
+    /// The event type this payload travels as, so a producer does not spell it by hand.
+    pub const EVENT_TYPE: &'static str = "assay.session.finding";
+
+    /// Build a finding from the sequence-rule vocabulary.
+    ///
+    /// The producer of these values is `assay_core::sequence_eval`, which this crate cannot call:
+    /// `assay-core` reaches `assay-evidence` through `assay-adapter-api`, so the edge would cycle.
+    /// `tests/session_finding_vocabulary_parity.rs` is the sanctioned fallback and holds the
+    /// strings against their source.
+    ///
+    /// It takes labels rather than enums for that same reason: this crate must not learn
+    /// `assay-core`'s types in order to accept a value from them. The constructor exists so the
+    /// caller that can see both sides does not restate the field order a third time.
+    ///
+    /// `spanned` is the whole claim. A consumer recomputes the finding from those call indices
+    /// rather than trusting `outcome`, which is what ADR-042 asks of a claim: bounded, and
+    /// checkable by someone who does not trust the producer. An empty span is admitted rather than
+    /// refused, because it is the honest span for a rule that read nothing, but it means the
+    /// finding carries no recomputable basis and a reader should treat it that way.
+    pub fn new(
+        rule_id: impl Into<String>,
+        kind: impl Into<String>,
+        outcome: impl Into<String>,
+        spanned: Vec<u64>,
+        extent: impl Into<String>,
+        reason: Option<String>,
+    ) -> Self {
+        PayloadSessionFinding {
+            rule_id: rule_id.into(),
+            kind: kind.into(),
+            outcome: outcome.into(),
+            spanned,
+            extent: extent.into(),
+            reason,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PayloadExecObserved {
     pub argv0: String,

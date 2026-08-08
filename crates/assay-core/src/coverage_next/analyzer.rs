@@ -50,30 +50,30 @@ impl CoverageAnalyzer {
 
             match rule {
                 crate::model::SequenceRule::Require { tool } => {
-                    policy_tools.insert(tool.clone());
+                    policy_tools.insert(tool.tool().to_string());
                 }
                 crate::model::SequenceRule::Eventually { tool, .. } => {
-                    policy_tools.insert(tool.clone());
+                    policy_tools.insert(tool.tool().to_string());
                 }
                 crate::model::SequenceRule::MaxCalls { tool, .. } => {
-                    policy_tools.insert(tool.clone());
+                    policy_tools.insert(tool.tool().to_string());
                 }
                 crate::model::SequenceRule::Before { first, then } => {
-                    policy_tools.insert(first.clone());
-                    policy_tools.insert(then.clone());
+                    policy_tools.insert(first.tool().to_string());
+                    policy_tools.insert(then.tool().to_string());
                 }
                 crate::model::SequenceRule::After { trigger, then, .. } => {
-                    policy_tools.insert(trigger.clone());
-                    policy_tools.insert(then.clone());
+                    policy_tools.insert(trigger.tool().to_string());
+                    policy_tools.insert(then.tool().to_string());
                 }
                 crate::model::SequenceRule::NeverAfter { trigger, forbidden } => {
-                    policy_tools.insert(trigger.clone());
-                    policy_tools.insert(forbidden.clone());
-                    high_risk_tools.insert(forbidden.clone()); // Forbidden = high risk
+                    policy_tools.insert(trigger.tool().to_string());
+                    policy_tools.insert(forbidden.tool().to_string());
+                    high_risk_tools.insert(forbidden.tool().to_string()); // Forbidden = high risk
                 }
                 crate::model::SequenceRule::Sequence { tools, .. } => {
                     for tool in tools {
-                        policy_tools.insert(tool.clone());
+                        policy_tools.insert(tool.tool().to_string());
                     }
                 }
                 crate::model::SequenceRule::Blocklist { pattern } => {
@@ -103,38 +103,47 @@ impl CoverageAnalyzer {
     fn rule_id(rule: &crate::model::SequenceRule, _idx: usize) -> String {
         match rule {
             crate::model::SequenceRule::Require { tool } => {
-                format!("require_{}", tool.to_lowercase())
+                format!("require_{}", tool.tool().to_lowercase())
             }
             crate::model::SequenceRule::Eventually { tool, within } => {
-                format!("eventually_{}_{}", tool.to_lowercase(), within)
+                format!("eventually_{}_{}", tool.tool().to_lowercase(), within)
             }
             crate::model::SequenceRule::MaxCalls { tool, max } => {
-                format!("max_calls_{}_{}", tool.to_lowercase(), max)
+                format!("max_calls_{}_{}", tool.tool().to_lowercase(), max)
             }
             crate::model::SequenceRule::Before { first, then } => {
                 format!(
                     "before_{}_then_{}",
-                    first.to_lowercase(),
-                    then.to_lowercase()
+                    first.tool().to_lowercase(),
+                    then.tool().to_lowercase()
                 )
             }
             crate::model::SequenceRule::After { trigger, then, .. } => {
                 format!(
                     "after_{}_then_{}",
-                    trigger.to_lowercase(),
-                    then.to_lowercase()
+                    trigger.tool().to_lowercase(),
+                    then.tool().to_lowercase()
                 )
             }
             crate::model::SequenceRule::NeverAfter { trigger, forbidden } => {
                 format!(
                     "never_after_{}_forbidden_{}",
-                    trigger.to_lowercase(),
-                    forbidden.to_lowercase()
+                    trigger.tool().to_lowercase(),
+                    forbidden.tool().to_lowercase()
                 )
             }
             crate::model::SequenceRule::Sequence { tools, strict } => {
                 let mode = if *strict { "strict" } else { "seq" };
-                format!("{}_{}", mode, tools.join("_").to_lowercase())
+                format!(
+                    "{}_{}",
+                    mode,
+                    tools
+                        .iter()
+                        .map(|t| t.tool().to_lowercase())
+                        .collect::<Vec<_>>()
+                        .join("_")
+                        .to_lowercase()
+                )
             }
             crate::model::SequenceRule::Blocklist { pattern } => {
                 format!("blocklist_{}", pattern.to_lowercase())

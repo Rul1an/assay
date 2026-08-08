@@ -26,7 +26,7 @@ fn make_policy() -> Policy {
             arg_constraints: None,
         },
         sequences: vec![SequenceRule::MaxCalls {
-            tool: "Alpha".to_string(),
+            tool: "Alpha".into(),
             max: 5,
         }],
         aliases: HashMap::new(),
