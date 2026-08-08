@@ -266,14 +266,24 @@ The counts that follow from it: `REQUIRED_SEAL_FIELDS` names **six** of the ten 
 the checker's known-optional set names the other four. The positive payload carried **eight** when
 this was written; it carries all ten as of the decision below.
 
-**`aeeVersion` stays 0.7, decided 2026-08-08 (#2093).** in-toto/attestation#570 is still open at
-v0.7, and the predicate author proposed shipping 0.7 as it stands and repairing the referencedness
-defect — which she rates Major — in 0.8. Pointing the constant at a version that does not exist
-upstream would be a conformance claim about an unpublished document.
+**`aeeVersion` stays 0.7, decided 2026-08-08 (#2093), and there is no 0.8 to wait for.**
 
-The migration trigger, recorded so it is not rediscovered: **0.8 is adopted when it exists upstream,
-not when it is proposed.** The constant lives in two places, `aee_seal.rs` and the fixture checker,
-pinned against each other by `crates/assay-cli/tests/aee_version_parity.rs`.
+The outcome stands; the reason it was first recorded on does not, and the correction is worth
+keeping rather than overwriting. This ADR said the predicate author had proposed shipping 0.7 and
+repairing the referencedness defect in 0.8, so the migration trigger read "0.8 is adopted when it
+exists upstream, not when it is proposed."
+
+She has since answered that plainly (in-toto/attestation#570, 2026-08-07): **pin 0.7, and do not
+plan for 0.8.** The repair had already landed on that branch as `c0c4da6` on 4 August — verified,
+"docs(aee): constrain every carried record, not only the referenced ones" — placed inside the 0.7
+changelog rather than behind a version bump, on the reasoning that a reject family a single edit
+empties is not something anyone should have to pin a version against. She names the ambiguity in
+her earlier sentence as hers, and our reading as the one her words invited.
+
+So the trigger above is void, and planning a 0.8 migration is the thing the placement was designed
+to avoid. What replaces it: the constant tracks whatever version #570 carries, and the pin to watch
+is the branch, not a successor version. The constant lives in two places, `aee_seal.rs` and the
+fixture checker, pinned against each other by `crates/assay-cli/tests/aee_version_parity.rs`.
 
 This is recorded here rather than only on the constant because the other half of the same
 acceptance item is, and a decision recorded one notch weaker than its sibling is the asymmetry an

@@ -26,15 +26,17 @@ use crate::enforcement_health_v1::{EnforcementHealthV1, Mechanism, Probe, Status
 pub const COLLECTION_PATH_LANDLOCK_TCP_CONNECT: &str = "landlock-tcp-connect";
 /// AEE draft version this payload is shape-compatible with. Not a conformance claim.
 ///
-/// **Stays at 0.7, decided in #2093.** in-toto/attestation#570 is still open at v0.7, and the
-/// predicate author has proposed shipping 0.7 as it stands and repairing the referencedness defect
-/// — which she rates Major — in 0.8. Pointing this at 0.8 would name a version that does not exist
-/// upstream, which is a conformance claim about an unpublished document.
+/// **Stays at 0.7, and there is no 0.8 to wait for.** Decided in #2093; the reason was corrected
+/// after the predicate author answered on in-toto/attestation#570 (2026-08-07).
 ///
-/// The migration trigger, stated so it is not rediscovered: **0.8 is adopted when it exists
-/// upstream, not when it is proposed.** Moving the constant is a one-line change today and a
-/// migration once runs emit sealed records, which is why #2093 resolved it before the producer
-/// lands rather than after.
+/// This first read her earlier sentence as an offer to ship 0.7 and repair the referencedness
+/// defect in 0.8, and recorded a migration trigger accordingly. She has since said to pin 0.7 and
+/// not plan for 0.8: the repair already landed on that branch as `c0c4da6` on 4 August, inside the
+/// 0.7 changelog rather than behind a bump, so that nobody has to pin a version whose reject family
+/// one edit empties.
+///
+/// So this constant tracks whatever version #570 carries. The thing to watch is that branch, not a
+/// successor version. See ADR-045 for the full correction.
 ///
 /// `tests/aee_version_parity.rs` pins this against the fixture checker's own copy. Two literals
 /// for one version drift silently, and a bump that reaches only one side would leave a producer
