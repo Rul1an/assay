@@ -16,7 +16,7 @@
 //! writer, a payload filter in the reader — fails this test rather than being invisible to it.
 
 use assay_evidence::bundle::{verify_bundle_with_limits, BundleWriter, ErrorClass, VerifyLimits};
-use assay_evidence::types::{EvidenceEvent, PayloadSessionFinding};
+use assay_evidence::types::{EvidenceEvent, Payload, PayloadSessionFinding};
 use serde_json::json;
 use std::io::Cursor;
 
@@ -66,14 +66,27 @@ fn a_session_finding_round_trips_through_the_writer_and_the_verifier() {
     assert_eq!(result.event_count, 2, "both events survived the round trip");
 
     // The payload is readable as a typed record rather than as loose JSON, which is what
-    // `PayloadSessionFinding` adds. It is parsed directly rather than through `Payload`: wiring the
-    // variant into that enum is a semver major (see ADR-047), so the struct ships first and the
-    // convenience view follows. A consumer reading `EvidenceEvent::payload` -- a raw `Value` --
+    // `PayloadSessionFinding` adds. A consumer reading `EvidenceEvent::payload` -- a raw `Value` --
     // does exactly this.
     let f: PayloadSessionFinding = serde_json::from_value(finding_payload("violated"))
         .expect("the written payload parses as the typed record");
     assert_eq!(f.spanned, vec![1, 2]);
     assert_eq!(f.outcome, "violated");
+
+    // And through the convenience view, which #2122 had to defer: on an exhaustive enum the
+    // variant alone was a semver major, so the struct shipped first and this followed once
+    // `#[non_exhaustive]` made the next kind cheap (#2126). This asserts the tag maps to the
+    // variant, which is the half a direct `from_value` on the struct cannot see: the struct
+    // parses the same bytes whether or not `Payload` knows the kind exists.
+    let tagged = serde_json::json!({
+        "type": "assay.session.finding",
+        "payload": finding_payload("violated"),
+    });
+    let view: Payload = serde_json::from_value(tagged).expect("the tag resolves to a variant");
+    match view {
+        Payload::SessionFinding(f) => assert_eq!(f.outcome, "violated"),
+        other => panic!("expected the session-finding variant, got {other:?}"),
+    }
 }
 
 /// Change the finding after the fact and verification refuses the bundle.

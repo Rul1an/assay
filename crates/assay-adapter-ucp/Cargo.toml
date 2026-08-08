@@ -10,8 +10,8 @@ readme.workspace = true
 publish = false
 
 [dependencies]
-assay-adapter-api = { path = "../assay-adapter-api", version = "4.0.0" }
-assay-evidence = { path = "../assay-evidence", version = "4.0.0" }
+assay-adapter-api = { path = "../assay-adapter-api", version = "5.0.0" }
+assay-evidence = { path = "../assay-evidence", version = "5.0.0" }
 serde = { workspace = true, features = ["derive", "std"] }
 serde_json = { workspace = true, features = ["std"] }
 chrono = { workspace = true, features = ["std"] }
