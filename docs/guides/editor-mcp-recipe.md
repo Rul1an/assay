@@ -5,6 +5,37 @@ servers it uses by wrapping each server with `assay mcp wrap`, so every tool cal
 checked against your policy inline. No bespoke plugin is needed; you only change the
 server command in the agent's standard MCP config.
 
+## Install Assay's review tools
+
+The repository ships project configuration for the five tools exposed by the
+standalone `assay-mcp-server` binary. Install that binary on `PATH`, then open the
+repository in your client:
+
+```bash
+cargo install --path crates/assay-mcp-server --locked
+```
+
+- Claude Code reads `.mcp.json` from the repository root.
+- Cursor reads `.cursor/mcp.json`.
+- Codex users can add the equivalent entry to project `.codex/config.toml` or
+  user `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.assay]
+command = "assay-mcp-server"
+args = ["--policy-root", "."]
+```
+
+The server is local stdio and needs no network or transport authentication. It
+evaluates policy and trace inputs supplied to its tools; it does not invoke or
+enforce the target MCP tool call. `--policy-root .` resolves policy paths against
+the server process's working directory. Project-scoped clients normally use the
+project root; if a host uses another directory, set an explicit local policy root
+in that client's uncommitted user or project configuration.
+
+The rest of this guide covers a different surface: wrapping a real MCP server so
+Assay can enforce its tool calls at the protocol boundary.
+
 ## The wrap command
 
 ```bash

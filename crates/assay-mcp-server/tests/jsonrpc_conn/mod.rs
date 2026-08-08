@@ -183,7 +183,18 @@ impl Conn {
         let deadline = Instant::now() + self.take_budget();
         loop {
             let v = self.read_json_by(deadline);
-            if v.get("method").is_none() {
+            if is_response(&v) {
+                return v;
+            }
+        }
+    }
+
+    /// [`Conn::read_response`], but also skips responses for other numeric request IDs.
+    pub fn read_response_for_id(&mut self, expected_id: u64) -> Value {
+        let deadline = Instant::now() + self.take_budget();
+        loop {
+            let v = self.read_json_by(deadline);
+            if is_response(&v) && v.get("id").and_then(Value::as_u64) == Some(expected_id) {
                 return v;
             }
         }
@@ -358,4 +369,8 @@ fn describe(v: &Value) -> String {
         Some(id) => format!("id={id} method={method}"),
         None => format!("notification method={method}"),
     }
+}
+
+fn is_response(value: &Value) -> bool {
+    value.get("method").is_none()
 }
