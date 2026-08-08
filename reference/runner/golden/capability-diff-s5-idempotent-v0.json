@@ -1,0 +1,75 @@
+{
+  "schema": "assay.runner.capability_diff.v0",
+  "base_run_id": "run_openai_agents_kernel_policy_determinism",
+  "head_run_id": "run_openai_agents_kernel_policy_determinism",
+  "status": "clean",
+  "preconditions": {
+    "base_health_clean": true,
+    "head_health_clean": true,
+    "base_correlation_clean": true,
+    "head_correlation_clean": true,
+    "stable_tool_call_ids_required": true,
+    "stable_tool_call_ids_present": true
+  },
+  "scope": {
+    "projection": "surface_set",
+    "uses_raw_telemetry": false,
+    "uses_proof_pack": false,
+    "per_binding_capability_values": false
+  },
+  "surface": {
+    "filesystem_paths": {
+      "added": [],
+      "removed": [],
+      "unchanged": [
+        "/tmp/assay-runner-openai-agents-kernel-policy/work/openai-agents-input.txt",
+        "/tmp/assay-runner-openai-agents-kernel-policy/work/policy-input.txt"
+      ]
+    },
+    "network_endpoints": {
+      "added": [],
+      "removed": [],
+      "unchanged": []
+    },
+    "process_execs": {
+      "added": [],
+      "removed": [],
+      "unchanged": []
+    },
+    "mcp_tools": {
+      "added": [],
+      "removed": [],
+      "unchanged": [
+        "read_file"
+      ]
+    },
+    "policy_decisions": {
+      "added": [],
+      "removed": [],
+      "unchanged": [
+        "allow:read_file"
+      ]
+    }
+  },
+  "binding_ids": {
+    "added": [],
+    "removed": [],
+    "unchanged": [
+      "tc_runner_policy_001"
+    ]
+  },
+  "policy_outcomes": {
+    "changed": []
+  },
+  "unbound": {
+    "filesystem_paths": [],
+    "network_endpoints": [],
+    "process_execs": [],
+    "mcp_tools": [],
+    "policy_decisions": []
+  },
+  "ambiguities": [],
+  "notes": [
+    "capability_diff_idempotent: base and head evidence sets are identical"
+  ]
+}

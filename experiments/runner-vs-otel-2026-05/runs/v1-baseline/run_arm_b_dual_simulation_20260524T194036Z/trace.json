@@ -1,0 +1,150 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "assay-runner-otel-experiment"
+            }
+          },
+          {
+            "key": "service.version",
+            "value": {
+              "stringValue": "0.0.0"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "assay-runner-otel-experiment"
+          },
+          "spans": [
+            {
+              "name": "execute_tool read_file",
+              "spanId": "fae8028cee497786",
+              "traceId": "917b970bceeedb631d3f708554ccb90e",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1779651636801000000",
+              "endTimeUnixNano": "1779651636801133083",
+              "attributes": [
+                {
+                  "key": "assay.run.id",
+                  "value": {
+                    "stringValue": "run_arm_b_dual_simulation_20260524T194036Z"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "read_file"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.type",
+                  "value": {
+                    "stringValue": "function"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "tc_runner_policy_001"
+                  }
+                }
+              ],
+              "events": [],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "name": "assay.runner.measured_run",
+              "spanId": "ef5cc370bbc28055",
+              "traceId": "a50c5be30820e02d6b7de18cd7a17169",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1779651636793000000",
+              "endTimeUnixNano": "1779651636803112708",
+              "attributes": [
+                {
+                  "key": "assay.run.id",
+                  "value": {
+                    "stringValue": "run_arm_b_dual_simulation_20260524T194036Z"
+                  }
+                },
+                {
+                  "key": "assay.measurement.boundary",
+                  "value": {
+                    "stringValue": "linux_ebpf_cgroup_v2"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "openai"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "create_agent"
+                  }
+                }
+              ],
+              "events": [
+                {
+                  "name": "assay.archive.created",
+                  "timeUnixNano": "1779651636803079917",
+                  "attributes": [
+                    {
+                      "key": "assay.archive.schema",
+                      "value": {
+                        "stringValue": "assay.runner.archive_manifest.v0"
+                      }
+                    },
+                    {
+                      "key": "assay.archive.manifest_digest",
+                      "value": {
+                        "stringValue": "sha256:c76eb655e4630235ad137a50427a47db4b70ab9dcb40ddf30ad3f3165ee9d1d8"
+                      }
+                    },
+                    {
+                      "key": "assay.archive.path",
+                      "value": {
+                        "stringValue": "docs/experiments/runner-vs-otel-2026-05/compare/tests/fixtures/archive"
+                      }
+                    },
+                    {
+                      "key": "assay.archive.manifest_bytes",
+                      "value": {
+                        "intValue": "261"
+                      }
+                    },
+                    {
+                      "key": "assay.archive.source",
+                      "value": {
+                        "stringValue": "directory"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "status": {
+                "code": 1
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
