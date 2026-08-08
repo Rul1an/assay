@@ -10,7 +10,8 @@ Assay is a **Policy-as-Code** engine for Model Context Protocol (MCP) that valid
 
 ## Workspace Structure
 
-Rust monorepo with workspace version `3.31.1` (21 crates). Curated view, grouped by role:
+Rust monorepo, workspace version `5.0.0`, 22 workspace packages (21 under `crates/` plus
+`assay-python-sdk`; 9 are `publish = false`). Curated view, grouped by role:
 
 ```
 crates/
@@ -72,7 +73,7 @@ All commands defined in `crates/assay-cli/src/cli/args/mod.rs`, dispatched in `c
 | `assay evidence diff` | Verified-only bundle comparison | `commands/evidence/diff.rs` |
 | `assay evidence explore` | Read-only TUI explorer | `commands/evidence/explore.rs` |
 | `assay evidence export` | Export evidence bundles | `commands/evidence.rs` |
-| `assay mcp-server` | MCP proxy with policy enforcement | `assay-mcp-server/src/main.rs` |
+| `assay-mcp-server` | MCP proxy with policy enforcement. A **separate binary**, not an `assay` subcommand: `assay mcp` exists and is a different thing (wrap, discover, inventory, kill, tool) | `assay-mcp-server/src/main.rs` |
 | `assay monitor` | eBPF runtime monitoring (Linux) | `commands/monitor.rs` |
 | `assay sandbox` | Landlock sandbox execution | `commands/sandbox.rs` |
 | `assay doctor` | Diagnostic tool | `commands/doctor.rs` |
