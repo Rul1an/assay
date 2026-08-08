@@ -496,3 +496,78 @@ fn every_seal_carries_the_coverage_indistinguishability_ceiling() {
         "carried once, not appended twice by two paths"
     );
 }
+
+/// A third party can recompute `aeeObservedSet` from what the run wrote down.
+///
+/// This is the property #2135 was filed for. The seal carries a digest over the interception and
+/// examination records; before `--aee-records` existed the run emitted the digest and not the
+/// records, so the one commitment the payload makes about anything outside itself could only ever
+/// be re-derived by its own producer.
+///
+/// The test is deliberately written the way a consumer would work: serialise the records to the
+/// NDJSON the flag writes, parse them back from that text, and recompute from the parsed values.
+/// Recomputing from the in-memory `run.records` would pass while the wire format lost a field, and
+/// that is the failure this exists to catch.
+#[test]
+fn the_observed_set_recomputes_from_the_emitted_records() {
+    use crate::aee_seal::{
+        build_sealed_run, observed_set, records_ndjson, ObservationRecord, OBSERVATION_PAYLOAD_TYPE,
+    };
+
+    // Two prior records, not zero. With `&[]` the run carries exactly one record -- the probe
+    // examination `build_sealed_run` appends -- so `records_ndjson`'s loop never runs more than
+    // once, and a `take(1)` mutation of it passed the whole suite and the standing mutation
+    // harness. A serialiser tested on one element is a serialiser whose loop is untested.
+    let prior = vec![
+        ObservationRecord {
+            payload: serde_json::json!({"aeeKind": "interception", "aeeVersion": "0.7", "n": 1}),
+            payload_type: OBSERVATION_PAYLOAD_TYPE.to_string(),
+        },
+        ObservationRecord {
+            payload: serde_json::json!({"aeeKind": "examination", "aeeVersion": "0.7", "n": 2}),
+            payload_type: OBSERVATION_PAYLOAD_TYPE.to_string(),
+        },
+    ];
+
+    let run = build_sealed_run(
+        Vantage::Landlock(&armed_run()),
+        &environment(),
+        &prior,
+        SEALED_AT,
+        &DropAccounting::SynchronousProbe,
+        COLLECTION_PATH_LANDLOCK_TCP_CONNECT,
+    )
+    .expect("seal-eligible");
+    assert!(
+        run.records.len() >= 3,
+        "the fixture must carry more than one record or the loop is untested: {}",
+        run.records.len()
+    );
+
+    // The function `--aee-records` calls, not a re-implementation of it. Reconstructing the
+    // serialisation here would test this test's idea of the wire format rather than the producer's.
+    let ndjson = records_ndjson(&run.records).expect("records serialise");
+    assert!(
+        !ndjson.is_empty(),
+        "a run with a run-end probe emits at least the examination record"
+    );
+
+    // Exactly what a consumer holding that file would do.
+    let parsed: Vec<ObservationRecord> = ndjson
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| serde_json::from_str(l).expect("emitted record parses back"))
+        .collect();
+    assert_eq!(
+        parsed.len(),
+        run.records.len(),
+        "no record lost on the wire"
+    );
+
+    assert_eq!(
+        observed_set(&parsed).expect("recomputes"),
+        run.seal.aee_observed_set,
+        "the seal's commitment must be checkable from the records the run wrote, not only from \
+         the values it held in memory"
+    );
+}

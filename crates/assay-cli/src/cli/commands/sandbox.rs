@@ -303,6 +303,7 @@ mod tests {
             aee_run_context: None,
             aee_seal_key: None,
             aee_seal: None,
+            aee_records: None,
             command: vec!["true".into()],
             policy: None,
             workdir: None,

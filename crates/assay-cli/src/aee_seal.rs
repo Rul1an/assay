@@ -323,9 +323,18 @@ pub struct ObservationEnvironment {
 }
 
 /// One emitted observation record, as it appears in `observationRecords`.
-#[derive(Debug, Clone)]
+///
+/// Serializable because the seal commits to these and a consumer cannot check that commitment
+/// without them (#2135). `aeeObservedSet` is a digest over the interception and examination leaves;
+/// emitting the digest while withholding the leaves leaves a member only its own producer can
+/// re-derive, which is the party it exists to constrain.
+///
+/// Field names are the wire names, not the Rust ones: `payloadType` is what DSSE calls it and what
+/// an `observationRecords` entry carries.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ObservationRecord {
     pub payload: serde_json::Value,
+    #[serde(rename = "payloadType")]
     pub payload_type: String,
 }
 
@@ -385,6 +394,27 @@ fn leaf_hash(rec: &ObservationRecord) -> Result<String, NotSealEligible> {
     buf.push(0x00);
     buf.extend_from_slice(&pae);
     Ok(sha256_hex(&buf))
+}
+
+/// The records, as `--aee-records` writes them: one JSON object per line.
+///
+/// A function rather than a loop at the call site, because the call site is in `sandbox/child.rs`
+/// behind `cfg(target_os = "linux")` and nothing on a non-Linux host compiles it, let alone runs
+/// it. Biting the write path there changed nothing and no test noticed. The serialisation is the
+/// part with a property worth holding -- a consumer must be able to parse back what was written --
+/// so it lives where a test can reach it and the call site keeps only the file write.
+///
+/// The shape is **two members**, `payload` and `payloadType`. An `observationRecords` entry in a
+/// statement carries `seq` and `signatures` as well, so this file is the digest's inputs and not a
+/// statement fragment: enough for a consumer to recompute `aeeObservedSet`, not enough to feed the
+/// fixture checker, which requires exactly one signature per record.
+pub fn records_ndjson(records: &[ObservationRecord]) -> Result<String, serde_json::Error> {
+    let mut out = String::new();
+    for rec in records {
+        out.push_str(&serde_json::to_string(rec)?);
+        out.push('\n');
+    }
+    Ok(out)
 }
 
 /// AEE v0.7 `aeeObservedSet`: a digest over the sorted lowercase leaf hashes of every emitted
