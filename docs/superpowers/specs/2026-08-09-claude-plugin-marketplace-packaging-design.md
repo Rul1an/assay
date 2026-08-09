@@ -21,10 +21,16 @@ built from the base SHA above:
 
 - Claude Code copies installed plugins into an isolated cache. Paths outside
   the plugin root are unavailable after installation.
-- `${CLAUDE_PLUGIN_ROOT}` resolves in skill content. `${CLAUDE_PROJECT_DIR}` is
-  accepted in stdio MCP arguments and substituted when the variable is present
-  in the environment. The standalone health subcommand does not synthesize it;
-  session-time synthesis remains unproven until the Task 3 session check.
+- `${CLAUDE_PLUGIN_ROOT}` resolves in skill content. Claude Code `2.1.32` does
+  not synthesize `${CLAUDE_PROJECT_DIR}` for either the standalone health
+  subcommand or an actual non-interactive session: the client reports the
+  variable missing and passes the literal string to the server. The server then
+  fails closed while canonicalizing that nonexistent policy root.
+- A disposable installed-plugin control using `--policy-root .` connected from
+  the consuming project without manual environment injection and discovered the
+  packaged skill. This proves the measured local-scope host cwd; other scopes
+  and hosts remain unproven. Acceptance additionally drives a policy found only
+  in that consuming project, because connection alone does not prove the root.
 - Sixteen inspected plugin artifacts are mixed: six use an `mcpServers` wrapper
   and ten use a bare server map. The installed cache artifact uses the wrapper;
   the bare examples are predominantly marketplace-source artifacts. Neither
@@ -99,16 +105,19 @@ The plugin's `.mcp.json` contains one stdio server under `mcpServers.assay`:
   "mcpServers": {
     "assay": {
       "command": "assay-mcp-server",
-      "args": ["--policy-root", "${CLAUDE_PROJECT_DIR}"]
+      "args": ["--policy-root", "."]
     }
   }
 }
 ```
 
 The plugin does not bundle `assay-mcp-server`; that binary must already be on
-`PATH`. The server reads policies from the consuming project, not the
-marketplace checkout or plugin cache. The manifest has no unverified `note`
-extension field; limits belong in the generated skill and install guide.
+`PATH`. For the measured Claude Code `2.1.32` local-scope flow, the server starts
+with the consuming project as cwd, so `.` resolves there. This host-cwd behavior
+is an explicit assumption outside that measured flow. If a host starts the
+server elsewhere, the user must override `--policy-root` in a project-specific
+MCP entry. The manifest has no unverified `note` extension field; limits and
+recovery belong in the generated skill and install guide.
 
 ## Generated Skill Profile
 
@@ -204,10 +213,10 @@ argument vector, and absence of `version`.
 ### Driven server contract
 
 A workspace-only `assay-mcp-server` integration test reads the plugin MCP entry,
-uses its argument vector with `${CLAUDE_PROJECT_DIR}` replaced by the temporary
-consuming-project directory, and launches
-`CARGO_BIN_EXE_assay-mcp-server`. An `initialize` plus `tools/list` exchange must
-return these names exactly:
+uses its argument vector unchanged from a temporary consuming-project cwd, and
+launches `CARGO_BIN_EXE_assay-mcp-server`. The project and plugin MCP entries are
+intentionally identical. An `initialize` plus `tools/list` exchange must return
+these names exactly:
 
 - `assay_check_args`;
 - `assay_check_coverage`;
@@ -218,6 +227,11 @@ return these names exactly:
 The default build must omit `assay_test_outbound`; an all-features run retains
 the existing bidirectional feature assertion.
 
+The same driven connection writes a unique blocklist policy only inside the
+temporary consuming project and calls `assay_policy_decide`. The marker tool
+must be denied. This proves that `.` resolves to the consuming project rather
+than merely proving that the server can connect from some existing directory.
+
 ### Real-client proof
 
 Before push, run both layers with the installed Claude client:
@@ -226,16 +240,15 @@ Before push, run both layers with the installed Claude client:
 - isolated marketplace add/install/update using a fresh
   `CLAUDE_CONFIG_DIR`;
 - inspect the cached plugin rather than the source directory;
-- from a disposable consuming project, run
-  `CLAUDE_PROJECT_DIR="$PWD" claude mcp list`; the standalone health subcommand
-  does not synthesize this session variable, so the explicit value proves that
-  the cached wrapper-shaped configuration is accepted and the stdio server
-  connects, but does not prove session-time variable injection;
+- from a disposable consuming project, run `claude mcp list` without injecting
+  a project-root variable and require the cached wrapper-shaped configuration to
+  connect;
 - drive the cached `.mcp.json` against the built server through a complete
   `initialize` plus `tools/list` exchange, not merely a config-listing command;
-- invoke an actual Claude Code session from a disposable project without
-  manually setting `CLAUDE_PROJECT_DIR`, and verify both session-time MCP
-  connection and discovery of the packaged `assay-golden-path` skill.
+- invoke an actual Claude Code session from a disposable project, verify both
+  session-time MCP connection and discovery of the packaged
+  `assay-golden-path` skill, and drive the consumer-only policy marker through
+  the installed MCP connection.
 
 Record the exact client version, source SHA, installed cache version, commands,
 and outcomes in the PR review packet. Vendor validation supplements rather than

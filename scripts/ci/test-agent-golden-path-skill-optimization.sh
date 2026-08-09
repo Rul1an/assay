@@ -33,6 +33,7 @@ cp "$ROOT/scripts/ci/test-agent-golden-path-skill.py" "$SCRATCH/scripts/ci/"
 cp "$ROOT/scripts/docs/generate-agent-golden-path.py" "$SCRATCH/scripts/docs/"
 cp "$ROOT/.gitignore" "$SCRATCH/"
 cp "$ROOT/.gitattributes" "$SCRATCH/"
+cp "$ROOT/.mcp.json" "$SCRATCH/"
 cp "$ROOT/docs/generated/agent-golden-path.json" "$SCRATCH/docs/generated/"
 cp "$ROOT/examples/privileged-action-gate/mock_github_mcp.py" \
   "$SCRATCH/examples/privileged-action-gate/"

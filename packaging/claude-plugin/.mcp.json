@@ -4,7 +4,7 @@
       "command": "assay-mcp-server",
       "args": [
         "--policy-root",
-        "${CLAUDE_PROJECT_DIR}"
+        "."
       ]
     }
   }

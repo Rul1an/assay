@@ -107,6 +107,7 @@ seed_case() {
   cp "$ROOT/scripts/docs/generate-agent-golden-path.py" "$case_root/scripts/docs/"
   cp "$ROOT/.gitignore" "$case_root/"
   cp "$ROOT/.gitattributes" "$case_root/"
+  cp "$ROOT/.mcp.json" "$case_root/"
   cp "$ROOT/.pre-commit-config.yaml" "$case_root/"
   cp "$ROOT/docs/generated/agent-golden-path.json" "$case_root/docs/generated/"
   cp "$ROOT/docs/guides/agent-golden-path.md" "$case_root/docs/guides/"

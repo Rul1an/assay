@@ -81,6 +81,11 @@ fn clean_server_command() -> Command {
 }
 
 fn assert_release_server_surface(cwd: &Path, args: &[String], context: &str) {
+    std::fs::write(
+        cwd.join("install-surface-policy.yaml"),
+        "blocklist:\n  - install_surface_probe\n",
+    )
+    .expect("write consumer-project policy probe");
     let child = clean_server_command()
         .args(args)
         .current_dir(cwd)
@@ -118,6 +123,19 @@ fn assert_release_server_surface(cwd: &Path, args: &[String], context: &str) {
         "method": "tools/list"
     }));
     let response = conn.read_response_for_id(1);
+    conn.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "assay_policy_decide",
+            "arguments": {
+                "tool": "install_surface_probe",
+                "policy": "install-surface-policy.yaml"
+            }
+        }
+    }));
+    let policy_response = conn.read_response_for_id(3);
     let status = conn.shutdown();
     assert!(
         status.success(),
@@ -152,6 +170,15 @@ fn assert_release_server_surface(cwd: &Path, args: &[String], context: &str) {
         "assay_policy_decide",
     ];
     assert_eq!(actual, expected, "release tool surface changed");
+
+    let policy_text = policy_response["result"]["content"][0]["text"]
+        .as_str()
+        .expect("policy decision text");
+    let policy_result: Value = serde_json::from_str(policy_text).expect("policy decision JSON");
+    assert_eq!(
+        policy_result["allowed"], false,
+        "{context} did not resolve policy from its consuming-project cwd"
+    );
 }
 
 #[test]
@@ -181,39 +208,31 @@ args = ["--policy-root", "."]"#;
         .iter()
         .map(|arg| arg.as_str().expect("manifest string arg").to_string())
         .collect();
-    assert_release_server_surface(&workspace_root(), &args, "project manifest");
+    let project = tempfile::tempdir().expect("temporary project-manifest consumer");
+    assert_release_server_surface(project.path(), &args, "project manifest");
 }
 
 #[test]
 fn plugin_manifest_drives_the_release_server_surface() {
     let plugin = manifest_entry(InstallFile::PluginManifest);
-    assert_eq!(plugin["command"], "assay-mcp-server");
+    let project_manifest = manifest_entry(InstallFile::ClaudeManifest);
     assert_eq!(
-        plugin["args"],
-        serde_json::json!(["--policy-root", "${CLAUDE_PROJECT_DIR}"])
+        plugin, project_manifest,
+        "project and plugin manifests must intentionally share cwd-relative policy-root semantics"
     );
+    assert_eq!(plugin["command"], "assay-mcp-server");
+    assert_eq!(plugin["args"], serde_json::json!(["--policy-root", "."]));
 
     let project = tempfile::tempdir().expect("temporary Claude project");
-    let project_root = project
-        .path()
-        .to_str()
-        .expect("temporary Claude project path must be UTF-8");
     let args: Vec<String> = plugin["args"]
         .as_array()
         .expect("plugin manifest args array")
         .iter()
-        .map(
-            |arg| match arg.as_str().expect("plugin manifest string arg") {
-                "${CLAUDE_PROJECT_DIR}" => project_root.to_string(),
-                value => {
-                    assert!(
-                        !value.contains("${"),
-                        "plugin manifest contains unsupported placeholder: {value}"
-                    );
-                    value.to_string()
-                }
-            },
-        )
+        .map(|arg| {
+            arg.as_str()
+                .expect("plugin manifest string arg")
+                .to_string()
+        })
         .collect();
     assert_release_server_surface(project.path(), &args, "plugin manifest");
 }

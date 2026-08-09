@@ -20,6 +20,7 @@ PRECOMMIT_PATH = ROOT / ".pre-commit-config.yaml"
 MARKETPLACE_PATH = ROOT / ".claude-plugin/marketplace.json"
 PLUGIN_MANIFEST_PATH = ROOT / "packaging/claude-plugin/.claude-plugin/plugin.json"
 PLUGIN_MCP_PATH = ROOT / "packaging/claude-plugin/.mcp.json"
+PROJECT_MCP_PATH = ROOT / ".mcp.json"
 PLUGIN_SKILL_PATH = ROOT / "packaging/claude-plugin/skills/assay-golden-path/SKILL.md"
 PLUGIN_CONTRACT_PATH = (
     ROOT
@@ -392,12 +393,17 @@ def validate_plugin_manifests() -> None:
         "mcpServers": {
             "assay": {
                 "command": "assay-mcp-server",
-                "args": ["--policy-root", "${CLAUDE_PROJECT_DIR}"],
+                "args": ["--policy-root", "."],
             }
         }
     }
     if mcp != expected_mcp:
         fail("Claude plugin MCP command or project-root arguments drifted")
+    project_mcp = json.loads(
+        read_bounded_evidence(PROJECT_MCP_PATH, "project MCP manifest")
+    )
+    if project_mcp != mcp:
+        fail("project and plugin MCP manifests no longer share the cwd-relative invocation")
 
 
 def validate_plugin_skill(contract: dict[str, object]) -> None:

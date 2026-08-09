@@ -13,7 +13,7 @@
 - Work only in the dedicated worktree on `codex/2152-plugin-packaging`; use a private `CARGO_TARGET_DIR`.
 - Implement against approved design commit `ed6accbb0fe5c44a810cf6414d7afdbefffff8e8`.
 - Plugin identity is `assay@assay`; neither marketplace nor plugin manifest has a `version`.
-- MCP is `assay-mcp-server --policy-root ${CLAUDE_PROJECT_DIR}`; no binary is bundled.
+- MCP is `assay-mcp-server --policy-root .`; no binary is bundled.
 - Default server exposes exactly five named production tools; `assay_test_outbound` is feature-only.
 - Package exactly three canonical fixtures, including executable Python; Python is optional except for journey step 6.
 - Bound hostile manifest/resource reads to 1 MiB and reject symlinks or invalid types.
@@ -56,9 +56,12 @@ list` reported `Connected`. The cached manifest independently completed
 `initialize` and `tools/list` and returned the five exact production names.
 Without the explicit variable, the standalone health subcommand failed before
 spawn and its debug log reported `Missing environment variables in plugin MCP
-config: CLAUDE_PROJECT_DIR`; Task 3 therefore owns separate actual-session
-injection proof. All temporary config, marketplace, cache, and project paths
-were deleted after each probe.
+config: CLAUDE_PROJECT_DIR`. Task 3 then falsified session-time injection too:
+Claude Code `2.1.32` passed the literal placeholder to the server. A disposable
+`--policy-root .` control connected from the consuming project and discovered
+the packaged skill, so the implementation now pins `.` and separately proves
+the root with a consumer-only policy. All temporary config, marketplace, cache,
+and project paths were deleted after each completed probe.
 
 ### Task 1: Pin Marketplace, Plugin, and Driven MCP Contracts
 
@@ -76,7 +79,7 @@ were deleted after each probe.
 - Produces: exact parsed manifest contracts, `InstallFile::PluginManifest`, and one shared
   manifest-to-release-surface driver for project and plugin installs.
 
-- [ ] **Step 1: Write failing parsed-manifest assertions**
+- [x] **Step 1: Write failing parsed-manifest assertions**
 
 Add bounded paths and compare parsed objects, not text:
 
@@ -98,9 +101,9 @@ if marketplace != {
     fail("Claude marketplace identity or local source drifted")
 ```
 
-Assert exact plugin fields (`name`, `description`, `author`), absence of `version`, and one `mcpServers.assay` entry with string command plus exact string args.
+Assert exact plugin fields (`name`, `description`, `author`), absence of `version`, and one `mcpServers.assay` entry with string command plus exact `--policy-root .` args. Assert that the project and plugin entries intentionally match.
 
-- [ ] **Step 2: Write the failing manifest-driven Rust test**
+- [x] **Step 2: Write the failing manifest-driven Rust test**
 
 ```rust
 #[test]
@@ -118,7 +121,7 @@ fn plugin_manifest_drives_the_release_server_surface() {
 
 Pin the five names, not only the count, and retain bidirectional `test-outbound` coverage.
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 ```bash
 python3 scripts/ci/test-agent-golden-path-skill.py
@@ -127,15 +130,15 @@ CARGO_TARGET_DIR=/tmp/assay-2152-target cargo test -p assay-mcp-server --test pr
 
 Both must fail on the named missing manifest, not on compilation or setup.
 
-- [ ] **Step 4: Create only the minimal typed manifests**
+- [x] **Step 4: Create only the minimal typed manifests**
 
 Create the exact approved JSON. Add LF attributes. Do not add versions, commands, agents, auth, network, or a `note` extension.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run both Step 3 commands, the full focused test target, and its `--features test-outbound` variant. Default must return the five exact production names; all-features may add only `assay_test_outbound`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A -- scripts/ci/test-agent-golden-path-skill.py crates/assay-mcp-server/tests/project_install_surfaces.rs .claude-plugin/marketplace.json packaging/claude-plugin/.claude-plugin/plugin.json packaging/claude-plugin/.mcp.json .gitattributes
@@ -159,7 +162,7 @@ git commit -m "feat(plugin): pin Claude marketplace and MCP contracts"
 - Consumes: `CONTRACT`, project skill renderer, canonical step-6 fixtures.
 - Produces: `render_plugin_skill() -> str` and `PLUGIN_RESOURCE_COPIES: tuple[tuple[Path, Path], ...]`.
 
-- [ ] **Step 1: Write failing profile/resource checks**
+- [x] **Step 1: Write failing profile/resource checks**
 
 Require plugin-root contract guidance, the exact source-to-bundle mapping, no executable/read instruction through source-only `docs/`, `scripts/`, or `examples/`, and byte parity:
 
@@ -171,19 +174,19 @@ for source, packaged in PLUGIN_RESOURCE_COPIES:
         fail(f"packaged resource drifted: {packaged.relative_to(ROOT)}")
 ```
 
-- [ ] **Step 2: Extend drift/hardening selectors and verify RED**
+- [x] **Step 2: Extend drift/hardening selectors and verify RED**
 
 Add all generated package files to `GENERATED` and wholly recreated outputs to `FRESH_GENERATED`. Seed them in hardening scratch repos. Add named failures for missing mapping, source-only instructions, and fixture-byte drift. Run validator, drift, and hardening scripts; failures must name absent generated outputs.
 
-- [ ] **Step 3: Implement one shared renderer with a plugin profile**
+- [x] **Step 3: Implement one shared renderer with a plugin profile**
 
 Extract only the shared journey rendering. Keep project skills byte-identical. The plugin profile uses `${CLAUDE_PLUGIN_ROOT}/skills/assay-golden-path/references/agent-golden-path.json`, omits source-generator editing instructions, and adds exactly one approved fixture mapping sentence.
 
-- [ ] **Step 4: Copy canonical resources in the generator**
+- [x] **Step 4: Copy canonical resources in the generator**
 
 Use `shutil.copyfile` after creating parents. Copy generated contract bytes after writing them and only the three approved fixtures: `mock_github_mcp.py`, `baseline-approved.json`, and `policies/no-allowance.yaml`.
 
-- [ ] **Step 5: Generate and verify GREEN**
+- [x] **Step 5: Generate and verify GREEN**
 
 ```bash
 python3 scripts/docs/generate-agent-golden-path.py
@@ -193,7 +196,7 @@ bash scripts/ci/test-agent-golden-path-skill-hardening.sh
 cmp .agents/skills/assay-golden-path/SKILL.md .claude/skills/assay-golden-path/SKILL.md
 ```
 
-- [ ] **Step 6: Commit exact generator/gate/output paths**
+- [x] **Step 6: Commit exact generator/gate/output paths**
 
 Commit as `feat(plugin): generate cache-safe golden-path resources`.
 
@@ -206,11 +209,11 @@ Commit as `feat(plugin): generate cache-safe golden-path resources`.
 
 **Interfaces:**
 - Consumes: marketplace root, `assay@assay`, server on `PATH`, Claude CLI.
-- Produces: bounded disposable-client proof recording client version, source SHA, cache version, health-subcommand connection, actual-session connection, and each phase.
+- Produces: bounded disposable-client proof recording client version, source SHA, cache version, health-subcommand connection, actual-session connection, consumer-project policy-root proof, and each phase.
 
 - [ ] **Step 1: Write a failing workflow self-test**
 
-Use a fake Claude executable and require validate, add/install/update, cache inspection, explicit-project-dir `mcp list`, complete JSON-RPC exchange, actual-session MCP connection without manual project-dir injection, and skill discovery. It must reject a source-directory-only success.
+Use a fake Claude executable and require validate, add/install/update, cache inspection, `mcp list`, complete JSON-RPC exchange, actual-session MCP connection, consumer-only policy-root proof, and skill discovery. It must reject a source-directory-only success.
 
 - [ ] **Step 2: Verify RED**
 
@@ -222,7 +225,7 @@ State that the plugin bundles no server, installation alone enforces nothing, po
 
 - [ ] **Step 4: Implement the bounded disposable workflow**
 
-Use fresh `CLAUDE_CONFIG_DIR`, temporary marketplace and consuming project, trap cleanup, 1 MiB output ceilings, and process-tree deadlines equivalent to #2189. Set `CLAUDE_PROJECT_DIR` explicitly only for the standalone `mcp list` health check. Invoke the actual Claude session without that manual injection and prove its MCP connection separately. Never mutate normal Claude config or pass credentials. Fail if installed cache resolves inside the source checkout.
+Use fresh `CLAUDE_CONFIG_DIR`, temporary marketplace and consuming project, trap cleanup, 1 MiB output ceilings, and process-tree deadlines equivalent to #2189. Do not inject `CLAUDE_PROJECT_DIR`. Prove both health-subcommand and actual-session MCP connection, then prove policy-root resolution with a policy available only inside the consuming project. Never mutate normal Claude config or pass credentials. Fail if installed cache resolves inside the source checkout.
 
 - [ ] **Step 5: Run the real-client proof**
 
@@ -235,6 +238,7 @@ installed_cache_version=<exact value>
 plugin_validate=pass
 mcp_list_connected=pass
 actual_session_mcp_connected=pass
+consumer_project_policy_root=pass
 initialize=pass
 tools_list=pass
 skill_discovery=pass
@@ -281,17 +285,14 @@ Include exact SHA/worktree, diffstat, hot files, contract changes, RED/GREEN evi
 
 - [ ] **Step 5: Obtain exact-head quorum and merge only when green**
 
-Follow the repository `AGENTS.md` quorum: one non-building agent plus CodeRabbit
-or Copilot, or two non-building agents when the bot-unavailability conditions
-are met and recorded on the final head. Claude Code Desktop may supply one
-non-building review, but the plan does not depend on a local chat identity. Fix
-or technically disposition every actionable finding. Any push restarts review
-and proof.
+Follow the repository `AGENTS.md` quorum: one non-building agent review on the
+final head. Automated reviews can add evidence but neither satisfy nor block
+quorum. Fix or technically disposition every actionable finding. Any push
+restarts review and proof.
 
 ## Self-Review
 
 - Spec coverage: pre-commit shape selection, identity, manifests, generated package, canonical resources, installed client, drift, mutation, security/failure policy, and non-claims each map to a task.
 - Placeholder scan: no deferred implementation or unnamed error-handling instruction remains.
-- Type consistency: `render_plugin_skill` and `PLUGIN_RESOURCE_COPIES` are introduced once and
-  consumed consistently; the existing install-surface driver owns the MCP invocation rule.
-- Residual: exact Claude marketplace flags must be read from the installed client during Task 3 and recorded with its version; the plan does not hardcode unverified vendor syntax.
+- Type consistency: one profiled `render_skill` function and `PLUGIN_RESOURCE_COPIES` are consumed consistently; the existing install-surface driver owns the MCP invocation and consumer-policy-root rules.
+- Residual: actual-session proof can establish MCP and skill startup without an authenticated API call; model-mediated tool use remains unavailable in a fresh unauthenticated `CLAUDE_CONFIG_DIR` and must not be reported as pass.
