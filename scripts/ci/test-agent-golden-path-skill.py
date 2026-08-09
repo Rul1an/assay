@@ -58,6 +58,48 @@ SELF_TEST_TRIGGER_PATH = "scripts/docs/generate-agent-golden-path.py"
 SELF_TEST_TRIGGER_MODE = "100644"
 SELF_TEST_TRIGGER_TYPES = frozenset({"file", "non-executable", "python", "text"})
 MAPPING_ENTRY_PATTERN = re.compile(r"^(?P<key>[A-Za-z0-9_-]+) *:(?P<value>.*)$")
+ISSUE_REFERENCE_PATTERN = re.compile(r"(?:#|/issues/)([0-9]+)")
+PUBLIC_TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
+PRIVATE_PHRASE_FAMILIES = (
+    (
+        "roadmap ownership",
+        (("roadmap", "ownership"), ("road", "map", "ownership")),
+    ),
+    (
+        "next slice",
+        (
+            ("next", "slice"),
+            ("future", "slice"),
+            ("next", "pr"),
+            ("future", "pr"),
+        ),
+    ),
+    (
+        "future marketplace",
+        (
+            ("future", "marketplace"),
+            ("future", "market", "place"),
+            ("marketplace", "packaging"),
+            ("market", "place", "packaging"),
+            ("future", "plugin"),
+            ("future", "plug", "in"),
+            ("plugin", "packaging"),
+            ("plug", "in", "packaging"),
+        ),
+    ),
+)
+NUMBER_WORDS = {
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+}
+STEP_NUMBERS = frozenset(NUMBER_WORDS.values())
 
 # Both bounded YAML readers intentionally model the repository's two-space
 # layout rather than arbitrary YAML indentation or scalar forms.
@@ -107,6 +149,71 @@ class WorkflowContract:
 
 def fail(message: str) -> None:
     raise AssertionError(message)
+
+
+def contains_token_sequence(tokens: tuple[str, ...], sequence: tuple[str, ...]) -> bool:
+    width = len(sequence)
+    return any(
+        tokens[index : index + width] == sequence
+        for index in range(len(tokens) - width + 1)
+    )
+
+
+def contract_issue_numbers(contract: dict[str, object]) -> set[int]:
+    allowed: set[int] = set()
+    steps = contract.get("steps")
+    if not isinstance(steps, list):
+        fail("golden-path contract steps must be a list")
+    for step in steps:
+        if not isinstance(step, dict):
+            fail("golden-path steps must be objects")
+        outcomes = step.get("outcomes")
+        if not isinstance(outcomes, list):
+            fail(f"golden-path outcomes must be a list for {step.get('id')}")
+        for outcome in outcomes:
+            if not isinstance(outcome, dict):
+                fail(f"golden-path outcomes must be objects for {step.get('id')}")
+            issue = outcome.get("gap_issue")
+            if issue is None:
+                continue
+            if not isinstance(issue, int) or isinstance(issue, bool):
+                fail(f"golden-path gap_issue must be an integer for {step.get('id')}")
+            allowed.add(issue)
+
+    non_claims = contract.get("non_claims")
+    if not isinstance(non_claims, list):
+        fail("golden-path contract non_claims must be a list")
+    for claim in non_claims:
+        if not isinstance(claim, str):
+            fail("golden-path non-claims must be strings")
+        allowed.update(int(raw) for raw in ISSUE_REFERENCE_PATTERN.findall(claim))
+    return allowed
+
+
+def validate_public_vocabulary(text: str, contract: dict[str, object]) -> None:
+    allowed_issues = contract_issue_numbers(contract)
+    observed_issues = {int(raw) for raw in ISSUE_REFERENCE_PATTERN.findall(text)}
+    unexpected = sorted(observed_issues - allowed_issues)
+    if unexpected:
+        fail(f"skill references issue outside contract evidence: #{unexpected[0]}")
+
+    tokens = tuple(PUBLIC_TOKEN_PATTERN.findall(text.lower()))
+    for label, sequences in PRIVATE_PHRASE_FAMILIES:
+        if any(contains_token_sequence(tokens, sequence) for sequence in sequences):
+            fail(f"skill introduces private planning vocabulary: {label}")
+
+    ownership_tokens = frozenset({"belongs", "owned", "ownership", "owns"})
+    for index in range(len(tokens) - 2):
+        if tokens[index : index + 2] != ("implementation", "step"):
+            continue
+        step_number = NUMBER_WORDS.get(tokens[index + 2], tokens[index + 2])
+        if step_number not in STEP_NUMBERS:
+            continue
+        if any(token in ownership_tokens for token in tokens[index + 3 : index + 7]):
+            fail(
+                "skill introduces private planning vocabulary: "
+                f"implementation step {step_number} ownership"
+            )
 
 
 def run_git(*args: str) -> subprocess.CompletedProcess[str]:
@@ -868,17 +975,17 @@ def main() -> None:
         if non_claim not in body:
             fail(f"skill omits non-claim: {non_claim}")
 
-    forbidden = (
+    validate_public_vocabulary(text, contract)
+
+    forbidden_claims = (
         "assay mcp-server",
         "assay_test_outbound",
         "six production tools",
         "safe agent",
         "compliance claim",
-        "issue #2152 step 3",
-        "Plugin and marketplace packaging belongs",
         "Cursor does not discover this project skill",
     )
-    for phrase in forbidden:
+    for phrase in forbidden_claims:
         if phrase in text:
             fail(f"skill introduces forbidden or stale claim: {phrase!r}")
 
