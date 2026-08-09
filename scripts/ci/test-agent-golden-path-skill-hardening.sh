@@ -157,7 +157,10 @@ replacements = {
     ),
     "pre-commit-files": (
         '          pre-commit run --all-files --show-diff-on-failure\n',
-        '          pre-commit run --files --show-diff-on-failure\n',
+        '          pre-commit run --all-files --show-diff-on-failure\n\n'
+        '      - name: Run noncanonical pre-commit\n'
+        '        shell: bash\n'
+        '        run: pre-commit run --files --show-diff-on-failure\n',
     ),
     "pre-commit-hook-stage": (
         '          pre-commit run --all-files --show-diff-on-failure\n',

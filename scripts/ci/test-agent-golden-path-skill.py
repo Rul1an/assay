@@ -35,6 +35,7 @@ CURSOR_SCOPE = (
 PROTECTED_ACTION_CWD = "examples/privileged-action-gate"
 MAX_EVIDENCE_BYTES = 1024 * 1024
 CANONICAL_PRECOMMIT = "pre-commit run --all-files --show-diff-on-failure"
+ALLOWED_PREPUSH_PRECOMMIT = "pre-commit run --hook-stage pre-push --all-files"
 
 
 @dataclass(frozen=True)
@@ -356,6 +357,11 @@ def validate_lint_executor(contract: WorkflowContract) -> None:
         fail("kernel-matrix lint executor must fail closed")
     if invocations != (CANONICAL_PRECOMMIT,):
         fail("kernel-matrix lint pre-commit command is noncanonical")
+    for other_step, other_invocations in invocation_steps:
+        if other_step is step:
+            continue
+        if other_invocations != (ALLOWED_PREPUSH_PRECOMMIT,):
+            fail("kernel-matrix lint pre-commit command is noncanonical")
 
 
 def parse_precommit_self_test(text: str) -> PrecommitHookContract:
