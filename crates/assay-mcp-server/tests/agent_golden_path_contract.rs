@@ -1,21 +1,19 @@
 //! MCP-owned rows of the #1975 stdout-and-exit-code journey contract.
 
+#[path = "../../../tests/support/bounded_process.rs"]
+mod bounded_process;
 mod jsonrpc_conn;
 #[path = "../../../tests/support/agent_golden_path.rs"]
 mod runtime_coverage;
 
+use bounded_process::{run_bounded, GOLDEN_PATH_LIMITS};
 use jsonrpc_conn::Conn;
 use serde_json::Value;
 use std::ffi::OsStr;
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::process::{Command, Output, Stdio};
 
 use runtime_coverage::ExpectedOutcome;
-
-const PROCESS_TIMEOUT: Duration = Duration::from_secs(10);
-const MAX_STDOUT_BYTES: u64 = 1024 * 1024;
 
 fn workspace_root() -> &'static Path {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -145,61 +143,14 @@ fn clean_server_command() -> Command {
 
 fn run_server<S: AsRef<OsStr>>(cwd: &Path, args: &[S], stdin: &[u8]) -> Output {
     let mut command = clean_server_command();
-    command
-        .current_dir(cwd)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
-    let mut child = command.spawn().expect("spawn assay-mcp-server");
-    let mut child_stdin = child.stdin.take().expect("child stdin");
-    let stdin = stdin.to_vec();
-    let writer = std::thread::spawn(move || {
-        child_stdin.write_all(&stdin)?;
-        Ok::<(), std::io::Error>(())
-    });
-    let output = wait_bounded(child);
-    writer
-        .join()
-        .expect("join stdin writer")
-        .expect("write child stdin");
-    output
-}
-
-fn wait_bounded(mut child: Child) -> Output {
-    let stdout = child.stdout.take().expect("child stdout");
-    let reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        stdout
-            .take(MAX_STDOUT_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .expect("read bounded child stdout");
-        bytes
-    });
-    let deadline = Instant::now() + PROCESS_TIMEOUT;
-    let status = loop {
-        match child.try_wait().expect("poll assay-mcp-server") {
-            Some(status) => break status,
-            None if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let status = child.wait().expect("reap timed-out assay-mcp-server");
-                panic!(
-                    "assay-mcp-server did not exit within {PROCESS_TIMEOUT:?}; killed it ({status})"
-                );
-            }
-            None => std::thread::sleep(Duration::from_millis(10)),
-        }
-    };
-    let stdout = reader.join().expect("join stdout reader");
-    assert!(
-        stdout.len() <= MAX_STDOUT_BYTES as usize,
-        "assay-mcp-server stdout exceeded the {MAX_STDOUT_BYTES}-byte test ceiling"
-    );
-    Output {
-        status,
-        stdout,
-        stderr: Vec::new(),
-    }
+    command.current_dir(cwd).args(args);
+    run_bounded(
+        &mut command,
+        stdin,
+        GOLDEN_PATH_LIMITS,
+        "agent golden-path MCP command",
+    )
+    .unwrap_or_else(|error| panic!("{error}"))
 }
 
 fn python() -> &'static str {
@@ -212,12 +163,17 @@ fn python() -> &'static str {
 
 fn required_python() -> &'static str {
     let interpreter = python();
-    let output = Command::new(interpreter)
-        .arg("--version")
-        .output()
-        .unwrap_or_else(|error| {
-            panic!("the protected-action reference fixture requires {interpreter} on PATH: {error}")
-        });
+    let mut command = Command::new(interpreter);
+    command.arg("--version");
+    let output = run_bounded(
+        &mut command,
+        b"",
+        GOLDEN_PATH_LIMITS,
+        "protected-action Python preflight",
+    )
+    .unwrap_or_else(|error| {
+        panic!("the protected-action reference fixture requires {interpreter} on PATH: {error}")
+    });
     assert!(
         output.status.success(),
         "the protected-action reference fixture requires a working {interpreter}"

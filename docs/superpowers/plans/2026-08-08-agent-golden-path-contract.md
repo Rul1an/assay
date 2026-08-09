@@ -121,7 +121,8 @@ scenarios and requires every MCP-owned contract outcome exactly once.
 cargo test -p assay-mcp-server --test agent_golden_path_contract -- --nocapture
 ```
 
-Expected: FAIL because the machine contract is absent.
+Expected: FAIL because the MCP-owned protected-action and SARIF outcomes are
+still missing or incomplete in the machine contract.
 
 - [x] **Step 3: Complete the machine outcomes and generated table**
 
