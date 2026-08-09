@@ -5,9 +5,9 @@ ROOT="$(git rev-parse --show-toplevel)"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
-# This cumulative pin keeps Task 1's 11 cases, Task 2's 13 parser cases, and
-# two structural steps-mapping regressions, so later tasks cannot silently drop either.
-EXPECTED_CASES=26
+# Task 2 pins the eleven inherited cases, twelve named parser failures, and one
+# parser allow probe. Structural probe assertions stay inside that 24-case boundary.
+EXPECTED_CASES=24
 case_count=0
 
 record_case_pass() {
@@ -135,14 +135,6 @@ replacements = {
     "delete-lint-runs-on": (
         '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n',
         '  lint:\n    name: Lint (pre-commit)\n',
-    ),
-    "delete-lint-steps": (
-        '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n    timeout-minutes: 10\n    permissions:\n      contents: read\n    steps:\n',
-        '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n    timeout-minutes: 10\n    permissions:\n      contents: read\n',
-    ),
-    "duplicate-lint-steps": (
-        '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n    timeout-minutes: 10\n    permissions:\n      contents: read\n    steps:\n',
-        '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n    timeout-minutes: 10\n    permissions:\n      contents: read\n    steps:\n    steps:\n',
     ),
 }
 
@@ -272,8 +264,6 @@ declare -a parser_mutations=(
   "types|pull-request types|kernel-matrix pull_request must not declare types"
   "comment-pull-request|commented pull-request section|kernel-matrix workflow must declare exactly one pull_request section"
   "delete-lint-runs-on|missing lint runner|kernel-matrix lint job is missing required key: runs-on"
-  "delete-lint-steps|missing lint steps|kernel-matrix lint job is missing required key: steps"
-  "duplicate-lint-steps|duplicate lint steps|kernel-matrix lint job duplicates key: steps"
 )
 
 for parser_case in "${parser_mutations[@]}"; do
@@ -328,6 +318,33 @@ module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 workflow = (case_root / ".github/workflows/kernel-matrix.yml").read_text(encoding="utf-8")
+steps_section = "    outputs:\n      - run: echo non-step-parser-sentinel\n    steps:\n"
+if workflow.count(steps_section) != 1:
+    raise SystemExit(f"injected steps section is not unique: {steps_section!r}")
+
+def expect_parser_failure(name, candidate, expected):
+    try:
+        module.parse_kernel_matrix_workflow(candidate)
+    except AssertionError as error:
+        if expected not in str(error):
+            raise SystemExit(f"{name} reached {error!s}, not {expected!r}") from error
+    else:
+        raise SystemExit(f"{name} was accepted")
+
+expect_parser_failure(
+    "missing lint steps",
+    workflow.replace(
+        steps_section,
+        "    outputs:\n      - run: echo non-step-parser-sentinel\n",
+        1,
+    ),
+    "kernel-matrix lint job is missing required key: steps",
+)
+expect_parser_failure(
+    "duplicate lint steps",
+    workflow.replace(steps_section, steps_section + "    steps:\n", 1),
+    "kernel-matrix lint job duplicates key: steps",
+)
 contract = module.parse_kernel_matrix_workflow(workflow)
 if sum(step.shell_lines == ("echo inline-parser-sentinel",) for step in contract.lint_steps) != 1:
     raise SystemExit("parser did not retain exactly one inline run sentinel")
