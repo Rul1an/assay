@@ -744,4 +744,4 @@ if (( case_count != EXPECTED_CASES )); then
   exit 1
 fi
 
-echo "agent golden-path hardening: $case_count case(s) executed"
+echo "agent golden-path hardening: $case_count case(s) observed"
