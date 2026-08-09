@@ -126,10 +126,13 @@ Run:
 ```bash
 python3 scripts/ci/test-agent-golden-path-skill.py
 bash scripts/ci/test-agent-golden-path-skill-hardening.sh
-pre-commit run docs-generated-drift-self-test --all-files
 ```
 
-Expected: all pass; the mutation names print `ok`.
+Expected: both pass and the two scheduling mutation names print `ok`. Do not
+execute `docs-generated-drift-self-test` against this worktree yet: until Task 6
+lands, the base self-test still mutates tracked files and relies on an EXIT trap
+to restore them. The actual default-stage invocation is exercised in Task 8,
+after the self-test is scratch-only.
 
 - [ ] **Step 7: Commit Task 1**
 
@@ -183,14 +186,26 @@ Add scratch cases that require these diagnostics:
 |---|---|
 | Tab before a `paths` item | `kernel-matrix workflow uses tab indentation` |
 | Duplicate `paths:` key | `kernel-matrix pull_request duplicates key: paths` |
+| Delete `paths:` | `kernel-matrix pull_request is missing required key: paths` |
 | Unsupported unquoted path item | `kernel-matrix pull_request.paths contains an unsupported entry` |
 | Add `paths-ignore:` | `kernel-matrix pull_request cannot combine paths and paths-ignore` |
 | Add `branches-ignore:` | `kernel-matrix pull_request cannot combine branches and branches-ignore` |
 | Change branches to `release/*` | `kernel-matrix pull_request does not cover main` |
+| Change branches to unquoted `[main]` | `kernel-matrix pull_request.branches must be a bracketed list of quoted strings` |
+| Change branches to a block sequence | `kernel-matrix pull_request.branches must be a bracketed list of quoted strings` |
 | Add `types: [labeled]` | `kernel-matrix pull_request must not declare types` |
 | Comment out `pull_request:` | `kernel-matrix workflow must declare exactly one pull_request section` |
+| Delete lint `runs-on:` | `kernel-matrix lint job is missing required key: runs-on` |
 
 The `types` diagnostic says the key is forbidden, not that it is narrowed.
+
+Add one direct parser probe for the existing inline `run:` form: replace
+`run: cargo install --locked cargo-deny` in a scratch workflow with
+`run: echo inline-parser-sentinel`, import the copied validator without invoking
+`main()`, call `parse_kernel_matrix_workflow()`, and require exactly one step
+whose `shell_lines == ("echo inline-parser-sentinel",)`. Also require every
+`uses:`-only step to have empty `shell_lines`. This probe fails if inline runs
+are silently discarded while the main workflow still happens to validate.
 
 - [ ] **Step 2: Run parser mutations and confirm RED**
 
@@ -209,8 +224,6 @@ Use these helpers in the validator:
 
 ```python
 def indentation(line: str) -> int:
-    if "\t" in line[: len(line) - len(line.lstrip())]:
-        fail("kernel-matrix workflow uses tab indentation")
     return len(line) - len(line.lstrip(" "))
 
 
@@ -234,14 +247,20 @@ Implement `parse_kernel_matrix_workflow()` with this exact sequence:
 3. collect its direct indentation-4 keys, rejecting duplicates before parsing
    values;
 4. reject `paths-ignore` with `paths` and `branches-ignore` with `branches`;
-5. parse `branches` and optional `types` as bracketed string lists with
-   `ast.literal_eval`, after confirming the scalar begins `[` and ends `]`;
+5. parse `branches` and optional `types` through one
+   `parse_inline_string_list(raw, label)` helper; require `[`/`]`, wrap
+   `ast.literal_eval` in `try/except (SyntaxError, ValueError)`, and fail with
+   `<label> must be a bracketed list of quoted strings` before rejecting any
+   non-string element with the same named diagnostic;
 6. parse the indentation-6 quoted `paths` sequence until the next active line
    at indentation 4 or less;
 7. locate one `jobs:` mapping, one nested `lint:` mapping, and collect its
    direct scalar keys plus its indentation-6 step sequence;
-8. for each step, collect direct `if`, `continue-on-error`, and the body of one
-   `run: |` block scalar;
+8. for each step, collect direct `if` and `continue-on-error`; `run` is optional,
+   a `run: <inline scalar>` contributes exactly that one shell line, a `run: |`
+   block contributes its expanded body, and a `uses:`-only step contributes an
+   empty `shell_lines`; reject duplicate `run` keys and do not expand other
+   block-scalar styles;
 9. construct `WorkflowContract` only after every required section and value has
    passed validation.
 
@@ -308,7 +327,7 @@ Create one scratch case per mutation and require the diagnostic shown:
 | Delete or comment `lint:` | `kernel-matrix workflow must declare exactly one active lint job` |
 | Delete or comment canonical command | `kernel-matrix lint job has no canonical pre-commit executor` |
 | Replace `--all-files` with `--files` | `kernel-matrix lint pre-commit command is noncanonical` |
-| Add `--hook-stage pre-push` | `kernel-matrix lint pre-commit command is noncanonical` |
+| Append `--hook-stage pre-push` to the canonical command | `kernel-matrix lint pre-commit command is noncanonical` |
 | Add job or executor-step `if: false` | `kernel-matrix lint executor must not be conditional` |
 | Add `continue-on-error: true` | `kernel-matrix lint executor must fail closed` |
 | Add `needs: optional-job` | `kernel-matrix lint job must not depend on another job` |
@@ -343,26 +362,27 @@ def validate_lint_executor(contract: WorkflowContract) -> None:
     if contract.lint_continue_on_error is True:
         fail("kernel-matrix lint executor must fail closed")
 
-    candidates = []
+    invocation_steps = []
+    canonical_steps = []
     for step in contract.lint_steps:
         active = tuple(line.strip() for line in step.shell_lines if line.strip())
         invocations = tuple(line for line in active if line.startswith("pre-commit "))
-        unqualified = tuple(line for line in invocations if "--hook-stage" not in line)
-        staged = tuple(line for line in invocations if "--hook-stage" in line)
-        if unqualified:
-            candidates.append((step, unqualified, staged))
+        if invocations:
+            invocation_steps.append((step, invocations))
+        if CANONICAL_PRECOMMIT in invocations:
+            canonical_steps.append((step, invocations))
 
-    if not candidates:
+    if not invocation_steps:
         fail("kernel-matrix lint job has no canonical pre-commit executor")
-    if len(candidates) != 1:
+    if len(canonical_steps) != 1:
         fail("kernel-matrix lint pre-commit command is noncanonical")
 
-    step, unqualified, staged = candidates[0]
+    step, invocations = canonical_steps[0]
     if step.condition is not None:
         fail("kernel-matrix lint executor must not be conditional")
     if step.continue_on_error is True:
         fail("kernel-matrix lint executor must fail closed")
-    if unqualified != (CANONICAL_PRECOMMIT,) or staged:
+    if invocations != (CANONICAL_PRECOMMIT,):
         fail("kernel-matrix lint pre-commit command is noncanonical")
 ```
 
@@ -452,6 +472,7 @@ GIT_ENV = {
     **os.environ,
     "GIT_CONFIG_NOSYSTEM": "1",
     "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CEILING_DIRECTORIES": str(ROOT.parent),
 }
 
 
@@ -472,7 +493,10 @@ def run_git(*args: str) -> subprocess.CompletedProcess[str]:
     )
 ```
 
-Call only with constant paths from `SKILL_PATHS` relative to `ROOT`. Require:
+Call only with constant paths from `SKILL_PATHS` relative to `ROOT`. Call
+`validate_skill_repository_state()` in `main()` before the first
+`read_bounded_evidence()` call for either skill, so an indexed symlink first
+passes the tracking predicate and then reaches the file-type predicate. Require:
 
 ```python
 git ls-files --error-unmatch -- <skill>
@@ -512,12 +536,18 @@ remove/comment the workflow path and remove it from both hook regexes.
 - [ ] **Step 7: Run focused GREEN verification**
 
 ```bash
-git check-ignore --no-index .claude/skills/assay-golden-path/OTHER.md
-! git check-ignore --no-index .claude/skills/assay-golden-path/SKILL.md
-git ls-files --error-unmatch -- \
+export GIT_CONFIG_NOSYSTEM=1
+export GIT_CONFIG_GLOBAL=/dev/null
+export GIT_CEILING_DIRECTORIES="$(dirname "$PWD")"
+git -c core.excludesFile= -c core.attributesFile= \
+  check-ignore --no-index .claude/skills/assay-golden-path/OTHER.md
+! git -c core.excludesFile= -c core.attributesFile= \
+  check-ignore --no-index .claude/skills/assay-golden-path/SKILL.md
+git -c core.excludesFile= -c core.attributesFile= \
+  ls-files --error-unmatch -- \
   .agents/skills/assay-golden-path/SKILL.md \
   .claude/skills/assay-golden-path/SKILL.md
-git check-attr eol -- \
+git -c core.excludesFile= -c core.attributesFile= check-attr eol -- \
   .agents/skills/assay-golden-path/SKILL.md \
   .claude/skills/assay-golden-path/SKILL.md
 python3 scripts/ci/test-agent-golden-path-skill.py
@@ -620,7 +650,10 @@ git commit -m "test(agent): reject symlinked golden-path skills"
   - `run_gate(case_root: str) -> exit status`
   - `expect_gate_status(name: str, case_root: str, expected: int)`
 - The safety wrapper consumes the self-test as a subprocess and proves it does
-  not rely on its cleanup trap to restore the repository it runs from.
+  not rely on its scratch cleanup trap to restore the repository it runs from.
+- The self-test accepts the test-only selector
+  `ASSAY_DOCS_DRIFT_SELF_TEST_CASE`; unset runs the full battery and
+  `hand-edited-diagram` runs exactly that one named case. Unknown values fail.
 
 - [ ] **Step 1: Write the cleanup-disabled safety test**
 
@@ -628,19 +661,33 @@ The new script must:
 
 1. copy the tracked working tree to `mktemp -d/case/repo` using the same
    `git ls-files -z | tar --null -T -` pattern as the drift gate;
-2. replace the historical copied line `trap cleanup EXIT` with `trap : EXIT`
-   when that exact line exists;
-3. snapshot the copied repository's tracked and non-ignored untracked entries;
-4. run the copied self-test, accepting its own expected status only for this
-   historical mutation;
-5. snapshot again and fail with
+2. require exactly one cleanup trap across the historical
+   `trap cleanup EXIT` spelling and the target
+   `trap 'rm -rf "$SCRATCH"' EXIT` spelling, then replace the matched line with
+   `trap : EXIT`; absence or duplication is a named failure, so the safety
+   mutation cannot silently disarm itself when cleanup spelling changes;
+3. when the target scratch-cleanup form is present, structurally reject
+   backup-and-restore code in the copied self-test, including a `cleanup()`
+   function, `*_BACKUP` variables, `trap cleanup`, or a `cp`/`mv` destination
+   rooted under `$ROOT` outside `seed_repo()`; the historical form remains
+   accepted only so the initial RED can expose its writes with cleanup disabled;
+4. snapshot the copied repository's tracked and non-ignored untracked entries;
+5. for the target scratch-cleanup form, run the copied self-test with
+   `ASSAY_DOCS_DRIFT_SELF_TEST_CASE=hand-edited-diagram` and `TMPDIR` set to a
+   second disposable directory outside the copied repository; require its output
+   to report exactly one executed case, then remove that external temp directory.
+   For the historical form only, run the copied full battery without the
+   unsupported selector so the RED observes the actual pre-change behavior;
+6. snapshot again and fail with
    `drift self-test writes its repository before cleanup` if the manifests
    differ.
 
-The snapshot manifest is generated by embedded Python from
-`git ls-files -z --cached --others --exclude-standard`. For every path, hash a
-record containing path bytes, `lstat` file type, regular-file content, or
-symlink target. Sort by raw path bytes before hashing.
+The snapshot manifest is generated by embedded Python from the output of a
+hermetic `git ls-files -z --cached --others --exclude-standard` invocation with
+`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, empty
+`core.excludesFile`/`core.attributesFile`, and a ceiling at the copied repo's
+parent. For every path, hash a record containing path bytes, `lstat` file type,
+regular-file content, or symlink target. Sort by raw path bytes before hashing.
 
 - [ ] **Step 2: Run the safety test and confirm RED**
 
@@ -671,6 +718,11 @@ For every case, copy `SEED/.` to a fresh case root, mutate only that copy, and
 execute `case_root/scripts/ci/check-docs-generated-drift.sh` with cwd at the
 case root. Capture expected non-zero statuses explicitly inside `if`; do not
 disable `set -e` globally.
+
+Route named cases through one case table. Increment `executed_cases` after each
+selected case, print `generated-docs drift self-test: <n> case(s) executed`, and
+require `n == 1` when the test-only selector is set. This makes the safety
+wrapper distinguish a passing case from a selector that ran nothing.
 
 - [ ] **Step 4: Port all existing mutations and add both destinations**
 
@@ -710,15 +762,21 @@ In a separate scratch case, snapshot, append to the copied
 diff to name that exact path. This proves the snapshot is neither constant nor
 empty.
 
+The real-root snapshot and the meta-mutation's snapshot use the same hermetic
+Git environment and config overrides as Task 4; no host-global ignore file may
+remove a path from the proof.
+
 - [ ] **Step 6: Add the safety wrapper to the hook**
 
-Set the hook entry to:
+Keep the hook at the default stage and set its entry to:
 
 ```yaml
 entry: bash -c 'bash scripts/ci/test-check-docs-generated-drift-safety.sh && bash scripts/ci/test-check-docs-generated-drift.sh'
 ```
 
-Extend its `files` regex with the new safety script.
+Extend its `files` regex with the new safety script. The wrapper executes only
+the one selector-gated mutation; the full battery therefore runs once, not once
+inside the wrapper and once directly.
 
 - [ ] **Step 7: Run focused GREEN verification**
 
@@ -895,7 +953,14 @@ cargo test -p assay-cli --test agent_golden_path_contract
 cargo test -p assay-mcp-server --test agent_golden_path_contract
 cargo test -p assay-sim
 cargo test -p assay-core agentic::tests
-cargo test -p assay-core judge::tests::contract
+judge_list="$(cargo test -p assay-core judge_internal::tests::contract -- --list)"
+judge_count="$(printf '%s\n' "$judge_list" | awk '/: test$/ { count++ } END { print count + 0 }')"
+if [[ "$judge_count" -le 0 ]]; then
+  echo "judge contract filter executed zero tests" >&2
+  exit 1
+fi
+printf 'judge contract tests selected: %s\n' "$judge_count"
+cargo test -p assay-core judge_internal::tests::contract
 ```
 
 The simulation/agentic/judge runs are regression probes, not claims that this
@@ -906,7 +971,7 @@ script-only change alters model or runtime behavior.
 ```bash
 export CARGO_TARGET_DIR=/tmp/assay-2176-durability-target
 cargo fmt --all -- --check
-cargo clippy -p assay-cli -p assay-mcp-server --all-targets -- -D warnings
+cargo clippy -p assay-cli -p assay-mcp-server -p assay-sim --all-targets -- -D warnings
 git diff --check
 git status --short
 ```
