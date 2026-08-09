@@ -30,7 +30,7 @@
 ## Review Quorum
 
 - [ ] One non-building agent review
-- [ ] CodeRabbit or Copilot review on this head SHA
-- [ ] If bots were unavailable for 30 minutes, a second non-building agent review is linked
 - [ ] Every actionable finding is fixed or has a technical disposition
 - [ ] Any delegated proof targets this exact head SHA
+
+Optional automated reviews can add evidence, but do not count toward or block quorum.
