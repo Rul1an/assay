@@ -448,8 +448,9 @@ def render_discovery() -> str:
             "- `.agents/skills/assay-golden-path/SKILL.md`",
             "- `.claude/skills/assay-golden-path/SKILL.md`",
             "",
-            "When a step has no `working_directory`, run it from the invocation cwd.",
-            "A present `working_directory` is a POSIX path relative to the source repository.",
+            INVOCATION_CWD_RULE,
+            SOURCE_REPO_CWD_RULE,
+            PYTHON_PLACEHOLDER_RULE,
             "",
             f"Source: [Cursor's skill documentation]({CURSOR_DOCS_URL}), accessed on "
             f"`{CURSOR_DOCS_ACCESSED}`.",

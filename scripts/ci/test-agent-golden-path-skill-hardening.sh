@@ -7,7 +7,7 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 # PR B adds discoverability, cwd wording, and issue-reference hardening cases to
 # the 58-case durability boundary established by PR B0.
-EXPECTED_CASES=72
+EXPECTED_CASES=74
 # Parser-layer follow-ups stay outside the approved cumulative case chain. The
 # 22 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode, and
 # 2 inline-parser checks; pin them so deletion cannot leave the cumulative total green.
@@ -559,6 +559,38 @@ expect_named_failure \
   "guide invocation cwd rendered as dot" \
   "$case_root" \
   "guide omits working directory for install-check"
+
+for rule in source-repo python-placeholder; do
+  case_root="$SCRATCH/guide-runtime-rule-$rule"
+  seed_case "$case_root"
+  CASE_ROOT="$case_root" RULE="$rule" python3 - <<'PY'
+import os
+from pathlib import Path
+
+rules = {
+    "source-repo": (
+        "A present `working_directory` is a POSIX path relative to the source repository.\n"
+    ),
+    "python-placeholder": (
+        "Replace `<python>` with `python3` on Unix-like hosts or `python` on Windows.\n"
+    ),
+}
+rule = rules[os.environ["RULE"]]
+path = Path(os.environ["CASE_ROOT"]) / "docs/guides/agent-golden-path.md"
+text = path.read_text(encoding="utf-8")
+if text.count(rule) != 1:
+    raise SystemExit(f"guide runtime rule is not unique: {rule!r}")
+path.write_text(text.replace(rule, "", 1), encoding="utf-8")
+PY
+  expected='A present `working_directory` is a POSIX path relative to the source repository.'
+  if [[ "$rule" == "python-placeholder" ]]; then
+    expected='Replace `<python>` with `python3` on Unix-like hosts or `python` on Windows.'
+  fi
+  expect_named_failure \
+    "guide runtime rule $rule" \
+    "$case_root" \
+    "guide discovery block omits required wording: '$expected'"
+done
 
 for rule in invocation source-repo; do
   case_root="$SCRATCH/skill-cwd-rule-$rule"

@@ -320,13 +320,14 @@ exercise Cursor runtime discovery. It must not claim runtime support.
 Keep `working_directory` optional and define both states explicitly:
 
 - absence means the command runs in the caller-selected invocation directory;
-- presence requires `working_directory_base`, which names the path referent.
+- in schema v1, presence means a POSIX path relative to the source repository.
 
-The protected-action step retains
-`working_directory: examples/privileged-action-gate` and adds
-`working_directory_base: source_repo`. It is a checked-in reference scenario,
-not a path promised to exist in every caller project. No other step gains a
-working-directory field.
+The design review rejected a separate `working_directory_base` field: v1 has
+only one supported referent, so a second field would add contradictory states
+and require a schema change without adding information. The protected-action
+step retains `working_directory: examples/privileged-action-gate`. It is a
+checked-in reference scenario, not a path promised to exist in every caller
+project. No other step gains a working-directory field.
 
 The guide table renders `invocation cwd` for an absent field rather than
 silently substituting `.`. The generated skill defines the default once and
@@ -336,10 +337,10 @@ temporary invocation directory, the MCP SARIF scenario keeps its temporary
 directory, and the protected-action scenario resolves its declared path from
 the Assay workspace root.
 
-Tests independently add an unsupported base to a default-cwd step, remove or
-change the protected step's base, and alter its relative path. The binary driver
-and both human views must fail on the same contract rule. Renderer-only equality
-is not accepted as execution proof.
+Tests reject absolute, drive-prefixed, empty, dot, dot-dot, and backslash path
+components, and alter the protected step's relative path. The binary driver and
+both human views must fail on the same contract rule. Renderer-only equality is
+not accepted as execution proof.
 
 ### 4. Semantic Public-Vocabulary Gate
 

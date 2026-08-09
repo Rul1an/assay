@@ -18,7 +18,7 @@ pub fn classify_working_directory(step: &Value) -> Result<WorkingDirectory, Stri
     let path = value
         .as_str()
         .ok_or_else(|| "working_directory must be a POSIX-relative string".to_owned())?;
-    if path.is_empty() || path.starts_with('/') || path.contains('\\') || has_drive_prefix(path) {
+    if path.is_empty() || path.starts_with('/') || path.contains('\\') {
         return Err(format!(
             "working_directory must be a non-empty POSIX path relative to the source repo: {path:?}"
         ));
@@ -26,7 +26,10 @@ pub fn classify_working_directory(step: &Value) -> Result<WorkingDirectory, Stri
     let components = path
         .split('/')
         .map(|component| {
-            if component.is_empty() || matches!(component, "." | "..") {
+            if component.is_empty()
+                || matches!(component, "." | "..")
+                || has_drive_prefix(component)
+            {
                 Err(format!(
                     "working_directory contains an unsafe path component: {path:?}"
                 ))
@@ -128,6 +131,8 @@ mod working_directory_tests {
             "/tmp/assay",
             "C:/assay",
             "C:\\assay",
+            "examples/C:/escape",
+            "examples/D:escape",
             "examples//privileged-action-gate",
             "./examples",
             "examples/.",

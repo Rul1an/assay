@@ -24,6 +24,7 @@ The generated `assay-golden-path` project skill is available at both:
 
 When a step has no `working_directory`, run it from the invocation cwd.
 A present `working_directory` is a POSIX path relative to the source repository.
+Replace `<python>` with `python3` on Unix-like hosts or `python` on Windows.
 
 Source: [Cursor's skill documentation](https://cursor.com/docs/skills), accessed on `2026-08-09`.
 The documentation describes `.agents/skills/` as a project-level location and `.claude/skills/` as a compatibility location. This repository does not exercise Cursor runtime discovery.

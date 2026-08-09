@@ -963,7 +963,9 @@ def main() -> None:
             fail(f"guide discovery block omits project skill root: {root}")
     for required in (
         "assay-golden-path",
-        "invocation cwd",
+        INVOCATION_CWD_RULE,
+        SOURCE_REPO_CWD_RULE,
+        PYTHON_PLACEHOLDER_RULE,
         CURSOR_DOCS_URL,
         CURSOR_DOCS_ACCESSED,
         "does not exercise Cursor runtime discovery",
