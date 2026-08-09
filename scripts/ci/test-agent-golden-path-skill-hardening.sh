@@ -5,15 +5,35 @@ ROOT="$(git rev-parse --show-toplevel)"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
-# Task 4 adds nine Git-state and four scheduling failure mutations to Task 3's
-# 33-case boundary. Structural probe assertions stay inside the 46-case boundary.
-EXPECTED_CASES=46
+# Task 5 adds three tracked-symlink mutations to Task 4's 46-case boundary.
+EXPECTED_CASES=49
 case_count=0
 
 record_case_pass() {
   local name="$1"
   case_count=$((case_count + 1))
   echo "ok    $name"
+}
+
+record_case_skip() {
+  local name="$1" diagnostic="$2"
+  case_count=$((case_count + 1))
+  echo "skip  $name: $diagnostic"
+}
+
+create_required_symlink() {
+  local name="$1" target="$2" link="$3" output os_name
+  if output="$(ln -s "$target" "$link" 2>&1)"; then
+    return 0
+  fi
+
+  os_name="$(uname -s)"
+  if [[ "$os_name" == "Linux" ]]; then
+    echo "FAIL: $name could not create required symlink on Linux: $output" >&2
+    exit 1
+  fi
+  record_case_skip "$name" "symlink creation refused on $os_name: $output"
+  return 1
 }
 
 check_ast_source_scope() {
@@ -312,6 +332,58 @@ PY
     "$case_root" \
     "skill does not declare eol=lf: $skill_path"
 done
+
+case_root="$SCRATCH/symlink-codex-regular-file"
+seed_case "$case_root"
+skill_path='.agents/skills/assay-golden-path/SKILL.md'
+target_path="$case_root/.agents/skills/assay-golden-path/copied-skill.md"
+cp "$case_root/$skill_path" "$target_path"
+rm "$case_root/$skill_path"
+if create_required_symlink \
+  "Codex skill symlink to regular copied file" \
+  "copied-skill.md" \
+  "$case_root/$skill_path"
+then
+  case_git "$case_root" add -f -- "$skill_path"
+  expect_named_failure \
+    "Codex skill symlink to regular copied file" \
+    "$case_root" \
+    "skill evidence must be a regular tracked file, not a symlink"
+fi
+
+case_root="$SCRATCH/symlink-claude-dangling"
+seed_case "$case_root"
+skill_path='.claude/skills/assay-golden-path/SKILL.md'
+rm "$case_root/$skill_path"
+if create_required_symlink \
+  "Claude skill dangling symlink" \
+  "missing-skill.md" \
+  "$case_root/$skill_path"
+then
+  case_git "$case_root" add -f -- "$skill_path"
+  expect_named_failure \
+    "Claude skill dangling symlink" \
+    "$case_root" \
+    "skill evidence must be a regular tracked file, not a symlink"
+fi
+
+case_root="$SCRATCH/symlink-directory"
+seed_case "$case_root"
+skill_path='.agents/skills/assay-golden-path/SKILL.md'
+target_path="$case_root/.agents/skills/assay-golden-path/skill-directory"
+mkdir "$target_path"
+rm "$case_root/$skill_path"
+if create_required_symlink \
+  "Codex skill symlink to directory" \
+  "skill-directory" \
+  "$case_root/$skill_path"
+then
+  case_git "$case_root" add -f -- "$skill_path"
+  expect_named_failure \
+    "Codex skill symlink to directory" \
+    "$case_root" \
+    "skill evidence must be a regular tracked file, not a symlink"
+fi
 
 case_root="$SCRATCH/hostile-global-excludes"
 seed_case "$case_root"

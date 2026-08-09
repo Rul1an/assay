@@ -121,10 +121,10 @@ def validate_skill_repository_state() -> None:
 
 
 def read_bounded_evidence(path: Path, label: str) -> bytes:
-    if not path.is_file():
-        fail(f"{label} is missing: {path.relative_to(ROOT)}")
     if path.is_symlink():
         fail(f"{label} must be a regular tracked file, not a symlink: {path}")
+    if not path.is_file():
+        fail(f"{label} is missing: {path.relative_to(ROOT)}")
     if path.stat().st_size > MAX_EVIDENCE_BYTES:
         fail(f"{label} exceeds {MAX_EVIDENCE_BYTES}-byte limit")
     with path.open("rb") as handle:
