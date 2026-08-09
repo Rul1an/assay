@@ -22,6 +22,31 @@
 
 ---
 
+### Task 0: Falsify the Selected Manifest Shape Before Committing It
+
+**Files:**
+- No repository files; use only a disposable directory and fresh `CLAUDE_CONFIG_DIR`.
+
+**Interfaces:**
+- Consumes: installed Claude CLI, the approved wrapper-shaped MCP entry, and `assay-mcp-server` on an isolated `PATH`.
+- Produces: exact client-version/argv/output evidence selecting wrapper or bare server-map shape for Task 1.
+
+- [ ] **Step 1: Build an ephemeral minimal marketplace and plugin**
+
+Create the approved marketplace/plugin metadata and wrapper-shaped `.mcp.json` under `mktemp -d`; do not copy these files into the worktree. Use the installed client's help output to derive marketplace add/install/list syntax.
+
+- [ ] **Step 2: Drive the installed client from a disposable project**
+
+With a fresh `CLAUDE_CONFIG_DIR`, add the temporary marketplace, install `assay@assay` at local scope, inspect the installed cache rather than the source directory, and run `claude mcp list`. Then drive the cached manifest against the built server through full `initialize` and `tools/list`.
+
+- [ ] **Step 3: Branch explicitly on the result**
+
+If the wrapper connects and returns the five exact tools, record it and continue. If the wrapper is rejected, repeat once with a bare server map. Update the approved design and obtain a new design review before Task 1 if and only if the bare shape succeeds. If neither works, stop as a client/plugin compatibility blocker; do not commit either shape.
+
+- [ ] **Step 4: Record provenance**
+
+Record exact source SHA, `claude --version`, generated temporary paths, executed argv, installed cache version/path, `mcp list`, `initialize`, and `tools/list` outcomes. This preflight selects a shape; Task 3 later proves the complete shipped package and update workflow.
+
 ### Task 1: Pin Marketplace, Plugin, and Driven MCP Contracts
 
 **Files:**
@@ -110,7 +135,9 @@ git commit -m "feat(plugin): pin Claude marketplace and MCP contracts"
 - Modify: `scripts/ci/check-docs-generated-drift.sh`
 - Modify: `scripts/ci/test-agent-golden-path-skill-hardening.sh`
 - Modify: `.pre-commit-config.yaml`
-- Modify: `.github/workflows/kernel-matrix.yml`
+- Modify: `.github/workflows/kernel-matrix.yml` so `packaging/claude-plugin/**`
+  and `.claude-plugin/**` changes trigger the head-side contract gates instead
+  of bypassing them through the workflow path filter.
 - Generate: `packaging/claude-plugin/skills/assay-golden-path/{SKILL.md,references/agent-golden-path.json,assets/privileged-action-gate/**}`
 
 **Interfaces:**
@@ -238,11 +265,16 @@ Include exact SHA/worktree, diffstat, hot files, contract changes, RED/GREEN evi
 
 - [ ] **Step 5: Obtain exact-head quorum and merge only when green**
 
-Use Claude Code Desktop's existing `Issue prioritering en overzicht` chat plus CodeRabbit/Copilot. Fix or technically disposition every actionable finding. Any push restarts review and proof.
+Follow the repository `AGENTS.md` quorum: one non-building agent plus CodeRabbit
+or Copilot, or two non-building agents when the bot-unavailability conditions
+are met and recorded on the final head. Claude Code Desktop may supply one
+non-building review, but the plan does not depend on a local chat identity. Fix
+or technically disposition every actionable finding. Any push restarts review
+and proof.
 
 ## Self-Review
 
-- Spec coverage: identity, manifests, generated package, canonical resources, installed client, drift, mutation, security/failure policy, and non-claims each map to a task.
+- Spec coverage: pre-commit shape selection, identity, manifests, generated package, canonical resources, installed client, drift, mutation, security/failure policy, and non-claims each map to a task.
 - Placeholder scan: no deferred implementation or unnamed error-handling instruction remains.
 - Type consistency: `render_plugin_skill`, `PLUGIN_RESOURCE_COPIES`, and `plugin_mcp_entry` are introduced once and consumed consistently.
 - Residual: exact Claude marketplace flags must be read from the installed client during Task 3 and recorded with its version; the plan does not hardcode unverified vendor syntax.
