@@ -468,6 +468,8 @@ def replace_generated_block(
         raise SystemExit(
             f"agent golden-path guide must contain exactly one {label} marker pair"
         )
+    if current.index(start) > current.index(end):
+        raise SystemExit(f"agent golden-path guide {label} markers are out of order")
     before, remainder = current.split(start, 1)
     _, after = remainder.split(end, 1)
     return f"{before}{start}\n{rendered}\n{end}{after}"

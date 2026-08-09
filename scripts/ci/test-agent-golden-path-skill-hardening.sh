@@ -7,7 +7,7 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 # PR B adds discoverability, cwd wording, and issue-reference hardening cases to
 # the 58-case durability boundary established by PR B0.
-EXPECTED_CASES=74
+EXPECTED_CASES=75
 # Parser-layer follow-ups stay outside the approved cumulative case chain. The
 # 22 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode, and
 # 2 inline-parser checks; pin them so deletion cannot leave the cumulative total green.
@@ -500,7 +500,7 @@ PY
     "golden-path gap_issue must be a positive integer for preflight"
 done
 
-for mutation in missing duplicate hand-edited; do
+for mutation in missing duplicate reversed hand-edited; do
   case_root="$SCRATCH/guide-discovery-$mutation"
   seed_case "$case_root"
   CASE_ROOT="$case_root" MUTATION="$mutation" python3 - <<'PY'
@@ -516,6 +516,9 @@ if mutation == "missing":
     text = text.replace(start, "", 1).replace(end, "", 1)
 elif mutation == "duplicate":
     text = text.replace(end, f"{end}\n{start}\ncopy\n{end}", 1)
+elif mutation == "reversed":
+    sentinel = "<!-- agent-golden-path-discovery:sentinel -->"
+    text = text.replace(start, sentinel, 1).replace(end, start, 1).replace(sentinel, end, 1)
 else:
     text = text.replace(
         ".agents/skills/assay-golden-path/SKILL.md",
@@ -525,10 +528,27 @@ else:
 path.write_text(text, encoding="utf-8")
 PY
   expected="agent golden-path guide must contain exactly one discovery marker pair"
+  if [[ "$mutation" == "reversed" ]]; then
+    expected="agent golden-path guide discovery markers are out of order"
+  fi
   if [[ "$mutation" == "hand-edited" ]]; then
     expected="guide discovery block omits project skill root: .agents/skills/assay-golden-path/SKILL.md"
   fi
   expect_named_failure "guide discovery $mutation" "$case_root" "$expected"
+  if [[ "$mutation" == "reversed" ]]; then
+    output="$case_root/generator.log"
+    if (cd "$case_root" && python3 scripts/docs/generate-agent-golden-path.py --check) \
+      >"$output" 2>&1
+    then
+      echo "FAIL: guide discovery reversed was accepted by generator" >&2
+      exit 1
+    fi
+    if ! grep -Fq "$expected" "$output"; then
+      cat "$output" >&2
+      echo "FAIL: guide discovery reversed missed generator guard: $expected" >&2
+      exit 1
+    fi
+  fi
 done
 
 case_root="$SCRATCH/guide-discovery-private-vocabulary"

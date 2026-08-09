@@ -197,6 +197,8 @@ def issue_references(text: str) -> set[int]:
 def generated_discovery_block(guide: str) -> str:
     if guide.count(DISCOVERY_START) != 1 or guide.count(DISCOVERY_END) != 1:
         fail("agent golden-path guide must contain exactly one discovery marker pair")
+    if guide.index(DISCOVERY_START) > guide.index(DISCOVERY_END):
+        fail("agent golden-path guide discovery markers are out of order")
     before, remainder = guide.split(DISCOVERY_START, 1)
     block, after = remainder.split(DISCOVERY_END, 1)
     if DISCOVERY_START in before or DISCOVERY_END in before + after:
