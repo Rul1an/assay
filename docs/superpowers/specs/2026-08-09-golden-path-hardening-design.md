@@ -97,7 +97,7 @@ Extend `scripts/ci/test-agent-golden-path-skill.py` with a structural reader for
 the active pull-request event and `jobs.lint` block. It must require:
 
 - an active `on.pull_request` event whose branch filter includes `main`;
-- no active `on.pull_request.types` narrowing;
+- no active `on.pull_request.types` key;
 - exactly one active `lint` job;
 - `runs-on: ubuntu-latest` and no `needs` dependency on that job;
 - no job-level or executor-step `if` condition;
@@ -116,6 +116,12 @@ stage-specific pre-commit steps remain permitted; they cannot substitute for
 the one canonical default-stage executor. The reader uses the workflow model
 defined in section 5 rather than a second approximate parser.
 
+This assertion proves that the canonical invocation is present as an active
+line in the shell block. It does not claim to interpret arbitrary shell control
+flow such as heredocs or unreachable branches. Exact `runs-on: ubuntu-latest`
+is an intentional maintenance pin: a runner migration must update the contract
+and its mutation proof in the same change.
+
 Required named mutations:
 
 | Mutation | Required diagnostic class |
@@ -128,6 +134,7 @@ Required named mutations:
 | Add `--hook-stage pre-push` | noncanonical executor command |
 | Change `branches` to `release/*` | pull requests to main are not covered |
 | Add `types: [labeled]` | pull-request event is narrowed |
+| Add `branches-ignore: [main]` | mutually exclusive branch filters |
 | Add `needs: optional-job` to `lint` | lint can be dependency-skipped |
 | Change `runs-on` to another label | canonical lint runner changed |
 
@@ -163,7 +170,9 @@ reach its named guard.
 Only the two skill paths receive new LF rules in this issue because their exact
 bytes are recorded and consumed as byte-identical packaging inputs. The other
 five drift-compared generated artifacts are not digest-pinned packaging inputs
-in this scope; the drift hook still schedules on `.gitattributes` changes.
+in this scope; the drift hook still schedules on `.gitattributes` changes. A
+CRLF checkout can still report drift for those five files, which is an explicit
+residual rather than a property claimed by this slice.
 
 ### 4. Make The Drift Self-Test Scratch-Only
 
@@ -211,6 +220,7 @@ The shared workflow reader fails before partial path extraction when it sees:
 
 - tab indentation in the relevant `on.pull_request` or `jobs.lint` structure;
 - an active `on.pull_request.paths-ignore` sibling;
+- an active `on.pull_request.branches-ignore` sibling;
 - malformed list content under `paths`.
 
 The diagnostics distinguish malformed indentation, mutually exclusive path
@@ -307,19 +317,29 @@ exercise Cursor runtime discovery. It must not claim runtime support.
 
 ### 3. Explicit Working Directories
 
-Every step in the machine contract receives an explicit `working_directory`
-relative to a caller-selected journey root. `.` means that journey root itself;
-it does not mean the Assay source repository. Eight steps use `.` and the
-protected-action step retains `examples/privileged-action-gate`. The guide
-table and generated skill render that field for every step. No renderer
-supplies an implicit default.
+Keep `working_directory` optional and define both states explicitly:
 
-The CLI and MCP binary-level golden-path drivers select their temporary test
-workspace as the journey root and execute each scenario from the
-contract-declared directory. Tests mutate a default-root step and the
-protected-action step independently, then require the driver plus both human
-views to fail on the same contract rule. Renderer-only equality is not accepted
-as execution proof.
+- absence means the command runs in the caller-selected invocation directory;
+- presence requires `working_directory_base`, which names the path referent.
+
+The protected-action step retains
+`working_directory: examples/privileged-action-gate` and adds
+`working_directory_base: source_repo`. It is a checked-in reference scenario,
+not a path promised to exist in every caller project. No other step gains a
+working-directory field.
+
+The guide table renders `invocation cwd` for an absent field rather than
+silently substituting `.`. The generated skill defines the default once and
+renders the protected step as source-repo-relative. A shared contract-test
+resolver answers the rule for both binaries: each CLI scenario keeps its own
+temporary invocation directory, the MCP SARIF scenario keeps its temporary
+directory, and the protected-action scenario resolves its declared path from
+the Assay workspace root.
+
+Tests independently add an unsupported base to a default-cwd step, remove or
+change the protected step's base, and alter its relative path. The binary driver
+and both human views must fail on the same contract rule. Renderer-only equality
+is not accepted as execution proof.
 
 ### 4. Semantic Public-Vocabulary Gate
 
@@ -355,7 +375,7 @@ protect those measurements across supported checkouts.
 |---|---|
 | users can find the skill | generated discovery block and marker mutations |
 | Cursor wording stays within evidence | exact source citation plus no-runtime-claim test |
-| cwd is never inferred | every contract step carries and renders a cwd |
+| cwd referents are explicit | default invocation cwd plus source-root base mutations |
 | private planning vocabulary cannot leak | normalized semantic mutation table |
 | legitimate gap/non-claim links survive | structural allow cases |
 | generated outputs agree | drift gate, byte equality, and exact SHA-256 measurement |
@@ -376,11 +396,13 @@ content.
 ## Non-Goals
 
 - No plugin or marketplace manifest; #2152 step 4 remains separate packaging.
+- No claim that the protected-action source fixture is already carried by a
+  future plugin; packaging must resolve that separately.
 - No MCP 2026-07-28 remediation; #2157 owns that protocol work.
 - No fixes for stdout/reason gaps #2160 through #2166.
 - No Cursor runtime-discovery claim or Cursor-specific skill copy.
 - No new Python version source, launcher, or duplicated toolchain pin.
-- No runtime command, output-schema, exit-code, policy, evidence, or security
+- No runtime command output-schema, exit-code, policy, evidence, or security
   behavior change.
 - No scalar trust score, whole-action verdict, compliance claim, certification,
   or proof of provider execution or external side effects.
