@@ -539,6 +539,14 @@ mod tests {
         !descendant_is_alive(pid)
     }
 
+    #[test]
+    fn liveness_probe_recognizes_the_current_test_process() {
+        assert!(
+            descendant_is_alive(std::process::id()),
+            "liveness probe must distinguish a live process from an exited descendant"
+        );
+    }
+
     #[cfg(windows)]
     fn stderr_flood_command() -> Command {
         let mut command = Command::new("cmd");
