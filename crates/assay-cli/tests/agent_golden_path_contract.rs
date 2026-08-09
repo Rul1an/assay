@@ -56,6 +56,23 @@ fn expected_outcome(step_id: &str, outcome_name: &str) -> Value {
     outcome
 }
 
+#[test]
+fn cli_contract_steps_default_to_invocation_cwd() {
+    for step in contract()["steps"]
+        .as_array()
+        .expect("contract steps array")
+        .iter()
+        .filter(|step| step["binary"] == "assay")
+    {
+        assert_eq!(
+            runtime_coverage::classify_working_directory(step),
+            Ok(runtime_coverage::WorkingDirectory::Invocation),
+            "CLI step {} unexpectedly depends on a source-repo cwd",
+            step["id"]
+        );
+    }
+}
+
 fn assert_exit(output: &Output, expected: &Value, context: &str) {
     let expected_exit = expected["exit_code"]
         .as_i64()

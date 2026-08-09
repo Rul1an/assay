@@ -241,14 +241,33 @@ fn required_python() -> &'static str {
 }
 
 fn contract_working_directory(expected: &Value) -> PathBuf {
-    match expected["working_directory"]
-        .as_str()
-        .expect("protected-action contract must pin its working directory")
+    match runtime_coverage::classify_working_directory(expected)
+        .expect("protected-action contract working directory must be safe")
     {
-        "examples/privileged-action-gate" => workspace_root()
-            .join("examples")
-            .join("privileged-action-gate"),
-        other => panic!("unsupported protected-action working directory: {other}"),
+        runtime_coverage::WorkingDirectory::Invocation => {
+            panic!("protected-action contract must pin its working directory")
+        }
+        runtime_coverage::WorkingDirectory::SourceRepoRelative(components) => components
+            .iter()
+            .fold(workspace_root().to_path_buf(), |path, component| {
+                path.join(component)
+            }),
+    }
+}
+
+#[test]
+fn protected_action_contract_cwd_is_source_repo_relative_and_materialized() {
+    let expected = expected_outcome("protected-action", "policy-denied");
+    let cwd = contract_working_directory(&expected);
+    for fixture in [
+        "mock_github_mcp.py",
+        "policies/no-allowance.yaml",
+        "baseline-approved.json",
+    ] {
+        assert!(
+            cwd.join(fixture).is_file(),
+            "contract cwd does not contain argv fixture {fixture}"
+        );
     }
 }
 
