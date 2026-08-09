@@ -5,9 +5,9 @@ ROOT="$(git rev-parse --show-toplevel)"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
-# PR B0 adds seven public-vocabulary mutations and two structural allow cases to
-# the 49-case durability boundary.
-EXPECTED_CASES=58
+# PR B adds discoverability, cwd wording, and issue-reference hardening cases to
+# the 58-case durability boundary established by PR B0.
+EXPECTED_CASES=69
 # Parser-layer follow-ups stay outside the approved cumulative case chain. The
 # 22 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode, and
 # 2 inline-parser checks; pin them so deletion cannot leave the cumulative total green.
@@ -462,6 +462,8 @@ vocabulary_mutations=(
   'future-marketplace|Future, MARKETPLACE packaging belongs here.|skill introduces private planning vocabulary: future marketplace'
   'future-market-place|Future market-place packaging belongs here.|skill introduces private planning vocabulary: future marketplace'
   'future-plug-in|Future plug-in packaging belongs here.|skill introduces private planning vocabulary: future marketplace'
+  'future-marketplaces|Future marketplaces belong here.|skill introduces private planning vocabulary: future marketplace'
+  'future-plugins|Future plugins belong here.|skill introduces private planning vocabulary: future marketplace'
   'roadmap-ownership|Road-map ownership belongs in this skill.|skill introduces private planning vocabulary: roadmap ownership'
   'number-word-step|Implementation step THREE owns this release.|skill introduces private planning vocabulary: implementation step 3 ownership'
   'unknown-issue|This is tracked by [gap #9999](https://github.com/Rul1an/assay/issues/9999).|skill references issue outside contract evidence: #9999'
@@ -473,6 +475,90 @@ for row in "${vocabulary_mutations[@]}"; do
   append_skill_text "$case_root" "$mutation"
   expect_named_failure "public vocabulary $name" "$case_root" "$expected"
 done
+
+case_root="$SCRATCH/public-vocabulary-markdown-anchor"
+seed_case "$case_root"
+append_skill_text "$case_root" 'See [starter files](#3-starter-files).'
+expect_named_success "public vocabulary ignores Markdown numeric anchor" "$case_root"
+
+for gap_issue in 0 -1; do
+  case_root="$SCRATCH/nonpositive-gap-issue-$gap_issue"
+  seed_case "$case_root"
+  CASE_ROOT="$case_root" GAP_ISSUE="$gap_issue" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+path = Path(os.environ["CASE_ROOT"]) / "docs/generated/agent-golden-path.json"
+contract = json.loads(path.read_text(encoding="utf-8"))
+contract["steps"][1]["outcomes"][1]["gap_issue"] = int(os.environ["GAP_ISSUE"])
+path.write_text(json.dumps(contract, indent=2) + "\n", encoding="utf-8")
+PY
+  expect_named_failure \
+    "nonpositive gap_issue $gap_issue" \
+    "$case_root" \
+    "golden-path gap_issue must be a positive integer for preflight"
+done
+
+for mutation in missing duplicate hand-edited; do
+  case_root="$SCRATCH/guide-discovery-$mutation"
+  seed_case "$case_root"
+  CASE_ROOT="$case_root" MUTATION="$mutation" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["CASE_ROOT"]) / "docs/guides/agent-golden-path.md"
+text = path.read_text(encoding="utf-8")
+start = "<!-- agent-golden-path-discovery:start -->"
+end = "<!-- agent-golden-path-discovery:end -->"
+mutation = os.environ["MUTATION"]
+if mutation == "missing":
+    text = text.replace(start, "", 1).replace(end, "", 1)
+elif mutation == "duplicate":
+    text = text.replace(end, f"{end}\n{start}\ncopy\n{end}", 1)
+else:
+    text = text.replace(
+        ".agents/skills/assay-golden-path/SKILL.md",
+        ".agents/skills/renamed/SKILL.md",
+        1,
+    )
+path.write_text(text, encoding="utf-8")
+PY
+  expected="agent golden-path guide must contain exactly one discovery marker pair"
+  if [[ "$mutation" == "hand-edited" ]]; then
+    expected="guide discovery block omits project skill root: .agents/skills/assay-golden-path/SKILL.md"
+  fi
+  expect_named_failure "guide discovery $mutation" "$case_root" "$expected"
+done
+
+case_root="$SCRATCH/guide-discovery-private-vocabulary"
+seed_case "$case_root"
+sed -i.bak \
+  's/The generated `assay-golden-path` project skill/Future marketplace packaging for the generated `assay-golden-path` project skill/' \
+  "$case_root/docs/guides/agent-golden-path.md"
+rm "$case_root/docs/guides/agent-golden-path.md.bak"
+expect_named_failure \
+  "guide discovery private vocabulary" \
+  "$case_root" \
+  "skill introduces private planning vocabulary: future marketplace"
+
+case_root="$SCRATCH/guide-discovery-cursor-provenance"
+seed_case "$case_root"
+sed -i.bak 's/`2026-08-09`/`unknown`/' "$case_root/docs/guides/agent-golden-path.md"
+rm "$case_root/docs/guides/agent-golden-path.md.bak"
+expect_named_failure \
+  "guide discovery Cursor provenance" \
+  "$case_root" \
+  "guide discovery block omits required wording: '2026-08-09'"
+
+case_root="$SCRATCH/guide-invocation-cwd"
+seed_case "$case_root"
+sed -i.bak 's/`invocation cwd`/`.`/' "$case_root/docs/guides/agent-golden-path.md"
+rm "$case_root/docs/guides/agent-golden-path.md.bak"
+expect_named_failure \
+  "guide invocation cwd rendered as dot" \
+  "$case_root" \
+  "guide omits working directory for install-check"
 
 case_root="$SCRATCH/public-vocabulary-allow-contract-evidence"
 seed_case "$case_root"

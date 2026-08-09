@@ -47,9 +47,19 @@ EMPTY_STDOUT_RULE = (
     "to infer success from missing evidence."
 )
 CURSOR_SCOPE = (
-    "Cursor documents compatibility loading for these project roots, but this "
-    "repository does not exercise Cursor runtime discovery."
+    "Cursor's skill documentation (https://cursor.com/docs/skills), accessed on "
+    "2026-08-09, describes .agents/skills as a project-level location and "
+    ".claude/skills as a compatibility location. This repository does not exercise "
+    "Cursor runtime discovery."
 )
+DISCOVERY_START = "<!-- agent-golden-path-discovery:start -->"
+DISCOVERY_END = "<!-- agent-golden-path-discovery:end -->"
+DISCOVERY_SKILL_ROOTS = (
+    ".agents/skills/assay-golden-path/SKILL.md",
+    ".claude/skills/assay-golden-path/SKILL.md",
+)
+CURSOR_DOCS_URL = "https://cursor.com/docs/skills"
+CURSOR_DOCS_ACCESSED = "2026-08-09"
 PROTECTED_ACTION_CWD = "examples/privileged-action-gate"
 MAX_EVIDENCE_BYTES = 1024 * 1024
 CANONICAL_PRECOMMIT = "pre-commit run --all-files --show-diff-on-failure"
@@ -58,7 +68,10 @@ SELF_TEST_TRIGGER_PATH = "scripts/docs/generate-agent-golden-path.py"
 SELF_TEST_TRIGGER_MODE = "100644"
 SELF_TEST_TRIGGER_TYPES = frozenset({"file", "non-executable", "python", "text"})
 MAPPING_ENTRY_PATTERN = re.compile(r"^(?P<key>[A-Za-z0-9_-]+) *:(?P<value>.*)$")
-ISSUE_REFERENCE_PATTERN = re.compile(r"(?:#|/issues/)([0-9]+)")
+ISSUE_REFERENCE_PATTERN = re.compile(
+    r"(?<!\]\()#(?P<short>[0-9]+)(?![A-Za-z0-9_-])"
+    r"|/issues/(?P<url>[0-9]+)(?![A-Za-z0-9_-])"
+)
 PUBLIC_TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 PRIVATE_PHRASE_FAMILIES = (
     (
@@ -78,12 +91,16 @@ PRIVATE_PHRASE_FAMILIES = (
         "future marketplace",
         (
             ("future", "marketplace"),
+            ("future", "marketplaces"),
             ("future", "market", "place"),
             ("marketplace", "packaging"),
+            ("marketplaces", "packaging"),
             ("market", "place", "packaging"),
             ("future", "plugin"),
+            ("future", "plugins"),
             ("future", "plug", "in"),
             ("plugin", "packaging"),
+            ("plugins", "packaging"),
             ("plug", "in", "packaging"),
         ),
     ),
@@ -100,6 +117,8 @@ NUMBER_WORDS = {
     "nine": "9",
 }
 STEP_NUMBERS = frozenset(NUMBER_WORDS.values())
+# This closed vocabulary intentionally covers only the nine implementation-step
+# labels in the generated golden path. It is not a general number normalizer.
 
 # Both bounded YAML readers intentionally model the repository's two-space
 # layout rather than arbitrary YAML indentation or scalar forms.
@@ -159,6 +178,23 @@ def contains_token_sequence(tokens: tuple[str, ...], sequence: tuple[str, ...]) 
     )
 
 
+def issue_references(text: str) -> set[int]:
+    return {
+        int(match.group("short") or match.group("url"))
+        for match in ISSUE_REFERENCE_PATTERN.finditer(text)
+    }
+
+
+def generated_discovery_block(guide: str) -> str:
+    if guide.count(DISCOVERY_START) != 1 or guide.count(DISCOVERY_END) != 1:
+        fail("agent golden-path guide must contain exactly one discovery marker pair")
+    before, remainder = guide.split(DISCOVERY_START, 1)
+    block, after = remainder.split(DISCOVERY_END, 1)
+    if DISCOVERY_START in before or DISCOVERY_END in before + after:
+        fail("agent golden-path guide discovery markers are out of order")
+    return block
+
+
 def contract_issue_numbers(contract: dict[str, object]) -> set[int]:
     allowed: set[int] = set()
     steps = contract.get("steps")
@@ -176,8 +212,15 @@ def contract_issue_numbers(contract: dict[str, object]) -> set[int]:
             issue = outcome.get("gap_issue")
             if issue is None:
                 continue
-            if not isinstance(issue, int) or isinstance(issue, bool):
-                fail(f"golden-path gap_issue must be an integer for {step.get('id')}")
+            if (
+                not isinstance(issue, int)
+                or isinstance(issue, bool)
+                or issue <= 0
+            ):
+                fail(
+                    "golden-path gap_issue must be a positive integer for "
+                    f"{step.get('id')}"
+                )
             allowed.add(issue)
 
     non_claims = contract.get("non_claims")
@@ -186,13 +229,13 @@ def contract_issue_numbers(contract: dict[str, object]) -> set[int]:
     for claim in non_claims:
         if not isinstance(claim, str):
             fail("golden-path non-claims must be strings")
-        allowed.update(int(raw) for raw in ISSUE_REFERENCE_PATTERN.findall(claim))
+        allowed.update(issue_references(claim))
     return allowed
 
 
 def validate_public_vocabulary(text: str, contract: dict[str, object]) -> None:
     allowed_issues = contract_issue_numbers(contract)
-    observed_issues = {int(raw) for raw in ISSUE_REFERENCE_PATTERN.findall(text)}
+    observed_issues = issue_references(text)
     unexpected = sorted(observed_issues - allowed_issues)
     if unexpected:
         fail(f"skill references issue outside contract evidence: #{unexpected[0]}")
@@ -905,6 +948,22 @@ def main() -> None:
 
     text = payloads[0].decode("ascii")
     guide = read_bounded_evidence(GUIDE_PATH, "guide evidence").decode("utf-8")
+    discovery = generated_discovery_block(guide)
+    for root in DISCOVERY_SKILL_ROOTS:
+        if root not in discovery:
+            fail(f"guide discovery block omits project skill root: {root}")
+    for required in (
+        "assay-golden-path",
+        "invocation cwd",
+        CURSOR_DOCS_URL,
+        CURSOR_DOCS_ACCESSED,
+        "does not exercise Cursor runtime discovery",
+    ):
+        if required not in discovery:
+            fail(f"guide discovery block omits required wording: {required!r}")
+    # Only the generator-owned block is semantic-gated. The surrounding guide
+    # remains human-reviewed prose and is still protected by the drift gate.
+    validate_public_vocabulary(discovery, contract)
     fields, body = parse_frontmatter(text)
     expected_fields = {
         "name": "assay-golden-path",
@@ -958,7 +1017,7 @@ def main() -> None:
             cwd_line = f"Working directory: `{working_directory}`"
             if cwd_line not in body:
                 fail(f"skill omits working directory for {step['id']}")
-        guide_working_directory = working_directory or "."
+        guide_working_directory = working_directory or "invocation cwd"
         guide_row = (
             f"| {step['step']}. {step['label']} | `{guide_working_directory}` | "
             f"`{step['command']}` |"

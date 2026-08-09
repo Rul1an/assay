@@ -17,7 +17,7 @@ Empty stdout in a gap row is an observed limitation, not permission for a caller
 Do not replace a linked gap with an inferred clean result.
 
 Codex and Claude Code are the project-skill hosts exercised here.
-Cursor documents compatibility loading for these project roots, but this repository does not exercise Cursor runtime discovery.
+Cursor's skill documentation (https://cursor.com/docs/skills), accessed on 2026-08-09, describes .agents/skills as a project-level location and .claude/skills as a compatibility location. This repository does not exercise Cursor runtime discovery.
 
 ## Journey
 

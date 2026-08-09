@@ -16,6 +16,10 @@ SKILL_OUTPUTS = (
 )
 TABLE_START = "<!-- agent-golden-path-table:start -->"
 TABLE_END = "<!-- agent-golden-path-table:end -->"
+DISCOVERY_START = "<!-- agent-golden-path-discovery:start -->"
+DISCOVERY_END = "<!-- agent-golden-path-discovery:end -->"
+CURSOR_DOCS_URL = "https://cursor.com/docs/skills"
+CURSOR_DOCS_ACCESSED = "2026-08-09"
 SKILL_DESCRIPTION = (
     "Drive Assay's install-to-evidence golden path and interpret its stdout and exit "
     "codes. Use when an agent must operate or diagnose Assay; do not use it to infer "
@@ -409,7 +413,7 @@ def render_table() -> str:
         "|---|---|---|---|---|---|",
     ]
     for step in STEPS:
-        working_directory = step.get("working_directory") or "."
+        working_directory = step.get("working_directory") or "invocation cwd"
         rows.append(
             "| {step}. {label} | `{working_directory}` | `{command}` | {exit_codes} | "
             "{stdout_summary} | {failure_summary} |".format(
@@ -425,12 +429,51 @@ def render_table() -> str:
     return "\n".join(rows)
 
 
+def render_discovery() -> str:
+    return "\n".join(
+        (
+            "## Project Skill Discovery",
+            "",
+            "The generated `assay-golden-path` project skill is available at both:",
+            "",
+            "- `.agents/skills/assay-golden-path/SKILL.md`",
+            "- `.claude/skills/assay-golden-path/SKILL.md`",
+            "",
+            "When a step has no `working_directory`, run it from the invocation cwd.",
+            "A present `working_directory` is a POSIX path relative to the source repository.",
+            "",
+            f"Source: [Cursor's skill documentation]({CURSOR_DOCS_URL}), accessed on "
+            f"`{CURSOR_DOCS_ACCESSED}`.",
+            "The documentation describes `.agents/skills/` as a project-level location "
+            "and `.claude/skills/` as a compatibility location. This repository does not "
+            "exercise Cursor runtime discovery.",
+        )
+    )
+
+
+def replace_generated_block(
+    current: str, start: str, end: str, rendered: str, label: str
+) -> str:
+    if current.count(start) != 1 or current.count(end) != 1:
+        raise SystemExit(
+            f"agent golden-path guide must contain exactly one {label} marker pair"
+        )
+    before, remainder = current.split(start, 1)
+    _, after = remainder.split(end, 1)
+    return f"{before}{start}\n{rendered}\n{end}{after}"
+
+
 def render_markdown(current: str) -> str:
-    if current.count(TABLE_START) != 1 or current.count(TABLE_END) != 1:
-        raise SystemExit("agent golden-path guide must contain exactly one table marker pair")
-    before, remainder = current.split(TABLE_START, 1)
-    _, after = remainder.split(TABLE_END, 1)
-    return f"{before}{TABLE_START}\n{render_table()}\n{TABLE_END}{after}"
+    with_discovery = replace_generated_block(
+        current,
+        DISCOVERY_START,
+        DISCOVERY_END,
+        render_discovery(),
+        "discovery",
+    )
+    return replace_generated_block(
+        with_discovery, TABLE_START, TABLE_END, render_table(), "table"
+    )
 
 
 def render_skill() -> str:
@@ -454,8 +497,10 @@ def render_skill() -> str:
         "Do not replace a linked gap with an inferred clean result.",
         "",
         "Codex and Claude Code are the project-skill hosts exercised here.",
-        "Cursor documents compatibility loading for these project roots, but this "
-        "repository does not exercise Cursor runtime discovery.",
+        f"Cursor's skill documentation ({CURSOR_DOCS_URL}), accessed on "
+        f"{CURSOR_DOCS_ACCESSED}, describes .agents/skills as a project-level location "
+        "and .claude/skills as a compatibility location. This repository does not "
+        "exercise Cursor runtime discovery.",
         "",
         "## Journey",
         "",

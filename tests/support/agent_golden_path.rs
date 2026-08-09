@@ -2,6 +2,47 @@ use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum WorkingDirectory {
+    Invocation,
+    SourceRepoRelative(Vec<String>),
+}
+
+pub fn classify_working_directory(step: &Value) -> Result<WorkingDirectory, String> {
+    let Some(value) = step.get("working_directory") else {
+        return Ok(WorkingDirectory::Invocation);
+    };
+    if value.is_null() {
+        return Ok(WorkingDirectory::Invocation);
+    }
+    let path = value
+        .as_str()
+        .ok_or_else(|| "working_directory must be a POSIX-relative string".to_owned())?;
+    if path.is_empty() || path.starts_with('/') || path.contains('\\') || has_drive_prefix(path) {
+        return Err(format!(
+            "working_directory must be a non-empty POSIX path relative to the source repo: {path:?}"
+        ));
+    }
+    let components = path
+        .split('/')
+        .map(|component| {
+            if component.is_empty() || matches!(component, "." | "..") {
+                Err(format!(
+                    "working_directory contains an unsafe path component: {path:?}"
+                ))
+            } else {
+                Ok(component.to_owned())
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(WorkingDirectory::SourceRepoRelative(components))
+}
+
+fn has_drive_prefix(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
 thread_local! {
     static DRIVEN_OUTCOMES: RefCell<BTreeMap<(String, String), usize>> =
         const { RefCell::new(BTreeMap::new()) };
@@ -51,4 +92,68 @@ fn expected_contract_outcomes(contract: &Value, binary: &str) -> BTreeMap<(Strin
         }
     }
     expected
+}
+
+#[cfg(test)]
+mod working_directory_tests {
+    use super::{classify_working_directory, WorkingDirectory};
+    use serde_json::json;
+
+    #[test]
+    fn absent_working_directory_means_invocation_cwd() {
+        assert_eq!(
+            classify_working_directory(&json!({"id": "doctor"})),
+            Ok(WorkingDirectory::Invocation)
+        );
+    }
+
+    #[test]
+    fn source_repo_relative_working_directory_is_split_into_safe_components() {
+        assert_eq!(
+            classify_working_directory(&json!({
+                "id": "protected-action",
+                "working_directory": "examples/privileged-action-gate"
+            })),
+            Ok(WorkingDirectory::SourceRepoRelative(vec![
+                "examples".to_owned(),
+                "privileged-action-gate".to_owned(),
+            ]))
+        );
+    }
+
+    #[test]
+    fn hostile_or_ambiguous_working_directories_are_rejected() {
+        for path in [
+            "",
+            "/tmp/assay",
+            "C:/assay",
+            "C:\\assay",
+            "examples//privileged-action-gate",
+            "./examples",
+            "examples/.",
+            "../examples",
+            "examples/..",
+            "examples\\privileged-action-gate",
+        ] {
+            let error = classify_working_directory(&json!({
+                "id": "protected-action",
+                "working_directory": path,
+            }))
+            .expect_err("unsafe working directory must be rejected");
+            assert!(
+                error.contains("working_directory"),
+                "diagnostic for {path:?} did not name working_directory: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_string_working_directory_is_rejected() {
+        let error = classify_working_directory(&json!({
+            "id": "protected-action",
+            "working_directory": ["examples", "privileged-action-gate"],
+        }))
+        .expect_err("non-string working directory must be rejected");
+        assert!(error.contains("working_directory"));
+    }
 }
