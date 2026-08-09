@@ -1,0 +1,13 @@
+{
+  "name": "assay",
+  "owner": {
+    "name": "Assay"
+  },
+  "plugins": [
+    {
+      "name": "assay",
+      "description": "Connect Claude Code to Assay's MCP policy and evidence tools and golden-path skill.",
+      "source": "./packaging/claude-plugin"
+    }
+  ]
+}

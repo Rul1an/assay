@@ -13,7 +13,7 @@ SELECTED_CASE="${ASSAY_DOCS_DRIFT_SELF_TEST_CASE:-}"
 INTERRUPT_CASE="${ASSAY_DOCS_DRIFT_INTERRUPT_AFTER_MUTATION:-}"
 GATE_OUTPUT=""
 # Full mode is a fixed mutation battery; selected mode deliberately executes one row.
-EXPECTED_CASES=10
+EXPECTED_CASES=12
 
 seed_repo() {
   local destination="$1"
@@ -136,6 +136,14 @@ case_hand_edited_codex_skill() {
   expect_gate_status "$name" "$case_root" 1
 }
 
+case_hand_edited_plugin_skill() {
+  local case_root="$1" name="$2"
+  printf '\n%%%% drift planted by the drift-check self-test\n' \
+    >> "$case_root/packaging/claude-plugin/skills/assay-golden-path/SKILL.md"
+  maybe_interrupt_after_mutation "$name"
+  expect_gate_status "$name" "$case_root" 1
+}
+
 case_missing_codex_destination() {
   local case_root="$1" name="$2"
   local destination=".agents/skills/assay-golden-path/SKILL.md"
@@ -148,6 +156,15 @@ case_missing_codex_destination() {
 case_missing_claude_destination() {
   local case_root="$1" name="$2"
   local destination=".claude/skills/assay-golden-path/SKILL.md"
+  remove_generator_destination "$case_root" "$destination"
+  maybe_interrupt_after_mutation "$name"
+  expect_gate_status "$name" "$case_root" 1
+  expect_gate_output "$name" "error: the generators did not produce $destination."
+}
+
+case_missing_plugin_destination() {
+  local case_root="$1" name="$2"
+  local destination="packaging/claude-plugin/skills/assay-golden-path/SKILL.md"
   remove_generator_destination "$case_root" "$destination"
   maybe_interrupt_after_mutation "$name"
   expect_gate_status "$name" "$case_root" 1
@@ -196,8 +213,10 @@ CASES=(
   "hand-edited-machine-contract|case_hand_edited_machine_contract"
   "hand-edited-rendered-guide-table|case_hand_edited_rendered_guide_table"
   "hand-edited-codex-skill|case_hand_edited_codex_skill"
+  "hand-edited-plugin-skill|case_hand_edited_plugin_skill"
   "missing-codex-skill-destination|case_missing_codex_destination"
   "missing-claude-skill-destination|case_missing_claude_destination"
+  "missing-plugin-skill-destination|case_missing_plugin_destination"
   "generator-unable-to-run|case_generator_unable_to_run"
   "gate-reads-working-tree|case_gate_reads_working_tree"
   "gate-leaves-worktree-untouched|case_gate_leaves_worktree_untouched"

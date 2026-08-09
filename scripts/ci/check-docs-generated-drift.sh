@@ -45,6 +45,11 @@ GENERATORS=(
 GENERATED=(
   .agents/skills/assay-golden-path/SKILL.md
   .claude/skills/assay-golden-path/SKILL.md
+  packaging/claude-plugin/skills/assay-golden-path/SKILL.md
+  packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json
+  packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/mock_github_mcp.py
+  packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json
+  packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml
   docs/generated/agent-golden-path.json
   docs/generated/crate-deps.mermaid
   docs/generated/module-map.mermaid
@@ -58,6 +63,11 @@ GENERATED=(
 FRESH_GENERATED=(
   .agents/skills/assay-golden-path/SKILL.md
   .claude/skills/assay-golden-path/SKILL.md
+  packaging/claude-plugin/skills/assay-golden-path/SKILL.md
+  packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json
+  packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/mock_github_mcp.py
+  packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json
+  packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml
   docs/generated/agent-golden-path.json
 )
 

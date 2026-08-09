@@ -7,7 +7,7 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 # PR B adds discoverability, cwd wording, and issue-reference hardening cases to
 # the 58-case durability boundary established by PR B0.
-EXPECTED_CASES=75
+EXPECTED_CASES=86
 # Parser-layer follow-ups stay outside the approved cumulative case chain. The
 # 22 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode, and
 # 2 inline-parser checks; pin them so deletion cannot leave the cumulative total green.
@@ -95,20 +95,46 @@ seed_case() {
     "$case_root/scripts/docs" \
     "$case_root/docs/generated" \
     "$case_root/docs/guides" \
+    "$case_root/examples/privileged-action-gate/policies" \
     "$case_root/.agents/skills/assay-golden-path" \
     "$case_root/.claude/skills/assay-golden-path" \
+    "$case_root/.claude-plugin" \
+    "$case_root/packaging/claude-plugin/.claude-plugin" \
+    "$case_root/packaging/claude-plugin/skills/assay-golden-path/references" \
+    "$case_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies" \
     "$case_root/.github/workflows"
   cp "$ROOT/scripts/ci/test-agent-golden-path-skill.py" "$case_root/scripts/ci/"
   cp "$ROOT/scripts/docs/generate-agent-golden-path.py" "$case_root/scripts/docs/"
   cp "$ROOT/.gitignore" "$case_root/"
   cp "$ROOT/.gitattributes" "$case_root/"
+  cp "$ROOT/.mcp.json" "$case_root/"
   cp "$ROOT/.pre-commit-config.yaml" "$case_root/"
   cp "$ROOT/docs/generated/agent-golden-path.json" "$case_root/docs/generated/"
   cp "$ROOT/docs/guides/agent-golden-path.md" "$case_root/docs/guides/"
+  cp "$ROOT/examples/privileged-action-gate/mock_github_mcp.py" \
+    "$case_root/examples/privileged-action-gate/"
+  cp "$ROOT/examples/privileged-action-gate/baseline-approved.json" \
+    "$case_root/examples/privileged-action-gate/"
+  cp "$ROOT/examples/privileged-action-gate/policies/no-allowance.yaml" \
+    "$case_root/examples/privileged-action-gate/policies/"
   cp "$ROOT/.agents/skills/assay-golden-path/SKILL.md" \
     "$case_root/.agents/skills/assay-golden-path/"
   cp "$ROOT/.claude/skills/assay-golden-path/SKILL.md" \
     "$case_root/.claude/skills/assay-golden-path/"
+  cp "$ROOT/.claude-plugin/marketplace.json" "$case_root/.claude-plugin/"
+  cp "$ROOT/packaging/claude-plugin/.claude-plugin/plugin.json" \
+    "$case_root/packaging/claude-plugin/.claude-plugin/"
+  cp "$ROOT/packaging/claude-plugin/.mcp.json" "$case_root/packaging/claude-plugin/"
+  cp "$ROOT/packaging/claude-plugin/skills/assay-golden-path/SKILL.md" \
+    "$case_root/packaging/claude-plugin/skills/assay-golden-path/"
+  cp "$ROOT/packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json" \
+    "$case_root/packaging/claude-plugin/skills/assay-golden-path/references/"
+  cp "$ROOT/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/mock_github_mcp.py" \
+    "$case_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/"
+  cp "$ROOT/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json" \
+    "$case_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/"
+  cp "$ROOT/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml" \
+    "$case_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/"
   cp "$ROOT/.github/workflows/kernel-matrix.yml" "$case_root/.github/workflows/"
   case_git "$case_root" -c init.defaultBranch=main init -q
   case_git "$case_root" -c core.excludesFile= -c core.attributesFile= \
@@ -131,6 +157,7 @@ append_contract_evidence_issue() {
 import json
 import re
 import os
+import shutil
 from pathlib import Path
 
 root = Path(os.environ["CASE_ROOT"])
@@ -157,6 +184,11 @@ claim = (
 )
 contract["non_claims"].append(claim)
 contract_path.write_text(json.dumps(contract, indent=2) + "\n", encoding="utf-8")
+shutil.copyfile(
+    contract_path,
+    root
+    / "packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json",
+)
 
 for skill_path in (
     root / ".agents/skills/assay-golden-path/SKILL.md",
@@ -196,6 +228,23 @@ expect_named_success() {
   if ! python3 "$case_root/scripts/ci/test-agent-golden-path-skill.py" >"$output" 2>&1; then
     cat "$output" >&2
     echo "FAIL: $name was rejected" >&2
+    return 1
+  fi
+  record_case_pass "$name"
+}
+
+expect_generator_failure() {
+  local name="$1" case_root="$2" expected="$3"
+  local output="$case_root/generator.log"
+  if (cd "$case_root" && python3 scripts/docs/generate-agent-golden-path.py) \
+    >"$output" 2>&1
+  then
+    echo "FAIL: $name was accepted by the generator" >&2
+    return 1
+  fi
+  if ! grep -Fq "$expected" "$output"; then
+    cat "$output" >&2
+    echo "FAIL: $name did not reach named generator guard: $expected" >&2
     return 1
   fi
   record_case_pass "$name"
@@ -336,7 +385,7 @@ hook_files = (
     "        files: ^(scripts/ci/(check-docs-generated-drift|"
     "test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot)\\.sh|scripts/docs/"
     "generate-agent-golden-path\\.py|\\.(agents|claude)/skills/"
-    "assay-golden-path/SKILL\\.md)$\n"
+    "assay-golden-path/SKILL\\.md|\\.claude-plugin/.*|packaging/claude-plugin/.*)$\n"
 )
 root_anchor = "default_install_hook_types: [pre-commit, pre-push]\n"
 
@@ -456,6 +505,63 @@ expect_named_failure \
   "human guide without protected-action cwd" \
   "$case_root" \
   "guide omits working directory for protected-action"
+
+case_root="$SCRATCH/plugin-missing-fixture-mapping"
+seed_case "$case_root"
+sed -i.bak '/Fixtures named by the contract under `examples\/privileged-action-gate` are bundled at/d' \
+  "$case_root/packaging/claude-plugin/skills/assay-golden-path/SKILL.md"
+rm "$case_root/packaging/claude-plugin/skills/assay-golden-path/SKILL.md.bak"
+expect_named_failure \
+  "plugin skill missing fixture mapping" \
+  "$case_root" \
+  "Claude plugin skill must contain exactly one source-to-bundle fixture mapping"
+
+case_root="$SCRATCH/plugin-source-path-leak"
+seed_case "$case_root"
+printf '\nRead docs/generated/agent-golden-path.json directly.\n' \
+  >> "$case_root/packaging/claude-plugin/skills/assay-golden-path/SKILL.md"
+expect_named_failure \
+  "plugin skill source-only path leak" \
+  "$case_root" \
+  "Claude plugin skill contains source-only path outside mapping: docs/generated/agent-golden-path.json"
+
+case_root="$SCRATCH/plugin-fixture-byte-drift"
+seed_case "$case_root"
+printf '\n' \
+  >> "$case_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json"
+expect_named_failure \
+  "plugin fixture byte drift" \
+  "$case_root" \
+  "packaged plugin resource drifted: packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json"
+
+case_root="$SCRATCH/plugin-resource-source-symlink"
+seed_case "$case_root"
+mv "$case_root/examples/privileged-action-gate/mock_github_mcp.py" \
+  "$case_root/examples/privileged-action-gate/mock_github_mcp-copy.py"
+if create_required_symlink \
+  "plugin resource source symlink" \
+  "mock_github_mcp-copy.py" \
+  "$case_root/examples/privileged-action-gate/mock_github_mcp.py"
+then
+  expect_generator_failure \
+    "plugin resource source symlink" \
+    "$case_root" \
+    "plugin resource source must not be a symlink"
+fi
+
+case_root="$SCRATCH/plugin-resource-source-oversized"
+seed_case "$case_root"
+python3 - "$case_root/examples/privileged-action-gate/baseline-approved.json" <<'PY'
+from pathlib import Path
+import sys
+
+with Path(sys.argv[1]).open("wb") as handle:
+    handle.truncate(1048577)
+PY
+expect_generator_failure \
+  "plugin resource source oversized" \
+  "$case_root" \
+  "plugin resource source exceeds 1048576 bytes"
 
 vocabulary_mutations=(
   'next-slice|The NEXT---SLICE owns this public wording.|skill introduces private planning vocabulary: next slice'
@@ -682,7 +788,12 @@ seed_case "$case_root"
 append_contract_evidence_issue "$case_root"
 expect_named_success "public vocabulary novel contract evidence allow case" "$case_root"
 
-for workflow_path in 'scripts/**' '.github/workflows/kernel-matrix.yml'; do
+for workflow_path in \
+  'scripts/**' \
+  '.github/workflows/kernel-matrix.yml' \
+  '.claude-plugin/**' \
+  'packaging/claude-plugin/**'
+do
   for mutation in remove comment; do
     case_root="$SCRATCH/workflow-$mutation-$(printf '%s' "$workflow_path" | tr '/.*' '---')"
     seed_case "$case_root"
@@ -703,6 +814,34 @@ PY
       "$case_root" \
       "kernel-matrix workflow does not cover skill contract path: $workflow_path"
   done
+done
+
+for hook_id in docs-generated-drift agent-golden-path-skill-contract; do
+  case_root="$SCRATCH/hook-plugin-surface-$hook_id"
+  seed_case "$case_root"
+  CASE_ROOT="$case_root" HOOK_ID="$hook_id" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["CASE_ROOT"]) / ".pre-commit-config.yaml"
+hook_id = os.environ["HOOK_ID"]
+text = path.read_text(encoding="utf-8")
+start = text.find(f"      - id: {hook_id}\n")
+if start < 0:
+    raise SystemExit(f"hook is not declared: {hook_id}")
+end = text.find("      - id: ", start + 1)
+if end < 0:
+    end = len(text)
+block = text[start:end]
+source = "|\\.claude-plugin/.*|packaging/claude-plugin/.*"
+if block.count(source) != 1:
+    raise SystemExit(f"hook plugin surface is not unique: {hook_id}")
+path.write_text(text[:start] + block.replace(source, "", 1) + text[end:], encoding="utf-8")
+PY
+  expect_named_failure \
+    "hook omits plugin surface $hook_id" \
+    "$case_root" \
+    "${hook_id} does not cover .claude-plugin/marketplace.json"
 done
 
 for skill_path in \
@@ -957,7 +1096,7 @@ source = (
     "        files: ^(scripts/ci/(check-docs-generated-drift|"
     "test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot)\\.sh|scripts/docs/"
     "generate-agent-golden-path\\.py|\\.(agents|claude)/skills/"
-    "assay-golden-path/SKILL\\.md)$\n"
+    "assay-golden-path/SKILL\\.md|\\.claude-plugin/.*|packaging/claude-plugin/.*)$\n"
 )
 replacement = "        stages: [pre-push]\n" + source
 text = path.read_text(encoding="utf-8")

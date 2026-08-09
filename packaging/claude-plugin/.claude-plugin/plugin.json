@@ -1,0 +1,7 @@
+{
+  "name": "assay",
+  "description": "Connect Claude Code to Assay's MCP policy and evidence tools and golden-path skill.",
+  "author": {
+    "name": "Assay"
+  }
+}
