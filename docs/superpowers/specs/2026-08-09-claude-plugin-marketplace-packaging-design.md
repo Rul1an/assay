@@ -23,7 +23,12 @@ built from the base SHA above:
   the plugin root are unavailable after installation.
 - `${CLAUDE_PLUGIN_ROOT}` resolves in skill content. `${CLAUDE_PROJECT_DIR}`
   resolves in stdio MCP arguments.
-- Plugin `.mcp.json` files use the `mcpServers` wrapper.
+- Shipped plugin artifacts are mixed: the installed Vercel partner plugin uses
+  an `mcpServers` wrapper, while Anthropic's marketplace `example-plugin` uses
+  a bare server map. Neither artifact alone proves what the installed client
+  executes. This design selects the wrapper used by the shipped partner
+  plugin, but acceptance requires a real-client connection probe plus the full
+  manifest-driven `initialize` and `tools/list` exchange below.
 - A plugin with no explicit version installs under a SHA-derived version and
   advances after a marketplace update.
 - `claude plugin validate` accepts a referenced `.mcp.json` whose `command` is
@@ -41,7 +46,8 @@ plugin cache.
 
 ## Package Layout
 
-The repository publishes one marketplace containing one config-only plugin:
+The repository publishes one marketplace containing one plugin made of MCP
+configuration and three fixtures, one of which is executable Python:
 
 ```text
 .claude-plugin/
@@ -68,7 +74,15 @@ The marketplace and plugin are both named `assay`, giving install identity
 `skills/assay-golden-path/SKILL.md`; `plugin.json` does not invent an unsupported
 `skills` field. The package has no commands or agents.
 
-The plugin omits `version`. Config-only changes must not be coupled to the Rust
+The marketplace manifest has the explicit minimal field set `name`, `owner`,
+and `plugins`; `owner` is `{ "name": "Assay" }`. Its sole plugin entry has
+`name`, `description`, and local `source: "./packaging/claude-plugin"`. The
+plugin manifest has `name`, `description`, and
+`author: { "name": "Assay" }`; neither manifest has a `version`. These fields
+follow inspected local-source marketplace artifacts rather than relying on
+directory discovery for the marketplace entry itself.
+
+The plugin omits `version`. Packaging-only changes must not be coupled to the Rust
 crate release cadence, and the measured Claude client already provides a
 commit-derived version for an unversioned git marketplace. The absence is a
 tested decision rather than an omitted field by accident.
@@ -88,10 +102,10 @@ The plugin's `.mcp.json` contains one stdio server under `mcpServers.assay`:
 }
 ```
 
-The plugin is config-only: `assay-mcp-server` must already be on `PATH`. The
-server reads policies from the consuming project, not the marketplace checkout
-or plugin cache. The manifest has no unverified `note` extension field; limits
-belong in the generated skill and install guide.
+The plugin does not bundle `assay-mcp-server`; that binary must already be on
+`PATH`. The server reads policies from the consuming project, not the
+marketplace checkout or plugin cache. The manifest has no unverified `note`
+extension field; limits belong in the generated skill and install guide.
 
 ## Generated Skill Profile
 
@@ -139,6 +153,11 @@ local files. The JSON and YAML fixtures do not reference other files. The
 remaining files in `examples/privileged-action-gate` serve other demos and are
 excluded.
 
+This is not a config-only package: `mock_github_mcp.py` is executable fixture
+code that step 6 starts through the user's Python interpreter. The install
+guide therefore requires `python3` or `python` on `PATH` for that optional
+step, separately from the mandatory `assay-mcp-server` prerequisite.
+
 The generator copies these three resources byte-for-byte. The generated-docs
 drift gate covers their package destinations, so source changes cannot leave a
 stale plugin copy. The package does not fetch mutable GitHub URLs and does not
@@ -151,7 +170,9 @@ require an Assay checkout.
 1. install `assay-mcp-server` from a reviewed release or checkout;
 2. add the repository marketplace;
 3. install `assay@assay`;
-4. verify the plugin and its MCP server from the consuming project.
+4. verify the plugin and its MCP server from the consuming project;
+5. after a marketplace update, run the plugin update and inspect the installed
+   cache version so stale cache state is visible rather than inferred away.
 
 The guide says plainly that the plugin does not bundle the binary, does not
 enforce anything merely by being installed, and consumes policy from the
@@ -173,8 +194,9 @@ Extend the existing golden-path validator so it proves:
 - private planning vocabulary and unsupported claims remain absent.
 
 Parse, do not search, the marketplace and plugin JSON. Assert the install
-identity, local source path, auto-discovered skill location, `mcpServers`
-wrapper, string command, exact argument vector, and absence of `version`.
+identity, exact owner and author field shapes, local source path,
+auto-discovered skill location, `mcpServers` wrapper, string command, exact
+argument vector, and absence of `version`.
 
 ### Driven server contract
 
@@ -201,13 +223,23 @@ Before push, run both layers with the installed Claude client:
 - isolated marketplace add/install/update using a fresh
   `CLAUDE_CONFIG_DIR`;
 - inspect the cached plugin rather than the source directory;
-- drive the cached `.mcp.json` against the built server;
+- from a disposable consuming project, run `claude mcp list` to
+  prove that the cached wrapper-shaped configuration is accepted and the
+  stdio server connects;
+- drive the cached `.mcp.json` against the built server through a complete
+  `initialize` plus `tools/list` exchange, not merely a config-listing command;
 - invoke Claude Code from a disposable project and verify discovery of the
   packaged `assay-golden-path` skill.
 
 Record the exact client version, source SHA, installed cache version, commands,
 and outcomes in the PR review packet. Vendor validation supplements rather than
 replaces repository assertions.
+
+These real-client steps remain a manual pre-push procedure. If they are later
+automated through `tests/support/bounded_process.rs`, that automation must use
+the process-tree and early-EPIPE semantics accepted by #2189; marketplace
+operations may spawn `git`, so direct-child-only timeout handling is not an
+equivalent proof.
 
 ### TDD and mutation proof
 
@@ -233,6 +265,8 @@ Every mutation is restored before final verification.
 - Manifest/schema/type errors fail closed.
 - Missing `assay-mcp-server` is reported as a host spawn failure; the plugin
   must not imply that a server ran.
+- Missing Python blocks only the optional step-6 fixture workflow and is named
+  as a prerequisite failure; it is not reported as an Assay policy verdict.
 - Missing project policy never becomes a clean enforcement result.
 - The bundled mock is a local stdio fixture. It performs no network or provider
   action.
