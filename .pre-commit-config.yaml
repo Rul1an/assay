@@ -102,13 +102,13 @@ repos:
 
       - id: docs-generated-drift-self-test
         name: Generated-docs drift check self-test
-        entry: bash scripts/ci/test-check-docs-generated-drift.sh
+        entry: bash -c 'bash scripts/ci/test-check-docs-generated-drift-safety.sh && bash scripts/ci/test-check-docs-generated-drift.sh'
         language: system
         pass_filenames: false
         # Both properties this pins have failed here before: `check-aee-seal-fixture-drift.sh`
         # documents an earlier version that ran its emitter in place and destroyed the fixtures it
         # audited, and `check-linux.sh` returned 0 on every failure (#2076).
-        files: ^(scripts/ci/(check-docs-generated-drift|test-check-docs-generated-drift)\.sh|scripts/docs/generate-agent-golden-path\.py|\.(agents|claude)/skills/assay-golden-path/SKILL\.md)$
+        files: ^(scripts/ci/(check-docs-generated-drift|test-check-docs-generated-drift(?:-safety)?)\.sh|scripts/docs/generate-agent-golden-path\.py|\.(agents|claude)/skills/assay-golden-path/SKILL\.md)$
 
       - id: docs-generated-drift
         name: Generated docs match their generators
