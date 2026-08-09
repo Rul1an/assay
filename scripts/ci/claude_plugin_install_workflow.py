@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import selectors
 import shutil
@@ -13,7 +14,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, NoReturn
 
 MAX_BYTES = 1_048_576
 DEFAULT_TIMEOUT_SECONDS = 30.0
@@ -45,8 +46,29 @@ class CommandResult:
     stderr: bytes
 
 
-def fail(phase: str, reason: str, next_step: str) -> "None":
+def fail(phase: str, reason: str, next_step: str) -> NoReturn:
     raise WorkflowError(phase, reason, next_step)
+
+
+def workflow_timeout_seconds() -> float:
+    raw = os.environ.get(
+        "ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS", str(DEFAULT_TIMEOUT_SECONDS)
+    )
+    try:
+        timeout = float(raw)
+    except ValueError:
+        fail(
+            "arguments",
+            f"ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS must be a positive number, got {raw!r}",
+            "set ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS to a finite value greater than zero",
+        )
+    if not math.isfinite(timeout) or timeout <= 0:
+        fail(
+            "arguments",
+            f"ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS must be positive and finite, got {raw!r}",
+            "set ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS to a finite value greater than zero",
+        )
+    return timeout
 
 
 def clean_env(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -82,7 +104,7 @@ def run_bounded(
     stdin: bytes = b"",
     allowed_codes: Iterable[int] = (0,),
 ) -> CommandResult:
-    timeout = float(os.environ.get("ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
+    timeout = workflow_timeout_seconds()
     process = subprocess.Popen(
         argv,
         cwd=cwd,
@@ -136,10 +158,8 @@ def run_bounded(
                         "inspect the command directly; the bounded workflow will not retain unbounded diagnostics",
                     )
 
-            if process.poll() is not None and not events:
-                # Descendants can inherit a pipe after the direct child exits. The
-                # same absolute deadline continues to govern that drain.
-                continue
+            # Descendants can inherit a pipe after the direct child exits. The
+            # same absolute deadline continues to govern that drain.
     finally:
         selector.close()
 
@@ -176,7 +196,11 @@ def read_bounded(path: Path, phase: str) -> bytes:
         fail(phase, f"expected regular non-symlink file: {path}", "replace the cache entry from the marketplace source")
     if stat.st_size > MAX_BYTES:
         fail(phase, f"file exceeds {MAX_BYTES}-byte ceiling: {path}", "inspect the package before installing it")
-    return path.read_bytes()
+    with path.open("rb") as source:
+        payload = source.read(MAX_BYTES + 1)
+    if len(payload) > MAX_BYTES:
+        fail(phase, f"file grew beyond {MAX_BYTES}-byte ceiling: {path}", "inspect the package before installing it")
+    return payload
 
 
 def descendants_are_regular(root: Path, phase: str) -> list[Path]:
@@ -209,7 +233,17 @@ def plugin_record(payload: object) -> dict[str, object]:
 
 def compare_installed_package(source_package: Path, installed: Path) -> None:
     source_files = descendants_are_regular(source_package, "installed_cache")
-    descendants_are_regular(installed, "installed_cache")
+    installed_files = descendants_are_regular(installed, "installed_cache")
+    source_relatives = {path.relative_to(source_package) for path in source_files}
+    installed_relatives = {path.relative_to(installed) for path in installed_files}
+    if source_relatives != installed_relatives:
+        missing = sorted(str(path) for path in source_relatives - installed_relatives)
+        extra = sorted(str(path) for path in installed_relatives - source_relatives)
+        fail(
+            "installed_cache",
+            f"installed file set drifted: missing={missing}, extra={extra}",
+            "remove the stale install, update the marketplace, and reinstall the plugin",
+        )
     for source in source_files:
         relative = source.relative_to(source_package)
         cached = installed / relative
@@ -233,6 +267,18 @@ def parse_protocol(stdout: bytes) -> dict[int, dict[str, object]]:
         if isinstance(value, dict) and isinstance(value.get("id"), int):
             responses[value["id"]] = value
     return responses
+
+
+def response_result(
+    responses: dict[int, dict[str, object]], response_id: int, phase: str
+) -> dict[str, object]:
+    response = responses.get(response_id)
+    if not isinstance(response, dict):
+        fail(phase, f"missing JSON-RPC response id {response_id}", "inspect the server stdout protocol stream")
+    result = response.get("result")
+    if not isinstance(result, dict):
+        fail(phase, f"JSON-RPC response id {response_id} has no object result", "inspect the server response shape")
+    return result
 
 
 def drive_cached_manifest(installed: Path, consumer: Path, env: dict[str, str], expected_server: Path) -> None:
@@ -315,18 +361,30 @@ def drive_cached_manifest(installed: Path, consumer: Path, env: dict[str, str], 
         stdin=stdin,
     )
     responses = parse_protocol(result.stdout)
-    initialize = responses.get(1, {})
-    if initialize.get("result", {}).get("protocolVersion") != "2024-11-05":
+    initialize = response_result(responses, 1, "initialize")
+    if initialize.get("protocolVersion") != "2024-11-05":
         fail("initialize", "server did not negotiate protocol 2024-11-05", "inspect the installed server version and manifest argv")
     print("initialize=pass")
 
-    tools = responses.get(2, {}).get("result", {}).get("tools", [])
-    names = sorted(tool.get("name") for tool in tools if isinstance(tool, dict))
+    tools = response_result(responses, 2, "tools_list").get("tools")
+    if not isinstance(tools, list) or any(
+        not isinstance(tool, dict) or not isinstance(tool.get("name"), str)
+        for tool in tools
+    ):
+        fail("tools_list", "tools/list returned an untyped tool entry", "inspect the release server tool schema")
+    names = sorted(tool["name"] for tool in tools)
     if names != EXPECTED_TOOLS:
         fail("tools_list", f"release tool names drifted: {names}", "install the release server built from the same source SHA")
     print("tools_list=pass")
 
-    content = responses.get(3, {}).get("result", {}).get("content", [])
+    policy_result = response_result(responses, 3, "policy_root_resolved_to_consumer")
+    if policy_result.get("isError") is not True:
+        fail(
+            "policy_root_resolved_to_consumer",
+            "consumer policy denial did not set MCP isError",
+            "preserve the release server's denied-result contract before interpreting its payload",
+        )
+    content = policy_result.get("content", [])
     try:
         decision = json.loads(content[0]["text"])
     except (IndexError, KeyError, TypeError, json.JSONDecodeError) as error:
@@ -339,7 +397,7 @@ def drive_cached_manifest(installed: Path, consumer: Path, env: dict[str, str], 
         )
     print("policy_root_resolved_to_consumer=pass")
 
-    missing_content = responses.get(4, {}).get("result", {}).get("content", [])
+    missing_content = response_result(responses, 4, "missing_policy_refused").get("content", [])
     try:
         missing = json.loads(missing_content[0]["text"])
     except (IndexError, KeyError, TypeError, json.JSONDecodeError) as error:
@@ -539,6 +597,8 @@ elif args[:2] == ["plugin", "update"]:
     if not os.environ.get("FAKE_NO_UPDATE"):
         if cache.exists(): shutil.rmtree(cache)
         shutil.copytree(source / "packaging/claude-plugin", cache)
+        if os.environ.get("FAKE_EXTRA_CACHE_FILE"):
+            (cache / "unexpected.txt").write_text("unexpected")
     print("plugin updated")
 elif args[:3] == ["plugin", "list", "--json"]:
     source = pathlib.Path(source_file.read_text())
@@ -569,6 +629,8 @@ for line in sys.stdin:
         result = {{"protocolVersion":"2024-11-05","capabilities":{{}},"serverInfo":{{"name":"fake","version":"1"}}}}
     elif method == "tools/list":
         result = {{"tools":[{{"name":name,"description":"test","inputSchema":{{"type":"object"}}}} for name in tool_names]}}
+        if os.environ.get("FAKE_NAMELESS_TOOL"):
+            result["tools"].append({{"description":"nameless"}})
     elif method == "tools/call":
         policy_name = request["params"]["arguments"]["policy"]
         policy = pathlib.Path.cwd() / policy_name
@@ -577,9 +639,13 @@ for line in sys.stdin:
         else:
             blocked = "install_surface_probe" in policy.read_text()
             payload = {{"allowed": not blocked}}
-        result = {{"content":[{{"type":"text","text":json.dumps(payload)}}],"isError":False}}
+        result = {{"content":[{{"type":"text","text":json.dumps(payload)}}],"isError":True}}
     else:
         result = {{}}
+    if os.environ.get("FAKE_NULL_RESULT_METHOD") == method:
+        result = None
+    if os.environ.get("FAKE_POLICY_IS_NOT_ERROR") and method == "tools/call" and policy_name == "install-surface-policy.yaml":
+        result["isError"] = False
     print(json.dumps({{"jsonrpc":"2.0","id":request["id"],"result":result}}), flush=True)
 """,
         encoding="utf-8",
@@ -630,11 +696,16 @@ def self_test() -> None:
             ("FAKE_FAIL_PHASE", "marketplace_update", "phase=marketplace_update"),
             ("FAKE_SOURCE_ONLY", "1", "phase=installed_cache"),
             ("FAKE_CACHE_VERSION_DRIFT", "1", "phase=installed_cache"),
+            ("FAKE_EXTRA_CACHE_FILE", "1", "phase=installed_cache"),
             ("FAKE_TOOL_DRIFT", "1", "phase=tools_list"),
+            ("FAKE_NAMELESS_TOOL", "1", "phase=tools_list"),
+            ("FAKE_NULL_RESULT_METHOD", "initialize", "phase=initialize"),
+            ("FAKE_POLICY_IS_NOT_ERROR", "1", "phase=policy_root_resolved_to_consumer"),
             ("FAKE_NO_UPDATE", "1", "phase=installed_cache"),
             ("FAKE_OVERSIZE_PHASE", "plugin_validate", "stdout exceeded 1048576-byte ceiling"),
             ("FAKE_HANG_PHASE", "plugin_validate", "process tree exceeded 2s deadline"),
             ("FAKE_ORPHAN_PIPE_PHASE", "plugin_validate", "process tree exceeded 2s deadline"),
+            ("ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS", "invalid", "phase=arguments"),
         ]
         for key, value, expected in mutations:
             mutated_env = dict(base_env)

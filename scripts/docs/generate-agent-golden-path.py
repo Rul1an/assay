@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import json
-import shutil
+import stat
 from pathlib import Path
 
 
@@ -43,6 +43,7 @@ PLUGIN_RESOURCE_COPIES = (
         / "packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml",
     ),
 )
+MAX_PLUGIN_RESOURCE_BYTES = 1024 * 1024
 TABLE_START = "<!-- agent-golden-path-table:start -->"
 TABLE_END = "<!-- agent-golden-path-table:end -->"
 DISCOVERY_START = "<!-- agent-golden-path-discovery:start -->"
@@ -599,15 +600,42 @@ def render_skill(*, plugin: bool = False) -> str:
     return "\n".join(lines)
 
 
+def read_plugin_resource(source: Path) -> bytes:
+    if source.is_symlink():
+        raise RuntimeError(f"plugin resource source must not be a symlink: {source}")
+    try:
+        metadata = source.stat()
+    except FileNotFoundError as error:
+        raise RuntimeError(f"plugin resource source is missing: {source}") from error
+    if not stat.S_ISREG(metadata.st_mode):
+        raise RuntimeError(f"plugin resource source must be a regular file: {source}")
+    if metadata.st_size > MAX_PLUGIN_RESOURCE_BYTES:
+        raise RuntimeError(
+            f"plugin resource source exceeds {MAX_PLUGIN_RESOURCE_BYTES} bytes: {source}"
+        )
+    with source.open("rb") as resource:
+        payload = resource.read(MAX_PLUGIN_RESOURCE_BYTES + 1)
+    if len(payload) > MAX_PLUGIN_RESOURCE_BYTES:
+        raise RuntimeError(
+            f"plugin resource source grew beyond {MAX_PLUGIN_RESOURCE_BYTES} bytes: {source}"
+        )
+    return payload
+
+
 def main() -> None:
     current = MARKDOWN_OUTPUT.read_text(encoding="utf-8")
     rendered_markdown = render_markdown(current)
     rendered_skill = render_skill()
     rendered_plugin_skill = render_skill(plugin=True)
-    JSON_OUTPUT.write_text(
-        json.dumps(CONTRACT, indent=2, ensure_ascii=True) + "\n",
-        encoding="utf-8",
+    rendered_contract = (json.dumps(CONTRACT, indent=2, ensure_ascii=True) + "\n").encode(
+        "ascii"
     )
+    plugin_resources = [
+        (rendered_contract if source == JSON_OUTPUT else read_plugin_resource(source), output)
+        for source, output in PLUGIN_RESOURCE_COPIES
+    ]
+
+    JSON_OUTPUT.write_bytes(rendered_contract)
     MARKDOWN_OUTPUT.write_text(rendered_markdown, encoding="utf-8")
     for output in SKILL_OUTPUTS:
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -615,9 +643,9 @@ def main() -> None:
     for output in PLUGIN_SKILL_OUTPUTS:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(rendered_plugin_skill, encoding="ascii")
-    for source, output in PLUGIN_RESOURCE_COPIES:
+    for payload, output in plugin_resources:
         output.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, output)
+        output.write_bytes(payload)
 
 
 if __name__ == "__main__":

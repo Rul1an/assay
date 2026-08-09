@@ -7,7 +7,7 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 # PR B adds discoverability, cwd wording, and issue-reference hardening cases to
 # the 58-case durability boundary established by PR B0.
-EXPECTED_CASES=84
+EXPECTED_CASES=86
 # Parser-layer follow-ups stay outside the approved cumulative case chain. The
 # 22 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode, and
 # 2 inline-parser checks; pin them so deletion cannot leave the cumulative total green.
@@ -228,6 +228,23 @@ expect_named_success() {
   if ! python3 "$case_root/scripts/ci/test-agent-golden-path-skill.py" >"$output" 2>&1; then
     cat "$output" >&2
     echo "FAIL: $name was rejected" >&2
+    return 1
+  fi
+  record_case_pass "$name"
+}
+
+expect_generator_failure() {
+  local name="$1" case_root="$2" expected="$3"
+  local output="$case_root/generator.log"
+  if (cd "$case_root" && python3 scripts/docs/generate-agent-golden-path.py) \
+    >"$output" 2>&1
+  then
+    echo "FAIL: $name was accepted by the generator" >&2
+    return 1
+  fi
+  if ! grep -Fq "$expected" "$output"; then
+    cat "$output" >&2
+    echo "FAIL: $name did not reach named generator guard: $expected" >&2
     return 1
   fi
   record_case_pass "$name"
@@ -516,6 +533,35 @@ expect_named_failure \
   "plugin fixture byte drift" \
   "$case_root" \
   "packaged plugin resource drifted: packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json"
+
+case_root="$SCRATCH/plugin-resource-source-symlink"
+seed_case "$case_root"
+mv "$case_root/examples/privileged-action-gate/mock_github_mcp.py" \
+  "$case_root/examples/privileged-action-gate/mock_github_mcp-copy.py"
+if create_required_symlink \
+  "plugin resource source symlink" \
+  "mock_github_mcp-copy.py" \
+  "$case_root/examples/privileged-action-gate/mock_github_mcp.py"
+then
+  expect_generator_failure \
+    "plugin resource source symlink" \
+    "$case_root" \
+    "plugin resource source must not be a symlink"
+fi
+
+case_root="$SCRATCH/plugin-resource-source-oversized"
+seed_case "$case_root"
+python3 - "$case_root/examples/privileged-action-gate/baseline-approved.json" <<'PY'
+from pathlib import Path
+import sys
+
+with Path(sys.argv[1]).open("wb") as handle:
+    handle.truncate(1048577)
+PY
+expect_generator_failure \
+  "plugin resource source oversized" \
+  "$case_root" \
+  "plugin resource source exceeds 1048576 bytes"
 
 vocabulary_mutations=(
   'next-slice|The NEXT---SLICE owns this public wording.|skill introduces private planning vocabulary: next slice'

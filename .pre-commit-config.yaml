@@ -128,16 +128,30 @@ repos:
 
       - id: agent-golden-path-skill-contract
         name: Agent golden-path skill contract
-        entry: bash -c 'python3 scripts/ci/test-agent-golden-path-skill.py && bash scripts/ci/test-agent-golden-path-skill-optimization.sh && bash scripts/ci/test-agent-golden-path-skill-hardening.sh'
+        entry: bash -c 'python3 scripts/ci/test-agent-golden-path-skill.py && python3 scripts/ci/test-golden-path-mock-bounds.py'
         language: system
         pass_filenames: false
-        files: ^(scripts/docs/generate-agent-golden-path\.py|scripts/ci/test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$
+        files: ^(scripts/docs/generate-agent-golden-path\.py|scripts/ci/(test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|test-golden-path-mock-bounds\.py)|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$
+
+      - id: agent-golden-path-skill-mutations
+        name: Agent golden-path skill mutations
+        entry: bash -c 'bash scripts/ci/test-agent-golden-path-skill-optimization.sh && bash scripts/ci/test-agent-golden-path-skill-hardening.sh'
+        language: system
+        pass_filenames: false
+        # The 86 mutation cases prove the validator has teeth, but their cost belongs
+        # at the publish boundary rather than in every intermediate commit.
+        stages: [pre-push]
+        files: ^(scripts/docs/generate-agent-golden-path\.py|scripts/ci/(test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|test-golden-path-mock-bounds\.py)|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$
 
       - id: claude-plugin-install-workflow-self-test
         name: Claude plugin install workflow self-test
         entry: bash scripts/ci/test-claude-plugin-install.sh --self-test
         language: system
         pass_filenames: false
+        # The full mutation suite drives install/update/cache/MCP/session behavior and
+        # costs several seconds warm. Keep commit-time feedback fast; the same hook is
+        # installed and enforced before push, where end-to-end workflow proof belongs.
+        stages: [pre-push]
         files: ^(scripts/ci/(test-claude-plugin-install\.sh|claude_plugin_install_workflow\.py)|docs/guides/editor-mcp-recipe\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.pre-commit-config\.yaml)$
 
       - id: docs-auto-update-reconcile-self-test

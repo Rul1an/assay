@@ -410,8 +410,8 @@ def validate_plugin_skill(contract: dict[str, object]) -> None:
     payload = read_bounded_evidence(PLUGIN_SKILL_PATH, "Claude plugin skill")
     try:
         text = payload.decode("ascii")
-    except UnicodeDecodeError as error:
-        raise AssertionError("Claude plugin skill must be ASCII") from error
+    except UnicodeDecodeError:
+        fail("Claude plugin skill must be ASCII")
     fields, body = parse_frontmatter(text)
     expected_fields = {
         "name": "assay-golden-path",
@@ -1217,8 +1217,15 @@ def main() -> None:
     precommit_text = read_bounded_evidence(
         PRECOMMIT_PATH, "pre-commit config evidence"
     ).decode("utf-8")
-    hook = parse_precommit_self_test(precommit_text)
-    validate_precommit_self_test(hook)
+    self_test_hook = parse_precommit_self_test(precommit_text)
+    validate_precommit_self_test(self_test_hook)
+    mutation_hook = parse_precommit_hook(
+        precommit_text,
+        "agent-golden-path-skill-mutations",
+        "agent golden-path skill mutations",
+    )
+    if mutation_hook.stages != ("pre-push",):
+        fail("agent golden-path skill mutations must run only at pre-push")
 
     required_hook_paths = (
         ".gitattributes",
@@ -1227,10 +1234,10 @@ def main() -> None:
         "packaging/claude-plugin/skills/assay-golden-path/SKILL.md",
     )
     for hook_id in ("docs-generated-drift", "agent-golden-path-skill-contract"):
-        hook = parse_precommit_hook(precommit_text, hook_id, hook_id)
+        contract_hook = parse_precommit_hook(precommit_text, hook_id, hook_id)
         for required_path in required_hook_paths:
             if not precommit_pattern_matches(
-                hook.files_pattern, required_path, f"{hook_id} files selector"
+                contract_hook.files_pattern, required_path, f"{hook_id} files selector"
             ):
                 fail(f"{hook_id} does not cover {required_path}")
 

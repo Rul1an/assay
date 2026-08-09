@@ -42,22 +42,66 @@ fn workspace_root() -> PathBuf {
 
 fn read_install_file(file: InstallFile) -> String {
     let path = workspace_root().join(file.relative_path());
-    let mut source = std::fs::File::open(&path)
-        .unwrap_or_else(|error| panic!("open checked project file {}: {error}", path.display()));
-    let bytes = source
-        .metadata()
-        .unwrap_or_else(|error| panic!("stat checked project file {}: {error}", path.display()))
-        .len();
+    read_bounded_install_path(&path)
+}
+
+fn read_bounded_install_path(path: &Path) -> String {
+    let metadata = std::fs::symlink_metadata(path)
+        .unwrap_or_else(|error| panic!("stat checked project file {}: {error}", path.display()));
+    assert!(
+        metadata.file_type().is_file() && !metadata.file_type().is_symlink(),
+        "checked project path must be a regular non-symlink file: {}",
+        path.display()
+    );
+    let bytes = metadata.len();
     assert!(
         bytes <= MAX_PROJECT_FILE_BYTES,
         "checked project file exceeds {MAX_PROJECT_FILE_BYTES} bytes: {} ({bytes} bytes)",
         path.display()
     );
-    let mut contents = String::with_capacity(bytes as usize);
-    source
-        .read_to_string(&mut contents)
+    let source = std::fs::File::open(path)
+        .unwrap_or_else(|error| panic!("open checked project file {}: {error}", path.display()));
+    let mut bounded = source.take(MAX_PROJECT_FILE_BYTES + 1);
+    let mut contents = Vec::with_capacity(bytes as usize);
+    bounded
+        .read_to_end(&mut contents)
         .unwrap_or_else(|error| panic!("read checked project file {}: {error}", path.display()));
-    contents
+    assert!(
+        contents.len() as u64 <= MAX_PROJECT_FILE_BYTES,
+        "checked project file grew beyond {MAX_PROJECT_FILE_BYTES} bytes while reading: {}",
+        path.display()
+    );
+    String::from_utf8(contents).unwrap_or_else(|error| {
+        panic!(
+            "checked project file is not UTF-8 {}: {error}",
+            path.display()
+        )
+    })
+}
+
+#[test]
+fn install_file_reader_rejects_oversized_regular_file() {
+    let directory = tempfile::tempdir().expect("temporary install-file probe");
+    let path = directory.path().join("oversized.json");
+    let file = std::fs::File::create(&path).expect("create sparse oversized probe");
+    file.set_len(MAX_PROJECT_FILE_BYTES + 1)
+        .expect("size oversized probe");
+    let result = std::panic::catch_unwind(|| read_bounded_install_path(&path));
+    assert!(result.is_err(), "oversized install file was accepted");
+}
+
+#[cfg(unix)]
+#[test]
+fn install_file_reader_rejects_symlink_to_regular_file() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir().expect("temporary install-file probe");
+    let target = directory.path().join("manifest.json");
+    let link = directory.path().join("manifest-link.json");
+    std::fs::write(&target, "{}\n").expect("write symlink target");
+    symlink(&target, &link).expect("create install-file symlink probe");
+    let result = std::panic::catch_unwind(|| read_bounded_install_path(&link));
+    assert!(result.is_err(), "symlinked install file was accepted");
 }
 
 fn manifest_entry(file: InstallFile) -> Value {
@@ -174,6 +218,11 @@ fn assert_release_server_surface(cwd: &Path, args: &[String], context: &str) {
     let policy_text = policy_response["result"]["content"][0]["text"]
         .as_str()
         .expect("policy decision text");
+    assert_eq!(
+        policy_response["result"]["isError"].as_bool(),
+        Some(true),
+        "{context} did not preserve the server contract that a denied tool result sets isError"
+    );
     let policy_result: Value = serde_json::from_str(policy_text).expect("policy decision JSON");
     assert_eq!(
         policy_result["allowed"], false,

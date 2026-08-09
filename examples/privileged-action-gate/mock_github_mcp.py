@@ -17,6 +17,7 @@ import os
 import sys
 
 MODE = os.environ.get("MOCK_MODE", "approved")
+MAX_REQUEST_BYTES = 1_048_576
 
 
 def _send(obj):
@@ -47,10 +48,24 @@ def _tools():
     return [_SEARCH, _DEPLOY_KEY_READONLY if MODE == "drifted" else _DEPLOY_KEY]
 
 
+def _read_request():
+    raw = sys.stdin.buffer.readline(MAX_REQUEST_BYTES + 1)
+    if not raw:
+        return None
+    if len(raw) <= MAX_REQUEST_BYTES:
+        return raw
+
+    while not raw.endswith(b"\n"):
+        raw = sys.stdin.buffer.readline(MAX_REQUEST_BYTES + 1)
+        if not raw:
+            break
+    return b""
+
+
 def main():
     while True:
-        raw = sys.stdin.readline()
-        if not raw:
+        raw = _read_request()
+        if raw is None:
             break
         line = raw.strip()
         if not line:
