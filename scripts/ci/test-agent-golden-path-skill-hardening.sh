@@ -5,11 +5,12 @@ ROOT="$(git rev-parse --show-toplevel)"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
-# Task 5 adds three tracked-symlink mutations to Task 4's 46-case boundary.
-EXPECTED_CASES=49
+# PR B0 adds five public-vocabulary mutations and one structural allow case to
+# the 49-case durability boundary.
+EXPECTED_CASES=55
 # Parser-layer follow-ups stay outside the approved cumulative case chain. The
 # 22 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode, and
-# 2 inline-parser checks; pin them so deletion cannot leave the 49-case total green.
+# 2 inline-parser checks; pin them so deletion cannot leave the cumulative total green.
 EXPECTED_STRUCTURAL_PROBES=22
 case_count=0
 structural_probe_count=0
@@ -112,6 +113,16 @@ seed_case() {
   case_git "$case_root" -c init.defaultBranch=main init -q
   case_git "$case_root" -c core.excludesFile= -c core.attributesFile= \
     add -f -- .
+}
+
+append_skill_text() {
+  local case_root="$1" text="$2" skill_path
+  for skill_path in \
+    '.agents/skills/assay-golden-path/SKILL.md' \
+    '.claude/skills/assay-golden-path/SKILL.md'
+  do
+    printf '\n%s\n' "$text" >> "$case_root/$skill_path"
+  done
 }
 
 expect_failure_with_recorder() {
@@ -403,6 +414,28 @@ expect_named_failure \
   "human guide without protected-action cwd" \
   "$case_root" \
   "guide omits working directory for protected-action"
+
+vocabulary_mutations=(
+  'next-slice|The NEXT---SLICE owns this public wording.|skill introduces private planning vocabulary: next slice'
+  'future-marketplace|Future, MARKETPLACE packaging belongs here.|skill introduces private planning vocabulary: future marketplace'
+  'roadmap-ownership|Road-map ownership belongs in this skill.|skill introduces private planning vocabulary: roadmap ownership'
+  'number-word-step|Implementation step THREE owns this release.|skill introduces private planning vocabulary: implementation step 3 ownership'
+  'unknown-issue|This is tracked by [gap #9999](https://github.com/Rul1an/assay/issues/9999).|skill references issue outside contract evidence: #9999'
+)
+for row in "${vocabulary_mutations[@]}"; do
+  IFS='|' read -r name mutation expected <<<"$row"
+  case_root="$SCRATCH/public-vocabulary-$name"
+  seed_case "$case_root"
+  append_skill_text "$case_root" "$mutation"
+  expect_named_failure "public vocabulary $name" "$case_root" "$expected"
+done
+
+case_root="$SCRATCH/public-vocabulary-allow-contract-evidence"
+seed_case "$case_root"
+append_skill_text \
+  "$case_root" \
+  'The nine steps retain the existing [gap #2160](https://github.com/Rul1an/assay/issues/2160) evidence link.'
+expect_named_success "public vocabulary contract evidence allow case" "$case_root"
 
 for workflow_path in 'scripts/**' '.github/workflows/kernel-matrix.yml'; do
   for mutation in remove comment; do
