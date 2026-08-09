@@ -21,8 +21,10 @@ built from the base SHA above:
 
 - Claude Code copies installed plugins into an isolated cache. Paths outside
   the plugin root are unavailable after installation.
-- `${CLAUDE_PLUGIN_ROOT}` resolves in skill content. `${CLAUDE_PROJECT_DIR}`
-  resolves in stdio MCP arguments.
+- `${CLAUDE_PLUGIN_ROOT}` resolves in skill content. `${CLAUDE_PROJECT_DIR}` is
+  accepted in stdio MCP arguments and substituted when the variable is present
+  in the environment. The standalone health subcommand does not synthesize it;
+  session-time synthesis remains unproven until the Task 3 session check.
 - Sixteen inspected plugin artifacts are mixed: six use an `mcpServers` wrapper
   and ten use a bare server map. The installed cache artifact uses the wrapper;
   the bare examples are predominantly marketplace-source artifacts. Neither
