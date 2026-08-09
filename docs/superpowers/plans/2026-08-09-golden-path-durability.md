@@ -12,7 +12,9 @@
 
 - Work only in `/Users/roelschuurkes/.config/superpowers/worktrees/assay/2176-durability` on `codex/2176-golden-path-durability`.
 - Use `CARGO_TARGET_DIR=/tmp/assay-2176-durability-target`; do not share another worktree's target directory.
-- Base implementation behavior on design head `e3d0fbe0eeeb3a1c3099799ac468f77ada1ffd87` and issue #2176's latest comments.
+- Before Task 1, record the Claude-approved plan head as `PLAN_HEAD`; base all
+  implementation behavior on the design file at that exact head and issue
+  #2176's latest comments.
 - Before every production change, add a named mutation, run it, and confirm the expected RED.
 - Every mutation writes only inside `mktemp -d`; never rewrite a tracked repository file for a test.
 - Read bounded evidence before decoding or parsing it.
@@ -35,7 +37,8 @@
 - Create `scripts/ci/test-check-docs-generated-drift-safety.sh`: prove the drift self-test does not rely on cleanup to restore its repository.
 - Rewrite `scripts/ci/test-check-docs-generated-drift.sh`: run every mutation in scratch and snapshot the reviewable tree.
 - Modify `scripts/docs/generate-agent-golden-path.py`: replace optimizer-erased assertions with explicit typed checks without changing output bytes.
-- Modify `docs/superpowers/specs/2026-08-09-golden-path-hardening-design.md`: apply the reviewed nonblocking claim-boundary wording correction only.
+- Verify `docs/superpowers/specs/2026-08-09-golden-path-hardening-design.md`:
+  implementation must preserve its reviewed executor predicate and Non-Goals.
 - Create no generated artifact and modify none of `.agents/skills/assay-golden-path/SKILL.md`, `.claude/skills/assay-golden-path/SKILL.md`, `docs/generated/agent-golden-path.json`, `docs/generated/*.mermaid`, `docs/AIcontext/architecture-diagrams.md`, or `docs/guides/agent-golden-path.md`.
 
 ---
@@ -50,6 +53,9 @@
 **Interfaces:**
 - Produces: `parse_precommit_self_test(text: str) -> PrecommitHookContract`.
 - Produces: `PrecommitHookContract(stages: tuple[str, ...] | None, files_pattern: str)`.
+- Produces one hardening-battery counter shared by Tasks 1-5. Every named
+  failure, allow probe, or explicit platform skip increments it exactly once;
+  the script fails unless the final count equals the task's pinned expectation.
 - Consumes later: Task 4 extends the same trigger assertions with `.gitattributes`.
 
 - [ ] **Step 1: Seed pre-commit evidence in hardening cases**
@@ -71,6 +77,13 @@ The shell seed must create the destination root and copy the file:
 ```bash
 cp "$ROOT/.pre-commit-config.yaml" "$case_root/"
 ```
+
+Refactor the existing nine cases through the same accounting path before adding
+new ones. Task 1 pins `EXPECTED_CASES=11`: nine existing cases plus the two new
+scheduling mutations. `expect_named_failure()` increments only after it observes
+the named diagnostic; allow probes use `record_case_pass()`. The final success
+line prints `agent golden-path hardening: 11 case(s) executed` and refuses zero,
+missing, or extra cases.
 
 - [ ] **Step 2: Add two failing scheduling mutations**
 
@@ -128,7 +141,8 @@ python3 scripts/ci/test-agent-golden-path-skill.py
 bash scripts/ci/test-agent-golden-path-skill-hardening.sh
 ```
 
-Expected: both pass and the two scheduling mutation names print `ok`. Do not
+Expected: both pass, the two scheduling mutation names print `ok`, and the
+hardening script reports exactly 11 executed cases. Do not
 execute `docs-generated-drift-self-test` against this worktree yet: until Task 6
 lands, the base self-test still mutates tracked files and relies on an EXIT trap
 to restore them. The actual default-stage invocation is exercised in Task 8,
@@ -206,6 +220,8 @@ Add one direct parser probe for the existing inline `run:` form: replace
 whose `shell_lines == ("echo inline-parser-sentinel",)`. Also require every
 `uses:`-only step to have empty `shell_lines`. This probe fails if inline runs
 are silently discarded while the main workflow still happens to validate.
+Update `EXPECTED_CASES` from 11 to 24: twelve named parser failures plus this
+one allow probe are added to the eleven Task 1 cases.
 
 - [ ] **Step 2: Run parser mutations and confirm RED**
 
@@ -296,7 +312,7 @@ python3 -OO scripts/ci/test-agent-golden-path-skill.py
 ```
 
 Expected: pass under normal and optimized Python; all direct parser mutations
-reach their named diagnostic.
+reach their named diagnostic and the hardening script reports exactly 24 cases.
 
 - [ ] **Step 6: Commit Task 2**
 
@@ -336,6 +352,8 @@ Create one scratch case per mutation and require the diagnostic shown:
 Also add one allow case with a separate step that runs
 `pre-commit run --hook-stage pre-push --all-files`; it must not replace or
 invalidate the canonical default-stage step.
+Update `EXPECTED_CASES` from 24 to 33 for eight named failures plus this allow
+case.
 
 - [ ] **Step 2: Run mutations and confirm RED**
 
@@ -390,6 +408,9 @@ Do not claim to interpret heredocs or arbitrary shell reachability. Comment-only
 lines are already absent from `shell_lines`; an inline suffix does not equal the
 canonical command.
 
+Add a validator comment that `ubuntu-latest` is an intentional maintenance pin:
+a runner migration must update this contract and its mutation proof together.
+
 - [ ] **Step 4: Run focused GREEN verification**
 
 ```bash
@@ -397,6 +418,8 @@ python3 scripts/ci/test-agent-golden-path-skill.py
 bash scripts/ci/test-agent-golden-path-skill-hardening.sh
 pre-commit run agent-golden-path-skill-contract --all-files
 ```
+
+Expected: the hardening script reports exactly 33 cases.
 
 - [ ] **Step 5: Commit Task 3**
 
@@ -435,6 +458,9 @@ env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
 ```
 
 Copy `.gitignore` and `.gitattributes` in `seed_case()`.
+Keep `-f`: ignored shipped paths must still be indexed so the independent
+`check-ignore --no-index` mutation can prove ignore state without conflating it
+with tracking state.
 
 - [ ] **Step 2: Add independent Git-state mutations**
 
@@ -445,7 +471,11 @@ Require named failures for:
 - removing the inner wildcard so `OTHER.md` becomes visible;
 - deleting each skill's `eol=lf` line independently;
 - setting hostile temporary global `core.excludesFile` and
-  `core.attributesFile` values and proving they cannot satisfy the case.
+  `core.attributesFile` values in two separate control cases and proving neither
+  can satisfy the case.
+
+Together with the four trigger-chain mutations in Step 6, Task 4 adds thirteen
+cases. Update `EXPECTED_CASES` from 33 to 46.
 
 Named diagnostics:
 
@@ -554,6 +584,8 @@ python3 scripts/ci/test-agent-golden-path-skill.py
 bash scripts/ci/test-agent-golden-path-skill-hardening.sh
 ```
 
+Expected: the hardening script reports exactly 46 cases.
+
 - [ ] **Step 8: Commit Task 4**
 
 ```bash
@@ -592,6 +624,9 @@ skill evidence must be a regular tracked file, not a symlink
 
 Skip with an explicit platform diagnostic only if the operating system refuses
 symlink creation; CI on Ubuntu must execute all cases.
+Update `EXPECTED_CASES` from 46 to 49. A platform skip counts as an observed
+case and is printed as `skip`, never as `ok`; Ubuntu must report all three as
+executed rather than skipped.
 
 - [ ] **Step 2: Run mutations and confirm the ordering RED**
 
@@ -626,6 +661,9 @@ python3 scripts/ci/test-agent-golden-path-skill.py
 bash scripts/ci/test-agent-golden-path-skill-hardening.sh
 ```
 
+Expected: the hardening script reports exactly 49 observed cases, with no
+symlink skip on Ubuntu.
+
 - [ ] **Step 5: Commit Task 5**
 
 ```bash
@@ -650,35 +688,40 @@ git commit -m "test(agent): reject symlinked golden-path skills"
   - `run_gate(case_root: str) -> exit status`
   - `expect_gate_status(name: str, case_root: str, expected: int)`
 - The safety wrapper consumes the self-test as a subprocess and proves it does
-  not rely on its scratch cleanup trap to restore the repository it runs from.
+  not rely on cleanup after an interrupted mutation to restore the repository it
+  runs from.
 - The self-test accepts the test-only selector
   `ASSAY_DOCS_DRIFT_SELF_TEST_CASE`; unset runs the full battery and
   `hand-edited-diagram` runs exactly that one named case. Unknown values fail.
+- The self-test accepts `ASSAY_DOCS_DRIFT_INTERRUPT_AFTER_MUTATION` only when it
+  equals the selected case. At the named point after planting the defect but
+  before running the gate, it prints an interruption marker and exits 97.
 
-- [ ] **Step 1: Write the cleanup-disabled safety test**
+- [ ] **Step 1: Write the interrupted-run safety test**
 
 The new script must:
 
 1. copy the tracked working tree to `mktemp -d/case/repo` using the same
    `git ls-files -z | tar --null -T -` pattern as the drift gate;
-2. require exactly one cleanup trap across the historical
-   `trap cleanup EXIT` spelling and the target
-   `trap 'rm -rf "$SCRATCH"' EXIT` spelling, then replace the matched line with
-   `trap : EXIT`; absence or duplication is a named failure, so the safety
-   mutation cannot silently disarm itself when cleanup spelling changes;
-3. when the target scratch-cleanup form is present, structurally reject
-   backup-and-restore code in the copied self-test, including a `cleanup()`
-   function, `*_BACKUP` variables, `trap cleanup`, or a `cp`/`mv` destination
-   rooted under `$ROOT` outside `seed_repo()`; the historical form remains
-   accepted only so the initial RED can expose its writes with cleanup disabled;
-4. snapshot the copied repository's tracked and non-ignored untracked entries;
-5. for the target scratch-cleanup form, run the copied self-test with
-   `ASSAY_DOCS_DRIFT_SELF_TEST_CASE=hand-edited-diagram` and `TMPDIR` set to a
-   second disposable directory outside the copied repository; require its output
-   to report exactly one executed case, then remove that external temp directory.
-   For the historical form only, run the copied full battery without the
-   unsupported selector so the RED observes the actual pre-change behavior;
-6. snapshot again and fail with
+2. detect exactly one mode: historical `trap cleanup EXIT` or target
+   `trap 'rm -rf "$SCRATCH"' EXIT`; absence, duplication, or both forms is a named
+   failure, so the probe cannot silently disarm itself;
+3. in historical mode, replace the trap with `trap : EXIT` and inject an exact,
+   unique `echo "test interruption: hand-edited-diagram"; exit 97` immediately
+   after the first diagram mutation and before its `check` call and inline
+   restore. In target mode, replace the scratch trap with `trap : EXIT` and use
+   the built-in interruption environment variable instead of source injection;
+4. in target mode, structurally reject backup-and-restore code in the copied
+   self-test, including a `cleanup()` function, `*_BACKUP` variables,
+   `trap cleanup`, or a `cp`/`mv` destination rooted under `$ROOT` outside
+   `seed_repo()`; historical mode remains accepted only to drive the initial RED;
+5. snapshot the copied repository's tracked and non-ignored untracked entries;
+6. run with `TMPDIR` set to a second disposable directory outside the copied
+   repository. In target mode also set both test-only variables to
+   `hand-edited-diagram`. Require exit 97 and exactly one
+   `test interruption: hand-edited-diagram` marker, then remove the external temp
+   directory;
+7. snapshot again and fail with
    `drift self-test writes its repository before cleanup` if the manifests
    differ.
 
@@ -696,8 +739,10 @@ bash scripts/ci/test-check-docs-generated-drift-safety.sh
 ```
 
 Expected: non-zero with
-`drift self-test writes its repository before cleanup`, because disabling the
-current restore trap leaves its five repository mutations behind.
+`drift self-test writes its repository before cleanup`, because the historical
+probe interrupts after the first mutation and before both its inline restore and
+its now-disabled EXIT restore. A normal uninterrupted historical run is expected
+to leave the tree clean and is not the RED claim.
 
 - [ ] **Step 3: Rewrite the self-test around a scratch seed**
 
@@ -723,6 +768,14 @@ Route named cases through one case table. Increment `executed_cases` after each
 selected case, print `generated-docs drift self-test: <n> case(s) executed`, and
 require `n == 1` when the test-only selector is set. This makes the safety
 wrapper distinguish a passing case from a selector that ran nothing.
+
+Before each selected mutation, print `running drift case: <name>`. Immediately
+after planting the named defect and before invoking its gate, call one
+`maybe_interrupt_after_mutation(name)` helper. The helper validates the
+test-only environment value and emits the exact interruption marker before exit
+97. This is the persistent GREEN path exercised by the safety wrapper; because
+the case root is under `SCRATCH`, interruption cannot dirty the copied repo even
+with its scratch cleanup trap disabled.
 
 - [ ] **Step 4: Port all existing mutations and add both destinations**
 
@@ -826,6 +879,8 @@ In the optimization script, copy both sources and run embedded Python:
 import ast
 from pathlib import Path
 
+if len(sys.argv) != 3:
+    raise SystemExit("optimizer gate must scan exactly two Python files")
 for raw in sys.argv[1:]:
     path = Path(raw)
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -836,7 +891,9 @@ for raw in sys.argv[1:]:
 ```
 
 Scan `test-agent-golden-path-skill.py` and
-`generate-agent-golden-path.py`.
+`generate-agent-golden-path.py`. Embedded Python in Bash gates remains outside
+this AST scan; that bounded optimizer-safety residual is explicit and is not a
+claim that every Python fragment in the repository is assert-free.
 
 - [ ] **Step 2: Run AST check and confirm RED**
 
@@ -851,16 +908,18 @@ Expected: non-zero naming generator lines 369, 371, 392, and 475.
 Use explicit checks, for example:
 
 ```python
-primary_outcome = step["outcomes"][0]
-if not isinstance(primary_outcome, dict):
-    raise SystemExit("primary golden-path outcome must be an object")
-primary_argv = primary_outcome["argv"]
-if not isinstance(primary_argv, list):
-    raise SystemExit("primary golden-path argv must be a list")
+outcomes = require_type(step["outcomes"], list, "golden-path outcomes")
+primary_outcome = require_type(
+    outcomes[0], dict, "primary golden-path outcome"
+)
+primary_argv = require_type(
+    primary_outcome["argv"], list, "primary golden-path argv"
+)
 ```
 
-Apply the same style to `outcomes` in `exit_summary()` and `non_claims` in
-`render_skill()`.
+Use `require_type()` for all four replacements, including `outcomes` in
+`exit_summary()` and `non_claims` in `render_skill()`. Do not duplicate the
+`isinstance` rule inline.
 
 - [ ] **Step 4: Add the insert-assert mutation**
 
@@ -872,7 +931,7 @@ require the AST check to fail with `optimizer-erased assert`. Retain the existin
 - [ ] **Step 5: Prove generated bytes did not change**
 
 Record before digests from `HEAD`, run the generator, and compare all generated
-outputs:
+outputs written by this generator:
 
 ```bash
 git diff --exit-code -- \
@@ -889,6 +948,10 @@ bash scripts/ci/test-agent-golden-path-skill-optimization.sh
 bash scripts/ci/check-docs-generated-drift.sh
 ```
 
+This focused four-path proof is intentionally narrower than the seven-path
+PR-A byte-identity assertion; Task 8 separately compares all seven paths to the
+base commit.
+
 - [ ] **Step 6: Commit Task 7**
 
 ```bash
@@ -899,26 +962,32 @@ git commit -m "test(agent): preserve golden-path guards under optimization"
 
 ---
 
-### Task 8: Correct Claim Wording And Run The PR-A Gate
+### Task 8: Run The PR-A Gate
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-08-09-golden-path-hardening-design.md:403-404`
-- Verify only: all Task 1-7 paths and existing golden-path integration tests.
+- Verify only: the reviewed design, all Task 1-7 paths, and existing golden-path
+  integration tests.
 
 **Interfaces:**
 - Produces no runtime or generated interface.
 - Carries forward PR B notes without implementing PR B.
 
-- [ ] **Step 1: Correct the reviewed Non-Goals wording**
+- [ ] **Step 1: Verify the reviewed design boundaries remain intact**
 
-Replace the ambiguous line with:
+Require `git diff --exit-code "$PLAN_HEAD" --` for the design file. Verify these
+three adjacent Non-Goals remain separate bullets:
 
 ```markdown
+- No Cursor runtime-discovery claim or Cursor-specific skill copy.
+- No new Python version source, launcher, or duplicated toolchain pin.
 - No runtime behavior, command output schema, exit code, policy, evidence, or
   security semantics change.
 ```
 
-Do not add future-plugin or packaging language to either generated skill.
+Also verify the executor rule says the shell body has one active `pre-commit`
+invocation equal to the canonical command while allowing other setup lines. Do
+not edit the design during implementation, and do not add future-plugin or
+packaging language to either generated skill.
 
 - [ ] **Step 2: Run focused script gates**
 
@@ -979,14 +1048,7 @@ git status --short
 Verify the seven generated paths have no diff against
 `55e8103029583a16af96e1eafe73025192d69cd2`.
 
-- [ ] **Step 6: Commit the wording correction**
-
-```bash
-git add -A -- docs/superpowers/specs/2026-08-09-golden-path-hardening-design.md
-git commit -m "docs(design): clarify golden-path non-goals"
-```
-
-- [ ] **Step 7: Push and open a draft PR**
+- [ ] **Step 6: Push and open a draft PR**
 
 ```bash
 git push --set-upstream origin codex/2176-golden-path-durability
@@ -1001,7 +1063,7 @@ The PR body must include exact-head measurement provenance, named RED/GREEN
 mutations, public-surface non-claims, the no-generated-byte assertion, and the
 technical no-change disposition for Python toolchain centralization.
 
-- [ ] **Step 8: Obtain final-head review quorum**
+- [ ] **Step 7: Obtain final-head review quorum**
 
 Use the existing context-bearing Claude Code Desktop review chat in read-only
 mode and state the exact PR head SHA. Request CodeRabbit or Copilot review. If a
@@ -1009,7 +1071,7 @@ bot is unavailable under `AGENTS.md`, obtain a second non-building agent review
 on the same SHA and record the substitution. A push after either review
 invalidates it.
 
-- [ ] **Step 9: Validate CI and prepare merge record**
+- [ ] **Step 8: Validate CI and prepare merge record**
 
 Require all required checks green and no unresolved actionable thread. Measure
 the external required-check list on the final head and record it rather than
@@ -1027,6 +1089,9 @@ already reviewed constraints:
 - Generated skill wording names only the cwd referent; packaging or future
   plugin language remains forbidden public vocabulary.
 - Missing `working_directory` renders as `invocation cwd`, not `.`.
+- Re-verify the existing protected-action guide-row sed fixture in
+  `scripts/ci/test-agent-golden-path-skill-hardening.sh`; it currently assumes
+  the pre-PR-B `.` rendering for absent working directories.
 - The protected-action fixture is source-repo-relative; #2152 step 4 must decide
   whether packaging carries or replaces that reference scenario.
 - PR B rechecks and cites current official Cursor documentation before changing

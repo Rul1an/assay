@@ -103,9 +103,9 @@ the active pull-request event and `jobs.lint` block. It must require:
 - no job-level or executor-step `if` condition;
 - no truthy `continue-on-error` on the job or executor step;
 - exactly one default-stage executor step whose block-scalar shell body has one
-  active line equal to
+  active `pre-commit` invocation equal to
   `pre-commit run --all-files --show-diff-on-failure` after leading and trailing
-  whitespace removal;
+  whitespace removal; other active setup lines in that shell body are permitted;
 - no additional active pre-commit invocation or hook-stage override in that
   executor step.
 
@@ -402,7 +402,7 @@ content.
 - No fixes for stdout/reason gaps #2160 through #2166.
 - No Cursor runtime-discovery claim or Cursor-specific skill copy.
 - No new Python version source, launcher, or duplicated toolchain pin.
-- No runtime command output-schema, exit-code, policy, evidence, or security
-  behavior change.
+- No runtime behavior, command output schema, exit code, policy, evidence, or
+  security semantics change.
 - No scalar trust score, whole-action verdict, compliance claim, certification,
   or proof of provider execution or external side effects.
