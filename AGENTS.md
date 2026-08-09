@@ -74,6 +74,9 @@ including its explicit non-claims, or amend the decision through a new ADR.
 The builder's self-review does not count. On the final head SHA, require one non-building agent
 review that actually reviews the change and records its verdict and findings. Automated reviewers
 may add evidence, but they are not part of the quorum and their absence never needs a substitute.
+A non-building reviewer authored or edited neither the PR's change nor the normative specification
+or implementation plan it claims to satisfy. Prior read-only review of that specification or plan
+does not itself make the reviewer a builder.
 
 A new push invalidates the review on the prior head, and the head a review was measured on is the
 head it counts for — a merge commit that brings `main` into the branch is a new head like any other.
