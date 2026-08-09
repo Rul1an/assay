@@ -1,19 +1,19 @@
 //! MCP-owned rows of the #1975 stdout-and-exit-code journey contract.
 
+#[path = "../../../tests/support/bounded_process.rs"]
+mod bounded_process;
 mod jsonrpc_conn;
 #[path = "../../../tests/support/agent_golden_path.rs"]
 mod runtime_coverage;
 
+use bounded_process::{run_bounded, GOLDEN_PATH_LIMITS};
 use jsonrpc_conn::Conn;
 use serde_json::Value;
 use std::ffi::OsStr;
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::process::{Command, Output, Stdio};
 
-const PROCESS_TIMEOUT: Duration = Duration::from_secs(10);
-const MAX_STDOUT_BYTES: u64 = 1024 * 1024;
+use runtime_coverage::ExpectedOutcome;
 
 fn workspace_root() -> &'static Path {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -42,29 +42,11 @@ fn contract() -> Value {
     contract
 }
 
-fn expected_outcome(step_id: &str, outcome_name: &str) -> Value {
-    let contract = contract();
-    let step = contract["steps"]
-        .as_array()
-        .expect("contract steps array")
-        .iter()
-        .find(|step| step["id"] == step_id)
-        .unwrap_or_else(|| panic!("contract step {step_id:?} is missing"));
-    let mut outcome = step["outcomes"]
-        .as_array()
-        .expect("step outcomes array")
-        .iter()
-        .find(|outcome| outcome["name"] == outcome_name)
-        .unwrap_or_else(|| panic!("contract outcome {step_id}/{outcome_name} is missing"))
-        .clone();
-    outcome["command"] = step["command"].clone();
-    outcome["binary"] = step["binary"].clone();
-    outcome["working_directory"] = step["working_directory"].clone();
-    runtime_coverage::record_outcome(step_id, outcome_name);
-    outcome
+fn expected_outcome(step_id: &str, outcome_name: &str) -> ExpectedOutcome {
+    runtime_coverage::expected_outcome(&contract(), step_id, outcome_name)
 }
 
-fn assert_exit(output: &Output, expected: &Value, context: &str) {
+fn assert_exit(output: &Output, expected: &ExpectedOutcome, context: &str) {
     let expected_exit = expected["exit_code"]
         .as_i64()
         .expect("contract exit_code must be an integer");
@@ -80,6 +62,7 @@ fn assert_exit(output: &Output, expected: &Value, context: &str) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    runtime_coverage::record_observation(expected);
 }
 
 fn assert_gap(expected: &Value, issue: u64) {
@@ -160,61 +143,14 @@ fn clean_server_command() -> Command {
 
 fn run_server<S: AsRef<OsStr>>(cwd: &Path, args: &[S], stdin: &[u8]) -> Output {
     let mut command = clean_server_command();
-    command
-        .current_dir(cwd)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
-    let mut child = command.spawn().expect("spawn assay-mcp-server");
-    let mut child_stdin = child.stdin.take().expect("child stdin");
-    let stdin = stdin.to_vec();
-    let writer = std::thread::spawn(move || {
-        child_stdin.write_all(&stdin)?;
-        Ok::<(), std::io::Error>(())
-    });
-    let output = wait_bounded(child);
-    writer
-        .join()
-        .expect("join stdin writer")
-        .expect("write child stdin");
-    output
-}
-
-fn wait_bounded(mut child: Child) -> Output {
-    let stdout = child.stdout.take().expect("child stdout");
-    let reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        stdout
-            .take(MAX_STDOUT_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .expect("read bounded child stdout");
-        bytes
-    });
-    let deadline = Instant::now() + PROCESS_TIMEOUT;
-    let status = loop {
-        match child.try_wait().expect("poll assay-mcp-server") {
-            Some(status) => break status,
-            None if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let status = child.wait().expect("reap timed-out assay-mcp-server");
-                panic!(
-                    "assay-mcp-server did not exit within {PROCESS_TIMEOUT:?}; killed it ({status})"
-                );
-            }
-            None => std::thread::sleep(Duration::from_millis(10)),
-        }
-    };
-    let stdout = reader.join().expect("join stdout reader");
-    assert!(
-        stdout.len() <= MAX_STDOUT_BYTES as usize,
-        "assay-mcp-server stdout exceeded the {MAX_STDOUT_BYTES}-byte test ceiling"
-    );
-    Output {
-        status,
-        stdout,
-        stderr: Vec::new(),
-    }
+    command.current_dir(cwd).args(args);
+    run_bounded(
+        command,
+        stdin,
+        GOLDEN_PATH_LIMITS,
+        "agent golden-path MCP command",
+    )
+    .unwrap_or_else(|error| panic!("{error}"))
 }
 
 fn python() -> &'static str {
@@ -227,12 +163,17 @@ fn python() -> &'static str {
 
 fn required_python() -> &'static str {
     let interpreter = python();
-    let output = Command::new(interpreter)
-        .arg("--version")
-        .output()
-        .unwrap_or_else(|error| {
-            panic!("the protected-action reference fixture requires {interpreter} on PATH: {error}")
-        });
+    let mut command = Command::new(interpreter);
+    command.arg("--version");
+    let output = run_bounded(
+        command,
+        b"",
+        GOLDEN_PATH_LIMITS,
+        "protected-action Python preflight",
+    )
+    .unwrap_or_else(|error| {
+        panic!("the protected-action reference fixture requires {interpreter} on PATH: {error}")
+    });
     assert!(
         output.status.success(),
         "the protected-action reference fixture requires a working {interpreter}"
@@ -327,6 +268,7 @@ fn enforcing_proxy_denial_is_structured_but_startup_failure_is_not() {
         status.code().map(i64::from),
         denied_expected["exit_code"].as_i64()
     );
+    runtime_coverage::record_observation(&denied_expected);
 
     let startup_expected = expected_outcome("protected-action", "startup-failure");
     let startup_argv = contract_argv(&startup_expected, &[("<python>", python)]);

@@ -1,5 +1,7 @@
 //! The #1975 journey as observed by a caller that reads only stdout and the exit status.
 
+#[path = "../../../tests/support/bounded_process.rs"]
+mod bounded_process;
 #[path = "../../../tests/support/agent_golden_path.rs"]
 mod runtime_coverage;
 
@@ -7,6 +9,9 @@ use serde_json::Value;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::process::{Command, Output};
+
+use bounded_process::{run_bounded, GOLDEN_PATH_LIMITS};
+use runtime_coverage::ExpectedOutcome;
 
 fn workspace_root() -> &'static Path {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -35,25 +40,8 @@ fn contract() -> Value {
     contract
 }
 
-fn expected_outcome(step_id: &str, outcome_name: &str) -> Value {
-    let contract = contract();
-    let step = contract["steps"]
-        .as_array()
-        .expect("contract steps array")
-        .iter()
-        .find(|step| step["id"] == step_id)
-        .unwrap_or_else(|| panic!("contract step {step_id:?} is missing"));
-    let mut outcome = step["outcomes"]
-        .as_array()
-        .expect("step outcomes array")
-        .iter()
-        .find(|outcome| outcome["name"] == outcome_name)
-        .unwrap_or_else(|| panic!("contract outcome {step_id}/{outcome_name} is missing"))
-        .clone();
-    outcome["command"] = step["command"].clone();
-    outcome["binary"] = step["binary"].clone();
-    runtime_coverage::record_outcome(step_id, outcome_name);
-    outcome
+fn expected_outcome(step_id: &str, outcome_name: &str) -> ExpectedOutcome {
+    runtime_coverage::expected_outcome(&contract(), step_id, outcome_name)
 }
 
 #[test]
@@ -73,7 +61,7 @@ fn cli_contract_steps_default_to_invocation_cwd() {
     }
 }
 
-fn assert_exit(output: &Output, expected: &Value, context: &str) {
+fn assert_exit(output: &Output, expected: &ExpectedOutcome, context: &str) {
     let expected_exit = expected["exit_code"]
         .as_i64()
         .expect("contract exit_code must be an integer");
@@ -89,6 +77,12 @@ fn assert_exit(output: &Output, expected: &Value, context: &str) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    runtime_coverage::record_observation(expected);
+}
+
+#[test]
+fn golden_path_contract_uses_only_supported_binaries() {
+    runtime_coverage::assert_contract_binaries(&contract(), &["assay", "assay-mcp-server"]);
 }
 
 fn assert_gap(expected: &Value, issue: u64) {
@@ -145,12 +139,14 @@ fn assay<S: AsRef<OsStr>>(cwd: &Path, args: &[S]) -> Output {
             command.env_remove(name);
         }
     }
-    command
-        .current_dir(cwd)
-        .env("NO_COLOR", "1")
-        .args(args)
-        .output()
-        .expect("run assay binary")
+    command.current_dir(cwd).env("NO_COLOR", "1").args(args);
+    run_bounded(
+        command,
+        b"",
+        GOLDEN_PATH_LIMITS,
+        "agent golden-path CLI command",
+    )
+    .unwrap_or_else(|error| panic!("{error}"))
 }
 
 fn assay_contract(cwd: &Path, expected: &Value, replacements: &[(&str, &str)]) -> Output {
