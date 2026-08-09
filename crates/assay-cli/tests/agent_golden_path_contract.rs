@@ -9,9 +9,8 @@ use serde_json::Value;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::process::{Command, Output};
-use std::time::Duration;
 
-use bounded_process::{run_bounded, ProcessLimits, GOLDEN_PATH_LIMITS};
+use bounded_process::{run_bounded, GOLDEN_PATH_LIMITS};
 use runtime_coverage::ExpectedOutcome;
 
 fn workspace_root() -> &'static Path {
@@ -413,57 +412,4 @@ fn every_cli_contract_outcome_is_executed_once() {
             offline_profile_verifier_keeps_both_outcomes_on_stdout,
         ],
     );
-}
-
-#[cfg(unix)]
-fn hanging_command() -> Command {
-    let mut command = Command::new("sh");
-    command.args(["-c", "while :; do :; done"]);
-    command
-}
-
-#[cfg(windows)]
-fn hanging_command() -> Command {
-    let mut command = Command::new("cmd");
-    command.args([
-        "/V:ON",
-        "/C",
-        "@echo off & :loop & set /a x+=1 >NUL & goto loop",
-    ]);
-    command
-}
-
-#[cfg(unix)]
-fn stdout_flood_command() -> Command {
-    let mut command = Command::new("sh");
-    command.args(["-c", "while :; do printf '0123456789abcdef'; done"]);
-    command
-}
-
-#[cfg(windows)]
-fn stdout_flood_command() -> Command {
-    let mut command = Command::new("cmd");
-    command.args(["/C", "for /L %i in (1,1,1000000) do @echo 0123456789abcdef"]);
-    command
-}
-
-#[test]
-fn bounded_runner_kills_timeout_and_reports_context() {
-    let mut command = hanging_command();
-    let limits = ProcessLimits::new(Duration::from_millis(100), 1024, 1024);
-    let error = run_bounded(&mut command, b"", limits, "hanging mutation")
-        .expect_err("hanging child must time out");
-    assert!(error.contains("hanging mutation"));
-    assert!(error.contains("deadline"));
-}
-
-#[test]
-fn bounded_runner_kills_output_flood() {
-    let mut command = stdout_flood_command();
-    let limits = ProcessLimits::new(Duration::from_secs(2), 1024, 1024);
-    let error = run_bounded(&mut command, b"", limits, "flood mutation")
-        .expect_err("output flood must exceed its ceiling");
-    assert!(error.contains("flood mutation"));
-    assert!(error.contains("stdout"));
-    assert!(error.contains("1024"));
 }

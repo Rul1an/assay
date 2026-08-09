@@ -275,3 +275,92 @@ fn excerpt(bytes: &[u8]) -> String {
     };
     format!("{:?}{suffix}", String::from_utf8_lossy(kept))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{run_bounded, ProcessLimits};
+    use std::process::Command;
+    use std::time::Duration;
+
+    #[cfg(unix)]
+    fn hanging_command() -> Command {
+        let mut command = Command::new("sh");
+        command.args(["-c", "while :; do :; done"]);
+        command
+    }
+
+    #[cfg(windows)]
+    fn hanging_command() -> Command {
+        let mut command = Command::new("ping");
+        command.args(["-t", "127.0.0.1"]);
+        command
+    }
+
+    #[cfg(unix)]
+    fn stdout_flood_command() -> Command {
+        let mut command = Command::new("sh");
+        command.args(["-c", "while :; do printf '0123456789abcdef'; done"]);
+        command
+    }
+
+    #[cfg(windows)]
+    fn stdout_flood_command() -> Command {
+        let mut command = Command::new("cmd");
+        command.args(["/C", "for /L %i in (1,1,1000000) do @echo 0123456789abcdef"]);
+        command
+    }
+
+    #[cfg(unix)]
+    fn stderr_flood_command() -> Command {
+        let mut command = Command::new("sh");
+        command.args(["-c", "while :; do printf '0123456789abcdef' >&2; done"]);
+        command
+    }
+
+    #[cfg(windows)]
+    fn stderr_flood_command() -> Command {
+        let mut command = Command::new("cmd");
+        command.args([
+            "/C",
+            "for /L %i in (1,1,1000000) do @echo 0123456789abcdef 1>&2",
+        ]);
+        command
+    }
+
+    #[test]
+    fn kills_timeout_and_reports_context() {
+        let mut command = hanging_command();
+        let limits = ProcessLimits::new(Duration::from_millis(100), 1024, 1024);
+        let error = run_bounded(&mut command, b"", limits, "hanging mutation")
+            .expect_err("hanging child must time out");
+        assert!(error.contains("hanging mutation"));
+        assert!(error.contains("deadline"));
+    }
+
+    #[test]
+    fn kills_stdout_flood() {
+        let mut command = stdout_flood_command();
+        let limits = ProcessLimits::new(Duration::from_secs(2), 1024, 2048);
+        let error = run_bounded(&mut command, b"", limits, "stdout flood mutation")
+            .expect_err("stdout flood must exceed its ceiling");
+        assert!(error.contains("stdout flood mutation"));
+        assert!(error.contains("stdout"));
+        assert!(error.contains("1024-byte ceiling"));
+    }
+
+    #[test]
+    fn stderr_flood_uses_its_own_ceiling_and_bounded_diagnostic() {
+        let mut command = stderr_flood_command();
+        let limits = ProcessLimits::new(Duration::from_secs(2), 1024, 8192);
+        let error = run_bounded(&mut command, b"", limits, "stderr flood mutation")
+            .expect_err("stderr flood must exceed its ceiling");
+        assert!(error.contains("stderr flood mutation"));
+        assert!(error.contains("stderr exceeded its 8192-byte ceiling"));
+        assert!(error.contains("... (8193 bytes total)"));
+        assert!(
+            error.len() < 5000,
+            "diagnostic escaped its bounded excerpt: {} bytes",
+            error.len()
+        );
+    }
+}
