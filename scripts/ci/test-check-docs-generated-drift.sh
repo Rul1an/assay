@@ -12,6 +12,8 @@ SEED="$SCRATCH/seed"
 SELECTED_CASE="${ASSAY_DOCS_DRIFT_SELF_TEST_CASE:-}"
 INTERRUPT_CASE="${ASSAY_DOCS_DRIFT_INTERRUPT_AFTER_MUTATION:-}"
 GATE_OUTPUT=""
+# Full mode is a fixed mutation battery; selected mode deliberately executes one row.
+EXPECTED_CASES=10
 
 seed_repo() {
   local destination="$1"
@@ -233,6 +235,10 @@ done
 
 if [[ -n "$SELECTED_CASE" && "$executed_cases" -ne 1 ]]; then
   echo "FAIL: selected drift self-test executed $executed_cases cases, wanted 1" >&2
+  exit 1
+fi
+if [[ -z "$SELECTED_CASE" && "$executed_cases" -ne "$EXPECTED_CASES" ]]; then
+  echo "FAIL: full drift self-test executed $executed_cases cases, wanted $EXPECTED_CASES" >&2
   exit 1
 fi
 echo "generated-docs drift self-test: $executed_cases case(s) executed"

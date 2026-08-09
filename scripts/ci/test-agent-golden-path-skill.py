@@ -54,12 +54,36 @@ PROTECTED_ACTION_CWD = "examples/privileged-action-gate"
 MAX_EVIDENCE_BYTES = 1024 * 1024
 CANONICAL_PRECOMMIT = "pre-commit run --all-files --show-diff-on-failure"
 ALLOWED_PREPUSH_PRECOMMIT = "pre-commit run --hook-stage pre-push --all-files"
+SELF_TEST_TRIGGER_PATH = "scripts/docs/generate-agent-golden-path.py"
+SELF_TEST_TRIGGER_MODE = "100644"
+SELF_TEST_TRIGGER_TYPES = frozenset({"file", "non-executable", "python", "text"})
+MAPPING_ENTRY_PATTERN = re.compile(r"^(?P<key>[A-Za-z0-9_-]+) *:(?P<value>.*)$")
+
+# Both bounded YAML readers intentionally model the repository's two-space
+# layout rather than arbitrary YAML indentation or scalar forms.
+YAML_INDENT_STEP = 2
+YAML_ROOT_INDENT = 0
+WORKFLOW_ROOT_PARENT_INDENT = -YAML_INDENT_STEP
+WORKFLOW_SECTION_INDENT = 2
+WORKFLOW_FIELD_INDENT = 4
+WORKFLOW_SEQUENCE_INDENT = 6
+WORKFLOW_STEP_FIELD_INDENT = 8
+PRECOMMIT_REPO_INDENT = 2
+PRECOMMIT_HOOKS_INDENT = 4
+PRECOMMIT_HOOK_INDENT = 6
+PRECOMMIT_HOOK_FIELD_INDENT = 8
 
 
 @dataclass(frozen=True)
 class PrecommitHookContract:
     stages: tuple[str, ...] | None
     files_pattern: str
+    root_files_pattern: str | None
+    root_exclude_pattern: str | None
+    exclude_pattern: str | None
+    types: tuple[str, ...] | None
+    types_or: tuple[str, ...] | None
+    exclude_types: tuple[str, ...] | None
 
 
 @dataclass(frozen=True)
@@ -138,6 +162,16 @@ def indentation(line: str) -> int:
     return len(line) - len(line.lstrip(" "))
 
 
+def mapping_key_value(candidate: str, label: str) -> tuple[str, str] | None:
+    """Read one plain bounded-YAML mapping entry, normalizing spaces before `:`."""
+    match = MAPPING_ENTRY_PATTERN.fullmatch(candidate)
+    if match:
+        return match.group("key"), match.group("value").strip()
+    if ":" in candidate:
+        fail(f"{label} contains unsupported mapping-key syntax")
+    return None
+
+
 def active_lines(text: str) -> list[tuple[int, str]]:
     result = []
     for line_number, line in enumerate(text.splitlines(), start=1):
@@ -155,7 +189,7 @@ def locate_mapping(
     missing_message: str | None = None,
 ) -> tuple[int, int]:
     """Locate one direct mapping key and the first line outside its scope."""
-    key_indent = parent_indent + 2
+    key_indent = parent_indent + YAML_INDENT_STEP
     matches = []
     end_index = len(lines)
     for index in range(start_index, len(lines)):
@@ -164,10 +198,14 @@ def locate_mapping(
         if line_indent <= parent_indent:
             end_index = index
             break
-        if line_indent == key_indent and line.strip() == key:
-            matches.append(index)
+        if line_indent == key_indent:
+            entry = mapping_key_value(line.strip(), "kernel-matrix workflow")
+            if entry is not None and entry[0] == key:
+                if entry[1] and not entry[1].startswith("#"):
+                    fail(f"kernel-matrix {key} section must be a mapping")
+                matches.append(index)
     if len(matches) != 1:
-        fail(missing_message or f"kernel-matrix workflow must declare exactly one {key[:-1]} section")
+        fail(missing_message or f"kernel-matrix workflow must declare exactly one {key} section")
 
     key_index = matches[0]
     key_end = end_index
@@ -199,12 +237,13 @@ def direct_mapping_values(
     for _, line in lines[start_index:end_index]:
         if indentation(line) != mapping_indent:
             continue
-        key, separator, raw = line.strip().partition(":")
-        if not separator:
+        entry = mapping_key_value(line.strip(), label)
+        if entry is None:
             continue
+        key, raw = entry
         if key in values:
             fail(f"{label} duplicates key: {key}")
-        values[key] = raw.strip()
+        values[key] = raw
     return values
 
 
@@ -236,18 +275,17 @@ def parse_lint_step(
         for index, (_, line) in enumerate(
             lines[start_index + 1 : end_index], start=start_index + 1
         )
-        if indentation(line) == 8
+        if indentation(line) == WORKFLOW_STEP_FIELD_INDENT
     )
     run_index = None
     for index, candidate in field_lines:
-        key, separator, raw = candidate.partition(":")
-        if not separator:
+        entry = mapping_key_value(candidate, "kernel-matrix lint step")
+        if entry is None:
             continue
+        key, raw = entry
         if key in fields:
-            if key == "run":
-                fail("kernel-matrix lint step duplicates key: run")
             fail(f"kernel-matrix lint step duplicates key: {key}")
-        fields[key] = raw.strip()
+        fields[key] = raw
         if key == "run":
             run_index = index
 
@@ -261,14 +299,14 @@ def parse_lint_step(
                 (
                     index
                     for index in range(run_index + 1, end_index)
-                    if indentation(lines[index][1]) <= 8
+                    if indentation(lines[index][1]) <= WORKFLOW_STEP_FIELD_INDENT
                 ),
                 end_index,
             )
             shell_lines = tuple(
                 line.strip()
                 for _, line in lines[run_index + 1 : run_end]
-                if indentation(line) > 8
+                if indentation(line) > WORKFLOW_STEP_FIELD_INDENT
             )
         elif not run.startswith((">", "|")):
             shell_lines = (run,)
@@ -284,12 +322,18 @@ def parse_lint_step(
 
 def parse_kernel_matrix_workflow(text: str) -> WorkflowContract:
     lines = active_lines(text)
-    on_index, _ = locate_mapping(lines, 0, -2, "on:")
+    on_index, _ = locate_mapping(
+        lines, 0, WORKFLOW_ROOT_PARENT_INDENT, "on"
+    )
     pull_request_index, pull_request_end = locate_mapping(
-        lines, on_index + 1, 0, "pull_request:"
+        lines, on_index + 1, YAML_ROOT_INDENT, "pull_request"
     )
     pull_request = direct_mapping_values(
-        lines, pull_request_index + 1, pull_request_end, 4, "kernel-matrix pull_request"
+        lines,
+        pull_request_index + 1,
+        pull_request_end,
+        WORKFLOW_FIELD_INDENT,
+        "kernel-matrix pull_request",
     )
     if "paths" not in pull_request:
         fail("kernel-matrix pull_request is missing required key: paths")
@@ -312,16 +356,22 @@ def parse_kernel_matrix_workflow(text: str) -> WorkflowContract:
     )
 
     paths = []
-    path_pattern = re.compile(r'^ {6}- "([^"]+)"\s*(?:#.*)?$')
+    path_pattern = re.compile(r'^- "([^"]+)"\s*(?:#.*)?$')
     paths_index = next(
         index
         for index in range(pull_request_index + 1, pull_request_end)
-        if indentation(lines[index][1]) == 4 and lines[index][1].strip().startswith("paths:")
+        if indentation(lines[index][1]) == WORKFLOW_FIELD_INDENT
+        and (entry := mapping_key_value(
+            lines[index][1].strip(), "kernel-matrix pull_request"
+        )) is not None
+        and entry[0] == "paths"
     )
     for _, line in lines[paths_index + 1 : pull_request_end]:
-        if indentation(line) <= 4:
+        if indentation(line) <= WORKFLOW_FIELD_INDENT:
             break
-        match = path_pattern.fullmatch(line)
+        if indentation(line) != WORKFLOW_SEQUENCE_INDENT:
+            fail("kernel-matrix pull_request.paths contains an unsupported entry")
+        match = path_pattern.fullmatch(line.strip())
         if not match:
             fail("kernel-matrix pull_request.paths contains an unsupported entry")
         path = match.group(1)
@@ -329,25 +379,36 @@ def parse_kernel_matrix_workflow(text: str) -> WorkflowContract:
             fail(f"kernel-matrix pull_request.paths duplicates entry: {path}")
         paths.append(path)
 
-    jobs_index, _ = locate_mapping(lines, 0, -2, "jobs:")
+    jobs_index, _ = locate_mapping(
+        lines, 0, WORKFLOW_ROOT_PARENT_INDENT, "jobs"
+    )
     lint_index, lint_end = locate_mapping(
         lines,
         jobs_index + 1,
-        0,
-        "lint:",
+        YAML_ROOT_INDENT,
+        "lint",
         "kernel-matrix workflow must declare exactly one active lint job",
     )
-    lint = direct_mapping_values(lines, lint_index + 1, lint_end, 4, "kernel-matrix lint job")
+    lint = direct_mapping_values(
+        lines,
+        lint_index + 1,
+        lint_end,
+        WORKFLOW_FIELD_INDENT,
+        "kernel-matrix lint job",
+    )
     if "runs-on" not in lint:
         fail("kernel-matrix lint job is missing required key: runs-on")
     if "steps" not in lint:
         fail("kernel-matrix lint job is missing required key: steps")
-    steps_index, steps_end = locate_mapping(lines, lint_index + 1, 2, "steps:")
+    steps_index, steps_end = locate_mapping(
+        lines, lint_index + 1, WORKFLOW_SECTION_INDENT, "steps"
+    )
 
     step_starts = [
         index
         for index in range(steps_index + 1, steps_end)
-        if indentation(lines[index][1]) == 6 and lines[index][1].strip().startswith("- ")
+        if indentation(lines[index][1]) == WORKFLOW_SEQUENCE_INDENT
+        and lines[index][1].strip().startswith("- ")
     ]
     lint_steps = tuple(
         parse_lint_step(
@@ -417,19 +478,81 @@ def validate_lint_executor(contract: WorkflowContract) -> None:
             fail("kernel-matrix lint pre-commit command is noncanonical")
 
 
+def precommit_line_indentation(line: str, line_number: int) -> int:
+    prefix = line[: len(line) - len(line.lstrip())]
+    if "\t" in prefix:
+        fail(f"pre-commit config uses tab indentation at line {line_number}")
+    return indentation(line)
+
+
+def parse_precommit_inline_list(raw: str, label: str) -> tuple[str, ...]:
+    match = re.fullmatch(r"\[(.*)\]\s*(?:#.*)?", raw)
+    if not match:
+        fail(f"{label} must be an inline list")
+    body = match.group(1).strip()
+    if not body:
+        return ()
+
+    values = []
+    for entry in body.split(","):
+        entry = entry.strip()
+        if not entry:
+            fail(f"{label} must not contain empty entries")
+        if entry.startswith(("'", '"')):
+            try:
+                value = ast.literal_eval(entry)
+            except (SyntaxError, ValueError):
+                fail(f"{label} contains an unsupported entry")
+            if not isinstance(value, str):
+                fail(f"{label} contains an unsupported entry")
+        elif re.fullmatch(r"[A-Za-z0-9_.+-]+", entry):
+            value = entry
+        else:
+            fail(f"{label} contains an unsupported entry")
+        values.append(value)
+    return tuple(values)
+
+
+def precommit_scalar(raw: str, label: str) -> str:
+    # In a YAML plain scalar, whitespace followed by `#` starts a comment.
+    raw = re.split(r"[ \t]+#", raw, maxsplit=1)[0].rstrip()
+    if not raw or raw.startswith(("|", ">", "'", '"')):
+        fail(f"{label} must be an unquoted inline scalar")
+    return raw
+
+
 def parse_precommit_hook(
     text: str, hook_id: str, label: str
 ) -> PrecommitHookContract:
-    """Read one unique active local pre-commit hook."""
+    """Read one unique active local pre-commit hook and its effective selectors."""
     lines = text.splitlines()
     hook_starts: list[int] = []
+    root_fields: dict[str, str] = {}
+
+    for line_number, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        line_indent = precommit_line_indentation(line, line_number)
+        if line_indent != YAML_ROOT_INDENT:
+            continue
+        entry = mapping_key_value(stripped, "pre-commit config")
+        if entry is None or entry[0] not in {"files", "exclude"}:
+            continue
+        key, value = entry
+        if key in root_fields:
+            fail(f"pre-commit config duplicates root selector: {key}")
+        root_fields[key] = precommit_scalar(value, f"pre-commit root {key}")
 
     for index, line in enumerate(lines):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        indentation = len(line) - len(line.lstrip(" "))
-        if indentation != 2 or stripped != "- repo: local":
+        line_indent = precommit_line_indentation(line, index + 1)
+        if line_indent != PRECOMMIT_REPO_INDENT or not stripped.startswith("- "):
+            continue
+        repo_entry = mapping_key_value(stripped[2:], "pre-commit repository")
+        if repo_entry != ("repo", "local"):
             continue
 
         local_end = len(lines)
@@ -438,7 +561,7 @@ def parse_precommit_hook(
             candidate_stripped = candidate.strip()
             if not candidate_stripped or candidate_stripped.startswith("#"):
                 continue
-            if len(candidate) - len(candidate.lstrip(" ")) <= 2:
+            if precommit_line_indentation(candidate, cursor + 1) <= PRECOMMIT_REPO_INDENT:
                 local_end = cursor
                 break
 
@@ -447,72 +570,176 @@ def parse_precommit_hook(
             candidate_stripped = candidate.strip()
             if not candidate_stripped or candidate_stripped.startswith("#"):
                 continue
-            if (
-                len(candidate) - len(candidate.lstrip(" ")) == 4
-                and candidate_stripped == "hooks:"
-            ):
-                hooks_end = local_end
-                for hook_cursor in range(cursor + 1, local_end):
-                    hook_line = lines[hook_cursor]
-                    hook_stripped = hook_line.strip()
-                    if not hook_stripped or hook_stripped.startswith("#"):
-                        continue
-                    if len(hook_line) - len(hook_line.lstrip(" ")) <= 4:
-                        hooks_end = hook_cursor
-                        break
-                for hook_cursor in range(cursor + 1, hooks_end):
-                    hook_line = lines[hook_cursor]
-                    hook_stripped = hook_line.strip()
-                    if hook_stripped.startswith("#"):
-                        continue
-                    if (
-                        len(hook_line) - len(hook_line.lstrip(" ")) == 6
-                        and hook_stripped == f"- id: {hook_id}"
-                    ):
-                        hook_starts.append(hook_cursor)
+            if precommit_line_indentation(candidate, cursor + 1) != PRECOMMIT_HOOKS_INDENT:
+                continue
+            hooks_entry = mapping_key_value(candidate_stripped, "pre-commit local repository")
+            if hooks_entry is None or hooks_entry[0] != "hooks":
+                continue
+            if hooks_entry[1] and not hooks_entry[1].startswith("#"):
+                fail("pre-commit local hooks must be a block sequence")
+
+            hooks_end = local_end
+            for hook_cursor in range(cursor + 1, local_end):
+                hook_line = lines[hook_cursor]
+                hook_stripped = hook_line.strip()
+                if not hook_stripped or hook_stripped.startswith("#"):
+                    continue
+                if (
+                    precommit_line_indentation(hook_line, hook_cursor + 1)
+                    <= PRECOMMIT_HOOKS_INDENT
+                ):
+                    hooks_end = hook_cursor
+                    break
+            for hook_cursor in range(cursor + 1, hooks_end):
+                hook_line = lines[hook_cursor]
+                hook_stripped = hook_line.strip()
+                if not hook_stripped or hook_stripped.startswith("#"):
+                    continue
+                if (
+                    precommit_line_indentation(hook_line, hook_cursor + 1)
+                    != PRECOMMIT_HOOK_INDENT
+                    or not hook_stripped.startswith("- ")
+                ):
+                    continue
+                id_entry = mapping_key_value(hook_stripped[2:], "pre-commit hook")
+                if id_entry == ("id", hook_id):
+                    hook_starts.append(hook_cursor)
 
     if len(hook_starts) != 1:
         fail(f"pre-commit config must declare exactly one active {label} hook")
 
-    fields: dict[str, list[str]] = {"stages": [], "files": []}
+    selector_keys = (
+        "stages",
+        "files",
+        "exclude",
+        "types",
+        "types_or",
+        "exclude_types",
+    )
+    fields: dict[str, list[str]] = {key: [] for key in selector_keys}
     hook_start = hook_starts[0]
-    for line in lines[hook_start + 1 :]:
+    for index, line in enumerate(lines[hook_start + 1 :], start=hook_start + 1):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        indentation = len(line) - len(line.lstrip(" "))
-        if indentation <= 6:
+        line_indent = precommit_line_indentation(line, index + 1)
+        if line_indent <= PRECOMMIT_HOOK_INDENT:
             break
-        if indentation != 8:
+        if line_indent != PRECOMMIT_HOOK_FIELD_INDENT:
             continue
-        key, separator, value = stripped.partition(":")
-        if separator and key in fields:
-            fields[key].append(value.strip())
+        entry = mapping_key_value(stripped, label)
+        if entry is not None and entry[0] in fields:
+            fields[entry[0]].append(entry[1])
 
-    if len(fields["stages"]) > 1:
-        fail(f"{label} duplicates stages")
+    for key, values in fields.items():
+        if len(values) > 1:
+            fail(f"{label} duplicates {key}")
     if len(fields["files"]) != 1:
         fail(f"{label} must declare exactly one files entry")
 
-    stages = None
-    if fields["stages"]:
-        match = re.fullmatch(r"\[([^]]*)\](?:\s+#.*)?", fields["stages"][0])
-        if not match:
-            fail(f"{label} stages must be an inline list")
-        raw_entries = match.group(1).strip()
-        entries = (
-            ()
-            if not raw_entries
-            else tuple(entry.strip() for entry in raw_entries.split(","))
+    stages = (
+        parse_precommit_inline_list(fields["stages"][0], f"{label} stages")
+        if fields["stages"]
+        else None
+    )
+    list_fields = {}
+    for key in ("types", "types_or", "exclude_types"):
+        list_fields[key] = (
+            parse_precommit_inline_list(fields[key][0], f"{label} {key}")
+            if fields[key]
+            else None
         )
-        if any(not entry for entry in entries):
-            fail(f"{label} stages must not contain empty entries")
-        stages = entries
 
-    files_pattern = fields["files"][0]
-    if not files_pattern:
-        fail(f"{label} files entry must be a scalar")
-    return PrecommitHookContract(stages=stages, files_pattern=files_pattern)
+    files_pattern = precommit_scalar(fields["files"][0], f"{label} files entry")
+    exclude_pattern = (
+        precommit_scalar(fields["exclude"][0], f"{label} exclude entry")
+        if fields["exclude"]
+        else None
+    )
+    return PrecommitHookContract(
+        stages=stages,
+        files_pattern=files_pattern,
+        root_files_pattern=root_fields.get("files"),
+        root_exclude_pattern=root_fields.get("exclude"),
+        exclude_pattern=exclude_pattern,
+        types=list_fields["types"],
+        types_or=list_fields["types_or"],
+        exclude_types=list_fields["exclude_types"],
+    )
+
+
+def precommit_pattern_matches(pattern: str, path: str, label: str) -> bool:
+    try:
+        return re.search(pattern, path) is not None
+    except re.error as error:
+        fail(f"{label} is not a supported regular expression: {error.msg}")
+
+
+def validate_precommit_self_test(hook: PrecommitHookContract) -> None:
+    trigger_index = run_git("ls-files", "--stage", "--", SELF_TEST_TRIGGER_PATH)
+    expected_prefix = f"{SELF_TEST_TRIGGER_MODE} "
+    if (
+        trigger_index.returncode != 0
+        or len(trigger_index.stdout.splitlines()) != 1
+        or not trigger_index.stdout.startswith(expected_prefix)
+    ):
+        fail(
+            "generated-docs drift self-test trigger must remain a tracked "
+            f"{SELF_TEST_TRIGGER_MODE} file: {SELF_TEST_TRIGGER_PATH}"
+        )
+
+    if hook.stages is not None and "pre-commit" not in hook.stages:
+        fail("generated-docs drift self-test must run at the default pre-commit stage")
+    if hook.root_files_pattern is not None and not precommit_pattern_matches(
+        hook.root_files_pattern,
+        SELF_TEST_TRIGGER_PATH,
+        "generated-docs drift self-test root files selector",
+    ):
+        fail(
+            "generated-docs drift self-test root files selector excludes its "
+            "golden-path generator"
+        )
+    if hook.root_exclude_pattern is not None and precommit_pattern_matches(
+        hook.root_exclude_pattern,
+        SELF_TEST_TRIGGER_PATH,
+        "generated-docs drift self-test root exclude selector",
+    ):
+        fail(
+            "generated-docs drift self-test root exclude selector excludes its "
+            "golden-path generator"
+        )
+    if not precommit_pattern_matches(
+        hook.files_pattern,
+        SELF_TEST_TRIGGER_PATH,
+        "generated-docs drift self-test files selector",
+    ):
+        fail("generated-docs drift self-test does not cover its golden-path generator")
+    if hook.exclude_pattern is not None and precommit_pattern_matches(
+        hook.exclude_pattern,
+        SELF_TEST_TRIGGER_PATH,
+        "generated-docs drift self-test exclude selector",
+    ):
+        fail(
+            "generated-docs drift self-test exclude selector excludes its golden-path generator"
+        )
+
+    effective_types = hook.types if hook.types is not None else ("file",)
+    if any(required not in SELF_TEST_TRIGGER_TYPES for required in effective_types):
+        fail(
+            "generated-docs drift self-test types selector excludes its golden-path generator"
+        )
+    if hook.types_or and not any(
+        candidate in SELF_TEST_TRIGGER_TYPES for candidate in hook.types_or
+    ):
+        fail(
+            "generated-docs drift self-test types_or selector excludes its golden-path generator"
+        )
+    if hook.exclude_types and any(
+        excluded in SELF_TEST_TRIGGER_TYPES for excluded in hook.exclude_types
+    ):
+        fail(
+            "generated-docs drift self-test exclude_types selector excludes its golden-path generator"
+        )
 
 
 def parse_precommit_self_test(text: str) -> PrecommitHookContract:
@@ -682,19 +909,13 @@ def main() -> None:
         PRECOMMIT_PATH, "pre-commit config evidence"
     ).decode("utf-8")
     hook = parse_precommit_self_test(precommit_text)
-    if hook.stages is not None and "pre-commit" not in hook.stages:
-        fail("generated-docs drift self-test must run at the default pre-commit stage")
-    if (
-        re.search(
-            hook.files_pattern, "scripts/docs/generate-agent-golden-path.py"
-        )
-        is None
-    ):
-        fail("generated-docs drift self-test does not cover its golden-path generator")
+    validate_precommit_self_test(hook)
 
     for hook_id in ("docs-generated-drift", "agent-golden-path-skill-contract"):
         hook = parse_precommit_hook(precommit_text, hook_id, hook_id)
-        if re.search(hook.files_pattern, ".gitattributes") is None:
+        if not precommit_pattern_matches(
+            hook.files_pattern, ".gitattributes", f"{hook_id} files selector"
+        ):
             fail(f"{hook_id} does not cover .gitattributes")
 
     print("agent golden-path skill: portable, byte-identical, and contract-complete")

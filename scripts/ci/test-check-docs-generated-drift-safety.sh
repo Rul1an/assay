@@ -24,6 +24,10 @@ seed_repo() {
     | (cd "$destination" && tar -xf -)
   hermetic_git "$destination" -c init.defaultBranch=main init -q
   hermetic_git "$destination" add -f -- .
+  hermetic_git "$destination" \
+    -c user.name="Assay drift safety test" \
+    -c user.email="assay-drift-safety@example.invalid" \
+    commit -qm "seed drift safety case"
 }
 
 CASE_ROOT="$PROBE/case/repo"
@@ -77,6 +81,120 @@ if ! grep -Fq 'docs/generated/crate-deps.mermaid' "$SNAPSHOT_DIFF"; then
   exit 1
 fi
 echo "ok    safety wrapper snapshot detects its tracked-file meta-mutation"
+
+INDEX_SNAPSHOT_CASE_ROOT="$PROBE/snapshot-index-meta/repo"
+seed_repo "$INDEX_SNAPSHOT_CASE_ROOT"
+INDEX_SUBJECT="docs/generated/crate-deps.mermaid"
+INDEX_SUBJECT_BACKUP="$PROBE/snapshot-index-meta/original.bin"
+cp "$INDEX_SNAPSHOT_CASE_ROOT/$INDEX_SUBJECT" "$INDEX_SUBJECT_BACKUP"
+INDEX_SNAPSHOT_BEFORE="$(snapshot_tree "$INDEX_SNAPSHOT_CASE_ROOT")"
+printf '\n%%%% wrapper index-only snapshot meta-mutation\n' \
+  >> "$INDEX_SNAPSHOT_CASE_ROOT/$INDEX_SUBJECT"
+hermetic_git "$INDEX_SNAPSHOT_CASE_ROOT" add -- "$INDEX_SUBJECT"
+cp "$INDEX_SUBJECT_BACKUP" "$INDEX_SNAPSHOT_CASE_ROOT/$INDEX_SUBJECT"
+INDEX_SNAPSHOT_AFTER="$(snapshot_tree "$INDEX_SNAPSHOT_CASE_ROOT")"
+if [[ "$INDEX_SNAPSHOT_BEFORE" == "$INDEX_SNAPSHOT_AFTER" ]]; then
+  echo "FAIL: safety wrapper snapshot ignored an index-only mutation" >&2
+  exit 1
+fi
+INDEX_SNAPSHOT_DIFF="$PROBE/snapshot-index-meta.diff"
+diff -u \
+  <(printf '%s\n' "$INDEX_SNAPSHOT_BEFORE") \
+  <(printf '%s\n' "$INDEX_SNAPSHOT_AFTER") >"$INDEX_SNAPSHOT_DIFF" || true
+if ! grep -Fq "$INDEX_SUBJECT" "$INDEX_SNAPSHOT_DIFF"; then
+  cat "$INDEX_SNAPSHOT_DIFF" >&2
+  echo "FAIL: index-only snapshot diff did not name $INDEX_SUBJECT" >&2
+  exit 1
+fi
+if ! grep -Fq 'index-stage' "$INDEX_SNAPSHOT_DIFF"; then
+  cat "$INDEX_SNAPSHOT_DIFF" >&2
+  echo "FAIL: index-only snapshot diff did not identify an index stage" >&2
+  exit 1
+fi
+if ! grep -Fq "MM $INDEX_SUBJECT" "$INDEX_SNAPSHOT_DIFF"; then
+  cat "$INDEX_SNAPSHOT_DIFF" >&2
+  echo "FAIL: index-only snapshot diff did not identify porcelain state for $INDEX_SUBJECT" >&2
+  exit 1
+fi
+echo "ok    safety wrapper snapshot detects its index-only meta-mutation"
+
+STATUS_SNAPSHOT_CASE_ROOT="$PROBE/snapshot-status-meta/repo"
+seed_repo "$STATUS_SNAPSHOT_CASE_ROOT"
+STATUS_SUBJECT="docs/generated/crate-deps.mermaid"
+printf '\n%%%% wrapper status-only snapshot meta-mutation\n' \
+  >> "$STATUS_SNAPSHOT_CASE_ROOT/$STATUS_SUBJECT"
+hermetic_git "$STATUS_SNAPSHOT_CASE_ROOT" add -- "$STATUS_SUBJECT"
+hermetic_git "$STATUS_SNAPSHOT_CASE_ROOT" \
+  -c user.name="Assay drift safety test" \
+  -c user.email="assay-drift-safety@example.invalid" \
+  commit -qm "seed status-only snapshot state"
+STATUS_INDEX_BEFORE="$(hermetic_git "$STATUS_SNAPSHOT_CASE_ROOT" ls-files --stage)"
+STATUS_SUBJECT_BACKUP="$PROBE/snapshot-status-meta/committed.bin"
+cp "$STATUS_SNAPSHOT_CASE_ROOT/$STATUS_SUBJECT" "$STATUS_SUBJECT_BACKUP"
+STATUS_SNAPSHOT_BEFORE="$(snapshot_tree "$STATUS_SNAPSHOT_CASE_ROOT")"
+STATUS_HEAD="$(hermetic_git "$STATUS_SNAPSHOT_CASE_ROOT" rev-parse HEAD)"
+STATUS_PARENT="$(hermetic_git "$STATUS_SNAPSHOT_CASE_ROOT" rev-parse HEAD^)"
+hermetic_git "$STATUS_SNAPSHOT_CASE_ROOT" update-ref HEAD "$STATUS_PARENT" "$STATUS_HEAD"
+STATUS_INDEX_AFTER="$(hermetic_git "$STATUS_SNAPSHOT_CASE_ROOT" ls-files --stage)"
+if [[ "$STATUS_INDEX_BEFORE" != "$STATUS_INDEX_AFTER" ]] \
+  || ! cmp -s "$STATUS_SUBJECT_BACKUP" "$STATUS_SNAPSHOT_CASE_ROOT/$STATUS_SUBJECT"
+then
+  echo "FAIL: status-only meta-mutation changed index or worktree bytes" >&2
+  exit 1
+fi
+STATUS_SNAPSHOT_AFTER="$(snapshot_tree "$STATUS_SNAPSHOT_CASE_ROOT")"
+if [[ "$STATUS_SNAPSHOT_BEFORE" == "$STATUS_SNAPSHOT_AFTER" ]]; then
+  echo "FAIL: safety wrapper snapshot ignored a status-only mutation" >&2
+  exit 1
+fi
+STATUS_SNAPSHOT_DIFF="$PROBE/snapshot-status-meta.diff"
+diff -u \
+  <(printf '%s\n' "$STATUS_SNAPSHOT_BEFORE") \
+  <(printf '%s\n' "$STATUS_SNAPSHOT_AFTER") >"$STATUS_SNAPSHOT_DIFF" || true
+if ! grep -Fq "M  $STATUS_SUBJECT" "$STATUS_SNAPSHOT_DIFF" \
+  || ! grep -Fq 'porcelain' "$STATUS_SNAPSHOT_DIFF"
+then
+  cat "$STATUS_SNAPSHOT_DIFF" >&2
+  echo "FAIL: status-only snapshot diff did not identify porcelain state for $STATUS_SUBJECT" >&2
+  exit 1
+fi
+echo "ok    safety wrapper snapshot detects its status-only meta-mutation"
+
+COUNT_CASE_ROOT="$PROBE/full-case-count/repo"
+seed_repo "$COUNT_CASE_ROOT"
+COUNT_SELF_TEST="$COUNT_CASE_ROOT/scripts/ci/test-check-docs-generated-drift.sh"
+COUNT_SELF_TEST="$COUNT_SELF_TEST" python3 - <<'PY'
+from pathlib import Path
+import os
+
+path = Path(os.environ["COUNT_SELF_TEST"])
+row = '  "tree-in-sync|case_tree_in_sync"\n'
+text = path.read_text(encoding="utf-8")
+if text.count(row) != 1:
+    raise SystemExit(f"full drift case row is not unique: {row!r}")
+path.write_text(text.replace(row, "", 1), encoding="utf-8")
+PY
+COUNT_OUTPUT="$PROBE/full-case-count.log"
+if (cd "$COUNT_CASE_ROOT" && without_git_context \
+    bash scripts/ci/test-check-docs-generated-drift.sh >"$COUNT_OUTPUT" 2>&1)
+then
+  cat "$COUNT_OUTPUT" >&2
+  echo "FAIL: deleting a full drift-battery row was accepted" >&2
+  exit 1
+else
+  COUNT_STATUS=$?
+fi
+if [[ "$COUNT_STATUS" -ne 1 ]]; then
+  cat "$COUNT_OUTPUT" >&2
+  echo "FAIL: deleted drift-battery row exited $COUNT_STATUS, wanted 1" >&2
+  exit 1
+fi
+if ! grep -Fq 'FAIL: full drift self-test executed 9 cases, wanted 10' "$COUNT_OUTPUT"; then
+  cat "$COUNT_OUTPUT" >&2
+  echo "FAIL: deleted drift-battery row did not reach the exact count guard" >&2
+  exit 1
+fi
+echo "ok    deleting a full drift-battery row reaches the exact count guard"
 
 MODE="$(python3 - "$SELF_TEST" <<'PY'
 from pathlib import Path

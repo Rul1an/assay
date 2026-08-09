@@ -7,7 +7,12 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 # Task 5 adds three tracked-symlink mutations to Task 4's 46-case boundary.
 EXPECTED_CASES=49
+# Parser-layer follow-ups stay outside the approved cumulative case chain. The
+# 22 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode, and
+# 2 inline-parser checks; pin them so deletion cannot leave the 49-case total green.
+EXPECTED_STRUCTURAL_PROBES=22
 case_count=0
+structural_probe_count=0
 
 record_case_pass() {
   local name="$1"
@@ -19,6 +24,12 @@ record_case_skip() {
   local name="$1" diagnostic="$2"
   case_count=$((case_count + 1))
   echo "skip  $name: $diagnostic"
+}
+
+record_structural_probe_pass() {
+  local name="$1"
+  structural_probe_count=$((structural_probe_count + 1))
+  echo "ok    structural probe: $name"
 }
 
 create_required_symlink() {
@@ -80,12 +91,14 @@ seed_case() {
   local case_root="$1"
   mkdir -p \
     "$case_root/scripts/ci" \
+    "$case_root/scripts/docs" \
     "$case_root/docs/generated" \
     "$case_root/docs/guides" \
     "$case_root/.agents/skills/assay-golden-path" \
     "$case_root/.claude/skills/assay-golden-path" \
     "$case_root/.github/workflows"
   cp "$ROOT/scripts/ci/test-agent-golden-path-skill.py" "$case_root/scripts/ci/"
+  cp "$ROOT/scripts/docs/generate-agent-golden-path.py" "$case_root/scripts/docs/"
   cp "$ROOT/.gitignore" "$case_root/"
   cp "$ROOT/.gitattributes" "$case_root/"
   cp "$ROOT/.pre-commit-config.yaml" "$case_root/"
@@ -101,8 +114,8 @@ seed_case() {
     add -f -- .
 }
 
-expect_named_failure() {
-  local name="$1" case_root="$2" expected="$3"
+expect_failure_with_recorder() {
+  local recorder="$1" name="$2" case_root="$3" expected="$4"
   local output="$case_root/validator.log"
   if python3 "$case_root/scripts/ci/test-agent-golden-path-skill.py" >"$output" 2>&1; then
     echo "FAIL: $name was accepted" >&2
@@ -113,7 +126,15 @@ expect_named_failure() {
     echo "FAIL: $name did not reach named guard: $expected" >&2
     return 1
   fi
-  record_case_pass "$name"
+  "$recorder" "$name"
+}
+
+expect_named_failure() {
+  expect_failure_with_recorder record_case_pass "$@"
+}
+
+expect_structural_failure() {
+  expect_failure_with_recorder record_structural_probe_pass "$@"
 }
 
 expect_named_success() {
@@ -145,6 +166,10 @@ replacements = {
     "duplicate-paths": (
         '    paths:\n',
         '    paths:\n    paths:\n',
+    ),
+    "duplicate-path-entry": (
+        '      - "crates/assay-ebpf/**"\n',
+        '      - "crates/assay-ebpf/**"\n      - "crates/assay-ebpf/**"\n',
     ),
     "delete-paths": (
         '    paths:\n',
@@ -178,6 +203,10 @@ replacements = {
         '    paths:\n',
         '    types: ["labeled"]\n    paths:\n',
     ),
+    "spaced-types": (
+        '    paths:\n',
+        '    types : ["labeled"]\n    paths:\n',
+    ),
     "comment-pull-request": (
         '  pull_request:\n',
         '  # pull_request:\n',
@@ -209,9 +238,17 @@ replacements = {
         '      - name: Run pre-commit (all files)\n        shell: bash\n',
         '      - name: Run pre-commit (all files)\n        shell: bash\n        if: false\n',
     ),
+    "lint-step-spaced-condition": (
+        '      - name: Run pre-commit (all files)\n        shell: bash\n',
+        '      - name: Run pre-commit (all files)\n        shell: bash\n        if : false\n',
+    ),
     "lint-step-continue-on-error": (
         '      - name: Run pre-commit (all files)\n        shell: bash\n',
         '      - name: Run pre-commit (all files)\n        shell: bash\n        continue-on-error: true\n',
+    ),
+    "lint-step-spaced-continue-on-error": (
+        '      - name: Run pre-commit (all files)\n        shell: bash\n',
+        '      - name: Run pre-commit (all files)\n        shell: bash\n        continue-on-error : true\n',
     ),
     "lint-needs": (
         '  lint:\n    name: Lint (pre-commit)\n',
@@ -231,6 +268,130 @@ if text.count(source) != 1:
     raise SystemExit(f"workflow mutation anchor is not unique: {source!r}")
 path.write_text(text.replace(source, replacement, 1), encoding="utf-8")
 PY
+}
+
+mutate_precommit_selector() {
+  local case_root="$1" mutation="$2"
+  CASE_ROOT="$case_root" MUTATION="$mutation" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["CASE_ROOT"]) / ".pre-commit-config.yaml"
+text = path.read_text(encoding="utf-8")
+mutation = os.environ["MUTATION"]
+hook_files = (
+    "        files: ^(scripts/ci/(check-docs-generated-drift|"
+    "test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot)\\.sh|scripts/docs/"
+    "generate-agent-golden-path\\.py|\\.(agents|claude)/skills/"
+    "assay-golden-path/SKILL\\.md)$\n"
+)
+root_anchor = "default_install_hook_types: [pre-commit, pre-push]\n"
+
+replacements = {
+    "spaced-stages": (
+        hook_files,
+        "        stages : [pre-push]\n" + hook_files,
+    ),
+    "root-files": (
+        root_anchor,
+        root_anchor + "files: ^does-not-match$\n",
+    ),
+    "root-spaced-files": (
+        root_anchor,
+        root_anchor + "files : ^does-not-match$\n",
+    ),
+    "root-exclude": (
+        root_anchor,
+        root_anchor + "exclude: .*\n",
+    ),
+    "root-spaced-exclude": (
+        root_anchor,
+        root_anchor + "exclude : .*\n",
+    ),
+    "hook-files": (
+        hook_files,
+        "        files: ^does-not-match$\n",
+    ),
+    "hook-spaced-files": (
+        hook_files,
+        "        files : ^does-not-match$\n",
+    ),
+    "hook-exclude": (
+        hook_files,
+        "        exclude: .*\n" + hook_files,
+    ),
+    "hook-exclude-inline-comment": (
+        hook_files,
+        "        exclude: .* # skip every path\n" + hook_files,
+    ),
+    "hook-spaced-exclude": (
+        hook_files,
+        "        exclude : .*\n" + hook_files,
+    ),
+    "hook-types": (
+        hook_files,
+        "        types: [image]\n" + hook_files,
+    ),
+    "hook-spaced-types": (
+        hook_files,
+        "        types : [image]\n" + hook_files,
+    ),
+    "hook-types-or": (
+        hook_files,
+        "        types_or: [image]\n" + hook_files,
+    ),
+    "hook-spaced-types-or": (
+        hook_files,
+        "        types_or : [image]\n" + hook_files,
+    ),
+    "hook-exclude-types": (
+        hook_files,
+        "        exclude_types: [file]\n" + hook_files,
+    ),
+    "hook-spaced-exclude-types": (
+        hook_files,
+        "        exclude_types : [file]\n" + hook_files,
+    ),
+}
+
+try:
+    source, replacement = replacements[mutation]
+except KeyError as error:
+    raise SystemExit(f"unknown pre-commit selector mutation: {mutation}") from error
+if text.count(source) != 1:
+    raise SystemExit(f"pre-commit mutation anchor is not unique: {source!r}")
+path.write_text(text.replace(source, replacement, 1), encoding="utf-8")
+PY
+}
+
+expect_valid_precommit_config() {
+  local name="$1" case_root="$2"
+  local output="$case_root/precommit-validate.log"
+  if ! (cd "$case_root" && pre-commit validate-config .pre-commit-config.yaml) \
+      >"$output" 2>&1
+  then
+    cat "$output" >&2
+    echo "FAIL: $name is not a valid pre-commit config" >&2
+    return 1
+  fi
+}
+
+expect_precommit_skip() {
+  local name="$1" case_root="$2"
+  local output="$case_root/precommit-run.log"
+  case_git "$case_root" add -f -- .pre-commit-config.yaml
+  if ! (cd "$case_root" && env -u SKIP \
+      pre-commit run docs-generated-drift-self-test --all-files) >"$output" 2>&1
+  then
+    cat "$output" >&2
+    echo "FAIL: $name did not skip successfully under pre-commit" >&2
+    return 1
+  fi
+  if ! grep -Fq "Skipped" "$output"; then
+    cat "$output" >&2
+    echo "FAIL: $name exited zero without reporting a skipped hook" >&2
+    return 1
+  fi
 }
 
 case_root="$SCRATCH/guide-cwd"
@@ -533,23 +694,9 @@ expect_named_failure \
 
 case_root="$SCRATCH/generator-outside-drift-self-test"
 seed_case "$case_root"
-CASE_ROOT="$case_root" python3 - <<'PY'
-import os
-from pathlib import Path
-
-path = Path(os.environ["CASE_ROOT"]) / ".pre-commit-config.yaml"
-source = (
-    "        files: ^(scripts/ci/(check-docs-generated-drift|"
-    "test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot)\\.sh|scripts/docs/"
-    "generate-agent-golden-path\\.py|\\.(agents|claude)/skills/"
-    "assay-golden-path/SKILL\\.md)$\n"
-)
-replacement = source.replace("scripts/docs/generate-agent-golden-path\\.py|", "")
-text = path.read_text(encoding="utf-8")
-if text.count(source) != 1:
-    raise SystemExit(f"self-test files entry is not unique: {source!r}")
-path.write_text(text.replace(source, replacement, 1), encoding="utf-8")
-PY
+mutate_precommit_selector "$case_root" hook-files
+expect_valid_precommit_config "golden-path generator outside generated-docs drift self-test" "$case_root"
+expect_precommit_skip "golden-path generator outside generated-docs drift self-test" "$case_root"
 expect_named_failure \
   "golden-path generator outside generated-docs drift self-test" \
   "$case_root" \
@@ -596,6 +743,66 @@ for executor_case in "${executor_mutations[@]}"; do
   mutate_workflow "$case_root" "$mutation"
   expect_named_failure "$name" "$case_root" "$expected"
 done
+
+declare -a structural_workflow_mutations=(
+  "duplicate-path-entry|duplicate pull-request path entry|kernel-matrix pull_request.paths duplicates entry: crates/assay-ebpf/**"
+  "spaced-types|spaced pull-request types key|kernel-matrix pull_request must not declare types"
+  "lint-step-spaced-condition|spaced lint-step condition key|kernel-matrix lint executor must not be conditional"
+  "lint-step-spaced-continue-on-error|spaced lint-step fail-open key|kernel-matrix lint executor must fail closed"
+)
+
+for structural_case in "${structural_workflow_mutations[@]}"; do
+  IFS='|' read -r mutation name expected <<<"$structural_case"
+  case_root="$SCRATCH/structural-workflow-$mutation"
+  seed_case "$case_root"
+  mutate_workflow "$case_root" "$mutation"
+  expect_structural_failure "$name" "$case_root" "$expected"
+done
+
+case_root="$SCRATCH/structural-precommit-spaced-stages"
+seed_case "$case_root"
+mutate_precommit_selector "$case_root" spaced-stages
+expect_valid_precommit_config "spaced self-test stages key" "$case_root"
+expect_structural_failure \
+  "spaced self-test stages key" \
+  "$case_root" \
+  "generated-docs drift self-test must run at the default pre-commit stage"
+
+declare -a selector_mutations=(
+  "root-files|root files selector|generated-docs drift self-test root files selector excludes its golden-path generator"
+  "root-spaced-files|spaced root files selector|generated-docs drift self-test root files selector excludes its golden-path generator"
+  "root-exclude|root exclude selector|generated-docs drift self-test root exclude selector excludes its golden-path generator"
+  "root-spaced-exclude|spaced root exclude selector|generated-docs drift self-test root exclude selector excludes its golden-path generator"
+  "hook-spaced-files|spaced hook files selector skip|generated-docs drift self-test does not cover its golden-path generator"
+  "hook-exclude|hook exclude selector|generated-docs drift self-test exclude selector excludes its golden-path generator"
+  "hook-exclude-inline-comment|hook exclude selector with inline comment|generated-docs drift self-test exclude selector excludes its golden-path generator"
+  "hook-spaced-exclude|spaced hook exclude selector|generated-docs drift self-test exclude selector excludes its golden-path generator"
+  "hook-types|hook types selector|generated-docs drift self-test types selector excludes its golden-path generator"
+  "hook-spaced-types|spaced hook types selector|generated-docs drift self-test types selector excludes its golden-path generator"
+  "hook-types-or|hook types_or selector|generated-docs drift self-test types_or selector excludes its golden-path generator"
+  "hook-spaced-types-or|spaced hook types_or selector|generated-docs drift self-test types_or selector excludes its golden-path generator"
+  "hook-exclude-types|hook exclude_types selector|generated-docs drift self-test exclude_types selector excludes its golden-path generator"
+  "hook-spaced-exclude-types|spaced hook exclude_types selector|generated-docs drift self-test exclude_types selector excludes its golden-path generator"
+)
+
+for selector_case in "${selector_mutations[@]}"; do
+  IFS='|' read -r mutation name expected <<<"$selector_case"
+  case_root="$SCRATCH/structural-selector-$mutation"
+  seed_case "$case_root"
+  mutate_precommit_selector "$case_root" "$mutation"
+  expect_valid_precommit_config "$name" "$case_root"
+  expect_precommit_skip "$name" "$case_root"
+  expect_structural_failure "$name" "$case_root" "$expected"
+done
+
+case_root="$SCRATCH/structural-trigger-executable-mode"
+seed_case "$case_root"
+chmod +x "$case_root/scripts/docs/generate-agent-golden-path.py"
+case_git "$case_root" add -- scripts/docs/generate-agent-golden-path.py
+expect_structural_failure \
+  "executable golden-path generator trigger" \
+  "$case_root" \
+  "generated-docs drift self-test trigger must remain a tracked 100644 file"
 
 case_root="$SCRATCH/separate-pre-push-pre-commit-step"
 seed_case "$case_root"
@@ -654,7 +861,8 @@ text = text.replace(
 )
 path.write_text(text, encoding="utf-8")
 PY
-if ! CASE_ROOT="$case_root" python3 - <<'PY'
+inner_probe_count_path="$case_root/inner-structural-probe-count"
+if ! CASE_ROOT="$case_root" STRUCTURAL_COUNT_PATH="$inner_probe_count_path" python3 - <<'PY'
 import importlib.util
 import os
 from pathlib import Path
@@ -673,7 +881,10 @@ steps_section = "    outputs:\n      - run: echo non-step-parser-sentinel\n    s
 if workflow.count(steps_section) != 1:
     raise SystemExit(f"injected steps section is not unique: {steps_section!r}")
 
+structural_probe_count = 0
+
 def expect_parser_failure(name, candidate, expected):
+    global structural_probe_count
     try:
         module.parse_kernel_matrix_workflow(candidate)
     except AssertionError as error:
@@ -681,6 +892,8 @@ def expect_parser_failure(name, candidate, expected):
             raise SystemExit(f"{name} reached {error!s}, not {expected!r}") from error
     else:
         raise SystemExit(f"{name} was accepted")
+    structural_probe_count += 1
+    print(f"ok    structural probe: {name}")
 
 expect_parser_failure(
     "missing lint steps",
@@ -732,11 +945,25 @@ if not uses_only_indices:
 for step_index in uses_only_indices:
     if contract.lint_steps[step_index].shell_lines:
         raise SystemExit("uses-only steps must have empty shell lines")
+
+Path(os.environ["STRUCTURAL_COUNT_PATH"]).write_text(
+    f"{structural_probe_count}\n", encoding="ascii"
+)
 PY
 then
   echo "FAIL: inline run parser probe failed" >&2
   exit 1
 fi
+if [[ ! -f "$inner_probe_count_path" ]]; then
+  echo "FAIL: inline parser probe did not report its structural probe count" >&2
+  exit 1
+fi
+inner_probe_count="$(cat "$inner_probe_count_path")"
+if [[ ! "$inner_probe_count" =~ ^[0-9]+$ ]]; then
+  echo "FAIL: inline parser probe reported invalid count: $inner_probe_count" >&2
+  exit 1
+fi
+structural_probe_count=$((structural_probe_count + inner_probe_count))
 record_case_pass "inline run parser probe"
 
 if (( case_count != EXPECTED_CASES )); then
@@ -744,4 +971,9 @@ if (( case_count != EXPECTED_CASES )); then
   exit 1
 fi
 
-echo "agent golden-path hardening: $case_count case(s) observed"
+if (( structural_probe_count != EXPECTED_STRUCTURAL_PROBES )); then
+  echo "FAIL: agent golden-path hardening expected $EXPECTED_STRUCTURAL_PROBES structural probe(s), executed $structural_probe_count" >&2
+  exit 1
+fi
+
+echo "agent golden-path hardening: $case_count case(s) observed; $structural_probe_count structural probe(s) observed"
