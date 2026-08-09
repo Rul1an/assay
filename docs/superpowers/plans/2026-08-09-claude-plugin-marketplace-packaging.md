@@ -244,7 +244,7 @@ fake update that exits zero but retains stale cache bytes must fail on cache
 parity. Failures use stable `phase`, `status`, `reason`, and `next_step` lines;
 success evidence uses one scan-friendly `key=pass` line per proven boundary.
 
-- [ ] **Step 5: Run the real-client proof**
+- [x] **Step 5: Run the real-client proof**
 
 Build/install the exact-SHA server into an isolated bin directory and record:
 
@@ -269,9 +269,20 @@ fresh client unexpectedly has working authentication, the status is
 `not_exercised` unless a separate test actually observes a model-mediated tool
 call. Unavailable vendor behavior is unavailable/failed proof, never pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Stage the exact guide, workflow script, and hook paths. Commit as `docs(plugin): add measured Claude install workflow`.
+
+**Task 3 evidence:** Commit
+`c61b43959b67c62037c3403c871d627bea517375` built
+`assay-mcp-server 5.0.0` with rustc/cargo `1.96.0` and drove Claude Code
+`2.1.32` from a fresh config and consumer project. Marketplace validation,
+add/install/update, cache parity, MCP health, `initialize`, the five exact tools,
+consumer-root policy denial, actual-session MCP startup, and packaged-skill
+discovery passed. Installed cache version was `c61b43959b67`.
+`model_mediated_tool_call=unavailable` because the disposable client had no
+credentials; no model/tool-use or provider-execution claim is made. The final
+head re-runs this proof after this evidence note is committed.
 
 ### Task 4: Mutation, Full Verification, and PR
 
