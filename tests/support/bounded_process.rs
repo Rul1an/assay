@@ -12,6 +12,7 @@ use process_wrap::std::ProcessGroup;
 use process_wrap::std::{ChildWrapper, CommandWrap};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
+const REAP_GRACE: Duration = Duration::from_secs(1);
 const MAX_DIAGNOSTIC_BYTES: usize = 4096;
 
 #[derive(Clone, Copy)]
@@ -278,13 +279,9 @@ fn terminate_and_reap(
     let direct_kill_error = tree_error
         .as_ref()
         .and_then(|_| child.inner_mut().start_kill().err());
-    let status = match observed_status {
-        Some(status) => Ok(status),
-        None => child.wait(),
-    }
-    .map_err(|wait_error| {
+    let status = reap_after_tree_kill(child, observed_status).map_err(|reap_error| {
         format!(
-            "{context}: failed to reap {command} after tree termination; tree={tree_error:?}; direct_kill={direct_kill_error:?}; wait={wait_error}"
+            "{context}: failed to reap {command} after tree termination; tree={tree_error:?}; direct_kill={direct_kill_error:?}; reap={reap_error}"
         )
     })?;
     if let Some(tree_error) = tree_error {
@@ -293,6 +290,25 @@ fn terminate_and_reap(
         ));
     }
     Ok(status)
+}
+
+fn reap_after_tree_kill(
+    child: &mut dyn ChildWrapper,
+    observed_status: Option<ExitStatus>,
+) -> Result<ExitStatus, String> {
+    if let Some(status) = observed_status {
+        return Ok(status);
+    }
+
+    let deadline = Instant::now() + REAP_GRACE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) if Instant::now() < deadline => thread::sleep(POLL_INTERVAL),
+            Ok(None) => return Err(format!("reap grace of {REAP_GRACE:?} expired")),
+            Err(error) => return Err(format!("poll after termination: {error}")),
+        }
+    }
 }
 
 fn finish_process_tree(
@@ -319,12 +335,17 @@ fn process_tree_absent(_error: &std::io::Error) -> bool {
     false
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 fn process_tree_quiescent_after_io(error: &std::io::Error) -> bool {
     // macOS may report EPERM for an already-empty group. This is accepted only
     // after child status, stdin, stdout, and stderr are all complete, so it can
     // never lead into a blocking join on a live inherited pipe.
     matches!(error.raw_os_error(), Some(libc::ESRCH) | Some(libc::EPERM))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn process_tree_quiescent_after_io(error: &std::io::Error) -> bool {
+    process_tree_absent(error)
 }
 
 #[cfg(windows)]
@@ -518,34 +539,59 @@ mod tests {
         !descendant_is_alive(pid)
     }
 
-    #[cfg(unix)]
-    fn cleanup_descendant(pid_file: &Path) {
-        if let Some(pid) = read_descendant_pid(pid_file) {
-            let _ = Command::new("kill")
-                .args(["-9", &pid.to_string()])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        }
-    }
-
-    #[cfg(windows)]
-    fn cleanup_descendant(pid_file: &Path) {
-        if let Some(pid) = read_descendant_pid(pid_file) {
-            let _ = Command::new("taskkill")
-                .args(["/PID", &pid.to_string(), "/T", "/F"])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        }
-    }
-
     #[cfg(windows)]
     fn stderr_flood_command() -> Command {
         let mut command = Command::new("cmd");
         command.args([
             "/C",
             "for /L %i in (1,1,1000000) do @echo 0123456789abcdef 1>&2",
+        ]);
+        command
+    }
+
+    #[cfg(unix)]
+    fn descendant_run_timeout() -> Duration {
+        Duration::from_millis(250)
+    }
+
+    #[cfg(windows)]
+    fn descendant_run_timeout() -> Duration {
+        Duration::from_secs(5)
+    }
+
+    #[cfg(unix)]
+    fn descendant_test_guard() -> Duration {
+        Duration::from_secs(2)
+    }
+
+    #[cfg(windows)]
+    fn descendant_test_guard() -> Duration {
+        Duration::from_secs(10)
+    }
+
+    #[cfg(unix)]
+    fn quiet_descendant_command(pid_file: &Path) -> Command {
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg(
+                "sh -c 'echo \"$$\" > \"$1\"; exec </dev/null >/dev/null 2>&1; while :; do :; done' descendant \"$1\" & while [ ! -s \"$1\" ]; do :; done; printf parent-ready",
+            )
+            .arg("runner")
+            .arg(pid_file);
+        command
+    }
+
+    #[cfg(windows)]
+    fn quiet_descendant_command(pid_file: &Path) -> Command {
+        let mut command = Command::new("powershell.exe");
+        command.env("ASSAY_DESCENDANT_PID_FILE", pid_file);
+        command.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$path = [Environment]::GetEnvironmentVariable('ASSAY_DESCENDANT_PID_FILE'); $p = Start-Process -FilePath ping.exe -ArgumentList @('-t','127.0.0.1') -WindowStyle Hidden -PassThru; [IO.File]::WriteAllText($path, [string]$p.Id); [Console]::Out.Write('parent-ready')",
         ]);
         command
     }
@@ -600,19 +646,14 @@ mod tests {
 
         let worker = thread::spawn(move || {
             let command = inherited_output_descendant_command(&pid_file);
-            let limits = ProcessLimits::new(Duration::from_millis(250), 1024, 1024);
+            let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
             let result = run_bounded(command, b"", limits, "inherited output mutation");
             let _ = result_tx.send(result);
         });
 
-        let result = match result_rx.recv_timeout(Duration::from_secs(2)) {
+        let result = match result_rx.recv_timeout(descendant_test_guard()) {
             Ok(result) => result,
-            Err(error) => {
-                cleanup_descendant(&cleanup_path);
-                let _ = result_rx.recv_timeout(Duration::from_secs(2));
-                let _ = worker.join();
-                panic!("runner escaped its wall-clock bound: {error}");
-            }
+            Err(error) => panic!("runner escaped its wall-clock bound: {error}"),
         };
         worker.join().expect("bounded runner worker");
 
@@ -620,15 +661,34 @@ mod tests {
         assert!(error.contains("inherited output mutation"));
         assert!(error.contains("deadline"));
         assert!(
-            started.elapsed() < Duration::from_secs(2),
+            started.elapsed() < descendant_test_guard(),
             "process-tree cleanup exceeded the test bound"
         );
         let descendant_pid = read_descendant_pid(&cleanup_path)
             .expect("descendant must publish its pid before inheriting output");
         if !wait_for_descendant_exit(descendant_pid) {
-            cleanup_descendant(&cleanup_path);
             panic!("descendant {descendant_pid} survived process-tree termination");
         }
+    }
+
+    #[test]
+    fn kills_quiet_descendant_after_normal_parent_exit() {
+        let temp = tempfile::tempdir().expect("temporary pid directory");
+        let pid_file = temp.path().join("quiet-descendant.pid");
+        let command = quiet_descendant_command(&pid_file);
+        let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
+
+        let output = run_bounded(command, b"", limits, "normal completion mutation")
+            .expect("normal parent completion must retain its outcome");
+
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"parent-ready");
+        let descendant_pid =
+            read_descendant_pid(&pid_file).expect("quiet descendant must publish its pid");
+        assert!(
+            wait_for_descendant_exit(descendant_pid),
+            "quiet descendant {descendant_pid} survived normal completion cleanup"
+        );
     }
 
     #[test]
@@ -647,10 +707,13 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn eperm_is_quiescent_only_after_all_io_is_complete() {
+    fn eperm_is_quiescent_only_on_macos_after_all_io_is_complete() {
         let error = std::io::Error::from_raw_os_error(libc::EPERM);
 
         assert!(!process_tree_absent(&error));
+        #[cfg(target_os = "macos")]
         assert!(process_tree_quiescent_after_io(&error));
+        #[cfg(not(target_os = "macos"))]
+        assert!(!process_tree_quiescent_after_io(&error));
     }
 }
