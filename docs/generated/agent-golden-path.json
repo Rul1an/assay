@@ -234,6 +234,7 @@
       "id": "protected-action",
       "label": "Protected action",
       "binary": "assay-mcp-server",
+      "working_directory": "examples/privileged-action-gate",
       "outcomes": [
         {
           "name": "policy-denied",

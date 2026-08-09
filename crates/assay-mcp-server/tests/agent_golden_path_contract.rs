@@ -8,7 +8,7 @@ use jsonrpc_conn::Conn;
 use serde_json::Value;
 use std::ffi::OsStr;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
@@ -59,6 +59,7 @@ fn expected_outcome(step_id: &str, outcome_name: &str) -> Value {
         .clone();
     outcome["command"] = step["command"].clone();
     outcome["binary"] = step["binary"].clone();
+    outcome["working_directory"] = step["working_directory"].clone();
     runtime_coverage::record_outcome(step_id, outcome_name);
     outcome
 }
@@ -239,11 +240,23 @@ fn required_python() -> &'static str {
     interpreter
 }
 
+fn contract_working_directory(expected: &Value) -> PathBuf {
+    match expected["working_directory"]
+        .as_str()
+        .expect("protected-action contract must pin its working directory")
+    {
+        "examples/privileged-action-gate" => workspace_root()
+            .join("examples")
+            .join("privileged-action-gate"),
+        other => panic!("unsupported protected-action working directory: {other}"),
+    }
+}
+
 #[test]
 fn enforcing_proxy_denial_is_structured_but_startup_failure_is_not() {
-    let example = workspace_root().join("examples/privileged-action-gate");
     let python = required_python();
     let denied_expected = expected_outcome("protected-action", "policy-denied");
+    let example = contract_working_directory(&denied_expected);
     let denied_argv = contract_argv(&denied_expected, &[("<python>", python)]);
     let mut command = clean_server_command();
     let child = command
