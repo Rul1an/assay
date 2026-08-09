@@ -64,15 +64,17 @@ were deleted after each probe.
 
 **Files:**
 - Modify: `scripts/ci/test-agent-golden-path-skill.py`
-- Modify: `crates/assay-mcp-server/tests/agent_golden_path_contract.rs`
+- Modify: `crates/assay-mcp-server/tests/project_install_surfaces.rs`
 - Create after RED: `.claude-plugin/marketplace.json`
 - Create after RED: `packaging/claude-plugin/.claude-plugin/plugin.json`
 - Create after RED: `packaging/claude-plugin/.mcp.json`
 - Modify after RED: `.gitattributes`
 
 **Interfaces:**
-- Consumes: `read_bounded_evidence`, `CARGO_BIN_EXE_assay-mcp-server`, JSON-RPC `Conn`.
-- Produces: exact parsed manifest contracts and `plugin_mcp_entry() -> serde_json::Value`.
+- Consumes: `read_bounded_evidence`, the existing bounded install-surface reader,
+  `CARGO_BIN_EXE_assay-mcp-server`, and JSON-RPC `Conn`.
+- Produces: exact parsed manifest contracts, `InstallFile::PluginManifest`, and one shared
+  manifest-to-release-surface driver for project and plugin installs.
 
 - [ ] **Step 1: Write failing parsed-manifest assertions**
 
@@ -103,7 +105,7 @@ Assert exact plugin fields (`name`, `description`, `author`), absence of `versio
 ```rust
 #[test]
 fn plugin_manifest_drives_the_release_server_surface() {
-    let entry = plugin_mcp_entry();
+    let entry = manifest_entry(InstallFile::PluginManifest);
     assert_eq!(entry["command"], "assay-mcp-server");
     let project = tempfile::tempdir().expect("temporary Claude project");
     let args = plugin_args(&entry, project.path());
@@ -120,7 +122,7 @@ Pin the five names, not only the count, and retain bidirectional `test-outbound`
 
 ```bash
 python3 scripts/ci/test-agent-golden-path-skill.py
-CARGO_TARGET_DIR=/tmp/assay-2152-target cargo test -p assay-mcp-server --test agent_golden_path_contract plugin_manifest_drives_the_release_server_surface -- --exact --nocapture
+CARGO_TARGET_DIR=/tmp/assay-2152-target cargo test -p assay-mcp-server --test project_install_surfaces plugin_manifest_drives_the_release_server_surface -- --exact --nocapture
 ```
 
 Both must fail on the named missing manifest, not on compilation or setup.
@@ -136,7 +138,7 @@ Run both Step 3 commands, the full focused test target, and its `--features test
 - [ ] **Step 6: Commit**
 
 ```bash
-git add -A -- scripts/ci/test-agent-golden-path-skill.py crates/assay-mcp-server/tests/agent_golden_path_contract.rs .claude-plugin/marketplace.json packaging/claude-plugin/.claude-plugin/plugin.json packaging/claude-plugin/.mcp.json .gitattributes
+git add -A -- scripts/ci/test-agent-golden-path-skill.py crates/assay-mcp-server/tests/project_install_surfaces.rs .claude-plugin/marketplace.json packaging/claude-plugin/.claude-plugin/plugin.json packaging/claude-plugin/.mcp.json .gitattributes
 git commit -m "feat(plugin): pin Claude marketplace and MCP contracts"
 ```
 
@@ -262,8 +264,8 @@ python3 scripts/ci/test-agent-golden-path-skill.py
 bash scripts/ci/test-agent-golden-path-skill-optimization.sh
 bash scripts/ci/test-agent-golden-path-skill-hardening.sh
 bash scripts/ci/check-docs-generated-drift.sh
-CARGO_TARGET_DIR=/tmp/assay-2152-target cargo test -p assay-mcp-server --test agent_golden_path_contract -- --nocapture
-CARGO_TARGET_DIR=/tmp/assay-2152-target cargo test -p assay-mcp-server --features test-outbound --test agent_golden_path_contract -- --nocapture
+CARGO_TARGET_DIR=/tmp/assay-2152-target cargo test -p assay-mcp-server --test project_install_surfaces -- --nocapture
+CARGO_TARGET_DIR=/tmp/assay-2152-target cargo test -p assay-mcp-server --features test-outbound --test project_install_surfaces -- --nocapture
 cargo fmt --all -- --check
 CARGO_TARGET_DIR=/tmp/assay-2152-target cargo clippy -p assay-mcp-server --all-targets --all-features -- -D warnings
 git diff --check
@@ -290,5 +292,6 @@ and proof.
 
 - Spec coverage: pre-commit shape selection, identity, manifests, generated package, canonical resources, installed client, drift, mutation, security/failure policy, and non-claims each map to a task.
 - Placeholder scan: no deferred implementation or unnamed error-handling instruction remains.
-- Type consistency: `render_plugin_skill`, `PLUGIN_RESOURCE_COPIES`, and `plugin_mcp_entry` are introduced once and consumed consistently.
+- Type consistency: `render_plugin_skill` and `PLUGIN_RESOURCE_COPIES` are introduced once and
+  consumed consistently; the existing install-surface driver owns the MCP invocation rule.
 - Residual: exact Claude marketplace flags must be read from the installed client during Task 3 and recorded with its version; the plan does not hardcode unverified vendor syntax.
