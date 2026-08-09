@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 import json
 import re
@@ -41,6 +42,25 @@ class PrecommitHookContract:
     files_pattern: str
 
 
+@dataclass(frozen=True)
+class WorkflowStepContract:
+    condition: str | None
+    continue_on_error: bool | None
+    shell_lines: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class WorkflowContract:
+    pull_request_branches: tuple[str, ...]
+    pull_request_types: tuple[str, ...] | None
+    pull_request_paths: tuple[str, ...]
+    lint_runner: str
+    lint_needs: tuple[str, ...] | None
+    lint_condition: str | None
+    lint_continue_on_error: bool | None
+    lint_steps: tuple[WorkflowStepContract, ...]
+
+
 def fail(message: str) -> None:
     raise AssertionError(message)
 
@@ -59,45 +79,237 @@ def read_bounded_evidence(path: Path, label: str) -> bytes:
     return payload
 
 
-def workflow_pull_request_paths(text: str) -> set[str]:
-    """Read active pull-request paths without accepting comments or sibling keys."""
-    lines = text.splitlines()
-    section_start = None
-    search_from = 0
-    for indentation, key in ((0, "on:"), (2, "pull_request:"), (4, "paths:")):
-        matches = []
-        for index in range(search_from, len(lines)):
-            line = lines[index]
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            current_indentation = len(line) - len(line.lstrip(" "))
-            if section_start is not None and current_indentation < indentation:
-                break
-            if current_indentation == indentation and stripped == key:
-                matches.append(index)
-        if len(matches) != 1:
-            fail(f"kernel-matrix workflow must declare exactly one {key[:-1]} section")
-        section_start = matches[0]
-        search_from = section_start + 1
+def indentation(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
 
-    paths = set()
-    item_pattern = re.compile(r'^\s{6}-\s+"([^"]+)"\s*(?:#.*)?$')
-    for line in lines[search_from:]:
+
+def active_lines(text: str) -> list[tuple[int, str]]:
+    result = []
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        prefix = line[: len(line) - len(line.lstrip())]
+        if "\t" in prefix:
+            fail(f"kernel-matrix workflow uses tab indentation at line {line_number}")
         stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        indentation = len(line) - len(line.lstrip(" "))
-        if indentation <= 4:
+        if stripped and not stripped.startswith("#"):
+            result.append((line_number, line))
+    return result
+
+
+def locate_mapping(
+    lines: list[tuple[int, str]], start_index: int, parent_indent: int, key: str
+) -> tuple[int, int]:
+    """Locate one direct mapping key and the first line outside its scope."""
+    key_indent = parent_indent + 2
+    matches = []
+    end_index = len(lines)
+    for index in range(start_index, len(lines)):
+        _, line = lines[index]
+        line_indent = indentation(line)
+        if line_indent <= parent_indent:
+            end_index = index
             break
-        match = item_pattern.fullmatch(line)
+        if line_indent == key_indent and line.strip() == key:
+            matches.append(index)
+    if len(matches) != 1:
+        fail(f"kernel-matrix workflow must declare exactly one {key[:-1]} section")
+
+    key_index = matches[0]
+    key_end = end_index
+    for index in range(key_index + 1, end_index):
+        if indentation(lines[index][1]) <= key_indent:
+            key_end = index
+            break
+    return key_index, key_end
+
+
+def parse_inline_string_list(raw: str, label: str) -> tuple[str, ...]:
+    diagnostic = f"{label} must be a bracketed list of quoted strings"
+    if not raw.startswith("[") or not raw.endswith("]"):
+        fail(diagnostic)
+    try:
+        values = ast.literal_eval(raw)
+    except (SyntaxError, ValueError):
+        fail(diagnostic)
+    if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+        fail(diagnostic)
+    return tuple(values)
+
+
+def direct_mapping_values(
+    lines: list[tuple[int, str]], start_index: int, end_index: int, mapping_indent: int,
+    label: str,
+) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for _, line in lines[start_index:end_index]:
+        if indentation(line) != mapping_indent:
+            continue
+        key, separator, raw = line.strip().partition(":")
+        if not separator:
+            continue
+        if key in values:
+            fail(f"{label} duplicates key: {key}")
+        values[key] = raw.strip()
+    return values
+
+
+def optional_boolean(raw: str, label: str) -> bool | None:
+    if not raw:
+        return None
+    if raw == "true":
+        return True
+    if raw == "false":
+        return False
+    fail(f"{label} must be true or false")
+
+
+def parse_job_needs(raw: str) -> tuple[str, ...]:
+    if raw.startswith("["):
+        return parse_inline_string_list(raw, "kernel-matrix lint.needs")
+    if not raw:
+        fail("kernel-matrix lint.needs must be a string or bracketed list of quoted strings")
+    return (raw,)
+
+
+def parse_lint_step(
+    lines: list[tuple[int, str]], start_index: int, end_index: int
+) -> WorkflowStepContract:
+    fields: dict[str, str] = {}
+    field_lines = [(start_index, lines[start_index][1].strip()[2:])]
+    field_lines.extend(
+        (index, line.strip())
+        for index, (_, line) in enumerate(
+            lines[start_index + 1 : end_index], start=start_index + 1
+        )
+        if indentation(line) == 8
+    )
+    run_index = None
+    for index, candidate in field_lines:
+        key, separator, raw = candidate.partition(":")
+        if not separator:
+            continue
+        if key in fields:
+            if key == "run":
+                fail("kernel-matrix lint step duplicates key: run")
+            fail(f"kernel-matrix lint step duplicates key: {key}")
+        fields[key] = raw.strip()
+        if key == "run":
+            run_index = index
+
+    shell_lines: tuple[str, ...] = ()
+    if "run" in fields:
+        run = fields["run"]
+        if run == "|":
+            if run_index is None:
+                fail("kernel-matrix lint step run location is unavailable")
+            run_end = next(
+                (
+                    index
+                    for index in range(run_index + 1, end_index)
+                    if indentation(lines[index][1]) <= 8
+                ),
+                end_index,
+            )
+            shell_lines = tuple(
+                line.strip()
+                for _, line in lines[run_index + 1 : run_end]
+                if indentation(line) > 8
+            )
+        elif not run.startswith((">", "|")):
+            shell_lines = (run,)
+    return WorkflowStepContract(
+        condition=fields.get("if"),
+        continue_on_error=optional_boolean(
+            fields.get("continue-on-error", ""),
+            "kernel-matrix lint step continue-on-error",
+        ),
+        shell_lines=shell_lines,
+    )
+
+
+def parse_kernel_matrix_workflow(text: str) -> WorkflowContract:
+    lines = active_lines(text)
+    on_index, _ = locate_mapping(lines, 0, -2, "on:")
+    pull_request_index, pull_request_end = locate_mapping(
+        lines, on_index + 1, 0, "pull_request:"
+    )
+    pull_request = direct_mapping_values(
+        lines, pull_request_index + 1, pull_request_end, 4, "kernel-matrix pull_request"
+    )
+    if "paths" not in pull_request:
+        fail("kernel-matrix pull_request is missing required key: paths")
+    if "branches" not in pull_request:
+        fail("kernel-matrix pull_request is missing required key: branches")
+    if "paths-ignore" in pull_request and "paths" in pull_request:
+        fail("kernel-matrix pull_request cannot combine paths and paths-ignore")
+    if "branches-ignore" in pull_request and "branches" in pull_request:
+        fail("kernel-matrix pull_request cannot combine branches and branches-ignore")
+
+    branches = parse_inline_string_list(
+        pull_request["branches"], "kernel-matrix pull_request.branches"
+    )
+    pull_request_types = (
+        parse_inline_string_list(
+            pull_request["types"], "kernel-matrix pull_request.types"
+        )
+        if "types" in pull_request
+        else None
+    )
+
+    paths = []
+    path_pattern = re.compile(r'^ {6}- "([^"]+)"\s*(?:#.*)?$')
+    paths_index = next(
+        index
+        for index in range(pull_request_index + 1, pull_request_end)
+        if indentation(lines[index][1]) == 4 and lines[index][1].strip().startswith("paths:")
+    )
+    for _, line in lines[paths_index + 1 : pull_request_end]:
+        if indentation(line) <= 4:
+            break
+        match = path_pattern.fullmatch(line)
         if not match:
             fail("kernel-matrix pull_request.paths contains an unsupported entry")
         path = match.group(1)
         if path in paths:
             fail(f"kernel-matrix pull_request.paths duplicates entry: {path}")
-        paths.add(path)
-    return paths
+        paths.append(path)
+
+    jobs_index, _ = locate_mapping(lines, 0, -2, "jobs:")
+    lint_index, lint_end = locate_mapping(lines, jobs_index + 1, 0, "lint:")
+    lint = direct_mapping_values(lines, lint_index + 1, lint_end, 4, "kernel-matrix lint job")
+    if "runs-on" not in lint:
+        fail("kernel-matrix lint job is missing required key: runs-on")
+
+    step_starts = [
+        index
+        for index in range(lint_index + 1, lint_end)
+        if indentation(lines[index][1]) == 6 and lines[index][1].strip().startswith("- ")
+    ]
+    lint_steps = tuple(
+        parse_lint_step(
+            lines,
+            step_start,
+            step_starts[position + 1] if position + 1 < len(step_starts) else lint_end,
+        )
+        for position, step_start in enumerate(step_starts)
+    )
+    lint_needs = (
+        parse_job_needs(lint["needs"])
+        if "needs" in lint
+        else None
+    )
+    return WorkflowContract(
+        pull_request_branches=branches,
+        pull_request_types=pull_request_types,
+        pull_request_paths=tuple(paths),
+        lint_runner=lint["runs-on"],
+        lint_needs=lint_needs,
+        lint_condition=lint.get("if"),
+        lint_continue_on_error=optional_boolean(
+            lint.get("continue-on-error", ""),
+            "kernel-matrix lint job continue-on-error",
+        ),
+        lint_steps=lint_steps,
+    )
 
 
 def parse_precommit_self_test(text: str) -> PrecommitHookContract:
@@ -328,7 +540,12 @@ def main() -> None:
             fail(f"skill introduces forbidden or stale claim: {phrase!r}")
 
     workflow = read_bounded_evidence(WORKFLOW_PATH, "workflow evidence").decode("utf-8")
-    workflow_paths = workflow_pull_request_paths(workflow)
+    workflow_contract = parse_kernel_matrix_workflow(workflow)
+    workflow_paths = set(workflow_contract.pull_request_paths)
+    if "main" not in workflow_contract.pull_request_branches:
+        fail("kernel-matrix pull_request does not cover main")
+    if workflow_contract.pull_request_types is not None:
+        fail("kernel-matrix pull_request must not declare types")
     required_workflow_paths = (
         'scripts/**',
         '.agents/**',
