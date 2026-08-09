@@ -129,10 +129,10 @@ repos:
 
       - id: agent-golden-path-skill-contract
         name: Agent golden-path skill contract
-        entry: bash -c 'python3 scripts/ci/test-agent-golden-path-skill.py && bash scripts/ci/test-agent-golden-path-skill-optimization.sh'
+        entry: bash -c 'python3 scripts/ci/test-agent-golden-path-skill.py && bash scripts/ci/test-agent-golden-path-skill-optimization.sh && bash scripts/ci/test-agent-golden-path-skill-hardening.sh'
         language: system
         pass_filenames: false
-        files: ^(scripts/docs/generate-agent-golden-path\.py|scripts/ci/test-agent-golden-path-skill(-optimization\.sh|\.py)|docs/generated/agent-golden-path\.json|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.pre-commit-config\.yaml)$
+        files: ^(scripts/docs/generate-agent-golden-path\.py|scripts/ci/test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.pre-commit-config\.yaml)$
 
       - id: docs-auto-update-reconcile-self-test
         name: Docs auto-update reconciliation self-test

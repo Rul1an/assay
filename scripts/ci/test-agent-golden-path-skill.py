@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT / "docs/generated/agent-golden-path.json"
+GUIDE_PATH = ROOT / "docs/guides/agent-golden-path.md"
 WORKFLOW_PATH = ROOT / ".github/workflows/kernel-matrix.yml"
 SKILL_PATHS = (
     ROOT / ".agents/skills/assay-golden-path/SKILL.md",
@@ -28,10 +29,25 @@ CURSOR_SCOPE = (
     "repository does not exercise Cursor runtime discovery."
 )
 PROTECTED_ACTION_CWD = "examples/privileged-action-gate"
+MAX_EVIDENCE_BYTES = 1024 * 1024
 
 
 def fail(message: str) -> None:
     raise AssertionError(message)
+
+
+def read_bounded_evidence(path: Path, label: str) -> bytes:
+    if not path.is_file():
+        fail(f"{label} is missing: {path.relative_to(ROOT)}")
+    if path.is_symlink():
+        fail(f"{label} must be a regular tracked file, not a symlink: {path}")
+    if path.stat().st_size > MAX_EVIDENCE_BYTES:
+        fail(f"{label} exceeds {MAX_EVIDENCE_BYTES}-byte limit")
+    with path.open("rb") as handle:
+        payload = handle.read(MAX_EVIDENCE_BYTES + 1)
+    if len(payload) > MAX_EVIDENCE_BYTES:
+        fail(f"{label} exceeds {MAX_EVIDENCE_BYTES}-byte limit")
+    return payload
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -64,7 +80,7 @@ def exit_summary(step: dict[str, object]) -> str:
 
 
 def main() -> None:
-    contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+    contract = json.loads(read_bounded_evidence(CONTRACT_PATH, "contract evidence"))
     if not isinstance(contract, dict):
         fail("golden-path contract root must be an object")
     if contract.get("schema") != "assay.agent_golden_path.v1":
@@ -74,16 +90,13 @@ def main() -> None:
 
     payloads: list[bytes] = []
     for path in SKILL_PATHS:
-        if not path.is_file():
-            fail(f"project skill is missing: {path.relative_to(ROOT)}")
-        if path.is_symlink():
-            fail(f"project skill must be a regular tracked file, not a symlink: {path}")
-        payloads.append(path.read_bytes())
+        payloads.append(read_bounded_evidence(path, "skill evidence"))
 
     if payloads[0] != payloads[1]:
         fail("Codex and Claude project skills are not byte-identical")
 
     text = payloads[0].decode("ascii")
+    guide = read_bounded_evidence(GUIDE_PATH, "guide evidence").decode("utf-8")
     fields, body = parse_frontmatter(text)
     expected_fields = {
         "name": "assay-golden-path",
@@ -137,6 +150,13 @@ def main() -> None:
             cwd_line = f"Working directory: `{working_directory}`"
             if cwd_line not in body:
                 fail(f"skill omits working directory for {step['id']}")
+        guide_working_directory = working_directory or "."
+        guide_row = (
+            f"| {step['step']}. {step['label']} | `{guide_working_directory}` | "
+            f"`{step['command']}` |"
+        )
+        if guide_row not in guide:
+            fail(f"guide omits working directory for {step['id']}")
 
     non_claims = contract.get("non_claims")
     if not isinstance(non_claims, list):
@@ -161,14 +181,16 @@ def main() -> None:
         if phrase in text:
             fail(f"skill introduces forbidden or stale claim: {phrase!r}")
 
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    workflow = read_bounded_evidence(WORKFLOW_PATH, "workflow evidence").decode("utf-8")
     required_workflow_paths = (
+        'scripts/**',
         '.agents/**',
         '.claude/**',
         '.gitignore',
         '.pre-commit-config.yaml',
         'docs/generated/**',
         'docs/guides/agent-golden-path.md',
+        '.github/workflows/kernel-matrix.yml',
     )
     for path in required_workflow_paths:
         if f'- "{path}"' not in workflow:

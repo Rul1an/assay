@@ -397,15 +397,17 @@ def exit_summary(step: dict[str, object]) -> str:
 
 def render_table() -> str:
     rows = [
-        "| step | command | exit code | stdout | on failure |",
-        "|---|---|---|---|---|",
+        "| step | working directory | command | exit code | stdout | on failure |",
+        "|---|---|---|---|---|---|",
     ]
     for step in STEPS:
+        working_directory = step.get("working_directory") or "."
         rows.append(
-            "| {step}. {label} | `{command}` | {exit_codes} | {stdout_summary} | "
-            "{failure_summary} |".format(
+            "| {step}. {label} | `{working_directory}` | `{command}` | {exit_codes} | "
+            "{stdout_summary} | {failure_summary} |".format(
                 step=step["step"],
                 label=step["label"],
+                working_directory=working_directory,
                 command=step["command"],
                 exit_codes=exit_summary(step),
                 stdout_summary=step["stdout_summary"],
