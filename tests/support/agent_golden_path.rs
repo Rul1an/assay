@@ -1,6 +1,7 @@
 use serde_json::Value;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Deref;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum WorkingDirectory {
@@ -49,6 +50,66 @@ fn has_drive_prefix(path: &str) -> bool {
 thread_local! {
     static DRIVEN_OUTCOMES: RefCell<BTreeMap<(String, String), usize>> =
         const { RefCell::new(BTreeMap::new()) };
+}
+
+pub struct ExpectedOutcome {
+    step_id: String,
+    outcome_name: String,
+    value: Value,
+}
+
+impl Deref for ExpectedOutcome {
+    type Target = Value;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+pub fn expected_outcome(contract: &Value, step_id: &str, outcome_name: &str) -> ExpectedOutcome {
+    let step = contract["steps"]
+        .as_array()
+        .expect("contract steps array")
+        .iter()
+        .find(|step| step["id"] == step_id)
+        .unwrap_or_else(|| panic!("contract step {step_id:?} is missing"));
+    let mut value = step["outcomes"]
+        .as_array()
+        .expect("step outcomes array")
+        .iter()
+        .find(|outcome| outcome["name"] == outcome_name)
+        .unwrap_or_else(|| panic!("contract outcome {step_id}/{outcome_name} is missing"))
+        .clone();
+    value["command"] = step["command"].clone();
+    value["binary"] = step["binary"].clone();
+    value["working_directory"] = step["working_directory"].clone();
+    ExpectedOutcome {
+        step_id: step_id.to_owned(),
+        outcome_name: outcome_name.to_owned(),
+        value,
+    }
+}
+
+pub fn record_observation(outcome: &ExpectedOutcome) {
+    record_outcome(&outcome.step_id, &outcome.outcome_name);
+}
+
+pub fn assert_contract_binaries(contract: &Value, expected: &[&str]) {
+    let actual = contract["steps"]
+        .as_array()
+        .expect("contract steps array")
+        .iter()
+        .map(|step| {
+            step["binary"]
+                .as_str()
+                .expect("contract step binary string")
+        })
+        .collect::<BTreeSet<_>>();
+    let expected = expected.iter().copied().collect::<BTreeSet<_>>();
+    assert_eq!(
+        actual, expected,
+        "agent golden-path contract binary set changed"
+    );
 }
 
 pub fn record_outcome(step_id: &str, outcome_name: &str) {
@@ -160,5 +221,58 @@ mod working_directory_tests {
         }))
         .expect_err("non-string working directory must be rejected");
         assert!(error.contains("working_directory"));
+    }
+}
+
+#[cfg(test)]
+mod execution_coverage_tests {
+    use super::{assert_contract_binaries, assert_exact, expected_outcome};
+    use serde_json::{json, Value};
+
+    fn fixture_contract() -> Value {
+        json!({
+            "steps": [{
+                "id": "doctor",
+                "binary": "assay",
+                "command": "assay doctor --format json",
+                "outcomes": [{"name": "success"}]
+            }]
+        })
+    }
+
+    fn lookup_only_scenario() {
+        let contract = fixture_contract();
+        let _ = expected_outcome(&contract, "doctor", "success");
+    }
+
+    #[test]
+    fn lookup_without_observation_fails_exact_coverage() {
+        let panic = std::panic::catch_unwind(|| {
+            assert_exact(&fixture_contract(), "assay", &[lookup_only_scenario]);
+        });
+        assert!(
+            panic.is_err(),
+            "looking up an outcome unexpectedly counted as observing a command"
+        );
+    }
+
+    #[test]
+    fn contract_binary_set_is_closed() {
+        assert_contract_binaries(&fixture_contract(), &["assay"]);
+
+        let mut mutated = fixture_contract();
+        mutated["steps"]
+            .as_array_mut()
+            .expect("fixture steps array")
+            .push(json!({
+                "id": "third",
+                "binary": "other",
+                "command": "other",
+                "outcomes": []
+            }));
+        let panic = std::panic::catch_unwind(|| {
+            assert_contract_binaries(&mutated, &["assay"]);
+        });
+        assert!(panic.is_err(), "a third contract binary was accepted");
     }
 }

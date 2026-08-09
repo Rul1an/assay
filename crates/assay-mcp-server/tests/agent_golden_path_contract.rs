@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
+use runtime_coverage::ExpectedOutcome;
+
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_STDOUT_BYTES: u64 = 1024 * 1024;
 
@@ -42,29 +44,11 @@ fn contract() -> Value {
     contract
 }
 
-fn expected_outcome(step_id: &str, outcome_name: &str) -> Value {
-    let contract = contract();
-    let step = contract["steps"]
-        .as_array()
-        .expect("contract steps array")
-        .iter()
-        .find(|step| step["id"] == step_id)
-        .unwrap_or_else(|| panic!("contract step {step_id:?} is missing"));
-    let mut outcome = step["outcomes"]
-        .as_array()
-        .expect("step outcomes array")
-        .iter()
-        .find(|outcome| outcome["name"] == outcome_name)
-        .unwrap_or_else(|| panic!("contract outcome {step_id}/{outcome_name} is missing"))
-        .clone();
-    outcome["command"] = step["command"].clone();
-    outcome["binary"] = step["binary"].clone();
-    outcome["working_directory"] = step["working_directory"].clone();
-    runtime_coverage::record_outcome(step_id, outcome_name);
-    outcome
+fn expected_outcome(step_id: &str, outcome_name: &str) -> ExpectedOutcome {
+    runtime_coverage::expected_outcome(&contract(), step_id, outcome_name)
 }
 
-fn assert_exit(output: &Output, expected: &Value, context: &str) {
+fn assert_exit(output: &Output, expected: &ExpectedOutcome, context: &str) {
     let expected_exit = expected["exit_code"]
         .as_i64()
         .expect("contract exit_code must be an integer");
@@ -80,6 +64,7 @@ fn assert_exit(output: &Output, expected: &Value, context: &str) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    runtime_coverage::record_observation(expected);
 }
 
 fn assert_gap(expected: &Value, issue: u64) {
@@ -327,6 +312,7 @@ fn enforcing_proxy_denial_is_structured_but_startup_failure_is_not() {
         status.code().map(i64::from),
         denied_expected["exit_code"].as_i64()
     );
+    runtime_coverage::record_observation(&denied_expected);
 
     let startup_expected = expected_outcome("protected-action", "startup-failure");
     let startup_argv = contract_argv(&startup_expected, &[("<python>", python)]);
