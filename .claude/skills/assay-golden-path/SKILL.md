@@ -16,8 +16,8 @@ run `scripts/docs/generate-agent-golden-path.py` instead of editing this file.
 Empty stdout in a gap row is an observed limitation, not permission for a caller to infer success from missing evidence.
 Do not replace a linked gap with an inferred clean result.
 
-Cursor does not discover this project skill; issue #2152 step 3 covers Codex
-and Claude Code only. Plugin and marketplace packaging belongs to step 4.
+Codex and Claude Code discover this project skill from their project roots.
+Cursor does not discover this project skill.
 
 ## Journey
 

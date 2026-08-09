@@ -46,8 +46,12 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
 
 
 def exit_summary(step: dict[str, object]) -> str:
-    outcomes = step["outcomes"]
-    assert isinstance(outcomes, list)
+    outcomes = step.get("outcomes")
+    if not isinstance(outcomes, list):
+        fail("golden-path step outcomes must be a list")
+    for outcome in outcomes:
+        if not isinstance(outcome, dict):
+            fail("golden-path outcomes must be objects")
     return "; ".join(
         f"{outcome['label']} `{outcome['exit_code']}`" for outcome in outcomes
     ) + "."
@@ -55,8 +59,12 @@ def exit_summary(step: dict[str, object]) -> str:
 
 def main() -> None:
     contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
-    assert contract["schema"] == "assay.agent_golden_path.v1"
-    assert contract["schema_version"] == 1
+    if not isinstance(contract, dict):
+        fail("golden-path contract root must be an object")
+    if contract.get("schema") != "assay.agent_golden_path.v1":
+        fail("unexpected golden-path contract schema")
+    if contract.get("schema_version") != 1:
+        fail("unexpected golden-path contract schema version")
 
     payloads: list[bytes] = []
     for path in SKILL_PATHS:
@@ -71,21 +79,31 @@ def main() -> None:
 
     text = payloads[0].decode("ascii")
     fields, body = parse_frontmatter(text)
-    assert fields == {
+    expected_fields = {
         "name": "assay-golden-path",
         "description": EXPECTED_DESCRIPTION,
-    }, "portable skill frontmatter or trigger boundaries drifted"
+    }
+    if fields != expected_fields:
+        fail("portable skill frontmatter or trigger boundaries drifted")
 
-    assert "docs/generated/agent-golden-path.json" in body
-    assert EMPTY_STDOUT_RULE in body
-    assert "Cursor does not discover this project skill" in body
+    required_body = (
+        "docs/generated/agent-golden-path.json",
+        EMPTY_STDOUT_RULE,
+        "Cursor does not discover this project skill",
+    )
+    for fragment in required_body:
+        if fragment not in body:
+            fail(f"skill omits required guidance: {fragment!r}")
 
     cursor = -1
-    steps = contract["steps"]
-    assert isinstance(steps, list)
-    assert len(steps) == 9
+    steps = contract.get("steps")
+    if not isinstance(steps, list):
+        fail("golden-path contract steps must be a list")
+    if len(steps) != 9:
+        fail(f"golden-path contract must contain 9 steps, found {len(steps)}")
     for step in steps:
-        assert isinstance(step, dict)
+        if not isinstance(step, dict):
+            fail("golden-path steps must be objects")
         required = (
             f"{step['step']}. {step['label']}",
             f"`{step['command']}`",
@@ -103,8 +121,14 @@ def main() -> None:
             fail(f"skill journey is out of order at {step['id']}")
         cursor = positions[0]
 
-    for non_claim in contract["non_claims"]:
-        assert non_claim in body, f"skill omits non-claim: {non_claim}"
+    non_claims = contract.get("non_claims")
+    if not isinstance(non_claims, list):
+        fail("golden-path contract non_claims must be a list")
+    for non_claim in non_claims:
+        if not isinstance(non_claim, str):
+            fail("golden-path non-claims must be strings")
+        if non_claim not in body:
+            fail(f"skill omits non-claim: {non_claim}")
 
     forbidden = (
         "assay mcp-server",
@@ -112,9 +136,12 @@ def main() -> None:
         "six production tools",
         "safe agent",
         "compliance claim",
+        "issue #2152 step 3",
+        "Plugin and marketplace packaging belongs",
     )
     for phrase in forbidden:
-        assert phrase not in text, f"skill introduces forbidden or stale claim: {phrase!r}"
+        if phrase in text:
+            fail(f"skill introduces forbidden or stale claim: {phrase!r}")
 
     print("agent golden-path skill: portable, byte-identical, and contract-complete")
 
