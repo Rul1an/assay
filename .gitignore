@@ -14,6 +14,7 @@ docs/DISTRIBUTION-CHANNELS.md
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/assay-golden-path/
+.claude/skills/assay-golden-path/*
 !.claude/skills/assay-golden-path/SKILL.md
 .obsidian/
 !.cursor/

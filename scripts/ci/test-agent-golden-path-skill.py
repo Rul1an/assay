@@ -6,8 +6,10 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 import json
+import os
 import re
 from pathlib import Path
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,6 +21,22 @@ SKILL_PATHS = (
     ROOT / ".agents/skills/assay-golden-path/SKILL.md",
     ROOT / ".claude/skills/assay-golden-path/SKILL.md",
 )
+CLAUDE_SKILL_SIBLING = ".claude/skills/assay-golden-path/OTHER.md"
+GIT_ENV = {
+    **os.environ,
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CEILING_DIRECTORIES": str(ROOT.parent),
+}
+for git_selector in (
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_WORK_TREE",
+):
+    GIT_ENV.pop(git_selector, None)
 EXPECTED_DESCRIPTION = (
     "Drive Assay's install-to-evidence golden path and interpret its stdout and exit "
     "codes. Use when an agent must operate or diagnose Assay; do not use it to infer "
@@ -65,6 +83,41 @@ class WorkflowContract:
 
 def fail(message: str) -> None:
     raise AssertionError(message)
+
+
+def run_git(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            "git",
+            "-c",
+            "core.excludesFile=",
+            "-c",
+            "core.attributesFile=",
+            "-c",
+            "init.defaultBranch=main",
+            *args,
+        ],
+        cwd=ROOT,
+        env=GIT_ENV,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def validate_skill_repository_state() -> None:
+    for path in SKILL_PATHS:
+        skill = path.relative_to(ROOT).as_posix()
+        if run_git("ls-files", "--error-unmatch", "--", skill).returncode != 0:
+            fail(f"skill is not tracked: {skill}")
+        if run_git("check-ignore", "--no-index", "--", skill).returncode == 0:
+            fail(f"tracked skill is ignored: {skill}")
+        attributes = run_git("check-attr", "eol", "--", skill)
+        if attributes.returncode != 0 or attributes.stdout != f"{skill}: eol: lf\n":
+            fail(f"skill does not declare eol=lf: {skill}")
+
+    if run_git("check-ignore", "--no-index", "--", CLAUDE_SKILL_SIBLING).returncode != 0:
+        fail(f"Claude skill sibling is not ignored: {CLAUDE_SKILL_SIBLING}")
 
 
 def read_bounded_evidence(path: Path, label: str) -> bytes:
@@ -364,8 +417,10 @@ def validate_lint_executor(contract: WorkflowContract) -> None:
             fail("kernel-matrix lint pre-commit command is noncanonical")
 
 
-def parse_precommit_self_test(text: str) -> PrecommitHookContract:
-    """Read the unique active drift self-test hook from local pre-commit hooks."""
+def parse_precommit_hook(
+    text: str, hook_id: str, label: str
+) -> PrecommitHookContract:
+    """Read one unique active local pre-commit hook."""
     lines = text.splitlines()
     hook_starts: list[int] = []
 
@@ -412,12 +467,12 @@ def parse_precommit_self_test(text: str) -> PrecommitHookContract:
                         continue
                     if (
                         len(hook_line) - len(hook_line.lstrip(" ")) == 6
-                        and hook_stripped == "- id: docs-generated-drift-self-test"
+                        and hook_stripped == f"- id: {hook_id}"
                     ):
                         hook_starts.append(hook_cursor)
 
     if len(hook_starts) != 1:
-        fail("pre-commit config must declare exactly one active generated-docs drift self-test hook")
+        fail(f"pre-commit config must declare exactly one active {label} hook")
 
     fields: dict[str, list[str]] = {"stages": [], "files": []}
     hook_start = hook_starts[0]
@@ -435,15 +490,15 @@ def parse_precommit_self_test(text: str) -> PrecommitHookContract:
             fields[key].append(value.strip())
 
     if len(fields["stages"]) > 1:
-        fail("generated-docs drift self-test duplicates stages")
+        fail(f"{label} duplicates stages")
     if len(fields["files"]) != 1:
-        fail("generated-docs drift self-test must declare exactly one files entry")
+        fail(f"{label} must declare exactly one files entry")
 
     stages = None
     if fields["stages"]:
         match = re.fullmatch(r"\[([^]]*)\](?:\s+#.*)?", fields["stages"][0])
         if not match:
-            fail("generated-docs drift self-test stages must be an inline list")
+            fail(f"{label} stages must be an inline list")
         raw_entries = match.group(1).strip()
         entries = (
             ()
@@ -451,13 +506,21 @@ def parse_precommit_self_test(text: str) -> PrecommitHookContract:
             else tuple(entry.strip() for entry in raw_entries.split(","))
         )
         if any(not entry for entry in entries):
-            fail("generated-docs drift self-test stages must not contain empty entries")
+            fail(f"{label} stages must not contain empty entries")
         stages = entries
 
     files_pattern = fields["files"][0]
     if not files_pattern:
-        fail("generated-docs drift self-test files entry must be a scalar")
+        fail(f"{label} files entry must be a scalar")
     return PrecommitHookContract(stages=stages, files_pattern=files_pattern)
+
+
+def parse_precommit_self_test(text: str) -> PrecommitHookContract:
+    return parse_precommit_hook(
+        text,
+        "docs-generated-drift-self-test",
+        "generated-docs drift self-test",
+    )
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -490,6 +553,7 @@ def exit_summary(step: dict[str, object]) -> str:
 
 
 def main() -> None:
+    validate_skill_repository_state()
     contract = json.loads(read_bounded_evidence(CONTRACT_PATH, "contract evidence"))
     if not isinstance(contract, dict):
         fail("golden-path contract root must be an object")
@@ -604,6 +668,7 @@ def main() -> None:
         '.agents/**',
         '.claude/**',
         '.gitignore',
+        '.gitattributes',
         '.pre-commit-config.yaml',
         'docs/generated/**',
         'docs/guides/agent-golden-path.md',
@@ -626,6 +691,11 @@ def main() -> None:
         is None
     ):
         fail("generated-docs drift self-test does not cover its golden-path generator")
+
+    for hook_id in ("docs-generated-drift", "agent-golden-path-skill-contract"):
+        hook = parse_precommit_hook(precommit_text, hook_id, hook_id)
+        if re.search(hook.files_pattern, ".gitattributes") is None:
+            fail(f"{hook_id} does not cover .gitattributes")
 
     print("agent golden-path skill: portable, byte-identical, and contract-complete")
 

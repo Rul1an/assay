@@ -5,9 +5,9 @@ ROOT="$(git rev-parse --show-toplevel)"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
-# Task 3 adds eight executor failure mutations and one allow probe to Task 2's
-# 24-case boundary. Structural probe assertions stay inside the 33-case boundary.
-EXPECTED_CASES=33
+# Task 4 adds nine Git-state and four scheduling failure mutations to Task 3's
+# 33-case boundary. Structural probe assertions stay inside the 46-case boundary.
+EXPECTED_CASES=46
 case_count=0
 
 record_case_pass() {
@@ -42,6 +42,20 @@ PY
 
 check_ast_source_scope
 
+case_git() {
+  local case_root="$1"
+  shift
+  env \
+    -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+    -u GIT_COMMON_DIR \
+    -u GIT_DIR \
+    -u GIT_INDEX_FILE \
+    -u GIT_OBJECT_DIRECTORY \
+    -u GIT_WORK_TREE \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    git -C "$case_root" "$@"
+}
+
 seed_case() {
   local case_root="$1"
   mkdir -p \
@@ -52,6 +66,8 @@ seed_case() {
     "$case_root/.claude/skills/assay-golden-path" \
     "$case_root/.github/workflows"
   cp "$ROOT/scripts/ci/test-agent-golden-path-skill.py" "$case_root/scripts/ci/"
+  cp "$ROOT/.gitignore" "$case_root/"
+  cp "$ROOT/.gitattributes" "$case_root/"
   cp "$ROOT/.pre-commit-config.yaml" "$case_root/"
   cp "$ROOT/docs/generated/agent-golden-path.json" "$case_root/docs/generated/"
   cp "$ROOT/docs/guides/agent-golden-path.md" "$case_root/docs/guides/"
@@ -60,6 +76,9 @@ seed_case() {
   cp "$ROOT/.claude/skills/assay-golden-path/SKILL.md" \
     "$case_root/.claude/skills/assay-golden-path/"
   cp "$ROOT/.github/workflows/kernel-matrix.yml" "$case_root/.github/workflows/"
+  case_git "$case_root" -c init.defaultBranch=main init -q
+  case_git "$case_root" -c core.excludesFile= -c core.attributesFile= \
+    add -f -- .
 }
 
 expect_named_failure() {
@@ -225,6 +244,173 @@ PY
       "$case_root" \
       "kernel-matrix workflow does not cover skill contract path: $workflow_path"
   done
+done
+
+for skill_path in \
+  '.agents/skills/assay-golden-path/SKILL.md' \
+  '.claude/skills/assay-golden-path/SKILL.md'
+do
+  case_root="$SCRATCH/untracked-$(printf '%s' "$skill_path" | tr '/.' '--')"
+  seed_case "$case_root"
+  case_git "$case_root" rm --cached -- "$skill_path"
+  expect_named_failure \
+    "untracked skill $skill_path" \
+    "$case_root" \
+    "skill is not tracked: $skill_path"
+done
+
+for skill_path in \
+  '.agents/skills/assay-golden-path/SKILL.md' \
+  '.claude/skills/assay-golden-path/SKILL.md'
+do
+  case_root="$SCRATCH/ignored-$(printf '%s' "$skill_path" | tr '/.' '--')"
+  seed_case "$case_root"
+  printf '%s\n' "$skill_path" >> "$case_root/.gitignore"
+  expect_named_failure \
+    "ignored tracked skill $skill_path" \
+    "$case_root" \
+    "tracked skill is ignored: $skill_path"
+done
+
+case_root="$SCRATCH/claude-sibling-visible"
+seed_case "$case_root"
+CASE_ROOT="$case_root" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["CASE_ROOT"]) / ".gitignore"
+source = ".claude/skills/assay-golden-path/*\n"
+text = path.read_text(encoding="utf-8")
+if text.count(source) != 1:
+    raise SystemExit(f"Claude skill wildcard is not unique: {source!r}")
+path.write_text(text.replace(source, "", 1), encoding="utf-8")
+PY
+expect_named_failure \
+  "Claude skill sibling visible without inner wildcard" \
+  "$case_root" \
+  "Claude skill sibling is not ignored: .claude/skills/assay-golden-path/OTHER.md"
+
+for skill_path in \
+  '.agents/skills/assay-golden-path/SKILL.md' \
+  '.claude/skills/assay-golden-path/SKILL.md'
+do
+  case_root="$SCRATCH/eol-$(printf '%s' "$skill_path" | tr '/.' '--')"
+  seed_case "$case_root"
+  CASE_ROOT="$case_root" SKILL_PATH="$skill_path" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["CASE_ROOT"]) / ".gitattributes"
+source = f"{os.environ['SKILL_PATH']} text eol=lf\n"
+text = path.read_text(encoding="utf-8")
+if text.count(source) != 1:
+    raise SystemExit(f"skill eol attribute is not unique: {source!r}")
+path.write_text(text.replace(source, "", 1), encoding="utf-8")
+PY
+  expect_named_failure \
+    "skill without LF attribute $skill_path" \
+    "$case_root" \
+    "skill does not declare eol=lf: $skill_path"
+done
+
+case_root="$SCRATCH/hostile-global-excludes"
+seed_case "$case_root"
+CASE_ROOT="$case_root" python3 - <<'PY'
+import os
+from pathlib import Path
+
+case_root = Path(os.environ["CASE_ROOT"])
+ignore = case_root / ".gitignore"
+source = ".claude/skills/assay-golden-path/*\n"
+text = ignore.read_text(encoding="utf-8")
+if text.count(source) != 1:
+    raise SystemExit(f"Claude skill wildcard is not unique: {source!r}")
+ignore.write_text(text.replace(source, "", 1), encoding="utf-8")
+(case_root / "hostile-excludes").write_text(
+    ".claude/skills/assay-golden-path/OTHER.md\n", encoding="utf-8"
+)
+(case_root / "hostile-gitconfig").write_text(
+    "[core]\n\texcludesFile = hostile-excludes\n", encoding="utf-8"
+)
+PY
+GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$case_root/hostile-gitconfig" \
+  expect_named_failure \
+    "hostile global excludes cannot hide visible Claude sibling" \
+    "$case_root" \
+    "Claude skill sibling is not ignored: .claude/skills/assay-golden-path/OTHER.md"
+
+case_root="$SCRATCH/hostile-global-attributes"
+seed_case "$case_root"
+CASE_ROOT="$case_root" python3 - <<'PY'
+import os
+from pathlib import Path
+
+case_root = Path(os.environ["CASE_ROOT"])
+attributes = case_root / ".gitattributes"
+skill = ".agents/skills/assay-golden-path/SKILL.md"
+source = f"{skill} text eol=lf\n"
+text = attributes.read_text(encoding="utf-8")
+if text.count(source) != 1:
+    raise SystemExit(f"skill eol attribute is not unique: {source!r}")
+attributes.write_text(text.replace(source, "", 1), encoding="utf-8")
+(case_root / "hostile-attributes").write_text(f"{skill} text eol=lf\n", encoding="utf-8")
+(case_root / "hostile-gitconfig").write_text(
+    "[core]\n\tattributesFile = hostile-attributes\n", encoding="utf-8"
+)
+PY
+GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$case_root/hostile-gitconfig" \
+  expect_named_failure \
+    "hostile global attributes cannot restore LF declaration" \
+    "$case_root" \
+    "skill does not declare eol=lf: .agents/skills/assay-golden-path/SKILL.md"
+
+for mutation in remove comment; do
+  case_root="$SCRATCH/workflow-$mutation-gitattributes"
+  seed_case "$case_root"
+  WORKFLOW_PATH='.gitattributes' CASE_ROOT="$case_root" MUTATION="$mutation" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["CASE_ROOT"]) / ".github/workflows/kernel-matrix.yml"
+line = f'      - "{os.environ["WORKFLOW_PATH"]}"\n'
+text = path.read_text(encoding="utf-8")
+if text.count(line) != 1:
+    raise SystemExit(f"workflow path is not uniquely declared: {line!r}")
+replacement = "" if os.environ["MUTATION"] == "remove" else f"      # {line.lstrip()}"
+path.write_text(text.replace(line, replacement, 1), encoding="utf-8")
+PY
+  expect_named_failure \
+    "workflow $mutation mutation for .gitattributes" \
+    "$case_root" \
+    "kernel-matrix workflow does not cover skill contract path: .gitattributes"
+done
+
+for hook_id in docs-generated-drift agent-golden-path-skill-contract; do
+  case_root="$SCRATCH/hook-gitattributes-$hook_id"
+  seed_case "$case_root"
+  CASE_ROOT="$case_root" HOOK_ID="$hook_id" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["CASE_ROOT"]) / ".pre-commit-config.yaml"
+hook_id = os.environ["HOOK_ID"]
+text = path.read_text(encoding="utf-8")
+start = text.find(f"      - id: {hook_id}\n")
+if start < 0:
+    raise SystemExit(f"hook is not declared: {hook_id}")
+end = text.find("      - id: ", start + 1)
+if end < 0:
+    end = len(text)
+block = text[start:end]
+source = "|\\.gitattributes"
+if block.count(source) != 1:
+    raise SystemExit(f"hook gitattributes path is not unique: {hook_id}")
+path.write_text(text[:start] + block.replace(source, "", 1) + text[end:], encoding="utf-8")
+PY
+  expect_named_failure \
+    "hook omits .gitattributes $hook_id" \
+    "$case_root" \
+    "${hook_id} does not cover .gitattributes"
 done
 
 for evidence in contract skill guide workflow; do

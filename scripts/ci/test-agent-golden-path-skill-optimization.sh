@@ -5,6 +5,18 @@ ROOT="$(git rev-parse --show-toplevel)"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
+scratch_git() {
+  env \
+    -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+    -u GIT_COMMON_DIR \
+    -u GIT_DIR \
+    -u GIT_INDEX_FILE \
+    -u GIT_OBJECT_DIRECTORY \
+    -u GIT_WORK_TREE \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    git -C "$SCRATCH" "$@"
+}
+
 mkdir -p \
   "$SCRATCH/scripts/ci" \
   "$SCRATCH/docs/generated" \
@@ -12,11 +24,16 @@ mkdir -p \
   "$SCRATCH/.claude/skills/assay-golden-path"
 
 cp "$ROOT/scripts/ci/test-agent-golden-path-skill.py" "$SCRATCH/scripts/ci/"
+cp "$ROOT/.gitignore" "$SCRATCH/"
+cp "$ROOT/.gitattributes" "$SCRATCH/"
 cp "$ROOT/docs/generated/agent-golden-path.json" "$SCRATCH/docs/generated/"
 cp "$ROOT/.agents/skills/assay-golden-path/SKILL.md" \
   "$SCRATCH/.agents/skills/assay-golden-path/"
 cp "$ROOT/.claude/skills/assay-golden-path/SKILL.md" \
   "$SCRATCH/.claude/skills/assay-golden-path/"
+scratch_git -c init.defaultBranch=main init -q
+scratch_git -c core.excludesFile= -c core.attributesFile= \
+  add -f -- .
 
 python3 - "$SCRATCH/docs/generated/agent-golden-path.json" <<'PY'
 import json
