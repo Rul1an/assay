@@ -231,6 +231,9 @@ The same driven connection writes a unique blocklist policy only inside the
 temporary consuming project and calls `assay_policy_decide`. The marker tool
 must be denied. This proves that `.` resolves to the consuming project rather
 than merely proving that the server can connect from some existing directory.
+The temporary project must not contain a `policies/` directory, and the cached
+manifest must still carry exact args `--policy-root .`; otherwise the server's
+default `policies` value could make a policy lookup look like proof of `.`.
 
 ### Real-client proof
 
@@ -254,11 +257,16 @@ Record the exact client version, source SHA, installed cache version, commands,
 and outcomes in the PR review packet. Vendor validation supplements rather than
 replaces repository assertions.
 
-These real-client steps remain a manual pre-push procedure. If they are later
-automated through `tests/support/bounded_process.rs`, that automation must use
-the process-tree and early-EPIPE semantics accepted by #2189; marketplace
-operations may spawn `git`, so direct-child-only timeout handling is not an
-equivalent proof.
+These real-client steps run through `scripts/ci/test-claude-plugin-install.sh`.
+The shell entrypoint delegates to a normal Python module so each language keeps
+its own linting boundary. The driver uses a fresh POSIX session/process group,
+one absolute deadline while draining inherited pipes, separate 1 MiB
+stdout/stderr ceilings, and bounded reaping. Its self-test covers a hung tree, a
+direct child that exits while a descendant retains an output handle, overflow,
+source-checkout cache substitution, stale cache after a successful no-op update,
+and tool-name drift. This is a separately proven macOS/Linux strategy for the
+vendor workflow; it does not replace the shared Rust test helper or claim native
+Windows support.
 
 ### TDD and mutation proof
 

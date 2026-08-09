@@ -205,27 +205,44 @@ Commit as `feat(plugin): generate cache-safe golden-path resources`.
 **Files:**
 - Modify: `docs/guides/editor-mcp-recipe.md`
 - Create: `scripts/ci/test-claude-plugin-install.sh`
+- Create: `scripts/ci/claude_plugin_install_workflow.py`
 - Modify: `.pre-commit-config.yaml`
 
 **Interfaces:**
 - Consumes: marketplace root, `assay@assay`, server on `PATH`, Claude CLI.
 - Produces: bounded disposable-client proof recording client version, source SHA, cache version, health-subcommand connection, actual-session connection, consumer-project policy-root proof, and each phase.
 
-- [ ] **Step 1: Write a failing workflow self-test**
+- [x] **Step 1: Write a failing workflow self-test**
 
 Use a fake Claude executable and require validate, add/install/update, cache inspection, `mcp list`, complete JSON-RPC exchange, actual-session MCP connection, consumer-only policy-root proof, and skill discovery. It must reject a source-directory-only success.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run `bash scripts/ci/test-claude-plugin-install.sh --self-test`; expect the named missing update/cache/protocol phase.
 
-- [ ] **Step 3: Add honest installation documentation**
+- [x] **Step 3: Add honest installation documentation**
 
 State that the plugin bundles no server, installation alone enforces nothing, policy resolves from the Claude project, Python is optional except for step 6, spawn failure is not an Assay verdict, and update plus cache inspection exposes stale state.
 
-- [ ] **Step 4: Implement the bounded disposable workflow**
+- [x] **Step 4: Implement the bounded disposable workflow**
 
 Use fresh `CLAUDE_CONFIG_DIR`, temporary marketplace and consuming project, trap cleanup, 1 MiB output ceilings, and process-tree deadlines equivalent to #2189. Do not inject `CLAUDE_PROJECT_DIR`. Prove both health-subcommand and actual-session MCP connection, then prove policy-root resolution with a policy available only inside the consuming project. Never mutate normal Claude config or pass credentials. Fail if installed cache resolves inside the source checkout.
+
+The implementation uses a thin shell entrypoint and a standard-library Python
+driver because the existing Rust helper is integration-test-only and cannot
+bound vendor CLI commands without compiling a test harness. The scoped driver
+starts a POSIX session, kills the process group, keeps one absolute deadline
+while draining inherited pipes, and caps stdout/stderr separately. Its self-test
+includes hangs, a direct child that exits while a descendant retains the pipe,
+and output overflow. This is a macOS/Linux workflow proof, not a Windows-native
+process-supervision claim.
+
+The consumer probe has no `policies/` directory and pins the installed argv to
+`--policy-root .` before writing a unique root-level policy. That prevents the
+server's default `policies` value from making the policy denial false-green. A
+fake update that exits zero but retains stale cache bytes must fail on cache
+parity. Failures use stable `phase`, `status`, `reason`, and `next_step` lines;
+success evidence uses one scan-friendly `key=pass` line per proven boundary.
 
 - [ ] **Step 5: Run the real-client proof**
 
@@ -238,13 +255,19 @@ installed_cache_version=<exact value>
 plugin_validate=pass
 mcp_list_connected=pass
 actual_session_mcp_connected=pass
-consumer_project_policy_root=pass
+policy_root_resolved_to_consumer=pass
 initialize=pass
 tools_list=pass
 skill_discovery=pass
+model_mediated_tool_call=unavailable
+verification=pass
 ```
 
-Unavailable vendor behavior is unavailable/failed proof, never pass.
+The last line means the scoped installation/protocol proof passed. It does not
+promote `model_mediated_tool_call=unavailable` to a model/tool-use pass. If the
+fresh client unexpectedly has working authentication, the status is
+`not_exercised` unless a separate test actually observes a model-mediated tool
+call. Unavailable vendor behavior is unavailable/failed proof, never pass.
 
 - [ ] **Step 6: Commit**
 
