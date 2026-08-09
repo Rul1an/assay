@@ -13,21 +13,25 @@ GATE="$ROOT/scripts/ci/check-docs-generated-drift.sh"
 SUBJECT="$ROOT/docs/generated/crate-deps.mermaid"
 GOLDEN_PATH_JSON="$ROOT/docs/generated/agent-golden-path.json"
 GOLDEN_PATH_GUIDE="$ROOT/docs/guides/agent-golden-path.md"
+GOLDEN_PATH_SKILL="$ROOT/.agents/skills/assay-golden-path/SKILL.md"
 FAILURES=0
 BACKUP="$(mktemp)"
 JSON_BACKUP="$(mktemp)"
 GUIDE_BACKUP="$(mktemp)"
+SKILL_BACKUP="$(mktemp)"
 
 cleanup() {
   [ -f "$BACKUP" ] && cp "$BACKUP" "$SUBJECT"
   [ -f "$JSON_BACKUP" ] && cp "$JSON_BACKUP" "$GOLDEN_PATH_JSON"
   [ -f "$GUIDE_BACKUP" ] && cp "$GUIDE_BACKUP" "$GOLDEN_PATH_GUIDE"
-  rm -f "$BACKUP" "$JSON_BACKUP" "$GUIDE_BACKUP"
+  [ -f "$SKILL_BACKUP" ] && cp "$SKILL_BACKUP" "$GOLDEN_PATH_SKILL"
+  rm -f "$BACKUP" "$JSON_BACKUP" "$GUIDE_BACKUP" "$SKILL_BACKUP"
 }
 trap cleanup EXIT
 cp "$SUBJECT" "$BACKUP"
 cp "$GOLDEN_PATH_JSON" "$JSON_BACKUP"
 cp "$GOLDEN_PATH_GUIDE" "$GUIDE_BACKUP"
+cp "$GOLDEN_PATH_SKILL" "$SKILL_BACKUP"
 
 check() {
   local name="$1" want="$2"
@@ -53,6 +57,10 @@ sed 's/| 1\. Install check |/| 1. Drifted install check |/' \
 mv "$GOLDEN_PATH_GUIDE.tmp" "$GOLDEN_PATH_GUIDE"
 check "a hand-edited rendered table fails" 1
 cp "$GUIDE_BACKUP" "$GOLDEN_PATH_GUIDE"
+
+printf '\n%%%% drift planted by the drift-check self-test\n' >> "$GOLDEN_PATH_SKILL"
+check "a hand-edited generated project skill fails" 1
+cp "$SKILL_BACKUP" "$GOLDEN_PATH_SKILL"
 
 # --- the check does not edit what it audits ----------------------------------------------------
 #

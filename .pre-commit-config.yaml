@@ -109,7 +109,7 @@ repos:
         # documents an earlier version that ran its emitter in place and destroyed the fixtures it
         # audited, and `check-linux.sh` returned 0 on every failure (#2076).
         stages: [pre-push]
-        files: ^scripts/ci/(check-docs-generated-drift|test-check-docs-generated-drift)\.sh$
+        files: ^(scripts/ci/(check-docs-generated-drift|test-check-docs-generated-drift)\.sh|\.(agents|claude)/skills/assay-golden-path/SKILL\.md)$
 
       - id: docs-generated-drift
         name: Generated docs match their generators
@@ -125,7 +125,14 @@ repos:
         # Caught here instead, the diagram edge lands in the pull request that added the dependency,
         # where a reviewer can see why it moved. It also makes the bot's `has_changes` false by
         # construction, so the un-mergeable PR is never created.
-        files: ^(Cargo\.toml|crates/.*/Cargo\.toml|scripts/docs/.*\.(sh|py)|docs/generated/.*|docs/AIcontext/architecture-diagrams\.md|docs/guides/agent-golden-path\.md|scripts/ci/check-docs-generated-drift\.sh|\.pre-commit-config\.yaml)$
+        files: ^(Cargo\.toml|crates/.*/Cargo\.toml|scripts/docs/.*\.(sh|py)|docs/generated/.*|docs/AIcontext/architecture-diagrams\.md|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|scripts/ci/check-docs-generated-drift\.sh|\.pre-commit-config\.yaml)$
+
+      - id: agent-golden-path-skill-contract
+        name: Agent golden-path skill contract
+        entry: python3 scripts/ci/test-agent-golden-path-skill.py
+        language: system
+        pass_filenames: false
+        files: ^(scripts/(docs/generate-agent-golden-path|ci/test-agent-golden-path-skill)\.py|docs/generated/agent-golden-path\.json|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.gitignore|\.pre-commit-config\.yaml)$
 
       - id: docs-auto-update-reconcile-self-test
         name: Docs auto-update reconciliation self-test

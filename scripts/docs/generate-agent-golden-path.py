@@ -10,8 +10,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 JSON_OUTPUT = ROOT / "docs/generated/agent-golden-path.json"
 MARKDOWN_OUTPUT = ROOT / "docs/guides/agent-golden-path.md"
+SKILL_OUTPUTS = (
+    ROOT / ".agents/skills/assay-golden-path/SKILL.md",
+    ROOT / ".claude/skills/assay-golden-path/SKILL.md",
+)
 TABLE_START = "<!-- agent-golden-path-table:start -->"
 TABLE_END = "<!-- agent-golden-path-table:end -->"
+SKILL_DESCRIPTION = (
+    "Drive Assay's install-to-evidence golden path and interpret its stdout and exit "
+    "codes. Use when an agent must operate or diagnose Assay; do not use it to infer "
+    "provider execution, external side effects, or a clean result from missing output."
+)
+EMPTY_STDOUT_RULE = (
+    "Empty stdout in a gap row is an observed limitation, not permission for a caller "
+    "to infer success from missing evidence."
+)
 
 
 def stdout(kind: str, document: str | None = None) -> dict[str, object]:
@@ -409,14 +422,68 @@ def render_markdown(current: str) -> str:
     return f"{before}{TABLE_START}\n{render_table()}\n{TABLE_END}{after}"
 
 
+def render_skill() -> str:
+    lines = [
+        "---",
+        "name: assay-golden-path",
+        f"description: {SKILL_DESCRIPTION}",
+        "---",
+        "",
+        "# Assay Golden Path",
+        "",
+        "Drive the nine steps below in order. Read stdout and the process exit code",
+        "separately; a policy denial can be a successful JSON-RPC exchange rather than",
+        "a process failure.",
+        "",
+        "`docs/generated/agent-golden-path.json` is the authoritative machine contract.",
+        "Read it when exact argv, fields, or per-outcome metadata are needed. Edit and",
+        "run `scripts/docs/generate-agent-golden-path.py` instead of editing this file.",
+        "",
+        f"{EMPTY_STDOUT_RULE}",
+        "Do not replace a linked gap with an inferred clean result.",
+        "",
+        "Cursor does not discover this project skill; issue #2152 step 3 covers Codex",
+        "and Claude Code only. Plugin and marketplace packaging belongs to step 4.",
+        "",
+        "## Journey",
+        "",
+    ]
+    for step in STEPS:
+        lines.extend(
+            [
+                f"### {step['step']}. {step['label']}",
+                "",
+                f"Run: `{step['command']}`",
+                "",
+                f"Exit: {exit_summary(step)}",
+                "",
+                f"Stdout: {step['stdout_summary']}",
+                "",
+                f"On failure: {step['failure_summary']}",
+                "",
+            ]
+        )
+
+    lines.extend(["## Non-claims", ""])
+    non_claims = CONTRACT["non_claims"]
+    assert isinstance(non_claims, list)
+    lines.extend(f"- {claim}" for claim in non_claims)
+    lines.append("")
+    return "\n".join(lines)
+
+
 def main() -> None:
     current = MARKDOWN_OUTPUT.read_text(encoding="utf-8")
     rendered_markdown = render_markdown(current)
+    rendered_skill = render_skill()
     JSON_OUTPUT.write_text(
         json.dumps(CONTRACT, indent=2, ensure_ascii=True) + "\n",
         encoding="utf-8",
     )
     MARKDOWN_OUTPUT.write_text(rendered_markdown, encoding="utf-8")
+    for output in SKILL_OUTPUTS:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(rendered_skill, encoding="ascii")
 
 
 if __name__ == "__main__":

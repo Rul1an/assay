@@ -43,6 +43,8 @@ GENERATORS=(
 # The files the generators own. Anything outside this list is not compared, so a hand-written doc
 # living beside a generated one is not held to the generator's output.
 GENERATED=(
+  .agents/skills/assay-golden-path/SKILL.md
+  .claude/skills/assay-golden-path/SKILL.md
   docs/generated/agent-golden-path.json
   docs/generated/crate-deps.mermaid
   docs/generated/module-map.mermaid
@@ -110,4 +112,4 @@ if [ ${#drifted[@]} -gt 0 ]; then
   exit 1
 fi
 
-echo "generated docs reproduce from their generators (${#GENERATED[@]} files)."
+echo "generated artifacts reproduce from their generators (${#GENERATED[@]} files)."

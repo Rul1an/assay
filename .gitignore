@@ -9,6 +9,12 @@ docs/DISTRIBUTION-CHANNELS.md
 
 # Local / one-off
 .claude/
+!.claude/
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/assay-golden-path/
+!.claude/skills/assay-golden-path/SKILL.md
 .obsidian/
 !.cursor/
 .cursor/*
