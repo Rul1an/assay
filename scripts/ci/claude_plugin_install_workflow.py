@@ -25,6 +25,9 @@ EXPECTED_TOOLS = [
     "assay_policy_decide",
 ]
 AUTH_ENV_PREFIXES = ("ANTHROPIC_", "CLAUDE_CODE_OAUTH_", "ASSAY_AUTH_")
+DRIVER = Path(__file__).resolve()
+SOURCE_ROOT = DRIVER.parents[2]
+WORKFLOW_SCRIPT = DRIVER.with_name("test-claude-plugin-install.sh")
 
 
 class WorkflowError(RuntimeError):
@@ -204,13 +207,6 @@ def plugin_record(payload: object) -> dict[str, object]:
     fail("installed_cache", "plugin list omitted assay@assay", "run `claude plugin list --json` and reinstall assay@assay")
 
 
-def assert_under(path: Path, parent: Path, phase: str, message: str) -> None:
-    try:
-        path.relative_to(parent)
-    except ValueError:
-        fail(phase, message, "remove the stale install and reinstall with a fresh CLAUDE_CONFIG_DIR")
-
-
 def compare_installed_package(source_package: Path, installed: Path) -> None:
     source_files = descendants_are_regular(source_package, "installed_cache")
     descendants_are_regular(installed, "installed_cache")
@@ -250,6 +246,8 @@ def drive_cached_manifest(installed: Path, consumer: Path, env: dict[str, str], 
         fail("initialize", f"installed MCP manifest is invalid: {error}", "reinstall the plugin from the reviewed marketplace")
     if not isinstance(command, str) or not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
         fail("initialize", "installed MCP command/args are not strings", "restore the typed plugin manifest")
+    if command != "assay-mcp-server":
+        fail("binary_spawn", f"installed MCP command drifted: {command!r}", "restore the release binary name in the plugin manifest")
     if args != ["--policy-root", "."]:
         fail(
             "policy_root_resolved_to_consumer",
@@ -309,7 +307,13 @@ def drive_cached_manifest(installed: Path, consumer: Path, env: dict[str, str], 
         },
     ]
     stdin = b"".join(json.dumps(request, separators=(",", ":")).encode() + b"\n" for request in requests)
-    result = run_bounded("initialize", [resolved, *args], cwd=consumer, env=env, stdin=stdin)
+    result = run_bounded(
+        "initialize",
+        [str(expected_server), "--policy-root", "."],
+        cwd=consumer,
+        env=env,
+        stdin=stdin,
+    )
     responses = parse_protocol(result.stdout)
     initialize = responses.get(1, {})
     if initialize.get("result", {}).get("protocolVersion") != "2024-11-05":
@@ -350,22 +354,25 @@ def drive_cached_manifest(installed: Path, consumer: Path, env: dict[str, str], 
 
 
 def verify_workflow() -> None:
-    script = Path(os.environ["ASSAY_CLAUDE_WORKFLOW_SCRIPT"]).resolve()
-    source_root = Path(os.environ.get("ASSAY_SOURCE_ROOT", script.parents[2])).resolve()
+    script = WORKFLOW_SCRIPT
+    source_root = SOURCE_ROOT
     source_package = source_root / "packaging/claude-plugin"
     marketplace = source_root / ".claude-plugin/marketplace.json"
-    claude = Path(os.environ.get("ASSAY_CLAUDE_BIN", shutil.which("claude") or ""))
-    server = Path(os.environ.get("ASSAY_MCP_SERVER_BIN", shutil.which("assay-mcp-server") or ""))
-    if not claude.is_file():
-        fail("prerequisite", "Claude Code executable not found", "install Claude Code and set ASSAY_CLAUDE_BIN if needed")
-    if not server.is_file():
-        fail("prerequisite", "assay-mcp-server executable not found", "install the exact-SHA server and set ASSAY_MCP_SERVER_BIN")
+    claude_lookup = shutil.which("claude")
+    server_lookup = shutil.which("assay-mcp-server")
+    if claude_lookup is None:
+        fail("prerequisite", "Claude Code executable not found", "install Claude Code and put `claude` on PATH")
+    if server_lookup is None:
+        fail("prerequisite", "assay-mcp-server executable not found", "install the exact-SHA `assay-mcp-server` on PATH")
+    claude = Path(claude_lookup).resolve()
+    server = Path(server_lookup).resolve()
     read_bounded(marketplace, "plugin_validate")
 
     git = run_bounded("source_sha", ["git", "rev-parse", "HEAD"], cwd=source_root, env=clean_env())
     source_sha = git.stdout.decode().strip()
     if len(source_sha) != 40 or any(char not in "0123456789abcdef" for char in source_sha):
         fail("source_sha", f"invalid git SHA: {source_sha!r}", "run from a committed git worktree")
+    expected_cache_version = source_sha[:12]
 
     with tempfile.TemporaryDirectory(prefix="assay-claude-plugin-") as temporary:
         temp = Path(temporary).resolve()
@@ -400,17 +407,23 @@ def verify_workflow() -> None:
         listing = run_bounded("installed_cache", [str(claude), "plugin", "list", "--json"], cwd=consumer, env=env)
         try:
             record = plugin_record(json.loads(listing.stdout))
-            installed = Path(str(record["installPath"])).resolve()
             cache_version = str(record["version"])
+            reported_install_path = str(record["installPath"])
         except (KeyError, TypeError, json.JSONDecodeError) as error:
             fail("installed_cache", f"plugin list JSON is invalid: {error}", "run `claude plugin list --json` and inspect assay@assay")
-        assert_under(installed, config, "installed_cache", "installed cache escaped the fresh Claude config")
-        try:
-            installed.relative_to(source_root)
-        except ValueError:
-            pass
-        else:
-            fail("installed_cache", "installed plugin resolves inside the source checkout", "install through the marketplace instead of reading source files directly")
+        installed = config / "plugins/cache/assay/assay" / expected_cache_version
+        if cache_version != expected_cache_version:
+            fail(
+                "installed_cache",
+                f"installed cache version {cache_version!r} does not match source {expected_cache_version!r}",
+                "run marketplace update and plugin update from the committed source head",
+            )
+        if reported_install_path != str(installed):
+            fail(
+                "installed_cache",
+                f"plugin list reported an unexpected install path: {reported_install_path}",
+                "remove the stale install and reinstall with a fresh CLAUDE_CONFIG_DIR",
+            )
         compare_installed_package(source_package, installed)
         print("installed_cache=pass")
 
@@ -458,7 +471,7 @@ def verify_workflow() -> None:
         print("verification=pass")
 
 
-def write_fake_tools(root: Path) -> tuple[Path, Path]:
+def write_fake_tools(root: Path, cache_version: str) -> tuple[Path, Path]:
     fake_bin = root / "fake-bin"
     fake_bin.mkdir()
     claude = fake_bin / "claude"
@@ -512,7 +525,7 @@ elif args[:3] == ["plugin", "marketplace", "add"]:
     print("added")
 elif args[:2] == ["plugin", "install"]:
     source = pathlib.Path(source_file.read_text())
-    cache = config / "plugins/cache/assay/assay/fake-v1"
+    cache = config / "plugins/cache/assay/assay/{cache_version}"
     cache.parent.mkdir(parents=True, exist_ok=True)
     if cache.exists(): shutil.rmtree(cache)
     shutil.copytree(source / "packaging/claude-plugin", cache)
@@ -522,15 +535,16 @@ elif args[:3] == ["plugin", "marketplace", "update"]:
     print("marketplace updated")
 elif args[:2] == ["plugin", "update"]:
     source = pathlib.Path(source_file.read_text())
-    cache = config / "plugins/cache/assay/assay/fake-v1"
+    cache = config / "plugins/cache/assay/assay/{cache_version}"
     if not os.environ.get("FAKE_NO_UPDATE"):
         if cache.exists(): shutil.rmtree(cache)
         shutil.copytree(source / "packaging/claude-plugin", cache)
     print("plugin updated")
 elif args[:3] == ["plugin", "list", "--json"]:
     source = pathlib.Path(source_file.read_text())
-    cache = source / "packaging/claude-plugin" if os.environ.get("FAKE_SOURCE_ONLY") else config / "plugins/cache/assay/assay/fake-v1"
-    print(json.dumps([{{"id":"assay@assay","version":"fake-v1","installPath":str(cache)}}]))
+    cache = source / "packaging/claude-plugin" if os.environ.get("FAKE_SOURCE_ONLY") else config / "plugins/cache/assay/assay/{cache_version}"
+    version = "forged-v2" if os.environ.get("FAKE_CACHE_VERSION_DRIFT") else "{cache_version}"
+    print(json.dumps([{{"id":"assay@assay","version":version,"installPath":str(cache)}}]))
 elif args[:2] == ["mcp", "list"]:
     print("assay: Connected")
 else:
@@ -576,16 +590,17 @@ for line in sys.stdin:
 
 
 def self_test() -> None:
-    script = Path(os.environ["ASSAY_CLAUDE_WORKFLOW_SCRIPT"]).resolve()
-    source_root = script.parents[2]
+    script = WORKFLOW_SCRIPT
+    source_root = SOURCE_ROOT
+    git = run_bounded("self_test", ["git", "rev-parse", "HEAD"], cwd=source_root, env=clean_env())
+    source_sha = git.stdout.decode().strip()
+    if len(source_sha) != 40 or any(char not in "0123456789abcdef" for char in source_sha):
+        fail("self_test", f"invalid git SHA: {source_sha!r}", "run the self-test from a committed git worktree")
     with tempfile.TemporaryDirectory(prefix="assay-claude-plugin-selftest-") as temporary:
         temp = Path(temporary)
-        claude, server = write_fake_tools(temp)
+        claude, _server = write_fake_tools(temp, source_sha[:12])
         base_env = clean_env(
             {
-                "ASSAY_CLAUDE_BIN": str(claude),
-                "ASSAY_MCP_SERVER_BIN": str(server),
-                "ASSAY_SOURCE_ROOT": str(source_root),
                 "ASSAY_CLAUDE_WORKFLOW_TIMEOUT_SECONDS": "2",
                 "PATH": os.pathsep.join([str(claude.parent), os.environ.get("PATH", "")]),
             }
@@ -614,6 +629,7 @@ def self_test() -> None:
         mutations = [
             ("FAKE_FAIL_PHASE", "marketplace_update", "phase=marketplace_update"),
             ("FAKE_SOURCE_ONLY", "1", "phase=installed_cache"),
+            ("FAKE_CACHE_VERSION_DRIFT", "1", "phase=installed_cache"),
             ("FAKE_TOOL_DRIFT", "1", "phase=tools_list"),
             ("FAKE_NO_UPDATE", "1", "phase=installed_cache"),
             ("FAKE_OVERSIZE_PHASE", "plugin_validate", "stdout exceeded 1048576-byte ceiling"),
