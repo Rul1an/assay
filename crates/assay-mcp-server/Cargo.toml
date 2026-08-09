@@ -51,3 +51,10 @@ base64 = "0.22"
 # uuid = { version = "1.0", features = ["v4"] } # Removed in favor of SystemTime
 rsa = "0.9"
 rand = "0.8"
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
+process-wrap = { workspace = true, features = ["process-group", "std"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+process-wrap = { workspace = true, features = ["job-object", "std"] }

@@ -141,7 +141,7 @@ fn assay<S: AsRef<OsStr>>(cwd: &Path, args: &[S]) -> Output {
     }
     command.current_dir(cwd).env("NO_COLOR", "1").args(args);
     run_bounded(
-        &mut command,
+        command,
         b"",
         GOLDEN_PATH_LIMITS,
         "agent golden-path CLI command",
