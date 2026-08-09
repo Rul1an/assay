@@ -681,6 +681,11 @@ git commit -m "test(agent): reject symlinked golden-path skills"
 - Rewrite: `scripts/ci/test-check-docs-generated-drift.sh`
 - Modify: `.pre-commit-config.yaml:103-112`
 
+**Task 6 implementation deviation:** Independent review found that the safety
+wrapper's duplicated snapshot implementation had no independent non-constancy proof.
+The shared `scripts/ci/lib/drift-tree-snapshot.sh` helper therefore overrides the
+local-copy sketch while preserving every behavioral requirement and the PR-B scope.
+
 **Interfaces:**
 - Produces shell functions:
   - `seed_repo(destination: str)`

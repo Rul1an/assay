@@ -516,7 +516,7 @@ from pathlib import Path
 path = Path(os.environ["CASE_ROOT"]) / ".pre-commit-config.yaml"
 source = (
     "        files: ^(scripts/ci/(check-docs-generated-drift|"
-    "test-check-docs-generated-drift)\\.sh|scripts/docs/"
+    "test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot)\\.sh|scripts/docs/"
     "generate-agent-golden-path\\.py|\\.(agents|claude)/skills/"
     "assay-golden-path/SKILL\\.md)$\n"
 )
@@ -540,7 +540,7 @@ from pathlib import Path
 path = Path(os.environ["CASE_ROOT"]) / ".pre-commit-config.yaml"
 source = (
     "        files: ^(scripts/ci/(check-docs-generated-drift|"
-    "test-check-docs-generated-drift)\\.sh|scripts/docs/"
+    "test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot)\\.sh|scripts/docs/"
     "generate-agent-golden-path\\.py|\\.(agents|claude)/skills/"
     "assay-golden-path/SKILL\\.md)$\n"
 )

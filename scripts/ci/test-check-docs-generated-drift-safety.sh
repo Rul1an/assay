@@ -1,16 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-without_git_context() {
-  env \
-    -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
-    -u GIT_COMMON_DIR \
-    -u GIT_DIR \
-    -u GIT_INDEX_FILE \
-    -u GIT_OBJECT_DIRECTORY \
-    -u GIT_WORK_TREE \
-    "$@"
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/ci/lib/drift-tree-snapshot.sh
+source "$SCRIPT_DIR/lib/drift-tree-snapshot.sh"
 
 ROOT="$(without_git_context git rev-parse --show-toplevel)"
 PROBE="$(mktemp -d)"
@@ -24,19 +17,6 @@ cleanup_probe() {
 }
 trap cleanup_probe EXIT
 
-hermetic_git() {
-  local root="$1"
-  shift
-  without_git_context env \
-    GIT_CONFIG_NOSYSTEM=1 \
-    GIT_CONFIG_GLOBAL=/dev/null \
-    GIT_CEILING_DIRECTORIES="$(dirname "$root")" \
-    git -C "$root" \
-      -c core.excludesFile= \
-      -c core.attributesFile= \
-      "$@"
-}
-
 seed_repo() {
   local destination="$1"
   mkdir -p "$destination"
@@ -46,61 +26,57 @@ seed_repo() {
   hermetic_git "$destination" add -f -- .
 }
 
-snapshot_tree() {
-  local root="$1"
-  hermetic_git "$root" ls-files -z --cached --others --exclude-standard \
-    | SNAPSHOT_ROOT="$root" python3 /dev/fd/3 3<<'PY'
-import hashlib
-import json
-import os
-import stat
-import sys
-
-MAX_LIST_BYTES = 64 * 1024 * 1024
-MAX_ENTRIES = 200_000
-MAX_TOTAL_CONTENT_BYTES = 2 * 1024 * 1024 * 1024
-
-listing = sys.stdin.buffer.read(MAX_LIST_BYTES + 1)
-if len(listing) > MAX_LIST_BYTES:
-    raise SystemExit("snapshot path list exceeds 64 MiB")
-
-paths = listing.rstrip(b"\0").split(b"\0") if listing else []
-if len(paths) > MAX_ENTRIES:
-    raise SystemExit("snapshot path list exceeds 200000 entries")
-
-root = os.fsencode(os.environ["SNAPSHOT_ROOT"])
-total_content = 0
-for path in sorted(paths):
-    absolute = os.path.join(root, path)
-    metadata = os.lstat(absolute)
-    file_type = stat.S_IFMT(metadata.st_mode)
-    digest = hashlib.sha256()
-    digest.update(len(path).to_bytes(8, "big"))
-    digest.update(path)
-    digest.update(file_type.to_bytes(4, "big"))
-
-    if stat.S_ISREG(metadata.st_mode):
-        total_content += metadata.st_size
-        if total_content > MAX_TOTAL_CONTENT_BYTES:
-            raise SystemExit("snapshot regular-file content exceeds 2 GiB")
-        digest.update(metadata.st_size.to_bytes(8, "big"))
-        with open(absolute, "rb") as handle:
-            while chunk := handle.read(1024 * 1024):
-                digest.update(chunk)
-    elif stat.S_ISLNK(metadata.st_mode):
-        target = os.readlink(absolute)
-        target_bytes = os.fsencode(target)
-        digest.update(len(target_bytes).to_bytes(8, "big"))
-        digest.update(target_bytes)
-
-    display_path = json.dumps(os.fsdecode(path), ensure_ascii=True)
-    print(f"{digest.hexdigest()}\t{display_path}")
-PY
-}
-
 CASE_ROOT="$PROBE/case/repo"
 seed_repo "$CASE_ROOT"
 SELF_TEST="$CASE_ROOT/scripts/ci/test-check-docs-generated-drift.sh"
+
+CASE_ROOT="$CASE_ROOT" python3 - <<'PY'
+from pathlib import Path
+import os
+import re
+
+root = Path(os.environ["CASE_ROOT"])
+consumers = (
+    root / "scripts/ci/test-check-docs-generated-drift-safety.sh",
+    root / "scripts/ci/test-check-docs-generated-drift.sh",
+)
+function_names = ("without_git_context", "hermetic_git", "snapshot_tree")
+source_pattern = re.compile(
+    r"(?m)^\s*(?:source|\.)\s+.*lib/drift-tree-snapshot\.sh[\"']?\s*$"
+)
+
+for consumer in consumers:
+    text = consumer.read_text(encoding="utf-8")
+    for name in function_names:
+        if re.search(rf"(?m)^{name}\s*\(\)\s*\{{", text):
+            raise SystemExit(f"FAIL: {consumer.name} defines local {name}()")
+    source_count = len(source_pattern.findall(text))
+    if source_count != 1:
+        raise SystemExit(
+            f"FAIL: {consumer.name} sources the snapshot helper {source_count} times, wanted 1"
+        )
+PY
+
+SNAPSHOT_CASE_ROOT="$PROBE/snapshot-meta/repo"
+seed_repo "$SNAPSHOT_CASE_ROOT"
+SNAPSHOT_BEFORE="$(snapshot_tree "$SNAPSHOT_CASE_ROOT")"
+printf '\n%%%% wrapper snapshot meta-mutation\n' \
+  >> "$SNAPSHOT_CASE_ROOT/docs/generated/crate-deps.mermaid"
+SNAPSHOT_AFTER="$(snapshot_tree "$SNAPSHOT_CASE_ROOT")"
+if [[ "$SNAPSHOT_BEFORE" == "$SNAPSHOT_AFTER" ]]; then
+  echo "FAIL: safety wrapper snapshot ignored a tracked-file mutation" >&2
+  exit 1
+fi
+SNAPSHOT_DIFF="$PROBE/snapshot-meta.diff"
+diff -u \
+  <(printf '%s\n' "$SNAPSHOT_BEFORE") \
+  <(printf '%s\n' "$SNAPSHOT_AFTER") >"$SNAPSHOT_DIFF" || true
+if ! grep -Fq 'docs/generated/crate-deps.mermaid' "$SNAPSHOT_DIFF"; then
+  cat "$SNAPSHOT_DIFF" >&2
+  echo "FAIL: safety wrapper snapshot diff did not name docs/generated/crate-deps.mermaid" >&2
+  exit 1
+fi
+echo "ok    safety wrapper snapshot detects its tracked-file meta-mutation"
 
 MODE="$(python3 - "$SELF_TEST" <<'PY'
 from pathlib import Path
