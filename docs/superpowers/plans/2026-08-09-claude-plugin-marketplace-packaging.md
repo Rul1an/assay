@@ -31,21 +31,34 @@
 - Consumes: installed Claude CLI, the approved wrapper-shaped MCP entry, and `assay-mcp-server` on an isolated `PATH`.
 - Produces: exact client-version/argv/output evidence selecting wrapper or bare server-map shape for Task 1.
 
-- [ ] **Step 1: Build an ephemeral minimal marketplace and plugin**
+- [x] **Step 1: Build an ephemeral minimal marketplace and plugin**
 
 Create the approved marketplace/plugin metadata and wrapper-shaped `.mcp.json` under `mktemp -d`; do not copy these files into the worktree. Use the installed client's help output to derive marketplace add/install/list syntax.
 
-- [ ] **Step 2: Drive the installed client from a disposable project**
+- [x] **Step 2: Drive the installed client from a disposable project**
 
-With a fresh `CLAUDE_CONFIG_DIR`, add the temporary marketplace, install `assay@assay` at local scope, inspect the installed cache rather than the source directory, and run `claude mcp list`. Then drive the cached manifest against the built server through full `initialize` and `tools/list`.
+With a fresh `CLAUDE_CONFIG_DIR`, add the temporary marketplace, install `assay@assay` at local scope, and inspect the installed cache rather than the source directory. Run `CLAUDE_PROJECT_DIR="$PWD" claude mcp list`: the standalone health subcommand does not synthesize this session variable, so this proves cached-wrapper parsing and connection but not session-time injection. Then drive the cached manifest against the built server through full `initialize` and `tools/list`.
 
-- [ ] **Step 3: Branch explicitly on the result**
+- [x] **Step 3: Branch explicitly on the result**
 
 If the wrapper connects and returns the five exact tools, record it and continue. If the wrapper is rejected, repeat once with a bare server map. Update the approved design and obtain a new design review before Task 1 if and only if the bare shape succeeds. If neither works, stop as a client/plugin compatibility blocker; do not commit either shape.
 
-- [ ] **Step 4: Record provenance**
+- [x] **Step 4: Record provenance**
 
 Record exact source SHA, `claude --version`, generated temporary paths, executed argv, installed cache version/path, `mcp list`, `initialize`, and `tools/list` outcomes. This preflight selects a shape; Task 3 later proves the complete shipped package and update workflow.
+
+**Task 0 evidence:** At source SHA
+`932ea9507560e47b0dbd3a3840218b8da601e2a8`, Claude Code `2.1.32`
+accepted the wrapper, installed `assay@assay` at local scope into its isolated
+cache, and exposed the entry through `plugin list --json`. With
+`CLAUDE_PROJECT_DIR` explicitly set to the disposable project, `claude mcp
+list` reported `Connected`. The cached manifest independently completed
+`initialize` and `tools/list` and returned the five exact production names.
+Without the explicit variable, the standalone health subcommand failed before
+spawn and its debug log reported `Missing environment variables in plugin MCP
+config: CLAUDE_PROJECT_DIR`; Task 3 therefore owns separate actual-session
+injection proof. All temporary config, marketplace, cache, and project paths
+were deleted after each probe.
 
 ### Task 1: Pin Marketplace, Plugin, and Driven MCP Contracts
 
@@ -191,11 +204,11 @@ Commit as `feat(plugin): generate cache-safe golden-path resources`.
 
 **Interfaces:**
 - Consumes: marketplace root, `assay@assay`, server on `PATH`, Claude CLI.
-- Produces: bounded disposable-client proof recording client version, source SHA, cache version, and each phase.
+- Produces: bounded disposable-client proof recording client version, source SHA, cache version, health-subcommand connection, actual-session connection, and each phase.
 
 - [ ] **Step 1: Write a failing workflow self-test**
 
-Use a fake Claude executable and require validate, add/install/update, cache inspection, `mcp list`, complete JSON-RPC exchange, and skill discovery. It must reject a source-directory-only success.
+Use a fake Claude executable and require validate, add/install/update, cache inspection, explicit-project-dir `mcp list`, complete JSON-RPC exchange, actual-session MCP connection without manual project-dir injection, and skill discovery. It must reject a source-directory-only success.
 
 - [ ] **Step 2: Verify RED**
 
@@ -207,7 +220,7 @@ State that the plugin bundles no server, installation alone enforces nothing, po
 
 - [ ] **Step 4: Implement the bounded disposable workflow**
 
-Use fresh `CLAUDE_CONFIG_DIR`, temporary marketplace and consuming project, trap cleanup, 1 MiB output ceilings, and process-tree deadlines equivalent to #2189. Never mutate normal Claude config or pass credentials. Fail if installed cache resolves inside the source checkout.
+Use fresh `CLAUDE_CONFIG_DIR`, temporary marketplace and consuming project, trap cleanup, 1 MiB output ceilings, and process-tree deadlines equivalent to #2189. Set `CLAUDE_PROJECT_DIR` explicitly only for the standalone `mcp list` health check. Invoke the actual Claude session without that manual injection and prove its MCP connection separately. Never mutate normal Claude config or pass credentials. Fail if installed cache resolves inside the source checkout.
 
 - [ ] **Step 5: Run the real-client proof**
 
@@ -219,6 +232,7 @@ claude_version=<exact output>
 installed_cache_version=<exact value>
 plugin_validate=pass
 mcp_list_connected=pass
+actual_session_mcp_connected=pass
 initialize=pass
 tools_list=pass
 skill_discovery=pass

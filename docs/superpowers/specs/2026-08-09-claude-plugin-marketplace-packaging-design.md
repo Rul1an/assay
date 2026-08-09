@@ -224,13 +224,16 @@ Before push, run both layers with the installed Claude client:
 - isolated marketplace add/install/update using a fresh
   `CLAUDE_CONFIG_DIR`;
 - inspect the cached plugin rather than the source directory;
-- from a disposable consuming project, run `claude mcp list` to
-  prove that the cached wrapper-shaped configuration is accepted and the
-  stdio server connects;
+- from a disposable consuming project, run
+  `CLAUDE_PROJECT_DIR="$PWD" claude mcp list`; the standalone health subcommand
+  does not synthesize this session variable, so the explicit value proves that
+  the cached wrapper-shaped configuration is accepted and the stdio server
+  connects, but does not prove session-time variable injection;
 - drive the cached `.mcp.json` against the built server through a complete
   `initialize` plus `tools/list` exchange, not merely a config-listing command;
-- invoke Claude Code from a disposable project and verify discovery of the
-  packaged `assay-golden-path` skill.
+- invoke an actual Claude Code session from a disposable project without
+  manually setting `CLAUDE_PROJECT_DIR`, and verify both session-time MCP
+  connection and discovery of the packaged `assay-golden-path` skill.
 
 Record the exact client version, source SHA, installed cache version, commands,
 and outcomes in the PR review packet. Vendor validation supplements rather than
