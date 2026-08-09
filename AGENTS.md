@@ -71,37 +71,32 @@ including its explicit non-claims, or amend the decision through a new ADR.
 
 ## Review Quorum
 
-The builder's self-review does not count. On the final head SHA, require:
+The builder's self-review does not count. On the final head SHA, require one non-building agent
+review that actually reviews the change and records its verdict and findings. Automated reviewers
+may add evidence, but they are not part of the quorum and their absence never needs a substitute.
+A non-building reviewer authored or edited neither the PR's change nor any normative specification
+or implementation plan governing that change, whether or not the PR cites the artifact. Prior
+read-only review of that specification or plan does not itself make the reviewer a builder.
 
-1. one non-building agent review plus CodeRabbit or Copilot; or
-2. two non-building agent reviews, when each bot is skipped, silent for 30 minutes after the last
-   push, or declares a limit in its own record on the current head — a declared limit opens that
-   bot's slot immediately, while a merely silent bot still gets its 30 minutes.
-
-`skipped` is not `pass`. A new push invalidates reviews on the prior head, and the head a review was
-measured on is the head it counts for — a merge commit that brings `main` into the branch is a new
-head like any other. A review is revalidated for a new head only by a recorded equivalence check
-with two conditions: the new head introduces no change, to any file, that is not already on `main`
-— its tree is what merging `main` into the reviewed head produces without conflicts — and the
-advance from the reviewed head to the new head touched no file the review covered, meaning the
-PR's changed files as of the reviewed head. The first covers the whole tree, never a file list, so
-content outside the reviewed files cannot ride the carry; the second exists because an upstream
-change to a reviewed file changes what lands even though it smuggles nothing, and "the branch added
-nothing" is a neighbouring property of "what was reviewed is what merges", not the same one. Put
-both checks in the review record; without them, the review does not carry. Rewritten history
-(rebase, squash) does not carry a review even when the tree is identical: revalidation is for
-upstream advances only.
+A new push invalidates the review on the prior head, and the head a review was measured on is the
+head it counts for — a merge commit that brings `main` into the branch is a new head like any other.
+A review is revalidated for a new head only by a recorded equivalence check with two conditions: the
+new head introduces no change, to any file, that is not already on `main` — its tree is what merging
+`main` into the reviewed head produces without conflicts — and the advance from the reviewed head to
+the new head touched no file the review covered, meaning the PR's changed files as of the reviewed
+head. The first covers the whole tree, never a file list, so content outside the reviewed files cannot
+ride the carry; the second exists because an upstream change to a reviewed file changes what lands
+even though it smuggles nothing, and "the branch added nothing" is a neighbouring property of "what
+was reviewed is what merges", not the same one. Put both checks in the review record; without them,
+the review does not carry. Rewritten history (rebase, squash) does not carry a review even when the
+tree is identical: revalidation is for upstream advances only.
 
 A review record that says it did not review is not a review. A bot that returns `COMMENTED` with
 "unable to review — quota limit", or a check that reports `pass` alongside "review rate limited",
 leaves no findings and no reviewer; it is unavailable infrastructure wearing the shape of a verdict,
-and it satisfies neither route. Read what a record says, not that it exists. A limit-shaped record
-is, however, itself the observation that the reviewer is unavailable, and that bot's slot in route
-2 opens immediately — provided the record declaring the limit is on the head the substitution
-covers (quotas reset; an earlier head's limit record does not carry forward), and the review record
-documents which reviewer was limited, which agent reviewed instead, and on which head. Reviews
-count as artifacts bound to an exact head, not as entries in GitHub's review list; a reviewer whose
-tooling cannot submit a review record counts through a comment bound to the SHA it reviewed.
+not a pass. Read what a record says, not that it exists. Reviews count as artifacts bound to an exact
+head, not as entries in GitHub's review list; a reviewer whose tooling cannot submit a review record
+counts through a comment bound to the SHA it reviewed.
 
 Auto-merge may be enabled only when:
 
@@ -167,6 +162,6 @@ so that display and round-trip "can never drift apart".
   plan/read-only mode.
 - Cursor may implement locally in its own worktree. Cursor Background Agents must not mutate auth
   or evidence-boundary code.
-- Bugbot, CodeRabbit, and Copilot are reviewers, not authorities. Their findings require technical
-  verification; their absence is handled by the review fallback above.
+- Bugbot, CodeRabbit, and Copilot are optional reviewers, not authorities. Their findings require
+  technical verification; their absence does not block the non-building-agent quorum above.
 - Heartbeats may monitor status only. They must not generate, edit, commit, push, or merge code.
