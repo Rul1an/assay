@@ -52,6 +52,9 @@ INVOCATION_CWD_RULE = (
 SOURCE_REPO_CWD_RULE = (
     "A present `working_directory` is a POSIX path relative to the source repository."
 )
+PYTHON_PLACEHOLDER_RULE = (
+    "Replace `<python>` with `python3` on Unix-like hosts or `python` on Windows."
+)
 CURSOR_SCOPE = (
     "Cursor's skill documentation (https://cursor.com/docs/skills), accessed on "
     "2026-08-09, describes .agents/skills as a project-level location and "
@@ -983,6 +986,7 @@ def main() -> None:
         EMPTY_STDOUT_RULE,
         INVOCATION_CWD_RULE,
         SOURCE_REPO_CWD_RULE,
+        PYTHON_PLACEHOLDER_RULE,
         CURSOR_SCOPE,
     )
     for fragment in required_body:

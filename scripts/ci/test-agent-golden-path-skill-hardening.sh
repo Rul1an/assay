@@ -7,7 +7,7 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 # PR B adds discoverability, cwd wording, and issue-reference hardening cases to
 # the 58-case durability boundary established by PR B0.
-EXPECTED_CASES=71
+EXPECTED_CASES=72
 # Parser-layer follow-ups stay outside the approved cumulative case chain. The
 # 22 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode, and
 # 2 inline-parser checks; pin them so deletion cannot leave the cumulative total green.
@@ -594,6 +594,29 @@ PY
     "$case_root" \
     "skill omits required guidance: '$expected'"
 done
+
+case_root="$SCRATCH/skill-python-placeholder-rule"
+seed_case "$case_root"
+CASE_ROOT="$case_root" python3 - <<'PY'
+import os
+from pathlib import Path
+
+rule = "Replace `<python>` with `python3` on Unix-like hosts or `python` on Windows.\n"
+root = Path(os.environ["CASE_ROOT"])
+for relative in (
+    ".agents/skills/assay-golden-path/SKILL.md",
+    ".claude/skills/assay-golden-path/SKILL.md",
+):
+    path = root / relative
+    text = path.read_text(encoding="ascii")
+    if text.count(rule) != 1:
+        raise SystemExit(f"skill Python placeholder rule is not unique: {rule!r}")
+    path.write_text(text.replace(rule, "", 1), encoding="ascii")
+PY
+expect_named_failure \
+  "skill Python placeholder rule" \
+  "$case_root" \
+  "skill omits required guidance: 'Replace \`<python>\` with \`python3\` on Unix-like hosts or \`python\` on Windows.'"
 
 case_root="$SCRATCH/public-vocabulary-allow-contract-evidence"
 seed_case "$case_root"

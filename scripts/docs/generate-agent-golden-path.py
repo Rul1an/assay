@@ -35,6 +35,9 @@ INVOCATION_CWD_RULE = (
 SOURCE_REPO_CWD_RULE = (
     "A present `working_directory` is a POSIX path relative to the source repository."
 )
+PYTHON_PLACEHOLDER_RULE = (
+    "Replace `<python>` with `python3` on Unix-like hosts or `python` on Windows."
+)
 
 
 def stdout(kind: str, document: str | None = None) -> dict[str, object]:
@@ -501,6 +504,7 @@ def render_skill() -> str:
         "",
         INVOCATION_CWD_RULE,
         SOURCE_REPO_CWD_RULE,
+        PYTHON_PLACEHOLDER_RULE,
         "",
         f"{EMPTY_STDOUT_RULE}",
         "Do not replace a linked gap with an inferred clean result.",

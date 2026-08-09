@@ -15,6 +15,7 @@ run `scripts/docs/generate-agent-golden-path.py` instead of editing this file.
 
 When a step has no `working_directory`, run it from the invocation cwd.
 A present `working_directory` is a POSIX path relative to the source repository.
+Replace `<python>` with `python3` on Unix-like hosts or `python` on Windows.
 
 Empty stdout in a gap row is an observed limitation, not permission for a caller to infer success from missing evidence.
 Do not replace a linked gap with an inferred clean result.
