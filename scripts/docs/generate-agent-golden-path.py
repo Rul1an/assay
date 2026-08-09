@@ -54,6 +54,12 @@ def outcome(
     }
 
 
+def require_type(value: object, expected: type, label: str):
+    if not isinstance(value, expected):
+        raise SystemExit(f"{label} must be {expected.__name__}")
+    return value
+
+
 STEPS: list[dict[str, object]] = [
     {
         "step": 1,
@@ -365,10 +371,13 @@ STEPS: list[dict[str, object]] = [
 ]
 
 for step in STEPS:
-    primary_outcome = step["outcomes"][0]
-    assert isinstance(primary_outcome, dict)
-    primary_argv = primary_outcome["argv"]
-    assert isinstance(primary_argv, list)
+    outcomes = require_type(step["outcomes"], list, "golden-path outcomes")
+    primary_outcome = require_type(
+        outcomes[0], dict, "primary golden-path outcome"
+    )
+    primary_argv = require_type(
+        primary_outcome["argv"], list, "primary golden-path argv"
+    )
     step["command"] = " ".join([str(step["binary"]), *map(str, primary_argv)])
 
 
@@ -388,8 +397,7 @@ CONTRACT: dict[str, object] = {
 
 
 def exit_summary(step: dict[str, object]) -> str:
-    outcomes = step["outcomes"]
-    assert isinstance(outcomes, list)
+    outcomes = require_type(step["outcomes"], list, "golden-path outcomes")
     return "; ".join(
         f"{item['label']} `{item['exit_code']}`" for item in outcomes
     ) + "."
@@ -471,8 +479,7 @@ def render_skill() -> str:
         )
 
     lines.extend(["## Non-claims", ""])
-    non_claims = CONTRACT["non_claims"]
-    assert isinstance(non_claims, list)
+    non_claims = require_type(CONTRACT["non_claims"], list, "golden-path non-claims")
     lines.extend(f"- {claim}" for claim in non_claims)
     lines.append("")
     return "\n".join(lines)

@@ -102,14 +102,13 @@ repos:
 
       - id: docs-generated-drift-self-test
         name: Generated-docs drift check self-test
-        entry: bash scripts/ci/test-check-docs-generated-drift.sh
+        entry: bash -c 'bash scripts/ci/test-check-docs-generated-drift-safety.sh && bash scripts/ci/test-check-docs-generated-drift.sh'
         language: system
         pass_filenames: false
         # Both properties this pins have failed here before: `check-aee-seal-fixture-drift.sh`
         # documents an earlier version that ran its emitter in place and destroyed the fixtures it
         # audited, and `check-linux.sh` returned 0 on every failure (#2076).
-        stages: [pre-push]
-        files: ^(scripts/ci/(check-docs-generated-drift|test-check-docs-generated-drift)\.sh|\.(agents|claude)/skills/assay-golden-path/SKILL\.md)$
+        files: ^(scripts/ci/(check-docs-generated-drift|test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot)\.sh|scripts/docs/generate-agent-golden-path\.py|\.(agents|claude)/skills/assay-golden-path/SKILL\.md)$
 
       - id: docs-generated-drift
         name: Generated docs match their generators
@@ -125,14 +124,14 @@ repos:
         # Caught here instead, the diagram edge lands in the pull request that added the dependency,
         # where a reviewer can see why it moved. It also makes the bot's `has_changes` false by
         # construction, so the un-mergeable PR is never created.
-        files: ^(Cargo\.toml|crates/.*/Cargo\.toml|scripts/docs/.*\.(sh|py)|docs/generated/.*|docs/AIcontext/architecture-diagrams\.md|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|scripts/ci/check-docs-generated-drift\.sh|\.pre-commit-config\.yaml)$
+        files: ^(Cargo\.toml|crates/.*/Cargo\.toml|scripts/docs/.*\.(sh|py)|docs/generated/.*|docs/AIcontext/architecture-diagrams\.md|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|scripts/ci/check-docs-generated-drift\.sh|\.gitattributes|\.pre-commit-config\.yaml)$
 
       - id: agent-golden-path-skill-contract
         name: Agent golden-path skill contract
         entry: bash -c 'python3 scripts/ci/test-agent-golden-path-skill.py && bash scripts/ci/test-agent-golden-path-skill-optimization.sh && bash scripts/ci/test-agent-golden-path-skill-hardening.sh'
         language: system
         pass_filenames: false
-        files: ^(scripts/docs/generate-agent-golden-path\.py|scripts/ci/test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.pre-commit-config\.yaml)$
+        files: ^(scripts/docs/generate-agent-golden-path\.py|scripts/ci/test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$
 
       - id: docs-auto-update-reconcile-self-test
         name: Docs auto-update reconciliation self-test

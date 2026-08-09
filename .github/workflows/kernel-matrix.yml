@@ -20,6 +20,7 @@ on:
       - ".agents/**"
       - ".claude/**"
       - ".gitignore"
+      - ".gitattributes"
       - ".pre-commit-config.yaml"
       - "docs/generated/**"
       - "docs/AIcontext/architecture-diagrams.md"
