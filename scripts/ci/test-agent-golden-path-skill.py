@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 
@@ -48,6 +49,47 @@ def read_bounded_evidence(path: Path, label: str) -> bytes:
     if len(payload) > MAX_EVIDENCE_BYTES:
         fail(f"{label} exceeds {MAX_EVIDENCE_BYTES}-byte limit")
     return payload
+
+
+def workflow_pull_request_paths(text: str) -> set[str]:
+    """Read active pull-request paths without accepting comments or sibling keys."""
+    lines = text.splitlines()
+    section_start = None
+    search_from = 0
+    for indentation, key in ((0, "on:"), (2, "pull_request:"), (4, "paths:")):
+        matches = []
+        for index in range(search_from, len(lines)):
+            line = lines[index]
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            current_indentation = len(line) - len(line.lstrip(" "))
+            if section_start is not None and current_indentation < indentation:
+                break
+            if current_indentation == indentation and stripped == key:
+                matches.append(index)
+        if len(matches) != 1:
+            fail(f"kernel-matrix workflow must declare exactly one {key[:-1]} section")
+        section_start = matches[0]
+        search_from = section_start + 1
+
+    paths = set()
+    item_pattern = re.compile(r'^\s{6}-\s+"([^"]+)"\s*(?:#.*)?$')
+    for line in lines[search_from:]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indentation = len(line) - len(line.lstrip(" "))
+        if indentation <= 4:
+            break
+        match = item_pattern.fullmatch(line)
+        if not match:
+            fail("kernel-matrix pull_request.paths contains an unsupported entry")
+        path = match.group(1)
+        if path in paths:
+            fail(f"kernel-matrix pull_request.paths duplicates entry: {path}")
+        paths.add(path)
+    return paths
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -182,6 +224,7 @@ def main() -> None:
             fail(f"skill introduces forbidden or stale claim: {phrase!r}")
 
     workflow = read_bounded_evidence(WORKFLOW_PATH, "workflow evidence").decode("utf-8")
+    workflow_paths = workflow_pull_request_paths(workflow)
     required_workflow_paths = (
         'scripts/**',
         '.agents/**',
@@ -193,7 +236,7 @@ def main() -> None:
         '.github/workflows/kernel-matrix.yml',
     )
     for path in required_workflow_paths:
-        if f'- "{path}"' not in workflow:
+        if path not in workflow_paths:
             fail(f"kernel-matrix workflow does not cover skill contract path: {path}")
 
     print("agent golden-path skill: portable, byte-identical, and contract-complete")

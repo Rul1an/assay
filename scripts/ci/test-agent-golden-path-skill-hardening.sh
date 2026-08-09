@@ -50,9 +50,10 @@ expect_named_failure \
   "guide omits working directory for protected-action"
 
 for workflow_path in 'scripts/**' '.github/workflows/kernel-matrix.yml'; do
-  case_root="$SCRATCH/workflow-$(printf '%s' "$workflow_path" | tr '/.*' '---')"
-  seed_case "$case_root"
-  WORKFLOW_PATH="$workflow_path" CASE_ROOT="$case_root" python3 - <<'PY'
+  for mutation in remove comment; do
+    case_root="$SCRATCH/workflow-$mutation-$(printf '%s' "$workflow_path" | tr '/.*' '---')"
+    seed_case "$case_root"
+    WORKFLOW_PATH="$workflow_path" CASE_ROOT="$case_root" MUTATION="$mutation" python3 - <<'PY'
 import os
 from pathlib import Path
 
@@ -61,12 +62,14 @@ line = f'      - "{os.environ["WORKFLOW_PATH"]}"\n'
 text = path.read_text(encoding="utf-8")
 if text.count(line) != 1:
     raise SystemExit(f"workflow path is not uniquely declared: {line!r}")
-path.write_text(text.replace(line, "", 1), encoding="utf-8")
+replacement = "" if os.environ["MUTATION"] == "remove" else f"      # {line.lstrip()}"
+path.write_text(text.replace(line, replacement, 1), encoding="utf-8")
 PY
-  expect_named_failure \
-    "workflow without $workflow_path" \
-    "$case_root" \
-    "kernel-matrix workflow does not cover skill contract path: $workflow_path"
+    expect_named_failure \
+      "workflow $mutation mutation for $workflow_path" \
+      "$case_root" \
+      "kernel-matrix workflow does not cover skill contract path: $workflow_path"
+  done
 done
 
 for evidence in contract skill guide workflow; do
