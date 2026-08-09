@@ -21,16 +21,25 @@ mkdir -p \
   "$SCRATCH/scripts/ci" \
   "$SCRATCH/scripts/docs" \
   "$SCRATCH/docs/generated" \
+  "$SCRATCH/examples/privileged-action-gate/policies" \
   "$SCRATCH/.agents/skills/assay-golden-path" \
   "$SCRATCH/.claude/skills/assay-golden-path" \
   "$SCRATCH/.claude-plugin" \
-  "$SCRATCH/packaging/claude-plugin/.claude-plugin"
+  "$SCRATCH/packaging/claude-plugin/.claude-plugin" \
+  "$SCRATCH/packaging/claude-plugin/skills/assay-golden-path/references" \
+  "$SCRATCH/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies"
 
 cp "$ROOT/scripts/ci/test-agent-golden-path-skill.py" "$SCRATCH/scripts/ci/"
 cp "$ROOT/scripts/docs/generate-agent-golden-path.py" "$SCRATCH/scripts/docs/"
 cp "$ROOT/.gitignore" "$SCRATCH/"
 cp "$ROOT/.gitattributes" "$SCRATCH/"
 cp "$ROOT/docs/generated/agent-golden-path.json" "$SCRATCH/docs/generated/"
+cp "$ROOT/examples/privileged-action-gate/mock_github_mcp.py" \
+  "$SCRATCH/examples/privileged-action-gate/"
+cp "$ROOT/examples/privileged-action-gate/baseline-approved.json" \
+  "$SCRATCH/examples/privileged-action-gate/"
+cp "$ROOT/examples/privileged-action-gate/policies/no-allowance.yaml" \
+  "$SCRATCH/examples/privileged-action-gate/policies/"
 cp "$ROOT/.agents/skills/assay-golden-path/SKILL.md" \
   "$SCRATCH/.agents/skills/assay-golden-path/"
 cp "$ROOT/.claude/skills/assay-golden-path/SKILL.md" \
@@ -39,6 +48,16 @@ cp "$ROOT/.claude-plugin/marketplace.json" "$SCRATCH/.claude-plugin/"
 cp "$ROOT/packaging/claude-plugin/.claude-plugin/plugin.json" \
   "$SCRATCH/packaging/claude-plugin/.claude-plugin/"
 cp "$ROOT/packaging/claude-plugin/.mcp.json" "$SCRATCH/packaging/claude-plugin/"
+cp "$ROOT/packaging/claude-plugin/skills/assay-golden-path/SKILL.md" \
+  "$SCRATCH/packaging/claude-plugin/skills/assay-golden-path/"
+cp "$ROOT/packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json" \
+  "$SCRATCH/packaging/claude-plugin/skills/assay-golden-path/references/"
+cp "$ROOT/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/mock_github_mcp.py" \
+  "$SCRATCH/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/"
+cp "$ROOT/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json" \
+  "$SCRATCH/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/"
+cp "$ROOT/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml" \
+  "$SCRATCH/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/"
 scratch_git -c init.defaultBranch=main init -q
 scratch_git -c core.excludesFile= -c core.attributesFile= \
   add -f -- .

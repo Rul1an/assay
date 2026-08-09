@@ -20,6 +20,11 @@ PRECOMMIT_PATH = ROOT / ".pre-commit-config.yaml"
 MARKETPLACE_PATH = ROOT / ".claude-plugin/marketplace.json"
 PLUGIN_MANIFEST_PATH = ROOT / "packaging/claude-plugin/.claude-plugin/plugin.json"
 PLUGIN_MCP_PATH = ROOT / "packaging/claude-plugin/.mcp.json"
+PLUGIN_SKILL_PATH = ROOT / "packaging/claude-plugin/skills/assay-golden-path/SKILL.md"
+PLUGIN_CONTRACT_PATH = (
+    ROOT
+    / "packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json"
+)
 SKILL_PATHS = (
     ROOT / ".agents/skills/assay-golden-path/SKILL.md",
     ROOT / ".claude/skills/assay-golden-path/SKILL.md",
@@ -47,6 +52,34 @@ EXPECTED_DESCRIPTION = (
 )
 EXPECTED_PLUGIN_DESCRIPTION = (
     "Connect Claude Code to Assay's MCP policy and evidence tools and golden-path skill."
+)
+PLUGIN_CONTRACT_REFERENCE = (
+    "${CLAUDE_PLUGIN_ROOT}/skills/assay-golden-path/references/agent-golden-path.json"
+)
+PLUGIN_ASSET_ROOT = (
+    "${CLAUDE_PLUGIN_ROOT}/skills/assay-golden-path/assets/privileged-action-gate"
+)
+PLUGIN_FIXTURE_MAPPING = (
+    "Fixtures named by the contract under `examples/privileged-action-gate` are bundled at "
+    f"`{PLUGIN_ASSET_ROOT}`."
+)
+PLUGIN_RESOURCE_COPIES = (
+    (CONTRACT_PATH, PLUGIN_CONTRACT_PATH),
+    (
+        ROOT / "examples/privileged-action-gate/mock_github_mcp.py",
+        ROOT
+        / "packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/mock_github_mcp.py",
+    ),
+    (
+        ROOT / "examples/privileged-action-gate/baseline-approved.json",
+        ROOT
+        / "packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json",
+    ),
+    (
+        ROOT / "examples/privileged-action-gate/policies/no-allowance.yaml",
+        ROOT
+        / "packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml",
+    ),
 )
 EMPTY_STDOUT_RULE = (
     "Empty stdout in a gap row is an observed limitation, not permission for a caller "
@@ -365,6 +398,42 @@ def validate_plugin_manifests() -> None:
     }
     if mcp != expected_mcp:
         fail("Claude plugin MCP command or project-root arguments drifted")
+
+
+def validate_plugin_skill(contract: dict[str, object]) -> None:
+    payload = read_bounded_evidence(PLUGIN_SKILL_PATH, "Claude plugin skill")
+    try:
+        text = payload.decode("ascii")
+    except UnicodeDecodeError as error:
+        raise AssertionError("Claude plugin skill must be ASCII") from error
+    fields, body = parse_frontmatter(text)
+    expected_fields = {
+        "name": "assay-golden-path",
+        "description": EXPECTED_DESCRIPTION,
+    }
+    if fields != expected_fields:
+        fail("Claude plugin skill frontmatter or trigger boundaries drifted")
+    if f"`{PLUGIN_CONTRACT_REFERENCE}` is the authoritative machine contract." not in body:
+        fail("Claude plugin skill omits its bundled authoritative contract")
+    if body.count(PLUGIN_FIXTURE_MAPPING) != 1:
+        fail("Claude plugin skill must contain exactly one source-to-bundle fixture mapping")
+    without_mapping = body.replace(PLUGIN_FIXTURE_MAPPING, "", 1)
+    for source_only in (
+        "docs/generated/agent-golden-path.json",
+        "scripts/docs/generate-agent-golden-path.py",
+        "examples/privileged-action-gate",
+    ):
+        if source_only in without_mapping:
+            fail(f"Claude plugin skill contains source-only path outside mapping: {source_only}")
+    if f"Working directory: `{PLUGIN_ASSET_ROOT}`" not in body:
+        fail("Claude plugin skill does not resolve protected-action assets through plugin root")
+    validate_public_vocabulary(text, contract)
+
+    for source, packaged in PLUGIN_RESOURCE_COPIES:
+        if read_bounded_evidence(source, "canonical plugin resource") != read_bounded_evidence(
+            packaged, "packaged plugin resource"
+        ):
+            fail(f"packaged plugin resource drifted: {packaged.relative_to(ROOT)}")
 
 
 def indentation(line: str) -> int:
@@ -998,6 +1067,7 @@ def main() -> None:
         fail("unexpected golden-path contract schema")
     if contract.get("schema_version") != 1:
         fail("unexpected golden-path contract schema version")
+    validate_plugin_skill(contract)
 
     payloads: list[bytes] = []
     for path in SKILL_PATHS:
@@ -1125,6 +1195,8 @@ def main() -> None:
         'scripts/**',
         '.agents/**',
         '.claude/**',
+        '.claude-plugin/**',
+        'packaging/claude-plugin/**',
         '.gitignore',
         '.gitattributes',
         '.pre-commit-config.yaml',
@@ -1142,12 +1214,19 @@ def main() -> None:
     hook = parse_precommit_self_test(precommit_text)
     validate_precommit_self_test(hook)
 
+    required_hook_paths = (
+        ".gitattributes",
+        ".claude-plugin/marketplace.json",
+        "packaging/claude-plugin/.mcp.json",
+        "packaging/claude-plugin/skills/assay-golden-path/SKILL.md",
+    )
     for hook_id in ("docs-generated-drift", "agent-golden-path-skill-contract"):
         hook = parse_precommit_hook(precommit_text, hook_id, hook_id)
-        if not precommit_pattern_matches(
-            hook.files_pattern, ".gitattributes", f"{hook_id} files selector"
-        ):
-            fail(f"{hook_id} does not cover .gitattributes")
+        for required_path in required_hook_paths:
+            if not precommit_pattern_matches(
+                hook.files_pattern, required_path, f"{hook_id} files selector"
+            ):
+                fail(f"{hook_id} does not cover {required_path}")
 
     print("agent golden-path skill: portable, byte-identical, and contract-complete")
 

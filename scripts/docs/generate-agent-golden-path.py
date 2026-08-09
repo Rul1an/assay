@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 
@@ -13,6 +14,34 @@ MARKDOWN_OUTPUT = ROOT / "docs/guides/agent-golden-path.md"
 SKILL_OUTPUTS = (
     ROOT / ".agents/skills/assay-golden-path/SKILL.md",
     ROOT / ".claude/skills/assay-golden-path/SKILL.md",
+)
+PLUGIN_SKILL_OUTPUTS = (
+    ROOT / "packaging/claude-plugin/skills/assay-golden-path/SKILL.md",
+)
+PLUGIN_CONTRACT_OUTPUT = (
+    ROOT
+    / "packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json"
+)
+PLUGIN_ASSET_ROOT = (
+    "${CLAUDE_PLUGIN_ROOT}/skills/assay-golden-path/assets/privileged-action-gate"
+)
+PLUGIN_RESOURCE_COPIES = (
+    (JSON_OUTPUT, PLUGIN_CONTRACT_OUTPUT),
+    (
+        ROOT / "examples/privileged-action-gate/mock_github_mcp.py",
+        ROOT
+        / "packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/mock_github_mcp.py",
+    ),
+    (
+        ROOT / "examples/privileged-action-gate/baseline-approved.json",
+        ROOT
+        / "packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json",
+    ),
+    (
+        ROOT / "examples/privileged-action-gate/policies/no-allowance.yaml",
+        ROOT
+        / "packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml",
+    ),
 )
 TABLE_START = "<!-- agent-golden-path-table:start -->"
 TABLE_END = "<!-- agent-golden-path-table:end -->"
@@ -488,7 +517,7 @@ def render_markdown(current: str) -> str:
     )
 
 
-def render_skill() -> str:
+def render_skill(*, plugin: bool = False) -> str:
     lines = [
         "---",
         "name: assay-golden-path",
@@ -501,31 +530,55 @@ def render_skill() -> str:
         "separately; a policy denial can be a successful JSON-RPC exchange rather than",
         "a process failure.",
         "",
-        "`docs/generated/agent-golden-path.json` is the authoritative machine contract.",
-        "Read it when exact argv, fields, or per-outcome metadata are needed. Edit and",
-        "run `scripts/docs/generate-agent-golden-path.py` instead of editing this file.",
-        "",
-        INVOCATION_CWD_RULE,
-        SOURCE_REPO_CWD_RULE,
-        PYTHON_PLACEHOLDER_RULE,
-        "",
-        f"{EMPTY_STDOUT_RULE}",
-        "Do not replace a linked gap with an inferred clean result.",
-        "",
-        "Codex and Claude Code are the project-skill hosts exercised here.",
-        f"Cursor's skill documentation ({CURSOR_DOCS_URL}), accessed on "
-        f"{CURSOR_DOCS_ACCESSED}, describes .agents/skills as a project-level location "
-        "and .claude/skills as a compatibility location. This repository does not "
-        "exercise Cursor runtime discovery.",
-        "",
-        "## Journey",
-        "",
     ]
+    if plugin:
+        lines.extend(
+            [
+                "`${CLAUDE_PLUGIN_ROOT}/skills/assay-golden-path/references/agent-golden-path.json` is the authoritative machine contract.",
+                "Read it when exact argv, fields, or per-outcome metadata are needed.",
+                "",
+                INVOCATION_CWD_RULE,
+                "Fixtures named by the contract under `examples/privileged-action-gate` are bundled at "
+                f"`{PLUGIN_ASSET_ROOT}`.",
+                "A present `working_directory` in the contract resolves through that mapping.",
+                PYTHON_PLACEHOLDER_RULE,
+                "",
+                f"{EMPTY_STDOUT_RULE}",
+                "Do not replace a linked gap with an inferred clean result.",
+                "",
+                "Claude Code loads this skill from the installed Assay plugin.",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "`docs/generated/agent-golden-path.json` is the authoritative machine contract.",
+                "Read it when exact argv, fields, or per-outcome metadata are needed. Edit and",
+                "run `scripts/docs/generate-agent-golden-path.py` instead of editing this file.",
+                "",
+                INVOCATION_CWD_RULE,
+                SOURCE_REPO_CWD_RULE,
+                PYTHON_PLACEHOLDER_RULE,
+                "",
+                f"{EMPTY_STDOUT_RULE}",
+                "Do not replace a linked gap with an inferred clean result.",
+                "",
+                "Codex and Claude Code are the project-skill hosts exercised here.",
+                f"Cursor's skill documentation ({CURSOR_DOCS_URL}), accessed on "
+                f"{CURSOR_DOCS_ACCESSED}, describes .agents/skills as a project-level location "
+                "and .claude/skills as a compatibility location. This repository does not "
+                "exercise Cursor runtime discovery.",
+                "",
+            ]
+        )
+    lines.extend(["## Journey", ""])
     for step in STEPS:
         lines.extend([f"### {step['step']}. {step['label']}", ""])
         working_directory = step.get("working_directory")
         if working_directory is not None:
-            lines.extend([f"Working directory: `{working_directory}`", ""])
+            rendered_working_directory = PLUGIN_ASSET_ROOT if plugin else working_directory
+            lines.extend([f"Working directory: `{rendered_working_directory}`", ""])
         lines.extend(
             [
                 f"Run: `{step['command']}`",
@@ -550,6 +603,7 @@ def main() -> None:
     current = MARKDOWN_OUTPUT.read_text(encoding="utf-8")
     rendered_markdown = render_markdown(current)
     rendered_skill = render_skill()
+    rendered_plugin_skill = render_skill(plugin=True)
     JSON_OUTPUT.write_text(
         json.dumps(CONTRACT, indent=2, ensure_ascii=True) + "\n",
         encoding="utf-8",
@@ -558,6 +612,12 @@ def main() -> None:
     for output in SKILL_OUTPUTS:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(rendered_skill, encoding="ascii")
+    for output in PLUGIN_SKILL_OUTPUTS:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(rendered_plugin_skill, encoding="ascii")
+    for source, output in PLUGIN_RESOURCE_COPIES:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, output)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,8 @@ on:
       - "scripts/**"
       - ".agents/**"
       - ".claude/**"
+      - ".claude-plugin/**"
+      - "packaging/claude-plugin/**"
       - ".gitignore"
       - ".gitattributes"
       - ".pre-commit-config.yaml"
