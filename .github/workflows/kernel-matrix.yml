@@ -17,6 +17,13 @@ on:
       - "crates/assay-sim/**"
       - "crates/assay-monitor/**"
       - "scripts/**"
+      - ".agents/**"
+      - ".claude/**"
+      - ".gitignore"
+      - ".pre-commit-config.yaml"
+      - "docs/generated/**"
+      - "docs/AIcontext/architecture-diagrams.md"
+      - "docs/guides/agent-golden-path.md"
       - ".github/workflows/kernel-matrix.yml"
       # The lane self-test pins guards inside this workflow file; run the
       # head-side pre-commit leg when it changes, because the lane workflow

@@ -16,8 +16,8 @@ run `scripts/docs/generate-agent-golden-path.py` instead of editing this file.
 Empty stdout in a gap row is an observed limitation, not permission for a caller to infer success from missing evidence.
 Do not replace a linked gap with an inferred clean result.
 
-Codex and Claude Code discover this project skill from their project roots.
-Cursor does not discover this project skill.
+Codex and Claude Code are the project-skill hosts exercised here.
+Cursor documents compatibility loading for these project roots, but this repository does not exercise Cursor runtime discovery.
 
 ## Journey
 
@@ -72,6 +72,8 @@ Stdout: Both completed outcomes parse as `assay.run_report.v1`; failed results c
 On failure: Exit `1` is a completed results report, not an early-failure diagnosis; `reason_code` and `next_step` are absent by design.
 
 ### 6. Protected action
+
+Working directory: `examples/privileged-action-gate`
 
 Run: `assay-mcp-server proxy-enforce --upstream-command <python> --upstream-arg -u --upstream-arg mock_github_mcp.py --enforce-policy policies/no-allowance.yaml --declared-mcp-manifest baseline-approved.json`
 

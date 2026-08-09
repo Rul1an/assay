@@ -203,6 +203,7 @@ STEPS: list[dict[str, object]] = [
         "id": "protected-action",
         "label": "Protected action",
         "binary": "assay-mcp-server",
+        "working_directory": "examples/privileged-action-gate",
         "outcomes": [
             outcome(
                 "policy-denied",
@@ -442,17 +443,20 @@ def render_skill() -> str:
         f"{EMPTY_STDOUT_RULE}",
         "Do not replace a linked gap with an inferred clean result.",
         "",
-        "Codex and Claude Code discover this project skill from their project roots.",
-        "Cursor does not discover this project skill.",
+        "Codex and Claude Code are the project-skill hosts exercised here.",
+        "Cursor documents compatibility loading for these project roots, but this "
+        "repository does not exercise Cursor runtime discovery.",
         "",
         "## Journey",
         "",
     ]
     for step in STEPS:
+        lines.extend([f"### {step['step']}. {step['label']}", ""])
+        working_directory = step.get("working_directory")
+        if working_directory is not None:
+            lines.extend([f"Working directory: `{working_directory}`", ""])
         lines.extend(
             [
-                f"### {step['step']}. {step['label']}",
-                "",
                 f"Run: `{step['command']}`",
                 "",
                 f"Exit: {exit_summary(step)}",

@@ -52,6 +52,15 @@ GENERATED=(
   docs/guides/agent-golden-path.md
 )
 
+# These outputs are wholly recreated and must not survive from the pre-seeded scratch tree. Starting
+# them absent proves that each destination is still owned by a generator; otherwise removing one
+# output path from a generator would leave a stale tracked file and make the drift check pass.
+FRESH_GENERATED=(
+  .agents/skills/assay-golden-path/SKILL.md
+  .claude/skills/assay-golden-path/SKILL.md
+  docs/generated/agent-golden-path.json
+)
+
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 
@@ -66,6 +75,10 @@ trap 'rm -rf "$scratch"' EXIT
 # see — and so the copy stays small.
 mkdir -p "$scratch/repo"
 git ls-files -z | tar -cf - --null -T - | (cd "$scratch/repo" && tar -xf -)
+
+for path in "${FRESH_GENERATED[@]}"; do
+  rm -f -- "$scratch/repo/$path"
+done
 
 for generator in "${GENERATORS[@]}"; do
   if [[ "$generator" == *.py ]]; then

@@ -14,24 +14,28 @@ SUBJECT="$ROOT/docs/generated/crate-deps.mermaid"
 GOLDEN_PATH_JSON="$ROOT/docs/generated/agent-golden-path.json"
 GOLDEN_PATH_GUIDE="$ROOT/docs/guides/agent-golden-path.md"
 GOLDEN_PATH_SKILL="$ROOT/.agents/skills/assay-golden-path/SKILL.md"
+GOLDEN_PATH_GENERATOR="$ROOT/scripts/docs/generate-agent-golden-path.py"
 FAILURES=0
 BACKUP="$(mktemp)"
 JSON_BACKUP="$(mktemp)"
 GUIDE_BACKUP="$(mktemp)"
 SKILL_BACKUP="$(mktemp)"
+GENERATOR_BACKUP="$(mktemp)"
 
 cleanup() {
   [ -f "$BACKUP" ] && cp "$BACKUP" "$SUBJECT"
   [ -f "$JSON_BACKUP" ] && cp "$JSON_BACKUP" "$GOLDEN_PATH_JSON"
   [ -f "$GUIDE_BACKUP" ] && cp "$GUIDE_BACKUP" "$GOLDEN_PATH_GUIDE"
   [ -f "$SKILL_BACKUP" ] && cp "$SKILL_BACKUP" "$GOLDEN_PATH_SKILL"
-  rm -f "$BACKUP" "$JSON_BACKUP" "$GUIDE_BACKUP" "$SKILL_BACKUP"
+  [ -f "$GENERATOR_BACKUP" ] && cp "$GENERATOR_BACKUP" "$GOLDEN_PATH_GENERATOR"
+  rm -f "$BACKUP" "$JSON_BACKUP" "$GUIDE_BACKUP" "$SKILL_BACKUP" "$GENERATOR_BACKUP"
 }
 trap cleanup EXIT
 cp "$SUBJECT" "$BACKUP"
 cp "$GOLDEN_PATH_JSON" "$JSON_BACKUP"
 cp "$GOLDEN_PATH_GUIDE" "$GUIDE_BACKUP"
 cp "$GOLDEN_PATH_SKILL" "$SKILL_BACKUP"
+cp "$GOLDEN_PATH_GENERATOR" "$GENERATOR_BACKUP"
 
 check() {
   local name="$1" want="$2"
@@ -61,6 +65,20 @@ cp "$GUIDE_BACKUP" "$GOLDEN_PATH_GUIDE"
 printf '\n%%%% drift planted by the drift-check self-test\n' >> "$GOLDEN_PATH_SKILL"
 check "a hand-edited generated project skill fails" 1
 cp "$SKILL_BACKUP" "$GOLDEN_PATH_SKILL"
+
+python3 - "$GOLDEN_PATH_GENERATOR" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+line = '    ROOT / ".claude/skills/assay-golden-path/SKILL.md",\n'
+if text.count(line) != 1:
+    raise SystemExit("Claude skill destination is not uniquely declared")
+path.write_text(text.replace(line, "", 1), encoding="utf-8")
+PY
+check "dropping a generated destination fails" 1
+cp "$GENERATOR_BACKUP" "$GOLDEN_PATH_GENERATOR"
 
 # --- the check does not edit what it audits ----------------------------------------------------
 #

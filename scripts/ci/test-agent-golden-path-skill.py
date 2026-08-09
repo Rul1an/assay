@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT / "docs/generated/agent-golden-path.json"
+WORKFLOW_PATH = ROOT / ".github/workflows/kernel-matrix.yml"
 SKILL_PATHS = (
     ROOT / ".agents/skills/assay-golden-path/SKILL.md",
     ROOT / ".claude/skills/assay-golden-path/SKILL.md",
@@ -22,6 +23,11 @@ EMPTY_STDOUT_RULE = (
     "Empty stdout in a gap row is an observed limitation, not permission for a caller "
     "to infer success from missing evidence."
 )
+CURSOR_SCOPE = (
+    "Cursor documents compatibility loading for these project roots, but this "
+    "repository does not exercise Cursor runtime discovery."
+)
+PROTECTED_ACTION_CWD = "examples/privileged-action-gate"
 
 
 def fail(message: str) -> None:
@@ -89,7 +95,7 @@ def main() -> None:
     required_body = (
         "docs/generated/agent-golden-path.json",
         EMPTY_STDOUT_RULE,
-        "Cursor does not discover this project skill",
+        CURSOR_SCOPE,
     )
     for fragment in required_body:
         if fragment not in body:
@@ -121,6 +127,17 @@ def main() -> None:
             fail(f"skill journey is out of order at {step['id']}")
         cursor = positions[0]
 
+        working_directory = step.get("working_directory")
+        if step.get("id") == "protected-action":
+            if working_directory != PROTECTED_ACTION_CWD:
+                fail("protected-action step must pin its working directory")
+        if working_directory is not None:
+            if not isinstance(working_directory, str) or not working_directory:
+                fail(f"invalid working directory for {step['id']}")
+            cwd_line = f"Working directory: `{working_directory}`"
+            if cwd_line not in body:
+                fail(f"skill omits working directory for {step['id']}")
+
     non_claims = contract.get("non_claims")
     if not isinstance(non_claims, list):
         fail("golden-path contract non_claims must be a list")
@@ -138,10 +155,24 @@ def main() -> None:
         "compliance claim",
         "issue #2152 step 3",
         "Plugin and marketplace packaging belongs",
+        "Cursor does not discover this project skill",
     )
     for phrase in forbidden:
         if phrase in text:
             fail(f"skill introduces forbidden or stale claim: {phrase!r}")
+
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    required_workflow_paths = (
+        '.agents/**',
+        '.claude/**',
+        '.gitignore',
+        '.pre-commit-config.yaml',
+        'docs/generated/**',
+        'docs/guides/agent-golden-path.md',
+    )
+    for path in required_workflow_paths:
+        if f'- "{path}"' not in workflow:
+            fail(f"kernel-matrix workflow does not cover skill contract path: {path}")
 
     print("agent golden-path skill: portable, byte-identical, and contract-complete")
 
