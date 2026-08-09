@@ -82,7 +82,6 @@ pub fn run_bounded(
     let mut child = command
         .spawn()
         .map_err(|error| format!("{context}: spawn {command_display}: {error}"))?;
-
     let mut child_stdin = child
         .stdin()
         .take()
@@ -121,19 +120,18 @@ pub fn run_bounded(
     let mut early_failure = None;
     let mut observed_status = None;
     let status = loop {
-        if let Ok(stream) = overflow_rx.try_recv() {
-            early_failure = Some(format!(
-                "{} exceeded its {}-byte ceiling",
-                stream.name(),
-                stream_limit(limits, stream)
-            ));
-            break terminate_and_reap(
-                child.as_mut(),
-                observed_status.take(),
-                context,
-                &command_display,
-            )?;
+        if early_failure.is_none() {
+            if let Ok(stream) = overflow_rx.try_recv() {
+                // The reader closes its pipe after limit + 1 bytes. Keep the
+                // child under this same deadline while it observes the close.
+                early_failure = Some(format!(
+                    "{} exceeded its {}-byte ceiling",
+                    stream.name(),
+                    stream_limit(limits, stream)
+                ));
+            }
         }
+
         if observed_status.is_none() {
             match child.try_wait() {
                 Ok(Some(status)) => observed_status = Some(status),
@@ -159,7 +157,9 @@ pub fn run_bounded(
         }
 
         if Instant::now() >= deadline {
-            early_failure = Some(format!("deadline of {:?} expired", limits.timeout));
+            if early_failure.is_none() {
+                early_failure = Some(format!("deadline of {:?} expired", limits.timeout));
+            }
             break terminate_and_reap(
                 child.as_mut(),
                 observed_status.take(),
@@ -212,6 +212,8 @@ pub fn run_bounded(
             &stderr,
         ));
     }
+    // Status and both output streams are already collected, so BrokenPipe here
+    // records an early stdin close without replacing the child's outcome.
     stdin_result.or_else(|error| {
         if error.kind() == std::io::ErrorKind::BrokenPipe {
             return Ok(());
@@ -300,7 +302,7 @@ fn finish_process_tree(
 ) -> Result<(), String> {
     match child.start_kill() {
         Ok(()) => Ok(()),
-        Err(error) if process_tree_absent(&error) => Ok(()),
+        Err(error) if process_tree_quiescent_after_io(&error) => Ok(()),
         Err(error) => Err(format!(
             "{context}: terminate remaining process tree for {command}: {error}"
         )),
@@ -309,13 +311,25 @@ fn finish_process_tree(
 
 #[cfg(unix)]
 fn process_tree_absent(error: &std::io::Error) -> bool {
-    // macOS may report EPERM when the owned group has only an already-reaped leader.
-    matches!(error.raw_os_error(), Some(libc::ESRCH) | Some(libc::EPERM))
+    error.raw_os_error() == Some(libc::ESRCH)
 }
 
 #[cfg(windows)]
 fn process_tree_absent(_error: &std::io::Error) -> bool {
     false
+}
+
+#[cfg(unix)]
+fn process_tree_quiescent_after_io(error: &std::io::Error) -> bool {
+    // macOS may report EPERM for an already-empty group. This is accepted only
+    // after child status, stdin, stdout, and stderr are all complete, so it can
+    // never lead into a blocking join on a live inherited pipe.
+    matches!(error.raw_os_error(), Some(libc::ESRCH) | Some(libc::EPERM))
+}
+
+#[cfg(windows)]
+fn process_tree_quiescent_after_io(error: &std::io::Error) -> bool {
+    process_tree_absent(error)
 }
 
 fn stream_limit(limits: ProcessLimits, stream: CapturedStream) -> usize {
@@ -366,6 +380,8 @@ fn excerpt(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use super::{process_tree_absent, process_tree_quiescent_after_io};
     use super::{run_bounded, ProcessLimits};
     use std::path::Path;
     use std::process::{Command, Stdio};
@@ -424,14 +440,14 @@ mod tests {
     #[cfg(windows)]
     fn inherited_output_descendant_command(pid_file: &Path) -> Command {
         let mut command = Command::new("powershell.exe");
+        command.env("ASSAY_DESCENDANT_PID_FILE", pid_file);
         command.args([
             "-NoLogo",
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            "$p = Start-Process -FilePath ping.exe -ArgumentList @('-t','127.0.0.1') -NoNewWindow -PassThru; [IO.File]::WriteAllText($args[0], [string]$p.Id); [Console]::Out.Write('parent-ready')",
+            "$path = [Environment]::GetEnvironmentVariable('ASSAY_DESCENDANT_PID_FILE'); $p = Start-Process -FilePath ping.exe -ArgumentList @('-t','127.0.0.1') -NoNewWindow -PassThru; [IO.File]::WriteAllText($path, [string]$p.Id); [Console]::Out.Write('parent-ready')",
         ]);
-        command.arg(pid_file);
         command
     }
 
@@ -474,15 +490,17 @@ mod tests {
 
     #[cfg(windows)]
     fn descendant_is_alive(pid: u32) -> bool {
-        Command::new("powershell.exe")
+        let mut command = Command::new("powershell.exe");
+        command
+            .env("ASSAY_DESCENDANT_PID", pid.to_string())
             .args([
                 "-NoLogo",
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                "if (Get-Process -Id $args[0] -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }",
-                &pid.to_string(),
-            ])
+                "$pid = [Environment]::GetEnvironmentVariable('ASSAY_DESCENDANT_PID'); if (Get-Process -Id $pid -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }",
+            ]);
+        command
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
@@ -625,5 +643,14 @@ mod tests {
         assert_eq!(output.status.code(), Some(23));
         assert!(output.stdout.is_empty());
         assert!(output.stderr.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn eperm_is_quiescent_only_after_all_io_is_complete() {
+        let error = std::io::Error::from_raw_os_error(libc::EPERM);
+
+        assert!(!process_tree_absent(&error));
+        assert!(process_tree_quiescent_after_io(&error));
     }
 }
