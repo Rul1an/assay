@@ -78,9 +78,13 @@ PRIVATE_PHRASE_FAMILIES = (
         "future marketplace",
         (
             ("future", "marketplace"),
+            ("future", "market", "place"),
             ("marketplace", "packaging"),
+            ("market", "place", "packaging"),
             ("future", "plugin"),
+            ("future", "plug", "in"),
             ("plugin", "packaging"),
+            ("plug", "in", "packaging"),
         ),
     ),
 )
