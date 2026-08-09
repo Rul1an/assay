@@ -29,6 +29,12 @@ EMPTY_STDOUT_RULE = (
     "Empty stdout in a gap row is an observed limitation, not permission for a caller "
     "to infer success from missing evidence."
 )
+INVOCATION_CWD_RULE = (
+    "When a step has no `working_directory`, run it from the invocation cwd."
+)
+SOURCE_REPO_CWD_RULE = (
+    "A present `working_directory` is a POSIX path relative to the source repository."
+)
 
 
 def stdout(kind: str, document: str | None = None) -> dict[str, object]:
@@ -492,6 +498,9 @@ def render_skill() -> str:
         "`docs/generated/agent-golden-path.json` is the authoritative machine contract.",
         "Read it when exact argv, fields, or per-outcome metadata are needed. Edit and",
         "run `scripts/docs/generate-agent-golden-path.py` instead of editing this file.",
+        "",
+        INVOCATION_CWD_RULE,
+        SOURCE_REPO_CWD_RULE,
         "",
         f"{EMPTY_STDOUT_RULE}",
         "Do not replace a linked gap with an inferred clean result.",

@@ -46,6 +46,12 @@ EMPTY_STDOUT_RULE = (
     "Empty stdout in a gap row is an observed limitation, not permission for a caller "
     "to infer success from missing evidence."
 )
+INVOCATION_CWD_RULE = (
+    "When a step has no `working_directory`, run it from the invocation cwd."
+)
+SOURCE_REPO_CWD_RULE = (
+    "A present `working_directory` is a POSIX path relative to the source repository."
+)
 CURSOR_SCOPE = (
     "Cursor's skill documentation (https://cursor.com/docs/skills), accessed on "
     "2026-08-09, describes .agents/skills as a project-level location and "
@@ -975,6 +981,8 @@ def main() -> None:
     required_body = (
         "docs/generated/agent-golden-path.json",
         EMPTY_STDOUT_RULE,
+        INVOCATION_CWD_RULE,
+        SOURCE_REPO_CWD_RULE,
         CURSOR_SCOPE,
     )
     for fragment in required_body:

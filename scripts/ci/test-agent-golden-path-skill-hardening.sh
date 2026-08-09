@@ -7,7 +7,7 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 # PR B adds discoverability, cwd wording, and issue-reference hardening cases to
 # the 58-case durability boundary established by PR B0.
-EXPECTED_CASES=69
+EXPECTED_CASES=71
 # Parser-layer follow-ups stay outside the approved cumulative case chain. The
 # 22 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode, and
 # 2 inline-parser checks; pin them so deletion cannot leave the cumulative total green.
@@ -559,6 +559,41 @@ expect_named_failure \
   "guide invocation cwd rendered as dot" \
   "$case_root" \
   "guide omits working directory for install-check"
+
+for rule in invocation source-repo; do
+  case_root="$SCRATCH/skill-cwd-rule-$rule"
+  seed_case "$case_root"
+  CASE_ROOT="$case_root" RULE="$rule" python3 - <<'PY'
+import os
+from pathlib import Path
+
+rules = {
+    "invocation": "When a step has no `working_directory`, run it from the invocation cwd.\n",
+    "source-repo": (
+        "A present `working_directory` is a POSIX path relative to the source repository.\n"
+    ),
+}
+rule = rules[os.environ["RULE"]]
+root = Path(os.environ["CASE_ROOT"])
+for relative in (
+    ".agents/skills/assay-golden-path/SKILL.md",
+    ".claude/skills/assay-golden-path/SKILL.md",
+):
+    path = root / relative
+    text = path.read_text(encoding="ascii")
+    if text.count(rule) != 1:
+        raise SystemExit(f"skill cwd rule is not unique: {rule!r}")
+    path.write_text(text.replace(rule, "", 1), encoding="ascii")
+PY
+  expected='When a step has no `working_directory`, run it from the invocation cwd.'
+  if [[ "$rule" == "source-repo" ]]; then
+    expected='A present `working_directory` is a POSIX path relative to the source repository.'
+  fi
+  expect_named_failure \
+    "skill cwd rule $rule" \
+    "$case_root" \
+    "skill omits required guidance: '$expected'"
+done
 
 case_root="$SCRATCH/public-vocabulary-allow-contract-evidence"
 seed_case "$case_root"
