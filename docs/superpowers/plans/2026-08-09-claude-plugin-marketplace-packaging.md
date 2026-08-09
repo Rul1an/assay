@@ -256,6 +256,7 @@ plugin_validate=pass
 mcp_list_connected=pass
 actual_session_mcp_connected=pass
 policy_root_resolved_to_consumer=pass
+missing_policy_refused=pass
 initialize=pass
 tools_list=pass
 skill_discovery=pass
@@ -291,11 +292,11 @@ head re-runs this proof after this evidence note is committed.
 - Modify if needed: `scripts/ci/test-claude-plugin-install.sh`
 - Update: this plan's checkboxes and evidence notes.
 
-- [ ] **Step 1: Run six required mutations individually**
+- [x] **Step 1: Run six required mutations individually**
 
 Each temporary mutation must reach its own guard, then be restored: command becomes number; fixture byte changes; instruction points to source-only path; production tool is renamed; manifest version is added; mapping sentence is removed.
 
-- [ ] **Step 2: Run final verification**
+- [x] **Step 2: Run final verification**
 
 ```bash
 python3 scripts/ci/test-agent-golden-path-skill.py
@@ -309,9 +310,31 @@ CARGO_TARGET_DIR=/tmp/assay-2152-target cargo clippy -p assay-mcp-server --all-t
 git diff --check
 ```
 
-- [ ] **Step 3: Run user/workflow/AI simulations**
+- [x] **Step 3: Run user/workflow/AI simulations**
 
 Exercise missing binary, missing optional Python, missing policy, stale cache before update, successful update/cache inspection, connected five-tool surface, skill discovery, and protected-action denial. Verify host/prerequisite/policy failures remain distinct and absence never becomes clean.
+
+**Task 4 evidence before PR:** All six required mutations bit their named
+guards: typed MCP command, fixture parity, source-only instruction, exact server
+tool names, unversioned plugin identity, and fixture mapping. The generated-skill
+hardening suite observed 84 cases plus 22 structural probes. The disposable
+workflow additionally rejected a missing server at `phase=prerequisite`, a
+source-checkout cache, a successful no-op update retaining stale bytes, tool
+drift, output overflow, a hung process tree, and an exited parent whose
+descendant retained the output pipe. The exact built server denied the
+consumer-only marker and returned `E_POLICY_NOT_FOUND` for a missing policy;
+neither absence became clean. The generated contract contains `<python>` only
+in protected-action step 6; installation and steps 1-5 do not claim Python is
+needed. A fresh unauthenticated Claude session connected the MCP server and
+discovered the skill while leaving model-mediated tool use unavailable.
+
+On head `a43edcb7e927894c1973635d71be0ce56b73ced8`, the full
+`assay-mcp-server` crate suite, the `test-outbound` install surface, all-targets
+and all-features clippy with `-D warnings`, fmt, and diff checks passed. The
+first post-mutation client run correctly caught that the debug binary still
+contained the temporary renamed tool even though source was restored. Rebuilding
+from the committed head restored artifact provenance, after which all installed
+workflow phases, including `missing_policy_refused=pass`, passed.
 
 - [ ] **Step 4: Push and open an audit-grade PR**
 
