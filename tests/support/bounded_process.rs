@@ -519,7 +519,7 @@ mod tests {
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                "$pid = [Environment]::GetEnvironmentVariable('ASSAY_DESCENDANT_PID'); if (Get-Process -Id $pid -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }",
+                "$targetPid = [Environment]::GetEnvironmentVariable('ASSAY_DESCENDANT_PID'); if (Get-Process -Id $targetPid -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }",
             ]);
         command
             .stdout(Stdio::null())
