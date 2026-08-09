@@ -23,12 +23,13 @@ built from the base SHA above:
   the plugin root are unavailable after installation.
 - `${CLAUDE_PLUGIN_ROOT}` resolves in skill content. `${CLAUDE_PROJECT_DIR}`
   resolves in stdio MCP arguments.
-- Shipped plugin artifacts are mixed: the installed Vercel partner plugin uses
-  an `mcpServers` wrapper, while Anthropic's marketplace `example-plugin` uses
-  a bare server map. Neither artifact alone proves what the installed client
-  executes. This design selects the wrapper used by the shipped partner
-  plugin, but acceptance requires a real-client connection probe plus the full
-  manifest-driven `initialize` and `tools/list` exchange below.
+- Sixteen inspected plugin artifacts are mixed: six use an `mcpServers` wrapper
+  and ten use a bare server map. The installed cache artifact uses the wrapper;
+  the bare examples are predominantly marketplace-source artifacts. Neither
+  shape alone proves what the installed client executes. This design selects
+  the installed partner plugin's wrapper, but acceptance requires a real-client
+  connection probe plus the full manifest-driven `initialize` and `tools/list`
+  exchange below.
 - A plugin with no explicit version installs under a SHA-derived version and
   advances after a marketplace update.
 - `claude plugin validate` accepts a referenced `.mcp.json` whose `command` is
