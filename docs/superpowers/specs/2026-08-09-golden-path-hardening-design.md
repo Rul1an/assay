@@ -72,14 +72,18 @@ include `scripts/docs/generate-agent-golden-path.py`.
 The validator reads the bounded `.pre-commit-config.yaml` input and
 structurally selects the unique active hook with id
 `docs-generated-drift-self-test`. It requires that hook to be eligible for the
-default pre-commit stage and that its active `files` expression covers the
-generator. A commented or duplicate hook does not satisfy the rule.
+default pre-commit stage: `stages` is absent or contains `pre-commit`. Its
+active `files` expression must match
+`scripts/docs/generate-agent-golden-path.py` under pre-commit's `re.search`
+semantics. A commented or duplicate hook does not satisfy the rule.
 
 The contract validator continues to require `.pre-commit-config.yaml` and the
 owning workflow in `pull_request.paths`, and adds `.gitattributes` to that set,
 so edits to any scheduling or byte-normalization surface cannot bypass the
 head-side lint job. The contract hook's own `files` expression also includes
-`.gitattributes`.
+`.gitattributes`. The `docs-generated-drift` hook includes `.gitattributes` in
+its `files` expression because checkout normalization affects its byte
+comparisons.
 
 Required RED mutations:
 
@@ -87,21 +91,30 @@ Required RED mutations:
 - remove the generator from the self-test filter and observe the named trigger
   assertion fail.
 
-### 2. Pin The Workflow Executor
+### 2. Pin Workflow Activation And The Executor
 
 Extend `scripts/ci/test-agent-golden-path-skill.py` with a structural reader for
-the active `jobs.lint` block. It must require:
+the active pull-request event and `jobs.lint` block. It must require:
 
+- an active `on.pull_request` event whose branch filter includes `main`;
+- no active `on.pull_request.types` narrowing;
 - exactly one active `lint` job;
+- `runs-on: ubuntu-latest` and no `needs` dependency on that job;
 - no job-level or executor-step `if` condition;
 - no truthy `continue-on-error` on the job or executor step;
-- exactly one active executor step whose shell body contains the exact command
-  `pre-commit run --all-files --show-diff-on-failure`;
-- no additional pre-commit invocation or hook-stage override in that step.
+- exactly one default-stage executor step whose block-scalar shell body has one
+  active line equal to
+  `pre-commit run --all-files --show-diff-on-failure` after leading and trailing
+  whitespace removal;
+- no additional active pre-commit invocation or hook-stage override in that
+  executor step.
 
-Comments and commented jobs do not count. The reader will use indentation and
-key structure already needed by `workflow_pull_request_paths()` rather than a
-second approximate parser.
+Blank lines and shell lines whose first non-whitespace character is `#` are
+inactive and do not count. Inline suffixes are not canonical command lines.
+Comments and commented jobs also do not count. Separate, explicitly
+stage-specific pre-commit steps remain permitted; they cannot substitute for
+the one canonical default-stage executor. The reader uses the workflow model
+defined in section 5 rather than a second approximate parser.
 
 Required named mutations:
 
@@ -113,6 +126,10 @@ Required named mutations:
 | Add `if: false` to job or step | gated executor |
 | Add `continue-on-error: true` | fail-open executor |
 | Add `--hook-stage pre-push` | noncanonical executor command |
+| Change `branches` to `release/*` | pull requests to main are not covered |
+| Add `types: [labeled]` | pull-request event is narrowed |
+| Add `needs: optional-job` to `lint` | lint can be dependency-skipped |
+| Change `runs-on` to another label | canonical lint runner changed |
 
 ### 3. Pin Tracking, Ignore Scope, And Line Endings
 
@@ -124,6 +141,7 @@ The validator will ask Git for repository state instead of reimplementing Git
 ignore rules:
 
 - `git ls-files --error-unmatch` must succeed for each shipped skill;
+- `git check-ignore --no-index` must exit non-zero for each shipped skill;
 - `git check-ignore --no-index` must report
   `.claude/skills/assay-golden-path/OTHER.md` as ignored.
 
@@ -132,8 +150,20 @@ fixtures so these assertions exercise real tracking behavior. A line-ending
 test reads the active repository attributes through `git check-attr eol` and
 requires `lf` for both paths.
 
-Required mutations independently untrack each skill, make the sibling visible,
-and remove each `eol=lf` entry. Each must reach its named guard.
+Every Git subprocess runs with system and global configuration disabled:
+`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, empty
+`core.excludesFile` and `core.attributesFile`, and a pinned
+`init.defaultBranch`. Host ignore or attribute files therefore cannot satisfy a
+repository-owned assertion.
+
+Required mutations independently untrack each skill, make either shipped path
+ignored, make the sibling visible, and remove each `eol=lf` entry. Each must
+reach its named guard.
+
+Only the two skill paths receive new LF rules in this issue because their exact
+bytes are recorded and consumed as byte-identical packaging inputs. The other
+five drift-compared generated artifacts are not digest-pinned packaging inputs
+in this scope; the drift hook still schedules on `.gitattributes` changes.
 
 ### 4. Make The Drift Self-Test Scratch-Only
 
@@ -152,10 +182,30 @@ and after the full mutation battery. The snapshot includes:
 Any difference is a failure. Because all writes are outside the repository,
 SIGTERM or a failed assertion cannot leave a tracked file modified.
 
+The snapshot mechanism has its own mutation: inside a controlled snapshot
+window the test changes one named tracked fixture and requires the snapshot to
+report that exact path, then discards the scratch case. A constant digest or an
+empty enumerator therefore cannot satisfy the no-mutation proof.
+
 The script switches to `set -euo pipefail`; expected non-zero gate runs are
 captured explicitly rather than relying on global error suppression.
 
 ### 5. Harden Workflow Parsing
+
+Replace `workflow_pull_request_paths(text: str) -> set[str]` with one named
+`parse_kernel_matrix_workflow(text: str) -> WorkflowContract` helper. The
+immutable result contains the pull-request branch filter, optional event types,
+path list, and the active lint job's runner, dependencies, conditions,
+continue-on-error state, and step block scalars. Consumer functions answer
+path coverage and executor activation from this one result.
+
+The parser supports only the bounded YAML subset used by this workflow:
+space-indented mappings, inline scalar/list values, block sequences, and `|`
+shell block scalars. It rejects duplicate keys at a structural level, missing
+required keys, unsupported scalar shapes, and active content at an unexpected
+indentation. Commented keys and comment-only shell lines are absent from the
+result. Direct parser mutations cover absent, duplicate, and commented keys plus
+block-scalar comment handling before consumer-specific mutation tables run.
 
 The shared workflow reader fails before partial path extraction when it sees:
 
@@ -225,6 +275,10 @@ must run the actual pre-commit executor command in a clean scratch checkout and
 prove one scheduled mutation fails. The generated artifacts must remain
 byte-identical to the base in PR A.
 
+The PR record also captures the repository's measured required-check list on
+the exact final head. Branch protection is external state and is reported as a
+measurement, not misrepresented as a file-based assertion.
+
 ## PR B: Public Vocabulary And Generated Precision
 
 PR B starts from merged PR A and changes the generated public artifacts once.
@@ -253,21 +307,28 @@ exercise Cursor runtime discovery. It must not claim runtime support.
 
 ### 3. Explicit Working Directories
 
-Every step in the machine contract receives an explicit `working_directory`.
-Eight steps use `.` and the protected-action step retains
-`examples/privileged-action-gate`. The guide table and generated skill render
-that field for every step. No renderer supplies an implicit default.
+Every step in the machine contract receives an explicit `working_directory`
+relative to a caller-selected journey root. `.` means that journey root itself;
+it does not mean the Assay source repository. Eight steps use `.` and the
+protected-action step retains `examples/privileged-action-gate`. The guide
+table and generated skill render that field for every step. No renderer
+supplies an implicit default.
 
-Tests mutate a default-root step and the protected-action step independently,
-then require both machine and human views to fail on the same contract rule.
+The CLI and MCP binary-level golden-path drivers select their temporary test
+workspace as the journey root and execute each scenario from the
+contract-declared directory. Tests mutate a default-root step and the
+protected-action step independently, then require the driver plus both human
+views to fail on the same contract rule. Renderer-only equality is not accepted
+as execution proof.
 
 ### 4. Semantic Public-Vocabulary Gate
 
 Replace the exact-string-only forbidden tuple with a structural vocabulary
 check over the generated skill:
 
-- issue references are allowed only when they are derived from a contract
-  `gap_issue` or an explicit contract non-claim;
+- issue references are allowed only when they are derived from an outcome-level
+  `steps[*].outcomes[*].gap_issue` already present in the contract or from an
+  explicit contract non-claim; no new gap field is added;
 - planning language such as roadmap ownership, future PR/slice, numbered
   implementation step ownership, and future plugin or marketplace packaging
   is forbidden after case, punctuation, and whitespace normalization;
@@ -276,8 +337,10 @@ check over the generated skill:
 
 Mutations use semantic variants rather than the original literals: alternate
 case, punctuation, number words, and synonymous `next slice` or `future
-marketplace` wording. Separate allow cases retain `[gap #216x]` links and the
-contract's issue-owned non-claim.
+marketplace` wording. The bounded normalizer folds English number words `one`
+through `nine` to digits only for implementation-step phrase matching. Separate
+allow cases retain `[gap #216x]` links and the contract's issue-owned
+non-claim.
 
 ### 5. Regenerate Once
 
