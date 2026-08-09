@@ -295,6 +295,18 @@ def drive_cached_manifest(installed: Path, consumer: Path, env: dict[str, str], 
                 },
             },
         },
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "assay_policy_decide",
+                "arguments": {
+                    "tool": "install_surface_probe",
+                    "policy": "missing-install-surface-policy.yaml",
+                },
+            },
+        },
     ]
     stdin = b"".join(json.dumps(request, separators=(",", ":")).encode() + b"\n" for request in requests)
     result = run_bounded("initialize", [resolved, *args], cwd=consumer, env=env, stdin=stdin)
@@ -322,6 +334,19 @@ def drive_cached_manifest(installed: Path, consumer: Path, env: dict[str, str], 
             "override the project MCP entry with an absolute --policy-root for hosts that use another cwd",
         )
     print("policy_root_resolved_to_consumer=pass")
+
+    missing_content = responses.get(4, {}).get("result", {}).get("content", [])
+    try:
+        missing = json.loads(missing_content[0]["text"])
+    except (IndexError, KeyError, TypeError, json.JSONDecodeError) as error:
+        fail("missing_policy_refused", f"missing-policy response is invalid: {error}", "inspect assay_policy_decide error output")
+    if missing.get("error", {}).get("code") != "E_POLICY_NOT_FOUND":
+        fail(
+            "missing_policy_refused",
+            f"missing policy did not return E_POLICY_NOT_FOUND: {missing}",
+            "keep missing policy distinct from a clean allow or deny verdict",
+        )
+    print("missing_policy_refused=pass")
 
 
 def verify_workflow() -> None:
@@ -522,8 +547,6 @@ import json, os, pathlib, sys
 tool_names = {EXPECTED_TOOLS!r}
 if os.environ.get("FAKE_TOOL_DRIFT"):
     tool_names[-1] = "assay_policy_changed"
-policy = pathlib.Path.cwd() / "install-surface-policy.yaml"
-blocked = "install_surface_probe" in policy.read_text() if policy.is_file() else False
 for line in sys.stdin:
     request = json.loads(line)
     if "id" not in request: continue
@@ -533,7 +556,14 @@ for line in sys.stdin:
     elif method == "tools/list":
         result = {{"tools":[{{"name":name,"description":"test","inputSchema":{{"type":"object"}}}} for name in tool_names]}}
     elif method == "tools/call":
-        result = {{"content":[{{"type":"text","text":json.dumps({{"allowed": not blocked}})}}],"isError":False}}
+        policy_name = request["params"]["arguments"]["policy"]
+        policy = pathlib.Path.cwd() / policy_name
+        if not policy.is_file():
+            payload = {{"error":{{"code":"E_POLICY_NOT_FOUND","message":f"Policy not found: {{policy_name}}"}}}}
+        else:
+            blocked = "install_surface_probe" in policy.read_text()
+            payload = {{"allowed": not blocked}}
+        result = {{"content":[{{"type":"text","text":json.dumps(payload)}}],"isError":False}}
     else:
         result = {{}}
     print(json.dumps({{"jsonrpc":"2.0","id":request["id"],"result":result}}), flush=True)
@@ -571,6 +601,7 @@ def self_test() -> None:
             "initialize=pass",
             "tools_list=pass",
             "policy_root_resolved_to_consumer=pass",
+            "missing_policy_refused=pass",
             "actual_session_mcp_connected=pass",
             "skill_discovery=pass",
             "model_mediated_tool_call=unavailable",
