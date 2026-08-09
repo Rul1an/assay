@@ -5,6 +5,16 @@ ROOT="$(git rev-parse --show-toplevel)"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
+# Task 1 pins the nine existing cases plus its two scheduling mutations.
+EXPECTED_CASES=11
+case_count=0
+
+record_case_pass() {
+  local name="$1"
+  case_count=$((case_count + 1))
+  echo "ok    $name"
+}
+
 seed_case() {
   local case_root="$1"
   mkdir -p \
@@ -15,6 +25,7 @@ seed_case() {
     "$case_root/.claude/skills/assay-golden-path" \
     "$case_root/.github/workflows"
   cp "$ROOT/scripts/ci/test-agent-golden-path-skill.py" "$case_root/scripts/ci/"
+  cp "$ROOT/.pre-commit-config.yaml" "$case_root/"
   cp "$ROOT/docs/generated/agent-golden-path.json" "$case_root/docs/generated/"
   cp "$ROOT/docs/guides/agent-golden-path.md" "$case_root/docs/guides/"
   cp "$ROOT/.agents/skills/assay-golden-path/SKILL.md" \
@@ -36,7 +47,7 @@ expect_named_failure() {
     echo "FAIL: $name did not reach named guard: $expected" >&2
     return 1
   fi
-  echo "ok    $name"
+  record_case_pass "$name"
 }
 
 case_root="$SCRATCH/guide-cwd"
@@ -94,4 +105,57 @@ PY
     "$evidence evidence exceeds 1048576-byte limit"
 done
 
-echo "agent golden-path hardening guards reject every planted defect"
+case_root="$SCRATCH/pre-push-only-drift-self-test"
+seed_case "$case_root"
+CASE_ROOT="$case_root" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["CASE_ROOT"]) / ".pre-commit-config.yaml"
+source = (
+    "        files: ^(scripts/ci/(check-docs-generated-drift|"
+    "test-check-docs-generated-drift)\\.sh|scripts/docs/"
+    "generate-agent-golden-path\\.py|\\.(agents|claude)/skills/"
+    "assay-golden-path/SKILL\\.md)$\n"
+)
+replacement = "        stages: [pre-push]\n" + source
+text = path.read_text(encoding="utf-8")
+if text.count(source) != 1:
+    raise SystemExit(f"self-test files entry is not unique: {source!r}")
+path.write_text(text.replace(source, replacement, 1), encoding="utf-8")
+PY
+expect_named_failure \
+  "pre-push-only generated-docs drift self-test" \
+  "$case_root" \
+  "generated-docs drift self-test must run at the default pre-commit stage"
+
+case_root="$SCRATCH/generator-outside-drift-self-test"
+seed_case "$case_root"
+CASE_ROOT="$case_root" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["CASE_ROOT"]) / ".pre-commit-config.yaml"
+source = (
+    "        files: ^(scripts/ci/(check-docs-generated-drift|"
+    "test-check-docs-generated-drift)\\.sh|scripts/docs/"
+    "generate-agent-golden-path\\.py|\\.(agents|claude)/skills/"
+    "assay-golden-path/SKILL\\.md)$\n"
+)
+replacement = source.replace("scripts/docs/generate-agent-golden-path\\.py|", "")
+text = path.read_text(encoding="utf-8")
+if text.count(source) != 1:
+    raise SystemExit(f"self-test files entry is not unique: {source!r}")
+path.write_text(text.replace(source, replacement, 1), encoding="utf-8")
+PY
+expect_named_failure \
+  "golden-path generator outside generated-docs drift self-test" \
+  "$case_root" \
+  "generated-docs drift self-test does not cover its golden-path generator"
+
+if (( case_count != EXPECTED_CASES )); then
+  echo "FAIL: agent golden-path hardening expected $EXPECTED_CASES case(s), executed $case_count" >&2
+  exit 1
+fi
+
+echo "agent golden-path hardening: $case_count case(s) executed"

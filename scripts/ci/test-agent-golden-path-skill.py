@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import re
 from pathlib import Path
@@ -12,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT / "docs/generated/agent-golden-path.json"
 GUIDE_PATH = ROOT / "docs/guides/agent-golden-path.md"
 WORKFLOW_PATH = ROOT / ".github/workflows/kernel-matrix.yml"
+PRECOMMIT_PATH = ROOT / ".pre-commit-config.yaml"
 SKILL_PATHS = (
     ROOT / ".agents/skills/assay-golden-path/SKILL.md",
     ROOT / ".claude/skills/assay-golden-path/SKILL.md",
@@ -31,6 +33,12 @@ CURSOR_SCOPE = (
 )
 PROTECTED_ACTION_CWD = "examples/privileged-action-gate"
 MAX_EVIDENCE_BYTES = 1024 * 1024
+
+
+@dataclass(frozen=True)
+class PrecommitHookContract:
+    stages: tuple[str, ...] | None
+    files_pattern: str
 
 
 def fail(message: str) -> None:
@@ -90,6 +98,102 @@ def workflow_pull_request_paths(text: str) -> set[str]:
             fail(f"kernel-matrix pull_request.paths duplicates entry: {path}")
         paths.add(path)
     return paths
+
+
+def parse_precommit_self_test(text: str) -> PrecommitHookContract:
+    """Read the unique active drift self-test hook from local pre-commit hooks."""
+    lines = text.splitlines()
+    hook_starts: list[int] = []
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indentation = len(line) - len(line.lstrip(" "))
+        if indentation != 2 or stripped != "- repo: local":
+            continue
+
+        local_end = len(lines)
+        for cursor in range(index + 1, len(lines)):
+            candidate = lines[cursor]
+            candidate_stripped = candidate.strip()
+            if not candidate_stripped or candidate_stripped.startswith("#"):
+                continue
+            if len(candidate) - len(candidate.lstrip(" ")) <= 2:
+                local_end = cursor
+                break
+
+        for cursor in range(index + 1, local_end):
+            candidate = lines[cursor]
+            candidate_stripped = candidate.strip()
+            if not candidate_stripped or candidate_stripped.startswith("#"):
+                continue
+            if (
+                len(candidate) - len(candidate.lstrip(" ")) == 4
+                and candidate_stripped == "hooks:"
+            ):
+                hooks_end = local_end
+                for hook_cursor in range(cursor + 1, local_end):
+                    hook_line = lines[hook_cursor]
+                    hook_stripped = hook_line.strip()
+                    if not hook_stripped or hook_stripped.startswith("#"):
+                        continue
+                    if len(hook_line) - len(hook_line.lstrip(" ")) <= 4:
+                        hooks_end = hook_cursor
+                        break
+                for hook_cursor in range(cursor + 1, hooks_end):
+                    hook_line = lines[hook_cursor]
+                    hook_stripped = hook_line.strip()
+                    if hook_stripped.startswith("#"):
+                        continue
+                    if (
+                        len(hook_line) - len(hook_line.lstrip(" ")) == 6
+                        and hook_stripped == "- id: docs-generated-drift-self-test"
+                    ):
+                        hook_starts.append(hook_cursor)
+
+    if len(hook_starts) != 1:
+        fail("pre-commit config must declare exactly one active generated-docs drift self-test hook")
+
+    fields: dict[str, list[str]] = {"stages": [], "files": []}
+    hook_start = hook_starts[0]
+    for line in lines[hook_start + 1 :]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indentation = len(line) - len(line.lstrip(" "))
+        if indentation <= 6:
+            break
+        if indentation != 8:
+            continue
+        key, separator, value = stripped.partition(":")
+        if separator and key in fields:
+            fields[key].append(value.strip())
+
+    if len(fields["stages"]) > 1:
+        fail("generated-docs drift self-test duplicates stages")
+    if len(fields["files"]) != 1:
+        fail("generated-docs drift self-test must declare exactly one files entry")
+
+    stages = None
+    if fields["stages"]:
+        match = re.fullmatch(r"\[([^]]*)\](?:\s+#.*)?", fields["stages"][0])
+        if not match:
+            fail("generated-docs drift self-test stages must be an inline list")
+        raw_entries = match.group(1).strip()
+        entries = (
+            ()
+            if not raw_entries
+            else tuple(entry.strip() for entry in raw_entries.split(","))
+        )
+        if any(not entry for entry in entries):
+            fail("generated-docs drift self-test stages must not contain empty entries")
+        stages = entries
+
+    files_pattern = fields["files"][0]
+    if not files_pattern:
+        fail("generated-docs drift self-test files entry must be a scalar")
+    return PrecommitHookContract(stages=stages, files_pattern=files_pattern)
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -238,6 +342,20 @@ def main() -> None:
     for path in required_workflow_paths:
         if path not in workflow_paths:
             fail(f"kernel-matrix workflow does not cover skill contract path: {path}")
+
+    precommit_text = read_bounded_evidence(
+        PRECOMMIT_PATH, "pre-commit config evidence"
+    ).decode("utf-8")
+    hook = parse_precommit_self_test(precommit_text)
+    if hook.stages is not None and "pre-commit" not in hook.stages:
+        fail("generated-docs drift self-test must run at the default pre-commit stage")
+    if (
+        re.search(
+            hook.files_pattern, "scripts/docs/generate-agent-golden-path.py"
+        )
+        is None
+    ):
+        fail("generated-docs drift self-test does not cover its golden-path generator")
 
     print("agent golden-path skill: portable, byte-identical, and contract-complete")
 
