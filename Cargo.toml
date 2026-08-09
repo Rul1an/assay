@@ -102,6 +102,7 @@ clap = { version = "4", features = ["derive", "env"] }
 uuid = { version = "1.23", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"], default-features = false }
 tempfile = "3"
+process-wrap = { version = "9.1", default-features = false }
 regex = "1"
 async-trait = "0.1"
 sha2 = "0.11"

@@ -5,6 +5,12 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
+use process_wrap::std::JobObject;
+#[cfg(unix)]
+use process_wrap::std::ProcessGroup;
+use process_wrap::std::{ChildWrapper, CommandWrap};
+
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 const MAX_DIAGNOSTIC_BYTES: usize = 4096;
 
@@ -43,8 +49,14 @@ impl CapturedStream {
     }
 }
 
+/// Runs one non-interactive command and owns its subprocess tree for the call.
+///
+/// A hard termination is sent to descendants that remain in the Unix process
+/// group or Windows Job Object before this function returns. Processes that
+/// deliberately escape those OS containers are outside this test helper's
+/// supported process shape.
 pub fn run_bounded(
-    command: &mut Command,
+    mut command: Command,
     stdin: &[u8],
     limits: ProcessLimits,
     context: &str,
@@ -57,25 +69,30 @@ pub fn run_bounded(
         limits.max_stderr_bytes > 0,
         "stderr ceiling must be positive"
     );
-    let command_display = display_command(command);
+    let command_display = display_command(&command);
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    let mut command = CommandWrap::from(command);
+    #[cfg(unix)]
+    command.wrap(ProcessGroup::leader());
+    #[cfg(windows)]
+    command.wrap(JobObject);
     let mut child = command
         .spawn()
         .map_err(|error| format!("{context}: spawn {command_display}: {error}"))?;
 
     let mut child_stdin = child
-        .stdin
+        .stdin()
         .take()
         .ok_or_else(|| format!("{context}: {command_display}: child stdin was not piped"))?;
     let child_stdout = child
-        .stdout
+        .stdout()
         .take()
         .ok_or_else(|| format!("{context}: {command_display}: child stdout was not piped"))?;
     let child_stderr = child
-        .stderr
+        .stderr()
         .take()
         .ok_or_else(|| format!("{context}: {command_display}: child stderr was not piped"))?;
 
@@ -102,6 +119,7 @@ pub fn run_bounded(
 
     let deadline = Instant::now() + limits.timeout;
     let mut early_failure = None;
+    let mut observed_status = None;
     let status = loop {
         if let Ok(stream) = overflow_rx.try_recv() {
             early_failure = Some(format!(
@@ -109,22 +127,47 @@ pub fn run_bounded(
                 stream.name(),
                 stream_limit(limits, stream)
             ));
-            break kill_and_reap(&mut child, context, &command_display)?;
+            break terminate_and_reap(
+                child.as_mut(),
+                observed_status.take(),
+                context,
+                &command_display,
+            )?;
         }
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() >= deadline => {
-                early_failure = Some(format!("deadline of {:?} expired", limits.timeout));
-                break kill_and_reap(&mut child, context, &command_display)?;
-            }
-            Ok(None) => thread::sleep(POLL_INTERVAL),
-            Err(error) => {
-                let reap = kill_and_reap(&mut child, context, &command_display);
-                return Err(format!(
-                    "{context}: poll {command_display}: {error}; kill/reap: {reap:?}"
-                ));
+        if observed_status.is_none() {
+            match child.try_wait() {
+                Ok(Some(status)) => observed_status = Some(status),
+                Ok(None) => {}
+                Err(error) => {
+                    let reap = terminate_and_reap(child.as_mut(), None, context, &command_display);
+                    return Err(format!(
+                        "{context}: poll {command_display}: {error}; terminate/reap: {reap:?}"
+                    ));
+                }
             }
         }
+
+        if observed_status.is_some()
+            && stdin_writer.is_finished()
+            && stdout_reader.is_finished()
+            && stderr_reader.is_finished()
+        {
+            finish_process_tree(child.as_mut(), context, &command_display)?;
+            break observed_status
+                .take()
+                .expect("status was checked immediately above");
+        }
+
+        if Instant::now() >= deadline {
+            early_failure = Some(format!("deadline of {:?} expired", limits.timeout));
+            break terminate_and_reap(
+                child.as_mut(),
+                observed_status.take(),
+                context,
+                &command_display,
+            )?;
+        }
+        thread::sleep(POLL_INTERVAL);
     };
 
     let stdin_result = stdin_writer
@@ -169,15 +212,18 @@ pub fn run_bounded(
             &stderr,
         ));
     }
-    stdin_result.map_err(|error| {
-        failure_diagnostic(
+    stdin_result.or_else(|error| {
+        if error.kind() == std::io::ErrorKind::BrokenPipe {
+            return Ok(());
+        }
+        Err(failure_diagnostic(
             context,
             &command_display,
             &format!("write stdin: {error}"),
             &status,
             &stdout,
             &stderr,
-        )
+        ))
     })?;
 
     Ok(Output {
@@ -217,17 +263,59 @@ fn join_reader(
         .map_err(|error| format!("{context}: read {stream} from {command}: {error}"))
 }
 
-fn kill_and_reap(
-    child: &mut std::process::Child,
+fn terminate_and_reap(
+    child: &mut dyn ChildWrapper,
+    observed_status: Option<ExitStatus>,
     context: &str,
     command: &str,
 ) -> Result<ExitStatus, String> {
-    let kill_error = child.kill().err();
-    child.wait().map_err(|wait_error| {
+    let tree_error = child
+        .start_kill()
+        .err()
+        .filter(|error| !process_tree_absent(error));
+    let direct_kill_error = tree_error
+        .as_ref()
+        .and_then(|_| child.inner_mut().start_kill().err());
+    let status = match observed_status {
+        Some(status) => Ok(status),
+        None => child.wait(),
+    }
+    .map_err(|wait_error| {
         format!(
-            "{context}: failed to reap {command} after kill; kill={kill_error:?}; wait={wait_error}"
+            "{context}: failed to reap {command} after tree termination; tree={tree_error:?}; direct_kill={direct_kill_error:?}; wait={wait_error}"
         )
-    })
+    })?;
+    if let Some(tree_error) = tree_error {
+        return Err(format!(
+            "{context}: failed to terminate process tree for {command}: {tree_error}; direct_kill={direct_kill_error:?}; status={status}"
+        ));
+    }
+    Ok(status)
+}
+
+fn finish_process_tree(
+    child: &mut dyn ChildWrapper,
+    context: &str,
+    command: &str,
+) -> Result<(), String> {
+    match child.start_kill() {
+        Ok(()) => Ok(()),
+        Err(error) if process_tree_absent(&error) => Ok(()),
+        Err(error) => Err(format!(
+            "{context}: terminate remaining process tree for {command}: {error}"
+        )),
+    }
+}
+
+#[cfg(unix)]
+fn process_tree_absent(error: &std::io::Error) -> bool {
+    // macOS may report EPERM when the owned group has only an already-reaped leader.
+    matches!(error.raw_os_error(), Some(libc::ESRCH) | Some(libc::EPERM))
+}
+
+#[cfg(windows)]
+fn process_tree_absent(_error: &std::io::Error) -> bool {
+    false
 }
 
 fn stream_limit(limits: ProcessLimits, stream: CapturedStream) -> usize {
@@ -279,8 +367,11 @@ fn excerpt(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{run_bounded, ProcessLimits};
-    use std::process::Command;
-    use std::time::Duration;
+    use std::path::Path;
+    use std::process::{Command, Stdio};
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     #[cfg(unix)]
     fn hanging_command() -> Command {
@@ -317,6 +408,120 @@ mod tests {
         command
     }
 
+    #[cfg(unix)]
+    fn inherited_output_descendant_command(pid_file: &Path) -> Command {
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg(
+                "sh -c 'echo \"$$\" > \"$1\"; while :; do :; done' descendant \"$1\" & printf parent-ready",
+            )
+            .arg("runner")
+            .arg(pid_file);
+        command
+    }
+
+    #[cfg(windows)]
+    fn inherited_output_descendant_command(pid_file: &Path) -> Command {
+        let mut command = Command::new("powershell.exe");
+        command.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$p = Start-Process -FilePath ping.exe -ArgumentList @('-t','127.0.0.1') -NoNewWindow -PassThru; [IO.File]::WriteAllText($args[0], [string]$p.Id); [Console]::Out.Write('parent-ready')",
+        ]);
+        command.arg(pid_file);
+        command
+    }
+
+    #[cfg(unix)]
+    fn early_exit_command() -> Command {
+        let mut command = Command::new("sh");
+        command.args(["-c", "exit 23"]);
+        command
+    }
+
+    #[cfg(windows)]
+    fn early_exit_command() -> Command {
+        let mut command = Command::new("cmd");
+        command.args(["/C", "exit", "/B", "23"]);
+        command
+    }
+
+    fn read_descendant_pid(pid_file: &Path) -> Option<u32> {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < deadline {
+            if let Ok(raw) = std::fs::read_to_string(pid_file) {
+                if let Ok(pid) = raw.trim().parse() {
+                    return Some(pid);
+                }
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        None
+    }
+
+    #[cfg(unix)]
+    fn descendant_is_alive(pid: u32) -> bool {
+        Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    #[cfg(windows)]
+    fn descendant_is_alive(pid: u32) -> bool {
+        Command::new("powershell.exe")
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "if (Get-Process -Id $args[0] -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }",
+                &pid.to_string(),
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    fn wait_for_descendant_exit(pid: u32) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < deadline {
+            if !descendant_is_alive(pid) {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        !descendant_is_alive(pid)
+    }
+
+    #[cfg(unix)]
+    fn cleanup_descendant(pid_file: &Path) {
+        if let Some(pid) = read_descendant_pid(pid_file) {
+            let _ = Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+
+    #[cfg(windows)]
+    fn cleanup_descendant(pid_file: &Path) {
+        if let Some(pid) = read_descendant_pid(pid_file) {
+            let _ = Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+
     #[cfg(windows)]
     fn stderr_flood_command() -> Command {
         let mut command = Command::new("cmd");
@@ -329,9 +534,9 @@ mod tests {
 
     #[test]
     fn kills_timeout_and_reports_context() {
-        let mut command = hanging_command();
+        let command = hanging_command();
         let limits = ProcessLimits::new(Duration::from_millis(100), 1024, 1024);
-        let error = run_bounded(&mut command, b"", limits, "hanging mutation")
+        let error = run_bounded(command, b"", limits, "hanging mutation")
             .expect_err("hanging child must time out");
         assert!(error.contains("hanging mutation"));
         assert!(error.contains("deadline"));
@@ -339,28 +544,86 @@ mod tests {
 
     #[test]
     fn kills_stdout_flood() {
-        let mut command = stdout_flood_command();
+        let command = stdout_flood_command();
         let limits = ProcessLimits::new(Duration::from_secs(2), 1024, 2048);
-        let error = run_bounded(&mut command, b"", limits, "stdout flood mutation")
+        let error = run_bounded(command, b"", limits, "stdout flood mutation")
             .expect_err("stdout flood must exceed its ceiling");
         assert!(error.contains("stdout flood mutation"));
         assert!(error.contains("stdout"));
-        assert!(error.contains("1024-byte ceiling"));
+        assert!(error.contains("1024-byte ceiling"), "{error}");
     }
 
     #[test]
     fn stderr_flood_uses_its_own_ceiling_and_bounded_diagnostic() {
-        let mut command = stderr_flood_command();
+        let command = stderr_flood_command();
         let limits = ProcessLimits::new(Duration::from_secs(2), 1024, 8192);
-        let error = run_bounded(&mut command, b"", limits, "stderr flood mutation")
+        let error = run_bounded(command, b"", limits, "stderr flood mutation")
             .expect_err("stderr flood must exceed its ceiling");
         assert!(error.contains("stderr flood mutation"));
-        assert!(error.contains("stderr exceeded its 8192-byte ceiling"));
+        assert!(
+            error.contains("stderr exceeded its 8192-byte ceiling"),
+            "{error}"
+        );
         assert!(error.contains("... (8193 bytes total)"));
         assert!(
             error.len() < 5000,
             "diagnostic escaped its bounded excerpt: {} bytes",
             error.len()
         );
+    }
+
+    #[test]
+    fn kills_descendant_that_holds_inherited_output_open() {
+        let temp = tempfile::tempdir().expect("temporary pid directory");
+        let pid_file = temp.path().join("descendant.pid");
+        let cleanup_path = pid_file.clone();
+        let (result_tx, result_rx) = mpsc::channel();
+        let started = Instant::now();
+
+        let worker = thread::spawn(move || {
+            let command = inherited_output_descendant_command(&pid_file);
+            let limits = ProcessLimits::new(Duration::from_millis(250), 1024, 1024);
+            let result = run_bounded(command, b"", limits, "inherited output mutation");
+            let _ = result_tx.send(result);
+        });
+
+        let result = match result_rx.recv_timeout(Duration::from_secs(2)) {
+            Ok(result) => result,
+            Err(error) => {
+                cleanup_descendant(&cleanup_path);
+                let _ = result_rx.recv_timeout(Duration::from_secs(2));
+                let _ = worker.join();
+                panic!("runner escaped its wall-clock bound: {error}");
+            }
+        };
+        worker.join().expect("bounded runner worker");
+
+        let error = result.expect_err("inherited output holder must force tree termination");
+        assert!(error.contains("inherited output mutation"));
+        assert!(error.contains("deadline"));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "process-tree cleanup exceeded the test bound"
+        );
+        let descendant_pid = read_descendant_pid(&cleanup_path)
+            .expect("descendant must publish its pid before inheriting output");
+        if !wait_for_descendant_exit(descendant_pid) {
+            cleanup_descendant(&cleanup_path);
+            panic!("descendant {descendant_pid} survived process-tree termination");
+        }
+    }
+
+    #[test]
+    fn preserves_child_outcome_when_stdin_closes_early() {
+        let command = early_exit_command();
+        let stdin = vec![b'x'; 8 * 1024 * 1024];
+        let limits = ProcessLimits::new(Duration::from_secs(2), 1024, 1024);
+
+        let output = run_bounded(command, &stdin, limits, "early stdin close mutation")
+            .expect("BrokenPipe must not hide an observed child outcome");
+
+        assert_eq!(output.status.code(), Some(23));
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.is_empty());
     }
 }

@@ -145,7 +145,7 @@ fn run_server<S: AsRef<OsStr>>(cwd: &Path, args: &[S], stdin: &[u8]) -> Output {
     let mut command = clean_server_command();
     command.current_dir(cwd).args(args);
     run_bounded(
-        &mut command,
+        command,
         stdin,
         GOLDEN_PATH_LIMITS,
         "agent golden-path MCP command",
@@ -166,7 +166,7 @@ fn required_python() -> &'static str {
     let mut command = Command::new(interpreter);
     command.arg("--version");
     let output = run_bounded(
-        &mut command,
+        command,
         b"",
         GOLDEN_PATH_LIMITS,
         "protected-action Python preflight",
