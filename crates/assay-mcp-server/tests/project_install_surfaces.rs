@@ -1,7 +1,7 @@
-//! Project install surfaces must launch the release MCP server they describe.
+//! Install surfaces must launch the release MCP server they describe.
 //!
-//! The JSON locations differ by client, while Codex uses TOML. This test keeps
-//! those three representations on one invocation and drives the built server so
+//! The JSON locations differ by surface, while Codex uses TOML. This test keeps
+//! those representations on one invocation and drives the built server so
 //! a syntactically correct manifest cannot advertise the wrong binary or tools.
 
 use serde_json::Value;
@@ -15,17 +15,19 @@ use jsonrpc_conn::Conn;
 const MAX_PROJECT_FILE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Copy)]
-enum ProjectFile {
+enum InstallFile {
     ClaudeManifest,
     CursorManifest,
+    PluginManifest,
     EditorGuide,
 }
 
-impl ProjectFile {
+impl InstallFile {
     fn relative_path(self) -> &'static Path {
         Path::new(match self {
             Self::ClaudeManifest => ".mcp.json",
             Self::CursorManifest => ".cursor/mcp.json",
+            Self::PluginManifest => "packaging/claude-plugin/.mcp.json",
             Self::EditorGuide => "docs/guides/editor-mcp-recipe.md",
         })
     }
@@ -38,7 +40,7 @@ fn workspace_root() -> PathBuf {
         .expect("workspace root")
 }
 
-fn read_project_file(file: ProjectFile) -> String {
+fn read_install_file(file: InstallFile) -> String {
     let path = workspace_root().join(file.relative_path());
     let mut source = std::fs::File::open(&path)
         .unwrap_or_else(|error| panic!("open checked project file {}: {error}", path.display()));
@@ -58,9 +60,9 @@ fn read_project_file(file: ProjectFile) -> String {
     contents
 }
 
-fn manifest_entry(file: ProjectFile) -> Value {
+fn manifest_entry(file: InstallFile) -> Value {
     let manifest: Value =
-        serde_json::from_str(&read_project_file(file)).expect("valid project MCP manifest JSON");
+        serde_json::from_str(&read_install_file(file)).expect("valid MCP manifest JSON");
     manifest["mcpServers"]["assay"].clone()
 }
 
@@ -78,41 +80,15 @@ fn clean_server_command() -> Command {
     command
 }
 
-#[test]
-fn project_surfaces_launch_the_five_production_tools() {
-    let claude = manifest_entry(ProjectFile::ClaudeManifest);
-    let cursor = manifest_entry(ProjectFile::CursorManifest);
-    assert_eq!(claude, cursor, "Claude and Cursor entries drifted");
-    assert_eq!(claude["command"], "assay-mcp-server");
-    assert_eq!(claude["args"], serde_json::json!(["--policy-root", "."]));
-
-    let codex_entry = r#"[mcp_servers.assay]
-command = "assay-mcp-server"
-args = ["--policy-root", "."]"#;
-    let guide = read_project_file(ProjectFile::EditorGuide).replace("\r\n", "\n");
-    assert!(
-        guide.contains("cargo install --path crates/assay-mcp-server --locked"),
-        "editor guide install must use the reviewed checkout"
-    );
-    assert!(
-        guide.contains(codex_entry),
-        "Codex guide does not carry the manifest invocation"
-    );
-
-    let args: Vec<&str> = claude["args"]
-        .as_array()
-        .expect("manifest args array")
-        .iter()
-        .map(|arg| arg.as_str().expect("manifest string arg"))
-        .collect();
+fn assert_release_server_surface(cwd: &Path, args: &[String], context: &str) {
     let child = clean_server_command()
         .args(args)
-        .current_dir(workspace_root())
+        .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .expect("spawn assay-mcp-server from project manifest");
+        .unwrap_or_else(|error| panic!("spawn assay-mcp-server from {context}: {error}"));
 
     let mut conn = Conn::attach(child);
     conn.send(serde_json::json!({
@@ -122,7 +98,7 @@ args = ["--policy-root", "."]"#;
         "params": {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
-            "clientInfo": {"name": "project-install-contract", "version": "1.0"}
+            "clientInfo": {"name": "install-surface-contract", "version": "1.0"}
         }
     }));
     let initialize = conn.read_response_for_id(0);
@@ -145,7 +121,7 @@ args = ["--policy-root", "."]"#;
     let status = conn.shutdown();
     assert!(
         status.success(),
-        "manifest invocation failed with status {status}"
+        "{context} invocation failed with status {status}"
     );
     let mut actual: Vec<&str> = response["result"]["tools"]
         .as_array()
@@ -176,4 +152,68 @@ args = ["--policy-root", "."]"#;
         "assay_policy_decide",
     ];
     assert_eq!(actual, expected, "release tool surface changed");
+}
+
+#[test]
+fn project_surfaces_launch_the_five_production_tools() {
+    let claude = manifest_entry(InstallFile::ClaudeManifest);
+    let cursor = manifest_entry(InstallFile::CursorManifest);
+    assert_eq!(claude, cursor, "Claude and Cursor entries drifted");
+    assert_eq!(claude["command"], "assay-mcp-server");
+    assert_eq!(claude["args"], serde_json::json!(["--policy-root", "."]));
+
+    let codex_entry = r#"[mcp_servers.assay]
+command = "assay-mcp-server"
+args = ["--policy-root", "."]"#;
+    let guide = read_install_file(InstallFile::EditorGuide).replace("\r\n", "\n");
+    assert!(
+        guide.contains("cargo install --path crates/assay-mcp-server --locked"),
+        "editor guide install must use the reviewed checkout"
+    );
+    assert!(
+        guide.contains(codex_entry),
+        "Codex guide does not carry the manifest invocation"
+    );
+
+    let args: Vec<String> = claude["args"]
+        .as_array()
+        .expect("manifest args array")
+        .iter()
+        .map(|arg| arg.as_str().expect("manifest string arg").to_string())
+        .collect();
+    assert_release_server_surface(&workspace_root(), &args, "project manifest");
+}
+
+#[test]
+fn plugin_manifest_drives_the_release_server_surface() {
+    let plugin = manifest_entry(InstallFile::PluginManifest);
+    assert_eq!(plugin["command"], "assay-mcp-server");
+    assert_eq!(
+        plugin["args"],
+        serde_json::json!(["--policy-root", "${CLAUDE_PROJECT_DIR}"])
+    );
+
+    let project = tempfile::tempdir().expect("temporary Claude project");
+    let project_root = project
+        .path()
+        .to_str()
+        .expect("temporary Claude project path must be UTF-8");
+    let args: Vec<String> = plugin["args"]
+        .as_array()
+        .expect("plugin manifest args array")
+        .iter()
+        .map(
+            |arg| match arg.as_str().expect("plugin manifest string arg") {
+                "${CLAUDE_PROJECT_DIR}" => project_root.to_string(),
+                value => {
+                    assert!(
+                        !value.contains("${"),
+                        "plugin manifest contains unsupported placeholder: {value}"
+                    );
+                    value.to_string()
+                }
+            },
+        )
+        .collect();
+    assert_release_server_surface(project.path(), &args, "plugin manifest");
 }

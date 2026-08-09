@@ -97,6 +97,8 @@ seed_case() {
     "$case_root/docs/guides" \
     "$case_root/.agents/skills/assay-golden-path" \
     "$case_root/.claude/skills/assay-golden-path" \
+    "$case_root/.claude-plugin" \
+    "$case_root/packaging/claude-plugin/.claude-plugin" \
     "$case_root/.github/workflows"
   cp "$ROOT/scripts/ci/test-agent-golden-path-skill.py" "$case_root/scripts/ci/"
   cp "$ROOT/scripts/docs/generate-agent-golden-path.py" "$case_root/scripts/docs/"
@@ -109,6 +111,10 @@ seed_case() {
     "$case_root/.agents/skills/assay-golden-path/"
   cp "$ROOT/.claude/skills/assay-golden-path/SKILL.md" \
     "$case_root/.claude/skills/assay-golden-path/"
+  cp "$ROOT/.claude-plugin/marketplace.json" "$case_root/.claude-plugin/"
+  cp "$ROOT/packaging/claude-plugin/.claude-plugin/plugin.json" \
+    "$case_root/packaging/claude-plugin/.claude-plugin/"
+  cp "$ROOT/packaging/claude-plugin/.mcp.json" "$case_root/packaging/claude-plugin/"
   cp "$ROOT/.github/workflows/kernel-matrix.yml" "$case_root/.github/workflows/"
   case_git "$case_root" -c init.defaultBranch=main init -q
   case_git "$case_root" -c core.excludesFile= -c core.attributesFile= \

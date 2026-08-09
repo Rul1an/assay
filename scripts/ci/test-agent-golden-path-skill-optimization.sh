@@ -22,7 +22,9 @@ mkdir -p \
   "$SCRATCH/scripts/docs" \
   "$SCRATCH/docs/generated" \
   "$SCRATCH/.agents/skills/assay-golden-path" \
-  "$SCRATCH/.claude/skills/assay-golden-path"
+  "$SCRATCH/.claude/skills/assay-golden-path" \
+  "$SCRATCH/.claude-plugin" \
+  "$SCRATCH/packaging/claude-plugin/.claude-plugin"
 
 cp "$ROOT/scripts/ci/test-agent-golden-path-skill.py" "$SCRATCH/scripts/ci/"
 cp "$ROOT/scripts/docs/generate-agent-golden-path.py" "$SCRATCH/scripts/docs/"
@@ -33,6 +35,10 @@ cp "$ROOT/.agents/skills/assay-golden-path/SKILL.md" \
   "$SCRATCH/.agents/skills/assay-golden-path/"
 cp "$ROOT/.claude/skills/assay-golden-path/SKILL.md" \
   "$SCRATCH/.claude/skills/assay-golden-path/"
+cp "$ROOT/.claude-plugin/marketplace.json" "$SCRATCH/.claude-plugin/"
+cp "$ROOT/packaging/claude-plugin/.claude-plugin/plugin.json" \
+  "$SCRATCH/packaging/claude-plugin/.claude-plugin/"
+cp "$ROOT/packaging/claude-plugin/.mcp.json" "$SCRATCH/packaging/claude-plugin/"
 scratch_git -c init.defaultBranch=main init -q
 scratch_git -c core.excludesFile= -c core.attributesFile= \
   add -f -- .

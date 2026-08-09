@@ -17,6 +17,9 @@ CONTRACT_PATH = ROOT / "docs/generated/agent-golden-path.json"
 GUIDE_PATH = ROOT / "docs/guides/agent-golden-path.md"
 WORKFLOW_PATH = ROOT / ".github/workflows/kernel-matrix.yml"
 PRECOMMIT_PATH = ROOT / ".pre-commit-config.yaml"
+MARKETPLACE_PATH = ROOT / ".claude-plugin/marketplace.json"
+PLUGIN_MANIFEST_PATH = ROOT / "packaging/claude-plugin/.claude-plugin/plugin.json"
+PLUGIN_MCP_PATH = ROOT / "packaging/claude-plugin/.mcp.json"
 SKILL_PATHS = (
     ROOT / ".agents/skills/assay-golden-path/SKILL.md",
     ROOT / ".claude/skills/assay-golden-path/SKILL.md",
@@ -41,6 +44,9 @@ EXPECTED_DESCRIPTION = (
     "Drive Assay's install-to-evidence golden path and interpret its stdout and exit "
     "codes. Use when an agent must operate or diagnose Assay; do not use it to infer "
     "provider execution, external side effects, or a clean result from missing output."
+)
+EXPECTED_PLUGIN_DESCRIPTION = (
+    "Connect Claude Code to Assay's MCP policy and evidence tools and golden-path skill."
 )
 EMPTY_STDOUT_RULE = (
     "Empty stdout in a gap row is an observed limitation, not permission for a caller "
@@ -317,6 +323,48 @@ def read_bounded_evidence(path: Path, label: str) -> bytes:
     if len(payload) > MAX_EVIDENCE_BYTES:
         fail(f"{label} exceeds {MAX_EVIDENCE_BYTES}-byte limit")
     return payload
+
+
+def validate_plugin_manifests() -> None:
+    marketplace = json.loads(
+        read_bounded_evidence(MARKETPLACE_PATH, "Claude marketplace manifest")
+    )
+    expected_marketplace = {
+        "name": "assay",
+        "owner": {"name": "Assay"},
+        "plugins": [
+            {
+                "name": "assay",
+                "description": EXPECTED_PLUGIN_DESCRIPTION,
+                "source": "./packaging/claude-plugin",
+            }
+        ],
+    }
+    if marketplace != expected_marketplace:
+        fail("Claude marketplace identity or local source drifted")
+
+    plugin = json.loads(
+        read_bounded_evidence(PLUGIN_MANIFEST_PATH, "Claude plugin manifest")
+    )
+    expected_plugin = {
+        "name": "assay",
+        "description": EXPECTED_PLUGIN_DESCRIPTION,
+        "author": {"name": "Assay"},
+    }
+    if plugin != expected_plugin:
+        fail("Claude plugin identity, fields, or unversioned contract drifted")
+
+    mcp = json.loads(read_bounded_evidence(PLUGIN_MCP_PATH, "Claude plugin MCP manifest"))
+    expected_mcp = {
+        "mcpServers": {
+            "assay": {
+                "command": "assay-mcp-server",
+                "args": ["--policy-root", "${CLAUDE_PROJECT_DIR}"],
+            }
+        }
+    }
+    if mcp != expected_mcp:
+        fail("Claude plugin MCP command or project-root arguments drifted")
 
 
 def indentation(line: str) -> int:
@@ -942,6 +990,7 @@ def exit_summary(step: dict[str, object]) -> str:
 
 def main() -> None:
     validate_skill_repository_state()
+    validate_plugin_manifests()
     contract = json.loads(read_bounded_evidence(CONTRACT_PATH, "contract evidence"))
     if not isinstance(contract, dict):
         fail("golden-path contract root must be an object")
