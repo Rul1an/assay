@@ -5,9 +5,9 @@ ROOT="$(git rev-parse --show-toplevel)"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
-# Task 2 pins the eleven inherited cases, twelve named parser failures, and one
-# parser allow probe. Structural probe assertions stay inside that 24-case boundary.
-EXPECTED_CASES=24
+# Task 3 adds eight executor failure mutations and one allow probe to Task 2's
+# 24-case boundary. Structural probe assertions stay inside the 33-case boundary.
+EXPECTED_CASES=33
 case_count=0
 
 record_case_pass() {
@@ -77,6 +77,17 @@ expect_named_failure() {
   record_case_pass "$name"
 }
 
+expect_named_success() {
+  local name="$1" case_root="$2"
+  local output="$case_root/validator.log"
+  if ! python3 "$case_root/scripts/ci/test-agent-golden-path-skill.py" >"$output" 2>&1; then
+    cat "$output" >&2
+    echo "FAIL: $name was rejected" >&2
+    return 1
+  fi
+  record_case_pass "$name"
+}
+
 mutate_workflow() {
   local case_root="$1" mutation="$2"
   CASE_ROOT="$case_root" MUTATION="$mutation" python3 - <<'PY'
@@ -135,6 +146,38 @@ replacements = {
     "delete-lint-runs-on": (
         '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n',
         '  lint:\n    name: Lint (pre-commit)\n',
+    ),
+    "comment-lint": (
+        '  lint:\n',
+        '  # lint:\n',
+    ),
+    "delete-canonical-pre-commit": (
+        '          pre-commit run --all-files --show-diff-on-failure\n',
+        '',
+    ),
+    "pre-commit-files": (
+        '          pre-commit run --all-files --show-diff-on-failure\n',
+        '          pre-commit run --files --show-diff-on-failure\n',
+    ),
+    "pre-commit-hook-stage": (
+        '          pre-commit run --all-files --show-diff-on-failure\n',
+        '          pre-commit run --all-files --show-diff-on-failure --hook-stage pre-push\n',
+    ),
+    "lint-step-condition": (
+        '      - name: Run pre-commit (all files)\n        shell: bash\n',
+        '      - name: Run pre-commit (all files)\n        shell: bash\n        if: false\n',
+    ),
+    "lint-step-continue-on-error": (
+        '      - name: Run pre-commit (all files)\n        shell: bash\n',
+        '      - name: Run pre-commit (all files)\n        shell: bash\n        continue-on-error: true\n',
+    ),
+    "lint-needs": (
+        '  lint:\n    name: Lint (pre-commit)\n',
+        '  lint:\n    name: Lint (pre-commit)\n    needs: optional-job\n',
+    ),
+    "lint-runner": (
+        '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n',
+        '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-24.04\n',
     ),
 }
 
@@ -273,6 +316,53 @@ for parser_case in "${parser_mutations[@]}"; do
   mutate_workflow "$case_root" "$mutation"
   expect_named_failure "$name" "$case_root" "$expected"
 done
+
+declare -a executor_mutations=(
+  "comment-lint|commented lint job|kernel-matrix workflow must declare exactly one active lint job"
+  "delete-canonical-pre-commit|missing canonical pre-commit executor|kernel-matrix lint job has no canonical pre-commit executor"
+  "pre-commit-files|pre-commit files executor|kernel-matrix lint pre-commit command is noncanonical"
+  "pre-commit-hook-stage|pre-commit hook-stage executor|kernel-matrix lint pre-commit command is noncanonical"
+  "lint-step-condition|conditional lint executor|kernel-matrix lint executor must not be conditional"
+  "lint-step-continue-on-error|non-failing lint executor|kernel-matrix lint executor must fail closed"
+  "lint-needs|lint job dependency|kernel-matrix lint job must not depend on another job"
+  "lint-runner|noncanonical lint runner|kernel-matrix lint job must run on ubuntu-latest"
+)
+
+for executor_case in "${executor_mutations[@]}"; do
+  IFS='|' read -r mutation name expected <<<"$executor_case"
+  case_root="$SCRATCH/executor-$mutation"
+  seed_case "$case_root"
+  mutate_workflow "$case_root" "$mutation"
+  expect_named_failure "$name" "$case_root" "$expected"
+done
+
+case_root="$SCRATCH/separate-pre-push-pre-commit-step"
+seed_case "$case_root"
+CASE_ROOT="$case_root" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["CASE_ROOT"]) / ".github/workflows/kernel-matrix.yml"
+source = (
+    "      - name: Run pre-commit (all files)\n"
+    "        shell: bash\n"
+    "        run: |\n"
+    "          set -euo pipefail\n"
+    "          pre-commit run --all-files --show-diff-on-failure\n"
+)
+addition = (
+    source
+    + "\n"
+    + "      - name: Run pre-push pre-commit\n"
+    + "        shell: bash\n"
+    + "        run: pre-commit run --hook-stage pre-push --all-files\n"
+)
+text = path.read_text(encoding="utf-8")
+if text.count(source) != 1:
+    raise SystemExit(f"canonical pre-commit step is not unique: {source!r}")
+path.write_text(text.replace(source, addition, 1), encoding="utf-8")
+PY
+expect_named_success "separate pre-push pre-commit step" "$case_root"
 
 case_root="$SCRATCH/inline-run-parser"
 seed_case "$case_root"

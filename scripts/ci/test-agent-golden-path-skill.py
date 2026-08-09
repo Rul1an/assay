@@ -34,6 +34,7 @@ CURSOR_SCOPE = (
 )
 PROTECTED_ACTION_CWD = "examples/privileged-action-gate"
 MAX_EVIDENCE_BYTES = 1024 * 1024
+CANONICAL_PRECOMMIT = "pre-commit run --all-files --show-diff-on-failure"
 
 
 @dataclass(frozen=True)
@@ -96,7 +97,8 @@ def active_lines(text: str) -> list[tuple[int, str]]:
 
 
 def locate_mapping(
-    lines: list[tuple[int, str]], start_index: int, parent_indent: int, key: str
+    lines: list[tuple[int, str]], start_index: int, parent_indent: int, key: str,
+    missing_message: str | None = None,
 ) -> tuple[int, int]:
     """Locate one direct mapping key and the first line outside its scope."""
     key_indent = parent_indent + 2
@@ -111,7 +113,7 @@ def locate_mapping(
         if line_indent == key_indent and line.strip() == key:
             matches.append(index)
     if len(matches) != 1:
-        fail(f"kernel-matrix workflow must declare exactly one {key[:-1]} section")
+        fail(missing_message or f"kernel-matrix workflow must declare exactly one {key[:-1]} section")
 
     key_index = matches[0]
     key_end = end_index
@@ -274,7 +276,13 @@ def parse_kernel_matrix_workflow(text: str) -> WorkflowContract:
         paths.append(path)
 
     jobs_index, _ = locate_mapping(lines, 0, -2, "jobs:")
-    lint_index, lint_end = locate_mapping(lines, jobs_index + 1, 0, "lint:")
+    lint_index, lint_end = locate_mapping(
+        lines,
+        jobs_index + 1,
+        0,
+        "lint:",
+        "kernel-matrix workflow must declare exactly one active lint job",
+    )
     lint = direct_mapping_values(lines, lint_index + 1, lint_end, 4, "kernel-matrix lint job")
     if "runs-on" not in lint:
         fail("kernel-matrix lint job is missing required key: runs-on")
@@ -313,6 +321,41 @@ def parse_kernel_matrix_workflow(text: str) -> WorkflowContract:
         ),
         lint_steps=lint_steps,
     )
+
+
+def validate_lint_executor(contract: WorkflowContract) -> None:
+    # This maintenance pin requires updating this contract and mutation proof together.
+    if contract.lint_runner != "ubuntu-latest":
+        fail("kernel-matrix lint job must run on ubuntu-latest")
+    if contract.lint_needs is not None:
+        fail("kernel-matrix lint job must not depend on another job")
+    if contract.lint_condition is not None:
+        fail("kernel-matrix lint executor must not be conditional")
+    if contract.lint_continue_on_error is True:
+        fail("kernel-matrix lint executor must fail closed")
+
+    invocation_steps = []
+    canonical_steps = []
+    for step in contract.lint_steps:
+        active = tuple(line.strip() for line in step.shell_lines if line.strip())
+        invocations = tuple(line for line in active if line.startswith("pre-commit "))
+        if invocations:
+            invocation_steps.append((step, invocations))
+        if CANONICAL_PRECOMMIT in invocations:
+            canonical_steps.append((step, invocations))
+
+    if not invocation_steps:
+        fail("kernel-matrix lint job has no canonical pre-commit executor")
+    if len(canonical_steps) != 1:
+        fail("kernel-matrix lint pre-commit command is noncanonical")
+
+    step, invocations = canonical_steps[0]
+    if step.condition is not None:
+        fail("kernel-matrix lint executor must not be conditional")
+    if step.continue_on_error is True:
+        fail("kernel-matrix lint executor must fail closed")
+    if invocations != (CANONICAL_PRECOMMIT,):
+        fail("kernel-matrix lint pre-commit command is noncanonical")
 
 
 def parse_precommit_self_test(text: str) -> PrecommitHookContract:
@@ -544,6 +587,7 @@ def main() -> None:
 
     workflow = read_bounded_evidence(WORKFLOW_PATH, "workflow evidence").decode("utf-8")
     workflow_contract = parse_kernel_matrix_workflow(workflow)
+    validate_lint_executor(workflow_contract)
     workflow_paths = set(workflow_contract.pull_request_paths)
     if "main" not in workflow_contract.pull_request_branches:
         fail("kernel-matrix pull_request does not cover main")
