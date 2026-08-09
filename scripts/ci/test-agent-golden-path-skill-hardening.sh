@@ -5,9 +5,9 @@ ROOT="$(git rev-parse --show-toplevel)"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
-# This cumulative pin keeps Task 1's 11 cases while Task 2 adds 12 parser
-# rejections and one parser allow probe, so later tasks cannot silently drop either.
-EXPECTED_CASES=24
+# This cumulative pin keeps Task 1's 11 cases, Task 2's 13 parser cases, and
+# two structural steps-mapping regressions, so later tasks cannot silently drop either.
+EXPECTED_CASES=26
 case_count=0
 
 record_case_pass() {
@@ -15,6 +15,32 @@ record_case_pass() {
   case_count=$((case_count + 1))
   echo "ok    $name"
 }
+
+check_ast_source_scope() {
+  HARDENING_PATH="$0" python3 - \
+    "$ROOT/scripts/ci/test-agent-golden-path-skill.py" \
+    "$ROOT/scripts/docs/generate-agent-golden-path.py" <<'PY'
+import ast
+import os
+from pathlib import Path
+import sys
+
+if len(sys.argv) != 3:
+    raise SystemExit("AST source check must scan exactly two Python source arguments")
+
+for raw in sys.argv[1:]:
+    path = Path(raw)
+    ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+# Bash heredoc Python remains an explicit residual: this source-file-only AST
+# check does not claim that embedded fragments are parsed or assertion-free.
+hardening = Path(os.environ["HARDENING_PATH"]).read_text(encoding="utf-8")
+if "python3 - <<'PY'" not in hardening:
+    raise SystemExit("AST source check must retain its embedded-Python residual")
+PY
+}
+
+check_ast_source_scope
 
 seed_case() {
   local case_root="$1"
@@ -109,6 +135,14 @@ replacements = {
     "delete-lint-runs-on": (
         '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n',
         '  lint:\n    name: Lint (pre-commit)\n',
+    ),
+    "delete-lint-steps": (
+        '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n    timeout-minutes: 10\n    permissions:\n      contents: read\n    steps:\n',
+        '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n    timeout-minutes: 10\n    permissions:\n      contents: read\n',
+    ),
+    "duplicate-lint-steps": (
+        '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n    timeout-minutes: 10\n    permissions:\n      contents: read\n    steps:\n',
+        '  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n    timeout-minutes: 10\n    permissions:\n      contents: read\n    steps:\n    steps:\n',
     ),
 }
 
@@ -238,6 +272,8 @@ declare -a parser_mutations=(
   "types|pull-request types|kernel-matrix pull_request must not declare types"
   "comment-pull-request|commented pull-request section|kernel-matrix workflow must declare exactly one pull_request section"
   "delete-lint-runs-on|missing lint runner|kernel-matrix lint job is missing required key: runs-on"
+  "delete-lint-steps|missing lint steps|kernel-matrix lint job is missing required key: steps"
+  "duplicate-lint-steps|duplicate lint steps|kernel-matrix lint job duplicates key: steps"
 )
 
 for parser_case in "${parser_mutations[@]}"; do
@@ -260,7 +296,22 @@ replacement = "run: echo inline-parser-sentinel"
 text = path.read_text(encoding="utf-8")
 if text.count(source) != 1:
     raise SystemExit(f"inline run anchor is not unique: {source!r}")
-path.write_text(text.replace(source, replacement, 1), encoding="utf-8")
+lint_steps_anchor = (
+    "  lint:\n    name: Lint (pre-commit)\n    runs-on: ubuntu-latest\n"
+    "    timeout-minutes: 10\n    permissions:\n      contents: read\n    steps:\n"
+)
+if text.count(lint_steps_anchor) != 1:
+    raise SystemExit(f"lint steps anchor is not unique: {lint_steps_anchor!r}")
+text = text.replace(source, replacement, 1)
+text = text.replace(
+    lint_steps_anchor,
+    lint_steps_anchor.replace(
+        "    steps:\n",
+        "    outputs:\n      - run: echo non-step-parser-sentinel\n    steps:\n",
+    ),
+    1,
+)
+path.write_text(text, encoding="utf-8")
 PY
 if ! CASE_ROOT="$case_root" python3 - <<'PY'
 import importlib.util
@@ -280,6 +331,8 @@ workflow = (case_root / ".github/workflows/kernel-matrix.yml").read_text(encodin
 contract = module.parse_kernel_matrix_workflow(workflow)
 if sum(step.shell_lines == ("echo inline-parser-sentinel",) for step in contract.lint_steps) != 1:
     raise SystemExit("parser did not retain exactly one inline run sentinel")
+if any("echo non-step-parser-sentinel" in step.shell_lines for step in contract.lint_steps):
+    raise SystemExit("parser treated a list outside steps as an executable step")
 
 uses_only_indices = []
 lines = workflow.splitlines()

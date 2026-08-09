@@ -278,17 +278,20 @@ def parse_kernel_matrix_workflow(text: str) -> WorkflowContract:
     lint = direct_mapping_values(lines, lint_index + 1, lint_end, 4, "kernel-matrix lint job")
     if "runs-on" not in lint:
         fail("kernel-matrix lint job is missing required key: runs-on")
+    if "steps" not in lint:
+        fail("kernel-matrix lint job is missing required key: steps")
+    steps_index, steps_end = locate_mapping(lines, lint_index + 1, 2, "steps:")
 
     step_starts = [
         index
-        for index in range(lint_index + 1, lint_end)
+        for index in range(steps_index + 1, steps_end)
         if indentation(lines[index][1]) == 6 and lines[index][1].strip().startswith("- ")
     ]
     lint_steps = tuple(
         parse_lint_step(
             lines,
             step_start,
-            step_starts[position + 1] if position + 1 < len(step_starts) else lint_end,
+            step_starts[position + 1] if position + 1 < len(step_starts) else steps_end,
         )
         for position, step_start in enumerate(step_starts)
     )
