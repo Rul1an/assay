@@ -201,17 +201,8 @@ fn incomplete_initialize_shape_is_value_free_invalid_params() {
     );
 }
 
-/// The probe a dual-era client sends first is now answered rather than refused.
-///
-/// This replaces `modern_discovery_probe_remains_a_method_not_found_fallback_signal`, which pinned
-/// the legacy-only behaviour: `server/discover` returned `-32601`, which a dual-era client
-/// recognises as a non-modern signal and falls back from. That fallback was the whole compatibility
-/// story, and it left modern-only clients with no path at all (#1943).
-///
-/// What the old test protected -- a dual-era client can use this proxy -- still holds. It now holds
-/// by discovery instead of by fallback, which is the stronger of the two.
 #[test]
-fn the_discovery_probe_is_answered() {
+fn discovery_is_an_explicit_legacy_fallback_signal() {
     let request = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -220,22 +211,16 @@ fn the_discovery_probe_is_answered() {
     });
     let output = run_session(&[request]);
     let response = responses(&output).pop().expect("discover response");
-    assert!(response.get("error").is_none(), "{response}");
-    let versions = response["result"]["protocolVersions"]
-        .as_array()
-        .expect("protocolVersions");
-    assert!(versions.iter().any(|v| v == "2026-07-28"));
-    assert!(versions.iter().any(|v| v == LATEST_LEGACY_VERSION));
-    assert!(response["result"]["capabilities"]["tools"].is_object());
-    assert_eq!(response["result"]["serverInfo"]["name"], "assay-mcp-server");
+    assert_eq!(response["error"]["code"].as_i64(), Some(-32601));
+    assert_eq!(
+        response["error"]["message"],
+        "Method not found: server/discover"
+    );
+    assert!(response.get("result").is_none());
 }
 
-/// A modern request carries its revision and needs no handshake.
-///
-/// This is what a modern-only client does, and what this proxy could not serve at all before: the
-/// spec's compatibility matrix marks Modern x Legacy as failing with no fall-forward.
 #[test]
-fn a_modern_request_is_served_without_a_handshake() {
+fn a_modern_revision_claim_is_refused_with_the_legacy_set() {
     let request = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -244,8 +229,13 @@ fn a_modern_request_is_served_without_a_handshake() {
     });
     let output = run_session(&[request]);
     let response = responses(&output).pop().expect("tools/list response");
-    assert!(response.get("error").is_none(), "{response}");
-    assert!(response["result"]["tools"].is_array());
+    assert_eq!(response["error"]["code"].as_i64(), Some(-32022));
+    assert_eq!(response["error"]["data"]["requested"], "2026-07-28");
+    assert_eq!(
+        response["error"]["data"]["supported"],
+        serde_json::json!(["2024-11-05", "2025-11-25"])
+    );
+    assert!(response.get("result").is_none());
 }
 
 /// A revision this server does not implement is refused by name, with the set it does implement.
@@ -268,30 +258,15 @@ fn an_unimplemented_revision_is_refused_with_the_supported_set() {
     let supported = response["error"]["data"]["supported"]
         .as_array()
         .expect("supported set");
-    assert!(supported.iter().any(|v| v == "2026-07-28"));
+    assert!(supported.iter().any(|v| v == "2024-11-05"));
+    assert!(supported.iter().any(|v| v == LATEST_LEGACY_VERSION));
+    assert!(!supported.iter().any(|v| v == "2026-07-28"));
     assert!(response.get("result").is_none());
 }
 
-/// What `server/discover` advertises is what the version check accepts.
-///
-/// Two lists would let a client discover a revision it is then refused, which is worse than not
-/// advertising it -- so this drives both through the wire rather than reading the constant.
 #[test]
-fn every_advertised_revision_is_accepted() {
-    let discover = serde_json::json!({
-        "jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {}
-    });
-    let output = run_session(&[discover]);
-    let response = responses(&output).pop().expect("discover response");
-    let versions: Vec<String> = response["result"]["protocolVersions"]
-        .as_array()
-        .expect("protocolVersions")
-        .iter()
-        .map(|v| v.as_str().expect("version string").to_string())
-        .collect();
-    assert!(!versions.is_empty());
-
-    for version in versions {
+fn every_supported_legacy_revision_is_accepted_in_request_metadata() {
+    for version in ["2024-11-05", LATEST_LEGACY_VERSION] {
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -302,15 +277,13 @@ fn every_advertised_revision_is_accepted() {
         let response = responses(&output).pop().expect("response");
         assert!(
             response.get("error").is_none(),
-            "discover advertises {version} and the version check refuses it: {response}"
+            "supported legacy revision {version} was refused: {response}"
         );
     }
 }
 
-/// The legacy handshake is untouched. A dual-era server serves both, and this is the half that
-/// was already working -- pinned so making the modern path work cannot quietly break it.
 #[test]
-fn the_legacy_handshake_still_works_alongside_discovery() {
+fn a_dual_era_client_can_fall_back_to_the_legacy_handshake() {
     let requests = [
         serde_json::json!({
             "jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {}
@@ -319,7 +292,7 @@ fn the_legacy_handshake_still_works_alongside_discovery() {
     ];
     let output = run_session(&requests);
     let responses = responses(&output);
-    assert!(responses[0].get("error").is_none(), "{}", responses[0]);
+    assert_eq!(responses[0]["error"]["code"].as_i64(), Some(-32601));
     assert_eq!(
         responses[1]["result"]["protocolVersion"],
         LATEST_LEGACY_VERSION
