@@ -78,6 +78,14 @@ pub enum ReasonCode {
     /// be well-formed and simply larger than the configured budget, which is an operator decision
     /// rather than a producer defect.
     EReplayLimitExceeded,
+    /// An evidence bundle was opened and its content failed verification: a hash, a manifest entry,
+    /// or the Merkle root does not match what the bundle carries.
+    ///
+    /// Scoped deliberately narrowly. It says content that was read does not verify, and it says
+    /// nothing about intent, so it is not a tampering claim. A bundle that could not be opened or
+    /// read at all is outside this code: that failure establishes no fact about content, and
+    /// collapsing the two would let an I/O error be reported as an integrity finding.
+    EEvidenceIntegrity,
     /// Invalid command-line arguments
     EInvalidArgs,
 
@@ -136,6 +144,7 @@ impl ReasonCode {
             | ReasonCode::EPolicyParse
             | ReasonCode::EReplayLimitExceeded
             | ReasonCode::EReplayMissingDependency
+            | ReasonCode::EEvidenceIntegrity
             | ReasonCode::EInvalidArgs => EXIT_CONFIG_ERROR,
 
             // V2: Infra errors -> 3
@@ -190,6 +199,7 @@ impl ReasonCode {
             ReasonCode::EPolicyParse => "E_POLICY_PARSE",
             ReasonCode::EReplayMissingDependency => "E_REPLAY_MISSING_DEPENDENCY",
             ReasonCode::EReplayLimitExceeded => "E_REPLAY_LIMIT_EXCEEDED",
+            ReasonCode::EEvidenceIntegrity => "E_EVIDENCE_INTEGRITY",
             ReasonCode::EInvalidArgs => "E_INVALID_ARGS",
             ReasonCode::EJudgeUnavailable => "E_JUDGE_UNAVAILABLE",
             ReasonCode::ERateLimit => "E_RATE_LIMIT",
@@ -226,6 +236,14 @@ impl ReasonCode {
             }
             ReasonCode::EReplayLimitExceeded => {
                 "Raise the replay ingest ceiling that was named, or supply a smaller bundle"
+                    .to_string()
+            }
+            ReasonCode::EEvidenceIntegrity => {
+                // Prose, not a command. Re-verifying the same bundle only repeats the same
+                // failure, so publishing a verify invocation here would be a diagnostic dressed
+                // as a remedy. Nothing this side of the producer can repair the content.
+                "Obtain an undamaged bundle from its producer; the content this bundle carries \
+                 does not match what it records"
                     .to_string()
             }
             ReasonCode::EMissingConfig => "Run: assay init to create a config file".to_string(),
@@ -383,6 +401,10 @@ mod tests {
             EXIT_CONFIG_ERROR
         );
         assert_eq!(ReasonCode::EInvalidArgs.exit_code(), EXIT_CONFIG_ERROR);
+        assert_eq!(
+            ReasonCode::EEvidenceIntegrity.exit_code(),
+            EXIT_CONFIG_ERROR
+        );
 
         // Infra errors map to 3
         assert_eq!(ReasonCode::EJudgeUnavailable.exit_code(), EXIT_INFRA_ERROR);
@@ -415,6 +437,43 @@ mod tests {
     }
 
     #[test]
+    fn evidence_integrity_holds_one_exit_class_across_profiles() {
+        // The class is the same under both profiles by design, so a consumer that pins a
+        // compatibility profile reads the same number. The V1 arm does not name this code, per the
+        // documented rule that a new code is V2-only until someone decides it had a V1 meaning;
+        // these assertions are what makes the intended equality checkable rather than incidental.
+        assert_eq!(
+            ReasonCode::EEvidenceIntegrity.exit_code_for(ExitCodeVersion::V1),
+            EXIT_CONFIG_ERROR
+        );
+        assert_eq!(
+            ReasonCode::EEvidenceIntegrity.exit_code_for(ExitCodeVersion::V2),
+            EXIT_CONFIG_ERROR
+        );
+    }
+
+    #[test]
+    fn evidence_integrity_remediation_promises_no_command() {
+        let next_step = ReasonCode::EEvidenceIntegrity.next_step(None);
+        assert!(!next_step.is_empty(), "the remediation must not be empty");
+        assert!(
+            !next_step.starts_with("Run:") && !next_step.starts_with("Run argv:"),
+            "integrity remediation must stay prose, not an executable claim: {next_step}"
+        );
+        assert!(
+            !next_step.contains("assay evidence verify"),
+            "re-verifying the same bundle repeats the same failure, so naming that command \
+             would publish a diagnostic as a remedy: {next_step}"
+        );
+        // The context argument is the caller's path. Nothing is interpolated here, so a hostile
+        // bundle path cannot reach the published string at all.
+        assert_eq!(
+            next_step,
+            ReasonCode::EEvidenceIntegrity.next_step(Some("bundle; rm -rf /.tar.gz"))
+        );
+    }
+
+    #[test]
     fn test_reason_code_as_str() {
         assert_eq!(ReasonCode::Success.as_str(), "");
         assert_eq!(ReasonCode::ECfgParse.as_str(), "E_CFG_PARSE");
@@ -427,6 +486,10 @@ mod tests {
             "E_REPLAY_MISSING_DEPENDENCY"
         );
         assert_eq!(ReasonCode::EInvalidArgs.as_str(), "E_INVALID_ARGS");
+        assert_eq!(
+            ReasonCode::EEvidenceIntegrity.as_str(),
+            "E_EVIDENCE_INTEGRITY"
+        );
         assert_eq!(
             ReasonCode::EJudgeUnavailable.as_str(),
             "E_JUDGE_UNAVAILABLE"
