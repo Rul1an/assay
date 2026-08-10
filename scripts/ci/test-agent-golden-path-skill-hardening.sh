@@ -151,6 +151,70 @@ append_skill_text() {
   done
 }
 
+append_existing_contract_evidence_issue() {
+  local case_root="$1"
+  CASE_ROOT="$case_root" python3 - <<'PY'
+import json
+import os
+import re
+from pathlib import Path
+
+ISSUE_REF = re.compile(r"(?:#|/issues/)([0-9]+)")
+
+# Cite an issue the shipped contract already vouches for. Naming one here instead would
+# state the allowed-issue set a second time, and it went stale the moment a gap closed.
+root = Path(os.environ["CASE_ROOT"])
+contract = json.loads(
+    (root / "docs/generated/agent-golden-path.json").read_text(encoding="utf-8")
+)
+
+skill_paths = (
+    root / ".agents/skills/assay-golden-path/SKILL.md",
+    root / ".claude/skills/assay-golden-path/SKILL.md",
+)
+
+vouched = {
+    int(match)
+    for claim in contract["non_claims"]
+    for match in ISSUE_REF.findall(claim)
+}
+for step in contract["steps"]:
+    vouched.update(
+        outcome["gap_issue"]
+        for outcome in step["outcomes"]
+        if isinstance(outcome.get("gap_issue"), int)
+        and not isinstance(outcome["gap_issue"], bool)
+    )
+
+# Keep only issues the shipped skill already names. `gap_issue` is a data field with no
+# requirement that it be rendered, so the contract-derived set alone would let this case cite
+# an issue absent from the skill -- the appended sentence would then claim the skill retains a
+# link it never carried, and the case would quietly become the novel-issue case instead.
+rendered = set.intersection(
+    *(
+        {int(match) for match in ISSUE_REF.findall(path.read_text(encoding="utf-8"))}
+        for path in skill_paths
+    )
+)
+issue_numbers = vouched & rendered
+
+if not issue_numbers:
+    raise SystemExit(
+        "no issue is both vouched for by the contract and already named in every shipped "
+        "skill, so this allow case would not exercise the vocabulary gate on an existing link"
+    )
+
+issue = min(issue_numbers)
+claim = (
+    "The steps retain the existing "
+    f"[gap #{issue}](https://github.com/Rul1an/assay/issues/{issue}) evidence link."
+)
+for skill_path in skill_paths:
+    with skill_path.open("a", encoding="ascii") as skill:
+        skill.write(f"\n{claim}\n")
+PY
+}
+
 append_contract_evidence_issue() {
   local case_root="$1"
   CASE_ROOT="$case_root" python3 - <<'PY'
@@ -778,9 +842,7 @@ expect_named_failure \
 
 case_root="$SCRATCH/public-vocabulary-allow-contract-evidence"
 seed_case "$case_root"
-append_skill_text \
-  "$case_root" \
-  'The nine steps retain the existing [gap #2160](https://github.com/Rul1an/assay/issues/2160) evidence link.'
+append_existing_contract_evidence_issue "$case_root"
 expect_named_success "public vocabulary contract evidence allow case" "$case_root"
 
 case_root="$SCRATCH/public-vocabulary-allow-novel-contract-evidence"
