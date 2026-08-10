@@ -11,6 +11,7 @@ pub mod aee_trust_set;
 pub mod backend;
 pub mod caps;
 mod cli;
+mod cli_failure;
 pub mod diagnostics;
 pub mod enforcement_health_v1;
 mod env_filter;
@@ -27,6 +28,7 @@ mod templates;
 
 use cli::args::Cli;
 use cli::commands::dispatch;
+use cli_failure::CliFailure;
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
@@ -35,13 +37,17 @@ async fn main() {
     }
     env_logger::init();
     let cli = Cli::parse();
+    let machine_output = cli.machine_output();
     let legacy_mode = std::env::var("MCP_CONFIG_LEGACY").ok().as_deref() == Some("1");
     let code = match dispatch(cli, legacy_mode).await {
         Ok(code) => code,
-        Err(e) => {
-            eprintln!("fatal: {e:?}");
-            2 // CONFIG_ERROR from cli::commands::exit_codes::CONFIG_ERROR ideally, but hardcoded 2 is safe here
-        }
+        Err(error) => match error.downcast::<CliFailure>() {
+            Ok(failure) => failure.emit(machine_output),
+            Err(error) => {
+                eprintln!("fatal: {error:?}");
+                2 // CONFIG_ERROR from cli::commands::exit_codes::CONFIG_ERROR ideally, but hardcoded 2 is safe here
+            }
+        },
     };
     std::process::exit(code);
 }

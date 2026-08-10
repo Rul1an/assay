@@ -56,13 +56,13 @@ On failure: No machine report, `reason_code`, or `next_step` on stdout: [gap #21
 
 ### 4. Policy validation
 
-Run: `assay policy validate --input <policy>`
+Run: `assay policy validate --input <policy> --format json`
 
 Exit: Valid `0`; malformed `2`.
 
-Stdout: Empty on both paths.
+Stdout: Both paths parse as `assay.run_summary.v1`; valid has exit `0` and an empty reason, while malformed YAML carries `E_POLICY_PARSE`. Other load or schema failures remain stderr-only until they receive an honest reason code.
 
-On failure: The diagnosis, registered reason, and next step are absent from stdout: [gap #2162](https://github.com/Rul1an/assay/issues/2162).
+On failure: Malformed policy is exit `2` and names the failing policy in a concrete JSON argv next step. Missing files and schema failures are not classified as parse failures.
 
 ### 5. Evaluation result
 

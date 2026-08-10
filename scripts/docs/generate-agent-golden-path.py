@@ -190,22 +190,45 @@ STEPS: list[dict[str, object]] = [
                 "valid",
                 "Valid",
                 0,
-                stdout("empty"),
-                ["policy", "validate", "--input", "<policy>"],
+                stdout("json", "assay.run_summary.v1"),
+                [
+                    "policy",
+                    "validate",
+                    "--input",
+                    "<policy>",
+                    "--format",
+                    "json",
+                ],
+                reason_code="",
             ),
             outcome(
                 "malformed",
                 "malformed",
                 2,
-                stdout("empty"),
-                ["policy", "validate", "--input", "<policy>"],
-                gap_issue=2162,
+                stdout("json", "assay.run_summary.v1"),
+                [
+                    "policy",
+                    "validate",
+                    "--input",
+                    "<policy>",
+                    "--format",
+                    "json",
+                ],
+                reason_code="E_POLICY_PARSE",
+                next_step=(
+                    'Run argv: ["assay","policy","validate","--input","<policy>"]'
+                ),
             ),
         ],
-        "stdout_summary": "Empty on both paths.",
+        "stdout_summary": (
+            "Both paths parse as `assay.run_summary.v1`; valid has exit `0` and an "
+            "empty reason, while malformed YAML carries `E_POLICY_PARSE`. Other load or "
+            "schema failures remain stderr-only until they receive an honest reason code."
+        ),
         "failure_summary": (
-            "The diagnosis, registered reason, and next step are absent from stdout: "
-            "[gap #2162](https://github.com/Rul1an/assay/issues/2162)."
+            "Malformed policy is exit `2` and names the failing policy in a concrete "
+            "JSON argv next step. Missing files and schema failures are not classified as "
+            "parse failures."
         ),
     },
     {

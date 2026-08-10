@@ -225,10 +225,14 @@ impl ReasonCode {
                 "Run: assay baseline record to create a new baseline".to_string()
             }
             ReasonCode::EPolicyParse => {
-                format!(
-                    "Run: assay policy validate {}",
+                let argv = serde_json::json!([
+                    "assay",
+                    "policy",
+                    "validate",
+                    "--input",
                     context.unwrap_or("<policy.yaml>")
-                )
+                ]);
+                format!("Run argv: {argv}")
             }
             ReasonCode::EReplayMissingDependency => {
                 "Replay bundle missing required offline dependency; rerun with --live or create a complete bundle".to_string()
@@ -454,9 +458,18 @@ mod tests {
         assert!(ReasonCode::EBaselineInvalid
             .next_step(None)
             .contains("baseline"));
-        assert!(ReasonCode::EPolicyParse
-            .next_step(None)
-            .contains("policy validate"));
+        let policy_path = "pol icy;$(echo x).yaml";
+        let next_step = ReasonCode::EPolicyParse.next_step(Some(policy_path));
+        let argv: Vec<String> = serde_json::from_str(
+            next_step
+                .strip_prefix("Run argv: ")
+                .expect("policy recovery must publish JSON argv"),
+        )
+        .expect("policy recovery argv must parse");
+        assert_eq!(
+            argv,
+            ["assay", "policy", "validate", "--input", policy_path]
+        );
         assert!(ReasonCode::EReplayMissingDependency
             .next_step(None)
             .contains("--live"));

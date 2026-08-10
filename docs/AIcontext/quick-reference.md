@@ -58,7 +58,7 @@ assay explain --trace traces.jsonl --policy policy.yaml  # Explain violations
 | `E_TRACE_NOT_FOUND` | Trace file missing | Check path exists |
 | `E_MISSING_CONFIG` | Config file missing | `assay init` |
 | `E_BASELINE_INVALID` | Baseline file invalid | `assay baseline record` |
-| `E_POLICY_PARSE` | Policy syntax error | `assay policy validate <file>` |
+| `E_POLICY_PARSE` | Policy YAML syntax error | argv `["assay","policy","validate","--input","<file>"]` |
 
 ### Infra Errors (exit 3)
 | Code | Meaning | Next Step |

@@ -282,7 +282,7 @@ fn init_stdout_records_success_but_not_the_failure_diagnosis() {
 }
 
 #[test]
-fn policy_validation_stdout_is_currently_empty_on_both_paths() {
+fn policy_validation_json_carries_success_and_failure_contracts() {
     let dir = tempfile::tempdir().expect("tempdir");
     let init = assay(dir.path(), &["init", "--preset", "dev", "--hello-trace"]);
     assert_eq!(init.status.code(), Some(0));
@@ -295,7 +295,13 @@ fn policy_validation_stdout_is_currently_empty_on_both_paths() {
         &[("<policy>", valid_policy.to_str().expect("UTF-8 path"))],
     );
     assert_exit(&success, &expected_success, "policy validation success");
-    assert_empty_stdout(&success, &expected_success, "policy validation success");
+    let success_json = stdout_json(&success, &expected_success, "policy validation success");
+    assert_eq!(success_json["exit_code"], 0);
+    assert_eq!(
+        success_json["reason_code"], expected_success["reason_code"],
+        "valid policy reason must match the generated contract"
+    );
+    assert!(success_json.get("next_step").is_none());
 
     let malformed_policy = dir.path().join("malformed.yaml");
     std::fs::write(&malformed_policy, "version: [\n").expect("write malformed policy");
@@ -306,8 +312,16 @@ fn policy_validation_stdout_is_currently_empty_on_both_paths() {
         &[("<policy>", malformed_policy.to_str().expect("UTF-8 path"))],
     );
     assert_exit(&failure, &expected_failure, "policy validation failure");
-    assert_empty_stdout(&failure, &expected_failure, "policy validation failure");
-    assert_gap(&expected_failure, 2162);
+    let failure_json = stdout_json(&failure, &expected_failure, "policy validation failure");
+    assert_eq!(
+        failure_json["reason_code"], expected_failure["reason_code"],
+        "malformed policy reason must match the generated contract"
+    );
+    let expected_next = expected_failure["next_step"]
+        .as_str()
+        .expect("contract next_step string")
+        .replace("<policy>", malformed_policy.to_str().expect("UTF-8 path"));
+    assert_eq!(failure_json["next_step"], expected_next);
 }
 
 #[test]
@@ -406,7 +420,7 @@ fn every_cli_contract_outcome_is_executed_once() {
             installed_binary_reports_a_version_on_stdout,
             doctor_json_exposes_its_current_success_and_failure_surface,
             init_stdout_records_success_but_not_the_failure_diagnosis,
-            policy_validation_stdout_is_currently_empty_on_both_paths,
+            policy_validation_json_carries_success_and_failure_contracts,
             completed_test_failure_is_a_run_report_not_a_diagnosis,
             bundle_inspection_json_disappears_on_integrity_failure,
             offline_profile_verifier_keeps_both_outcomes_on_stdout,

@@ -6,6 +6,8 @@ use clap::{Args, Subcommand};
 
 use crate::cli::commands::{generate::GenerateArgs, record::RecordArgs};
 
+use super::common::OutputFormat;
+
 #[derive(Args, Clone, Debug)]
 pub struct PolicyArgs {
     #[command(subcommand)]
@@ -39,6 +41,16 @@ pub struct PolicyValidateArgs {
     /// Fail if deprecated v1 policy format is detected
     #[arg(long)]
     pub deny_deprecations: bool,
+
+    /// Output format; JSON writes a machine-readable validation report to stdout
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub format: OutputFormat,
+}
+
+impl PolicyValidateArgs {
+    pub(crate) fn is_json(&self) -> bool {
+        self.format == OutputFormat::Json
+    }
 }
 
 #[derive(Args, Clone, Debug)]

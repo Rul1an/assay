@@ -48,6 +48,22 @@ assay policy record --output policy.yaml -- npm test
 assay policy validate --input policy.yaml
 ```
 
+The default writes the human result to stderr and keeps stdout empty. For an
+agent or CI caller, request the existing run-summary envelope explicitly:
+
+```bash
+assay policy validate --input policy.yaml --format json
+```
+
+Valid policies and malformed YAML write `assay.run_summary.v1` to stdout. A
+YAML parse failure exits `2` with `reason_code: E_POLICY_PARSE` and a JSON-argv
+`next_step`; a valid policy exits `0` with an empty reason code. Missing files,
+semantic refusals, and schema-compile failures remain on the legacy stderr-only
+path until they receive honest reason mappings. An empty stdout on those
+failures is not a clean result; callers must still check the exit code. This
+command reuses the existing summary envelope rather than introducing a new
+schema; schema-identity evolution remains tracked in issue #2167.
+
 ---
 
 ## Compatibility

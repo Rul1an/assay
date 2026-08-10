@@ -253,3 +253,31 @@ fn every_format_argument_advertises_its_accepted_values() {
         untyped.join("\n  ")
     );
 }
+
+#[test]
+fn top_level_failure_funnel_only_owns_policy_validate_json() {
+    let policy_json = Cli::try_parse_from([
+        "assay",
+        "policy",
+        "validate",
+        "--input",
+        "policy.yaml",
+        "--format",
+        "json",
+    ])
+    .expect("policy validate JSON parses");
+    assert!(policy_json.machine_output());
+
+    let policy_text =
+        Cli::try_parse_from(["assay", "policy", "validate", "--input", "policy.yaml"])
+            .expect("policy validate text parses");
+    assert!(!policy_text.machine_output());
+
+    let run_json =
+        Cli::try_parse_from(["assay", "run", "--config", "eval.yaml", "--format", "json"])
+            .expect("run JSON parses");
+    assert!(
+        !run_json.machine_output(),
+        "run owns its JSON error renderer and must not be rendered twice"
+    );
+}
