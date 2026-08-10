@@ -209,3 +209,73 @@ fn text_is_still_the_default_and_still_a_human_progress_stream() {
         "the default failure output became a JSON document"
     );
 }
+
+/// Where the default text stream stops describing the host and starts describing this run.
+///
+/// Everything above it reports what MCP configuration the machine happens to have, so it is not
+/// the same bytes on a developer's laptop and on a runner. Everything below it is a function of
+/// the arguments and the directory alone.
+const GENERATING: &str = "🏗️  Generating Assay Policy & Config...";
+
+const CREATED_WITH_HELLO_TRACE: &str = "🏗️  Generating Assay Policy & Config...
+   Created policy.yaml (preset: dev)
+   Created eval.yaml
+   Created traces/hello.jsonl
+✅  Initialization complete.
+   Note: hello trace uses demo prompt/response text only; treat real traces as potentially sensitive.
+   Next: assay validate --config eval.yaml --trace-file traces/hello.jsonl
+";
+
+const SKIPPED_WITH_HELLO_TRACE: &str = "🏗️  Generating Assay Policy & Config...
+   Skipped policy.yaml (exists)
+   Skipped eval.yaml (exists)
+   Skipped traces/hello.jsonl (exists)
+✅  Initialization complete.
+   Note: hello trace uses demo prompt/response text only; treat real traces as potentially sensitive.
+   Next: assay validate --config eval.yaml --trace-file traces/hello.jsonl
+";
+
+const CREATED_WITHOUT_HELLO_TRACE: &str = "🏗️  Generating Assay Policy & Config...
+   Created policy.yaml (preset: default)
+   Created eval.yaml
+✅  Initialization complete.
+   Next: assay validate
+";
+
+/// The part of stdout that this run is responsible for.
+fn own_output(stdout: &str) -> &str {
+    let start = stdout
+        .find(GENERATING)
+        .unwrap_or_else(|| panic!("stdout never reaches {GENERATING:?}; stdout was:\n{stdout}"));
+    &stdout[start..]
+}
+
+/// The default text stream is byte for byte what it was, in the part a run controls.
+///
+/// The claim that this change leaves the default output alone was measured once, by building the
+/// binary on both trees and diffing their stdout over twenty-one invocations. That is the right
+/// way to make the claim and the wrong way to keep it: it does not survive into the next edit of
+/// the closing block. Swapping the `Note:` and `Next:` lines — which restructuring that block is
+/// exactly in a position to do — passed every other test in this crate, because the only
+/// assertions on this stream ask whether `Next: assay validate` appears somewhere in it.
+///
+/// So the stream is pinned instead of described. What is pinned is the ordering of the closing
+/// block, the rendering of a created and a skipped file, and the two shapes of the next-step line.
+#[test]
+fn the_default_text_stream_is_pinned_where_the_run_controls_it() {
+    let created_dir = tempfile::tempdir().expect("created tempdir");
+    let created = init(created_dir.path(), &["--preset", "dev", "--hello-trace"]);
+    assert_eq!(created.exit_code, 0);
+    assert_eq!(own_output(&created.stdout), CREATED_WITH_HELLO_TRACE);
+
+    // The same directory again, so every file is a `Skipped … (exists)` line instead.
+    let skipped = init(created_dir.path(), &["--preset", "dev", "--hello-trace"]);
+    assert_eq!(skipped.exit_code, 0);
+    assert_eq!(own_output(&skipped.stdout), SKIPPED_WITH_HELLO_TRACE);
+
+    // Without `--hello-trace` there is no trace to caveat, so the closing block is one line.
+    let plain_dir = tempfile::tempdir().expect("plain tempdir");
+    let plain = init(plain_dir.path(), &[]);
+    assert_eq!(plain.exit_code, 0);
+    assert_eq!(own_output(&plain.stdout), CREATED_WITHOUT_HELLO_TRACE);
+}
