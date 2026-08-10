@@ -157,13 +157,19 @@ jobs:
         with:
           persist-credentials: false
       - name: Install cargo-deny
-        run: cargo install --locked cargo-deny
+        run: ./scripts/ci/install-cargo-deny.sh
       - name: Install cargo-audit
-        run: cargo install --locked cargo-audit
+        # Same toolchain selection as the cargo-deny install, and for the same reason: this job
+        # installs no toolchain, so without RUSTUP_TOOLCHAIN rustup reads rust-toolchain.toml and
+        # picks 1.96.0, which the runner image is not required to carry a cargo for.
+        run: RUSTUP_TOOLCHAIN=stable cargo install --locked cargo-audit
       - name: Check Aya/eBPF dependency alignment
         run: ./scripts/ci/check-aya-ebpf-alignment.sh
       - name: cargo deny (advisories, licenses, bans, sources)
-        run: cargo deny check advisories bans licenses sources
+        # `cargo-deny` rather than `cargo deny`: invoking it through cargo re-enters the same
+        # toolchain resolution that broke the install, so the check would inherit the failure the
+        # install step was just fixed for. The binary is the one the pinned install asserted.
+        run: cargo-deny check advisories bans licenses sources
       - name: cargo audit (RustSec)
         run: |
           rm -rf ~/.cargo/advisory-db
