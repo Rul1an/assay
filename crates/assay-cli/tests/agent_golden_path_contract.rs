@@ -231,13 +231,86 @@ fn installed_binary_reports_a_version_on_stdout() {
     );
 }
 
+/// A config that loads and produces no diagnostics, so the success row is measured on a preflight
+/// that actually examined something.
+const CLEAN_EVAL_YAML: &str = r#"configVersion: 1
+suite: "preflight_success"
+model: "trace"
+tests:
+  - id: "preflight_success_regex"
+    input:
+      prompt: "hello_prompt"
+    expected:
+      type: regex_match
+      pattern: "Hello\\s+Assay"
+      flags: ["i"]
+"#;
+
 #[test]
 fn doctor_json_failure_publishes_the_registered_reason_and_next_step() {
     let dir = tempfile::tempdir().expect("tempdir");
+
+    // The success row is measured on a config that was actually examined. It was measured on an
+    // empty directory once, which published `Success 0` for a run in which no config validation
+    // occurred (#2210). Both rows are exit 0, so `config_check.status` is the only thing that
+    // separates them, and the two are driven here rather than described.
+    let clean_config = dir.path().join("clean.yaml");
+    std::fs::write(&clean_config, CLEAN_EVAL_YAML).expect("wrote clean config");
     let expected_success = expected_outcome("preflight", "success");
-    let success = assay_contract(dir.path(), &expected_success, &[]);
+    let success = assay_contract(
+        dir.path(),
+        &expected_success,
+        &[("<config>", clean_config.to_str().expect("UTF-8 path"))],
+    );
     assert_exit(&success, &expected_success, "doctor success");
-    stdout_json(&success, &expected_success, "doctor success");
+    let success_json = stdout_json(&success, &expected_success, "doctor success");
+    assert_eq!(
+        success_json["config_check"]["status"], expected_success["config_check"],
+        "the success row claims a config was examined"
+    );
+
+    let empty = tempfile::tempdir().expect("tempdir");
+    let expected_skipped = expected_outcome("preflight", "no-config");
+    let skipped = assay_contract(empty.path(), &expected_skipped, &[]);
+    assert_exit(&skipped, &expected_skipped, "doctor no-config");
+    let skipped_json = stdout_json(&skipped, &expected_skipped, "doctor no-config");
+    assert_eq!(
+        skipped_json["config_check"]["status"], expected_skipped["config_check"],
+        "an unexamined config is published as such rather than as a clean one"
+    );
+    assert_ne!(
+        success_json["config_check"]["status"], skipped_json["config_check"]["status"],
+        "both runs exit 0, so a consumer can only tell them apart by this key"
+    );
+
+    // The examined-and-failing row. Its exit is the one `decide_exit` gives this diagnostic, so
+    // driving it here is what stops the guide from asserting a class nothing measures.
+    let bad_trace_dir = tempfile::tempdir().expect("tempdir");
+    let bad_config = bad_trace_dir.path().join("clean.yaml");
+    std::fs::write(&bad_config, CLEAN_EVAL_YAML).expect("wrote config");
+    let expected_diag = expected_outcome("preflight", "diagnostics-error");
+    let diag = assay_contract(
+        bad_trace_dir.path(),
+        &expected_diag,
+        &[
+            ("<config>", bad_config.to_str().expect("UTF-8 path")),
+            ("<trace>", "traces/absent.jsonl"),
+        ],
+    );
+    assert_exit(&diag, &expected_diag, "doctor diagnostics-error");
+    let diag_json = stdout_json(&diag, &expected_diag, "doctor diagnostics-error");
+    assert_eq!(
+        diag_json["config_check"]["status"], expected_diag["config_check"],
+        "the config was examined; the error is in what it found"
+    );
+    assert!(
+        diag_json["data_diagnostics"]
+            .as_array()
+            .expect("data_diagnostics is an array")
+            .iter()
+            .any(|d| d["severity"] == "error"),
+        "this row exists to pin the exit class for an error-severity diagnostic"
+    );
 
     let missing = dir.path().join("missing.yaml");
     let expected_failure = expected_outcome("preflight", "invalid-config");

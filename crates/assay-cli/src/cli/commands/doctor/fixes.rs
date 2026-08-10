@@ -6,9 +6,26 @@ use assay_core::errors::diagnostic::{codes, Diagnostic};
 use dialoguer::{theme::ColorfulTheme, Confirm};
 
 use crate::cli::args::DoctorArgs;
-use crate::cli::helpers::{infer_policy_path, normalize_severity};
+use crate::cli::helpers::{
+    decide_exit, decide_repair_failure_exit, infer_policy_path, normalize_severity,
+};
 
+use super::implementation::config_failure;
 use super::patching::{apply_patch_to_file, create_empty_trace, preview_patch};
+
+#[cfg(test)]
+mod tests;
+
+/// Whether a diagnostic is one this module can offer to create a trace file for.
+///
+/// Asked in two places — the gate that decides whether to look for a target at all, and the scan
+/// that finds which path to create — so it is one function rather than one predicate written twice.
+/// The two sites are not interchangeable: the scan returns `--trace-file` before it looks at any
+/// code, so without the gate a tree with no missing-trace diagnostic would still be offered a
+/// trace-creation fix.
+fn is_missing_trace(diagnostic: &Diagnostic) -> bool {
+    diagnostic.code == codes::E_TRACE_MISS || diagnostic.code == codes::E_PATH_NOT_FOUND
+}
 
 #[derive(Debug, Clone)]
 enum DoctorFixOp {
@@ -40,10 +57,13 @@ pub(super) async fn run_doctor_fix(
     diagnostics: &[Diagnostic],
     legacy_mode: bool,
 ) -> anyhow::Result<i32> {
-    let initial_errors = diagnostics
-        .iter()
-        .filter(|d| normalize_severity(&d.severity) == "error")
-        .count();
+    // The class for these diagnostics, decided where every other doctor path decides it. This used
+    // to count error-severity diagnostics here and return a literal `1`, which agreed with the rest
+    // of doctor only while doctor also returned `1`. Once both output channels moved to
+    // `decide_exit` — which reads the ADR-046 class table, so a config-class code is `2` — the hand
+    // computation became a second answer to a question the shared function owns, and the exit class
+    // started depending on whether `--fix` was passed. Same rule, one function, three readers.
+    let unfixed_exit = decide_exit(diagnostics);
 
     let inferred_policy = infer_policy_path(config_path);
     let (_actions, mut patches) = build_suggestions(
@@ -58,10 +78,7 @@ pub(super) async fn run_doctor_fix(
 
     let mut ops: Vec<DoctorFixOp> = patches.into_iter().map(DoctorFixOp::Patch).collect();
 
-    if diagnostics
-        .iter()
-        .any(|d| d.code == codes::E_TRACE_MISS || d.code == codes::E_PATH_NOT_FOUND)
-    {
+    if diagnostics.iter().any(is_missing_trace) {
         if let Some(trace_path) = trace_fix_target(args, diagnostics) {
             if !trace_path.exists() {
                 ops.push(DoctorFixOp::CreateTrace { path: trace_path });
@@ -73,7 +90,7 @@ pub(super) async fn run_doctor_fix(
 
     if ops.is_empty() {
         println!("\nNo auto-fixable diagnostics found.");
-        return Ok(if initial_errors == 0 { 0 } else { 1 });
+        return Ok(unfixed_exit);
     }
 
     println!("\nAuto-fix candidates:");
@@ -141,24 +158,28 @@ pub(super) async fn run_doctor_fix(
     }
 
     if failed > 0 {
-        return Ok(1);
+        return Ok(decide_repair_failure_exit());
     }
 
     if applied == 0 {
         println!("No fixes applied.");
-        return Ok(if initial_errors == 0 { 0 } else { 1 });
+        return Ok(unfixed_exit);
     }
 
     if args.dry_run {
         println!("\nDry run complete. {} fix(es) previewed.", applied);
-        return Ok(if initial_errors == 0 { 0 } else { 1 });
+        return Ok(unfixed_exit);
     }
 
     let cfg = match load_config(config_path, legacy_mode, false) {
         Ok(c) => c,
         Err(err) => {
+            // An unloadable config is one condition with one class, decided where the non-`--fix`
+            // path decides it. This return held a literal `1` while the same config read one
+            // function earlier exits `2`, so whether an unloadable config was a config fault
+            // depended on how far the command had got before it noticed.
             eprintln!("Re-validation skipped: config still invalid ({})", err);
-            return Ok(1);
+            return Ok(config_failure(config_path, err.to_string()).exit_code);
         }
     };
 
@@ -183,7 +204,9 @@ pub(super) async fn run_doctor_fix(
         applied, remaining_errors
     );
 
-    Ok(if remaining_errors == 0 { 0 } else { 1 })
+    // The re-validated tree gets its class from the same function as the unrepaired one, so a
+    // repair that resolves nothing reports what `doctor` alone would have reported for what is left.
+    Ok(decide_exit(&report.diagnostics))
 }
 
 fn trace_fix_target(args: &DoctorArgs, diagnostics: &[Diagnostic]) -> Option<PathBuf> {
@@ -192,7 +215,7 @@ fn trace_fix_target(args: &DoctorArgs, diagnostics: &[Diagnostic]) -> Option<Pat
     }
 
     for d in diagnostics {
-        if d.code != codes::E_TRACE_MISS && d.code != codes::E_PATH_NOT_FOUND {
+        if !is_missing_trace(d) {
             continue;
         }
 
