@@ -15,6 +15,14 @@
 //! would pass the first test and be wrong, because a warning is not a failed validation. So a tree
 //! whose only diagnostic is `warn` must still exit `0` on both channels, and both tests read the
 //! exit code alone — the same thing the consumer keys on.
+//!
+//! The second pair of tests pins the same rule across `--fix`, which is where the divergence
+//! reappeared once `--format` stopped producing one. `doctor/fixes.rs` recomputed the
+//! error-severity predicate by hand and turned the count into a literal `1`, so routing the two
+//! output channels through `decide_exit` — which reads the ADR-046 class table and answers `2` for
+//! a config-class code — made the two *flag* paths disagree about one tree instead. These tests
+//! assert the two runs equal each other rather than a literal, because what the contract owns is
+//! that one tree gets one class, not which number that class currently is.
 
 #[path = "../../../tests/support/bounded_process.rs"]
 #[allow(dead_code)]
@@ -48,9 +56,9 @@ const MATCHING_TRACE: &str = r#"{"schema_version": 1, "type": "assay.trace", "re
 const LEGACY_LINE: &str = r#"{"schema_version": 1, "type": "assay.trace", "request_id": "legacy_1", "prompt": "p2", "response": "r", "model": "trace", "provider": "trace", "function_call": {"name": "x"}}
 "#;
 
-/// Runs `doctor` in `cwd` and returns its exit code. Both channels go through this one function so
-/// a difference in the result cannot come from a difference in how they were driven.
-fn doctor_exit_code(cwd: &Path, format: &str, trace: &str) -> i32 {
+/// Runs `doctor` in `cwd` and returns its exit code. Every channel and flag path goes through this
+/// one function so a difference in the result cannot come from a difference in how they were driven.
+fn doctor_exit_code_with(cwd: &Path, format: &str, trace: &str, extra: &[&str]) -> i32 {
     let mut command = Command::new(env!("CARGO_BIN_EXE_assay"));
     for (name, _) in std::env::vars_os() {
         if name
@@ -66,12 +74,17 @@ fn doctor_exit_code(cwd: &Path, format: &str, trace: &str) -> i32 {
         .env("NO_COLOR", "1")
         .args(["doctor", "--format", format])
         .args(["--config", "eval.yaml"])
-        .args(["--trace-file", trace]);
+        .args(["--trace-file", trace])
+        .args(extra);
     let output = run_bounded(command, b"", GOLDEN_PATH_LIMITS, "assay doctor").expect("doctor ran");
     output
         .status
         .code()
         .expect("doctor exited by code rather than by signal")
+}
+
+fn doctor_exit_code(cwd: &Path, format: &str, trace: &str) -> i32 {
+    doctor_exit_code_with(cwd, format, trace, &[])
 }
 
 /// Writes a tree whose config loads, and returns its path.
@@ -126,5 +139,66 @@ fn a_warning_is_not_a_failed_validation_on_either_channel() {
         "doctor returned exit {json} for a tree whose only diagnostic is a warning. This is the \
          control on the fix above: keying the exit class on 'any diagnostic exists' rather than on \
          error severity would pass that test and turn every advisory into a failure here."
+    );
+}
+
+/// The same property one flag over: `--fix` must not change the class either.
+///
+/// This is deliberately not written as `assert_eq!(fixing, 2)`. What the contract owns is that one
+/// tree gets one class, so the assertion compares the two runs to each other. If the class for this
+/// diagnostic is ever renegotiated, both sides move together and this test keeps holding — it pins
+/// the rule rather than today's answer to it.
+#[test]
+fn the_exit_class_does_not_depend_on_whether_a_fix_was_requested() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    tree(dir.path(), MATCHING_TRACE);
+
+    let plain = doctor_exit_code(dir.path(), "text", "traces/absent.jsonl");
+    let fixing = doctor_exit_code_with(
+        dir.path(),
+        "text",
+        "traces/absent.jsonl",
+        &["--fix", "--dry-run"],
+    );
+
+    assert!(
+        !dir.path().join("traces/absent.jsonl").exists(),
+        "--dry-run created the file it previewed, so the two runs above did not see the same tree \
+         and the comparison below would not mean what it says."
+    );
+    assert_eq!(
+        fixing, plain,
+        "doctor returned exit {plain} and `doctor --fix --dry-run` returned exit {fixing} for one \
+         tree. `--fix` says what to attempt about a diagnostic, not what class the diagnostic has, \
+         so a repair flag must not reclassify it: the class comes from `decide_exit` on both paths."
+    );
+}
+
+/// The control for the test above, and the reason it cannot be satisfied by a constant.
+///
+/// Returning the non-`--fix` class unconditionally from the `--fix` path would pass the parity
+/// assertion and turn a warning into a failure here.
+#[test]
+fn a_warning_stays_clean_when_a_fix_is_requested() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    tree(dir.path(), &format!("{MATCHING_TRACE}{LEGACY_LINE}"));
+
+    let plain = doctor_exit_code(dir.path(), "text", "traces/present.jsonl");
+    let fixing = doctor_exit_code_with(
+        dir.path(),
+        "text",
+        "traces/present.jsonl",
+        &["--fix", "--dry-run"],
+    );
+
+    assert_eq!(
+        fixing, plain,
+        "doctor returned exit {plain} and `doctor --fix --dry-run` returned exit {fixing} for one \
+         warn-only tree."
+    );
+    assert_eq!(
+        fixing, 0,
+        "`doctor --fix --dry-run` returned exit {fixing} for a tree whose only diagnostic is a \
+         warning. An advisory is not a failed validation on any flag path."
     );
 }
