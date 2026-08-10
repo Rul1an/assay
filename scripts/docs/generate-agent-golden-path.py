@@ -461,6 +461,9 @@ CONTRACT: dict[str, object] = {
         "A doctor config failure does not distinguish an absent config from an unreadable "
         "one, and its recovery step is the invocation that produced it; both are owned by "
         "issue #2206.",
+        "A preflight exit 0 on the JSON channel does not mean the report carries no "
+        "error-severity diagnostic; the text channel returns 1 in that case. Read "
+        "data_diagnostics[].severity rather than the exit code alone. Owned by issue #2215.",
     ],
     "steps": STEPS,
 }

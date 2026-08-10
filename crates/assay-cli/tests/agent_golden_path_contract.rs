@@ -253,8 +253,14 @@ fn doctor_json_failure_publishes_the_registered_reason_and_next_step() {
         failure_json["config_error"]["code"],
         expected_failure["config_error_code"]
     );
+    // Read the contract side as a string rather than comparing two Values. Comparing Values lets a
+    // coordinated regression pass: if the generator drops the field back to null and the binary
+    // stops emitting it, `Null == Null` holds and the assertion is satisfied by two absences.
+    let expected_reason = expected_failure["reason_code"]
+        .as_str()
+        .expect("contract reason_code string");
     assert_eq!(
-        failure_json["reason_code"], expected_failure["reason_code"],
+        failure_json["reason_code"], expected_reason,
         "doctor config failure reason must match the generated contract"
     );
     let expected_next = expected_failure["next_step"]
