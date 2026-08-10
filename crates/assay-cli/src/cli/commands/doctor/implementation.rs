@@ -39,7 +39,9 @@ const NO_CONFIG_FOUND: &str = "No config found; run inside project or use --conf
 ///
 /// The key is present in every JSON report rather than only in the skipped one, so the question
 /// "was this config read?" has an answer a consumer can key on without knowing which absences
-/// mean what.
+/// mean what. `reason` accompanies the two states that produced no diagnostics; on `failed` it
+/// restates `config_error.message` from the same value rather than deriving a second one, because
+/// the registered diagnosis stays the carrier a consumer branches on.
 fn config_check_marker(checked: bool, error: Option<&str>) -> serde_json::Value {
     match (checked, error) {
         (_, Some(message)) => serde_json::json!({
