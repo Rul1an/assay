@@ -174,6 +174,41 @@ fn the_exit_class_does_not_depend_on_whether_a_fix_was_requested() {
     );
 }
 
+/// The condition `--dry-run` cannot reach: a repair that is attempted and fails to apply.
+///
+/// The parity test above drives `--dry-run`, where `failed` is structurally always zero — every
+/// dry-run branch previews and counts the op as applied. So the `failed > 0` return was reachable
+/// only with `--yes` against a target that cannot be written, and it returned a literal `1` while
+/// `doctor` returned `2` for the very same diagnostic. Independent review found it after the first
+/// fix landed, which is the argument for driving the branch rather than reasoning about it.
+///
+/// The tree makes the repair fail without any permission trickery: the trace path names a child of
+/// `traces/present.jsonl`, which is a regular file, so `create_dir_all` on its parent cannot
+/// succeed. That keeps the fixture portable — a read-only directory behaves differently for root,
+/// and CI containers do run as root.
+#[test]
+fn a_repair_that_cannot_be_applied_does_not_change_the_exit_class() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    tree(dir.path(), MATCHING_TRACE);
+    let unwritable = "traces/present.jsonl/nested.jsonl";
+
+    let plain = doctor_exit_code(dir.path(), "text", unwritable);
+    let fixing = doctor_exit_code_with(dir.path(), "text", unwritable, &["--fix", "--yes"]);
+
+    assert!(
+        !dir.path().join(unwritable).exists(),
+        "the repair was expected to fail, but the target exists, so this test is no longer driving \
+         the failed-to-apply branch."
+    );
+    assert_eq!(
+        fixing, plain,
+        "doctor returned exit {plain} and `doctor --fix --yes` returned exit {fixing} for one tree \
+         whose repair could not be applied. A repair that fails is a reason to report a fault, not \
+         a reason to report a different fault than the one the diagnostic has: `assay fix` answers \
+         this same condition with the config-error class, and so must this."
+    );
+}
+
 /// The control for the test above, and the reason it cannot be satisfied by a constant.
 ///
 /// Returning the non-`--fix` class unconditionally from the `--fix` path would pass the parity
@@ -200,5 +235,34 @@ fn a_warning_stays_clean_when_a_fix_is_requested() {
         fixing, 0,
         "`doctor --fix --dry-run` returned exit {fixing} for a tree whose only diagnostic is a \
          warning. An advisory is not a failed validation on any flag path."
+    );
+}
+
+/// The third `--fix` branch: a repair that applies and leaves an error-severity diagnostic behind.
+///
+/// `doctor_fix_e2e.rs` drives this same path for its filesystem effect and asserts only that the
+/// exit is non-zero, because the class belongs here rather than in two places. That leaves the
+/// class on this branch pinned nowhere unless this test exists — `--fix --yes` creates the missing
+/// trace file, the empty file still does not satisfy the test's prompt, and the re-validated report
+/// therefore carries an error the repair did not resolve.
+#[test]
+fn a_repair_that_leaves_an_error_behind_does_not_change_the_exit_class() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    tree(dir.path(), MATCHING_TRACE);
+    let absent = "traces/absent.jsonl";
+
+    let plain = doctor_exit_code(dir.path(), "text", absent);
+    let fixing = doctor_exit_code_with(dir.path(), "text", absent, &["--fix", "--yes"]);
+
+    assert!(
+        dir.path().join(absent).exists(),
+        "`--fix --yes` was expected to create the missing trace file; without that this test is no \
+         longer driving the applied-then-re-validated branch."
+    );
+    assert_eq!(
+        fixing, plain,
+        "doctor returned exit {plain} and `doctor --fix --yes` returned exit {fixing} for one tree. \
+         A repair that runs and leaves an error-severity diagnostic in place reports the class that \
+         diagnostic has."
     );
 }

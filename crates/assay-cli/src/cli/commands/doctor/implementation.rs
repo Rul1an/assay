@@ -18,7 +18,11 @@ use super::parse_error::try_fix_parse_error;
 /// registry, so the JSON report cannot disagree with the text path, and neither can disagree
 /// with `assay run` on the same file. Before this existed, the JSON report named the reason
 /// with a literal and both paths returned the test-failure class for a config error.
-fn config_failure(path: &Path, message: String) -> RunOutcome {
+///
+/// `fixes.rs` reads it too, for the config it re-loads after applying repairs. That return was a
+/// literal `1` until independent review found it, which made the class of an unloadable config
+/// depend on whether `--fix` had already written something.
+pub(super) fn config_failure(path: &Path, message: String) -> RunOutcome {
     let path = path.display().to_string();
     RunOutcome::from_reason(ReasonCode::ECfgParse, Some(message), Some(path.as_str()))
 }

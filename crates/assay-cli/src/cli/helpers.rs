@@ -64,6 +64,29 @@ pub fn decide_exit(diags: &[Diagnostic]) -> i32 {
     }
 }
 
+/// The process exit code for a repair that could not be applied.
+///
+/// A patch that fails to write is a fault in the tree the caller pointed at, so it gets the same
+/// class a config fault gets, and `assay fix` has answered it that way since before `assay doctor
+/// --fix` existed. This function exists so the two commands read one answer: they held two literals
+/// for one condition, `2` in `commands/fix.rs` and `1` in `commands/doctor/fixes.rs`, and the second
+/// was the only `1` in the system for it.
+///
+/// It is deliberately not [`decide_exit`] over the surviving diagnostics. Those two agree today,
+/// because every diagnostic that produces a patch is registered [`ExitClass::Config`], but they are
+/// different rules: `decide_exit` describes what the report found, while this describes an operation
+/// this process attempted and could not complete. Reading the class off the diagnostics would exit
+/// `0` for a repair that failed on a tree whose findings are all advisory, which reports a failed
+/// write as a clean run.
+///
+/// The reason-code registry has no code for the condition, so this cannot yet come from
+/// `ReasonCode::exit_code` the way an unloadable config does. That registry is frozen against
+/// SPEC-PR-Gate-Outputs-v1 and adding to it is a spec change, not a bug fix; #2208 already owns the
+/// broader question of which CLI literals belong in it.
+pub fn decide_repair_failure_exit() -> i32 {
+    exit_codes::CONFIG_ERROR
+}
+
 #[cfg(test)]
 mod decide_exit_tests {
     use super::*;

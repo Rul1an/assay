@@ -6,8 +6,11 @@ use assay_core::errors::diagnostic::{codes, Diagnostic};
 use dialoguer::{theme::ColorfulTheme, Confirm};
 
 use crate::cli::args::DoctorArgs;
-use crate::cli::helpers::{decide_exit, infer_policy_path, normalize_severity};
+use crate::cli::helpers::{
+    decide_exit, decide_repair_failure_exit, infer_policy_path, normalize_severity,
+};
 
+use super::implementation::config_failure;
 use super::patching::{apply_patch_to_file, create_empty_trace, preview_patch};
 
 /// Whether a diagnostic is one this module can offer to create a trace file for.
@@ -152,7 +155,7 @@ pub(super) async fn run_doctor_fix(
     }
 
     if failed > 0 {
-        return Ok(1);
+        return Ok(decide_repair_failure_exit());
     }
 
     if applied == 0 {
@@ -168,8 +171,12 @@ pub(super) async fn run_doctor_fix(
     let cfg = match load_config(config_path, legacy_mode, false) {
         Ok(c) => c,
         Err(err) => {
+            // An unloadable config is one condition with one class, decided where the non-`--fix`
+            // path decides it. This return held a literal `1` while the same config read one
+            // function earlier exits `2`, so whether an unloadable config was a config fault
+            // depended on how far the command had got before it noticed.
             eprintln!("Re-validation skipped: config still invalid ({})", err);
-            return Ok(1);
+            return Ok(config_failure(config_path, err.to_string()).exit_code);
         }
     };
 

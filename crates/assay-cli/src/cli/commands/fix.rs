@@ -10,7 +10,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use crate::cli::args::{FixArgs, MaxRisk};
-use crate::cli::util::{decide_exit, infer_policy_path, normalize_severity};
+use crate::cli::util::{
+    decide_exit, decide_repair_failure_exit, infer_policy_path, normalize_severity,
+};
 use crate::exit_codes;
 
 pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
@@ -138,7 +140,9 @@ pub async fn run(args: FixArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     }
 
     if !failed.is_empty() {
-        return Ok(exit_codes::CONFIG_ERROR);
+        // The class this command has always given a failed patch, now stated once so that
+        // `doctor --fix` reads it here instead of answering the same condition for itself.
+        return Ok(decide_repair_failure_exit());
     }
 
     if applied.is_empty() {
