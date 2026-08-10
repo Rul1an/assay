@@ -78,13 +78,26 @@ pub enum ReasonCode {
     /// be well-formed and simply larger than the configured budget, which is an operator decision
     /// rather than a producer defect.
     EReplayLimitExceeded,
-    /// An evidence bundle was opened and its content failed verification: a hash, a manifest entry,
-    /// or the Merkle root does not match what the bundle carries.
+    /// An evidence bundle was opened and its content failed verification: among others, a member
+    /// hash, an event's `content_hash`, a manifest entry, or the run integrity chain (`run_root`)
+    /// does not match what the bundle carries.
+    ///
+    /// `run_root` is a hash chain over the content hashes in sequence order. Naming it for the
+    /// structure `assay-evidence` actually builds keeps the row clear of the inclusion-proof and
+    /// sub-range properties a tree would imply to a reader.
     ///
     /// Scoped deliberately narrowly. It says content that was read does not verify, and it says
     /// nothing about intent, so it is not a tampering claim. A bundle that could not be opened or
     /// read at all is outside this code: that failure establishes no fact about content, and
     /// collapsing the two would let an I/O error be reported as an integrity finding.
+    ///
+    /// That exclusion is a boundary an emitter has to enforce, not one it inherits.
+    /// `assay_evidence::ErrorClass::Integrity` does not draw it: `From<std::io::Error>` maps every
+    /// I/O failure into `Integrity`/`IntegrityIo`, and a read that fails mid-stream surfaces as
+    /// `IntegrityGzip` or `IntegrityTar`. Key on the codes that establish a content fact --
+    /// `IntegrityManifestHash`, `IntegrityEventHash`, `IntegrityFileSizeMismatch`,
+    /// `IntegrityRunRootMismatch` -- and see the §5.1 registry row, which states the same rule
+    /// normatively for #2164 and #2165.
     EEvidenceIntegrity,
     /// Invalid command-line arguments
     EInvalidArgs,
