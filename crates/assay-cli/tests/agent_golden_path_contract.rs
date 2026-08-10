@@ -233,7 +233,7 @@ fn installed_binary_reports_a_version_on_stdout() {
 }
 
 #[test]
-fn doctor_json_exposes_its_current_success_and_failure_surface() {
+fn doctor_json_failure_publishes_the_registered_reason_and_next_step() {
     let dir = tempfile::tempdir().expect("tempdir");
     let expected_success = expected_outcome("preflight", "success");
     let success = assay_contract(dir.path(), &expected_success, &[]);
@@ -253,8 +253,19 @@ fn doctor_json_exposes_its_current_success_and_failure_surface() {
         failure_json["config_error"]["code"],
         expected_failure["config_error_code"]
     );
-    assert_no_diagnosis(&expected_failure, &failure_json);
-    assert_gap(&expected_failure, 2160);
+    assert_eq!(
+        failure_json["reason_code"], expected_failure["reason_code"],
+        "doctor config failure reason must match the generated contract"
+    );
+    let expected_next = expected_failure["next_step"]
+        .as_str()
+        .expect("contract next_step string")
+        .replace("<config>", missing.to_str().expect("UTF-8 path"));
+    assert_eq!(failure_json["next_step"], expected_next);
+    assert!(
+        expected_failure["gap_issue"].is_null(),
+        "the doctor diagnosis gap is closed and must no longer carry an owning issue"
+    );
 }
 
 #[test]
@@ -418,7 +429,7 @@ fn every_cli_contract_outcome_is_executed_once() {
         "assay",
         &[
             installed_binary_reports_a_version_on_stdout,
-            doctor_json_exposes_its_current_success_and_failure_surface,
+            doctor_json_failure_publishes_the_registered_reason_and_next_step,
             init_stdout_records_success_but_not_the_failure_diagnosis,
             policy_validation_json_carries_success_and_failure_contracts,
             completed_test_failure_is_a_run_report_not_a_diagnosis,

@@ -132,20 +132,22 @@ STEPS: list[dict[str, object]] = [
             outcome(
                 "invalid-config",
                 "invalid explicit config",
-                1,
+                2,
                 stdout("json", "assay.doctor_report.v0"),
                 ["doctor", "--format", "json", "--config", "<config>"],
-                gap_issue=2160,
+                reason_code="E_CFG_PARSE",
+                next_step='Run argv: ["assay","doctor","--config","<config>"]',
                 config_error_code="E_CFG_PARSE",
             ),
         ],
         "stdout_summary": (
-            "Parses as `assay.doctor_report.v0`. A config failure remains JSON and "
-            "carries `config_error.code: E_CFG_PARSE`."
+            "Parses as `assay.doctor_report.v0`. A config failure remains JSON and carries "
+            "the top-level `reason_code` and `next_step` alongside `config_error.code`."
         ),
         "failure_summary": (
-            "`reason_code` and `next_step` are absent, and the exit is outside the frozen "
-            "config/usage class: [gap #2160](https://github.com/Rul1an/assay/issues/2160)."
+            "An unreadable explicit config is exit `2` and names the failing file in a "
+            "concrete JSON argv next step. An absent explicit config reports the same "
+            "`E_CFG_PARSE` identity as a malformed one; that identity is not split here."
         ),
     },
     {

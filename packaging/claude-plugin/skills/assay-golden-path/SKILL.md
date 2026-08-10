@@ -38,11 +38,11 @@ On failure: A missing or unstartable binary is a host spawn failure: no Assay pr
 
 Run: `assay doctor --format json`
 
-Exit: Success `0`; invalid explicit config `1`.
+Exit: Success `0`; invalid explicit config `2`.
 
-Stdout: Parses as `assay.doctor_report.v0`. A config failure remains JSON and carries `config_error.code: E_CFG_PARSE`.
+Stdout: Parses as `assay.doctor_report.v0`. A config failure remains JSON and carries the top-level `reason_code` and `next_step` alongside `config_error.code`.
 
-On failure: `reason_code` and `next_step` are absent, and the exit is outside the frozen config/usage class: [gap #2160](https://github.com/Rul1an/assay/issues/2160).
+On failure: An unreadable explicit config is exit `2` and names the failing file in a concrete JSON argv next step. An absent explicit config reports the same `E_CFG_PARSE` identity as a malformed one; that identity is not split here.
 
 ### 3. Starter files
 

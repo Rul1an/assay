@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use assay_core::config::{load_config, path_resolver::PathResolver};
 
@@ -7,9 +7,21 @@ use crate::cli::args::DoctorArgs;
 use crate::cli::helpers::normalize_severity;
 use crate::diagnostics;
 use crate::diagnostics::format::format_text;
+use crate::exit_codes::{ReasonCode, RunOutcome};
 
 use super::fixes::run_doctor_fix;
 use super::parse_error::try_fix_parse_error;
+
+/// The one decision for an explicit config that could not be loaded.
+///
+/// The reason identity, the recovery step and the exit class all come from the reason-code
+/// registry, so the JSON report cannot disagree with the text path, and neither can disagree
+/// with `assay run` on the same file. Before this existed, the JSON report named the reason
+/// with a literal and both paths returned the test-failure class for a config error.
+fn config_failure(path: &Path, message: String) -> RunOutcome {
+    let path = path.display().to_string();
+    RunOutcome::from_reason(ReasonCode::ECfgParse, Some(message), Some(path.as_str()))
+}
 
 pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     if args.fix && args.format == OutputFormat::Json {
@@ -47,15 +59,24 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             obj.insert("generated_at".to_string(), serde_json::json!(timestamp));
 
             if let Some(err) = cfg_err {
+                let outcome = config_failure(&target_path, err);
+                obj.insert(
+                    "reason_code".to_string(),
+                    serde_json::json!(outcome.reason_code),
+                );
+                obj.insert(
+                    "next_step".to_string(),
+                    serde_json::json!(outcome.next_step),
+                );
                 obj.insert(
                     "config_error".to_string(),
                     serde_json::json!({
-                        "message": err.to_string(),
-                        "code": "E_CFG_PARSE"
+                        "message": outcome.message,
+                        "code": outcome.reason_code,
                     }),
                 );
                 println!("{}", serde_json::to_string_pretty(&json_out)?);
-                return Ok(1);
+                return Ok(outcome.exit_code);
             }
 
             if let Some(c) = &cfg {
@@ -95,7 +116,7 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         if args.fix {
             return try_fix_parse_error(&args, &target_path, &e, legacy_mode);
         }
-        return Ok(1);
+        return Ok(config_failure(&target_path, e).exit_code);
     }
 
     if let Some(c) = cfg {
