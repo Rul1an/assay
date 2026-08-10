@@ -58,12 +58,10 @@ GATE="$(extract_gate)"
 [[ -n "$GATE" ]] || fail "extracted an empty gate body — the workflow shape changed"
 grep -q "MCP_REGISTRY_TOUCHED" <<<"$GATE" \
   || fail "the gate does not read mcp_registry_touched; three scope outputs decide whether a job should run"
-grep -q "PUBLIC_MSRV_RESULT" <<<"$GATE" \
-  || fail "the gate does not inspect the public-msrv result"
-grep -q "RUSTDOC_RESULT" <<<"$GATE" \
-  || fail "the gate does not inspect the rustdoc result"
-grep -q "RELEASE_ASSET_CONTRACT_RESULT" <<<"$GATE" \
-  || fail "the gate does not inspect the release-asset-contract result"
+# Which jobs the gate must wait on and judge is asserted by
+# `scripts/ci/check-ci-gate-coverage.py`, derived from the workflow. Three job names used to be
+# grepped for here as well; that was a second, hand-maintained statement of the same rule, and a
+# hand-maintained list is what let #2230's two jobs sit outside the gate for eleven weeks.
 grep -q "write_sha256_sidecar" "$WORKFLOW" \
   || fail "checksum helper changes do not activate the MCP Registry foundation smoke"
 python3 - "$WORKFLOW" <<'PY' \
@@ -179,32 +177,20 @@ PY
 if sed -n '/^run_gate()/,/^}/p' "$0" | grep -qE '(PUBLIC_MSRV|RUSTDOC)_RESULT=success'; then
   fail "run_gate must not inject a successful MSRV or rustdoc result into every scenario"
 fi
-python3 - "$WORKFLOW" <<'PY' || fail "the required CI rollup does not need every lane listed in REQUIRED"
-import sys
-
-# A lane wired only into `needs:` still gates; a lane wired only into the triples does not exist to
-# the rollup at all. Both halves are checked: this one asserts the `needs:` membership, and the
-# `*_RESULT` greps above assert the gate actually reads the result.
-REQUIRED = ("public-msrv", "rustdoc", "release-asset-contract")
-
-lines = open(sys.argv[1]).read().splitlines()
-for index, line in enumerate(lines):
-    if line == "  ci:":
-        for candidate in lines[index + 1 : index + 10]:
-            if candidate.strip().startswith("needs:"):
-                if any(name not in candidate for name in REQUIRED):
-                    sys.exit(1)
-                sys.exit(0)
-        break
-sys.exit(1)
-PY
-
 # Run the gate under one environment. Echoes the exit code and captured output.
+#
+# The three results injected here belong to jobs with no `if:`: they always run, `required` is
+# their only expectation, and no scope output moves it. A default is therefore not hiding a
+# variation, which is why the code-gated lanes below are still written out per scenario. The
+# skip cases further down override these explicitly, so the defaults do not make them vacuous.
 run_gate() {
   local expected="$1" name="$2"
   shift 2
   local out rc=0
-  out="$(env RELEASE_ASSET_CONTRACT_RESULT=success "$@" bash -c "$GATE" 2>&1)" || rc=$?
+  out="$(env RELEASE_ASSET_CONTRACT_RESULT=success \
+             PUBLISH_SHAPE_CLI_RESULT=success \
+             PUBLIC_CRATE_POLICY_RESULT=success \
+             "$@" bash -c "$GATE" 2>&1)" || rc=$?
   if [[ "$expected" == "pass" && $rc -ne 0 ]]; then
     echo "$out" >&2
     fail "$name: expected the gate to pass, it exited $rc"
@@ -273,8 +259,10 @@ grep -q "mcp-registry-foundation was skipped" <<<"$out" \
   || fail "the registry case failed for the wrong reason: $out"
 echo "ok: mcp-registry-foundation skipped while touched fails the gate"
 
-# Unconditional jobs may never be skipped, whatever the scope says.
-for job in DISTRIBUTION_BOUNDARY VENDORED_PACKS RELEASE_ASSET_CONTRACT; do
+# Unconditional jobs may never be skipped, whatever the scope says. `publish-shape-cli` and
+# `public-crate-policy` join the list with #2230: both were outside `needs:` entirely, so the gate
+# had no opinion about them at all, skipped or failed.
+for job in DISTRIBUTION_BOUNDARY VENDORED_PACKS RELEASE_ASSET_CONTRACT PUBLISH_SHAPE_CLI PUBLIC_CRATE_POLICY; do
   out="$(run_gate fail "unconditional $job skipped" \
     SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=true DEPS_SECURITY_RESULT=skipped CLIPPY_RESULT=skipped RUSTDOC_RESULT=skipped \
     PUBLIC_MSRV_RESULT=skipped \
@@ -286,6 +274,21 @@ for job in DISTRIBUTION_BOUNDARY VENDORED_PACKS RELEASE_ASSET_CONTRACT; do
     || fail "$job: expected the unconditional-skip message, got: $out"
 done
 echo "ok: a job with no condition may not be skipped even on a docs-only run"
+
+# The #2230 case stated as the outcome that was wrong: a red release guardrail must now turn the
+# required context red. Both were green as `CI` reported success, because the gate never saw them.
+for job in PUBLISH_SHAPE_CLI PUBLIC_CRATE_POLICY; do
+  out="$(run_gate fail "$job failed" \
+    SCOPE_RESULT=$ok LIGHTWEIGHT_ONLY=false DEPS_SECURITY_RESULT=$ok CLIPPY_RESULT=$ok RUSTDOC_RESULT=$ok \
+    PUBLIC_MSRV_RESULT=$ok \
+    DISTRIBUTION_BOUNDARY_RESULT=$ok VENDORED_PACKS_RESULT=$ok \
+    MCP_REGISTRY_FOUNDATION_RESULT=$ok PERF_RESULT=$ok TEST_RESULT=$ok \
+    EBPF_SMOKE_REQUIRED=false EBPF_SMOKE_UBUNTU_RESULT=skipped MCP_REGISTRY_TOUCHED=false \
+    "${job}_RESULT=failure")"
+  grep -q "ended with failure" <<<"$out" \
+    || fail "$job: expected the gate to report the failed dependency, got: $out"
+done
+echo "ok: a failed release guardrail fails the required gate"
 
 # Failure still fails, and scope failing takes the basis for every other judgement with it.
 run_gate fail "a job failed" \
