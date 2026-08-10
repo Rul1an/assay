@@ -266,12 +266,12 @@ fn top_level_failure_funnel_owns_supported_machine_output_commands() {
         "json",
     ])
     .expect("policy validate JSON parses");
-    assert!(policy_json.machine_output());
+    assert_eq!(policy_json.machine_output_verify_enabled(), Some(true));
 
     let policy_text =
         Cli::try_parse_from(["assay", "policy", "validate", "--input", "policy.yaml"])
             .expect("policy validate text parses");
-    assert!(!policy_text.machine_output());
+    assert_eq!(policy_text.machine_output_verify_enabled(), None);
 
     let evidence_json = Cli::try_parse_from([
         "assay",
@@ -282,17 +282,32 @@ fn top_level_failure_funnel_owns_supported_machine_output_commands() {
         "json",
     ])
     .expect("evidence show JSON parses");
-    assert!(evidence_json.machine_output());
+    assert_eq!(evidence_json.machine_output_verify_enabled(), Some(true));
+
+    let evidence_json_unverified = Cli::try_parse_from([
+        "assay",
+        "evidence",
+        "show",
+        "bundle.tar.gz",
+        "--format",
+        "json",
+        "--no-verify",
+    ])
+    .expect("unverified evidence show JSON parses");
+    assert_eq!(
+        evidence_json_unverified.machine_output_verify_enabled(),
+        Some(false)
+    );
 
     let evidence_table = Cli::try_parse_from(["assay", "evidence", "show", "bundle.tar.gz"])
         .expect("evidence show table parses");
-    assert!(!evidence_table.machine_output());
+    assert_eq!(evidence_table.machine_output_verify_enabled(), None);
 
     let run_json =
         Cli::try_parse_from(["assay", "run", "--config", "eval.yaml", "--format", "json"])
             .expect("run JSON parses");
     assert!(
-        !run_json.machine_output(),
+        run_json.machine_output_verify_enabled().is_none(),
         "run owns its JSON error renderer and must not be rendered twice"
     );
 }

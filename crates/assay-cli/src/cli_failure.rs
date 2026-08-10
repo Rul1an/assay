@@ -127,10 +127,10 @@ impl CliFailure {
         })
     }
 
-    pub(crate) fn emit(self, machine_output: bool) -> i32 {
+    pub(crate) fn emit(self, machine_output_verify_enabled: Option<bool>) -> i32 {
         emit_operator_diagnostic(&self.diagnostic());
-        if machine_output {
-            let summary = summary_from_outcome(&self.outcome, true);
+        if let Some(verify_enabled) = machine_output_verify_enabled {
+            let summary = summary_from_outcome(&self.outcome, verify_enabled);
             if let Err(error) = emit_summary_stdout(&summary) {
                 let _ = writeln!(
                     std::io::stderr().lock(),

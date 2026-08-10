@@ -46,18 +46,20 @@ pub struct Cli {
 }
 
 impl Cli {
-    pub(crate) fn machine_output(&self) -> bool {
+    pub(crate) fn machine_output_verify_enabled(&self) -> Option<bool> {
         matches!(
             &self.cmd,
             Command::Policy(PolicyArgs {
                 cmd: PolicyCommand::Validate(args)
             }) if args.is_json()
-        ) || matches!(
-            &self.cmd,
-            Command::Evidence(EvidenceArgs {
-                cmd: crate::cli::commands::evidence::EvidenceCmd::Show(args)
-            }) if args.format == ShowFormat::Json
         )
+        .then_some(true)
+        .or_else(|| match &self.cmd {
+            Command::Evidence(EvidenceArgs {
+                cmd: crate::cli::commands::evidence::EvidenceCmd::Show(args),
+            }) if args.format == ShowFormat::Json => Some(!args.no_verify),
+            _ => None,
+        })
     }
 }
 

@@ -428,23 +428,39 @@ fn bundle_inspection_json_publishes_typed_failures_on_stdout() {
     assert!(success_json["events"].is_array());
     assert_eq!(success_json["verify_mode"], "enabled");
 
-    let skipped = assay(
+    let expected_skipped = expected_outcome("evidence-inspection", "verification-disabled");
+    let skipped = assay_contract(
+        dir.path(),
+        &expected_skipped,
+        &[(
+            "<bundle>",
+            corpus_vector(CorpusVector::Tampered)
+                .to_str()
+                .expect("UTF-8 path"),
+        )],
+    );
+    assert_exit(&skipped, &expected_skipped, "evidence show --no-verify");
+    let skipped_json = stdout_json(&skipped, &expected_skipped, "evidence show --no-verify");
+    assert_eq!(skipped_json["verify_mode"], "disabled");
+
+    let missing_unverified = assay(
         dir.path(),
         &[
             "evidence",
             "show",
-            corpus_vector(CorpusVector::Tampered)
-                .to_str()
-                .expect("UTF-8 path"),
+            "missing.bundle.tar.gz",
             "--format",
             "json",
             "--no-verify",
         ],
     );
-    assert_eq!(skipped.status.code(), Some(0));
-    let skipped_json: Value = serde_json::from_slice(&skipped.stdout)
-        .expect("evidence show --no-verify stdout must be JSON");
-    assert_eq!(skipped_json["verify_mode"], "skipped");
+    assert_eq!(missing_unverified.status.code(), Some(2));
+    let missing_unverified_json: Value = serde_json::from_slice(&missing_unverified.stdout)
+        .expect("unreadable --no-verify stdout must be JSON");
+    assert_eq!(
+        missing_unverified_json["provenance"]["verify_mode"],
+        "disabled"
+    );
 
     let tampered = corpus_vector(CorpusVector::Tampered);
     let expected_failure = expected_outcome("evidence-inspection", "tampered");
@@ -549,6 +565,15 @@ fn evidence_inspection_contract_discloses_the_deferred_format_contract_gap() {
     assert!(
         failure_summary.contains("empty stdout"),
         "the residual gap must state its machine-channel consequence"
+    );
+    let stdout_summary = step["stdout_summary"]
+        .as_str()
+        .expect("evidence inspection stdout summary");
+    assert!(
+        stdout_summary.contains("verify_mode")
+            && stdout_summary.contains("enabled")
+            && stdout_summary.contains("disabled"),
+        "the shipped contract must publish the verification-mode field and vocabulary"
     );
 }
 

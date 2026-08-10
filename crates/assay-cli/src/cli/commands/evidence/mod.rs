@@ -316,7 +316,7 @@ fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
         let bundle_json = serde_json::json!({
             "manifest": manifest,
             "events": events,
-            "verify_mode": if verified { "enabled" } else { "skipped" },
+            "verify_mode": assay_core::report::summary::verification_mode(verified),
         });
         println!("{}", serde_json::to_string_pretty(&bundle_json)?);
         return Ok(0);

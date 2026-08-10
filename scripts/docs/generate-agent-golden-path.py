@@ -373,6 +373,20 @@ STEPS: list[dict[str, object]] = [
                 ["evidence", "show", "<bundle>", "--format", "json"],
             ),
             outcome(
+                "verification-disabled",
+                "Valid with verification disabled",
+                0,
+                stdout("json"),
+                [
+                    "evidence",
+                    "show",
+                    "<bundle>",
+                    "--format",
+                    "json",
+                    "--no-verify",
+                ],
+            ),
+            outcome(
                 "tampered",
                 "integrity failure",
                 2,
@@ -406,7 +420,9 @@ STEPS: list[dict[str, object]] = [
             ),
         ],
         "stdout_summary": (
-            "Success parses as an object containing `manifest` and `events`. A recorded-value "
+            "Success parses as an object containing `manifest`, `events`, and `verify_mode`; "
+            "the registered values are `enabled` and `disabled`, with `--no-verify` producing "
+            "`disabled`. A recorded-value "
             "mismatch parses as `assay.run_summary.v1` with `E_EVIDENCE_INTEGRITY`; an "
             "unreadable path uses `E_EVIDENCE_UNREADABLE`."
         ),
