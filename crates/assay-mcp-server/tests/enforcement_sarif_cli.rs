@@ -56,9 +56,10 @@ fn stdout_json(output: &Output) -> Value {
 }
 
 fn assert_invalid_line(output: &Output, line: usize) {
-    assert!(
-        !output.status.success(),
-        "invalid NDJSON must fail; stdout:\n{}\nstderr:\n{}",
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "invalid NDJSON must exit 1; stdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
