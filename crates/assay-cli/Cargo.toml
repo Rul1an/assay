@@ -21,6 +21,8 @@ exclude = [
     "tests/e2e_mcp_wrap_assert_cmd.rs",
     # Workspace-only contract: reads generated docs and shared test support outside this package.
     "tests/agent_golden_path_contract.rs",
+    # Workspace-only contract: uses the shared bounded-process helper outside this package.
+    "tests/policy_validate_machine_contract.rs",
 ]
 
 [lints]
