@@ -46,12 +46,10 @@ including its explicit non-claims, or amend the decision through a new ADR.
 - At most two ADR-042/043 implementation branches may be active at once.
 - Use `codex/`, `claude/`, or `cursor/` branch prefixes matching the writer.
 - Do not implement on `main`.
-- Build in the worktree's own `target/`. Cargo creates one per worktree on first build, so the
-  isolation this rule asks for needs no configuration, and `/target` is git-ignored so an in-tree
-  build leaves a read-only review's tree clean. Setting `CARGO_TARGET_DIR` is allowed; whoever sets
-  it owns bounding it, by reusing one directory or by removing it when the run ends. The pre-push
-  hook reuses one; `scripts/ci/test-semver-gate.sh` removes its own on `trap`. An unbounded target
-  per run is what fills the disk — the name is not the problem.
+- Build in the worktree's own `target/`. Cargo creates one per worktree on first build, so
+  worktrees do not share one unless told to, and `/target` is git-ignored so an in-tree build
+  leaves a read-only review's tree clean. A `CARGO_TARGET_DIR` you export by hand, you remove when
+  the work ends. Paths set by checked-in scripts are those scripts' business.
 - Remove merged branches and their worktrees only after recording the merge in the programme ledger.
 
 ## Development Discipline
