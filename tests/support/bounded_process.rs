@@ -624,6 +624,9 @@ mod tests {
 
     /// Runs as the bounded child of the Windows descendant tests, never as part
     /// of the suite. `--ignored` keeps it out of a normal run.
+    // The descendant is deliberately never waited on: it has to outlive this
+    // process so that the process-tree termination under test is what reaps it.
+    #[allow(clippy::zombie_processes)]
     #[test]
     #[ignore = "re-executed as the bounded child of the descendant tests"]
     fn descendant_spawner_helper_process() {
