@@ -18,7 +18,7 @@ pub async fn run(args: PolicyValidateArgs) -> Result<i32> {
     // Force schema compilation so failures happen here (not at runtime).
     policy
         .try_compile_all_schemas()
-        .map_err(anyhow::Error::msg)?;
+        .map_err(|error| anyhow::anyhow!("policy schemas failed to compile: {error}"))?;
 
     eprintln!("✔ Policy OK: {}", args.input.display());
     if args.is_json() {
@@ -33,5 +33,5 @@ fn classify_load_error(path: &Path, error: anyhow::Error) -> anyhow::Error {
     if error.downcast_ref::<serde_yaml::Error>().is_some() {
         return CliFailure::policy_parse(path, error).into();
     }
-    error
+    error.context(format!("failed to load policy {}", path.display()))
 }

@@ -68,7 +68,7 @@ fn recovery_argv(summary: &Value) -> Vec<String> {
     serde_json::from_str(encoded).expect("next_step argv must be valid JSON")
 }
 
-fn assert_unclassified_failure(output: &Output, context: &str) {
+fn assert_unclassified_failure(output: &Output, context: &str, expected_diagnostic: &str) {
     assert_eq!(output.status.code(), Some(2), "{context} must fail");
     assert!(
         output.stdout.is_empty(),
@@ -82,6 +82,10 @@ fn assert_unclassified_failure(output: &Output, context: &str) {
     assert!(
         !stderr.contains("E_POLICY_PARSE"),
         "{context} must not be misclassified as a YAML parse failure: {stderr}"
+    );
+    assert!(
+        stderr.contains(expected_diagnostic),
+        "{context} must preserve its legacy diagnostic context: {stderr}"
     );
 }
 
@@ -212,7 +216,11 @@ fn json_mode_does_not_misclassify_untyped_policy_failures() {
             "json",
         ],
     );
-    assert_unclassified_failure(&missing, "missing policy");
+    assert_unclassified_failure(
+        &missing,
+        "missing policy",
+        "failed to load policy missing.yaml",
+    );
 
     std::fs::write(
         dir.path().join("invalid-schema.yaml"),
@@ -240,5 +248,9 @@ schemas:
             "json",
         ],
     );
-    assert_unclassified_failure(&invalid_schema, "invalid policy schema");
+    assert_unclassified_failure(
+        &invalid_schema,
+        "invalid policy schema",
+        "policy schemas failed to compile:",
+    );
 }
