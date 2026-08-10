@@ -9,8 +9,8 @@ All notable changes to this project will be documented in this file.
 This release turns the install-to-verifiable-evidence path into an agent-facing product surface.
 It adds project and plugin installation for the golden path, gives non-interactive callers
 structured failure contracts at the commands they use to set up and inspect that path, and removes
-an MCP protocol claim the server did not implement. The Rust API remains minor-compatible; the
-consumer-visible compatibility corrections below may require CLI, MCP or policy-pin migration.
+an MCP protocol claim the server did not implement. The consumer-visible compatibility corrections
+below may require CLI, MCP, evidence-input or policy-pin migration.
 
 ### Added
 - Project-scoped MCP manifests for Claude Code, Cursor and Codex start the separate
@@ -26,21 +26,31 @@ consumer-visible compatibility corrections below may require CLI, MCP or policy-
   stable reason identities, actionable next steps and the command-specific result data needed by
   non-interactive callers (#2198, #2240, #2207, #2204, #2262).
 - `E_EVIDENCE_INTEGRITY` distinguishes hostile or damaged evidence content from argument, baseline
-  and replay failures, with one shared mapping for evidence consumers (#2213).
+  and replay failures, while `E_EVIDENCE_UNREADABLE` identifies evidence that cannot be opened or
+  read. Both use shared mappings across evidence consumers (#2213, #2262).
+- Run and validation JSON documents now name their `schema` and `schema_version`, and failing
+  `assay run --format json` diagnostics are emitted on stdout for machine consumers (#2151, #2169).
+- `assay evidence show --format json` now reports whether verification was enabled or disabled via
+  its additive `verify_mode` field (#2262).
 
 ### Changed
 - The MCP server no longer advertises unimplemented protocol revision `2026-07-28` or responds to
   `server/discover`. Clients pinned to that revision must negotiate `2025-11-25` or `2024-11-05`;
   the public `MODERN_PROTOCOL_VERSION` constant remains available but deprecated (#2267).
 - `assay doctor` now exits `2` for configuration-class failures. This changes JSON runs with an
-  error-severity configuration diagnostic from `0` to `2`, and unloadable-config failures from
-  `1` to `2`; scripts should treat `2` as configuration/user error (#2247).
+  error-severity configuration diagnostic from `0` to `2`, and unloadable-config failures without
+  `--fix` from `1` to `2`; repair paths can still exit `1`, while scripts should treat `2` as
+  configuration/user error (#2247, #2209).
 - MCP `tool_pins` now require 64-character lowercase hexadecimal hashes, and schema identity uses
-  RFC 8785 canonical JSON bytes. Re-record pins created by older versions after upgrading or calls
-  can be denied with `E_TOOL_DRIFT` (#2239, #2268).
+  RFC 8785 canonical JSON bytes. A policy carrying a malformed pin now fails to load. Re-record
+  otherwise valid pins created by older versions after upgrading or calls can be denied with
+  `E_TOOL_DRIFT` (`P_TOOL_DRIFT` in decision events) (#2239, #2268).
 - Machine-readable next-step guidance for configuration and policy parse failures now renders an
-  explicit argument vector rather than a shell command string, avoiding ambiguous quoting (#2198,
-  #2204).
+  explicit argument vector rather than a shell command string, avoiding ambiguous quoting. Policy
+  validation recovery also adds the previously missing `--input` flag (#2198, #2204).
+- `assay-mcp-server enforcement-sarif` now fails closed instead of skipping malformed non-empty
+  NDJSON lines and rejects input above 16 MiB. Streams accepted by 5.0.0 can therefore fail and must
+  be repaired or reduced before conversion (#2197).
 
 ### Fixed
 - The MCP server no longer advertises protocol revision `2026-07-28` while omitting required result
