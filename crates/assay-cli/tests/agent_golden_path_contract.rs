@@ -284,6 +284,35 @@ fn doctor_json_failure_publishes_the_registered_reason_and_next_step() {
         "both runs exit 0, so a consumer can only tell them apart by this key"
     );
 
+    // The examined-and-failing row. Its exit is the one `decide_exit` gives this diagnostic, so
+    // driving it here is what stops the guide from asserting a class nothing measures.
+    let bad_trace_dir = tempfile::tempdir().expect("tempdir");
+    let bad_config = bad_trace_dir.path().join("clean.yaml");
+    std::fs::write(&bad_config, CLEAN_EVAL_YAML).expect("wrote config");
+    let expected_diag = expected_outcome("preflight", "diagnostics-error");
+    let diag = assay_contract(
+        bad_trace_dir.path(),
+        &expected_diag,
+        &[
+            ("<config>", bad_config.to_str().expect("UTF-8 path")),
+            ("<trace>", "traces/absent.jsonl"),
+        ],
+    );
+    assert_exit(&diag, &expected_diag, "doctor diagnostics-error");
+    let diag_json = stdout_json(&diag, &expected_diag, "doctor diagnostics-error");
+    assert_eq!(
+        diag_json["config_check"]["status"], expected_diag["config_check"],
+        "the config was examined; the error is in what it found"
+    );
+    assert!(
+        diag_json["data_diagnostics"]
+            .as_array()
+            .expect("data_diagnostics is an array")
+            .iter()
+            .any(|d| d["severity"] == "error"),
+        "this row exists to pin the exit class for an error-severity diagnostic"
+    );
+
     let missing = dir.path().join("missing.yaml");
     let expected_failure = expected_outcome("preflight", "invalid-config");
     let failure = assay_contract(

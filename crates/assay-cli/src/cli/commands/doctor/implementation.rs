@@ -4,7 +4,7 @@ use assay_core::config::{load_config, path_resolver::PathResolver};
 
 use crate::cli::args::common::OutputFormat;
 use crate::cli::args::DoctorArgs;
-use crate::cli::helpers::normalize_severity;
+use crate::cli::helpers::decide_exit;
 use crate::diagnostics;
 use crate::diagnostics::format::format_text;
 use crate::exit_codes::{ReasonCode, RunOutcome};
@@ -56,23 +56,6 @@ fn config_check_marker(checked: bool, error: Option<&str>) -> serde_json::Value 
     }
 }
 
-/// The exit class for a set of data diagnostics.
-///
-/// Both output channels call this rather than each deciding for itself. They did decide for
-/// themselves once — the text branch counted error severities and the JSON branch returned `0`
-/// whatever it had found — and the disagreement was invisible from either side, because each was
-/// self-consistent and no test compared them. A formatting flag is not a fact about the tree.
-///
-/// A warning is deliberately not an error here. `doctor` raises `warn` for advisory findings such
-/// as a legacy trace shape, and treating "any diagnostic exists" as failure would make every
-/// advisory a failed preflight.
-fn exit_class(diagnostics: &[assay_core::errors::diagnostic::Diagnostic]) -> i32 {
-    let has_errors = diagnostics
-        .iter()
-        .any(|d| normalize_severity(&d.severity) == "error");
-    i32::from(has_errors)
-}
-
 pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     if args.fix && args.format == OutputFormat::Json {
         eprintln!("doctor --fix currently supports text output only; use --format text");
@@ -105,7 +88,9 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
         let timestamp = chrono::Utc::now().to_rfc3339();
         let mut json_out = serde_json::to_value(&report)?;
         // Stays `0` when no config was examined: nothing was checked, so nothing failed. The
-        // `config_check` marker is what tells a consumer which of the two a `0` means.
+        // `config_check` marker is what tells a consumer which of the two a `0` means. When a
+        // config was examined, `decide_exit` answers — the same function `validate` and `run` use,
+        // so one diagnostic does not get three exit codes depending on which command met it.
         let mut exit = 0;
 
         if let Some(obj) = json_out.as_object_mut() {
@@ -154,7 +139,7 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
                     "data_suggestions".to_string(),
                     serde_json::to_value(&core_report.suggested_actions)?,
                 );
-                exit = exit_class(&core_report.diagnostics);
+                exit = decide_exit(&core_report.diagnostics);
             }
         }
 
@@ -207,7 +192,7 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             return Ok(fix_result);
         }
 
-        return Ok(exit_class(&core_report.diagnostics));
+        return Ok(decide_exit(&core_report.diagnostics));
     }
 
     println!("\nPolicy Check: SKIPPED ({NO_CONFIG_FOUND})");

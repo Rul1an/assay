@@ -89,6 +89,10 @@ fn both_channels_agree_when_a_validation_fails() {
     // The trace this names does not exist, so `validate` raises `E_PATH_NOT_FOUND` at `error`.
     let text = doctor_exit_code(dir.path(), "text", "traces/absent.jsonl");
     let json = doctor_exit_code(dir.path(), "json", "traces/absent.jsonl");
+    // `E_PATH_NOT_FOUND` is `ExitClass::Config` in the ADR-046 table, so `decide_exit` answers 2.
+    // `assay-cli` is bin-only, so an integration test cannot import the constant; the class table
+    // is pinned in-crate, and what this test owns is that both channels get the same answer.
+    let expected = 2;
 
     assert_eq!(
         json, text,
@@ -96,9 +100,11 @@ fn both_channels_agree_when_a_validation_fails() {
          one tree. The exit class is a property of what was checked, not of how it was printed."
     );
     assert_eq!(
-        json, 1,
+        json, expected,
         "doctor returned exit {json} while publishing an error-severity diagnostic. A failed \
-         validation published as a clean result is the one thing the machine channel must never do."
+         validation published as a clean result is the one thing the machine channel must never do. \
+         The class itself comes from `decide_exit`, so `assay validate` and `assay run` answer \
+         {expected} for this same diagnostic and doctor does not get a third answer."
     );
 }
 

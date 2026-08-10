@@ -38,9 +38,9 @@ On failure: A missing or unstartable binary is a host spawn failure: no Assay pr
 
 Run: `assay doctor --format json --config <config>`
 
-Exit: Success `0`; no config examined `0`; invalid explicit config `2`.
+Exit: Success `0`; no config examined `0`; config examined, error-severity diagnostic `2`; invalid explicit config `2`.
 
-Stdout: Parses as `assay.doctor_report.v0`. Every report carries `config_check.status`, one of `checked`, `skipped` or `failed`. Exit `0` on its own does not mean a config was examined: read `config_check.status` to tell a clean config from no config. Exit `1` means the config was examined and at least one `data_diagnostics[]` entry has severity `error`; the text channel returns the same class for the same tree. A config failure remains JSON and carries the top-level `reason_code` and `next_step` alongside `config_error.code`.
+Stdout: Parses as `assay.doctor_report.v0`. Every report carries `config_check.status`, one of `checked`, `skipped` or `failed`. Exit `0` on its own does not mean a config was examined: read `config_check.status` to tell a clean config from no config. A config that was examined and carries an error-severity `data_diagnostics[]` entry exits `2`, the class `decide_exit` gives that diagnostic for `assay validate` and `assay run` too; the text channel returns the same class for the same tree. A config failure remains JSON and carries the top-level `reason_code` and `next_step` alongside `config_error.code`.
 
 On failure: An explicit config that will not load, absent or unreadable alike, is exit `2` and names the failing file in a concrete JSON argv next step, the same exit class `assay run` gives the same file. The reason code is not always the same one, per the non-claim below.
 

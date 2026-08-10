@@ -141,6 +141,24 @@ STEPS: list[dict[str, object]] = [
                 ["doctor", "--format", "json"],
                 config_check="skipped",
             ),
+            # The row that carries this PR's behaviour. Without it the guide asserted an exit in
+            # prose that no outcome enumerated, so nothing required a test to drive it.
+            outcome(
+                "diagnostics-error",
+                "config examined, error-severity diagnostic",
+                2,
+                stdout("json", "assay.doctor_report.v0"),
+                [
+                    "doctor",
+                    "--format",
+                    "json",
+                    "--config",
+                    "<config>",
+                    "--trace-file",
+                    "<trace>",
+                ],
+                config_check="checked",
+            ),
             outcome(
                 "invalid-config",
                 "invalid explicit config",
@@ -156,8 +174,9 @@ STEPS: list[dict[str, object]] = [
             "Parses as `assay.doctor_report.v0`. Every report carries "
             "`config_check.status`, one of `checked`, `skipped` or `failed`. Exit `0` on "
             "its own does not mean a config was examined: read `config_check.status` to "
-            "tell a clean config from no config. Exit `1` means the config was examined "
-            "and at least one `data_diagnostics[]` entry has severity `error`; the text "
+            "tell a clean config from no config. A config that was examined and carries an "
+            "error-severity `data_diagnostics[]` entry exits `2`, the class `decide_exit` "
+            "gives that diagnostic for `assay validate` and `assay run` too; the text "
             "channel returns the same class for the same tree. A config failure remains "
             "JSON and carries the top-level `reason_code` and `next_step` alongside "
             "`config_error.code`."
