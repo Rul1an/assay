@@ -25,6 +25,7 @@ exclude = [
     "tests/policy_validate_machine_contract.rs",
     "tests/config_recovery_argv_contract.rs",
     "tests/doctor_config_check_contract.rs",
+    "tests/init_stdout_contract.rs",
     "tests/doctor_exit_class_contract.rs",
 ]
 
