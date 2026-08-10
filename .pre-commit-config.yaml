@@ -262,6 +262,22 @@ repos:
         pass_filenames: false
         files: ^(scripts/ci/test-ci-gate-expectations\.sh|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
 
+      - id: ci-gate-coverage
+        name: Required CI gate waits on every gating job
+        entry: bash -c 'python3 scripts/ci/check-ci-gate-coverage.py --self-test && python3 scripts/ci/check-ci-gate-coverage.py'
+        language: system
+        pass_filenames: false
+        # The hook above asks whether the gate judged its dependencies correctly; this one asks
+        # whether the dependency list covers the workflow. `publish-shape-cli` and
+        # `public-crate-policy` passed the first question and failed the second for eleven weeks,
+        # because nothing was asking it (#2230). The same check runs inside the `CI` job itself, so
+        # the required context, not only a local hook, is what refuses.
+        #
+        # The ruleset is in `files:` because the guard finds the rollup by matching a job's
+        # reported name against the required contexts; editing that artifact can change which job
+        # it believes it is checking.
+        files: ^(scripts/ci/check-ci-gate-coverage\.py|\.github/workflows/ci\.yml|\.github/rulesets/main-required-ci-contexts\.json|\.pre-commit-config\.yaml)$
+
       - id: mcp-registry-release-txn-self-test
         name: MCP Registry release transaction self-test
         entry: bash scripts/ci/test-mcp-registry-release-txn.sh
@@ -307,6 +323,11 @@ repos:
 
       - id: cargo-audit
         name: cargo audit (RustSec)
+        # `cargo-audit audit` rather than `cargo audit`, for the reason the neighbouring cargo-deny
+        # hook states: through cargo the toolchain resolves from rust-toolchain.toml. CI's dependency
+        # job now sets RUSTUP_TOOLCHAIN for every step, but a hook runs on a developer machine where
+        # nothing does, so this site was the one left uncovered (#2237). The two hooks answered the
+        # same question differently, which is how the answer drifts.
         # Keep the ignore list in lockstep with the three peer locations that carry it:
         # deny.toml, .github/workflows/ci.yml and .cargo/audit.toml. Naming all of them matters —
         # an incomplete peer list is how this hook drifted in the first place.
@@ -315,11 +336,23 @@ repos:
         # retired by the pyo3 0.29 migration (#1651) and the quick-xml pair
         # (RUSTSEC-2026-0194/0195) by object_store 0.14.1; both were left here after they stopped
         # matching anything, which is what let the list drift out of lockstep.
-        entry: bash -lc 'cargo audit --ignore RUSTSEC-2023-0071'
+        entry: bash -lc 'cargo-audit audit --ignore RUSTSEC-2023-0071'
         language: system
         pass_filenames: false
         files: ^Cargo\.lock$
         stages: [pre-push]
+
+      - id: install-cargo-deny-self-test
+        name: cargo-deny install pin self-test
+        entry: bash scripts/ci/test-install-cargo-deny.sh
+        language: system
+        pass_filenames: false
+        # The install script carries the pin, the toolchain export and the version assertion, and
+        # before this hook nothing exercised any of them: removing `--version`, removing the export,
+        # or rewriting the assertion to `if false` each left the script exiting 0 while still printing
+        # a version line that reads as evidence of a pin. The self-test drives stub cargo/cargo-deny
+        # binaries on PATH, so it costs no network and no install.
+        files: ^(scripts/ci/(install-cargo-deny|test-install-cargo-deny)\.sh|\.pre-commit-config\.yaml)$
       - id: cargo-clippy
         name: cargo clippy (workspace, deny warnings)
         entry: scripts/precommit/cargo-clippy.sh

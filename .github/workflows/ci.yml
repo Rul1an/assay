@@ -176,6 +176,11 @@ jobs:
       - name: Install cargo-deny
         run: ./scripts/ci/install-cargo-deny.sh
       - name: Install cargo-audit
+        # Version deliberately unpinned, unlike the sibling install two lines up. An advisory scanner
+        # is the one tool where floating is arguably right: a pinned scanner stops learning about new
+        # advisories, so the pin would age into a silent gap rather than a loud failure. Stated here
+        # because an unexplained asymmetry beside a pinned sibling reads as an oversight, and #2237
+        # holds the question of whether this reasoning survives scrutiny.
         run: cargo install --locked cargo-audit
       - name: Check Aya/eBPF dependency alignment
         run: ./scripts/ci/check-aya-ebpf-alignment.sh
@@ -190,7 +195,7 @@ jobs:
         run: |
           rm -rf ~/.cargo/advisory-db
           # RUSTSEC-2023-0071 (rsa Marvin Attack): no fixed upgrade; assay-mcp-server JWT (see deny.toml)
-          cargo audit --ignore RUSTSEC-2023-0071
+          cargo-audit audit --ignore RUSTSEC-2023-0071
 
       - name: cargo audit (RustSec) — fuzz lockfile
         # Runs when the root audit above fails, so coverage does not drop out exactly when the tree
@@ -210,7 +215,7 @@ jobs:
           # would defeat the reason this step exists. An advisory that matches only the fuzz tree is
           # then a deliberate decision, not a silent pass; there is nowhere for it to be quietly
           # excused, which is the point.
-          ( cd "${RUNNER_TEMP}" && cargo audit --file "${GITHUB_WORKSPACE}/fuzz/Cargo.lock" )
+          ( cd "${RUNNER_TEMP}" && cargo-audit audit --file "${GITHUB_WORKSPACE}/fuzz/Cargo.lock" )
 
   clippy:
     name: Clippy (deny warnings)
@@ -756,6 +761,9 @@ jobs:
 
 
   ebpf-smoke-self-hosted:
+    # ci-gate: not-required -- never runs on a pull request, by the `if:` below, so it has no
+    # result to contribute on the event branch protection judges. ADR-043's consequences record
+    # kernel validation running post-merge as consistent with its supporting status.
     name: eBPF monitor smoke (Linux - Self-Hosted)
     needs: [scope, test]
     if: github.event_name != 'pull_request' && needs.scope.outputs.self_hosted_ebpf_required == 'true'
@@ -924,8 +932,20 @@ jobs:
     name: CI
     runs-on: ubuntu-latest
     if: always()
-    needs: [scope, deps-security, clippy, rustdoc, public-msrv, distribution-boundary, vendored-packs, release-asset-contract, mcp-registry-foundation, perf, test, ebpf-smoke-ubuntu]
+    needs: [scope, deps-security, clippy, rustdoc, public-msrv, distribution-boundary, publish-shape-cli, public-crate-policy, vendored-packs, release-asset-contract, mcp-registry-foundation, perf, test, ebpf-smoke-ubuntu]
+    permissions:
+      contents: read
     steps:
+      # This gate can only judge the jobs it was told to wait on, and for eleven weeks it was
+      # told about two fewer than the workflow defined (#2230). The coverage guard reads the
+      # membership off this file so a job added later is caught by construction rather than by
+      # whoever remembers to widen the list.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Verify this gate waits on every gating job
+        run: python3 scripts/ci/check-ci-gate-coverage.py
+
       - name: Evaluate required job results
         env:
           SCOPE_RESULT: ${{ needs.scope.result }}
@@ -935,6 +955,8 @@ jobs:
           RUSTDOC_RESULT: ${{ needs.rustdoc.result }}
           PUBLIC_MSRV_RESULT: ${{ needs.public-msrv.result }}
           DISTRIBUTION_BOUNDARY_RESULT: ${{ needs.distribution-boundary.result }}
+          PUBLISH_SHAPE_CLI_RESULT: ${{ needs.publish-shape-cli.result }}
+          PUBLIC_CRATE_POLICY_RESULT: ${{ needs.public-crate-policy.result }}
           VENDORED_PACKS_RESULT: ${{ needs.vendored-packs.result }}
           RELEASE_ASSET_CONTRACT_RESULT: ${{ needs.release-asset-contract.result }}
           MCP_REGISTRY_FOUNDATION_RESULT: ${{ needs.mcp-registry-foundation.result }}
@@ -991,6 +1013,8 @@ jobs:
             "rustdoc|${RUSTDOC_RESULT}|${code_gated_expectation}" \
             "public-msrv|${PUBLIC_MSRV_RESULT}|${code_gated_expectation}" \
             "distribution-boundary|${DISTRIBUTION_BOUNDARY_RESULT}|required" \
+            "publish-shape-cli|${PUBLISH_SHAPE_CLI_RESULT}|required" \
+            "public-crate-policy|${PUBLIC_CRATE_POLICY_RESULT}|required" \
             "vendored-packs|${VENDORED_PACKS_RESULT}|required" \
             "release-asset-contract|${RELEASE_ASSET_CONTRACT_RESULT}|required" \
             "mcp-registry-foundation|${MCP_REGISTRY_FOUNDATION_RESULT}|${registry_expectation}" \
