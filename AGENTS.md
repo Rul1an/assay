@@ -48,11 +48,10 @@ including its explicit non-claims, or amend the decision through a new ADR.
 - Do not implement on `main`.
 - Build in the worktree's own `target/`. Cargo creates one per worktree on first build, so the
   isolation this rule asks for needs no configuration, and `/target` is git-ignored so an in-tree
-  build leaves a read-only review's tree clean. Set `CARGO_TARGET_DIR` only to keep a build out of
-  the branch's cache, and scope it to one worktree — never one path per reviewed head. A tool may
-  share one target across worktrees only where it must, and its script records the reason: the
-  pre-push hook does, trading cargo's lock for one build cache instead of one per worktree, and
-  under that hook's timeout the lock can abort a push rather than only delay it.
+  build leaves a read-only review's tree clean. Setting `CARGO_TARGET_DIR` is allowed; whoever sets
+  it owns bounding it, by reusing one directory or by removing it when the run ends. The pre-push
+  hook reuses one; `scripts/ci/test-semver-gate.sh` removes its own on `trap`. An unbounded target
+  per run is what fills the disk — the name is not the problem.
 - Remove merged branches and their worktrees only after recording the merge in the programme ledger.
 
 ## Development Discipline
