@@ -275,7 +275,7 @@ fn doctor_json_failure_publishes_the_registered_reason_and_next_step() {
 }
 
 #[test]
-fn init_stdout_records_success_but_not_the_failure_diagnosis() {
+fn init_text_stays_the_human_progress_stream_it_has_always_been() {
     let success_dir = tempfile::tempdir().expect("success tempdir");
     let expected_success = expected_outcome("starter-files", "success");
     let success = assay_contract(success_dir.path(), &expected_success, &[]);
@@ -293,9 +293,44 @@ fn init_stdout_records_success_but_not_the_failure_diagnosis() {
     let failure_stdout = stdout_text(&failure, &expected_failure, "init failure");
     assert!(
         !failure_stdout.contains("unknown preset"),
-        "the actionable diagnosis unexpectedly moved to stdout; update the contract"
+        "the actionable diagnosis unexpectedly moved to the default stdout; update the contract"
     );
-    assert_gap(&expected_failure, 2161);
+}
+
+#[test]
+fn init_json_publishes_the_registered_reason_and_next_step() {
+    let success_dir = tempfile::tempdir().expect("success tempdir");
+    let expected_success = expected_outcome("starter-files", "success-json");
+    let success = assay_contract(success_dir.path(), &expected_success, &[]);
+    assert_exit(&success, &expected_success, "init json success");
+    let success_json = stdout_json(&success, &expected_success, "init json success");
+    let expected_success_reason = expected_success["reason_code"]
+        .as_str()
+        .expect("contract reason_code string");
+    assert_eq!(success_json["reason_code"], expected_success_reason);
+
+    let failure_dir = tempfile::tempdir().expect("failure tempdir");
+    let expected_failure = expected_outcome("starter-files", "unknown-preset-json");
+    let failure = assay_contract(failure_dir.path(), &expected_failure, &[]);
+    assert_exit(&failure, &expected_failure, "init json failure");
+    let failure_json = stdout_json(&failure, &expected_failure, "init json failure");
+    // Read each contract side as a string rather than comparing two Values: comparing Values lets
+    // a coordinated regression pass, because two absences are equal to each other.
+    let expected_reason = expected_failure["reason_code"]
+        .as_str()
+        .expect("contract reason_code string");
+    assert_eq!(
+        failure_json["reason_code"], expected_reason,
+        "init failure reason must match the generated contract"
+    );
+    let expected_next = expected_failure["next_step"]
+        .as_str()
+        .expect("contract next_step string");
+    assert_eq!(failure_json["next_step"], expected_next);
+    assert!(
+        expected_failure["gap_issue"].is_null(),
+        "the init diagnosis gap is closed and must no longer carry an owning issue"
+    );
 }
 
 #[test]
@@ -436,7 +471,8 @@ fn every_cli_contract_outcome_is_executed_once() {
         &[
             installed_binary_reports_a_version_on_stdout,
             doctor_json_failure_publishes_the_registered_reason_and_next_step,
-            init_stdout_records_success_but_not_the_failure_diagnosis,
+            init_text_stays_the_human_progress_stream_it_has_always_been,
+            init_json_publishes_the_registered_reason_and_next_step,
             policy_validation_json_carries_success_and_failure_contracts,
             completed_test_failure_is_a_run_report_not_a_diagnosis,
             bundle_inspection_json_disappears_on_integrity_failure,

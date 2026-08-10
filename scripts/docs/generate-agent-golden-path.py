@@ -172,17 +172,37 @@ STEPS: list[dict[str, object]] = [
                 2,
                 stdout("text"),
                 ["init", "--preset", "not-a-preset"],
-                gap_issue=2161,
+            ),
+            outcome(
+                "success-json",
+                "success with `--format json`",
+                0,
+                stdout("json", "assay.init_report.v0"),
+                ["init", "--preset", "dev", "--hello-trace", "--format", "json"],
+                reason_code="",
+            ),
+            outcome(
+                "unknown-preset-json",
+                "unknown preset with `--format json`",
+                2,
+                stdout("json", "assay.init_report.v0"),
+                ["init", "--preset", "not-a-preset", "--format", "json"],
+                reason_code="E_INVALID_ARGS",
+                next_step="Run: assay --help for usage",
             ),
         ],
         "stdout_summary": (
-            "Human progress text; success ends with `Next: assay validate --config "
-            "eval.yaml --trace-file traces/hello.jsonl`. A failing run writes partial "
-            "progress text, not the fatal diagnosis."
+            "Default `text` is human progress; success ends with `Next: assay validate "
+            "--config eval.yaml --trace-file traces/hello.jsonl`, and a failing run "
+            "writes partial progress text rather than the fatal diagnosis. `--format "
+            "json` replaces that stream with one `assay.init_report.v0` document "
+            "naming `reason_code`, `next_step`, and the files created and skipped."
         ),
         "failure_summary": (
-            "No machine report, `reason_code`, or `next_step` on stdout: "
-            "[gap #2161](https://github.com/Rul1an/assay/issues/2161)."
+            "Under `--format json` a rejected `--preset` publishes `E_INVALID_ARGS` and "
+            "a `next_step` on stdout. Failures the reason-code registry does not name, "
+            "such as a filesystem write error, still produce no document: stdout is "
+            "empty and the diagnosis stays on stderr."
         ),
     },
     {

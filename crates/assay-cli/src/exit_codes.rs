@@ -106,7 +106,11 @@ pub enum ReasonCode {
     EArgSchema,
 }
 
-fn format_recovery_argv(args: &[&str]) -> String {
+/// The one construction of an executable recovery step that carries caller-controlled values.
+///
+/// Callers outside the registry render the same shape rather than building a second one, because
+/// a shell string and a JSON argv disagree about what a value containing a quote or a space means.
+pub(crate) fn format_recovery_argv(args: &[&str]) -> String {
     format!("Run argv: {}", serde_json::json!(args))
 }
 
