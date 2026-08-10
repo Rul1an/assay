@@ -416,7 +416,7 @@
         {
           "name": "malformed",
           "label": "malformed non-empty NDJSON",
-          "exit_code": 0,
+          "exit_code": 1,
           "argv": [
             "enforcement-sarif",
             "--input",
@@ -425,16 +425,16 @@
             "-"
           ],
           "stdout": {
-            "kind": "json",
-            "document": "sarif-2.1.0"
+            "kind": "empty",
+            "document": null
           },
           "reason_code": null,
           "next_step": null,
-          "gap_issue": 2166
+          "gap_issue": null
         }
       ],
-      "stdout_summary": "Valid input produces SARIF `2.1.0`. Malformed lines are currently discarded and can produce a clean report with zero results.",
-      "failure_summary": "This is fail-open, not a successful empty projection: [gap #2166](https://github.com/Rul1an/assay/issues/2166). No reason or next step is emitted.",
+      "stdout_summary": "Valid input produces SARIF `2.1.0`. A malformed non-empty line produces no SARIF document.",
+      "failure_summary": "Malformed NDJSON fails before projection and names the invalid input line on stderr. Blank lines remain accepted.",
       "command": "assay-mcp-server enforcement-sarif --input - --output -"
     }
   ]

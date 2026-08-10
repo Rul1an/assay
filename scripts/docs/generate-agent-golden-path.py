@@ -395,20 +395,18 @@ STEPS: list[dict[str, object]] = [
             outcome(
                 "malformed",
                 "malformed non-empty NDJSON",
-                0,
-                stdout("json", "sarif-2.1.0"),
+                1,
+                stdout("empty"),
                 ["enforcement-sarif", "--input", "-", "--output", "-"],
-                gap_issue=2166,
             ),
         ],
         "stdout_summary": (
-            "Valid input produces SARIF `2.1.0`. Malformed lines are currently discarded "
-            "and can produce a clean report with zero results."
+            "Valid input produces SARIF `2.1.0`. A malformed non-empty line produces no "
+            "SARIF document."
         ),
         "failure_summary": (
-            "This is fail-open, not a successful empty projection: "
-            "[gap #2166](https://github.com/Rul1an/assay/issues/2166). No reason or next "
-            "step is emitted."
+            "Malformed NDJSON fails before projection and names the invalid input line on "
+            "stderr. Blank lines remain accepted."
         ),
     },
 ]

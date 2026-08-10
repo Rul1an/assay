@@ -2,6 +2,7 @@ use anyhow::Result;
 use assay_mcp_server::config;
 use assay_mcp_server::server::Server;
 use clap::{Parser, Subcommand};
+use std::io::Read;
 use std::path::PathBuf;
 
 // P61b: upstream proxy mode lives in the binary crate only (not exposed in the library's public API),
@@ -96,7 +97,7 @@ enum Mode {
     /// GitHub Security tab. Only deny records become results; allow and non-enforcement records are
     /// skipped. Reads/writes stdin/stdout when the path is omitted or "-".
     EnforcementSarif {
-        /// Input NDJSON path of enforcement_decision.v0 records ("-" or omitted = stdin).
+        /// Input NDJSON path of enforcement_decision.v0 records ("-" or omitted = stdin; max 16 MiB).
         #[arg(long, default_value = "-")]
         input: String,
         /// Output SARIF path ("-" or omitted = stdout).
@@ -106,6 +107,19 @@ enum Mode {
 }
 
 use tracing_subscriber::{fmt, EnvFilter};
+
+const MAX_ENFORCEMENT_NDJSON_BYTES: u64 = 16 * 1024 * 1024;
+
+fn read_enforcement_ndjson(reader: impl Read) -> Result<String> {
+    let mut raw = String::new();
+    reader
+        .take(MAX_ENFORCEMENT_NDJSON_BYTES + 1)
+        .read_to_string(&mut raw)?;
+    if raw.len() as u64 > MAX_ENFORCEMENT_NDJSON_BYTES {
+        anyhow::bail!("enforcement NDJSON input exceeds {MAX_ENFORCEMENT_NDJSON_BYTES}-byte limit");
+    }
+    Ok(raw)
+}
 
 fn init_logging(log_level: &str) {
     let filter = EnvFilter::try_new(log_level).unwrap_or_else(|_| EnvFilter::new("info"));
@@ -215,26 +229,31 @@ async fn main() -> Result<()> {
         }
         Some(Mode::EnforcementSarif { input, output }) => {
             use assay_mcp_server::enforcement_sarif::enforcement_decisions_to_sarif;
-            use std::io::{Read, Write};
+            use std::io::Write;
             let raw = if input == "-" {
-                let mut s = String::new();
-                std::io::stdin().read_to_string(&mut s)?;
-                s
+                read_enforcement_ndjson(std::io::stdin().lock())?
             } else {
-                std::fs::read_to_string(&input)?
+                read_enforcement_ndjson(std::fs::File::open(&input)?)?
             };
-            // Tolerant NDJSON: skip blank/unparseable lines rather than abort the projection.
             let records: Vec<serde_json::Value> = raw
                 .lines()
-                .filter_map(|line| {
+                .enumerate()
+                .filter_map(|(index, line)| {
                     let line = line.trim();
                     if line.is_empty() {
                         None
                     } else {
-                        serde_json::from_str::<serde_json::Value>(line).ok()
+                        Some((index + 1, line))
                     }
                 })
-                .collect();
+                .map(|(line_number, line)| {
+                    serde_json::from_str::<serde_json::Value>(line).map_err(|_| {
+                        anyhow::anyhow!(
+                            "invalid enforcement NDJSON at input line {line_number}; expected one JSON value per non-empty line"
+                        )
+                    })
+                })
+                .collect::<anyhow::Result<_>>()?;
             let sarif = enforcement_decisions_to_sarif(&records);
             let pretty = serde_json::to_string_pretty(&sarif)?;
             if output == "-" {

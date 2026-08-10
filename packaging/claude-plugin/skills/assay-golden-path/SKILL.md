@@ -110,11 +110,11 @@ On failure: The failure report has no registered `reason_code` or actionable `ne
 
 Run: `assay-mcp-server enforcement-sarif --input - --output -`
 
-Exit: Valid input `0`; malformed non-empty NDJSON `0`.
+Exit: Valid input `0`; malformed non-empty NDJSON `1`.
 
-Stdout: Valid input produces SARIF `2.1.0`. Malformed lines are currently discarded and can produce a clean report with zero results.
+Stdout: Valid input produces SARIF `2.1.0`. A malformed non-empty line produces no SARIF document.
 
-On failure: This is fail-open, not a successful empty projection: [gap #2166](https://github.com/Rul1an/assay/issues/2166). No reason or next step is emitted.
+On failure: Malformed NDJSON fails before projection and names the invalid input line on stderr. Blank lines remain accepted.
 
 ## Non-claims
 
