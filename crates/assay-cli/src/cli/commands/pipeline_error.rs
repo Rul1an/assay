@@ -235,6 +235,14 @@ mod tests {
         )
     }
 
+    fn recovery_argv(step: &str) -> Vec<String> {
+        serde_json::from_str(
+            step.strip_prefix("Run argv: ")
+                .expect("command recovery must publish JSON argv"),
+        )
+        .expect("command recovery argv must parse")
+    }
+
     /// The property this issue exists to establish: an operator grepping stderr and
     /// a CI job parsing run.json see the same code for the same failure.
     #[test]
@@ -275,8 +283,8 @@ mod tests {
         let config = RunError::config_parse(Some("suites/prod.yaml".to_string()), "bad indent");
         let diagnostic = diagnostic_for(&config, ReasonCode::ECfgParse);
         assert_eq!(
-            diagnostic.fix_steps[0],
-            "Run: assay doctor --config suites/prod.yaml"
+            recovery_argv(&diagnostic.fix_steps[0]),
+            ["assay", "doctor", "--config", "suites/prod.yaml"]
         );
         assert_eq!(
             outcome_as_written(&config, ReasonCode::ECfgParse).next_step,
@@ -302,8 +310,8 @@ mod tests {
         let run_error = RunError::config_parse(None, "could not locate a config");
         let diagnostic = diagnostic_for(&run_error, ReasonCode::ECfgParse);
         assert_eq!(
-            diagnostic.fix_steps[0],
-            "Run: assay doctor --config <config.yaml>"
+            recovery_argv(&diagnostic.fix_steps[0]),
+            ["assay", "doctor", "--config", "<config.yaml>"]
         );
         assert_eq!(
             outcome_as_written(&run_error, ReasonCode::ECfgParse).next_step,
@@ -440,10 +448,19 @@ mod tests {
             .fix_steps
             .iter()
             .any(|s| s.contains("Regenerate baseline")));
-        assert!(
-            folded.fix_steps.iter().any(|s| s.contains("assay doctor")),
-            "the reason's own next step survives too: {:?}",
-            folded.fix_steps
+        let own_recovery = folded
+            .fix_steps
+            .iter()
+            .find(|step| step.starts_with("Run argv: "))
+            .unwrap_or_else(|| {
+                panic!(
+                    "the reason's own next step survives too: {:?}",
+                    folded.fix_steps
+                )
+            });
+        assert_eq!(
+            recovery_argv(own_recovery),
+            ["assay", "doctor", "--config", "assay.yaml"]
         );
 
         let rendered = folded.format_plain();

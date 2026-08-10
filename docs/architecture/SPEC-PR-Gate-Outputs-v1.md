@@ -47,7 +47,7 @@ When `assay ci` (or the equivalent run invoked by the blessed workflow) complete
 | `exit_code`           | integer | **Yes**  | Process exit code: 0 = pass, 1 = test failure, 2 = config/user error, 3 = infra/judge unavailable. See §4. |
 | `reason_code`         | string  | **Yes**  | Stable machine-readable code when exit_code ≠ 0; e.g. `E_TRACE_NOT_FOUND`, `E_JUDGE_UNAVAILABLE`. See §5. When exit_code is 0, MAY be empty string or a designated success code (e.g. OK); empty is allowed and common. |
 | `message`             | string  | No       | Human-readable one-line description of outcome. |
-| `next_step`           | string  | No       | Single suggested command or hint when exit_code ≠ 0; e.g. "Run: assay doctor --config ...", "See: assay explain ...". See §7. |
+| `next_step`           | string  | No       | Single suggested command or hint when exit_code ≠ 0. Executable recovery containing caller-controlled values uses `Run argv: <JSON array>` so consumers can invoke it without a shell; non-command guidance remains prose. See §7. |
 
 ### 3.2 Provenance (Artifact Auditability)
 
@@ -148,7 +148,7 @@ JSON object key order in these examples is illustrative, not normative.
   "exit_code": 2,
   "reason_code": "E_TRACE_NOT_FOUND",
   "message": "Trace file not found: traces/ci.jsonl",
-  "next_step": "Run: assay doctor --config ci-eval.yaml --trace-file traces/ci.jsonl",
+  "next_step": "Check trace file exists: traces/ci.jsonl",
   "provenance": {
     "assay_version": "2.12.0",
     "verify_mode": "enabled"
