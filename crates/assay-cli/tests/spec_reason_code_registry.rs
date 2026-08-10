@@ -195,6 +195,123 @@ fn every_remediation_branch_keys_on_a_registered_code() {
     );
 }
 
+/// Every `ReasonCode` variant name, keyed by the string it serialises to.
+fn variant_by_code() -> std::collections::BTreeMap<String, String> {
+    let src = read("crates/assay-cli/src/exit_codes.rs");
+    let body = after(&src, "pub fn as_str(&self) -> &'static str {");
+    let body = before(body, "\n    }");
+    let mut map = std::collections::BTreeMap::new();
+    for line in body.lines() {
+        let Some(rest) = line.trim().strip_prefix("ReasonCode::") else {
+            continue;
+        };
+        let Some((variant, value)) = rest.split_once("=>") else {
+            continue;
+        };
+        if let Some(code) = string_literal(value) {
+            map.insert(code, variant.trim().to_owned());
+        }
+    }
+    map
+}
+
+/// Every `.rs` file under `crates/`, as workspace-relative paths.
+fn walk_rust_sources() -> Vec<String> {
+    fn visit(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                visit(&path, root, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    out.push(rel.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    let root = workspace_root();
+    let mut out = Vec::new();
+    visit(&root.join("crates"), &root, &mut out);
+    assert!(
+        out.len() > 100,
+        "walked only {} source files; the layout moved",
+        out.len()
+    );
+    out
+}
+
+#[test]
+fn the_reserved_section_claims_nothing_a_variant_construction_contradicts() {
+    // The sibling test below reads one file, `policy_engine.rs`, because that is where the two
+    // string-only codes are originated. That left the commoner shape unchecked: a `ReasonCode`
+    // variant constructed anywhere in the workspace while §5.4 says nothing constructs it. §5.4 had
+    // exactly one such row -- `E_POLICY_PARSE`, built at `cli_failure.rs:27` and reached from
+    // `policy/validate.rs` -- and it survived long enough for a version-history note to cite it as
+    // precedent for a new code. Deriving the property from the sources is the difference between an
+    // inventory that is checked and one that is merely maintained.
+    let variants = variant_by_code();
+    let sources = walk_rust_sources();
+    let mut live = Vec::new();
+    for code in registered("5.4") {
+        let Some(variant) = variants.get(&code) else {
+            continue;
+        };
+        let needle = format!("ReasonCode::{variant}");
+        for path in &sources {
+            // The enum's own file declares and matches every variant, so it is not a construction
+            // site. Tests construct freely and are not the CLI's shipped behaviour either.
+            if path.contains("exit_codes.rs") || path.contains("tests/") {
+                continue;
+            }
+            if read(path).contains(&needle) {
+                live.push(format!("{code} ({needle} in {path})"));
+                break;
+            }
+        }
+    }
+    assert!(
+        live.is_empty(),
+        "§5.4 calls these reserved, and something constructs the variant: {live:?}. A consumer told \
+         a code may start appearing, about a code already appearing, has been misled in the \
+         direction that matters."
+    );
+}
+
+#[test]
+fn the_boundary_names_error_codes_that_still_exist_in_assay_evidence() {
+    // The rule names seven `assay_evidence::ErrorCode` variants across a crate boundary, four it
+    // requires and three it forbids. They are correct today, but they are strings here: a rename in
+    // `assay-evidence` would leave a normative MUST pointing at a variant that does not exist, and
+    // nothing would fail. Negative control for this test: renaming `IntegrityRunRootMismatch`
+    // throughout `assay-evidence` only -- what a developer who has never read this spec would do --
+    // fails it.
+    let errors = read("crates/assay-evidence/src/bundle/writer_next/errors.rs");
+    let boundary = read(BOUNDARY);
+    for code in [
+        "IntegrityManifestHash",
+        "IntegrityEventHash",
+        "IntegrityFileSizeMismatch",
+        "IntegrityRunRootMismatch",
+        "IntegrityIo",
+        "IntegrityGzip",
+        "IntegrityTar",
+    ] {
+        assert!(
+            boundary.contains(code),
+            "{code} is checked here and the boundary no longer names it; update this list in the \
+             same change that drops it, and say why"
+        );
+        assert!(
+            errors.contains(code),
+            "the boundary names `ErrorCode::{code}` and `assay-evidence` no longer declares it. A \
+             normative MUST pointing at a renamed variant is worse than one pointing at none."
+        );
+    }
+}
+
 #[test]
 fn the_reserved_section_claims_nothing_that_is_live() {
     // A reserved code that something constructs is a stale record, and a consumer told "this may
@@ -217,5 +334,83 @@ fn the_reserved_section_claims_nothing_that_is_live() {
     assert!(
         contradictions.is_empty(),
         "§5.4 lists these as reserved, but `policy_engine` constructs them: {contradictions:?}"
+    );
+}
+
+/// The one file that states the evidence-integrity boundary. Both the §5.1 registry row and the
+/// `ReasonCode::EEvidenceIntegrity` doc comment are transports for it, so it is the only place the
+/// rule is written.
+const BOUNDARY: &str = "crates/assay-cli/src/exit_codes/evidence_integrity_boundary.md";
+
+/// One line of flowed prose: every run of whitespace collapsed.
+///
+/// The boundary file wraps at 100 columns and the §5.1 row is a single markdown table cell, so a
+/// byte comparison of the two would be an assertion about line wrapping. Flowing both first makes
+/// the comparison about the words.
+fn flowed(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The description cell of one code's row in a §5 table.
+fn spec_description(section: &str, code: &str) -> String {
+    let spec = read(SPEC);
+    let body = after(&spec, &format!("### {section}"));
+    let body = before(body, "\n### ");
+    let prefix = format!("| {code} ");
+    let row = body
+        .lines()
+        .find(|line| line.starts_with(&prefix))
+        .unwrap_or_else(|| panic!("§{section} has no row for {code}"));
+    let cells: Vec<&str> = row.trim_matches('|').split('|').collect();
+    assert_eq!(
+        cells.len(),
+        2,
+        "§{section}'s row for {code} has {} cells, not the code/description pair this reads: {row}",
+        cells.len()
+    );
+    flowed(cells[1])
+}
+
+#[test]
+fn the_evidence_integrity_boundary_reads_the_same_in_the_spec_and_the_code() {
+    // One statement is normative for consumers and the other is what an author reads at the
+    // definition, and they have to say the same thing. Asserting that each separately contains the
+    // right phrases is a neighbouring property, not this one: it passes when the two are exact
+    // opposites, which is how a doc comment claiming the bundle was tampered with and an I/O
+    // failure is in scope sat next to a row denying both, green.
+    assert_eq!(
+        spec_description("5.1", "E_EVIDENCE_INTEGRITY"),
+        flowed(&read(BOUNDARY)),
+        "the §5.1 registry row is no longer the text of {BOUNDARY}. That file is the boundary; the \
+         row and the `ReasonCode::EEvidenceIntegrity` doc comment transport it. Edit the file and \
+         reflow it into the row rather than editing the row."
+    );
+}
+
+#[test]
+fn the_doc_comment_transports_the_boundary_rather_than_restating_it() {
+    // `include_str!` is what makes the equality above cover the doc comment too. Replace it with a
+    // hand-written `///` block and the row could be pinned while the definition drifts.
+    let src = read("crates/assay-cli/src/exit_codes.rs");
+    let head = src
+        .split_once("    EEvidenceIntegrity,")
+        .map(|(before_decl, _)| before_decl)
+        .expect("no `EEvidenceIntegrity` variant in the enum");
+    let last = head.lines().next_back().unwrap_or_default().trim();
+    assert_eq!(
+        last, "#[doc = include_str!(\"exit_codes/evidence_integrity_boundary.md\")]",
+        "`EEvidenceIntegrity` is documented by {last:?} rather than by including {BOUNDARY}"
+    );
+}
+
+#[test]
+fn the_boundary_claims_no_structure_the_verifier_does_not_build() {
+    // `compute_run_root` is a flat sha256 over the concatenated content hashes, so "Merkle" would
+    // promise inclusion proofs and sub-range verification that do not exist. ADR-042's stop list
+    // makes that an unearned claim rather than loose wording, and one file now carries it.
+    let boundary = read(BOUNDARY);
+    assert!(
+        !boundary.contains("Merkle"),
+        "{BOUNDARY} names a Merkle structure; `run_root` is a hash chain"
     );
 }
