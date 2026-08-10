@@ -72,12 +72,17 @@ pub fn decide_exit(diags: &[Diagnostic]) -> i32 {
 /// for one condition, `2` in `commands/fix.rs` and `1` in `commands/doctor/fixes.rs`, and the second
 /// was the only `1` in the system for it.
 ///
-/// It is deliberately not [`decide_exit`] over the surviving diagnostics. Those two agree today,
-/// because every diagnostic that produces a patch is registered [`ExitClass::Config`], but they are
-/// different rules: `decide_exit` describes what the report found, while this describes an operation
-/// this process attempted and could not complete. Reading the class off the diagnostics would exit
-/// `0` for a repair that failed on a tree whose findings are all advisory, which reports a failed
-/// write as a clean run.
+/// It is deliberately not [`decide_exit`] over the surviving diagnostics, and the reason is
+/// forward-looking rather than observable. The two agree for every input that can reach a failed
+/// repair: on the doctor path an op is only ever offered for `E_PATH_NOT_FOUND` or `E_TRACE_MISS`,
+/// both error-severity and both registered [`ExitClass::Config`], so a tree where a write can fail
+/// already answers `2`. That agreement is a property of today's class table, not of the two
+/// questions — `decide_exit` answers what the report found, this answers what happened to an
+/// operation the process attempted. Coupling them would let a future op producer at `warn`, or a
+/// re-registration of an existing code, silently turn a failed write into exit `0`: a failed
+/// operation reported as a clean result, which `AGENTS.md` forbids whether or not anyone can reach
+/// it. An earlier version of this comment claimed the difference was observable on an advisory-only
+/// tree. It is not — such a tree is offered no repair at all, so none can fail.
 ///
 /// The reason-code registry has no code for the condition, so this cannot yet come from
 /// `ReasonCode::exit_code` the way an unloadable config does. That registry is frozen against

@@ -13,6 +13,9 @@ use crate::cli::helpers::{
 use super::implementation::config_failure;
 use super::patching::{apply_patch_to_file, create_empty_trace, preview_patch};
 
+#[cfg(test)]
+mod tests;
+
 /// Whether a diagnostic is one this module can offer to create a trace file for.
 ///
 /// Asked in two places — the gate that decides whether to look for a target at all, and the scan

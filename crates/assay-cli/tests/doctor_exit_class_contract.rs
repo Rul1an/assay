@@ -51,6 +51,25 @@ tests:
 const MATCHING_TRACE: &str = r#"{"schema_version": 1, "type": "assay.trace", "request_id": "hello_1", "prompt": "hello_prompt", "response": "Hello Assay", "model": "trace", "provider": "trace"}
 "#;
 
+/// A config that does not load, whose parse error `--fix` can repair, and which still does not load
+/// after that repair.
+///
+/// `inputs` is close enough to `input` for `try_fix_parse_error`'s 0.80 similarity gate to rename
+/// it; `bogusfield` is close to nothing, so the second load fails too. Field order matters, because
+/// serde reports the first unknown field it meets and the repair only ever renames that one.
+const REPAIRABLE_THEN_STILL_BROKEN: &str = r#"configVersion: 1
+suite: "exit_class"
+model: "trace"
+tests:
+  - id: "exit_class_regex"
+    inputs:
+      prompt: "hello_prompt"
+    bogusfield: 1
+    expected:
+      type: regex_match
+      pattern: "Hello"
+"#;
+
 /// A second entry in the legacy OpenAI shape. `analyze_trace_schema` raises `E_TRACE_INVALID` at
 /// `warn` for it, which is how this fixture gets a diagnostic that is not an error.
 const LEGACY_LINE: &str = r#"{"schema_version": 1, "type": "assay.trace", "request_id": "legacy_1", "prompt": "p2", "response": "r", "model": "trace", "provider": "trace", "function_call": {"name": "x"}}
@@ -171,6 +190,53 @@ fn the_exit_class_does_not_depend_on_whether_a_fix_was_requested() {
         "doctor returned exit {plain} and `doctor --fix --dry-run` returned exit {fixing} for one \
          tree. `--fix` says what to attempt about a diagnostic, not what class the diagnostic has, \
          so a repair flag must not reclassify it: the class comes from `decide_exit` on both paths."
+    );
+}
+
+/// A config that a repair changed and that still does not load gets one class, whichever repair ran.
+///
+/// Two sites answer this one question. `doctor/fixes.rs` re-loads the config after applying
+/// diagnostic repairs; `doctor/parse_error.rs` re-loads it after renaming a misspelled key. Both
+/// print "still invalid"/"still has issues" and both then have to say what that is worth. They said
+/// `1` and, once `fixes.rs` moved to the reason code for an unloadable config, `2` — a divergence
+/// this branch introduced, in the defect class this branch exists to remove.
+///
+/// The five other returns in `parse_error.rs` are a different question — no repair was applied, so
+/// they report the outcome of an offer rather than the state of a config a repair changed — and
+/// [#2209](https://github.com/Rul1an/assay/issues/2209) owns them.
+///
+/// The tree is measured before the repair runs, because `--fix --yes` rewrites `eval.yaml`: two
+/// directories, identical content, so the comparison is between two runs and not between a run and a
+/// number.
+#[test]
+fn a_repair_that_leaves_the_config_unloadable_does_not_change_the_exit_class() {
+    let plain_dir = tempfile::tempdir().expect("tempdir");
+    let fixing_dir = tempfile::tempdir().expect("tempdir");
+    for dir in [plain_dir.path(), fixing_dir.path()] {
+        std::fs::write(dir.join("eval.yaml"), REPAIRABLE_THEN_STILL_BROKEN).expect("wrote config");
+        std::fs::create_dir_all(dir.join("traces")).expect("created traces/");
+        std::fs::write(dir.join("traces/present.jsonl"), MATCHING_TRACE).expect("wrote trace");
+    }
+
+    let plain = doctor_exit_code(plain_dir.path(), "text", "traces/present.jsonl");
+    let fixing = doctor_exit_code_with(
+        fixing_dir.path(),
+        "text",
+        "traces/present.jsonl",
+        &["--fix", "--yes"],
+    );
+
+    let after = std::fs::read_to_string(fixing_dir.path().join("eval.yaml")).expect("read config");
+    assert!(
+        after.contains("input:") && after.contains("bogusfield"),
+        "the parse repair did not run, or it repaired more than the first key, so this test is no \
+         longer driving a config that a repair changed and that still does not load."
+    );
+    assert_eq!(
+        fixing, plain,
+        "doctor returned exit {plain} for a config that does not load and exit {fixing} once a \
+         repair had rewritten it and it still did not load. Both are the same condition — this \
+         config does not load — so both report the class the reason code gives it."
     );
 }
 

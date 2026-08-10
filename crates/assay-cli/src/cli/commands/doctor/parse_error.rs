@@ -7,6 +7,7 @@ use dialoguer::{theme::ColorfulTheme, Confirm};
 
 use crate::cli::args::DoctorArgs;
 
+use super::implementation::config_failure;
 use super::patching::{print_unified_diff, write_text_file};
 
 pub(super) fn try_fix_parse_error(
@@ -97,8 +98,12 @@ pub(super) fn try_fix_parse_error(
             Ok(0)
         }
         Err(e) => {
+            // The same question `fixes.rs` asks after applying its own repairs — this config does
+            // not load — so the same answer, from the reason code that owns an unloadable config.
+            // The five returns above are a different question: no repair was applied, so they
+            // report the outcome of an offer, and #2209 owns what those are worth.
             println!("Config still has issues after fix: {}", e);
-            Ok(1)
+            Ok(config_failure(config_path, e.to_string()).exit_code)
         }
     }
 }
