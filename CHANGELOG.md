@@ -9,7 +9,8 @@ All notable changes to this project will be documented in this file.
 This release turns the install-to-verifiable-evidence path into an agent-facing product surface.
 It adds project and plugin installation for the golden path, gives non-interactive callers
 structured failure contracts at the commands they use to set up and inspect that path, and removes
-an MCP protocol claim the server did not implement. There are no breaking changes in this release.
+an MCP protocol claim the server did not implement. The Rust API remains minor-compatible; the
+consumer-visible compatibility corrections below may require CLI, MCP or policy-pin migration.
 
 ### Added
 - Project-scoped MCP manifests for Claude Code, Cursor and Codex start the separate
@@ -26,6 +27,20 @@ an MCP protocol claim the server did not implement. There are no breaking change
   non-interactive callers (#2198, #2240, #2207, #2204, #2262).
 - `E_EVIDENCE_INTEGRITY` distinguishes hostile or damaged evidence content from argument, baseline
   and replay failures, with one shared mapping for evidence consumers (#2213).
+
+### Changed
+- The MCP server no longer advertises unimplemented protocol revision `2026-07-28` or responds to
+  `server/discover`. Clients pinned to that revision must negotiate `2025-11-25` or `2024-11-05`;
+  the public `MODERN_PROTOCOL_VERSION` constant remains available but deprecated (#2267).
+- `assay doctor` now exits `2` for configuration-class failures. This changes JSON runs with an
+  error-severity configuration diagnostic from `0` to `2`, and unloadable-config failures from
+  `1` to `2`; scripts should treat `2` as configuration/user error (#2247).
+- MCP `tool_pins` now require 64-character lowercase hexadecimal hashes, and schema identity uses
+  RFC 8785 canonical JSON bytes. Re-record pins created by older versions after upgrading or calls
+  can be denied with `E_TOOL_DRIFT` (#2239, #2268).
+- Machine-readable next-step guidance for configuration and policy parse failures now renders an
+  explicit argument vector rather than a shell command string, avoiding ambiguous quoting (#2198,
+  #2204).
 
 ### Fixed
 - The MCP server no longer advertises protocol revision `2026-07-28` while omitting required result
