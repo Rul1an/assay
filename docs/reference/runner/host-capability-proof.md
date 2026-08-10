@@ -1,7 +1,15 @@
-# Host-Capability Proof Gate (RFC, v0)
+# Host-Capability Proof Gate (v0)
 
-Status: accepted design, not yet implemented. This document is the contract; the checker and
-workflows land in a follow-up PR and must match what is written here.
+Status: implemented and active. This document remains the contract, and the implementation must
+match what is written here:
+
+- checker: `scripts/ci/assay_host_capability_check.py`
+- gate workflow: `.github/workflows/host-capability-check.yml`
+- proof producer: `.github/workflows/host-capability-proof.yml`
+
+`host-capability-check` is one of the contexts branch protection on `main` requires, alongside
+`CI` and `lane-check/proof`. A change that trips the trigger paths below cannot merge without a
+host proof bound to the exact PR head.
 
 ## Problem
 
@@ -53,11 +61,19 @@ suspicion as a change to the lane-check classifier.
 
 ```yaml
 on: workflow_dispatch
-runs-on: [self-hosted, assay-bpf-runner]
+runs-on: [self-hosted, linux, assay-bpf-runner]
 permissions:
   contents: read
   actions: read
+concurrency:
+  group: assay-bpf-runner-host
+  cancel-in-progress: false
+  queue: max
 ```
+
+The concurrency group is shared with `Runner Spike Delegated`: the host is a singleton, so
+dispatches queue rather than run in parallel. A run is usable as proof only for a PR whose head is
+exactly the dispatched SHA, so dispatch against the PR head, never against `main`.
 
 The run builds `assay-cli` from the dispatched ref and uploads an artifact containing:
 
@@ -77,12 +93,18 @@ operated infrastructure, not a safe arbitrary-fork runner.
 ## Check workflow (`host-capability-check.yml`)
 
 ```yaml
-on: pull_request
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs: [pr_number, expected_head_sha]
 permissions:
   contents: read
   actions: read
   pull-requests: read
 ```
+
+There is no path filter. A required check that does not run blocks merges as pending, so the
+checker runs on every PR and passes immediately when no trigger path changed.
 
 The job runs the checker and passes or fails; it posts no comment (a fork PR's `GITHUB_TOKEN` is
 read-only and must stay that way). No `pull_request_target` in v0: a write-token checker is exactly

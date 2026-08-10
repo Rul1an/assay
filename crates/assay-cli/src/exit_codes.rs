@@ -84,6 +84,9 @@ pub enum ReasonCode {
     // one file byte for byte once flowed; a second hand-written copy here could contradict it.
     #[doc = include_str!("exit_codes/evidence_integrity_boundary.md")]
     EEvidenceIntegrity,
+    /// Evidence bundle could not be opened or read to completion. This establishes no content
+    /// mismatch; it is the companion to `EEvidenceIntegrity` for I/O/archive-read failures.
+    EEvidenceUnreadable,
     /// Invalid command-line arguments
     EInvalidArgs,
 
@@ -147,6 +150,7 @@ impl ReasonCode {
             | ReasonCode::EReplayLimitExceeded
             | ReasonCode::EReplayMissingDependency
             | ReasonCode::EEvidenceIntegrity
+            | ReasonCode::EEvidenceUnreadable
             | ReasonCode::EInvalidArgs => EXIT_CONFIG_ERROR,
 
             // V2: Infra errors -> 3
@@ -202,6 +206,7 @@ impl ReasonCode {
             ReasonCode::EReplayMissingDependency => "E_REPLAY_MISSING_DEPENDENCY",
             ReasonCode::EReplayLimitExceeded => "E_REPLAY_LIMIT_EXCEEDED",
             ReasonCode::EEvidenceIntegrity => "E_EVIDENCE_INTEGRITY",
+            ReasonCode::EEvidenceUnreadable => "E_EVIDENCE_UNREADABLE",
             ReasonCode::EInvalidArgs => "E_INVALID_ARGS",
             ReasonCode::EJudgeUnavailable => "E_JUDGE_UNAVAILABLE",
             ReasonCode::ERateLimit => "E_RATE_LIMIT",
@@ -248,6 +253,14 @@ impl ReasonCode {
                  does not match what it records"
                     .to_string()
             }
+            ReasonCode::EEvidenceUnreadable => format_recovery_argv(&[
+                "assay",
+                "evidence",
+                "show",
+                context.unwrap_or("<bundle>"),
+                "--format",
+                "json",
+            ]),
             ReasonCode::EMissingConfig => "Run: assay init to create a config file".to_string(),
             ReasonCode::EBaselineInvalid => {
                 "Run: assay baseline record to create a new baseline".to_string()
@@ -452,6 +465,14 @@ mod tests {
             ReasonCode::EEvidenceIntegrity.exit_code_for(ExitCodeVersion::V2),
             EXIT_CONFIG_ERROR
         );
+        assert_eq!(
+            ReasonCode::EEvidenceUnreadable.exit_code_for(ExitCodeVersion::V1),
+            EXIT_CONFIG_ERROR
+        );
+        assert_eq!(
+            ReasonCode::EEvidenceUnreadable.exit_code_for(ExitCodeVersion::V2),
+            EXIT_CONFIG_ERROR
+        );
     }
 
     #[test]
@@ -491,6 +512,10 @@ mod tests {
         assert_eq!(
             ReasonCode::EEvidenceIntegrity.as_str(),
             "E_EVIDENCE_INTEGRITY"
+        );
+        assert_eq!(
+            ReasonCode::EEvidenceUnreadable.as_str(),
+            "E_EVIDENCE_UNREADABLE"
         );
         assert_eq!(
             ReasonCode::EJudgeUnavailable.as_str(),
@@ -596,6 +621,10 @@ mod tests {
             (
                 ReasonCode::EPolicyParse,
                 vec!["assay", "policy", "validate", "--input", path],
+            ),
+            (
+                ReasonCode::EEvidenceUnreadable,
+                vec!["assay", "evidence", "show", path, "--format", "json"],
             ),
         ];
 
