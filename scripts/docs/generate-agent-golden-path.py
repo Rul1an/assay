@@ -127,7 +127,37 @@ STEPS: list[dict[str, object]] = [
                 "Success",
                 0,
                 stdout("json", "assay.doctor_report.v0"),
+                ["doctor", "--format", "json", "--config", "<config>"],
+                config_check="checked",
+            ),
+            # Split from `success` because both are exit 0 and only this key separates them. The
+            # success row was measured on an empty directory, so the published `Success 0` was
+            # established by a run in which no config validation occurred.
+            outcome(
+                "no-config",
+                "no config examined",
+                0,
+                stdout("json", "assay.doctor_report.v0"),
                 ["doctor", "--format", "json"],
+                config_check="skipped",
+            ),
+            # The row that carries this PR's behaviour. Without it the guide asserted an exit in
+            # prose that no outcome enumerated, so nothing required a test to drive it.
+            outcome(
+                "diagnostics-error",
+                "config examined, error-severity diagnostic",
+                2,
+                stdout("json", "assay.doctor_report.v0"),
+                [
+                    "doctor",
+                    "--format",
+                    "json",
+                    "--config",
+                    "<config>",
+                    "--trace-file",
+                    "<trace>",
+                ],
+                config_check="checked",
             ),
             outcome(
                 "invalid-config",
@@ -142,9 +172,14 @@ STEPS: list[dict[str, object]] = [
         ],
         "stdout_summary": (
             "Parses as `assay.doctor_report.v0`. Every report carries "
-            "`config_check.status`, one of `checked`, `skipped` or `failed`. A config "
-            "failure remains JSON and carries the top-level `reason_code` and `next_step` "
-            "alongside `config_error.code`."
+            "`config_check.status`, one of `checked`, `skipped` or `failed`. Exit `0` on "
+            "its own does not mean a config was examined: read `config_check.status` to "
+            "tell a clean config from no config. A config that was examined and carries an "
+            "error-severity `data_diagnostics[]` entry exits `2`, the class `decide_exit` "
+            "gives that diagnostic for `assay validate` and `assay run` too; the text "
+            "channel returns the same class for the same tree. A config failure remains "
+            "JSON and carries the top-level `reason_code` and `next_step` alongside "
+            "`config_error.code`."
         ),
         "failure_summary": (
             "An explicit config that will not load, absent or unreadable alike, is exit `2` "
@@ -533,9 +568,6 @@ CONTRACT: dict[str, object] = {
         "A doctor config failure does not distinguish an absent config from an unreadable "
         "one, and its recovery step is the invocation that produced it; both are owned by "
         "issue #2206.",
-        "A preflight exit 0 on the JSON channel does not mean the report carries no "
-        "error-severity diagnostic; the text channel returns 1 in that case. Read "
-        "data_diagnostics[].severity rather than the exit code alone. Owned by issue #2215.",
         "Read config_check.status before reading data_diagnostics: only the value checked "
         "means a config was read, and on skipped the absent data_diagnostics records an "
         "unchecked config rather than a clean one.",

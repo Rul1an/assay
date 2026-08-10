@@ -64,6 +64,34 @@ pub fn decide_exit(diags: &[Diagnostic]) -> i32 {
     }
 }
 
+/// The process exit code for a repair that could not be applied.
+///
+/// A patch that fails to write is a fault in the tree the caller pointed at, so it gets the same
+/// class a config fault gets, and `assay fix` has answered it that way since before `assay doctor
+/// --fix` existed. This function exists so the two commands read one answer: they held two literals
+/// for one condition, `2` in `commands/fix.rs` and `1` in `commands/doctor/fixes.rs`, and the second
+/// was the only `1` in the system for it.
+///
+/// It is deliberately not [`decide_exit`] over the surviving diagnostics, and the reason is
+/// forward-looking rather than observable. The two agree for every input that can reach a failed
+/// repair: on the doctor path an op is only ever offered for `E_PATH_NOT_FOUND` or `E_TRACE_MISS`,
+/// both error-severity and both registered [`ExitClass::Config`], so a tree where a write can fail
+/// already answers `2`. That agreement is a property of today's class table, not of the two
+/// questions — `decide_exit` answers what the report found, this answers what happened to an
+/// operation the process attempted. Coupling them would let a future op producer at `warn`, or a
+/// re-registration of an existing code, silently turn a failed write into exit `0`: a failed
+/// operation reported as a clean result, which `AGENTS.md` forbids whether or not anyone can reach
+/// it. An earlier version of this comment claimed the difference was observable on an advisory-only
+/// tree. It is not — such a tree is offered no repair at all, so none can fail.
+///
+/// The reason-code registry has no code for the condition, so this cannot yet come from
+/// `ReasonCode::exit_code` the way an unloadable config does. That registry is frozen against
+/// SPEC-PR-Gate-Outputs-v1 and adding to it is a spec change, not a bug fix; #2208 already owns the
+/// broader question of which CLI literals belong in it.
+pub fn decide_repair_failure_exit() -> i32 {
+    exit_codes::CONFIG_ERROR
+}
+
 #[cfg(test)]
 mod decide_exit_tests {
     use super::*;

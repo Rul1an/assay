@@ -4,7 +4,7 @@ use assay_core::config::{load_config, path_resolver::PathResolver};
 
 use crate::cli::args::common::OutputFormat;
 use crate::cli::args::DoctorArgs;
-use crate::cli::helpers::normalize_severity;
+use crate::cli::helpers::decide_exit;
 use crate::diagnostics;
 use crate::diagnostics::format::format_text;
 use crate::exit_codes::{ReasonCode, RunOutcome};
@@ -18,7 +18,11 @@ use super::parse_error::try_fix_parse_error;
 /// registry, so the JSON report cannot disagree with the text path, and neither can disagree
 /// with `assay run` on the same file. Before this existed, the JSON report named the reason
 /// with a literal and both paths returned the test-failure class for a config error.
-fn config_failure(path: &Path, message: String) -> RunOutcome {
+///
+/// `fixes.rs` reads it too, for the config it re-loads after applying repairs. That return was a
+/// literal `1` until independent review found it, which made the class of an unloadable config
+/// depend on whether `--fix` had already written something.
+pub(super) fn config_failure(path: &Path, message: String) -> RunOutcome {
     let path = path.display().to_string();
     RunOutcome::from_reason(ReasonCode::ECfgParse, Some(message), Some(path.as_str()))
 }
@@ -87,6 +91,11 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     if args.format == OutputFormat::Json {
         let timestamp = chrono::Utc::now().to_rfc3339();
         let mut json_out = serde_json::to_value(&report)?;
+        // Stays `0` when no config was examined: nothing was checked, so nothing failed. The
+        // `config_check` marker is what tells a consumer which of the two a `0` means. When a
+        // config was examined, `decide_exit` answers — the same function `validate` and `run` use,
+        // so one diagnostic does not get three exit codes depending on which command met it.
+        let mut exit = 0;
 
         if let Some(obj) = json_out.as_object_mut() {
             obj.insert("generated_at".to_string(), serde_json::json!(timestamp));
@@ -134,11 +143,12 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
                     "data_suggestions".to_string(),
                     serde_json::to_value(&core_report.suggested_actions)?,
                 );
+                exit = decide_exit(&core_report.diagnostics);
             }
         }
 
         println!("{}", serde_json::to_string_pretty(&json_out)?);
-        return Ok(0);
+        return Ok(exit);
     }
 
     // Text Format
@@ -186,11 +196,7 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             return Ok(fix_result);
         }
 
-        let has_errors = core_report
-            .diagnostics
-            .iter()
-            .any(|d| normalize_severity(&d.severity) == "error");
-        return Ok(if has_errors { 1 } else { 0 });
+        return Ok(decide_exit(&core_report.diagnostics));
     }
 
     println!("\nPolicy Check: SKIPPED ({NO_CONFIG_FOUND})");

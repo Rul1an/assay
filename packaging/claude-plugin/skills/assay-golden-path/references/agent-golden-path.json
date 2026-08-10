@@ -9,7 +9,6 @@
     "Schema identity conventions outside this narrow contract remain owned by issue #2167.",
     "A passing evidence integrity check does not prove an external side effect.",
     "A doctor config failure does not distinguish an absent config from an unreadable one, and its recovery step is the invocation that produced it; both are owned by issue #2206.",
-    "A preflight exit 0 on the JSON channel does not mean the report carries no error-severity diagnostic; the text channel returns 1 in that case. Read data_diagnostics[].severity rather than the exit code alone. Owned by issue #2215.",
     "Read config_check.status before reading data_diagnostics: only the value checked means a config was read, and on skipped the absent data_diagnostics records an unchecked config rather than a clean one."
   ],
   "steps": [
@@ -52,6 +51,26 @@
           "argv": [
             "doctor",
             "--format",
+            "json",
+            "--config",
+            "<config>"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.doctor_report.v0"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null,
+          "config_check": "checked"
+        },
+        {
+          "name": "no-config",
+          "label": "no config examined",
+          "exit_code": 0,
+          "argv": [
+            "doctor",
+            "--format",
             "json"
           ],
           "stdout": {
@@ -60,7 +79,30 @@
           },
           "reason_code": null,
           "next_step": null,
-          "gap_issue": null
+          "gap_issue": null,
+          "config_check": "skipped"
+        },
+        {
+          "name": "diagnostics-error",
+          "label": "config examined, error-severity diagnostic",
+          "exit_code": 2,
+          "argv": [
+            "doctor",
+            "--format",
+            "json",
+            "--config",
+            "<config>",
+            "--trace-file",
+            "<trace>"
+          ],
+          "stdout": {
+            "kind": "json",
+            "document": "assay.doctor_report.v0"
+          },
+          "reason_code": null,
+          "next_step": null,
+          "gap_issue": null,
+          "config_check": "checked"
         },
         {
           "name": "invalid-config",
@@ -83,9 +125,9 @@
           "config_error_code": "E_CFG_PARSE"
         }
       ],
-      "stdout_summary": "Parses as `assay.doctor_report.v0`. Every report carries `config_check.status`, one of `checked`, `skipped` or `failed`. A config failure remains JSON and carries the top-level `reason_code` and `next_step` alongside `config_error.code`.",
+      "stdout_summary": "Parses as `assay.doctor_report.v0`. Every report carries `config_check.status`, one of `checked`, `skipped` or `failed`. Exit `0` on its own does not mean a config was examined: read `config_check.status` to tell a clean config from no config. A config that was examined and carries an error-severity `data_diagnostics[]` entry exits `2`, the class `decide_exit` gives that diagnostic for `assay validate` and `assay run` too; the text channel returns the same class for the same tree. A config failure remains JSON and carries the top-level `reason_code` and `next_step` alongside `config_error.code`.",
       "failure_summary": "An explicit config that will not load, absent or unreadable alike, is exit `2` and names the failing file in a concrete JSON argv next step, the same exit class `assay run` gives the same file. The reason code is not always the same one, per the non-claim below.",
-      "command": "assay doctor --format json"
+      "command": "assay doctor --format json --config <config>"
     },
     {
       "step": 3,
