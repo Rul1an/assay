@@ -492,6 +492,19 @@ that is how `lane-check` outlived its retirement here and in the troubleshooting
 section of `docs/BRANCH-PROTECTION-SETUP.md` after PR #1878 removed it everywhere
 else. `scripts/ci/check-required-contexts.py` now fails when they disagree.
 
+Agreeing on the *set* leaves a second question open: whether the `CI` context covers
+the jobs its workflow defines. It did not. `publish-shape-cli` and
+`public-crate-policy` ran on every pull request and were absent from the rollup's
+`needs:`, so either could go red while `CI` reported success (#2230).
+`scripts/ci/check-ci-gate-coverage.py` closes that, as a step of the `CI` job itself
+and as a pre-commit hook: every job in `ci.yml` must reach the rollup's `needs:` and
+its decision table, or carry a `# ci-gate: not-required -- <reason>` marker naming why
+it cannot gate a merge. The rule is read off the workflow rather than restated as a
+list of job names, so a job added later is covered without anyone widening anything.
+The guard locates the rollup by matching a job's reported name against the required
+contexts above, which is also how a rename of that job -- the breaking change item 4
+warns about -- surfaces as a failure instead of as silently un-gated protection.
+
 Do not make these required in this slice:
 
 - Manual, release-only, scheduled-only, or host-capability-specific jobs.
