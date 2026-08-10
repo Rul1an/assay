@@ -220,118 +220,80 @@ fn the_reserved_section_claims_nothing_that_is_live() {
     );
 }
 
-/// One line of flowed prose: `///` markers dropped and every run of whitespace collapsed.
+/// The one file that states the evidence-integrity boundary. Both the §5.1 registry row and the
+/// `ReasonCode::EEvidenceIntegrity` doc comment are transports for it, so it is the only place the
+/// rule is written.
+const BOUNDARY: &str = "crates/assay-cli/src/exit_codes/evidence_integrity_boundary.md";
+
+/// One line of flowed prose: every run of whitespace collapsed.
 ///
-/// Without this the checks below would be assertions about line wrapping — the doc comment breaks
-/// "could not be opened or read" across two lines, and reflowing a paragraph would fail a test that
-/// has nothing to do with reflowing.
+/// The boundary file wraps at 100 columns and the §5.1 row is a single markdown table cell, so a
+/// byte comparison of the two would be an assertion about line wrapping. Flowing both first makes
+/// the comparison about the words.
 fn flowed(text: &str) -> String {
-    text.lines()
-        .map(|line| line.trim().trim_start_matches("///"))
-        .collect::<Vec<_>>()
-        .join(" ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The whole `|`-delimited row for one code in a §5 table, description cell included.
-fn spec_row(section: &str, code: &str) -> String {
+/// The description cell of one code's row in a §5 table.
+fn spec_description(section: &str, code: &str) -> String {
     let spec = read(SPEC);
     let body = after(&spec, &format!("### {section}"));
     let body = before(body, "\n### ");
     let prefix = format!("| {code} ");
-    body.lines()
-        .find(|line| line.starts_with(&prefix))
-        .unwrap_or_else(|| panic!("§{section} has no row for {code}"))
-        .to_owned()
-}
-
-/// The contiguous `///` block immediately above a `ReasonCode` variant.
-fn variant_doc(variant: &str) -> String {
-    let src = read("crates/assay-cli/src/exit_codes.rs");
-    let decl = format!("    {variant},");
-    let head = src
-        .split_once(&decl)
-        .map(|(before_decl, _)| before_decl)
-        .unwrap_or_else(|| panic!("no `{decl}` in the enum"));
-    let doc: Vec<&str> = head
+    let row = body
         .lines()
-        .rev()
-        .take_while(|line| line.trim_start().starts_with("///"))
-        .collect();
-    assert!(
-        doc.len() > 3,
-        "`{variant}` carries {} doc line(s); the rule this test reads is not there",
-        doc.len()
+        .find(|line| line.starts_with(&prefix))
+        .unwrap_or_else(|| panic!("§{section} has no row for {code}"));
+    let cells: Vec<&str> = row.trim_matches('|').split('|').collect();
+    assert_eq!(
+        cells.len(),
+        2,
+        "§{section}'s row for {code} has {} cells, not the code/description pair this reads: {row}",
+        cells.len()
     );
-    doc.into_iter().rev().collect::<Vec<_>>().join("\n")
+    flowed(cells[1])
 }
-
-/// What the evidence-integrity boundary asserts, as `(property, one-of-these-present,
-/// none-of-these-present)`.
-///
-/// One table applied to both statements of the rule, which is `AGENTS.md`'s sanctioned fallback
-/// where a doc comment and a normative table cannot share code. Two separately written checks would
-/// drift exactly the way the two statements would.
-const BOUNDARY: &[(&str, &[&str], &[&str])] = &[
-    (
-        "excludes a bundle that could not be opened or read",
-        &["could not be opened or read"],
-        &[],
-    ),
-    (
-        "denies rather than makes a tampering claim",
-        &["not a tampering claim", "no tampering or intent claim"],
-        &["was tampered with", "bundle was tampered"],
-    ),
-    (
-        "names the structure the verifier builds",
-        &["run_root"],
-        &["the Merkle root"],
-    ),
-    (
-        "refuses the Integrity class and prefix as the mapping key",
-        &["IntegrityIo"],
-        &[],
-    ),
-    (
-        "keeps remediation clear of a command that cannot help",
-        &[],
-        &["assay evidence verify"],
-    ),
-];
 
 #[test]
 fn the_evidence_integrity_boundary_reads_the_same_in_the_spec_and_the_code() {
-    // Both statements exist because one is normative for consumers and the other is what an author
-    // reads at the definition. Until this test, only the row's first cell was pinned: the whole
-    // description could be replaced with a tampering claim that included I/O failure and named a
-    // command as the remedy, and every gate stayed green.
-    let sides = [
-        (
-            "§5.1 registry row",
-            flowed(&spec_row("5.1", "E_EVIDENCE_INTEGRITY")),
-        ),
-        (
-            "`ReasonCode::EEvidenceIntegrity` doc comment",
-            flowed(&variant_doc("EEvidenceIntegrity")),
-        ),
-    ];
-    for (where_, text) in &sides {
-        for (property, any_of, none_of) in BOUNDARY {
-            if !any_of.is_empty() {
-                assert!(
-                    any_of.iter().any(|needle| text.contains(needle)),
-                    "the {where_} no longer {property}; expected one of {any_of:?}"
-                );
-            }
-            for forbidden in *none_of {
-                assert!(
-                    !text.contains(forbidden),
-                    "the {where_} contains {forbidden:?}, so it no longer {property}"
-                );
-            }
-        }
-    }
+    // One statement is normative for consumers and the other is what an author reads at the
+    // definition, and they have to say the same thing. Asserting that each separately contains the
+    // right phrases is a neighbouring property, not this one: it passes when the two are exact
+    // opposites, which is how a doc comment claiming the bundle was tampered with and an I/O
+    // failure is in scope sat next to a row denying both, green.
+    assert_eq!(
+        spec_description("5.1", "E_EVIDENCE_INTEGRITY"),
+        flowed(&read(BOUNDARY)),
+        "the §5.1 registry row is no longer the text of {BOUNDARY}. That file is the boundary; the \
+         row and the `ReasonCode::EEvidenceIntegrity` doc comment transport it. Edit the file and \
+         reflow it into the row rather than editing the row."
+    );
+}
+
+#[test]
+fn the_doc_comment_transports_the_boundary_rather_than_restating_it() {
+    // `include_str!` is what makes the equality above cover the doc comment too. Replace it with a
+    // hand-written `///` block and the row could be pinned while the definition drifts.
+    let src = read("crates/assay-cli/src/exit_codes.rs");
+    let head = src
+        .split_once("    EEvidenceIntegrity,")
+        .map(|(before_decl, _)| before_decl)
+        .expect("no `EEvidenceIntegrity` variant in the enum");
+    let last = head.lines().next_back().unwrap_or_default().trim();
+    assert_eq!(
+        last, "#[doc = include_str!(\"exit_codes/evidence_integrity_boundary.md\")]",
+        "`EEvidenceIntegrity` is documented by {last:?} rather than by including {BOUNDARY}"
+    );
+}
+
+#[test]
+fn the_boundary_claims_no_structure_the_verifier_does_not_build() {
+    // `compute_run_root` is a flat sha256 over the concatenated content hashes, so "Merkle" would
+    // promise inclusion proofs and sub-range verification that do not exist. ADR-042's stop list
+    // makes that an unearned claim rather than loose wording, and one file now carries it.
+    let boundary = read(BOUNDARY);
+    assert!(
+        !boundary.contains("Merkle"),
+        "{BOUNDARY} names a Merkle structure; `run_root` is a hash chain"
+    );
 }
