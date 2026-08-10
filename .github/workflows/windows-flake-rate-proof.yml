@@ -42,6 +42,11 @@ on:
         required: true
         default: "20"
         type: string
+      iteration_ceiling_s:
+        description: "Per-iteration ceiling in seconds; a breach is recorded as data"
+        required: true
+        default: "300"
+        type: string
       load:
         description: "Concurrent load arm(s) to measure"
         required: true
@@ -54,8 +59,12 @@ on:
   # Bootstrap lane. `workflow_dispatch` resolves the workflow from the default
   # branch, so an unmerged instrument cannot be dispatched — and measuring an
   # unmerged fix is the whole purpose. Pushing to this reserved namespace runs
-  # the definition from that branch. The namespace carries no pull request, so
-  # this can never attach a check to one, and it never matches `main`.
+  # the definition from that branch, and it never matches `main`.
+  #
+  # By convention no pull request is opened from this namespace, which is why a
+  # push here does not put a check on one. That is a convention and not a
+  # guarantee: open a PR from such a branch and its push-triggered checks would
+  # appear on it like any other.
   push:
     branches:
       - "proof/windows-flake-rate/**"
@@ -84,6 +93,14 @@ jobs:
           ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
 
+      # Run the instrument's own behavioural self-test on the host that will
+      # take the measurement, before it takes it. A broken classifier reports a
+      # confident rate for something else.
+      - name: Self-test the instrument
+        shell: bash
+        working-directory: scripts/ci
+        run: python3 windows_flake_rate_proof_selftest.py
+
       - name: Measure
         shell: bash
         env:
@@ -93,6 +110,7 @@ jobs:
           PROOF_TEST_TARGET: ${{ inputs.test_target || 'agent_golden_path_contract' }}
           PROOF_FILTER: ${{ inputs.filter || 'bounded_process' }}
           PROOF_ITERATIONS: ${{ inputs.iterations || '20' }}
+          PROOF_ITERATION_CEILING_S: ${{ inputs.iteration_ceiling_s || '300' }}
           PROOF_REF_INPUT: ${{ inputs.ref || github.ref }}
         run: |
           set -euo pipefail
@@ -104,6 +122,7 @@ jobs:
             --test-target "$PROOF_TEST_TARGET" \
             --filter "$PROOF_FILTER" \
             --iterations "$PROOF_ITERATIONS" \
+            --iteration-ceiling-s "$PROOF_ITERATION_CEILING_S" \
             --load "${{ matrix.load }}" \
             --out "proof-out/windows-flake-rate-${{ matrix.load }}.json"
 
@@ -129,9 +148,14 @@ jobs:
           print(f"- runner image: {runner['image_os']} {runner['image_version']}")
           print(f"- toolchain: {proof['toolchain']['rustc']}")
           print(f"- failed runs: {summary['failed_runs']} / {summary['measured']} measured"
-                f" (rate {summary['failure_rate']})")
+                f" (observed rate {summary['observed_failure_rate']}, not a causal claim)")
+          print(f"- reuse rule: {manifest['reuse_rule']}")
+          if summary["timed_out"]:
+              print(f"- iterations that breached the ceiling: {summary['timed_out']}")
           if summary["could_not_measure"]:
               print(f"- iterations that measured nothing: {summary['could_not_measure']}")
+          if summary["load_gaps"]:
+              print(f"- iterations that lost their load: {summary['load_gaps']}")
           for name, count in sorted(summary["failures_by_test"].items()):
               print(f"  - {name}: {count}")
           EOF
