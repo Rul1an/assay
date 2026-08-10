@@ -61,11 +61,13 @@ cargo xtask build-ebpf                      # Build eBPF (Linux)
 ```
 
 Build in the worktree's own `target/`, including for read-only reviews: `/target` is git-ignored,
-so an in-tree build leaves `git status --porcelain` empty and needs no scratch directory. Set
-`CARGO_TARGET_DIR` only when a build genuinely must not warm the branch's cache, and then to one
-stable path per repository — `scripts/ci/phase5-check.sh` and the pre-push hook are the idiom. Not
-one path per reviewed head: those are never reaped (`/tmp` has no expiry on macOS) and reached
-~40 GB across seven merged pull requests on 2026-08-10.
+so an in-tree build leaves `git status --porcelain` empty and needs no scratch directory. That
+already satisfies `AGENTS.md`'s rule against sharing a target between active worktrees, so a
+scratch path is not required to honour it. If you do set `CARGO_TARGET_DIR`, keep one path per
+worktree — never one per reviewed head. macOS does reap `/tmp` daily through
+`/usr/libexec/tmp_cleaner`, but only files untouched for three days and then only directories that
+have become empty, so a target still being built against never ages out while its pull request is
+open; per-head paths therefore accumulate one full target per review round.
 
 ## CLI Entry Points
 
