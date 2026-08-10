@@ -49,7 +49,7 @@ including its explicit non-claims, or amend the decision through a new ADR.
 - Build in the worktree's own `target/`. Cargo creates one per worktree on first build, so
   worktrees do not share one unless told to, and `/target` is git-ignored so an in-tree build
   leaves a read-only review's tree clean. A `CARGO_TARGET_DIR` you export by hand, you remove when
-  the work ends. Paths set by checked-in scripts are those scripts' business.
+  the work ends.
 - Remove merged branches and their worktrees only after recording the merge in the programme ledger.
 
 ## Development Discipline
