@@ -309,7 +309,12 @@ repos:
       # --- Dependency security (shift-left) ---
       - id: cargo-deny
         name: cargo deny (advisories, licenses, bans, sources)
-        entry: bash -lc 'cargo deny check advisories bans licenses sources'
+        # `cargo-deny` rather than `cargo deny`: going through cargo resolves the toolchain from
+        # rust-toolchain.toml, which in CI selects a toolchain the lint job never installed. The
+        # binary runs the same checks without that resolution. No version assertion here -- the pin
+        # is enforced where CI installs it, and asserting it in a local hook would fail every
+        # developer whose cargo-deny predates the pin.
+        entry: bash -lc 'cargo-deny check advisories bans licenses sources'
         language: system
         pass_filenames: false
         # Only run when deps/policy change (avoids noise on unrelated commits)
