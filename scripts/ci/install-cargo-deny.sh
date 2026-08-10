@@ -41,8 +41,15 @@ cargo install --locked --version "${CARGO_DENY_VERSION}" cargo-deny
 # Echo the resolved version and hold it against the pin, so the number in the log is one that was
 # checked rather than one that was printed. An install that silently produced a different version
 # would otherwise leave a log that looks like evidence of the pin.
+#
+# The path is echoed with it because the version alone does not say which binary answered. This
+# resolves through `PATH`, with no relationship to where `cargo install` wrote, so an unrelated
+# `cargo-deny` reporting the pinned version would satisfy the check below while the install did
+# nothing. Asserting the path instead would be stricter, and it was not done because
+# `CARGO_INSTALL_ROOT` is unset in both jobs and shadowing `~/.cargo/bin` on a runner is not a
+# condition this repository has met; recording it means the next reader knows the check's reach.
 resolved="$(cargo-deny --version)"
-echo "cargo-deny resolved: ${resolved}"
+echo "cargo-deny resolved: ${resolved} at $(command -v cargo-deny)"
 if [[ "${resolved}" != "cargo-deny ${CARGO_DENY_VERSION}" ]]; then
   echo "cargo-deny reports '${resolved}', which is not the pinned ${CARGO_DENY_VERSION}" >&2
   echo "the pin lives in scripts/ci/install-cargo-deny.sh and is the only place to change it" >&2

@@ -176,6 +176,11 @@ jobs:
       - name: Install cargo-deny
         run: ./scripts/ci/install-cargo-deny.sh
       - name: Install cargo-audit
+        # Version deliberately unpinned, unlike the sibling install two lines up. An advisory scanner
+        # is the one tool where floating is arguably right: a pinned scanner stops learning about new
+        # advisories, so the pin would age into a silent gap rather than a loud failure. Stated here
+        # because an unexplained asymmetry beside a pinned sibling reads as an oversight, and #2237
+        # holds the question of whether this reasoning survives scrutiny.
         run: cargo install --locked cargo-audit
       - name: Check Aya/eBPF dependency alignment
         run: ./scripts/ci/check-aya-ebpf-alignment.sh
@@ -190,7 +195,7 @@ jobs:
         run: |
           rm -rf ~/.cargo/advisory-db
           # RUSTSEC-2023-0071 (rsa Marvin Attack): no fixed upgrade; assay-mcp-server JWT (see deny.toml)
-          cargo audit --ignore RUSTSEC-2023-0071
+          cargo-audit audit --ignore RUSTSEC-2023-0071
 
       - name: cargo audit (RustSec) — fuzz lockfile
         # Runs when the root audit above fails, so coverage does not drop out exactly when the tree
@@ -210,7 +215,7 @@ jobs:
           # would defeat the reason this step exists. An advisory that matches only the fuzz tree is
           # then a deliberate decision, not a silent pass; there is nowhere for it to be quietly
           # excused, which is the point.
-          ( cd "${RUNNER_TEMP}" && cargo audit --file "${GITHUB_WORKSPACE}/fuzz/Cargo.lock" )
+          ( cd "${RUNNER_TEMP}" && cargo-audit audit --file "${GITHUB_WORKSPACE}/fuzz/Cargo.lock" )
 
   clippy:
     name: Clippy (deny warnings)
