@@ -152,6 +152,23 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      # Stated once for the whole job, because every cargo command below runs inside the repository,
+      # where rustup reads `rust-toolchain.toml` and selects 1.96.0 -- a toolchain this job never
+      # installs, so whether a step works depends on what the runner image happens to carry:
+      #
+      #   error: 'cargo' is not installed for the toolchain '1.96.0-x86_64-unknown-linux-gnu'
+      #
+      # Both installs and both `cargo audit` invocations took that resolution, so stating it per
+      # step would write `stable` once per cargo command; the job is the smallest scope that covers
+      # them all with one statement. `install-cargo-deny.sh` honours an inherited value, so this is
+      # the selection there too rather than being shadowed by the script's own default.
+      #
+      # Scope, deliberately: no step in this job builds or tests the workspace -- checkout, two tool
+      # installs, a `sed`-only alignment check, `cargo-deny check` and two `cargo audit` runs. This
+      # selects the toolchain that runs the dependency tooling, never one that compiles a crate, and
+      # `rust-toolchain.toml` stays the source for every job that does compile.
+      RUSTUP_TOOLCHAIN: stable
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -159,16 +176,15 @@ jobs:
       - name: Install cargo-deny
         run: ./scripts/ci/install-cargo-deny.sh
       - name: Install cargo-audit
-        # Same toolchain selection as the cargo-deny install, and for the same reason: this job
-        # installs no toolchain, so without RUSTUP_TOOLCHAIN rustup reads rust-toolchain.toml and
-        # picks 1.96.0, which the runner image is not required to carry a cargo for.
-        run: RUSTUP_TOOLCHAIN=stable cargo install --locked cargo-audit
+        run: cargo install --locked cargo-audit
       - name: Check Aya/eBPF dependency alignment
         run: ./scripts/ci/check-aya-ebpf-alignment.sh
       - name: cargo deny (advisories, licenses, bans, sources)
-        # `cargo-deny` rather than `cargo deny`: invoking it through cargo re-enters the same
-        # toolchain resolution that broke the install, so the check would inherit the failure the
-        # install step was just fixed for. The binary is the one the pinned install asserted.
+        # `cargo-deny` rather than `cargo deny`: invoking it through cargo re-enters the toolchain
+        # resolution that broke the install. The job-level RUSTUP_TOOLCHAIN now states that
+        # resolution, so this form no longer carries the job on its own; it is kept because it does
+        # not depend on that variable surviving a later edit. The binary is the one the pinned
+        # install asserted.
         run: cargo-deny check advisories bans licenses sources
       - name: cargo audit (RustSec)
         run: |

@@ -27,7 +27,13 @@ CARGO_DENY_VERSION="0.20.2"
 # The same branch passed at 11:43 and failed at 11:48 on 2026-08-10 with no code change. The log
 # named 1.97.1 while 1.96.0 ran, which is why reading the log gave the wrong answer about what was
 # selected. RUSTUP_TOOLCHAIN overrides the file, so the selection is now stated rather than inferred.
-export RUSTUP_TOOLCHAIN="${CARGO_DENY_TOOLCHAIN:-stable}"
+#
+# An inherited value wins. ci.yml's dependency job states the selection once for every cargo command
+# it runs; overriding that here would make the job's statement decorative for this step, and would
+# make `stable` a value written in two places that have to agree -- the defect this script exists to
+# remove. `stable` below is the fallback for a caller that states nothing, which is the lint job in
+# kernel-matrix.yml and anyone running the script by hand.
+export RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}"
 
 echo "installing cargo-deny ${CARGO_DENY_VERSION} using toolchain ${RUSTUP_TOOLCHAIN}"
 cargo install --locked --version "${CARGO_DENY_VERSION}" cargo-deny
