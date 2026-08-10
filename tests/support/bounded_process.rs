@@ -556,6 +556,11 @@ mod tests {
     /// control channel with rules of its own: the pid now arrives through the
     /// same bounded capture the harness under test already governs.
     const READY_RECORD_PREFIX: &str = "READY pid=";
+    /// The control's record. It names no pid because the control spawns nothing,
+    /// and it deliberately does not carry the pid prefix, so a control run whose
+    /// output were mistaken for a descendant run would fail to parse rather than
+    /// report a pid nobody spawned.
+    const READY_SOLO_RECORD: &str = "READY solo";
     /// `u32::MAX` is ten digits, so anything longer is not a pid.
     const MAX_PID_DIGITS: usize = 10;
 
@@ -608,22 +613,32 @@ mod tests {
         seen.ok_or_else(|| format!("no readiness record: {record:?}"))
     }
 
-    /// What the descendant does with the bounded run's output handles.
+    /// What the bounded child does before it exits.
+    ///
+    /// The three variants are one manipulation with one variable: whether a
+    /// descendant exists and, if it does, what it asks for. Holding the rest of
+    /// the run fixed is what lets `Solo` act as the control for the
+    /// inherited-handle claim rather than as another sample.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    enum DescendantOutput {
-        /// Keeps stdout and stderr open after its parent exits, so the reader
-        /// threads never reach EOF.
+    enum HelperPlan {
+        /// Spawns a descendant that keeps stdout and stderr open after its
+        /// parent exits, so the reader threads never reach EOF.
         Inherited,
-        /// Asks for neither handle. Whether asking is enough is a platform
-        /// question, answered where the two descendant tests are cfg-split.
+        /// Spawns a descendant that asks for neither handle. Whether asking is
+        /// enough is a platform question, answered where the descendant tests
+        /// are cfg-split.
         Detached,
+        /// Spawns nothing. The control: with no descendant to hold anything, the
+        /// readers must reach EOF when the child exits.
+        Solo,
     }
 
-    impl DescendantOutput {
+    impl HelperPlan {
         fn as_str(self) -> &'static str {
             match self {
                 Self::Inherited => "inherited",
                 Self::Detached => "detached",
+                Self::Solo => "solo",
             }
         }
 
@@ -631,6 +646,7 @@ mod tests {
             match value {
                 "inherited" => Some(Self::Inherited),
                 "detached" => Some(Self::Detached),
+                "solo" => Some(Self::Solo),
                 _ => None,
             }
         }
@@ -648,7 +664,7 @@ mod tests {
     /// interpreter startup rather than process-tree teardown decided the
     /// result. Unix keeps its shell, whose startup is a fraction of that bound.
     #[cfg(windows)]
-    fn descendant_spawner_command(output: DescendantOutput) -> Command {
+    fn descendant_spawner_command(plan: HelperPlan) -> Command {
         let mut command = Command::new(current_test_binary());
         command
             .args([
@@ -658,22 +674,30 @@ mod tests {
                 "--format",
                 "terse",
             ])
-            .env(HELPER_MODE_ENV, output.as_str());
+            .env(HELPER_MODE_ENV, plan.as_str());
         command
     }
 
     #[cfg(unix)]
-    fn descendant_spawner_command(output: DescendantOutput) -> Command {
-        let detach = match output {
-            DescendantOutput::Inherited => "",
-            DescendantOutput::Detached => "exec </dev/null >/dev/null 2>&1;",
+    fn descendant_spawner_command(plan: HelperPlan) -> Command {
+        let script = match plan {
+            HelperPlan::Solo => {
+                format!("printf '{READY_SOLO_RECORD}'; printf '{READY_SOLO_RECORD}' >&2",)
+            }
+            HelperPlan::Inherited | HelperPlan::Detached => {
+                let detach = match plan {
+                    HelperPlan::Detached => "exec </dev/null >/dev/null 2>&1;",
+                    _ => "",
+                };
+                format!(
+                    "sh -c '{detach} while :; do :; done' descendant & \
+                     printf '{READY_RECORD_PREFIX}%s' \"$!\"; \
+                     printf '{READY_RECORD_PREFIX}%s' \"$!\" >&2",
+                )
+            }
         };
         let mut command = Command::new("sh");
-        command.arg("-c").arg(format!(
-            "sh -c '{detach} while :; do :; done' descendant & \
-             printf '{READY_RECORD_PREFIX}%s' \"$!\"; \
-             printf '{READY_RECORD_PREFIX}%s' \"$!\" >&2",
-        ));
+        command.arg("-c").arg(script);
         command
     }
 
@@ -687,23 +711,28 @@ mod tests {
     fn descendant_spawner_helper_process() {
         let mode = std::env::var(HELPER_MODE_ENV)
             .unwrap_or_else(|error| panic!("{HELPER_MODE_ENV} must be set: {error}"));
-        let output = DescendantOutput::parse(&mode)
-            .unwrap_or_else(|| panic!("unknown descendant output mode {mode:?}"));
+        let plan =
+            HelperPlan::parse(&mode).unwrap_or_else(|| panic!("unknown helper plan {mode:?}"));
 
-        let mut descendant = hanging_command();
-        descendant.stdin(Stdio::null());
-        if output == DescendantOutput::Detached {
-            descendant.stdout(Stdio::null()).stderr(Stdio::null());
-        }
-        let child = descendant
-            .spawn()
-            .unwrap_or_else(|error| panic!("spawn the descendant: {error}"));
+        let record = match plan {
+            HelperPlan::Solo => READY_SOLO_RECORD.to_owned(),
+            HelperPlan::Inherited | HelperPlan::Detached => {
+                let mut descendant = hanging_command();
+                descendant.stdin(Stdio::null());
+                if plan == HelperPlan::Detached {
+                    descendant.stdout(Stdio::null()).stderr(Stdio::null());
+                }
+                let child = descendant
+                    .spawn()
+                    .unwrap_or_else(|error| panic!("spawn the descendant: {error}"));
+                ready_record(child.id())
+            }
+        };
 
         // The pid travels in the output the bounded run already captures, so
         // there is no second channel and no path to control. libtest prefixes
         // this process's stdout with its own report, so the record goes to both:
         // stderr carries this child's bytes alone.
-        let record = ready_record(child.id());
         std::io::stdout()
             .write_all(record.as_bytes())
             .expect("report readiness on stdout");
@@ -714,11 +743,18 @@ mod tests {
     }
 
     #[test]
-    fn the_descendant_output_mode_survives_the_round_trip_to_the_helper() {
-        for mode in [DescendantOutput::Inherited, DescendantOutput::Detached] {
-            assert_eq!(DescendantOutput::parse(mode.as_str()), Some(mode));
+    fn the_helper_plan_survives_the_round_trip_to_the_helper() {
+        for plan in [
+            HelperPlan::Inherited,
+            HelperPlan::Detached,
+            HelperPlan::Solo,
+        ] {
+            assert_eq!(HelperPlan::parse(plan.as_str()), Some(plan));
         }
-        assert_eq!(DescendantOutput::parse("hidden"), None);
+        assert_eq!(HelperPlan::parse("hidden"), None);
+        // The control's record must not read as a descendant's, or a run that
+        // spawned nothing could report a pid.
+        assert!(descendant_pid_from(READY_SOLO_RECORD).is_err());
     }
 
     #[test]
@@ -886,7 +922,7 @@ mod tests {
         let started = Instant::now();
 
         let worker = thread::spawn(move || {
-            let command = descendant_spawner_command(DescendantOutput::Inherited);
+            let command = descendant_spawner_command(HelperPlan::Inherited);
             let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
             let result = run_bounded(command, b"", limits, "inherited output mutation");
             let _ = result_tx.send(result);
@@ -941,7 +977,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn kills_quiet_descendant_after_normal_parent_exit() {
-        let command = descendant_spawner_command(DescendantOutput::Detached);
+        let command = descendant_spawner_command(HelperPlan::Detached);
         let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
 
         let output = run_bounded(command, b"", limits, "normal completion mutation")
@@ -980,7 +1016,7 @@ mod tests {
         let (result_tx, result_rx) = mpsc::channel();
 
         let worker = thread::spawn(move || {
-            let command = descendant_spawner_command(DescendantOutput::Detached);
+            let command = descendant_spawner_command(HelperPlan::Detached);
             let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
             let _ = result_tx.send(run_bounded(
                 command,
@@ -1019,6 +1055,66 @@ mod tests {
         );
     }
 
+    /// The control for the test above, and the reason the claim beside it is a
+    /// measurement rather than an inference.
+    ///
+    /// Everything is held fixed -- same binary, same re-execution, same limits,
+    /// same bound, same guard -- and one thing varies: the bounded child spawns
+    /// no descendant. The claim under test is that a descendant holds the run's
+    /// inherited stdout and stderr write handles, so the readers never see EOF.
+    /// That claim predicts the two arms disagree:
+    ///
+    /// - control succeeds and the descendant arm hits the deadline with both
+    ///   handles outstanding: the descendant is the holder, and nothing else in
+    ///   the run keeps the handles open;
+    /// - both arms hit the deadline: the holder is not the descendant, and the
+    ///   claim is refuted -- whatever retains the write end does so with no
+    ///   descendant in existence;
+    /// - both arms succeed: the descendant does release the handles, so the
+    ///   deadline seen in job 93527135001 was raced rather than structural. The
+    ///   descendant arm above fails first in that case, which is how it is the
+    ///   tripwire.
+    ///
+    /// The control is not cfg-split, because the prediction is the same on both
+    /// platforms and a control that only runs where it is expected to pass tests
+    /// nothing.
+    #[test]
+    fn the_same_child_reaches_eof_when_it_spawns_no_descendant() {
+        let (result_tx, result_rx) = mpsc::channel();
+
+        let worker = thread::spawn(move || {
+            let command = descendant_spawner_command(HelperPlan::Solo);
+            let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
+            let _ = result_tx.send(run_bounded(command, b"", limits, "no descendant control"));
+        });
+
+        let result = match result_rx.recv_timeout(descendant_test_guard()) {
+            Ok(result) => result,
+            Err(error) => panic!("runner escaped its wall-clock bound: {error}"),
+        };
+        worker.join().expect("bounded runner worker");
+
+        let output = result.unwrap_or_else(|error| {
+            panic!(
+                "a child that spawned nothing must reach EOF; that it did not refutes the \
+                 inherited-handle account of #2249, since no descendant existed to hold the \
+                 run's handles: {error}"
+            )
+        });
+
+        assert!(output.status.success(), "{:?}", output.status);
+        let stderr = String::from_utf8(output.stderr.clone()).expect("stderr is the child's text");
+        assert_eq!(
+            stderr, READY_SOLO_RECORD,
+            "the control must be the same child, reporting"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains(READY_SOLO_RECORD),
+            "stdout must carry the same record: {stdout:?}"
+        );
+    }
+
     /// On Windows the descendant tests use this re-execution as their bounded
     /// child, so it is covered there. Here it is the only exercise of it, since
     /// the Unix spawner is a shell -- and it separates "the helper is broken"
@@ -1036,7 +1132,7 @@ mod tests {
                 "--format",
                 "terse",
             ])
-            .env(HELPER_MODE_ENV, DescendantOutput::Detached.as_str());
+            .env(HELPER_MODE_ENV, HelperPlan::Detached.as_str());
         let limits = ProcessLimits::new(descendant_test_guard(), 1024, 1024);
 
         let output = run_bounded(command, b"", limits, "helper re-execution")
