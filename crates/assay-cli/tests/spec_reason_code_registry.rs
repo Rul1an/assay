@@ -7,6 +7,7 @@
 //! over the enum, so parsing its arms gives every variant — a hand-kept list beside the enum would
 //! be one more thing to drift, which is the failure being fixed here.
 
+use quote::ToTokens;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -387,38 +388,93 @@ fn the_evidence_integrity_boundary_reads_the_same_in_the_spec_and_the_code() {
     );
 }
 
+/// The argument `EEvidenceIntegrity`'s one doc attribute must pass to `include_str!`.
+const BOUNDARY_INCLUDE_ARG: &str = "exit_codes/evidence_integrity_boundary.md";
+
+/// Is this the attribute `#[doc = include_str!("exit_codes/evidence_integrity_boundary.md")]`?
+fn is_the_boundary_include(attr: &syn::Attribute) -> bool {
+    let syn::Meta::NameValue(name_value) = &attr.meta else {
+        return false;
+    };
+    let syn::Expr::Macro(expanded) = &name_value.value else {
+        return false;
+    };
+    name_value.path.is_ident("doc")
+        && expanded.mac.path.is_ident("include_str")
+        && syn::parse2::<syn::LitStr>(expanded.mac.tokens.clone())
+            .is_ok_and(|arg| arg.value() == BOUNDARY_INCLUDE_ARG)
+}
+
+/// Does this attribute put text in the `doc` namespace under any configuration?
+///
+/// `///` and `/** */` are `#[doc = "..."]` by the time they reach a parser, so they need no case of
+/// their own. `#[cfg_attr(<cfg>, doc = "...")]` does: its path is not `doc`, it expands to one, and
+/// `cfg(doc)` in particular puts text in the *shipped* rustdoc and nowhere else.
+fn documents_the_item(attr: &syn::Attribute) -> bool {
+    fn mentions_doc(tokens: proc_macro2::TokenStream) -> bool {
+        tokens.into_iter().any(|tree| match tree {
+            proc_macro2::TokenTree::Ident(ident) => ident == "doc",
+            proc_macro2::TokenTree::Group(group) => mentions_doc(group.stream()),
+            _ => false,
+        })
+    }
+    attr.path().is_ident("doc")
+        || (attr.path().is_ident("cfg_attr") && mentions_doc(attr.to_token_stream()))
+}
+
 #[test]
-fn the_doc_comment_transports_the_boundary_rather_than_restating_it() {
+fn the_integrity_variant_carries_the_boundary_include_and_no_other_doc_text() {
     // `include_str!` is what makes the equality above cover the doc comment too. Replace it with a
     // hand-written `///` block and the row could be pinned while the definition drifts.
     //
-    // The whole doc block is collected, not the line nearest the declaration. Checking only that
-    // line asserts "the include is present, adjacent to the variant", which is a neighbouring
-    // property: rustc concatenates `///` lines and `#[doc]` attributes on one item in source order,
-    // so four `///` lines placed *above* the include documented this variant, rendered ahead of the
-    // boundary text in the shipped rustdoc, and left that line untouched. The same gap re-admitted a
-    // withdrawn "Merkle root ... inclusion proofs" claim past the test written to forbid it, because
-    // that test reads the fragment and the claim was not in the fragment. Asserting the block is
-    // exactly the include says "the include is the only thing that documents this variant", which is
-    // the property the transport claim needs.
+    // Every doc attribute on the variant is collected, not the line nearest the declaration:
+    // rustc concatenates `///` lines and `#[doc]` attributes on one item in source order, so a
+    // `///` line placed *above* the include also documents the variant and renders ahead of the
+    // boundary text in the shipped rustdoc while leaving that line untouched. That gap re-admitted
+    // a withdrawn "Merkle root ... inclusion proofs" claim past the test written to forbid it,
+    // because that test reads the fragment and the claim was not in the fragment.
+    //
+    // Which attributes are attached to this variant is a question the Rust grammar already answers,
+    // so it is asked of a parser rather than answered a second time here. A line scan looking for
+    // `///` and `#[doc` prefixes above the declaration is that second answer, and it drifted from
+    // the first immediately: an attribute spanning source lines, a `/** */` block, a `cfg_attr`, or
+    // a benign attribute interleaved between the include and the variant each broke the scan in one
+    // direction or the other, and a `    EEvidenceIntegrity,` inside an earlier comment made it
+    // report on a location it did not pin.
+    //
+    // What this still does not pin, so that it is not read as more than it is: doc text on `enum
+    // ReasonCode` itself, which documents the enum and not this variant, and the rendering step —
+    // it reads the source rustdoc is given, not rustdoc's output.
     let src = read("crates/assay-cli/src/exit_codes.rs");
-    let head = src
-        .split_once("    EEvidenceIntegrity,")
-        .map(|(before_decl, _)| before_decl)
-        .expect("no `EEvidenceIntegrity` variant in the enum");
-    let mut doc_block: Vec<&str> = head
-        .lines()
-        .rev()
-        .map(str::trim)
-        .take_while(|line| line.starts_with("///") || line.starts_with("#[doc"))
+    let file = syn::parse_file(&src).expect("crates/assay-cli/src/exit_codes.rs does not parse");
+    let registry = file
+        .items
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Enum(registry) if registry.ident == "ReasonCode" => Some(registry),
+            _ => None,
+        })
+        .expect("no `enum ReasonCode` in crates/assay-cli/src/exit_codes.rs");
+    let variant = registry
+        .variants
+        .iter()
+        .find(|variant| variant.ident == "EEvidenceIntegrity")
+        .expect("no `EEvidenceIntegrity` variant in `ReasonCode`");
+    let doc_attrs: Vec<&syn::Attribute> = variant
+        .attrs
+        .iter()
+        .filter(|attr| documents_the_item(attr))
         .collect();
-    doc_block.reverse();
-    assert_eq!(
-        doc_block,
-        vec!["#[doc = include_str!(\"exit_codes/evidence_integrity_boundary.md\")]"],
-        "`EEvidenceIntegrity` is documented by {doc_block:?} rather than by including {BOUNDARY} and \
+    let rendered: Vec<String> = doc_attrs
+        .iter()
+        .map(|attr| attr.to_token_stream().to_string())
+        .collect();
+    assert!(
+        matches!(doc_attrs[..], [only] if is_the_boundary_include(only)),
+        "`EEvidenceIntegrity` is documented by {rendered:?} rather than by including {BOUNDARY} and \
          nothing else. Anything beside the include is a second copy of the rule, free to contradict \
-         it while the §5.1 row stays correct. Plain `//` comments are not doc text and are fine."
+         it while the §5.1 row stays correct. Attributes that put no text in the `doc` namespace, \
+         and comments of either kind, are not counted and are fine anywhere."
     );
 }
 

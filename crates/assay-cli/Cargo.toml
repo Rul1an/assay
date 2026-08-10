@@ -122,6 +122,11 @@ harness = false
 [dev-dependencies]
 tempfile = "3"
 regex = "1"
+# `spec_reason_code_registry` asks a parser which attributes are attached to a variant instead of
+# scanning source lines for `///` and `#[doc` prefixes, which is the same question answered twice.
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "3", features = ["full"] }
 assert_cmd = "2.2.2"
 predicates = "3.1.4"
 proptest = "1.10"
