@@ -1,6 +1,8 @@
-use crate::cli::args::PolicyValidateArgs;
+use crate::cli::args::{OutputFormat, PolicyValidateArgs};
+use crate::cli_failure::{emit_summary_stdout, summary_from_outcome, CliFailure};
 use crate::exit_codes;
-use anyhow::{Context, Result};
+use crate::exit_codes::RunOutcome;
+use anyhow::Result;
 
 pub async fn run(args: PolicyValidateArgs) -> Result<i32> {
     if args.deny_deprecations {
@@ -9,13 +11,18 @@ pub async fn run(args: PolicyValidateArgs) -> Result<i32> {
 
     // Let core handle parsing + auto-migration warnings.
     let policy = assay_core::mcp::policy::McpPolicy::from_file(&args.input)
-        .with_context(|| format!("failed to load policy {}", args.input.display()))?;
+        .map_err(|error| CliFailure::policy_parse(&args.input, error))?;
 
     // Force schema compilation so failures happen here (not at runtime).
     policy
         .try_compile_all_schemas()
-        .map_err(|error| anyhow::anyhow!("policy schemas failed to compile: {error}"))?;
+        .map_err(|error| CliFailure::policy_parse(&args.input, error))?;
 
     eprintln!("✔ Policy OK: {}", args.input.display());
+    if args.format == OutputFormat::Json {
+        let mut summary = summary_from_outcome(&RunOutcome::success(), true);
+        summary.message = None;
+        emit_summary_stdout(&summary)?;
+    }
     Ok(exit_codes::OK)
 }

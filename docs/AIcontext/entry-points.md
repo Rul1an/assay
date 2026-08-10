@@ -596,7 +596,7 @@ Reason codes provide precise error identification for automation and debugging.
 | `E_TRACE_NOT_FOUND` | Trace file not found | Check path exists |
 | `E_MISSING_CONFIG` | Required config missing | `assay init` |
 | `E_BASELINE_INVALID` | Baseline file invalid | `assay baseline record` |
-| `E_POLICY_PARSE` | Policy syntax error | `assay policy validate <file>` |
+| `E_POLICY_PARSE` | Policy syntax error | `assay policy validate --input <file>` |
 | `E_INVALID_ARGS` | Invalid CLI arguments | `assay --help` |
 
 #### Infrastructure Errors (Exit 3)

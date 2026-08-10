@@ -226,7 +226,7 @@ impl ReasonCode {
             }
             ReasonCode::EPolicyParse => {
                 format!(
-                    "Run: assay policy validate {}",
+                    "Run: assay policy validate --input {}",
                     context.unwrap_or("<policy.yaml>")
                 )
             }
@@ -456,7 +456,7 @@ mod tests {
             .contains("baseline"));
         assert!(ReasonCode::EPolicyParse
             .next_step(None)
-            .contains("policy validate"));
+            .contains("policy validate --input"));
         assert!(ReasonCode::EReplayMissingDependency
             .next_step(None)
             .contains("--live"));

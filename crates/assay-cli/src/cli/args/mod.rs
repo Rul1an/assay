@@ -45,6 +45,17 @@ pub struct Cli {
     pub cmd: Command,
 }
 
+impl Cli {
+    pub(crate) fn machine_output(&self) -> bool {
+        matches!(
+            &self.cmd,
+            Command::Policy(PolicyArgs {
+                cmd: PolicyCommand::Validate(args)
+            }) if args.format == OutputFormat::Json
+        )
+    }
+}
+
 #[derive(Subcommand)]
 pub enum Command {
     /// Run an evaluation suite and write run artifacts

@@ -203,7 +203,7 @@ schemas:
 
 ```bash
 # Validate syntax and compile schemas
-assay policy validate policy.yaml
+assay policy validate --input policy.yaml
 
 # Migrate v1 policy to v2 (preview)
 assay policy migrate --input policy.yaml --dry-run

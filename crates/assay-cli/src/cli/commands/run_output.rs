@@ -210,25 +210,8 @@ fn pick_infra_reason(
     ReasonCode::EJudgeUnavailable
 }
 
-/// Build a Summary from RunOutcome for writing summary.json (same dir as run.json).
-pub(crate) fn summary_from_outcome(
-    outcome: &crate::exit_codes::RunOutcome,
-    verify_enabled: bool,
-) -> assay_core::report::summary::Summary {
-    let assay_version = env!("CARGO_PKG_VERSION");
-    if outcome.exit_code == 0 {
-        assay_core::report::summary::Summary::success(assay_version, verify_enabled)
-    } else {
-        assay_core::report::summary::Summary::failure(
-            outcome.exit_code,
-            &outcome.reason_code,
-            outcome.message.as_deref().unwrap_or(""),
-            outcome.next_step.as_deref().unwrap_or(""),
-            assay_version,
-            verify_enabled,
-        )
-    }
-}
+/// Compatibility facade for existing run/replay callers.
+pub(crate) use crate::cli_failure::summary_from_outcome;
 
 pub(crate) fn write_extended_run_json(
     artifacts: &assay_core::report::RunArtifacts,
