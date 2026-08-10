@@ -1,73 +1,81 @@
 use crate::cli::args::InitArgs;
-use crate::exit_codes;
+use crate::exit_codes::{ReasonCode, RunOutcome};
 use std::path::{Path, PathBuf};
 
+use super::init_report::InitReport;
+
 pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
+    let mut report = InitReport::new(args.format.clone());
+
     if args.list_presets {
-        for p in crate::packs::list() {
-            println!("{}\t{}", p.name, p.description);
-        }
-        return Ok(exit_codes::OK);
+        report.record_presets(crate::packs::list());
+        return report.succeed(&["assay", "init"], &[]);
     }
 
     // --from-trace: generate policy + config from existing trace
     if let Some(trace_path) = &args.from_trace {
-        return run_from_trace(&args, trace_path);
+        return run_from_trace(&args, trace_path, report);
     }
 
-    println!("🔍 Scanning project for MCP configurations...");
+    report.progress("🔍 Scanning project for MCP configurations...");
 
     let mut found_config = false;
 
     // 1. Detect Config Files
     if Path::new("claude_desktop_config.json").exists() {
-        println!("   ✨ Detected Claude Desktop config");
+        report.progress("   ✨ Detected Claude Desktop config");
         found_config = true;
     } else if let Some(home) = dirs::home_dir() {
         // Check standard macOS path
         let mac_path = home.join("Library/Application Support/Claude/claude_desktop_config.json");
         if mac_path.exists() {
-            println!("   ✨ Detected Claude Desktop config (global)");
+            report.progress("   ✨ Detected Claude Desktop config (global)");
             // We could offer to import it, but for now just acknowledging it is good DX
         }
     }
 
     if Path::new("mcp.json").exists() {
-        println!("   ✨ Detected mcp.json");
+        report.progress("   ✨ Detected mcp.json");
         found_config = true;
     }
 
     // 2. Detect Package Type (Node/Python)
     if Path::new("package.json").exists() {
-        println!("   📦 Detected Node.js project");
+        report.progress("   📦 Detected Node.js project");
         found_config = true;
     } else if Path::new("pyproject.toml").exists() || Path::new("requirements.txt").exists() {
-        println!("   🐍 Detected Python project");
+        report.progress("   🐍 Detected Python project");
         found_config = true;
     }
 
     if !found_config {
-        println!("   ℹ️  No specific MCP config found, initializing generic project.");
+        report.progress("   ℹ️  No specific MCP config found, initializing generic project.");
     }
 
-    println!("\n🏗️  Generating Assay Policy & Config...");
+    report.progress("\n🏗️  Generating Assay Policy & Config...");
 
     // Write Policy Pack
-    let pack = crate::packs::get(&args.preset)
-        .ok_or_else(|| anyhow::anyhow!("unknown preset '{}'. Use --list-presets.", args.preset))?;
+    let Some(pack) = crate::packs::get(&args.preset) else {
+        // An unusable `--preset` value is an argument the registry already names, so the machine
+        // channel branches on `E_INVALID_ARGS` while the human channel keeps its `fatal:` line.
+        return report.fail(RunOutcome::from_reason(
+            ReasonCode::EInvalidArgs,
+            Some(format!(
+                "unknown preset '{}'. Use --list-presets.",
+                args.preset
+            )),
+            None,
+        ));
+    };
 
     // Write policy file (respecting existing)
     let policy_path = Path::new("policy.yaml");
     if policy_path.exists() {
-        println!("   Skipped {} (exists)", policy_path.display());
+        report.record_skipped(policy_path);
     } else {
         std::fs::write(policy_path, pack.policy_yaml)
             .map_err(|e| anyhow::anyhow!("failed to write {}: {}", policy_path.display(), e))?;
-        println!(
-            "   Created {} (preset: {})",
-            policy_path.display(),
-            pack.name
-        );
+        report.record_created(policy_path, Some(&format!("preset: {}", pack.name)));
     }
 
     let config_template = if args.hello_trace {
@@ -75,30 +83,40 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
     } else {
         crate::templates::EVAL_CONFIG_DEFAULT_YAML
     };
-    write_file_if_missing(&args.config, config_template)?;
+    write_file_if_missing(&mut report, &args.config, config_template)?;
 
     let hello_trace_path = args
         .hello_trace
         .then(|| hello_trace_path_for_config(&args.config));
     if let Some(path) = &hello_trace_path {
-        write_file_if_missing(path, crate::templates::HELLO_TRACES_JSONL)?;
+        write_file_if_missing(&mut report, path, crate::templates::HELLO_TRACES_JSONL)?;
     }
 
     // 2. Gitignore
     if args.gitignore {
-        write_file_if_missing(Path::new(".gitignore"), crate::templates::GITIGNORE)?;
+        write_file_if_missing(
+            &mut report,
+            Path::new(".gitignore"),
+            crate::templates::GITIGNORE,
+        )?;
     }
 
     // 3. CI Scaffolding
     // Handle the boolean flag or the provider string if we upgrade the arg
     if args.ci.is_some() {
-        println!("🏗️  Generating CI scaffolding...");
-        write_file_if_missing(Path::new("ci-eval.yaml"), crate::templates::CI_EVAL_YAML)?;
+        report.progress("🏗️  Generating CI scaffolding...");
         write_file_if_missing(
+            &mut report,
+            Path::new("ci-eval.yaml"),
+            crate::templates::CI_EVAL_YAML,
+        )?;
+        write_file_if_missing(
+            &mut report,
             Path::new("schemas/ci_answer.schema.json"),
             crate::templates::CI_SCHEMA_JSON,
         )?;
         write_file_if_missing(
+            &mut report,
             Path::new("traces/ci.jsonl"),
             crate::templates::CI_TRACES_JSONL,
         )?;
@@ -107,12 +125,14 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
         match provider {
             "gitlab" => {
                 write_file_if_missing(
+                    &mut report,
                     Path::new(".gitlab-ci.yml"),
                     crate::templates::GITLAB_CI_YML,
                 )?;
             }
             _ => {
                 write_file_if_missing(
+                    &mut report,
                     Path::new(".github/workflows/assay.yml"),
                     crate::templates::CI_WORKFLOW_YML,
                 )?;
@@ -120,23 +140,32 @@ pub async fn run(args: InitArgs) -> anyhow::Result<i32> {
         }
     }
 
-    println!("✅  Initialization complete.");
+    report.progress("✅  Initialization complete.");
+    let config = args.config.display().to_string();
     if args.hello_trace {
         let hello_trace = hello_trace_path
             .as_ref()
-            .expect("hello trace path must exist when --hello-trace is set");
-        println!(
-            "   Note: hello trace uses demo prompt/response text only; treat real traces as potentially sensitive."
-        );
-        println!(
-            "   Next: assay validate --config {} --trace-file {}",
-            args.config.display(),
-            hello_trace.display()
-        );
+            .expect("hello trace path must exist when --hello-trace is set")
+            .display()
+            .to_string();
+        let argv = [
+            "assay",
+            "validate",
+            "--config",
+            config.as_str(),
+            "--trace-file",
+            hello_trace.as_str(),
+        ];
+        let human = [
+            "   Note: hello trace uses demo prompt/response text only; treat real traces as potentially sensitive.".to_string(),
+            report.next_line(&argv),
+        ];
+        report.succeed(&argv, &human)
     } else {
-        println!("   Next: assay validate");
+        let argv = ["assay", "validate"];
+        let human = [report.next_line(&argv)];
+        report.succeed(&argv, &human)
     }
-    Ok(exit_codes::OK)
 }
 
 fn hello_trace_path_for_config(config_path: &Path) -> PathBuf {
@@ -149,15 +178,19 @@ fn hello_trace_path_for_config(config_path: &Path) -> PathBuf {
     }
 }
 
-fn write_file_if_missing(path: &Path, content: &str) -> anyhow::Result<()> {
+fn write_file_if_missing(
+    report: &mut InitReport,
+    path: &Path,
+    content: &str,
+) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     if !path.exists() {
         std::fs::write(path, content)?;
-        println!("   Created {}", path.display());
+        report.record_created(path, None);
     } else {
-        println!("   Skipped {} (exists)", path.display());
+        report.record_skipped(path);
     }
     Ok(())
 }
@@ -166,16 +199,28 @@ fn write_file_if_missing(path: &Path, content: &str) -> anyhow::Result<()> {
 // init --from-trace: Generate policy + config from existing trace
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn run_from_trace(args: &InitArgs, trace_path: &std::path::Path) -> anyhow::Result<i32> {
+fn run_from_trace(
+    args: &InitArgs,
+    trace_path: &std::path::Path,
+    mut report: InitReport,
+) -> anyhow::Result<i32> {
     use super::generate;
     use super::heuristics::HeuristicsConfig;
 
     if !trace_path.exists() {
-        anyhow::bail!("trace file not found: {}", trace_path.display());
+        let path = trace_path.display().to_string();
+        return report.fail(RunOutcome::from_reason(
+            ReasonCode::ETraceNotFound,
+            Some(format!("trace file not found: {path}")),
+            Some(path.as_str()),
+        ));
     }
 
     let trace_pathbuf = trace_path.to_path_buf();
-    println!("🔍 Generating policy from trace: {}", trace_path.display());
+    report.progress(&format!(
+        "🔍 Generating policy from trace: {}",
+        trace_path.display()
+    ));
 
     // 1. Read and aggregate events
     let events = generate::read_events(&trace_pathbuf)?;
@@ -183,11 +228,11 @@ fn run_from_trace(args: &InitArgs, trace_path: &std::path::Path) -> anyhow::Resu
         anyhow::bail!("no events found in trace file: {}", trace_path.display());
     }
     let agg = generate::aggregate(&events);
-    println!(
+    report.progress(&format!(
         "   Aggregated {} unique entries from {} events",
         agg.total(),
         events.len()
-    );
+    ));
 
     // 2. Generate policy
     let heur_cfg = HeuristicsConfig::default();
@@ -209,12 +254,14 @@ fn run_from_trace(args: &InitArgs, trace_path: &std::path::Path) -> anyhow::Resu
     // 3. Write policy.yaml
     let policy_path = Path::new("policy.yaml");
     if policy_path.exists() {
-        println!("   Skipped policy.yaml (exists)");
+        report.record_skipped(policy_path);
     } else {
         std::fs::write(policy_path, &policy_yaml)?;
-        println!(
-            "   Created policy.yaml ({} allow, {} needs_review, {} deny)",
-            allow_count, review_count, deny_count
+        report.record_created(
+            policy_path,
+            Some(&format!(
+                "{allow_count} allow, {review_count} needs_review, {deny_count} deny"
+            )),
         );
     }
 
@@ -232,26 +279,32 @@ tests:
       flags: ["s"]
 "#
     .to_string();
-    write_file_if_missing(&args.config, &config_content)?;
+    write_file_if_missing(&mut report, &args.config, &config_content)?;
 
     // 5. Gitignore
     if args.gitignore {
-        write_file_if_missing(Path::new(".gitignore"), crate::templates::GITIGNORE)?;
+        write_file_if_missing(
+            &mut report,
+            Path::new(".gitignore"),
+            crate::templates::GITIGNORE,
+        )?;
     }
 
     // 6. CI scaffolding (reuse existing logic)
     if args.ci.is_some() {
-        println!("🏗️  Generating CI scaffolding...");
+        report.progress("🏗️  Generating CI scaffolding...");
         let provider = args.ci.as_deref().unwrap_or("github");
         match provider {
             "gitlab" => {
                 write_file_if_missing(
+                    &mut report,
                     Path::new(".gitlab-ci.yml"),
                     crate::templates::GITLAB_CI_YML,
                 )?;
             }
             _ => {
                 write_file_if_missing(
+                    &mut report,
                     Path::new(".github/workflows/assay.yml"),
                     crate::templates::CI_WORKFLOW_YML,
                 )?;
@@ -259,18 +312,21 @@ tests:
         }
     }
 
-    println!("\n✅  Initialization complete.");
-    println!(
-        "\n   Next: assay validate --config {} --trace-file {}",
-        args.config.display(),
-        trace_path.display()
-    );
-    println!(
-        "   CI:   assay ci --config {} --trace-file {}",
-        args.config.display(),
-        trace_path.display()
-    );
-    println!("\n   Tip: For EU AI Act compliance scanning, add: --pack eu-ai-act-baseline");
-
-    Ok(exit_codes::OK)
+    report.progress("\n✅  Initialization complete.");
+    let config = args.config.display().to_string();
+    let trace = trace_path.display().to_string();
+    let argv = [
+        "assay",
+        "validate",
+        "--config",
+        config.as_str(),
+        "--trace-file",
+        trace.as_str(),
+    ];
+    let human = [
+        format!("\n{}", report.next_line(&argv)),
+        format!("   CI:   assay ci --config {config} --trace-file {trace}"),
+        "\n   Tip: For EU AI Act compliance scanning, add: --pack eu-ai-act-baseline".to_string(),
+    ];
+    report.succeed(&argv, &human)
 }

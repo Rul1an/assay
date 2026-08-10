@@ -37,6 +37,11 @@ pub struct InitArgs {
     /// Generate a ready-to-run hello trace + smoke suite scaffold
     #[arg(long, conflicts_with = "from_trace")]
     pub hello_trace: bool,
+
+    /// Output format. `text` is the human progress stream; `json` publishes one
+    /// `assay.init_report.v0` document on stdout instead.
+    #[arg(long, value_enum, default_value_t = super::common::OutputFormat::Text)]
+    pub format: super::common::OutputFormat,
 }
 
 #[derive(clap::Args, Debug, Clone)]
