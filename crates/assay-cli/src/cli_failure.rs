@@ -72,6 +72,47 @@ impl CliFailure {
         })
     }
 
+    /// Classify failures where the bundle could not be opened or read to completion.
+    ///
+    /// If the evidence verifier supplied a typed code, that code is authoritative. Searching the
+    /// rest of its source chain for an I/O error would misclassify a contract or content finding
+    /// that merely carries an I/O source.
+    pub(crate) fn evidence_unreadable(path: &Path, error: &anyhow::Error) -> Option<Self> {
+        use assay_evidence::ErrorCode;
+
+        let verifier = error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<assay_evidence::VerifyError>());
+        let unreadable = match verifier {
+            Some(verifier) => matches!(
+                verifier.code,
+                ErrorCode::IntegrityIo | ErrorCode::IntegrityGzip | ErrorCode::IntegrityTar
+            ),
+            None => {
+                error.downcast_ref::<std::io::Error>().is_some()
+                    || error
+                        .chain()
+                        .any(|cause| cause.downcast_ref::<std::io::Error>().is_some())
+            }
+        };
+        if !unreadable {
+            return None;
+        }
+
+        let path = path.display().to_string();
+        let message = format!("evidence bundle {path} could not be opened or read: {error}");
+        let outcome = RunOutcome::from_reason(
+            ReasonCode::EEvidenceUnreadable,
+            Some(message),
+            Some(path.as_str()),
+        );
+        Some(Self {
+            outcome,
+            source: "evidence",
+            context: serde_json::json!({ "path": path }),
+        })
+    }
+
     pub(crate) fn emit(self, machine_output: bool) -> i32 {
         emit_operator_diagnostic(&self.diagnostic());
         if machine_output {
@@ -184,5 +225,58 @@ mod tests {
                 "{code} establishes no recorded-value mismatch"
             );
         }
+    }
+
+    #[test]
+    fn evidence_unreadable_classification_excludes_content_and_contract_findings() {
+        let direct_io = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::NotFound));
+        let failure = CliFailure::evidence_unreadable(Path::new("missing.bundle"), &direct_io)
+            .expect("a direct open failure must classify as unreadable");
+        assert_eq!(failure.outcome.reason_code, "E_EVIDENCE_UNREADABLE");
+
+        for code in [
+            ErrorCode::IntegrityIo,
+            ErrorCode::IntegrityGzip,
+            ErrorCode::IntegrityTar,
+        ] {
+            assert!(
+                CliFailure::evidence_unreadable(
+                    Path::new("bundle.tar.gz"),
+                    &verifier_error(ErrorClass::Integrity, code),
+                )
+                .is_some(),
+                "{code} must classify as unreadable"
+            );
+        }
+
+        for (class, code) in [
+            (ErrorClass::Integrity, ErrorCode::IntegrityManifestHash),
+            (ErrorClass::Contract, ErrorCode::ContractInvalidJson),
+            (ErrorClass::Limits, ErrorCode::LimitBundleBytes),
+            (ErrorClass::Security, ErrorCode::SecurityPathTraversal),
+        ] {
+            assert!(
+                CliFailure::evidence_unreadable(
+                    Path::new("bundle.tar.gz"),
+                    &verifier_error(class, code),
+                )
+                .is_none(),
+                "{code} is not an unreadable-bundle finding"
+            );
+        }
+
+        let contract_with_io_source = anyhow::Error::new(
+            VerifyError::new(
+                ErrorClass::Contract,
+                ErrorCode::ContractInvalidJson,
+                "invalid event",
+            )
+            .with_source(std::io::Error::from(std::io::ErrorKind::UnexpectedEof)),
+        );
+        assert!(
+            CliFailure::evidence_unreadable(Path::new("bundle.tar.gz"), &contract_with_io_source,)
+                .is_none(),
+            "a typed contract code must not be reclassified from its nested I/O source"
+        );
     }
 }

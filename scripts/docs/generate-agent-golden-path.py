@@ -384,10 +384,23 @@ STEPS: list[dict[str, object]] = [
                     "carries does not match what it records"
                 ),
             ),
+            outcome(
+                "unreadable",
+                "unreadable bundle",
+                2,
+                stdout("json", "assay.run_summary.v1"),
+                ["evidence", "show", "<bundle>", "--format", "json"],
+                reason_code="E_EVIDENCE_UNREADABLE",
+                next_step=(
+                    'Run argv: ["assay","evidence","show","<bundle>",'
+                    '"--format","json"]'
+                ),
+            ),
         ],
         "stdout_summary": (
             "Success parses as an object containing `manifest` and `events`. A recorded-value "
-            "mismatch parses as `assay.run_summary.v1` with `E_EVIDENCE_INTEGRITY`."
+            "mismatch parses as `assay.run_summary.v1` with `E_EVIDENCE_INTEGRITY`; an "
+            "unreadable path uses `E_EVIDENCE_UNREADABLE`."
         ),
         "failure_summary": (
             "Only the four verifier codes that establish a recorded-value mismatch map to "

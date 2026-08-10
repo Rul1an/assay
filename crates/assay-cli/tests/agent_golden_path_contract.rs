@@ -408,7 +408,7 @@ fn completed_test_failure_is_a_run_report_not_a_diagnosis() {
 }
 
 #[test]
-fn bundle_inspection_json_publishes_integrity_failure_on_stdout() {
+fn bundle_inspection_json_publishes_typed_failures_on_stdout() {
     let dir = tempfile::tempdir().expect("tempdir");
     let valid = corpus_vector(CorpusVector::Valid);
     let expected_success = expected_outcome("evidence-inspection", "valid");
@@ -445,6 +445,48 @@ fn bundle_inspection_json_publishes_integrity_failure_on_stdout() {
         "integrity remediation must match the generated contract"
     );
     assert!(!next_step.trim().is_empty());
+
+    let missing = dir.path().join("missing bundle.tar.gz");
+    let expected_unreadable = expected_outcome("evidence-inspection", "unreadable");
+    let unreadable = assay_contract(
+        dir.path(),
+        &expected_unreadable,
+        &[("<bundle>", missing.to_str().expect("UTF-8 path"))],
+    );
+    assert_exit(
+        &unreadable,
+        &expected_unreadable,
+        "evidence show unreadable",
+    );
+    let unreadable_json = stdout_json(
+        &unreadable,
+        &expected_unreadable,
+        "evidence show unreadable",
+    );
+    assert_eq!(unreadable_json["reason_code"], "E_EVIDENCE_UNREADABLE");
+    assert_ne!(unreadable_json["reason_code"], "E_EVIDENCE_INTEGRITY");
+    let expected_next_step = expected_unreadable["next_step"]
+        .as_str()
+        .expect("contract unreadable next_step")
+        .replace("<bundle>", missing.to_str().expect("UTF-8 path"));
+    assert_eq!(unreadable_json["next_step"], expected_next_step);
+    let recovery = unreadable_json["next_step"]
+        .as_str()
+        .expect("unreadable bundle next_step")
+        .strip_prefix("Run argv: ")
+        .expect("unreadable bundle recovery must be JSON argv");
+    let argv: Vec<String> = serde_json::from_str(recovery).expect("recovery argv must parse");
+    assert_eq!(
+        argv,
+        [
+            "assay",
+            "evidence",
+            "show",
+            missing.to_str().expect("UTF-8 path"),
+            "--format",
+            "json",
+        ]
+    );
 }
 
 #[test]
@@ -492,7 +534,7 @@ fn every_cli_contract_outcome_is_executed_once() {
             init_json_publishes_the_registered_reason_and_next_step,
             policy_validation_json_carries_success_and_failure_contracts,
             completed_test_failure_is_a_run_report_not_a_diagnosis,
-            bundle_inspection_json_publishes_integrity_failure_on_stdout,
+            bundle_inspection_json_publishes_typed_failures_on_stdout,
             offline_profile_verifier_keeps_both_outcomes_on_stdout,
         ],
     );
