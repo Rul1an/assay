@@ -37,12 +37,12 @@ async fn main() {
     }
     env_logger::init();
     let cli = Cli::parse();
-    let machine_output = cli.machine_output();
+    let machine_output_verify_enabled = cli.machine_output_verify_enabled();
     let legacy_mode = std::env::var("MCP_CONFIG_LEGACY").ok().as_deref() == Some("1");
     let code = match dispatch(cli, legacy_mode).await {
         Ok(code) => code,
         Err(error) => match error.downcast::<CliFailure>() {
-            Ok(failure) => failure.emit(machine_output),
+            Ok(failure) => failure.emit(machine_output_verify_enabled),
             Err(error) => {
                 eprintln!("fatal: {error:?}");
                 2 // CONFIG_ERROR from cli::commands::exit_codes::CONFIG_ERROR ideally, but hardcoded 2 is safe here

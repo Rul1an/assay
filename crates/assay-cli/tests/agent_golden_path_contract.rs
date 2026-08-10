@@ -169,12 +169,6 @@ fn stdout_text(output: &Output, expected: &Value, context: &str) -> String {
         .unwrap_or_else(|error| panic!("{context} stdout is not UTF-8: {error}"))
 }
 
-fn assert_empty_stdout(output: &Output, expected: &Value, context: &str) {
-    assert_stdout_kind(expected, "empty");
-    assert!(expected["stdout"]["document"].is_null());
-    assert!(output.stdout.is_empty(), "{context} stdout is not empty");
-}
-
 fn stdout_json(output: &Output, expected: &Value, context: &str) -> Value {
     assert_stdout_kind(expected, "json");
     let document = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
@@ -213,6 +207,11 @@ fn corpus_vector(vector: CorpusVector) -> std::path::PathBuf {
     workspace_root()
         .join("conformance/privileged-mcp-action-v0/vectors")
         .join(name)
+}
+
+fn invalid_contract_bundle() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/evidence/invalid-manifest.bundle.tar.gz")
 }
 
 #[test]
@@ -414,7 +413,7 @@ fn completed_test_failure_is_a_run_report_not_a_diagnosis() {
 }
 
 #[test]
-fn bundle_inspection_json_disappears_on_integrity_failure() {
+fn bundle_inspection_json_publishes_typed_failures_on_stdout() {
     let dir = tempfile::tempdir().expect("tempdir");
     let valid = corpus_vector(CorpusVector::Valid);
     let expected_success = expected_outcome("evidence-inspection", "valid");
@@ -427,6 +426,41 @@ fn bundle_inspection_json_disappears_on_integrity_failure() {
     let success_json = stdout_json(&success, &expected_success, "evidence show success");
     assert_eq!(success_json["manifest"]["event_count"], 2);
     assert!(success_json["events"].is_array());
+    assert_eq!(success_json["verify_mode"], "enabled");
+
+    let expected_skipped = expected_outcome("evidence-inspection", "verification-disabled");
+    let skipped = assay_contract(
+        dir.path(),
+        &expected_skipped,
+        &[(
+            "<bundle>",
+            corpus_vector(CorpusVector::Tampered)
+                .to_str()
+                .expect("UTF-8 path"),
+        )],
+    );
+    assert_exit(&skipped, &expected_skipped, "evidence show --no-verify");
+    let skipped_json = stdout_json(&skipped, &expected_skipped, "evidence show --no-verify");
+    assert_eq!(skipped_json["verify_mode"], "disabled");
+
+    let missing_unverified = assay(
+        dir.path(),
+        &[
+            "evidence",
+            "show",
+            "missing.bundle.tar.gz",
+            "--format",
+            "json",
+            "--no-verify",
+        ],
+    );
+    assert_eq!(missing_unverified.status.code(), Some(2));
+    let missing_unverified_json: Value = serde_json::from_slice(&missing_unverified.stdout)
+        .expect("unreadable --no-verify stdout must be JSON");
+    assert_eq!(
+        missing_unverified_json["provenance"]["verify_mode"],
+        "disabled"
+    );
 
     let tampered = corpus_vector(CorpusVector::Tampered);
     let expected_failure = expected_outcome("evidence-inspection", "tampered");
@@ -436,8 +470,111 @@ fn bundle_inspection_json_disappears_on_integrity_failure() {
         &[("<bundle>", tampered.to_str().expect("UTF-8 path"))],
     );
     assert_exit(&failure, &expected_failure, "evidence show failure");
-    assert_empty_stdout(&failure, &expected_failure, "evidence show failure");
-    assert_gap(&expected_failure, 2164);
+    let failure_json = stdout_json(&failure, &expected_failure, "evidence show failure");
+    assert_eq!(
+        failure_json["reason_code"], expected_failure["reason_code"],
+        "integrity failure must publish the registered contract reason"
+    );
+    assert_eq!(failure_json["exit_code"], 2);
+    let next_step = failure_json["next_step"]
+        .as_str()
+        .expect("integrity failure next_step");
+    assert_eq!(
+        Some(next_step),
+        expected_failure["next_step"].as_str(),
+        "integrity remediation must match the generated contract"
+    );
+    assert!(!next_step.trim().is_empty());
+
+    let missing = dir.path().join("missing bundle.tar.gz");
+    let expected_unreadable = expected_outcome("evidence-inspection", "unreadable");
+    let unreadable = assay_contract(
+        dir.path(),
+        &expected_unreadable,
+        &[("<bundle>", missing.to_str().expect("UTF-8 path"))],
+    );
+    assert_exit(
+        &unreadable,
+        &expected_unreadable,
+        "evidence show unreadable",
+    );
+    let unreadable_json = stdout_json(
+        &unreadable,
+        &expected_unreadable,
+        "evidence show unreadable",
+    );
+    assert_eq!(unreadable_json["reason_code"], "E_EVIDENCE_UNREADABLE");
+    assert_ne!(unreadable_json["reason_code"], "E_EVIDENCE_INTEGRITY");
+    let expected_next_step = expected_unreadable["next_step"]
+        .as_str()
+        .expect("contract unreadable next_step")
+        .replace("<bundle>", missing.to_str().expect("UTF-8 path"));
+    assert_eq!(unreadable_json["next_step"], expected_next_step);
+    let recovery = unreadable_json["next_step"]
+        .as_str()
+        .expect("unreadable bundle next_step")
+        .strip_prefix("Run argv: ")
+        .expect("unreadable bundle recovery must be JSON argv");
+    let argv: Vec<String> = serde_json::from_str(recovery).expect("recovery argv must parse");
+    assert_eq!(
+        argv,
+        [
+            "assay",
+            "evidence",
+            "show",
+            missing.to_str().expect("UTF-8 path"),
+            "--format",
+            "json",
+        ]
+    );
+
+    let invalid_contract = invalid_contract_bundle();
+    let expected_contract_failure =
+        expected_outcome("evidence-inspection", "format-contract-failure");
+    let contract_failure = assay_contract(
+        dir.path(),
+        &expected_contract_failure,
+        &[("<bundle>", invalid_contract.to_str().expect("UTF-8 path"))],
+    );
+    assert_exit(
+        &contract_failure,
+        &expected_contract_failure,
+        "evidence show format-contract failure",
+    );
+    assert!(contract_failure.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&contract_failure.stderr).contains("ContractInvalidJson"));
+    assert_gap(&expected_contract_failure, 2219);
+}
+
+#[test]
+fn evidence_inspection_contract_discloses_the_deferred_format_contract_gap() {
+    let contract = contract();
+    let step = contract["steps"]
+        .as_array()
+        .expect("contract steps array")
+        .iter()
+        .find(|step| step["id"] == "evidence-inspection")
+        .expect("evidence inspection step");
+    let failure_summary = step["failure_summary"]
+        .as_str()
+        .expect("evidence inspection failure summary");
+    assert!(
+        failure_summary.contains("gap #2219"),
+        "the residual format-contract failure must remain disclosed"
+    );
+    assert!(
+        failure_summary.contains("empty stdout"),
+        "the residual gap must state its machine-channel consequence"
+    );
+    let stdout_summary = step["stdout_summary"]
+        .as_str()
+        .expect("evidence inspection stdout summary");
+    assert!(
+        stdout_summary.contains("verify_mode")
+            && stdout_summary.contains("enabled")
+            && stdout_summary.contains("disabled"),
+        "the shipped contract must publish the verification-mode field and vocabulary"
+    );
 }
 
 #[test]
@@ -485,7 +622,7 @@ fn every_cli_contract_outcome_is_executed_once() {
             init_json_publishes_the_registered_reason_and_next_step,
             policy_validation_json_carries_success_and_failure_contracts,
             completed_test_failure_is_a_run_report_not_a_diagnosis,
-            bundle_inspection_json_disappears_on_integrity_failure,
+            bundle_inspection_json_publishes_typed_failures_on_stdout,
             offline_profile_verifier_keeps_both_outcomes_on_stdout,
         ],
     );

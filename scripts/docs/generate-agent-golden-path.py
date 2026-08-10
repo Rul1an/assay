@@ -373,21 +373,64 @@ STEPS: list[dict[str, object]] = [
                 ["evidence", "show", "<bundle>", "--format", "json"],
             ),
             outcome(
+                "verification-disabled",
+                "Valid with verification disabled",
+                0,
+                stdout("json"),
+                [
+                    "evidence",
+                    "show",
+                    "<bundle>",
+                    "--format",
+                    "json",
+                    "--no-verify",
+                ],
+            ),
+            outcome(
                 "tampered",
                 "integrity failure",
                 2,
+                stdout("json", "assay.run_summary.v1"),
+                ["evidence", "show", "<bundle>", "--format", "json"],
+                reason_code="E_EVIDENCE_INTEGRITY",
+                next_step=(
+                    "Obtain an undamaged bundle from its producer; the content this bundle "
+                    "carries does not match what it records"
+                ),
+            ),
+            outcome(
+                "unreadable",
+                "unreadable bundle",
+                2,
+                stdout("json", "assay.run_summary.v1"),
+                ["evidence", "show", "<bundle>", "--format", "json"],
+                reason_code="E_EVIDENCE_UNREADABLE",
+                next_step=(
+                    'Run argv: ["assay","evidence","show","<bundle>",'
+                    '"--format","json"]'
+                ),
+            ),
+            outcome(
+                "format-contract-failure",
+                "format-contract failure",
+                2,
                 stdout("empty"),
                 ["evidence", "show", "<bundle>", "--format", "json"],
-                gap_issue=2164,
+                gap_issue=2219,
             ),
         ],
         "stdout_summary": (
-            "Success parses as an object containing `manifest` and `events`. Integrity "
-            "failure produces no stdout."
+            "Success parses as an object containing `manifest`, `events`, and `verify_mode`; "
+            "the registered values are `enabled` and `disabled`, with `--no-verify` producing "
+            "`disabled`. A recorded-value "
+            "mismatch parses as `assay.run_summary.v1` with `E_EVIDENCE_INTEGRITY`; an "
+            "unreadable path uses `E_EVIDENCE_UNREADABLE`."
         ),
         "failure_summary": (
-            "No JSON failure report, `reason_code`, or `next_step`: "
-            "[gap #2164](https://github.com/Rul1an/assay/issues/2164)."
+            "Only the four verifier codes that establish a recorded-value mismatch map to "
+            "`E_EVIDENCE_INTEGRITY`; I/O, gzip, and tar failures use "
+            "`E_EVIDENCE_UNREADABLE`. Format-contract failures still exit `2` with empty "
+            "stdout: [gap #2219](https://github.com/Rul1an/assay/issues/2219)."
         ),
     },
     {
