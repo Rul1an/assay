@@ -64,11 +64,11 @@ After apply, doctor re-runs diagnostics and reports remaining error count.
 
 | Code | Meaning |
 |------|---------|
-| `0` | No blocking diagnostics (or fixes resolved them). |
+| `0` | On the text channel: no blocking diagnostics (or fixes resolved them). With `--format json` the code is weaker than that — it also covers a report carrying an error-severity diagnostic, and one where no config was checked at all. Read `config_check.status` and `data_diagnostics[].severity`; see the limits below. |
 | `1` | Diagnostics remain, fix failed, or unsupported fix mode usage. Also returned when `--fix` is given for a config that will not load ([#2209](https://github.com/Rul1an/assay/issues/2209)). |
 | `2` | An explicit `--config` will not load — absent or unreadable alike — and `--fix` was not given. Same class `assay run` returns for the same file. |
 
-Two limits of this table are worth stating rather than leaving a reader to discover them:
+Three limits of this table are worth stating rather than leaving a reader to discover them:
 
 - `--fix` and no `--fix` disagree on the class for the same unloadable config, `1` against `2`. The
   `--fix` returns report the outcome of a repair attempt rather than classifying the config, so
@@ -77,6 +77,11 @@ Two limits of this table are worth stating rather than leaving a reader to disco
   The text path returns `1` in that case and the JSON path returns `0`;
   [#2215](https://github.com/Rul1an/assay/issues/2215) owns the reconciliation. Read
   `data_diagnostics[].severity` rather than the exit code alone.
+- Exit `0` also covers the run that checked no config at all. With no `--config` and no `eval.yaml`
+  in the invocation directory, the text path prints `Policy Check: SKIPPED` and the JSON report
+  carries `config_check.status: "skipped"` and no `data_diagnostics` key. `checked` is the only
+  status under which an empty or absent diagnostics list describes a clean config; `failed` is the
+  exit-`2` row above.
 
 ---
 
