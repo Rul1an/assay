@@ -145,8 +145,10 @@ STEPS: list[dict[str, object]] = [
             "the top-level `reason_code` and `next_step` alongside `config_error.code`."
         ),
         "failure_summary": (
-            "An unreadable explicit config is exit `2` and names the failing file in a "
-            "concrete JSON argv next step, the same class `assay run` gives the same file."
+            "An explicit config that will not load, absent or unreadable alike, is exit `2` "
+            "and names the failing file in a concrete JSON argv next step, the same exit "
+            "class `assay run` gives the same file. The reason code is not always the same "
+            "one, per the non-claim below."
         ),
     },
     {
