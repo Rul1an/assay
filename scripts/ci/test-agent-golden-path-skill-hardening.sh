@@ -1318,7 +1318,7 @@ import os
 from pathlib import Path
 
 path = Path(os.environ["CASE_ROOT"]) / ".github/workflows/kernel-matrix.yml"
-source = "run: cargo install --locked cargo-deny"
+source = "run: ./scripts/ci/install-cargo-deny.sh"
 replacement = "run: echo inline-parser-sentinel"
 text = path.read_text(encoding="utf-8")
 if text.count(source) != 1:
