@@ -391,15 +391,34 @@ fn the_evidence_integrity_boundary_reads_the_same_in_the_spec_and_the_code() {
 fn the_doc_comment_transports_the_boundary_rather_than_restating_it() {
     // `include_str!` is what makes the equality above cover the doc comment too. Replace it with a
     // hand-written `///` block and the row could be pinned while the definition drifts.
+    //
+    // The whole doc block is collected, not the line nearest the declaration. Checking only that
+    // line asserts "the include is present, adjacent to the variant", which is a neighbouring
+    // property: rustc concatenates `///` lines and `#[doc]` attributes on one item in source order,
+    // so four `///` lines placed *above* the include documented this variant, rendered ahead of the
+    // boundary text in the shipped rustdoc, and left that line untouched. The same gap re-admitted a
+    // withdrawn "Merkle root ... inclusion proofs" claim past the test written to forbid it, because
+    // that test reads the fragment and the claim was not in the fragment. Asserting the block is
+    // exactly the include says "the include is the only thing that documents this variant", which is
+    // the property the transport claim needs.
     let src = read("crates/assay-cli/src/exit_codes.rs");
     let head = src
         .split_once("    EEvidenceIntegrity,")
         .map(|(before_decl, _)| before_decl)
         .expect("no `EEvidenceIntegrity` variant in the enum");
-    let last = head.lines().next_back().unwrap_or_default().trim();
+    let mut doc_block: Vec<&str> = head
+        .lines()
+        .rev()
+        .map(str::trim)
+        .take_while(|line| line.starts_with("///") || line.starts_with("#[doc"))
+        .collect();
+    doc_block.reverse();
     assert_eq!(
-        last, "#[doc = include_str!(\"exit_codes/evidence_integrity_boundary.md\")]",
-        "`EEvidenceIntegrity` is documented by {last:?} rather than by including {BOUNDARY}"
+        doc_block,
+        vec!["#[doc = include_str!(\"exit_codes/evidence_integrity_boundary.md\")]"],
+        "`EEvidenceIntegrity` is documented by {doc_block:?} rather than by including {BOUNDARY} and \
+         nothing else. Anything beside the include is a second copy of the rule, free to contradict \
+         it while the §5.1 row stays correct. Plain `//` comments are not doc text and are fine."
     );
 }
 
