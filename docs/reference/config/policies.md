@@ -267,6 +267,12 @@ tool_pins:
     meta_hash: "42f5df3e..."
 ```
 
+`schema_hash` is the hex SHA-256 of the RFC 8785 (JCS) canonical bytes of the tool's `inputSchema`,
+or of `null` when the tool declares none. `meta_hash` is the hex SHA-256 of the description bytes
+verbatim, or of the empty string when there is none. Because `schema_hash` is taken over canonical
+bytes, a server that reorders its keys or re-emits `100` as `1e2` does not drift; a changed schema
+does.
+
 ## Legacy v1 Compatibility
 
 Legacy v1 policies use `constraints:`:
