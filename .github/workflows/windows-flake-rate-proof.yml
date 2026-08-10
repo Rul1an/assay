@@ -1,0 +1,146 @@
+# Windows flake-rate proof producer.
+#
+# Contract: docs/reference/ci/windows-flake-rate-proof.md. An instrument, not a
+# gate. It mirrors host-capability-proof.yml: dispatch-only, produces a measurement
+# on a host the developer cannot reach, and uploads an artifact that *is* the proof.
+#
+# It makes no pass/fail claim about any change. A red required check is never
+# discharged by a green proof here, and this workflow is deliberately absent from
+# the `CI` rollup and from every required context.
+#
+# Why a rate and not an outcome: one green run cannot separate "fixed" from "won
+# the race this time", so every iteration is recorded and the artifact reports the
+# rate behind them. The `load` arms make the load hypothesis directly testable —
+# the same SHA measured alone and under the concurrency a full `cargo test`
+# produces — rather than inferred from which branches happen to be red.
+name: windows-flake-rate-proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref or SHA whose tree is measured"
+        required: true
+        type: string
+      package:
+        description: "cargo package (-p)"
+        required: true
+        default: assay-mcp-server
+        type: string
+      test_target:
+        description: "Integration test target (--test)"
+        required: true
+        default: agent_golden_path_contract
+        type: string
+      filter:
+        description: "libtest name filter"
+        required: false
+        default: bounded_process
+        type: string
+      iterations:
+        description: "How many times to run the selection"
+        required: true
+        default: "20"
+        type: string
+      load:
+        description: "Concurrent load arm(s) to measure"
+        required: true
+        default: both
+        type: choice
+        options:
+          - none
+          - workspace-tests
+          - both
+  # Bootstrap lane. `workflow_dispatch` resolves the workflow from the default
+  # branch, so an unmerged instrument cannot be dispatched — and measuring an
+  # unmerged fix is the whole purpose. Pushing to this reserved namespace runs
+  # the definition from that branch. The namespace carries no pull request, so
+  # this can never attach a check to one, and it never matches `main`.
+  push:
+    branches:
+      - "proof/windows-flake-rate/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Serialize arms so a load arm never becomes another arm's ambient load.
+  group: windows-flake-rate-proof
+  cancel-in-progress: false
+
+jobs:
+  arms:
+    name: "Measure (load=${{ matrix.load }})"
+    runs-on: windows-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        load: ${{ (github.event_name == 'push' || inputs.load == 'both') && fromJSON('["none","workspace-tests"]') || fromJSON(format('["{0}"]', inputs.load)) }}
+    steps:
+      - name: Checkout the tree under measurement
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - name: Measure
+        shell: bash
+        env:
+          # A push-triggered bootstrap run has no inputs, so the defaults live
+          # here once and both triggers read them from this one place.
+          PROOF_PACKAGE: ${{ inputs.package || 'assay-mcp-server' }}
+          PROOF_TEST_TARGET: ${{ inputs.test_target || 'agent_golden_path_contract' }}
+          PROOF_FILTER: ${{ inputs.filter || 'bounded_process' }}
+          PROOF_ITERATIONS: ${{ inputs.iterations || '20' }}
+          PROOF_REF_INPUT: ${{ inputs.ref || github.ref }}
+        run: |
+          set -euo pipefail
+          mkdir -p proof-out
+          python3 scripts/ci/windows_flake_rate_proof.py \
+            --ref-input "$PROOF_REF_INPUT" \
+            --workflow-path ".github/workflows/windows-flake-rate-proof.yml" \
+            --package "$PROOF_PACKAGE" \
+            --test-target "$PROOF_TEST_TARGET" \
+            --filter "$PROOF_FILTER" \
+            --iterations "$PROOF_ITERATIONS" \
+            --load "${{ matrix.load }}" \
+            --out "proof-out/windows-flake-rate-${{ matrix.load }}.json"
+
+      - name: Summarize
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          file="proof-out/windows-flake-rate-${{ matrix.load }}.json"
+          if [ ! -f "$file" ]; then
+            echo "- no proof produced for load=${{ matrix.load }}" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python3 - "$file" >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          import json, sys
+          proof = json.load(open(sys.argv[1], encoding="utf-8"))
+          manifest, runner, summary = proof["manifest"], proof["runner"], proof["summary"]
+          print(f"### load={proof['load']['mode']}")
+          print(f"- claim ceiling: `{manifest['claim_ceiling']}`")
+          print(f"- head_sha: `{manifest['head_sha']}`")
+          for path, digest in manifest["subject_digests"].items():
+              print(f"- `{path}` blob: `{digest.get('blob_oid','')}`")
+          print(f"- runner image: {runner['image_os']} {runner['image_version']}")
+          print(f"- toolchain: {proof['toolchain']['rustc']}")
+          print(f"- failed runs: {summary['failed_runs']} / {summary['measured']} measured"
+                f" (rate {summary['failure_rate']})")
+          if summary["could_not_measure"]:
+              print(f"- iterations that measured nothing: {summary['could_not_measure']}")
+          for name, count in sorted(summary["failures_by_test"].items()):
+              print(f"  - {name}: {count}")
+          EOF
+
+      - name: Upload proof artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-flake-rate-proof-${{ github.run_id }}-${{ matrix.load }}
+          path: proof-out/
+          if-no-files-found: error
+          retention-days: 90
