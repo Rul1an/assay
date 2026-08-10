@@ -17,12 +17,16 @@ fn next_rid() -> String {
     format!("r-{n:06}")
 }
 
-/// Modern MCP revision retained only for source compatibility with `assay-mcp-server` 5.0.0.
+/// MCP revision `2026-07-28`, which `assay-mcp-server` does not implement.
 ///
-/// This server does not implement or advertise this revision. Modern requests are refused with
-/// the supported legacy set until the complete modern wire contract is implemented.
+/// Retained at its 5.0.0 path, type, and value only so that code compiled against
+/// `assay-mcp-server` 5.0.0 keeps compiling. It is an API compatibility artifact, not a capability
+/// claim: the constant is absent from the accepted version set, is never advertised on the wire,
+/// and no accept or dispatch path reads it. A request declaring `2026-07-28` in `_meta` is refused
+/// with a typed `-32022` before dispatch, and `server/discover`, which that revision makes
+/// mandatory, returns `-32601`.
 #[deprecated(
-    note = "assay-mcp-server does not implement this revision; use the legacy initialize handshake"
+    note = "assay-mcp-server does not implement MCP revision 2026-07-28; this constant is retained only for API compatibility with 5.0.0"
 )]
 pub const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 

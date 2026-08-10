@@ -5,9 +5,16 @@ use std::process::{Command, Output, Stdio};
 
 const LATEST_LEGACY_VERSION: &str = "2025-11-25";
 
+/// `MODERN_PROTOCOL_VERSION` shipped public in `assay-mcp-server` 5.0.0, so removing it or
+/// narrowing it to private breaks a published API at an unchanged crate version.
+///
+/// This lives in an integration test because that compiles as a separate crate: a unit test
+/// inside `server.rs` still sees the item after a `pub` is dropped, so it could not fail on the
+/// visibility half of the contract. The `allow` is the assertion -- the item is deprecated
+/// precisely because this crate does not implement the revision it names.
 #[test]
 #[allow(deprecated)]
-fn published_modern_version_constant_remains_source_compatible() {
+fn deprecated_modern_protocol_version_stays_publicly_reachable() {
     assert_eq!(
         assay_mcp_server::server::MODERN_PROTOCOL_VERSION,
         "2026-07-28"
