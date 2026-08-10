@@ -127,7 +127,19 @@ STEPS: list[dict[str, object]] = [
                 "Success",
                 0,
                 stdout("json", "assay.doctor_report.v0"),
+                ["doctor", "--format", "json", "--config", "<config>"],
+                config_check="checked",
+            ),
+            # Split from `success` because both are exit 0 and only this key separates them. The
+            # success row was measured on an empty directory, so the published `Success 0` was
+            # established by a run in which no config validation occurred.
+            outcome(
+                "no-config",
+                "no config examined",
+                0,
+                stdout("json", "assay.doctor_report.v0"),
                 ["doctor", "--format", "json"],
+                config_check="skipped",
             ),
             outcome(
                 "invalid-config",
@@ -142,9 +154,13 @@ STEPS: list[dict[str, object]] = [
         ],
         "stdout_summary": (
             "Parses as `assay.doctor_report.v0`. Every report carries "
-            "`config_check.status`, one of `checked`, `skipped` or `failed`. A config "
-            "failure remains JSON and carries the top-level `reason_code` and `next_step` "
-            "alongside `config_error.code`."
+            "`config_check.status`, one of `checked`, `skipped` or `failed`. Exit `0` on "
+            "its own does not mean a config was examined: read `config_check.status` to "
+            "tell a clean config from no config. Exit `1` means the config was examined "
+            "and at least one `data_diagnostics[]` entry has severity `error`; the text "
+            "channel returns the same class for the same tree. A config failure remains "
+            "JSON and carries the top-level `reason_code` and `next_step` alongside "
+            "`config_error.code`."
         ),
         "failure_summary": (
             "An explicit config that will not load, absent or unreadable alike, is exit `2` "
