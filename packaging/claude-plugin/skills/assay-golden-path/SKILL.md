@@ -38,11 +38,11 @@ On failure: A missing or unstartable binary is a host spawn failure: no Assay pr
 
 Run: `assay doctor --format json`
 
-Exit: Success `0`; invalid explicit config `1`.
+Exit: Success `0`; invalid explicit config `2`.
 
-Stdout: Parses as `assay.doctor_report.v0`. A config failure remains JSON and carries `config_error.code: E_CFG_PARSE`.
+Stdout: Parses as `assay.doctor_report.v0`. Every report carries `config_check.status`, one of `checked`, `skipped` or `failed`. A config failure remains JSON and carries the top-level `reason_code` and `next_step` alongside `config_error.code`.
 
-On failure: `reason_code` and `next_step` are absent, and the exit is outside the frozen config/usage class: [gap #2160](https://github.com/Rul1an/assay/issues/2160).
+On failure: An explicit config that will not load, absent or unreadable alike, is exit `2` and names the failing file in a concrete JSON argv next step, the same exit class `assay run` gives the same file. The reason code is not always the same one, per the non-claim below.
 
 ### 3. Starter files
 
@@ -121,3 +121,6 @@ On failure: Malformed NDJSON fails before projection and names the invalid input
 - The contract records current behavior; gap rows are not clean results.
 - Schema identity conventions outside this narrow contract remain owned by issue #2167.
 - A passing evidence integrity check does not prove an external side effect.
+- A doctor config failure does not distinguish an absent config from an unreadable one, and its recovery step is the invocation that produced it; both are owned by issue #2206.
+- A preflight exit 0 on the JSON channel does not mean the report carries no error-severity diagnostic; the text channel returns 1 in that case. Read data_diagnostics[].severity rather than the exit code alone. Owned by issue #2215.
+- Read config_check.status before reading data_diagnostics: only the value checked means a config was read, and on skipped the absent data_diagnostics records an unchecked config rather than a clean one.

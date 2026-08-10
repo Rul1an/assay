@@ -98,7 +98,12 @@ fn config_parse_recovery_argv_executes_without_a_shell() {
     );
 
     let recovered = assay(dir.path(), &recovery[1..], "execute config recovery");
-    assert_eq!(recovered.status.code(), Some(1));
+    assert_eq!(
+        recovered.status.code(),
+        failed.status.code(),
+        "the published recovery must not reclassify the failure it recovers from: {}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
     let recovered_stdout = String::from_utf8_lossy(&recovered.stdout);
     assert!(
         recovered_stdout.contains("Config Status: FAILED"),
