@@ -51,7 +51,7 @@ impl Cli {
             &self.cmd,
             Command::Policy(PolicyArgs {
                 cmd: PolicyCommand::Validate(args)
-            }) if args.format == OutputFormat::Json
+            }) if args.is_json()
         )
     }
 }

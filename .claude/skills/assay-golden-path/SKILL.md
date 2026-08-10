@@ -61,9 +61,9 @@ Run: `assay policy validate --input <policy> --format json`
 
 Exit: Valid `0`; malformed `2`.
 
-Stdout: Both paths parse as `assay.run_summary.v1`; valid has exit `0` and an empty reason, while malformed carries `E_POLICY_PARSE`.
+Stdout: Both paths parse as `assay.run_summary.v1`; valid has exit `0` and an empty reason, while malformed YAML carries `E_POLICY_PARSE`. Other load or schema failures remain stderr-only until they receive an honest reason code.
 
-On failure: Malformed policy is exit `2` and names the failing policy in a concrete `assay policy validate` next step.
+On failure: Malformed policy is exit `2` and names the failing policy in a concrete JSON argv next step. Missing files and schema failures are not classified as parse failures.
 
 ### 5. Evaluation result
 

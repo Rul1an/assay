@@ -47,6 +47,12 @@ pub struct PolicyValidateArgs {
     pub format: OutputFormat,
 }
 
+impl PolicyValidateArgs {
+    pub(crate) fn is_json(&self) -> bool {
+        self.format == OutputFormat::Json
+    }
+}
+
 #[derive(Args, Clone, Debug)]
 pub struct PolicyMigrateArgs {
     /// Input policy file (v1.x or v2.0)

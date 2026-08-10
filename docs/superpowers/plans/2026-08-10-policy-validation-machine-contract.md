@@ -7,17 +7,20 @@
 `assay policy validate` an explicit, symmetric machine-output contract.
 
 **Architecture:** `policy validate --format json` emits the existing
-`assay.run_summary.v1` document on both valid and malformed input. The valid path
-renders from the command; the malformed path returns a typed `CliFailure` that the
-single `main.rs` error funnel renders. Both paths call the existing
-`render_summary_json` function. Default text mode remains stdout-clean and human
-diagnostics remain on stderr.
+`assay.run_summary.v1` document on valid input and malformed YAML. The valid path
+renders from the command; the YAML parse path returns a typed `CliFailure` that
+the single `main.rs` error funnel renders. Both paths call the existing
+`render_summary_json` function. Missing files, semantic refusals, and schema
+compile failures remain untyped until they receive honest reason mappings.
+Default text mode remains stdout-clean and human diagnostics remain on stderr.
 
 ## Constraints
 
 - Do not add a schema, field, reason code, or exit code.
-- Use `E_POLICY_PARSE` for malformed policies and derive its exit and next step
+- Use `E_POLICY_PARSE` only for malformed YAML and derive its exit and next step
   from the existing `ReasonCode` implementation.
+- Publish dynamic recovery commands as JSON argv inside `next_step`; never splice
+  an untrusted path into shell prose.
 - Do not classify untyped `anyhow::Error` values; they retain `fatal:` and exit 2.
 - Do not let `run --format json` pass through the new funnel and render twice.
 - Keep render safety in #2168 and schema-identity migration in #2167.
@@ -32,6 +35,9 @@ diagnostics remain on stderr.
 - [x] Drive default valid and malformed policies and pin stdout/stderr channels.
 - [x] Drive JSON valid and malformed policies and pin schema, exit, reason, and
   remediation semantics.
+- [x] Prove paths with whitespace and shell metacharacters stay one argv element.
+- [x] Prove missing files and invalid schemas are not misclassified as YAML parse
+  failures.
 - [x] Prove deterministic stdout, bounded output, and bounded process duration.
 - [x] Run the test and record RED before changing production code.
 
@@ -46,8 +52,10 @@ diagnostics remain on stderr.
 
 - [x] Add `--format text|json`, defaulting to text.
 - [x] Capture machine-output intent before `dispatch` consumes `Cli`.
-- [x] Return `CliFailure(E_POLICY_PARSE)` from both parse and schema-compile
-  failures.
+- [x] Return `CliFailure(E_POLICY_PARSE)` only when the loader preserves a
+  `serde_yaml::Error`; leave other load and schema-compile failures untyped.
+- [x] Share one `PolicyValidateArgs::is_json()` predicate between the success
+  renderer and top-level failure funnel.
 - [x] Render typed failures at the funnel and preserve legacy handling for
   untyped failures.
 - [x] Render valid JSON from the same summary renderer without the inaccurate
@@ -66,6 +74,8 @@ diagnostics remain on stderr.
 - Modify: `crates/assay-cli/tests/agent_golden_path_contract.rs`
 
 - [x] Replace the measured #2162 gap with JSON outcomes on both paths.
+- [x] State the partial failure contract explicitly: other load and schema errors
+  remain stderr-only pending reason-code decisions.
 - [x] Make the golden-path runtime test drive and inspect both documents.
 - [x] Run generator drift and mutation-sensitive contract tests.
 

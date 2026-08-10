@@ -59,6 +59,32 @@ fn parse_json(output: &Output, expected_exit: i32, context: &str) -> Value {
     })
 }
 
+fn recovery_argv(summary: &Value) -> Vec<String> {
+    let encoded = summary["next_step"]
+        .as_str()
+        .expect("failure next_step")
+        .strip_prefix("Run argv: ")
+        .expect("next_step must publish JSON argv");
+    serde_json::from_str(encoded).expect("next_step argv must be valid JSON")
+}
+
+fn assert_unclassified_failure(output: &Output, context: &str) {
+    assert_eq!(output.status.code(), Some(2), "{context} must fail");
+    assert!(
+        output.stdout.is_empty(),
+        "{context} has no honest typed JSON contract yet"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("fatal:"),
+        "{context} must retain the legacy untyped failure path: {stderr}"
+    );
+    assert!(
+        !stderr.contains("E_POLICY_PARSE"),
+        "{context} must not be misclassified as a YAML parse failure: {stderr}"
+    );
+}
+
 #[test]
 fn default_mode_keeps_the_existing_human_channels() {
     let dir = initialized_project();
@@ -116,13 +142,16 @@ fn json_mode_reports_valid_and_malformed_policies_on_stdout() {
         "policy validation must not claim that tests ran"
     );
 
-    std::fs::write(dir.path().join("malformed.yaml"), "version: [\n")
+    // This also pins the serde_yaml error downcast: if the loader backend or
+    // wrapping changes, E_POLICY_PARSE must not silently disappear.
+    let malformed_name = "pol icy;$(echo x).yaml";
+    std::fs::write(dir.path().join(malformed_name), "version: [\n")
         .expect("write malformed policy");
     let malformed_args = [
         "policy",
         "validate",
         "--input",
-        "malformed.yaml",
+        malformed_name,
         "--format",
         "json",
     ];
@@ -135,26 +164,20 @@ fn json_mode_reports_valid_and_malformed_policies_on_stdout() {
     assert!(
         malformed_json["message"]
             .as_str()
-            .is_some_and(|message| message.contains("malformed.yaml")),
+            .is_some_and(|message| message.contains(malformed_name)),
         "failure must identify the policy path"
-    );
-    assert!(
-        malformed_json["next_step"]
-            .as_str()
-            .is_some_and(|next| next.starts_with("Run: assay ") && next.contains("malformed.yaml")),
-        "an agent must receive a concrete recovery command"
     );
 
     let stderr = String::from_utf8_lossy(&malformed.stderr);
     assert!(stderr.contains("E_POLICY_PARSE"));
 
-    let recovery = malformed_json["next_step"]
-        .as_str()
-        .expect("failure next_step")
-        .strip_prefix("Run: assay ")
-        .expect("next_step must invoke assay");
-    let recovery_args = recovery.split_whitespace().collect::<Vec<_>>();
-    let recovered = assay(dir.path(), &recovery_args);
+    let recovery = recovery_argv(&malformed_json);
+    assert_eq!(
+        recovery,
+        ["assay", "policy", "validate", "--input", malformed_name],
+        "the hostile path must remain one argv element"
+    );
+    let recovered = assay(dir.path(), &recovery[1..]);
     assert_eq!(recovered.status.code(), Some(2));
     let recovered_stderr = String::from_utf8_lossy(&recovered.stderr);
     assert!(
@@ -173,4 +196,49 @@ fn json_mode_reports_valid_and_malformed_policies_on_stdout() {
         malformed.stdout, malformed_again.stdout,
         "failure JSON must be stable"
     );
+}
+
+#[test]
+fn json_mode_does_not_misclassify_untyped_policy_failures() {
+    let dir = initialized_project();
+    let missing = assay(
+        dir.path(),
+        &[
+            "policy",
+            "validate",
+            "--input",
+            "missing.yaml",
+            "--format",
+            "json",
+        ],
+    );
+    assert_unclassified_failure(&missing, "missing policy");
+
+    std::fs::write(
+        dir.path().join("invalid-schema.yaml"),
+        r#"version: "2.0"
+tools:
+  allow: [demo]
+schemas:
+  demo:
+    type: object
+    properties:
+      value:
+        type: string
+        pattern: "["
+"#,
+    )
+    .expect("write invalid schema policy");
+    let invalid_schema = assay(
+        dir.path(),
+        &[
+            "policy",
+            "validate",
+            "--input",
+            "invalid-schema.yaml",
+            "--format",
+            "json",
+        ],
+    );
+    assert_unclassified_failure(&invalid_schema, "invalid policy schema");
 }

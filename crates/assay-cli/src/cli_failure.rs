@@ -22,7 +22,7 @@ pub(crate) struct CliFailure {
 impl CliFailure {
     pub(crate) fn policy_parse(path: &Path, error: impl std::fmt::Display) -> Self {
         let path = path.display().to_string();
-        let message = format!("failed to load policy {path}: {error}");
+        let message = format!("failed to parse policy {path}: {error}");
         let outcome =
             RunOutcome::from_reason(ReasonCode::EPolicyParse, Some(message), Some(path.as_str()));
         Self {

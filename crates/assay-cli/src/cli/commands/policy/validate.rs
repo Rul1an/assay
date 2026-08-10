@@ -1,4 +1,6 @@
-use crate::cli::args::{OutputFormat, PolicyValidateArgs};
+use std::path::Path;
+
+use crate::cli::args::PolicyValidateArgs;
 use crate::cli_failure::{emit_summary_stdout, summary_from_outcome, CliFailure};
 use crate::exit_codes;
 use crate::exit_codes::RunOutcome;
@@ -11,18 +13,25 @@ pub async fn run(args: PolicyValidateArgs) -> Result<i32> {
 
     // Let core handle parsing + auto-migration warnings.
     let policy = assay_core::mcp::policy::McpPolicy::from_file(&args.input)
-        .map_err(|error| CliFailure::policy_parse(&args.input, error))?;
+        .map_err(|error| classify_load_error(&args.input, error))?;
 
     // Force schema compilation so failures happen here (not at runtime).
     policy
         .try_compile_all_schemas()
-        .map_err(|error| CliFailure::policy_parse(&args.input, error))?;
+        .map_err(anyhow::Error::msg)?;
 
     eprintln!("✔ Policy OK: {}", args.input.display());
-    if args.format == OutputFormat::Json {
+    if args.is_json() {
         let mut summary = summary_from_outcome(&RunOutcome::success(), true);
         summary.message = None;
         emit_summary_stdout(&summary)?;
     }
     Ok(exit_codes::OK)
+}
+
+fn classify_load_error(path: &Path, error: anyhow::Error) -> anyhow::Error {
+    if error.downcast_ref::<serde_yaml::Error>().is_some() {
+        return CliFailure::policy_parse(path, error).into();
+    }
+    error
 }

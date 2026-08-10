@@ -215,16 +215,20 @@ STEPS: list[dict[str, object]] = [
                     "json",
                 ],
                 reason_code="E_POLICY_PARSE",
-                next_step="Run: assay policy validate --input <policy>",
+                next_step=(
+                    'Run argv: ["assay","policy","validate","--input","<policy>"]'
+                ),
             ),
         ],
         "stdout_summary": (
             "Both paths parse as `assay.run_summary.v1`; valid has exit `0` and an "
-            "empty reason, while malformed carries `E_POLICY_PARSE`."
+            "empty reason, while malformed YAML carries `E_POLICY_PARSE`. Other load or "
+            "schema failures remain stderr-only until they receive an honest reason code."
         ),
         "failure_summary": (
             "Malformed policy is exit `2` and names the failing policy in a concrete "
-            "`assay policy validate` next step."
+            "JSON argv next step. Missing files and schema failures are not classified as "
+            "parse failures."
         ),
     },
     {
