@@ -227,7 +227,6 @@ Reserved means: an implementation MAY begin emitting it without a version bump, 
 |------|-------------|------|
 | E_EVIDENCE_INTEGRITY | `ReasonCode::EEvidenceIntegrity` | Registered in §5.1. Nothing constructs the variant; its consumers are #2164 and #2165. |
 | E_BASELINE_INVALID | `ReasonCode::EBaselineInvalid` | Registered in §5.1. Nothing constructs the variant. |
-| E_POLICY_PARSE | `ReasonCode::EPolicyParse` | Registered in §5.1. Nothing constructs the variant. |
 | E_ARG_SCHEMA | `ReasonCode::EArgSchema` | The *variant* is dead; the string is live, originated by `assay_core::policy_engine:102` and forwarded into a `Diagnostic`. Two producers, one code. |
 | E_SEQUENCE_VIOLATION | `ReasonCode::ESequenceViolation` | As above, originated at `policy_engine:302`. |
 | W_BASE_FINGERPRINT | `codes::W_BASE_FINGERPRINT` | Warning severity, so it never reaches `reason_code`. Constructed nowhere. |
