@@ -106,6 +106,10 @@ pub enum ReasonCode {
     EArgSchema,
 }
 
+fn format_recovery_argv(args: &[&str]) -> String {
+    format!("Run argv: {}", serde_json::json!(args))
+}
+
 impl ReasonCode {
     /// Get the corresponding exit code for this reason, respecting version
     pub fn exit_code_for(&self, version: ExitCodeVersion) -> i32 {
@@ -200,16 +204,20 @@ impl ReasonCode {
         }
     }
 
-    /// Suggested next step for this error
+    /// Suggested next step for this error.
+    ///
+    /// Executable recovery with caller-controlled values is JSON argv. Dynamic trace-path
+    /// guidance is prose rather than a command; remaining command-like steps are static strings
+    /// and therefore carry no caller-controlled argument boundary.
     pub fn next_step(&self, context: Option<&str>) -> String {
         match self {
             ReasonCode::Success => String::new(),
-            ReasonCode::ECfgParse => {
-                format!(
-                    "Run: assay doctor --config {}",
-                    context.unwrap_or("<config.yaml>")
-                )
-            }
+            ReasonCode::ECfgParse => format_recovery_argv(&[
+                "assay",
+                "doctor",
+                "--config",
+                context.unwrap_or("<config.yaml>"),
+            ]),
             ReasonCode::ETraceNotFound => {
                 format!(
                     "Check trace file exists: {}",
@@ -224,16 +232,13 @@ impl ReasonCode {
             ReasonCode::EBaselineInvalid => {
                 "Run: assay baseline record to create a new baseline".to_string()
             }
-            ReasonCode::EPolicyParse => {
-                let argv = serde_json::json!([
-                    "assay",
-                    "policy",
-                    "validate",
-                    "--input",
-                    context.unwrap_or("<policy.yaml>")
-                ]);
-                format!("Run argv: {argv}")
-            }
+            ReasonCode::EPolicyParse => format_recovery_argv(&[
+                "assay",
+                "policy",
+                "validate",
+                "--input",
+                context.unwrap_or("<policy.yaml>"),
+            ]),
             ReasonCode::EReplayMissingDependency => {
                 "Replay bundle missing required offline dependency; rerun with --live or create a complete bundle".to_string()
             }
@@ -445,10 +450,21 @@ mod tests {
         // Success returns empty string
         assert!(ReasonCode::Success.next_step(None).is_empty());
 
-        // Config errors provide actionable next steps
-        assert!(ReasonCode::ECfgParse
-            .next_step(Some("test.yaml"))
-            .contains("test.yaml"));
+        // Dynamic command recovery preserves hostile paths as one argv element.
+        let config_path = "cfg file;$(touch should-not-exist).yaml";
+        let config_next_step = ReasonCode::ECfgParse.next_step(Some(config_path));
+        assert_eq!(
+            config_next_step,
+            r#"Run argv: ["assay","doctor","--config","cfg file;$(touch should-not-exist).yaml"]"#,
+            "the shared recovery formatter must preserve the published compact representation"
+        );
+        let config_argv: Vec<String> = serde_json::from_str(
+            config_next_step
+                .strip_prefix("Run argv: ")
+                .expect("config recovery must publish JSON argv"),
+        )
+        .expect("config recovery argv must parse");
+        assert_eq!(config_argv, ["assay", "doctor", "--config", config_path]);
         assert!(ReasonCode::ETraceNotFound
             .next_step(Some("traces/ci.jsonl"))
             .contains("traces/ci.jsonl"));
@@ -502,6 +518,31 @@ mod tests {
             .next_step(None)
             .contains("explain"));
         assert!(ReasonCode::EArgSchema.next_step(None).contains("explain"));
+    }
+
+    #[test]
+    fn dynamic_recovery_argv_round_trips_json_significant_paths() {
+        let path = "cfg \"quoted\"\\nested\nline\ttab\u{0007}.yaml";
+        let cases = [
+            (
+                ReasonCode::ECfgParse,
+                vec!["assay", "doctor", "--config", path],
+            ),
+            (
+                ReasonCode::EPolicyParse,
+                vec!["assay", "policy", "validate", "--input", path],
+            ),
+        ];
+
+        for (reason, expected) in cases {
+            let next_step = reason.next_step(Some(path));
+            let encoded = next_step
+                .strip_prefix("Run argv: ")
+                .expect("dynamic recovery must publish JSON argv");
+            let argv: Vec<String> =
+                serde_json::from_str(encoded).expect("recovery argv must remain valid JSON");
+            assert_eq!(argv, expected, "{reason:?} must preserve one path argument");
+        }
     }
 
     #[test]
