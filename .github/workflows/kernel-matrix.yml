@@ -77,7 +77,7 @@ jobs:
           pip install pre-commit==4.4.0
 
       - name: Install cargo-deny (for pre-commit hook)
-        run: cargo install --locked cargo-deny
+        run: ./scripts/ci/install-cargo-deny.sh
 
       - name: Run pre-commit (all files)
         shell: bash
