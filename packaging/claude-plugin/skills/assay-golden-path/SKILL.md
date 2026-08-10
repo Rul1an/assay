@@ -90,11 +90,11 @@ On failure: Policy denial is not a process failure. A missing enforcement policy
 
 Run: `assay evidence show <bundle> --format json`
 
-Exit: Valid `0`; integrity failure `2`; unreadable bundle `2`.
+Exit: Valid `0`; integrity failure `2`; unreadable bundle `2`; format-contract failure `2`.
 
 Stdout: Success parses as an object containing `manifest` and `events`. A recorded-value mismatch parses as `assay.run_summary.v1` with `E_EVIDENCE_INTEGRITY`; an unreadable path uses `E_EVIDENCE_UNREADABLE`.
 
-On failure: Only the four verifier codes that establish a recorded-value mismatch map to `E_EVIDENCE_INTEGRITY`; I/O, gzip, tar, and format-contract failures do not.
+On failure: Only the four verifier codes that establish a recorded-value mismatch map to `E_EVIDENCE_INTEGRITY`; I/O, gzip, and tar failures use `E_EVIDENCE_UNREADABLE`. Format-contract failures still exit `2` with empty stdout: [gap #2219](https://github.com/Rul1an/assay/issues/2219).
 
 ### 8. Offline profile verification
 

@@ -209,6 +209,11 @@ fn corpus_vector(vector: CorpusVector) -> std::path::PathBuf {
         .join(name)
 }
 
+fn invalid_contract_bundle() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/evidence/invalid-manifest.bundle.tar.gz")
+}
+
 #[test]
 fn installed_binary_reports_a_version_on_stdout() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -421,6 +426,25 @@ fn bundle_inspection_json_publishes_typed_failures_on_stdout() {
     let success_json = stdout_json(&success, &expected_success, "evidence show success");
     assert_eq!(success_json["manifest"]["event_count"], 2);
     assert!(success_json["events"].is_array());
+    assert_eq!(success_json["verify_mode"], "enabled");
+
+    let skipped = assay(
+        dir.path(),
+        &[
+            "evidence",
+            "show",
+            corpus_vector(CorpusVector::Tampered)
+                .to_str()
+                .expect("UTF-8 path"),
+            "--format",
+            "json",
+            "--no-verify",
+        ],
+    );
+    assert_eq!(skipped.status.code(), Some(0));
+    let skipped_json: Value = serde_json::from_slice(&skipped.stdout)
+        .expect("evidence show --no-verify stdout must be JSON");
+    assert_eq!(skipped_json["verify_mode"], "skipped");
 
     let tampered = corpus_vector(CorpusVector::Tampered);
     let expected_failure = expected_outcome("evidence-inspection", "tampered");
@@ -486,6 +510,45 @@ fn bundle_inspection_json_publishes_typed_failures_on_stdout() {
             "--format",
             "json",
         ]
+    );
+
+    let invalid_contract = invalid_contract_bundle();
+    let expected_contract_failure =
+        expected_outcome("evidence-inspection", "format-contract-failure");
+    let contract_failure = assay_contract(
+        dir.path(),
+        &expected_contract_failure,
+        &[("<bundle>", invalid_contract.to_str().expect("UTF-8 path"))],
+    );
+    assert_exit(
+        &contract_failure,
+        &expected_contract_failure,
+        "evidence show format-contract failure",
+    );
+    assert!(contract_failure.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&contract_failure.stderr).contains("ContractInvalidJson"));
+    assert_gap(&expected_contract_failure, 2219);
+}
+
+#[test]
+fn evidence_inspection_contract_discloses_the_deferred_format_contract_gap() {
+    let contract = contract();
+    let step = contract["steps"]
+        .as_array()
+        .expect("contract steps array")
+        .iter()
+        .find(|step| step["id"] == "evidence-inspection")
+        .expect("evidence inspection step");
+    let failure_summary = step["failure_summary"]
+        .as_str()
+        .expect("evidence inspection failure summary");
+    assert!(
+        failure_summary.contains("gap #2219"),
+        "the residual format-contract failure must remain disclosed"
+    );
+    assert!(
+        failure_summary.contains("empty stdout"),
+        "the residual gap must state its machine-channel consequence"
     );
 }
 

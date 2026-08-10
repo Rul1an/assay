@@ -396,6 +396,14 @@ STEPS: list[dict[str, object]] = [
                     '"--format","json"]'
                 ),
             ),
+            outcome(
+                "format-contract-failure",
+                "format-contract failure",
+                2,
+                stdout("empty"),
+                ["evidence", "show", "<bundle>", "--format", "json"],
+                gap_issue=2219,
+            ),
         ],
         "stdout_summary": (
             "Success parses as an object containing `manifest` and `events`. A recorded-value "
@@ -404,7 +412,9 @@ STEPS: list[dict[str, object]] = [
         ),
         "failure_summary": (
             "Only the four verifier codes that establish a recorded-value mismatch map to "
-            "`E_EVIDENCE_INTEGRITY`; I/O, gzip, tar, and format-contract failures do not."
+            "`E_EVIDENCE_INTEGRITY`; I/O, gzip, and tar failures use "
+            "`E_EVIDENCE_UNREADABLE`. Format-contract failures still exit `2` with empty "
+            "stdout: [gap #2219](https://github.com/Rul1an/assay/issues/2219)."
         ),
     },
     {
