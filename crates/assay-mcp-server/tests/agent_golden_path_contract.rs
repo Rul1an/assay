@@ -279,7 +279,7 @@ fn enforcing_proxy_denial_is_structured_but_startup_failure_is_not() {
 }
 
 #[test]
-fn sarif_projection_currently_turns_malformed_input_into_clean_output() {
+fn sarif_projection_rejects_malformed_input_without_clean_output() {
     let dir = tempfile::tempdir().expect("tempdir");
     let deny = serde_json::json!({
         "schema": "assay.enforcement_decision.v0",
@@ -311,16 +311,16 @@ fn sarif_projection_currently_turns_malformed_input_into_clean_output() {
     let malformed_argv = contract_argv(&expected_malformed, &[]);
     let malformed = run_server(dir.path(), &malformed_argv, b"not-json\n");
     assert_exit(&malformed, &expected_malformed, "SARIF malformed input");
-    let malformed_json = stdout_json(&malformed, &expected_malformed, "malformed-input SARIF");
-    assert_eq!(
-        format!("sarif-{}", malformed_json["version"].as_str().unwrap()),
-        expected_malformed["stdout"]["document"]
+    assert_empty_stdout(&malformed, &expected_malformed, "SARIF malformed input");
+    let stderr = String::from_utf8_lossy(&malformed.stderr);
+    assert!(
+        stderr.contains("input line 1") && stderr.contains("expected one JSON value"),
+        "malformed-input diagnosis is not actionable: {stderr}"
     );
-    assert!(malformed_json["runs"][0]["results"]
-        .as_array()
-        .unwrap()
-        .is_empty());
-    assert_gap(&expected_malformed, 2166);
+    assert!(
+        !stderr.contains("not-json"),
+        "stderr leaked input: {stderr}"
+    );
 }
 
 #[test]
@@ -330,7 +330,7 @@ fn every_mcp_contract_outcome_is_executed_once() {
         "assay-mcp-server",
         &[
             enforcing_proxy_denial_is_structured_but_startup_failure_is_not,
-            sarif_projection_currently_turns_malformed_input_into_clean_output,
+            sarif_projection_rejects_malformed_input_without_clean_output,
         ],
     );
 }
