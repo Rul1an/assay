@@ -496,7 +496,7 @@ mod tests {
     #[cfg(unix)]
     use super::{process_tree_absent, process_tree_quiescent_after_io};
     use std::io::Write;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use std::process::{Command, Stdio};
     use std::sync::mpsc;
     use std::thread;
@@ -540,15 +540,73 @@ mod tests {
     /// Selected on the bounded child so this test binary, re-executed, acts as
     /// the descendant spawner instead of running the suite.
     const HELPER_MODE_ENV: &str = "ASSAY_BOUNDED_PROCESS_HELPER_MODE";
-    const PID_FILE_ENV: &str = "ASSAY_DESCENDANT_PID_FILE";
     /// libtest filter that selects the helper in every binary including this
     /// module, whatever module path it is included under. A filter that matched
     /// nothing would exit 0 silently, so
     /// `the_re_executed_helper_is_selected_by_exactly_one_filter_match` pins it.
     const HELPER_FILTER: &str = "descendant_spawner_helper_process";
-    /// Written to both channels by every spawner, so the bounded run can assert
-    /// one channel verbatim and find the marker on the other.
-    const READY_MARKER: &[u8] = b"parent-ready";
+    /// Readiness and the descendant's pid travel as one record on both output
+    /// channels, so the bounded run can assert one verbatim and find it in the
+    /// other.
+    ///
+    /// This used to be a bare marker beside a pid file whose path came from the
+    /// environment, which put an environment-controlled path in front of a write
+    /// -- the sink CodeQL flagged on 870a02c9. Sanitising that path would narrow
+    /// the sink; carrying the pid in output removes it, and it removes a second
+    /// control channel with rules of its own: the pid now arrives through the
+    /// same bounded capture the harness under test already governs.
+    const READY_RECORD_PREFIX: &str = "READY pid=";
+    /// `u32::MAX` is ten digits, so anything longer is not a pid.
+    const MAX_PID_DIGITS: usize = 10;
+
+    fn ready_record(pid: u32) -> String {
+        format!("{READY_RECORD_PREFIX}{pid}")
+    }
+
+    /// Reads the descendant's pid out of a bounded run's captured record.
+    ///
+    /// The text is a child's output, or a diagnostic quoting it, so it is
+    /// untrusted and this rejects rather than scans. Only digits may follow the
+    /// prefix and they must be a non-zero `u32`; every record present must name
+    /// the same pid; and no record at all is an error.
+    /// A pid read out of noise would otherwise turn every descendant assertion
+    /// into a claim about a process nobody spawned.
+    ///
+    /// One record appears more than once by construction: the child writes it to
+    /// both channels and the diagnostic quotes both. Identical repetitions are
+    /// therefore admitted, while a disagreement is not, since two pids cannot say
+    /// which descendant the claim is about.
+    fn descendant_pid_from(record: &str) -> Result<u32, String> {
+        let mut seen: Option<u32> = None;
+        for (start, _) in record.match_indices(READY_RECORD_PREFIX) {
+            // Eleven digits is enough to decide: every eleven-digit run
+            // overflows `u32` and is rejected below, so bounding the scan here
+            // cannot truncate a longer run into a valid-looking pid.
+            let digits: String = record[start + READY_RECORD_PREFIX.len()..]
+                .chars()
+                .take(MAX_PID_DIGITS + 1)
+                .take_while(char::is_ascii_digit)
+                .collect();
+            if digits.is_empty() {
+                // The quoted command line carries the prefix with no pid behind
+                // it. That is not a record, and not a malformed one either.
+                continue;
+            }
+            let pid = match digits.parse::<u32>() {
+                Ok(0) | Err(_) => {
+                    return Err(format!("readiness record has no usable pid: {record:?}"));
+                }
+                Ok(pid) => pid,
+            };
+            match seen {
+                Some(first) if first != pid => {
+                    return Err(format!("readiness records disagree: {first} and {pid}"));
+                }
+                _ => seen = Some(pid),
+            }
+        }
+        seen.ok_or_else(|| format!("no readiness record: {record:?}"))
+    }
 
     /// What the descendant does with the bounded run's output handles.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -590,7 +648,7 @@ mod tests {
     /// interpreter startup rather than process-tree teardown decided the
     /// result. Unix keeps its shell, whose startup is a fraction of that bound.
     #[cfg(windows)]
-    fn descendant_spawner_command(pid_file: &Path, output: DescendantOutput) -> Command {
+    fn descendant_spawner_command(output: DescendantOutput) -> Command {
         let mut command = Command::new(current_test_binary());
         command
             .args([
@@ -600,26 +658,22 @@ mod tests {
                 "--format",
                 "terse",
             ])
-            .env(HELPER_MODE_ENV, output.as_str())
-            .env(PID_FILE_ENV, pid_file);
+            .env(HELPER_MODE_ENV, output.as_str());
         command
     }
 
     #[cfg(unix)]
-    fn descendant_spawner_command(pid_file: &Path, output: DescendantOutput) -> Command {
+    fn descendant_spawner_command(output: DescendantOutput) -> Command {
         let detach = match output {
             DescendantOutput::Inherited => "",
             DescendantOutput::Detached => "exec </dev/null >/dev/null 2>&1;",
         };
         let mut command = Command::new("sh");
-        command
-            .arg("-c")
-            .arg(format!(
-                "sh -c 'echo \"$$\" > \"$1\"; {detach} while :; do :; done' descendant \"$1\" & \
-                 while [ ! -s \"$1\" ]; do :; done; printf parent-ready; printf parent-ready >&2",
-            ))
-            .arg("runner")
-            .arg(pid_file);
+        command.arg("-c").arg(format!(
+            "sh -c '{detach} while :; do :; done' descendant & \
+             printf '{READY_RECORD_PREFIX}%s' \"$!\"; \
+             printf '{READY_RECORD_PREFIX}%s' \"$!\" >&2",
+        ));
         command
     }
 
@@ -635,9 +689,6 @@ mod tests {
             .unwrap_or_else(|error| panic!("{HELPER_MODE_ENV} must be set: {error}"));
         let output = DescendantOutput::parse(&mode)
             .unwrap_or_else(|| panic!("unknown descendant output mode {mode:?}"));
-        let pid_file = PathBuf::from(
-            std::env::var_os(PID_FILE_ENV).unwrap_or_else(|| panic!("{PID_FILE_ENV} must be set")),
-        );
 
         let mut descendant = hanging_command();
         descendant.stdin(Stdio::null());
@@ -647,17 +698,18 @@ mod tests {
         let child = descendant
             .spawn()
             .unwrap_or_else(|error| panic!("spawn the descendant: {error}"));
-        std::fs::write(&pid_file, child.id().to_string())
-            .unwrap_or_else(|error| panic!("publish the descendant pid: {error}"));
 
-        // libtest prefixes this process's stdout with its own report, so the
-        // marker goes to both channels: stderr carries the child's bytes alone.
+        // The pid travels in the output the bounded run already captures, so
+        // there is no second channel and no path to control. libtest prefixes
+        // this process's stdout with its own report, so the record goes to both:
+        // stderr carries this child's bytes alone.
+        let record = ready_record(child.id());
         std::io::stdout()
-            .write_all(READY_MARKER)
+            .write_all(record.as_bytes())
             .expect("report readiness on stdout");
         std::io::stdout().flush().expect("flush readiness");
         std::io::stderr()
-            .write_all(READY_MARKER)
+            .write_all(record.as_bytes())
             .expect("report readiness on stderr");
     }
 
@@ -705,19 +757,6 @@ mod tests {
         let mut command = Command::new("cmd");
         command.args(["/C", "exit", "/B", "23"]);
         command
-    }
-
-    fn read_descendant_pid(pid_file: &Path) -> Option<u32> {
-        let deadline = Instant::now() + Duration::from_secs(1);
-        while Instant::now() < deadline {
-            if let Ok(raw) = std::fs::read_to_string(pid_file) {
-                if let Ok(pid) = raw.trim().parse() {
-                    return Some(pid);
-                }
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-        None
     }
 
     /// A probe that cannot run is not an answer, so a spawn failure panics
@@ -843,14 +882,11 @@ mod tests {
 
     #[test]
     fn kills_descendant_that_holds_inherited_output_open() {
-        let temp = tempfile::tempdir().expect("temporary pid directory");
-        let pid_file = temp.path().join("descendant.pid");
-        let cleanup_path = pid_file.clone();
         let (result_tx, result_rx) = mpsc::channel();
         let started = Instant::now();
 
         let worker = thread::spawn(move || {
-            let command = descendant_spawner_command(&pid_file, DescendantOutput::Inherited);
+            let command = descendant_spawner_command(DescendantOutput::Inherited);
             let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
             let result = run_bounded(command, b"", limits, "inherited output mutation");
             let _ = result_tx.send(result);
@@ -876,8 +912,10 @@ mod tests {
             started.elapsed() < descendant_test_guard(),
             "process-tree cleanup exceeded the test bound"
         );
-        let descendant_pid = read_descendant_pid(&cleanup_path)
-            .expect("descendant must publish its pid before inheriting output");
+        // The diagnostic quotes the bounded output, so the pid the child
+        // published arrives on the error path through the same capture.
+        let descendant_pid = descendant_pid_from(&error)
+            .unwrap_or_else(|reason| panic!("descendant pid unreadable: {reason}"));
         if !wait_for_descendant_exit(descendant_pid) {
             panic!("descendant {descendant_pid} survived process-tree termination");
         }
@@ -903,9 +941,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn kills_quiet_descendant_after_normal_parent_exit() {
-        let temp = tempfile::tempdir().expect("temporary pid directory");
-        let pid_file = temp.path().join("quiet-descendant.pid");
-        let command = descendant_spawner_command(&pid_file, DescendantOutput::Detached);
+        let command = descendant_spawner_command(DescendantOutput::Detached);
         let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
 
         let output = run_bounded(command, b"", limits, "normal completion mutation")
@@ -914,17 +950,16 @@ mod tests {
         assert!(output.status.success());
         // Both channels go through one reader, so stderr proves the bytes are
         // returned verbatim while stdout may carry a test harness's own report.
-        assert_eq!(output.stderr, READY_MARKER);
-        assert!(
-            output
-                .stdout
-                .windows(READY_MARKER.len())
-                .any(|w| w == READY_MARKER),
-            "stdout must carry the child's readiness marker: {:?}",
-            String::from_utf8_lossy(&output.stdout)
+        let stderr = String::from_utf8(output.stderr.clone()).expect("stderr is the child's text");
+        let descendant_pid = descendant_pid_from(&stderr)
+            .unwrap_or_else(|reason| panic!("quiet descendant pid unreadable: {reason}"));
+        assert_eq!(stderr, ready_record(descendant_pid));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            descendant_pid_from(&stdout).ok(),
+            Some(descendant_pid),
+            "stdout must carry the same readiness record: {stdout:?}"
         );
-        let descendant_pid =
-            read_descendant_pid(&pid_file).expect("quiet descendant must publish its pid");
         assert!(
             wait_for_descendant_exit(descendant_pid),
             "quiet descendant {descendant_pid} survived normal completion cleanup"
@@ -942,13 +977,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_descendant_that_asks_for_no_output_still_holds_the_run_open_and_is_killed() {
-        let temp = tempfile::tempdir().expect("temporary pid directory");
-        let pid_file = temp.path().join("quiet-descendant.pid");
-        let cleanup_path = pid_file.clone();
         let (result_tx, result_rx) = mpsc::channel();
 
         let worker = thread::spawn(move || {
-            let command = descendant_spawner_command(&pid_file, DescendantOutput::Detached);
+            let command = descendant_spawner_command(DescendantOutput::Detached);
             let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
             let _ = result_tx.send(run_bounded(
                 command,
@@ -976,12 +1008,11 @@ mod tests {
         assert!(!error.contains("child still running"), "{error}");
         assert!(error.contains("stdout handle still open"), "{error}");
         assert!(error.contains("stderr handle still open"), "{error}");
-        // Readiness still has to be observable on the error path, or a child
-        // that never ran would read the same as one that ran and was outlived.
-        let marker = std::str::from_utf8(READY_MARKER).expect("marker is text");
-        assert!(error.contains(marker), "{error}");
-        let descendant_pid = read_descendant_pid(&cleanup_path)
-            .expect("quiet descendant must publish its pid before the deadline");
+        // Readiness has to be observable on the error path, or a child that
+        // never ran would read the same as one that ran and was outlived. The
+        // pid it published is what makes the teardown claim below checkable.
+        let descendant_pid = descendant_pid_from(&error)
+            .unwrap_or_else(|reason| panic!("quiet descendant pid unreadable: {reason}"));
         assert!(
             wait_for_descendant_exit(descendant_pid),
             "quiet descendant {descendant_pid} survived process-tree termination"
@@ -996,8 +1027,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_re_executed_helper_publishes_a_pid_and_reports_readiness() {
-        let temp = tempfile::tempdir().expect("temporary pid directory");
-        let pid_file = temp.path().join("helper-descendant.pid");
         let mut command = Command::new(current_test_binary());
         command
             .args([
@@ -1007,21 +1036,66 @@ mod tests {
                 "--format",
                 "terse",
             ])
-            .env(HELPER_MODE_ENV, DescendantOutput::Detached.as_str())
-            .env(PID_FILE_ENV, &pid_file);
+            .env(HELPER_MODE_ENV, DescendantOutput::Detached.as_str());
         let limits = ProcessLimits::new(descendant_test_guard(), 1024, 1024);
 
         let output = run_bounded(command, b"", limits, "helper re-execution")
             .expect("the re-executed helper must complete within the test guard");
 
         assert!(output.status.success(), "{:?}", output.status);
-        assert_eq!(output.stderr, READY_MARKER);
-        let descendant_pid = read_descendant_pid(&pid_file)
-            .expect("the re-executed helper must publish its descendant's pid");
+        let stderr = String::from_utf8(output.stderr.clone()).expect("stderr is the child's text");
+        let descendant_pid = descendant_pid_from(&stderr)
+            .unwrap_or_else(|reason| panic!("helper pid unreadable: {reason}"));
+        assert_eq!(stderr, ready_record(descendant_pid));
         assert!(
             wait_for_descendant_exit(descendant_pid),
             "descendant {descendant_pid} of the re-executed helper survived cleanup"
         );
+    }
+
+    /// The pid arrives inside untrusted child output, and every descendant
+    /// assertion is only as good as this parse: a pid read from noise would make
+    /// those assertions pass against a process nobody spawned. So the shape is
+    /// exact and everything else is an error, never a skip.
+    #[test]
+    fn only_one_exactly_shaped_readiness_record_yields_a_pid() {
+        assert_eq!(descendant_pid_from("READY pid=4294967295"), Ok(u32::MAX));
+        assert_eq!(
+            descendant_pid_from("\nrunning 1 test\nREADY pid=1234.\ntest result: ok.\n"),
+            Ok(1234),
+            "libtest's own report surrounds the record and must not hide it"
+        );
+        // The shape a failing bounded run actually produces: the prefix appears
+        // in the quoted command line with no pid, and the record itself twice.
+        assert_eq!(
+            descendant_pid_from(
+                "sh -c printf 'READY pid=%s'\": deadline expired; \
+                 stdout=\"READY pid=77\" (12 bytes); stderr=\"READY pid=77\" (12 bytes)"
+            ),
+            Ok(77),
+            "one pid written to both channels and quoted back must still read"
+        );
+
+        for rejected in [
+            "",
+            "READY pid=",
+            "READY pid=x",
+            "READY pid=-1",
+            // Zero is not a process this test could wait on.
+            "READY pid=0",
+            // One past u32::MAX, and one digit too long to be a pid at all.
+            "READY pid=4294967296",
+            "READY pid=42949672960",
+            // Two different pids cannot say which descendant the claim is about.
+            "READY pid=1 READY pid=2",
+            "READY pid=1 READY pid=1 READY pid=3",
+            "parent-ready",
+        ] {
+            assert!(
+                descendant_pid_from(rejected).is_err(),
+                "{rejected:?} must not yield a pid"
+            );
+        }
     }
 
     #[test]
