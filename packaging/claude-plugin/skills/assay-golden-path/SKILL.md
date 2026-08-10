@@ -48,11 +48,11 @@ On failure: An explicit config that will not load, absent or unreadable alike, i
 
 Run: `assay init --preset dev --hello-trace`
 
-Exit: Success `0`; unknown preset `2`.
+Exit: Success `0`; unknown preset `2`; success with `--format json` `0`; unknown preset with `--format json` `2`.
 
-Stdout: Human progress text; success ends with `Next: assay validate --config eval.yaml --trace-file traces/hello.jsonl`. A failing run writes partial progress text, not the fatal diagnosis.
+Stdout: Default `text` is human progress; success ends with `Next: assay validate --config eval.yaml --trace-file traces/hello.jsonl`, and a failing run writes partial progress text rather than the fatal diagnosis. `--format json` replaces that stream with one `assay.init_report.v0` document naming `reason_code`, `next_step`, and the files created and skipped.
 
-On failure: No machine report, `reason_code`, or `next_step` on stdout: [gap #2161](https://github.com/Rul1an/assay/issues/2161).
+On failure: Under `--format json` a rejected `--preset` publishes `E_INVALID_ARGS` and a `next_step` on stdout. Failures the reason-code registry does not name, such as a filesystem write error, still produce no document: stdout is empty and the diagnosis stays on stderr.
 
 ### 4. Policy validation
 
