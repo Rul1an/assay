@@ -225,7 +225,6 @@ Reserved means: an implementation MAY begin emitting it without a version bump, 
 
 | Code | Declared in | Note |
 |------|-------------|------|
-| E_EVIDENCE_INTEGRITY | `ReasonCode::EEvidenceIntegrity` | Registered in §5.1. Nothing constructs the variant; its consumers are #2164 and #2165. |
 | E_BASELINE_INVALID | `ReasonCode::EBaselineInvalid` | Registered in §5.1. Nothing constructs the variant. |
 | E_ARG_SCHEMA | `ReasonCode::EArgSchema` | The *variant* is dead; the string is live, originated by `assay_core::policy_engine:102` and forwarded into a `Diagnostic`. Two producers, one code. |
 | E_SEQUENCE_VIOLATION | `ReasonCode::ESequenceViolation` | As above, originated at `policy_engine:302`. |
@@ -324,7 +323,7 @@ For every non-zero exit, the implementation MUST provide **at least one suggeste
 | 1              | 2026-07  | Added `E_REPLAY_LIMIT_EXCEEDED` (§5.1). Backward compatible: a new registry string under the existing `reason_code_version` 1, so consumers branching on `(reason_code_version, reason_code)` treat it as an unknown code under a known version and fall back as they already must. No version bump. |
 | 1              | 2026-08  | Added the stable `assay.run_summary.v1` document identity for newly produced summaries. This is additive; consumers MUST continue accepting pre-identity version-1 summaries without `schema`, and the existing integer `schema_version` remains `1`. |
 | 1              | 2026-08  | Required executable recovery containing caller-controlled values to use `Run argv: <JSON array>` in both structured and console output. Static commands and non-command guidance remain valid prose; no schema change. |
-| 1              | 2026-08  | Added `E_EVIDENCE_INTEGRITY` (§5.1). Backward compatible on the same terms as `E_REPLAY_LIMIT_EXCEEDED`: a new registry string under the existing `reason_code_version` 1, which consumers branching on `(reason_code_version, reason_code)` treat as an unknown code under a known version and fall back on as they already must. No version bump. Nothing constructs the variant yet, so it is also listed in §5.4 alongside `E_BASELINE_INVALID`: registered here, reserved there, and awaiting its consumers in #2164 and #2165. §5.4's "reserved means" is the property those consumers need — an implementation MAY begin emitting a reserved code without a version bump. |
+| 1              | 2026-08  | Added `E_EVIDENCE_INTEGRITY` (§5.1). Backward compatible on the same terms as `E_REPLAY_LIMIT_EXCEEDED`: a new registry string under the existing `reason_code_version` 1, which consumers branching on `(reason_code_version, reason_code)` treat as an unknown code under a known version and fall back on as they already must. No version bump. It was initially reserved under §5.4; `assay evidence show --format json` now emits it only for the four verifier codes named in §5.1 that establish a recorded-value mismatch. |
 
 ---
 

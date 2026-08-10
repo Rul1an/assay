@@ -293,12 +293,12 @@ fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
     let f = File::open(&args.bundle)
         .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
 
-    let br = if args.no_verify {
+    let reader = if args.no_verify {
         assay_evidence::bundle::BundleReader::open_unverified(f)
     } else {
         assay_evidence::bundle::BundleReader::open(f)
-    }
-    .context("failed to open bundle reader")?;
+    };
+    let br = reader.map_err(|error| classify_show_reader_error(&args.bundle, error))?;
 
     let verified = !args.no_verify; // If open() succeeded above, it IS verified.
     let manifest = br.manifest();
@@ -362,6 +362,13 @@ fn cmd_show(args: EvidenceShowArgs) -> Result<i32> {
     }
 
     Ok(0)
+}
+
+fn classify_show_reader_error(path: &std::path::Path, error: anyhow::Error) -> anyhow::Error {
+    if let Some(failure) = crate::cli_failure::CliFailure::evidence_integrity(path, &error) {
+        return failure.into();
+    }
+    error.context("failed to open bundle reader")
 }
 
 // TUI explore module (conditional compilation)

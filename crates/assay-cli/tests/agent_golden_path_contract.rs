@@ -169,12 +169,6 @@ fn stdout_text(output: &Output, expected: &Value, context: &str) -> String {
         .unwrap_or_else(|error| panic!("{context} stdout is not UTF-8: {error}"))
 }
 
-fn assert_empty_stdout(output: &Output, expected: &Value, context: &str) {
-    assert_stdout_kind(expected, "empty");
-    assert!(expected["stdout"]["document"].is_null());
-    assert!(output.stdout.is_empty(), "{context} stdout is not empty");
-}
-
 fn stdout_json(output: &Output, expected: &Value, context: &str) -> Value {
     assert_stdout_kind(expected, "json");
     let document = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
@@ -414,7 +408,7 @@ fn completed_test_failure_is_a_run_report_not_a_diagnosis() {
 }
 
 #[test]
-fn bundle_inspection_json_disappears_on_integrity_failure() {
+fn bundle_inspection_json_publishes_integrity_failure_on_stdout() {
     let dir = tempfile::tempdir().expect("tempdir");
     let valid = corpus_vector(CorpusVector::Valid);
     let expected_success = expected_outcome("evidence-inspection", "valid");
@@ -436,8 +430,21 @@ fn bundle_inspection_json_disappears_on_integrity_failure() {
         &[("<bundle>", tampered.to_str().expect("UTF-8 path"))],
     );
     assert_exit(&failure, &expected_failure, "evidence show failure");
-    assert_empty_stdout(&failure, &expected_failure, "evidence show failure");
-    assert_gap(&expected_failure, 2164);
+    let failure_json = stdout_json(&failure, &expected_failure, "evidence show failure");
+    assert_eq!(
+        failure_json["reason_code"], expected_failure["reason_code"],
+        "integrity failure must publish the registered contract reason"
+    );
+    assert_eq!(failure_json["exit_code"], 2);
+    let next_step = failure_json["next_step"]
+        .as_str()
+        .expect("integrity failure next_step");
+    assert_eq!(
+        Some(next_step),
+        expected_failure["next_step"].as_str(),
+        "integrity remediation must match the generated contract"
+    );
+    assert!(!next_step.trim().is_empty());
 }
 
 #[test]
@@ -485,7 +492,7 @@ fn every_cli_contract_outcome_is_executed_once() {
             init_json_publishes_the_registered_reason_and_next_step,
             policy_validation_json_carries_success_and_failure_contracts,
             completed_test_failure_is_a_run_report_not_a_diagnosis,
-            bundle_inspection_json_disappears_on_integrity_failure,
+            bundle_inspection_json_publishes_integrity_failure_on_stdout,
             offline_profile_verifier_keeps_both_outcomes_on_stdout,
         ],
     );

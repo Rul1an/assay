@@ -32,6 +32,46 @@ impl CliFailure {
         }
     }
 
+    /// Classify only verifier outcomes that establish a recorded-value mismatch.
+    ///
+    /// `ErrorClass::Integrity` is intentionally too broad: the evidence crate also assigns it to
+    /// I/O, gzip, and tar failures, none of which establish anything about the content that was
+    /// successfully read. Keep this list aligned with the normative boundary included on
+    /// `ReasonCode::EEvidenceIntegrity`.
+    pub(crate) fn evidence_integrity(path: &Path, error: &anyhow::Error) -> Option<Self> {
+        use assay_evidence::ErrorCode;
+
+        let verifier = error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<assay_evidence::VerifyError>())?;
+        if !matches!(
+            verifier.code,
+            ErrorCode::IntegrityManifestHash
+                | ErrorCode::IntegrityEventHash
+                | ErrorCode::IntegrityFileSizeMismatch
+                | ErrorCode::IntegrityRunRootMismatch
+        ) {
+            return None;
+        }
+
+        let path = path.display().to_string();
+        let verifier_code = verifier.code.to_string();
+        let message = format!("evidence bundle {path} failed content verification: {error}");
+        let outcome = RunOutcome::from_reason(
+            ReasonCode::EEvidenceIntegrity,
+            Some(message),
+            Some(path.as_str()),
+        );
+        Some(Self {
+            outcome,
+            source: "evidence",
+            context: serde_json::json!({
+                "path": path,
+                "verifier_code": verifier_code,
+            }),
+        })
+    }
+
     pub(crate) fn emit(self, machine_output: bool) -> i32 {
         emit_operator_diagnostic(&self.diagnostic());
         if machine_output {
@@ -89,4 +129,60 @@ pub(crate) fn emit_summary_stdout(summary: &Summary) -> anyhow::Result<()> {
     let rendered = assay_core::report::summary::render_summary_json(summary)?;
     writeln!(std::io::stdout().lock(), "{rendered}")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CliFailure;
+    use assay_evidence::{ErrorClass, ErrorCode, VerifyError};
+    use std::path::Path;
+
+    fn verifier_error(class: ErrorClass, code: ErrorCode) -> anyhow::Error {
+        anyhow::Error::new(VerifyError::new(class, code, "measured failure"))
+            .context("bundle reader failed")
+    }
+
+    #[test]
+    fn evidence_integrity_classification_matches_the_normative_code_boundary() {
+        for code in [
+            ErrorCode::IntegrityManifestHash,
+            ErrorCode::IntegrityEventHash,
+            ErrorCode::IntegrityFileSizeMismatch,
+            ErrorCode::IntegrityRunRootMismatch,
+        ] {
+            let failure = CliFailure::evidence_integrity(
+                Path::new("bundle.tar.gz"),
+                &verifier_error(ErrorClass::Integrity, code),
+            )
+            .unwrap_or_else(|| panic!("{code} must classify as an evidence mismatch"));
+            assert_eq!(failure.outcome.reason_code, "E_EVIDENCE_INTEGRITY");
+            assert_eq!(failure.outcome.exit_code, 2);
+            assert!(
+                failure
+                    .outcome
+                    .next_step
+                    .as_deref()
+                    .is_some_and(|step| !step.is_empty()),
+                "{code} must carry remediation"
+            );
+        }
+
+        for (class, code) in [
+            (ErrorClass::Integrity, ErrorCode::IntegrityIo),
+            (ErrorClass::Integrity, ErrorCode::IntegrityGzip),
+            (ErrorClass::Integrity, ErrorCode::IntegrityTar),
+            (ErrorClass::Contract, ErrorCode::ContractInvalidJson),
+            (ErrorClass::Limits, ErrorCode::LimitBundleBytes),
+            (ErrorClass::Security, ErrorCode::SecurityPathTraversal),
+        ] {
+            assert!(
+                CliFailure::evidence_integrity(
+                    Path::new("bundle.tar.gz"),
+                    &verifier_error(class, code),
+                )
+                .is_none(),
+                "{code} establishes no recorded-value mismatch"
+            );
+        }
+    }
 }

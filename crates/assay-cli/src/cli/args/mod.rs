@@ -52,6 +52,11 @@ impl Cli {
             Command::Policy(PolicyArgs {
                 cmd: PolicyCommand::Validate(args)
             }) if args.is_json()
+        ) || matches!(
+            &self.cmd,
+            Command::Evidence(EvidenceArgs {
+                cmd: crate::cli::commands::evidence::EvidenceCmd::Show(args)
+            }) if args.format == ShowFormat::Json
         )
     }
 }

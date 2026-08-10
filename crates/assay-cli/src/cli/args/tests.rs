@@ -255,7 +255,7 @@ fn every_format_argument_advertises_its_accepted_values() {
 }
 
 #[test]
-fn top_level_failure_funnel_only_owns_policy_validate_json() {
+fn top_level_failure_funnel_owns_supported_machine_output_commands() {
     let policy_json = Cli::try_parse_from([
         "assay",
         "policy",
@@ -272,6 +272,21 @@ fn top_level_failure_funnel_only_owns_policy_validate_json() {
         Cli::try_parse_from(["assay", "policy", "validate", "--input", "policy.yaml"])
             .expect("policy validate text parses");
     assert!(!policy_text.machine_output());
+
+    let evidence_json = Cli::try_parse_from([
+        "assay",
+        "evidence",
+        "show",
+        "bundle.tar.gz",
+        "--format",
+        "json",
+    ])
+    .expect("evidence show JSON parses");
+    assert!(evidence_json.machine_output());
+
+    let evidence_table = Cli::try_parse_from(["assay", "evidence", "show", "bundle.tar.gz"])
+        .expect("evidence show table parses");
+    assert!(!evidence_table.machine_output());
 
     let run_json =
         Cli::try_parse_from(["assay", "run", "--config", "eval.yaml", "--format", "json"])

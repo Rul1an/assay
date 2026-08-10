@@ -92,9 +92,9 @@ Run: `assay evidence show <bundle> --format json`
 
 Exit: Valid `0`; integrity failure `2`.
 
-Stdout: Success parses as an object containing `manifest` and `events`. Integrity failure produces no stdout.
+Stdout: Success parses as an object containing `manifest` and `events`. A recorded-value mismatch parses as `assay.run_summary.v1` with `E_EVIDENCE_INTEGRITY`.
 
-On failure: No JSON failure report, `reason_code`, or `next_step`: [gap #2164](https://github.com/Rul1an/assay/issues/2164).
+On failure: Only the four verifier codes that establish a recorded-value mismatch map to `E_EVIDENCE_INTEGRITY`; I/O, gzip, tar, and format-contract failures do not.
 
 ### 8. Offline profile verification
 
