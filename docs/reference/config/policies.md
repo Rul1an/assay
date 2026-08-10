@@ -267,6 +267,30 @@ tool_pins:
     meta_hash: "42f5df3e..."
 ```
 
+`schema_hash` is the hex SHA-256 of the RFC 8785 (JCS) canonical bytes of the tool's `inputSchema`,
+or of `null` when the tool declares none. `meta_hash` is the hex SHA-256 of the description bytes
+verbatim, or of the empty string when there is none. Because `schema_hash` is taken over canonical
+bytes, a server that reorders its keys or re-emits `100` as `1e2` does not drift; a changed schema
+does, with one exception.
+
+RFC 8785 renders every number as an IEEE 754 double, so two numeric literals with the same double
+value become one pin. Below 2^53 that is only a spelling difference and there is nothing to detect.
+Above it, two literals can be different integers and still share a double, and then the pin stops
+seeing a real edit: a schema changed only from `{"maximum": 9007199254740993}` to
+`{"maximum": 9007199254740992}` keeps the same `schema_hash` while admitting a different set of
+arguments, because a validator still reads the two literals as different integers. **A `tool_pins`
+entry does not detect that edit.**
+
+The exception is a property of the number, not of the keyword, so do not read any keyword list as
+the boundary. It applies wherever such a pair of integers is compared against an argument for order
+or identity — `maximum`, `minimum`, `exclusiveMaximum`, `exclusiveMinimum`, `const` and `enum` are
+where it is measured to bite today, and that is an example set, not a limit. It is bounded on the
+other side: past the 64-bit integer range the two literals stop being distinguishable anywhere, so
+they are one value rather than a missed edit.
+
+An argument constraint written in this policy is unaffected, because it is validated from the
+schema you wrote here and not from the one the server declares.
+
 ## Legacy v1 Compatibility
 
 Legacy v1 policies use `constraints:`:
