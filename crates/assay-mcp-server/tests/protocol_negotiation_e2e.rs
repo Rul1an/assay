@@ -5,6 +5,15 @@ use std::process::{Command, Output, Stdio};
 
 const LATEST_LEGACY_VERSION: &str = "2025-11-25";
 
+#[test]
+#[allow(deprecated)]
+fn published_modern_version_constant_remains_source_compatible() {
+    assert_eq!(
+        assay_mcp_server::server::MODERN_PROTOCOL_VERSION,
+        "2026-07-28"
+    );
+}
+
 fn policy_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/mcp")
 }

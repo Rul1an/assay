@@ -17,6 +17,15 @@ fn next_rid() -> String {
     format!("r-{n:06}")
 }
 
+/// Modern MCP revision retained only for source compatibility with `assay-mcp-server` 5.0.0.
+///
+/// This server does not implement or advertise this revision. Modern requests are refused with
+/// the supported legacy set until the complete modern wire contract is implemented.
+#[deprecated(
+    note = "assay-mcp-server does not implement this revision; use the legacy initialize handshake"
+)]
+pub const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
+
 /// The reserved `_meta` key a request may use to declare its revision.
 const PROTOCOL_VERSION_META_KEY: &str = "io.modelcontextprotocol/protocolVersion";
 
