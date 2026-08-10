@@ -62,3 +62,26 @@
 - [ ] `python3 scripts/ci/test-agent-golden-path-skill.py`
 - [ ] `cargo test -p assay-cli`, `cargo fmt --all -- --check`, `cargo clippy -p assay-cli --all-targets -- -D warnings`
 - [ ] Drive the built binary: both channels exit `2`, `assay run` on the same file exits `2`, the published recovery exits `2`, and the success report gains no fields.
+
+---
+
+### Task 2: Make a skipped config check representable in JSON (review-driven)
+
+Independent review of PR #2207 at head `1a654a7062c5b9fab3ddef06992c51fa5400738e` found that the reading instruction this slice publishes — read `data_diagnostics[].severity` rather than the exit code — resolves an unchecked config into a clean one. With no `--config` and no `eval.yaml`, the JSON report exits `0`, omits `data_diagnostics`, and carries no skip marker, while the text channel prints `Policy Check: SKIPPED`. A consumer that follows the instruction finds no error severity and concludes the config is fine when it was never read.
+
+This amends two statements above. The success report does gain a field, against the Architecture note that it is "untouched on success", because a state that cannot be expressed cannot be published honestly. The text renderer's `println!` output stays byte-identical: the skipped line and the JSON reason now read one shared constant instead of two literals, which is the "one rule, one function" shape rather than a rendering change.
+
+**Files:**
+- Modify: `crates/assay-cli/src/cli/commands/doctor/implementation.rs`
+- Modify: `scripts/docs/generate-agent-golden-path.py`
+- Modify: `docs/reference/cli/doctor.md`
+- Add: `crates/assay-cli/tests/doctor_config_check_contract.rs`
+
+**Steps:**
+
+- [ ] Assert `config_check.status` for all three states against the built binary. **Expected RED:** `left: Null  right: "skipped"`.
+- [ ] Emit `config_check` in every JSON report: `checked`, `skipped` with a reason, or `failed` with the load error.
+- [ ] Move the reading instruction to name `config_check.status`, and regenerate.
+- [ ] Pin the instruction to the field, so a published discriminator that the binary does not emit fails a test.
+
+**Out of scope, deliberately:** the exit class does not move. `skipped` stays `0` on both channels, so nothing here touches the registry frozen by #2148.

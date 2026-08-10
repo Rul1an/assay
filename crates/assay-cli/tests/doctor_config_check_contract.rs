@@ -1,0 +1,190 @@
+//! `assay doctor --format json` must say whether the config was checked at all (#2160).
+//!
+//! The published reading instruction tells an agent to read `data_diagnostics[].severity` rather
+//! than the exit code. That instruction is only safe if the machine channel can express "the
+//! config was never read": before this contract existed, an unconfigured directory produced exit
+//! `0` with `data_diagnostics` absent and no skip token anywhere in the document, while the text
+//! channel printed `Policy Check: SKIPPED`. A consumer that looked for error severities found none
+//! and concluded the config was fine. `AGENTS.md` names that move directly: never turn absence of
+//! evidence into a clean result.
+//!
+//! So the three states the command can be in — checked, skipped, failed — are each represented by
+//! one always-present key, and the reading instruction is pinned to the field name it tells a
+//! consumer to read, so the two cannot drift apart.
+
+#[path = "../../../tests/support/bounded_process.rs"]
+#[allow(dead_code)]
+mod bounded_process;
+
+use bounded_process::{run_bounded, GOLDEN_PATH_LIMITS};
+use serde_json::Value;
+use std::ffi::OsStr;
+use std::path::Path;
+use std::process::Command;
+
+fn workspace_root() -> &'static Path {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("assay-cli must live two components below the workspace root");
+    assert!(
+        root.join("Cargo.toml").is_file(),
+        "workspace root does not contain Cargo.toml: {}",
+        root.display()
+    );
+    root
+}
+
+/// Drives the binary in `cwd` and returns its exit code plus parsed stdout.
+fn doctor_json<S: AsRef<OsStr>>(cwd: &Path, extra: &[S]) -> (i32, Value) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_assay"));
+    for (name, _) in std::env::vars_os() {
+        if name
+            .to_string_lossy()
+            .to_ascii_uppercase()
+            .starts_with("ASSAY_")
+        {
+            command.env_remove(name);
+        }
+    }
+    command
+        .current_dir(cwd)
+        .env("NO_COLOR", "1")
+        .args(["doctor", "--format", "json"])
+        .args(extra);
+    let output = run_bounded(
+        command,
+        b"",
+        GOLDEN_PATH_LIMITS,
+        "assay doctor --format json",
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+    let code = output
+        .status
+        .code()
+        .expect("assay process terminated without an exit code");
+    let document: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "doctor stdout is not JSON: {error}\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
+    (code, document)
+}
+
+fn init_project(cwd: &Path) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_assay"));
+    command.current_dir(cwd).env("NO_COLOR", "1").args([
+        "init",
+        "--preset",
+        "dev",
+        "--hello-trace",
+    ]);
+    let output = run_bounded(command, b"", GOLDEN_PATH_LIMITS, "assay init")
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "init must seed a loadable config: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn an_unchecked_config_is_not_reported_as_a_clean_one() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (code, document) = doctor_json::<&str>(dir.path(), &[]);
+
+    assert_eq!(code, 0, "the skipped check keeps its exit class");
+    assert_eq!(
+        document["config_check"]["status"],
+        "skipped",
+        "no config was read, so the JSON channel must say so instead of leaving a consumer to \
+         read an absent data_diagnostics as an absence of problems; document:\n{}",
+        serde_json::to_string_pretty(&document).expect("re-serialize")
+    );
+    assert!(
+        document["config_check"]["reason"]
+            .as_str()
+            .is_some_and(|reason| !reason.trim().is_empty()),
+        "a skipped check must name why it was skipped"
+    );
+    assert!(
+        document.get("data_diagnostics").is_none(),
+        "nothing was checked, so there are no diagnostics to publish"
+    );
+}
+
+#[test]
+fn a_checked_config_is_distinguishable_from_a_skipped_one() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_project(dir.path());
+    let (code, document) = doctor_json::<&str>(dir.path(), &[]);
+
+    assert_eq!(code, 0, "a loadable config with no findings stays exit 0");
+    assert_eq!(
+        document["config_check"]["status"],
+        "checked",
+        "a config that was read must not carry the same marker as one that was not; document:\n{}",
+        serde_json::to_string_pretty(&document).expect("re-serialize")
+    );
+    assert!(
+        document["data_diagnostics"].is_array(),
+        "a checked config publishes the diagnostics array the reading instruction names"
+    );
+}
+
+#[test]
+fn a_config_that_will_not_load_is_neither_checked_nor_skipped() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = dir.path().join("broken.yaml");
+    std::fs::write(&config, "version: [\n").expect("write malformed config");
+    let (code, document) = doctor_json(
+        dir.path(),
+        &["--config", config.to_str().expect("UTF-8 path")],
+    );
+
+    assert_eq!(
+        code, 2,
+        "an unloadable explicit config stays the config class"
+    );
+    assert_eq!(
+        document["config_check"]["status"],
+        "failed",
+        "a failed load is its own state; document:\n{}",
+        serde_json::to_string_pretty(&document).expect("re-serialize")
+    );
+}
+
+/// The instruction and the field are one rule answered in two places, so pin them together.
+///
+/// A reading instruction that names a field the binary does not emit is worse than no instruction:
+/// it reads as a checkable discriminator and is not one. The generated contract is the published
+/// form of that instruction, so the assertion is against the artifact a consumer actually reads.
+#[test]
+fn the_published_reading_instruction_names_the_field_the_binary_emits() {
+    let path = workspace_root().join("docs/generated/agent-golden-path.json");
+    let raw = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let contract: Value = serde_json::from_str(&raw).expect("golden-path contract is JSON");
+    let non_claims = contract["non_claims"]
+        .as_array()
+        .expect("contract non_claims array");
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (_, document) = doctor_json::<&str>(dir.path(), &[]);
+    let status = document["config_check"]["status"]
+        .as_str()
+        .expect("doctor must publish config_check.status");
+
+    let names_the_field = non_claims
+        .iter()
+        .filter_map(Value::as_str)
+        .any(|claim| claim.contains("config_check") && claim.contains(status));
+    assert!(
+        names_the_field,
+        "no published non-claim tells a consumer to read config_check for the {status:?} state, \
+         so the instruction still resolves an unchecked config into a clean one"
+    );
+}

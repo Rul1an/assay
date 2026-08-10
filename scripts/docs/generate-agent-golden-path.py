@@ -141,8 +141,10 @@ STEPS: list[dict[str, object]] = [
             ),
         ],
         "stdout_summary": (
-            "Parses as `assay.doctor_report.v0`. A config failure remains JSON and carries "
-            "the top-level `reason_code` and `next_step` alongside `config_error.code`."
+            "Parses as `assay.doctor_report.v0`. Every report carries "
+            "`config_check.status`, one of `checked`, `skipped` or `failed`. A config "
+            "failure remains JSON and carries the top-level `reason_code` and `next_step` "
+            "alongside `config_error.code`."
         ),
         "failure_summary": (
             "An explicit config that will not load, absent or unreadable alike, is exit `2` "
@@ -464,6 +466,9 @@ CONTRACT: dict[str, object] = {
         "A preflight exit 0 on the JSON channel does not mean the report carries no "
         "error-severity diagnostic; the text channel returns 1 in that case. Read "
         "data_diagnostics[].severity rather than the exit code alone. Owned by issue #2215.",
+        "Read config_check.status before reading data_diagnostics: only the value checked "
+        "means a config was read, and on skipped the absent data_diagnostics records an "
+        "unchecked config rather than a clean one.",
     ],
     "steps": STEPS,
 }
