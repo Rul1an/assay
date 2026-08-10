@@ -5,15 +5,19 @@
 mod bounded_process;
 
 use bounded_process::{run_bounded, ProcessLimits};
+use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::process::{Command, Output};
 use std::time::Duration;
 
 const LIMITS: ProcessLimits = ProcessLimits::new(Duration::from_secs(5), 64 * 1024, 64 * 1024);
 
-fn assay(cwd: &Path, args: &[&str], context: &str) -> Output {
+fn assay_command_with_environment(
+    cwd: &Path,
+    environment_names: impl IntoIterator<Item = OsString>,
+) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_assay"));
-    for (name, _) in std::env::vars_os() {
+    for name in environment_names {
         if name
             .to_string_lossy()
             .to_ascii_uppercase()
@@ -22,7 +26,40 @@ fn assay(cwd: &Path, args: &[&str], context: &str) -> Output {
             command.env_remove(name);
         }
     }
-    command.current_dir(cwd).env("NO_COLOR", "1").args(args);
+    command.current_dir(cwd).env("NO_COLOR", "1");
+    command
+}
+
+fn assay_command(cwd: &Path) -> Command {
+    assay_command_with_environment(cwd, std::env::vars_os().map(|(name, _)| name))
+}
+
+#[test]
+fn assay_command_scrubs_assay_environment_case_insensitively() {
+    let command = assay_command_with_environment(
+        Path::new("."),
+        [
+            OsString::from("ASSAY_EXIT_CODES"),
+            OsString::from("assay_vcr_dir"),
+            OsString::from("NO_COLOR"),
+        ],
+    );
+    let env = command.get_envs().collect::<Vec<_>>();
+
+    assert!(env
+        .iter()
+        .any(|(name, value)| *name == "ASSAY_EXIT_CODES" && value.is_none()));
+    assert!(env
+        .iter()
+        .any(|(name, value)| *name == "assay_vcr_dir" && value.is_none()));
+    assert!(env
+        .iter()
+        .any(|(name, value)| *name == "NO_COLOR" && *value == Some("1".as_ref())));
+}
+
+fn assay<T: AsRef<OsStr>>(cwd: &Path, args: &[T], context: &str) -> Output {
+    let mut command = assay_command(cwd);
+    command.args(args);
     run_bounded(command, b"", LIMITS, context).unwrap_or_else(|error| panic!("{error}"))
 }
 
@@ -60,13 +97,7 @@ fn config_parse_recovery_argv_executes_without_a_shell() {
         "the hostile path must remain one argv element"
     );
 
-    let mut command = Command::new(env!("CARGO_BIN_EXE_assay"));
-    command
-        .current_dir(dir.path())
-        .env("NO_COLOR", "1")
-        .args(&recovery[1..]);
-    let recovered = run_bounded(command, b"", LIMITS, "execute config recovery")
-        .unwrap_or_else(|error| panic!("{error}"));
+    let recovered = assay(dir.path(), &recovery[1..], "execute config recovery");
     assert_eq!(recovered.status.code(), Some(1));
     let recovered_stdout = String::from_utf8_lossy(&recovered.stdout);
     assert!(
