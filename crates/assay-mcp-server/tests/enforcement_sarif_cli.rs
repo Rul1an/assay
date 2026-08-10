@@ -149,3 +149,19 @@ fn oversized_input_fails_before_projection() {
         "missing bounded-input diagnosis: {stderr}"
     );
 }
+
+#[test]
+fn oversized_input_reports_limit_when_boundary_splits_utf8() {
+    const LIMIT: usize = 16 * 1024 * 1024;
+    let mut input = vec![b'x'; LIMIT];
+    input.extend_from_slice("€".as_bytes());
+    let output = run_projection(&input, &["--output", "-"]);
+
+    assert!(!output.status.success(), "oversized input must fail");
+    assert!(output.stdout.is_empty(), "oversized input emitted SARIF");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("input exceeds 16777216-byte limit"),
+        "size classification was hidden by UTF-8 decoding: {stderr}"
+    );
+}

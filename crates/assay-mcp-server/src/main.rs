@@ -111,14 +111,15 @@ use tracing_subscriber::{fmt, EnvFilter};
 const MAX_ENFORCEMENT_NDJSON_BYTES: u64 = 16 * 1024 * 1024;
 
 fn read_enforcement_ndjson(reader: impl Read) -> Result<String> {
-    let mut raw = String::new();
+    let mut raw = Vec::new();
     reader
         .take(MAX_ENFORCEMENT_NDJSON_BYTES + 1)
-        .read_to_string(&mut raw)?;
+        .read_to_end(&mut raw)?;
     if raw.len() as u64 > MAX_ENFORCEMENT_NDJSON_BYTES {
         anyhow::bail!("enforcement NDJSON input exceeds {MAX_ENFORCEMENT_NDJSON_BYTES}-byte limit");
     }
-    Ok(raw)
+    String::from_utf8(raw)
+        .map_err(|_| anyhow::anyhow!("enforcement NDJSON input must be valid UTF-8"))
 }
 
 fn init_logging(log_level: &str) {
