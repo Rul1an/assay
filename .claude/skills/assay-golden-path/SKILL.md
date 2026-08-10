@@ -43,7 +43,7 @@ Exit: Success `0`; invalid explicit config `2`.
 
 Stdout: Parses as `assay.doctor_report.v0`. A config failure remains JSON and carries the top-level `reason_code` and `next_step` alongside `config_error.code`.
 
-On failure: An unreadable explicit config is exit `2` and names the failing file in a concrete JSON argv next step. An absent explicit config reports the same `E_CFG_PARSE` identity as a malformed one; that identity is not split here.
+On failure: An unreadable explicit config is exit `2` and names the failing file in a concrete JSON argv next step, the same class `assay run` gives the same file.
 
 ### 3. Starter files
 
@@ -122,3 +122,4 @@ On failure: Malformed NDJSON fails before projection and names the invalid input
 - The contract records current behavior; gap rows are not clean results.
 - Schema identity conventions outside this narrow contract remain owned by issue #2167.
 - A passing evidence integrity check does not prove an external side effect.
+- A doctor config failure does not distinguish an absent config from an unreadable one, and its recovery step is the invocation that produced it; both are owned by issue #2206.

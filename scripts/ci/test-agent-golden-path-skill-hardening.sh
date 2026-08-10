@@ -151,6 +151,54 @@ append_skill_text() {
   done
 }
 
+append_existing_contract_evidence_issue() {
+  local case_root="$1"
+  CASE_ROOT="$case_root" python3 - <<'PY'
+import json
+import os
+import re
+from pathlib import Path
+
+# Cite an issue the shipped contract already vouches for. Naming one here instead would
+# state the allowed-issue set a second time, and it went stale the moment a gap closed.
+root = Path(os.environ["CASE_ROOT"])
+contract = json.loads(
+    (root / "docs/generated/agent-golden-path.json").read_text(encoding="utf-8")
+)
+
+issue_numbers = {
+    int(match)
+    for claim in contract["non_claims"]
+    for match in re.findall(r"(?:#|/issues/)([0-9]+)", claim)
+}
+for step in contract["steps"]:
+    issue_numbers.update(
+        outcome["gap_issue"]
+        for outcome in step["outcomes"]
+        if isinstance(outcome.get("gap_issue"), int)
+        and not isinstance(outcome["gap_issue"], bool)
+    )
+
+if not issue_numbers:
+    raise SystemExit(
+        "the contract vouches for no issue, so this allow case would pass without "
+        "exercising the vocabulary gate"
+    )
+
+issue = min(issue_numbers)
+claim = (
+    "The steps retain the existing "
+    f"[gap #{issue}](https://github.com/Rul1an/assay/issues/{issue}) evidence link."
+)
+for skill_path in (
+    root / ".agents/skills/assay-golden-path/SKILL.md",
+    root / ".claude/skills/assay-golden-path/SKILL.md",
+):
+    with skill_path.open("a", encoding="ascii") as skill:
+        skill.write(f"\n{claim}\n")
+PY
+}
+
 append_contract_evidence_issue() {
   local case_root="$1"
   CASE_ROOT="$case_root" python3 - <<'PY'
@@ -778,9 +826,7 @@ expect_named_failure \
 
 case_root="$SCRATCH/public-vocabulary-allow-contract-evidence"
 seed_case "$case_root"
-append_skill_text \
-  "$case_root" \
-  'The nine steps retain the existing [gap #2160](https://github.com/Rul1an/assay/issues/2160) evidence link.'
+append_existing_contract_evidence_issue "$case_root"
 expect_named_success "public vocabulary contract evidence allow case" "$case_root"
 
 case_root="$SCRATCH/public-vocabulary-allow-novel-contract-evidence"

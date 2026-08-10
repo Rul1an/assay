@@ -146,8 +146,7 @@ STEPS: list[dict[str, object]] = [
         ),
         "failure_summary": (
             "An unreadable explicit config is exit `2` and names the failing file in a "
-            "concrete JSON argv next step. An absent explicit config reports the same "
-            "`E_CFG_PARSE` identity as a malformed one; that identity is not split here."
+            "concrete JSON argv next step, the same class `assay run` gives the same file."
         ),
     },
     {
@@ -457,6 +456,9 @@ CONTRACT: dict[str, object] = {
         "The contract records current behavior; gap rows are not clean results.",
         "Schema identity conventions outside this narrow contract remain owned by issue #2167.",
         "A passing evidence integrity check does not prove an external side effect.",
+        "A doctor config failure does not distinguish an absent config from an unreadable "
+        "one, and its recovery step is the invocation that produced it; both are owned by "
+        "issue #2206.",
     ],
     "steps": STEPS,
 }
