@@ -521,6 +521,31 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_recovery_argv_round_trips_json_significant_paths() {
+        let path = "cfg \"quoted\"\\nested\nline\ttab\u{0007}.yaml";
+        let cases = [
+            (
+                ReasonCode::ECfgParse,
+                vec!["assay", "doctor", "--config", path],
+            ),
+            (
+                ReasonCode::EPolicyParse,
+                vec!["assay", "policy", "validate", "--input", path],
+            ),
+        ];
+
+        for (reason, expected) in cases {
+            let next_step = reason.next_step(Some(path));
+            let encoded = next_step
+                .strip_prefix("Run argv: ")
+                .expect("dynamic recovery must publish JSON argv");
+            let argv: Vec<String> =
+                serde_json::from_str(encoded).expect("recovery argv must remain valid JSON");
+            assert_eq!(argv, expected, "{reason:?} must preserve one path argument");
+        }
+    }
+
+    #[test]
     fn test_reason_code_display() {
         assert_eq!(
             format!("{}", ReasonCode::ETraceNotFound),
