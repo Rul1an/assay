@@ -186,9 +186,12 @@ mod tests {
     /// each of these pairs apart. This is inherited from the canonicalization the tool-definition
     /// binding already applies to the same object, not introduced by routing identity through it.
     ///
-    /// It *is* a widening of what `schema_hash` distinguishes, and not only a cosmetic one:
-    /// `the_f64_collapse_hides_a_difference_a_validator_still_enforces` measures where it bites
-    /// and bounds it. Accepted because the alternative is a second canonicalization rule for the
+    /// The hasher never sees a keyword — it sees bytes — so the merge is a property of the number
+    /// and not of where the number sits, which the last pair pins under a key that is not a schema
+    /// keyword at all. Merging two spellings of one number is what canonicalizing is for; merging
+    /// two *different* numbers is a widening, and
+    /// `the_f64_collapse_hides_a_difference_a_validator_still_enforces` is where that is measured
+    /// and paid for. Accepted because the alternative is a second canonicalization rule for the
     /// question the binding digest already answers, which `AGENTS.md` "one rule, one function"
     /// forbids.
     #[test]
@@ -205,6 +208,12 @@ mod tests {
             (r#"{"multipleOf":1.0}"#, r#"{"multipleOf":1}"#),
             // Magnitude, under the smallest subnormal.
             (r#"{"minimum":1e-400}"#, r#"{"minimum":0}"#),
+            // The same collapse under a key that is no keyword and at a nesting the hasher has no
+            // opinion about, because the hasher has no opinion about either.
+            (
+                r#"{"properties":{"n":{"notAKeyword":9007199254740993}}}"#,
+                r#"{"properties":{"n":{"notAKeyword":9007199254740992}}}"#,
+            ),
         ] {
             assert_eq!(
                 identity_for(a).schema_hash,
@@ -214,64 +223,120 @@ mod tests {
         }
     }
 
-    /// The bound on the widening above, measured rather than reasoned about, because #2229 is
-    /// what an unchecked claim about this file costs and the first answer to it asserted that
-    /// `jsonschema` shares the `f64` and so cannot see the collapse. It does not:
-    /// `serde_json::Number` keeps `u64`/`i64` precision for an integer literal instead of
-    /// rounding it to a double, and `jsonschema` compares on that integer path. So a tool
-    /// definition edited only in an integer literal above 2^53 changes what it admits while its
-    /// `schema_hash` stays byte-identical — a missed drift with an enforcement consequence, not a
-    /// spelling difference.
+    /// Where the merge above stops being cosmetic — stated as a rule, because the keyword list has
+    /// been wrong twice. #2229 is what one unchecked claim about this file costs; the first answer
+    /// to it asserted that `jsonschema` shares the `f64` and so cannot see the collapse, which the
+    /// review disproved with six sampled pairs and read as four keywords, and a further probe made
+    /// five. Undercounting here is not the conservative error it looks like: the list says which
+    /// edits `schema_hash` *fails* to catch, so a short list tells an operator that an edit to a
+    /// keyword outside it would be caught as drift, when it would not be.
     ///
-    /// The four pairs are the ones the review of #2239 measured diverging under `jsonschema`
-    /// 0.49.2, kept here so the test and that review pin the same fact. `minimum` and
-    /// `multipleOf` agreed on the instances tried there, which is a property of those instances
-    /// and not of the keywords; four of six is what was measured, not a survey of the numeric
-    /// keyword set.
+    /// The rule. `serde_json::Number` keeps `u64`/`i64` precision for an integer literal instead
+    /// of rounding it to a double, and `jsonschema` compares on that integer path, for the schema
+    /// literal and the instance alike. So the merge hides an enforceable difference for exactly
+    /// one class of input: two *distinct* integers that round to one double. That class opens
+    /// above 2^53 and closes at the `u64`/`i64` limit, past which `serde_json` itself falls back
+    /// to `f64` and both sides collapse together — `18446744073709551616` against `…617` does not
+    /// diverge. Pairs that denote one number, `1.0` against `1` or `-0.0` against `0`, are
+    /// separated by nothing downstream on any instance; that merge is the normalization this
+    /// change is for. Given a pair from the class, every keyword that compares it against an
+    /// instance number for order or identity is affected, whatever the keyword is called.
+    ///
+    /// So the table below is the whole numeric-valued vocabulary of JSON Schema 2020-12 rather
+    /// than a sample of it, and each row carries what was measured against `jsonschema` 0.49.2:
+    /// six keywords have a separating instance, and for the rest none was found. "None found" is
+    /// not "none exists", and the rule says why for each: the length and count keywords compare
+    /// against a length, and no instance can be 2^53 items long, while `multipleOf` asks for a
+    /// remainder rather than an order or identity comparison. Those rows still bite — if a
+    /// validator change moves one of them into the diverging set, this fails here rather than
+    /// leaving the paragraph above to age quietly.
     #[test]
     fn the_f64_collapse_hides_a_difference_a_validator_still_enforces() {
-        for (admits, rejects, instance) in [
+        // No `f64` holds the first of these; both canonicalize to the double the second names.
+        const UNREPRESENTABLE: &str = "9007199254740993";
+        const SHARED_DOUBLE: &str = "9007199254740992";
+
+        // Every numeric-valued keyword of the 2020-12 validation vocabulary, against the instance
+        // that separates the pair and the literal whose schema admits that instance, where such an
+        // instance exists.
+        for (shape, separating) in [
+            (r#"{"multipleOf":$N}"#, None),
             (
-                r#"{"maximum":9007199254740993}"#,
-                r#"{"maximum":9007199254740992}"#,
-                "9007199254740993",
+                r#"{"maximum":$N}"#,
+                Some((UNREPRESENTABLE, UNREPRESENTABLE)),
             ),
             (
-                r#"{"exclusiveMaximum":9007199254740993}"#,
-                r#"{"exclusiveMaximum":9007199254740992}"#,
-                "9007199254740992",
+                r#"{"exclusiveMaximum":$N}"#,
+                Some((SHARED_DOUBLE, UNREPRESENTABLE)),
             ),
+            (r#"{"minimum":$N}"#, Some((SHARED_DOUBLE, SHARED_DOUBLE))),
             (
-                r#"{"const":9007199254740993}"#,
-                r#"{"const":9007199254740992}"#,
-                "9007199254740993",
+                r#"{"exclusiveMinimum":$N}"#,
+                Some((UNREPRESENTABLE, SHARED_DOUBLE)),
             ),
-            (
-                r#"{"enum":[9007199254740993]}"#,
-                r#"{"enum":[9007199254740992]}"#,
-                "9007199254740993",
-            ),
+            (r#"{"maxLength":$N}"#, None),
+            (r#"{"minLength":$N}"#, None),
+            (r#"{"maxItems":$N}"#, None),
+            (r#"{"minItems":$N}"#, None),
+            (r#"{"maxContains":$N}"#, None),
+            (r#"{"minContains":$N}"#, None),
+            (r#"{"maxProperties":$N}"#, None),
+            (r#"{"minProperties":$N}"#, None),
+            (r#"{"const":$N}"#, Some((UNREPRESENTABLE, UNREPRESENTABLE))),
+            (r#"{"enum":[$N]}"#, Some((UNREPRESENTABLE, UNREPRESENTABLE))),
         ] {
+            let bigger = shape.replace("$N", UNREPRESENTABLE);
+            let smaller = shape.replace("$N", SHARED_DOUBLE);
+
             assert_eq!(
-                identity_for(admits).schema_hash,
-                identity_for(rejects).schema_hash,
-                "{admits} and {rejects} should share one identity"
+                identity_for(&bigger).schema_hash,
+                identity_for(&smaller).schema_hash,
+                "{bigger} and {smaller} should share one identity"
             );
 
-            let instance: Value = serde_json::from_str(instance).expect("instance parses");
-            let allows = |source: &str| {
+            // `compile_schema` is the path every enforcement route takes, so the property is
+            // pinned against the validator that actually enforces.
+            let allows = |source: &str, instance: &Value| {
                 let schema: Value = serde_json::from_str(source).expect("schema parses");
                 crate::policy_engine::compile_schema(&schema)
                     .expect("schema compiles")
-                    .is_valid(&instance)
+                    .is_valid(instance)
             };
 
+            let Some((instance, admitting_literal)) = separating else {
+                for source in [
+                    UNREPRESENTABLE,
+                    SHARED_DOUBLE,
+                    "0",
+                    "1.5",
+                    r#""abc""#,
+                    "[1,2,3]",
+                    r#"{"k":1}"#,
+                ] {
+                    let instance: Value = serde_json::from_str(source).expect("instance parses");
+                    assert_eq!(
+                        allows(&bigger, &instance),
+                        allows(&smaller, &instance),
+                        "{bigger} and {smaller} disagree on {source}, so this keyword has joined \
+                         the diverging set and the comment above no longer describes it"
+                    );
+                }
+                continue;
+            };
+
+            let (admits, rejects) = if admitting_literal == UNREPRESENTABLE {
+                (&bigger, &smaller)
+            } else {
+                (&smaller, &bigger)
+            };
+            let instance: Value = serde_json::from_str(instance).expect("instance parses");
+
             assert!(
-                allows(admits),
-                "{admits} should admit {instance}, or the pair below proves nothing"
+                allows(admits, &instance),
+                "{admits} should admit {instance}, or the assertion below proves nothing"
             );
             assert!(
-                !allows(rejects),
+                !allows(rejects, &instance),
                 "{rejects} should reject {instance}: if the validator has started sharing the \
                  f64, the collapse is no longer a widening and the comment above overstates it"
             );
