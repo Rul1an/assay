@@ -1,7 +1,8 @@
 # deny.toml - cargo-deny configuration
 # Docs: https://embarkstudios.github.io/cargo-deny/
 #
-# Run: cargo deny check advisories bans licenses sources
+# Run: cargo-deny check advisories bans licenses sources
+# (the binary, not `cargo deny`: through cargo it re-enters rust-toolchain.toml resolution, see #2214)
 
 [graph]
 # Exclude dev-only and build-only dependencies from most checks
