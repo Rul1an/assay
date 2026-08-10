@@ -46,13 +46,14 @@ including its explicit non-claims, or amend the decision through a new ADR.
 - At most two ADR-042/043 implementation branches may be active at once.
 - Use `codex/`, `claude/`, or `cursor/` branch prefixes matching the writer.
 - Do not implement on `main`.
-- Build in the worktree's own `target/`. Each worktree already has one, so the isolation this rule
-  asks for needs no configuration, and `/target` is git-ignored so an in-tree build leaves a
-  read-only review's tree clean. Set `CARGO_TARGET_DIR` only when a build must not warm the
-  branch's cache, and then scope it to one worktree — never one path per reviewed head. The
-  pre-push hook is the single deliberate exception: it shares one target under the common git
-  directory across every worktree, trading cargo's lock on concurrent pushes for one build cache
-  instead of one per worktree.
+- Build in the worktree's own `target/`. Cargo creates one per worktree on first build, so the
+  isolation this rule asks for needs no configuration, and `/target` is git-ignored so an in-tree
+  build leaves a read-only review's tree clean. Set `CARGO_TARGET_DIR` only to keep a build out of
+  the branch's cache, and scope it to one worktree — never one path per reviewed head. A tool may
+  share one target across worktrees when its script records why: the pre-push hook does, for one
+  build cache instead of one per worktree, and `scripts/ci/phase5-check.sh` does, to avoid VM
+  mount filesystem issues. Sharing costs cargo's lock, and under the pre-push hook's timeout that
+  can abort a push rather than only delay it.
 - Remove merged branches and their worktrees only after recording the merge in the programme ledger.
 
 ## Development Discipline
