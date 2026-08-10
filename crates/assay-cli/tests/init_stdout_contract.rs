@@ -125,29 +125,57 @@ fn a_successful_init_publishes_the_files_it_created_and_an_empty_reason_code() {
     );
 }
 
-/// The report describes the directory it left behind, including a failure that wrote files first.
+/// A classified failure reports no files, because every classified failure happens before the
+/// first write.
 ///
-/// Without this, a caller that reads only the failure envelope cannot tell an `init` that touched
-/// nothing from one that wrote `policy.yaml` and then failed, which is the difference between
-/// retrying and cleaning up first.
+/// This test was named `a_failure_after_partial_work_still_reports_what_it_wrote` and asserted
+/// nothing of the kind: deleting `created` and `skipped` from the emitted document left it green.
+/// The name described a capability no reachable path has. Both `InitReport::fail` call sites sit
+/// upstream of every `record_created`/`record_skipped`, so a failing document's file lists are
+/// structurally always empty, and a failure that happens *after* a write leaves `?`/`bail!` and
+/// emits no document at all — the limit stated as a non-claim rather than papered over.
+///
+/// So the checkable rule is the structural one, and it is worth pinning in this direction: if a
+/// future `fail` site lands after a write, these lists stop being empty and this test fires,
+/// which forces the choice between reporting the partial work and keeping the limit honest.
 #[test]
-fn a_failure_after_partial_work_still_reports_what_it_wrote() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    std::fs::write(dir.path().join("policy.yaml"), "existing: true\n").expect("seed policy.yaml");
+fn a_classified_failure_reports_no_files_because_it_fails_before_the_first_write() {
+    for (args, reason) in [
+        (
+            vec!["--preset", "not-a-preset", "--format", "json"],
+            "E_INVALID_ARGS",
+        ),
+        (
+            vec!["--from-trace", "absent.jsonl", "--format", "json"],
+            "E_TRACE_NOT_FOUND",
+        ),
+    ] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("policy.yaml"), "existing: true\n")
+            .expect("seed policy.yaml");
 
-    let run = init(
-        dir.path(),
-        &["--preset", "not-a-preset", "--format", "json"],
-    );
+        let run = init(dir.path(), &args);
 
-    assert_eq!(run.exit_code, 2);
-    let report = sole_document(&run, "failure after partial work");
-    assert_eq!(report["reason_code"], "E_INVALID_ARGS");
-    assert_eq!(
-        std::fs::read_to_string(dir.path().join("policy.yaml")).expect("policy.yaml survives"),
-        "existing: true\n",
-        "a failing init must not overwrite an existing policy"
-    );
+        assert_eq!(run.exit_code, 2, "{reason} exits 2");
+        let report = sole_document(&run, reason);
+        assert_eq!(report["reason_code"], reason);
+        assert_eq!(
+            report["created"].as_array().expect("created is an array"),
+            &Vec::<serde_json::Value>::new(),
+            "{reason} reported files it created, so a failure now happens after a write and the \
+             document must either carry that work or stop claiming to describe the directory"
+        );
+        assert_eq!(
+            report["skipped"].as_array().expect("skipped is an array"),
+            &Vec::<serde_json::Value>::new(),
+            "{reason} reported skipped files, so this failure now runs past the first write"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("policy.yaml")).expect("policy.yaml survives"),
+            "existing: true\n",
+            "a failing init must not overwrite an existing policy"
+        );
+    }
 }
 
 /// Text stays the default and stays human.

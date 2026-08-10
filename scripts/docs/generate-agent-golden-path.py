@@ -180,6 +180,13 @@ STEPS: list[dict[str, object]] = [
                 stdout("json", "assay.init_report.v0"),
                 ["init", "--preset", "dev", "--hello-trace", "--format", "json"],
                 reason_code="",
+                # A success carries a next step too. Leaving this `null` said the key was absent,
+                # which is what `null` means for `policy-validation/valid` in this same file, and
+                # the document has carried a concrete argv all along.
+                next_step=(
+                    'Run argv: ["assay","validate","--config","eval.yaml",'
+                    '"--trace-file","traces/hello.jsonl"]'
+                ),
             ),
             outcome(
                 "unknown-preset-json",

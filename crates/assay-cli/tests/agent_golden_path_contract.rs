@@ -308,6 +308,16 @@ fn init_json_publishes_the_registered_reason_and_next_step() {
         .as_str()
         .expect("contract reason_code string");
     assert_eq!(success_json["reason_code"], expected_success_reason);
+    // Read the contract side as a string for the same reason the failure side does below. This one
+    // was `null` in the generated contract while the binary emitted a concrete argv, and nothing
+    // compared them, so the published document understated what a success actually carries.
+    let expected_success_next = expected_success["next_step"]
+        .as_str()
+        .expect("contract next_step string");
+    assert_eq!(
+        success_json["next_step"], expected_success_next,
+        "init success next_step must match the generated contract"
+    );
 
     let failure_dir = tempfile::tempdir().expect("failure tempdir");
     let expected_failure = expected_outcome("starter-files", "unknown-preset-json");

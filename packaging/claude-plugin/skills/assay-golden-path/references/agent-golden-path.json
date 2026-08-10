@@ -145,7 +145,7 @@
             "document": "assay.init_report.v0"
           },
           "reason_code": "",
-          "next_step": null,
+          "next_step": "Run argv: [\"assay\",\"validate\",\"--config\",\"eval.yaml\",\"--trace-file\",\"traces/hello.jsonl\"]",
           "gap_issue": null
         },
         {
