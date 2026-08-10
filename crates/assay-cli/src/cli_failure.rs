@@ -210,6 +210,10 @@ mod tests {
             .split('`')
             .filter(|token| token.starts_with("Integrity"))
             .collect();
+        assert!(
+            !normative.is_empty(),
+            "the normative integrity boundary parser must find verifier codes"
+        );
         let implemented: BTreeSet<String> = EVIDENCE_INTEGRITY_CODES
             .iter()
             .map(ToString::to_string)
@@ -232,6 +236,10 @@ mod tests {
             .split('`')
             .filter(|token| token.starts_with("Integrity"))
             .collect();
+        assert!(
+            !normative.is_empty(),
+            "the unreadable reason registry parser must find verifier codes"
+        );
         let implemented: BTreeSet<String> = EVIDENCE_UNREADABLE_CODES
             .iter()
             .map(ToString::to_string)
