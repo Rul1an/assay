@@ -35,6 +35,83 @@ impl ProcessLimits {
 pub const GOLDEN_PATH_LIMITS: ProcessLimits =
     ProcessLimits::new(Duration::from_secs(10), 1024 * 1024, 1024 * 1024);
 
+/// Where a reported exit status came from.
+///
+/// A status the harness reaped after terminating the process tree is not an
+/// ending the child chose: on Windows `TerminateJobObject` supplies the exit
+/// code itself, and on Unix the group kill supplies the signal. Rendering that
+/// the same way as a child-chosen exit makes a timeout indistinguishable from a
+/// child that died instantly, which is what run 31404812176 reported.
+#[derive(Clone, Copy)]
+enum StatusOrigin {
+    ChildExit,
+    HarnessTermination,
+}
+
+/// A child's exit status together with the origin that explains it.
+#[derive(Clone, Copy)]
+struct Ending {
+    status: ExitStatus,
+    origin: StatusOrigin,
+}
+
+impl Ending {
+    fn child_exit(status: ExitStatus) -> Self {
+        Self {
+            status,
+            origin: StatusOrigin::ChildExit,
+        }
+    }
+
+    fn harness_termination(status: ExitStatus) -> Self {
+        Self {
+            status,
+            origin: StatusOrigin::HarnessTermination,
+        }
+    }
+
+    fn describe(&self) -> String {
+        match self.origin {
+            StatusOrigin::ChildExit => format!("{} (child exit)", self.status),
+            StatusOrigin::HarnessTermination => format!(
+                "{} (recorded after harness termination; may be the termination's own code)",
+                self.status
+            ),
+        }
+    }
+}
+
+/// Names what the deadline was still waiting for when it expired.
+///
+/// Without this, "deadline expired" covers two different endings — a child that
+/// never exited, and a child that exited while a descendant kept its output
+/// handles open — and the reader of a failure cannot tell them apart.
+fn deadline_expiry(
+    timeout: Duration,
+    child_exited: bool,
+    stdin_pending: bool,
+    stdout_pending: bool,
+    stderr_pending: bool,
+) -> String {
+    let mut outstanding = Vec::new();
+    if !child_exited {
+        outstanding.push("child still running");
+    }
+    if stdin_pending {
+        outstanding.push("stdin still being written");
+    }
+    if stdout_pending {
+        outstanding.push("stdout handle still open");
+    }
+    if stderr_pending {
+        outstanding.push("stderr handle still open");
+    }
+    format!(
+        "deadline of {timeout:?} expired; outstanding=[{}]",
+        outstanding.join(", ")
+    )
+}
+
 #[derive(Clone, Copy)]
 enum CapturedStream {
     Stdout,
@@ -120,7 +197,7 @@ pub fn run_bounded(
     let deadline = Instant::now() + limits.timeout;
     let mut early_failure = None;
     let mut observed_status = None;
-    let status = loop {
+    let ending = loop {
         if early_failure.is_none() {
             if let Ok(stream) = overflow_rx.try_recv() {
                 // The reader closes its pipe after limit + 1 bytes. Keep the
@@ -138,9 +215,13 @@ pub fn run_bounded(
                 Ok(Some(status)) => observed_status = Some(status),
                 Ok(None) => {}
                 Err(error) => {
-                    let reap = terminate_and_reap(child.as_mut(), None, context, &command_display);
+                    let reap =
+                        match terminate_and_reap(child.as_mut(), None, context, &command_display) {
+                            Ok(ending) => ending.describe(),
+                            Err(reap_error) => reap_error,
+                        };
                     return Err(format!(
-                        "{context}: poll {command_display}: {error}; terminate/reap: {reap:?}"
+                        "{context}: poll {command_display}: {error}; terminate/reap: {reap}"
                     ));
                 }
             }
@@ -152,14 +233,22 @@ pub fn run_bounded(
             && stderr_reader.is_finished()
         {
             finish_process_tree(child.as_mut(), context, &command_display)?;
-            break observed_status
-                .take()
-                .expect("status was checked immediately above");
+            break Ending::child_exit(
+                observed_status
+                    .take()
+                    .expect("status was checked immediately above"),
+            );
         }
 
         if Instant::now() >= deadline {
             if early_failure.is_none() {
-                early_failure = Some(format!("deadline of {:?} expired", limits.timeout));
+                early_failure = Some(deadline_expiry(
+                    limits.timeout,
+                    observed_status.is_some(),
+                    !stdin_writer.is_finished(),
+                    !stdout_reader.is_finished(),
+                    !stderr_reader.is_finished(),
+                ));
             }
             break terminate_and_reap(
                 child.as_mut(),
@@ -182,7 +271,7 @@ pub fn run_bounded(
             context,
             &command_display,
             &failure,
-            &status,
+            &ending,
             &stdout,
             &stderr,
         ));
@@ -195,7 +284,7 @@ pub fn run_bounded(
                 "stdout exceeded its {}-byte ceiling",
                 limits.max_stdout_bytes
             ),
-            &status,
+            &ending,
             &stdout,
             &stderr,
         ));
@@ -208,7 +297,7 @@ pub fn run_bounded(
                 "stderr exceeded its {}-byte ceiling",
                 limits.max_stderr_bytes
             ),
-            &status,
+            &ending,
             &stdout,
             &stderr,
         ));
@@ -223,14 +312,14 @@ pub fn run_bounded(
             context,
             &command_display,
             &format!("write stdin: {error}"),
-            &status,
+            &ending,
             &stdout,
             &stderr,
         ))
     })?;
 
     Ok(Output {
-        status,
+        status: ending.status,
         stdout,
         stderr,
     })
@@ -271,7 +360,7 @@ fn terminate_and_reap(
     observed_status: Option<ExitStatus>,
     context: &str,
     command: &str,
-) -> Result<ExitStatus, String> {
+) -> Result<Ending, String> {
     let tree_error = child
         .start_kill()
         .err()
@@ -279,31 +368,32 @@ fn terminate_and_reap(
     let direct_kill_error = tree_error
         .as_ref()
         .and_then(|_| child.inner_mut().start_kill().err());
-    let status = reap_after_tree_kill(child, observed_status).map_err(|reap_error| {
+    let ending = reap_after_tree_kill(child, observed_status).map_err(|reap_error| {
         format!(
             "{context}: failed to reap {command} after tree termination; tree={tree_error:?}; direct_kill={direct_kill_error:?}; reap={reap_error}"
         )
     })?;
     if let Some(tree_error) = tree_error {
         return Err(format!(
-            "{context}: failed to terminate process tree for {command}: {tree_error}; direct_kill={direct_kill_error:?}; status={status}"
+            "{context}: failed to terminate process tree for {command}: {tree_error}; direct_kill={direct_kill_error:?}; status={}",
+            ending.describe()
         ));
     }
-    Ok(status)
+    Ok(ending)
 }
 
 fn reap_after_tree_kill(
     child: &mut dyn ChildWrapper,
     observed_status: Option<ExitStatus>,
-) -> Result<ExitStatus, String> {
+) -> Result<Ending, String> {
     if let Some(status) = observed_status {
-        return Ok(status);
+        return Ok(Ending::child_exit(status));
     }
 
     let deadline = Instant::now() + REAP_GRACE;
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => return Ok(status),
+            Ok(Some(status)) => return Ok(Ending::harness_termination(status)),
             Ok(None) if Instant::now() < deadline => thread::sleep(POLL_INTERVAL),
             Ok(None) => return Err(format!("reap grace of {REAP_GRACE:?} expired")),
             Err(error) => return Err(format!("poll after termination: {error}")),
@@ -378,12 +468,13 @@ fn failure_diagnostic(
     context: &str,
     command: &str,
     failure: &str,
-    status: &ExitStatus,
+    ending: &Ending,
     stdout: &[u8],
     stderr: &[u8],
 ) -> String {
     format!(
-        "{context}: {command}: {failure}; status={status}; stdout={}; stderr={}",
+        "{context}: {command}: {failure}; status={}; stdout={}; stderr={}",
+        ending.describe(),
         excerpt(stdout),
         excerpt(stderr)
     )
@@ -401,10 +492,11 @@ fn excerpt(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::{deadline_expiry, run_bounded, ProcessLimits};
     #[cfg(unix)]
     use super::{process_tree_absent, process_tree_quiescent_after_io};
-    use super::{run_bounded, ProcessLimits};
-    use std::path::Path;
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
     use std::sync::mpsc;
     use std::thread;
@@ -445,31 +537,156 @@ mod tests {
         command
     }
 
+    /// Selected on the bounded child so this test binary, re-executed, acts as
+    /// the descendant spawner instead of running the suite.
+    const HELPER_MODE_ENV: &str = "ASSAY_BOUNDED_PROCESS_HELPER_MODE";
+    const PID_FILE_ENV: &str = "ASSAY_DESCENDANT_PID_FILE";
+    /// libtest filter that selects the helper in every binary including this
+    /// module, whatever module path it is included under. A filter that matched
+    /// nothing would exit 0 silently, so
+    /// `the_re_executed_helper_is_selected_by_exactly_one_filter_match` pins it.
+    const HELPER_FILTER: &str = "descendant_spawner_helper_process";
+    /// Written to both channels by every spawner, so the bounded run can assert
+    /// one channel verbatim and find the marker on the other.
+    const READY_MARKER: &[u8] = b"parent-ready";
+
+    /// What the descendant does with the bounded run's output handles.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum DescendantOutput {
+        /// Keeps stdout and stderr open after its parent exits, so the reader
+        /// threads never reach EOF.
+        Inherited,
+        /// Detached from both, so the readers finish when the parent exits.
+        Detached,
+    }
+
+    impl DescendantOutput {
+        fn as_str(self) -> &'static str {
+            match self {
+                Self::Inherited => "inherited",
+                Self::Detached => "detached",
+            }
+        }
+
+        fn parse(value: &str) -> Option<Self> {
+            match value {
+                "inherited" => Some(Self::Inherited),
+                "detached" => Some(Self::Detached),
+                _ => None,
+            }
+        }
+    }
+
+    fn current_test_binary() -> PathBuf {
+        std::env::current_exe().expect("the running test binary must be addressable")
+    }
+
+    /// The bounded child that spawns a descendant and publishes its pid.
+    ///
+    /// On Windows this re-executes the test binary rather than scripting
+    /// `powershell.exe`. In run 31404812176 one `powershell.exe` start took
+    /// about 18 seconds on the runner, longer than the whole bounded window, so
+    /// interpreter startup rather than process-tree teardown decided the
+    /// result. Unix keeps its shell, whose startup is a fraction of that bound.
+    #[cfg(windows)]
+    fn descendant_spawner_command(pid_file: &Path, output: DescendantOutput) -> Command {
+        let mut command = Command::new(current_test_binary());
+        command
+            .args([
+                HELPER_FILTER,
+                "--ignored",
+                "--nocapture",
+                "--format",
+                "terse",
+            ])
+            .env(HELPER_MODE_ENV, output.as_str())
+            .env(PID_FILE_ENV, pid_file);
+        command
+    }
+
     #[cfg(unix)]
-    fn inherited_output_descendant_command(pid_file: &Path) -> Command {
+    fn descendant_spawner_command(pid_file: &Path, output: DescendantOutput) -> Command {
+        let detach = match output {
+            DescendantOutput::Inherited => "",
+            DescendantOutput::Detached => "exec </dev/null >/dev/null 2>&1;",
+        };
         let mut command = Command::new("sh");
         command
             .arg("-c")
-            .arg(
-                "sh -c 'echo \"$$\" > \"$1\"; while :; do :; done' descendant \"$1\" & printf parent-ready",
-            )
+            .arg(format!(
+                "sh -c 'echo \"$$\" > \"$1\"; {detach} while :; do :; done' descendant \"$1\" & \
+                 while [ ! -s \"$1\" ]; do :; done; printf parent-ready; printf parent-ready >&2",
+            ))
             .arg("runner")
             .arg(pid_file);
         command
     }
 
-    #[cfg(windows)]
-    fn inherited_output_descendant_command(pid_file: &Path) -> Command {
-        let mut command = Command::new("powershell.exe");
-        command.env("ASSAY_DESCENDANT_PID_FILE", pid_file);
-        command.args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "$path = [Environment]::GetEnvironmentVariable('ASSAY_DESCENDANT_PID_FILE'); $p = Start-Process -FilePath ping.exe -ArgumentList @('-t','127.0.0.1') -NoNewWindow -PassThru; [IO.File]::WriteAllText($path, [string]$p.Id); [Console]::Out.Write('parent-ready')",
-        ]);
-        command
+    /// Runs as the bounded child of the Windows descendant tests, never as part
+    /// of the suite. `--ignored` keeps it out of a normal run.
+    #[test]
+    #[ignore = "re-executed as the bounded child of the descendant tests"]
+    fn descendant_spawner_helper_process() {
+        let mode = std::env::var(HELPER_MODE_ENV)
+            .unwrap_or_else(|error| panic!("{HELPER_MODE_ENV} must be set: {error}"));
+        let output = DescendantOutput::parse(&mode)
+            .unwrap_or_else(|| panic!("unknown descendant output mode {mode:?}"));
+        let pid_file = PathBuf::from(
+            std::env::var_os(PID_FILE_ENV).unwrap_or_else(|| panic!("{PID_FILE_ENV} must be set")),
+        );
+
+        let mut descendant = hanging_command();
+        descendant.stdin(Stdio::null());
+        if output == DescendantOutput::Detached {
+            descendant.stdout(Stdio::null()).stderr(Stdio::null());
+        }
+        let child = descendant
+            .spawn()
+            .unwrap_or_else(|error| panic!("spawn the descendant: {error}"));
+        std::fs::write(&pid_file, child.id().to_string())
+            .unwrap_or_else(|error| panic!("publish the descendant pid: {error}"));
+
+        // libtest prefixes this process's stdout with its own report, so the
+        // marker goes to both channels: stderr carries the child's bytes alone.
+        std::io::stdout()
+            .write_all(READY_MARKER)
+            .expect("report readiness on stdout");
+        std::io::stdout().flush().expect("flush readiness");
+        std::io::stderr()
+            .write_all(READY_MARKER)
+            .expect("report readiness on stderr");
+    }
+
+    #[test]
+    fn the_descendant_output_mode_survives_the_round_trip_to_the_helper() {
+        for mode in [DescendantOutput::Inherited, DescendantOutput::Detached] {
+            assert_eq!(DescendantOutput::parse(mode.as_str()), Some(mode));
+        }
+        assert_eq!(DescendantOutput::parse("hidden"), None);
+    }
+
+    #[test]
+    fn the_re_executed_helper_is_selected_by_exactly_one_filter_match() {
+        let listing = Command::new(current_test_binary())
+            .args([HELPER_FILTER, "--ignored", "--list", "--format", "terse"])
+            .output()
+            .expect("list the helper test");
+        assert!(
+            listing.status.success(),
+            "listing the helper test failed: {}",
+            listing.status
+        );
+        let listed = String::from_utf8_lossy(&listing.stdout);
+        let selected: Vec<&str> = listed
+            .lines()
+            .filter(|line| line.ends_with(": test"))
+            .collect();
+        assert_eq!(
+            selected.len(),
+            1,
+            "{HELPER_FILTER} must select exactly one test, listing was {listed:?}"
+        );
+        assert!(selected[0].contains(HELPER_FILTER), "{listed:?}");
     }
 
     #[cfg(unix)]
@@ -499,6 +716,8 @@ mod tests {
         None
     }
 
+    /// A probe that cannot run is not an answer, so a spawn failure panics
+    /// rather than reporting a descendant dead.
     #[cfg(unix)]
     fn descendant_is_alive(pid: u32) -> bool {
         Command::new("kill")
@@ -506,26 +725,25 @@ mod tests {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
-            .is_ok_and(|status| status.success())
+            .expect("the liveness probe must be runnable")
+            .success()
     }
 
+    /// `tasklist` is native. The interpreter this used to spawn cost as much as
+    /// 18 seconds on the runner in run 31404812176, inside a one-second wait.
     #[cfg(windows)]
     fn descendant_is_alive(pid: u32) -> bool {
-        let mut command = Command::new("powershell.exe");
-        command
-            .env("ASSAY_DESCENDANT_PID", pid.to_string())
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "$targetPid = [Environment]::GetEnvironmentVariable('ASSAY_DESCENDANT_PID'); if (Get-Process -Id $targetPid -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }",
-            ]);
-        command
-            .stdout(Stdio::null())
+        let listing = Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
             .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success())
+            .output()
+            .expect("the liveness probe must be runnable");
+        // The filter admits only this pid, so a row naming it is the process
+        // being alive; a miss is an informational line with no such field.
+        let pid = pid.to_string();
+        String::from_utf8_lossy(&listing.stdout)
+            .split_whitespace()
+            .any(|field| field == pid)
     }
 
     fn wait_for_descendant_exit(pid: u32) -> bool {
@@ -539,6 +757,8 @@ mod tests {
         !descendant_is_alive(pid)
     }
 
+    /// Guards the probe against the failure that would make every descendant
+    /// assertion pass vacuously: reporting everything dead.
     #[test]
     fn liveness_probe_recognizes_the_current_test_process() {
         assert!(
@@ -575,33 +795,6 @@ mod tests {
     #[cfg(windows)]
     fn descendant_test_guard() -> Duration {
         Duration::from_secs(10)
-    }
-
-    #[cfg(unix)]
-    fn quiet_descendant_command(pid_file: &Path) -> Command {
-        let mut command = Command::new("sh");
-        command
-            .arg("-c")
-            .arg(
-                "sh -c 'echo \"$$\" > \"$1\"; exec </dev/null >/dev/null 2>&1; while :; do :; done' descendant \"$1\" & while [ ! -s \"$1\" ]; do :; done; printf parent-ready",
-            )
-            .arg("runner")
-            .arg(pid_file);
-        command
-    }
-
-    #[cfg(windows)]
-    fn quiet_descendant_command(pid_file: &Path) -> Command {
-        let mut command = Command::new("powershell.exe");
-        command.env("ASSAY_DESCENDANT_PID_FILE", pid_file);
-        command.args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "$path = [Environment]::GetEnvironmentVariable('ASSAY_DESCENDANT_PID_FILE'); $p = Start-Process -FilePath ping.exe -ArgumentList @('-t','127.0.0.1') -WindowStyle Hidden -PassThru; [IO.File]::WriteAllText($path, [string]$p.Id); [Console]::Out.Write('parent-ready')",
-        ]);
-        command
     }
 
     #[test]
@@ -653,7 +846,7 @@ mod tests {
         let started = Instant::now();
 
         let worker = thread::spawn(move || {
-            let command = inherited_output_descendant_command(&pid_file);
+            let command = descendant_spawner_command(&pid_file, DescendantOutput::Inherited);
             let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
             let result = run_bounded(command, b"", limits, "inherited output mutation");
             let _ = result_tx.send(result);
@@ -667,7 +860,14 @@ mod tests {
 
         let error = result.expect_err("inherited output holder must force tree termination");
         assert!(error.contains("inherited output mutation"));
-        assert!(error.contains("deadline"));
+        assert!(error.contains("deadline"), "{error}");
+        // The spawner exits by itself here; the deadline is reached because the
+        // descendant still holds the handles. The diagnostic must say which
+        // ending this was, or it cannot be told from a child that never ran.
+        assert!(error.contains("stdout handle still open"), "{error}");
+        assert!(error.contains("stderr handle still open"), "{error}");
+        assert!(!error.contains("child still running"), "{error}");
+        assert!(error.contains("(child exit)"), "{error}");
         assert!(
             started.elapsed() < descendant_test_guard(),
             "process-tree cleanup exceeded the test bound"
@@ -683,20 +883,95 @@ mod tests {
     fn kills_quiet_descendant_after_normal_parent_exit() {
         let temp = tempfile::tempdir().expect("temporary pid directory");
         let pid_file = temp.path().join("quiet-descendant.pid");
-        let command = quiet_descendant_command(&pid_file);
+        let command = descendant_spawner_command(&pid_file, DescendantOutput::Detached);
         let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
 
         let output = run_bounded(command, b"", limits, "normal completion mutation")
             .expect("normal parent completion must retain its outcome");
 
         assert!(output.status.success());
-        assert_eq!(output.stdout, b"parent-ready");
+        // Both channels go through one reader, so stderr proves the bytes are
+        // returned verbatim while stdout may carry a test harness's own report.
+        assert_eq!(output.stderr, READY_MARKER);
+        assert!(
+            output
+                .stdout
+                .windows(READY_MARKER.len())
+                .any(|w| w == READY_MARKER),
+            "stdout must carry the child's readiness marker: {:?}",
+            String::from_utf8_lossy(&output.stdout)
+        );
         let descendant_pid =
             read_descendant_pid(&pid_file).expect("quiet descendant must publish its pid");
         assert!(
             wait_for_descendant_exit(descendant_pid),
             "quiet descendant {descendant_pid} survived normal completion cleanup"
         );
+    }
+
+    /// The Windows descendant tests use this re-execution as their bounded
+    /// child. Running it on every platform keeps the mechanism exercised where
+    /// those tests use a shell instead, and separates "the helper is broken"
+    /// from "the bound was lost" when Windows goes red: this bound is the test
+    /// guard, not the deadline under test.
+    #[test]
+    fn the_re_executed_helper_publishes_a_pid_and_reports_readiness() {
+        let temp = tempfile::tempdir().expect("temporary pid directory");
+        let pid_file = temp.path().join("helper-descendant.pid");
+        let mut command = Command::new(current_test_binary());
+        command
+            .args([
+                HELPER_FILTER,
+                "--ignored",
+                "--nocapture",
+                "--format",
+                "terse",
+            ])
+            .env(HELPER_MODE_ENV, DescendantOutput::Detached.as_str())
+            .env(PID_FILE_ENV, &pid_file);
+        let limits = ProcessLimits::new(descendant_test_guard(), 1024, 1024);
+
+        let output = run_bounded(command, b"", limits, "helper re-execution")
+            .expect("the re-executed helper must complete within the test guard");
+
+        assert!(output.status.success(), "{:?}", output.status);
+        assert_eq!(output.stderr, READY_MARKER);
+        let descendant_pid = read_descendant_pid(&pid_file)
+            .expect("the re-executed helper must publish its descendant's pid");
+        assert!(
+            wait_for_descendant_exit(descendant_pid),
+            "descendant {descendant_pid} of the re-executed helper survived cleanup"
+        );
+    }
+
+    #[test]
+    fn a_deadline_reached_with_the_child_alive_reads_differently_from_one_reached_with_open_output()
+    {
+        let running = deadline_expiry(Duration::from_secs(5), false, false, true, true);
+        assert!(running.contains("child still running"), "{running}");
+
+        let exited = deadline_expiry(Duration::from_secs(5), true, false, true, true);
+        assert!(!exited.contains("child still running"), "{exited}");
+        assert!(exited.contains("stdout handle still open"), "{exited}");
+        assert!(exited.contains("stderr handle still open"), "{exited}");
+    }
+
+    #[test]
+    fn a_harness_terminated_status_is_not_reported_as_a_child_exit() {
+        let command = hanging_command();
+        let limits = ProcessLimits::new(Duration::from_millis(100), 1024, 1024);
+        let error = run_bounded(command, b"", limits, "harness termination mutation")
+            .expect_err("hanging child must time out");
+
+        assert!(
+            error.contains("outstanding=[child still running"),
+            "{error}"
+        );
+        assert!(
+            error.contains("recorded after harness termination"),
+            "{error}"
+        );
+        assert!(!error.contains("(child exit)"), "{error}");
     }
 
     #[test]
