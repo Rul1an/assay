@@ -374,6 +374,19 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: the instrument could not build its subject", file=sys.stderr)
         return EXIT_INSTRUMENT_BROKEN
 
+    # Build the load arm's own selection before measuring, or the first minutes
+    # of the arm are a compile storm rather than the test concurrency the arm is
+    # supposed to reproduce. Measured on run 31417348260: iteration 2 breached a
+    # 300s ceiling and iteration 3 took 243s, in both the baseline and the
+    # candidate, which is the build starving the box and not either tree.
+    if load_command is not None:
+        prebuild = run([*load_command, "--no-run"])
+        if prebuild.returncode != 0:
+            sys.stderr.write(prebuild.stdout)
+            sys.stderr.write(prebuild.stderr)
+            print("ERROR: the instrument could not build its load arm", file=sys.stderr)
+            return EXIT_INSTRUMENT_BROKEN
+
     load = LoadSupervisor(load_command)
     load.start()
     iterations: list[dict] = []
@@ -412,7 +425,12 @@ def main(argv: list[str] | None = None) -> int:
             "command": measured,
             "iteration_ceiling_s": args.iteration_ceiling_s,
         },
-        "load": {"mode": args.load, "command": load_command, "starts": load.starts},
+        "load": {
+            "mode": args.load,
+            "command": load_command,
+            "starts": load.starts,
+            "prebuilt": load_command is not None,
+        },
         "iterations": iterations,
         "summary": summary,
     }

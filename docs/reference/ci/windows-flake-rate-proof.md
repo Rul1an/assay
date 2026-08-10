@@ -86,6 +86,10 @@ concurrency) that moves the rate the way the hypothesis predicts.
 - `load.mode` — `none` or `workspace-tests`. The second keeps a full
   `cargo test --workspace` (the Windows CI selection) running alongside the
   measured iterations, supervised continuously and restarted as often as needed.
+  Its selection is built before the first iteration (`load.prebuilt`), so the arm
+  reproduces test concurrency rather than a compile storm: run 31417348260
+  breached a 300s ceiling on iteration 2 and spent 243s on iteration 3 in both
+  trees it compared, which was the load arm's build and not either tree.
 - `iterations[]` — per iteration: exit code, duration, pass/fail/ignore counts,
   `timed_out`, `could_not_measure`, `load.alive_fraction` and `load.gap`, the
   names of failing tests, and each panic's site and first message line.
