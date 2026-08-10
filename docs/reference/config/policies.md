@@ -263,8 +263,9 @@ tool_pins:
   read_file:
     server_id: "filesystem-prod"
     tool_name: "read_file"
-    schema_hash: "9f4d4d0f..."
-    meta_hash: "42f5df3e..."
+    # Replace these example values with the full 64-character lowercase SHA-256 hashes.
+    schema_hash: "9f4d4d0f9f4d4d0f9f4d4d0f9f4d4d0f9f4d4d0f9f4d4d0f9f4d4d0f9f4d4d0f"
+    meta_hash: "42f5df3e42f5df3e42f5df3e42f5df3e42f5df3e42f5df3e42f5df3e42f5df3e"
 ```
 
 `schema_hash` is the hex SHA-256 of the RFC 8785 (JCS) canonical bytes of the tool's `inputSchema`,

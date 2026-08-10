@@ -39,6 +39,17 @@ pub(super) fn from_file(path: &Path) -> anyhow::Result<McpPolicy> {
 }
 
 pub(super) fn validate(policy: &McpPolicy) -> anyhow::Result<()> {
+    let mut pin_names: Vec<&String> = policy.tool_pins.keys().collect();
+    pin_names.sort();
+    for pin_name in pin_names {
+        let pin = &policy.tool_pins[pin_name];
+        validate_sha256_hex(
+            &pin.schema_hash,
+            &format!("tool_pins.{pin_name}.schema_hash"),
+        )?;
+        validate_sha256_hex(&pin.meta_hash, &format!("tool_pins.{pin_name}.meta_hash"))?;
+    }
+
     // Cross-validation: Kill triggers must reference valid rules
     if let (Some(rm), Some(ks)) = (&policy.runtime_monitor, &policy.kill_switch) {
         let rule_ids: std::collections::HashSet<&str> =
@@ -54,6 +65,17 @@ pub(super) fn validate(policy: &McpPolicy) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+fn validate_sha256_hex(value: &str, field: &str) -> anyhow::Result<()> {
+    if value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Ok(());
+    }
+    anyhow::bail!("{field} must be exactly 64 lowercase hexadecimal characters")
 }
 
 pub(super) fn is_v1_format(policy: &McpPolicy) -> bool {
