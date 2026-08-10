@@ -271,7 +271,15 @@ tool_pins:
 or of `null` when the tool declares none. `meta_hash` is the hex SHA-256 of the description bytes
 verbatim, or of the empty string when there is none. Because `schema_hash` is taken over canonical
 bytes, a server that reorders its keys or re-emits `100` as `1e2` does not drift; a changed schema
-does.
+does, with one measured exception.
+
+RFC 8785 renders every number as an IEEE 754 double, so two numeric literals with the same double
+value become one pin. Above 2^53 that stops being a spelling difference: a schema edited only from
+`{"maximum": 9007199254740993}` to `{"maximum": 9007199254740992}` keeps the same `schema_hash`
+while admitting a different set of arguments, because a validator still reads the two literals as
+different integers. The same holds for `exclusiveMaximum`, `const`, and `enum`. A `tool_pins` entry
+does not detect that edit. An argument constraint written in this policy is unaffected, because it
+is validated from the schema you wrote here and not from the one the server declares.
 
 ## Legacy v1 Compatibility
 

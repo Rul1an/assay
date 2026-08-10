@@ -184,9 +184,13 @@ mod tests {
     /// discovered one case at a time: JCS renders every number as an IEEE 754 double, so any two
     /// numeric literals with the same `f64` value are one value. `serde_json::to_string` told
     /// each of these pairs apart. This is inherited from the canonicalization the tool-definition
-    /// binding already applies to the same object, not introduced by routing identity through it,
-    /// and it is not a widening: `jsonschema` enforces over the same `f64`, so a pair JCS calls
-    /// equal is a pair the validator also cannot distinguish.
+    /// binding already applies to the same object, not introduced by routing identity through it.
+    ///
+    /// It *is* a widening of what `schema_hash` distinguishes, and not only a cosmetic one:
+    /// `the_f64_collapse_hides_a_difference_a_validator_still_enforces` measures where it bites
+    /// and bounds it. Accepted because the alternative is a second canonicalization rule for the
+    /// question the binding digest already answers, which `AGENTS.md` "one rule, one function"
+    /// forbids.
     #[test]
     fn numbers_sharing_an_f64_value_are_one_value() {
         for (a, b) in [
@@ -206,6 +210,70 @@ mod tests {
                 identity_for(a).schema_hash,
                 identity_for(b).schema_hash,
                 "{a} and {b} should share one identity"
+            );
+        }
+    }
+
+    /// The bound on the widening above, measured rather than reasoned about, because #2229 is
+    /// what an unchecked claim about this file costs and the first answer to it asserted that
+    /// `jsonschema` shares the `f64` and so cannot see the collapse. It does not:
+    /// `serde_json::Number` keeps `u64`/`i64` precision for an integer literal instead of
+    /// rounding it to a double, and `jsonschema` compares on that integer path. So a tool
+    /// definition edited only in an integer literal above 2^53 changes what it admits while its
+    /// `schema_hash` stays byte-identical — a missed drift with an enforcement consequence, not a
+    /// spelling difference.
+    ///
+    /// The four pairs are the ones the review of #2239 measured diverging under `jsonschema`
+    /// 0.49.2, kept here so the test and that review pin the same fact. `minimum` and
+    /// `multipleOf` agreed on the instances tried there, which is a property of those instances
+    /// and not of the keywords; four of six is what was measured, not a survey of the numeric
+    /// keyword set.
+    #[test]
+    fn the_f64_collapse_hides_a_difference_a_validator_still_enforces() {
+        for (admits, rejects, instance) in [
+            (
+                r#"{"maximum":9007199254740993}"#,
+                r#"{"maximum":9007199254740992}"#,
+                "9007199254740993",
+            ),
+            (
+                r#"{"exclusiveMaximum":9007199254740993}"#,
+                r#"{"exclusiveMaximum":9007199254740992}"#,
+                "9007199254740992",
+            ),
+            (
+                r#"{"const":9007199254740993}"#,
+                r#"{"const":9007199254740992}"#,
+                "9007199254740993",
+            ),
+            (
+                r#"{"enum":[9007199254740993]}"#,
+                r#"{"enum":[9007199254740992]}"#,
+                "9007199254740993",
+            ),
+        ] {
+            assert_eq!(
+                identity_for(admits).schema_hash,
+                identity_for(rejects).schema_hash,
+                "{admits} and {rejects} should share one identity"
+            );
+
+            let instance: Value = serde_json::from_str(instance).expect("instance parses");
+            let allows = |source: &str| {
+                let schema: Value = serde_json::from_str(source).expect("schema parses");
+                crate::policy_engine::compile_schema(&schema)
+                    .expect("schema compiles")
+                    .is_valid(&instance)
+            };
+
+            assert!(
+                allows(admits),
+                "{admits} should admit {instance}, or the pair below proves nothing"
+            );
+            assert!(
+                !allows(rejects),
+                "{rejects} should reject {instance}: if the validator has started sharing the \
+                 f64, the collapse is no longer a widening and the comment above overstates it"
             );
         }
     }
