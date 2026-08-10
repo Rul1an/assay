@@ -556,7 +556,8 @@ mod tests {
         /// Keeps stdout and stderr open after its parent exits, so the reader
         /// threads never reach EOF.
         Inherited,
-        /// Detached from both, so the readers finish when the parent exits.
+        /// Asks for neither handle. Whether asking is enough is a platform
+        /// question, answered where the two descendant tests are cfg-split.
         Detached,
     }
 
@@ -882,6 +883,24 @@ mod tests {
         }
     }
 
+    /// A descendant that asks for no output handles releases the bounded run's
+    /// on Unix, and cannot on Windows. `CreateProcess` is called with
+    /// `bInheritHandles = TRUE`, and a handle the bounded child inherited stays
+    /// inheritable inside it, so every process it spawns receives the run's
+    /// stdout and stderr write handles whatever its own stdio is set to.
+    ///
+    /// Job 93527135001 measured exactly that: the child exited 0, every byte it
+    /// wrote had been read, and the readers still had no EOF with only a
+    /// `Stdio::null()` descendant alive. The spawner this replaced escaped it
+    /// through `Start-Process`, which goes via `ShellExecuteEx` and inherits no
+    /// handles -- at the price of a `powershell.exe` start inside the bounded
+    /// window, which is the defect in #2249.
+    ///
+    /// So the success path with a live descendant is reachable on Unix and not
+    /// on Windows, and each platform asserts the ending it can actually reach.
+    /// The Windows test fails if that ever stops being true, which is the signal
+    /// to restore one cross-platform test here.
+    #[cfg(unix)]
     #[test]
     fn kills_quiet_descendant_after_normal_parent_exit() {
         let temp = tempfile::tempdir().expect("temporary pid directory");
@@ -912,11 +931,69 @@ mod tests {
         );
     }
 
-    /// The Windows descendant tests use this re-execution as their bounded
-    /// child. Running it on every platform keeps the mechanism exercised where
-    /// those tests use a shell instead, and separates "the helper is broken"
-    /// from "the bound was lost" when Windows goes red: this bound is the test
-    /// guard, not the deadline under test.
+    /// The Windows half of the split above: asking for detached output changes
+    /// nothing about who holds the run's handles, so the reachable ending is the
+    /// deadline, and the descendant must still not survive it.
+    ///
+    /// This is the tripwire. If Windows or `std::process` ever stops handing the
+    /// run's handles to every descendant, this test fails with a successful run
+    /// it did not expect, and the fix is to delete it and drop the `cfg(unix)`
+    /// from `kills_quiet_descendant_after_normal_parent_exit`.
+    #[cfg(windows)]
+    #[test]
+    fn a_descendant_that_asks_for_no_output_still_holds_the_run_open_and_is_killed() {
+        let temp = tempfile::tempdir().expect("temporary pid directory");
+        let pid_file = temp.path().join("quiet-descendant.pid");
+        let cleanup_path = pid_file.clone();
+        let (result_tx, result_rx) = mpsc::channel();
+
+        let worker = thread::spawn(move || {
+            let command = descendant_spawner_command(&pid_file, DescendantOutput::Detached);
+            let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
+            let _ = result_tx.send(run_bounded(
+                command,
+                b"",
+                limits,
+                "normal completion mutation",
+            ));
+        });
+
+        let result = match result_rx.recv_timeout(descendant_test_guard()) {
+            Ok(result) => result,
+            Err(error) => panic!("runner escaped its wall-clock bound: {error}"),
+        };
+        worker.join().expect("bounded runner worker");
+
+        let error = result.expect_err(
+            "a Windows descendant inherits the run's handles, so the deadline is the only \
+             reachable ending; a success here means the platform changed",
+        );
+        assert!(error.contains("normal completion mutation"));
+        // The spawner chose to exit; the deadline belongs to the handles its
+        // descendant holds. Reporting that as a child that timed out is the
+        // misdirection this diagnostic exists to prevent.
+        assert!(error.contains("(child exit)"), "{error}");
+        assert!(!error.contains("child still running"), "{error}");
+        assert!(error.contains("stdout handle still open"), "{error}");
+        assert!(error.contains("stderr handle still open"), "{error}");
+        // Readiness still has to be observable on the error path, or a child
+        // that never ran would read the same as one that ran and was outlived.
+        let marker = std::str::from_utf8(READY_MARKER).expect("marker is text");
+        assert!(error.contains(marker), "{error}");
+        let descendant_pid = read_descendant_pid(&cleanup_path)
+            .expect("quiet descendant must publish its pid before the deadline");
+        assert!(
+            wait_for_descendant_exit(descendant_pid),
+            "quiet descendant {descendant_pid} survived process-tree termination"
+        );
+    }
+
+    /// On Windows the descendant tests use this re-execution as their bounded
+    /// child, so it is covered there. Here it is the only exercise of it, since
+    /// the Unix spawner is a shell -- and it separates "the helper is broken"
+    /// from "the bound was lost": this bound is the test guard, not the deadline
+    /// under test.
+    #[cfg(unix)]
     #[test]
     fn the_re_executed_helper_publishes_a_pid_and_reports_readiness() {
         let temp = tempfile::tempdir().expect("temporary pid directory");
