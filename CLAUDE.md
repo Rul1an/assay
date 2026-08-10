@@ -60,6 +60,13 @@ cargo clippy --workspace --all-targets -- -D warnings  # Lint
 cargo xtask build-ebpf                      # Build eBPF (Linux)
 ```
 
+Build in the worktree's own `target/`, including for read-only reviews: `/target` is git-ignored,
+so an in-tree build leaves `git status --porcelain` empty and needs no scratch directory. Set
+`CARGO_TARGET_DIR` only when a build genuinely must not warm the branch's cache, and then to one
+stable path per repository — `scripts/ci/phase5-check.sh` and the pre-push hook are the idiom. Not
+one path per reviewed head: those are never reaped (`/tmp` has no expiry on macOS) and reached
+~40 GB across seven merged pull requests on 2026-08-10.
+
 ## CLI Entry Points
 
 All commands defined in `crates/assay-cli/src/cli/args/mod.rs`, dispatched in `crates/assay-cli/src/cli/commands/mod.rs`. The table below is a representative subset; the CLI has ~40 subcommands (see `commands/` for the full set, including `import`, `project-otel`, `inventory`, `discover`, and the `verify-*` evidence family).
