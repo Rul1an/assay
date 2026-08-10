@@ -56,6 +56,23 @@ fn config_check_marker(checked: bool, error: Option<&str>) -> serde_json::Value 
     }
 }
 
+/// The exit class for a set of data diagnostics.
+///
+/// Both output channels call this rather than each deciding for itself. They did decide for
+/// themselves once — the text branch counted error severities and the JSON branch returned `0`
+/// whatever it had found — and the disagreement was invisible from either side, because each was
+/// self-consistent and no test compared them. A formatting flag is not a fact about the tree.
+///
+/// A warning is deliberately not an error here. `doctor` raises `warn` for advisory findings such
+/// as a legacy trace shape, and treating "any diagnostic exists" as failure would make every
+/// advisory a failed preflight.
+fn exit_class(diagnostics: &[assay_core::errors::diagnostic::Diagnostic]) -> i32 {
+    let has_errors = diagnostics
+        .iter()
+        .any(|d| normalize_severity(&d.severity) == "error");
+    i32::from(has_errors)
+}
+
 pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     if args.fix && args.format == OutputFormat::Json {
         eprintln!("doctor --fix currently supports text output only; use --format text");
@@ -87,6 +104,9 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
     if args.format == OutputFormat::Json {
         let timestamp = chrono::Utc::now().to_rfc3339();
         let mut json_out = serde_json::to_value(&report)?;
+        // Stays `0` when no config was examined: nothing was checked, so nothing failed. The
+        // `config_check` marker is what tells a consumer which of the two a `0` means.
+        let mut exit = 0;
 
         if let Some(obj) = json_out.as_object_mut() {
             obj.insert("generated_at".to_string(), serde_json::json!(timestamp));
@@ -134,11 +154,12 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
                     "data_suggestions".to_string(),
                     serde_json::to_value(&core_report.suggested_actions)?,
                 );
+                exit = exit_class(&core_report.diagnostics);
             }
         }
 
         println!("{}", serde_json::to_string_pretty(&json_out)?);
-        return Ok(0);
+        return Ok(exit);
     }
 
     // Text Format
@@ -186,11 +207,7 @@ pub async fn run(args: DoctorArgs, legacy_mode: bool) -> anyhow::Result<i32> {
             return Ok(fix_result);
         }
 
-        let has_errors = core_report
-            .diagnostics
-            .iter()
-            .any(|d| normalize_severity(&d.severity) == "error");
-        return Ok(if has_errors { 1 } else { 0 });
+        return Ok(exit_class(&core_report.diagnostics));
     }
 
     println!("\nPolicy Check: SKIPPED ({NO_CONFIG_FOUND})");
