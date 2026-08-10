@@ -50,10 +50,9 @@ including its explicit non-claims, or amend the decision through a new ADR.
   isolation this rule asks for needs no configuration, and `/target` is git-ignored so an in-tree
   build leaves a read-only review's tree clean. Set `CARGO_TARGET_DIR` only to keep a build out of
   the branch's cache, and scope it to one worktree — never one path per reviewed head. A tool may
-  share one target across worktrees when its script records why: the pre-push hook does, for one
-  build cache instead of one per worktree, and `scripts/ci/phase5-check.sh` does, to avoid VM
-  mount filesystem issues. Sharing costs cargo's lock, and under the pre-push hook's timeout that
-  can abort a push rather than only delay it.
+  share one target across worktrees only where it must, and its script records the reason: the
+  pre-push hook does, trading cargo's lock for one build cache instead of one per worktree, and
+  under that hook's timeout the lock can abort a push rather than only delay it.
 - Remove merged branches and their worktrees only after recording the merge in the programme ledger.
 
 ## Development Discipline
