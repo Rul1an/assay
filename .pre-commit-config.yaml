@@ -100,6 +100,17 @@ repos:
         # workflow checks out the PR base on purpose, so a PR never runs this
         # against its own tree.
 
+      - id: windows-flake-rate-proof-self-test
+        name: Windows flake-rate instrument self-test
+        entry: bash -c 'cd scripts/ci && python3 windows_flake_rate_proof_selftest.py'
+        language: system
+        pass_filenames: false
+        # The instrument decides which output is a pass, a failure, a timeout or
+        # no measurement at all, and fails closed on the last two. A silent
+        # inversion there reports a confident rate for something else, so the
+        # classifications are pinned rather than reviewed.
+        files: ^scripts/ci/windows_flake_rate_proof(_selftest)?\.py$
+
       - id: docs-generated-drift-self-test
         name: Generated-docs drift check self-test
         entry: bash -c 'bash scripts/ci/test-check-docs-generated-drift-safety.sh && bash scripts/ci/test-check-docs-generated-drift.sh'
