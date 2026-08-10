@@ -592,12 +592,15 @@ Reason codes provide precise error identification for automation and debugging.
 #### Config/User Errors (Exit 2)
 | Code | Description | Next Step |
 |------|-------------|-----------|
-| `E_CFG_PARSE` | Config file parse error | `assay doctor --config <file>` |
+| `E_CFG_PARSE` | Config file parse error | argv `["assay","doctor","--config","<file>"]` |
 | `E_TRACE_NOT_FOUND` | Trace file not found | Check path exists |
 | `E_MISSING_CONFIG` | Required config missing | `assay init` |
 | `E_BASELINE_INVALID` | Baseline file invalid | `assay baseline record` |
 | `E_POLICY_PARSE` | Policy YAML syntax error | argv `["assay","policy","validate","--input","<file>"]` |
 | `E_INVALID_ARGS` | Invalid CLI arguments | `assay --help` |
+
+For `Run argv:` recovery steps, parse the JSON array and pass its elements directly to a process
+API. Do not join the elements into a shell command.
 
 #### Infrastructure Errors (Exit 3)
 | Code | Description | Next Step |

@@ -47,7 +47,7 @@ When `assay ci` (or the equivalent run invoked by the blessed workflow) complete
 | `exit_code`           | integer | **Yes**  | Process exit code: 0 = pass, 1 = test failure, 2 = config/user error, 3 = infra/judge unavailable. See §4. |
 | `reason_code`         | string  | **Yes**  | Stable machine-readable code when exit_code ≠ 0; e.g. `E_TRACE_NOT_FOUND`, `E_JUDGE_UNAVAILABLE`. See §5. When exit_code is 0, MAY be empty string or a designated success code (e.g. OK); empty is allowed and common. |
 | `message`             | string  | No       | Human-readable one-line description of outcome. |
-| `next_step`           | string  | No       | Single suggested command or hint when exit_code ≠ 0; e.g. "Run: assay doctor --config ...", "See: assay explain ...". See §7. |
+| `next_step`           | string  | No       | Single suggested command or hint when exit_code ≠ 0. Executable recovery containing caller-controlled values uses `Run argv: <JSON array>` so consumers can invoke it without a shell; non-command guidance remains prose. See §7. |
 
 ### 3.2 Provenance (Artifact Auditability)
 
@@ -148,7 +148,7 @@ JSON object key order in these examples is illustrative, not normative.
   "exit_code": 2,
   "reason_code": "E_TRACE_NOT_FOUND",
   "message": "Trace file not found: traces/ci.jsonl",
-  "next_step": "Run: assay doctor --config ci-eval.yaml --trace-file traces/ci.jsonl",
+  "next_step": "Check trace file exists: traces/ci.jsonl",
   "provenance": {
     "assay_version": "2.12.0",
     "verify_mode": "enabled"
@@ -297,7 +297,7 @@ SARIF produced for GitHub Code Scanning MUST satisfy the following so that `uplo
 
 For every non-zero exit, the implementation MUST provide **at least one suggested next step** so that users and CI logs know what to do next.
 
-- **Console:** When exiting with exit_code ≠ 0, the process MUST print at least one line that is a concrete command or hint (e.g. "Run: assay doctor ...", "See: assay explain ...", "Fix baseline: assay baseline record ...").
+- **Console:** When exiting with exit_code ≠ 0, the process MUST print at least one line that is a concrete command or hint. Executable recovery containing caller-controlled values MUST use the argument-safe form from §3.1 (for example, `Run argv: ["assay","doctor","--config","path with spaces.yaml"]`). Fully static commands MAY use `Run: assay explain ...`; non-command guidance MAY use `See: ...` or `Fix baseline: ...` prose.
 - **summary.json:** The `next_step` field SHOULD be set when exit_code ≠ 0 (see §3.1). It MAY be the same as or a shortened form of the console message.
 
 **Normative:** Contract tests MAY verify that for a set of known error conditions (missing config, missing trace, failing test), the output contains a non-empty next_step (in summary.json) and a console line with a suggested command.
@@ -322,6 +322,7 @@ For every non-zero exit, the implementation MUST provide **at least one suggeste
 | 1              | 2026-02  | E9c alignment draft: replay provenance keys in `provenance` (`replay`, `bundle_digest`, `replay_mode`, `source_run_id`) and `E_REPLAY_MISSING_DEPENDENCY` reason code. |
 | 1              | 2026-07  | Added `E_REPLAY_LIMIT_EXCEEDED` (§5.1). Backward compatible: a new registry string under the existing `reason_code_version` 1, so consumers branching on `(reason_code_version, reason_code)` treat it as an unknown code under a known version and fall back as they already must. No version bump. |
 | 1              | 2026-08  | Added the stable `assay.run_summary.v1` document identity for newly produced summaries. This is additive; consumers MUST continue accepting pre-identity version-1 summaries without `schema`, and the existing integer `schema_version` remains `1`. |
+| 1              | 2026-08  | Required executable recovery containing caller-controlled values to use `Run argv: <JSON array>` in both structured and console output. Static commands and non-command guidance remain valid prose; no schema change. |
 
 ---
 
