@@ -61,7 +61,6 @@ The documentation describes `.agents/skills/` as a project-level location and `.
 From the repository root:
 
 ```bash
-export CARGO_TARGET_DIR="$(mktemp -d "${TMPDIR:-/tmp}/assay-target-2154.XXXXXX")"
 cargo test -p assay-cli --test agent_golden_path_contract
 cargo test -p assay-mcp-server --test agent_golden_path_contract
 ```
