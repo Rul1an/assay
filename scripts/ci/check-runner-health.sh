@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Sample GitHub control-plane runner registration and label-specific demand.
+# Emits runner_state + alert_required. Does not claim host functionality or SLA.
+# expected_offline is not health: never publish healthy=true for that state.
 set -euo pipefail
 
 repo="${GITHUB_REPOSITORY:-${REPO:-}}"
@@ -61,7 +64,9 @@ else
 fi
 
 matching_jobs="$tmpdir/matching-jobs.tsv"
+: >"$matching_jobs"
 queue_stderr="$tmpdir/queue.stderr"
+: >"$queue_stderr"
 queue_status_error=""
 general_queued_runs=0
 inspected_workflow_runs=0
@@ -104,19 +109,48 @@ if [[ -s "$queue_stderr" ]]; then
 fi
 
 matching_queued_jobs="$(count_nonempty_lines <"$matching_jobs")"
-health_reason="clear"
-healthy="true"
 
-if [[ "$runner_status" == "online" ]]; then
-  health_reason="runner_online"
-elif [[ "$matching_queued_jobs" =~ ^[0-9]+$ && "$matching_queued_jobs" -gt 0 ]]; then
+# Explicit state contract (issue #2256). Do not overload healthy for offline.
+runner_state="classification_unknown"
+alert_required="true"
+healthy="false"
+health_reason="runner_classification_unknown"
+
+if [[ -n "$runner_status_error" ]]; then
+  runner_state="classification_unknown"
+  alert_required="true"
   healthy="false"
-  health_reason="runner_${runner_status}_with_matching_backlog"
-elif [[ -n "$queue_status_error" && "$runner_status" != "online" ]]; then
+  health_reason="runner_status_classification_failed"
+elif [[ "$runner_status" == "online" ]]; then
+  runner_state="available"
+  alert_required="false"
+  healthy="true"
+  health_reason="runner_online"
+elif [[ "$runner_status" == "not_found" ]]; then
+  runner_state="unavailable"
+  alert_required="true"
+  healthy="false"
+  health_reason="runner_not_found"
+elif [[ -n "$queue_status_error" ]]; then
+  runner_state="classification_unknown"
+  alert_required="true"
   healthy="false"
   health_reason="runner_${runner_status}_queue_classification_unknown"
-elif [[ "$runner_status" == "offline" || "$runner_status" == "not_found" || "$runner_status" == "unknown" ]]; then
-  health_reason="runner_${runner_status}_without_matching_backlog"
+elif [[ "$matching_queued_jobs" =~ ^[0-9]+$ && "$matching_queued_jobs" -gt 0 ]]; then
+  runner_state="demand_backed_outage"
+  alert_required="true"
+  healthy="false"
+  health_reason="runner_${runner_status}_with_matching_backlog"
+elif [[ "$runner_status" == "offline" ]]; then
+  runner_state="expected_offline"
+  alert_required="false"
+  healthy="false"
+  health_reason="runner_offline_without_matching_backlog"
+else
+  runner_state="classification_unknown"
+  alert_required="true"
+  healthy="false"
+  health_reason="runner_${runner_status}_classification_unknown"
 fi
 
 write_output "runner_status" "$runner_status"
@@ -128,11 +162,13 @@ write_output "general_queued_runs" "$general_queued_runs"
 write_output "inspected_workflow_runs" "$inspected_workflow_runs"
 write_output "matching_queued_jobs" "$matching_queued_jobs"
 write_output "queue_status_error" "$queue_status_error"
+write_output "runner_state" "$runner_state"
+write_output "alert_required" "$alert_required"
 write_output "healthy" "$healthy"
 write_output "health_reason" "$health_reason"
 
 {
-  echo "## Runner Health"
+  echo "## Runner control-plane sample"
   echo "- runner: ${runner_name}"
   echo "- runner_status: ${runner_status}"
   echo "- runner_busy: ${runner_busy}"
@@ -141,8 +177,11 @@ write_output "health_reason" "$health_reason"
   echo "- general_queued_workflow_runs: ${general_queued_runs}"
   echo "- inspected_workflow_runs: ${inspected_workflow_runs}"
   echo "- matching_queued_jobs: ${matching_queued_jobs}"
+  echo "- runner_state: ${runner_state}"
+  echo "- alert_required: ${alert_required}"
   echo "- healthy: ${healthy}"
   echo "- health_reason: ${health_reason}"
+  echo "- note: samples registration and label demand only; not host functionality or SLA"
   if [[ -n "$runner_status_error" ]]; then
     echo "- runner_status_error: ${runner_status_error}"
   fi
@@ -158,9 +197,9 @@ write_output "health_reason" "$health_reason"
   fi
 } >>"$summary_file"
 
-if [[ "$healthy" != "true" ]]; then
-  echo "Runner health alert: ${health_reason}" >&2
+if [[ "$alert_required" == "true" ]]; then
+  echo "Runner alert required: state=${runner_state} reason=${health_reason}" >&2
   exit 1
 fi
 
-echo "Runner health clear: ${health_reason}"
+echo "Runner alert not required: state=${runner_state} reason=${health_reason}"
