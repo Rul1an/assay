@@ -137,11 +137,53 @@ To **inspect** current protection:
 gh api repos/OWNER/REPO/branches/main/protection
 ```
 
+To inspect only the required status checks subresource (what the reconciliation
+monitor reads):
+
+```bash
+gh api repos/OWNER/REPO/branches/main/protection/required_status_checks
+```
+
 To **remove** protection (use with care):
 
 ```bash
 gh api repos/OWNER/REPO/branches/main/protection -X DELETE
 ```
+
+---
+
+## Live reconciliation monitor (required contexts)
+
+`.github/rulesets/main-required-ci-contexts.json` is the sole machine-readable
+expected set. Classic branch protection on the default branch is what actually
+enforces merges. The scheduled workflow
+`.github/workflows/required-context-reconciliation.yml` compares those two on
+context names and `strict` only (it ignores `app_id` / `integration_id`, review
+settings, force-push, and deletion rules).
+
+**Prerequisite (owner action):** create a fine-grained personal access token for
+**this repository only** with **Administration: Read-only**, and store it as the
+repository secret `BRANCH_PROTECTION_READ_TOKEN`. The workflow does not fall
+back to `github.token`. Until that secret exists, scheduled and manual runs fail
+closed at preflight with an explicit missing-secret error; they do not silently
+skip reconciliation.
+
+The monitor is **not** a required status check. It runs on a schedule (every six
+hours) and `workflow_dispatch` on the default branch only. A red run means live
+protection drifted from the checked-in artifact, or the read failed (auth, API,
+or malformed evidence).
+
+Local check against a saved API response:
+
+```bash
+gh api repos/OWNER/REPO/branches/main/protection/required_status_checks \
+  > /tmp/live-required-status-checks.json
+python3 scripts/ci/check-required-contexts.py \
+  --live-response /tmp/live-required-status-checks.json
+```
+
+Exit codes for `--live-response`: `0` match, `1` semantic drift, `2` unreadable
+or missing live evidence.
 
 ---
 
