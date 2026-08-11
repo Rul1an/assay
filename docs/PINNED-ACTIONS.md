@@ -4,20 +4,33 @@ Repo settings: **Allowed actions** should be restricted (e.g. "Allow GitHub-owne
 
 ## Source of truth
 
-Workflow files under `.github/workflows/` are the only source of truth for
-which third-party actions are used and which commit SHAs pin them. This page
-does not restate those SHAs or tag refs. A duplicated table was a second literal
-that Dependabot never updated and that drifted from the workflows (see #2223).
+The canonical pin for a third-party action is the `uses:` callsite in the YAML
+that invokes it. This page does not restate those SHAs or tag refs. A duplicated
+table was a second literal that Dependabot never updated and that drifted from
+the callsites (see #2223).
 
-To inspect the pins currently in use:
+Callsite surfaces in this repository include:
+
+- workflow files under `.github/workflows/**/*.yml`
+- composite/action manifests such as `assay-action/action.yml` and
+  `.github/actions/**/action.yml`
+
+A surface can be empty of external `uses:` today (for example
+`.github/actions/**` may have none) and still belongs in the scan set: new
+callsites land there without this page being updated.
+
+To inspect the pins currently in use across those surfaces:
 
 ```bash
-rg -n --pcre2 'uses:\s*[^\s]+@[0-9a-f]{40}' .github/workflows/
+rg -n --pcre2 'uses:\s*[^\s]+@[0-9a-f]{40}' \
+  .github/workflows \
+  assay-action/action.yml \
+  .github/actions
 ```
 
 Nothing in this repository regenerates or verifies this page against the
-workflows. Treat the workflows as authoritative; treat this page as procedure
-only.
+callsite YAML. Treat the callsites as authoritative; treat this page as
+procedure only.
 
 ## Resolving SHAs
 
@@ -41,17 +54,18 @@ updates:
       prefix: "chore(ci)"
 ```
 
-Dependabot proposes PRs that update action refs in the workflow files. With SHA
-pinning, those PRs bump the SHA when the action repo advances on the same tag.
-Dependabot does not maintain this document.
+Dependabot proposes PRs that update action refs in callsite YAML it covers.
+With SHA pinning, those PRs bump the SHA when the action repo advances on the
+same tag. Dependabot does not maintain this document.
 
 ## Updating SHAs
 
 When updating SHAs manually:
 
 1. Resolve new SHA: `gh api repos/OWNER/REPO/commits/REF --jq .sha`
-2. Update the workflow files that call the action (for example:
-   `sed -i '' 's|OLD_SHA|NEW_SHA|g' .github/workflows/*.yml`)
+2. Update every callsite YAML that invokes the action (workflows under
+   `.github/workflows/`, plus composite/action manifests such as
+   `assay-action/action.yml` and `.github/actions/**/action.yml`)
 3. Commit with message: `chore(ci): pin OWNER/REPO to SHA (was vX)`
 
 Do not add the SHA back into this document.
