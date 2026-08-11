@@ -234,7 +234,16 @@ printf '%s\n' '{"total_count":1,"runners":[{"name":"assay-bpf-runner","status":"
   >"${FAKE_RUNNERS_JSON}"
 FAKE_RUNS_FAIL=1
 run_check "${TEST_TEMP_DIR}/out-queue-api.txt" "${TEST_TEMP_DIR}/sum-queue-api.txt"
-expect_case "queue API failure → classification_unknown" "classification_unknown" "true" 1 "false"
+expect_case "queue API failure (offline) → classification_unknown" "classification_unknown" "true" 1 "false"
+FAKE_RUNS_FAIL=
+
+# --- queue API failure while online → classification_unknown (must not mask as available) -
+write_defaults
+printf '%s\n' '{"total_count":1,"runners":[{"name":"assay-bpf-runner","status":"online","busy":false,"labels":[{"name":"assay-bpf-runner"}]}]}' \
+  >"${FAKE_RUNNERS_JSON}"
+FAKE_RUNS_FAIL=1
+run_check "${TEST_TEMP_DIR}/out-online-queue-api.txt" "${TEST_TEMP_DIR}/sum-online-queue-api.txt"
+expect_case "queue API failure (online) → classification_unknown" "classification_unknown" "true" 1 "false"
 FAKE_RUNS_FAIL=
 
 # --- workflow: schedule + alert_required routing + stale header --------------------------

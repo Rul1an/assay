@@ -121,6 +121,12 @@ if [[ -n "$runner_status_error" ]]; then
   alert_required="true"
   healthy="false"
   health_reason="runner_status_classification_failed"
+elif [[ -n "$queue_status_error" ]]; then
+  # Queue classification incomplete/failed is unknown even when the runner is online.
+  runner_state="classification_unknown"
+  alert_required="true"
+  healthy="false"
+  health_reason="runner_${runner_status}_queue_classification_unknown"
 elif [[ "$runner_status" == "online" ]]; then
   runner_state="available"
   alert_required="false"
@@ -131,11 +137,6 @@ elif [[ "$runner_status" == "not_found" ]]; then
   alert_required="true"
   healthy="false"
   health_reason="runner_not_found"
-elif [[ -n "$queue_status_error" ]]; then
-  runner_state="classification_unknown"
-  alert_required="true"
-  healthy="false"
-  health_reason="runner_${runner_status}_queue_classification_unknown"
 elif [[ "$matching_queued_jobs" =~ ^[0-9]+$ && "$matching_queued_jobs" -gt 0 ]]; then
   runner_state="demand_backed_outage"
   alert_required="true"

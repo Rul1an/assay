@@ -44,6 +44,31 @@ mutations = {
         '  alert_required="false"\n'
         '  healthy="true"\n',
     ),
+    # Online must not mask a failed queue classification as available.
+    "online-masks-queue-error": (
+        'elif [[ -n "$queue_status_error" ]]; then\n'
+        '  # Queue classification incomplete/failed is unknown even when the runner is online.\n'
+        '  runner_state="classification_unknown"\n'
+        '  alert_required="true"\n'
+        '  healthy="false"\n'
+        '  health_reason="runner_${runner_status}_queue_classification_unknown"\n'
+        'elif [[ "$runner_status" == "online" ]]; then\n'
+        '  runner_state="available"\n'
+        '  alert_required="false"\n'
+        '  healthy="true"\n'
+        '  health_reason="runner_online"\n',
+        'elif [[ "$runner_status" == "online" ]]; then\n'
+        '  runner_state="available"\n'
+        '  alert_required="false"\n'
+        '  healthy="true"\n'
+        '  health_reason="runner_online"\n'
+        'elif [[ -n "$queue_status_error" ]]; then\n'
+        '  # Queue classification incomplete/failed is unknown even when the runner is online.\n'
+        '  runner_state="classification_unknown"\n'
+        '  alert_required="true"\n'
+        '  healthy="false"\n'
+        '  health_reason="runner_${runner_status}_queue_classification_unknown"\n',
+    ),
     # Workflow must not fall back to step-outcome routing.
     "alert-from-step-outcome": (
         "        if: always() && steps.check.outputs.alert_required == 'true'\n",
@@ -71,6 +96,7 @@ PY
 
 expect_rejected offline-to-healthy "$SCRIPT"
 expect_rejected api-error-to-clean "$SCRIPT"
+expect_rejected online-masks-queue-error "$SCRIPT"
 expect_rejected alert-from-step-outcome "$WORKFLOW"
 
 echo "ok: check-runner-health contract rejects inert substitutes"
