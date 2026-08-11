@@ -42,21 +42,47 @@ count_nonempty_lines() {
   sed '/^[[:space:]]*$/d' | wc -l | tr -d ' '
 }
 
+# Centralized jq capture for hostile/malformed API bodies.
+# On success: prints jq stdout. On failure: appends a value-free marker to
+# err_file (never echoes jq diagnostics that may include payload fragments)
+# and returns 1 so callers can continue into classification_unknown.
+jq_try() {
+  local err_file="$1"
+  local marker="$2"
+  shift 2
+  local out_file="$tmpdir/jq.out"
+  if jq "$@" >"$out_file" 2>/dev/null; then
+    cat "$out_file"
+    return 0
+  fi
+  printf '%s\n' "$marker" >>"$err_file"
+  return 1
+}
+
 runner_status="unknown"
 runner_status_error=""
 runner_busy="unknown"
 runner_labels=""
 
 runner_status_stderr="$tmpdir/runner-status.stderr"
+runner_parse_err="$tmpdir/runner-parse.err"
+: >"$runner_parse_err"
 runner_json="$tmpdir/runners.json"
 if GH_TOKEN="$runner_status_token" gh api --paginate "repos/$repo/actions/runners?per_page=100" >"$runner_json" 2>"$runner_status_stderr"; then
-  selected_runner="$(jq -sc --arg name "$runner_name" '[.[].runners[]? | select(.name == $name)] | .[0] // empty' "$runner_json")"
-  if [[ -z "$selected_runner" ]]; then
-    runner_status="not_found"
-  else
-    runner_status="$(jq -r '.status // "unknown"' <<<"$selected_runner")"
-    runner_busy="$(jq -r 'if has("busy") then (.busy | tostring) else "unknown" end' <<<"$selected_runner")"
-    runner_labels="$(jq -r '[.labels[]?.name] | join(",")' <<<"$selected_runner")"
+  # jq program: $name is a jq --arg, not a shell expansion.
+  # shellcheck disable=SC2016
+  if selected_runner="$(jq_try "$runner_parse_err" "runner_json_parse_failed" -sc --arg name "$runner_name" '[.[].runners[]? | select(.name == $name)] | .[0] // empty' "$runner_json")"; then
+    if [[ -z "$selected_runner" ]]; then
+      runner_status="not_found"
+    else
+      runner_status="$(jq -r '.status // "unknown"' <<<"$selected_runner")"
+      runner_busy="$(jq -r 'if has("busy") then (.busy | tostring) else "unknown" end' <<<"$selected_runner")"
+      runner_labels="$(jq -r '[.labels[]?.name] | join(",")' <<<"$selected_runner")"
+    fi
+  fi
+  if [[ -s "$runner_parse_err" ]]; then
+    runner_status_error="$(sanitize_error <"$runner_parse_err")"
+    echo "::warning::Unable to classify self-hosted runner status: ${runner_status_error}" >&2
   fi
 else
   runner_status_error="$(sanitize_error <"$runner_status_stderr")"
@@ -74,32 +100,39 @@ inspected_workflow_runs=0
 for run_status in queued in_progress; do
   runs_json="$tmpdir/runs-${run_status}.json"
   if GH_TOKEN="$queue_token" gh api --paginate "repos/$repo/actions/runs?status=${run_status}&per_page=100" >"$runs_json" 2>>"$queue_stderr"; then
-    run_rows="$(jq -r '.workflow_runs[]? | [.id, .name, .status, .html_url] | @tsv' "$runs_json")"
-    if [[ "$run_status" == "queued" ]]; then
-      general_queued_runs="$(jq -r '.workflow_runs[]?.id' "$runs_json" | count_nonempty_lines)"
-    fi
-
-    while IFS=$'\t' read -r run_id run_name _status run_url; do
-      [[ -n "${run_id:-}" ]] || continue
-      inspected_workflow_runs=$((inspected_workflow_runs + 1))
-
-      jobs_json="$tmpdir/jobs-${run_id}.json"
-      if GH_TOKEN="$queue_token" gh api --paginate "repos/$repo/actions/runs/${run_id}/jobs?filter=latest&per_page=100" >"$jobs_json" 2>>"$queue_stderr"; then
-        jq -r \
-          --arg label "$required_runner_label" \
-          --arg run_name "$run_name" \
-          --arg run_url "$run_url" \
-          '
-          .jobs[]?
-          | select((.status == "queued" or .status == "waiting" or .status == "pending" or .status == "requested")
-              and ((.labels // []) | index($label)))
-          | [$run_name, .name, .status, ((.labels // []) | join(",")), (.html_url // $run_url)]
-          | @tsv
-          ' "$jobs_json" >>"$matching_jobs"
-      else
-        echo "Unable to query jobs for run ${run_id}" >>"$queue_stderr"
+    if run_rows="$(jq_try "$queue_stderr" "queue_json_parse_failed" -r '.workflow_runs[]? | [.id, .name, .status, .html_url] | @tsv' "$runs_json")"; then
+      if [[ "$run_status" == "queued" ]]; then
+        if queued_ids="$(jq_try "$queue_stderr" "queue_json_parse_failed" -r '.workflow_runs[]?.id' "$runs_json")"; then
+          general_queued_runs="$(printf '%s\n' "$queued_ids" | count_nonempty_lines)"
+        fi
       fi
-    done <<<"$run_rows"
+
+      while IFS=$'\t' read -r run_id run_name _status run_url; do
+        [[ -n "${run_id:-}" ]] || continue
+        inspected_workflow_runs=$((inspected_workflow_runs + 1))
+
+        jobs_json="$tmpdir/jobs-${run_id}.json"
+        if GH_TOKEN="$queue_token" gh api --paginate "repos/$repo/actions/runs/${run_id}/jobs?filter=latest&per_page=100" >"$jobs_json" 2>>"$queue_stderr"; then
+          # jq program: $label/$run_name/$run_url are jq --arg bindings.
+          # shellcheck disable=SC2016
+          if ! jq_try "$queue_stderr" "queue_json_parse_failed" -r \
+            --arg label "$required_runner_label" \
+            --arg run_name "$run_name" \
+            --arg run_url "$run_url" \
+            '
+            .jobs[]?
+            | select((.status == "queued" or .status == "waiting" or .status == "pending" or .status == "requested")
+                and ((.labels // []) | index($label)))
+            | [$run_name, .name, .status, ((.labels // []) | join(",")), (.html_url // $run_url)]
+            | @tsv
+            ' "$jobs_json" >>"$matching_jobs"; then
+            :
+          fi
+        else
+          echo "Unable to query jobs for run ${run_id}" >>"$queue_stderr"
+        fi
+      done <<<"$run_rows"
+    fi
   fi
 done
 

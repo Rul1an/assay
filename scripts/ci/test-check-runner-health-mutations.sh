@@ -69,6 +69,26 @@ mutations = {
         '  healthy="false"\n'
         '  health_reason="runner_${runner_status}_queue_classification_unknown"\n',
     ),
+    # Parse failure must not become a silent clean/available result.
+    "parse-failure-to-clean": (
+        '  if jq "$@" >"$out_file" 2>/dev/null; then\n'
+        '    cat "$out_file"\n'
+        '    return 0\n'
+        '  fi\n'
+        '  printf \'%s\\n\' "$marker" >>"$err_file"\n'
+        '  return 1\n',
+        '  if jq "$@" >"$out_file" 2>/dev/null; then\n'
+        '    cat "$out_file"\n'
+        '    return 0\n'
+        '  fi\n'
+        '  # mutation: swallow parse failure without recording a marker\n'
+        '  return 0\n',
+    ),
+    # Raw jq must not replace jq_try (abort before outputs / alert routing).
+    "parse-failure-uncaught": (
+        '  if selected_runner="$(jq_try "$runner_parse_err" "runner_json_parse_failed" -sc --arg name "$runner_name" \'[.[].runners[]? | select(.name == $name)] | .[0] // empty\' "$runner_json")"; then\n',
+        '  if selected_runner="$(jq -sc --arg name "$runner_name" \'[.[].runners[]? | select(.name == $name)] | .[0] // empty\' "$runner_json")"; then\n',
+    ),
     # Workflow must not fall back to step-outcome routing.
     "alert-from-step-outcome": (
         "        if: always() && steps.check.outputs.alert_required == 'true'\n",
@@ -97,6 +117,8 @@ PY
 expect_rejected offline-to-healthy "$SCRIPT"
 expect_rejected api-error-to-clean "$SCRIPT"
 expect_rejected online-masks-queue-error "$SCRIPT"
+expect_rejected parse-failure-to-clean "$SCRIPT"
+expect_rejected parse-failure-uncaught "$SCRIPT"
 expect_rejected alert-from-step-outcome "$WORKFLOW"
 
 echo "ok: check-runner-health contract rejects inert substitutes"

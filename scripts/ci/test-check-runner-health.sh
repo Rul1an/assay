@@ -179,6 +179,17 @@ expect_case() {
     fail "${name}: alert_required=true must not exit 0"
     return
   fi
+  # Parse/API failures must emit outputs (workflow alert routing) and stay value-free.
+  if [[ "${want_state}" == "classification_unknown" ]]; then
+    if [[ -z "${got_state}" || -z "${got_alert}" ]]; then
+      fail "${name}: classification_unknown must publish runner_state/alert_required outputs"
+      return
+    fi
+    if printf '%s\n%s\n' "${CHECK_OUTPUT}" "${CHECK_STDERR}" | grep -qF '{not-json'; then
+      fail "${name}: leaked raw malformed payload into output/stderr"
+      return
+    fi
+  fi
   ok "${name}"
 }
 
@@ -245,6 +256,30 @@ FAKE_RUNS_FAIL=1
 run_check "${TEST_TEMP_DIR}/out-online-queue-api.txt" "${TEST_TEMP_DIR}/sum-online-queue-api.txt"
 expect_case "queue API failure (online) → classification_unknown" "classification_unknown" "true" 1 "false"
 FAKE_RUNS_FAIL=
+
+# --- malformed runner JSON (gh exits 0) → classification_unknown, value-free -------------
+write_defaults
+printf '%s\n' '{not-json' >"${FAKE_RUNNERS_JSON}"
+run_check "${TEST_TEMP_DIR}/out-bad-runner-json.txt" "${TEST_TEMP_DIR}/sum-bad-runner-json.txt"
+expect_case "malformed runner JSON → classification_unknown" "classification_unknown" "true" 1 "false"
+if [[ "$(output_value runner_status_error)" != *runner_json_parse_failed* ]]; then
+  fail "malformed runner JSON: runner_status_error must name runner_json_parse_failed (got: $(output_value runner_status_error))"
+else
+  ok "malformed runner JSON reports value-free runner_json_parse_failed"
+fi
+
+# --- malformed queue JSON while online → classification_unknown, value-free --------------
+write_defaults
+printf '%s\n' '{"total_count":1,"runners":[{"name":"assay-bpf-runner","status":"online","busy":false,"labels":[{"name":"assay-bpf-runner"}]}]}' \
+  >"${FAKE_RUNNERS_JSON}"
+printf '%s\n' '{not-json' >"${FAKE_QUEUED_RUNS_JSON}"
+run_check "${TEST_TEMP_DIR}/out-bad-queue-json.txt" "${TEST_TEMP_DIR}/sum-bad-queue-json.txt"
+expect_case "malformed queue JSON → classification_unknown" "classification_unknown" "true" 1 "false"
+if [[ "$(output_value queue_status_error)" != *queue_json_parse_failed* ]]; then
+  fail "malformed queue JSON: queue_status_error must name queue_json_parse_failed (got: $(output_value queue_status_error))"
+else
+  ok "malformed queue JSON reports value-free queue_json_parse_failed"
+fi
 
 # --- workflow: schedule + alert_required routing + stale header --------------------------
 if grep -qE 'Runs every 15 minutes' "${WORKFLOW}"; then
