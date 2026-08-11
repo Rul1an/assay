@@ -7,6 +7,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKSPACES=("$ROOT"/docs/architecture/structurizr/*/workspace.dsl)
+STRUCTURIZR_CLI_IMAGE="$("${ROOT}/scripts/structurizr-cli-image.sh")"
 
 if [[ ${#WORKSPACES[@]} -eq 0 ]]; then
   echo "[structurizr] No workspaces found"
@@ -26,7 +27,7 @@ validate_with_docker() {
   local file
   file="$(basename "$dsl")"
   echo "[structurizr] validate (docker): $dsl"
-  docker run --rm -v "$dir:/workspace" structurizr/cli:latest \
+  docker run --rm -v "$dir:/workspace" "${STRUCTURIZR_CLI_IMAGE}" \
     validate -workspace "/workspace/$file"
 }
 
@@ -39,7 +40,7 @@ for dsl in "${WORKSPACES[@]}"; do
   else
     echo "[structurizr] ERROR: neither structurizr-cli nor docker found"
     echo "  Install: brew install structurizr-cli"
-    echo "  Or:      docker pull structurizr/cli:latest"
+    echo "  Or:      docker pull ${STRUCTURIZR_CLI_IMAGE}"
     exit 2
   fi
 done

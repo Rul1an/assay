@@ -1,7 +1,7 @@
 # CI Infrastructure
 
 > **Purpose**: Documentation for CI/CD infrastructure, self-hosted runners, health checks, and optimization.
-> **Version**: 3.9.0 (April 2026)
+> **Scope**: Describes current CI topology; release version lives in the workspace `Cargo.toml` / git tags, not in this header.
 
 ## Overview
 

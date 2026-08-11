@@ -15,6 +15,7 @@ permissions: {}
 jobs:
   security-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       security-events: write
       actions: read
@@ -25,10 +26,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Resolve Assay release tag
+        id: assay_tag
+        run: bash scripts/ci/read-assay-release-tag.sh
+
       - name: Install Assay
         shell: bash
         env:
-          ASSAY_VERSION: v2.12.0
+          ASSAY_VERSION: ${{ steps.assay_tag.outputs.version }}
         run: |
           set -euo pipefail
           # Security: Download first to avoid pipe-to-shell.
