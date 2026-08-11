@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract for .github/actions/setup-rust and its week8 + wave6 + fuzz-smoke + ADR025 soak + smoke-install assay + Runner Spike SDK caller surfaces.
+# Contract for .github/actions/setup-rust and its week8 + wave6 + fuzz-smoke + ADR025 soak + smoke-install assay + Runner Spike SDK + perf family caller surfaces.
 # Guards only the new boundary; actionlint + diff review cover unchanged workflow structure.
 #
 # Empty optional forwarding is safe for the pinned upstream versions measured in this
@@ -15,6 +15,9 @@ FUZZ_SMOKE="${ROOT}/.github/workflows/fuzz-smoke.yml"
 ADR025="${ROOT}/.github/workflows/adr025-nightly-evidence.yml"
 SMOKE_INSTALL="${ROOT}/.github/workflows/smoke-install.yml"
 RUNNER_SPIKE="${ROOT}/.github/workflows/runner-spike-sdk.yml"
+PERF_MAIN="${ROOT}/.github/workflows/perf_main.yml"
+PERF_PR="${ROOT}/.github/workflows/perf_pr.yml"
+PERF_NIGHTLY="${ROOT}/.github/workflows/perf_nightly.yml"
 KERNEL_MATRIX="${ROOT}/.github/workflows/kernel-matrix.yml"
 TOOLCHAIN_REF="dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
 CACHE_REF="Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4"
@@ -35,6 +38,9 @@ trap 'abort_is_failure "$?"' ERR
 [[ -f "${ADR025}" ]] || fail "missing .github/workflows/adr025-nightly-evidence.yml"
 [[ -f "${SMOKE_INSTALL}" ]] || fail "missing .github/workflows/smoke-install.yml"
 [[ -f "${RUNNER_SPIKE}" ]] || fail "missing .github/workflows/runner-spike-sdk.yml"
+[[ -f "${PERF_MAIN}" ]] || fail "missing .github/workflows/perf_main.yml"
+[[ -f "${PERF_PR}" ]] || fail "missing .github/workflows/perf_pr.yml"
+[[ -f "${PERF_NIGHTLY}" ]] || fail "missing .github/workflows/perf_nightly.yml"
 [[ -f "${KERNEL_MATRIX}" ]] || fail "missing .github/workflows/kernel-matrix.yml"
 
 grep -qE '^[[:space:]]*using:[[:space:]]*composite[[:space:]]*$' "${ACTION}" \
@@ -207,7 +213,7 @@ print(
 )
 PY
 
-python3 - "${FUZZ_SMOKE}" "${ADR025}" "${SMOKE_INSTALL}" "${RUNNER_SPIKE}" <<'PY' || fail "simple-caller setup-rust contract failed"
+python3 - "${FUZZ_SMOKE}" "${ADR025}" "${SMOKE_INSTALL}" "${RUNNER_SPIKE}" "${PERF_MAIN}" "${PERF_PR}" "${PERF_NIGHTLY}" <<'PY' || fail "simple-caller setup-rust contract failed"
 import re, sys
 from pathlib import Path
 
@@ -215,6 +221,9 @@ fuzz_text = Path(sys.argv[1]).read_text(encoding="utf-8")
 adr025_text = Path(sys.argv[2]).read_text(encoding="utf-8")
 smoke_text = Path(sys.argv[3]).read_text(encoding="utf-8")
 spike_text = Path(sys.argv[4]).read_text(encoding="utf-8")
+perf_main_text = Path(sys.argv[5]).read_text(encoding="utf-8")
+perf_pr_text = Path(sys.argv[6]).read_text(encoding="utf-8")
+perf_nightly_text = Path(sys.argv[7]).read_text(encoding="utf-8")
 
 
 def jobs_by_id(text: str) -> dict[str, str]:
@@ -414,6 +423,62 @@ print(
     "with-map empty; no direct pins"
 )
 
+
+def assert_setup_rust_exact_with(
+    wf_label: str, text: str, job_id: str, expected: dict[str, str]
+) -> None:
+    """Immediate setup-rust after checkout with an exact with-map (reuse parsers)."""
+    if re.search(r"dtolnay/rust-toolchain@", text):
+        raise SystemExit(f"{wf_label} still calls dtolnay/rust-toolchain directly")
+    if re.search(r"Swatinem/rust-cache@", text):
+        raise SystemExit(f"{wf_label} still calls Swatinem/rust-cache directly")
+    jobs = jobs_by_id(text)
+    if job_id not in jobs:
+        raise SystemExit(f"{wf_label} missing job {job_id}")
+    block = jobs[job_id]
+    setup = assert_immediate_setup_rust(job_id, block)
+    got = setup_rust_with_map(block)
+    if got != expected:
+        raise SystemExit(
+            f"{job_id}: setup-rust with-map must be exactly {expected}, got {got}"
+        )
+    if re.search(r"(?m)^\s+uses:\s*(?:dtolnay/rust-toolchain@|Swatinem/rust-cache@)", setup):
+        raise SystemExit(f"{job_id}: setup step must not call dtolnay/Swatinem directly")
+
+
+# --- Perf Main benches (components: rustfmt) ---
+assert_setup_rust_exact_with(
+    "perf_main", perf_main_text, "benches", {"components": "rustfmt"}
+)
+print(
+    "ok   perf_main: benches one setup-rust after checkout; "
+    "with-map exact {components: rustfmt}; no direct pins"
+)
+
+# --- Perf PR benches only (components: rustfmt); leave detect job alone ---
+perf_pr_jobs = jobs_by_id(perf_pr_text)
+if "benches" not in perf_pr_jobs:
+    raise SystemExit("perf_pr missing job benches")
+assert_setup_rust_exact_with(
+    "perf_pr", perf_pr_text, "benches", {"components": "rustfmt"}
+)
+for job_id, block in perf_pr_jobs.items():
+    if job_id == "benches":
+        continue
+    if "./.github/actions/setup-rust" in block:
+        raise SystemExit(f"perf_pr: setup-rust only allowed in benches, found in {job_id}")
+print(
+    "ok   perf_pr: benches one setup-rust after checkout; "
+    "with-map exact {components: rustfmt}; no setup-rust in other jobs; no direct pins"
+)
+
+# --- Perf Nightly forensic (default-caller / composite defaults) ---
+assert_default_setup_rust_caller("perf_nightly", perf_nightly_text, "forensic")
+print(
+    "ok   perf_nightly: forensic one setup-rust after checkout; "
+    "with-map empty; no direct pins"
+)
+
 PY
 
 python3 - "${KERNEL_MATRIX}" <<'PY' || fail "kernel-matrix hook-trigger paths missing"
@@ -447,6 +512,9 @@ required = (
     ".github/workflows/adr025-nightly-evidence.yml",
     ".github/workflows/smoke-install.yml",
     ".github/workflows/runner-spike-sdk.yml",
+    ".github/workflows/perf_main.yml",
+    ".github/workflows/perf_pr.yml",
+    ".github/workflows/perf_nightly.yml",
 )
 bad = [p for p in required if paths.count(p) != 1]
 if bad:
@@ -454,7 +522,7 @@ if bad:
         "pull_request.paths must list each trigger path exactly once; "
         + ", ".join(f"{p!r} appears {paths.count(p)} time(s)" for p in bad)
     )
-print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6 + fuzz-smoke + adr025 + smoke-install + runner-spike-sdk")
+print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6 + fuzz-smoke + adr025 + smoke-install + runner-spike-sdk + perf_main + perf_pr + perf_nightly")
 PY
 
 echo "setup-rust composite contract: all checks passed"

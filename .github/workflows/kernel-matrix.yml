@@ -45,6 +45,10 @@ on:
       - ".github/workflows/smoke-install.yml"
       # Runner Spike SDK calls setup-rust (empty with-map / composite defaults).
       - ".github/workflows/runner-spike-sdk.yml"
+      # Perf family calls setup-rust (rustfmt with-map / forensic defaults).
+      - ".github/workflows/perf_main.yml"
+      - ".github/workflows/perf_pr.yml"
+      - ".github/workflows/perf_nightly.yml"
       # Note: Cargo.toml/Cargo.lock removed - check-ebpf-changes job handles skip logic
   push:
     branches: [ "main", "debug/**" ]
