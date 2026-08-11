@@ -6,6 +6,7 @@ on:
       - "docs/architecture/structurizr/**"
       - "scripts/structurizr-validate.sh"
       - "scripts/structurizr-cli-image.sh"
+      - ".github/structurizr-cli-image"
       - ".github/workflows/structurizr-validate.yml"
   workflow_dispatch:
 

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Wave B1 contract: single-source Assay release-tag pin, Structurizr digest pin,
+# Wave B1 contract: single-source Assay release-tag pin, Structurizr image pin,
 # timeouts on touched jobs, and a version-independent CI infra doc header.
 #
-# Failures here are the intended RED state before production edits land.
+# Expected release tag is derived from Cargo.toml [workspace.package].version
+# (independent of the production pin reader). Digests live only in the
+# Structurizr pin file — never as test or consumer literals.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -14,9 +16,9 @@ STRUCTURIZR_WF="${ROOT}/.github/workflows/structurizr-validate.yml"
 STRUCTURIZR_VALIDATE="${ROOT}/scripts/structurizr-validate.sh"
 STRUCTURIZR_EXPORT="${ROOT}/scripts/structurizr-export.sh"
 STRUCTURIZR_IMAGE_HELPER="${ROOT}/scripts/structurizr-cli-image.sh"
+STRUCTURIZR_IMAGE_PIN="${ROOT}/.github/structurizr-cli-image"
 CI_DOC="${ROOT}/docs/AIcontext/ci-infrastructure.md"
-EXPECTED_DIGEST="sha256:717e320e0ad52335ea9939bf5fae092620cc3deccecf6f280a5b6fee99763c53"
-EXPECTED_TAG="v5.1.0"
+THIS_TEST="${ROOT}/scripts/ci/test-ci-hardening-b1.sh"
 
 failures=0
 
@@ -35,7 +37,28 @@ abort_is_failure() {
     echo "ci-hardening-b1 contract aborted (exit ${rc}); treat as failure" >&2
   fi
 }
+scratch="$(mktemp -d)"
 trap 'abort_is_failure "$?"' ERR
+trap 'rm -rf "${scratch}"' EXIT
+
+# Independent of the production pin reader: the release line is v + workspace version.
+workspace_version="$(
+  awk '
+    $0 == "[workspace.package]" { in_workspace_package = 1; next }
+    /^\[/ && $0 != "[workspace.package]" { in_workspace_package = 0 }
+    in_workspace_package && $1 == "version" {
+      gsub(/"/, "", $3)
+      print $3
+      exit
+    }
+  ' "${ROOT}/Cargo.toml"
+)"
+if [[ ! "${workspace_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  fail "could not read [workspace.package].version from Cargo.toml (got '${workspace_version}')"
+  echo "ci-hardening-b1 contract: ${failures} failure(s)" >&2
+  exit 1
+fi
+EXPECTED_TAG="v${workspace_version}"
 
 job_has_timeout() {
   local wf="$1" job="$2"
@@ -53,13 +76,18 @@ sys.exit(0 if re.search(r"(?m)^    timeout-minutes:\s*[1-9][0-9]*\s*$", block) e
 PY
 }
 
-echo "== pin file exists and names ${EXPECTED_TAG} =="
+is_digest_image_ref() {
+  local ref="$1"
+  [[ "${ref}" =~ ^[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]
+}
+
+echo "== pin file matches workspace release line ${EXPECTED_TAG} =="
 if [[ -f "${PIN_FILE}" ]]; then
   pin_raw="$(tr -d '[:space:]' <"${PIN_FILE}")"
   if [[ "${pin_raw}" == "${EXPECTED_TAG}" ]]; then
-    ok "pin file is ${EXPECTED_TAG}"
+    ok "pin file is ${EXPECTED_TAG} (v + workspace.package.version)"
   else
-    fail "pin file content is '${pin_raw}', expected ${EXPECTED_TAG}"
+    fail "pin file content is '${pin_raw}', expected ${EXPECTED_TAG} from Cargo.toml"
   fi
 else
   fail "missing ${PIN_FILE#"${ROOT}"/}"
@@ -84,10 +112,8 @@ else
   fail "cannot exercise reader; script missing"
 fi
 
-echo "== malformed pin fails closed =="
+echo "== malformed Assay pin fails closed =="
 if [[ -f "${READER}" ]]; then
-  scratch="$(mktemp -d)"
-  trap 'rm -rf "${scratch}"' EXIT
   bad_pin="${scratch}/assay-release-tag"
   printf 'not-a-tag\n' >"${bad_pin}"
   if ASSAY_RELEASE_TAG_FILE="${bad_pin}" "${READER}" >/dev/null 2>"${scratch}/err"; then
@@ -130,38 +156,100 @@ for wf in "${ASSAY_WF}" "${SECURITY_WF}"; do
   else
     ok "${name} has no embedded release-tag literal"
   fi
-  # A second parser would be sed/awk/cat of the pin file inline in the workflow.
   if grep -qE 'assay-release-tag' "${wf}" && ! grep -qE 'read-assay-release-tag\.sh' "${wf}"; then
     fail "${name} references the pin file without the shared reader"
   fi
 done
 
-# assay.yml must wire the composite input from the step output.
 if grep -qE 'version:\s*\$\{\{\s*steps\.[^}]+\.outputs\.version\s*\}\}' "${ASSAY_WF}"; then
   ok "assay.yml composite input uses steps.*.outputs.version"
 else
   fail "assay.yml does not bind version: \${{ steps.*.outputs.version }}"
 fi
 
-# assay-security.yml must wire ASSAY_VERSION from the same output shape.
 if grep -qE 'ASSAY_VERSION:\s*\$\{\{\s*steps\.[^}]+\.outputs\.version\s*\}\}' "${SECURITY_WF}"; then
   ok "assay-security.yml ASSAY_VERSION uses steps.*.outputs.version"
 else
   fail "assay-security.yml does not bind ASSAY_VERSION to steps.*.outputs.version"
 fi
 
-echo "== Structurizr image is digest-pinned (no :latest) =="
+echo "== Structurizr image pin file exists and has valid digest form =="
+if [[ -f "${STRUCTURIZR_IMAGE_PIN}" ]]; then
+  ok "image pin file present"
+else
+  fail "missing ${STRUCTURIZR_IMAGE_PIN#"${ROOT}"/}"
+fi
+
+echo "== Structurizr image helper reads the pin (no embedded digest) =="
 if [[ -f "${STRUCTURIZR_IMAGE_HELPER}" ]]; then
-  image="$("${STRUCTURIZR_IMAGE_HELPER}" 2>/dev/null || true)"
-  if [[ "${image}" == "structurizr/cli@${EXPECTED_DIGEST}" ]]; then
-    ok "image helper returns exact digest pin"
+  if grep -qE 'sha256:[0-9a-f]{64}' "${STRUCTURIZR_IMAGE_HELPER}"; then
+    fail "structurizr-cli-image.sh embeds a digest literal (pin file must be the only source)"
   else
-    fail "image helper returned '${image}', expected structurizr/cli@${EXPECTED_DIGEST}"
+    ok "structurizr-cli-image.sh has no digest literal"
+  fi
+  if [[ -f "${STRUCTURIZR_IMAGE_PIN}" ]]; then
+    image="$("${STRUCTURIZR_IMAGE_HELPER}" 2>/dev/null || true)"
+    pin_raw="$(
+      lines=()
+      while IFS= read -r line || [[ -n "${line}" ]]; do
+        line="${line//$'\r'/}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -z "${line}" ]] && continue
+        lines+=("${line}")
+      done <"${STRUCTURIZR_IMAGE_PIN}"
+      if [[ "${#lines[@]}" -eq 1 ]]; then
+        printf '%s\n' "${lines[0]}"
+      fi
+    )"
+    if is_digest_image_ref "${image}" && [[ "${image}" == "${pin_raw}" ]]; then
+      ok "helper returns the pin file image reference"
+    else
+      fail "helper returned '${image}', pin file is '${pin_raw}' (want identical name@sha256:<64 hex>)"
+    fi
+  else
+    fail "cannot compare helper to missing pin file"
   fi
 else
   fail "missing ${STRUCTURIZR_IMAGE_HELPER#"${ROOT}"/}"
 fi
 
+echo "== malformed Structurizr image pin fails closed =="
+if [[ -f "${STRUCTURIZR_IMAGE_HELPER}" ]]; then
+  bad_image="${scratch}/structurizr-cli-image"
+  printf 'structurizr/cli:latest\n' >"${bad_image}"
+  if STRUCTURIZR_CLI_IMAGE_FILE="${bad_image}" "${STRUCTURIZR_IMAGE_HELPER}" >/dev/null 2>"${scratch}/img-err"; then
+    fail "image helper accepted ':latest' pin"
+  else
+    ok "image helper rejects :latest"
+  fi
+  printf 'structurizr/cli@sha256:deadbeef\n' >"${bad_image}"
+  if STRUCTURIZR_CLI_IMAGE_FILE="${bad_image}" "${STRUCTURIZR_IMAGE_HELPER}" >/dev/null 2>"${scratch}/img-err"; then
+    fail "image helper accepted short digest"
+  else
+    ok "image helper rejects short digest"
+  fi
+  : >"${bad_image}"
+  if STRUCTURIZR_CLI_IMAGE_FILE="${bad_image}" "${STRUCTURIZR_IMAGE_HELPER}" >/dev/null 2>"${scratch}/img-err"; then
+    fail "image helper accepted empty pin"
+  else
+    ok "image helper rejects empty pin"
+  fi
+  # Build multi-line content at runtime so this test file never embeds a digest literal.
+  {
+    printf 'structurizr/cli@sha256:%s\n' "$(python3 -c 'print("a" * 64)')"
+    printf 'structurizr/cli@sha256:%s\n' "$(python3 -c 'print("b" * 64)')"
+  } >"${bad_image}"
+  if STRUCTURIZR_CLI_IMAGE_FILE="${bad_image}" "${STRUCTURIZR_IMAGE_HELPER}" >/dev/null 2>"${scratch}/img-err"; then
+    fail "image helper accepted multi-line pin"
+  else
+    ok "image helper rejects multi-line pin"
+  fi
+else
+  fail "cannot prove image-pin fail-closed; helper missing"
+fi
+
+echo "== Structurizr consumers use the helper only (no :latest, no digest literal) =="
 for path in "${STRUCTURIZR_WF}" "${STRUCTURIZR_VALIDATE}" "${STRUCTURIZR_EXPORT}"; do
   name="${path#"${ROOT}"/}"
   if grep -qE 'structurizr/cli:latest' "${path}"; then
@@ -169,9 +257,13 @@ for path in "${STRUCTURIZR_WF}" "${STRUCTURIZR_VALIDATE}" "${STRUCTURIZR_EXPORT}
   else
     ok "${name} has no :latest"
   fi
+  if grep -qE 'sha256:[0-9a-f]{64}' "${path}"; then
+    fail "${name} embeds a digest literal (second source)"
+  else
+    ok "${name} has no digest literal"
+  fi
 done
 
-# Consumers must obtain the image from the helper, not a second literal.
 for path in "${STRUCTURIZR_VALIDATE}" "${STRUCTURIZR_EXPORT}"; do
   name="${path#"${ROOT}"/}"
   if grep -qE 'structurizr-cli-image\.sh' "${path}"; then
@@ -179,15 +271,8 @@ for path in "${STRUCTURIZR_VALIDATE}" "${STRUCTURIZR_EXPORT}"; do
   else
     fail "${name} does not call scripts/structurizr-cli-image.sh"
   fi
-  if grep -qE 'structurizr/cli@sha256:' "${path}"; then
-    fail "${name} embeds a digest literal (second source)"
-  else
-    ok "${name} has no embedded digest literal"
-  fi
 done
 
-# Workflow must call the validate script or image helper in an active step — not merely
-# list the path in `on.pull_request.paths` (that matched before any production edit).
 if python3 - "${STRUCTURIZR_WF}" <<'PY'
 import re
 import sys
@@ -197,7 +282,6 @@ jobs = text.split("\njobs:", 1)
 if len(jobs) != 2:
     sys.exit(1)
 body = jobs[1]
-# Active step lines (not comments).
 active = [
     line
     for line in body.splitlines()
@@ -213,9 +297,18 @@ then
 else
   fail "structurizr-validate.yml job steps neither call structurizr-validate.sh nor structurizr-cli-image.sh"
 fi
-if grep -qE 'structurizr/cli@sha256:717e320e0ad52335ea9939bf5fae092620cc3deccecf6f280a5b6fee99763c53' \
-  "${STRUCTURIZR_WF}"; then
-  fail "structurizr-validate.yml embeds the digest literal (second source)"
+
+if grep -qE '^\s*-\s*"\.github/structurizr-cli-image"\s*$' "${STRUCTURIZR_WF}"; then
+  ok "structurizr-validate.yml paths filter includes the image pin file"
+else
+  fail "structurizr-validate.yml paths filter missing .github/structurizr-cli-image"
+fi
+
+echo "== contract test carries no digest literal =="
+if grep -qE 'sha256:[0-9a-f]{64}' "${THIS_TEST}"; then
+  fail "test-ci-hardening-b1.sh embeds a digest literal (violates single-source)"
+else
+  ok "contract test has no digest literal"
 fi
 
 echo "== touched jobs declare timeout-minutes =="
