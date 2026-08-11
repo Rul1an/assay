@@ -402,7 +402,10 @@ else
   fail "structurizr-validate.yml does not force STRUCTURIZR_FORCE_DOCKER on the validate step"
 fi
 
-# Behavioral: force-docker must not fall back to native CLI when Docker is absent.
+# Behavioral: force-docker must not fall back to native CLI when Docker is unusable.
+# ubuntu-latest ships /usr/bin/docker; omitting a stub lets the real binary succeed and
+# falsely green this case. Put an unusable docker stub first (exit 127) so discovery
+# finds docker but every invocation fails.
 force_bin="${scratch}/force-bin"
 mkdir -p "${force_bin}"
 cat >"${force_bin}/structurizr-cli" <<'STUB'
@@ -411,21 +414,28 @@ echo "native-cli-invoked" >>"${STRUCTURIZR_STUB_LOG}"
 exit 0
 STUB
 chmod +x "${force_bin}/structurizr-cli"
-# No docker on PATH for this case.
+cat >"${force_bin}/docker" <<'STUB'
+#!/usr/bin/env bash
+echo "docker-unusable-invoked:$*" >>"${STRUCTURIZR_STUB_LOG}"
+exit 127
+STUB
+chmod +x "${force_bin}/docker"
 : >"${scratch}/force.log"
 force_rc=0
 STRUCTURIZR_FORCE_DOCKER=1 STRUCTURIZR_STUB_LOG="${scratch}/force.log" \
   PATH="${force_bin}:/usr/bin:/bin" \
   bash "${STRUCTURIZR_VALIDATE}" >"${scratch}/force.out" 2>&1 || force_rc=$?
 if [[ "${force_rc}" -eq 0 ]]; then
-  fail "STRUCTURIZR_FORCE_DOCKER=1 succeeded without docker (native bypass or empty pass)"
+  fail "STRUCTURIZR_FORCE_DOCKER=1 succeeded with unusable docker (native bypass or empty pass)"
 elif grep -q 'native-cli-invoked' "${scratch}/force.log"; then
   fail "STRUCTURIZR_FORCE_DOCKER=1 fell back to native structurizr-cli"
+elif ! grep -q 'docker-unusable-invoked:' "${scratch}/force.log"; then
+  fail "STRUCTURIZR_FORCE_DOCKER=1 did not invoke the unusable docker stub"
 else
-  ok "STRUCTURIZR_FORCE_DOCKER=1 fails closed without docker (no native fallback)"
+  ok "STRUCTURIZR_FORCE_DOCKER=1 fails closed with unusable docker (no native fallback)"
 fi
 
-# Behavioral: with docker present, force-docker must call docker with the pin, not native.
+# Behavioral: overwrite with a successful docker stub; force-docker must use it, not native.
 cat >"${force_bin}/docker" <<'STUB'
 #!/usr/bin/env bash
 echo "docker-invoked:$*" >>"${STRUCTURIZR_STUB_LOG}"
