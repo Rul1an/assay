@@ -5,6 +5,11 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+use std::cell::Cell;
+#[cfg(test)]
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+
 #[cfg(windows)]
 use process_wrap::std::JobObject;
 #[cfg(unix)]
@@ -14,6 +19,45 @@ use process_wrap::std::{ChildWrapper, CommandWrap};
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 const REAP_GRACE: Duration = Duration::from_secs(1);
 const MAX_DIAGNOSTIC_BYTES: usize = 4096;
+
+// Test-only: when set, the next `terminate_remaining_tree` returns this error
+// without sending a tree kill, so the early-failure path can be exercised.
+#[cfg(test)]
+thread_local! {
+    static INJECT_TERMINATE_REMAINING_TREE_ERROR: Cell<Option<&'static str>> = const { Cell::new(None) };
+}
+
+// Test-only: process id observed when an injected tree-kill failure fires.
+#[cfg(test)]
+static INJECTED_TREE_KILL_CHILD_PID: AtomicU32 = AtomicU32::new(0);
+
+// Test-only: when set on the `run_bounded` caller thread, spawned I/O workers
+// register in `LIVE_IO_WORKERS` for the duration of their closure.
+#[cfg(test)]
+thread_local! {
+    static TRACK_IO_WORKERS: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(test)]
+static LIVE_IO_WORKERS: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+struct IoWorkerGuard;
+
+#[cfg(test)]
+impl IoWorkerGuard {
+    fn enter() -> Self {
+        LIVE_IO_WORKERS.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for IoWorkerGuard {
+    fn drop(&mut self) {
+        LIVE_IO_WORKERS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct ProcessLimits {
@@ -97,7 +141,11 @@ pub fn run_bounded(
         .ok_or_else(|| format!("{context}: {command_display}: child stderr was not piped"))?;
 
     let stdin = stdin.to_vec();
+    #[cfg(test)]
+    let track_io_workers = TRACK_IO_WORKERS.get();
     let stdin_writer = thread::spawn(move || {
+        #[cfg(test)]
+        let _worker_guard = track_io_workers.then(IoWorkerGuard::enter);
         let result = child_stdin.write_all(&stdin);
         drop(child_stdin);
         result
@@ -119,6 +167,7 @@ pub fn run_bounded(
 
     let deadline = Instant::now() + limits.timeout;
     let mut early_failure = None;
+    let mut tree_termination_error = None;
     let mut observed_status = None;
     let status = loop {
         if early_failure.is_none() {
@@ -145,7 +194,15 @@ pub fn run_bounded(
                         || !stdout_reader.is_finished()
                         || !stderr_reader.is_finished();
                     if io_outstanding {
-                        terminate_remaining_tree(child.as_mut(), context, &command_display)?;
+                        // Preserve a tree-kill failure, but do not return while
+                        // JoinHandles and descendants may still be live. Keep
+                        // draining under the same deadline; terminate_and_reap
+                        // below retries termination before joins.
+                        if let Err(error) =
+                            terminate_remaining_tree(child.as_mut(), context, &command_display)
+                        {
+                            tree_termination_error = Some(error);
+                        }
                     }
                 }
                 Ok(None) => {}
@@ -174,7 +231,7 @@ pub fn run_bounded(
         }
 
         if Instant::now() >= deadline {
-            if early_failure.is_none() {
+            if early_failure.is_none() && tree_termination_error.is_none() {
                 early_failure = Some(format!("deadline of {:?} expired", limits.timeout));
             }
             break terminate_and_reap(
@@ -192,6 +249,14 @@ pub fn run_bounded(
         .map_err(|_| format!("{context}: {command_display}: stdin writer panicked"))?;
     let stdout = join_reader(stdout_reader, context, &command_display, "stdout")?;
     let stderr = join_reader(stderr_reader, context, &command_display, "stderr")?;
+
+    if let Some(error) = tree_termination_error {
+        return Err(format!(
+            "{error}; status={status}; stdout={}; stderr={}",
+            excerpt(&stdout),
+            excerpt(&stderr),
+        ));
+    }
 
     if let Some(failure) = early_failure {
         return Err(failure_diagnostic(
@@ -258,7 +323,11 @@ fn spawn_reader<R: Read + Send + 'static>(
     stream: CapturedStream,
     overflow: mpsc::Sender<CapturedStream>,
 ) -> thread::JoinHandle<std::io::Result<Vec<u8>>> {
+    #[cfg(test)]
+    let track_io_workers = TRACK_IO_WORKERS.get();
     thread::spawn(move || {
+        #[cfg(test)]
+        let _worker_guard = track_io_workers.then(IoWorkerGuard::enter);
         let mut bytes = Vec::with_capacity(limit.saturating_add(1));
         reader
             .take(limit.saturating_add(1) as u64)
@@ -350,6 +419,13 @@ fn terminate_remaining_tree(
     context: &str,
     command: &str,
 ) -> Result<(), String> {
+    #[cfg(test)]
+    if let Some(injected) = INJECT_TERMINATE_REMAINING_TREE_ERROR.take() {
+        INJECTED_TREE_KILL_CHILD_PID.store(child.id(), Ordering::SeqCst);
+        return Err(format!(
+            "{context}: failed to terminate remaining process tree for {command}: {injected}"
+        ));
+    }
     match child.start_kill() {
         Ok(()) => Ok(()),
         Err(error) if process_tree_absent(&error) => Ok(()),
@@ -1035,5 +1111,105 @@ mod tests {
         assert!(process_tree_quiescent_after_io(&error));
         #[cfg(not(target_os = "macos"))]
         assert!(!process_tree_quiescent_after_io(&error));
+    }
+
+    /// Contract: an early `terminate_remaining_tree` failure must not let
+    /// `run_bounded` return while I/O workers or process-tree descendants are
+    /// still live. The original termination error is preserved after cleanup.
+    #[test]
+    fn early_tree_kill_failure_preserves_error_after_bounded_cleanup() {
+        use super::{
+            INJECTED_TREE_KILL_CHILD_PID, INJECT_TERMINATE_REMAINING_TREE_ERROR, LIVE_IO_WORKERS,
+            TRACK_IO_WORKERS,
+        };
+        use std::sync::atomic::Ordering;
+
+        const INJECTED: &str = "injected tree-kill failure";
+
+        struct TrackingGuard;
+        impl Drop for TrackingGuard {
+            fn drop(&mut self) {
+                TRACK_IO_WORKERS.set(false);
+                INJECT_TERMINATE_REMAINING_TREE_ERROR.set(None);
+                let pid = INJECTED_TREE_KILL_CHILD_PID.swap(0, Ordering::SeqCst);
+                best_effort_kill_tree_for_test(pid);
+            }
+        }
+        let _tracking_guard = TrackingGuard;
+        INJECTED_TREE_KILL_CHILD_PID.store(0, Ordering::SeqCst);
+        assert_eq!(LIVE_IO_WORKERS.load(Ordering::SeqCst), 0);
+
+        let (result_tx, result_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            TRACK_IO_WORKERS.set(true);
+            INJECT_TERMINATE_REMAINING_TREE_ERROR.set(Some(INJECTED));
+            let command = descendant_spawner_command(HelperPlan::Inherited);
+            let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
+            let _ = result_tx.send(run_bounded(
+                command,
+                b"",
+                limits,
+                "injected tree-kill failure mutation",
+            ));
+        });
+
+        let result = match result_rx.recv_timeout(descendant_test_guard()) {
+            Ok(result) => result,
+            Err(error) => panic!("runner escaped its wall-clock bound: {error}"),
+        };
+        worker.join().expect("bounded runner worker");
+
+        let live_after_return = LIVE_IO_WORKERS.load(Ordering::SeqCst);
+        let injected_child_pid = INJECTED_TREE_KILL_CHILD_PID.load(Ordering::SeqCst);
+
+        let error = result.expect_err(
+            "injected terminate_remaining_tree failure must surface as Err after cleanup",
+        );
+        assert!(
+            error.contains(INJECTED),
+            "original termination error must be preserved: {error}"
+        );
+        assert!(
+            error.contains("failed to terminate remaining process tree"),
+            "tree-kill failure wording must be preserved: {error}"
+        );
+        assert_eq!(
+            live_after_return, 0,
+            "run_bounded returned while {live_after_return} I/O worker(s) still live \
+             (detached JoinHandles); injected child pid={injected_child_pid}; error={error}"
+        );
+
+        let descendant_pid = descendant_pid_from(&error).unwrap_or_else(|reason| {
+            panic!("descendant pid must be recoverable after cleanup joins: {reason}; {error}")
+        });
+        assert!(
+            wait_for_descendant_exit(descendant_pid),
+            "descendant {descendant_pid} still live after run_bounded returned; error={error}"
+        );
+    }
+
+    #[cfg(unix)]
+    fn best_effort_kill_tree_for_test(pid: u32) {
+        if pid == 0 {
+            return;
+        }
+        // ProcessGroup::leader uses the child pid as the process-group id.
+        let _ = Command::new("kill")
+            .args(["-KILL", &format!("-{pid}")])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+
+    #[cfg(windows)]
+    fn best_effort_kill_tree_for_test(pid: u32) {
+        if pid == 0 {
+            return;
+        }
+        let _ = Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
 }
