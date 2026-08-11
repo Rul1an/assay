@@ -22,8 +22,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Set up Rust toolchain and cache
+        uses: ./.github/actions/setup-rust
 
       - name: Build and Install Assay (from source)
         run: |
