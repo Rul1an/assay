@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract for .github/actions/setup-rust and its week8 + wave6 + fuzz-smoke + ADR025 soak + smoke-install assay + Runner Spike SDK + perf family caller surfaces.
+# Contract for .github/actions/setup-rust and its week8 + wave6 + fuzz-smoke + ADR025 soak + smoke-install assay + Runner Spike SDK + perf family + Split Wave 0 caller surfaces.
 # Guards only the new boundary; actionlint + diff review cover unchanged workflow structure.
 #
 # Empty optional forwarding is safe for the pinned upstream versions measured in this
@@ -18,6 +18,7 @@ RUNNER_SPIKE="${ROOT}/.github/workflows/runner-spike-sdk.yml"
 PERF_MAIN="${ROOT}/.github/workflows/perf_main.yml"
 PERF_PR="${ROOT}/.github/workflows/perf_pr.yml"
 PERF_NIGHTLY="${ROOT}/.github/workflows/perf_nightly.yml"
+SPLIT_WAVE0="${ROOT}/.github/workflows/split-wave0-gates.yml"
 KERNEL_MATRIX="${ROOT}/.github/workflows/kernel-matrix.yml"
 TOOLCHAIN_REF="dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
 CACHE_REF="Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4"
@@ -41,6 +42,7 @@ trap 'abort_is_failure "$?"' ERR
 [[ -f "${PERF_MAIN}" ]] || fail "missing .github/workflows/perf_main.yml"
 [[ -f "${PERF_PR}" ]] || fail "missing .github/workflows/perf_pr.yml"
 [[ -f "${PERF_NIGHTLY}" ]] || fail "missing .github/workflows/perf_nightly.yml"
+[[ -f "${SPLIT_WAVE0}" ]] || fail "missing .github/workflows/split-wave0-gates.yml"
 [[ -f "${KERNEL_MATRIX}" ]] || fail "missing .github/workflows/kernel-matrix.yml"
 
 grep -qE '^[[:space:]]*using:[[:space:]]*composite[[:space:]]*$' "${ACTION}" \
@@ -213,7 +215,7 @@ print(
 )
 PY
 
-python3 - "${FUZZ_SMOKE}" "${ADR025}" "${SMOKE_INSTALL}" "${RUNNER_SPIKE}" "${PERF_MAIN}" "${PERF_PR}" "${PERF_NIGHTLY}" <<'PY' || fail "simple-caller setup-rust contract failed"
+python3 - "${FUZZ_SMOKE}" "${ADR025}" "${SMOKE_INSTALL}" "${RUNNER_SPIKE}" "${PERF_MAIN}" "${PERF_PR}" "${PERF_NIGHTLY}" "${SPLIT_WAVE0}" <<'PY' || fail "simple-caller setup-rust contract failed"
 import re, sys
 from pathlib import Path
 
@@ -224,6 +226,7 @@ spike_text = Path(sys.argv[4]).read_text(encoding="utf-8")
 perf_main_text = Path(sys.argv[5]).read_text(encoding="utf-8")
 perf_pr_text = Path(sys.argv[6]).read_text(encoding="utf-8")
 perf_nightly_text = Path(sys.argv[7]).read_text(encoding="utf-8")
+split_wave0_text = Path(sys.argv[8]).read_text(encoding="utf-8")
 
 
 def jobs_by_id(text: str) -> dict[str, str]:
@@ -479,6 +482,34 @@ print(
     "with-map empty; no direct pins"
 )
 
+# --- Split Wave 0: feature-matrix / quality-gates / semver-public only ---
+split_wave0_jobs = jobs_by_id(split_wave0_text)
+for required in ("feature-matrix", "quality-gates", "semver-public", "detect-changes", "nightly-safety"):
+    if required not in split_wave0_jobs:
+        raise SystemExit(f"split-wave0 missing job {required}")
+
+assert_default_setup_rust_caller("split-wave0", split_wave0_text, "feature-matrix")
+assert_setup_rust_exact_with(
+    "split-wave0", split_wave0_text, "quality-gates", {"components": "clippy"}
+)
+assert_default_setup_rust_caller("split-wave0", split_wave0_text, "semver-public")
+
+allowed_setup = {"feature-matrix", "quality-gates", "semver-public"}
+for job_id, block in split_wave0_jobs.items():
+    if job_id in allowed_setup:
+        continue
+    if "./.github/actions/setup-rust" in block:
+        raise SystemExit(
+            f"split-wave0: setup-rust only allowed in "
+            f"feature-matrix/quality-gates/semver-public, found in {job_id}"
+        )
+
+print(
+    "ok   split-wave0: feature-matrix + semver-public default setup-rust after checkout; "
+    "quality-gates with-map exact {components: clippy}; "
+    "no setup-rust in detect-changes/nightly-safety; no direct pins"
+)
+
 PY
 
 python3 - "${KERNEL_MATRIX}" <<'PY' || fail "kernel-matrix hook-trigger paths missing"
@@ -515,6 +546,7 @@ required = (
     ".github/workflows/perf_main.yml",
     ".github/workflows/perf_pr.yml",
     ".github/workflows/perf_nightly.yml",
+    ".github/workflows/split-wave0-gates.yml",
 )
 bad = [p for p in required if paths.count(p) != 1]
 if bad:
@@ -522,7 +554,7 @@ if bad:
         "pull_request.paths must list each trigger path exactly once; "
         + ", ".join(f"{p!r} appears {paths.count(p)} time(s)" for p in bad)
     )
-print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6 + fuzz-smoke + adr025 + smoke-install + runner-spike-sdk + perf_main + perf_pr + perf_nightly")
+print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6 + fuzz-smoke + adr025 + smoke-install + runner-spike-sdk + perf_main + perf_pr + perf_nightly + split-wave0")
 PY
 
 echo "setup-rust composite contract: all checks passed"
