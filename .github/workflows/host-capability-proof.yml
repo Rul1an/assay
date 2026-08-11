@@ -53,10 +53,34 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Resolve pinned Rust toolchain
+        id: rust-toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import tomllib
+
+          with open("rust-toolchain.toml", "rb") as source:
+              channel = tomllib.load(source)["toolchain"]["channel"]
+          if not isinstance(channel, str) or not channel:
+              raise SystemExit("rust-toolchain.toml has no non-empty toolchain.channel")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"channel={channel}", file=output)
+          PY
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: ${{ steps.rust-toolchain.outputs.channel }}
+
       - name: Restore bounded Rust build cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          prefix-key: host-capability-proof-v1
+          # Never let cache cleanup or restore mutate rustup/cargo shims on the persistent host.
+          cache-bin: false
+          prefix-key: host-capability-proof-v2
 
       - name: Build assay CLI
         shell: bash

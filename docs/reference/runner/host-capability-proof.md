@@ -81,8 +81,11 @@ The run builds `assay-cli` from the dispatched ref and uploads an artifact conta
 - the full `assay doctor --format json` output,
 - host metadata (`uname -a`, runner label).
 
-The producer restores a Rust build cache under the isolated
-`host-capability-proof-v1` prefix before compiling. It keeps the workflow-level
+The producer reads the Rust version from the repository's `rust-toolchain.toml`,
+installs it through a commit-pinned action, and then restores a Rust build cache
+under the isolated `host-capability-proof-v2` prefix before compiling. The cache
+excludes `CARGO_HOME/bin`: cache cleanup or restore must never mutate the
+persistent host's `rustup`, `cargo`, or `rustc` shims. It keeps the workflow-level
 `contents: read` and `actions: read` permissions; cache restore/save uses the
 job's Actions runtime token and does not justify repository Actions write
 access. Failed builds are not cached.
