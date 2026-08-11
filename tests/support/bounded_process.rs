@@ -570,8 +570,13 @@ mod tests {
     }
 
     fn ready_record_left_boundary(record: &str, start: usize) -> bool {
-        match record[..start].chars().next_back() {
+        let before = &record[..start];
+        match before.chars().next_back() {
             None => true,
+            // excerpt() Debug-escapes newlines as the two-char sequence '\\''n'
+            // (and CRLF as '\\''r''\\''n'); that 'n' is a line boundary, not an
+            // identifier character glued to READY.
+            Some('n') if before.ends_with("\\n") => true,
             Some(c) => !is_ascii_ident_char(c),
         }
     }
@@ -1119,6 +1124,20 @@ mod tests {
             ),
             Ok(77),
             "identical both-channel quotes must still read"
+        );
+        // excerpt() debug-escapes newlines, so the diagnostic carries the two-char
+        // sequence '\\' 'n' immediately before READY — not a real newline.
+        assert_eq!(
+            descendant_pid_from(
+                r#"deadline; stdout="\nrunning 1 test\nREADY pid=6024.\ntest result: ok."; stderr="READY pid=6024""#
+            ),
+            Ok(6024),
+            "debug-escaped newlines in excerpt must not hide READY"
+        );
+        assert_eq!(
+            descendant_pid_from(r#"stdout="\r\nREADY pid=6024.""#),
+            Ok(6024),
+            "debug-escaped CRLF must also be a left boundary"
         );
 
         for rejected in [
