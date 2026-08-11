@@ -41,6 +41,8 @@ on:
       - ".github/workflows/fuzz-smoke.yml"
       # ADR025 soak calls setup-rust (empty with-map / composite defaults).
       - ".github/workflows/adr025-nightly-evidence.yml"
+      # Smoke Install assay calls setup-rust (empty with-map / composite defaults).
+      - ".github/workflows/smoke-install.yml"
       # Note: Cargo.toml/Cargo.lock removed - check-ebpf-changes job handles skip logic
   push:
     branches: [ "main", "debug/**" ]

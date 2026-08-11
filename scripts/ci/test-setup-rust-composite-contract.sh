@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract for .github/actions/setup-rust and its week8 + wave6 + fuzz-smoke + ADR025 soak caller surfaces.
+# Contract for .github/actions/setup-rust and its week8 + wave6 + fuzz-smoke + ADR025 soak + smoke-install assay caller surfaces.
 # Guards only the new boundary; actionlint + diff review cover unchanged workflow structure.
 #
 # Empty optional forwarding is safe for the pinned upstream versions measured in this
@@ -13,6 +13,7 @@ WEEK8="${ROOT}/.github/workflows/week8-sota-gates.yml"
 WAVE6="${ROOT}/.github/workflows/wave6-nightly-safety.yml"
 FUZZ_SMOKE="${ROOT}/.github/workflows/fuzz-smoke.yml"
 ADR025="${ROOT}/.github/workflows/adr025-nightly-evidence.yml"
+SMOKE_INSTALL="${ROOT}/.github/workflows/smoke-install.yml"
 KERNEL_MATRIX="${ROOT}/.github/workflows/kernel-matrix.yml"
 TOOLCHAIN_REF="dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
 CACHE_REF="Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4"
@@ -31,6 +32,7 @@ trap 'abort_is_failure "$?"' ERR
 [[ -f "${WAVE6}" ]] || fail "missing .github/workflows/wave6-nightly-safety.yml"
 [[ -f "${FUZZ_SMOKE}" ]] || fail "missing .github/workflows/fuzz-smoke.yml"
 [[ -f "${ADR025}" ]] || fail "missing .github/workflows/adr025-nightly-evidence.yml"
+[[ -f "${SMOKE_INSTALL}" ]] || fail "missing .github/workflows/smoke-install.yml"
 [[ -f "${KERNEL_MATRIX}" ]] || fail "missing .github/workflows/kernel-matrix.yml"
 
 grep -qE '^[[:space:]]*using:[[:space:]]*composite[[:space:]]*$' "${ACTION}" \
@@ -203,12 +205,13 @@ print(
 )
 PY
 
-python3 - "${FUZZ_SMOKE}" "${ADR025}" <<'PY' || fail "simple-caller setup-rust contract failed"
+python3 - "${FUZZ_SMOKE}" "${ADR025}" "${SMOKE_INSTALL}" <<'PY' || fail "simple-caller setup-rust contract failed"
 import re, sys
 from pathlib import Path
 
 fuzz_text = Path(sys.argv[1]).read_text(encoding="utf-8")
 adr025_text = Path(sys.argv[2]).read_text(encoding="utf-8")
+smoke_text = Path(sys.argv[3]).read_text(encoding="utf-8")
 
 
 def jobs_by_id(text: str) -> dict[str, str]:
@@ -306,6 +309,32 @@ def assert_immediate_setup_rust(job_id: str, block: str) -> str:
     return bodies[setup_idxs[0]]
 
 
+def assert_default_setup_rust_caller(wf_label: str, text: str, job_id: str) -> None:
+    """Named setup-rust immediately after checkout; composite defaults only; no direct pins."""
+    if re.search(r"dtolnay/rust-toolchain@", text):
+        raise SystemExit(f"{wf_label} still calls dtolnay/rust-toolchain directly")
+    if re.search(r"Swatinem/rust-cache@", text):
+        raise SystemExit(f"{wf_label} still calls Swatinem/rust-cache directly")
+    jobs = jobs_by_id(text)
+    if job_id not in jobs:
+        raise SystemExit(f"{wf_label} missing job {job_id}")
+    setup = assert_immediate_setup_rust(job_id, jobs[job_id])
+    first = setup.splitlines()[0]
+    if first != "      - name: Set up Rust toolchain and cache":
+        raise SystemExit(
+            f"{job_id}: setup step must be named exactly "
+            f"'Set up Rust toolchain and cache', got {first!r}"
+        )
+    # Reject any with: in the actual setup step body (with before/after uses, any keys).
+    if re.search(r"(?m)^        with:\s*$", setup):
+        raise SystemExit(
+            f"{job_id}: setup-rust must not declare a with: map (composite defaults only)"
+        )
+    # Trailing-slash uses still classify as setup-rust; with-map rejection above still applies.
+    if re.search(r"(?m)^\s+uses:\s*(?:dtolnay/rust-toolchain@|Swatinem/rust-cache@)", setup):
+        raise SystemExit(f"{job_id}: setup step must not call dtolnay/Swatinem directly")
+
+
 # --- fuzz-smoke ---
 if re.search(r"dtolnay/rust-toolchain@", fuzz_text):
     raise SystemExit("fuzz-smoke still calls dtolnay/rust-toolchain directly")
@@ -341,25 +370,13 @@ print(
     "FUZZ_TOOLCHAIN=nightly-2026-07-28; no direct pins"
 )
 
-# --- ADR025 soak (simple empty with-map caller) ---
-if re.search(r"dtolnay/rust-toolchain@", adr025_text):
-    raise SystemExit("adr025 still calls dtolnay/rust-toolchain directly")
-if re.search(r"Swatinem/rust-cache@", adr025_text):
-    raise SystemExit("adr025 still calls Swatinem/rust-cache directly")
-
+# --- ADR025 soak (default-caller / composite defaults) ---
 adr_jobs = jobs_by_id(adr025_text)
 for required in ("soak", "readiness", "closure", "otel_bridge"):
     if required not in adr_jobs:
         raise SystemExit(f"adr025 missing job {required}")
 
-soak_setup = assert_immediate_setup_rust("soak", adr_jobs["soak"])
-# Reject any top-level with: in the actual setup step body. Do not parse the
-# with-map via uses-line regex: that conflates parse miss with {} and misses
-# trailing-slash uses / with-before-uses reorderings.
-if re.search(r"(?m)^        with:\s*$", soak_setup):
-    raise SystemExit(
-        "soak: setup-rust must not declare a with: map (composite defaults only)"
-    )
+assert_default_setup_rust_caller("adr025", adr025_text, "soak")
 
 for job_id in ("readiness", "closure", "otel_bridge"):
     if "./.github/actions/setup-rust" in adr_jobs[job_id]:
@@ -369,6 +386,23 @@ print(
     "ok   adr025: soak one setup-rust after checkout; with-map empty; "
     "no setup-rust in readiness/closure/otel_bridge; no direct pins"
 )
+
+# --- Smoke Install assay (default-caller / composite defaults) ---
+smoke_jobs = jobs_by_id(smoke_text)
+if "assay" not in smoke_jobs:
+    raise SystemExit("smoke-install missing job assay")
+assert_default_setup_rust_caller("smoke-install", smoke_text, "assay")
+for job_id, block in smoke_jobs.items():
+    if job_id == "assay":
+        continue
+    if "./.github/actions/setup-rust" in block:
+        raise SystemExit(f"smoke-install: setup-rust only allowed in assay, found in {job_id}")
+
+print(
+    "ok   smoke-install: assay one setup-rust after checkout; with-map empty; "
+    "no direct pins"
+)
+
 PY
 
 python3 - "${KERNEL_MATRIX}" <<'PY' || fail "kernel-matrix hook-trigger paths missing"
@@ -400,6 +434,7 @@ required = (
     ".github/workflows/wave6-nightly-safety.yml",
     ".github/workflows/fuzz-smoke.yml",
     ".github/workflows/adr025-nightly-evidence.yml",
+    ".github/workflows/smoke-install.yml",
 )
 bad = [p for p in required if paths.count(p) != 1]
 if bad:
@@ -407,7 +442,7 @@ if bad:
         "pull_request.paths must list each trigger path exactly once; "
         + ", ".join(f"{p!r} appears {paths.count(p)} time(s)" for p in bad)
     )
-print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6 + fuzz-smoke + adr025")
+print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6 + fuzz-smoke + adr025 + smoke-install")
 PY
 
 echo "setup-rust composite contract: all checks passed"
