@@ -32,6 +32,9 @@ on:
       # head-side pre-commit leg when it changes, because the lane workflow
       # itself checks out the PR base and would validate the base copy.
       - ".github/workflows/assay-runner-lane-check.yml"
+      # setup-rust contract hook runs under Lint (pre-commit) in this workflow.
+      - ".github/actions/setup-rust/**"
+      - ".github/workflows/week8-sota-gates.yml"
       # Note: Cargo.toml/Cargo.lock removed - check-ebpf-changes job handles skip logic
   push:
     branches: [ "main", "debug/**" ]
