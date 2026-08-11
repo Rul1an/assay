@@ -29,8 +29,16 @@ grep -qE '^[[:space:]]*using:[[:space:]]*composite[[:space:]]*$' "${ACTION}" \
   || fail "action must declare runs.using: composite"
 ok "composite action present"
 
-grep -qE 'actions/checkout@' "${ACTION}" && fail "composite must not checkout" || ok "no checkout in composite"
-grep -qE 'apt-get|apt install|sudo apt' "${ACTION}" && fail "composite must not apt-install" || ok "no apt in composite"
+if grep -qE 'actions/checkout@' "${ACTION}"; then
+  fail "composite must not checkout"
+else
+  ok "no checkout in composite"
+fi
+if grep -qE 'apt-get|apt install|sudo apt' "${ACTION}"; then
+  fail "composite must not apt-install"
+else
+  ok "no apt in composite"
+fi
 
 python3 - "${ACTION}" "${TOOLCHAIN_REF}" "${CACHE_REF}" <<'PY' || fail "composite pin/input contract failed"
 import re, sys
@@ -51,11 +59,14 @@ for opt in ("components", "cache-workspaces"):
     if not re.search(rf"(?m)^  {opt}:\n(?:.*\n)*?    default:\s*(\"\"|'')\s*$", text):
         raise SystemExit(f"{opt} default must be empty")
 
-# Exactly one occurrence of each external action@SHA (single-sourced pins).
-for label, needle in (("toolchain", want_toolchain), ("cache", want_cache)):
-    count = text.count(needle)
-    if count != 1:
-        raise SystemExit(f"{label} ref {needle} occurs {count} times; want exactly 1")
+# All action@SHA uses for each name must be exactly the single wanted ref.
+for label, action, wanted in (
+    ("toolchain", "dtolnay/rust-toolchain", want_toolchain),
+    ("cache", "Swatinem/rust-cache", want_cache),
+):
+    found = re.findall(rf"{re.escape(action)}@[0-9a-f]{{40}}", text)
+    if found != [wanted]:
+        raise SystemExit(f"{label} refs {found}, expected [{wanted}]")
 if not re.search(r"(?m)^\s+components:\s*\$\{\{\s*inputs\.components\s*\}\}\s*$", text):
     raise SystemExit("must pass components: ${{ inputs.components }}")
 if not re.search(r"(?m)^\s+workspaces:\s*\$\{\{\s*inputs\.cache-workspaces\s*\}\}\s*$", text):
