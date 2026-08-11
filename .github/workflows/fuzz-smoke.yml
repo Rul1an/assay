@@ -64,7 +64,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      # setup-rust installs the FUZZ_TOOLCHAIN pin then restores the fuzz workspace cache.
+      # Prior layout already placed cache immediately after toolchain with no steps between;
+      # the composite keeps that pair. This migration does not claim ordering equivalence for
+      # lanes that had apt or other work between those two steps (this lane did not).
+      - uses: ./.github/actions/setup-rust
         with:
           # Date-pinned, not floating `nightly`. Pinning cargo-fuzz alone does not freeze the
           # compiler that produced a reported run, and a sanitizer-instrumented build is exactly
@@ -74,11 +78,7 @@ jobs:
           # alias, which resolves to the newest nightly and will install one if it is missing --
           # silently defeating the pin while the log still says the dated toolchain was installed.
           toolchain: ${{ env.FUZZ_TOOLCHAIN }}
-
-      - name: Swatinem/rust-cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          workspaces: fuzz -> target
+          cache-workspaces: fuzz -> target
 
       - name: Install cargo-fuzz
         # Version-pinned, not just `--locked`: `--locked` fixes the tool's dependencies but still
