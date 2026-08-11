@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract for .github/actions/setup-rust and its week8 + wave6 + fuzz-smoke + ADR025 soak + smoke-install assay + Runner Spike SDK + perf family + Split Wave 0 caller surfaces.
+# Contract for .github/actions/setup-rust and its week8 + wave6 + fuzz-smoke + ADR025 soak + smoke-install assay + Runner Spike SDK + perf family + Split Wave 0 + CI clippy/rustdoc caller surfaces.
 # Guards only the new boundary; actionlint + diff review cover unchanged workflow structure.
 #
 # Empty optional forwarding is safe for the pinned upstream versions measured in this
@@ -19,6 +19,7 @@ PERF_MAIN="${ROOT}/.github/workflows/perf_main.yml"
 PERF_PR="${ROOT}/.github/workflows/perf_pr.yml"
 PERF_NIGHTLY="${ROOT}/.github/workflows/perf_nightly.yml"
 SPLIT_WAVE0="${ROOT}/.github/workflows/split-wave0-gates.yml"
+CI_YML="${ROOT}/.github/workflows/ci.yml"
 KERNEL_MATRIX="${ROOT}/.github/workflows/kernel-matrix.yml"
 TOOLCHAIN_REF="dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
 CACHE_REF="Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4"
@@ -43,6 +44,7 @@ trap 'abort_is_failure "$?"' ERR
 [[ -f "${PERF_PR}" ]] || fail "missing .github/workflows/perf_pr.yml"
 [[ -f "${PERF_NIGHTLY}" ]] || fail "missing .github/workflows/perf_nightly.yml"
 [[ -f "${SPLIT_WAVE0}" ]] || fail "missing .github/workflows/split-wave0-gates.yml"
+[[ -f "${CI_YML}" ]] || fail "missing .github/workflows/ci.yml"
 [[ -f "${KERNEL_MATRIX}" ]] || fail "missing .github/workflows/kernel-matrix.yml"
 
 grep -qE '^[[:space:]]*using:[[:space:]]*composite[[:space:]]*$' "${ACTION}" \
@@ -215,7 +217,7 @@ print(
 )
 PY
 
-python3 - "${FUZZ_SMOKE}" "${ADR025}" "${SMOKE_INSTALL}" "${RUNNER_SPIKE}" "${PERF_MAIN}" "${PERF_PR}" "${PERF_NIGHTLY}" "${SPLIT_WAVE0}" <<'PY' || fail "simple-caller setup-rust contract failed"
+python3 - "${FUZZ_SMOKE}" "${ADR025}" "${SMOKE_INSTALL}" "${RUNNER_SPIKE}" "${PERF_MAIN}" "${PERF_PR}" "${PERF_NIGHTLY}" "${SPLIT_WAVE0}" "${CI_YML}" <<'PY' || fail "simple-caller setup-rust contract failed"
 import re, sys
 from pathlib import Path
 
@@ -227,6 +229,7 @@ perf_main_text = Path(sys.argv[5]).read_text(encoding="utf-8")
 perf_pr_text = Path(sys.argv[6]).read_text(encoding="utf-8")
 perf_nightly_text = Path(sys.argv[7]).read_text(encoding="utf-8")
 split_wave0_text = Path(sys.argv[8]).read_text(encoding="utf-8")
+ci_text = Path(sys.argv[9]).read_text(encoding="utf-8")
 
 
 def jobs_by_id(text: str) -> dict[str, str]:
@@ -510,6 +513,61 @@ print(
     "no setup-rust in detect-changes/nightly-safety; no direct pins"
 )
 
+
+def assert_job_scoped_setup_rust(
+    job_id: str, block: str, expected: dict[str, str]
+) -> None:
+    """Adjacency, exact with-map, and no direct pins inside this job block only."""
+    if re.search(r"dtolnay/rust-toolchain@", block):
+        raise SystemExit(f"{job_id}: still calls dtolnay/rust-toolchain directly")
+    if re.search(r"Swatinem/rust-cache@", block):
+        raise SystemExit(f"{job_id}: still calls Swatinem/rust-cache directly")
+    setup = assert_immediate_setup_rust(job_id, block)
+    got = setup_rust_with_map(block)
+    if got != expected:
+        raise SystemExit(
+            f"{job_id}: setup-rust with-map must be exactly {expected}, got {got}"
+        )
+    if expected == {}:
+        first = setup.splitlines()[0]
+        if first != "      - name: Set up Rust toolchain and cache":
+            raise SystemExit(
+                f"{job_id}: setup step must be named exactly "
+                f"'Set up Rust toolchain and cache', got {first!r}"
+            )
+        if re.search(r"(?m)^        with:\s*$", setup):
+            raise SystemExit(
+                f"{job_id}: setup-rust must not declare a with: map (composite defaults only)"
+            )
+    if re.search(
+        r"(?m)^\s+uses:\s*(?:dtolnay/rust-toolchain@|Swatinem/rust-cache@)", setup
+    ):
+        raise SystemExit(f"{job_id}: setup step must not call dtolnay/Swatinem directly")
+
+
+# --- CI: clippy / rustdoc only (job-scoped; other jobs keep direct pins) ---
+ci_jobs = jobs_by_id(ci_text)
+for required in ("clippy", "rustdoc"):
+    if required not in ci_jobs:
+        raise SystemExit(f"ci.yml missing job {required}")
+
+assert_job_scoped_setup_rust("clippy", ci_jobs["clippy"], {"components": "clippy"})
+assert_job_scoped_setup_rust("rustdoc", ci_jobs["rustdoc"], {})
+
+allowed_ci_setup = {"clippy", "rustdoc"}
+for job_id, block in ci_jobs.items():
+    if job_id in allowed_ci_setup:
+        continue
+    if "./.github/actions/setup-rust" in block:
+        raise SystemExit(
+            f"ci.yml: setup-rust only allowed in clippy/rustdoc for this slice, found in {job_id}"
+        )
+
+print(
+    "ok   ci.yml: clippy with-map exact {components: clippy}; rustdoc empty with-map; "
+    "setup-rust only in clippy/rustdoc; job-scoped no direct pins"
+)
+
 PY
 
 python3 - "${KERNEL_MATRIX}" <<'PY' || fail "kernel-matrix hook-trigger paths missing"
@@ -547,6 +605,7 @@ required = (
     ".github/workflows/perf_pr.yml",
     ".github/workflows/perf_nightly.yml",
     ".github/workflows/split-wave0-gates.yml",
+    ".github/workflows/ci.yml",
 )
 bad = [p for p in required if paths.count(p) != 1]
 if bad:
@@ -554,7 +613,7 @@ if bad:
         "pull_request.paths must list each trigger path exactly once; "
         + ", ".join(f"{p!r} appears {paths.count(p)} time(s)" for p in bad)
     )
-print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6 + fuzz-smoke + adr025 + smoke-install + runner-spike-sdk + perf_main + perf_pr + perf_nightly + split-wave0")
+print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6 + fuzz-smoke + adr025 + smoke-install + runner-spike-sdk + perf_main + perf_pr + perf_nightly + split-wave0 + ci.yml")
 PY
 
 echo "setup-rust composite contract: all checks passed"
