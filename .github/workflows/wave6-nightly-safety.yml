@@ -47,8 +47,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo miri setup
-          cargo miri test -p assay-registry test_verify_pack_fail_closed_matrix_contract -- --exact --nocapture
+          cargo +nightly miri setup
+          cargo +nightly miri test -p assay-registry test_verify_pack_fail_closed_matrix_contract -- --exact --nocapture
 
   proptest-cli-smoke:
     name: Nightly property smoke (assay-cli)
