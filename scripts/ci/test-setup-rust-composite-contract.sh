@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract for .github/actions/setup-rust and its week8 + wave6 + fuzz-smoke + ADR025 soak + smoke-install assay caller surfaces.
+# Contract for .github/actions/setup-rust and its week8 + wave6 + fuzz-smoke + ADR025 soak + smoke-install assay + Runner Spike SDK caller surfaces.
 # Guards only the new boundary; actionlint + diff review cover unchanged workflow structure.
 #
 # Empty optional forwarding is safe for the pinned upstream versions measured in this
@@ -14,6 +14,7 @@ WAVE6="${ROOT}/.github/workflows/wave6-nightly-safety.yml"
 FUZZ_SMOKE="${ROOT}/.github/workflows/fuzz-smoke.yml"
 ADR025="${ROOT}/.github/workflows/adr025-nightly-evidence.yml"
 SMOKE_INSTALL="${ROOT}/.github/workflows/smoke-install.yml"
+RUNNER_SPIKE="${ROOT}/.github/workflows/runner-spike-sdk.yml"
 KERNEL_MATRIX="${ROOT}/.github/workflows/kernel-matrix.yml"
 TOOLCHAIN_REF="dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
 CACHE_REF="Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4"
@@ -33,6 +34,7 @@ trap 'abort_is_failure "$?"' ERR
 [[ -f "${FUZZ_SMOKE}" ]] || fail "missing .github/workflows/fuzz-smoke.yml"
 [[ -f "${ADR025}" ]] || fail "missing .github/workflows/adr025-nightly-evidence.yml"
 [[ -f "${SMOKE_INSTALL}" ]] || fail "missing .github/workflows/smoke-install.yml"
+[[ -f "${RUNNER_SPIKE}" ]] || fail "missing .github/workflows/runner-spike-sdk.yml"
 [[ -f "${KERNEL_MATRIX}" ]] || fail "missing .github/workflows/kernel-matrix.yml"
 
 grep -qE '^[[:space:]]*using:[[:space:]]*composite[[:space:]]*$' "${ACTION}" \
@@ -205,13 +207,14 @@ print(
 )
 PY
 
-python3 - "${FUZZ_SMOKE}" "${ADR025}" "${SMOKE_INSTALL}" <<'PY' || fail "simple-caller setup-rust contract failed"
+python3 - "${FUZZ_SMOKE}" "${ADR025}" "${SMOKE_INSTALL}" "${RUNNER_SPIKE}" <<'PY' || fail "simple-caller setup-rust contract failed"
 import re, sys
 from pathlib import Path
 
 fuzz_text = Path(sys.argv[1]).read_text(encoding="utf-8")
 adr025_text = Path(sys.argv[2]).read_text(encoding="utf-8")
 smoke_text = Path(sys.argv[3]).read_text(encoding="utf-8")
+spike_text = Path(sys.argv[4]).read_text(encoding="utf-8")
 
 
 def jobs_by_id(text: str) -> dict[str, str]:
@@ -403,6 +406,14 @@ print(
     "no direct pins"
 )
 
+# --- Runner Spike SDK (default-caller / composite defaults) ---
+assert_default_setup_rust_caller("runner-spike-sdk", spike_text, "sdk-policy-determinism")
+
+print(
+    "ok   runner-spike-sdk: sdk-policy-determinism one setup-rust after checkout; "
+    "with-map empty; no direct pins"
+)
+
 PY
 
 python3 - "${KERNEL_MATRIX}" <<'PY' || fail "kernel-matrix hook-trigger paths missing"
@@ -435,6 +446,7 @@ required = (
     ".github/workflows/fuzz-smoke.yml",
     ".github/workflows/adr025-nightly-evidence.yml",
     ".github/workflows/smoke-install.yml",
+    ".github/workflows/runner-spike-sdk.yml",
 )
 bad = [p for p in required if paths.count(p) != 1]
 if bad:
@@ -442,7 +454,7 @@ if bad:
         "pull_request.paths must list each trigger path exactly once; "
         + ", ".join(f"{p!r} appears {paths.count(p)} time(s)" for p in bad)
     )
-print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6 + fuzz-smoke + adr025 + smoke-install")
+print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6 + fuzz-smoke + adr025 + smoke-install + runner-spike-sdk")
 PY
 
 echo "setup-rust composite contract: all checks passed"
