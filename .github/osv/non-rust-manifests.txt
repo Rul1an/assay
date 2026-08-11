@@ -2,6 +2,7 @@
 #
 # Keep this list limited to tracked non-Rust dependency inputs. Rust advisory
 # policy is owned by cargo-deny/cargo-audit in PR CI.
+crates/assay-core/tests/fixtures/otel-mcp-ingest-v0/generator/package-lock.json
 docs/requirements-ci.txt
 examples/agentevals-trajectory-strict-match-evidence/requirements.txt
 examples/autoevals-exactmatch-evidence/requirements.txt
