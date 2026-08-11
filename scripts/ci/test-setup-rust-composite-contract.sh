@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract for .github/actions/setup-rust and its week8 + wave6 + fuzz-smoke + ADR025 soak + smoke-install assay + Runner Spike SDK + perf family + Split Wave 0 + CI clippy/rustdoc caller surfaces.
+# Contract for .github/actions/setup-rust and its week8 + wave6 + fuzz-smoke + ADR025 soak + smoke-install assay + Runner Spike SDK + perf family + Split Wave 0 + CI clippy/rustdoc + Kernel Matrix lint caller surfaces.
 # Guards only the new boundary; actionlint + diff review cover unchanged workflow structure.
 #
 # Empty optional forwarding is safe for the pinned upstream versions measured in this
@@ -217,7 +217,7 @@ print(
 )
 PY
 
-python3 - "${FUZZ_SMOKE}" "${ADR025}" "${SMOKE_INSTALL}" "${RUNNER_SPIKE}" "${PERF_MAIN}" "${PERF_PR}" "${PERF_NIGHTLY}" "${SPLIT_WAVE0}" "${CI_YML}" <<'PY' || fail "simple-caller setup-rust contract failed"
+python3 - "${FUZZ_SMOKE}" "${ADR025}" "${SMOKE_INSTALL}" "${RUNNER_SPIKE}" "${PERF_MAIN}" "${PERF_PR}" "${PERF_NIGHTLY}" "${SPLIT_WAVE0}" "${CI_YML}" "${KERNEL_MATRIX}" <<'PY' || fail "simple-caller setup-rust contract failed"
 import re, sys
 from pathlib import Path
 
@@ -230,6 +230,7 @@ perf_pr_text = Path(sys.argv[6]).read_text(encoding="utf-8")
 perf_nightly_text = Path(sys.argv[7]).read_text(encoding="utf-8")
 split_wave0_text = Path(sys.argv[8]).read_text(encoding="utf-8")
 ci_text = Path(sys.argv[9]).read_text(encoding="utf-8")
+kernel_matrix_text = Path(sys.argv[10]).read_text(encoding="utf-8")
 
 
 def jobs_by_id(text: str) -> dict[str, str]:
@@ -566,6 +567,49 @@ for job_id, block in ci_jobs.items():
 print(
     "ok   ci.yml: clippy with-map exact {components: clippy}; rustdoc empty with-map; "
     "setup-rust only in clippy/rustdoc; job-scoped no direct pins"
+)
+
+# --- Kernel Matrix: lint only (build-artifacts keeps direct eBPF toolchain/cache-on-failure) ---
+km_jobs = jobs_by_id(kernel_matrix_text)
+if "lint" not in km_jobs:
+    raise SystemExit("kernel-matrix.yml missing job lint")
+if "build-artifacts" not in km_jobs:
+    raise SystemExit("kernel-matrix.yml missing job build-artifacts")
+
+assert_job_scoped_setup_rust(
+    "lint", km_jobs["lint"], {"components": "rustfmt, clippy"}
+)
+
+allowed_km_setup = {"lint"}
+for job_id, block in km_jobs.items():
+    if job_id in allowed_km_setup:
+        continue
+    if "./.github/actions/setup-rust" in block:
+        raise SystemExit(
+            f"kernel-matrix.yml: setup-rust only allowed in lint for this slice, found in {job_id}"
+        )
+
+build_block = km_jobs["build-artifacts"]
+if not re.search(r"dtolnay/rust-toolchain@", build_block):
+    raise SystemExit(
+        "build-artifacts: must retain direct dtolnay/rust-toolchain (custom eBPF boundary)"
+    )
+if "install-ebpf-toolchain.sh" not in build_block:
+    raise SystemExit(
+        "build-artifacts: must retain pinned eBPF toolchain install script"
+    )
+if not re.search(r"Swatinem/rust-cache@", build_block):
+    raise SystemExit(
+        "build-artifacts: must retain direct Swatinem/rust-cache (cache-on-failure boundary)"
+    )
+if not re.search(r"(?m)^\s*cache-on-failure:\s*true\s*$", build_block):
+    raise SystemExit(
+        "build-artifacts: must retain Swatinem cache-on-failure: true"
+    )
+
+print(
+    "ok   kernel-matrix.yml: lint with-map exact {components: rustfmt, clippy}; "
+    "setup-rust only in lint; build-artifacts keeps direct toolchain + eBPF + cache-on-failure"
 )
 
 PY
