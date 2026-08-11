@@ -205,6 +205,18 @@ if miri_with != miri_expected:
         f"got {miri_with}"
     )
 
+miri_commands = re.findall(
+    r"(?m)^\s+cargo(?:\s+\+nightly)?\s+miri(?:\s|$).*$",
+    jobs["miri-registry-smoke"],
+)
+if len(miri_commands) != 2 or any(
+    "cargo +nightly miri" not in command for command in miri_commands
+):
+    raise SystemExit(
+        "miri-registry-smoke: every cargo miri invocation must explicitly select +nightly; "
+        f"got {miri_commands}"
+    )
+
 proptest_with = setup_rust_with_map(jobs["proptest-cli-smoke"])
 if proptest_with != {}:
     raise SystemExit(
@@ -214,7 +226,7 @@ if proptest_with != {}:
 
 print(
     f"ok   wave6: setup-rust after checkout for {', '.join(setup_jobs)}; "
-    "miri with-map exact; proptest with-map empty; no direct pins"
+    "miri with-map and +nightly invocations exact; proptest with-map empty; no direct pins"
 )
 PY
 
