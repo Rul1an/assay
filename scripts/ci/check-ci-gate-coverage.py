@@ -21,11 +21,12 @@ Expectations are checked too, because a permissive one is a fail-open that survi
 wiring: a job with no `if:` can only legitimately end in `success`, so its expectation must
 be the literal `required`. Only a job that can be scoped out may carry a computed one.
 
-`continue-on-error: true` is the same class of fail-open one road over (#2242): a step failure
-becomes a successful conclusion, so the rollup reads `success` while the guardrail is red.
-Every literal in a wired job is rejected unless the same step carries
-`# ci-gate: continue-on-error-ok --` with a reason at least as long as the job opt-out floor.
-Job-level `continue-on-error` has no marker and is always a problem.
+`continue-on-error: true` (also YAML `True` / `TRUE`) is the same class of fail-open one road
+over (#2242): a step failure becomes a successful conclusion, so the rollup reads `success`
+while the guardrail is red. Every such key in a wired job — at job indent (4 spaces) or step
+indent (8 spaces) only, never deeper run/heredoc text — is rejected unless the same step
+carries `# ci-gate: continue-on-error-ok --` with a reason at least as long as the job opt-out
+floor. Job-level `continue-on-error` has no marker and is always a problem.
 
 The aggregator is not named here either. It is whichever job in the workflow reports a
 context the checked-in ruleset requires -- so renaming that job without amending the ruleset
@@ -68,7 +69,11 @@ MARKER_RE = re.compile(rf"^    {re.escape(MARKER_PREFIX)}\s*(?P<reason>\S.*)$")
 CONTINUE_ON_ERROR_MARKER_RE = re.compile(
     rf"^        {re.escape(CONTINUE_ON_ERROR_MARKER_PREFIX)}\s*(?P<reason>\S.*)$"
 )
-CONTINUE_ON_ERROR_TRUE_RE = re.compile(r"^(?P<indent>\s*)continue-on-error:\s*true\b")
+# Only the two semantic key indents: job properties are four spaces, step keys eight.
+# Deeper indentation is run/heredoc payload text, not a GitHub Actions key.
+CONTINUE_ON_ERROR_TRUE_RE = re.compile(
+    r"^(?P<indent>    |        )continue-on-error:\s*(?:true|True|TRUE)\b"
+)
 STEP_START_RE = re.compile(r"^      - ")
 NEEDS_RE = re.compile(r"^    needs:\s*\[(?P<items>[^\]]*)\]\s*$")
 RESULT_ENV_RE = re.compile(
@@ -479,6 +484,26 @@ def self_test() -> int:
             ),
             "character reason",
         ),
+        (
+            "an unmarked continue-on-error: True on a gating step",
+            lambda t: t.replace(
+                "      - name: Install Linux deps (for build scripts)\n",
+                "      - name: Install Linux deps (for build scripts)\n"
+                "        continue-on-error: True\n",
+                1,
+            ),
+            "continue-on-error: true` unmarked",
+        ),
+        (
+            "an unmarked continue-on-error: TRUE on a gating step",
+            lambda t: t.replace(
+                "      - name: Install Linux deps (for build scripts)\n",
+                "      - name: Install Linux deps (for build scripts)\n"
+                "        continue-on-error: TRUE\n",
+                1,
+            ),
+            "continue-on-error: true` unmarked",
+        ),
     ]
 
     for label, mutate, expected in detected:
@@ -502,6 +527,24 @@ def self_test() -> int:
     # what makes the unwired case above a finding about the wiring rather than about newness.
     if check(_add_job(good_reason)(workflow), ruleset):
         print("self-test: a deliberately marked non-gating job was still reported", file=sys.stderr)
+        return 1
+
+    # A run/heredoc payload can contain the same characters; only job (4) and step (8) indents
+    # are YAML keys. Ten-space script text must not redden the gate.
+    script_payload = workflow.replace(
+        "          set -euo pipefail\n",
+        "          set -euo pipefail\n"
+        "          continue-on-error: true\n",
+        1,
+    )
+    if script_payload == workflow:
+        print("self-test: the run-payload mutation for continue-on-error did not apply", file=sys.stderr)
+        return 1
+    if check(script_payload, ruleset):
+        print(
+            "self-test: a continue-on-error string inside a run payload was reported as a key",
+            file=sys.stderr,
+        )
         return 1
 
     unreadable = [
