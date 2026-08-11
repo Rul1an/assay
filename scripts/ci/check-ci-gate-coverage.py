@@ -21,6 +21,12 @@ Expectations are checked too, because a permissive one is a fail-open that survi
 wiring: a job with no `if:` can only legitimately end in `success`, so its expectation must
 be the literal `required`. Only a job that can be scoped out may carry a computed one.
 
+`continue-on-error: true` is the same class of fail-open one road over (#2242): a step failure
+becomes a successful conclusion, so the rollup reads `success` while the guardrail is red.
+Every literal in a wired job is rejected unless the same step carries
+`# ci-gate: continue-on-error-ok --` with a reason at least as long as the job opt-out floor.
+Job-level `continue-on-error` has no marker and is always a problem.
+
 The aggregator is not named here either. It is whichever job in the workflow reports a
 context the checked-in ruleset requires -- so renaming that job without amending the ruleset
 fails this check rather than silently detaching branch protection.
@@ -50,12 +56,20 @@ RULESET = Path(".github/rulesets/main-required-ci-contexts.json")
 # prose quality: it is there so the marker cannot be added as reflex punctuation while a
 # reviewer skims past it.
 MARKER_PREFIX = "# ci-gate: not-required --"
+# Step-level twin: a wired job may keep `continue-on-error: true` only when the same step
+# carries this marker with a real reason. Job-level `continue-on-error` has no opt-out.
+CONTINUE_ON_ERROR_MARKER_PREFIX = "# ci-gate: continue-on-error-ok --"
 MIN_REASON_CHARS = 30
 
 JOB_KEY_RE = re.compile(r"^  (?P<name>[A-Za-z0-9_][A-Za-z0-9_-]*):\s*(?:#.*)?$")
 JOB_NAME_RE = re.compile(r"^    name:\s*(?P<value>.+?)\s*$")
 JOB_IF_RE = re.compile(r"^    if:\s*\S")
 MARKER_RE = re.compile(rf"^    {re.escape(MARKER_PREFIX)}\s*(?P<reason>\S.*)$")
+CONTINUE_ON_ERROR_MARKER_RE = re.compile(
+    rf"^        {re.escape(CONTINUE_ON_ERROR_MARKER_PREFIX)}\s*(?P<reason>\S.*)$"
+)
+CONTINUE_ON_ERROR_TRUE_RE = re.compile(r"^(?P<indent>\s*)continue-on-error:\s*true\b")
+STEP_START_RE = re.compile(r"^      - ")
 NEEDS_RE = re.compile(r"^    needs:\s*\[(?P<items>[^\]]*)\]\s*$")
 RESULT_ENV_RE = re.compile(
     r"^\s*(?P<var>[A-Z][A-Z0-9_]*):\s*\$\{\{\s*needs\.(?P<job>[A-Za-z0-9_-]+)\.result\s*\}\}\s*$"
@@ -164,6 +178,72 @@ def evaluated_triples(body: list[str]) -> dict[str, tuple[str, str]]:
     }
 
 
+def step_blocks(job_body: list[str]) -> list[list[str]]:
+    """Step lists inside a job body, still as raw lines so step markers stay visible.
+
+    Same contract as `parse_jobs`: comments are load-bearing, so this stays line-based.
+    """
+    blocks: list[list[str]] = []
+    current: list[str] | None = None
+    for line in job_body:
+        if STEP_START_RE.match(line):
+            current = [line]
+            blocks.append(current)
+            continue
+        if current is None:
+            continue
+        if line.startswith("        ") or line == "":
+            current.append(line)
+        else:
+            current = None
+    return blocks
+
+
+def continue_on_error_problems(name: str, job_body: list[str]) -> list[str]:
+    """Reject substituted conclusions on wired jobs unless a step marker excuses them."""
+    problems: list[str] = []
+    covered: set[int] = set()
+
+    for step in step_blocks(job_body):
+        continue_idxs = [
+            id(line) for line in step if CONTINUE_ON_ERROR_TRUE_RE.match(line)
+        ]
+        if not continue_idxs:
+            continue
+        covered.update(continue_idxs)
+        marker = next((m for m in map(CONTINUE_ON_ERROR_MARKER_RE.match, step) if m), None)
+        if marker is None:
+            problems.append(
+                f"`{name}` has a step with `continue-on-error: true` unmarked; add "
+                f"`{CONTINUE_ON_ERROR_MARKER_PREFIX} <reason>` on that step, or drop the flag "
+                "so a failure can redden the required context (#2242)"
+            )
+            continue
+        reason = marker["reason"].strip()
+        if len(reason) < MIN_REASON_CHARS:
+            problems.append(
+                f"`{name}` allows `continue-on-error` with a {len(reason)}-character reason; "
+                f"state why a substituted conclusion is acceptable in at least "
+                f"{MIN_REASON_CHARS} characters"
+            )
+
+    for line in job_body:
+        match = CONTINUE_ON_ERROR_TRUE_RE.match(line)
+        if not match or id(line) in covered:
+            continue
+        if match["indent"] == "    ":
+            problems.append(
+                f"`{name}` sets job-level `continue-on-error: true`, which can keep the "
+                "required context green when the job fails (#2242)"
+            )
+        else:
+            problems.append(
+                f"`{name}` has `continue-on-error: true` outside a recognisable step; the "
+                "guard will not guess which conclusion GitHub substitutes (#2242)"
+            )
+    return problems
+
+
 def check(workflow_text: str, ruleset_text: str) -> list[str]:
     lines = workflow_text.splitlines()
     jobs = parse_jobs(lines)
@@ -212,6 +292,8 @@ def check(workflow_text: str, ruleset_text: str) -> list[str]:
                 "at the job's own indentation if it is genuinely not a merge gate"
             )
             continue
+
+        problems.extend(continue_on_error_problems(name, job_body))
 
         variable, expectation = triples.get(name, (None, None))
         if variable is None:
@@ -356,6 +438,47 @@ def self_test() -> int:
             _rewrite_aggregator_needs(["    needs: [scoop, publish-shape-cli]\n"]),
             "not a job in this workflow",
         ),
+        (
+            "an unmarked continue-on-error on a gating step",
+            lambda t: t.replace(
+                "      - name: Install Linux deps (for build scripts)\n",
+                "      - name: Install Linux deps (for build scripts)\n"
+                "        continue-on-error: true\n",
+                1,
+            ),
+            "continue-on-error: true` unmarked",
+        ),
+        (
+            "job-level continue-on-error on a wired job",
+            lambda t: t.replace(
+                "  publish-shape-cli:\n",
+                "  publish-shape-cli:\n    continue-on-error: true\n",
+                1,
+            ),
+            "job-level `continue-on-error: true`",
+        ),
+        (
+            "the diagnostic upload step without its marker",
+            lambda t: re.sub(
+                rf"^        {re.escape(CONTINUE_ON_ERROR_MARKER_PREFIX)} .*\n",
+                "",
+                t,
+                count=1,
+                flags=re.M,
+            ),
+            "continue-on-error: true` unmarked",
+        ),
+        (
+            "a continue-on-error marker with no real reason",
+            lambda t: re.sub(
+                rf"^(        {re.escape(CONTINUE_ON_ERROR_MARKER_PREFIX)} ).+$",
+                r"\1n/a",
+                t,
+                count=1,
+                flags=re.M,
+            ),
+            "character reason",
+        ),
     ]
 
     for label, mutate, expected in detected:
@@ -431,8 +554,9 @@ def main() -> int:
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)
         print(
-            "\nA job outside the rollup's `needs:` can fail while the required context reports "
-            "success, so the merge it was written to block goes through (#2230).",
+            "\nA job outside the rollup's `needs:`, or one whose step concludes success via "
+            "`continue-on-error`, can fail while the required context reports success, so the "
+            "merge it was written to block goes through (#2230, #2242).",
             file=sys.stderr,
         )
         return 1

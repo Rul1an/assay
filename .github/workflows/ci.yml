@@ -757,6 +757,7 @@ jobs:
       - name: Upload verification logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        # ci-gate: continue-on-error-ok -- diagnostic log upload only; a failed upload must not redden the eBPF smoke gate
         continue-on-error: true
         with:
           name: ci-smoke-logs-ubuntu
