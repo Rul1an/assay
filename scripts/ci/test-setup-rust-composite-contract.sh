@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Contract for .github/actions/setup-rust and its week8 + wave6 + fuzz-smoke + ADR025 soak + smoke-install assay + Runner Spike SDK + perf family + Split Wave 0 + CI clippy/rustdoc + Kernel Matrix lint caller surfaces.
+# Also fail-closed inventory of intentional direct dtolnay/Swatinem exceptions.
 # Guards only the new boundary; actionlint + diff review cover unchanged workflow structure.
 #
 # Empty optional forwarding is safe for the pinned upstream versions measured in this
@@ -650,6 +651,10 @@ required = (
     ".github/workflows/perf_nightly.yml",
     ".github/workflows/split-wave0-gates.yml",
     ".github/workflows/ci.yml",
+    ".github/workflows/demo.yml",
+    ".github/workflows/docs-auto-update.yml",
+    ".github/workflows/parity.yml",
+    ".github/workflows/release.yml",
 )
 bad = [p for p in required if paths.count(p) != 1]
 if bad:
@@ -657,7 +662,255 @@ if bad:
         "pull_request.paths must list each trigger path exactly once; "
         + ", ".join(f"{p!r} appears {paths.count(p)} time(s)" for p in bad)
     )
-print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6 + fuzz-smoke + adr025 + smoke-install + runner-spike-sdk + perf_main + perf_pr + perf_nightly + split-wave0 + ci.yml")
+print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6 + fuzz-smoke + adr025 + smoke-install + runner-spike-sdk + perf_main + perf_pr + perf_nightly + split-wave0 + ci.yml + demo + docs-auto-update + parity + release")
 PY
+
+
+python3 - "${ROOT}/.pre-commit-config.yaml" <<'PY' || fail "setup-rust pre-commit files regex contract failed"
+import re, sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+in_hook = False
+files_line = None
+for line in text.splitlines():
+    if re.search(r"id:\s*setup-rust-composite-contract-self-test\s*$", line):
+        in_hook = True
+        continue
+    if in_hook and re.match(r"^\s+- id:\s*", line):
+        break
+    if in_hook:
+        m = re.match(r"^\s+files:\s*(.+)\s*$", line)
+        if m:
+            files_line = m.group(1).strip()
+            break
+if files_line is None:
+    raise SystemExit("setup-rust-composite-contract-self-test files: line missing")
+expected = (
+    r"^(\.github/actions/setup-rust/action\.yml|"
+    r"scripts/ci/test-setup-rust-composite-contract\.sh|"
+    r"\.pre-commit-config\.yaml|"
+    r"\.github/workflows/[^/]+\.ya?ml)$"
+)
+if files_line != expected:
+    raise SystemExit(
+        f"setup-rust pre-commit files regex must be exactly {expected!r}, got {files_line!r}"
+    )
+sample = [
+    ".github/workflows/demo.yml",
+    ".github/workflows/docs-auto-update.yml",
+    ".github/workflows/parity.yml",
+    ".github/workflows/release.yml",
+    ".github/workflows/ci.yml",
+    ".github/workflows/kernel-matrix.yml",
+]
+cre = re.compile(files_line)
+bad = [s for s in sample if not cre.search(s)]
+if bad:
+    raise SystemExit(f"pre-commit files regex must match exception workflows; missed {bad}")
+print("ok   setup-rust pre-commit files regex covers action, contract, pre-commit config, and workflows")
+PY
+
+
+python3 - "${ROOT}" <<'PY' || fail "direct-action exception inventory failed"
+import re, sys
+from pathlib import Path
+from collections import Counter
+
+root = Path(sys.argv[1])
+workflows_dir = root / ".github" / "workflows"
+toolchain_pin = "dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
+cache_pin = "Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4"
+
+
+def jobs_by_id(text: str) -> dict[str, str]:
+    return {
+        job_id: block
+        for job_id, block in re.findall(
+            r"(?m)^  ([A-Za-z0-9_-]+):\n(.*?)(?=^  [A-Za-z0-9_-]+:|\Z)",
+            text,
+            re.S,
+        )
+    }
+
+
+USES_RE = re.compile(
+    r"(?m)^(?:      - uses:|        uses:)\s*"
+    r"((?:dtolnay/rust-toolchain|Swatinem/rust-cache)@[^\s#]+)"
+)
+
+# Fail-closed allowlist: (workflow relpath, top-level job id, exact pinned ref).
+# Reasons name behavior setup-rust cannot preserve (toolchain/components/workspaces only).
+ALLOWED_DIRECT: list[tuple[str, str, str, str]] = [
+    (
+        ".github/workflows/ci.yml",
+        "public-msrv",
+        toolchain_pin,
+        "dynamic ASSAY_PUBLIC_MSRV toolchain; composite has no Swatinem key input",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "public-msrv",
+        cache_pin,
+        "Swatinem key public-msrv-${{ env.ASSAY_PUBLIC_MSRV }}; composite has no key input",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "public-crate-policy",
+        toolchain_pin,
+        "policy validation installs toolchain without cache; composite always caches",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "perf",
+        cache_pin,
+        "Swatinem id/output cache-hit; composite cache step has no id and fixed order",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "perf",
+        toolchain_pin,
+        "paired with direct Swatinem id/output; composite forces toolchain-then-cache",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "test",
+        toolchain_pin,
+        "paired with sccache cache-directories + cache-on-failure Swatinem inputs",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "test",
+        cache_pin,
+        "Swatinem cache-directories (~/.sccache) and cache-on-failure; composite lacks both",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "ebpf-smoke-ubuntu",
+        toolchain_pin,
+        "rust-src plus install-ebpf-toolchain.sh; composite would inject unwanted rust-cache",
+    ),
+    (
+        ".github/workflows/demo.yml",
+        "regenerate",
+        toolchain_pin,
+        "demo tape rebuild installs toolchain without cache; composite always caches",
+    ),
+    (
+        ".github/workflows/docs-auto-update.yml",
+        "generate-docs",
+        toolchain_pin,
+        "docs generation installs toolchain without cache; composite always caches",
+    ),
+    (
+        ".github/workflows/kernel-matrix.yml",
+        "build-artifacts",
+        toolchain_pin,
+        "host toolchain before install-ebpf-toolchain.sh; not composite defaults",
+    ),
+    (
+        ".github/workflows/kernel-matrix.yml",
+        "build-artifacts",
+        cache_pin,
+        "Swatinem cache-on-failure for eBPF artifact builds; composite lacks that input",
+    ),
+    (
+        ".github/workflows/parity.yml",
+        "parity",
+        toolchain_pin,
+        "uses actions/cache paths, not Swatinem; composite would inject Swatinem",
+    ),
+    (
+        ".github/workflows/parity.yml",
+        "integration-parity",
+        toolchain_pin,
+        "toolchain without Swatinem; composite always runs rust-cache",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "build",
+        toolchain_pin,
+        "dtolnay targets: ${{ matrix.target }}; composite has no targets input",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "build-mcp-server-linux",
+        toolchain_pin,
+        "dtolnay targets: ${{ matrix.target }}; composite has no targets input",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "release",
+        toolchain_pin,
+        "release SBOM job installs toolchain without cache; composite always caches",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "verify-lsm-blocking",
+        toolchain_pin,
+        "self-hosted LSM gate installs toolchain without cache; composite always caches",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "publish-crates",
+        toolchain_pin,
+        "crates.io publish installs toolchain without cache; composite always caches",
+    ),
+]
+
+allowed_keys = [(w, j, r) for w, j, r, _reason in ALLOWED_DIRECT]
+if len(allowed_keys) != len(set(allowed_keys)):
+    raise SystemExit("allowlist contains duplicate (workflow, job, ref) entries")
+
+measured: list[tuple[str, str, str]] = []
+for path in sorted(workflows_dir.glob("*.yml")) + sorted(workflows_dir.glob("*.yaml")):
+    text = path.read_text(encoding="utf-8")
+    jobs_m = re.search(r"(?m)^jobs:\n(.*)\Z", text, re.S)
+    if not jobs_m:
+        continue
+    rel = str(path.relative_to(root))
+    for job_id, block in jobs_by_id(jobs_m.group(1)).items():
+        for ref in USES_RE.findall(block):
+            measured.append((rel, job_id, ref))
+
+measured_sorted = sorted(measured)
+allowed_sorted = sorted(allowed_keys)
+
+if measured_sorted != allowed_sorted:
+    measured_set = set(measured)
+    allowed_set = set(allowed_keys)
+    unregistered = sorted(measured_set - allowed_set)
+    missing = sorted(allowed_set - measured_set)
+    mc, ac = Counter(measured), Counter(allowed_keys)
+    count_drift = sorted(
+        (k, mc[k], ac[k]) for k in sorted(set(mc) | set(ac)) if mc[k] != ac[k]
+    )
+    parts = []
+    if unregistered:
+        parts.append(
+            "unregistered direct actions: "
+            + ", ".join(f"{w} job {j} uses {r}" for w, j, r in unregistered)
+        )
+    if missing:
+        parts.append(
+            "allowlisted but absent: "
+            + ", ".join(f"{w} job {j} uses {r}" for w, j, r in missing)
+        )
+    if count_drift and not (unregistered or missing):
+        parts.append(
+            "count drift: "
+            + ", ".join(
+                f"{w}/{j}/{r} measured={m} allowlisted={a}"
+                for (w, j, r), m, a in count_drift
+            )
+        )
+    raise SystemExit("; ".join(parts) if parts else "direct-action inventory mismatch")
+
+print(
+    f"ok   direct-action exception inventory: {len(measured)} pinned calls "
+    f"across {len({w for w, _, _ in measured})} workflows (fail-closed allowlist)"
+)
+PY
+
 
 echo "setup-rust composite contract: all checks passed"
