@@ -1,0 +1,56 @@
+# Reconcile checked-in required contexts with live classic branch protection.
+# Not a required check. Operates only after BRANCH_PROTECTION_READ_TOKEN is set.
+name: Required Context Reconciliation
+
+on:
+  schedule:
+    # Every 6 hours, offset to minute 17.
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  reconcile:
+    name: reconcile-live-required-contexts
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Require BRANCH_PROTECTION_READ_TOKEN
+        env:
+          BRANCH_PROTECTION_READ_TOKEN: ${{ secrets.BRANCH_PROTECTION_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BRANCH_PROTECTION_READ_TOKEN}" ]; then
+            echo "::error::BRANCH_PROTECTION_READ_TOKEN is not set. Create a fine-grained PAT for this repository with Administration: Read-only, store it as that repository secret, then re-run. See docs/BRANCH-PROTECTION-SETUP.md."
+            exit 1
+          fi
+
+      - name: Self-test required-contexts guard
+        run: python3 scripts/ci/check-required-contexts.py --self-test
+
+      - name: Fetch live required status checks
+        env:
+          GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_READ_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          live_json="${RUNNER_TEMP}/live-required-status-checks.json"
+          gh api \
+            "repos/${REPOSITORY}/branches/${DEFAULT_BRANCH}/protection/required_status_checks" \
+            >"${live_json}"
+
+      - name: Reconcile ruleset against live protection
+        run: |
+          set -euo pipefail
+          live_json="${RUNNER_TEMP}/live-required-status-checks.json"
+          python3 scripts/ci/check-required-contexts.py --live-response \
+            < "${live_json}"

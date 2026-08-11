@@ -21,13 +21,17 @@ still is, and a guard that cannot tell that from a stale requirement would be tu
 Usage:
     check-required-contexts.py             # verify the three locations agree
     check-required-contexts.py --self-test # prove each parser detects a drift
+    check-required-contexts.py --live-response < live.json  # stdin-only live reconcile
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -36,32 +40,135 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RULESET = Path(".github/rulesets/main-required-ci-contexts.json")
 CI_CONTRACT = Path("CI-CONTRACT.md")
 RUNBOOK = Path("docs/BRANCH-PROTECTION-SETUP.md")
+RECONCILE_WORKFLOW = Path(".github/workflows/required-context-reconciliation.yml")
 
 CI_CONTRACT_ANCHOR = "Currently required live branch-protection contexts:"
 CI_CONTRACT_SENTINEL = "<!-- required-contexts:end"
 BULLET_RE = re.compile(r"^-\s+`([^`]+)`")
 CONTEXTS_ARRAY_RE = re.compile(r'"contexts"\s*:\s*(\[[^\]]*\])')
 
+EXIT_MATCH = 0
+EXIT_DRIFT = 1
+EXIT_UNREADABLE = 2
+
 
 class DriftError(Exception):
     """A location disagrees with the ruleset, or its anchor is gone."""
 
 
-def ruleset_contexts(text: str) -> list[str]:
-    """The importable artifact is the source of truth: it is the one that can be applied."""
+def _ruleset_required_status_parameters(text: str) -> dict:
+    """Shared ruleset parser: the required_status_checks rule parameters object."""
     doc = json.loads(text)
-    found: list[str] = []
     for rule in doc.get("rules", []):
         if rule.get("type") != "required_status_checks":
             continue
-        for check in rule.get("parameters", {}).get("required_status_checks", []):
-            found.append(check["context"])
+        params = rule.get("parameters")
+        if not isinstance(params, dict):
+            raise DriftError(
+                f"{RULESET}: required_status_checks rule has no parameters object"
+            )
+        return params
+    raise DriftError(
+        f"{RULESET}: no required_status_checks rule found; the guard cannot "
+        "determine the required set"
+    )
+
+
+def ruleset_contexts(text: str) -> list[str]:
+    """The importable artifact is the source of truth: it is the one that can be applied."""
+    params = _ruleset_required_status_parameters(text)
+    found: list[str] = []
+    for check in params.get("required_status_checks", []):
+        found.append(check["context"])
     if not found:
         raise DriftError(
-            f"{RULESET}: no required_status_checks rule found; the guard cannot "
+            f"{RULESET}: no required_status_checks entries; the guard cannot "
             "determine the required set"
         )
     return found
+
+
+def ruleset_strict(text: str) -> bool:
+    """Strictness comes from the same ruleset artifact as the context list."""
+    params = _ruleset_required_status_parameters(text)
+    if "strict_required_status_checks_policy" not in params:
+        raise DriftError(
+            f"{RULESET}: missing strict_required_status_checks_policy; the guard "
+            "cannot determine the required strict setting"
+        )
+    value = params["strict_required_status_checks_policy"]
+    if not isinstance(value, bool):
+        raise DriftError(
+            f"{RULESET}: strict_required_status_checks_policy must be a boolean"
+        )
+    return value
+
+
+def live_protection(text: str) -> tuple[list[str], bool]:
+    """Parse classic branch-protection required_status_checks JSON (contexts + strict).
+
+    app_id on individual checks is ignored on purpose: live and the ruleset already
+    disagree there for CI, and this slice reconciles only context set and strictness.
+    """
+    if not text or not text.strip():
+        raise DriftError("live response is empty")
+    try:
+        doc = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise DriftError(f"live response is not JSON: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise DriftError("live response must be a JSON object")
+    missing = [key for key in ("contexts", "strict") if key not in doc]
+    if missing:
+        raise DriftError(
+            "live response missing required_status_checks fields: "
+            + ", ".join(missing)
+        )
+    contexts = doc["contexts"]
+    strict = doc["strict"]
+    if not isinstance(contexts, list) or not all(isinstance(c, str) for c in contexts):
+        raise DriftError("live response contexts must be a list of strings")
+    if not isinstance(strict, bool):
+        raise DriftError("live response strict must be a boolean")
+    return contexts, strict
+
+
+def check_live(read, live_text: str) -> list[str]:
+    """Compare live classic protection to the ruleset (contexts set + strict only)."""
+    expected = ruleset_contexts(read(RULESET))
+    expected_strict = ruleset_strict(read(RULESET))
+    actual, actual_strict = live_protection(live_text)
+    problems = compare(expected, actual, "live required_status_checks.contexts")
+    if expected_strict != actual_strict:
+        problems.append(
+            "live required_status_checks.strict="
+            f"{actual_strict!r} but ruleset strict_required_status_checks_policy="
+            f"{expected_strict!r}"
+        )
+    return problems
+
+
+def main_live(live_text: str) -> int:
+    """Production evaluator: already-loaded live JSON text → exit 0/1/2."""
+    try:
+        problems = check_live(read_repo, live_text)
+    except DriftError as exc:
+        print(f"required-contexts-live=unreadable\n{exc}", file=sys.stderr)
+        return EXIT_UNREADABLE
+
+    if problems:
+        print("required-contexts-live=drift", file=sys.stderr)
+        for problem in problems:
+            print(f"  {problem}", file=sys.stderr)
+        return EXIT_DRIFT
+
+    print("required-contexts-live=match")
+    return EXIT_MATCH
+
+
+def main_live_from_stdin() -> int:
+    """CLI route: read stdin exactly once, then evaluate via main_live."""
+    return main_live(sys.stdin.read())
 
 
 def ci_contract_contexts(text: str) -> list[str]:
@@ -262,17 +369,482 @@ def self_test() -> int:
         )
         return 1
 
+    if live_self_test(baseline) != 0:
+        return 1
+
+    if workflow_contract_self_test() != 0:
+        return 1
+
     print("check-required-contexts self-test=passed")
+    return 0
+
+
+def _baseline_live_json(contexts: list[str], *, strict: bool = True, app_id=15368) -> str:
+    """Shape of GET .../protection/required_status_checks, including ignored app_id."""
+    return json.dumps(
+        {
+            "strict": strict,
+            "contexts": list(contexts),
+            "checks": [{"context": c, "app_id": app_id} for c in contexts],
+        },
+        indent=2,
+    )
+
+
+DEFAULT_BRANCH_GUARD = "if: github.ref_name == github.event.repository.default_branch"
+
+
+def _apply_text(baseline: str, mutate, label: str) -> str | None:
+    """Reject no-op mutations: unchanged output means the case never bit."""
+    mutated = mutate(baseline)
+    if mutated == baseline:
+        print(f"self-test: mutation {label} did not apply", file=sys.stderr)
+        return None
+    return mutated
+
+
+def _invoke_main_live(live_text: str) -> int:
+    """Exercise production main_live() on already-loaded text (stdout/stderr redirected)."""
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+        io.StringIO()
+    ):
+        return main_live(live_text)
+
+
+def live_self_test(baseline: dict) -> int:
+    """Prove live-response mode detects semantic drift and unreadable evidence separately."""
+    expected = ruleset_contexts(baseline[RULESET])
+    expected_strict = ruleset_strict(baseline[RULESET])
+    live_ok = _baseline_live_json(expected, strict=expected_strict)
+
+    def apply_live(mutate, label: str) -> str | None:
+        return _apply_text(live_ok, mutate, label)
+
+    # Identity must be rejected by the applicator (real no-op bite).
+    if (lambda t: t)(live_ok) != live_ok:
+        print("self-test: identity no-op unexpectedly changed live JSON", file=sys.stderr)
+        return 1
+    with contextlib.redirect_stderr(io.StringIO()):
+        identity_applied = apply_live(lambda t: t, "identity_noop")
+    if identity_applied is not None:
+        print("self-test: identity no-op was not rejected by apply helper", file=sys.stderr)
+        return 1
+
+    # Match cases, including reorder and app_id noise, via production main_live().
+    reordered = list(reversed(expected))
+    assert set(reordered) == set(expected)
+    match_cases = [
+        ("baseline", live_ok),
+        ("reordered", _baseline_live_json(reordered, strict=expected_strict)),
+        ("app_id_ignored", _baseline_live_json(expected, strict=expected_strict, app_id=None)),
+    ]
+    for label, live_text in match_cases:
+        code = _invoke_main_live(live_text)
+        if code != EXIT_MATCH:
+            print(
+                f"self-test: live {label} must exit {EXIT_MATCH} via main_live, got {code}",
+                file=sys.stderr,
+            )
+            return 1
+
+    drift_cases = [
+        (
+            "context_added",
+            lambda t: _baseline_live_json(expected + ["extra-context"], strict=expected_strict),
+        ),
+        (
+            "context_removed",
+            lambda t: _baseline_live_json(expected[:-1], strict=expected_strict),
+        ),
+        (
+            "strict_flip",
+            lambda t: _baseline_live_json(expected, strict=not expected_strict),
+        ),
+    ]
+    for label, mutate in drift_cases:
+        mutated = apply_live(mutate, label)
+        if mutated is None:
+            return 1
+        code = _invoke_main_live(mutated)
+        if code != EXIT_DRIFT:
+            print(
+                f"self-test: live drift {label} must exit {EXIT_DRIFT} via main_live, got {code}",
+                file=sys.stderr,
+            )
+            return 1
+
+    unreadable_live = [
+        ("empty", lambda t: ""),
+        ("malformed", lambda t: "{not-json"),
+        ("missing_contexts", lambda t: json.dumps({"strict": True})),
+        ("missing_strict", lambda t: json.dumps({"contexts": expected})),
+    ]
+    for label, mutate in unreadable_live:
+        mutated = apply_live(mutate, label)
+        if mutated is None:
+            return 1
+        code = _invoke_main_live(mutated)
+        if code != EXIT_UNREADABLE:
+            print(
+                f"self-test: live unreadable {label} must exit {EXIT_UNREADABLE} "
+                f"via main_live, got {code}",
+                file=sys.stderr,
+            )
+            return 1
+
+    # app_id-only change must apply (text differs) and still match through main_live.
+    app_only = apply_live(
+        lambda t: _baseline_live_json(expected, strict=expected_strict, app_id=99999),
+        "app_id_only",
+    )
+    if app_only is None:
+        return 1
+    if _invoke_main_live(app_only) != EXIT_MATCH:
+        print("self-test: app_id-only change must exit 0 via main_live", file=sys.stderr)
+        return 1
+
+    # CLI is stdin-only: a path argv must be rejected (no arbitrary Path read).
+    script = REPO_ROOT / "scripts" / "ci" / "check-required-contexts.py"
+    path_argv = subprocess.run(
+        [sys.executable, str(script), "--live-response", "/tmp/not-a-live-response.json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if path_argv.returncode == 0:
+        print(
+            "self-test: --live-response with a path argv must be rejected, got exit 0",
+            file=sys.stderr,
+        )
+        return 1
+
+    # CLI route reads stdin once and calls main_live (match / drift / unreadable).
+    for label, payload, want in (
+        ("stdin_match", live_ok, EXIT_MATCH),
+        (
+            "stdin_drift",
+            _baseline_live_json(expected + ["extra"], strict=expected_strict),
+            EXIT_DRIFT,
+        ),
+        ("stdin_unreadable", "{", EXIT_UNREADABLE),
+    ):
+        cli = subprocess.run(
+            [sys.executable, str(script), "--live-response"],
+            input=payload,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if cli.returncode != want:
+            print(
+                f"self-test: CLI {label} must exit {want}, got {cli.returncode}",
+                file=sys.stderr,
+            )
+            return 1
+
+    return 0
+
+
+def _workflow_on_event_keys(text: str) -> list[str]:
+    """Top-level keys under the workflow `on:` mapping (line-based, not a YAML parser)."""
+    keys: list[str] = []
+    in_on = False
+    for line in text.splitlines():
+        if not in_on:
+            if line.rstrip() == "on:":
+                in_on = True
+            continue
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = re.match(r"^([ \t]*)([A-Za-z0-9_-]+):\s*(?:#.*)?$", line)
+        if not match:
+            continue
+        indent = match.group(1)
+        key = match.group(2)
+        if len(indent) == 0:
+            break
+        if indent in ("  ", "\t"):
+            keys.append(key)
+    return keys
+
+
+# Step-level env is the only place GitHub expressions may appear (Zizmor template-injection).
+ENV_REPOSITORY = "REPOSITORY: ${{ github.repository }}"
+ENV_DEFAULT_BRANCH = "DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}"
+ENV_GH_TOKEN = "GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_READ_TOKEN }}"
+ENV_SECRET_TOKEN = "BRANCH_PROTECTION_READ_TOKEN: ${{ secrets.BRANCH_PROTECTION_READ_TOKEN }}"
+API_PATH_QUOTED = (
+    '"repos/${REPOSITORY}/branches/${DEFAULT_BRANCH}/protection/required_status_checks"'
+)
+LIVE_JSON_ASSIGN = 'live_json="${RUNNER_TEMP}/live-required-status-checks.json"'
+STDIN_REDIRECT = '< "${live_json}"'
+
+_ALLOWED_TEMPLATE_ENV_LINES = frozenset(
+    {
+        ENV_REPOSITORY,
+        ENV_DEFAULT_BRANCH,
+        ENV_GH_TOKEN,
+        ENV_SECRET_TOKEN,
+    }
+)
+
+
+def workflow_contract_problems(text: str) -> list[str]:
+    """Return contract violations for reconcile-workflow text (no YAML parse)."""
+    problems: list[str] = []
+    required_substrings = [
+        "schedule:",
+        "workflow_dispatch:",
+        "cron:",
+        "contents: read",
+        "secrets.BRANCH_PROTECTION_READ_TOKEN",
+        "check-required-contexts.py --live-response",
+        ENV_REPOSITORY,
+        ENV_DEFAULT_BRANCH,
+        API_PATH_QUOTED,
+        LIVE_JSON_ASSIGN,
+        STDIN_REDIRECT,
+        DEFAULT_BRANCH_GUARD,
+        "set -euo pipefail",
+    ]
+    for needle in required_substrings:
+        if needle not in text:
+            problems.append(f"missing {needle!r}")
+
+    # Stdin redirection into the checker via RUNNER_TEMP-derived live_json.
+    if not re.search(
+        r"check-required-contexts\.py --live-response\s*\\\s*\n\s*<\s*\"\$\{live_json\}\"",
+        text,
+    ):
+        problems.append(
+            "checker must be invoked with stdin redirection "
+            "(--live-response \\< newline < \"${live_json}\")"
+        )
+
+    # Both steps must independently derive the same fixed RUNNER_TEMP path.
+    if text.count(LIVE_JSON_ASSIGN) < 2:
+        problems.append(
+            f"{LIVE_JSON_ASSIGN!r} must appear in both fetch and reconcile steps"
+        )
+
+    # Reject GitHub/${{ steps.* }} expansions outside allowlisted step-level env lines.
+    for line in text.splitlines():
+        stripped = line.strip()
+        if "${{" not in stripped:
+            continue
+        if stripped in _ALLOWED_TEMPLATE_ENV_LINES:
+            continue
+        if re.search(r"\$\{\{\s*(github\.|steps\.)", stripped):
+            problems.append(
+                "direct template expansion outside step env "
+                f"(Zizmor template-injection shape): {stripped!r}"
+            )
+
+    forbidden = [
+        "pull_request:",
+        "merge_group:",
+        "github.token",
+        "GITHUB_TOKEN",
+        " -X PUT",
+        " -X PATCH",
+        " -X DELETE",
+        "|| github.token",
+        "|| secrets.GITHUB_TOKEN",
+        # Path argv / step-output shapes (CodeQL + Zizmor).
+        "--live-response /",
+        "steps.fetch.outputs.path",
+        'repos/${{ github.repository }}',
+        "${{ github.event.repository.default_branch }}/protection",
+        # Unquoted API path (shell-injection adjacent).
+        "repos/${REPOSITORY}/branches/${DEFAULT_BRANCH}/protection/required_status_checks",
+    ]
+    for needle in forbidden:
+        if needle in text:
+            # The quoted form contains the unquoted form as a substring; only flag
+            # the unquoted needle when the quoted API path is absent or when the
+            # unquoted literal appears outside the quoted occurrence.
+            if needle == (
+                "repos/${REPOSITORY}/branches/${DEFAULT_BRANCH}/"
+                "protection/required_status_checks"
+            ):
+                if API_PATH_QUOTED in text and text.count(needle) == text.count(
+                    API_PATH_QUOTED
+                ):
+                    continue
+            problems.append(f"forbidden {needle!r}")
+
+    on_keys = _workflow_on_event_keys(text)
+    if set(on_keys) != {"schedule", "workflow_dispatch"}:
+        problems.append(
+            "on: events must be exactly schedule + workflow_dispatch, "
+            f"found {on_keys}"
+        )
+
+    # Exactly one job-level default-branch guard line (secret boundary).
+    guard_lines = [
+        line for line in text.splitlines() if line.strip() == DEFAULT_BRANCH_GUARD
+    ]
+    if len(guard_lines) != 1:
+        problems.append(
+            f"exact default-branch guard must appear once, found {len(guard_lines)}"
+        )
+
+    gh_api_lines = [
+        line for line in text.splitlines() if re.search(r"(^|[^\w-])gh(\s+|$)api\b", line)
+    ]
+    if len(gh_api_lines) != 1:
+        problems.append(f"exactly one gh api call required, found {len(gh_api_lines)}")
+    elif re.search(r"-X\s+(PUT|PATCH|DELETE|POST)\b", gh_api_lines[0]):
+        problems.append("the sole gh api call must be a GET")
+
+    return problems
+
+
+def workflow_contract_self_test() -> int:
+    """Thin string contracts for the reconciliation workflow — not a YAML parser."""
+    path = REPO_ROOT / RECONCILE_WORKFLOW
+    if not path.is_file():
+        print(f"self-test: missing workflow {RECONCILE_WORKFLOW}", file=sys.stderr)
+        return 1
+    text = path.read_text(encoding="utf-8")
+
+    problems = workflow_contract_problems(text)
+    if problems:
+        print("self-test: workflow contract failed:", file=sys.stderr)
+        for problem in problems:
+            print(f"  {problem}", file=sys.stderr)
+        return 1
+
+    # Mutation: drop or rewrite the default-branch secret boundary — must go red.
+    removed = _apply_text(
+        text,
+        lambda t: "\n".join(
+            line for line in t.splitlines() if line.strip() != DEFAULT_BRANCH_GUARD
+        )
+        + ("\n" if t.endswith("\n") else ""),
+        "default_branch_guard_removed",
+    )
+    if removed is None:
+        return 1
+    if not workflow_contract_problems(removed):
+        print(
+            "self-test: removing default-branch guard went undetected",
+            file=sys.stderr,
+        )
+        return 1
+
+    rewritten = _apply_text(
+        text,
+        lambda t: t.replace(DEFAULT_BRANCH_GUARD, "if: github.ref == 'refs/heads/main'", 1),
+        "default_branch_guard_rewritten",
+    )
+    if rewritten is None:
+        return 1
+    if not workflow_contract_problems(rewritten):
+        print(
+            "self-test: rewriting default-branch guard went undetected",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Mutation: drop stdin redirection back to a path argv — must go red.
+    path_argv = _apply_text(
+        text,
+        lambda t: t.replace(
+            'python3 scripts/ci/check-required-contexts.py --live-response \\\n'
+            '            < "${live_json}"',
+            'python3 scripts/ci/check-required-contexts.py --live-response \\\n'
+            '            "${live_json}"',
+            1,
+        ),
+        "live_response_path_argv",
+    )
+    if path_argv is None:
+        return 1
+    if not workflow_contract_problems(path_argv):
+        print(
+            "self-test: replacing stdin redirect with path argv went undetected",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Mutation: remove REPOSITORY env binding — must go red.
+    env_removed = _apply_text(
+        text,
+        lambda t: "\n".join(
+            line for line in t.splitlines() if line.strip() != ENV_REPOSITORY
+        )
+        + ("\n" if t.endswith("\n") else ""),
+        "repository_env_removed",
+    )
+    if env_removed is None:
+        return 1
+    if not workflow_contract_problems(env_removed):
+        print(
+            "self-test: removing REPOSITORY env binding went undetected",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Mutation: restore direct github.* template in the gh api path — must go red.
+    direct_template = _apply_text(
+        text,
+        lambda t: t.replace(
+            API_PATH_QUOTED,
+            '"repos/${{ github.repository }}/branches/'
+            '${{ github.event.repository.default_branch }}/'
+            'protection/required_status_checks"',
+            1,
+        ),
+        "direct_github_template_restored",
+    )
+    if direct_template is None:
+        return 1
+    if not workflow_contract_problems(direct_template):
+        print(
+            "self-test: restoring direct github.* templates in run went undetected",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Mutation: drop quoting around the API path — must go red.
+    unquoted = _apply_text(
+        text,
+        lambda t: t.replace(
+            API_PATH_QUOTED,
+            "repos/${REPOSITORY}/branches/${DEFAULT_BRANCH}/"
+            "protection/required_status_checks",
+            1,
+        ),
+        "api_path_unquoted",
+    )
+    if unquoted is None:
+        return 1
+    if not workflow_contract_problems(unquoted):
+        print(
+            "self-test: unquoting API path went undetected",
+            file=sys.stderr,
+        )
+        return 1
+
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--self-test", action="store_true", help="prove the parsers detect drift")
+    parser.add_argument(
+        "--live-response",
+        action="store_true",
+        help="reconcile ruleset against live required_status_checks JSON from stdin",
+    )
     args = parser.parse_args()
 
     if args.self_test:
         return self_test()
+
+    if args.live_response:
+        return main_live_from_stdin()
 
     try:
         problems = check(read_repo)
