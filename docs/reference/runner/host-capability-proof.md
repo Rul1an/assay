@@ -81,6 +81,22 @@ The run builds `assay-cli` from the dispatched ref and uploads an artifact conta
 - the full `assay doctor --format json` output,
 - host metadata (`uname -a`, runner label).
 
+The producer restores a Rust build cache under the isolated
+`host-capability-proof-v1` prefix before compiling. It keeps the workflow-level
+`contents: read` and `actions: read` permissions; cache restore/save uses the
+job's Actions runtime token and does not justify repository Actions write
+access. Failed builds are not cached.
+
+The job has a 90-minute ceiling. This is a provisional cold-start budget: a
+30-minute run on Assay 5.0.0 timed out inside `cargo build`, while the existing
+delegated peer lane already uses a 90-minute bound on the same singleton host.
+The number is not a measured cold-build duration. A change to this producer
+must obtain an exact-head cold run followed by a warm run and tighten or retain
+the ceiling from that evidence. A deliberately cold run uses an empty workspace
+`target/` plus a proof-workflow cache-key miss; it must not delete unrelated
+global Cargo caches. Timeout, cancelled build, absent output, and failed upload
+remain non-success.
+
 Starting a `workflow_dispatch` run requires write access to the repository, so who-may-produce-proof
 is enforced by GitHub's own permission model, not by comment-author filtering.
 

@@ -34,7 +34,9 @@ jobs:
   proof:
     name: Produce host-capability proof
     runs-on: [self-hosted, linux, assay-bpf-runner]
-    timeout-minutes: 30
+    # A cold v5 workspace exceeded 30 minutes. Match the bounded peer lane until
+    # exact-head cold/warm proof provides a tighter measured ceiling.
+    timeout-minutes: 90
     steps:
       - name: Reset workspace ownership
         shell: bash
@@ -50,6 +52,11 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+
+      - name: Restore bounded Rust build cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: host-capability-proof-v1
 
       - name: Build assay CLI
         shell: bash

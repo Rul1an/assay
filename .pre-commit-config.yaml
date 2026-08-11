@@ -161,6 +161,13 @@ repos:
         pass_filenames: false
         files: ^(scripts/ci/(reconcile-docs-auto-pr|test-reconcile-docs-auto-pr)\.sh|\.github/workflows/(docs-auto-update|ci|assay-runner-lane-check|host-capability-check)\.yml|\.pre-commit-config\.yaml)$
 
+      - id: host-capability-proof-contract
+        name: Host-capability proof cold-start contract
+        entry: bash scripts/ci/test-host-capability-proof-contract.sh --self-test
+        language: system
+        pass_filenames: false
+        files: ^(scripts/ci/test-host-capability-proof-contract\.sh|\.github/workflows/host-capability-proof\.yml|docs/reference/runner/host-capability-proof\.md|\.pre-commit-config\.yaml)$
+
       - id: aee-seal-producer-mutations
         name: ADR-045 seal producer mutations
         entry: python3 scripts/ci/test_aee_seal_producer_mutations.py
