@@ -278,6 +278,13 @@ repos:
         # it believes it is checking.
         files: ^(scripts/ci/check-ci-gate-coverage\.py|\.github/workflows/ci\.yml|\.github/rulesets/main-required-ci-contexts\.json|\.pre-commit-config\.yaml)$
 
+      - id: setup-rust-composite-contract-self-test
+        name: Setup-rust composite contract
+        entry: bash scripts/ci/test-setup-rust-composite-contract.sh
+        language: system
+        pass_filenames: false
+        files: ^(\.github/actions/setup-rust/action\.yml|\.github/workflows/week8-sota-gates\.yml|scripts/ci/test-setup-rust-composite-contract\.sh|\.pre-commit-config\.yaml)$
+
       - id: mcp-registry-release-txn-self-test
         name: MCP Registry release transaction self-test
         entry: bash scripts/ci/test-mcp-registry-release-txn.sh
