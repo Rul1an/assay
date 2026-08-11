@@ -1,7 +1,11 @@
+// Non-blocking pipe mode needs fcntl (Unix) / SetNamedPipeHandleState (Windows).
+// That FFI is what makes stdout/stderr capture cancelable when every tree-kill
+// attempt fails, so run_bounded can return without joining blocked readers.
+#![allow(unsafe_code)]
+
 use std::ffi::OsStr;
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::process::{Command, ExitStatus, Output, Stdio};
-use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -9,6 +13,11 @@ use std::time::{Duration, Instant};
 use std::cell::Cell;
 #[cfg(test)]
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
 
 #[cfg(windows)]
 use process_wrap::std::JobObject;
@@ -20,9 +29,8 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 const REAP_GRACE: Duration = Duration::from_secs(1);
 const MAX_DIAGNOSTIC_BYTES: usize = 4096;
 
-// Test-only: when set, every tree-kill attempt returns this error without
-// sending a tree kill, so the first attempt and the deadline retry can both
-// be exercised under a persistent failure.
+// Test-only: when set, every tree-kill attempt (early, deadline retry, and
+// fallback) returns this error without sending a tree kill.
 #[cfg(test)]
 thread_local! {
     static INJECT_TERMINATE_REMAINING_TREE_ERROR: Cell<Option<&'static str>> = const { Cell::new(None) };
@@ -156,28 +164,36 @@ pub fn run_bounded(
         result
     });
 
-    let (overflow_tx, overflow_rx) = mpsc::channel();
-    let stdout_reader = spawn_reader(
+    // Non-blocking spoolers: capture is cancelable by dropping the pipe end, so
+    // return stays bounded even when every tree-kill attempt fails and EOF never
+    // arrives. Blocking read_to_end workers cannot offer that.
+    let mut stdout_capture = CapturedOutput::new(
         child_stdout,
         limits.max_stdout_bytes,
         CapturedStream::Stdout,
-        overflow_tx.clone(),
-    );
-    let stderr_reader = spawn_reader(
+    )
+    .map_err(|error| format!("{context}: {command_display}: stdout capture: {error}"))?;
+    let mut stderr_capture = CapturedOutput::new(
         child_stderr,
         limits.max_stderr_bytes,
         CapturedStream::Stderr,
-        overflow_tx,
-    );
+    )
+    .map_err(|error| format!("{context}: {command_display}: stderr capture: {error}"))?;
 
     let deadline = Instant::now() + limits.timeout;
     let mut early_failure = None;
     let mut tree_termination_error = None;
     let mut observed_status = None;
     let status = loop {
+        stdout_capture.drain();
+        stderr_capture.drain();
+
         if early_failure.is_none() {
-            if let Ok(stream) = overflow_rx.try_recv() {
-                // The reader closes its pipe after limit + 1 bytes. Keep the
+            if let Some(stream) = stdout_capture
+                .overflowed_stream()
+                .or_else(|| stderr_capture.overflowed_stream())
+            {
+                // The capture closes its pipe after limit + 1 bytes. Keep the
                 // child under this same deadline while it observes the close.
                 early_failure = Some(format!(
                     "{} exceeded its {}-byte ceiling",
@@ -191,18 +207,18 @@ pub fn run_bounded(
             match child.try_wait() {
                 Ok(Some(status)) => {
                     observed_status = Some(status);
-                    // Descendants that still hold inherited pipes keep readers
+                    // Descendants that still hold inherited pipes keep captures
                     // from EOF. Terminate the remaining tree now — before
                     // treating reader EOF as the success condition — then drain
                     // buffered output within the same total deadline.
                     let io_outstanding = !stdin_writer.is_finished()
-                        || !stdout_reader.is_finished()
-                        || !stderr_reader.is_finished();
+                        || !stdout_capture.is_finished()
+                        || !stderr_capture.is_finished();
                     if io_outstanding {
                         // Preserve a tree-kill failure, but do not return while
-                        // JoinHandles and descendants may still be live. Keep
-                        // draining under the same deadline; terminate_and_reap
-                        // below retries termination before joins.
+                        // the stdin worker or open captures may still be live.
+                        // Keep draining under the same deadline; terminate_and_reap
+                        // below retries termination before finalizing captures.
                         if let Err(error) =
                             terminate_remaining_tree(child.as_mut(), context, &command_display)
                         {
@@ -213,6 +229,9 @@ pub fn run_bounded(
                 Ok(None) => {}
                 Err(error) => {
                     let reap = terminate_and_reap(child.as_mut(), None, context, &command_display);
+                    stdout_capture.abandon();
+                    stderr_capture.abandon();
+                    let _ = stdin_writer.join();
                     return Err(format!(
                         "{context}: poll {command_display}: {error}; terminate/reap: {reap:?}"
                     ));
@@ -222,8 +241,8 @@ pub fn run_bounded(
 
         if observed_status.is_some()
             && stdin_writer.is_finished()
-            && stdout_reader.is_finished()
-            && stderr_reader.is_finished()
+            && stdout_capture.is_finished()
+            && stderr_capture.is_finished()
         {
             // After I/O completion this may accept post-IO quiescence (including
             // macOS EPERM on an empty group) that terminate_remaining_tree does
@@ -239,9 +258,9 @@ pub fn run_bounded(
             if early_failure.is_none() && tree_termination_error.is_none() {
                 early_failure = Some(format!("deadline of {:?} expired", limits.timeout));
             }
-            // Never return here on terminate/reap failure: JoinHandles and
-            // descendants may still be live. Preserve the first error, best-
-            // effort kill so readers can EOF, then join below before surfacing.
+            // Preserve the first error, attempt one more tree kill through the
+            // same seam, drain whatever is already readable, then abandon any
+            // capture that still lacks EOF so return never waits unboundedly.
             let prior_status = observed_status.take();
             let status = match terminate_and_reap(
                 child.as_mut(),
@@ -254,10 +273,17 @@ pub fn run_bounded(
                     if tree_termination_error.is_none() {
                         tree_termination_error = Some(error);
                     }
-                    // terminate_and_reap may have skipped OS kill under a
-                    // persistent injected failure; a direct start_kill is
-                    // outside that seam so joins below stay bounded.
-                    let _ = child.start_kill();
+                    if let Err(fallback_error) = request_tree_kill(child.as_mut()) {
+                        let detail =
+                            format!("fallback tree kill after deadline failed: {fallback_error}");
+                        match &mut tree_termination_error {
+                            Some(error) => {
+                                error.push_str("; ");
+                                error.push_str(&detail);
+                            }
+                            None => tree_termination_error = Some(detail),
+                        }
+                    }
                     let _ = child.inner_mut().start_kill();
                     if let Some(status) = prior_status {
                         status
@@ -273,6 +299,9 @@ pub fn run_bounded(
                     }
                 }
             };
+            drain_captures_briefly(&mut stdout_capture, &mut stderr_capture);
+            stdout_capture.abandon();
+            stderr_capture.abandon();
             break status;
         }
         thread::sleep(POLL_INTERVAL);
@@ -281,8 +310,12 @@ pub fn run_bounded(
     let stdin_result = stdin_writer
         .join()
         .map_err(|_| format!("{context}: {command_display}: stdin writer panicked"))?;
-    let stdout = join_reader(stdout_reader, context, &command_display, "stdout")?;
-    let stderr = join_reader(stderr_reader, context, &command_display, "stderr")?;
+    let stdout = stdout_capture
+        .into_bytes()
+        .map_err(|error| format!("{context}: read stdout from {command_display}: {error}"))?;
+    let stderr = stderr_capture
+        .into_bytes()
+        .map_err(|error| format!("{context}: read stderr from {command_display}: {error}"))?;
 
     if let Some(error) = tree_termination_error {
         return Err(format!(
@@ -351,38 +384,176 @@ pub fn run_bounded(
     })
 }
 
-fn spawn_reader<R: Read + Send + 'static>(
-    reader: R,
+/// Bounded stdout/stderr capture that never blocks the helper on EOF.
+///
+/// Pipes are set non-blocking so `drain` returns when the kernel has no bytes
+/// ready. Dropping the reader (`abandon` / overflow / EOF) cancels capture
+/// without a joinable worker that can hang after a persistent tree-kill failure.
+struct CapturedOutput<R> {
+    reader: Option<R>,
+    bytes: Vec<u8>,
     limit: usize,
     stream: CapturedStream,
-    overflow: mpsc::Sender<CapturedStream>,
-) -> thread::JoinHandle<std::io::Result<Vec<u8>>> {
-    #[cfg(test)]
-    let track_io_workers = TRACK_IO_WORKERS.get();
-    thread::spawn(move || {
-        #[cfg(test)]
-        let _worker_guard = track_io_workers.then(IoWorkerGuard::enter);
-        let mut bytes = Vec::with_capacity(limit.saturating_add(1));
-        reader
-            .take(limit.saturating_add(1) as u64)
-            .read_to_end(&mut bytes)?;
-        if bytes.len() > limit {
-            let _ = overflow.send(stream);
-        }
-        Ok(bytes)
-    })
+    overflowed: bool,
+    read_error: Option<std::io::Error>,
 }
 
-fn join_reader(
-    reader: thread::JoinHandle<std::io::Result<Vec<u8>>>,
-    context: &str,
-    command: &str,
-    stream: &str,
-) -> Result<Vec<u8>, String> {
-    reader
-        .join()
-        .map_err(|_| format!("{context}: {command}: {stream} reader panicked"))?
-        .map_err(|error| format!("{context}: read {stream} from {command}: {error}"))
+impl<R: Read> CapturedOutput<R> {
+    #[cfg(unix)]
+    fn new(reader: R, limit: usize, stream: CapturedStream) -> std::io::Result<Self>
+    where
+        R: AsRawFd,
+    {
+        set_nonblocking(&reader)?;
+        Ok(Self {
+            reader: Some(reader),
+            bytes: Vec::with_capacity(limit.saturating_add(1)),
+            limit,
+            stream,
+            overflowed: false,
+            read_error: None,
+        })
+    }
+
+    #[cfg(windows)]
+    fn new(reader: R, limit: usize, stream: CapturedStream) -> std::io::Result<Self>
+    where
+        R: AsRawHandle,
+    {
+        set_nonblocking(&reader)?;
+        Ok(Self {
+            reader: Some(reader),
+            bytes: Vec::with_capacity(limit.saturating_add(1)),
+            limit,
+            stream,
+            overflowed: false,
+            read_error: None,
+        })
+    }
+
+    fn drain(&mut self) {
+        let Some(reader) = self.reader.as_mut() else {
+            return;
+        };
+        let mut chunk = [0u8; 8192];
+        loop {
+            match reader.read(&mut chunk) {
+                Ok(0) => {
+                    self.reader = None;
+                    return;
+                }
+                Ok(n) => {
+                    let room = self
+                        .limit
+                        .saturating_add(1)
+                        .saturating_sub(self.bytes.len());
+                    let take = room.min(n);
+                    self.bytes.extend_from_slice(&chunk[..take]);
+                    if self.bytes.len() > self.limit {
+                        self.overflowed = true;
+                        self.reader = None;
+                        return;
+                    }
+                }
+                Err(error)
+                    if error.kind() == ErrorKind::WouldBlock
+                        || error.kind() == ErrorKind::Interrupted =>
+                {
+                    return;
+                }
+                Err(error) => {
+                    self.read_error = Some(error);
+                    self.reader = None;
+                    return;
+                }
+            }
+        }
+    }
+
+    fn is_finished(&self) -> bool {
+        self.reader.is_none()
+    }
+
+    fn overflowed_stream(&self) -> Option<CapturedStream> {
+        self.overflowed.then_some(self.stream)
+    }
+
+    fn abandon(&mut self) {
+        self.reader = None;
+    }
+
+    fn into_bytes(mut self) -> std::io::Result<Vec<u8>> {
+        self.reader = None;
+        if let Some(error) = self.read_error.take() {
+            return Err(error);
+        }
+        Ok(self.bytes)
+    }
+}
+
+/// After deadline termination, pull any already-readable bytes without waiting
+/// unboundedly for EOF that a failed tree kill will never deliver.
+fn drain_captures_briefly(
+    stdout: &mut CapturedOutput<impl Read>,
+    stderr: &mut CapturedOutput<impl Read>,
+) {
+    let drain_deadline = Instant::now() + REAP_GRACE;
+    loop {
+        stdout.drain();
+        stderr.drain();
+        if stdout.is_finished() && stderr.is_finished() {
+            return;
+        }
+        if Instant::now() >= drain_deadline {
+            return;
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+}
+
+#[cfg(unix)]
+fn set_nonblocking(pipe: &impl AsRawFd) -> std::io::Result<()> {
+    let raw = pipe.as_raw_fd();
+    // SAFETY: fcntl F_GETFL/F_SETFL on a live pipe fd owned by this helper.
+    let flags = unsafe { libc::fcntl(raw, libc::F_GETFL) };
+    if flags == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: same fd; O_NONBLOCK is a valid flag for pipes.
+    if unsafe { libc::fcntl(raw, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn set_nonblocking(pipe: &impl AsRawHandle) -> std::io::Result<()> {
+    const PIPE_NOWAIT: u32 = 0x0000_0001;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn SetNamedPipeHandleState(
+            h_named_pipe: *mut core::ffi::c_void,
+            lp_mode: *const u32,
+            lp_max_collection_count: *const u32,
+            lp_collect_data_timeout: *const u32,
+        ) -> i32;
+    }
+    let mode = PIPE_NOWAIT;
+    // SAFETY: handle is the ChildStdout/ChildStderr pipe we own; PIPE_NOWAIT is
+    // a valid named-pipe mode for anonymous stdio pipes on Windows.
+    let ok = unsafe {
+        SetNamedPipeHandleState(
+            pipe.as_raw_handle(),
+            &mode,
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    };
+    if ok == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 fn terminate_and_reap(
@@ -391,22 +562,7 @@ fn terminate_and_reap(
     context: &str,
     command: &str,
 ) -> Result<ExitStatus, String> {
-    #[cfg(test)]
-    if let Some(injected) = injected_tree_kill_failure(child.id()) {
-        // Persistent injected failure skips the OS kill, matching
-        // terminate_remaining_tree, so the deadline retry can still return Err
-        // while descendants hold inherited pipes.
-        let status = reap_after_tree_kill(child, observed_status).map_err(|reap_error| {
-            format!(
-                "{context}: failed to reap {command} after tree termination; tree=Some({injected}); direct_kill=None; reap={reap_error}"
-            )
-        })?;
-        return Err(format!(
-            "{context}: failed to terminate process tree for {command}: {injected}; direct_kill=None; status={status}"
-        ));
-    }
-    let tree_error = child
-        .start_kill()
+    let tree_error = request_tree_kill(child)
         .err()
         .filter(|error| !process_tree_absent(error));
     let direct_kill_error = tree_error
@@ -449,7 +605,7 @@ fn finish_process_tree(
     context: &str,
     command: &str,
 ) -> Result<(), String> {
-    match child.start_kill() {
+    match request_tree_kill(child) {
         Ok(()) => Ok(()),
         Err(error) if process_tree_quiescent_after_io(&error) => Ok(()),
         Err(error) => Err(format!(
@@ -467,13 +623,7 @@ fn terminate_remaining_tree(
     context: &str,
     command: &str,
 ) -> Result<(), String> {
-    #[cfg(test)]
-    if let Some(injected) = injected_tree_kill_failure(child.id()) {
-        return Err(format!(
-            "{context}: failed to terminate remaining process tree for {command}: {injected}"
-        ));
-    }
-    match child.start_kill() {
+    match request_tree_kill(child) {
         Ok(()) => Ok(()),
         Err(error) if process_tree_absent(&error) => Ok(()),
         Err(error) => {
@@ -485,17 +635,16 @@ fn terminate_remaining_tree(
     }
 }
 
-/// Test-only: observe a persistent injected tree-kill failure without clearing it.
-///
-/// Unlike a one-shot `take()`, this stays armed across the early
-/// `terminate_remaining_tree` attempt and the deadline `terminate_and_reap`
-/// retry so both arms can fail the same way.
-#[cfg(test)]
-fn injected_tree_kill_failure(child_id: u32) -> Option<&'static str> {
-    INJECT_TERMINATE_REMAINING_TREE_ERROR.get().inspect(|_| {
-        INJECTED_TREE_KILL_CHILD_PID.store(child_id, Ordering::SeqCst);
+/// Single seam for process-tree kill so test injection covers every attempt,
+/// including the deadline fallback. Production always calls `start_kill`.
+fn request_tree_kill(child: &mut dyn ChildWrapper) -> std::io::Result<()> {
+    #[cfg(test)]
+    if let Some(injected) = INJECT_TERMINATE_REMAINING_TREE_ERROR.get() {
+        INJECTED_TREE_KILL_CHILD_PID.store(child.id(), Ordering::SeqCst);
         INJECTED_TREE_KILL_HITS.fetch_add(1, Ordering::SeqCst);
-    })
+        return Err(std::io::Error::other(injected));
+    }
+    child.start_kill()
 }
 
 #[cfg(unix)]
@@ -1173,10 +1322,12 @@ mod tests {
         assert!(!process_tree_quiescent_after_io(&error));
     }
 
-    /// Contract: a persistent tree-kill failure (first attempt and deadline
-    /// retry) must not let `run_bounded` return while I/O workers or
-    /// process-tree descendants are still live. The original termination error
-    /// is preserved after bounded cleanup and joins.
+    /// Contract: when every tree-kill attempt fails (early, deadline retry, and
+    /// fallback), `run_bounded` must still return inside the wall-clock guard
+    /// without leaving blocked I/O workers joined forever. The first termination
+    /// error is preserved and cleanup failure is reported. Descendant reaping
+    /// after a true persistent OS kill failure is outside this helper's power
+    /// and is left to the test guard.
     #[test]
     fn early_tree_kill_failure_preserves_error_after_bounded_cleanup() {
         use super::{
@@ -1202,6 +1353,7 @@ mod tests {
         INJECTED_TREE_KILL_HITS.store(0, Ordering::SeqCst);
         assert_eq!(LIVE_IO_WORKERS.load(Ordering::SeqCst), 0);
 
+        let started = Instant::now();
         let (result_tx, result_rx) = mpsc::channel();
         let worker = thread::spawn(move || {
             TRACK_IO_WORKERS.set(true);
@@ -1221,6 +1373,10 @@ mod tests {
             Err(error) => panic!("runner escaped its wall-clock bound: {error}"),
         };
         worker.join().expect("bounded runner worker");
+        assert!(
+            started.elapsed() < descendant_test_guard(),
+            "persistent kill failure must return inside the wall-clock guard"
+        );
 
         let live_after_return = LIVE_IO_WORKERS.load(Ordering::SeqCst);
         let injected_child_pid = INJECTED_TREE_KILL_CHILD_PID.load(Ordering::SeqCst);
@@ -1229,9 +1385,9 @@ mod tests {
         let error = result
             .expect_err("persistent injected tree-kill failure must surface as Err after cleanup");
         assert!(
-            injected_hits >= 2,
-            "injection must arm both the early terminate_remaining_tree attempt and the \
-             deadline terminate_and_reap retry; hits={injected_hits}; error={error}"
+            injected_hits >= 3,
+            "injection must arm early terminate_remaining_tree, deadline terminate_and_reap, \
+             and the fallback request_tree_kill; hits={injected_hits}; error={error}"
         );
         assert!(
             error.contains(INJECTED),
@@ -1241,6 +1397,10 @@ mod tests {
             error.contains("failed to terminate remaining process tree"),
             "first tree-kill failure wording must be preserved: {error}"
         );
+        assert!(
+            error.contains("fallback tree kill after deadline failed"),
+            "cleanup failure must be reported rather than ignored: {error}"
+        );
         assert_eq!(
             live_after_return, 0,
             "run_bounded returned while {live_after_return} I/O worker(s) still live \
@@ -1249,11 +1409,13 @@ mod tests {
         );
 
         let descendant_pid = descendant_pid_from(&error).unwrap_or_else(|reason| {
-            panic!("descendant pid must be recoverable after cleanup joins: {reason}; {error}")
+            panic!("descendant pid must be recoverable from spooled diagnostics: {reason}; {error}")
         });
+        // Persistent kill failure leaves the descendant alive; the tracking
+        // guard reaps it. Returning while it lives is required, not a defect.
         assert!(
-            wait_for_descendant_exit(descendant_pid),
-            "descendant {descendant_pid} still live after run_bounded returned; error={error}"
+            descendant_is_alive(descendant_pid) || wait_for_descendant_exit(descendant_pid),
+            "descendant pid {descendant_pid} must remain addressable for guard cleanup; error={error}"
         );
     }
 
