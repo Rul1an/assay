@@ -1,10 +1,5 @@
-// Non-blocking pipe mode needs fcntl (Unix) / SetNamedPipeHandleState (Windows).
-// That FFI is what makes stdout/stderr capture cancelable when every tree-kill
-// attempt fails, so run_bounded can return without joining blocked readers.
-#![allow(unsafe_code)]
-
 use std::ffi::OsStr;
-use std::io::{ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::process::{Command, ExitStatus, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -44,33 +39,16 @@ static INJECTED_TREE_KILL_CHILD_PID: AtomicU32 = AtomicU32::new(0);
 #[cfg(test)]
 static INJECTED_TREE_KILL_HITS: AtomicUsize = AtomicUsize::new(0);
 
-// Test-only: when set on the `run_bounded` caller thread, spawned I/O workers
-// register in `LIVE_IO_WORKERS` for the duration of their closure.
+// Test-only: when set, stdout/stderr capture setup fails after spawn so the
+// post-spawn cleanup path can be exercised.
 #[cfg(test)]
 thread_local! {
-    static TRACK_IO_WORKERS: Cell<bool> = const { Cell::new(false) };
+    static INJECT_CAPTURE_SETUP_ERROR: Cell<Option<&'static str>> = const { Cell::new(None) };
 }
 
+// Test-only: last child pid observed at spawn, for cleanup-leak assertions.
 #[cfg(test)]
-static LIVE_IO_WORKERS: AtomicUsize = AtomicUsize::new(0);
-
-#[cfg(test)]
-struct IoWorkerGuard;
-
-#[cfg(test)]
-impl IoWorkerGuard {
-    fn enter() -> Self {
-        LIVE_IO_WORKERS.fetch_add(1, Ordering::SeqCst);
-        Self
-    }
-}
-
-#[cfg(test)]
-impl Drop for IoWorkerGuard {
-    fn drop(&mut self) {
-        LIVE_IO_WORKERS.fetch_sub(1, Ordering::SeqCst);
-    }
-}
+static LAST_SPAWNED_CHILD_PID: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Clone, Copy)]
 pub struct ProcessLimits {
@@ -113,6 +91,10 @@ impl CapturedStream {
 /// group or Windows Job Object before this function returns. Processes that
 /// deliberately escape those OS containers are outside this test helper's
 /// supported process shape.
+///
+/// Stdin is file-backed before spawn (no writer thread). Stdout/stderr are
+/// polled by this owner with cancelable capture so return stays bounded even
+/// when every tree-kill attempt fails.
 pub fn run_bounded(
     mut command: Command,
     stdin: &[u8],
@@ -128,8 +110,9 @@ pub fn run_bounded(
         "stderr ceiling must be positive"
     );
     let command_display = display_command(&command);
+    let stdin_stdio = prepare_stdin_stdio(stdin, context, &command_display)?;
     command
-        .stdin(Stdio::piped())
+        .stdin(stdin_stdio)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut command = CommandWrap::from(command);
@@ -140,10 +123,8 @@ pub fn run_bounded(
     let mut child = command
         .spawn()
         .map_err(|error| format!("{context}: spawn {command_display}: {error}"))?;
-    let mut child_stdin = child
-        .stdin()
-        .take()
-        .ok_or_else(|| format!("{context}: {command_display}: child stdin was not piped"))?;
+    #[cfg(test)]
+    LAST_SPAWNED_CHILD_PID.store(child.id(), Ordering::SeqCst);
     let child_stdout = child
         .stdout()
         .take()
@@ -153,32 +134,44 @@ pub fn run_bounded(
         .take()
         .ok_or_else(|| format!("{context}: {command_display}: child stderr was not piped"))?;
 
-    let stdin = stdin.to_vec();
-    #[cfg(test)]
-    let track_io_workers = TRACK_IO_WORKERS.get();
-    let stdin_writer = thread::spawn(move || {
-        #[cfg(test)]
-        let _worker_guard = track_io_workers.then(IoWorkerGuard::enter);
-        let result = child_stdin.write_all(&stdin);
-        drop(child_stdin);
-        result
-    });
-
-    // Non-blocking spoolers: capture is cancelable by dropping the pipe end, so
-    // return stays bounded even when every tree-kill attempt fails and EOF never
-    // arrives. Blocking read_to_end workers cannot offer that.
-    let mut stdout_capture = CapturedOutput::new(
+    // Capture setup is post-spawn (pipes exist only then). Failures must still
+    // terminate/reap — process-wrap does not kill on drop.
+    let mut stdout_capture = match open_capture(
         child_stdout,
         limits.max_stdout_bytes,
         CapturedStream::Stdout,
-    )
-    .map_err(|error| format!("{context}: {command_display}: stdout capture: {error}"))?;
-    let mut stderr_capture = CapturedOutput::new(
+        context,
+        &command_display,
+    ) {
+        Ok(capture) => capture,
+        Err(error) => {
+            drop(child_stderr);
+            return Err(fail_spawned_child(
+                child.as_mut(),
+                context,
+                &command_display,
+                error,
+            ));
+        }
+    };
+    let mut stderr_capture = match open_capture(
         child_stderr,
         limits.max_stderr_bytes,
         CapturedStream::Stderr,
-    )
-    .map_err(|error| format!("{context}: {command_display}: stderr capture: {error}"))?;
+        context,
+        &command_display,
+    ) {
+        Ok(capture) => capture,
+        Err(error) => {
+            stdout_capture.abandon();
+            return Err(fail_spawned_child(
+                child.as_mut(),
+                context,
+                &command_display,
+                error,
+            ));
+        }
+    };
 
     let deadline = Instant::now() + limits.timeout;
     let mut early_failure = None;
@@ -211,14 +204,9 @@ pub fn run_bounded(
                     // from EOF. Terminate the remaining tree now — before
                     // treating reader EOF as the success condition — then drain
                     // buffered output within the same total deadline.
-                    let io_outstanding = !stdin_writer.is_finished()
-                        || !stdout_capture.is_finished()
-                        || !stderr_capture.is_finished();
+                    let io_outstanding =
+                        !stdout_capture.is_finished() || !stderr_capture.is_finished();
                     if io_outstanding {
-                        // Preserve a tree-kill failure, but do not return while
-                        // the stdin worker or open captures may still be live.
-                        // Keep draining under the same deadline; terminate_and_reap
-                        // below retries termination before finalizing captures.
                         if let Err(error) =
                             terminate_remaining_tree(child.as_mut(), context, &command_display)
                         {
@@ -231,7 +219,6 @@ pub fn run_bounded(
                     let reap = terminate_and_reap(child.as_mut(), None, context, &command_display);
                     stdout_capture.abandon();
                     stderr_capture.abandon();
-                    let _ = stdin_writer.join();
                     return Err(format!(
                         "{context}: poll {command_display}: {error}; terminate/reap: {reap:?}"
                     ));
@@ -239,16 +226,17 @@ pub fn run_bounded(
             }
         }
 
-        if observed_status.is_some()
-            && stdin_writer.is_finished()
-            && stdout_capture.is_finished()
-            && stderr_capture.is_finished()
+        if observed_status.is_some() && stdout_capture.is_finished() && stderr_capture.is_finished()
         {
             // After I/O completion this may accept post-IO quiescence (including
             // macOS EPERM on an empty group) that terminate_remaining_tree does
             // not. When the early path already killed the tree, this is a
             // no-op or that quiescent acceptance.
-            finish_process_tree(child.as_mut(), context, &command_display)?;
+            if let Err(error) = finish_process_tree(child.as_mut(), context, &command_display) {
+                if tree_termination_error.is_none() {
+                    tree_termination_error = Some(error);
+                }
+            }
             break observed_status
                 .take()
                 .expect("status was checked immediately above");
@@ -307,9 +295,6 @@ pub fn run_bounded(
         thread::sleep(POLL_INTERVAL);
     };
 
-    let stdin_result = stdin_writer
-        .join()
-        .map_err(|_| format!("{context}: {command_display}: stdin writer panicked"))?;
     let stdout = stdout_capture
         .into_bytes()
         .map_err(|error| format!("{context}: read stdout from {command_display}: {error}"))?;
@@ -361,21 +346,6 @@ pub fn run_bounded(
             &stderr,
         ));
     }
-    // Status and both output streams are already collected, so BrokenPipe here
-    // records an early stdin close without replacing the child's outcome.
-    stdin_result.or_else(|error| {
-        if error.kind() == std::io::ErrorKind::BrokenPipe {
-            return Ok(());
-        }
-        Err(failure_diagnostic(
-            context,
-            &command_display,
-            &format!("write stdin: {error}"),
-            &status,
-            &stdout,
-            &stderr,
-        ))
-    })?;
 
     Ok(Output {
         status,
@@ -384,10 +354,36 @@ pub fn run_bounded(
     })
 }
 
+/// Prepare stdin before spawn so setup failures cannot leak a child. Empty
+/// stdin uses `/dev/null`; non-empty payloads are a bounded tempfile sized to
+/// the caller slice (not an output spool).
+fn prepare_stdin_stdio(stdin: &[u8], context: &str, command: &str) -> Result<Stdio, String> {
+    if stdin.is_empty() {
+        return Ok(Stdio::null());
+    }
+    let mut file = tempfile::tempfile()
+        .map_err(|error| format!("{context}: {command}: create stdin tempfile: {error}"))?;
+    file.write_all(stdin)
+        .map_err(|error| format!("{context}: {command}: write stdin tempfile: {error}"))?;
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| format!("{context}: {command}: rewind stdin tempfile: {error}"))?;
+    Ok(Stdio::from(file))
+}
+
+fn fail_spawned_child(
+    child: &mut dyn ChildWrapper,
+    context: &str,
+    command: &str,
+    setup_error: String,
+) -> String {
+    let reap = terminate_and_reap(child, None, context, command);
+    format!("{setup_error}; terminate/reap: {reap:?}")
+}
+
 /// Bounded stdout/stderr capture that never blocks the helper on EOF.
 ///
-/// Pipes are set non-blocking so `drain` returns when the kernel has no bytes
-/// ready. Dropping the reader (`abandon` / overflow / EOF) cancels capture
+/// Unix pipes use O_NONBLOCK. Windows uses PeekNamedPipe (no pipe-mode
+/// mutation). Dropping the reader (`abandon` / overflow / EOF) cancels capture
 /// without a joinable worker that can hang after a persistent tree-kill failure.
 struct CapturedOutput<R> {
     reader: Option<R>,
@@ -396,6 +392,44 @@ struct CapturedOutput<R> {
     stream: CapturedStream,
     overflowed: bool,
     read_error: Option<std::io::Error>,
+}
+
+#[cfg(unix)]
+fn open_capture<R: Read + AsRawFd>(
+    reader: R,
+    limit: usize,
+    stream: CapturedStream,
+    context: &str,
+    command: &str,
+) -> Result<CapturedOutput<R>, String> {
+    #[cfg(test)]
+    if let Some(injected) = INJECT_CAPTURE_SETUP_ERROR.get() {
+        return Err(format!(
+            "{context}: {command}: {} capture: {injected}",
+            stream.name()
+        ));
+    }
+    CapturedOutput::new(reader, limit, stream)
+        .map_err(|error| format!("{context}: {command}: {} capture: {error}", stream.name()))
+}
+
+#[cfg(windows)]
+fn open_capture<R: Read + AsRawHandle>(
+    reader: R,
+    limit: usize,
+    stream: CapturedStream,
+    context: &str,
+    command: &str,
+) -> Result<CapturedOutput<R>, String> {
+    #[cfg(test)]
+    if let Some(injected) = INJECT_CAPTURE_SETUP_ERROR.get() {
+        return Err(format!(
+            "{context}: {command}: {} capture: {injected}",
+            stream.name()
+        ));
+    }
+    CapturedOutput::new(reader, limit, stream)
+        .map_err(|error| format!("{context}: {command}: {} capture: {error}", stream.name()))
 }
 
 impl<R: Read> CapturedOutput<R> {
@@ -420,7 +454,8 @@ impl<R: Read> CapturedOutput<R> {
     where
         R: AsRawHandle,
     {
-        set_nonblocking(&reader)?;
+        // PeekNamedPipe path: do not mutate pipe mode (PIPE_NOWAIT needs
+        // FILE_WRITE_ATTRIBUTES that ChildStdout/ChildStderr lack).
         Ok(Self {
             reader: Some(reader),
             bytes: Vec::with_capacity(limit.saturating_add(1)),
@@ -431,13 +466,17 @@ impl<R: Read> CapturedOutput<R> {
         })
     }
 
+    #[cfg(unix)]
     fn drain(&mut self) {
-        let Some(reader) = self.reader.as_mut() else {
-            return;
-        };
         let mut chunk = [0u8; 8192];
         loop {
-            match reader.read(&mut chunk) {
+            let read_result = {
+                let Some(reader) = self.reader.as_mut() else {
+                    return;
+                };
+                reader.read(&mut chunk)
+            };
+            match read_result {
                 Ok(0) => {
                     self.reader = None;
                     return;
@@ -454,6 +493,86 @@ impl<R: Read> CapturedOutput<R> {
                         self.reader = None;
                         return;
                     }
+                }
+                Err(error)
+                    if error.kind() == ErrorKind::WouldBlock
+                        || error.kind() == ErrorKind::Interrupted =>
+                {
+                    return;
+                }
+                Err(error) => {
+                    self.read_error = Some(error);
+                    self.reader = None;
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Windows: PeekNamedPipe for availability; never mutate pipe mode.
+    /// Empty-open (`avail == 0`) is a poll; broken pipe is EOF.
+    #[cfg(windows)]
+    fn drain(&mut self)
+    where
+        R: AsRawHandle,
+    {
+        loop {
+            let available = {
+                let Some(reader) = self.reader.as_ref() else {
+                    return;
+                };
+                match peek_pipe_available(reader.as_raw_handle()) {
+                    Ok(0) => return,
+                    Ok(available) => available,
+                    Err(error) if is_broken_pipe(&error) => {
+                        self.reader = None;
+                        return;
+                    }
+                    Err(error) => {
+                        self.read_error = Some(error);
+                        self.reader = None;
+                        return;
+                    }
+                }
+            };
+            let room = self
+                .limit
+                .saturating_add(1)
+                .saturating_sub(self.bytes.len());
+            if room == 0 {
+                self.overflowed = true;
+                self.reader = None;
+                return;
+            }
+            let to_read = (available as usize).min(room).min(8192);
+            let mut chunk = vec![0u8; to_read];
+            let read_result = {
+                let Some(reader) = self.reader.as_mut() else {
+                    return;
+                };
+                reader.read(&mut chunk)
+            };
+            match read_result {
+                Ok(0) => {
+                    self.reader = None;
+                    return;
+                }
+                Ok(n) => {
+                    let room = self
+                        .limit
+                        .saturating_add(1)
+                        .saturating_sub(self.bytes.len());
+                    let take = room.min(n);
+                    self.bytes.extend_from_slice(&chunk[..take]);
+                    if self.bytes.len() > self.limit {
+                        self.overflowed = true;
+                        self.reader = None;
+                        return;
+                    }
+                }
+                Err(error) if is_broken_pipe(&error) => {
+                    self.reader = None;
+                    return;
                 }
                 Err(error)
                     if error.kind() == ErrorKind::WouldBlock
@@ -494,8 +613,8 @@ impl<R: Read> CapturedOutput<R> {
 /// After deadline termination, pull any already-readable bytes without waiting
 /// unboundedly for EOF that a failed tree kill will never deliver.
 fn drain_captures_briefly(
-    stdout: &mut CapturedOutput<impl Read>,
-    stderr: &mut CapturedOutput<impl Read>,
+    stdout: &mut CapturedOutput<impl CaptureDrain>,
+    stderr: &mut CapturedOutput<impl CaptureDrain>,
 ) {
     let drain_deadline = Instant::now() + REAP_GRACE;
     loop {
@@ -511,15 +630,28 @@ fn drain_captures_briefly(
     }
 }
 
+/// Platform read handle bounds required to drain a capture.
+#[cfg(unix)]
+trait CaptureDrain: Read {}
+#[cfg(unix)]
+impl<T: Read> CaptureDrain for T {}
+
+#[cfg(windows)]
+trait CaptureDrain: Read + AsRawHandle {}
+#[cfg(windows)]
+impl<T: Read + AsRawHandle> CaptureDrain for T {}
+
 #[cfg(unix)]
 fn set_nonblocking(pipe: &impl AsRawFd) -> std::io::Result<()> {
     let raw = pipe.as_raw_fd();
     // SAFETY: fcntl F_GETFL/F_SETFL on a live pipe fd owned by this helper.
+    #[allow(unsafe_code)]
     let flags = unsafe { libc::fcntl(raw, libc::F_GETFL) };
     if flags == -1 {
         return Err(std::io::Error::last_os_error());
     }
     // SAFETY: same fd; O_NONBLOCK is a valid flag for pipes.
+    #[allow(unsafe_code)]
     if unsafe { libc::fcntl(raw, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
         return Err(std::io::Error::last_os_error());
     }
@@ -527,33 +659,43 @@ fn set_nonblocking(pipe: &impl AsRawFd) -> std::io::Result<()> {
 }
 
 #[cfg(windows)]
-fn set_nonblocking(pipe: &impl AsRawHandle) -> std::io::Result<()> {
-    const PIPE_NOWAIT: u32 = 0x0000_0001;
+fn peek_pipe_available(handle: std::os::windows::io::RawHandle) -> std::io::Result<u32> {
     #[link(name = "kernel32")]
     extern "system" {
-        fn SetNamedPipeHandleState(
+        fn PeekNamedPipe(
             h_named_pipe: *mut core::ffi::c_void,
-            lp_mode: *const u32,
-            lp_max_collection_count: *const u32,
-            lp_collect_data_timeout: *const u32,
+            lp_buffer: *mut core::ffi::c_void,
+            n_buffer_size: u32,
+            lp_bytes_read: *mut u32,
+            lp_total_bytes_avail: *mut u32,
+            lp_bytes_left_this_message: *mut u32,
         ) -> i32;
     }
-    let mode = PIPE_NOWAIT;
-    // SAFETY: handle is the ChildStdout/ChildStderr pipe we own; PIPE_NOWAIT is
-    // a valid named-pipe mode for anonymous stdio pipes on Windows.
+    let mut available = 0u32;
+    // SAFETY: `handle` is the ChildStdout/ChildStderr pipe we own. PeekNamedPipe
+    // is the supported read-only availability probe for anonymous pipe reads
+    // (unlike SetNamedPipeHandleState, which needs FILE_WRITE_ATTRIBUTES).
+    #[allow(unsafe_code)]
     let ok = unsafe {
-        SetNamedPipeHandleState(
-            pipe.as_raw_handle(),
-            &mode,
-            std::ptr::null(),
-            std::ptr::null(),
+        PeekNamedPipe(
+            handle,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            &mut available,
+            std::ptr::null_mut(),
         )
     };
     if ok == 0 {
         Err(std::io::Error::last_os_error())
     } else {
-        Ok(())
+        Ok(available)
     }
+}
+
+#[cfg(windows)]
+fn is_broken_pipe(error: &std::io::Error) -> bool {
+    error.kind() == ErrorKind::BrokenPipe || error.raw_os_error() == Some(109) // ERROR_BROKEN_PIPE
 }
 
 fn terminate_and_reap(
@@ -798,6 +940,10 @@ mod tests {
         /// parent exits, so the reader threads never reach EOF until the tree
         /// is terminated.
         Inherited,
+        /// Like `Inherited`, but the descendant also keeps the inherited stdin
+        /// read end open without consuming it (re-exec only; shell async jobs
+        /// often redirect stdin from `/dev/null`).
+        StdinHold,
         /// Spawns a descendant that asks for neither handle.
         Detached,
         /// Spawns nothing. The control: with no descendant to hold anything, the
@@ -809,6 +955,7 @@ mod tests {
         fn as_str(self) -> &'static str {
             match self {
                 Self::Inherited => "inherited",
+                Self::StdinHold => "stdin_hold",
                 Self::Detached => "detached",
                 Self::Solo => "solo",
             }
@@ -817,6 +964,7 @@ mod tests {
         fn parse(value: &str) -> Option<Self> {
             match value {
                 "inherited" => Some(Self::Inherited),
+                "stdin_hold" => Some(Self::StdinHold),
                 "detached" => Some(Self::Detached),
                 "solo" => Some(Self::Solo),
                 _ => None,
@@ -834,8 +982,7 @@ mod tests {
     /// `powershell.exe`, whose startup has been observed longer than the
     /// bounded window. Unix keeps a shell whose startup is a fraction of that
     /// bound; both sides speak the same READY record protocol.
-    #[cfg(windows)]
-    fn descendant_spawner_command(plan: HelperPlan) -> Command {
+    fn reexec_helper_command(plan: HelperPlan) -> Command {
         let mut command = Command::new(current_test_binary());
         command
             .args([
@@ -849,8 +996,18 @@ mod tests {
         command
     }
 
+    #[cfg(windows)]
+    fn descendant_spawner_command(plan: HelperPlan) -> Command {
+        reexec_helper_command(plan)
+    }
+
     #[cfg(unix)]
     fn descendant_spawner_command(plan: HelperPlan) -> Command {
+        if plan == HelperPlan::StdinHold {
+            // Shell async lists often redirect stdin from /dev/null; re-exec so
+            // the descendant truly retains the pipe read end.
+            return reexec_helper_command(plan);
+        }
         let script = match plan {
             HelperPlan::Solo => {
                 format!("printf '{READY_SOLO_RECORD}'; printf '{READY_SOLO_RECORD}' >&2",)
@@ -866,6 +1023,7 @@ mod tests {
                      printf '{READY_RECORD_PREFIX}%s' \"$!\" >&2",
                 )
             }
+            HelperPlan::StdinHold => unreachable!("handled by re-exec above"),
         };
         let mut command = Command::new("sh");
         command.arg("-c").arg(script);
@@ -887,11 +1045,23 @@ mod tests {
 
         let record = match plan {
             HelperPlan::Solo => READY_SOLO_RECORD.to_owned(),
-            HelperPlan::Inherited | HelperPlan::Detached => {
+            HelperPlan::Inherited | HelperPlan::Detached | HelperPlan::StdinHold => {
                 let mut descendant = hanging_command();
-                descendant.stdin(Stdio::null());
-                if plan == HelperPlan::Detached {
-                    descendant.stdout(Stdio::null()).stderr(Stdio::null());
+                match plan {
+                    HelperPlan::Detached => {
+                        descendant
+                            .stdin(Stdio::null())
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null());
+                    }
+                    HelperPlan::Inherited => {
+                        // Hold stdout/stderr; do not retain the parent's stdin.
+                        descendant.stdin(Stdio::null());
+                    }
+                    HelperPlan::StdinHold => {
+                        // Inherit stdin/stdout/stderr and keep them open.
+                    }
+                    HelperPlan::Solo => unreachable!(),
                 }
                 let child = descendant
                     .spawn()
@@ -915,6 +1085,7 @@ mod tests {
     fn the_helper_plan_survives_the_round_trip_to_the_helper() {
         for plan in [
             HelperPlan::Inherited,
+            HelperPlan::StdinHold,
             HelperPlan::Detached,
             HelperPlan::Solo,
         ] {
@@ -995,6 +1166,22 @@ mod tests {
     fn hanging_command() -> Command {
         let mut command = Command::new("ping");
         command.args(["-t", "127.0.0.1"]);
+        command
+    }
+
+    /// Starts with an empty open stdout pipe, then delivers bytes after a short
+    /// delay so capture must poll empty-open rather than treating it as EOF.
+    #[cfg(unix)]
+    fn delayed_stdout_command() -> Command {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 0.05; printf 'later'"]);
+        command
+    }
+
+    #[cfg(windows)]
+    fn delayed_stdout_command() -> Command {
+        let mut command = Command::new("cmd");
+        command.args(["/C", "ping -n 1 127.0.0.1 >NUL & echo|set /p=later"]);
         command
     }
 
@@ -1322,26 +1509,85 @@ mod tests {
         assert!(!process_tree_quiescent_after_io(&error));
     }
 
+    /// Contract: an empty-but-open stdout pipe must be polled, not treated as
+    /// EOF/error, so output that arrives after a delay is still captured. This
+    /// pins the Windows PeekNamedPipe empty-open model and the Unix O_NONBLOCK
+    /// WouldBlock poll model.
+    #[test]
+    fn delayed_stdout_after_empty_open_pipe_is_captured() {
+        let command = delayed_stdout_command();
+        let limits = ProcessLimits::new(Duration::from_secs(2), 1024, 1024);
+        let output = run_bounded(command, b"", limits, "delayed stdout mutation")
+            .expect("delayed stdout must be captured after empty-open polling");
+        assert!(output.status.success(), "{:?}", output.status);
+        assert_eq!(
+            output.stdout, b"later",
+            "empty-open polling must not drop later output"
+        );
+    }
+
+    /// Contract: capture setup failure after spawn must still terminate/reap the
+    /// child. Propagating with `?` before cleanup leaves a live process tree.
+    #[test]
+    fn capture_setup_failure_terminates_spawned_child() {
+        use super::{INJECT_CAPTURE_SETUP_ERROR, LAST_SPAWNED_CHILD_PID};
+        use std::sync::atomic::Ordering;
+
+        const INJECTED: &str = "injected capture setup failure";
+
+        struct InjectGuard;
+        impl Drop for InjectGuard {
+            fn drop(&mut self) {
+                INJECT_CAPTURE_SETUP_ERROR.set(None);
+                let pid = LAST_SPAWNED_CHILD_PID.swap(0, Ordering::SeqCst);
+                best_effort_kill_tree_for_test(pid);
+            }
+        }
+        let _guard = InjectGuard;
+        LAST_SPAWNED_CHILD_PID.store(0, Ordering::SeqCst);
+        INJECT_CAPTURE_SETUP_ERROR.set(Some(INJECTED));
+
+        let error = run_bounded(
+            hanging_command(),
+            b"",
+            ProcessLimits::new(Duration::from_secs(2), 1024, 1024),
+            "capture setup failure mutation",
+        )
+        .expect_err("capture setup failure must surface as Err");
+        assert!(
+            error.contains(INJECTED),
+            "setup failure must be preserved: {error}"
+        );
+
+        let child_pid = LAST_SPAWNED_CHILD_PID.load(Ordering::SeqCst);
+        assert_ne!(child_pid, 0, "spawn must have recorded a child pid");
+        assert!(
+            wait_for_descendant_exit(child_pid),
+            "capture setup failure leaked live child {child_pid}; error={error}"
+        );
+    }
+
     /// Contract: when every tree-kill attempt fails (early, deadline retry, and
-    /// fallback), `run_bounded` must still return inside the wall-clock guard
-    /// without leaving blocked I/O workers joined forever. The first termination
-    /// error is preserved and cleanup failure is reported. Descendant reaping
-    /// after a true persistent OS kill failure is outside this helper's power
-    /// and is left to the test guard.
+    /// fallback) while a descendant still holds inherited stdin and a large
+    /// stdin payload would otherwise block a writer thread, `run_bounded` must
+    /// still return inside the wall-clock guard. The first termination error is
+    /// preserved and cleanup failure is reported.
     #[test]
     fn early_tree_kill_failure_preserves_error_after_bounded_cleanup() {
         use super::{
             INJECTED_TREE_KILL_CHILD_PID, INJECTED_TREE_KILL_HITS,
-            INJECT_TERMINATE_REMAINING_TREE_ERROR, LIVE_IO_WORKERS, TRACK_IO_WORKERS,
+            INJECT_TERMINATE_REMAINING_TREE_ERROR,
         };
         use std::sync::atomic::Ordering;
 
         const INJECTED: &str = "injected tree-kill failure";
+        // Larger than a typical pipe buffer so a blocking stdin writer would hang
+        // if a descendant retained the read end without consuming it.
+        const BLOCKING_STDIN: &[u8] = &[b'x'; 256 * 1024];
 
         struct TrackingGuard;
         impl Drop for TrackingGuard {
             fn drop(&mut self) {
-                TRACK_IO_WORKERS.set(false);
                 INJECT_TERMINATE_REMAINING_TREE_ERROR.set(None);
                 INJECTED_TREE_KILL_HITS.store(0, Ordering::SeqCst);
                 let pid = INJECTED_TREE_KILL_CHILD_PID.swap(0, Ordering::SeqCst);
@@ -1351,35 +1597,36 @@ mod tests {
         let _tracking_guard = TrackingGuard;
         INJECTED_TREE_KILL_CHILD_PID.store(0, Ordering::SeqCst);
         INJECTED_TREE_KILL_HITS.store(0, Ordering::SeqCst);
-        assert_eq!(LIVE_IO_WORKERS.load(Ordering::SeqCst), 0);
 
+        // Re-exec helper + post-deadline drain need more headroom than the
+        // shell-based Inherited path; keep the wall-clock guard tight enough to
+        // catch an unbounded stdin join.
+        let run_timeout = Duration::from_secs(1);
+        let wall_guard = Duration::from_secs(5);
         let started = Instant::now();
         let (result_tx, result_rx) = mpsc::channel();
         let worker = thread::spawn(move || {
-            TRACK_IO_WORKERS.set(true);
             INJECT_TERMINATE_REMAINING_TREE_ERROR.set(Some(INJECTED));
-            let command = descendant_spawner_command(HelperPlan::Inherited);
-            let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
+            let command = descendant_spawner_command(HelperPlan::StdinHold);
+            let limits = ProcessLimits::new(run_timeout, 1024, 1024);
             let _ = result_tx.send(run_bounded(
                 command,
-                b"",
+                BLOCKING_STDIN,
                 limits,
                 "injected tree-kill failure mutation",
             ));
         });
 
-        let result = match result_rx.recv_timeout(descendant_test_guard()) {
+        let result = match result_rx.recv_timeout(wall_guard) {
             Ok(result) => result,
             Err(error) => panic!("runner escaped its wall-clock bound: {error}"),
         };
         worker.join().expect("bounded runner worker");
         assert!(
-            started.elapsed() < descendant_test_guard(),
-            "persistent kill failure must return inside the wall-clock guard"
+            started.elapsed() < wall_guard,
+            "persistent kill failure with blocked stdin must return inside the wall-clock guard"
         );
 
-        let live_after_return = LIVE_IO_WORKERS.load(Ordering::SeqCst);
-        let injected_child_pid = INJECTED_TREE_KILL_CHILD_PID.load(Ordering::SeqCst);
         let injected_hits = INJECTED_TREE_KILL_HITS.load(Ordering::SeqCst);
 
         let error = result
@@ -1400,12 +1647,6 @@ mod tests {
         assert!(
             error.contains("fallback tree kill after deadline failed"),
             "cleanup failure must be reported rather than ignored: {error}"
-        );
-        assert_eq!(
-            live_after_return, 0,
-            "run_bounded returned while {live_after_return} I/O worker(s) still live \
-             (detached JoinHandles); injected child pid={injected_child_pid}; \
-             hits={injected_hits}; error={error}"
         );
 
         let descendant_pid = descendant_pid_from(&error).unwrap_or_else(|reason| {
