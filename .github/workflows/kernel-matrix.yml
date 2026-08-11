@@ -43,6 +43,8 @@ on:
       - ".github/workflows/adr025-nightly-evidence.yml"
       # Smoke Install assay calls setup-rust (empty with-map / composite defaults).
       - ".github/workflows/smoke-install.yml"
+      # Runner Spike SDK calls setup-rust (empty with-map / composite defaults).
+      - ".github/workflows/runner-spike-sdk.yml"
       # Note: Cargo.toml/Cargo.lock removed - check-ebpf-changes job handles skip logic
   push:
     branches: [ "main", "debug/**" ]
