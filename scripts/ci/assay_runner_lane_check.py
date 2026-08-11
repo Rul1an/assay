@@ -2138,6 +2138,7 @@ def self_test() -> None:
     _test_run_check_executes()
     _test_run_check_consults_the_override()
     _test_content_tree_comparison()
+    _test_uncovered_paths_require_exact_head()
 
     valid_run = {
         "name": DELEGATED_WORKFLOW_NAME,
@@ -2653,6 +2654,64 @@ def _test_content_tree_comparison() -> None:
     error = compare_content_path_trees(error_manifest, current)
     assert not error.accepted
     assert "proof tree error" in error.diagnostics[0]
+
+
+def _test_uncovered_paths_require_exact_head() -> None:
+    gated_paths = load_gated_path_config()
+    proof_head = "proof-head"
+    manifest = {
+        "source": {"head_sha": proof_head},
+        "content_provenance": {
+            "path_trees": {
+                path: {"oid": f"oid:{path}", "error": None}
+                for path in gated_paths.content_provenance_paths
+            }
+        },
+    }
+    stale_pr = PullRequest(
+        number=1,
+        title="Dependency update",
+        body="",
+        author_login="dependabot[bot]",
+        head_sha="new-head",
+        files=("Cargo.lock",),
+    )
+
+    old_fetch = globals()["fetch_ref_for_diff"]
+    old_current = globals()["current_content_path_trees"]
+    try:
+        def unexpected_downstream(*_args: object) -> None:
+            raise AssertionError("stale uncovered proof reached content-tree comparison")
+
+        globals()["fetch_ref_for_diff"] = unexpected_downstream
+        globals()["current_content_path_trees"] = unexpected_downstream
+        rejected = content_tree_proof_accepts_head(manifest, stale_pr)
+        assert not rejected.accepted
+        assert rejected.diagnostics == (
+            "Cargo.lock: gated path is not covered by content-provenance trees",
+        )
+
+        globals()["fetch_ref_for_diff"] = lambda *_args: None
+        globals()["current_content_path_trees"] = lambda _head: (
+            {
+                path: f"oid:{path}"
+                for path in gated_paths.content_provenance_paths
+            },
+            (),
+        )
+        exact_pr = PullRequest(
+            number=stale_pr.number,
+            title=stale_pr.title,
+            body=stale_pr.body,
+            author_login=stale_pr.author_login,
+            head_sha=proof_head,
+            files=stale_pr.files,
+        )
+        accepted = content_tree_proof_accepts_head(manifest, exact_pr)
+        assert accepted.accepted, accepted.diagnostics
+    finally:
+        globals()["fetch_ref_for_diff"] = old_fetch
+        globals()["current_content_path_trees"] = old_current
 
 
 def _test_attested_proof_pack_helpers() -> None:
