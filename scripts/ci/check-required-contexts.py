@@ -28,9 +28,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -171,17 +174,6 @@ def main_live(path: str) -> int:
         return EXIT_DRIFT
 
     print("required-contexts-live=match")
-    return EXIT_MATCH
-
-
-def run_live_exit(live_text: str, baseline: dict) -> int:
-    """Exercise check_live exit mapping without going through argparse/filesystem."""
-    try:
-        problems = check_live(baseline.__getitem__, live_text)
-    except DriftError:
-        return EXIT_UNREADABLE
-    if problems:
-        return EXIT_DRIFT
     return EXIT_MATCH
 
 
@@ -405,27 +397,68 @@ def _baseline_live_json(contexts: list[str], *, strict: bool = True, app_id=1536
     )
 
 
+DEFAULT_BRANCH_GUARD = "if: github.ref_name == github.event.repository.default_branch"
+
+
+def _apply_text(baseline: str, mutate, label: str) -> str | None:
+    """Reject no-op mutations: unchanged output means the case never bit."""
+    mutated = mutate(baseline)
+    if mutated == baseline:
+        print(f"self-test: mutation {label} did not apply", file=sys.stderr)
+        return None
+    return mutated
+
+
+def _invoke_main_live(live_text: str) -> int:
+    """Exercise the production exit path: tempfile + main_live() (stdout/stderr redirected)."""
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".json", delete=False, encoding="utf-8"
+    ) as handle:
+        handle.write(live_text)
+        path = handle.name
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+            io.StringIO()
+        ):
+            return main_live(path)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
 def live_self_test(baseline: dict) -> int:
     """Prove live-response mode detects semantic drift and unreadable evidence separately."""
     expected = ruleset_contexts(baseline[RULESET])
     expected_strict = ruleset_strict(baseline[RULESET])
     live_ok = _baseline_live_json(expected, strict=expected_strict)
 
-    # Match, including reordered contexts and an app_id that disagrees with the ruleset.
+    def apply_live(mutate, label: str) -> str | None:
+        return _apply_text(live_ok, mutate, label)
+
+    # Identity must be rejected by the applicator (real no-op bite).
+    if (lambda t: t)(live_ok) != live_ok:
+        print("self-test: identity no-op unexpectedly changed live JSON", file=sys.stderr)
+        return 1
+    with contextlib.redirect_stderr(io.StringIO()):
+        identity_applied = apply_live(lambda t: t, "identity_noop")
+    if identity_applied is not None:
+        print("self-test: identity no-op was not rejected by apply helper", file=sys.stderr)
+        return 1
+
+    # Match cases, including reorder and app_id noise, via production main_live().
     reordered = list(reversed(expected))
     assert set(reordered) == set(expected)
-    for label, live_text in (
+    match_cases = [
         ("baseline", live_ok),
         ("reordered", _baseline_live_json(reordered, strict=expected_strict)),
         ("app_id_ignored", _baseline_live_json(expected, strict=expected_strict, app_id=None)),
-    ):
-        try:
-            problems = check_live(baseline.__getitem__, live_text)
-        except DriftError as exc:
-            print(f"self-test: live {label} should match, got unreadable: {exc}", file=sys.stderr)
-            return 1
-        if problems:
-            print(f"self-test: live {label} should match, got drift: {problems}", file=sys.stderr)
+    ]
+    for label, live_text in match_cases:
+        code = _invoke_main_live(live_text)
+        if code != EXIT_MATCH:
+            print(
+                f"self-test: live {label} must exit {EXIT_MATCH} via main_live, got {code}",
+                file=sys.stderr,
+            )
             return 1
 
     drift_cases = [
@@ -443,20 +476,15 @@ def live_self_test(baseline: dict) -> int:
         ),
     ]
     for label, mutate in drift_cases:
-        mutated = mutate(live_ok)
-        if mutated == live_ok:
-            print(f"self-test: live drift mutation {label} did not apply", file=sys.stderr)
+        mutated = apply_live(mutate, label)
+        if mutated is None:
             return 1
-        try:
-            problems = check_live(baseline.__getitem__, mutated)
-        except DriftError as exc:
+        code = _invoke_main_live(mutated)
+        if code != EXIT_DRIFT:
             print(
-                f"self-test: live drift {label} was unreadable, expected semantic drift: {exc}",
+                f"self-test: live drift {label} must exit {EXIT_DRIFT} via main_live, got {code}",
                 file=sys.stderr,
             )
-            return 1
-        if not problems:
-            print(f"self-test: live drift {label} went undetected", file=sys.stderr)
             return 1
 
     unreadable_live = [
@@ -466,64 +494,58 @@ def live_self_test(baseline: dict) -> int:
         ("missing_strict", lambda t: json.dumps({"contexts": expected})),
     ]
     for label, mutate in unreadable_live:
-        mutated = mutate(live_ok)
-        if mutated == live_ok:
-            print(f"self-test: live unreadable mutation {label} did not apply", file=sys.stderr)
+        mutated = apply_live(mutate, label)
+        if mutated is None:
             return 1
-        try:
-            check_live(baseline.__getitem__, mutated)
-        except DriftError:
-            continue
-        print(
-            f"self-test: live unreadable {label} did not raise; the guard accepted bad evidence",
-            file=sys.stderr,
-        )
-        return 1
+        code = _invoke_main_live(mutated)
+        if code != EXIT_UNREADABLE:
+            print(
+                f"self-test: live unreadable {label} must exit {EXIT_UNREADABLE} "
+                f"via main_live, got {code}",
+                file=sys.stderr,
+            )
+            return 1
 
-    # Harness bite: a true no-op must be rejected by the mutation applicator, not silent.
-    noop = (lambda t: t)(live_ok)
-    if noop != live_ok:
-        print("self-test: no-op mutation unexpectedly changed live JSON", file=sys.stderr)
+    # app_id-only change must apply (text differs) and still match through main_live.
+    app_only = apply_live(
+        lambda t: _baseline_live_json(expected, strict=expected_strict, app_id=99999),
+        "app_id_only",
+    )
+    if app_only is None:
         return 1
-    # And changing only app_id must not be treated as drift (already covered) while still
-    # changing the file so a harness would accept the mutation as applied.
-    app_only = _baseline_live_json(expected, strict=expected_strict, app_id=99999)
-    if app_only == live_ok:
-        print("self-test: app_id-only mutation did not apply", file=sys.stderr)
-        return 1
-    try:
-        problems = check_live(baseline.__getitem__, app_only)
-    except DriftError as exc:
-        print(f"self-test: app_id-only change must be ignored, got unreadable: {exc}", file=sys.stderr)
-        return 1
-    if problems:
-        print(f"self-test: app_id-only change must be ignored, got drift: {problems}", file=sys.stderr)
-        return 1
-
-    # CLI exit codes: 0 match, 1 drift, 2 unreadable.
-    if run_live_exit(live_ok, baseline) != EXIT_MATCH:
-        print("self-test: live CLI match must exit 0", file=sys.stderr)
-        return 1
-    if run_live_exit(
-        _baseline_live_json(expected + ["extra"], strict=expected_strict), baseline
-    ) != EXIT_DRIFT:
-        print("self-test: live CLI drift must exit 1", file=sys.stderr)
-        return 1
-    if run_live_exit("{", baseline) != EXIT_UNREADABLE:
-        print("self-test: live CLI unreadable must exit 2", file=sys.stderr)
+    if _invoke_main_live(app_only) != EXIT_MATCH:
+        print("self-test: app_id-only change must exit 0 via main_live", file=sys.stderr)
         return 1
 
     return 0
 
 
-def workflow_contract_self_test() -> int:
-    """Thin string contracts for the reconciliation workflow — not a YAML parser."""
-    path = REPO_ROOT / RECONCILE_WORKFLOW
-    if not path.is_file():
-        print(f"self-test: missing workflow {RECONCILE_WORKFLOW}", file=sys.stderr)
-        return 1
-    text = path.read_text(encoding="utf-8")
+def _workflow_on_event_keys(text: str) -> list[str]:
+    """Top-level keys under the workflow `on:` mapping (line-based, not a YAML parser)."""
+    keys: list[str] = []
+    in_on = False
+    for line in text.splitlines():
+        if not in_on:
+            if line.rstrip() == "on:":
+                in_on = True
+            continue
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = re.match(r"^([ \t]*)([A-Za-z0-9_-]+):\s*(?:#.*)?$", line)
+        if not match:
+            continue
+        indent = match.group(1)
+        key = match.group(2)
+        if len(indent) == 0:
+            break
+        if indent in ("  ", "\t"):
+            keys.append(key)
+    return keys
 
+
+def workflow_contract_problems(text: str) -> list[str]:
+    """Return contract violations for reconcile-workflow text (no YAML parse)."""
+    problems: list[str] = []
     required_substrings = [
         "schedule:",
         "workflow_dispatch:",
@@ -534,12 +556,12 @@ def workflow_contract_self_test() -> int:
         "protection/required_status_checks",
         "github.repository",
         "github.event.repository.default_branch",
+        DEFAULT_BRANCH_GUARD,
         "set -euo pipefail",
     ]
     for needle in required_substrings:
         if needle not in text:
-            print(f"self-test: workflow missing {needle!r}", file=sys.stderr)
-            return 1
+            problems.append(f"missing {needle!r}")
 
     forbidden = [
         "pull_request:",
@@ -554,21 +576,80 @@ def workflow_contract_self_test() -> int:
     ]
     for needle in forbidden:
         if needle in text:
-            print(f"self-test: workflow must not contain {needle!r}", file=sys.stderr)
-            return 1
+            problems.append(f"forbidden {needle!r}")
 
-    # Exactly one GET via gh api (no method flag => GET). Count gh api invocations.
+    on_keys = _workflow_on_event_keys(text)
+    if set(on_keys) != {"schedule", "workflow_dispatch"}:
+        problems.append(
+            "on: events must be exactly schedule + workflow_dispatch, "
+            f"found {on_keys}"
+        )
+
+    # Exactly one job-level default-branch guard line (secret boundary).
+    guard_lines = [
+        line for line in text.splitlines() if line.strip() == DEFAULT_BRANCH_GUARD
+    ]
+    if len(guard_lines) != 1:
+        problems.append(
+            f"exact default-branch guard must appear once, found {len(guard_lines)}"
+        )
+
     gh_api_lines = [
         line for line in text.splitlines() if re.search(r"(^|[^\w-])gh(\s+|$)api\b", line)
     ]
     if len(gh_api_lines) != 1:
+        problems.append(f"exactly one gh api call required, found {len(gh_api_lines)}")
+    elif re.search(r"-X\s+(PUT|PATCH|DELETE|POST)\b", gh_api_lines[0]):
+        problems.append("the sole gh api call must be a GET")
+
+    return problems
+
+
+def workflow_contract_self_test() -> int:
+    """Thin string contracts for the reconciliation workflow — not a YAML parser."""
+    path = REPO_ROOT / RECONCILE_WORKFLOW
+    if not path.is_file():
+        print(f"self-test: missing workflow {RECONCILE_WORKFLOW}", file=sys.stderr)
+        return 1
+    text = path.read_text(encoding="utf-8")
+
+    problems = workflow_contract_problems(text)
+    if problems:
+        print("self-test: workflow contract failed:", file=sys.stderr)
+        for problem in problems:
+            print(f"  {problem}", file=sys.stderr)
+        return 1
+
+    # Mutation: drop or rewrite the default-branch secret boundary — must go red.
+    removed = _apply_text(
+        text,
+        lambda t: "\n".join(
+            line for line in t.splitlines() if line.strip() != DEFAULT_BRANCH_GUARD
+        )
+        + ("\n" if t.endswith("\n") else ""),
+        "default_branch_guard_removed",
+    )
+    if removed is None:
+        return 1
+    if not workflow_contract_problems(removed):
         print(
-            f"self-test: workflow must contain exactly one gh api call, found {len(gh_api_lines)}",
+            "self-test: removing default-branch guard went undetected",
             file=sys.stderr,
         )
         return 1
-    if re.search(r"-X\s+(PUT|PATCH|DELETE|POST)\b", gh_api_lines[0]):
-        print("self-test: the sole gh api call must be a GET", file=sys.stderr)
+
+    rewritten = _apply_text(
+        text,
+        lambda t: t.replace(DEFAULT_BRANCH_GUARD, "if: github.ref == 'refs/heads/main'", 1),
+        "default_branch_guard_rewritten",
+    )
+    if rewritten is None:
+        return 1
+    if not workflow_contract_problems(rewritten):
+        print(
+            "self-test: rewriting default-branch guard went undetected",
+            file=sys.stderr,
+        )
         return 1
 
     return 0
