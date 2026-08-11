@@ -20,8 +20,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 const REAP_GRACE: Duration = Duration::from_secs(1);
 const MAX_DIAGNOSTIC_BYTES: usize = 4096;
 
-// Test-only: when set, the next `terminate_remaining_tree` returns this error
-// without sending a tree kill, so the early-failure path can be exercised.
+// Test-only: when set, every tree-kill attempt returns this error without
+// sending a tree kill, so the first attempt and the deadline retry can both
+// be exercised under a persistent failure.
 #[cfg(test)]
 thread_local! {
     static INJECT_TERMINATE_REMAINING_TREE_ERROR: Cell<Option<&'static str>> = const { Cell::new(None) };
@@ -30,6 +31,10 @@ thread_local! {
 // Test-only: process id observed when an injected tree-kill failure fires.
 #[cfg(test)]
 static INJECTED_TREE_KILL_CHILD_PID: AtomicU32 = AtomicU32::new(0);
+
+// Test-only: how many injected tree-kill failures fired on this thread's run.
+#[cfg(test)]
+static INJECTED_TREE_KILL_HITS: AtomicUsize = AtomicUsize::new(0);
 
 // Test-only: when set on the `run_bounded` caller thread, spawned I/O workers
 // register in `LIVE_IO_WORKERS` for the duration of their closure.
@@ -234,12 +239,41 @@ pub fn run_bounded(
             if early_failure.is_none() && tree_termination_error.is_none() {
                 early_failure = Some(format!("deadline of {:?} expired", limits.timeout));
             }
-            break terminate_and_reap(
+            // Never return here on terminate/reap failure: JoinHandles and
+            // descendants may still be live. Preserve the first error, best-
+            // effort kill so readers can EOF, then join below before surfacing.
+            let prior_status = observed_status.take();
+            let status = match terminate_and_reap(
                 child.as_mut(),
-                observed_status.take(),
+                prior_status,
                 context,
                 &command_display,
-            )?;
+            ) {
+                Ok(status) => status,
+                Err(error) => {
+                    if tree_termination_error.is_none() {
+                        tree_termination_error = Some(error);
+                    }
+                    // terminate_and_reap may have skipped OS kill under a
+                    // persistent injected failure; a direct start_kill is
+                    // outside that seam so joins below stay bounded.
+                    let _ = child.start_kill();
+                    let _ = child.inner_mut().start_kill();
+                    if let Some(status) = prior_status {
+                        status
+                    } else {
+                        reap_after_tree_kill(child.as_mut(), None).map_err(|reap_error| {
+                            match tree_termination_error.take() {
+                                Some(error) => format!("{error}; reap={reap_error}"),
+                                None => format!(
+                                    "{context}: failed to reap {command_display} after deadline termination: {reap_error}"
+                                ),
+                            }
+                        })?
+                    }
+                }
+            };
+            break status;
         }
         thread::sleep(POLL_INTERVAL);
     };
@@ -357,6 +391,20 @@ fn terminate_and_reap(
     context: &str,
     command: &str,
 ) -> Result<ExitStatus, String> {
+    #[cfg(test)]
+    if let Some(injected) = injected_tree_kill_failure(child.id()) {
+        // Persistent injected failure skips the OS kill, matching
+        // terminate_remaining_tree, so the deadline retry can still return Err
+        // while descendants hold inherited pipes.
+        let status = reap_after_tree_kill(child, observed_status).map_err(|reap_error| {
+            format!(
+                "{context}: failed to reap {command} after tree termination; tree=Some({injected}); direct_kill=None; reap={reap_error}"
+            )
+        })?;
+        return Err(format!(
+            "{context}: failed to terminate process tree for {command}: {injected}; direct_kill=None; status={status}"
+        ));
+    }
     let tree_error = child
         .start_kill()
         .err()
@@ -420,8 +468,7 @@ fn terminate_remaining_tree(
     command: &str,
 ) -> Result<(), String> {
     #[cfg(test)]
-    if let Some(injected) = INJECT_TERMINATE_REMAINING_TREE_ERROR.take() {
-        INJECTED_TREE_KILL_CHILD_PID.store(child.id(), Ordering::SeqCst);
+    if let Some(injected) = injected_tree_kill_failure(child.id()) {
         return Err(format!(
             "{context}: failed to terminate remaining process tree for {command}: {injected}"
         ));
@@ -436,6 +483,19 @@ fn terminate_remaining_tree(
             ))
         }
     }
+}
+
+/// Test-only: observe a persistent injected tree-kill failure without clearing it.
+///
+/// Unlike a one-shot `take()`, this stays armed across the early
+/// `terminate_remaining_tree` attempt and the deadline `terminate_and_reap`
+/// retry so both arms can fail the same way.
+#[cfg(test)]
+fn injected_tree_kill_failure(child_id: u32) -> Option<&'static str> {
+    INJECT_TERMINATE_REMAINING_TREE_ERROR.get().inspect(|_| {
+        INJECTED_TREE_KILL_CHILD_PID.store(child_id, Ordering::SeqCst);
+        INJECTED_TREE_KILL_HITS.fetch_add(1, Ordering::SeqCst);
+    })
 }
 
 #[cfg(unix)]
@@ -1113,14 +1173,15 @@ mod tests {
         assert!(!process_tree_quiescent_after_io(&error));
     }
 
-    /// Contract: an early `terminate_remaining_tree` failure must not let
-    /// `run_bounded` return while I/O workers or process-tree descendants are
-    /// still live. The original termination error is preserved after cleanup.
+    /// Contract: a persistent tree-kill failure (first attempt and deadline
+    /// retry) must not let `run_bounded` return while I/O workers or
+    /// process-tree descendants are still live. The original termination error
+    /// is preserved after bounded cleanup and joins.
     #[test]
     fn early_tree_kill_failure_preserves_error_after_bounded_cleanup() {
         use super::{
-            INJECTED_TREE_KILL_CHILD_PID, INJECT_TERMINATE_REMAINING_TREE_ERROR, LIVE_IO_WORKERS,
-            TRACK_IO_WORKERS,
+            INJECTED_TREE_KILL_CHILD_PID, INJECTED_TREE_KILL_HITS,
+            INJECT_TERMINATE_REMAINING_TREE_ERROR, LIVE_IO_WORKERS, TRACK_IO_WORKERS,
         };
         use std::sync::atomic::Ordering;
 
@@ -1131,12 +1192,14 @@ mod tests {
             fn drop(&mut self) {
                 TRACK_IO_WORKERS.set(false);
                 INJECT_TERMINATE_REMAINING_TREE_ERROR.set(None);
+                INJECTED_TREE_KILL_HITS.store(0, Ordering::SeqCst);
                 let pid = INJECTED_TREE_KILL_CHILD_PID.swap(0, Ordering::SeqCst);
                 best_effort_kill_tree_for_test(pid);
             }
         }
         let _tracking_guard = TrackingGuard;
         INJECTED_TREE_KILL_CHILD_PID.store(0, Ordering::SeqCst);
+        INJECTED_TREE_KILL_HITS.store(0, Ordering::SeqCst);
         assert_eq!(LIVE_IO_WORKERS.load(Ordering::SeqCst), 0);
 
         let (result_tx, result_rx) = mpsc::channel();
@@ -1161,9 +1224,14 @@ mod tests {
 
         let live_after_return = LIVE_IO_WORKERS.load(Ordering::SeqCst);
         let injected_child_pid = INJECTED_TREE_KILL_CHILD_PID.load(Ordering::SeqCst);
+        let injected_hits = INJECTED_TREE_KILL_HITS.load(Ordering::SeqCst);
 
-        let error = result.expect_err(
-            "injected terminate_remaining_tree failure must surface as Err after cleanup",
+        let error = result
+            .expect_err("persistent injected tree-kill failure must surface as Err after cleanup");
+        assert!(
+            injected_hits >= 2,
+            "injection must arm both the early terminate_remaining_tree attempt and the \
+             deadline terminate_and_reap retry; hits={injected_hits}; error={error}"
         );
         assert!(
             error.contains(INJECTED),
@@ -1171,12 +1239,13 @@ mod tests {
         );
         assert!(
             error.contains("failed to terminate remaining process tree"),
-            "tree-kill failure wording must be preserved: {error}"
+            "first tree-kill failure wording must be preserved: {error}"
         );
         assert_eq!(
             live_after_return, 0,
             "run_bounded returned while {live_after_return} I/O worker(s) still live \
-             (detached JoinHandles); injected child pid={injected_child_pid}; error={error}"
+             (detached JoinHandles); injected child pid={injected_child_pid}; \
+             hits={injected_hits}; error={error}"
         );
 
         let descendant_pid = descendant_pid_from(&error).unwrap_or_else(|reason| {
