@@ -35,6 +35,83 @@ impl ProcessLimits {
 pub const GOLDEN_PATH_LIMITS: ProcessLimits =
     ProcessLimits::new(Duration::from_secs(10), 1024 * 1024, 1024 * 1024);
 
+/// Where a reported exit status came from.
+///
+/// A status the harness reaped after terminating the process tree is not an
+/// ending the child chose: on Windows `TerminateJobObject` supplies the exit
+/// code itself, and on Unix the group kill supplies the signal. Rendering that
+/// the same way as a child-chosen exit makes a timeout indistinguishable from a
+/// child that died instantly.
+#[derive(Clone, Copy)]
+enum StatusOrigin {
+    ChildExit,
+    HarnessTermination,
+}
+
+/// A child's exit status together with the origin that explains it.
+#[derive(Clone, Copy)]
+struct Ending {
+    status: ExitStatus,
+    origin: StatusOrigin,
+}
+
+impl Ending {
+    fn child_exit(status: ExitStatus) -> Self {
+        Self {
+            status,
+            origin: StatusOrigin::ChildExit,
+        }
+    }
+
+    fn harness_termination(status: ExitStatus) -> Self {
+        Self {
+            status,
+            origin: StatusOrigin::HarnessTermination,
+        }
+    }
+
+    fn describe(&self) -> String {
+        match self.origin {
+            StatusOrigin::ChildExit => format!("{} (child exit)", self.status),
+            StatusOrigin::HarnessTermination => format!(
+                "{} (recorded after harness termination; may be the termination's own code)",
+                self.status
+            ),
+        }
+    }
+}
+
+/// Names what the deadline was still waiting for when it expired.
+///
+/// Without this, "deadline expired" covers two different endings — a child that
+/// never exited, and a child that exited while a descendant kept its output
+/// handles open — and the reader of a failure cannot tell them apart.
+fn deadline_expiry(
+    timeout: Duration,
+    child_exited: bool,
+    stdin_pending: bool,
+    stdout_pending: bool,
+    stderr_pending: bool,
+) -> String {
+    let mut outstanding = Vec::new();
+    if !child_exited {
+        outstanding.push("child still running");
+    }
+    if stdin_pending {
+        outstanding.push("stdin still being written");
+    }
+    if stdout_pending {
+        outstanding.push("stdout handle still open");
+    }
+    if stderr_pending {
+        outstanding.push("stderr handle still open");
+    }
+    format!(
+        "deadline of {timeout:?} expired; outstanding=[{}]",
+        outstanding.join(", ")
+    )
+}
+
 #[derive(Clone, Copy)]
 enum CapturedStream {
     Stdout,
@@ -120,7 +197,7 @@ pub fn run_bounded(
     let deadline = Instant::now() + limits.timeout;
     let mut early_failure = None;
     let mut observed_status = None;
-    let status = loop {
+    let ending = loop {
         if early_failure.is_none() {
             if let Ok(stream) = overflow_rx.try_recv() {
                 // The reader closes its pipe after limit + 1 bytes. Keep the
@@ -138,9 +215,13 @@ pub fn run_bounded(
                 Ok(Some(status)) => observed_status = Some(status),
                 Ok(None) => {}
                 Err(error) => {
-                    let reap = terminate_and_reap(child.as_mut(), None, context, &command_display);
+                    let reap =
+                        match terminate_and_reap(child.as_mut(), None, context, &command_display) {
+                            Ok(ending) => ending.describe(),
+                            Err(reap_error) => reap_error,
+                        };
                     return Err(format!(
-                        "{context}: poll {command_display}: {error}; terminate/reap: {reap:?}"
+                        "{context}: poll {command_display}: {error}; terminate/reap: {reap}"
                     ));
                 }
             }
@@ -152,14 +233,22 @@ pub fn run_bounded(
             && stderr_reader.is_finished()
         {
             finish_process_tree(child.as_mut(), context, &command_display)?;
-            break observed_status
-                .take()
-                .expect("status was checked immediately above");
+            break Ending::child_exit(
+                observed_status
+                    .take()
+                    .expect("status was checked immediately above"),
+            );
         }
 
         if Instant::now() >= deadline {
             if early_failure.is_none() {
-                early_failure = Some(format!("deadline of {:?} expired", limits.timeout));
+                early_failure = Some(deadline_expiry(
+                    limits.timeout,
+                    observed_status.is_some(),
+                    !stdin_writer.is_finished(),
+                    !stdout_reader.is_finished(),
+                    !stderr_reader.is_finished(),
+                ));
             }
             break terminate_and_reap(
                 child.as_mut(),
@@ -182,7 +271,7 @@ pub fn run_bounded(
             context,
             &command_display,
             &failure,
-            &status,
+            &ending,
             &stdout,
             &stderr,
         ));
@@ -195,7 +284,7 @@ pub fn run_bounded(
                 "stdout exceeded its {}-byte ceiling",
                 limits.max_stdout_bytes
             ),
-            &status,
+            &ending,
             &stdout,
             &stderr,
         ));
@@ -208,7 +297,7 @@ pub fn run_bounded(
                 "stderr exceeded its {}-byte ceiling",
                 limits.max_stderr_bytes
             ),
-            &status,
+            &ending,
             &stdout,
             &stderr,
         ));
@@ -223,14 +312,14 @@ pub fn run_bounded(
             context,
             &command_display,
             &format!("write stdin: {error}"),
-            &status,
+            &ending,
             &stdout,
             &stderr,
         ))
     })?;
 
     Ok(Output {
-        status,
+        status: ending.status,
         stdout,
         stderr,
     })
@@ -271,7 +360,7 @@ fn terminate_and_reap(
     observed_status: Option<ExitStatus>,
     context: &str,
     command: &str,
-) -> Result<ExitStatus, String> {
+) -> Result<Ending, String> {
     let tree_error = child
         .start_kill()
         .err()
@@ -279,31 +368,32 @@ fn terminate_and_reap(
     let direct_kill_error = tree_error
         .as_ref()
         .and_then(|_| child.inner_mut().start_kill().err());
-    let status = reap_after_tree_kill(child, observed_status).map_err(|reap_error| {
+    let ending = reap_after_tree_kill(child, observed_status).map_err(|reap_error| {
         format!(
             "{context}: failed to reap {command} after tree termination; tree={tree_error:?}; direct_kill={direct_kill_error:?}; reap={reap_error}"
         )
     })?;
     if let Some(tree_error) = tree_error {
         return Err(format!(
-            "{context}: failed to terminate process tree for {command}: {tree_error}; direct_kill={direct_kill_error:?}; status={status}"
+            "{context}: failed to terminate process tree for {command}: {tree_error}; direct_kill={direct_kill_error:?}; status={}",
+            ending.describe()
         ));
     }
-    Ok(status)
+    Ok(ending)
 }
 
 fn reap_after_tree_kill(
     child: &mut dyn ChildWrapper,
     observed_status: Option<ExitStatus>,
-) -> Result<ExitStatus, String> {
+) -> Result<Ending, String> {
     if let Some(status) = observed_status {
-        return Ok(status);
+        return Ok(Ending::child_exit(status));
     }
 
     let deadline = Instant::now() + REAP_GRACE;
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => return Ok(status),
+            Ok(Some(status)) => return Ok(Ending::harness_termination(status)),
             Ok(None) if Instant::now() < deadline => thread::sleep(POLL_INTERVAL),
             Ok(None) => return Err(format!("reap grace of {REAP_GRACE:?} expired")),
             Err(error) => return Err(format!("poll after termination: {error}")),
@@ -378,12 +468,13 @@ fn failure_diagnostic(
     context: &str,
     command: &str,
     failure: &str,
-    status: &ExitStatus,
+    ending: &Ending,
     stdout: &[u8],
     stderr: &[u8],
 ) -> String {
     format!(
-        "{context}: {command}: {failure}; status={status}; stdout={}; stderr={}",
+        "{context}: {command}: {failure}; status={}; stdout={}; stderr={}",
+        ending.describe(),
         excerpt(stdout),
         excerpt(stderr)
     )
@@ -401,9 +492,9 @@ fn excerpt(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::{deadline_expiry, run_bounded, ProcessLimits};
     #[cfg(unix)]
     use super::{process_tree_absent, process_tree_quiescent_after_io};
-    use super::{run_bounded, ProcessLimits};
     use std::path::Path;
     use std::process::{Command, Stdio};
     use std::sync::mpsc;
@@ -602,6 +693,51 @@ mod tests {
             "$path = [Environment]::GetEnvironmentVariable('ASSAY_DESCENDANT_PID_FILE'); $p = Start-Process -FilePath ping.exe -ArgumentList @('-t','127.0.0.1') -WindowStyle Hidden -PassThru; [IO.File]::WriteAllText($path, [string]$p.Id); [Console]::Out.Write('parent-ready')",
         ]);
         command
+    }
+
+    #[test]
+    fn deadline_expiry_names_each_outstanding_wait_and_distinguishes_child_liveness() {
+        let all = deadline_expiry(Duration::from_secs(5), false, true, true, true);
+        assert!(
+            all.contains("outstanding=["),
+            "deadline naming must expose outstanding waits: {all}"
+        );
+        assert!(all.contains("child still running"), "{all}");
+        assert!(all.contains("stdin still being written"), "{all}");
+        assert!(all.contains("stdout handle still open"), "{all}");
+        assert!(all.contains("stderr handle still open"), "{all}");
+
+        let running = deadline_expiry(Duration::from_secs(5), false, false, true, true);
+        assert!(running.contains("child still running"), "{running}");
+        assert!(running.contains("stdout handle still open"), "{running}");
+        assert!(running.contains("stderr handle still open"), "{running}");
+
+        let exited = deadline_expiry(Duration::from_secs(5), true, false, true, true);
+        assert!(!exited.contains("child still running"), "{exited}");
+        assert!(exited.contains("stdout handle still open"), "{exited}");
+        assert!(exited.contains("stderr handle still open"), "{exited}");
+        assert!(
+            exited.contains("outstanding=["),
+            "child-exited-with-open-handles must still name outstanding waits: {exited}"
+        );
+    }
+
+    #[test]
+    fn a_harness_terminated_status_is_not_reported_as_a_child_exit() {
+        let command = hanging_command();
+        let limits = ProcessLimits::new(Duration::from_millis(100), 1024, 1024);
+        let error = run_bounded(command, b"", limits, "harness termination mutation")
+            .expect_err("hanging child must time out");
+
+        assert!(
+            error.contains("outstanding=[child still running"),
+            "{error}"
+        );
+        assert!(
+            error.contains("recorded after harness termination"),
+            "{error}"
+        );
+        assert!(!error.contains("(child exit)"), "{error}");
     }
 
     #[test]
