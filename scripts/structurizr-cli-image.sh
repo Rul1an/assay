@@ -37,9 +37,11 @@ fi
 
 image="${refs[0]}"
 
-# Digest-pinned references only. Refuse :latest, tags, and short digests.
-if [[ ! "${image}" =~ ^[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]; then
-  echo "structurizr CLI image pin is malformed (want name@sha256:<64 lowercase hex>): '${image}'" >&2
+# Exactly structurizr/cli at a full sha256 digest. Refuse :latest, tags, short
+# digests, and any other repository (a valid digest under a foreign name is still
+# a supply-chain bypass).
+if [[ ! "${image}" =~ ^structurizr/cli@sha256:[0-9a-f]{64}$ ]]; then
+  echo "structurizr CLI image pin is malformed (want structurizr/cli@sha256:<64 lowercase hex>): '${image}'" >&2
   echo "the pin lives in .github/structurizr-cli-image and is the only place to change it" >&2
   exit 1
 fi

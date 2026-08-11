@@ -23,4 +23,7 @@ jobs:
           persist-credentials: false
 
       - name: Validate Structurizr workspaces
+        env:
+          # Fail closed on the digest-pinned image; never a host structurizr-cli.
+          STRUCTURIZR_FORCE_DOCKER: "1"
         run: bash scripts/structurizr-validate.sh

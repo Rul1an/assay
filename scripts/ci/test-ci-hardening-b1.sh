@@ -78,7 +78,8 @@ PY
 
 is_digest_image_ref() {
   local ref="$1"
-  [[ "${ref}" =~ ^[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]
+  # Exactly the Structurizr CLI repository — any other name@digest is hostile.
+  [[ "${ref}" =~ ^structurizr/cli@sha256:[0-9a-f]{64}$ ]]
 }
 
 echo "== pin file matches workspace release line ${EXPECTED_TAG} =="
@@ -205,7 +206,7 @@ if [[ -f "${STRUCTURIZR_IMAGE_HELPER}" ]]; then
     if is_digest_image_ref "${image}" && [[ "${image}" == "${pin_raw}" ]]; then
       ok "helper returns the pin file image reference"
     else
-      fail "helper returned '${image}', pin file is '${pin_raw}' (want identical name@sha256:<64 hex>)"
+      fail "helper returned '${image}', pin file is '${pin_raw}' (want identical structurizr/cli@sha256:<64 hex>)"
     fi
   else
     fail "cannot compare helper to missing pin file"
@@ -244,6 +245,13 @@ if [[ -f "${STRUCTURIZR_IMAGE_HELPER}" ]]; then
     fail "image helper accepted multi-line pin"
   else
     ok "image helper rejects multi-line pin"
+  fi
+  # Foreign repository with a valid-looking digest must not be accepted.
+  printf 'evil.example/cli@sha256:%s\n' "$(python3 -c 'print("c" * 64)')" >"${bad_image}"
+  if STRUCTURIZR_CLI_IMAGE_FILE="${bad_image}" "${STRUCTURIZR_IMAGE_HELPER}" >/dev/null 2>"${scratch}/img-err"; then
+    fail "image helper accepted foreign repository evil.example/cli@sha256:<64 hex>"
+  else
+    ok "image helper rejects foreign repository (evil.example/cli)"
   fi
 else
   fail "cannot prove image-pin fail-closed; helper missing"
@@ -302,6 +310,116 @@ if grep -qE '^\s*-\s*"\.github/structurizr-cli-image"\s*$' "${STRUCTURIZR_WF}"; 
   ok "structurizr-validate.yml paths filter includes the image pin file"
 else
   fail "structurizr-validate.yml paths filter missing .github/structurizr-cli-image"
+fi
+
+echo "== CI forces pinned Docker route (no native CLI bypass) =="
+# The workflow must set STRUCTURIZR_FORCE_DOCKER on the validate step so a
+# coincidentally installed structurizr-cli cannot skip the digest-pinned image.
+if python3 - "${STRUCTURIZR_WF}" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1]).read()
+jobs = text.split("\njobs:", 1)
+if len(jobs) != 2:
+    sys.exit("no jobs")
+body = jobs[1]
+# Find the Validate Structurizr workspaces step and require FORCE_DOCKER in its env/run.
+step_pat = re.compile(
+    r"- name: Validate Structurizr workspaces\n(?P<body>(?:[ \t]+.+\n)+)",
+    re.M,
+)
+m = step_pat.search(body)
+if not m:
+    sys.exit("validate step missing")
+step = m.group("body")
+if "STRUCTURIZR_FORCE_DOCKER" not in step:
+    sys.exit("FORCE_DOCKER unset")
+# Must be an active assignment to a truthy value, not a comment.
+active = [
+    line
+    for line in step.splitlines()
+    if line.strip() and not line.lstrip().startswith("#")
+]
+joined = "\n".join(active)
+if not re.search(
+    r"STRUCTURIZR_FORCE_DOCKER:\s*['\"]?[1ty]",
+    joined,
+    re.I,
+) and "STRUCTURIZR_FORCE_DOCKER=1" not in joined:
+    sys.exit("FORCE_DOCKER not truthy")
+if "structurizr-validate.sh" not in joined:
+    sys.exit("does not call validate script")
+sys.exit(0)
+PY
+then
+  ok "structurizr-validate.yml forces STRUCTURIZR_FORCE_DOCKER for pinned Docker"
+else
+  fail "structurizr-validate.yml does not force STRUCTURIZR_FORCE_DOCKER on the validate step"
+fi
+
+# Behavioral: force-docker must not fall back to native CLI when Docker is absent.
+force_bin="${scratch}/force-bin"
+mkdir -p "${force_bin}"
+cat >"${force_bin}/structurizr-cli" <<'STUB'
+#!/usr/bin/env bash
+echo "native-cli-invoked" >>"${STRUCTURIZR_STUB_LOG}"
+exit 0
+STUB
+chmod +x "${force_bin}/structurizr-cli"
+# No docker on PATH for this case.
+: >"${scratch}/force.log"
+force_rc=0
+STRUCTURIZR_FORCE_DOCKER=1 STRUCTURIZR_STUB_LOG="${scratch}/force.log" \
+  PATH="${force_bin}:/usr/bin:/bin" \
+  bash "${STRUCTURIZR_VALIDATE}" >"${scratch}/force.out" 2>&1 || force_rc=$?
+if [[ "${force_rc}" -eq 0 ]]; then
+  fail "STRUCTURIZR_FORCE_DOCKER=1 succeeded without docker (native bypass or empty pass)"
+elif grep -q 'native-cli-invoked' "${scratch}/force.log"; then
+  fail "STRUCTURIZR_FORCE_DOCKER=1 fell back to native structurizr-cli"
+else
+  ok "STRUCTURIZR_FORCE_DOCKER=1 fails closed without docker (no native fallback)"
+fi
+
+# Behavioral: with docker present, force-docker must call docker with the pin, not native.
+cat >"${force_bin}/docker" <<'STUB'
+#!/usr/bin/env bash
+echo "docker-invoked:$*" >>"${STRUCTURIZR_STUB_LOG}"
+exit 0
+STUB
+chmod +x "${force_bin}/docker"
+: >"${scratch}/force-docker.log"
+# Use an empty workspace glob sandbox by pointing at a temp tree with no DSL —
+# still exercises the route selection before/at the loop. Prefer a fixture dir
+# that has at least one workspace so docker is actually invoked.
+fixture_root="${scratch}/sz-root"
+mkdir -p "${fixture_root}/docs/architecture/structurizr/demo"
+printf 'workspace "demo" {}\n' >"${fixture_root}/docs/architecture/structurizr/demo/workspace.dsl"
+# Re-run validate from a copy that resolves ROOT relative to the script location;
+# the real script uses its own ROOT. Instead invoke with a wrapper that cds and
+# relies on the real script — create a temporary validate that uses our stubs
+# by running the production script under PATH stubs; workspaces come from repo.
+STRUCTURIZR_FORCE_DOCKER=1 STRUCTURIZR_STUB_LOG="${scratch}/force-docker.log" \
+  PATH="${force_bin}:/usr/bin:/bin" \
+  bash "${STRUCTURIZR_VALIDATE}" >"${scratch}/force-docker.out" 2>&1 || true
+if grep -q 'native-cli-invoked' "${scratch}/force-docker.log"; then
+  fail "STRUCTURIZR_FORCE_DOCKER=1 invoked native CLI even with docker available"
+elif grep -q 'docker-invoked:' "${scratch}/force-docker.log"; then
+  ok "STRUCTURIZR_FORCE_DOCKER=1 uses docker when available"
+else
+  # Repo may have zero matching workspaces in some checkouts; require the script
+  # to document force-docker and refuse native. Check the script itself.
+  if grep -qE 'STRUCTURIZR_FORCE_DOCKER' "${STRUCTURIZR_VALIDATE}" \
+    && ! grep -qE 'native-cli-invoked' "${scratch}/force-docker.log"; then
+    # If workspaces exist in this clone, docker must have been called.
+    if compgen -G "${ROOT}/docs/architecture/structurizr/*/workspace.dsl" >/dev/null; then
+      fail "STRUCTURIZR_FORCE_DOCKER=1 did not invoke docker despite workspaces present"
+    else
+      ok "STRUCTURIZR_FORCE_DOCKER path present; no workspaces to exercise docker"
+    fi
+  else
+    fail "STRUCTURIZR_FORCE_DOCKER=1 neither invoked docker nor declares the force mode"
+  fi
 fi
 
 echo "== contract test carries no digest literal =="
