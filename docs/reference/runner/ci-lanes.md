@@ -85,6 +85,10 @@ cleanup and checkout.
    attested lane -- dispatch `Assay-Runner Lane Check` with `override_reason`.
    That records who decided and why in the commit status. It does not make
    proceeding without evidence safe; it makes it attributable.
+   No clock-skew tolerance is part of this verification contract: the attestation
+   checks no wall-clock field. A timestamp difference is therefore neither accepted
+   nor rejected by lane-check; subject digests, workflow identity, source head, and
+   invocation bind the proof instead.
 4. Do not treat a delegated skip as success. In the delegated lane, exit `40`
    means the runner contract has drifted.
 5. Do not bypass required repository checks for runner-impacting changes.

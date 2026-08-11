@@ -22,7 +22,8 @@ The delegated workflow runs the Linux/eBPF gates that hosted CI cannot prove:
 | `kernel-only` | `scripts/ci/runner-spike-kernel-only-three-run-determinism.sh` | kernel observation, cgroup correlation, bundle verification, three-run determinism |
 | `kernel-policy` | `scripts/ci/runner-spike-kernel-policy-three-run-determinism.sh` | kernel plus policy correlation, bundle verification, three-run determinism |
 | `openai-agents-kernel-policy` | `scripts/ci/runner-spike-openai-agents-kernel-policy-three-run-determinism.sh` | kernel plus policy plus real `@openai/agents` SDK runtime correlation, bundle verification, three-run determinism |
-| `all` | all of the above, plus `scripts/ci/runner-spike-openai-agents-kernel-policy-hidden-write-three-run-determinism.sh` | full delegated proof, including the post-closure hidden-write semantic-gap expansion gate |
+| `gemini-google-genai-kernel-policy` | `scripts/ci/runner-spike-gemini-google-genai-acceptance.sh` | Gemini Python `google-genai` fixture correlation and cassette-backed acceptance |
+| `all` | all of the above, plus `scripts/ci/runner-spike-openai-agents-kernel-policy-hidden-write-three-run-determinism.sh` | full delegated proof, including Gemini and the post-closure hidden-write semantic-gap expansion gate |
 
 Each three-run script executes its single-run acceptance three times and then
 compares the deterministic artifacts. Kernel raw event ordering is not used as
@@ -98,7 +99,8 @@ Recommended progression during diagnosis:
 1. `kernel-only`
 2. `kernel-policy`
 3. `openai-agents-kernel-policy`
-4. `all`
+4. `gemini-google-genai-kernel-policy`
+5. `all`
 
 Use `all` once the narrower failing gate has been fixed. This avoids mixing
 multiple failure signals in the same diagnostic run.
@@ -388,6 +390,7 @@ PASS: runner-spike kernel+policy acceptance
 PASS: runner-spike kernel+policy three-run determinism
 PASS: runner-spike OpenAI Agents kernel+policy acceptance
 PASS: runner-spike OpenAI Agents kernel+policy three-run determinism
+PASS: runner-spike Gemini google-genai kernel+policy acceptance
 ```
 
 Each acceptance line appears once per run inside its three-run wrapper. The
