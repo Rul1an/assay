@@ -291,8 +291,9 @@ def setup_rust_with_map(job_block: str) -> dict[str, str]:
     return vals
 
 
-def assert_immediate_setup_rust(job_id: str, block: str) -> None:
-    kinds = [step_kind(b) for b in top_level_step_bodies(block)]
+def assert_immediate_setup_rust(job_id: str, block: str) -> str:
+    bodies = top_level_step_bodies(block)
+    kinds = [step_kind(b) for b in bodies]
     setup_idxs = [i for i, k in enumerate(kinds) if k == "setup-rust"]
     if len(setup_idxs) != 1:
         raise SystemExit(f"{job_id}: expected one setup-rust call, found {len(setup_idxs)}")
@@ -302,6 +303,7 @@ def assert_immediate_setup_rust(job_id: str, block: str) -> None:
             f"{job_id}: setup-rust must be the immediate next top-level step after checkout "
             f"(step kinds: {kinds})"
         )
+    return bodies[setup_idxs[0]]
 
 
 # --- fuzz-smoke ---
@@ -350,11 +352,13 @@ for required in ("soak", "readiness", "closure", "otel_bridge"):
     if required not in adr_jobs:
         raise SystemExit(f"adr025 missing job {required}")
 
-assert_immediate_setup_rust("soak", adr_jobs["soak"])
-if setup_rust_with_map(adr_jobs["soak"]) != {}:
+soak_setup = assert_immediate_setup_rust("soak", adr_jobs["soak"])
+# Reject any top-level with: in the actual setup step body. Do not parse the
+# with-map via uses-line regex: that conflates parse miss with {} and misses
+# trailing-slash uses / with-before-uses reorderings.
+if re.search(r"(?m)^        with:\s*$", soak_setup):
     raise SystemExit(
-        f"soak: setup-rust with-map must be exactly {{}}, "
-        f"got {setup_rust_with_map(adr_jobs['soak'])}"
+        "soak: setup-rust must not declare a with: map (composite defaults only)"
     )
 
 for job_id in ("readiness", "closure", "otel_bridge"):
