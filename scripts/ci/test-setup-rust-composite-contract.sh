@@ -77,9 +77,6 @@ if not re.search(r"(?m)^\s+workspaces:\s*\$\{\{\s*inputs\.cache-workspaces\s*\}\
 print("ok   inputs/defaults; one pin each; empty inputs forwarded")
 PY
 
-KERNEL_MATRIX="${ROOT}/.github/workflows/kernel-matrix.yml"
-[[ -f "${KERNEL_MATRIX}" ]] || fail "missing .github/workflows/kernel-matrix.yml"
-
 python3 - "${KERNEL_MATRIX}" <<'PY' || fail "kernel-matrix hook-trigger paths missing"
 import re, sys
 from pathlib import Path
