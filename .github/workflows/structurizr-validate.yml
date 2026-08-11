@@ -5,6 +5,8 @@ on:
     paths:
       - "docs/architecture/structurizr/**"
       - "scripts/structurizr-validate.sh"
+      - "scripts/structurizr-cli-image.sh"
+      - ".github/structurizr-cli-image"
       - ".github/workflows/structurizr-validate.yml"
   workflow_dispatch:
 
@@ -14,19 +16,14 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
       - name: Validate Structurizr workspaces
-        run: |
-          for dsl in docs/architecture/structurizr/*/workspace.dsl; do
-            [ -f "$dsl" ] || continue
-            dir="$(dirname "$dsl")"
-            file="$(basename "$dsl")"
-            echo "::group::Validate $dsl"
-            docker run --rm -v "$PWD/$dir:/workspace" structurizr/cli:latest \
-              validate -workspace "/workspace/$file"
-            echo "::endgroup::"
-          done
+        env:
+          # Fail closed on the digest-pinned image; never a host structurizr-cli.
+          STRUCTURIZR_FORCE_DOCKER: "1"
+        run: bash scripts/structurizr-validate.sh

@@ -144,6 +144,13 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Verify CI hardening contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/test-ci-hardening-b1.sh
+          bash scripts/ci/test-structurizr-export-docker.sh
+
   # --- Dependency security (advisories, licenses, sources) ---
   deps-security:
     name: Dependency Security (cargo-deny + audit)

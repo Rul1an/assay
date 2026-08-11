@@ -7,6 +7,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKSPACES=("$ROOT"/docs/architecture/structurizr/*/workspace.dsl)
+STRUCTURIZR_CLI_IMAGE="$("${ROOT}/scripts/structurizr-cli-image.sh")"
 
 if [[ ${#WORKSPACES[@]} -eq 0 ]]; then
   echo "[structurizr] No workspaces found"
@@ -28,11 +29,13 @@ export_with_docker() {
   local file
   file="$(basename "$dsl")"
   local outdir="$2"
+  # Output is always <workspace>/export. Use a portable relative path — macOS
+  # /bin/realpath rejects GNU's --relative-to.
   local rel_out
-  rel_out="$(realpath --relative-to="$dir" "$outdir")"
+  rel_out="$(basename "$outdir")"
   mkdir -p "$outdir"
   echo "[structurizr] export (docker): $dsl → $outdir"
-  docker run --rm -v "$dir:/workspace" structurizr/cli:latest \
+  docker run --rm -v "$dir:/workspace" "${STRUCTURIZR_CLI_IMAGE}" \
     export -workspace "/workspace/$file" -format mermaid -output "/workspace/$rel_out"
 }
 
@@ -46,6 +49,7 @@ for dsl in "${WORKSPACES[@]}"; do
     export_with_docker "$dsl" "$outdir"
   else
     echo "[structurizr] ERROR: neither structurizr-cli nor docker found"
+    echo "  Or:      docker pull ${STRUCTURIZR_CLI_IMAGE}"
     exit 2
   fi
 done
