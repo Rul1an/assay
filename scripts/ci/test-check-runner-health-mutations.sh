@@ -84,10 +84,41 @@ mutations = {
         '  # mutation: swallow parse failure without recording a marker\n'
         '  return 0\n',
     ),
-    # Raw jq must not replace jq_try (abort before outputs / alert routing).
+    # Skipping shape validation + raw jq restores empty/malformed abort-or-misclassify paths.
     "parse-failure-uncaught": (
-        '  if selected_runner="$(jq_try "$runner_parse_err" "runner_json_parse_failed" -sc --arg name "$runner_name" \'[.[].runners[]? | select(.name == $name)] | .[0] // empty\' "$runner_json")"; then\n',
-        '  if selected_runner="$(jq -sc --arg name "$runner_name" \'[.[].runners[]? | select(.name == $name)] | .[0] // empty\' "$runner_json")"; then\n',
+        '  if require_json_pages "$runner_json" "runners" "$runner_parse_err" "runner_json_incomplete"; then\n'
+        '    # jq program: $name is a jq --arg, not a shell expansion.\n'
+        '    # shellcheck disable=SC2016\n'
+        '    if selected_runner="$(jq_try "$runner_parse_err" "runner_json_parse_failed" -sc --arg name "$runner_name" \'[.[].runners[]? | select(.name == $name)] | .[0] // empty\' "$runner_json")"; then\n',
+        '  if true; then\n'
+        '    # mutation: skip shape gate and use raw jq\n'
+        '    # shellcheck disable=SC2016\n'
+        '    if selected_runner="$(jq -sc --arg name "$runner_name" \'[.[].runners[]? | select(.name == $name)] | .[0] // empty\' "$runner_json")"; then\n',
+    ),
+    # Shape validation must not be weakened to a no-op (empty/wrong bodies ≠ clean).
+    "shape-validation-removed": (
+        'require_json_pages() {\n'
+        '  local file="$1"\n'
+        '  local array_key="$2"\n'
+        '  local err_file="$3"\n'
+        '  local marker="$4"\n'
+        '\n'
+        '  if [[ ! -s "$file" ]]; then\n'
+        '    printf \'%s\\n\' "$marker" >>"$err_file"\n'
+        '    return 1\n'
+        '  fi\n',
+        'require_json_pages() {\n'
+        '  local file="$1"\n'
+        '  local array_key="$2"\n'
+        '  local err_file="$3"\n'
+        '  local marker="$4"\n'
+        '\n'
+        '  # mutation: accept any body, including empty/wrong-shape streams\n'
+        '  return 0\n'
+        '  if [[ ! -s "$file" ]]; then\n'
+        '    printf \'%s\\n\' "$marker" >>"$err_file"\n'
+        '    return 1\n'
+        '  fi\n',
     ),
     # Workflow must not fall back to step-outcome routing.
     "alert-from-step-outcome": (
@@ -119,6 +150,7 @@ expect_rejected api-error-to-clean "$SCRIPT"
 expect_rejected online-masks-queue-error "$SCRIPT"
 expect_rejected parse-failure-to-clean "$SCRIPT"
 expect_rejected parse-failure-uncaught "$SCRIPT"
+expect_rejected shape-validation-removed "$SCRIPT"
 expect_rejected alert-from-step-outcome "$WORKFLOW"
 
 echo "ok: check-runner-health contract rejects inert substitutes"

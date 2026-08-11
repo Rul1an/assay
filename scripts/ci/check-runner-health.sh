@@ -59,6 +59,43 @@ jq_try() {
   return 1
 }
 
+# Validate a paginated gh api stream before extraction.
+# Requires >=1 JSON document and every page to be an object whose expected key
+# is an array (empty arrays are valid). Empty bodies and wrong shapes are
+# incomplete classification inputs, not "no matching rows".
+require_json_pages() {
+  local file="$1"
+  local array_key="$2"
+  local err_file="$3"
+  local marker="$4"
+
+  if [[ ! -s "$file" ]]; then
+    printf '%s\n' "$marker" >>"$err_file"
+    return 1
+  fi
+
+  # jq program: $key is a jq --arg, not a shell expansion.
+  # shellcheck disable=SC2016
+  if jq_try "$err_file" "$marker" -se --arg key "$array_key" '
+    if length < 1 then
+      error("incomplete")
+    else
+      map(
+        if (type != "object")
+          or ((has($key) | not))
+          or ((.[$key] | type) != "array")
+        then error("incomplete")
+        else true
+        end
+      )
+      | length
+    end
+  ' "$file" >/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
 runner_status="unknown"
 runner_status_error=""
 runner_busy="unknown"
@@ -69,15 +106,17 @@ runner_parse_err="$tmpdir/runner-parse.err"
 : >"$runner_parse_err"
 runner_json="$tmpdir/runners.json"
 if GH_TOKEN="$runner_status_token" gh api --paginate "repos/$repo/actions/runners?per_page=100" >"$runner_json" 2>"$runner_status_stderr"; then
-  # jq program: $name is a jq --arg, not a shell expansion.
-  # shellcheck disable=SC2016
-  if selected_runner="$(jq_try "$runner_parse_err" "runner_json_parse_failed" -sc --arg name "$runner_name" '[.[].runners[]? | select(.name == $name)] | .[0] // empty' "$runner_json")"; then
-    if [[ -z "$selected_runner" ]]; then
-      runner_status="not_found"
-    else
-      runner_status="$(jq -r '.status // "unknown"' <<<"$selected_runner")"
-      runner_busy="$(jq -r 'if has("busy") then (.busy | tostring) else "unknown" end' <<<"$selected_runner")"
-      runner_labels="$(jq -r '[.labels[]?.name] | join(",")' <<<"$selected_runner")"
+  if require_json_pages "$runner_json" "runners" "$runner_parse_err" "runner_json_incomplete"; then
+    # jq program: $name is a jq --arg, not a shell expansion.
+    # shellcheck disable=SC2016
+    if selected_runner="$(jq_try "$runner_parse_err" "runner_json_parse_failed" -sc --arg name "$runner_name" '[.[].runners[]? | select(.name == $name)] | .[0] // empty' "$runner_json")"; then
+      if [[ -z "$selected_runner" ]]; then
+        runner_status="not_found"
+      else
+        runner_status="$(jq -r '.status // "unknown"' <<<"$selected_runner")"
+        runner_busy="$(jq -r 'if has("busy") then (.busy | tostring) else "unknown" end' <<<"$selected_runner")"
+        runner_labels="$(jq -r '[.labels[]?.name] | join(",")' <<<"$selected_runner")"
+      fi
     fi
   fi
   if [[ -s "$runner_parse_err" ]]; then
@@ -100,38 +139,42 @@ inspected_workflow_runs=0
 for run_status in queued in_progress; do
   runs_json="$tmpdir/runs-${run_status}.json"
   if GH_TOKEN="$queue_token" gh api --paginate "repos/$repo/actions/runs?status=${run_status}&per_page=100" >"$runs_json" 2>>"$queue_stderr"; then
-    if run_rows="$(jq_try "$queue_stderr" "queue_json_parse_failed" -r '.workflow_runs[]? | [.id, .name, .status, .html_url] | @tsv' "$runs_json")"; then
-      if [[ "$run_status" == "queued" ]]; then
-        if queued_ids="$(jq_try "$queue_stderr" "queue_json_parse_failed" -r '.workflow_runs[]?.id' "$runs_json")"; then
-          general_queued_runs="$(printf '%s\n' "$queued_ids" | count_nonempty_lines)"
-        fi
-      fi
-
-      while IFS=$'\t' read -r run_id run_name _status run_url; do
-        [[ -n "${run_id:-}" ]] || continue
-        inspected_workflow_runs=$((inspected_workflow_runs + 1))
-
-        jobs_json="$tmpdir/jobs-${run_id}.json"
-        if GH_TOKEN="$queue_token" gh api --paginate "repos/$repo/actions/runs/${run_id}/jobs?filter=latest&per_page=100" >"$jobs_json" 2>>"$queue_stderr"; then
-          # jq program: $label/$run_name/$run_url are jq --arg bindings.
-          # shellcheck disable=SC2016
-          if ! jq_try "$queue_stderr" "queue_json_parse_failed" -r \
-            --arg label "$required_runner_label" \
-            --arg run_name "$run_name" \
-            --arg run_url "$run_url" \
-            '
-            .jobs[]?
-            | select((.status == "queued" or .status == "waiting" or .status == "pending" or .status == "requested")
-                and ((.labels // []) | index($label)))
-            | [$run_name, .name, .status, ((.labels // []) | join(",")), (.html_url // $run_url)]
-            | @tsv
-            ' "$jobs_json" >>"$matching_jobs"; then
-            :
+    if require_json_pages "$runs_json" "workflow_runs" "$queue_stderr" "queue_json_incomplete"; then
+      if run_rows="$(jq_try "$queue_stderr" "queue_json_parse_failed" -r '.workflow_runs[]? | [.id, .name, .status, .html_url] | @tsv' "$runs_json")"; then
+        if [[ "$run_status" == "queued" ]]; then
+          if queued_ids="$(jq_try "$queue_stderr" "queue_json_parse_failed" -r '.workflow_runs[]?.id' "$runs_json")"; then
+            general_queued_runs="$(printf '%s\n' "$queued_ids" | count_nonempty_lines)"
           fi
-        else
-          echo "Unable to query jobs for run ${run_id}" >>"$queue_stderr"
         fi
-      done <<<"$run_rows"
+
+        while IFS=$'\t' read -r run_id run_name _status run_url; do
+          [[ -n "${run_id:-}" ]] || continue
+          inspected_workflow_runs=$((inspected_workflow_runs + 1))
+
+          jobs_json="$tmpdir/jobs-${run_id}.json"
+          if GH_TOKEN="$queue_token" gh api --paginate "repos/$repo/actions/runs/${run_id}/jobs?filter=latest&per_page=100" >"$jobs_json" 2>>"$queue_stderr"; then
+            if require_json_pages "$jobs_json" "jobs" "$queue_stderr" "queue_json_incomplete"; then
+              # jq program: $label/$run_name/$run_url are jq --arg bindings.
+              # shellcheck disable=SC2016
+              if ! jq_try "$queue_stderr" "queue_json_parse_failed" -r \
+                --arg label "$required_runner_label" \
+                --arg run_name "$run_name" \
+                --arg run_url "$run_url" \
+                '
+                .jobs[]?
+                | select((.status == "queued" or .status == "waiting" or .status == "pending" or .status == "requested")
+                    and ((.labels // []) | index($label)))
+                | [$run_name, .name, .status, ((.labels // []) | join(",")), (.html_url // $run_url)]
+                | @tsv
+                ' "$jobs_json" >>"$matching_jobs"; then
+                :
+              fi
+            fi
+          else
+            echo "Unable to query jobs for run ${run_id}" >>"$queue_stderr"
+          fi
+        done <<<"$run_rows"
+      fi
     fi
   fi
 done

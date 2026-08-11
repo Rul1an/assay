@@ -262,10 +262,11 @@ write_defaults
 printf '%s\n' '{not-json' >"${FAKE_RUNNERS_JSON}"
 run_check "${TEST_TEMP_DIR}/out-bad-runner-json.txt" "${TEST_TEMP_DIR}/sum-bad-runner-json.txt"
 expect_case "malformed runner JSON → classification_unknown" "classification_unknown" "true" 1 "false"
-if [[ "$(output_value runner_status_error)" != *runner_json_parse_failed* ]]; then
-  fail "malformed runner JSON: runner_status_error must name runner_json_parse_failed (got: $(output_value runner_status_error))"
+# Shape gate runs before extraction; unparsable bodies surface as incomplete.
+if [[ "$(output_value runner_status_error)" != *runner_json_incomplete* ]]; then
+  fail "malformed runner JSON: runner_status_error must name runner_json_incomplete (got: $(output_value runner_status_error))"
 else
-  ok "malformed runner JSON reports value-free runner_json_parse_failed"
+  ok "malformed runner JSON reports value-free runner_json_incomplete"
 fi
 
 # --- malformed queue JSON while online → classification_unknown, value-free --------------
@@ -275,11 +276,71 @@ printf '%s\n' '{"total_count":1,"runners":[{"name":"assay-bpf-runner","status":"
 printf '%s\n' '{not-json' >"${FAKE_QUEUED_RUNS_JSON}"
 run_check "${TEST_TEMP_DIR}/out-bad-queue-json.txt" "${TEST_TEMP_DIR}/sum-bad-queue-json.txt"
 expect_case "malformed queue JSON → classification_unknown" "classification_unknown" "true" 1 "false"
-if [[ "$(output_value queue_status_error)" != *queue_json_parse_failed* ]]; then
-  fail "malformed queue JSON: queue_status_error must name queue_json_parse_failed (got: $(output_value queue_status_error))"
+# Shape gate runs before extraction; unparsable bodies surface as incomplete.
+if [[ "$(output_value queue_status_error)" != *queue_json_incomplete* ]]; then
+  fail "malformed queue JSON: queue_status_error must name queue_json_incomplete (got: $(output_value queue_status_error))"
 else
-  ok "malformed queue JSON reports value-free queue_json_parse_failed"
+  ok "malformed queue JSON reports value-free queue_json_incomplete"
 fi
+
+# --- empty-body queue while online → classification_unknown (incomplete, not available) --
+write_defaults
+printf '%s\n' '{"total_count":1,"runners":[{"name":"assay-bpf-runner","status":"online","busy":false,"labels":[{"name":"assay-bpf-runner"}]}]}' \
+  >"${FAKE_RUNNERS_JSON}"
+: >"${FAKE_QUEUED_RUNS_JSON}"
+: >"${FAKE_IN_PROGRESS_RUNS_JSON}"
+run_check "${TEST_TEMP_DIR}/out-empty-queue.txt" "${TEST_TEMP_DIR}/sum-empty-queue.txt"
+expect_case "empty-body queue → classification_unknown" "classification_unknown" "true" 1 "false"
+if [[ "$(output_value queue_status_error)" != *queue_json_incomplete* ]]; then
+  fail "empty-body queue: queue_status_error must name queue_json_incomplete (got: $(output_value queue_status_error))"
+else
+  ok "empty-body queue reports value-free queue_json_incomplete"
+fi
+
+# --- wrong-shape queue while online → classification_unknown -----------------------------
+write_defaults
+printf '%s\n' '{"total_count":1,"runners":[{"name":"assay-bpf-runner","status":"online","busy":false,"labels":[{"name":"assay-bpf-runner"}]}]}' \
+  >"${FAKE_RUNNERS_JSON}"
+printf '%s\n' '{"message":"unexpected"}' >"${FAKE_QUEUED_RUNS_JSON}"
+printf '%s\n' '{"message":"unexpected"}' >"${FAKE_IN_PROGRESS_RUNS_JSON}"
+run_check "${TEST_TEMP_DIR}/out-wrong-queue-shape.txt" "${TEST_TEMP_DIR}/sum-wrong-queue-shape.txt"
+expect_case "wrong-shape queue → classification_unknown" "classification_unknown" "true" 1 "false"
+if [[ "$(output_value queue_status_error)" != *queue_json_incomplete* ]]; then
+  fail "wrong-shape queue: queue_status_error must name queue_json_incomplete (got: $(output_value queue_status_error))"
+else
+  ok "wrong-shape queue reports value-free queue_json_incomplete"
+fi
+
+# --- empty-body runner → classification_unknown (must not be not_found/unavailable) ------
+write_defaults
+: >"${FAKE_RUNNERS_JSON}"
+run_check "${TEST_TEMP_DIR}/out-empty-runner.txt" "${TEST_TEMP_DIR}/sum-empty-runner.txt"
+expect_case "empty-body runner → classification_unknown" "classification_unknown" "true" 1 "false"
+if [[ "$(output_value runner_status_error)" != *runner_json_incomplete* ]]; then
+  fail "empty-body runner: runner_status_error must name runner_json_incomplete (got: $(output_value runner_status_error))"
+else
+  ok "empty-body runner reports value-free runner_json_incomplete"
+fi
+
+# --- wrong-shape runner → classification_unknown ----------------------------------------
+write_defaults
+printf '%s\n' '{"message":"unexpected"}' >"${FAKE_RUNNERS_JSON}"
+run_check "${TEST_TEMP_DIR}/out-wrong-runner-shape.txt" "${TEST_TEMP_DIR}/sum-wrong-runner-shape.txt"
+expect_case "wrong-shape runner → classification_unknown" "classification_unknown" "true" 1 "false"
+if [[ "$(output_value runner_status_error)" != *runner_json_incomplete* ]]; then
+  fail "wrong-shape runner: runner_status_error must name runner_json_incomplete (got: $(output_value runner_status_error))"
+else
+  ok "wrong-shape runner reports value-free runner_json_incomplete"
+fi
+
+# --- legitimate empty arrays remain classifiable (online + no demand → available) -------
+write_defaults
+printf '%s\n' '{"total_count":1,"runners":[{"name":"assay-bpf-runner","status":"online","busy":false,"labels":[{"name":"assay-bpf-runner"}]}]}' \
+  >"${FAKE_RUNNERS_JSON}"
+printf '%s\n' '{"total_count":0,"workflow_runs":[]}' >"${FAKE_QUEUED_RUNS_JSON}"
+printf '%s\n' '{"total_count":0,"workflow_runs":[]}' >"${FAKE_IN_PROGRESS_RUNS_JSON}"
+run_check "${TEST_TEMP_DIR}/out-empty-arrays.txt" "${TEST_TEMP_DIR}/sum-empty-arrays.txt"
+expect_case "empty-array queue pages → available" "available" "false" 0 "true"
 
 # --- workflow: schedule + alert_required routing + stale header --------------------------
 if grep -qE 'Runs every 15 minutes' "${WORKFLOW}"; then
