@@ -39,6 +39,8 @@ on:
       - ".github/workflows/wave6-nightly-safety.yml"
       # fuzz-smoke calls setup-rust with cache-workspaces; keep contract hook on that surface.
       - ".github/workflows/fuzz-smoke.yml"
+      # ADR025 soak calls setup-rust (empty with-map / composite defaults).
+      - ".github/workflows/adr025-nightly-evidence.yml"
       # Note: Cargo.toml/Cargo.lock removed - check-ebpf-changes job handles skip logic
   push:
     branches: [ "main", "debug/**" ]
