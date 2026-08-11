@@ -49,6 +49,8 @@ on:
       - ".github/workflows/perf_main.yml"
       - ".github/workflows/perf_pr.yml"
       - ".github/workflows/perf_nightly.yml"
+      # Split Wave 0 Rust jobs call setup-rust (defaults / clippy with-map).
+      - ".github/workflows/split-wave0-gates.yml"
       # Note: Cargo.toml/Cargo.lock removed - check-ebpf-changes job handles skip logic
   push:
     branches: [ "main", "debug/**" ]
