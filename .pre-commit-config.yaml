@@ -360,6 +360,16 @@ repos:
         # a version line that reads as evidence of a pin. The self-test drives stub cargo/cargo-deny
         # binaries on PATH, so it costs no network and no install.
         files: ^(scripts/ci/(install-cargo-deny|test-install-cargo-deny)\.sh|\.pre-commit-config\.yaml)$
+
+      - id: deps-security-toolchain-contract-self-test
+        name: deps-security toolchain contract
+        entry: bash scripts/ci/test-deps-security-toolchain-contract.sh
+        language: system
+        pass_filenames: false
+        # Protects the workflow half the install self-test cannot see: deleting or weakening
+        # deps-security's RUSTUP_TOOLCHAIN, and restoring the false "never compiles a crate" claim.
+        # files: includes ci.yml so a workflow-only edit still runs this gate in Lint (pre-commit).
+        files: ^(scripts/ci/(install-cargo-deny|test-deps-security-toolchain-contract)\.sh|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
       - id: cargo-clippy
         name: cargo clippy (workspace, deny warnings)
         entry: scripts/precommit/cargo-clippy.sh

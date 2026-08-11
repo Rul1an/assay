@@ -172,9 +172,9 @@ jobs:
       # the selection there too rather than being shadowed by the script's own default.
       #
       # Scope, deliberately: no step in this job builds or tests the workspace -- checkout, two tool
-      # installs, a `sed`-only alignment check, `cargo-deny check` and two `cargo audit` runs. This
-      # selects the toolchain that runs the dependency tooling, never one that compiles a crate, and
-      # `rust-toolchain.toml` stays the source for every job that does compile.
+      # installs, a `sed`-only alignment check, `cargo-deny check` and two `cargo audit` runs. The
+      # only crates this job compiles are the dependency tools themselves, installed from source.
+      # `rust-toolchain.toml` stays the source for every job that compiles workspace code.
       RUSTUP_TOOLCHAIN: stable
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
