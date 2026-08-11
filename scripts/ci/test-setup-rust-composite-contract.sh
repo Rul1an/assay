@@ -179,25 +179,23 @@ def setup_rust_with_map(block: str) -> dict[str, str]:
     return vals
 
 miri_with = setup_rust_with_map(jobs["miri-registry-smoke"])
-if miri_with.get("toolchain") != "nightly":
+miri_expected = {"toolchain": "nightly", "components": "miri"}
+if miri_with != miri_expected:
     raise SystemExit(
-        f"miri-registry-smoke: toolchain must be nightly, got {miri_with.get('toolchain')!r}"
-    )
-if miri_with.get("components") != "miri":
-    raise SystemExit(
-        f"miri-registry-smoke: components must be miri, got {miri_with.get('components')!r}"
+        f"miri-registry-smoke: setup-rust with-map must be exactly {miri_expected}, "
+        f"got {miri_with}"
     )
 
 proptest_with = setup_rust_with_map(jobs["proptest-cli-smoke"])
-if "toolchain" in proptest_with or "components" in proptest_with:
+if proptest_with != {}:
     raise SystemExit(
-        "proptest-cli-smoke: setup-rust must use composite defaults "
-        f"(no toolchain/components overrides); got {proptest_with}"
+        "proptest-cli-smoke: setup-rust with-map must be exactly {} "
+        f"(composite defaults); got {proptest_with}"
     )
 
 print(
     f"ok   wave6: setup-rust after checkout for {', '.join(setup_jobs)}; "
-    "miri nightly+miri; proptest defaults; no direct pins"
+    "miri with-map exact; proptest with-map empty; no direct pins"
 )
 PY
 
@@ -229,10 +227,13 @@ required = (
     ".github/workflows/week8-sota-gates.yml",
     ".github/workflows/wave6-nightly-safety.yml",
 )
-missing = [p for p in required if p not in paths]
-if missing:
-    raise SystemExit(f"pull_request.paths missing {missing}")
-print("ok   kernel-matrix pull_request.paths cover setup-rust + week8 + wave6 triggers")
+bad = [p for p in required if paths.count(p) != 1]
+if bad:
+    raise SystemExit(
+        "pull_request.paths must list each trigger path exactly once; "
+        + ", ".join(f"{p!r} appears {paths.count(p)} time(s)" for p in bad)
+    )
+print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6")
 PY
 
 echo "setup-rust composite contract: all checks passed"
