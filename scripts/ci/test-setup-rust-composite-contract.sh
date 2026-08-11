@@ -10,6 +10,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ACTION="${ROOT}/.github/actions/setup-rust/action.yml"
 WEEK8="${ROOT}/.github/workflows/week8-sota-gates.yml"
+KERNEL_MATRIX="${ROOT}/.github/workflows/kernel-matrix.yml"
 TOOLCHAIN_REF="dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
 CACHE_REF="Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4"
 
@@ -24,6 +25,7 @@ trap 'abort_is_failure "$?"' ERR
 
 [[ -f "${ACTION}" ]] || fail "missing .github/actions/setup-rust/action.yml"
 [[ -f "${WEEK8}" ]] || fail "missing .github/workflows/week8-sota-gates.yml"
+[[ -f "${KERNEL_MATRIX}" ]] || fail "missing .github/workflows/kernel-matrix.yml"
 
 grep -qE '^[[:space:]]*using:[[:space:]]*composite[[:space:]]*$' "${ACTION}" \
   || fail "action must declare runs.using: composite"
@@ -59,12 +61,13 @@ for opt in ("components", "cache-workspaces"):
     if not re.search(rf"(?m)^  {opt}:\n(?:.*\n)*?    default:\s*(\"\"|'')\s*$", text):
         raise SystemExit(f"{opt} default must be empty")
 
-# All action@SHA uses for each name must be exactly the single wanted ref.
+# Every action@ref (SHA, tag, branch) must be exactly the single wanted pin.
+# SHA-only extraction missed mutable refs like @stable beside a correct pin.
 for label, action, wanted in (
     ("toolchain", "dtolnay/rust-toolchain", want_toolchain),
     ("cache", "Swatinem/rust-cache", want_cache),
 ):
-    found = re.findall(rf"{re.escape(action)}@[0-9a-f]{{40}}", text)
+    found = re.findall(rf"{re.escape(action)}@[^\s#]+", text)
     if found != [wanted]:
         raise SystemExit(f"{label} refs {found}, expected [{wanted}]")
 if not re.search(r"(?m)^\s+components:\s*\$\{\{\s*inputs\.components\s*\}\}\s*$", text):
@@ -72,6 +75,42 @@ if not re.search(r"(?m)^\s+components:\s*\$\{\{\s*inputs\.components\s*\}\}\s*$"
 if not re.search(r"(?m)^\s+workspaces:\s*\$\{\{\s*inputs\.cache-workspaces\s*\}\}\s*$", text):
     raise SystemExit("must pass workspaces: ${{ inputs.cache-workspaces }}")
 print("ok   inputs/defaults; one pin each; empty inputs forwarded")
+PY
+
+KERNEL_MATRIX="${ROOT}/.github/workflows/kernel-matrix.yml"
+[[ -f "${KERNEL_MATRIX}" ]] || fail "missing .github/workflows/kernel-matrix.yml"
+
+python3 - "${KERNEL_MATRIX}" <<'PY' || fail "kernel-matrix hook-trigger paths missing"
+import re, sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+in_pr = in_paths = False
+paths: list[str] = []
+for line in text.splitlines():
+    if re.match(r"^  pull_request:\s*$", line):
+        in_pr, in_paths = True, False
+        continue
+    if in_pr and re.match(r"^  \S", line):
+        in_pr = in_paths = False
+    if in_pr and re.match(r"^    paths:\s*$", line):
+        in_paths = True
+        continue
+    if in_pr and in_paths and re.match(r"^    \S", line):
+        in_paths = False
+    if in_paths:
+        m = re.match(r'^      - "([^"]+)"\s*(?:#.*)?$', line)
+        if m:
+            paths.append(m.group(1))
+
+required = (
+    ".github/actions/setup-rust/**",
+    ".github/workflows/week8-sota-gates.yml",
+)
+missing = [p for p in required if p not in paths]
+if missing:
+    raise SystemExit(f"pull_request.paths missing {missing}")
+print("ok   kernel-matrix pull_request.paths cover setup-rust + week8 triggers")
 PY
 
 python3 - "${WEEK8}" <<'PY' || fail "week8 setup-rust caller contract failed"
