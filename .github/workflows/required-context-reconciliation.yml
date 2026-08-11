@@ -37,19 +37,20 @@ jobs:
         run: python3 scripts/ci/check-required-contexts.py --self-test
 
       - name: Fetch live required status checks
-        id: fetch
         env:
           GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_READ_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
-          out="${RUNNER_TEMP}/live-required-status-checks.json"
+          live_json="${RUNNER_TEMP}/live-required-status-checks.json"
           gh api \
-            "repos/${{ github.repository }}/branches/${{ github.event.repository.default_branch }}/protection/required_status_checks" \
-            >"${out}"
-          echo "path=${out}" >>"${GITHUB_OUTPUT}"
+            "repos/${REPOSITORY}/branches/${DEFAULT_BRANCH}/protection/required_status_checks" \
+            >"${live_json}"
 
       - name: Reconcile ruleset against live protection
         run: |
           set -euo pipefail
+          live_json="${RUNNER_TEMP}/live-required-status-checks.json"
           python3 scripts/ci/check-required-contexts.py --live-response \
-            < "${{ steps.fetch.outputs.path }}"
+            < "${live_json}"

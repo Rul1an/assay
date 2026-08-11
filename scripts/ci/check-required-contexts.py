@@ -568,6 +568,27 @@ def _workflow_on_event_keys(text: str) -> list[str]:
     return keys
 
 
+# Step-level env is the only place GitHub expressions may appear (Zizmor template-injection).
+ENV_REPOSITORY = "REPOSITORY: ${{ github.repository }}"
+ENV_DEFAULT_BRANCH = "DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}"
+ENV_GH_TOKEN = "GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_READ_TOKEN }}"
+ENV_SECRET_TOKEN = "BRANCH_PROTECTION_READ_TOKEN: ${{ secrets.BRANCH_PROTECTION_READ_TOKEN }}"
+API_PATH_QUOTED = (
+    '"repos/${REPOSITORY}/branches/${DEFAULT_BRANCH}/protection/required_status_checks"'
+)
+LIVE_JSON_ASSIGN = 'live_json="${RUNNER_TEMP}/live-required-status-checks.json"'
+STDIN_REDIRECT = '< "${live_json}"'
+
+_ALLOWED_TEMPLATE_ENV_LINES = frozenset(
+    {
+        ENV_REPOSITORY,
+        ENV_DEFAULT_BRANCH,
+        ENV_GH_TOKEN,
+        ENV_SECRET_TOKEN,
+    }
+)
+
+
 def workflow_contract_problems(text: str) -> list[str]:
     """Return contract violations for reconcile-workflow text (no YAML parse)."""
     problems: list[str] = []
@@ -578,9 +599,11 @@ def workflow_contract_problems(text: str) -> list[str]:
         "contents: read",
         "secrets.BRANCH_PROTECTION_READ_TOKEN",
         "check-required-contexts.py --live-response",
-        "protection/required_status_checks",
-        "github.repository",
-        "github.event.repository.default_branch",
+        ENV_REPOSITORY,
+        ENV_DEFAULT_BRANCH,
+        API_PATH_QUOTED,
+        LIVE_JSON_ASSIGN,
+        STDIN_REDIRECT,
         DEFAULT_BRANCH_GUARD,
         "set -euo pipefail",
     ]
@@ -588,15 +611,34 @@ def workflow_contract_problems(text: str) -> list[str]:
         if needle not in text:
             problems.append(f"missing {needle!r}")
 
-    # Stdin redirection into the checker (shell opens the file; Python never takes a path argv).
+    # Stdin redirection into the checker via RUNNER_TEMP-derived live_json.
     if not re.search(
-        r"check-required-contexts\.py --live-response\s*\\\s*\n\s*<\s*\"",
+        r"check-required-contexts\.py --live-response\s*\\\s*\n\s*<\s*\"\$\{live_json\}\"",
         text,
     ):
         problems.append(
             "checker must be invoked with stdin redirection "
-            "(--live-response \\< newline < \"...\")"
+            "(--live-response \\< newline < \"${live_json}\")"
         )
+
+    # Both steps must independently derive the same fixed RUNNER_TEMP path.
+    if text.count(LIVE_JSON_ASSIGN) < 2:
+        problems.append(
+            f"{LIVE_JSON_ASSIGN!r} must appear in both fetch and reconcile steps"
+        )
+
+    # Reject GitHub/${{ steps.* }} expansions outside allowlisted step-level env lines.
+    for line in text.splitlines():
+        stripped = line.strip()
+        if "${{" not in stripped:
+            continue
+        if stripped in _ALLOWED_TEMPLATE_ENV_LINES:
+            continue
+        if re.search(r"\$\{\{\s*(github\.|steps\.)", stripped):
+            problems.append(
+                "direct template expansion outside step env "
+                f"(Zizmor template-injection shape): {stripped!r}"
+            )
 
     forbidden = [
         "pull_request:",
@@ -608,12 +650,27 @@ def workflow_contract_problems(text: str) -> list[str]:
         " -X DELETE",
         "|| github.token",
         "|| secrets.GITHUB_TOKEN",
-        # Path argv to the checker (the CodeQL py/path-injection shape).
-        '--live-response \\\n            "${{ steps.fetch.outputs.path }}"',
+        # Path argv / step-output shapes (CodeQL + Zizmor).
         "--live-response /",
+        "steps.fetch.outputs.path",
+        'repos/${{ github.repository }}',
+        "${{ github.event.repository.default_branch }}/protection",
+        # Unquoted API path (shell-injection adjacent).
+        "repos/${REPOSITORY}/branches/${DEFAULT_BRANCH}/protection/required_status_checks",
     ]
     for needle in forbidden:
         if needle in text:
+            # The quoted form contains the unquoted form as a substring; only flag
+            # the unquoted needle when the quoted API path is absent or when the
+            # unquoted literal appears outside the quoted occurrence.
+            if needle == (
+                "repos/${REPOSITORY}/branches/${DEFAULT_BRANCH}/"
+                "protection/required_status_checks"
+            ):
+                if API_PATH_QUOTED in text and text.count(needle) == text.count(
+                    API_PATH_QUOTED
+                ):
+                    continue
             problems.append(f"forbidden {needle!r}")
 
     on_keys = _workflow_on_event_keys(text)
@@ -695,9 +752,9 @@ def workflow_contract_self_test() -> int:
         text,
         lambda t: t.replace(
             'python3 scripts/ci/check-required-contexts.py --live-response \\\n'
-            '            < "${{ steps.fetch.outputs.path }}"',
+            '            < "${live_json}"',
             'python3 scripts/ci/check-required-contexts.py --live-response \\\n'
-            '            "${{ steps.fetch.outputs.path }}"',
+            '            "${live_json}"',
             1,
         ),
         "live_response_path_argv",
@@ -707,6 +764,65 @@ def workflow_contract_self_test() -> int:
     if not workflow_contract_problems(path_argv):
         print(
             "self-test: replacing stdin redirect with path argv went undetected",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Mutation: remove REPOSITORY env binding — must go red.
+    env_removed = _apply_text(
+        text,
+        lambda t: "\n".join(
+            line for line in t.splitlines() if line.strip() != ENV_REPOSITORY
+        )
+        + ("\n" if t.endswith("\n") else ""),
+        "repository_env_removed",
+    )
+    if env_removed is None:
+        return 1
+    if not workflow_contract_problems(env_removed):
+        print(
+            "self-test: removing REPOSITORY env binding went undetected",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Mutation: restore direct github.* template in the gh api path — must go red.
+    direct_template = _apply_text(
+        text,
+        lambda t: t.replace(
+            API_PATH_QUOTED,
+            '"repos/${{ github.repository }}/branches/'
+            '${{ github.event.repository.default_branch }}/'
+            'protection/required_status_checks"',
+            1,
+        ),
+        "direct_github_template_restored",
+    )
+    if direct_template is None:
+        return 1
+    if not workflow_contract_problems(direct_template):
+        print(
+            "self-test: restoring direct github.* templates in run went undetected",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Mutation: drop quoting around the API path — must go red.
+    unquoted = _apply_text(
+        text,
+        lambda t: t.replace(
+            API_PATH_QUOTED,
+            "repos/${REPOSITORY}/branches/${DEFAULT_BRANCH}/"
+            "protection/required_status_checks",
+            1,
+        ),
+        "api_path_unquoted",
+    )
+    if unquoted is None:
+        return 1
+    if not workflow_contract_problems(unquoted):
+        print(
+            "self-test: unquoting API path went undetected",
             file=sys.stderr,
         )
         return 1
