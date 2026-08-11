@@ -495,7 +495,8 @@ mod tests {
     use super::{deadline_expiry, run_bounded, ProcessLimits};
     #[cfg(unix)]
     use super::{process_tree_absent, process_tree_quiescent_after_io};
-    use std::path::Path;
+    use std::io::Write;
+    use std::path::PathBuf;
     use std::process::{Command, Stdio};
     use std::sync::mpsc;
     use std::thread;
@@ -537,33 +538,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn inherited_output_descendant_command(pid_file: &Path) -> Command {
-        let mut command = Command::new("sh");
-        command
-            .arg("-c")
-            .arg(
-                "sh -c 'echo \"$$\" > \"$1\"; while :; do :; done' descendant \"$1\" & printf parent-ready",
-            )
-            .arg("runner")
-            .arg(pid_file);
-        command
-    }
-
-    #[cfg(windows)]
-    fn inherited_output_descendant_command(pid_file: &Path) -> Command {
-        let mut command = Command::new("powershell.exe");
-        command.env("ASSAY_DESCENDANT_PID_FILE", pid_file);
-        command.args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "$path = [Environment]::GetEnvironmentVariable('ASSAY_DESCENDANT_PID_FILE'); $p = Start-Process -FilePath ping.exe -ArgumentList @('-t','127.0.0.1') -NoNewWindow -PassThru; [IO.File]::WriteAllText($path, [string]$p.Id); [Console]::Out.Write('parent-ready')",
-        ]);
-        command
-    }
-
-    #[cfg(unix)]
     fn early_exit_command() -> Command {
         let mut command = Command::new("sh");
         command.args(["-c", "exit 23"]);
@@ -577,17 +551,181 @@ mod tests {
         command
     }
 
-    fn read_descendant_pid(pid_file: &Path) -> Option<u32> {
-        let deadline = Instant::now() + Duration::from_secs(1);
-        while Instant::now() < deadline {
-            if let Ok(raw) = std::fs::read_to_string(pid_file) {
-                if let Ok(pid) = raw.trim().parse() {
-                    return Some(pid);
-                }
-            }
-            thread::sleep(Duration::from_millis(10));
+    /// Re-exec mode env; replaces the old environment-derived PID-file path.
+    const HELPER_MODE_ENV: &str = "ASSAY_BOUNDED_PROCESS_HELPER_MODE";
+    /// libtest filter for the helper. Zero/multiple matches must not go green.
+    const HELPER_FILTER: &str = "descendant_spawner_helper_process";
+    const READY_RECORD_PREFIX: &str = "READY pid=";
+    /// Solo control marker: no pid prefix, so mistaking Solo for a descendant fails parse.
+    const READY_SOLO_RECORD: &str = "READY solo";
+    const MAX_PID_DIGITS: usize = 10;
+
+    fn ready_record(pid: u32) -> String {
+        format!("{READY_RECORD_PREFIX}{pid}")
+    }
+
+    /// ASCII identifier continuation: alphanumeric or `_` is inside a word.
+    fn is_ascii_ident_char(c: char) -> bool {
+        c.is_ascii_alphanumeric() || c == '_'
+    }
+
+    fn ready_record_left_boundary(record: &str, start: usize) -> bool {
+        let before = &record[..start];
+        match before.chars().next_back() {
+            None => true,
+            // excerpt() Debug-escapes newlines as the two-char sequence '\\''n'
+            // (and CRLF as '\\''r''\\''n'); that 'n' is a line boundary, not an
+            // identifier character glued to READY.
+            Some('n') if before.ends_with("\\n") => true,
+            Some(c) => !is_ascii_ident_char(c),
         }
-        None
+    }
+
+    fn ready_record_right_boundary(record: &str, end: usize) -> bool {
+        match record[end..].chars().next() {
+            None => true,
+            Some(c) => !is_ascii_ident_char(c),
+        }
+    }
+
+    /// Strict `READY pid=<nonzero u32>` parse with left/right record boundaries.
+    /// Identical repeats agree; disagree errs. Empty template prefixes (no digits)
+    /// are ignored; a digit run without valid boundaries is a malformed record.
+    fn descendant_pid_from(record: &str) -> Result<u32, String> {
+        let mut seen: Option<u32> = None;
+        for (start, _) in record.match_indices(READY_RECORD_PREFIX) {
+            let after = start + READY_RECORD_PREFIX.len();
+            let digits: String = record[after..]
+                .chars()
+                .take(MAX_PID_DIGITS + 1)
+                .take_while(char::is_ascii_digit)
+                .collect();
+            if digits.is_empty() {
+                // Quoted command templates carry the prefix with no pid; skip.
+                continue;
+            }
+            if !ready_record_left_boundary(record, start)
+                || !ready_record_right_boundary(record, after + digits.len())
+            {
+                return Err(format!("readiness record is not bounded: {record:?}"));
+            }
+            let pid = match digits.parse::<u32>() {
+                Ok(0) | Err(_) => {
+                    return Err(format!("readiness record has no usable pid: {record:?}"));
+                }
+                Ok(pid) => pid,
+            };
+            match seen {
+                Some(first) if first != pid => {
+                    return Err(format!("readiness records disagree: {first} and {pid}"));
+                }
+                _ => seen = Some(pid),
+            }
+        }
+        seen.ok_or_else(|| format!("no readiness record: {record:?}"))
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum HelperPlan {
+        Inherited,
+        Detached,
+        Solo,
+    }
+
+    impl HelperPlan {
+        fn as_str(self) -> &'static str {
+            match self {
+                Self::Inherited => "inherited",
+                Self::Detached => "detached",
+                Self::Solo => "solo",
+            }
+        }
+
+        fn parse(value: &str) -> Option<Self> {
+            match value {
+                "inherited" => Some(Self::Inherited),
+                "detached" => Some(Self::Detached),
+                "solo" => Some(Self::Solo),
+                _ => None,
+            }
+        }
+    }
+
+    fn current_test_binary() -> PathBuf {
+        std::env::current_exe().expect("the running test binary must be addressable")
+    }
+
+    /// Windows: re-exec this binary (PowerShell startup was observed ~18s / 5s bound).
+    #[cfg(windows)]
+    fn descendant_spawner_command(plan: HelperPlan) -> Command {
+        let mut command = Command::new(current_test_binary());
+        command
+            .args([
+                HELPER_FILTER,
+                "--ignored",
+                "--nocapture",
+                "--format",
+                "terse",
+            ])
+            .env(HELPER_MODE_ENV, plan.as_str());
+        command
+    }
+
+    /// Unix: shell spawner emitting the same READY records as the Windows helper.
+    #[cfg(unix)]
+    fn descendant_spawner_command(plan: HelperPlan) -> Command {
+        let script = match plan {
+            HelperPlan::Solo => {
+                format!("printf '{READY_SOLO_RECORD}'; printf '{READY_SOLO_RECORD}' >&2")
+            }
+            HelperPlan::Inherited | HelperPlan::Detached => {
+                let detach = match plan {
+                    HelperPlan::Detached => "exec </dev/null >/dev/null 2>&1;",
+                    _ => "",
+                };
+                format!(
+                    "sh -c '{detach} while :; do :; done' descendant & \
+                     printf '{READY_RECORD_PREFIX}%s' \"$!\"; \
+                     printf '{READY_RECORD_PREFIX}%s' \"$!\" >&2"
+                )
+            }
+        };
+        let mut command = Command::new("sh");
+        command.arg("-c").arg(script);
+        command
+    }
+
+    #[allow(clippy::zombie_processes)]
+    #[test]
+    #[ignore = "re-executed as the bounded child of the descendant tests"]
+    fn descendant_spawner_helper_process() {
+        let mode = std::env::var(HELPER_MODE_ENV)
+            .unwrap_or_else(|error| panic!("{HELPER_MODE_ENV} must be set: {error}"));
+        let plan =
+            HelperPlan::parse(&mode).unwrap_or_else(|| panic!("unknown helper plan {mode:?}"));
+
+        let record = match plan {
+            HelperPlan::Solo => READY_SOLO_RECORD.to_owned(),
+            HelperPlan::Inherited | HelperPlan::Detached => {
+                let mut descendant = hanging_command();
+                descendant.stdin(Stdio::null());
+                if plan == HelperPlan::Detached {
+                    descendant.stdout(Stdio::null()).stderr(Stdio::null());
+                }
+                let child = descendant
+                    .spawn()
+                    .unwrap_or_else(|error| panic!("spawn the descendant: {error}"));
+                ready_record(child.id())
+            }
+        };
+
+        std::io::stdout()
+            .write_all(record.as_bytes())
+            .expect("report readiness on stdout");
+        std::io::stdout().flush().expect("flush readiness");
+        std::io::stderr()
+            .write_all(record.as_bytes())
+            .expect("report readiness on stderr");
     }
 
     #[cfg(unix)]
@@ -666,33 +804,6 @@ mod tests {
     #[cfg(windows)]
     fn descendant_test_guard() -> Duration {
         Duration::from_secs(10)
-    }
-
-    #[cfg(unix)]
-    fn quiet_descendant_command(pid_file: &Path) -> Command {
-        let mut command = Command::new("sh");
-        command
-            .arg("-c")
-            .arg(
-                "sh -c 'echo \"$$\" > \"$1\"; exec </dev/null >/dev/null 2>&1; while :; do :; done' descendant \"$1\" & while [ ! -s \"$1\" ]; do :; done; printf parent-ready",
-            )
-            .arg("runner")
-            .arg(pid_file);
-        command
-    }
-
-    #[cfg(windows)]
-    fn quiet_descendant_command(pid_file: &Path) -> Command {
-        let mut command = Command::new("powershell.exe");
-        command.env("ASSAY_DESCENDANT_PID_FILE", pid_file);
-        command.args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "$path = [Environment]::GetEnvironmentVariable('ASSAY_DESCENDANT_PID_FILE'); $p = Start-Process -FilePath ping.exe -ArgumentList @('-t','127.0.0.1') -WindowStyle Hidden -PassThru; [IO.File]::WriteAllText($path, [string]$p.Id); [Console]::Out.Write('parent-ready')",
-        ]);
-        command
     }
 
     #[test]
@@ -782,14 +893,11 @@ mod tests {
 
     #[test]
     fn kills_descendant_that_holds_inherited_output_open() {
-        let temp = tempfile::tempdir().expect("temporary pid directory");
-        let pid_file = temp.path().join("descendant.pid");
-        let cleanup_path = pid_file.clone();
         let (result_tx, result_rx) = mpsc::channel();
         let started = Instant::now();
 
         let worker = thread::spawn(move || {
-            let command = inherited_output_descendant_command(&pid_file);
+            let command = descendant_spawner_command(HelperPlan::Inherited);
             let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
             let result = run_bounded(command, b"", limits, "inherited output mutation");
             let _ = result_tx.send(result);
@@ -808,30 +916,73 @@ mod tests {
             started.elapsed() < descendant_test_guard(),
             "process-tree cleanup exceeded the test bound"
         );
-        let descendant_pid = read_descendant_pid(&cleanup_path)
-            .expect("descendant must publish its pid before inheriting output");
+        let descendant_pid = descendant_pid_from(&error)
+            .unwrap_or_else(|reason| panic!("descendant pid unreadable: {reason}"));
         if !wait_for_descendant_exit(descendant_pid) {
             panic!("descendant {descendant_pid} survived process-tree termination");
         }
     }
 
+    /// Unix may keep success; Windows deadline only if Solo (same head) proves EOF.
+    #[cfg(unix)]
     #[test]
     fn kills_quiet_descendant_after_normal_parent_exit() {
-        let temp = tempfile::tempdir().expect("temporary pid directory");
-        let pid_file = temp.path().join("quiet-descendant.pid");
-        let command = quiet_descendant_command(&pid_file);
+        let command = descendant_spawner_command(HelperPlan::Detached);
         let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
 
         let output = run_bounded(command, b"", limits, "normal completion mutation")
             .expect("normal parent completion must retain its outcome");
 
         assert!(output.status.success());
-        assert_eq!(output.stdout, b"parent-ready");
-        let descendant_pid =
-            read_descendant_pid(&pid_file).expect("quiet descendant must publish its pid");
+        let stderr = String::from_utf8(output.stderr.clone()).expect("stderr is the child's text");
+        let descendant_pid = descendant_pid_from(&stderr)
+            .unwrap_or_else(|reason| panic!("quiet descendant pid unreadable: {reason}"));
+        assert_eq!(stderr, ready_record(descendant_pid));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains(&ready_record(descendant_pid)),
+            "stdout must carry READY: {stdout:?}"
+        );
         assert!(
             wait_for_descendant_exit(descendant_pid),
             "quiet descendant {descendant_pid} survived normal completion cleanup"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn kills_quiet_descendant_after_normal_parent_exit() {
+        let (result_tx, result_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let command = descendant_spawner_command(HelperPlan::Detached);
+            let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
+            let _ = result_tx.send(run_bounded(
+                command,
+                b"",
+                limits,
+                "normal completion mutation",
+            ));
+        });
+        let result = match result_rx.recv_timeout(descendant_test_guard()) {
+            Ok(result) => result,
+            Err(error) => panic!("runner escaped its wall-clock bound: {error}"),
+        };
+        worker.join().expect("bounded runner worker");
+
+        let error = result.expect_err(
+            "a Windows descendant inherits the run's handles, so the deadline is the only \
+             reachable ending; a success here means the platform changed",
+        );
+        assert!(error.contains("normal completion mutation"));
+        assert!(error.contains("(child exit)"), "{error}");
+        assert!(!error.contains("child still running"), "{error}");
+        assert!(error.contains("stdout handle still open"), "{error}");
+        assert!(error.contains("stderr handle still open"), "{error}");
+        let descendant_pid = descendant_pid_from(&error)
+            .unwrap_or_else(|reason| panic!("quiet descendant pid unreadable: {reason}"));
+        assert!(
+            wait_for_descendant_exit(descendant_pid),
+            "quiet descendant {descendant_pid} survived process-tree termination"
         );
     }
 
@@ -859,5 +1010,158 @@ mod tests {
         assert!(process_tree_quiescent_after_io(&error));
         #[cfg(not(target_os = "macos"))]
         assert!(!process_tree_quiescent_after_io(&error));
+    }
+
+    #[test]
+    fn the_helper_plan_survives_the_round_trip_to_the_helper() {
+        for plan in [
+            HelperPlan::Inherited,
+            HelperPlan::Detached,
+            HelperPlan::Solo,
+        ] {
+            assert_eq!(HelperPlan::parse(plan.as_str()), Some(plan));
+        }
+        assert_eq!(HelperPlan::parse("other"), None);
+        assert!(descendant_pid_from(READY_SOLO_RECORD).is_err());
+    }
+
+    #[test]
+    fn the_re_executed_helper_is_selected_by_exactly_one_filter_match() {
+        let output = Command::new(current_test_binary())
+            .args(["--list", HELPER_FILTER])
+            .output()
+            .expect("list the helper test");
+        assert!(
+            output.status.success(),
+            "listing the helper test failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let matches: Vec<_> = stdout
+            .lines()
+            .filter(|line| line.contains(HELPER_FILTER))
+            .collect();
+        assert_eq!(
+            matches.len(),
+            1,
+            "helper filter must select exactly one test, got {}: {stdout}",
+            matches.len()
+        );
+    }
+
+    /// Unix-only helper smoke: Windows exercises re-exec via the descendant tests.
+    #[cfg(unix)]
+    #[test]
+    fn the_re_executed_helper_publishes_a_pid_and_reports_readiness() {
+        let mut command = Command::new(current_test_binary());
+        command
+            .args([
+                HELPER_FILTER,
+                "--ignored",
+                "--nocapture",
+                "--format",
+                "terse",
+            ])
+            .env(HELPER_MODE_ENV, HelperPlan::Detached.as_str());
+        let limits = ProcessLimits::new(descendant_test_guard(), 1024, 1024);
+
+        let output = run_bounded(command, b"", limits, "helper re-execution")
+            .expect("the re-executed helper must complete within the test guard");
+
+        assert!(output.status.success(), "{:?}", output.status);
+        let stderr = String::from_utf8(output.stderr.clone()).expect("stderr is the child's text");
+        let descendant_pid = descendant_pid_from(&stderr)
+            .unwrap_or_else(|reason| panic!("helper pid unreadable: {reason}"));
+        assert_eq!(stderr, ready_record(descendant_pid));
+        assert!(
+            wait_for_descendant_exit(descendant_pid),
+            "descendant {descendant_pid} of the re-executed helper survived cleanup"
+        );
+    }
+
+    /// Solo control: no descendant ⇒ EOF/success. Pins the inherited-handle claim.
+    #[test]
+    fn the_same_child_reaches_eof_when_it_spawns_no_descendant() {
+        let (result_tx, result_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let command = descendant_spawner_command(HelperPlan::Solo);
+            let limits = ProcessLimits::new(descendant_run_timeout(), 1024, 1024);
+            let _ = result_tx.send(run_bounded(command, b"", limits, "no descendant control"));
+        });
+        let result = match result_rx.recv_timeout(descendant_test_guard()) {
+            Ok(result) => result,
+            Err(error) => panic!("runner escaped its wall-clock bound: {error}"),
+        };
+        worker.join().expect("bounded runner worker");
+        let output = result.unwrap_or_else(|error| {
+            panic!(
+                "a child that spawned nothing must reach EOF; without a descendant the \
+                 inherited-handle account of #2249 is refuted: {error}"
+            )
+        });
+        assert!(output.status.success(), "{:?}", output.status);
+        let stderr = String::from_utf8(output.stderr.clone()).expect("stderr is the child's text");
+        assert_eq!(stderr, READY_SOLO_RECORD);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains(READY_SOLO_RECORD),
+            "stdout must carry the same record: {stdout:?}"
+        );
+    }
+
+    #[test]
+    fn only_one_exactly_shaped_readiness_record_yields_a_pid() {
+        assert_eq!(descendant_pid_from("READY pid=4294967295"), Ok(u32::MAX));
+        assert_eq!(
+            descendant_pid_from("\nrunning 1 test\nREADY pid=1234.\ntest result: ok.\n"),
+            Ok(1234),
+            "libtest noise must not hide the record"
+        );
+        assert_eq!(
+            descendant_pid_from(
+                "sh -c printf 'READY pid=%s'\": deadline expired; \
+                 stdout=\"READY pid=77\" (12 bytes); stderr=\"READY pid=77\" (12 bytes)"
+            ),
+            Ok(77),
+            "identical both-channel quotes must still read"
+        );
+        // excerpt() debug-escapes newlines, so the diagnostic carries the two-char
+        // sequence '\\' 'n' immediately before READY — not a real newline.
+        assert_eq!(
+            descendant_pid_from(
+                r#"deadline; stdout="\nrunning 1 test\nREADY pid=6024.\ntest result: ok."; stderr="READY pid=6024""#
+            ),
+            Ok(6024),
+            "debug-escaped newlines in excerpt must not hide READY"
+        );
+        assert_eq!(
+            descendant_pid_from(r#"stdout="\r\nREADY pid=6024.""#),
+            Ok(6024),
+            "debug-escaped CRLF must also be a left boundary"
+        );
+
+        for rejected in [
+            "",
+            "READY pid=",
+            "READY pid=x",
+            "READY pid=-1",
+            "READY pid=0",
+            "READY pid=4294967296",
+            "READY pid=42949672960",
+            "READY pid=1 READY pid=2",
+            "READY pid=1 READY pid=1 READY pid=3",
+            "parent-ready",
+            "READY solo",
+            // Embedded prefix / trailing payload must not supply identity.
+            "XREADY pid=5",
+            "READY pid=5evil",
+            "_READY pid=5",
+            "READY pid=5_evil",
+        ] {
+            assert!(
+                descendant_pid_from(rejected).is_err(),
+                "{rejected:?} must not yield a pid"
+            );
+        }
     }
 }
