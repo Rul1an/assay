@@ -564,17 +564,22 @@ mod tests {
         format!("{READY_RECORD_PREFIX}{pid}")
     }
 
+    /// ASCII identifier continuation: alphanumeric or `_` is inside a word.
+    fn is_ascii_ident_char(c: char) -> bool {
+        c.is_ascii_alphanumeric() || c == '_'
+    }
+
     fn ready_record_left_boundary(record: &str, start: usize) -> bool {
         match record[..start].chars().next_back() {
             None => true,
-            Some(c) => !c.is_ascii_alphanumeric(),
+            Some(c) => !is_ascii_ident_char(c),
         }
     }
 
     fn ready_record_right_boundary(record: &str, end: usize) -> bool {
         match record[end..].chars().next() {
             None => true,
-            Some(c) => !c.is_ascii_alphanumeric(),
+            Some(c) => !is_ascii_ident_char(c),
         }
     }
 
@@ -1131,6 +1136,8 @@ mod tests {
             // Embedded prefix / trailing payload must not supply identity.
             "XREADY pid=5",
             "READY pid=5evil",
+            "_READY pid=5",
+            "READY pid=5_evil",
         ] {
             assert!(
                 descendant_pid_from(rejected).is_err(),
