@@ -564,17 +564,40 @@ mod tests {
         format!("{READY_RECORD_PREFIX}{pid}")
     }
 
-    /// Strict `READY pid=<nonzero u32>` parse. Identical repeats agree; disagree errs.
+    fn ready_record_left_boundary(record: &str, start: usize) -> bool {
+        match record[..start].chars().next_back() {
+            None => true,
+            Some(c) => !c.is_ascii_alphanumeric(),
+        }
+    }
+
+    fn ready_record_right_boundary(record: &str, end: usize) -> bool {
+        match record[end..].chars().next() {
+            None => true,
+            Some(c) => !c.is_ascii_alphanumeric(),
+        }
+    }
+
+    /// Strict `READY pid=<nonzero u32>` parse with left/right record boundaries.
+    /// Identical repeats agree; disagree errs. Empty template prefixes (no digits)
+    /// are ignored; a digit run without valid boundaries is a malformed record.
     fn descendant_pid_from(record: &str) -> Result<u32, String> {
         let mut seen: Option<u32> = None;
         for (start, _) in record.match_indices(READY_RECORD_PREFIX) {
-            let digits: String = record[start + READY_RECORD_PREFIX.len()..]
+            let after = start + READY_RECORD_PREFIX.len();
+            let digits: String = record[after..]
                 .chars()
                 .take(MAX_PID_DIGITS + 1)
                 .take_while(char::is_ascii_digit)
                 .collect();
             if digits.is_empty() {
+                // Quoted command templates carry the prefix with no pid; skip.
                 continue;
+            }
+            if !ready_record_left_boundary(record, start)
+                || !ready_record_right_boundary(record, after + digits.len())
+            {
+                return Err(format!("readiness record is not bounded: {record:?}"));
             }
             let pid = match digits.parse::<u32>() {
                 Ok(0) | Err(_) => {
@@ -1105,6 +1128,9 @@ mod tests {
             "READY pid=1 READY pid=1 READY pid=3",
             "parent-ready",
             "READY solo",
+            // Embedded prefix / trailing payload must not supply identity.
+            "XREADY pid=5",
+            "READY pid=5evil",
         ] {
             assert!(
                 descendant_pid_from(rejected).is_err(),
