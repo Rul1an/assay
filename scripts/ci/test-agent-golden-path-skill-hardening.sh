@@ -151,116 +151,95 @@ append_skill_text() {
   done
 }
 
-append_existing_contract_evidence_issue() {
-  local case_root="$1"
-  CASE_ROOT="$case_root" python3 - <<'PY'
+append_contract_evidence_mutation() {
+  local case_root="$1" mode="$2"
+  CASE_ROOT="$case_root" MUTATION_MODE="$mode" python3 - <<'PY'
+import importlib.util
 import json
 import os
-import re
+import shutil
+import sys
 from pathlib import Path
 
-ISSUE_REF = re.compile(r"(?:#|/issues/)([0-9]+)")
-
-# Cite an issue the shipped contract already vouches for. Naming one here instead would
-# state the allowed-issue set a second time, and it went stale the moment a gap closed.
 root = Path(os.environ["CASE_ROOT"])
+validator_path = root / "scripts/ci/test-agent-golden-path-skill.py"
+spec = importlib.util.spec_from_file_location("golden_path_mutation_validator", validator_path)
+if spec is None or spec.loader is None:
+    raise SystemExit(f"cannot import copied validator: {validator_path}")
+validator = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = validator
+spec.loader.exec_module(validator)
+
+contract_path = root / "docs/generated/agent-golden-path.json"
 contract = json.loads(
-    (root / "docs/generated/agent-golden-path.json").read_text(encoding="utf-8")
+    validator.read_bounded_evidence(contract_path, "contract evidence")
 )
 
 skill_paths = (
     root / ".agents/skills/assay-golden-path/SKILL.md",
     root / ".claude/skills/assay-golden-path/SKILL.md",
 )
-
-vouched = {
-    int(match)
-    for claim in contract["non_claims"]
-    for match in ISSUE_REF.findall(claim)
+skill_text = {
+    path: validator.read_bounded_evidence(path, "skill mutation input").decode("ascii")
+    for path in skill_paths
 }
-for step in contract["steps"]:
-    vouched.update(
-        outcome["gap_issue"]
-        for outcome in step["outcomes"]
-        if isinstance(outcome.get("gap_issue"), int)
-        and not isinstance(outcome["gap_issue"], bool)
-    )
+issue_numbers = validator.contract_issue_numbers(contract)
+mode = os.environ["MUTATION_MODE"]
 
-# Keep only issues the shipped skill already names. `gap_issue` is a data field with no
-# requirement that it be rendered, so the contract-derived set alone would let this case cite
-# an issue absent from the skill -- the appended sentence would then claim the skill retains a
-# link it never carried, and the case would quietly become the novel-issue case instead.
-rendered = set.intersection(
-    *(
-        {int(match) for match in ISSUE_REF.findall(path.read_text(encoding="utf-8"))}
-        for path in skill_paths
+if mode == "existing":
+    # Keep only issues the shipped skill already names. `gap_issue` is a data field with no
+    # requirement that it be rendered, so the contract-derived set alone would let this case cite
+    # an issue absent from the skill and quietly turn this into the novel-issue case.
+    rendered = set.intersection(
+        *(
+            validator.issue_references(text)
+            for text in skill_text.values()
+        )
     )
-)
-issue_numbers = vouched & rendered
-
-if not issue_numbers:
-    raise SystemExit(
-        "no issue is both vouched for by the contract and already named in every shipped "
-        "skill, so this allow case would not exercise the vocabulary gate on an existing link"
+    existing = issue_numbers & rendered
+    if not existing:
+        raise SystemExit(
+            "no issue is both vouched for by the contract and already named in every shipped "
+            "skill, so this allow case would not exercise the vocabulary gate on an existing link"
+        )
+    issue = min(existing)
+    claim = (
+        "The steps retain the existing "
+        f"[gap #{issue}](https://github.com/Rul1an/assay/issues/{issue}) evidence link."
     )
+elif mode == "novel":
+    novel_issue = max(issue_numbers) + 1000
+    claim = (
+        "Mutation-only contract evidence is tracked by "
+        f"[#{novel_issue}](https://github.com/Rul1an/assay/issues/{novel_issue})."
+    )
+    contract["non_claims"].append(claim)
+    contract_path.write_text(json.dumps(contract, indent=2) + "\n", encoding="utf-8")
+    shutil.copyfile(
+        contract_path,
+        root
+        / "packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json",
+    )
+else:
+    raise SystemExit(f"unknown contract-evidence mutation mode: {mode}")
 
-issue = min(issue_numbers)
-claim = (
-    "The steps retain the existing "
-    f"[gap #{issue}](https://github.com/Rul1an/assay/issues/{issue}) evidence link."
-)
 for skill_path in skill_paths:
     with skill_path.open("a", encoding="ascii") as skill:
         skill.write(f"\n{claim}\n")
+    mutated = validator.read_bounded_evidence(
+        skill_path, "mutated skill evidence"
+    ).decode("ascii")
+    if mutated.count(claim) != 1:
+        raise SystemExit(f"contract-evidence mutation was not applied exactly once: {skill_path}")
 PY
+}
+
+append_existing_contract_evidence_issue() {
+  append_contract_evidence_mutation "$1" existing
 }
 
 append_contract_evidence_issue() {
-  local case_root="$1"
-  CASE_ROOT="$case_root" python3 - <<'PY'
-import json
-import re
-import os
-import shutil
-from pathlib import Path
-
-root = Path(os.environ["CASE_ROOT"])
-contract_path = root / "docs/generated/agent-golden-path.json"
-contract = json.loads(contract_path.read_text(encoding="utf-8"))
-
-issue_numbers = {
-    int(match)
-    for claim in contract["non_claims"]
-    for match in re.findall(r"(?:#|/issues/)([0-9]+)", claim)
-}
-for step in contract["steps"]:
-    issue_numbers.update(
-        outcome["gap_issue"]
-        for outcome in step["outcomes"]
-        if isinstance(outcome.get("gap_issue"), int)
-        and not isinstance(outcome["gap_issue"], bool)
-    )
-
-novel_issue = max(issue_numbers) + 1000
-claim = (
-    "Mutation-only contract evidence is tracked by "
-    f"[#{novel_issue}](https://github.com/Rul1an/assay/issues/{novel_issue})."
-)
-contract["non_claims"].append(claim)
-contract_path.write_text(json.dumps(contract, indent=2) + "\n", encoding="utf-8")
-shutil.copyfile(
-    contract_path,
-    root
-    / "packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json",
-)
-
-for skill_path in (
-    root / ".agents/skills/assay-golden-path/SKILL.md",
-    root / ".claude/skills/assay-golden-path/SKILL.md",
-):
-    with skill_path.open("a", encoding="ascii") as skill:
-        skill.write(f"\n{claim}\n")
-PY
+  append_contract_evidence_mutation "$1" novel
 }
 
 expect_failure_with_recorder() {
