@@ -88,6 +88,23 @@ def ruleset_contexts(text: str) -> list[str]:
     return found
 
 
+def ruleset_checks(text: str) -> dict[str, int | None]:
+    """Required context -> integration binding from the importable ruleset."""
+    params = _ruleset_required_status_parameters(text)
+    checks: dict[str, int | None] = {}
+    for check in params.get("required_status_checks", []):
+        context = check.get("context")
+        integration_id = check.get("integration_id")
+        if not isinstance(context, str) or not context:
+            raise DriftError(f"{RULESET}: required status check has no context")
+        if integration_id is not None and not isinstance(integration_id, int):
+            raise DriftError(f"{RULESET}: integration_id for {context!r} must be an integer or null")
+        checks[context] = integration_id
+    if not checks:
+        raise DriftError(f"{RULESET}: no required status checks to bind")
+    return checks
+
+
 def ruleset_strict(text: str) -> bool:
     """Strictness comes from the same ruleset artifact as the context list."""
     params = _ruleset_required_status_parameters(text)
@@ -104,12 +121,8 @@ def ruleset_strict(text: str) -> bool:
     return value
 
 
-def live_protection(text: str) -> tuple[list[str], bool]:
-    """Parse classic branch-protection required_status_checks JSON (contexts + strict).
-
-    app_id on individual checks is ignored on purpose: live and the ruleset already
-    disagree there for CI, and this slice reconciles only context set and strictness.
-    """
+def live_protection(text: str) -> tuple[list[str], bool, dict[str, int | None]]:
+    """Parse classic branch-protection context names, strictness, and app bindings."""
     if not text or not text.strip():
         raise DriftError("live response is empty")
     try:
@@ -118,7 +131,7 @@ def live_protection(text: str) -> tuple[list[str], bool]:
         raise DriftError(f"live response is not JSON: {exc}") from exc
     if not isinstance(doc, dict):
         raise DriftError("live response must be a JSON object")
-    missing = [key for key in ("contexts", "strict") if key not in doc]
+    missing = [key for key in ("contexts", "strict", "checks") if key not in doc]
     if missing:
         raise DriftError(
             "live response missing required_status_checks fields: "
@@ -126,18 +139,32 @@ def live_protection(text: str) -> tuple[list[str], bool]:
         )
     contexts = doc["contexts"]
     strict = doc["strict"]
+    raw_checks = doc["checks"]
     if not isinstance(contexts, list) or not all(isinstance(c, str) for c in contexts):
         raise DriftError("live response contexts must be a list of strings")
     if not isinstance(strict, bool):
         raise DriftError("live response strict must be a boolean")
-    return contexts, strict
+    if not isinstance(raw_checks, list):
+        raise DriftError("live response checks must be a list")
+    checks: dict[str, int | None] = {}
+    for check in raw_checks:
+        if not isinstance(check, dict):
+            raise DriftError("live response checks must contain objects")
+        context = check.get("context")
+        app_id = check.get("app_id")
+        if not isinstance(context, str) or not context:
+            raise DriftError("live response check context must be a non-empty string")
+        if app_id is not None and not isinstance(app_id, int):
+            raise DriftError(f"live response app_id for {context!r} must be an integer or null")
+        checks[context] = app_id
+    return contexts, strict, checks
 
 
 def check_live(read, live_text: str) -> list[str]:
     """Compare live classic protection to the ruleset (contexts set + strict only)."""
     expected = ruleset_contexts(read(RULESET))
     expected_strict = ruleset_strict(read(RULESET))
-    actual, actual_strict = live_protection(live_text)
+    actual, actual_strict, actual_checks = live_protection(live_text)
     problems = compare(expected, actual, "live required_status_checks.contexts")
     if expected_strict != actual_strict:
         problems.append(
@@ -145,6 +172,16 @@ def check_live(read, live_text: str) -> list[str]:
             f"{actual_strict!r} but ruleset strict_required_status_checks_policy="
             f"{expected_strict!r}"
         )
+    expected_checks = ruleset_checks(read(RULESET))
+    for context in sorted(set(expected_checks) & set(actual_checks)):
+        if expected_checks[context] != actual_checks[context]:
+            problems.append(
+                f"live required status check {context!r} app_id={actual_checks[context]!r} "
+                f"but ruleset integration_id={expected_checks[context]!r}"
+            )
+    missing_checks = sorted(set(expected_checks) - set(actual_checks))
+    if missing_checks:
+        problems.append(f"live required_status_checks.checks missing {missing_checks}")
     return problems
 
 
@@ -380,7 +417,7 @@ def self_test() -> int:
 
 
 def _baseline_live_json(contexts: list[str], *, strict: bool = True, app_id=15368) -> str:
-    """Shape of GET .../protection/required_status_checks, including ignored app_id."""
+    """Shape of GET .../protection/required_status_checks."""
     return json.dumps(
         {
             "strict": strict,
@@ -430,13 +467,12 @@ def live_self_test(baseline: dict) -> int:
         print("self-test: identity no-op was not rejected by apply helper", file=sys.stderr)
         return 1
 
-    # Match cases, including reorder and app_id noise, via production main_live().
+    # Match cases, including harmless ordering differences, via production main_live().
     reordered = list(reversed(expected))
     assert set(reordered) == set(expected)
     match_cases = [
         ("baseline", live_ok),
         ("reordered", _baseline_live_json(reordered, strict=expected_strict)),
-        ("app_id_ignored", _baseline_live_json(expected, strict=expected_strict, app_id=None)),
     ]
     for label, live_text in match_cases:
         code = _invoke_main_live(live_text)
@@ -476,8 +512,9 @@ def live_self_test(baseline: dict) -> int:
     unreadable_live = [
         ("empty", lambda t: ""),
         ("malformed", lambda t: "{not-json"),
-        ("missing_contexts", lambda t: json.dumps({"strict": True})),
-        ("missing_strict", lambda t: json.dumps({"contexts": expected})),
+        ("missing_contexts", lambda t: json.dumps({"strict": True, "checks": []})),
+        ("missing_strict", lambda t: json.dumps({"contexts": expected, "checks": []})),
+        ("missing_checks", lambda t: json.dumps({"contexts": expected, "strict": True})),
     ]
     for label, mutate in unreadable_live:
         mutated = apply_live(mutate, label)
@@ -492,15 +529,15 @@ def live_self_test(baseline: dict) -> int:
             )
             return 1
 
-    # app_id-only change must apply (text differs) and still match through main_live.
+    # An app_id-only change is real protection drift: the ruleset pins who may report each check.
     app_only = apply_live(
         lambda t: _baseline_live_json(expected, strict=expected_strict, app_id=99999),
         "app_id_only",
     )
     if app_only is None:
         return 1
-    if _invoke_main_live(app_only) != EXIT_MATCH:
-        print("self-test: app_id-only change must exit 0 via main_live", file=sys.stderr)
+    if _invoke_main_live(app_only) != EXIT_DRIFT:
+        print("self-test: app_id-only change must exit 1 via main_live", file=sys.stderr)
         return 1
 
     # CLI is stdin-only: a path argv must be rejected (no arbitrary Path read).
