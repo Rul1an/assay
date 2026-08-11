@@ -35,6 +35,8 @@ on:
       # setup-rust contract hook runs under Lint (pre-commit) in this workflow.
       - ".github/actions/setup-rust/**"
       - ".github/workflows/week8-sota-gates.yml"
+      # wave6 Rust jobs call setup-rust; keep contract hook on that surface.
+      - ".github/workflows/wave6-nightly-safety.yml"
       # Note: Cargo.toml/Cargo.lock removed - check-ebpf-changes job handles skip logic
   push:
     branches: [ "main", "debug/**" ]
