@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Sample GitHub control-plane runner registration and label-specific demand.
+# Emits runner_state + alert_required. Does not claim host functionality or SLA.
+# expected_offline is not health: never publish healthy=true for that state.
 set -euo pipefail
 
 repo="${GITHUB_REPOSITORY:-${REPO:-}}"
@@ -39,21 +42,86 @@ count_nonempty_lines() {
   sed '/^[[:space:]]*$/d' | wc -l | tr -d ' '
 }
 
+# Centralized jq capture for hostile/malformed API bodies.
+# On success: prints jq stdout. On failure: appends a value-free marker to
+# err_file (never echoes jq diagnostics that may include payload fragments)
+# and returns 1 so callers can continue into classification_unknown.
+jq_try() {
+  local err_file="$1"
+  local marker="$2"
+  shift 2
+  local out_file="$tmpdir/jq.out"
+  if jq "$@" >"$out_file" 2>/dev/null; then
+    cat "$out_file"
+    return 0
+  fi
+  printf '%s\n' "$marker" >>"$err_file"
+  return 1
+}
+
+# Validate a paginated gh api stream before extraction.
+# Requires >=1 JSON document and every page to be an object whose expected key
+# is an array (empty arrays are valid). Empty bodies and wrong shapes are
+# incomplete classification inputs, not "no matching rows".
+require_json_pages() {
+  local file="$1"
+  local array_key="$2"
+  local err_file="$3"
+  local marker="$4"
+
+  if [[ ! -s "$file" ]]; then
+    printf '%s\n' "$marker" >>"$err_file"
+    return 1
+  fi
+
+  # jq program: $key is a jq --arg, not a shell expansion.
+  # shellcheck disable=SC2016
+  if jq_try "$err_file" "$marker" -se --arg key "$array_key" '
+    if length < 1 then
+      error("incomplete")
+    else
+      map(
+        if (type != "object")
+          or ((has($key) | not))
+          or ((.[$key] | type) != "array")
+        then error("incomplete")
+        else true
+        end
+      )
+      | length
+    end
+  ' "$file" >/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
 runner_status="unknown"
 runner_status_error=""
 runner_busy="unknown"
 runner_labels=""
 
 runner_status_stderr="$tmpdir/runner-status.stderr"
+runner_parse_err="$tmpdir/runner-parse.err"
+: >"$runner_parse_err"
 runner_json="$tmpdir/runners.json"
 if GH_TOKEN="$runner_status_token" gh api --paginate "repos/$repo/actions/runners?per_page=100" >"$runner_json" 2>"$runner_status_stderr"; then
-  selected_runner="$(jq -sc --arg name "$runner_name" '[.[].runners[]? | select(.name == $name)] | .[0] // empty' "$runner_json")"
-  if [[ -z "$selected_runner" ]]; then
-    runner_status="not_found"
-  else
-    runner_status="$(jq -r '.status // "unknown"' <<<"$selected_runner")"
-    runner_busy="$(jq -r 'if has("busy") then (.busy | tostring) else "unknown" end' <<<"$selected_runner")"
-    runner_labels="$(jq -r '[.labels[]?.name] | join(",")' <<<"$selected_runner")"
+  if require_json_pages "$runner_json" "runners" "$runner_parse_err" "runner_json_incomplete"; then
+    # jq program: $name is a jq --arg, not a shell expansion.
+    # shellcheck disable=SC2016
+    if selected_runner="$(jq_try "$runner_parse_err" "runner_json_parse_failed" -sc --arg name "$runner_name" '[.[].runners[]? | select(.name == $name)] | .[0] // empty' "$runner_json")"; then
+      if [[ -z "$selected_runner" ]]; then
+        runner_status="not_found"
+      else
+        runner_status="$(jq -r '.status // "unknown"' <<<"$selected_runner")"
+        runner_busy="$(jq -r 'if has("busy") then (.busy | tostring) else "unknown" end' <<<"$selected_runner")"
+        runner_labels="$(jq -r '[.labels[]?.name] | join(",")' <<<"$selected_runner")"
+      fi
+    fi
+  fi
+  if [[ -s "$runner_parse_err" ]]; then
+    runner_status_error="$(sanitize_error <"$runner_parse_err")"
+    echo "::warning::Unable to classify self-hosted runner status: ${runner_status_error}" >&2
   fi
 else
   runner_status_error="$(sanitize_error <"$runner_status_stderr")"
@@ -61,7 +129,9 @@ else
 fi
 
 matching_jobs="$tmpdir/matching-jobs.tsv"
+: >"$matching_jobs"
 queue_stderr="$tmpdir/queue.stderr"
+: >"$queue_stderr"
 queue_status_error=""
 general_queued_runs=0
 inspected_workflow_runs=0
@@ -69,32 +139,43 @@ inspected_workflow_runs=0
 for run_status in queued in_progress; do
   runs_json="$tmpdir/runs-${run_status}.json"
   if GH_TOKEN="$queue_token" gh api --paginate "repos/$repo/actions/runs?status=${run_status}&per_page=100" >"$runs_json" 2>>"$queue_stderr"; then
-    run_rows="$(jq -r '.workflow_runs[]? | [.id, .name, .status, .html_url] | @tsv' "$runs_json")"
-    if [[ "$run_status" == "queued" ]]; then
-      general_queued_runs="$(jq -r '.workflow_runs[]?.id' "$runs_json" | count_nonempty_lines)"
-    fi
+    if require_json_pages "$runs_json" "workflow_runs" "$queue_stderr" "queue_json_incomplete"; then
+      if run_rows="$(jq_try "$queue_stderr" "queue_json_parse_failed" -r '.workflow_runs[]? | [.id, .name, .status, .html_url] | @tsv' "$runs_json")"; then
+        if [[ "$run_status" == "queued" ]]; then
+          if queued_ids="$(jq_try "$queue_stderr" "queue_json_parse_failed" -r '.workflow_runs[]?.id' "$runs_json")"; then
+            general_queued_runs="$(printf '%s\n' "$queued_ids" | count_nonempty_lines)"
+          fi
+        fi
 
-    while IFS=$'\t' read -r run_id run_name _status run_url; do
-      [[ -n "${run_id:-}" ]] || continue
-      inspected_workflow_runs=$((inspected_workflow_runs + 1))
+        while IFS=$'\t' read -r run_id run_name _status run_url; do
+          [[ -n "${run_id:-}" ]] || continue
+          inspected_workflow_runs=$((inspected_workflow_runs + 1))
 
-      jobs_json="$tmpdir/jobs-${run_id}.json"
-      if GH_TOKEN="$queue_token" gh api --paginate "repos/$repo/actions/runs/${run_id}/jobs?filter=latest&per_page=100" >"$jobs_json" 2>>"$queue_stderr"; then
-        jq -r \
-          --arg label "$required_runner_label" \
-          --arg run_name "$run_name" \
-          --arg run_url "$run_url" \
-          '
-          .jobs[]?
-          | select((.status == "queued" or .status == "waiting" or .status == "pending" or .status == "requested")
-              and ((.labels // []) | index($label)))
-          | [$run_name, .name, .status, ((.labels // []) | join(",")), (.html_url // $run_url)]
-          | @tsv
-          ' "$jobs_json" >>"$matching_jobs"
-      else
-        echo "Unable to query jobs for run ${run_id}" >>"$queue_stderr"
+          jobs_json="$tmpdir/jobs-${run_id}.json"
+          if GH_TOKEN="$queue_token" gh api --paginate "repos/$repo/actions/runs/${run_id}/jobs?filter=latest&per_page=100" >"$jobs_json" 2>>"$queue_stderr"; then
+            if require_json_pages "$jobs_json" "jobs" "$queue_stderr" "queue_json_incomplete"; then
+              # jq program: $label/$run_name/$run_url are jq --arg bindings.
+              # shellcheck disable=SC2016
+              if ! jq_try "$queue_stderr" "queue_json_parse_failed" -r \
+                --arg label "$required_runner_label" \
+                --arg run_name "$run_name" \
+                --arg run_url "$run_url" \
+                '
+                .jobs[]?
+                | select((.status == "queued" or .status == "waiting" or .status == "pending" or .status == "requested")
+                    and ((.labels // []) | index($label)))
+                | [$run_name, .name, .status, ((.labels // []) | join(",")), (.html_url // $run_url)]
+                | @tsv
+                ' "$jobs_json" >>"$matching_jobs"; then
+                :
+              fi
+            fi
+          else
+            echo "Unable to query jobs for run ${run_id}" >>"$queue_stderr"
+          fi
+        done <<<"$run_rows"
       fi
-    done <<<"$run_rows"
+    fi
   fi
 done
 
@@ -104,19 +185,49 @@ if [[ -s "$queue_stderr" ]]; then
 fi
 
 matching_queued_jobs="$(count_nonempty_lines <"$matching_jobs")"
-health_reason="clear"
-healthy="true"
 
-if [[ "$runner_status" == "online" ]]; then
-  health_reason="runner_online"
-elif [[ "$matching_queued_jobs" =~ ^[0-9]+$ && "$matching_queued_jobs" -gt 0 ]]; then
+# Explicit state contract (issue #2256). Do not overload healthy for offline.
+runner_state="classification_unknown"
+alert_required="true"
+healthy="false"
+health_reason="runner_classification_unknown"
+
+if [[ -n "$runner_status_error" ]]; then
+  runner_state="classification_unknown"
+  alert_required="true"
   healthy="false"
-  health_reason="runner_${runner_status}_with_matching_backlog"
-elif [[ -n "$queue_status_error" && "$runner_status" != "online" ]]; then
+  health_reason="runner_status_classification_failed"
+elif [[ -n "$queue_status_error" ]]; then
+  # Queue classification incomplete/failed is unknown even when the runner is online.
+  runner_state="classification_unknown"
+  alert_required="true"
   healthy="false"
   health_reason="runner_${runner_status}_queue_classification_unknown"
-elif [[ "$runner_status" == "offline" || "$runner_status" == "not_found" || "$runner_status" == "unknown" ]]; then
-  health_reason="runner_${runner_status}_without_matching_backlog"
+elif [[ "$runner_status" == "online" ]]; then
+  runner_state="available"
+  alert_required="false"
+  healthy="true"
+  health_reason="runner_online"
+elif [[ "$runner_status" == "not_found" ]]; then
+  runner_state="unavailable"
+  alert_required="true"
+  healthy="false"
+  health_reason="runner_not_found"
+elif [[ "$matching_queued_jobs" =~ ^[0-9]+$ && "$matching_queued_jobs" -gt 0 ]]; then
+  runner_state="demand_backed_outage"
+  alert_required="true"
+  healthy="false"
+  health_reason="runner_${runner_status}_with_matching_backlog"
+elif [[ "$runner_status" == "offline" ]]; then
+  runner_state="expected_offline"
+  alert_required="false"
+  healthy="false"
+  health_reason="runner_offline_without_matching_backlog"
+else
+  runner_state="classification_unknown"
+  alert_required="true"
+  healthy="false"
+  health_reason="runner_${runner_status}_classification_unknown"
 fi
 
 write_output "runner_status" "$runner_status"
@@ -128,11 +239,13 @@ write_output "general_queued_runs" "$general_queued_runs"
 write_output "inspected_workflow_runs" "$inspected_workflow_runs"
 write_output "matching_queued_jobs" "$matching_queued_jobs"
 write_output "queue_status_error" "$queue_status_error"
+write_output "runner_state" "$runner_state"
+write_output "alert_required" "$alert_required"
 write_output "healthy" "$healthy"
 write_output "health_reason" "$health_reason"
 
 {
-  echo "## Runner Health"
+  echo "## Runner control-plane sample"
   echo "- runner: ${runner_name}"
   echo "- runner_status: ${runner_status}"
   echo "- runner_busy: ${runner_busy}"
@@ -141,8 +254,11 @@ write_output "health_reason" "$health_reason"
   echo "- general_queued_workflow_runs: ${general_queued_runs}"
   echo "- inspected_workflow_runs: ${inspected_workflow_runs}"
   echo "- matching_queued_jobs: ${matching_queued_jobs}"
+  echo "- runner_state: ${runner_state}"
+  echo "- alert_required: ${alert_required}"
   echo "- healthy: ${healthy}"
   echo "- health_reason: ${health_reason}"
+  echo "- note: samples registration and label demand only; not host functionality or SLA"
   if [[ -n "$runner_status_error" ]]; then
     echo "- runner_status_error: ${runner_status_error}"
   fi
@@ -158,9 +274,9 @@ write_output "health_reason" "$health_reason"
   fi
 } >>"$summary_file"
 
-if [[ "$healthy" != "true" ]]; then
-  echo "Runner health alert: ${health_reason}" >&2
+if [[ "$alert_required" == "true" ]]; then
+  echo "Runner alert required: state=${runner_state} reason=${health_reason}" >&2
   exit 1
 fi
 
-echo "Runner health clear: ${health_reason}"
+echo "Runner alert not required: state=${runner_state} reason=${health_reason}"

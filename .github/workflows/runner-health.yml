@@ -1,5 +1,6 @@
-# Self-hosted runner health monitor
-# Runs every 15 minutes to check runner status and alert if offline
+# Self-hosted runner control-plane monitor
+# Samples runner registration and label-specific demand every 6 hours.
+# Does not claim host functionality or SLA. expected_offline is not health.
 name: Runner Health
 
 on:
@@ -35,8 +36,8 @@ jobs:
         run: |
           bash scripts/ci/check-runner-health.sh
 
-      - name: Create issue if unhealthy
-        if: steps.check.outcome == 'failure'
+      - name: Create issue if alert required
+        if: always() && steps.check.outputs.alert_required == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -49,6 +50,8 @@ jobs:
           INSPECTED_WORKFLOW_RUNS: ${{ steps.check.outputs.inspected_workflow_runs }}
           MATCHING_QUEUED_JOBS: ${{ steps.check.outputs.matching_queued_jobs }}
           QUEUE_STATUS_ERROR: ${{ steps.check.outputs.queue_status_error }}
+          RUNNER_STATE: ${{ steps.check.outputs.runner_state }}
+          ALERT_REQUIRED: ${{ steps.check.outputs.alert_required }}
           HEALTH_REASON: ${{ steps.check.outputs.health_reason }}
         run: |
           set -euo pipefail
@@ -73,12 +76,16 @@ jobs:
           if [[ "$EXISTING" -eq 0 ]]; then
             detected_at="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
             ISSUE_BODY="$(cat <<EOF
-          ## Runner Health Alert
+          ## Runner Alert
 
-          The self-hosted runner \`assay-bpf-runner\` needs attention for label-specific queue health.
+          The self-hosted runner \`assay-bpf-runner\` needs attention for control-plane registration or label-specific demand.
+
+          This alert samples GitHub runner registration and queue labels only. It does not claim host functionality or SLA.
 
           ### Details
           - **Runner:** assay-bpf-runner
+          - **Runner State:** ${RUNNER_STATE}
+          - **Alert Required:** ${ALERT_REQUIRED}
           - **Status:** ${RUNNER_STATUS}
           - **Status Error:** ${RUNNER_STATUS_ERROR}
           - **Busy:** ${RUNNER_BUSY}
@@ -114,7 +121,7 @@ jobs:
           - Runner token expired
           - Network issues
 
-          This issue will auto-close when the label-specific health alert condition clears.
+          This issue will auto-close when alert_required clears for the exact alert title.
           EOF
           )"
 
@@ -135,8 +142,8 @@ jobs:
             echo "Health alert issue already exists"
           fi
 
-      - name: Close issue if healthy
-        if: success()
+      - name: Close issue if alert not required
+        if: always() && steps.check.outputs.alert_required == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -155,6 +162,6 @@ jobs:
 
           for ISSUE in $ISSUES; do
             gh issue close "$ISSUE" --repo "$REPO" \
-              --comment "✅ Runner health alert condition cleared. Auto-closing this alert."
+              --comment "✅ Runner alert_required cleared. Auto-closing this alert."
             echo "Closed issue #$ISSUE"
           done
