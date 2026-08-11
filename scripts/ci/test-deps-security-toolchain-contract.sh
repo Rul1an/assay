@@ -85,6 +85,16 @@ ${env_lines:-<empty>}"
     || fail "install-cargo-deny.sh must echo the resolved toolchain beside the requested alias"
   grep -qF 'rustc -vV' "${INSTALL}" \
     || fail "install-cargo-deny.sh must resolve the toolchain via rustc -vV"
+  grep -qF 'resolved="$(resolved_toolchain_label)" || exit 1' "${INSTALL}" \
+    || fail "install-cargo-deny.sh must fail closed when toolchain identity cannot be resolved"
+  # Success must not invent an identity. Active-code `unresolved` fallback is the defect under test.
+  if awk '
+    /^[[:space:]]*#/ { next }
+    /printf.*unresolved/ || /echo.*unresolved/ { found=1 }
+    END { exit found ? 0 : 1 }
+  ' "${INSTALL}"; then
+    fail "install-cargo-deny.sh still has an unresolved success fallback"
+  fi
 
   # Bound binary: PATH must not answer the pin check.
   grep -qE '^cargo_deny_bin_path[[:space:]]*\(\)' "${INSTALL}" \
@@ -183,6 +193,45 @@ if ( check_workflow "${WORKFLOW}" ) >/dev/null 2>&1; then
 fi
 INSTALL="${INSTALL_SAVE}"
 ok "removing resolved-toolchain echo turns the contract red"
+
+# Restoring the unresolved-success fallback must turn the contract red.
+fallback_mutant="${SANDBOX_ROOT}/install-fallback.sh"
+cp "${INSTALL}" "${fallback_mutant}"
+python3 - "${fallback_mutant}" <<'PY'
+import pathlib, re, sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+fail_open = '''resolved_toolchain_label() {
+  local release
+  release="$(rustc -vV 2>/dev/null | sed -n 's/^release: //p' | head -n 1)" || true
+  if [[ -n "${release}" ]]; then
+    printf '%s\\n' "${release}"
+  else
+    printf '%s\\n' "unresolved"
+  fi
+}'''
+# lambda replacement: a plain string would let re.sub turn `\n` into a real newline.
+replaced, n = re.subn(
+    r'^resolved_toolchain_label\(\) \{.*?\n\}',
+    lambda _m: fail_open,
+    text,
+    count=1,
+    flags=re.M | re.S,
+)
+if n != 1:
+    raise SystemExit(f"could not rewrite resolved_toolchain_label (n={n})")
+path.write_text(replaced)
+PY
+grep -qF 'printf' "${fallback_mutant}" && grep -qF '"unresolved"' "${fallback_mutant}" \
+  || fail "unresolved-success fallback mutation did not apply"
+INSTALL="${fallback_mutant}"
+if ( check_workflow "${WORKFLOW}" ) >/dev/null 2>&1; then
+  INSTALL="${INSTALL_SAVE}"
+  fail "restoring unresolved-success fallback left the contract green"
+fi
+INSTALL="${INSTALL_SAVE}"
+ok "restoring unresolved-success fallback turns the contract red"
 
 ok "deps-security toolchain contract mutations bite"
 echo "PASS: deps-security toolchain contract"

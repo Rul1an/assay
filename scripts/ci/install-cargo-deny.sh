@@ -24,15 +24,21 @@ cargo_deny_bin_path() {
 }
 
 # Resolve the alias RUSTUP_TOOLCHAIN names. Echoing only `stable` records the request, not what ran
-# (AGENTS.md pinning rule). rustc -vV's release line is the checkable half.
+# (AGENTS.md pinning rule). rustc -vV's release line is the checkable half. Absence or failure is
+# not an identity: returning a placeholder and continuing would make the log look resolved while
+# naming nothing.
 resolved_toolchain_label() {
-  local release
-  release="$(rustc -vV 2>/dev/null | sed -n 's/^release: //p' | head -n 1)" || true
-  if [[ -n "${release}" ]]; then
-    printf '%s\n' "${release}"
-  else
-    printf '%s\n' "unresolved"
+  local out release
+  if ! out="$(rustc -vV 2>&1)"; then
+    echo "rustc -vV failed; cannot resolve toolchain identity" >&2
+    return 1
   fi
+  release="$(printf '%s\n' "${out}" | sed -n 's/^release: //p' | head -n 1)"
+  if [[ -z "${release}" ]]; then
+    echo "rustc -vV produced no release line; cannot resolve toolchain identity" >&2
+    return 1
+  fi
+  printf '%s\n' "${release}"
 }
 
 install_cargo_deny() {
@@ -57,7 +63,9 @@ install_cargo_deny() {
   export RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}"
 
   local resolved
-  resolved="$(resolved_toolchain_label)"
+  # Assignment alone does not trip `set -e` on a failing command substitution in all bash
+  # versions; keep the failure explicit.
+  resolved="$(resolved_toolchain_label)" || exit 1
   echo "installing cargo-deny ${CARGO_DENY_VERSION} using toolchain ${RUSTUP_TOOLCHAIN} (resolved ${resolved})"
   cargo install --locked --version "${CARGO_DENY_VERSION}" cargo-deny
 

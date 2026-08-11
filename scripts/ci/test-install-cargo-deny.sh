@@ -254,6 +254,156 @@ fi
 expect_in_file "${root_out}" "at ${root_dir}/install-root/bin/cargo-deny" \
   "CARGO_INSTALL_ROOT selects the bound binary"
 
+echo "== unresolved toolchain identity fails closed =="
+# rustc -vV that exits 0 but omits the release line used to print "(resolved unresolved)" and
+# continue — a success that names no identity. The pin check can still pass; the log cannot.
+unres_dir="${SCRATCH}/unresolved_rustc"
+mkdir -p "${unres_dir}/tools" "${unres_dir}/cargo-home" "${unres_dir}/home"
+make_stubs "${unres_dir}/tools" "${PIN}"
+cat >"${unres_dir}/tools/rustc" <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "-vV" ]]; then
+  echo "rustc mystery-build"
+  echo "host: stub"
+  exit 0
+fi
+exit 1
+STUB
+chmod +x "${unres_dir}/tools/rustc"
+unres_log="${unres_dir}/log"
+unres_out="${unres_dir}/out"
+: >"${unres_log}"
+unres_exit=0
+STUB_LOG="${unres_log}" STUB_DENY_VERSION="${PIN}" \
+  HOME="${unres_dir}/home" CARGO_HOME="${unres_dir}/cargo-home" \
+  PATH="${unres_dir}/tools:${PATH}" \
+  bash "${UNDER_TEST}" >"${unres_out}" 2>&1 || unres_exit=$?
+if [[ "${unres_exit}" -eq 0 ]]; then
+  echo "FAIL unresolved rustc: install exited 0 without a release line"
+  sed 's/^/      /' "${unres_out}"
+  failures=$((failures + 1))
+else
+  echo "ok   unresolved rustc refused (exit ${unres_exit})"
+fi
+expect_in_file "${unres_out}" "no release line" \
+  "unresolved rustc names the missing release line"
+# Must not claim a fake identity and continue.
+if grep -qF '(resolved unresolved)' "${unres_out}"; then
+  echo "FAIL unresolved rustc: log still contains '(resolved unresolved)' success spelling"
+  sed 's/^/      /' "${unres_out}"
+  failures=$((failures + 1))
+else
+  echo "ok   unresolved rustc does not print a fake resolved identity"
+fi
+
+echo "== rustc -vV failure fails closed =="
+fail_dir="${SCRATCH}/rustc_fails"
+mkdir -p "${fail_dir}/tools" "${fail_dir}/cargo-home" "${fail_dir}/home"
+make_stubs "${fail_dir}/tools" "${PIN}"
+cat >"${fail_dir}/tools/rustc" <<'STUB'
+#!/usr/bin/env bash
+echo "rustc: stub failure" >&2
+exit 1
+STUB
+chmod +x "${fail_dir}/tools/rustc"
+fail_log="${fail_dir}/log"
+fail_out="${fail_dir}/out"
+: >"${fail_log}"
+fail_exit=0
+STUB_LOG="${fail_log}" STUB_DENY_VERSION="${PIN}" \
+  HOME="${fail_dir}/home" CARGO_HOME="${fail_dir}/cargo-home" \
+  PATH="${fail_dir}/tools:${PATH}" \
+  bash "${UNDER_TEST}" >"${fail_out}" 2>&1 || fail_exit=$?
+if [[ "${fail_exit}" -eq 0 ]]; then
+  echo "FAIL rustc failure: install exited 0 when rustc -vV failed"
+  sed 's/^/      /' "${fail_out}"
+  failures=$((failures + 1))
+else
+  echo "ok   rustc failure refused (exit ${fail_exit})"
+fi
+expect_in_file "${fail_out}" "rustc -vV failed" \
+  "rustc failure names the command that could not identify the toolchain"
+
+echo "== restoring unresolved-success fallback turns the probe green (mutation bites) =="
+# If someone reintroduces `printf … unresolved` / `|| true`, the no-release probe exits 0 again.
+# Prove that mutation by applying it to a copy; production must not contain the success fallback.
+mut_install="${SCRATCH}/install-unresolved-fallback.sh"
+cp "${UNDER_TEST}" "${mut_install}"
+python3 - "${mut_install}" <<'PY'
+import pathlib, re, sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+fail_open = '''resolved_toolchain_label() {
+  local release
+  release="$(rustc -vV 2>/dev/null | sed -n 's/^release: //p' | head -n 1)" || true
+  if [[ -n "${release}" ]]; then
+    printf '%s\\n' "${release}"
+  else
+    printf '%s\\n' "unresolved"
+  fi
+}'''
+# lambda replacement: a plain string would let re.sub turn `\n` into a real newline.
+replaced, n = re.subn(
+    r'^resolved_toolchain_label\(\) \{.*?\n\}',
+    lambda _m: fail_open,
+    text,
+    count=1,
+    flags=re.M | re.S,
+)
+if n != 1:
+    raise SystemExit(f"could not rewrite resolved_toolchain_label (n={n})")
+replaced, n2 = re.subn(
+    r'resolved="\$\(resolved_toolchain_label\)" \|\| exit 1',
+    'resolved="$(resolved_toolchain_label)"',
+    replaced,
+    count=1,
+)
+if n2 != 1:
+    raise SystemExit(f"could not drop || exit 1 after resolved_toolchain_label (n={n2})")
+path.write_text(replaced)
+PY
+mut_dir="${SCRATCH}/fallback_mutant_probe"
+mkdir -p "${mut_dir}/tools" "${mut_dir}/cargo-home" "${mut_dir}/home"
+make_stubs "${mut_dir}/tools" "${PIN}"
+cat >"${mut_dir}/tools/rustc" <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "-vV" ]]; then
+  echo "rustc mystery-build"
+  echo "host: stub"
+  exit 0
+fi
+exit 1
+STUB
+chmod +x "${mut_dir}/tools/rustc"
+mut_out="${mut_dir}/out"
+mut_exit=0
+STUB_DENY_VERSION="${PIN}" HOME="${mut_dir}/home" CARGO_HOME="${mut_dir}/cargo-home" \
+  PATH="${mut_dir}/tools:${PATH}" \
+  bash "${mut_install}" >"${mut_out}" 2>&1 || mut_exit=$?
+if [[ "${mut_exit}" -ne 0 ]]; then
+  echo "FAIL fallback mutation: probe still exited ${mut_exit}; mutation did not restore fail-open"
+  sed 's/^/      /' "${mut_out}"
+  failures=$((failures + 1))
+elif ! grep -qF '(resolved unresolved)' "${mut_out}"; then
+  echo "FAIL fallback mutation: expected '(resolved unresolved)' on the mutant"
+  sed 's/^/      /' "${mut_out}"
+  failures=$((failures + 1))
+else
+  echo "ok   restoring unresolved-success fallback turns the probe green"
+fi
+# Production must not keep the success fallback spelling in active code.
+if awk '
+  /^[[:space:]]*#/ { next }
+  /printf.*unresolved/ || /echo.*unresolved/ { found=1; print NR ":" $0 }
+  END { exit found ? 0 : 1 }
+' "${UNDER_TEST}"; then
+  echo "FAIL production install still contains an unresolved success fallback" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   production install has no unresolved success fallback"
+fi
+
 if [[ "${failures}" -ne 0 ]]; then
   echo "install-cargo-deny self-test: ${failures} failure(s)" >&2
   exit 1
