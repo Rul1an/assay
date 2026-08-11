@@ -708,6 +708,8 @@ ALLOWED = [
     (".github/workflows/ci.yml", "ebpf-smoke-ubuntu", TC, "rust-src + install-ebpf-toolchain.sh; composite would inject rust-cache"),
     (".github/workflows/demo.yml", "regenerate", TC, "no-cache demo rebuild; composite always caches"),
     (".github/workflows/docs-auto-update.yml", "generate-docs", TC, "no-cache docs generation; composite always caches"),
+    (".github/workflows/host-capability-proof.yml", "proof", TC, "repository-pinned toolchain paired with isolated direct cache; composite cannot set prefix-key/cache-bin"),
+    (".github/workflows/host-capability-proof.yml", "proof", RC, "self-hosted proof uses isolated host-capability prefix-key; composite has no prefix-key input"),
     (".github/workflows/kernel-matrix.yml", "build-artifacts", TC, "host toolchain before install-ebpf-toolchain.sh"),
     (".github/workflows/kernel-matrix.yml", "build-artifacts", RC, "Swatinem cache-on-failure for eBPF builds; composite lacks input"),
     (".github/workflows/parity.yml", "parity", TC, "actions/cache not Swatinem; composite would inject Swatinem"),
