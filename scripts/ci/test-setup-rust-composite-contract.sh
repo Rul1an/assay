@@ -233,13 +233,49 @@ if "fuzz-smoke" not in jobs:
     raise SystemExit("fuzz-smoke missing job fuzz-smoke")
 
 block = jobs["fuzz-smoke"]
-uses = re.findall(r"(?m)^      - uses:\s*(\S+)", block)
-setup_idxs = [i for i, u in enumerate(uses) if u.rstrip("/") == "./.github/actions/setup-rust"]
+
+# Top-level step sequence (every `^      - ` item), not merely `- uses:` lines —
+# a `run:`/`name:` step between checkout and setup-rust must fail this guard.
+def top_level_step_bodies(job_block: str) -> list[str]:
+    lines = job_block.splitlines()
+    bodies: list[str] = []
+    i = 0
+    while i < len(lines):
+        if re.match(r"^      - ", lines[i]):
+            start = i
+            i += 1
+            while i < len(lines) and not re.match(r"^      - ", lines[i]):
+                i += 1
+            bodies.append("\n".join(lines[start:i]))
+        else:
+            i += 1
+    return bodies
+
+
+def step_kind(body: str) -> str:
+    m = re.match(r"^      - uses:\s*(\S+)", body)
+    if not m:
+        m = re.search(r"(?m)^        uses:\s*(\S+)", body)
+    if m:
+        uses = m.group(1).rstrip("/")
+        if uses.startswith("actions/checkout@"):
+            return "checkout"
+        if uses == "./.github/actions/setup-rust":
+            return "setup-rust"
+        return "other-uses"
+    return "other"
+
+
+kinds = [step_kind(b) for b in top_level_step_bodies(block)]
+setup_idxs = [i for i, k in enumerate(kinds) if k == "setup-rust"]
 if len(setup_idxs) != 1:
     raise SystemExit(f"fuzz-smoke: expected one setup-rust call, found {len(setup_idxs)}")
-checkout_idxs = [i for i, u in enumerate(uses) if u.startswith("actions/checkout@")]
+checkout_idxs = [i for i, k in enumerate(kinds) if k == "checkout"]
 if not checkout_idxs or setup_idxs[0] != checkout_idxs[0] + 1:
-    raise SystemExit("fuzz-smoke: setup-rust must follow checkout in that job")
+    raise SystemExit(
+        "fuzz-smoke: setup-rust must be the immediate next top-level step after checkout "
+        f"(step kinds: {kinds})"
+    )
 
 
 def setup_rust_with_map(job_block: str) -> dict[str, str]:
