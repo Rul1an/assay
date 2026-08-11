@@ -18,6 +18,7 @@ STRUCTURIZR_EXPORT="${ROOT}/scripts/structurizr-export.sh"
 STRUCTURIZR_IMAGE_HELPER="${ROOT}/scripts/structurizr-cli-image.sh"
 STRUCTURIZR_IMAGE_PIN="${ROOT}/.github/structurizr-cli-image"
 CI_DOC="${ROOT}/docs/AIcontext/ci-infrastructure.md"
+CI_WF="${ROOT}/.github/workflows/ci.yml"
 THIS_TEST="${ROOT}/scripts/ci/test-ci-hardening-b1.sh"
 
 failures=0
@@ -568,6 +569,49 @@ if [[ -f "${CI_DOC}" ]]; then
   fi
 else
   fail "missing ${CI_DOC#"${ROOT}"/}"
+fi
+
+echo "== required CI workflow actively runs both hardening contracts =="
+# Without a workflow invocation, every GitHub check can stay green while these
+# regressions return. The scope job is always required by the CI aggregator.
+if python3 - "${CI_WF}" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1]).read()
+match = re.search(r"(?ms)^  scope:\n(.*?)(?=^  [a-zA-Z][\w-]*:|\Z)", text)
+if not match:
+    sys.exit("scope job missing from ci.yml")
+section = match.group(1)
+# Reject if/continue-on-error on the hardening step itself.
+step = re.search(
+    r"(?ms)^      - name: Verify CI hardening contracts\n(?P<body>(?:        .+\n)+)",
+    section,
+)
+if not step:
+    sys.exit("scope job missing 'Verify CI hardening contracts' step")
+body = step.group("body")
+for forbidden in ("if:", "continue-on-error:"):
+    if re.search(rf"(?m)^        {re.escape(forbidden)}", body):
+        sys.exit(f"hardening step must not use {forbidden}")
+active = [
+    line.strip()
+    for line in body.splitlines()
+    if line.startswith("          ") and not line.lstrip().startswith("#")
+]
+required = (
+    "bash scripts/ci/test-ci-hardening-b1.sh",
+    "bash scripts/ci/test-structurizr-export-docker.sh",
+)
+missing = [cmd for cmd in required if cmd not in active]
+if missing:
+    sys.exit("active commands missing: " + ", ".join(missing))
+sys.exit(0)
+PY
+then
+  ok "ci.yml scope job actively runs both hardening contract scripts"
+else
+  fail "ci.yml does not actively invoke both hardening contracts in the scope job"
 fi
 
 if [[ "${failures}" -ne 0 ]]; then
