@@ -173,13 +173,14 @@ hours) and `workflow_dispatch` on the default branch only. A red run means live
 protection drifted from the checked-in artifact, or the read failed (auth, API,
 or malformed evidence).
 
-Local check against a saved API response:
+Local check against a saved API response (**stdin-only**; the checker does not
+accept a path argument):
 
 ```bash
 gh api repos/OWNER/REPO/branches/main/protection/required_status_checks \
   > /tmp/live-required-status-checks.json
-python3 scripts/ci/check-required-contexts.py \
-  --live-response /tmp/live-required-status-checks.json
+python3 scripts/ci/check-required-contexts.py --live-response \
+  < /tmp/live-required-status-checks.json
 ```
 
 Exit codes for `--live-response`: `0` match, `1` semantic drift, `2` unreadable

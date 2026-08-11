@@ -21,8 +21,7 @@ still is, and a guard that cannot tell that from a stale requirement would be tu
 Usage:
     check-required-contexts.py             # verify the three locations agree
     check-required-contexts.py --self-test # prove each parser detects a drift
-    check-required-contexts.py --live-response PATH  # reconcile ruleset vs live API JSON
-    check-required-contexts.py --live-response -     # same, reading stdin
+    check-required-contexts.py --live-response < live.json  # stdin-only live reconcile
 """
 
 from __future__ import annotations
@@ -32,8 +31,8 @@ import contextlib
 import io
 import json
 import re
+import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -149,19 +148,9 @@ def check_live(read, live_text: str) -> list[str]:
     return problems
 
 
-def read_live_response(path: str) -> str:
-    if path == "-":
-        return sys.stdin.read()
-    live_path = Path(path)
+def main_live(live_text: str) -> int:
+    """Production evaluator: already-loaded live JSON text → exit 0/1/2."""
     try:
-        return live_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise DriftError(f"cannot read live response {path}: {exc}") from exc
-
-
-def main_live(path: str) -> int:
-    try:
-        live_text = read_live_response(path)
         problems = check_live(read_repo, live_text)
     except DriftError as exc:
         print(f"required-contexts-live=unreadable\n{exc}", file=sys.stderr)
@@ -175,6 +164,11 @@ def main_live(path: str) -> int:
 
     print("required-contexts-live=match")
     return EXIT_MATCH
+
+
+def main_live_from_stdin() -> int:
+    """CLI route: read stdin exactly once, then evaluate via main_live."""
+    return main_live(sys.stdin.read())
 
 
 def ci_contract_contexts(text: str) -> list[str]:
@@ -410,19 +404,11 @@ def _apply_text(baseline: str, mutate, label: str) -> str | None:
 
 
 def _invoke_main_live(live_text: str) -> int:
-    """Exercise the production exit path: tempfile + main_live() (stdout/stderr redirected)."""
-    with tempfile.NamedTemporaryFile(
-        "w", suffix=".json", delete=False, encoding="utf-8"
-    ) as handle:
-        handle.write(live_text)
-        path = handle.name
-    try:
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
-            io.StringIO()
-        ):
-            return main_live(path)
-    finally:
-        Path(path).unlink(missing_ok=True)
+    """Exercise production main_live() on already-loaded text (stdout/stderr redirected)."""
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+        io.StringIO()
+    ):
+        return main_live(live_text)
 
 
 def live_self_test(baseline: dict) -> int:
@@ -517,6 +503,45 @@ def live_self_test(baseline: dict) -> int:
         print("self-test: app_id-only change must exit 0 via main_live", file=sys.stderr)
         return 1
 
+    # CLI is stdin-only: a path argv must be rejected (no arbitrary Path read).
+    script = REPO_ROOT / "scripts" / "ci" / "check-required-contexts.py"
+    path_argv = subprocess.run(
+        [sys.executable, str(script), "--live-response", "/tmp/not-a-live-response.json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if path_argv.returncode == 0:
+        print(
+            "self-test: --live-response with a path argv must be rejected, got exit 0",
+            file=sys.stderr,
+        )
+        return 1
+
+    # CLI route reads stdin once and calls main_live (match / drift / unreadable).
+    for label, payload, want in (
+        ("stdin_match", live_ok, EXIT_MATCH),
+        (
+            "stdin_drift",
+            _baseline_live_json(expected + ["extra"], strict=expected_strict),
+            EXIT_DRIFT,
+        ),
+        ("stdin_unreadable", "{", EXIT_UNREADABLE),
+    ):
+        cli = subprocess.run(
+            [sys.executable, str(script), "--live-response"],
+            input=payload,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if cli.returncode != want:
+            print(
+                f"self-test: CLI {label} must exit {want}, got {cli.returncode}",
+                file=sys.stderr,
+            )
+            return 1
+
     return 0
 
 
@@ -563,6 +588,16 @@ def workflow_contract_problems(text: str) -> list[str]:
         if needle not in text:
             problems.append(f"missing {needle!r}")
 
+    # Stdin redirection into the checker (shell opens the file; Python never takes a path argv).
+    if not re.search(
+        r"check-required-contexts\.py --live-response\s*\\\s*\n\s*<\s*\"",
+        text,
+    ):
+        problems.append(
+            "checker must be invoked with stdin redirection "
+            "(--live-response \\< newline < \"...\")"
+        )
+
     forbidden = [
         "pull_request:",
         "merge_group:",
@@ -573,6 +608,9 @@ def workflow_contract_problems(text: str) -> list[str]:
         " -X DELETE",
         "|| github.token",
         "|| secrets.GITHUB_TOKEN",
+        # Path argv to the checker (the CodeQL py/path-injection shape).
+        '--live-response \\\n            "${{ steps.fetch.outputs.path }}"',
+        "--live-response /",
     ]
     for needle in forbidden:
         if needle in text:
@@ -652,6 +690,27 @@ def workflow_contract_self_test() -> int:
         )
         return 1
 
+    # Mutation: drop stdin redirection back to a path argv — must go red.
+    path_argv = _apply_text(
+        text,
+        lambda t: t.replace(
+            'python3 scripts/ci/check-required-contexts.py --live-response \\\n'
+            '            < "${{ steps.fetch.outputs.path }}"',
+            'python3 scripts/ci/check-required-contexts.py --live-response \\\n'
+            '            "${{ steps.fetch.outputs.path }}"',
+            1,
+        ),
+        "live_response_path_argv",
+    )
+    if path_argv is None:
+        return 1
+    if not workflow_contract_problems(path_argv):
+        print(
+            "self-test: replacing stdin redirect with path argv went undetected",
+            file=sys.stderr,
+        )
+        return 1
+
     return 0
 
 
@@ -660,16 +719,16 @@ def main() -> int:
     parser.add_argument("--self-test", action="store_true", help="prove the parsers detect drift")
     parser.add_argument(
         "--live-response",
-        metavar="PATH",
-        help="reconcile ruleset against live required_status_checks JSON (PATH or - for stdin)",
+        action="store_true",
+        help="reconcile ruleset against live required_status_checks JSON from stdin",
     )
     args = parser.parse_args()
 
     if args.self_test:
         return self_test()
 
-    if args.live_response is not None:
-        return main_live(args.live_response)
+    if args.live_response:
+        return main_live_from_stdin()
 
     try:
         problems = check(read_repo)

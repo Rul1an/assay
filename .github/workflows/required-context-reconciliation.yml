@@ -52,4 +52,4 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/ci/check-required-contexts.py --live-response \
-            "${{ steps.fetch.outputs.path }}"
+            < "${{ steps.fetch.outputs.path }}"
