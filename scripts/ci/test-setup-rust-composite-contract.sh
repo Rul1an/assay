@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract for .github/actions/setup-rust and its week8 + wave6 caller surfaces.
+# Contract for .github/actions/setup-rust and its week8 + wave6 + fuzz-smoke caller surfaces.
 # Guards only the new boundary; actionlint + diff review cover unchanged workflow structure.
 #
 # Empty optional forwarding is safe for the pinned upstream versions measured in this
@@ -11,6 +11,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ACTION="${ROOT}/.github/actions/setup-rust/action.yml"
 WEEK8="${ROOT}/.github/workflows/week8-sota-gates.yml"
 WAVE6="${ROOT}/.github/workflows/wave6-nightly-safety.yml"
+FUZZ_SMOKE="${ROOT}/.github/workflows/fuzz-smoke.yml"
 KERNEL_MATRIX="${ROOT}/.github/workflows/kernel-matrix.yml"
 TOOLCHAIN_REF="dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8"
 CACHE_REF="Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4"
@@ -27,6 +28,7 @@ trap 'abort_is_failure "$?"' ERR
 [[ -f "${ACTION}" ]] || fail "missing .github/actions/setup-rust/action.yml"
 [[ -f "${WEEK8}" ]] || fail "missing .github/workflows/week8-sota-gates.yml"
 [[ -f "${WAVE6}" ]] || fail "missing .github/workflows/wave6-nightly-safety.yml"
+[[ -f "${FUZZ_SMOKE}" ]] || fail "missing .github/workflows/fuzz-smoke.yml"
 [[ -f "${KERNEL_MATRIX}" ]] || fail "missing .github/workflows/kernel-matrix.yml"
 
 grep -qE '^[[:space:]]*using:[[:space:]]*composite[[:space:]]*$' "${ACTION}" \
@@ -199,6 +201,129 @@ print(
 )
 PY
 
+python3 - "${FUZZ_SMOKE}" <<'PY' || fail "fuzz-smoke setup-rust caller contract failed"
+import re, sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+
+# Direct toolchain/cache callers (mutable tags or SHA pins) are forbidden after migration.
+if re.search(r"dtolnay/rust-toolchain@", text):
+    raise SystemExit("fuzz-smoke still calls dtolnay/rust-toolchain directly")
+if re.search(r"Swatinem/rust-cache@", text):
+    raise SystemExit("fuzz-smoke still calls Swatinem/rust-cache directly")
+
+# Toolchain pin env must stay the measured nightly; install and run share FUZZ_TOOLCHAIN.
+m = re.search(r"(?m)^  FUZZ_TOOLCHAIN:\s*(\S+)\s*$", text)
+if not m or m.group(1) != "nightly-2026-07-28":
+    raise SystemExit(
+        f"FUZZ_TOOLCHAIN must be exactly nightly-2026-07-28, got "
+        f"{m.group(1) if m else None!r}"
+    )
+
+jobs = {
+    job_id: block
+    for job_id, block in re.findall(
+        r"(?m)^  ([A-Za-z0-9_-]+):\n(.*?)(?=^  [A-Za-z0-9_-]+:|\Z)",
+        text,
+        re.S,
+    )
+}
+if "fuzz-smoke" not in jobs:
+    raise SystemExit("fuzz-smoke missing job fuzz-smoke")
+
+block = jobs["fuzz-smoke"]
+
+# Top-level step sequence (every `^      - ` item), not merely `- uses:` lines —
+# a `run:`/`name:` step between checkout and setup-rust must fail this guard.
+def top_level_step_bodies(job_block: str) -> list[str]:
+    lines = job_block.splitlines()
+    bodies: list[str] = []
+    i = 0
+    while i < len(lines):
+        if re.match(r"^      - ", lines[i]):
+            start = i
+            i += 1
+            while i < len(lines) and not re.match(r"^      - ", lines[i]):
+                i += 1
+            bodies.append("\n".join(lines[start:i]))
+        else:
+            i += 1
+    return bodies
+
+
+def step_kind(body: str) -> str:
+    m = re.match(r"^      - uses:\s*(\S+)", body)
+    if not m:
+        m = re.search(r"(?m)^        uses:\s*(\S+)", body)
+    if m:
+        uses = m.group(1).rstrip("/")
+        if uses.startswith("actions/checkout@"):
+            return "checkout"
+        if uses == "./.github/actions/setup-rust":
+            return "setup-rust"
+        return "other-uses"
+    return "other"
+
+
+kinds = [step_kind(b) for b in top_level_step_bodies(block)]
+setup_idxs = [i for i, k in enumerate(kinds) if k == "setup-rust"]
+if len(setup_idxs) != 1:
+    raise SystemExit(f"fuzz-smoke: expected one setup-rust call, found {len(setup_idxs)}")
+checkout_idxs = [i for i, k in enumerate(kinds) if k == "checkout"]
+if not checkout_idxs or setup_idxs[0] != checkout_idxs[0] + 1:
+    raise SystemExit(
+        "fuzz-smoke: setup-rust must be the immediate next top-level step after checkout "
+        f"(step kinds: {kinds})"
+    )
+
+
+def setup_rust_with_map(job_block: str) -> dict[str, str]:
+    m = re.search(
+        r"(?m)^      - uses:\s*\./\.github/actions/setup-rust\s*\n"
+        r"((?:        .*\n)*)",
+        job_block,
+    )
+    if not m:
+        return {}
+    tail = m.group(1)
+    if not re.match(r"^        with:\s*$", tail, re.M):
+        return {}
+    vals: dict[str, str] = {}
+    in_with = False
+    for line in tail.splitlines():
+        if re.match(r"^        with:\s*$", line):
+            in_with = True
+            continue
+        if not in_with:
+            continue
+        if re.match(r"^\s*(?:#.*)?$", line):
+            continue
+        km = re.match(r"^          ([A-Za-z0-9_-]+):\s*(.*?)\s*$", line)
+        if km:
+            vals[km.group(1)] = km.group(2)
+            continue
+        break
+    return vals
+
+
+expected = {
+    "toolchain": "${{ env.FUZZ_TOOLCHAIN }}",
+    "cache-workspaces": "fuzz -> target",
+}
+got = setup_rust_with_map(block)
+if got != expected:
+    raise SystemExit(
+        f"fuzz-smoke: setup-rust with-map must be exactly {expected}, got {got}"
+    )
+
+print(
+    "ok   fuzz-smoke: one setup-rust after checkout; with-map exact "
+    "(toolchain=${{ env.FUZZ_TOOLCHAIN }}, cache-workspaces=fuzz -> target); "
+    "FUZZ_TOOLCHAIN=nightly-2026-07-28; no direct pins"
+)
+PY
+
 python3 - "${KERNEL_MATRIX}" <<'PY' || fail "kernel-matrix hook-trigger paths missing"
 import re, sys
 from pathlib import Path
@@ -226,6 +351,7 @@ required = (
     ".github/actions/setup-rust/**",
     ".github/workflows/week8-sota-gates.yml",
     ".github/workflows/wave6-nightly-safety.yml",
+    ".github/workflows/fuzz-smoke.yml",
 )
 bad = [p for p in required if paths.count(p) != 1]
 if bad:
@@ -233,7 +359,7 @@ if bad:
         "pull_request.paths must list each trigger path exactly once; "
         + ", ".join(f"{p!r} appears {paths.count(p)} time(s)" for p in bad)
     )
-print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6")
+print("ok   kernel-matrix pull_request.paths exact-once for setup-rust + week8 + wave6 + fuzz-smoke")
 PY
 
 echo "setup-rust composite contract: all checks passed"

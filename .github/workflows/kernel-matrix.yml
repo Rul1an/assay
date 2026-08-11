@@ -37,6 +37,8 @@ on:
       - ".github/workflows/week8-sota-gates.yml"
       # wave6 Rust jobs call setup-rust; keep contract hook on that surface.
       - ".github/workflows/wave6-nightly-safety.yml"
+      # fuzz-smoke calls setup-rust with cache-workspaces; keep contract hook on that surface.
+      - ".github/workflows/fuzz-smoke.yml"
       # Note: Cargo.toml/Cargo.lock removed - check-ebpf-changes job handles skip logic
   push:
     branches: [ "main", "debug/**" ]
