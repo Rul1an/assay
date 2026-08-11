@@ -134,7 +134,7 @@ if [[ -f "${READER}" ]]; then
   else
     ok "reader rejects empty pin"
   fi
-  printf 'v5.1.0\nv9.9.9\n' >"${bad_pin}"
+  printf 'v1.2.3\nv9.9.9\n' >"${bad_pin}"
   if ASSAY_RELEASE_TAG_FILE="${bad_pin}" "${READER}" >/dev/null 2>"${scratch}/err"; then
     fail "reader accepted multi-line pin"
   else
@@ -172,6 +172,49 @@ if grep -qE 'ASSAY_VERSION:\s*\$\{\{\s*steps\.[^}]+\.outputs\.version\s*\}\}' "$
   ok "assay-security.yml ASSAY_VERSION uses steps.*.outputs.version"
 else
   fail "assay-security.yml does not bind ASSAY_VERSION to steps.*.outputs.version"
+fi
+
+echo "== assay-security.yml push.paths cover pin inputs =="
+# push.paths must name every new dependency the job reads, plus the workflow
+# itself. pull_request stays unfiltered so PR coverage is unchanged.
+if python3 - "${SECURITY_WF}" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1]).read()
+# pull_request must remain present and not gain a paths: filter under on:.
+on_match = re.search(r"(?ms)^on:\n(.*?)(?=^permissions:|^jobs:)", text)
+if not on_match:
+    sys.exit("missing on:")
+on_block = on_match.group(1)
+if not re.search(r"(?m)^  pull_request:\s*$", on_block):
+    sys.exit("pull_request trigger missing or altered")
+# No paths: indented under pull_request (unfiltered).
+pr_section = re.search(
+    r"(?ms)^  pull_request:\n((?:    .+\n)*)",
+    on_block,
+)
+if pr_section and re.search(r"(?m)^    paths:", pr_section.group(1)):
+    sys.exit("pull_request gained a paths filter")
+
+push = re.search(r"(?ms)^  push:\n((?:    .+\n)*)", on_block)
+if not push:
+    sys.exit("push trigger missing")
+paths = re.findall(r'(?m)^      - "([^"]+)"\s*$', push.group(1))
+required = {
+    ".github/assay-release-tag",
+    "scripts/ci/read-assay-release-tag.sh",
+    ".github/workflows/assay-security.yml",
+}
+missing = sorted(required - set(paths))
+if missing:
+    sys.exit("push.paths missing: " + ", ".join(missing))
+sys.exit(0)
+PY
+then
+  ok "assay-security.yml push.paths include pin, reader, and workflow; pull_request unfiltered"
+else
+  fail "assay-security.yml push.paths incomplete or pull_request behavior changed"
 fi
 
 echo "== Structurizr image pin file exists and has valid digest form =="
@@ -427,6 +470,70 @@ if grep -qE 'sha256:[0-9a-f]{64}' "${THIS_TEST}"; then
   fail "test-ci-hardening-b1.sh embeds a digest literal (violates single-source)"
 else
   ok "contract test has no digest literal"
+fi
+
+echo "== derived release tag is not a second pin literal outside the pin file =="
+# Scan B1 production/contract paths for the derived tag. Allow the pin file and
+# Cargo.toml; ignore GitHub Actions SHA-pin version comments (# vX.Y.Z).
+if python3 - "${EXPECTED_TAG}" "${ROOT}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+tag = sys.argv[1]
+root = Path(sys.argv[2])
+allow_files = {
+    root / ".github" / "assay-release-tag",
+    root / "Cargo.toml",
+}
+scan = [
+    root / "scripts" / "ci" / "test-ci-hardening-b1.sh",
+    root / "scripts" / "ci" / "read-assay-release-tag.sh",
+    root / "scripts" / "ci" / "test-structurizr-export-docker.sh",
+    root / "scripts" / "structurizr-cli-image.sh",
+    root / "scripts" / "structurizr-validate.sh",
+    root / "scripts" / "structurizr-export.sh",
+    root / ".github" / "workflows" / "assay.yml",
+    root / ".github" / "workflows" / "assay-security.yml",
+    root / ".github" / "workflows" / "structurizr-validate.yml",
+]
+action_ver_comment = re.compile(
+    r"^\s*(?:-[^\n]*|uses:[^\n]*)#\s*" + re.escape(tag) + r"\s*$"
+)
+# Variable/name references that mention the derived value only as EXPECTED_TAG=.
+expected_assign = re.compile(r"^EXPECTED_TAG=")
+bad = []
+for path in scan:
+    if not path.exists() or path in allow_files:
+        continue
+    for i, line in enumerate(path.read_text().splitlines(), 1):
+        if tag not in line:
+            continue
+        if action_ver_comment.match(line):
+            continue
+        if expected_assign.match(line.strip()):
+            continue
+        # Allow printing/comparing the derived variable, not a quoted literal pin.
+        if f'"{tag}"' in line or f"'{tag}'" in line or f"{tag}\\n" in line or line.strip() == tag:
+            bad.append(f"{path.relative_to(root)}:{i}:{line.strip()}")
+            continue
+        # Bare occurrence in prose/example (e.g. "e.g. <tag>") still counts.
+        if re.search(r"(?:e\.g\.|example|fixture|want|got|is)\s+" + re.escape(tag), line):
+            bad.append(f"{path.relative_to(root)}:{i}:{line.strip()}")
+            continue
+        if re.search(r"\b" + re.escape(tag) + r"\b", line):
+            # References via ${EXPECTED_TAG} are fine.
+            if "EXPECTED_TAG" in line and tag not in line.replace("${EXPECTED_TAG}", "").replace("$EXPECTED_TAG", ""):
+                continue
+            bad.append(f"{path.relative_to(root)}:{i}:{line.strip()}")
+if bad:
+    print("\n".join(bad), file=sys.stderr)
+    sys.exit(1)
+PY
+then
+  ok "no stray ${EXPECTED_TAG} release-pin literals outside .github/assay-release-tag"
+else
+  fail "derived tag ${EXPECTED_TAG} appears as a release-pin literal outside the pin file"
 fi
 
 echo "== touched jobs declare timeout-minutes =="

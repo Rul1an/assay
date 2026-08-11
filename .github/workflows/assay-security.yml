@@ -7,6 +7,9 @@ on:
       - "policy.yaml"
       - "examples/**"
       - "**/*.mcp.json"
+      - ".github/assay-release-tag"
+      - "scripts/ci/read-assay-release-tag.sh"
+      - ".github/workflows/assay-security.yml"
   pull_request:
   workflow_dispatch:
 

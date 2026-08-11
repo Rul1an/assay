@@ -29,8 +29,10 @@ export_with_docker() {
   local file
   file="$(basename "$dsl")"
   local outdir="$2"
+  # Output is always <workspace>/export. Use a portable relative path — macOS
+  # /bin/realpath rejects GNU's --relative-to.
   local rel_out
-  rel_out="$(realpath --relative-to="$dir" "$outdir")"
+  rel_out="$(basename "$outdir")"
   mkdir -p "$outdir"
   echo "[structurizr] export (docker): $dsl → $outdir"
   docker run --rm -v "$dir:/workspace" "${STRUCTURIZR_CLI_IMAGE}" \

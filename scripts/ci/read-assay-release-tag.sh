@@ -6,7 +6,7 @@
 # literal lives; this is the only parser.
 #
 # Outputs:
-#   - stdout: the validated tag (e.g. v5.1.0)
+#   - stdout: the validated tag (e.g. v1.2.3)
 #   - when GITHUB_OUTPUT is set: version=<tag>
 #
 # Override the pin path with ASSAY_RELEASE_TAG_FILE (tests only).
