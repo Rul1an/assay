@@ -17,7 +17,8 @@ connects, process execs) without instrumenting the application.
 Datagram-peer coverage labels exist in the descriptor vocabulary, but
 `assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
 release ELF and presently unattached (`Unsupported`); those labels are
-unreachable on a live `assay monitor` run.
+unreachable on `assay runner-spike --kernel-capture` / `assay-runner-core`
+while those TPs stay unattached.
 That raw observation is the only thing the whole chain is allowed to treat as
 ground truth. Everything downstream is a claim *about* this capture, bounded by
 how complete the capture was.
@@ -26,10 +27,14 @@ how complete the capture was.
 A coverage descriptor records the completeness of the observation for each effect
 class (for example: were only `open`-family syscalls seen? was network capture
 connect-only, or did the archive already carry datagram-peer observations?).
-Datagram labels are unreachable on a live `assay monitor` run: the send
-tracepoints are compiled-but-unattached. Live `network_protocol_coverage` is
-`connect_only` only when the cgroup `connect4` peer source attaches on the
-network-policy path; otherwise it is `absent`. This is the honesty
+These examples are Runner archives: `assay runner-spike --kernel-capture` /
+`assay-runner-core` `network_protocol_coverage_for` is **count-derived**, so
+`connect_only` means `connect_emitted > 0` from always-attached
+`sys_enter_connect`, with **no** connect4 / network-policy requirement.
+Datagram labels require send-event counts and are unreachable there while
+those TPs stay unattached. CLI `assay monitor` `observation_health` is a
+different producer (attach-derived from cgroup `connect4`, otherwise `absent`).
+This is the honesty
 ceiling: it says what the capture can and cannot support, before any claim is
 made. See the descriptor semantics in `crates/assay-runner-schema/src/coverage.rs`.
 

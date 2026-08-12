@@ -2,12 +2,13 @@
 
 > **Status:** internal capture-fidelity detail. This page documents a counter
 > that keeps the datagram peer label honest. It adds no Runner archive member,
-> no CLI output, no Trust Basis claim, and no stable report schema. Two gaps
-> keep it off a live `assay monitor` run: `assay_monitor_sendto` /
-> `assay_monitor_sendmsg` are compiled into the release ELF and presently
-> unattached (`Unsupported`), and userspace does not read back
-> `sendto_non_ip_family` / `sendmsg_non_ip_family` (kernel stat indices 16
-> and 17).
+> no CLI output, no Trust Basis claim, and no stable report schema. The
+> kernel-capture note that would surface it is produced by
+> `assay runner-spike --kernel-capture` / `assay-runner-core`. Two gaps keep
+> it off that path: `assay_monitor_sendto` / `assay_monitor_sendmsg` are
+> compiled into the release ELF and presently unattached (`Unsupported`), and
+> userspace does not read back `sendto_non_ip_family` /
+> `sendmsg_non_ip_family` (kernel stat indices 16 and 17).
 
 ## What it observes
 
@@ -34,8 +35,9 @@ peer nor a silently lost observation.
 
 `assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
 release ELF and inventoried `Unsupported` / unattached. Userspace does not
-read back `sendto_non_ip_family` / `sendmsg_non_ip_family`. A live
-`assay monitor` run therefore does not surface this counter.
+read back `sendto_non_ip_family` / `sendmsg_non_ip_family`. An
+`assay runner-spike --kernel-capture` / `assay-runner-core` run therefore
+does not surface this counter.
 
 ## What it does not do (non-claims)
 
@@ -55,6 +57,6 @@ archives read identically before and after this change.
 ## Why it matters
 
 Coverage honesty: the counter exists so a non-IP send is not silently lost
-beside an IP-only `datagram_peer_observed` label. A live `assay monitor` run
-presently has neither attach nor userspace readback, so the counter is not
-surfaced.
+beside an IP-only `datagram_peer_observed` label. An
+`assay runner-spike --kernel-capture` / `assay-runner-core` run presently
+has neither attach nor userspace readback, so the counter is not surfaced.

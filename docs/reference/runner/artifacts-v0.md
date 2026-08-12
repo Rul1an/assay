@@ -244,19 +244,25 @@ Interpretation rules:
   interpreted, for example because relevant network hook events may have been
   dropped.
 - `network_protocol_coverage=connect_only` means Runner observed
-  `connect()`-level network evidence only.
+  `connect()`-level network evidence only. On Runner archives produced by
+  `assay runner-spike --kernel-capture` / `assay-runner-core`
+  `network_protocol_coverage_for`, that value is **count-derived**:
+  `connect_emitted > 0` from the always-attached `sys_enter_connect`
+  path, with **no** connect4 / network-policy requirement. CLI
+  `assay monitor` `observation_health` is a **different** producer:
+  **attach-derived** from cgroup `connect4` (network-policy path),
+  otherwise `absent`.
 - `network_protocol_coverage=datagram_peer_observed` means Runner observed
   datagram peer evidence from `sendto` or `sendmsg`, without a matching
-  `connect()` event in the same capture window. Those events require
+  `connect()` event in the same capture window. Those counts require
   `assay_monitor_sendto` / `assay_monitor_sendmsg`, which are compiled into
-  the release ELF and presently unattached (`Unsupported`); those datagram
-  labels are unreachable on a live `assay monitor` run.
+  the release ELF and presently unattached (`Unsupported`); datagram labels
+  are unreachable on `assay runner-spike --kernel-capture` /
+  `assay-runner-core` (and CLI `assay monitor` does not emit them either).
 - `network_protocol_coverage=connect_and_datagram_peer_observed` means Runner
   observed both `connect()` and datagram peer evidence in the same capture
   window. The datagram half has the same compiled-but-unattached
-  `sendto`/`sendmsg` dependency. Live `network_protocol_coverage` is
-  `connect_only` only when the cgroup `connect4` peer source attaches on
-  the network-policy path; otherwise it is `absent`.
+  `sendto`/`sendmsg` dependency.
 - `network_endpoint_claim_scope=diagnostic_only` means `network_endpoints`
   are useful for coarse/diagnostic review, not for exact peer-set claims on
   datagram protocols such as QUIC.

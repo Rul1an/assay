@@ -2,11 +2,13 @@
 
 > **Status:** internal capture-fidelity detail. This page documents a counter
 > that makes an address-less send visible. It adds no Runner archive member, no
-> CLI output, no Trust Basis claim, and no stable report schema. Two gaps keep
-> it off a live `assay monitor` run: `assay_monitor_sendto` /
-> `assay_monitor_sendmsg` are compiled into the release ELF and presently
-> unattached (`Unsupported`), and userspace does not read back
-> `sendto_no_peer` / `sendmsg_no_peer` (kernel stat indices 14 and 15).
+> CLI output, no Trust Basis claim, and no stable report schema. The
+> kernel-capture note that would surface it is produced by
+> `assay runner-spike --kernel-capture` / `assay-runner-core`. Two gaps keep
+> it off that path: `assay_monitor_sendto` / `assay_monitor_sendmsg` are
+> compiled into the release ELF and presently unattached (`Unsupported`), and
+> userspace does not read back `sendto_no_peer` / `sendmsg_no_peer` (kernel
+> stat indices 14 and 15).
 
 ## What it observes
 
@@ -34,8 +36,9 @@ counters when those tracepoints run:
 
 `assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
 release ELF and inventoried `Unsupported` / unattached. Userspace does not
-read back `sendto_no_peer` / `sendmsg_no_peer`. A live `assay monitor` run
-therefore does not surface this counter.
+read back `sendto_no_peer` / `sendmsg_no_peer`. An
+`assay runner-spike --kernel-capture` / `assay-runner-core` run therefore
+does not surface this counter.
 
 ## What it does not do (non-claims)
 
@@ -56,6 +59,6 @@ clean archives read identically before and after this change.
 ## Why it matters
 
 Coverage honesty: the counter exists so an address-less send is not silently
-indistinguishable from "no such send happened." A live `assay monitor` run
-presently has neither attach nor userspace readback, so the counter is not
-surfaced.
+indistinguishable from "no such send happened." An
+`assay runner-spike --kernel-capture` / `assay-runner-core` run presently
+has neither attach nor userspace readback, so the counter is not surfaced.

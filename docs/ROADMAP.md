@@ -219,13 +219,17 @@ identity.
 
 **Present tense (not a rewrite of those release lines):**
 `assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
-release ELF and inventoried `Unsupported` / unattached, so datagram coverage
-labels are unreachable on a live `assay monitor` run. Live
-`network_protocol_coverage` is `connect_only` only when the cgroup `connect4`
-peer source attaches on the network-policy path; otherwise it is `absent`.
-`connect6_hook` is compiled-but-unattached **enforcement**; IPv6 connect
-observation remains on the always-attached `sys_enter_connect` tracepoint
-(`AF_INET6` included).
+release ELF and inventoried `Unsupported` / unattached. Runner archives from
+`assay runner-spike --kernel-capture` / `assay-runner-core`
+`network_protocol_coverage_for` are **count-derived**: `connect_emitted > 0`
+yields `connect_only` from always-attached `sys_enter_connect`, with **no**
+connect4 / network-policy requirement. Datagram labels require send-event
+counts and are unreachable there while those TPs stay unattached. CLI
+`assay monitor` `observation_health` is a **different** producer:
+**attach-derived** from cgroup `connect4` (network-policy path), otherwise
+`absent`. `connect6_hook` is compiled-but-unattached **enforcement**; IPv6
+connect observation remains on the always-attached `sys_enter_connect`
+tracepoint (`AF_INET6` included).
 
 The `v3.17.0` release-prep line adds a canonical sandbox-observation evidence
 bundle projection, records the Assay/Runner/Harness contract seam and related
