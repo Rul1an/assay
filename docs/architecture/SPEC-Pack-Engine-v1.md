@@ -490,7 +490,7 @@ owes a consumer; it is not a construct the format provides for capping.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
   "version": "2.1.0",
   "runs": [{
     "tool": {

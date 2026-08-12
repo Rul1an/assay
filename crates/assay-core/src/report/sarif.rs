@@ -19,7 +19,7 @@ pub struct SarifWriteOutcome {
 /// the same schema URI and version `"2.1.0"`.  When changing this constant,
 /// update the sibling in `assay-evidence/src/lint/sarif.rs` as well.
 pub const SARIF_SCHEMA: &str =
-    "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json";
+    "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json";
 
 /// Synthetic location for results without file context.
 ///
@@ -164,12 +164,20 @@ pub fn write_sarif_with_limit(
 ///
 /// # SARIF consistency contract
 ///
-/// There are two SARIF producers in the Assay workspace:
+/// There are three SARIF-emitting modules in the Assay workspace, one per crate:
 ///
-/// | Producer | Crate | Purpose |
-/// |----------|-------|---------|
-/// | `write_sarif` / `write_sarif_with_limit` / `build_sarif_diagnostics` (this module) | `assay-core` | Test results & diagnostic reports |
-/// | `to_sarif` | `assay-evidence` | Evidence-bundle lint findings for GitHub Code Scanning |
+/// | Producer | Crate | Purpose | `driver.rules[]` on a clean run |
+/// |----------|-------|---------|--------------------------------|
+/// | `write_sarif` / `write_sarif_with_limit` / `build_sarif_diagnostics` (this module) | `assay-core` | Test results & diagnostic reports | key absent |
+/// | `to_sarif` | `assay-evidence` | Evidence-bundle lint findings for GitHub Code Scanning | full catalog, every registry rule |
+/// | `enforcement_decision_sarif` | `assay-mcp-server` | Policy enforcement decisions | `[]`, since rules derive from deny records |
+///
+/// The rightmost column is deliberate rather than incidental, and the three disagree. A
+/// consumer reading `driver.rules[]` therefore cannot infer from one Assay document what an
+/// empty or absent catalog means in another: absent is not empty, and empty is not "nothing
+/// could have fired". Anything reasoning across producers has to read the producer name
+/// first. A fourth static document is written by hand in `.github/workflows/assay-security.yml`
+/// as a fallback and shares no code with any of these.
 ///
 /// **Shared invariants** (must stay in sync):
 /// - SARIF version: `"2.1.0"`
