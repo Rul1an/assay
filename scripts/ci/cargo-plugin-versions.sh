@@ -11,6 +11,11 @@ set -euo pipefail
 
 # Exported so a sourcing install step and its version assertion share one value.
 export CARGO_AUDIT_VERSION="0.22.2"
+# CI-4D2 / #2224: split-wave plugins (nextest, hack, semver-checks). Measured against
+# crates.io max_stable_version and Rust 1.96 (each tool's MSRV is below that).
+export CARGO_NEXTEST_VERSION="0.9.143"
+export CARGO_HACK_VERSION="0.6.45"
+export CARGO_SEMVER_CHECKS_VERSION="0.50.0"
 
 # Where `cargo install` writes binaries: CARGO_INSTALL_ROOT, else CARGO_HOME, else ~/.cargo.
 cargo_plugin_bin_path() {
@@ -20,6 +25,12 @@ cargo_plugin_bin_path() {
 
 # Bind the assertion to Cargo's install location. Resolving through PATH lets an unrelated
 # binary earlier on PATH satisfy the pin while the install wrote nothing (#2226).
+#
+# cargo-nextest alone prints a multi-line banner. Measured shape of line 1:
+#   cargo-nextest <semver> (<hex> <YYYY-MM-DD>)
+# Only that tool may take the first line and strip that documented suffix. Other plugins
+# (cargo-audit, cargo-hack, cargo-semver-checks) keep exact full --version equality so a
+# parenthetical cannot silently satisfy the pin.
 assert_cargo_plugin_version() {
   local name="$1" expected="$2"
   local bin reported
@@ -30,6 +41,13 @@ assert_cargo_plugin_version() {
     return 1
   fi
   reported="$("${bin}" --version)"
+  if [[ "${name}" == "cargo-nextest" ]]; then
+    reported="${reported%%$'\n'*}"
+    # Bash 3.2: =~ + BASH_REMATCH. Require hex hash + ISO date inside the parens.
+    if [[ "${reported}" =~ ^cargo-nextest\ ([0-9]+\.[0-9]+\.[0-9]+)\ \(([0-9a-f]+)\ ([0-9]{4}-[0-9]{2}-[0-9]{2})\)$ ]]; then
+      reported="cargo-nextest ${BASH_REMATCH[1]}"
+    fi
+  fi
   echo "${name} resolved: ${reported} at ${bin}"
   if [[ "${reported}" != "${name} ${expected}" ]]; then
     echo "${name} reports '${reported}', which is not the pinned ${expected}" >&2

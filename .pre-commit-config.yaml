@@ -394,6 +394,16 @@ repos:
         # CI-4D1 / #2224: pin cargo-audit from one shared source. Mutations cover removing
         # --version, restating the pin in the workflow, PATH decoys, and dropping source/assert.
         files: ^(scripts/ci/(cargo-plugin-versions|test-cargo-plugin-versions-contract)\.sh|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+
+      - id: split-wave-plugin-versions-contract-self-test
+        name: split-wave plugin versions contract
+        entry: bash scripts/ci/test-split-wave-plugin-versions-contract.sh
+        language: system
+        pass_filenames: false
+        # CI-4D2 / #2224: pin nextest/hack/semver-checks from the same shared source. Mutations
+        # cover missing pins, restated literals, missing source/assert, unpinned/duplicate
+        # install (including cargo +toolchain), PATH decoys, and optional-helper unpin.
+        files: ^(scripts/ci/(cargo-plugin-versions|test-split-wave-plugin-versions-contract|optional-public-api-drift)\.sh|\.github/workflows/split-wave0-gates\.yml|\.pre-commit-config\.yaml)$
       - id: cargo-clippy
         name: cargo clippy (workspace, deny warnings)
         entry: scripts/precommit/cargo-clippy.sh

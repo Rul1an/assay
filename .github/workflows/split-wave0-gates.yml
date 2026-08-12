@@ -193,12 +193,23 @@ jobs:
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
           }
 
+      # Pins live in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). `--locked` alone is
+      # not a pin: it locks each tool's own dependencies, not the tool version. RUSTUP_TOOLCHAIN
+      # is step-scoped so workspace cargo check/nextest/hack below still follow rust-toolchain.toml.
       - name: Install cargo-nextest and cargo-hack
         shell: bash
+        env:
+          RUSTUP_TOOLCHAIN: stable
         run: |
           set -euo pipefail
-          cargo install --locked cargo-nextest
-          cargo install --locked cargo-hack
+          # shellcheck source=scripts/ci/cargo-plugin-versions.sh
+          source ./scripts/ci/cargo-plugin-versions.sh
+          echo "installing cargo-nextest ${CARGO_NEXTEST_VERSION}"
+          cargo install --locked --version "${CARGO_NEXTEST_VERSION}" cargo-nextest
+          assert_cargo_plugin_version cargo-nextest "${CARGO_NEXTEST_VERSION}"
+          echo "installing cargo-hack ${CARGO_HACK_VERSION}"
+          cargo install --locked --version "${CARGO_HACK_VERSION}" cargo-hack
+          assert_cargo_plugin_version cargo-hack "${CARGO_HACK_VERSION}"
 
       - name: Run curated feature sets
         shell: bash
@@ -233,9 +244,10 @@ jobs:
             cargo check -p assay-core --no-default-features --features kill-switch
             cargo check -p assay-core --no-default-features --features discovery,kill-switch-capture
             cargo check -p assay-core --all-features
-            cargo nextest run -p assay-core --all-features
+            # D2 plugins: bind stable per command so cargo check/test keep rust-toolchain.toml.
+            RUSTUP_TOOLCHAIN=stable cargo nextest run -p assay-core --all-features
             cargo test -p assay-core --lib --no-default-features
-            cargo hack check -p assay-core --each-feature
+            RUSTUP_TOOLCHAIN=stable cargo hack check -p assay-core --each-feature
           fi
 
           if [[ "${RUN_ALL}" == "true" || "${CLI_CHANGED}" == "true" ]]; then
@@ -266,8 +278,8 @@ jobs:
             cargo check -p assay-cli --no-default-features --features tui
             cargo check -p assay-cli --no-default-features --features sim,tui
             cargo check -p assay-cli --all-features
-            cargo nextest run -p assay-cli --all-features
-            cargo hack check -p assay-cli --each-feature --exclude-features experimental
+            RUSTUP_TOOLCHAIN=stable cargo nextest run -p assay-cli --all-features
+            RUSTUP_TOOLCHAIN=stable cargo hack check -p assay-cli --each-feature --exclude-features experimental
           fi
 
           if [[ "${RUN_ALL}" == "true" || "${REGISTRY_CHANGED}" == "true" ]]; then
@@ -284,9 +296,9 @@ jobs:
             cargo check -p assay-registry --no-default-features
             cargo check -p assay-registry --features oidc
             cargo check -p assay-registry --all-features
-            cargo nextest run -p assay-registry --all-features
+            RUSTUP_TOOLCHAIN=stable cargo nextest run -p assay-registry --all-features
             cargo test -p assay-registry --lib --no-default-features
-            cargo hack test -p assay-registry --lib --each-feature
+            RUSTUP_TOOLCHAIN=stable cargo hack test -p assay-registry --lib --each-feature
           fi
 
           if [[ "${RUN_ALL}" == "true" || "${EVIDENCE_CHANGED}" == "true" ]]; then
@@ -302,7 +314,7 @@ jobs:
             cargo check -p assay-evidence
             cargo check -p assay-evidence --no-default-features
             cargo check -p assay-evidence --all-features
-            cargo nextest run -p assay-evidence --all-features
+            RUSTUP_TOOLCHAIN=stable cargo nextest run -p assay-evidence --all-features
             cargo test -p assay-evidence --lib --no-default-features
           fi
 
@@ -385,9 +397,19 @@ jobs:
       - name: Set up Rust toolchain and cache
         uses: ./.github/actions/setup-rust
 
+      # Pin lives in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). Step-scoped
+      # RUSTUP_TOOLCHAIN so check-release below still follows rust-toolchain.toml.
       - name: Install cargo-semver-checks
-        run: cargo install --locked cargo-semver-checks
-
+        shell: bash
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/ci/cargo-plugin-versions.sh
+          source ./scripts/ci/cargo-plugin-versions.sh
+          echo "installing cargo-semver-checks ${CARGO_SEMVER_CHECKS_VERSION}"
+          cargo install --locked --version "${CARGO_SEMVER_CHECKS_VERSION}" cargo-semver-checks
+          assert_cargo_plugin_version cargo-semver-checks "${CARGO_SEMVER_CHECKS_VERSION}"
 
       # The baseline is the last release, resolved now, not a SHA pinned in this file.
       #
@@ -451,7 +473,8 @@ jobs:
           run_semver_for() {
             local crate="$1"
             echo "- ${crate}" >> "$GITHUB_STEP_SUMMARY"
-            cargo semver-checks check-release -p "${crate}" --baseline-rev "${BASELINE_TAG}"
+            # Bind stable for the plugin only; workspace rust-toolchain.toml stays for cargo check.
+            RUSTUP_TOOLCHAIN=stable cargo semver-checks check-release -p "${crate}" --baseline-rev "${BASELINE_TAG}"
           }
 
           {
