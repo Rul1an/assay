@@ -9,7 +9,7 @@ use serde_json::json;
 /// same schema URI and version `"2.1.0"`.  When changing this constant, update
 /// the sibling in `assay-core/src/report/sarif.rs` as well.
 pub const SARIF_SCHEMA: &str =
-    "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json";
+    "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json";
 
 /// SARIF output options.
 #[derive(Debug, Clone, Default)]
