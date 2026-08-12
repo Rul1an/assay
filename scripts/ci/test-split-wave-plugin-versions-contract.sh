@@ -441,6 +441,25 @@ CARGO_HOME="${audit_dir}" \
   assert_cargo_plugin_version cargo-audit "${AUDIT_PIN}" >"${audit_out}" 2>&1 || audit_exit=$?
 [[ "${audit_exit}" -ne 0 ]] || fail "cargo-audit parenthetical suffix was accepted (global strip weakens CI-4D1)"
 
+echo "== cargo-hack receives its Cargo subcommand argv =="
+hack_argv_dir="${SCRATCH}/hack_argv"
+mkdir -p "${hack_argv_dir}/bin"
+cat >"${hack_argv_dir}/bin/cargo-hack" <<STUB
+#!/usr/bin/env bash
+if [[ "\${1:-}" != "hack" || "\${2:-}" != "--version" || "\${#}" -ne 2 ]]; then
+  echo "expected cargo-hack argv: hack --version; got: \$*" >&2
+  exit 64
+fi
+echo "cargo-hack ${HACK_PIN}"
+STUB
+chmod +x "${hack_argv_dir}/bin/cargo-hack"
+hack_argv_out="${hack_argv_dir}/out"
+hack_argv_exit=0
+CARGO_HOME="${hack_argv_dir}" \
+  assert_cargo_plugin_version cargo-hack "${HACK_PIN}" >"${hack_argv_out}" 2>&1 || hack_argv_exit=$?
+[[ "${hack_argv_exit}" -eq 0 ]] \
+  || fail "cargo-hack version assertion did not use Cargo subcommand argv (exit ${hack_argv_exit}): $(cat "${hack_argv_out}")"
+
 echo "== cargo-hack parenthetical suffix must stay RED (no global strip) =="
 hack_paren_dir="${SCRATCH}/hack_paren"
 mkdir -p "${hack_paren_dir}/bin"
