@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Public docs record a one-host Linux 6.8/aarch64 measurement of
+  `IORING_OP_CONNECT`: on `assay-bpf-runner` (kernel `6.8.0-137-generic`,
+  checkout `886ebce908401cb0a49502e7c7515f85fc9ceebd`) `sys_enter_connect`
+  emitted no event, while attached cgroup `connect4` observed allow to
+  `127.0.0.1:9101` and blocked deny of that port. `observed_peers` is
+  documented as diagnostic and not exhaustive; `connect6_hook` remains
+  enforcement-only unattached; the 11 compiled programs vs 7
+  `EXPECTED_PROBES` inventory and mode-aware outcomes are named as
+  object/loader agreement, not attach completeness. Monitor artifact
+  `run_id` pairing remains [#2342](https://github.com/Rul1an/assay/issues/2342)
+  and is not fixed here. Documentation only; no attach, schema, or runtime
+  change. The measurement is not kernel-version general.
+
 ### Changed
 - Public docs now record that `assay_monitor_sendto` and `assay_monitor_sendmsg`
   are compiled into the release ELF / program set and presently unattached

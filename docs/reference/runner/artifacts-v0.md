@@ -265,7 +265,10 @@ Interpretation rules:
   `sendto`/`sendmsg` dependency.
 - `network_endpoint_claim_scope=diagnostic_only` means `network_endpoints`
   are useful for coarse/diagnostic review, not for exact peer-set claims on
-  datagram protocols such as QUIC.
+  datagram protocols such as QUIC. The set is **not exhaustive**: connect-time
+  evidence on the surfaces that actually emitted, not every destination the
+  process reached. CLI `assay monitor --observed-peers` is the same bound
+  (cgroup connect events only).
 - `network_endpoint_claim_scope=not_applicable` means no network endpoint claim
   is available for this run.
 - `network_endpoint_claim_scope=unknown` means no bounded endpoint claim should
@@ -432,6 +435,13 @@ assay.runner.archive_manifest.v0
 
 The manifest records each archive path, byte length, and `sha256:` digest.
 The three v0 JSON artifacts must all share the archive `run_id`.
+
+CLI `assay monitor` writes a different pair (`--observed-peers` and
+`--observation-health`) whose shared `run_id` currently hashes attachment /
+drop / policy posture, not invocation identity. Distinct invocations with the
+same posture can share an id, so equal ids do not prove same-invocation
+pairing. That defect is [#2342](https://github.com/Rul1an/assay/issues/2342)
+and is ordered separately; this page does not fix it.
 
 ## Dependency Upgrade Flow
 
