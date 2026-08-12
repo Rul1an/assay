@@ -5,7 +5,7 @@
 set -euo pipefail
 
 repo="${GITHUB_REPOSITORY:-${REPO:-}}"
-runner_name="${RUNNER_NAME:-assay-bpf-runner}"
+runner_name="${ASSAY_RUNNER_NAME:-assay-bpf-runner}"
 required_runner_label="${REQUIRED_RUNNER_LABEL:-assay-bpf-runner}"
 runner_status_token="${RUNNER_STATUS_TOKEN:-${GH_TOKEN:-}}"
 queue_token="${QUEUE_TOKEN:-${GH_TOKEN:-}}"
