@@ -97,12 +97,13 @@ active_source_line() {
   grep -qE '^[[:space:]]*source[[:space:]]+(\./scripts/ci/cargo-plugin-versions\.sh|"(\./)?scripts/ci/cargo-plugin-versions\.sh")[[:space:]]*$' <<<"$1"
 }
 
-# Dedicated Install cargo-audit step: count any active line containing the token
-# sequence `cargo` + whitespace + `install`. No package/flag/shell parser — a second
-# cargo install of any shape fails (#2317 review 4914469947).
+# Dedicated Install cargo-audit step: count any active line containing
+# `cargo` + optional one `+toolchain` token + `install`. No package/flag/shell
+# parser — a second cargo install of any shape fails (#2317 reviews 4914469947,
+# 4914536813). rustup forms like `cargo +stable install` must count.
 count_active_cargo_installs() {
   # grep -c exits 1 on zero matches; keep zero under set -e.
-  printf '%s\n' "$1" | grep -cE 'cargo[[:space:]]+install' || true
+  printf '%s\n' "$1" | grep -cE 'cargo[[:space:]]+(\+[^[:space:]]+[[:space:]]+)?install' || true
 }
 
 active_pinned_install_line() {
@@ -133,9 +134,10 @@ check_workflow() {
     || fail "Install cargo-audit must have an active complete line sourcing scripts/ci/cargo-plugin-versions.sh; got:
 ${install_run}"
 
-  # Exactly one active `cargo install` line in this dedicated step, and it must be the
-  # pinned argv. Rejects @version, --force, flag reorder, env/command prefix, redirect,
-  # quotes, and trailing-# forms without parsing cargo/shell (#2317 review 4914469947).
+  # Exactly one active `cargo [+toolchain] install` line in this dedicated step, and it
+  # must be the pinned argv. Rejects @version, --force, flag reorder, env/command prefix,
+  # redirect, quotes, trailing-#, and rustup `+toolchain` forms without parsing packages
+  # (#2317 reviews 4914469947, 4914536813).
   install_count="$(count_active_cargo_installs "${install_run}")"
   [[ "${install_count}" -eq 1 ]] \
     || fail "Install cargo-audit must have exactly one active line containing cargo install; found ${install_count}:
@@ -537,6 +539,8 @@ expect_second_cargo_install_red redirect 'cargo install --locked cargo-audit >/d
 expect_second_cargo_install_red quoted 'cargo install --locked "cargo-audit"'
 expect_second_cargo_install_red trailing_hash 'cargo install --locked cargo-audit # overwrite'
 expect_second_cargo_install_red other_pkg 'cargo install --locked cargo-deny'
+expect_second_cargo_install_red plus_stable 'cargo +stable install --locked cargo-audit'
+expect_second_cargo_install_red plus_nightly 'cargo +nightly install --locked cargo-audit'
 
 ok "cargo-plugin-versions contract mutations bite"
 echo "PASS: cargo-plugin-versions contract"
