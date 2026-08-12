@@ -26,32 +26,16 @@
 //! coverage rather than overstating it — so this is a correctness improvement in the safe direction,
 //! not a loosening.
 
-use assay_monitor::probes::ProbeAttachment;
+use assay_monitor::probes::{ProbeAttachment, ProbeOutcome, EGRESS_PEER_PROBE};
 use assay_runner_schema::{
     CgroupCorrelationStatus, KernelLayerStatus, NetworkEndpointClaimScope,
     NetworkProtocolCoverageStatus, ObservationHealth, PolicyLayerStatus, SdkLayerStatus,
 };
 use std::path::Path;
 
-/// The tracepoint that used to decide the coverage claim, kept only for the tests that pin why it
-/// no longer does.
-///
-/// `#[cfg(test)]` because this commit is what stopped production code reading it: deriving coverage
-/// from `sys_enter_connect` while the peers came from the hook below is the defect being fixed. The
-/// constant stays because the tests need to name the wrong probe to show it is not consulted, and
-/// the doc on `EGRESS_PEER_PROBE` refers to it by name.
+/// Tracepoint that must not earn peer coverage (tests only).
 #[cfg(test)]
 const CONNECT_PROBE: &str = "sys_enter_connect";
-
-/// The cgroup hook that supplies the peer set, which is NOT the probe above.
-///
-/// `sys_enter_connect` is a tracepoint that fires on every connect attempt and is always attached;
-/// `cgroup_sock_addr:connect4` only attaches when a policy is loaded, and is the only source whose
-/// address comes from the kernel's own `bpf_sock_addr`. Deriving the coverage claim from the
-/// tracepoint while the peers come from the hook is what let a run report `connect_only` coverage
-/// with a structurally empty peer set — a combination a consumer reads as "watched and saw nothing",
-/// which is precisely the false refutation the coverage denominator exists to prevent.
-const EGRESS_PEER_PROBE: &str = "cgroup_sock_addr:connect4";
 
 /// A deterministic run id over what the run observed, matching the sandbox convention
 /// (`sandbox_<digest-prefix>`): the same observation produces the same id, and nothing is invented
@@ -90,14 +74,13 @@ pub(crate) fn build(
     ringbuf_drops: u64,
     policy_declared: bool,
 ) -> ObservationHealth {
-    // Keyed on the probe that actually supplies peers, not on the one that merely sees connects.
-    let network_protocol_coverage = if attachment.attached_probes().contains(&EGRESS_PEER_PROBE) {
-        // Connect-time peers only. The monitor attaches no sendto/sendmsg probe, so a datagram peer
-        // set is not observable and must not be claimed.
-        NetworkProtocolCoverageStatus::ConnectOnly
-    } else {
-        NetworkProtocolCoverageStatus::Absent
-    };
+    // Inventory outcome for the cgroup peer-source (not the connect tracepoint, not event counts).
+    let network_protocol_coverage =
+        if attachment.outcome(EGRESS_PEER_PROBE) == Some(ProbeOutcome::Attached) {
+            NetworkProtocolCoverageStatus::ConnectOnly
+        } else {
+            NetworkProtocolCoverageStatus::Absent
+        };
 
     let mut health = ObservationHealth::new(run_id, "linux")
         .with_policy_layer(if policy_declared {
