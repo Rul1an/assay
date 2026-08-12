@@ -124,7 +124,7 @@ PY
 }
 
 expect_generator_omits_destination() {
-  local name="$1" case_root="$2" destination="$3"
+  local name="$1" case_root="$2" destination="$3" expected="$4"
   local output="$case_root/generator.log"
   remove_generator_destination "$case_root" "$destination"
   rm -f -- "$case_root/$destination"
@@ -139,7 +139,9 @@ expect_generator_omits_destination() {
     echo "FAIL: $name: generator still produced $destination" >&2
     return 1
   fi
-  record_case_pass "$name"
+  # The contract validator must reject the omitted destination by name; absence
+  # after generate alone does not prove the gate bites (#2196 review).
+  expect_named_failure "$name" "$case_root" "$expected"
 }
 
 append_skill_text() {
@@ -571,17 +573,19 @@ expect_named_failure \
 
 # Every generated destination must have a mutation that names it (CI-5C / #2196).
 declare -a GENERATOR_SKILL_DESTINATIONS=(
-  '.agents/skills/assay-golden-path/SKILL.md'
-  '.claude/skills/assay-golden-path/SKILL.md'
-  'packaging/claude-plugin/skills/assay-golden-path/SKILL.md'
+  '.agents/skills/assay-golden-path/SKILL.md|skill evidence is missing: .agents/skills/assay-golden-path/SKILL.md'
+  '.claude/skills/assay-golden-path/SKILL.md|skill evidence is missing: .claude/skills/assay-golden-path/SKILL.md'
+  'packaging/claude-plugin/skills/assay-golden-path/SKILL.md|Claude plugin skill is missing: packaging/claude-plugin/skills/assay-golden-path/SKILL.md'
 )
-for destination in "${GENERATOR_SKILL_DESTINATIONS[@]}"; do
+for row in "${GENERATOR_SKILL_DESTINATIONS[@]}"; do
+  IFS='|' read -r destination expected <<<"$row"
   case_root="$SCRATCH/generator-omits-$(printf '%s' "$destination" | tr '/.' '--')"
   seed_case "$case_root"
   expect_generator_omits_destination \
     "generator omits destination $destination" \
     "$case_root" \
-    "$destination"
+    "$destination" \
+    "$expected"
 done
 
 declare -a PACKAGED_PLUGIN_DESTINATIONS=(
