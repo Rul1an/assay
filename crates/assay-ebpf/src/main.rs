@@ -19,6 +19,7 @@ pub mod socket_lsm;
 #[allow(clippy::undocumented_unsafe_blocks, unsafe_op_in_unsafe_fn)]
 pub mod vmlinux;
 
+use assay_common::monitor_object_abi_digest;
 use assay_common::{
     MonitorEvent, EVENT_CONNECT, EVENT_OPENAT, EVENT_SENDMSG, EVENT_SENDTO, KEY_DEDUP_OPEN_PATHS,
     KEY_MONITOR_ALL, MONITOR_STATS_LEN, MONITOR_STAT_CONNECT_EVENTS_EMITTED,
@@ -39,6 +40,12 @@ use aya_ebpf::{
     maps::{Array, HashMap, PerCpuArray, RingBuf},
     programs::TracePointContext,
 };
+
+/// Read-only CONFIG object-ABI marker; loader verifies before Ebpf::load. Never set_global.
+#[used]
+#[no_mangle]
+#[link_section = ".rodata"]
+static ASSAY_MONITOR_OBJECT_ABI: u32 = monitor_object_abi_digest();
 
 #[inline(always)]
 fn current_tgid() -> u32 {

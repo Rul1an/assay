@@ -21,6 +21,12 @@ pub mod dsse;
 /// a `&str` method and nothing allocates.
 pub mod tool_pattern;
 
+/// Monitor object ABI digest (`KEY_*` descriptor); shared by eBPF bake + monitor verify.
+pub mod object_abi;
+pub use object_abi::{
+    monitor_object_abi_digest, ConfigKeyDesc, MONITOR_CONFIG_KEYS, OBJECT_ABI_SYMBOL,
+};
+
 pub const EVENT_OPENAT: u32 = 1;
 pub const EVENT_CONNECT: u32 = 2;
 pub const EVENT_FORK: u32 = 3;

@@ -111,6 +111,8 @@ flate2 = "1.1"
 tar = "0.4"
 aya = "0.13.0"
 aya-log = "0.2"
+# Pin to aya's object 0.36.7 (no second object line for P1 ELF reads).
+object = { version = "=0.36.7", default-features = false, features = ["elf", "read_core", "std"] }
 ratatui = "0.30"
 crossterm = "0.29"
 jsonschema = { version = "0.49", default-features = false }

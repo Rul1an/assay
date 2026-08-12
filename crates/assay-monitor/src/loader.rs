@@ -1,5 +1,6 @@
 use crate::config_flags::{apply_dedup_open_paths, apply_emit_observed_connect, FlagConfigSink};
 use crate::events::{self, EventStream};
+use crate::object_abi::verify_object_abi_marker;
 use crate::probes::{
     connect4_update, Connect4Fault, ModeUpdate, ProbeAttachment, EGRESS_PEER_PROBE, EXPECTED_PROBES,
 };
@@ -93,6 +94,8 @@ impl FlagConfigSink for LinuxMonitor {
 #[cfg(target_os = "linux")]
 impl LinuxMonitor {
     pub fn new(ebpf_data: &[u8]) -> Result<Self, MonitorError> {
+        // P1: named CONFIG object-ABI symbol before Aya load (never set_global).
+        verify_object_abi_marker(ebpf_data)?;
         let bpf = Ebpf::load(ebpf_data).map_err(|e| MonitorError::LoadError(e.to_string()))?;
         Ok(Self {
             bpf: Arc::new(Mutex::new(bpf)),
