@@ -107,11 +107,19 @@ pub(crate) fn format_monitor_event(event_type: u32, pid: u32, data: &[u8]) -> Op
 
     let line = match event_type {
         EVENT_OPENAT => format!("[PID {}] openat: {}", pid, decode_utf8_cstr(data)),
-        EVENT_CONNECT => format!(
-            "[PID {}] connect sockaddr[0..32]=0x{}",
-            pid,
-            dump_prefix_hex(data, 32)
-        ),
+        // Decode to ip:port, falling back to hex for a family we do not model. The raw form
+        // was unreadable in practice: a reader has to know that 0200 is AF_INET and that the
+        // next two bytes are a network-order port, and grepping a log for a decimal port
+        // against a hex payload silently finds nothing. That produced three false negatives
+        // while investigating egress coverage, each of which read like the monitor was blind.
+        EVENT_CONNECT => match assay_monitor::events::decode_raw_sockaddr(data) {
+            Some(peer) => format!("[PID {pid}] connect: {peer}"),
+            None => format!(
+                "[PID {}] connect sockaddr[0..32]=0x{}",
+                pid,
+                dump_prefix_hex(data, 32)
+            ),
+        },
         EVENT_FILE_BLOCKED => match decode_file_blocked_payload(data) {
             Some((dev, ino, cgroup_id, rule_id)) => format!(
                 "[PID {}] 🛡️ BLOCKED FILE: dev={} ino={} cgroup={} rule_id={}",
