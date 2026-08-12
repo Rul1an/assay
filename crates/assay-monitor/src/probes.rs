@@ -1,6 +1,6 @@
 //! Probe attachment + mode-aware inventory (`not_requested`≠`unavailable`≠`failed`≠`unsupported`).
 //! Always probes: [`EXPECTED_PROBES`] + [`ProbeAttachment::reconcile`].
-//! Mode-aware: [`default_status`] / [`apply_mode_update`]; Linux loader seams via [`connect4_update`].
+//! Mode-aware: `default_status` / `apply_mode_update`; Linux loader seams via `connect4_update`.
 
 pub const EXPECTED_PROBES: &[&str] = &[
     "sys_enter_openat",
