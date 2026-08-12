@@ -65,7 +65,9 @@ deps_security_job() {
 }
 
 # Active (non-comment, non-blank) lines of the Install cargo-audit step run block.
-# Comment ghosts must not satisfy source / --version / assert greps (#2317 review).
+# Whole-line `# …` ghosts are dropped here. Trailing `# …` on an active line is still emitted;
+# check_workflow therefore requires complete anchored command lines so those tails cannot satisfy
+# source / --version / assert (#2317 review 4914059003). No shell comment parser.
 install_cargo_audit_run() {
   local wf="$1"
   deps_security_job "${wf}" | awk '
@@ -77,7 +79,8 @@ install_cargo_audit_run() {
     }
     /^      - name: Install cargo-audit[[:space:]]*$/ { in_step=1; next }
     in_step && /^      - name:/ { exit }
-    in_step && /^        run:[[:space:]]*\|[[:space:]]*$/ { in_run=1; next }
+    # Block scalars: run: | / |- / |+ with optional spaces (#2317 review).
+    in_step && /^        run:[[:space:]]*\|[-+]?[[:space:]]*$/ { in_run=1; next }
     in_step && /^        run:[[:space:]]+/ {
       sub(/^        run:[[:space:]]*/, "")
       emit_active($0)
@@ -86,6 +89,25 @@ install_cargo_audit_run() {
     in_run && /^        [^[:space:]]/ { exit }
     in_run { emit_active($0) }
   '
+}
+
+# Complete active command lines only (optional leading/trailing blank). Trailing `# ghosts`
+# on the same line cannot match these end-anchored patterns.
+active_source_line() {
+  grep -qE '^[[:space:]]*source[[:space:]]+(\./scripts/ci/cargo-plugin-versions\.sh|"(\./)?scripts/ci/cargo-plugin-versions\.sh")[[:space:]]*$' <<<"$1"
+}
+
+active_pinned_install_line() {
+  grep -qE '^[[:space:]]*cargo[[:space:]]+install[[:space:]]+--locked[[:space:]]+--version[[:space:]]+"\$\{CARGO_AUDIT_VERSION\}"[[:space:]]+cargo-audit[[:space:]]*$' <<<"$1"
+}
+
+active_literal_install_line() {
+  # Restated pin as a complete install argv (not a # tail after an unpinned install).
+  grep -qE '^[[:space:]]*cargo[[:space:]]+install[[:space:]]+--locked[[:space:]]+--version[[:space:]]+"?'"${PIN}"'"?[[:space:]]+cargo-audit[[:space:]]*$' <<<"$1"
+}
+
+active_assert_line() {
+  grep -qE '^[[:space:]]*assert_cargo_plugin_version[[:space:]]+cargo-audit[[:space:]]+"\$\{CARGO_AUDIT_VERSION\}"[[:space:]]*$' <<<"$1"
 }
 
 check_workflow() {
@@ -99,26 +121,22 @@ check_workflow() {
   [[ -n "${install_run}" ]] || fail "could not find Install cargo-audit run block in ${wf##*/}"
 
   # Must source the shared pin — both install --version and the runtime assertion read it.
-  grep -qE 'source[[:space:]]+("?\./)?scripts/ci/cargo-plugin-versions\.sh"?' <<<"${install_run}" \
-    || grep -qE 'source[[:space:]]+".*cargo-plugin-versions\.sh"' <<<"${install_run}" \
-    || fail "Install cargo-audit must source scripts/ci/cargo-plugin-versions.sh; got:
+  active_source_line "${install_run}" \
+    || fail "Install cargo-audit must have an active complete line sourcing scripts/ci/cargo-plugin-versions.sh; got:
 ${install_run}"
 
-  # Pin must be stated on the install argv via the shared variable, not omitted and not a restated literal.
-  grep -qE 'cargo[[:space:]]+install[[:space:]].*--version[[:space:]]+"\$\{CARGO_AUDIT_VERSION\}"' <<<"${install_run}" \
-    || fail "Install cargo-audit must pass --version \"\${CARGO_AUDIT_VERSION}\"; got:
+  # Pin must be a complete active install argv via the shared variable.
+  active_pinned_install_line "${install_run}" \
+    || fail "Install cargo-audit must have an active complete line: cargo install --locked --version \"\${CARGO_AUDIT_VERSION}\" cargo-audit; got:
 ${install_run}"
 
   # A restated pin in the workflow can drift from the shared source (AGENTS.md pinning rule).
-  if grep -qE -- "--version[[:space:]]+(\"?)(${PIN})(\"?)" <<<"${install_run}"; then
-    fail "Install cargo-audit restates version literal ${PIN}; both install and assertion must read CARGO_AUDIT_VERSION"
-  fi
-  if grep -qF "${PIN}" <<<"${install_run}"; then
-    fail "Install cargo-audit run block contains version literal ${PIN}; use \${CARGO_AUDIT_VERSION} only"
+  if active_literal_install_line "${install_run}"; then
+    fail "Install cargo-audit restates version literal ${PIN} on an active complete install line; both install and assertion must read CARGO_AUDIT_VERSION"
   fi
 
-  grep -qE 'assert_cargo_plugin_version[[:space:]]+cargo-audit[[:space:]]+"\$\{CARGO_AUDIT_VERSION\}"' <<<"${install_run}" \
-    || fail "Install cargo-audit must call assert_cargo_plugin_version cargo-audit \"\${CARGO_AUDIT_VERSION}\"; got:
+  active_assert_line "${install_run}" \
+    || fail "Install cargo-audit must have an active complete assert_cargo_plugin_version line; got:
 ${install_run}"
 
   # The former floating-scanner rationale must not return; it conflicts with the pin contract.
@@ -228,13 +246,11 @@ if n != 1:
     raise SystemExit(f"could not strip --version (n={n})")
 dst.write_text(new)
 PY
-grep -qE 'cargo install --locked cargo-audit' "${mutant}" \
-  || fail "--version removal mutation did not apply"
-if grep -qE -- '--version[[:space:]]+"\$\{CARGO_AUDIT_VERSION\}"' "${mutant}"; then
-  # Still present elsewhere is fine; must be gone from install-audit argv. Re-check install block.
-  if grep -qE -- '--version[[:space:]]+"\$\{CARGO_AUDIT_VERSION\}"' <<<"$(install_cargo_audit_run "${mutant}")"; then
-    fail "--version removal mutation still leaves --version in Install cargo-audit"
-  fi
+grep -qE '^[[:space:]]*cargo[[:space:]]+install[[:space:]]+--locked[[:space:]]+cargo-audit[[:space:]]*$' \
+  <<<"$(install_cargo_audit_run "${mutant}")" \
+  || fail "--version removal mutation did not leave an active unpinned install line"
+if active_pinned_install_line "$(install_cargo_audit_run "${mutant}")"; then
+  fail "--version removal mutation still leaves a complete pinned install line"
 fi
 if ( check_workflow "${mutant}" ) >/dev/null 2>&1; then
   fail "removing --version left the contract green"
@@ -280,8 +296,8 @@ if n != 1:
 dst.write_text(new)
 PY
 install_after="$(install_cargo_audit_run "${nosource}")"
-if grep -qE '^[[:space:]]*source[[:space:]].*cargo-plugin-versions\.sh' <<<"${install_after}"; then
-  fail "source-removal mutation still leaves an active source of cargo-plugin-versions.sh"
+if active_source_line "${install_after}"; then
+  fail "source-removal mutation still leaves a complete active source line"
 fi
 if ( check_workflow "${nosource}" ) >/dev/null 2>&1; then
   fail "removing workflow source left the contract green"
@@ -305,8 +321,8 @@ if n != 1:
     raise SystemExit(f"could not remove assert line (n={n})")
 dst.write_text(new)
 PY
-if grep -q 'assert_cargo_plugin_version' <<<"$(install_cargo_audit_run "${noassert}")"; then
-  fail "assertion-removal mutation still leaves assert_cargo_plugin_version in Install cargo-audit"
+if active_assert_line "$(install_cargo_audit_run "${noassert}")"; then
+  fail "assertion-removal mutation still leaves a complete active assert line"
 fi
 if ( check_workflow "${noassert}" ) >/dev/null 2>&1; then
   fail "removing version assertion left the contract green"
@@ -344,16 +360,17 @@ if n != 1:
 dst.write_text(new)
 PY
 install_ghost="$(install_cargo_audit_run "${ghost}")"
-grep -qE 'cargo install --locked cargo-audit' <<<"${install_ghost}" \
+grep -qE '^[[:space:]]*cargo[[:space:]]+install[[:space:]]+--locked[[:space:]]+cargo-audit[[:space:]]*$' \
+  <<<"${install_ghost}" \
   || fail "ghost mutation did not leave an active unpinned cargo install"
-if grep -qE '^[[:space:]]*source[[:space:]].*cargo-plugin-versions\.sh' <<<"${install_ghost}"; then
-  fail "ghost mutation still leaves an active source line"
+if active_source_line "${install_ghost}"; then
+  fail "ghost mutation still leaves a complete active source line"
 fi
-if grep -qE -- '--version[[:space:]]+"\$\{CARGO_AUDIT_VERSION\}"' <<<"${install_ghost}"; then
-  fail "ghost mutation still leaves an active --version pin"
+if active_pinned_install_line "${install_ghost}"; then
+  fail "ghost mutation still leaves a complete pinned install line"
 fi
-if grep -qE '^[[:space:]]*assert_cargo_plugin_version[[:space:]]' <<<"${install_ghost}"; then
-  fail "ghost mutation still leaves an active assert_cargo_plugin_version"
+if active_assert_line "${install_ghost}"; then
+  fail "ghost mutation still leaves a complete active assert line"
 fi
 # Comment text must still contain the ghosts — otherwise we tested a different defect.
 grep -q 'source ./scripts/ci/cargo-plugin-versions.sh' "${ghost}" \
@@ -364,6 +381,99 @@ if ( check_workflow "${ghost}" ) >/dev/null 2>&1; then
   fail "comment-ghost pin left the contract green"
 fi
 ok "comment-ghost pin + active unpinned install turns the contract red"
+
+echo "== mutation: trailing inline # ghosts + active unpinned install =="
+# Pin markers survive only as trailing comments on otherwise-active lines (#2317 review 4914059003).
+inline_ghost="$(mktemp "${SANDBOX_ROOT}/inline.XXXXXX.yml")"
+python3 - "${WORKFLOW}" "${inline_ghost}" <<'PY'
+import pathlib, re, sys
+
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+text = src.read_text()
+pat = re.compile(
+    r"(      - name: Install cargo-audit\n"
+    r"(?:        #.*\n)*"
+    r"        run: \|[-+]?\n)"
+    r"(?:          .*\n)+"
+)
+repl = (
+    "\\1"
+    "          set -euo pipefail\n"
+    "          true # source ./scripts/ci/cargo-plugin-versions.sh\n"
+    '          cargo install --locked cargo-audit # --version "${CARGO_AUDIT_VERSION}"\n'
+    '          true # assert_cargo_plugin_version cargo-audit "${CARGO_AUDIT_VERSION}"\n'
+)
+new, n = pat.subn(repl, text, count=1)
+if n != 1:
+    raise SystemExit(f"could not rewrite install block for inline-ghost mutation (n={n})")
+dst.write_text(new)
+PY
+install_inline="$(install_cargo_audit_run "${inline_ghost}")"
+grep -qF 'source ./scripts/ci/cargo-plugin-versions.sh' <<<"${install_inline}" \
+  || fail "inline-ghost mutation did not retain trailing source text on an emitted line"
+# Needle is the literal workflow text `--version "${CARGO_AUDIT_VERSION}"`, not an expanded pin.
+# shellcheck disable=SC2016
+grep -qF -- '--version "${CARGO_AUDIT_VERSION}"' <<<"${install_inline}" \
+  || fail "inline-ghost mutation did not retain trailing --version text on an emitted line"
+if active_source_line "${install_inline}"; then
+  fail "inline-ghost mutation unexpectedly matches a complete active source line"
+fi
+if active_pinned_install_line "${install_inline}"; then
+  fail "inline-ghost mutation unexpectedly matches a complete pinned install line"
+fi
+if active_assert_line "${install_inline}"; then
+  fail "inline-ghost mutation unexpectedly matches a complete active assert line"
+fi
+if ( check_workflow "${inline_ghost}" ) >/dev/null 2>&1; then
+  fail "trailing inline # ghosts left the contract green"
+fi
+ok "trailing inline # ghosts + active unpinned install turns the contract red"
+
+echo "== regression: correctly pinned run: |- stays green =="
+chomp="$(mktemp "${SANDBOX_ROOT}/chomp.XXXXXX.yml")"
+python3 - "${WORKFLOW}" "${chomp}" <<'PY'
+import pathlib, re, sys
+
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+text = src.read_text()
+pat = re.compile(
+    r"(      - name: Install cargo-audit\n(?:        #.*\n)*)"
+    r"        run: \|\n"
+)
+new, n = pat.subn(r"\1        run: |-\n", text, count=1)
+if n != 1:
+    raise SystemExit(f"could not switch Install cargo-audit to run: |- (n={n})")
+dst.write_text(new)
+PY
+grep -qE '^[[:space:]]*run:[[:space:]]*\|-[[:space:]]*$' <<<"$(deps_security_job "${chomp}")" \
+  || fail "run: |- regression did not apply"
+if ! ( check_workflow "${chomp}" ) >/dev/null 2>&1; then
+  fail "correctly pinned run: |- turned the contract red"
+fi
+ok "correctly pinned run: |- stays green"
+
+echo "== regression: correctly pinned run: |+ stays green =="
+keep="$(mktemp "${SANDBOX_ROOT}/keep.XXXXXX.yml")"
+python3 - "${WORKFLOW}" "${keep}" <<'PY'
+import pathlib, re, sys
+
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+text = src.read_text()
+pat = re.compile(
+    r"(      - name: Install cargo-audit\n(?:        #.*\n)*)"
+    r"        run: \|\n"
+)
+new, n = pat.subn(r"\1        run: |+\n", text, count=1)
+if n != 1:
+    raise SystemExit(f"could not switch Install cargo-audit to run: |+ (n={n})")
+dst.write_text(new)
+PY
+grep -qE '^[[:space:]]*run:[[:space:]]*\|\+[[:space:]]*$' <<<"$(deps_security_job "${keep}")" \
+  || fail "run: |+ regression did not apply"
+if ! ( check_workflow "${keep}" ) >/dev/null 2>&1; then
+  fail "correctly pinned run: |+ turned the contract red"
+fi
+ok "correctly pinned run: |+ stays green"
 
 ok "cargo-plugin-versions contract mutations bite"
 echo "PASS: cargo-plugin-versions contract"
