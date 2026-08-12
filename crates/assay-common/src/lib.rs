@@ -38,7 +38,7 @@ pub const KEY_EMIT_INODE_RESOLVED: u32 = 101;
 /// unconditional emit would charge every existing user ring-buffer bandwidth for evidence they did
 /// not ask for. When it is off, `observed_peers` is honestly empty rather than quietly partial.
 pub const KEY_EMIT_OBSERVED_CONNECT: u32 = 102;
-pub const KEY_DEDUP_OPEN_PATHS: u32 = 102;
+pub const KEY_DEDUP_OPEN_PATHS: u32 = 103;
 
 pub const EVENT_FILE_BLOCKED: u32 = 10;
 pub const EVENT_CONNECT_BLOCKED: u32 = 20;
@@ -334,5 +334,55 @@ pub mod strict_open {
             return Err(std::io::Error::last_os_error());
         }
         Ok(fd as i32)
+    }
+}
+
+#[cfg(test)]
+mod monitor_config_key_tests {
+    use super::{
+        KEY_DEDUP_OPEN_PATHS, KEY_EMIT_INODE_RESOLVED, KEY_EMIT_OBSERVED_CONNECT, KEY_MONITOR_ALL,
+    };
+
+    /// Behavioral proof: independently configurable CONFIG flag keys must not share a
+    /// slot. Opposite values are written under every flag key into a HashMap shaped like
+    /// the ephemeral eBPF CONFIG map; observed-connect and dedup must both retain theirs.
+    #[cfg(feature = "std")]
+    #[test]
+    fn independently_configurable_config_flags_do_not_alias() {
+        use std::collections::HashMap;
+
+        let flag_keys = [
+            KEY_MONITOR_ALL,
+            KEY_EMIT_INODE_RESOLVED,
+            KEY_EMIT_OBSERVED_CONNECT,
+            KEY_DEDUP_OPEN_PATHS,
+        ];
+
+        // Test-local uniqueness: every independently configurable flag key is distinct.
+        for (i, &a) in flag_keys.iter().enumerate() {
+            for &b in &flag_keys[i + 1..] {
+                assert_ne!(
+                    a, b,
+                    "independently configurable CONFIG flag keys must not alias (got {a})"
+                );
+            }
+        }
+
+        let mut config = HashMap::new();
+        // Opposite values: odd indices 1, even indices 0 — so adjacent flags differ.
+        for (i, &key) in flag_keys.iter().enumerate() {
+            config.insert(key, u32::from(i % 2 == 0));
+        }
+
+        assert_eq!(
+            config.get(&KEY_EMIT_OBSERVED_CONNECT),
+            Some(&1),
+            "KEY_EMIT_OBSERVED_CONNECT must retain its value when other flag keys are set"
+        );
+        assert_eq!(
+            config.get(&KEY_DEDUP_OPEN_PATHS),
+            Some(&0),
+            "KEY_DEDUP_OPEN_PATHS must retain its value when other flag keys are set"
+        );
     }
 }
