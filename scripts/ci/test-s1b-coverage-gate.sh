@@ -43,23 +43,31 @@ echo "ok: mutation-selftest and cleanup-selftest"
 wf="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/monitor-attach-smoke.yml"
 grep -q 'bash scripts/ci/run-send-syscall-matrix.sh cleanup-selftest' "$wf" \
   || fail "workflow does not invoke cleanup-selftest"
-# Intentional: match the workflow's literal rm/cp of "$bin", not expand here.
+# Intentional: match the workflow's literal backup copy/mv/cmp, not expand here.
 # shellcheck disable=SC2016
-grep -Fq 'rm -f "$bin"' "$wf" || fail "workflow restore does not rm mutated assay binary"
+grep -Fq 'cp "$binbak"' "$wf" || fail "workflow restore does not copy pre-mutation backup"
 # shellcheck disable=SC2016
-if grep -Fq 'cp "$binbak" "$bin"' "$wf"; then
-  fail "workflow restore copies mutated binary back"
+grep -Fq 'mv -f "$bin.tmp" "$bin"' "$wf" || fail "workflow restore does not atomically mv backup onto assay"
+# shellcheck disable=SC2016
+grep -Fq 'cmp -s "$bin" "$binbak"' "$wf" || fail "workflow restore does not verify restored binary matches backup"
+restore_fn=$(awk '/restore\(\) \{/,/^          \}/' "$wf")
+[[ -n "$restore_fn" ]] || fail "could not extract restore() from workflow"
+if grep -q 'cargo build' <<<"$restore_fn"; then
+  fail "workflow restore must not cargo build"
 fi
 grep -q 'elapsed_ms' "$(cd "$(dirname "$0")" && pwd)/s1b-send-syscall-matrix.c" \
   || fail "timeout selftest does not assert elapsed_ms"
 
 sim=$(mktemp -d)
-printf 'canonical\n' >"$sim/src"
-printf 'canonical\n' >"$sim/bak"
+printf 'canonical-src\n' >"$sim/src"
+printf 'canonical-src\n' >"$sim/bak"
+printf 'canonical-bin\n' >"$sim/binbak"
 printf 'MUTATED-s1b-cell7-disabled\n' >"$sim/bin"
 cp "$sim/bak" "$sim/src"
-rm -f "$sim/bin"
-[[ ! -e "$sim/bin" ]] || fail "restore simulation left mutated binary"
+cp "$sim/binbak" "$sim/bin.tmp"
+cmp -s "$sim/bin.tmp" "$sim/binbak" || fail "temp copy hash mismatch"
+mv "$sim/bin.tmp" "$sim/bin"
+cmp -s "$sim/bin" "$sim/binbak" || fail "restored binary does not match pre-mutation backup"
 cmp -s "$sim/src" "$sim/bak" || fail "restore simulation did not restore source"
 rm -rf "$sim"
-echo "ok: restore removes mutated binary; cleanup-selftest is invoked"
+echo "ok: restore copies exact pre-mutation binary; no cargo build in restore"

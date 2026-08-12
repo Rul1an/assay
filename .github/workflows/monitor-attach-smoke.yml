@@ -134,10 +134,13 @@ jobs:
           cp "$src" "$bak"
           cp "$bin" "$binbak"
           restore() {
-            cp "$bak" "$src" || true
-            rm -f "$bin"
-            rm -f "$bak" "$binbak"
-            cargo build -p assay-cli --release || true
+            cp "$bak" "$src"
+            cp "$binbak" "$bin.tmp"
+            cmp -s "$bin.tmp" "$binbak"
+            mv -f "$bin.tmp" "$bin"
+            test -f "$bin"
+            cmp -s "$bin" "$binbak"
+            rm -f "$bak" "$binbak" "$bin.tmp"
           }
           trap restore EXIT
           trap 'exit 143' TERM
