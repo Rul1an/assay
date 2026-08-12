@@ -32,8 +32,8 @@ if ! rg -q 'serde_yaml' docs/architecture/PLAN-DEPENDENCY-PERF-HYGIENE-PR4-2026q
   exit 1
 fi
 
-echo "[review] cargo deny scope"
-cargo deny check advisories bans sources
+echo "[review] cargo-deny scope"
+cargo-deny check advisories bans sources
 
 echo "[review] format/check/clippy"
 cargo fmt --check

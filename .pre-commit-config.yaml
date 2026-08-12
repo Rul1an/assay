@@ -391,18 +391,21 @@ repos:
         entry: bash scripts/ci/test-cargo-plugin-versions-contract.sh
         language: system
         pass_filenames: false
-        # CI-4D1 / #2224: pin cargo-audit from one shared source. Mutations cover removing
-        # --version, restating the pin in the workflow, PATH decoys, and dropping source/assert.
-        files: ^(scripts/ci/(cargo-plugin-versions|test-cargo-plugin-versions-contract)\.sh|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        # CI-4D1 / #2224: pin cargo-audit from one shared source. CI-4D4 also pins the review
+        # helper's direct cargo-deny invocation. Mutations cover removing --version, restating
+        # the pin, PATH decoys, dropping source/assert, and reverting the helper to cargo deny.
+        files: ^(scripts/ci/(cargo-plugin-versions|test-cargo-plugin-versions-contract|review-dependency-perf-hygiene-pr4)\.sh|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
 
       - id: split-wave-plugin-versions-contract-self-test
         name: split-wave plugin versions contract
         entry: bash scripts/ci/test-split-wave-plugin-versions-contract.sh
         language: system
         pass_filenames: false
-        # CI-4D2 / #2224: pin nextest/hack/semver-checks from the same shared source. Mutations
-        # cover missing pins, restated literals, missing source/assert, unpinned/duplicate
-        # install (including cargo +toolchain), PATH decoys, and optional-helper unpin.
+        # CI-4D2 / #2224: pin nextest/hack/semver-checks from the same shared source. CI-4D4
+        # also pins install-step comment semantics (step-scoped install; plugins bind stable;
+        # workspace cargo follows rust-toolchain.toml). Mutations cover missing pins, restated
+        # literals, missing source/assert, unpinned/duplicate install (including cargo
+        # +toolchain), PATH decoys, optional-helper unpin, and stale toolchain comments.
         files: ^(scripts/ci/(cargo-plugin-versions|test-split-wave-plugin-versions-contract|optional-public-api-drift)\.sh|\.github/workflows/split-wave0-gates\.yml|\.pre-commit-config\.yaml)$
 
       - id: optional-plugin-versions-contract-self-test

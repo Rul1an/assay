@@ -310,10 +310,78 @@ check_d2_plugin_invocation_bindings() {
   done <<<"${body}"
 }
 
+# Contiguous `#` comments immediately above a named workflow step (CI-4D4 / #2224).
+step_preamble_comments() {
+  local wf="$1" step_name="$2"
+  awk -v step="${step_name}" '
+    {
+      if ($0 ~ /^[[:space:]]*#/) {
+        buf = buf $0 ORS
+        next
+      }
+      if ($0 ~ /^[[:space:]]*$/) {
+        next
+      }
+      name = $0
+      sub(/^[[:space:]]*- name:[[:space:]]*/, "", name)
+      sub(/[[:space:]]*$/, "", name)
+      if (name == step) {
+        printf "%s", buf
+        exit
+      }
+      buf = ""
+    }
+  ' "${wf}"
+}
+
+# Install-step comments must not teach that plugin invocations follow rust-toolchain.toml.
+# Correct semantics: install RUSTUP_TOOLCHAIN is step-scoped; plugin invocations bind stable
+# explicitly; ordinary workspace cargo follows rust-toolchain.toml.
+check_one_d2_install_preamble() {
+  local label="$1" comments="$2"
+
+  grep -qF 'step-scoped' <<<"${comments}" \
+    || fail "${label} install comments must state RUSTUP_TOOLCHAIN is step-scoped; got:
+${comments}"
+  grep -qF 'plugin invocations bind stable explicitly' <<<"${comments}" \
+    || fail "${label} install comments must state plugin invocations bind stable explicitly; got:
+${comments}"
+  grep -qF 'ordinary workspace cargo follows rust-toolchain.toml' <<<"${comments}" \
+    || fail "${label} install comments must state ordinary workspace cargo follows rust-toolchain.toml; got:
+${comments}"
+}
+
+check_d2_install_comment_semantics() {
+  local wf="$1"
+  local nextest_comments semver_comments
+
+  nextest_comments="$(step_preamble_comments "${wf}" "Install cargo-nextest and cargo-hack")"
+  [[ -n "${nextest_comments}" ]] \
+    || fail "missing preamble comments above Install cargo-nextest and cargo-hack"
+
+  semver_comments="$(step_preamble_comments "${wf}" "Install cargo-semver-checks")"
+  [[ -n "${semver_comments}" ]] \
+    || fail "missing preamble comments above Install cargo-semver-checks"
+
+  # Stale D2 wording (pre-CI-4D4): grouped plugins with workspace cargo under rust-toolchain.toml.
+  if grep -qF 'still follow rust-toolchain.toml' <<<"${nextest_comments}"; then
+    fail "nextest/hack install comments still claim later steps follow rust-toolchain.toml; plugin invocations bind stable explicitly"
+  fi
+  if grep -qF 'still follows rust-toolchain.toml' <<<"${semver_comments}"; then
+    fail "semver-checks install comments still claim check-release follows rust-toolchain.toml; plugin invocations bind stable explicitly"
+  fi
+
+  check_one_d2_install_preamble "nextest/hack" "${nextest_comments}"
+  check_one_d2_install_preamble "semver-checks" "${semver_comments}"
+
+  ok "D2 install-step comment semantics hold for ${wf##*/}"
+}
+
 check_workflow() {
   local wf="$1"
   check_feature_matrix_install "${wf}"
   check_semver_public_install "${wf}"
+  check_d2_install_comment_semantics "${wf}"
 }
 
 # --- Optional helper: semver-checks pin (public-api pin/bind owned by CI-4D3) -----------
@@ -752,6 +820,91 @@ if ( check_optional_helper "${opt_unbound}" ) >/dev/null 2>&1; then
   fail "removing optional semver check-release binding left the helper contract green"
 fi
 ok "removing optional semver check-release binding turns the helper contract red"
+
+echo "== mutation: restore stale nextest/hack rust-toolchain.toml comment =="
+stale_nextest="$(mktemp "${SANDBOX_ROOT}/stale-nextest.XXXXXX.yml")"
+python3 - "${WORKFLOW}" "${stale_nextest}" <<'PY'
+import pathlib, re, sys
+
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+text = src.read_text()
+# Replace the contiguous preamble above Install cargo-nextest and cargo-hack.
+pat = re.compile(
+    r"(?:^[ \t]*#.*\n)+(?=^[ \t]*- name: Install cargo-nextest and cargo-hack[ \t]*$)",
+    re.M,
+)
+stale = (
+    "      # Pins live in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). `--locked` alone is\n"
+    "      # not a pin: it locks each tool's own dependencies, not the tool version. RUSTUP_TOOLCHAIN\n"
+    "      # is step-scoped so workspace cargo check/nextest/hack below still follow rust-toolchain.toml.\n"
+)
+new, n = pat.subn(stale, text, count=1)
+if n != 1:
+    raise SystemExit(f"could not rewrite nextest/hack preamble (n={n})")
+dst.write_text(new)
+PY
+grep -qF 'still follow rust-toolchain.toml' \
+  <<<"$(step_preamble_comments "${stale_nextest}" "Install cargo-nextest and cargo-hack")" \
+  || fail "stale nextest/hack comment mutation did not apply"
+if ( check_d2_install_comment_semantics "${stale_nextest}" ) >/dev/null 2>&1; then
+  fail "restoring stale nextest/hack rust-toolchain.toml comment left the contract green"
+fi
+ok "restoring stale nextest/hack comment turns the contract red"
+
+echo "== mutation: restore stale semver check-release rust-toolchain.toml comment =="
+stale_semver="$(mktemp "${SANDBOX_ROOT}/stale-semver.XXXXXX.yml")"
+python3 - "${WORKFLOW}" "${stale_semver}" <<'PY'
+import pathlib, re, sys
+
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+text = src.read_text()
+pat = re.compile(
+    r"(?:^[ \t]*#.*\n)+(?=^[ \t]*- name: Install cargo-semver-checks[ \t]*$)",
+    re.M,
+)
+stale = (
+    "      # Pin lives in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). Step-scoped\n"
+    "      # RUSTUP_TOOLCHAIN so check-release below still follows rust-toolchain.toml.\n"
+)
+new, n = pat.subn(stale, text, count=1)
+if n != 1:
+    raise SystemExit(f"could not rewrite semver preamble (n={n})")
+dst.write_text(new)
+PY
+grep -qF 'still follows rust-toolchain.toml' \
+  <<<"$(step_preamble_comments "${stale_semver}" "Install cargo-semver-checks")" \
+  || fail "stale semver comment mutation did not apply"
+if ( check_d2_install_comment_semantics "${stale_semver}" ) >/dev/null 2>&1; then
+  fail "restoring stale semver rust-toolchain.toml comment left the contract green"
+fi
+ok "restoring stale semver comment turns the contract red"
+
+echo "== mutation: drop explicit plugin-bind claim from nextest/hack comments =="
+no_bind="$(mktemp "${SANDBOX_ROOT}/no-bind.XXXXXX.yml")"
+python3 - "${WORKFLOW}" "${no_bind}" <<'PY'
+import pathlib, re, sys
+
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+text = src.read_text()
+pat = re.compile(
+    r"(?:^[ \t]*#.*\n)+(?=^[ \t]*- name: Install cargo-nextest and cargo-hack[ \t]*$)",
+    re.M,
+)
+weak = (
+    "      # Pins live in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). `--locked` alone is\n"
+    "      # not a pin: it locks each tool's own dependencies, not the tool version. RUSTUP_TOOLCHAIN\n"
+    "      # is step-scoped for the install, while\n"
+    "      # ordinary workspace cargo follows rust-toolchain.toml.\n"
+)
+new, n = pat.subn(weak, text, count=1)
+if n != 1:
+    raise SystemExit(f"could not weaken nextest/hack preamble (n={n})")
+dst.write_text(new)
+PY
+if ( check_d2_install_comment_semantics "${no_bind}" ) >/dev/null 2>&1; then
+  fail "dropping plugin-bind claim from nextest/hack comments left the contract green"
+fi
+ok "dropping plugin-bind claim from nextest/hack comments turns the contract red"
 
 ok "split-wave plugin-versions contract mutations bite"
 echo "PASS: split-wave plugin-versions contract"
