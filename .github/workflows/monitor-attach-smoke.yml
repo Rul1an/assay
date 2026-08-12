@@ -5,6 +5,8 @@ name: Monitor attach smoke
 # enforcement. This exists because a green `runner-spike` delegated lane is NOT evidence that
 # `assay monitor` can attach — they attach different program sets (see #1570). Manual dispatch so it
 # does not block unrelated PRs; run it to verify attach-health after touching monitor/eBPF code.
+# `proof_mode=send-matrix` reuses this registered workflow_dispatch entrypoint (GitHub cannot start a
+# workflow file that exists only on a feature branch). Default remains attach-smoke.
 
 on:
   workflow_dispatch:
@@ -13,6 +15,14 @@ on:
         description: "Build target/assay-ebpf.o from source before the smoke run"
         required: false
         default: "true"
+      proof_mode:
+        description: "attach-smoke (default) or send-matrix exact-syscall/effect cells"
+        required: false
+        type: choice
+        options:
+          - attach-smoke
+          - send-matrix
+        default: attach-smoke
 
 permissions:
   contents: read
@@ -50,6 +60,7 @@ jobs:
         run: python3 -m json.tool "${{ steps.canonical-ebpf.outputs.provenance-path }}"
 
       - name: Smoke - assay monitor must attach its observation probes
+        if: ${{ github.event.inputs.proof_mode != 'send-matrix' }}
         run: |
           set -euo pipefail
           OBJ="target/assay-ebpf.o"
@@ -75,6 +86,7 @@ jobs:
           echo "SMOKE PASS: assay monitor attached its observation probes."
 
       - name: ABI skew check - loaded object must emit the pinned MonitorEvent size
+        if: ${{ github.event.inputs.proof_mode != 'send-matrix' }}
         # Separate step so the attach proof above stays a pure attach proof. This is the
         # mechanical close condition of #1575: a canonical same-commit build that still emits
         # size-mismatched records means the loaded object was stale, and that must FAIL the run
@@ -89,3 +101,31 @@ jobs:
             exit 1
           fi
           echo "ABI SKEW PASS: no MonitorEvent size mismatch observed."
+
+      - name: Compile syscall harness
+        if: ${{ github.event.inputs.proof_mode == 'send-matrix' }}
+        run: |
+          cc -Wall -Werror -o "$RUNNER_TEMP/s1b-harness" scripts/ci/s1b-send-syscall-matrix.c
+          "$RUNNER_TEMP/s1b-harness" --timeout-selftest
+
+      - name: Positive syscall/effect matrix
+        if: ${{ github.event.inputs.proof_mode == 'send-matrix' }}
+        run: |
+          set -euo pipefail
+          test -f target/assay-ebpf.o
+          sudo -E env HARNESS_BIN="$RUNNER_TEMP/s1b-harness" WORKDIR="$RUNNER_TEMP/s1b-positive" \
+            bash scripts/ci/run-send-syscall-matrix.sh positive
+
+      - name: Attach-disabled negative matrix
+        if: ${{ github.event.inputs.proof_mode == 'send-matrix' }}
+        run: |
+          set -euo pipefail
+          src=crates/assay-monitor/src/loader.rs
+          bak="$RUNNER_TEMP/loader.rs.s1b.bak"
+          cp "$src" "$bak"
+          restore() { cp "$bak" "$src"; rm -f "$bak"; }
+          trap restore EXIT
+          bash scripts/ci/run-send-syscall-matrix.sh disable-send-attach
+          cargo build -p assay-cli --release
+          sudo -E env HARNESS_BIN="$RUNNER_TEMP/s1b-harness" WORKDIR="$RUNNER_TEMP/s1b-disabled" \
+            bash scripts/ci/run-send-syscall-matrix.sh attach-disabled
