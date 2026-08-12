@@ -11,6 +11,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERSIONS="${ROOT}/scripts/ci/cargo-plugin-versions.sh"
 WORKFLOW="${ROOT}/.github/workflows/ci.yml"
+REVIEW_HELPER="${ROOT}/scripts/ci/review-dependency-perf-hygiene-pr4.sh"
+PRECOMMIT="${ROOT}/.pre-commit-config.yaml"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -169,7 +171,25 @@ ${install_run}"
   ok "deps-security cargo-audit pin contract holds for ${wf##*/}"
 }
 
+# CI-4D4 / #2224: review helper uses direct cargo-deny (not `cargo deny`); D1 hook watches it.
+check_review_helper_cargo_deny() {
+  local helper="$1"
+  [[ -f "${helper}" ]] || fail "missing ${helper#"${ROOT}"/}"
+  grep -qE '^[[:space:]]*cargo-deny[[:space:]]+check[[:space:]]+advisories[[:space:]]+bans[[:space:]]+sources[[:space:]]*$' "${helper}" \
+    || fail "review-dependency-perf-hygiene-pr4.sh must have complete line: cargo-deny check advisories bans sources"
+  if grep -qE '^[[:space:]]*cargo[[:space:]]+deny([[:space:]]|$)' "${helper}"; then
+    fail "review-dependency-perf-hygiene-pr4.sh still invokes cargo deny; use cargo-deny (#2214)"
+  fi
+}
+
 check_workflow "${WORKFLOW}"
+check_review_helper_cargo_deny "${REVIEW_HELPER}"
+ok "review helper uses direct cargo-deny"
+# Hook section: id line then files: must include the review script stem.
+grep -A8 '^[[:space:]]*- id:[[:space:]]*cargo-plugin-versions-contract-self-test[[:space:]]*$' "${PRECOMMIT}" \
+  | grep -qE '^[[:space:]]*files:.*review-dependency-perf-hygiene-pr4' \
+  || fail "cargo-plugin-versions-contract-self-test files: must watch review-dependency-perf-hygiene-pr4.sh"
+ok "D1 pre-commit hook watches the review helper"
 
 # --- Behavioral: assertion binds install location, not PATH --------------------
 
@@ -541,6 +561,16 @@ expect_second_cargo_install_red trailing_hash 'cargo install --locked cargo-audi
 expect_second_cargo_install_red other_pkg 'cargo install --locked cargo-deny'
 expect_second_cargo_install_red plus_stable 'cargo +stable install --locked cargo-audit'
 expect_second_cargo_install_red plus_nightly 'cargo +nightly install --locked cargo-audit'
+
+echo "== mutation: review helper reverts to cargo deny =="
+deny_mut="$(mktemp "${SANDBOX_ROOT}/deny.XXXXXX.sh")"
+sed 's/^cargo-deny check /cargo deny check /' "${REVIEW_HELPER}" >"${deny_mut}"
+grep -qE '^[[:space:]]*cargo[[:space:]]+deny[[:space:]]+check' "${deny_mut}" \
+  || fail "cargo deny mutation did not apply"
+if ( check_review_helper_cargo_deny "${deny_mut}" ) >/dev/null 2>&1; then
+  fail "reverting review helper to cargo deny left the contract green"
+fi
+ok "reverting review helper to cargo deny turns the contract red"
 
 ok "cargo-plugin-versions contract mutations bite"
 echo "PASS: cargo-plugin-versions contract"

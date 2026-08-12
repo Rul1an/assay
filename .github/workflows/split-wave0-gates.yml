@@ -195,7 +195,8 @@ jobs:
 
       # Pins live in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). `--locked` alone is
       # not a pin: it locks each tool's own dependencies, not the tool version. RUSTUP_TOOLCHAIN
-      # is step-scoped so workspace cargo check/nextest/hack below still follow rust-toolchain.toml.
+      # is step-scoped for the install; plugin invocations bind stable explicitly, while
+      # ordinary workspace cargo follows rust-toolchain.toml.
       - name: Install cargo-nextest and cargo-hack
         shell: bash
         env:
@@ -397,8 +398,9 @@ jobs:
       - name: Set up Rust toolchain and cache
         uses: ./.github/actions/setup-rust
 
-      # Pin lives in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). Step-scoped
-      # RUSTUP_TOOLCHAIN so check-release below still follows rust-toolchain.toml.
+      # Pin lives in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). RUSTUP_TOOLCHAIN is
+      # step-scoped for the install; plugin invocations bind stable explicitly, while
+      # ordinary workspace cargo follows rust-toolchain.toml.
       - name: Install cargo-semver-checks
         shell: bash
         env:

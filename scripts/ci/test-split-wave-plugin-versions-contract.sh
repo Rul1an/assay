@@ -310,10 +310,34 @@ check_d2_plugin_invocation_bindings() {
   done <<<"${body}"
 }
 
+# CI-4D4 / #2224: install-step comments pin three claims near the two known step names.
+# step-scoped install; plugin invocations bind stable explicitly; ordinary workspace cargo
+# follows rust-toolchain.toml. Reject the pre-D4 "still follow(s) rust-toolchain.toml" wording.
+check_d2_install_comment_semantics() {
+  local wf="$1" step window
+  for step in \
+    "Install cargo-nextest and cargo-hack" \
+    "Install cargo-semver-checks"; do
+    window="$(grep -B5 -F -- "- name: ${step}" "${wf}" || true)"
+    [[ -n "${window}" ]] || fail "missing step: ${step}"
+    grep -qF 'step-scoped' <<<"${window}" \
+      || fail "${step}: comments must state step-scoped install"
+    grep -qF 'plugin invocations bind stable explicitly' <<<"${window}" \
+      || fail "${step}: comments must state plugin invocations bind stable explicitly"
+    grep -qF 'ordinary workspace cargo follows rust-toolchain.toml' <<<"${window}" \
+      || fail "${step}: comments must state ordinary workspace cargo follows rust-toolchain.toml"
+    if grep -qE 'still follow(s)?[[:space:]]+rust-toolchain\.toml' <<<"${window}"; then
+      fail "${step}: stale still follow(s) rust-toolchain.toml claim"
+    fi
+  done
+  ok "D2 install-step comment semantics hold for ${wf##*/}"
+}
+
 check_workflow() {
   local wf="$1"
   check_feature_matrix_install "${wf}"
   check_semver_public_install "${wf}"
+  check_d2_install_comment_semantics "${wf}"
 }
 
 # --- Optional helper: semver-checks pin (public-api pin/bind owned by CI-4D3) -----------
@@ -752,6 +776,49 @@ if ( check_optional_helper "${opt_unbound}" ) >/dev/null 2>&1; then
   fail "removing optional semver check-release binding left the helper contract green"
 fi
 ok "removing optional semver check-release binding turns the helper contract red"
+
+# Table-driven: replace the comment block above a named install step with stale text; must bite.
+# Stale body is read from stdin (heredoc at the call site).
+expect_stale_install_comment_red() {
+  local label="$1" step="$2" mutant stale
+  stale="$(cat)"
+  mutant="$(mktemp "${SANDBOX_ROOT}/stale-${label}.XXXXXX.yml")"
+  STEP="${step}" STALE="${stale}" python3 - "${WORKFLOW}" "${mutant}" <<'PY'
+import os, pathlib, re, sys
+
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+step, stale = os.environ["STEP"], os.environ["STALE"]
+if not stale.endswith("\n"):
+    stale += "\n"
+text = src.read_text()
+pat = re.compile(
+    r"(?:^[ \t]*#.*\n)+(?=^[ \t]*- name: " + re.escape(step) + r"[ \t]*$)",
+    re.M,
+)
+new, n = pat.subn(stale, text, count=1)
+if n != 1:
+    raise SystemExit(f"could not rewrite preamble for {step!r} (n={n})")
+dst.write_text(new)
+PY
+  if ( check_d2_install_comment_semantics "${mutant}" ) >/dev/null 2>&1; then
+    fail "stale ${label} install comment left the contract green"
+  fi
+  ok "stale ${label} install comment turns the contract red"
+}
+
+echo "== mutation: stale install-step comments =="
+expect_stale_install_comment_red nextest "Install cargo-nextest and cargo-hack" <<'EOF'
+      # Pins live in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). RUSTUP_TOOLCHAIN
+      # is step-scoped so workspace cargo check/nextest/hack below still follow rust-toolchain.toml.
+EOF
+expect_stale_install_comment_red semver "Install cargo-semver-checks" <<'EOF'
+      # Pin lives in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). Step-scoped
+      # RUSTUP_TOOLCHAIN so check-release below still follows rust-toolchain.toml.
+EOF
+expect_stale_install_comment_red nobind "Install cargo-nextest and cargo-hack" <<'EOF'
+      # Pins live in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). RUSTUP_TOOLCHAIN
+      # is step-scoped for the install, while ordinary workspace cargo follows rust-toolchain.toml.
+EOF
 
 ok "split-wave plugin-versions contract mutations bite"
 echo "PASS: split-wave plugin-versions contract"
