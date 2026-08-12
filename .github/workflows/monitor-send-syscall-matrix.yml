@@ -1,0 +1,66 @@
+name: Monitor send syscall matrix
+# Exact-syscall/effect proof for sendto/sendmsg. Manual dispatch; not a required check.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_ebpf:
+        description: "Build target/assay-ebpf.o from source before the matrix"
+        required: false
+        default: "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assay-bpf-runner-host
+  cancel-in-progress: false
+
+jobs:
+  matrix:
+    runs-on: [self-hosted, linux, assay-bpf-runner]
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Build assay-cli
+        run: cargo build -p assay-cli --release
+
+      - name: Build eBPF object
+        id: canonical-ebpf
+        if: ${{ github.event.inputs.build_ebpf != 'false' }}
+        uses: ./.github/actions/canonical-ebpf-build
+        with:
+          clean-ebpf-crate: "true"
+
+      - name: Show eBPF build provenance
+        if: ${{ github.event.inputs.build_ebpf != 'false' }}
+        run: python3 -m json.tool "${{ steps.canonical-ebpf.outputs.provenance-path }}"
+
+      - name: Compile syscall harness
+        run: |
+          cc -Wall -Werror -o "$RUNNER_TEMP/s1b-harness" scripts/ci/s1b-send-syscall-matrix.c
+          "$RUNNER_TEMP/s1b-harness" --timeout-selftest
+
+      - name: Positive syscall/effect matrix
+        run: |
+          set -euo pipefail
+          test -f target/assay-ebpf.o
+          sudo -E env HARNESS_BIN="$RUNNER_TEMP/s1b-harness" WORKDIR="$RUNNER_TEMP/s1b-positive" \
+            bash scripts/ci/run-send-syscall-matrix.sh positive
+
+      - name: Attach-disabled negative matrix
+        run: |
+          set -euo pipefail
+          src=crates/assay-monitor/src/loader.rs
+          bak="$RUNNER_TEMP/loader.rs.s1b.bak"
+          cp "$src" "$bak"
+          restore() { cp "$bak" "$src"; rm -f "$bak"; }
+          trap restore EXIT
+          bash scripts/ci/run-send-syscall-matrix.sh disable-send-attach
+          cargo build -p assay-cli --release
+          sudo -E env HARNESS_BIN="$RUNNER_TEMP/s1b-harness" WORKDIR="$RUNNER_TEMP/s1b-disabled" \
+            bash scripts/ci/run-send-syscall-matrix.sh attach-disabled
