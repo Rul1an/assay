@@ -98,6 +98,23 @@ It does not:
 - imply that Assay independently verified onchain state or settlement finality
 - claim that this sample already defines a stable upstream wire-format contract
 
+### Declared limit: one transport, and it refuses the others
+
+`transport` is closed to `http`. An artifact declaring `mcp` or `a2a` exits
+with `transport must be one of: http` and never reaches a verdict about the
+payment it describes. That is a scope decision rather than a judgement about
+those surfaces, and it is written here because the paragraph above names all
+three as real and the code accepts one, which left a reader to infer the gap.
+
+The consequence is worth stating in the form it takes: the accepting branch of
+this mapper is unreachable for two of the three transports x402 defines, so a
+run over an MCP-transported corpus would reject every artifact and that
+uniform rejection would decide nothing. A refusal can be correct on each input
+and still be vacuous over a corpus. Widening the vocabulary is not the fix on
+its own; fixtures and expected verdicts for those surfaces are, and this sample
+carries neither, so the honest move is to declare the limit rather than to
+accept a token whose semantics are not pinned here.
+
 This sample targets the smallest honest x402 requirement-and-verification
 surface, not a settlement-response, receipt, payer, or fulfillment truth
 surface.
