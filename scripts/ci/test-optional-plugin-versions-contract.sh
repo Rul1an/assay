@@ -352,6 +352,25 @@ PATH="${decoy_dir}/early:${PATH}" CARGO_HOME="${decoy_dir}/cargo-home" \
 expect_in_file "${decoy_out}" "cargo-mutants missing at install location" \
   "path decoy names the missing install-root binary"
 
+echo "== cargo-mutants receives its Cargo subcommand argv =="
+mutants_argv_dir="${SCRATCH}/mutants_argv"
+mkdir -p "${mutants_argv_dir}/bin"
+cat >"${mutants_argv_dir}/bin/cargo-mutants" <<STUB
+#!/usr/bin/env bash
+if [[ "\${1:-}" != "mutants" || "\${2:-}" != "--version" || "\${#}" -ne 2 ]]; then
+  echo "expected cargo-mutants argv: mutants --version; got: \$*" >&2
+  exit 64
+fi
+echo "cargo-mutants ${MUTANTS_PIN}"
+STUB
+chmod +x "${mutants_argv_dir}/bin/cargo-mutants"
+mutants_argv_out="${mutants_argv_dir}/out"
+mutants_argv_exit=0
+CARGO_HOME="${mutants_argv_dir}" \
+  assert_cargo_plugin_version cargo-mutants "${MUTANTS_PIN}" >"${mutants_argv_out}" 2>&1 || mutants_argv_exit=$?
+[[ "${mutants_argv_exit}" -eq 0 ]] \
+  || fail "cargo-mutants version assertion did not use Cargo subcommand argv (exit ${mutants_argv_exit}): $(cat "${mutants_argv_out}")"
+
 echo "== wrong installed mutants version fails =="
 wrong_dir="${SCRATCH}/assert_wrong"
 mkdir -p "${wrong_dir}/bin"
