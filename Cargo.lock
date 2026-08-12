@@ -468,6 +468,7 @@ dependencies = [
  "assay-policy",
  "aya",
  "aya-log",
+ "object",
  "thiserror 2.0.19",
  "tokio",
  "tokio-stream",

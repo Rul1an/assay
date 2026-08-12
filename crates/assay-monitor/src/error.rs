@@ -35,6 +35,13 @@ pub enum MonitorError {
     #[error("config verification failed for key {key}: expected {expected}, got {got}")]
     ConfigVerification { key: u32, expected: u32, got: u32 },
 
+    /// P1: CONFIG object-ABI ELF symbol missing or mismatched (pre-`Ebpf::load`).
+    #[error("monitor object ABI: {detail}. {guidance}")]
+    ObjectAbi {
+        detail: String,
+        guidance: &'static str,
+    },
+
     #[error("invalid event size (got={got}, need={need})")]
     InvalidEvent { got: usize, need: usize },
 

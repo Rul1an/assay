@@ -18,8 +18,12 @@ anyhow.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream = "0.1"
 
+[dev-dependencies]
+object = { workspace = true, features = ["write"] }
+
 # Linux-only eBPF stack
 [target.'cfg(target_os = "linux")'.dependencies]
 aya = { workspace = true }
 aya-log = { workspace = true }
 assay-common = { workspace = true, features = ["user"] }
+object = { workspace = true }
