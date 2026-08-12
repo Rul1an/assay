@@ -171,69 +171,25 @@ ${install_run}"
   ok "deps-security cargo-audit pin contract holds for ${wf##*/}"
 }
 
-# CI-4D4 / #2224 close-out: the human review helper must name the same direct
-# cargo-deny binary CI and the hook use. `cargo deny` re-enters rust-toolchain.toml
-# resolution (#2214); deny.toml already documents the binary form.
+# CI-4D4 / #2224: review helper uses direct cargo-deny (not `cargo deny`); D1 hook watches it.
 check_review_helper_cargo_deny() {
   local helper="$1"
-  local active
-
-  [[ -f "${helper}" ]] || fail "missing review helper ${helper#"${ROOT}"/}"
-
-  active="$(awk '
-    /^[[:space:]]*#/ { next }
-    {
-      tmp = $0
-      sub(/^[[:space:]]+/, "", tmp)
-      if (tmp == "") next
-      print
-    }
-  ' "${helper}")"
-
-  grep -qE '^[[:space:]]*cargo-deny[[:space:]]+check[[:space:]]+advisories[[:space:]]+bans[[:space:]]+sources[[:space:]]*$' <<<"${active}" \
-    || fail "review-dependency-perf-hygiene-pr4.sh must have an active complete line: cargo-deny check advisories bans sources; got:
-${active}"
-
-  # Command form only (line starts with cargo deny). Echo/string mentions are not invocations.
-  if grep -qE '^[[:space:]]*cargo[[:space:]]+deny([[:space:]]|$)' <<<"${active}"; then
-    fail "review-dependency-perf-hygiene-pr4.sh still invokes cargo deny; use the cargo-deny binary (#2214 / #2224)"
+  [[ -f "${helper}" ]] || fail "missing ${helper#"${ROOT}"/}"
+  grep -qE '^[[:space:]]*cargo-deny[[:space:]]+check[[:space:]]+advisories[[:space:]]+bans[[:space:]]+sources[[:space:]]*$' "${helper}" \
+    || fail "review-dependency-perf-hygiene-pr4.sh must have complete line: cargo-deny check advisories bans sources"
+  if grep -qE '^[[:space:]]*cargo[[:space:]]+deny([[:space:]]|$)' "${helper}"; then
+    fail "review-dependency-perf-hygiene-pr4.sh still invokes cargo deny; use cargo-deny (#2214)"
   fi
-
-  ok "review helper uses direct cargo-deny"
-}
-
-# The D1 pre-commit hook must watch the review helper so a drift back to
-# `cargo deny` runs this contract in Lint (pre-commit).
-check_d1_precommit_watches_review_helper() {
-  local pc="$1"
-  local files_line
-
-  [[ -f "${pc}" ]] || fail "missing ${pc#"${ROOT}"/}"
-
-  files_line="$(awk '
-    /^[[:space:]]*- id:[[:space:]]*cargo-plugin-versions-contract-self-test[[:space:]]*$/ { in_hook=1; next }
-    in_hook && /^[[:space:]]*- id:/ { exit }
-    in_hook && /^[[:space:]]*files:[[:space:]]*/ {
-      sub(/^[[:space:]]*files:[[:space:]]*/, "")
-      print
-      exit
-    }
-  ' "${pc}")"
-
-  [[ -n "${files_line}" ]] \
-    || fail "cargo-plugin-versions-contract-self-test is missing a files: line in .pre-commit-config.yaml"
-
-  # Require the review helper path inside the files regex (as a script stem or path).
-  grep -qE 'review-dependency-perf-hygiene-pr4' <<<"${files_line}" \
-    || fail "cargo-plugin-versions-contract-self-test files: must watch review-dependency-perf-hygiene-pr4.sh; got:
-${files_line}"
-
-  ok "D1 pre-commit hook watches the review helper"
 }
 
 check_workflow "${WORKFLOW}"
 check_review_helper_cargo_deny "${REVIEW_HELPER}"
-check_d1_precommit_watches_review_helper "${PRECOMMIT}"
+ok "review helper uses direct cargo-deny"
+# Hook section: id line then files: must include the review script stem.
+grep -A8 '^[[:space:]]*- id:[[:space:]]*cargo-plugin-versions-contract-self-test[[:space:]]*$' "${PRECOMMIT}" \
+  | grep -qE '^[[:space:]]*files:.*review-dependency-perf-hygiene-pr4' \
+  || fail "cargo-plugin-versions-contract-self-test files: must watch review-dependency-perf-hygiene-pr4.sh"
+ok "D1 pre-commit hook watches the review helper"
 
 # --- Behavioral: assertion binds install location, not PATH --------------------
 
@@ -608,65 +564,13 @@ expect_second_cargo_install_red plus_nightly 'cargo +nightly install --locked ca
 
 echo "== mutation: review helper reverts to cargo deny =="
 deny_mut="$(mktemp "${SANDBOX_ROOT}/deny.XXXXXX.sh")"
-python3 - "${REVIEW_HELPER}" "${deny_mut}" <<'PY'
-import pathlib, sys
-
-src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
-text = src.read_text()
-old = "cargo-deny check advisories bans sources"
-new = "cargo deny check advisories bans sources"
-if old not in text:
-    # Production may still be on the stale form; seed the binary form then weaken it.
-    if "cargo deny check advisories bans sources" in text:
-        text = text.replace("cargo deny check advisories bans sources", old, 1)
-    else:
-        raise SystemExit("could not find cargo-deny/cargo deny check line to mutate")
-if old not in text:
-    raise SystemExit("could not normalize to cargo-deny before weakening")
-dst.write_text(text.replace(old, new, 1))
-PY
+sed 's/^cargo-deny check /cargo deny check /' "${REVIEW_HELPER}" >"${deny_mut}"
 grep -qE '^[[:space:]]*cargo[[:space:]]+deny[[:space:]]+check' "${deny_mut}" \
   || fail "cargo deny mutation did not apply"
 if ( check_review_helper_cargo_deny "${deny_mut}" ) >/dev/null 2>&1; then
   fail "reverting review helper to cargo deny left the contract green"
 fi
 ok "reverting review helper to cargo deny turns the contract red"
-
-echo "== mutation: D1 pre-commit drops review helper from files: =="
-pc_mut="$(mktemp "${SANDBOX_ROOT}/pc.XXXXXX.yaml")"
-python3 - "${PRECOMMIT}" "${pc_mut}" <<'PY'
-import pathlib, re, sys
-
-src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
-text = src.read_text()
-pat = re.compile(
-    r"(^[ \t]*- id:[ \t]*cargo-plugin-versions-contract-self-test[ \t]*\n"
-    r"(?:.*\n)*?"
-    r"[ \t]*files:[ \t]*)"
-    r"(.+)$",
-    re.M,
-)
-
-def drop_review(m: re.Match) -> str:
-    files = m.group(2)
-    weakened = files.replace("review-dependency-perf-hygiene-pr4|", "")
-    weakened = weakened.replace("|review-dependency-perf-hygiene-pr4", "")
-    weakened = weakened.replace("review-dependency-perf-hygiene-pr4", "")
-    if weakened == files and "review-dependency-perf-hygiene-pr4" not in files:
-        return m.group(0)
-    return m.group(1) + weakened
-
-new, n = pat.subn(drop_review, text, count=1)
-if n != 1:
-    raise SystemExit(f"could not locate cargo-plugin-versions-contract-self-test files: line (n={n})")
-dst.write_text(new)
-PY
-grep -q 'review-dependency-perf-hygiene-pr4' "${pc_mut}" \
-  && fail "D1 pre-commit files: mutation did not drop review-dependency-perf-hygiene-pr4"
-if ( check_d1_precommit_watches_review_helper "${pc_mut}" ) >/dev/null 2>&1; then
-  fail "dropping review helper from D1 pre-commit files: left the contract green"
-fi
-ok "dropping review helper from D1 pre-commit files: turns the contract red"
 
 ok "cargo-plugin-versions contract mutations bite"
 echo "PASS: cargo-plugin-versions contract"
