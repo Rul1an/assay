@@ -402,21 +402,6 @@ miss_dir="${SCRATCH}/mut_miss"
 mkdir -p "${miss_dir}/bin"
 cat >"${miss_dir}/bin/cargo" <<'STUB'
 #!/usr/bin/env bash
-# Reject mutants so the helper takes the missing-tool branch.
-if [[ "${1:-}" == "mutants" ]] || { [[ "${1:-}" == "+"* ]] && [[ "${2:-}" == "mutants" ]]; }; then
-  echo "error: no such command: \`mutants\`" >&2
-  exit 101
-fi
-# Honor RUSTUP_TOOLCHAIN presence probes that still go through cargo.
-if [[ "${1:-}" == "mutants" ]]; then
-  exit 101
-fi
-# For version probes with env-bound form: cargo mutants --version
-exec /usr/bin/env -u RUSTUP_TOOLCHAIN command cargo "$@"
-STUB
-# Simpler: just make `cargo mutants` fail always via a wrapper that shadows cargo.
-cat >"${miss_dir}/bin/cargo" <<'STUB'
-#!/usr/bin/env bash
 if [[ "$*" == *mutants* ]]; then
   echo "error: no such command: \`mutants\`" >&2
   exit 101
@@ -434,6 +419,35 @@ miss_exit=0
 ) || miss_exit=$?
 [[ "${miss_exit}" -eq 0 ]] || fail "mutation-smoke missing-tool install=0 exited ${miss_exit}, expected 0"
 expect_in_file "${miss_dir}/out" "cargo-mutants is not installed" "missing-tool skip names cargo-mutants"
+
+echo "== optional-public-api-drift missing tools + install=0 skips with exit 0 =="
+# Real sandbox: both optional subcommands absent; install opt-out must exit 0 with skip lines.
+api_miss_dir="${SCRATCH}/api_miss"
+mkdir -p "${api_miss_dir}/bin"
+cat >"${api_miss_dir}/bin/cargo" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == *semver-checks* ]] || [[ "$*" == *public-api* ]]; then
+  echo "error: no such command" >&2
+  exit 101
+fi
+exit 0
+STUB
+chmod +x "${api_miss_dir}/bin/cargo"
+api_miss_exit=0
+(
+  cd "${ROOT}"
+  PATH="${api_miss_dir}/bin:${PATH}" \
+  BASE_REV=HEAD \
+  ASSAY_INSTALL_API_DRIFT_TOOLS=0 \
+    bash "${OPTIONAL}" >"${api_miss_dir}/out" 2>&1
+) || api_miss_exit=$?
+[[ "${api_miss_exit}" -eq 0 ]] || fail "optional-public-api-drift missing-tool install=0 exited ${api_miss_exit}, expected 0"
+expect_in_file "${api_miss_dir}/out" "skip cargo-semver-checks: cargo subcommand not installed" \
+  "api-drift skip names cargo-semver-checks"
+expect_in_file "${api_miss_dir}/out" "skip cargo-public-api: cargo subcommand not installed" \
+  "api-drift skip names cargo-public-api"
+expect_in_file "${api_miss_dir}/out" "no optional public API drift tools installed" \
+  "api-drift reports no optional tools installed"
 
 # --- Mutations must bite -----------------------------------------------------------------
 
