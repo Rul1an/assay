@@ -1,6 +1,9 @@
 mod error;
 pub use error::MonitorError;
 
+#[cfg(any(test, target_os = "linux"))]
+mod config_flags;
+
 pub mod events;
 pub mod probes;
 pub mod tree;
