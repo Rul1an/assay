@@ -193,12 +193,23 @@ jobs:
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
           }
 
+      # Pins live in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). `--locked` alone is
+      # not a pin: it locks each tool's own dependencies, not the tool version. RUSTUP_TOOLCHAIN
+      # is step-scoped so workspace cargo check/nextest/hack below still follow rust-toolchain.toml.
       - name: Install cargo-nextest and cargo-hack
         shell: bash
+        env:
+          RUSTUP_TOOLCHAIN: stable
         run: |
           set -euo pipefail
-          cargo install --locked cargo-nextest
-          cargo install --locked cargo-hack
+          # shellcheck source=scripts/ci/cargo-plugin-versions.sh
+          source ./scripts/ci/cargo-plugin-versions.sh
+          echo "installing cargo-nextest ${CARGO_NEXTEST_VERSION}"
+          cargo install --locked --version "${CARGO_NEXTEST_VERSION}" cargo-nextest
+          assert_cargo_plugin_version cargo-nextest "${CARGO_NEXTEST_VERSION}"
+          echo "installing cargo-hack ${CARGO_HACK_VERSION}"
+          cargo install --locked --version "${CARGO_HACK_VERSION}" cargo-hack
+          assert_cargo_plugin_version cargo-hack "${CARGO_HACK_VERSION}"
 
       - name: Run curated feature sets
         shell: bash
@@ -385,9 +396,19 @@ jobs:
       - name: Set up Rust toolchain and cache
         uses: ./.github/actions/setup-rust
 
+      # Pin lives in scripts/ci/cargo-plugin-versions.sh (#2224 / CI-4D2). Step-scoped
+      # RUSTUP_TOOLCHAIN so check-release below still follows rust-toolchain.toml.
       - name: Install cargo-semver-checks
-        run: cargo install --locked cargo-semver-checks
-
+        shell: bash
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/ci/cargo-plugin-versions.sh
+          source ./scripts/ci/cargo-plugin-versions.sh
+          echo "installing cargo-semver-checks ${CARGO_SEMVER_CHECKS_VERSION}"
+          cargo install --locked --version "${CARGO_SEMVER_CHECKS_VERSION}" cargo-semver-checks
+          assert_cargo_plugin_version cargo-semver-checks "${CARGO_SEMVER_CHECKS_VERSION}"
 
       # The baseline is the last release, resolved now, not a SHA pinned in this file.
       #

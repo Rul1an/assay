@@ -47,7 +47,17 @@ ensure_cargo_subcommand() {
   fi
   if [ "${INSTALL_TOOLS}" = "1" ]; then
     echo "[api-drift] installing ${crate}"
-    cargo install --locked "${crate}"
+    # CI-4D2 / #2224: pin cargo-semver-checks from the shared source and assert install-root.
+    # cargo-public-api stays unpinned here for CI-4D3. This helper cds to ROOT, so state the
+    # toolchain explicitly rather than inferring rust-toolchain.toml for the install.
+    if [ "${crate}" = "cargo-semver-checks" ]; then
+      # shellcheck source=scripts/ci/cargo-plugin-versions.sh
+      source "${ROOT}/scripts/ci/cargo-plugin-versions.sh"
+      RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo install --locked --version "${CARGO_SEMVER_CHECKS_VERSION}" cargo-semver-checks
+      assert_cargo_plugin_version cargo-semver-checks "${CARGO_SEMVER_CHECKS_VERSION}"
+    else
+      cargo install --locked "${crate}"
+    fi
     cargo "${subcommand}" --version >/dev/null
     return 0
   fi
