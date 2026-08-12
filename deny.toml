@@ -20,7 +20,10 @@ exclude = [
 # [advisories] - RustSec advisory database checks
 # =============================================================================
 [advisories]
-db-path = "~/.cargo/advisory-db"
+# cargo-deny 0.20 default / supported root (plural). Do not point this at the
+# cargo-audit singular default (~/.cargo/advisory-db): deny nests a hashed clone
+# there and audit then refuses to initialize the non-empty directory (#2188).
+db-path = "$CARGO_HOME/advisory-dbs"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 # Ignore specific advisories (add RUSTSEC-YYYY-NNNN here if needed)
 # Only list advisories that currently match a crate in the tree; remove when dep is upgraded or removed.
