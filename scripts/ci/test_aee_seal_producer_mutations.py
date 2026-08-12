@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import os
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -75,11 +76,18 @@ _SIGNAL_NAMES = {
 }
 
 
-def write_bytes_atomic(path: Path, data: bytes) -> None:
-    """Replace path with data using same-directory os.replace (byte-safe, no git)."""
+def write_bytes_atomic(path: Path, data: bytes, mode: int | None = None) -> None:
+    """Replace path with data using same-directory os.replace (byte- and mode-safe, no git).
+
+    mkstemp creates 0600 temps; without fchmod before replace, a 0644 producer silently
+    becomes owner-only while git status stays clean (Git tracks only the executable bit).
+    """
+    if mode is None:
+        mode = stat.S_IMODE(path.stat().st_mode)
     fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
     tmp = Path(tmp_name)
     try:
+        os.fchmod(fd, mode)
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
             handle.flush()
@@ -143,13 +151,14 @@ def run_mutations(target: Path) -> int:
         return 1
 
     original = target.read_bytes()
+    original_mode = stat.S_IMODE(target.stat().st_mode)
     restored = False
 
     def restore() -> None:
         nonlocal restored
         if restored:
             return
-        write_bytes_atomic(target, original)
+        write_bytes_atomic(target, original, mode=original_mode)
         restored = True
 
     def on_signal(signum: int, _frame: object) -> None:
@@ -165,14 +174,14 @@ def run_mutations(target: Path) -> int:
     try:
         src_text = original.decode()
         for name, search, replace, expect in MUTATIONS:
-            write_bytes_atomic(target, original)
+            write_bytes_atomic(target, original, mode=original_mode)
             restored = False
             if search not in src_text:
                 failures.append(f"{name}: search string absent, so this mutation tested nothing")
                 print(f"FAIL {name}: search string absent", file=sys.stderr)
                 continue
             mutated = src_text.replace(search, replace, 1).encode()
-            write_bytes_atomic(target, mutated)
+            write_bytes_atomic(target, mutated, mode=original_mode)
             maybe_interrupt_after_mutation(name)
             out = run_tests()
             if "test result: FAILED" not in out:
@@ -184,7 +193,9 @@ def run_mutations(target: Path) -> int:
             else:
                 print(f"ok   {name}  -> caught by {expect}")
         restore()
-    except Exception:
+    except BaseException:
+        # SystemExit (invalid interrupt seam) and KeyboardInterrupt are BaseException,
+        # not Exception; they must still restore before re-raise.
         restore()
         raise
 

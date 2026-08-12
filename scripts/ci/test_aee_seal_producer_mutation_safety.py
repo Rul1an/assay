@@ -9,10 +9,11 @@ each signal restoration path is load-bearing.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import os
 import re
 import shutil
-import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -58,8 +59,22 @@ def porcelain() -> str:
     ).stdout
 
 
-def snapshot() -> tuple[str, str, str]:
-    return sha256(TARGET.read_bytes()), index_digest(), porcelain()
+def file_mode(path: Path = TARGET) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def snapshot() -> tuple[str, str, str, int]:
+    return sha256(TARGET.read_bytes()), index_digest(), porcelain(), file_mode()
+
+
+def load_mutation_module(script: Path | None = None):
+    path = script or MUTATION_SCRIPT
+    spec = importlib.util.spec_from_file_location("aee_seal_producer_mutations", path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"cannot load {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def run_mutation_script(
@@ -88,6 +103,7 @@ def fail(msg: str) -> None:
 
 def test_sigterm_interruption_restores() -> None:
     original = TARGET.read_bytes()
+    os.chmod(TARGET, 0o644)
     before = snapshot()
     try:
         result = run_mutation_script(
@@ -107,17 +123,19 @@ def test_sigterm_interruption_restores() -> None:
         after = snapshot()
         if after != before:
             fail(
-                "SIGTERM interruption changed digest/index/porcelain: "
+                "SIGTERM interruption changed digest/index/porcelain/mode: "
                 f"before={before!r} after={after!r}"
             )
     finally:
         if TARGET.read_bytes() != original:
             TARGET.write_bytes(original)
-    print("ok   SIGTERM interruption restores bytes/index/porcelain")
+        os.chmod(TARGET, before[3])
+    print("ok   SIGTERM interruption restores bytes/index/porcelain/mode")
 
 
 def test_sigint_interruption_restores() -> None:
     original = TARGET.read_bytes()
+    os.chmod(TARGET, 0o644)
     before = snapshot()
     try:
         result = run_mutation_script(
@@ -137,13 +155,137 @@ def test_sigint_interruption_restores() -> None:
         after = snapshot()
         if after != before:
             fail(
-                "SIGINT interruption changed digest/index/porcelain: "
+                "SIGINT interruption changed digest/index/porcelain/mode: "
                 f"before={before!r} after={after!r}"
             )
     finally:
         if TARGET.read_bytes() != original:
             TARGET.write_bytes(original)
-    print("ok   SIGINT interruption restores bytes/index/porcelain")
+        os.chmod(TARGET, before[3])
+    print("ok   SIGINT interruption restores bytes/index/porcelain/mode")
+
+
+def test_atomic_write_preserves_exact_mode() -> None:
+    """Regression: mkstemp defaults to 0600; producer must stay at its original mode."""
+    fixture_dir = Path(tempfile.mkdtemp(prefix="aee-mode-"))
+    fixture = fixture_dir / "aee_seal.rs"
+    try:
+        fixture.write_bytes(b"mode-preservation-probe\n")
+        os.chmod(fixture, 0o644)
+        before = file_mode(fixture)
+        if before != 0o644:
+            fail(f"fixture setup expected 0644, got {oct(before)}")
+        mod = load_mutation_module()
+        mod.write_bytes_atomic(fixture, fixture.read_bytes())
+        after = file_mode(fixture)
+        if after != 0o644:
+            fail(
+                f"write_bytes_atomic changed mode from {oct(before)} to {oct(after)} "
+                "(mkstemp residue; git cannot see this)"
+            )
+        # Non-default mode must also round-trip.
+        os.chmod(fixture, 0o640)
+        mod.write_bytes_atomic(fixture, fixture.read_bytes())
+        if file_mode(fixture) != 0o640:
+            fail(f"write_bytes_atomic did not preserve 0640; got {oct(file_mode(fixture))}")
+    finally:
+        shutil.rmtree(fixture_dir, ignore_errors=True)
+    print("ok   write_bytes_atomic preserves exact mode")
+
+
+def test_removing_fchmod_reopens_mode_gap() -> None:
+    text = MUTATION_SCRIPT.read_text()
+    pattern = r"(?m)^\s*os\.fchmod\(fd, mode\)\n"
+    if len(re.findall(pattern, text)) != 1:
+        fail("mutation script has no unique os.fchmod(fd, mode) path to bite")
+    mutated = re.sub(pattern, "", text, count=1)
+    probe_dir = Path(tempfile.mkdtemp(prefix="aee-mode-mut-"))
+    probe = probe_dir / "mutations.py"
+    fixture = probe_dir / "aee_seal.rs"
+    try:
+        probe.write_text(mutated)
+        fixture.write_bytes(b"mode-gap-mutation\n")
+        os.chmod(fixture, 0o644)
+        mod = load_mutation_module(probe)
+        mod.write_bytes_atomic(fixture, fixture.read_bytes())
+        after = file_mode(fixture)
+        if after == 0o644:
+            fail("stripping os.fchmod still preserved 0644; mode path is not load-bearing")
+        if after != 0o600:
+            fail(f"expected mkstemp 0600 after stripping fchmod, got {oct(after)}")
+    finally:
+        shutil.rmtree(probe_dir, ignore_errors=True)
+    print("ok   removing fchmod re-opens 0644->0600 mode gap")
+
+
+def test_invalid_interrupt_signal_restores() -> None:
+    original = TARGET.read_bytes()
+    os.chmod(TARGET, 0o644)
+    before = snapshot()
+    try:
+        result = run_mutation_script(
+            env_extra={
+                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_AFTER": RUN_BINDING,
+                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_SIGNAL": "NOT_A_SIGNAL",
+            }
+        )
+        if result.returncode == 0:
+            fail("invalid interrupt signal exited 0")
+        if "unknown ASSAY_AEE_SEAL_MUTATION_INTERRUPT_SIGNAL" not in result.stderr:
+            fail(f"expected SystemExit message in stderr; got {result.stderr!r}")
+        after = snapshot()
+        if MUTANT_MARKER.encode() in TARGET.read_bytes():
+            fail("invalid interrupt signal left run-binding preimage mutant")
+        if after != before:
+            fail(
+                "invalid interrupt signal changed digest/index/porcelain/mode: "
+                f"before={before!r} after={after!r}"
+            )
+    finally:
+        if TARGET.read_bytes() != original:
+            TARGET.write_bytes(original)
+        os.chmod(TARGET, before[3])
+    print("ok   invalid interrupt signal restores bytes/index/porcelain/mode")
+
+
+def test_removing_baseexception_restore_reopens_systemexit_gap() -> None:
+    text = MUTATION_SCRIPT.read_text()
+    anchor = "except BaseException:\n"
+    if text.count(anchor) != 1:
+        fail(f"expected exactly one BaseException restore handler, found {text.count(anchor)}")
+    mutated = text.replace(anchor, "except Exception:\n", 1)
+    probe_dir = Path(tempfile.mkdtemp(prefix="aee-sysexit-mut-"))
+    probe = probe_dir / "mutations.py"
+    original = TARGET.read_bytes()
+    os.chmod(TARGET, 0o644)
+    try:
+        probe.write_text(mutated)
+        before = snapshot()
+        result = run_mutation_script(
+            script=probe,
+            env_extra={
+                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_AFTER": RUN_BINDING,
+                "ASSAY_AEE_SEAL_MUTATION_INTERRUPT_SIGNAL": "NOT_A_SIGNAL",
+            },
+        )
+        after_bytes = TARGET.read_bytes()
+        dirty = after_bytes != original or MUTANT_MARKER.encode() in after_bytes
+        if after_bytes != original:
+            TARGET.write_bytes(original)
+        os.chmod(TARGET, before[3])
+        if not dirty:
+            fail(
+                "narrowing BaseException->Exception still cleaned SystemExit path "
+                f"(exit={result.returncode}); restore path is not load-bearing"
+            )
+        if snapshot()[0] != before[0]:
+            fail("failed to restore producer after SystemExit-path mutation probe")
+    finally:
+        if TARGET.read_bytes() != original:
+            TARGET.write_bytes(original)
+        os.chmod(TARGET, 0o644)
+        shutil.rmtree(probe_dir, ignore_errors=True)
+    print("ok   narrowing BaseException->Exception re-opens SystemExit residue")
 
 
 def test_residue_check_detects_planted_mutant_read_only() -> None:
@@ -178,7 +320,6 @@ def test_residue_check_detects_planted_mutant_read_only() -> None:
         if probe.returncode == 0:
             fail("residue check accepted a live run-binding preimage mutant")
         if REL_TARGET not in probe.stderr and str(fixture) not in probe.stderr:
-            # Accept either the real relative path message or the fixture path.
             if "run-binding preimage" not in probe.stderr:
                 fail(
                     "residue check must name the mutation; stderr was: "
@@ -231,6 +372,12 @@ def test_removing_signal_path_fails(signame: str) -> None:
     original = TARGET.read_bytes()
     text = MUTATION_SCRIPT.read_text()
     mutated = _strip_signal_handler(text, signame)
+    if signame == "SIGINT":
+        # BaseException restore also covers KeyboardInterrupt. Pair handler deletion
+        # with Exception narrowing so the SIGINT gap is observable again.
+        if mutated.count("except BaseException:\n") != 1:
+            fail("SIGINT bite needs a unique BaseException restore to narrow")
+        mutated = mutated.replace("except BaseException:\n", "except Exception:\n", 1)
     probe_dir = Path(tempfile.mkdtemp(prefix="aee-signal-mut-"))
     probe = probe_dir / "mutations.py"
     try:
@@ -245,7 +392,6 @@ def test_removing_signal_path_fails(signame: str) -> None:
         )
         after_bytes = TARGET.read_bytes()
         dirty = after_bytes != original or MUTANT_MARKER.encode() in after_bytes
-        # Restore from scratch bytes if the mutated script leaked (expected).
         if after_bytes != original:
             TARGET.write_bytes(original)
         if not dirty:
@@ -305,7 +451,6 @@ def test_precommit_trigger_excludes_config_yaml() -> None:
 
 def test_no_git_restore_in_mutation_script() -> None:
     text = MUTATION_SCRIPT.read_text()
-    # Docstrings may name the historical hazard; forbid live recovery invocations.
     live = [
         pat
         for pat in (
@@ -323,8 +468,10 @@ def test_no_git_restore_in_mutation_script() -> None:
 def main() -> int:
     # Dirty trees are allowed: probes must restore the exact preimage bytes, including
     # uncommitted producer work. Only refuse to conclude if we cannot restore.
+    os.chmod(TARGET, 0o644)
     baseline = snapshot()
     baseline_bytes = TARGET.read_bytes()
+    baseline_mode = baseline[3]
     start = time.perf_counter()
     failures = 0
 
@@ -342,10 +489,15 @@ def main() -> int:
             failures += 1
             if TARGET.read_bytes() != baseline_bytes:
                 TARGET.write_bytes(baseline_bytes)
+            os.chmod(TARGET, baseline_mode)
 
     # Interruption residue first: the bug this issue exists to close.
     step(test_sigterm_interruption_restores)
     step(test_sigint_interruption_restores)
+    step(test_atomic_write_preserves_exact_mode)
+    step(test_removing_fchmod_reopens_mode_gap)
+    step(test_invalid_interrupt_signal_restores)
+    step(test_removing_baseexception_restore_reopens_systemexit_gap)
     step(test_clean_tree_residue_check_passes)
     step(test_residue_check_detects_planted_mutant_read_only)
     step(test_removing_signal_path_fails, "SIGTERM")
@@ -353,10 +505,14 @@ def main() -> int:
     step(test_uncommitted_producer_bytes_survive_sigterm)
     step(test_precommit_trigger_excludes_config_yaml)
     step(test_no_git_restore_in_mutation_script)
-    if TARGET.read_bytes() != baseline_bytes or snapshot() != baseline:
-        # Last resort restore so a failed probe never strands the producer.
+    if (
+        TARGET.read_bytes() != baseline_bytes
+        or snapshot() != baseline
+        or file_mode() != baseline_mode
+    ):
         TARGET.write_bytes(baseline_bytes)
-        fail(f"safety suite altered {REL_TARGET} bytes/index/porcelain")
+        os.chmod(TARGET, baseline_mode)
+        fail(f"safety suite altered {REL_TARGET} bytes/index/porcelain/mode")
     elapsed = time.perf_counter() - start
     if failures:
         print(
