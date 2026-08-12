@@ -97,9 +97,12 @@ active_source_line() {
   grep -qE '^[[:space:]]*source[[:space:]]+(\./scripts/ci/cargo-plugin-versions\.sh|"(\./)?scripts/ci/cargo-plugin-versions\.sh")[[:space:]]*$' <<<"$1"
 }
 
-count_active_cargo_audit_installs() {
+# Dedicated Install cargo-audit step: count any active line containing the token
+# sequence `cargo` + whitespace + `install`. No package/flag/shell parser — a second
+# cargo install of any shape fails (#2317 review 4914469947).
+count_active_cargo_installs() {
   # grep -c exits 1 on zero matches; keep zero under set -e.
-  printf '%s\n' "$1" | grep -cE '^[[:space:]]*cargo[[:space:]]+install[[:space:]].*[[:space:]]cargo-audit[[:space:]]*$' || true
+  printf '%s\n' "$1" | grep -cE 'cargo[[:space:]]+install' || true
 }
 
 active_pinned_install_line() {
@@ -130,12 +133,12 @@ check_workflow() {
     || fail "Install cargo-audit must have an active complete line sourcing scripts/ci/cargo-plugin-versions.sh; got:
 ${install_run}"
 
-  # Exactly one active cargo install of cargo-audit, and it must be the pinned argv.
-  # A second install (pinned or unpinned) after assert would overwrite the pin while a
-  # presence-only check stayed green (#2317 review 4914399777).
-  install_count="$(count_active_cargo_audit_installs "${install_run}")"
+  # Exactly one active `cargo install` line in this dedicated step, and it must be the
+  # pinned argv. Rejects @version, --force, flag reorder, env/command prefix, redirect,
+  # quotes, and trailing-# forms without parsing cargo/shell (#2317 review 4914469947).
+  install_count="$(count_active_cargo_installs "${install_run}")"
   [[ "${install_count}" -eq 1 ]] \
-    || fail "Install cargo-audit must have exactly one active cargo install of cargo-audit; found ${install_count}:
+    || fail "Install cargo-audit must have exactly one active line containing cargo install; found ${install_count}:
 ${install_run}"
 
   active_pinned_install_line "${install_run}" \
@@ -487,37 +490,53 @@ if ! ( check_workflow "${keep}" ) >/dev/null 2>&1; then
 fi
 ok "correctly pinned run: |+ stays green"
 
-echo "== mutation: second active unpinned cargo-audit install =="
-# Keep source + pinned install + assert, then append an unpinned install that would overwrite
-# the pin at runtime while a presence-only check stayed green (#2317 review 4914399777).
-dual="$(mktemp "${SANDBOX_ROOT}/dual.XXXXXX.yml")"
-python3 - "${WORKFLOW}" "${dual}" <<'PY'
+echo "== mutation: second active cargo install (any shape) =="
+# Keep source + pinned install + assert, then append a second cargo install. Counting only
+# lines ending in bare cargo-audit left @version/--force/env/redirect/… green while the
+# floating install overwrote the pin (#2317 review 4914469947).
+expect_second_cargo_install_red() {
+  local name="$1" extra="$2"
+  local mutant mutant_run
+  mutant="$(mktemp "${SANDBOX_ROOT}/dual-${name}.XXXXXX.yml")"
+  python3 - "${WORKFLOW}" "${mutant}" "${extra}" <<'PY'
 import pathlib, sys
 
-src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+src, dst, extra = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sys.argv[3]
 text = src.read_text()
 old = '          assert_cargo_plugin_version cargo-audit "${CARGO_AUDIT_VERSION}"\n'
-new = old + "          cargo install --locked cargo-audit\n"
+new = old + f"          {extra}\n"
 if old not in text:
     raise SystemExit("could not find assert line to append a second install after")
 dst.write_text(text.replace(old, new, 1))
 PY
-dual_run="$(install_cargo_audit_run "${dual}")"
-[[ "$(count_active_cargo_audit_installs "${dual_run}")" -eq 2 ]] \
-  || fail "dual-install mutation did not leave two active cargo-audit installs"
-active_pinned_install_line "${dual_run}" \
-  || fail "dual-install mutation lost the pinned install line"
-active_source_line "${dual_run}" \
-  || fail "dual-install mutation lost the source line"
-active_assert_line "${dual_run}" \
-  || fail "dual-install mutation lost the assert line"
-grep -qE '^[[:space:]]*cargo[[:space:]]+install[[:space:]]+--locked[[:space:]]+cargo-audit[[:space:]]*$' \
-  <<<"${dual_run}" \
-  || fail "dual-install mutation did not append an active unpinned install"
-if ( check_workflow "${dual}" ) >/dev/null 2>&1; then
-  fail "second active unpinned cargo-audit install left the contract green"
-fi
-ok "second active unpinned cargo-audit install turns the contract red"
+  mutant_run="$(install_cargo_audit_run "${mutant}")"
+  [[ "$(count_active_cargo_installs "${mutant_run}")" -eq 2 ]] \
+    || fail "${name}: expected two active cargo install lines; got:
+${mutant_run}"
+  active_pinned_install_line "${mutant_run}" \
+    || fail "${name}: lost the pinned install line"
+  active_source_line "${mutant_run}" \
+    || fail "${name}: lost the source line"
+  active_assert_line "${mutant_run}" \
+    || fail "${name}: lost the assert line"
+  if ( check_workflow "${mutant}" ) >/dev/null 2>&1; then
+    fail "${name}: second cargo install left the contract green"
+  fi
+  ok "second cargo install turns red (${name})"
+}
+
+expect_second_cargo_install_red bare 'cargo install --locked cargo-audit'
+expect_second_cargo_install_red atversion 'cargo install --locked cargo-audit@0.99.0'
+expect_second_cargo_install_red force 'cargo install --locked cargo-audit --force'
+expect_second_cargo_install_red reorder 'cargo install cargo-audit --locked'
+# shellcheck disable=SC2016
+expect_second_cargo_install_red reorder_version 'cargo install --version "${CARGO_AUDIT_VERSION}" --locked cargo-audit'
+expect_second_cargo_install_red envprefix 'CARGO_HOME=/tmp/x cargo install --locked cargo-audit'
+expect_second_cargo_install_red command_prefix 'command cargo install --locked cargo-audit'
+expect_second_cargo_install_red redirect 'cargo install --locked cargo-audit >/dev/null'
+expect_second_cargo_install_red quoted 'cargo install --locked "cargo-audit"'
+expect_second_cargo_install_red trailing_hash 'cargo install --locked cargo-audit # overwrite'
+expect_second_cargo_install_red other_pkg 'cargo install --locked cargo-deny'
 
 ok "cargo-plugin-versions contract mutations bite"
 echo "PASS: cargo-plugin-versions contract"
