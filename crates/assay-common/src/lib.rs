@@ -38,7 +38,7 @@ pub const KEY_EMIT_INODE_RESOLVED: u32 = 101;
 /// unconditional emit would charge every existing user ring-buffer bandwidth for evidence they did
 /// not ask for. When it is off, `observed_peers` is honestly empty rather than quietly partial.
 pub const KEY_EMIT_OBSERVED_CONNECT: u32 = 102;
-pub const KEY_DEDUP_OPEN_PATHS: u32 = 102;
+pub const KEY_DEDUP_OPEN_PATHS: u32 = 103;
 
 pub const EVENT_FILE_BLOCKED: u32 = 10;
 pub const EVENT_CONNECT_BLOCKED: u32 = 20;

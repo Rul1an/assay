@@ -29,6 +29,7 @@ all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/as
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-ebpf/src/socket_lsm.rs
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-ebpf/src/vmlinux.rs
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-monitor/Cargo.toml
+all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-monitor/src/config_flags.rs
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-monitor/src/error.rs
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-monitor/src/events.rs
 all	addressed	shared runner/eBPF/monitor/xtask code requires gates=all	crates/assay-monitor/src/lib.rs

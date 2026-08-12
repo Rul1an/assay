@@ -1,17 +1,18 @@
+use crate::config_flags::{apply_dedup_open_paths, apply_emit_observed_connect, FlagConfigSink};
 use crate::events::{self, EventStream};
 use crate::probes::{ProbeAttachment, EXPECTED_PROBES};
 use crate::{MonitorError, MonitorStatsSnapshot};
 use assay_common::{
-    CidrRuleValue, KEY_DEDUP_OPEN_PATHS, KEY_EMIT_INODE_RESOLVED, KEY_EMIT_OBSERVED_CONNECT,
-    KEY_MONITOR_ALL, MONITOR_STAT_CONNECT_EVENTS_EMITTED, MONITOR_STAT_CONNECT_RINGBUF_DROPPED,
-    MONITOR_STAT_LSM_EVENTS_EMITTED, MONITOR_STAT_LSM_RINGBUF_DROPPED,
-    MONITOR_STAT_OPENAT2_EVENTS_EMITTED, MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
-    MONITOR_STAT_OPENAT_EVENTS_EMITTED, MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
-    MONITOR_STAT_SENDMSG_EVENTS_EMITTED, MONITOR_STAT_SENDMSG_RINGBUF_DROPPED,
-    MONITOR_STAT_SENDTO_EVENTS_EMITTED, MONITOR_STAT_SENDTO_RINGBUF_DROPPED,
-    MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
-    SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR, SOCKET_STAT_BLOCKED_PORT, SOCKET_STAT_CHECKS,
-    SOCKET_STAT_EVENTS_EMITTED, SOCKET_STAT_RINGBUF_DROPPED,
+    CidrRuleValue, KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL, MONITOR_STAT_CONNECT_EVENTS_EMITTED,
+    MONITOR_STAT_CONNECT_RINGBUF_DROPPED, MONITOR_STAT_LSM_EVENTS_EMITTED,
+    MONITOR_STAT_LSM_RINGBUF_DROPPED, MONITOR_STAT_OPENAT2_EVENTS_EMITTED,
+    MONITOR_STAT_OPENAT2_RINGBUF_DROPPED, MONITOR_STAT_OPENAT_EVENTS_EMITTED,
+    MONITOR_STAT_OPENAT_RINGBUF_DROPPED, MONITOR_STAT_SENDMSG_EVENTS_EMITTED,
+    MONITOR_STAT_SENDMSG_RINGBUF_DROPPED, MONITOR_STAT_SENDTO_EVENTS_EMITTED,
+    MONITOR_STAT_SENDTO_RINGBUF_DROPPED, MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED,
+    MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED, SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR,
+    SOCKET_STAT_BLOCKED_PORT, SOCKET_STAT_CHECKS, SOCKET_STAT_EVENTS_EMITTED,
+    SOCKET_STAT_RINGBUF_DROPPED,
 };
 use assay_policy::tiers::CompiledPolicy;
 use aya::maps::lpm_trie::Key;
@@ -65,6 +66,14 @@ enum MonitorLink {
     KProbe(#[allow(dead_code)] aya::programs::kprobe::KProbeLink),
     #[allow(dead_code)]
     CgroupSockAddr(#[allow(dead_code)] aya::programs::cgroup_sock_addr::CgroupSockAddrLink),
+}
+
+#[cfg(target_os = "linux")]
+impl FlagConfigSink for LinuxMonitor {
+    fn put_flag(&mut self, key: u32, value: u32) -> Result<(), MonitorError> {
+        let config = std::collections::HashMap::from([(key, value)]);
+        self.set_config(&config)
+    }
 }
 
 /// What the loader actually managed to attach, recorded at the attach sites themselves.
@@ -148,9 +157,7 @@ impl LinuxMonitor {
     /// than default: a run that does not ask pays nothing, and its peer set is honestly empty
     /// instead of quietly partial.
     pub fn set_emit_observed_connect(&mut self, enabled: bool) -> Result<(), MonitorError> {
-        let val = u32::from(enabled);
-        let config = std::collections::HashMap::from([(KEY_EMIT_OBSERVED_CONNECT, val)]);
-        self.set_config(&config)
+        apply_emit_observed_connect(self, enabled)
     }
 
     pub fn set_emit_inode_resolved(&mut self, enabled: bool) -> Result<(), MonitorError> {
@@ -160,9 +167,7 @@ impl LinuxMonitor {
     }
 
     pub fn set_dedup_open_paths(&mut self, enabled: bool) -> Result<(), MonitorError> {
-        let val = if enabled { 1 } else { 0 };
-        let config = std::collections::HashMap::from([(KEY_DEDUP_OPEN_PATHS, val)]);
-        self.set_config(&config)
+        apply_dedup_open_paths(self, enabled)
     }
 
     pub fn set_monitored_pids(&mut self, pids: &[u32]) -> Result<(), MonitorError> {
