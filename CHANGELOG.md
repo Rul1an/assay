@@ -5,13 +5,16 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
-- Public docs now record that `assay_monitor_sendto`, `assay_monitor_sendmsg`,
-  and `connect6_hook` are compiled into the release ELF / program set and
-  presently unattached (`Unsupported`). Coverage labels, send counters, and
-  datagram-peer events that depend on those programs do not fire on a live
-  `assay monitor` run. This supersedes the v3.15.0 changelog line that
-  described those send tracepoints as attached. Documentation only; no attach,
-  schema, or runtime change.
+- Public docs now record that `assay_monitor_sendto` and `assay_monitor_sendmsg`
+  are compiled into the release ELF / program set and presently unattached
+  (`Unsupported`), so datagram coverage labels are unreachable on a live
+  `assay monitor` run. Live `network_protocol_coverage` is `connect_only` only
+  when the cgroup `connect4` peer source attaches on the network-policy path;
+  otherwise it is `absent`. `connect6_hook` is compiled-but-unattached
+  **enforcement**; IPv6 connect observation remains on always-attached
+  `sys_enter_connect` (`AF_INET6` included). The send `no_peer` / `non_ip`
+  counters also lack userspace readback. Documentation only; no attach, schema,
+  or runtime change.
 
 ## [5.1.0] - 2026-08-11
 

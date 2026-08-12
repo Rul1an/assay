@@ -109,9 +109,11 @@ already carry `sendto` or `sendmsg` destination sockaddr events may report
 but still not a request-level or exact peer-set binding while
 `network_endpoint_claim_scope = diagnostic_only`.
 `assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
-release ELF and presently unattached (`Unsupported`), so a live
-`assay monitor` run does not emit those events or those coverage upgrades.
-`connect6_hook` is likewise compiled-but-unattached. If network events may have
+release ELF and presently unattached (`Unsupported`), so those datagram
+coverage upgrades are unreachable on a live `assay monitor` run. Live
+`network_protocol_coverage` is `connect_only` only when the cgroup
+`connect4` peer source attaches on the network-policy path; otherwise it
+is `absent`. If network events may have
 been dropped before any network event was emitted, coverage is `unknown`.
 
 ## Composition With Projection `claim_level`

@@ -2,10 +2,11 @@
 
 > **Status:** internal capture-fidelity detail. This page documents a counter
 > that makes an address-less send visible. It adds no Runner archive member, no
-> CLI output, no Trust Basis claim, and no stable report schema. The counter
-> increments only if `assay_monitor_sendto` / `assay_monitor_sendmsg` run;
-> those programs are compiled into the release ELF and presently unattached
-> (`Unsupported`).
+> CLI output, no Trust Basis claim, and no stable report schema. Two gaps keep
+> it off a live `assay monitor` run: `assay_monitor_sendto` /
+> `assay_monitor_sendmsg` are compiled into the release ELF and presently
+> unattached (`Unsupported`), and userspace does not read back
+> `sendto_no_peer` / `sendmsg_no_peer` (kernel stat indices 14 and 15).
 
 ## What it observes
 
@@ -23,8 +24,8 @@ descriptor's protocol, so an address-less send may be a connected datagram socke
 *or* a connected stream (TCP/TLS) socket. The counter therefore counts
 address-less sends generically — it does not assert they are datagram traffic.
 
-Previously these sends were dropped silently. This counter records them
-**when those tracepoints run**:
+Previously these sends were dropped silently. The kernel increments these
+counters when those tracepoints run:
 
 - eBPF increments `sendto_no_peer` / `sendmsg_no_peer` (kernel stat indices 14
   and 15) when a `sendto`/`sendmsg` has no recoverable destination address.
@@ -32,8 +33,9 @@ Previously these sends were dropped silently. This counter records them
   `send_no_recoverable_peer=sendto:<n> sendmsg:<m>`.
 
 `assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
-release ELF and inventoried `Unsupported` / unattached. A live
-`assay monitor` run therefore does not increment these counters.
+release ELF and inventoried `Unsupported` / unattached. Userspace does not
+read back `sendto_no_peer` / `sendmsg_no_peer`. A live `assay monitor` run
+therefore does not surface this counter.
 
 ## What it does not do (non-claims)
 
@@ -53,7 +55,7 @@ clean archives read identically before and after this change.
 
 ## Why it matters
 
-Coverage honesty: if those tracepoints run, an operator can tell the difference
-between "no such sends happened" and "sends happened whose peer was not
-recoverable from the call." A live `assay monitor` run does not presently
-increment this counter.
+Coverage honesty: the counter exists so an address-less send is not silently
+indistinguishable from "no such send happened." A live `assay monitor` run
+presently has neither attach nor userspace readback, so the counter is not
+surfaced.

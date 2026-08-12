@@ -203,11 +203,8 @@ top-level command count.
 
 The `v3.15.0` release line closed the Runner QUIC fidelity follow-up on `main`:
 Runner archives can state protocol coverage and diagnostic-only network endpoint
-scope separately from capture health, `assay_monitor_sendto` and
-`assay_monitor_sendmsg` are compiled into the release ELF and inventoried
-`Unsupported` / unattached (a live `assay monitor` run does not record
-datagram destination sockaddr evidence from those tracepoints; `connect6_hook`
-is likewise compiled-but-unattached), and the
+scope separately from capture health, Linux captures can record observed
+datagram destination sockaddr evidence from `sendto`/`sendmsg`, and the
 cross-runtime experiment comparator treats diagnostic-only endpoint churn as
 inconclusive instead of hard provider/runtime drift.
 
@@ -215,13 +212,20 @@ The `v3.16.0` release line layers coverage-aware interpretation on top of
 that substrate: consumers can classify effect claims through coverage
 descriptors, drift annotations can be emitted and enforced as sidecars, and
 datagram-aware network descriptors are selected from
-`observation_health.network_protocol_coverage` when a run actually reports
-those coverage values. Those datagram labels require `sendto`/`sendmsg`
-events; `assay_monitor_sendto` and `assay_monitor_sendmsg` remain
-compiled-but-unattached, so a live `assay monitor` run does not presently
-produce them. The line still
-does not claim request-level binding, `cf_ray` capture, or authoritative
-exact QUIC peer identity.
+`observation_health.network_protocol_coverage`. This strengthens positive
+network observations beyond connect-only capture, but it still does not claim
+request-level binding, `cf_ray` capture, or authoritative exact QUIC peer
+identity.
+
+**Present tense (not a rewrite of those release lines):**
+`assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
+release ELF and inventoried `Unsupported` / unattached, so datagram coverage
+labels are unreachable on a live `assay monitor` run. Live
+`network_protocol_coverage` is `connect_only` only when the cgroup `connect4`
+peer source attaches on the network-policy path; otherwise it is `absent`.
+`connect6_hook` is compiled-but-unattached **enforcement**; IPv6 connect
+observation remains on the always-attached `sys_enter_connect` tracepoint
+(`AF_INET6` included).
 
 The `v3.17.0` release-prep line adds a canonical sandbox-observation evidence
 bundle projection, records the Assay/Runner/Harness contract seam and related

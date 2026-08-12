@@ -2,10 +2,12 @@
 
 > **Status:** internal capture-fidelity detail. This page documents a counter
 > that keeps the datagram peer label honest. It adds no Runner archive member,
-> no CLI output, no Trust Basis claim, and no stable report schema. The counter
-> increments only if `assay_monitor_sendto` / `assay_monitor_sendmsg` run;
-> those programs are compiled into the release ELF and presently unattached
-> (`Unsupported`).
+> no CLI output, no Trust Basis claim, and no stable report schema. Two gaps
+> keep it off a live `assay monitor` run: `assay_monitor_sendto` /
+> `assay_monitor_sendmsg` are compiled into the release ELF and presently
+> unattached (`Unsupported`), and userspace does not read back
+> `sendto_non_ip_family` / `sendmsg_non_ip_family` (kernel stat indices 16
+> and 17).
 
 ## What it observes
 
@@ -20,8 +22,8 @@ descriptor's protocol, so a non-IP send is not asserted to be datagram traffic;
 the counter records non-IP-family `sendto`/`sendmsg` generically.
 
 This counter records them so the `datagram_peer_observed` coverage label stays
-honest **when those tracepoints run**: that label reflects **IP peers only**, and
-a non-IP send is neither an IP peer nor a silently lost observation.
+honest: that label reflects **IP peers only**, and a non-IP send is neither an IP
+peer nor a silently lost observation.
 
 - eBPF increments `sendto_non_ip_family` / `sendmsg_non_ip_family` (kernel stat
   indices 16 and 17) when a `sendto`/`sendmsg` is skipped because its socket
@@ -31,8 +33,9 @@ a non-IP send is neither an IP peer nor a silently lost observation.
   `send_non_ip_family=sendto:<n> sendmsg:<m>`.
 
 `assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
-release ELF and inventoried `Unsupported` / unattached. A live
-`assay monitor` run therefore does not increment these counters.
+release ELF and inventoried `Unsupported` / unattached. Userspace does not
+read back `sendto_non_ip_family` / `sendmsg_non_ip_family`. A live
+`assay monitor` run therefore does not surface this counter.
 
 ## What it does not do (non-claims)
 
@@ -51,7 +54,7 @@ archives read identically before and after this change.
 
 ## Why it matters
 
-Coverage honesty: if those tracepoints run, an operator can tell that sends to
-non-IP families occurred, so the IP-only `datagram_peer_observed` label is read
-in context rather than mistaken for the complete picture. A live
-`assay monitor` run does not presently increment this counter.
+Coverage honesty: the counter exists so a non-IP send is not silently lost
+beside an IP-only `datagram_peer_observed` label. A live `assay monitor` run
+presently has neither attach nor userspace readback, so the counter is not
+surfaced.

@@ -79,12 +79,14 @@ descriptor is supplied, rather than treating absence as permission.
 
 The seed descriptors describe today's capture ceilings: filesystem capture
 is `open_syscall_only` (io_uring and mmap-backed writes are blind spots);
-network capture is `connect_only` on a live `assay monitor` run.
 `datagram_peer_observed` and `connect_and_datagram_peer_observed` are
-vocabulary for runs that actually observed `sendto`/`sendmsg` peers;
+vocabulary for archives that already carry `sendto`/`sendmsg` peers;
 `assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
-release ELF and presently unattached (`Unsupported`), so those labels do
-not fire from live monitor capture. Process capture is `exec_only`
+release ELF and presently unattached (`Unsupported`), so those datagram
+labels are unreachable on a live `assay monitor` run. Live
+`network_protocol_coverage` is `connect_only` only when the cgroup
+`connect4` peer source attaches on the network-policy path; otherwise it
+is `absent`. Process capture is `exec_only`
 (fork/clone gaps). None of the seed descriptors support complete claims yet,
 so every exhaustive set degrades and every bounded-negative claim blocks under
 the current seeds. That is the point: the gate must not silently upgrade a
@@ -136,7 +138,7 @@ endpoint it emits:
   and the run's network coverage ceiling (`connect_only` on this example
   fixture). `datagram_peer_observed` and
   `connect_and_datagram_peer_observed` remain vocabulary for archives that
-  already carry those send events; they are not produced by a live
+  already carry those send events; those labels are unreachable on a live
   `assay monitor` run.
 - `no_unexpected_filesystem_effect` and `no_unexpected_network_effect` —
   **blocked**, recorded in `blocked_claims` rather than emitted as cells.

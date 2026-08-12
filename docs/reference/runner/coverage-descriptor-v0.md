@@ -80,10 +80,11 @@ silently assuming a method.
 The datagram-aware helpers are real vocabulary for archives that already
 carry those coverage values. They are not a live monitor selector:
 `assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
-release ELF and presently unattached (`Unsupported`). A live `assay monitor`
-run does not emit the `sendto`/`sendmsg` events those labels require.
-`connect6_hook` is likewise compiled-but-unattached; IPv6 connect coverage
-is not a live attached surface.
+release ELF and presently unattached (`Unsupported`), so those datagram
+labels are unreachable on a live `assay monitor` run. Live
+`network_protocol_coverage` is `connect_only` only when the cgroup
+`connect4` peer source attaches on the network-policy path; otherwise it
+is `absent`.
 
 ## Claim Kinds
 
@@ -176,5 +177,5 @@ the Runner archive contract is unchanged. This helper still does not:
 Any consumer that mirrors the gate should preserve the same ceiling: when a
 run actually carries datagram peer observations, those can strengthen
 positive network evidence, but they do not permit exact peer-set or
-bounded-negative network claims while blind spots remain declared. Live
-`assay monitor` capture does not presently produce those observations.
+bounded-negative network claims while blind spots remain declared. Those
+datagram observations are unreachable on a live `assay monitor` run.

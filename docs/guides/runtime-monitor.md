@@ -45,8 +45,9 @@ Uses the Cgroup `connect4` hook to enforce IPv4/TCP `connect()` rules:
 
 IPv6 CIDR policies are refused before any rule map is changed; they are not silently reduced to
 their IPv4 subset. `connect6_hook` is compiled into the release ELF and presently unattached
-(`Unsupported`); IPv6 connect is not a live attached surface. IPv6, UDP/QUIC, DNS resolution,
-already-open sockets, raw sockets, and
+(`Unsupported`); it is IPv6 **enforcement**, not the connect observer.
+`sys_enter_connect` is always attached and handles `AF_INET6`. IPv6 CIDR enforcement, UDP/QUIC,
+DNS resolution, already-open sockets, raw sockets, and
 proxy/tunnel identity remain outside the enforcement claim tracked in issue #1576.
 
 ## 3. Developer Workflow
