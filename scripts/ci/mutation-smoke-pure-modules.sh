@@ -9,10 +9,13 @@ if [ "${ASSAY_RUN_MUTATION_SMOKE:-0}" != "1" ]; then
   exit 0
 fi
 
-if ! cargo mutants --version >/dev/null 2>&1; then
+if ! RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo mutants --version >/dev/null 2>&1; then
   if [ "${ASSAY_INSTALL_MUTATION_TOOLS:-0}" = "1" ]; then
     echo "[mutation-smoke] installing cargo-mutants"
-    cargo install --locked cargo-mutants
+    # shellcheck source=scripts/ci/cargo-plugin-versions.sh
+    source "${ROOT}/scripts/ci/cargo-plugin-versions.sh"
+    RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo install --locked --version "${CARGO_MUTANTS_VERSION}" cargo-mutants
+    assert_cargo_plugin_version cargo-mutants "${CARGO_MUTANTS_VERSION}"
   else
     echo "[mutation-smoke] skipped: cargo-mutants is not installed"
     exit 0
@@ -22,10 +25,10 @@ fi
 COMMON=(--timeout 60 --minimum-test-timeout 20 --jobs "${ASSAY_MUTATION_JOBS:-2}")
 
 echo "[mutation-smoke] trust_basis diff.rs"
-cargo mutants --package assay-evidence --file crates/assay-evidence/src/trust_basis/diff.rs "${COMMON[@]}" -- trust_basis
+RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo mutants --package assay-evidence --file crates/assay-evidence/src/trust_basis/diff.rs "${COMMON[@]}" -- trust_basis
 
 echo "[mutation-smoke] trust_basis classifiers.rs"
-cargo mutants --package assay-evidence --file crates/assay-evidence/src/trust_basis/classifiers.rs "${COMMON[@]}" -- trust_basis
+RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo mutants --package assay-evidence --file crates/assay-evidence/src/trust_basis/classifiers.rs "${COMMON[@]}" -- trust_basis
 
 echo "[mutation-smoke] sandbox degradation.rs"
-cargo mutants --package assay-cli --file crates/assay-cli/src/cli/commands/sandbox/degradation.rs "${COMMON[@]}" -- sandbox
+RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo mutants --package assay-cli --file crates/assay-cli/src/cli/commands/sandbox/degradation.rs "${COMMON[@]}" -- sandbox

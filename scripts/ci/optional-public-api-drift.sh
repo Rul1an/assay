@@ -42,27 +42,26 @@ fi
 ensure_cargo_subcommand() {
   local subcommand="$1"
   local crate="$2"
-  # CI-4D2 / #2224: bind an explicit toolchain for semver-checks probes and installs (this
-  # helper cds to ROOT). cargo-public-api stays unbound/unpinned for CI-4D3.
-  if [ "${crate}" = "cargo-semver-checks" ]; then
-    if RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo "${subcommand}" --version >/dev/null 2>&1; then
-      return 0
-    fi
-  elif cargo "${subcommand}" --version >/dev/null 2>&1; then
+  # CI-4D2/D3 / #2224: bind an explicit toolchain for plugin probes and installs (this
+  # helper cds to ROOT). Pins live in scripts/ci/cargo-plugin-versions.sh.
+  if RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo "${subcommand}" --version >/dev/null 2>&1; then
     return 0
   fi
   if [ "${INSTALL_TOOLS}" = "1" ]; then
     echo "[api-drift] installing ${crate}"
+    # shellcheck source=scripts/ci/cargo-plugin-versions.sh
+    source "${ROOT}/scripts/ci/cargo-plugin-versions.sh"
     if [ "${crate}" = "cargo-semver-checks" ]; then
-      # shellcheck source=scripts/ci/cargo-plugin-versions.sh
-      source "${ROOT}/scripts/ci/cargo-plugin-versions.sh"
       RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo install --locked --version "${CARGO_SEMVER_CHECKS_VERSION}" cargo-semver-checks
       assert_cargo_plugin_version cargo-semver-checks "${CARGO_SEMVER_CHECKS_VERSION}"
-      RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo "${subcommand}" --version >/dev/null
+    elif [ "${crate}" = "cargo-public-api" ]; then
+      RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo install --locked --version "${CARGO_PUBLIC_API_VERSION}" cargo-public-api
+      assert_cargo_plugin_version cargo-public-api "${CARGO_PUBLIC_API_VERSION}"
     else
-      cargo install --locked "${crate}"
-      cargo "${subcommand}" --version >/dev/null
+      echo "[api-drift] unsupported optional API drift tool: ${crate}" >&2
+      return 1
     fi
+    RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo "${subcommand}" --version >/dev/null
     return 0
   fi
   return 1
@@ -86,10 +85,10 @@ if ensure_cargo_subcommand public-api cargo-public-api; then
   echo "[api-drift] cargo-public-api diff vs ${BASE_REV}"
   for package in "${PACKAGES[@]}"; do
     echo "[api-drift] public-api package=${package}"
-    if cargo public-api diff --help 2>/dev/null | grep -qE -- '--package|-p'; then
-      cargo public-api diff --package "${package}" "${BASE_REV}..HEAD" -sss
-    elif cargo public-api --help 2>/dev/null | grep -qE -- '--package|-p'; then
-      cargo public-api --package "${package}" diff "${BASE_REV}..HEAD" -sss
+    if RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo public-api diff --help 2>/dev/null | grep -qE -- '--package|-p'; then
+      RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo public-api diff --package "${package}" "${BASE_REV}..HEAD" -sss
+    elif RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo public-api --help 2>/dev/null | grep -qE -- '--package|-p'; then
+      RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo public-api --package "${package}" diff "${BASE_REV}..HEAD" -sss
     else
       echo "[api-drift] skip package-scoped public-api diff for ${package}: installed cargo-public-api does not advertise --package"
     fi

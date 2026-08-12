@@ -316,7 +316,7 @@ check_workflow() {
   check_semver_public_install "${wf}"
 }
 
-# --- Optional helper: semver-checks pin only; public-api remains D3 --------------------
+# --- Optional helper: semver-checks pin (public-api pin/bind owned by CI-4D3) -----------
 
 check_optional_helper() {
   local helper="$1"
@@ -331,28 +331,17 @@ check_optional_helper() {
   grep -qE '^[[:space:]]*assert_cargo_plugin_version[[:space:]]+cargo-semver-checks[[:space:]]+"\$\{CARGO_SEMVER_CHECKS_VERSION\}"[[:space:]]*$' "${helper}" \
     || fail "optional-public-api-drift.sh must assert cargo-semver-checks at install-root"
 
-  # public-api remains unpinned for D3 — the generic install path must still exist and must
-  # not gain a CARGO_PUBLIC_API_VERSION pin in this slice.
-  grep -qE 'cargo[[:space:]]+install[[:space:]]+--locked[[:space:]]+"\$\{crate\}"' "${helper}" \
-    || fail "optional-public-api-drift.sh lost the generic unpinned cargo install --locked \"\${crate}\" path (public-api D3)"
-  if grep -qE 'CARGO_PUBLIC_API_VERSION' "${helper}"; then
-    fail "optional-public-api-drift.sh must not pin cargo-public-api in CI-4D2 (D3 owns that)"
-  fi
-
-  # Preserve semver gate invocation shape with toolchain binding; public-api stays unbound (D3).
+  # Preserve semver gate invocation shape with toolchain binding.
   grep -qE 'RUSTUP_TOOLCHAIN="\$\{RUSTUP_TOOLCHAIN:-stable\}"[[:space:]]+cargo[[:space:]]+semver-checks[[:space:]]+check-release' "${helper}" \
     || fail "optional-public-api-drift.sh lost bound cargo semver-checks check-release"
-  # Initial/presence and post-install version probes for semver-checks must also bind.
+  # Initial/presence and post-install version probes for plugins must also bind.
   local semver_version_binds
   semver_version_binds="$(grep -cE 'RUSTUP_TOOLCHAIN="\$\{RUSTUP_TOOLCHAIN:-stable\}"[[:space:]]+cargo[[:space:]]+"\$\{subcommand\}"[[:space:]]+--version' "${helper}" || true)"
   [[ "${semver_version_binds}" -ge 2 ]] \
     || fail "optional-public-api-drift.sh must bind RUSTUP_TOOLCHAIN on semver-checks initial and post-install --version probes (found ${semver_version_binds})"
+  # public-api path must remain; pin/bind ownership is CI-4D3 (test-optional-plugin-versions-contract.sh).
   grep -qE 'cargo[[:space:]]+public-api' "${helper}" \
     || fail "optional-public-api-drift.sh lost cargo public-api path"
-  # public-api invocations must remain unbound in this slice (D3).
-  if grep -qE 'RUSTUP_TOOLCHAIN=.*cargo[[:space:]]+public-api' "${helper}"; then
-    fail "optional-public-api-drift.sh must not bind RUSTUP_TOOLCHAIN on public-api in CI-4D2"
-  fi
 
   ok "optional-public-api-drift.sh semver-checks pin contract holds"
 }
