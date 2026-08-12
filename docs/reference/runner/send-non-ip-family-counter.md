@@ -2,8 +2,13 @@
 
 > **Status:** internal capture-fidelity detail. This page documents a counter
 > that keeps the datagram peer label honest. It adds no Runner archive member,
-> no CLI output, no Trust Basis claim, and no stable report schema. It is
-> additive and visible only when the relevant syscalls are used.
+> no CLI output, no Trust Basis claim, and no stable report schema. The
+> kernel-capture note that would surface it is produced by
+> `assay runner-spike --kernel-capture` / `assay-runner-core`. Two gaps keep
+> it off that path: `assay_monitor_sendto` / `assay_monitor_sendmsg` are
+> compiled into the release ELF and presently unattached (`Unsupported`), and
+> userspace does not read back `sendto_non_ip_family` /
+> `sendmsg_non_ip_family` (kernel stat indices 16 and 17).
 
 ## What it observes
 
@@ -28,6 +33,12 @@ peer nor a silently lost observation.
 - The kernel-capture note gains, **only when the count is non-zero**, the suffix
   `send_non_ip_family=sendto:<n> sendmsg:<m>`.
 
+`assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
+release ELF and inventoried `Unsupported` / unattached. Userspace does not
+read back `sendto_non_ip_family` / `sendmsg_non_ip_family`. An
+`assay runner-spike --kernel-capture` / `assay-runner-core` run therefore
+does not surface this counter.
+
 ## What it does not do (non-claims)
 
 - It does **not** recover or classify the non-IP peer, and does **not** raise the
@@ -45,6 +56,7 @@ archives read identically before and after this change.
 
 ## Why it matters
 
-Coverage honesty: an operator can tell that sends to non-IP families occurred, so
-the IP-only `datagram_peer_observed` label is read in context rather than mistaken
-for the complete picture.
+Coverage honesty: the counter exists so a non-IP send is not silently lost
+beside an IP-only `datagram_peer_observed` label. An
+`assay runner-spike --kernel-capture` / `assay-runner-core` run presently
+has neither attach nor userspace readback, so the counter is not surfaced.
