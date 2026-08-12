@@ -2,8 +2,10 @@
 
 > **Status:** internal capture-fidelity detail. This page documents a counter
 > that makes an address-less send visible. It adds no Runner archive member, no
-> CLI output, no Trust Basis claim, and no stable report schema. It is additive
-> and visible only when the relevant syscalls are used.
+> CLI output, no Trust Basis claim, and no stable report schema. The counter
+> increments only if `assay_monitor_sendto` / `assay_monitor_sendmsg` run;
+> those programs are compiled into the release ELF and presently unattached
+> (`Unsupported`).
 
 ## What it observes
 
@@ -21,12 +23,17 @@ descriptor's protocol, so an address-less send may be a connected datagram socke
 *or* a connected stream (TCP/TLS) socket. The counter therefore counts
 address-less sends generically — it does not assert they are datagram traffic.
 
-Previously these sends were dropped silently. This counter records them:
+Previously these sends were dropped silently. This counter records them
+**when those tracepoints run**:
 
 - eBPF increments `sendto_no_peer` / `sendmsg_no_peer` (kernel stat indices 14
   and 15) when a `sendto`/`sendmsg` has no recoverable destination address.
 - The kernel-capture note gains, **only when the count is non-zero**, the suffix
   `send_no_recoverable_peer=sendto:<n> sendmsg:<m>`.
+
+`assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
+release ELF and inventoried `Unsupported` / unattached. A live
+`assay monitor` run therefore does not increment these counters.
 
 ## What it does not do (non-claims)
 
@@ -46,8 +53,7 @@ clean archives read identically before and after this change.
 
 ## Why it matters
 
-Coverage honesty: an operator can tell the difference between "no such sends
-happened" and "sends happened whose peer was not recoverable from the call." The
-latter is where a connect-correlation step (future, separate work) plus socket
-type classification would be needed before any per-peer or datagram-specific
-claim could be made.
+Coverage honesty: if those tracepoints run, an operator can tell the difference
+between "no such sends happened" and "sends happened whose peer was not
+recoverable from the call." A live `assay monitor` run does not presently
+increment this counter.

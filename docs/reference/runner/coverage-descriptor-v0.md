@@ -70,14 +70,20 @@ must consult it before interpreting absence or exhaustiveness.
 | process | `process_exec_only()` | `exec_only` | fork/clone gaps that affect process-tree exhaustiveness |
 
 The seed descriptors intentionally describe the current capture ceiling.
-Future capture improvements can narrow or remove blind spots by changing
-descriptor data; until then, the gate must not silently upgrade claims.
 `network_for_protocol_coverage(status)` maps
 `observation_health.network_protocol_coverage` into the matching network
 descriptor when the run reported `connect_only`, `datagram_peer_observed`,
 or `connect_and_datagram_peer_observed`. `unknown` and `absent` return no
 descriptor, so coverage-aware network claims remain blocked rather than
 silently assuming a method.
+
+The datagram-aware helpers are real vocabulary for archives that already
+carry those coverage values. They are not a live monitor selector:
+`assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
+release ELF and presently unattached (`Unsupported`). A live `assay monitor`
+run does not emit the `sendto`/`sendmsg` events those labels require.
+`connect6_hook` is likewise compiled-but-unattached; IPv6 connect coverage
+is not a live attached surface.
 
 ## Claim Kinds
 
@@ -167,7 +173,8 @@ the Runner archive contract is unchanged. This helper still does not:
 - add Trust Basis claims;
 - add capture enhancements for io_uring or fork/clone.
 
-Any consumer that mirrors the gate should preserve the same ceiling: datagram
-peer observations can strengthen positive network evidence, but they do not
-permit exact peer-set or bounded-negative network claims while blind spots
-remain declared.
+Any consumer that mirrors the gate should preserve the same ceiling: when a
+run actually carries datagram peer observations, those can strengthen
+positive network evidence, but they do not permit exact peer-set or
+bounded-negative network claims while blind spots remain declared. Live
+`assay monitor` capture does not presently produce those observations.

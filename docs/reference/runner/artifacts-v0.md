@@ -247,10 +247,15 @@ Interpretation rules:
   `connect()`-level network evidence only.
 - `network_protocol_coverage=datagram_peer_observed` means Runner observed
   datagram peer evidence from `sendto` or `sendmsg`, without a matching
-  `connect()` event in the same capture window.
+  `connect()` event in the same capture window. Those events require
+  `assay_monitor_sendto` / `assay_monitor_sendmsg`, which are compiled into
+  the release ELF and presently unattached (`Unsupported`); a live
+  `assay monitor` run does not emit them.
 - `network_protocol_coverage=connect_and_datagram_peer_observed` means Runner
   observed both `connect()` and datagram peer evidence in the same capture
-  window.
+  window. The datagram half has the same compiled-but-unattached
+  `sendto`/`sendmsg` dependency. `connect6_hook` is likewise
+  compiled-but-unattached; IPv6 connect is not a live attached surface.
 - `network_endpoint_claim_scope=diagnostic_only` means `network_endpoints`
   are useful for coarse/diagnostic review, not for exact peer-set claims on
   datagram protocols such as QUIC.

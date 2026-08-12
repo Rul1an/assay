@@ -13,7 +13,12 @@ and every stage degrades rather than inflates when evidence is missing.**
 
 ### 1. Capture — what was actually observed
 The Runner observes side effects at the kernel boundary (file opens, network
-connects, datagram peers, process execs) without instrumenting the application.
+connects, process execs) without instrumenting the application.
+Datagram-peer coverage labels exist in the descriptor vocabulary, but
+`assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
+release ELF and presently unattached (`Unsupported`); a live `assay monitor`
+run does not emit those events. `connect6_hook` is likewise
+compiled-but-unattached.
 That raw observation is the only thing the whole chain is allowed to treat as
 ground truth. Everything downstream is a claim *about* this capture, bounded by
 how complete the capture was.
@@ -21,7 +26,9 @@ how complete the capture was.
 ### 2. Coverage descriptor — how complete the observation was
 A coverage descriptor records the completeness of the observation for each effect
 class (for example: were only `open`-family syscalls seen? was network capture
-connect-only, or were datagram peers also observed?). This is the honesty
+connect-only, or did the archive already carry datagram-peer observations?).
+Live monitor capture presently stays connect-only for network: the send
+tracepoints are compiled-but-unattached. This is the honesty
 ceiling: it says what the capture can and cannot support, before any claim is
 made. See the descriptor semantics in `crates/assay-runner-schema/src/coverage.rs`.
 

@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Public docs now record that `assay_monitor_sendto`, `assay_monitor_sendmsg`,
+  and `connect6_hook` are compiled into the release ELF / program set and
+  presently unattached (`Unsupported`). Coverage labels, send counters, and
+  datagram-peer events that depend on those programs do not fire on a live
+  `assay monitor` run. This supersedes the v3.15.0 changelog line that
+  described those send tracepoints as attached. Documentation only; no attach,
+  schema, or runtime change.
+
 ## [5.1.0] - 2026-08-11
 
 This release turns the install-to-verifiable-evidence path into an agent-facing product surface.
