@@ -42,23 +42,27 @@ fi
 ensure_cargo_subcommand() {
   local subcommand="$1"
   local crate="$2"
-  if cargo "${subcommand}" --version >/dev/null 2>&1; then
+  # CI-4D2 / #2224: bind an explicit toolchain for semver-checks probes and installs (this
+  # helper cds to ROOT). cargo-public-api stays unbound/unpinned for CI-4D3.
+  if [ "${crate}" = "cargo-semver-checks" ]; then
+    if RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo "${subcommand}" --version >/dev/null 2>&1; then
+      return 0
+    fi
+  elif cargo "${subcommand}" --version >/dev/null 2>&1; then
     return 0
   fi
   if [ "${INSTALL_TOOLS}" = "1" ]; then
     echo "[api-drift] installing ${crate}"
-    # CI-4D2 / #2224: pin cargo-semver-checks from the shared source and assert install-root.
-    # cargo-public-api stays unpinned here for CI-4D3. This helper cds to ROOT, so state the
-    # toolchain explicitly rather than inferring rust-toolchain.toml for the install.
     if [ "${crate}" = "cargo-semver-checks" ]; then
       # shellcheck source=scripts/ci/cargo-plugin-versions.sh
       source "${ROOT}/scripts/ci/cargo-plugin-versions.sh"
       RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo install --locked --version "${CARGO_SEMVER_CHECKS_VERSION}" cargo-semver-checks
       assert_cargo_plugin_version cargo-semver-checks "${CARGO_SEMVER_CHECKS_VERSION}"
+      RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo "${subcommand}" --version >/dev/null
     else
       cargo install --locked "${crate}"
+      cargo "${subcommand}" --version >/dev/null
     fi
-    cargo "${subcommand}" --version >/dev/null
     return 0
   fi
   return 1
@@ -71,7 +75,7 @@ if ensure_cargo_subcommand semver-checks cargo-semver-checks; then
   echo "[api-drift] cargo-semver-checks vs ${BASE_REV}"
   for package in "${PACKAGES[@]}"; do
     echo "[api-drift] semver-checks package=${package}"
-    cargo semver-checks check-release -p "${package}" --baseline-rev "${BASE_REV}"
+    RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo semver-checks check-release -p "${package}" --baseline-rev "${BASE_REV}"
   done
 else
   echo "[api-drift] skip cargo-semver-checks: cargo subcommand not installed"

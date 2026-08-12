@@ -25,8 +25,12 @@ cargo_plugin_bin_path() {
 
 # Bind the assertion to Cargo's install location. Resolving through PATH lets an unrelated
 # binary earlier on PATH satisfy the pin while the install wrote nothing (#2226).
-# cargo-nextest prints a multi-line banner whose first line may append " (hash date)"; pin
-# comparison uses the first line with that optional suffix stripped.
+#
+# cargo-nextest alone prints a multi-line banner. Measured shape of line 1:
+#   cargo-nextest <semver> (<hex> <YYYY-MM-DD>)
+# Only that tool may take the first line and strip that documented suffix. Other plugins
+# (cargo-audit, cargo-hack, cargo-semver-checks) keep exact full --version equality so a
+# parenthetical cannot silently satisfy the pin.
 assert_cargo_plugin_version() {
   local name="$1" expected="$2"
   local bin reported
@@ -37,10 +41,13 @@ assert_cargo_plugin_version() {
     return 1
   fi
   reported="$("${bin}" --version)"
-  reported="${reported%%$'\n'*}"
-  case "${reported}" in
-    *" ("*) reported="${reported%% (*}" ;;
-  esac
+  if [[ "${name}" == "cargo-nextest" ]]; then
+    reported="${reported%%$'\n'*}"
+    # Bash 3.2: =~ + BASH_REMATCH. Require hex hash + ISO date inside the parens.
+    if [[ "${reported}" =~ ^cargo-nextest\ ([0-9]+\.[0-9]+\.[0-9]+)\ \(([0-9a-f]+)\ ([0-9]{4}-[0-9]{2}-[0-9]{2})\)$ ]]; then
+      reported="cargo-nextest ${BASH_REMATCH[1]}"
+    fi
+  fi
   echo "${name} resolved: ${reported} at ${bin}"
   if [[ "${reported}" != "${name} ${expected}" ]]; then
     echo "${name} reports '${reported}', which is not the pinned ${expected}" >&2

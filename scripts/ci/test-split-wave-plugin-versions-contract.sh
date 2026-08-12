@@ -63,9 +63,11 @@ source "${VERSIONS}"
 NEXTEST_PIN="${CARGO_NEXTEST_VERSION:-}"
 HACK_PIN="${CARGO_HACK_VERSION:-}"
 SEMVER_PIN="${CARGO_SEMVER_CHECKS_VERSION:-}"
+AUDIT_PIN="${CARGO_AUDIT_VERSION:-}"
 [[ -n "${NEXTEST_PIN}" ]] || fail "CARGO_NEXTEST_VERSION is empty after sourcing ${VERSIONS#"${ROOT}"/}"
 [[ -n "${HACK_PIN}" ]] || fail "CARGO_HACK_VERSION is empty after sourcing ${VERSIONS#"${ROOT}"/}"
 [[ -n "${SEMVER_PIN}" ]] || fail "CARGO_SEMVER_CHECKS_VERSION is empty after sourcing ${VERSIONS#"${ROOT}"/}"
+[[ -n "${AUDIT_PIN}" ]] || fail "CARGO_AUDIT_VERSION is empty after sourcing ${VERSIONS#"${ROOT}"/}"
 
 # --- Workflow extractors (no YAML/shell parser beyond dedicated step bodies) ------------
 
@@ -228,13 +230,14 @@ ${install_run}"
   install_step_states_or_inherits_toolchain "${wf}" "Install cargo-nextest and cargo-hack" feature_matrix_job \
     || fail "feature-matrix install must set RUSTUP_TOOLCHAIN: stable (step/job) or call setup-rust before the install"
 
-  # Preserve feature-matrix invocations (not an install-site rewrite of the curated sets).
+  # Preserve feature-matrix invocations with per-command toolchain binding.
   local job
   job="$(feature_matrix_job "${wf}")"
-  grep -qE 'cargo[[:space:]]+nextest[[:space:]]+run[[:space:]]+-p[[:space:]]+assay-core' <<<"${job}" \
-    || fail "feature-matrix lost cargo nextest run -p assay-core"
-  grep -qE 'cargo[[:space:]]+hack[[:space:]]+check[[:space:]]+-p[[:space:]]+assay-core[[:space:]]+--each-feature' <<<"${job}" \
-    || fail "feature-matrix lost cargo hack check -p assay-core --each-feature"
+  grep -qE 'RUSTUP_TOOLCHAIN=stable[[:space:]]+cargo[[:space:]]+nextest[[:space:]]+run[[:space:]]+-p[[:space:]]+assay-core' <<<"${job}" \
+    || fail "feature-matrix lost bound cargo nextest run -p assay-core"
+  grep -qE 'RUSTUP_TOOLCHAIN=stable[[:space:]]+cargo[[:space:]]+hack[[:space:]]+check[[:space:]]+-p[[:space:]]+assay-core[[:space:]]+--each-feature' <<<"${job}" \
+    || fail "feature-matrix lost bound cargo hack check -p assay-core --each-feature"
+  check_d2_plugin_invocation_bindings "${job}" "feature-matrix"
 
   ok "feature-matrix nextest/hack pin contract holds for ${wf##*/}"
 }
@@ -276,10 +279,35 @@ ${install_run}"
     || fail "semver-public lost baseline resolution step"
   grep -q 'scripts/ci/test-semver-gate.sh' <<<"${job}" \
     || fail "semver-public lost semver gate self-test"
-  grep -qE 'cargo[[:space:]]+semver-checks[[:space:]]+check-release' <<<"${job}" \
-    || fail "semver-public lost cargo semver-checks check-release allowlist invocations"
+  grep -qE 'RUSTUP_TOOLCHAIN=stable[[:space:]]+cargo[[:space:]]+semver-checks[[:space:]]+check-release' <<<"${job}" \
+    || fail "semver-public lost bound cargo semver-checks check-release allowlist invocations"
+  check_d2_plugin_invocation_bindings "${job}" "semver-public"
 
   ok "semver-public cargo-semver-checks pin contract holds for ${wf##*/}"
+}
+
+# Every active D2 plugin invocation (`cargo nextest|hack|semver-checks`, not install) must
+# bind RUSTUP_TOOLCHAIN=stable on the command itself so root cargo check/test still follow
+# rust-toolchain.toml. Summary `echo` lines are ignored.
+check_d2_plugin_invocation_bindings() {
+  local body="$1" label="$2"
+  local line tmp
+  while IFS= read -r line; do
+    tmp="${line#"${line%%[![:space:]]*}"}"
+    [[ -n "${tmp}" ]] || continue
+    [[ "${tmp}" != \#* ]] || continue
+    [[ "${tmp}" != echo\ * ]] || continue
+    [[ "${tmp}" != echo\$* ]] || continue
+    # Only cargo nextest / hack / semver-checks invocations (not cargo install / check / test).
+    if ! grep -qE '(^|[[:space:]])cargo[[:space:]]+(nextest|hack|semver-checks)([[:space:]]|$)' <<<"${tmp}"; then
+      continue
+    fi
+    if grep -qE '(^|[[:space:]])cargo[[:space:]]+install([[:space:]]|$)' <<<"${tmp}"; then
+      continue
+    fi
+    grep -qE '^RUSTUP_TOOLCHAIN=stable[[:space:]]+cargo[[:space:]]+(nextest|hack|semver-checks)([[:space:]]|$)' <<<"${tmp}" \
+      || fail "${label}: unbound D2 plugin invocation (need RUSTUP_TOOLCHAIN=stable prefix): ${tmp}"
+  done <<<"${body}"
 }
 
 check_workflow() {
@@ -311,11 +339,20 @@ check_optional_helper() {
     fail "optional-public-api-drift.sh must not pin cargo-public-api in CI-4D2 (D3 owns that)"
   fi
 
-  # Preserve semver gate invocation shape after tools are present.
-  grep -qE 'cargo[[:space:]]+semver-checks[[:space:]]+check-release' "${helper}" \
-    || fail "optional-public-api-drift.sh lost cargo semver-checks check-release"
+  # Preserve semver gate invocation shape with toolchain binding; public-api stays unbound (D3).
+  grep -qE 'RUSTUP_TOOLCHAIN="\$\{RUSTUP_TOOLCHAIN:-stable\}"[[:space:]]+cargo[[:space:]]+semver-checks[[:space:]]+check-release' "${helper}" \
+    || fail "optional-public-api-drift.sh lost bound cargo semver-checks check-release"
+  # Initial/presence and post-install version probes for semver-checks must also bind.
+  local semver_version_binds
+  semver_version_binds="$(grep -cE 'RUSTUP_TOOLCHAIN="\$\{RUSTUP_TOOLCHAIN:-stable\}"[[:space:]]+cargo[[:space:]]+"\$\{subcommand\}"[[:space:]]+--version' "${helper}" || true)"
+  [[ "${semver_version_binds}" -ge 2 ]] \
+    || fail "optional-public-api-drift.sh must bind RUSTUP_TOOLCHAIN on semver-checks initial and post-install --version probes (found ${semver_version_binds})"
   grep -qE 'cargo[[:space:]]+public-api' "${helper}" \
     || fail "optional-public-api-drift.sh lost cargo public-api path"
+  # public-api invocations must remain unbound in this slice (D3).
+  if grep -qE 'RUSTUP_TOOLCHAIN=.*cargo[[:space:]]+public-api' "${helper}"; then
+    fail "optional-public-api-drift.sh must not bind RUSTUP_TOOLCHAIN on public-api in CI-4D2"
+  fi
 
   ok "optional-public-api-drift.sh semver-checks pin contract holds"
 }
@@ -339,12 +376,14 @@ expect_in_file() {
   fi
 }
 
-echo "== assert_cargo_plugin_version accepts install-root nextest (banner) =="
+echo "== assert_cargo_plugin_version accepts install-root nextest (measured banner) =="
+# Measured cargo-nextest --version: first line "cargo-nextest <ver> (<hex> <YYYY-MM-DD>)"
+# plus further banner lines. Only that tool may normalize that first-line suffix.
 pass_dir="${SCRATCH}/assert_pass"
 mkdir -p "${pass_dir}/bin" "${pass_dir}/early"
 cat >"${pass_dir}/bin/cargo-nextest" <<STUB
 #!/usr/bin/env bash
-echo "cargo-nextest ${NEXTEST_PIN} (deadbeef 2026-01-01)"
+echo "cargo-nextest ${NEXTEST_PIN} (deadbeef01 2026-01-01)"
 echo "release: ${NEXTEST_PIN}"
 echo "host: test"
 STUB
@@ -360,6 +399,48 @@ PATH="${pass_dir}/early:${PATH}" CARGO_HOME="${pass_dir}" \
   assert_cargo_plugin_version cargo-nextest "${NEXTEST_PIN}" >"${pass_out}" 2>&1 || pass_exit=$?
 [[ "${pass_exit}" -eq 0 ]] || fail "assert_cargo_plugin_version failed against install-root nextest pin (exit ${pass_exit})"
 expect_in_file "${pass_out}" "at ${pass_dir}/bin/cargo-nextest" "assertion names the install-root binary"
+
+echo "== nextest arbitrary parenthetical suffix stays RED =="
+nxt_evil_dir="${SCRATCH}/nextest_evil_paren"
+mkdir -p "${nxt_evil_dir}/bin"
+cat >"${nxt_evil_dir}/bin/cargo-nextest" <<STUB
+#!/usr/bin/env bash
+echo "cargo-nextest ${NEXTEST_PIN} (not-a-nextest-suffix)"
+STUB
+chmod +x "${nxt_evil_dir}/bin/cargo-nextest"
+nxt_evil_out="${nxt_evil_dir}/out"
+nxt_evil_exit=0
+CARGO_HOME="${nxt_evil_dir}" \
+  assert_cargo_plugin_version cargo-nextest "${NEXTEST_PIN}" >"${nxt_evil_out}" 2>&1 || nxt_evil_exit=$?
+[[ "${nxt_evil_exit}" -ne 0 ]] || fail "nextest accepted a non-banner parenthetical suffix"
+
+echo "== cargo-audit parenthetical suffix must stay RED (no global strip) =="
+audit_dir="${SCRATCH}/audit_paren"
+mkdir -p "${audit_dir}/bin"
+cat >"${audit_dir}/bin/cargo-audit" <<STUB
+#!/usr/bin/env bash
+echo "cargo-audit ${AUDIT_PIN} (evil-suffix)"
+STUB
+chmod +x "${audit_dir}/bin/cargo-audit"
+audit_out="${audit_dir}/out"
+audit_exit=0
+CARGO_HOME="${audit_dir}" \
+  assert_cargo_plugin_version cargo-audit "${AUDIT_PIN}" >"${audit_out}" 2>&1 || audit_exit=$?
+[[ "${audit_exit}" -ne 0 ]] || fail "cargo-audit parenthetical suffix was accepted (global strip weakens CI-4D1)"
+
+echo "== cargo-hack parenthetical suffix must stay RED (no global strip) =="
+hack_paren_dir="${SCRATCH}/hack_paren"
+mkdir -p "${hack_paren_dir}/bin"
+cat >"${hack_paren_dir}/bin/cargo-hack" <<STUB
+#!/usr/bin/env bash
+echo "cargo-hack ${HACK_PIN} (evil-suffix)"
+STUB
+chmod +x "${hack_paren_dir}/bin/cargo-hack"
+hack_paren_out="${hack_paren_dir}/out"
+hack_paren_exit=0
+CARGO_HOME="${hack_paren_dir}" \
+  assert_cargo_plugin_version cargo-hack "${HACK_PIN}" >"${hack_paren_out}" 2>&1 || hack_paren_exit=$?
+[[ "${hack_paren_exit}" -ne 0 ]] || fail "cargo-hack parenthetical suffix was accepted (global strip weakens exactness)"
 
 echo "== wrong installed hack version fails =="
 wrong_dir="${SCRATCH}/assert_wrong"
@@ -614,6 +695,74 @@ if ! ( check_workflow "${chomp}" ) >/dev/null 2>&1; then
   fail "correctly pinned feature-matrix run: |- turned the contract red"
 fi
 ok "correctly pinned feature-matrix run: |- stays green"
+
+echo "== mutation: remove nextest invocation toolchain binding =="
+unbound_nextest="$(mktemp "${SANDBOX_ROOT}/unbound-nextest.XXXXXX.yml")"
+python3 - "${WORKFLOW}" "${unbound_nextest}" <<'PY'
+import pathlib, sys
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+text = src.read_text()
+old = "RUSTUP_TOOLCHAIN=stable cargo nextest run -p assay-core --all-features"
+new = "cargo nextest run -p assay-core --all-features"
+if old not in text:
+    raise SystemExit("could not find bound nextest invocation to unbind")
+dst.write_text(text.replace(old, new, 1))
+PY
+if ( check_workflow "${unbound_nextest}" ) >/dev/null 2>&1; then
+  fail "removing nextest invocation RUSTUP_TOOLCHAIN binding left the contract green"
+fi
+ok "removing nextest invocation binding turns the contract red"
+
+echo "== mutation: remove hack invocation toolchain binding =="
+unbound_hack="$(mktemp "${SANDBOX_ROOT}/unbound-hack.XXXXXX.yml")"
+python3 - "${WORKFLOW}" "${unbound_hack}" <<'PY'
+import pathlib, sys
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+text = src.read_text()
+old = "RUSTUP_TOOLCHAIN=stable cargo hack check -p assay-core --each-feature"
+new = "cargo hack check -p assay-core --each-feature"
+if old not in text:
+    raise SystemExit("could not find bound hack invocation to unbind")
+dst.write_text(text.replace(old, new, 1))
+PY
+if ( check_workflow "${unbound_hack}" ) >/dev/null 2>&1; then
+  fail "removing hack invocation RUSTUP_TOOLCHAIN binding left the contract green"
+fi
+ok "removing hack invocation binding turns the contract red"
+
+echo "== mutation: remove semver-checks invocation toolchain binding =="
+unbound_semver="$(mktemp "${SANDBOX_ROOT}/unbound-semver.XXXXXX.yml")"
+python3 - "${WORKFLOW}" "${unbound_semver}" <<'PY'
+import pathlib, sys
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+text = src.read_text()
+old = 'RUSTUP_TOOLCHAIN=stable cargo semver-checks check-release -p "${crate}" --baseline-rev "${BASELINE_TAG}"'
+new = 'cargo semver-checks check-release -p "${crate}" --baseline-rev "${BASELINE_TAG}"'
+if old not in text:
+    raise SystemExit("could not find bound semver-checks invocation to unbind")
+dst.write_text(text.replace(old, new, 1))
+PY
+if ( check_workflow "${unbound_semver}" ) >/dev/null 2>&1; then
+  fail "removing semver-checks invocation RUSTUP_TOOLCHAIN binding left the contract green"
+fi
+ok "removing semver-checks invocation binding turns the contract red"
+
+echo "== mutation: optional helper drops semver check-release binding =="
+opt_unbound="$(mktemp "${SANDBOX_ROOT}/opt-unbound.XXXXXX.sh")"
+python3 - "${OPTIONAL}" "${opt_unbound}" <<'PY'
+import pathlib, sys
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+text = src.read_text()
+old = 'RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}" cargo semver-checks check-release'
+new = "cargo semver-checks check-release"
+if old not in text:
+    raise SystemExit("could not find bound optional semver check-release to unbind")
+dst.write_text(text.replace(old, new, 1))
+PY
+if ( check_optional_helper "${opt_unbound}" ) >/dev/null 2>&1; then
+  fail "removing optional semver check-release binding left the helper contract green"
+fi
+ok "removing optional semver check-release binding turns the helper contract red"
 
 ok "split-wave plugin-versions contract mutations bite"
 echo "PASS: split-wave plugin-versions contract"

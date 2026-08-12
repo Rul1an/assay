@@ -244,9 +244,10 @@ jobs:
             cargo check -p assay-core --no-default-features --features kill-switch
             cargo check -p assay-core --no-default-features --features discovery,kill-switch-capture
             cargo check -p assay-core --all-features
-            cargo nextest run -p assay-core --all-features
+            # D2 plugins: bind stable per command so cargo check/test keep rust-toolchain.toml.
+            RUSTUP_TOOLCHAIN=stable cargo nextest run -p assay-core --all-features
             cargo test -p assay-core --lib --no-default-features
-            cargo hack check -p assay-core --each-feature
+            RUSTUP_TOOLCHAIN=stable cargo hack check -p assay-core --each-feature
           fi
 
           if [[ "${RUN_ALL}" == "true" || "${CLI_CHANGED}" == "true" ]]; then
@@ -277,8 +278,8 @@ jobs:
             cargo check -p assay-cli --no-default-features --features tui
             cargo check -p assay-cli --no-default-features --features sim,tui
             cargo check -p assay-cli --all-features
-            cargo nextest run -p assay-cli --all-features
-            cargo hack check -p assay-cli --each-feature --exclude-features experimental
+            RUSTUP_TOOLCHAIN=stable cargo nextest run -p assay-cli --all-features
+            RUSTUP_TOOLCHAIN=stable cargo hack check -p assay-cli --each-feature --exclude-features experimental
           fi
 
           if [[ "${RUN_ALL}" == "true" || "${REGISTRY_CHANGED}" == "true" ]]; then
@@ -295,9 +296,9 @@ jobs:
             cargo check -p assay-registry --no-default-features
             cargo check -p assay-registry --features oidc
             cargo check -p assay-registry --all-features
-            cargo nextest run -p assay-registry --all-features
+            RUSTUP_TOOLCHAIN=stable cargo nextest run -p assay-registry --all-features
             cargo test -p assay-registry --lib --no-default-features
-            cargo hack test -p assay-registry --lib --each-feature
+            RUSTUP_TOOLCHAIN=stable cargo hack test -p assay-registry --lib --each-feature
           fi
 
           if [[ "${RUN_ALL}" == "true" || "${EVIDENCE_CHANGED}" == "true" ]]; then
@@ -313,7 +314,7 @@ jobs:
             cargo check -p assay-evidence
             cargo check -p assay-evidence --no-default-features
             cargo check -p assay-evidence --all-features
-            cargo nextest run -p assay-evidence --all-features
+            RUSTUP_TOOLCHAIN=stable cargo nextest run -p assay-evidence --all-features
             cargo test -p assay-evidence --lib --no-default-features
           fi
 
@@ -472,7 +473,8 @@ jobs:
           run_semver_for() {
             local crate="$1"
             echo "- ${crate}" >> "$GITHUB_STEP_SUMMARY"
-            cargo semver-checks check-release -p "${crate}" --baseline-rev "${BASELINE_TAG}"
+            # Bind stable for the plugin only; workspace rust-toolchain.toml stays for cargo check.
+            RUSTUP_TOOLCHAIN=stable cargo semver-checks check-release -p "${crate}" --baseline-rev "${BASELINE_TAG}"
           }
 
           {
