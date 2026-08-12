@@ -170,18 +170,29 @@ repos:
 
       - id: aee-seal-producer-mutations
         name: ADR-045 seal producer mutations
-        entry: python3 scripts/ci/test_aee_seal_producer_mutations.py
+        entry: bash -c 'python3 scripts/ci/test_aee_seal_producer_mutation_safety.py && python3 scripts/ci/test_aee_seal_producer_mutations.py'
         language: system
         pass_filenames: false
         # Each mutation names the test that must catch it. Run by hand this went wrong four times in
-        # one session; mechanised it has not. Restores from a scratch copy, never from git, so it is
-        # safe on a dirty tree and needs no commit first.
+        # one session; mechanised it has not. Restores from scratch bytes held in-process, never from
+        # git, and SIGINT/SIGTERM handlers rewrite those bytes before exit so an interrupted push
+        # cannot leave the first mutant behind (#2318).
         #
         # pre-push, not pre-commit: fourteen `cargo test` runs cost ~56s warm, and a gate that taxes
         # every intermediate commit is a gate people learn to pass `--no-verify` to. The question it
         # answers -- does this suite still have teeth -- is a push-time question.
+        #
+        # Trigger is content paths only: editing unrelated hook config must not run this battery.
         stages: [pre-push]
-        files: ^(crates/assay-cli/src/aee_seal\.rs|scripts/ci/test_aee_seal_producer_mutations\.py|\.pre-commit-config\.yaml)$
+        files: ^(crates/assay-cli/src/aee_seal\.rs|scripts/ci/test_aee_seal_producer_mutations\.py|scripts/ci/test_aee_seal_producer_mutation_safety\.py)$
+      - id: aee-seal-producer-residue
+        name: ADR-045 seal producer mutation residue
+        entry: python3 scripts/ci/test_aee_seal_producer_mutations.py --check-residue
+        language: system
+        pass_filenames: false
+        # Read-only fail-closed check: every declared mutant search anchor must still be present.
+        # Catches interruption residue on the next commit without rewriting production code.
+        files: ^(crates/assay-cli/src/aee_seal\.rs|scripts/ci/test_aee_seal_producer_mutations\.py)$
       - id: aee-seal-checker-coverage
         name: ADR-045 seal checker coverage
         entry: bash -c 'f=scripts/experiments/aee_landlock_seal_fixture.py; python3 $f --meta-test && python3 $f --required-field-test && python3 $f --rule-coverage-test && python3 $f --producer-vocabulary-test'

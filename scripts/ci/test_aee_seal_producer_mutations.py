@@ -6,11 +6,13 @@ under a mutation is not testing that property, and trying is the only way to kno
 
 This ran by hand four times in one session and went wrong four times: bites too
 narrow to conclude from, and `git checkout` restores that silently wiped
-uncommitted work because the fix had not been committed yet. Three properties
-make this version safe:
+uncommitted work because the fix had not been committed yet. Properties that
+keep this version safe:
 
 - the original is saved to a scratch copy and restored from *that*, never from
   git, so uncommitted work survives and no commit is needed first;
+- SIGINT/SIGTERM handlers restore those scratch bytes before the process exits,
+  so an interrupted push cannot leave the first mutant behind;
 - a search string that does not appear is a hard failure, because a bite that
   never applied looks exactly like a bite that was caught;
 - the table lives in Python rather than a shell array, because the first shell
@@ -20,13 +22,23 @@ make this version safe:
 
 from __future__ import annotations
 
-import shutil
+import argparse
+import os
+import signal
+import stat
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip())
+ROOT = Path(
+    subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+)
 TARGET = ROOT / "crates/assay-cli/src/aee_seal.rs"
 
 # (name, search, replacement, test that must fail)
@@ -58,28 +70,119 @@ MUTATIONS: list[tuple[str, str, str, str]] = [
     ("vantage scope", "assay_seal_scope: vantage.scope(),", 'assay_seal_scope: "tcp_connect:landlock_port".to_string(),', "the_proxy_is_a_second_vantage_under_the_same_key_and_substrate"),
 ]
 
+_SIGNAL_NAMES = {
+    "SIGINT": signal.SIGINT,
+    "SIGTERM": signal.SIGTERM,
+}
+
+
+def write_bytes_atomic(path: Path, data: bytes, mode: int | None = None) -> None:
+    """Replace path with data using same-directory os.replace (byte- and mode-safe, no git).
+
+    mkstemp creates 0600 temps; without fchmod before replace, a 0644 producer silently
+    becomes owner-only while git status stays clean (Git tracks only the executable bit).
+    """
+    if mode is None:
+        mode = stat.S_IMODE(path.stat().st_mode)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    tmp = Path(tmp_name)
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def check_residue(target: Path) -> list[str]:
+    """Read-only: report declared mutations whose search anchors are absent.
+
+    Applying a table entry replaces its search string once. Absence of that
+    anchor means a live mutant (or a refactor that voids the table). Never
+    rewrites the target.
+    """
+    text = target.read_text()
+    findings: list[str] = []
+    for name, search, _replace, _expect in MUTATIONS:
+        if search not in text:
+            findings.append(f"{target}: live mutant anchor missing for {name!r}")
+    return findings
+
 
 def run_tests() -> str:
     return subprocess.run(
         ["cargo", "test", "-q", "-p", "assay-cli", "--bin", "assay", "aee_seal"],
-        capture_output=True, text=True, cwd=ROOT,
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
     ).stdout
 
 
-def main() -> int:
-    scratch = Path(tempfile.mkdtemp())
-    original = scratch / "original.rs"
-    shutil.copy(TARGET, original)
+def maybe_interrupt_after_mutation(name: str) -> None:
+    """Test seam: deliver SIGINT/SIGTERM after a named mutant is written."""
+    wanted = os.environ.get("ASSAY_AEE_SEAL_MUTATION_INTERRUPT_AFTER", "")
+    if not wanted:
+        return
+    if wanted != name:
+        return
+    signame = os.environ.get("ASSAY_AEE_SEAL_MUTATION_INTERRUPT_SIGNAL", "SIGTERM")
+    signum = _SIGNAL_NAMES.get(signame)
+    if signum is None:
+        raise SystemExit(f"unknown ASSAY_AEE_SEAL_MUTATION_INTERRUPT_SIGNAL={signame!r}")
+    os.kill(os.getpid(), signum)
+
+
+def run_mutations(target: Path) -> int:
+    residue = check_residue(target)
+    if residue:
+        for line in residue:
+            print(line, file=sys.stderr)
+        print(
+            f"refusing to mutate: {len(residue)} declared mutant anchor(s) already absent",
+            file=sys.stderr,
+        )
+        return 1
+
+    original = target.read_bytes()
+    original_mode = stat.S_IMODE(target.stat().st_mode)
+    restored = False
+
+    def restore() -> None:
+        nonlocal restored
+        if restored:
+            return
+        write_bytes_atomic(target, original, mode=original_mode)
+        restored = True
+
+    def on_signal(signum: int, _frame: object) -> None:
+        # Restore then _exit so cleanup cannot depend on finally unwinding.
+        restore()
+        os._exit(128 + signum)
+
+    # Explicit registrations — safety mutations delete these lines one at a time.
+    signal.signal(signal.SIGINT, on_signal)
+    signal.signal(signal.SIGTERM, on_signal)
+
     failures: list[str] = []
     try:
+        src_text = original.decode()
         for name, search, replace, expect in MUTATIONS:
-            shutil.copy(original, TARGET)
-            src = original.read_text()
-            if search not in src:
+            write_bytes_atomic(target, original, mode=original_mode)
+            restored = False
+            if search not in src_text:
                 failures.append(f"{name}: search string absent, so this mutation tested nothing")
                 print(f"FAIL {name}: search string absent", file=sys.stderr)
                 continue
-            TARGET.write_text(src.replace(search, replace, 1))
+            mutated = src_text.replace(search, replace, 1).encode()
+            write_bytes_atomic(target, mutated, mode=original_mode)
+            maybe_interrupt_after_mutation(name)
             out = run_tests()
             if "test result: FAILED" not in out:
                 failures.append(f"{name}: suite passed under the mutation")
@@ -89,15 +192,47 @@ def main() -> int:
                 print(f"WARN {name}: caught, but not by {expect}", file=sys.stderr)
             else:
                 print(f"ok   {name}  -> caught by {expect}")
-    finally:
-        shutil.copy(original, TARGET)
-        shutil.rmtree(scratch, ignore_errors=True)
+        restore()
+    except BaseException:
+        # SystemExit (invalid interrupt seam) and KeyboardInterrupt are BaseException,
+        # not Exception; they must still restore before re-raise.
+        restore()
+        raise
 
     if failures:
         print(f"\n{len(failures)} mutation(s) not caught by the test that names them", file=sys.stderr)
         return 1
     print(f"\nall {len(MUTATIONS)} mutations caught by the test that names them")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
+    parser.add_argument(
+        "--check-residue",
+        action="store_true",
+        help="read-only fail-closed check for declared live mutant anchors",
+    )
+    parser.add_argument(
+        "--target",
+        type=Path,
+        default=TARGET,
+        help="producer path to mutate or inspect (default: live aee_seal.rs)",
+    )
+    args = parser.parse_args(argv)
+
+    target = args.target.resolve()
+    if args.check_residue:
+        findings = check_residue(target)
+        if findings:
+            for line in findings:
+                print(line, file=sys.stderr)
+            print(f"{len(findings)} declared mutant anchor(s) absent in {target}", file=sys.stderr)
+            return 1
+        print(f"ok   no declared mutant anchors missing in {target}")
+        return 0
+
+    return run_mutations(target)
 
 
 if __name__ == "__main__":
