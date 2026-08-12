@@ -8,6 +8,8 @@ pub mod events;
 #[cfg(any(test, target_os = "linux"))]
 mod object_abi;
 pub mod probes;
+#[cfg(any(test, target_os = "linux"))]
+mod program_set;
 pub mod tree;
 
 #[cfg(target_os = "linux")]

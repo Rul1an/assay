@@ -1,8 +1,9 @@
 use crate::config_flags::{apply_dedup_open_paths, apply_emit_observed_connect, FlagConfigSink};
 use crate::events::{self, EventStream};
-use crate::object_abi::verify_object_abi_marker;
+use crate::object_abi::{verify_object_abi_marker, REBUILD_EBPF_GUIDANCE};
 use crate::probes::{
-    connect4_update, Connect4Fault, ModeUpdate, ProbeAttachment, EGRESS_PEER_PROBE, EXPECTED_PROBES,
+    connect4_update, Connect4Fault, ModeUpdate, ProbeAttachment, ProbeProgram, EGRESS_PEER_PROBE,
+    EXPECTED_PROBES,
 };
 use crate::{MonitorError, MonitorStatsSnapshot};
 use assay_common::{
@@ -28,6 +29,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+
+fn unknown_probe() -> MonitorError {
+    MonitorError::ProgramSet {
+        detail: "unknown program table row".into(),
+        guidance: REBUILD_EBPF_GUIDANCE,
+    }
+}
 
 fn attach_kernel_lacks_point(err: &ProgramError) -> bool {
     // ENOENT=2, EOPNOTSUPP=95 on Linux.
@@ -97,6 +105,8 @@ impl LinuxMonitor {
         // P1: named CONFIG object-ABI symbol before Aya load (never set_global).
         verify_object_abi_marker(ebpf_data)?;
         let bpf = Ebpf::load(ebpf_data).map_err(|e| MonitorError::LoadError(e.to_string()))?;
+        // P2: exact Aya program-name set before any program load/attach.
+        crate::program_set::compare_program_names(bpf.programs().map(|(name, _)| name))?;
         Ok(Self {
             bpf: Arc::new(Mutex::new(bpf)),
             links: Vec::new(),
@@ -229,85 +239,91 @@ impl LinuxMonitor {
         }
 
         // 1. Tracepoints
-        if let Some(prog) = bpf.program_mut("assay_monitor_openat") {
+        let r = ProbeProgram::by_elf("assay_monitor_openat").ok_or_else(unknown_probe)?;
+        if let Some(prog) = bpf.program_mut(r.elf_name) {
             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
                 tp.load()?;
-                let link_id = tp.attach("syscalls", "sys_enter_openat")?;
+                let link_id = tp.attach(r.tp().0, r.tp().1)?;
                 let link = tp.take_link(link_id)?;
-                self.probe_attachment.attached("sys_enter_openat");
+                self.probe_attachment.attached(r.surface_name);
                 self.links.push(MonitorLink::TracePoint(link));
                 println!("DEBUG: Attached Tracepoint sys_enter_openat");
             }
         }
-        if let Some(prog) = bpf.program_mut("assay_monitor_openat2") {
+        let r = ProbeProgram::by_elf("assay_monitor_openat2").ok_or_else(unknown_probe)?;
+        if let Some(prog) = bpf.program_mut(r.elf_name) {
             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
                 tp.load()?;
-                let link_id = tp.attach("syscalls", "sys_enter_openat2")?;
+                let link_id = tp.attach(r.tp().0, r.tp().1)?;
                 let link = tp.take_link(link_id)?;
-                self.probe_attachment.attached("sys_enter_openat2");
+                self.probe_attachment.attached(r.surface_name);
                 self.links.push(MonitorLink::TracePoint(link));
                 println!("DEBUG: Attached Tracepoint sys_enter_openat2");
             }
         }
-        if let Some(prog) = bpf.program_mut("assay_monitor_openat_exit") {
+        let r = ProbeProgram::by_elf("assay_monitor_openat_exit").ok_or_else(unknown_probe)?;
+        if let Some(prog) = bpf.program_mut(r.elf_name) {
             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
                 tp.load()?;
-                match tp.attach("syscalls", "sys_exit_openat") {
+                match tp.attach(r.tp().0, r.tp().1) {
                     Ok(link_id) => {
                         if let Ok(link) = tp.take_link(link_id) {
-                            self.probe_attachment.attached("sys_exit_openat");
+                            self.probe_attachment.attached(r.surface_name);
                             self.links.push(MonitorLink::TracePoint(link));
                             println!("DEBUG: Attached Tracepoint sys_exit_openat");
                         }
                     }
                     Err(e) => {
-                        self.probe_attachment.skipped("sys_exit_openat");
+                        self.probe_attachment.skipped(r.surface_name);
                         eprintln!("WARN: Failed to attach sys_exit_openat: {}", e);
                     }
                 }
             }
         }
-        if let Some(prog) = bpf.program_mut("assay_monitor_openat2_exit") {
+        let r = ProbeProgram::by_elf("assay_monitor_openat2_exit").ok_or_else(unknown_probe)?;
+        if let Some(prog) = bpf.program_mut(r.elf_name) {
             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
                 tp.load()?;
-                match tp.attach("syscalls", "sys_exit_openat2") {
+                match tp.attach(r.tp().0, r.tp().1) {
                     Ok(link_id) => {
                         if let Ok(link) = tp.take_link(link_id) {
-                            self.probe_attachment.attached("sys_exit_openat2");
+                            self.probe_attachment.attached(r.surface_name);
                             self.links.push(MonitorLink::TracePoint(link));
                             println!("DEBUG: Attached Tracepoint sys_exit_openat2");
                         }
                     }
                     Err(e) => {
-                        self.probe_attachment.skipped("sys_exit_openat2");
+                        self.probe_attachment.skipped(r.surface_name);
                         eprintln!("WARN: Failed to attach sys_exit_openat2: {}", e);
                     }
                 }
             }
         }
-        if let Some(prog) = bpf.program_mut("assay_monitor_connect") {
+        let r = ProbeProgram::by_elf("assay_monitor_connect").ok_or_else(unknown_probe)?;
+        if let Some(prog) = bpf.program_mut(r.elf_name) {
             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
                 tp.load()?;
-                let link_id = tp.attach("syscalls", "sys_enter_connect")?;
+                let link_id = tp.attach(r.tp().0, r.tp().1)?;
                 let link = tp.take_link(link_id)?;
-                self.probe_attachment.attached("sys_enter_connect");
+                self.probe_attachment.attached(r.surface_name);
                 self.links.push(MonitorLink::TracePoint(link));
                 println!("DEBUG: Attached Tracepoint sys_enter_connect");
             }
         }
-        if let Some(prog) = bpf.program_mut("assay_monitor_fork") {
+        let r = ProbeProgram::by_elf("assay_monitor_fork").ok_or_else(unknown_probe)?;
+        if let Some(prog) = bpf.program_mut(r.elf_name) {
             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
                 tp.load()?;
-                match tp.attach("syscalls", "sys_enter_fork") {
+                match tp.attach(r.tp().0, r.tp().1) {
                     Ok(link_id) => {
                         if let Ok(link) = tp.take_link(link_id) {
-                            self.probe_attachment.attached("sys_enter_fork");
+                            self.probe_attachment.attached(r.surface_name);
                             self.links.push(MonitorLink::TracePoint(link));
                             println!("DEBUG: Attached Tracepoint sys_enter_fork");
                         }
                     }
                     Err(e) => {
-                        self.probe_attachment.skipped("sys_enter_fork");
+                        self.probe_attachment.skipped(r.surface_name);
                         eprintln!("WARN: Failed to attach sys_enter_fork: {}", e);
                     }
                 }
@@ -316,13 +332,14 @@ impl LinuxMonitor {
 
         // 2. LSM
         {
-            if let Some(prog) = bpf.program_mut("file_open_lsm") {
+            let r = ProbeProgram::by_elf("file_open_lsm").ok_or_else(unknown_probe)?;
+            if let Some(prog) = bpf.program_mut(r.elf_name) {
                 if let Ok(lsm) = TryInto::<&mut Lsm>::try_into(&mut *prog) {
                     let btf = Btf::from_sys_fs()?;
-                    lsm.load("file_open", &btf)?;
+                    lsm.load(r.lsm(), &btf)?;
                     let link_id = lsm.attach()?;
                     let link = lsm.take_link(link_id)?;
-                    self.probe_attachment.attached("lsm:file_open");
+                    self.probe_attachment.attached(r.surface_name);
                     self.links.push(MonitorLink::Lsm(link));
                     println!("DEBUG: Attached LSM file_open");
                 }
@@ -463,9 +480,10 @@ impl LinuxMonitor {
         let mut bpf = self.bpf.lock().unwrap();
         // Fail-closed. Inventory via connect4_update: missing→Unavailable, wrong-kind/load→Failed,
         // attach ENOENT/EOPNOTSUPP→Unsupported, other attach→Failed.
-        let Some(prog) = bpf.program_mut("connect4_hook") else {
+        let r = ProbeProgram::by_elf("connect4_hook").ok_or_else(unknown_probe)?;
+        let Some(prog) = bpf.program_mut(r.elf_name) else {
             self.probe_attachment.record_mode(
-                EGRESS_PEER_PROBE,
+                r.surface_name,
                 connect4_update(Connect4Fault::MissingProgram),
             );
             return Err(MonitorError::EnforcementUnavailable(
@@ -476,7 +494,7 @@ impl LinuxMonitor {
             Ok(csa) => csa,
             Err(e) => {
                 self.probe_attachment.record_mode(
-                    EGRESS_PEER_PROBE,
+                    r.surface_name,
                     connect4_update(Connect4Fault::WrongProgramKind),
                 );
                 return Err(MonitorError::EnforcementUnavailable(format!(
@@ -485,10 +503,8 @@ impl LinuxMonitor {
             }
         };
         if let Err(e) = csa.load() {
-            self.probe_attachment.record_mode(
-                EGRESS_PEER_PROBE,
-                connect4_update(Connect4Fault::LoadFailed),
-            );
+            self.probe_attachment
+                .record_mode(r.surface_name, connect4_update(Connect4Fault::LoadFailed));
             return Err(e.into());
         }
         let link_id = match csa.attach(cgroup_file, CgroupAttachMode::Single) {
@@ -496,7 +512,7 @@ impl LinuxMonitor {
             Err(e) => {
                 let lacks = attach_kernel_lacks_point(&e);
                 self.probe_attachment.record_mode(
-                    EGRESS_PEER_PROBE,
+                    r.surface_name,
                     connect4_update(Connect4Fault::AttachFailed {
                         kernel_lacks_point: lacks,
                     }),
@@ -506,13 +522,13 @@ impl LinuxMonitor {
         };
         let link = csa.take_link(link_id).inspect_err(|_| {
             self.probe_attachment.record_mode(
-                EGRESS_PEER_PROBE,
+                r.surface_name,
                 connect4_update(Connect4Fault::AttachFailed {
                     kernel_lacks_point: false,
                 }),
             );
         })?;
-        self.probe_attachment.attached(EGRESS_PEER_PROBE);
+        self.probe_attachment.attached(r.surface_name);
         self.links.push(MonitorLink::CgroupSockAddr(link));
         println!("DEBUG: Attached cgroup connect4 egress enforcement");
         Ok(())
