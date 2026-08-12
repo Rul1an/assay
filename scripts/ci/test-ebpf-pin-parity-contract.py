@@ -197,26 +197,35 @@ def assert_precommit_ownership() -> None:
     ok("pre-commit files: owns owners; broken grouping and .* go red")
 
 def main() -> None:
-    try:
-        extract_provisioning("no pins here\n", "synth")
-        fail("missing-pin synth stayed green")
-    except ContractError as exc:
-        if "missing toolchain" not in str(exc):
-            fail(f"missing synth wrong error: {exc}")
-    ok("synthetic missing toolchain is rejected")
-
-    ambiguous = (
-        "rustup toolchain install nightly-2026-01-01 --profile minimal\n"
-        "rustup toolchain install nightly-2099-01-01 --profile minimal\n"
-        "cargo install bpf-linker --version 0.10.3 --locked\n"
-    )
-    try:
-        extract_provisioning(ambiguous, "synth")
-        fail("ambiguous-pin synth stayed green")
-    except ContractError as exc:
-        if "ambiguous toolchain" not in str(exc):
-            fail(f"ambiguous synth wrong error: {exc}")
-    ok("synthetic ambiguous toolchain is rejected")
+    for label, text, needle in (
+        ("missing toolchain", "no pins here\n", "missing toolchain"),
+        (
+            "missing bpf-linker",
+            "rustup toolchain install nightly-2026-01-01 --profile minimal\n",
+            "missing bpf-linker",
+        ),
+        (
+            "ambiguous toolchain",
+            "rustup toolchain install nightly-2026-01-01 --profile minimal\n"
+            "rustup toolchain install nightly-2099-01-01 --profile minimal\n"
+            "cargo install bpf-linker --version 0.10.3 --locked\n",
+            "ambiguous toolchain",
+        ),
+        (
+            "ambiguous bpf-linker",
+            "rustup toolchain install nightly-2026-01-01 --profile minimal\n"
+            "cargo install bpf-linker --version 0.10.3 --locked\n"
+            "cargo install bpf-linker --version 9.9.9 --locked\n",
+            "ambiguous bpf-linker",
+        ),
+    ):
+        try:
+            extract_provisioning(text, "synth")
+            fail(f"{label} synth stayed green")
+        except ContractError as exc:
+            if needle not in str(exc):
+                fail(f"{label} synth wrong error: {exc}")
+        ok(f"synthetic {label} is rejected")
 
     try:
         toolchain, bpf_linker = check_parity(default_paths(ROOT))
@@ -226,17 +235,22 @@ def main() -> None:
 
     scratch = Path(tempfile.mkdtemp(prefix="ebpf-pin-parity-"))
     try:
+        fields = (
+            ("toolchain", toolchain, "nightly-2099-12-31"),
+            ("bpf-linker", bpf_linker, "9.9.9"),
+        )
         for cid, rel, _kind in CONSUMERS:
-            mutant_path = scratch / Path(rel).name
-            mutant_path.write_text(
-                mutate_first((ROOT / rel).read_text(encoding="utf-8"), toolchain, "nightly-2099-12-31", cid),
-                encoding="utf-8",
-            )
-            mutant_paths = default_paths(ROOT)
-            mutant_paths[cid] = mutant_path
-            msg = expect_red(mutant_paths, cid)
-            cls = next(k for k in ("divergent", "ambiguous", "missing") if k in msg)
-            ok(f"mutating {cid} toolchain pin turns red ({cls})")
+            src = (ROOT / rel).read_text(encoding="utf-8")
+            for field, old, new in fields:
+                mutant_path = scratch / f"{cid}-{field}-{Path(rel).name}"
+                mutant_path.write_text(
+                    mutate_first(src, old, new, cid), encoding="utf-8"
+                )
+                mutant_paths = default_paths(ROOT)
+                mutant_paths[cid] = mutant_path
+                msg = expect_red(mutant_paths, f"{cid}/{field}")
+                cls = next(k for k in ("divergent", "ambiguous", "missing") if k in msg)
+                ok(f"mutating {cid} {field} pin turns red ({cls})")
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
