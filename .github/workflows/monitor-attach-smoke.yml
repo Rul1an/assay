@@ -107,6 +107,13 @@ jobs:
         run: |
           cc -Wall -Werror -o "$RUNNER_TEMP/s1b-harness" scripts/ci/s1b-send-syscall-matrix.c
           "$RUNNER_TEMP/s1b-harness" --timeout-selftest
+          fifo="$RUNNER_TEMP/s1b-fifo-selftest"
+          rm -f "$fifo"
+          mkfifo "$fifo"
+          "$RUNNER_TEMP/s1b-harness" --fifo-selftest "$fifo"
+          rm -f "$fifo"
+          bash scripts/ci/run-send-syscall-matrix.sh cleanup-selftest
+          bash scripts/ci/run-send-syscall-matrix.sh mutation-selftest
 
       - name: Positive syscall/effect matrix
         if: ${{ github.event.inputs.proof_mode == 'send-matrix' }}
@@ -122,10 +129,21 @@ jobs:
           set -euo pipefail
           src=crates/assay-monitor/src/loader.rs
           bak="$RUNNER_TEMP/loader.rs.s1b.bak"
+          bin=target/release/assay
+          binbak="$RUNNER_TEMP/assay.s1b.bin.bak"
           cp "$src" "$bak"
-          restore() { cp "$bak" "$src"; rm -f "$bak"; }
+          cp "$bin" "$binbak"
+          restore() {
+            cp "$bak" "$src" || true
+            rm -f "$bin"
+            rm -f "$bak" "$binbak"
+            cargo build -p assay-cli --release || true
+          }
           trap restore EXIT
+          trap 'exit 143' TERM
+          trap 'exit 130' INT
           bash scripts/ci/run-send-syscall-matrix.sh disable-send-attach
           cargo build -p assay-cli --release
+          python3 -c 'import pathlib,sys; sys.exit(0 if b"s1b-cell7-disabled" in pathlib.Path("target/release/assay").read_bytes() else 1)'
           sudo -E env HARNESS_BIN="$RUNNER_TEMP/s1b-harness" WORKDIR="$RUNNER_TEMP/s1b-disabled" \
             bash scripts/ci/run-send-syscall-matrix.sh attach-disabled

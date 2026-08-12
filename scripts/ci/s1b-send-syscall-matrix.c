@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -9,6 +10,7 @@
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 
 #define MUST(c, m) \
@@ -20,6 +22,29 @@
 static int die(const char *msg) {
     perror(msg);
     return 1;
+}
+
+static int wait_readable(int fd, int timeout_ms) {
+    struct pollfd p = {.fd = fd, .events = POLLIN};
+    return poll(&p, 1, timeout_ms);
+}
+
+static int open_go_fifo(const char *path, int timeout_ms) {
+    int fd = open(path, O_RDONLY | O_NONBLOCK);
+    char x;
+    if (fd < 0) {
+        return -1;
+    }
+    if (wait_readable(fd, timeout_ms) <= 0) {
+        close(fd);
+        errno = ETIMEDOUT;
+        return -1;
+    }
+    if (read(fd, &x, 1) < 1) {
+        close(fd);
+        return -1;
+    }
+    return fd;
 }
 
 static int set_rcvtimeo(int fd) {
@@ -76,23 +101,39 @@ int main(int argc, char **argv) {
     unsigned char b;
     socklen_t ulen;
     int go, tcp_l, tcp_c, acc, r2, s2, r3, s3, fa, fb, ur, us, n;
-    char x;
 
     if (argc == 2 && strcmp(argv[1], "--timeout-selftest") == 0) {
         struct sockaddr_in a;
+        struct timespec t0, t1;
+        unsigned char g = 0;
+        ssize_t n;
+        long elapsed_ms;
         int fd = bound_inet(SOCK_DGRAM, &a);
-        MUST(fd >= 0 && recv_byte(fd, 0x00) != 0, "timeout selftest");
-        printf("TIMEOUT_OK\n");
+        MUST(fd >= 0, "timeout selftest bind");
+        MUST(clock_gettime(CLOCK_MONOTONIC, &t0) == 0, "clock start");
+        errno = 0;
+        n = recv(fd, &g, 1, 0);
+        MUST(clock_gettime(CLOCK_MONOTONIC, &t1) == 0, "clock end");
+        elapsed_ms = (t1.tv_sec - t0.tv_sec) * 1000L + (t1.tv_nsec - t0.tv_nsec) / 1000000L;
+        MUST(elapsed_ms >= 1500, "timeout selftest elapsed");
+        MUST(n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK), "timeout selftest errno");
+        printf("TIMEOUT_OK errno=%d elapsed_ms=%ld\n", errno, elapsed_ms);
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "--fifo-selftest") == 0) {
+        int fd = open_go_fifo(argv[2], 2000);
+        MUST(fd < 0, "fifo selftest should time out");
+        printf("FIFO_TIMEOUT_OK\n");
         return 0;
     }
     if (argc != 2) {
-        fprintf(stderr, "usage: %s GO_FIFO\n", argv[0]);
+        fprintf(stderr, "usage: %s GO_FIFO | --timeout-selftest | --fifo-selftest FIFO\n", argv[0]);
         return 2;
     }
     printf("HARNESS_PID=%d\n", getpid());
     fflush(stdout);
-    go = open(argv[1], O_RDONLY);
-    MUST(go >= 0 && read(go, &x, 1) >= 1, "GO fifo");
+    go = open_go_fifo(argv[1], 10000);
+    MUST(go >= 0, "GO fifo");
     close(go);
 
     tcp_l = bound_inet(SOCK_STREAM, &tcp_a);

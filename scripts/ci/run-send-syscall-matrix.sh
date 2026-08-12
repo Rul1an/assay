@@ -8,6 +8,8 @@ ASSAY_BIN="${ASSAY_BIN:-$ROOT/target/release/assay}"
 ASSAY_EBPF="${ASSAY_EBPF:-$ROOT/target/assay-ebpf.o}"
 HARNESS_BIN="${HARNESS_BIN:-}"
 WORKDIR="${WORKDIR:-${RUNNER_TEMP:-/tmp}/s1b-send-matrix}"
+MUTATION_OLD='attach_send_tracepoint(&mut bpf, r)'
+MUTATION_NEW='Err((SendFault::AttachFailed { kernel_lacks_point: false }, "s1b-cell7-disabled".to_string()))'
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -25,28 +27,59 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 send_debug() {
   grep -q "DEBUG: Attached Tracepoint sys_enter_sendto" "$LOG" ||
     grep -q "DEBUG: Attached Tracepoint sys_enter_sendmsg" "$LOG"
 }
 
-disable_send_attach() {
-  local src="$ROOT/crates/assay-monitor/src/loader.rs"
-  python3 - "$src" <<'PY'
+mutate_loader() {
+  local src="$1"
+  python3 - "$src" "$MUTATION_OLD" "$MUTATION_NEW" <<'PY'
 from pathlib import Path
 import sys
 p = Path(sys.argv[1])
-old = "attach_send_tracepoint(&mut bpf, r)"
-new = 'Err((SendFault::AttachFailed { kernel_lacks_point: false }, "s1b-cell7-disabled".into()))'
+old, new = sys.argv[2], sys.argv[3]
 t = p.read_text()
-if old not in t:
-    raise SystemExit("mutation target missing")
+n = t.count(old)
+if n != 1:
+    raise SystemExit(f"mutation target count {n}, want 1")
 p.write_text(t.replace(old, new, 1))
 PY
   grep -q 's1b-cell7-disabled' "$src" || fail "mutation marker missing"
-  grep -q 'attach_send_tracepoint(&mut bpf' "$src" && fail "send attach call site still present"
+  if grep -q 'attach_send_tracepoint(&mut bpf' "$src"; then
+    fail "send attach call site still present"
+  fi
+}
+
+disable_send_attach() {
+  mutate_loader "$ROOT/crates/assay-monitor/src/loader.rs"
   echo "ok: send attach call replaced; caller must restore loader.rs"
+}
+
+write_go() {
+  python3 - "$FIFO" <<'PY'
+import errno
+import os
+import sys
+import time
+
+path = sys.argv[1]
+deadline = time.time() + 10
+while time.time() < deadline:
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
+        os.write(fd, b"GO\n")
+        os.close(fd)
+        sys.exit(0)
+    except OSError as e:
+        if e.errno not in (errno.ENXIO, errno.EAGAIN, errno.EWOULDBLOCK):
+            raise
+        time.sleep(0.1)
+raise SystemExit("GO fifo write timeout")
+PY
 }
 
 wait_log() {
@@ -113,7 +146,7 @@ run_matrix() {
   fi
 
   kill -0 "$HARNESS_PID" 2>/dev/null || fail "harness died before GO"
-  echo GO >"$FIFO"
+  write_go
   wait "$HARNESS_PID" || hc=$?
   HARNESS_PID=""
   [[ "$hc" -eq 0 ]] || fail "harness exit $hc (receiver effect missing)"
@@ -149,18 +182,110 @@ run_matrix() {
     grep -q 'sendto emitted=1 dropped=0 no_peer=1 non_ip=1; sendmsg emitted=1 dropped=0 no_peer=1 non_ip=1' \
       <<<"$summary" || fail "exact send counts missing: $summary"
   else
-    send_debug && fail "send DEBUG attach lines present in attach-disabled run"
-    grep -Eq "\\[PID ${hpid}\\] send(to|msg):" "$LOG" &&
+    if send_debug; then
+      fail "send DEBUG attach lines present in attach-disabled run"
+    fi
+    if grep -Eq "\\[PID ${hpid}\\] send(to|msg):" "$LOG"; then
       fail "send endpoint lines present in attach-disabled run"
+    fi
     grep -q 'sendto emitted=0 dropped=0 no_peer=0 non_ip=0; sendmsg emitted=0 dropped=0 no_peer=0 non_ip=0' \
       <<<"$summary" || fail "attach-disabled send stats not all zero: $summary"
   fi
 
   grep 'Tracepoint ringbuf:' "$LOG" | grep -q 'dropped=0' \
     || fail "tracepoint drop field is not 0"
-  python3 -c 'import json,sys; c=json.load(open(sys.argv[1])).get("network_protocol_coverage");
-raise SystemExit(c) if c in ("datagram_peer_observed","connect_and_datagram_peer_observed") else print("ok: network_protocol_coverage="+str(c))' "$OH"
+  coverage_gate "$OH"
   echo "ok: $MODE matrix"
+}
+
+coverage_gate() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+
+c = json.load(open(sys.argv[1])).get("network_protocol_coverage")
+if c in ("connect_only", "absent"):
+    print("ok: network_protocol_coverage=" + str(c))
+    sys.exit(0)
+raise SystemExit("unexpected network_protocol_coverage=" + repr(c))
+PY
+}
+
+mutation_selftest() {
+  local src="$ROOT/crates/assay-monitor/src/loader.rs"
+  local orig work rustdir
+  orig=$(mktemp)
+  work=$(mktemp)
+  rustdir=$(mktemp -d)
+  cp "$src" "$orig"
+  cp "$src" "$work"
+  python3 - "$orig" "$MUTATION_OLD" <<'PY'
+import sys
+from pathlib import Path
+n = Path(sys.argv[1]).read_text().count(sys.argv[2])
+raise SystemExit(0 if n == 1 else f"original target count {n}, want 1")
+PY
+  mutate_loader "$work"
+  grep -q 's1b-cell7-disabled".to_string()' "$work" || fail "to_string mutant missing"
+  cp "$orig" "$work"
+  cmp -s "$orig" "$work" || fail "restore did not put original bytes back"
+  cat >"$rustdir/into.rs" <<'RS'
+#![allow(dead_code)]
+fn main() {
+    enum SendFault {
+        AttachFailed { kernel_lacks_point: bool },
+    }
+    struct TracePointLink;
+    match Err((
+        SendFault::AttachFailed {
+            kernel_lacks_point: false,
+        },
+        "s1b-cell7-disabled".into(),
+    )) {
+        Ok(link) => {
+            let _: TracePointLink = link;
+        }
+        Err((fault, detail)) => {
+            let _ = fault;
+            eprintln!("{}", detail);
+        }
+    }
+}
+RS
+  cat >"$rustdir/to_string.rs" <<'RS'
+#![allow(dead_code)]
+fn main() {
+    enum SendFault {
+        AttachFailed { kernel_lacks_point: bool },
+    }
+    struct TracePointLink;
+    match Err((
+        SendFault::AttachFailed {
+            kernel_lacks_point: false,
+        },
+        "s1b-cell7-disabled".to_string(),
+    )) {
+        Ok(link) => {
+            let _: TracePointLink = link;
+        }
+        Err((fault, detail)) => {
+            let _ = fault;
+            eprintln!("{}", detail);
+        }
+    }
+}
+RS
+  set +e
+  rustc --edition 2021 -o "$rustdir/into" "$rustdir/into.rs" 2>"$rustdir/into.err"
+  into_ec=$?
+  set -e
+  [[ "$into_ec" -ne 0 ]] || fail ".into() mutant type-checked; expected failure"
+  grep -q . "$rustdir/into.err" || fail ".into() rustc produced no error"
+  rustc --edition 2021 -o "$rustdir/to_string" "$rustdir/to_string.rs" \
+    || fail ".to_string() mutant failed to type-check"
+  rm -f "$orig" "$work"
+  rm -rf "$rustdir"
+  echo "ok: mutation uniqueness, restore, into-fails, to_string-compiles"
 }
 
 case "$MODE" in
@@ -170,11 +295,31 @@ case "$MODE" in
     run_matrix yes ;;
   attach-disabled)
     [[ -x "${HARNESS_BIN:-}" && -x "$ASSAY_BIN" && -f "$ASSAY_EBPF" ]] || fail "missing bin/object"
+    python3 -c 'import pathlib,sys; sys.exit(0 if b"s1b-cell7-disabled" in pathlib.Path(sys.argv[1]).read_bytes() else 1)' \
+      "$ASSAY_BIN" || fail "ASSAY_BIN is not the mutated rebuild (missing s1b-cell7-disabled)"
     run_matrix no ;;
   cleanup-selftest)
-    WORKDIR=$(mktemp -d); FIFO=$WORKDIR/go.fifo; mkfifo "$FIFO"
-    sleep 30 & MONITOR_PID=$!; sleep 30 & HARNESS_PID=$!
-    LEAF=$(mktemp -d); echo "$MONITOR_PID $HARNESS_PID $FIFO $LEAF"
-    fail "injected failure" ;;
-  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest" ;;
+    WORKDIR=$(mktemp -d)
+    FIFO=$WORKDIR/go.fifo
+    mkfifo "$FIFO"
+    sleep 30 &
+    MONITOR_PID=$!
+    sleep 30 &
+    HARNESS_PID=$!
+    LEAF=$(mktemp -d)
+    mp=$MONITOR_PID hp=$HARNESS_PID fifo=$FIFO leaf=$LEAF
+    cleanup
+    MONITOR_PID="" HARNESS_PID="" FIFO="" LEAF=""
+    if kill -0 "$mp" 2>/dev/null; then
+      fail "monitor pid $mp still alive"
+    fi
+    if kill -0 "$hp" 2>/dev/null; then
+      fail "harness pid $hp still alive"
+    fi
+    [[ ! -e "$fifo" ]] || fail "FIFO leftover $fifo"
+    [[ ! -d "$leaf" ]] || fail "leaf leftover $leaf"
+    echo "ok: cleanup-selftest" ;;
+  coverage-gate) coverage_gate "${2:?coverage-gate requires a JSON path}" ;;
+  mutation-selftest) mutation_selftest ;;
+  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|coverage-gate|mutation-selftest" ;;
 esac
