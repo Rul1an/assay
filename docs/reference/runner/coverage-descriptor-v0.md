@@ -70,14 +70,25 @@ must consult it before interpreting absence or exhaustiveness.
 | process | `process_exec_only()` | `exec_only` | fork/clone gaps that affect process-tree exhaustiveness |
 
 The seed descriptors intentionally describe the current capture ceiling.
-Future capture improvements can narrow or remove blind spots by changing
-descriptor data; until then, the gate must not silently upgrade claims.
 `network_for_protocol_coverage(status)` maps
 `observation_health.network_protocol_coverage` into the matching network
 descriptor when the run reported `connect_only`, `datagram_peer_observed`,
 or `connect_and_datagram_peer_observed`. `unknown` and `absent` return no
 descriptor, so coverage-aware network claims remain blocked rather than
 silently assuming a method.
+
+The datagram-aware helpers are real vocabulary for archives that already
+carry those coverage values. `assay_monitor_sendto` and
+`assay_monitor_sendmsg` are compiled into the release ELF and presently
+unattached (`Unsupported`). Runner archives from
+`assay runner-spike --kernel-capture` / `assay-runner-core`
+`network_protocol_coverage_for` are **count-derived**: `connect_emitted > 0`
+yields `connect_only` from always-attached `sys_enter_connect`, with **no**
+connect4 / network-policy requirement. Datagram labels require
+`sendto_emitted` or `sendmsg_emitted` > 0 and are unreachable there while
+those TPs stay unattached. CLI `assay monitor` `observation_health` is a
+**different** producer: **attach-derived** from cgroup `connect4`
+(network-policy path), otherwise `absent`, and does not emit datagram labels.
 
 ## Claim Kinds
 
@@ -167,7 +178,9 @@ the Runner archive contract is unchanged. This helper still does not:
 - add Trust Basis claims;
 - add capture enhancements for io_uring or fork/clone.
 
-Any consumer that mirrors the gate should preserve the same ceiling: datagram
-peer observations can strengthen positive network evidence, but they do not
-permit exact peer-set or bounded-negative network claims while blind spots
-remain declared.
+Any consumer that mirrors the gate should preserve the same ceiling: when a
+run actually carries datagram peer observations, those can strengthen
+positive network evidence, but they do not permit exact peer-set or
+bounded-negative network claims while blind spots remain declared. Those
+datagram observations are unreachable on `assay runner-spike --kernel-capture`
+/ `assay-runner-core` while the send TPs stay unattached.

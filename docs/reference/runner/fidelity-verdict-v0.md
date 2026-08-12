@@ -102,12 +102,27 @@ measured claims but blocks bounded negative claims.
 events were observed. A record with observed connect activity may instead
 declare `network_protocol_coverage = connect_only` and
 `network_endpoint_claim_scope = diagnostic_only`; downstream code must not
-stretch that into an exact QUIC/datagram peer-set claim. When Runner observes
-`sendto` or `sendmsg` destination sockaddr events it may upgrade
-`network_protocol_coverage` to `datagram_peer_observed` or
+stretch that into an exact QUIC/datagram peer-set claim. Archives that
+already carry `sendto` or `sendmsg` destination sockaddr events may report
+`network_protocol_coverage` as `datagram_peer_observed` or
 `connect_and_datagram_peer_observed`; that is a stronger transport signal,
 but still not a request-level or exact peer-set binding while
-`network_endpoint_claim_scope = diagnostic_only`. If network events may have
+`network_endpoint_claim_scope = diagnostic_only`.
+`assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
+release ELF and presently unattached (`Unsupported`). Two producers fill
+`network_protocol_coverage` and must not be collapsed:
+
+- Runner archives (`assay runner-spike --kernel-capture` /
+  `assay-runner-core` `network_protocol_coverage_for`) are **count-derived**.
+  `connect_emitted > 0` yields `connect_only` from always-attached
+  `sys_enter_connect`, with **no** connect4 / network-policy requirement.
+  Datagram upgrades require `sendto_emitted` or `sendmsg_emitted` > 0 and
+  are unreachable while those TPs stay unattached.
+- CLI `assay monitor` `observation_health` is **attach-derived** from
+  cgroup `connect4` (network-policy path): `connect_only` if that probe
+  attached, otherwise `absent`. It does not emit datagram labels.
+
+If network events may have
 been dropped before any network event was emitted, coverage is `unknown`.
 
 ## Composition With Projection `claim_level`
