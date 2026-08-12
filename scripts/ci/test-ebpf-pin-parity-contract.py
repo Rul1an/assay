@@ -144,6 +144,20 @@ def mutate_first(text: str, old: str, new: str, consumer: str) -> str:
     return out
 
 
+def _assert_files_regex_owns(rx: re.Pattern[str], label: str) -> None:
+    """Compile-time ownership: exact positives + one nearby non-owner negative."""
+    must_own = [rel for _cid, rel, _kind in CONSUMERS]
+    must_own.append("scripts/ci/test-ebpf-pin-parity-contract.py")
+    must_own.append(".pre-commit-config.yaml")
+    for path in must_own:
+        if rx.fullmatch(path) is None:
+            raise ContractError(f"{label}: must own {path!r}")
+    # Nearby non-owner: over-broad `.*` would match this and stay green otherwise.
+    non_owner = "scripts/ci/test-cargo-plugin-versions-contract.sh"
+    if rx.fullmatch(non_owner) is not None:
+        raise ContractError(f"{label}: must not own nearby non-owner {non_owner!r}")
+
+
 def assert_precommit_ownership() -> None:
     pc = PRECOMMIT.read_text(encoding="utf-8")
     if "id: ebpf-pin-parity-contract-self-test" not in pc:
@@ -155,20 +169,32 @@ def assert_precommit_ownership() -> None:
     )
     if not block_m:
         fail("ebpf-pin-parity-contract-self-test files: line missing")
-    files_pat = block_m.group(1)
-    for stem in (
-        "install-ebpf-toolchain",
-        "test-ebpf-pin-parity-contract",
-        "assay-xtask/src/main",
-        "setup\\.sh",
-        "cloud-init\\.yaml",
-        "Dockerfile\\.ebpf-builder",
-        "pre-commit-config",
+    files_pat = block_m.group(1).strip()
+    try:
+        rx = re.compile(files_pat)
+    except re.error as exc:
+        fail(f"files: regex does not compile: {exc}: {files_pat}")
+    try:
+        _assert_files_regex_owns(rx, "files")
+    except ContractError as exc:
+        fail(str(exc))
+    # Controls: root nested under scripts/ci/(...) fails; overbroad .* fails non-owner.
+    broken = (
+        r"^(scripts/ci/(install-ebpf-toolchain\.sh|test-ebpf-pin-parity-contract\.py|"
+        r"\.pre-commit-config\.yaml)|crates/assay-xtask/src/main\.rs|"
+        r"infra/bpf-runner/(setup\.sh|cloud-init\.yaml)|docker/Dockerfile\.ebpf-builder)$"
+    )
+    for label, pat, needle in (
+        ("broken-grouping", broken, ".pre-commit-config.yaml"),
+        ("overbroad", r".*", "must not own"),
     ):
-        if stem not in files_pat:
-            fail(f"files: must watch {stem!r}; got {files_pat}")
-    ok("pre-commit hook watches the five consumers and this test")
-
+        try:
+            _assert_files_regex_owns(re.compile(pat), label)
+            fail(f"{label} files: control left ownership green")
+        except ContractError as exc:
+            if needle not in str(exc):
+                fail(f"{label} control wrong error: {exc}")
+    ok("pre-commit files: owns owners; broken grouping and .* go red")
 
 def main() -> None:
     try:

@@ -427,7 +427,8 @@ repos:
         # CI-4E / #2225: parity fallback over five eBPF pin consumers. Canonical defaults live in
         # install-ebpf-toolchain.sh; missing/ambiguous/divergent pins fail. No shared manifest and
         # no upstream-availability claim.
-        files: ^(scripts/ci/(install-ebpf-toolchain\.sh|test-ebpf-pin-parity-contract\.py)|crates/assay-xtask/src/main\.rs|infra/bpf-runner/(setup\.sh|cloud-init\.yaml)|docker/Dockerfile\.ebpf-builder|\.pre-commit-config\.yaml)$
+        # Root .pre-commit-config.yaml is a top-level alternative (not under scripts/ci/).
+        files: ^(\.pre-commit-config\.yaml|scripts/ci/(install-ebpf-toolchain\.sh|test-ebpf-pin-parity-contract\.py)|crates/assay-xtask/src/main\.rs|infra/bpf-runner/(setup\.sh|cloud-init\.yaml)|docker/Dockerfile\.ebpf-builder)$
 
       - id: cargo-clippy
         name: cargo clippy (workspace, deny warnings)
