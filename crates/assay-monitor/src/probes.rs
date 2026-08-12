@@ -1,5 +1,5 @@
 //! Probe attachment + mode-aware inventory (`not_requested`≠`unavailable`≠`failed`≠`unsupported`).
-//! [`PROBE_PROGRAMS`] owns ELF names, surfaces, class, and attach spec; [`EXPECTED_PROBES`] is derived.
+//! `PROBE_PROGRAMS` owns ELF names, surfaces, class, and attach spec; [`EXPECTED_PROBES`] is derived.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProbeClass {
