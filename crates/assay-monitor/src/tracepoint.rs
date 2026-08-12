@@ -1,4 +1,10 @@
 use anyhow::{Context, Result};
+use assay_common::{
+    KEY_OFFSET_FILENAME, KEY_OFFSET_FILENAME_OPENAT2, KEY_OFFSET_FORK_CHILD,
+    KEY_OFFSET_FORK_PARENT, KEY_OFFSET_OPENAT2_HOW, KEY_OFFSET_OPENAT_FLAGS,
+    KEY_OFFSET_OPENAT_MODE, KEY_OFFSET_SENDMSG_MSGHDR, KEY_OFFSET_SENDTO_SOCKADDR,
+    KEY_OFFSET_SOCKADDR, KEY_OFFSET_SYSCALL_EXIT_RET,
+};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -12,60 +18,48 @@ impl TracepointResolver {
     pub fn resolve_default_offsets() -> HashMap<u32, u32> {
         let mut map = HashMap::new();
 
-        // Key 0: openat filename
-        // Key 1: connect sockaddr
-        // Key 2: fork parent
-        // Key 3: fork child
-        // Key 4: openat2 filename (SOTA)
-        // Key 5: openat flags
-        // Key 6: openat mode
-        // Key 7: openat2 how
-        // Key 8: syscall exit return value
-        // Key 11: sendto sockaddr
-        // Key 12: sendmsg msghdr
-
         let openat_fn = Self::find_offset("syscalls", "sys_enter_openat", "filename").unwrap_or(24);
-        map.insert(0, openat_fn);
+        map.insert(KEY_OFFSET_FILENAME, openat_fn);
 
         let connect_sa = Self::find_offset("syscalls", "sys_enter_connect", "uservaddr")
             .or_else(|_| Self::find_offset("syscalls", "sys_enter_connect", "addr"))
             .unwrap_or(24);
-        map.insert(1, connect_sa);
+        map.insert(KEY_OFFSET_SOCKADDR, connect_sa);
 
         let fork_parent =
             Self::find_offset("sched", "sched_process_fork", "parent_pid").unwrap_or(24);
-        map.insert(2, fork_parent);
+        map.insert(KEY_OFFSET_FORK_PARENT, fork_parent);
 
         let fork_child =
             Self::find_offset("sched", "sched_process_fork", "child_pid").unwrap_or(44);
-        map.insert(3, fork_child);
+        map.insert(KEY_OFFSET_FORK_CHILD, fork_child);
 
         let openat2_fn =
             Self::find_offset("syscalls", "sys_enter_openat2", "filename").unwrap_or(24);
-        map.insert(4, openat2_fn);
+        map.insert(KEY_OFFSET_FILENAME_OPENAT2, openat2_fn);
 
         let openat_flags = Self::find_offset("syscalls", "sys_enter_openat", "flags").unwrap_or(32);
-        map.insert(5, openat_flags);
+        map.insert(KEY_OFFSET_OPENAT_FLAGS, openat_flags);
 
         let openat_mode = Self::find_offset("syscalls", "sys_enter_openat", "mode").unwrap_or(40);
-        map.insert(6, openat_mode);
+        map.insert(KEY_OFFSET_OPENAT_MODE, openat_mode);
 
         let openat2_how = Self::find_offset("syscalls", "sys_enter_openat2", "how").unwrap_or(32);
-        map.insert(7, openat2_how);
+        map.insert(KEY_OFFSET_OPENAT2_HOW, openat2_how);
 
         let exit_ret = Self::find_offset("syscalls", "sys_exit_openat", "ret").unwrap_or(16);
-        map.insert(8, exit_ret);
+        map.insert(KEY_OFFSET_SYSCALL_EXIT_RET, exit_ret);
 
         let sendto_sa = Self::find_offset("syscalls", "sys_enter_sendto", "addr")
             .or_else(|_| Self::find_offset("syscalls", "sys_enter_sendto", "dest_addr"))
             .or_else(|_| Self::find_offset("syscalls", "sys_enter_sendto", "uservaddr"))
             .unwrap_or(48);
-        map.insert(11, sendto_sa);
+        map.insert(KEY_OFFSET_SENDTO_SOCKADDR, sendto_sa);
 
         let sendmsg_msg = Self::find_offset("syscalls", "sys_enter_sendmsg", "msg")
             .or_else(|_| Self::find_offset("syscalls", "sys_enter_sendmsg", "msg_ptr"))
             .unwrap_or(24);
-        map.insert(12, sendmsg_msg);
+        map.insert(KEY_OFFSET_SENDMSG_MSGHDR, sendmsg_msg);
 
         map
     }

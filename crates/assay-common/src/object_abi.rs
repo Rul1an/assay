@@ -12,6 +12,18 @@ macro_rules! define_monitor_config_keys {
 }
 
 define_monitor_config_keys! {
+    KEY_OFFSET_FILENAME = 0,
+    KEY_OFFSET_SOCKADDR = 1,
+    KEY_OFFSET_FORK_PARENT = 2,
+    KEY_OFFSET_FORK_CHILD = 3,
+    KEY_OFFSET_FILENAME_OPENAT2 = 4,
+    KEY_OFFSET_OPENAT_FLAGS = 5,
+    KEY_OFFSET_OPENAT_MODE = 6,
+    KEY_OFFSET_OPENAT2_HOW = 7,
+    KEY_OFFSET_SYSCALL_EXIT_RET = 8,
+    KEY_MAX_ANCESTOR_DEPTH = 10,
+    KEY_OFFSET_SENDTO_SOCKADDR = 11,
+    KEY_OFFSET_SENDMSG_MSGHDR = 12,
     KEY_MONITOR_ALL = 100,
     KEY_EMIT_INODE_RESOLVED = 101,
     /// Emit an observed-connect event for every ALLOWED connect, not just blocked ones.
@@ -55,19 +67,38 @@ pub const fn monitor_object_abi_digest() -> u32 {
 mod tests {
     use super::*;
 
-    /// Literals + independent golden digest; must fail on add/remove/rename/id/algorithm drift.
     #[test]
     fn exported_keys_and_descriptor_derive_together() {
         assert_eq!(MONITOR_CONFIG_KEYS, &[
+            ("KEY_OFFSET_FILENAME", 0),
+            ("KEY_OFFSET_SOCKADDR", 1),
+            ("KEY_OFFSET_FORK_PARENT", 2),
+            ("KEY_OFFSET_FORK_CHILD", 3),
+            ("KEY_OFFSET_FILENAME_OPENAT2", 4),
+            ("KEY_OFFSET_OPENAT_FLAGS", 5),
+            ("KEY_OFFSET_OPENAT_MODE", 6),
+            ("KEY_OFFSET_OPENAT2_HOW", 7),
+            ("KEY_OFFSET_SYSCALL_EXIT_RET", 8),
+            ("KEY_MAX_ANCESTOR_DEPTH", 10),
+            ("KEY_OFFSET_SENDTO_SOCKADDR", 11),
+            ("KEY_OFFSET_SENDMSG_MSGHDR", 12),
             ("KEY_MONITOR_ALL", 100),
             ("KEY_EMIT_INODE_RESOLVED", 101),
             ("KEY_EMIT_OBSERVED_CONNECT", 102),
             ("KEY_DEDUP_OPEN_PATHS", 103),
         ]);
         assert_eq!(
-            [KEY_MONITOR_ALL, KEY_EMIT_INODE_RESOLVED, KEY_EMIT_OBSERVED_CONNECT, KEY_DEDUP_OPEN_PATHS],
-            [100, 101, 102, 103],
+            [
+                KEY_OFFSET_FILENAME, KEY_OFFSET_SOCKADDR, KEY_OFFSET_FORK_PARENT,
+                KEY_OFFSET_FORK_CHILD, KEY_OFFSET_FILENAME_OPENAT2, KEY_OFFSET_OPENAT_FLAGS,
+                KEY_OFFSET_OPENAT_MODE, KEY_OFFSET_OPENAT2_HOW, KEY_OFFSET_SYSCALL_EXIT_RET,
+                KEY_MAX_ANCESTOR_DEPTH, KEY_OFFSET_SENDTO_SOCKADDR, KEY_OFFSET_SENDMSG_MSGHDR,
+                KEY_MONITOR_ALL, KEY_EMIT_INODE_RESOLVED, KEY_EMIT_OBSERVED_CONNECT,
+                KEY_DEDUP_OPEN_PATHS,
+            ],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 100, 101, 102, 103],
         );
-        assert_eq!(monitor_object_abi_digest(), 0x0736_2158);
+        // Independent golden over the full CONFIG identity table (names + LE ids).
+        assert_eq!(monitor_object_abi_digest(), 0x4db6_b07a);
     }
 }
