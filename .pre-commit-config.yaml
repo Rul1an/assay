@@ -374,6 +374,15 @@ repos:
         # deps-security's RUSTUP_TOOLCHAIN, and restoring the false "never compiles a crate" claim.
         # files: includes ci.yml so a workflow-only edit still runs this gate in Lint (pre-commit).
         files: ^(scripts/ci/(install-cargo-deny|test-deps-security-toolchain-contract)\.sh|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+
+      - id: cargo-plugin-versions-contract-self-test
+        name: cargo-plugin versions contract
+        entry: bash scripts/ci/test-cargo-plugin-versions-contract.sh
+        language: system
+        pass_filenames: false
+        # CI-4D1 / #2224: pin cargo-audit from one shared source. Mutations cover removing
+        # --version, restating the pin in the workflow, PATH decoys, and dropping source/assert.
+        files: ^(scripts/ci/(cargo-plugin-versions|test-cargo-plugin-versions-contract)\.sh|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
       - id: cargo-clippy
         name: cargo clippy (workspace, deny warnings)
         entry: scripts/precommit/cargo-clippy.sh
