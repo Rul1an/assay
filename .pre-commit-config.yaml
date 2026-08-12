@@ -418,6 +418,17 @@ repos:
         # cargo +toolchain install, PATH decoys, missing invocation toolchain binding, and
         # opt-in/opt-out skip semantics.
         files: ^(scripts/ci/(cargo-plugin-versions|test-optional-plugin-versions-contract|optional-public-api-drift|mutation-smoke-pure-modules)\.sh|\.pre-commit-config\.yaml)$
+
+      - id: ebpf-pin-parity-contract-self-test
+        name: eBPF pin parity contract
+        entry: python3 scripts/ci/test-ebpf-pin-parity-contract.py
+        language: system
+        pass_filenames: false
+        # CI-4E / #2225: parity fallback over five eBPF pin consumers. Canonical defaults live in
+        # install-ebpf-toolchain.sh; missing/ambiguous/divergent pins fail. No shared manifest and
+        # no upstream-availability claim.
+        files: ^(scripts/ci/(install-ebpf-toolchain\.sh|test-ebpf-pin-parity-contract\.py)|crates/assay-xtask/src/main\.rs|infra/bpf-runner/(setup\.sh|cloud-init\.yaml)|docker/Dockerfile\.ebpf-builder|\.pre-commit-config\.yaml)$
+
       - id: cargo-clippy
         name: cargo clippy (workspace, deny warnings)
         entry: scripts/precommit/cargo-clippy.sh
