@@ -97,18 +97,10 @@ claims yet, so every exhaustive set degrades and every bounded-negative claim
 blocks under the current seeds. That is the point: the gate must not silently
 upgrade a claim the method cannot back.
 
-On one measured host (`assay-bpf-runner`, kernel `6.8.0-137-generic`, aarch64,
-checkout
-[`886ebce908401cb0a49502e7c7515f85fc9ceebd`](https://github.com/Rul1an/assay/commit/886ebce908401cb0a49502e7c7515f85fc9ceebd)),
-`IORING_OP_CONNECT` to `127.0.0.1:9101` was invisible to `sys_enter_connect` and
-visible to attached cgroup `connect4` (blocked only in the deny cell for that
-port). Do not read Runner `connect_only` as a connect4 requirement, and do not
-read CLI `observation_health` as count-derived. `connect6_hook` is
-compiled-but-unattached IPv6 **enforcement**; `sys_enter_connect` observing
-`AF_INET6` is not an IPv6 enforcement claim. Network endpoints /
-`observed_peers` are diagnostic and not exhaustive. io_uring `SEND` / `SENDMSG`
-was not measured. Monitor artifact `run_id` pairing remains
-[#2342](https://github.com/Rul1an/assay/issues/2342).
+Do not read Runner `connect_only` as a connect4 requirement, and do not read
+CLI `observation_health` as count-derived. The measured cell that shows why
+those producers must stay separate is
+[runtime-monitor: Measured IORING_OP_CONNECT](../../guides/runtime-monitor.md#measured-ioring-op-connect).
 
 ## Composition order
 
@@ -177,6 +169,7 @@ blocked negatives stay blocked, because gate two never permitted them.
 - The example mirrors the canonical Rust gate in
   `crates/assay-runner-schema/src/coverage.rs`; the Rust helper remains
   the source of truth if the two ever diverge.
-- One-host `IORING_OP_CONNECT` measurement does not generalize kernels,
-  attach send probes, or fix monitor `run_id` pairing
-  ([#2342](https://github.com/Rul1an/assay/issues/2342)).
+- The measured cell linked from
+  [runtime-monitor](../../guides/runtime-monitor.md#measured-ioring-op-connect)
+  does not generalize kernels, attach send probes, or fix monitor `run_id`
+  pairing ([#2342](https://github.com/Rul1an/assay/issues/2342)).

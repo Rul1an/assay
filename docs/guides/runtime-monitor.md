@@ -51,7 +51,11 @@ their IPv4 subset. `connect6_hook` is compiled into the release ELF and presentl
 DNS resolution, already-open sockets, raw sockets, and
 proxy/tunnel identity remain outside the enforcement claim tracked in issue #1576.
 
-### Measured `IORING_OP_CONNECT` (one host)
+<a id="measured-ioring-op-connect"></a>
+### Measured IORING_OP_CONNECT (one host)
+
+This section is the canonical public record of the measured cell. Other pages
+link here rather than restating host, kernel, SHA, or ports.
 
 On one measured host — `assay-bpf-runner`, Ubuntu 24.04, kernel `6.8.0-137-generic`, aarch64,
 Assay checkout [`886ebce908401cb0a49502e7c7515f85fc9ceebd`](https://github.com/Rul1an/assay/commit/886ebce908401cb0a49502e7c7515f85fc9ceebd)

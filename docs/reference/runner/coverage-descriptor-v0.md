@@ -90,21 +90,12 @@ those TPs stay unattached. CLI `assay monitor` `observation_health` is a
 **different** producer: **attach-derived** from cgroup `connect4`
 (network-policy path), otherwise `absent`, and does not emit datagram labels.
 
-On one measured host (`assay-bpf-runner`, Ubuntu 24.04, kernel `6.8.0-137-generic`,
-aarch64, checkout
-[`886ebce908401cb0a49502e7c7515f85fc9ceebd`](https://github.com/Rul1an/assay/commit/886ebce908401cb0a49502e7c7515f85fc9ceebd)),
-`IORING_OP_CONNECT` to `127.0.0.1:9101` produced **no** `sys_enter_connect` event
-while attached cgroup `connect4` **did** observe that destination (and blocked it
-when `:9101` was denied). That split is why the two producers must stay separate:
-Runner `connect_only` does **not** require connect4, and CLI `connect_only` is not
-count-derived. The seed `known_blind_spots` text "io_uring network operations"
-names the syscall-tracepoint ceiling used by the Runner helper; it is not a claim
-that connect4 was also blind on that host. The measurement is one kernel and
-architecture. `connect6_hook` remains compiled-but-unattached **enforcement**;
-`sys_enter_connect` can observe `AF_INET6` and that is not an IPv6 enforcement
-claim. `observed_peers` / network endpoints remain diagnostic and not exhaustive.
-Monitor artifact `run_id` pairing is [#2342](https://github.com/Rul1an/assay/issues/2342)
-and is not fixed here.
+The seed `known_blind_spots` text "io_uring network operations" names the
+syscall-tracepoint ceiling used by the Runner helper; it is not a claim that
+connect4 was also blind. Runner `connect_only` does **not** require connect4,
+and CLI `connect_only` is not count-derived. The measured cell that
+demonstrates that split is
+[runtime-monitor: Measured IORING_OP_CONNECT](../../guides/runtime-monitor.md#measured-ioring-op-connect).
 
 ## Claim Kinds
 
@@ -181,10 +172,10 @@ Initial rules:
   capture into an exact peer set.
 - The descriptor does not make self-reported SDK or trace evidence
   measured.
-- A measured `IORING_OP_CONNECT` cell on one Linux 6.8/aarch64 host does not
-  generalize the seed blind-spot text, require connect4 for Runner
-  `connect_only`, or fix monitor `run_id` pairing
-  ([#2342](https://github.com/Rul1an/assay/issues/2342)).
+- The descriptor does not generalize the measured cell, require connect4
+  for Runner `connect_only`, or fix monitor `run_id` pairing
+  ([#2342](https://github.com/Rul1an/assay/issues/2342)). See
+  [runtime-monitor](../../guides/runtime-monitor.md#measured-ioring-op-connect).
 
 ## Wiring Status
 

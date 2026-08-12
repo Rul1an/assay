@@ -251,7 +251,9 @@ Interpretation rules:
   path, with **no** connect4 / network-policy requirement. CLI
   `assay monitor` `observation_health` is a **different** producer:
   **attach-derived** from cgroup `connect4` (network-policy path),
-  otherwise `absent`.
+  otherwise `absent`. The measured cell that shows why those producers must
+  stay distinct is
+  [runtime-monitor: Measured IORING_OP_CONNECT](../../guides/runtime-monitor.md#measured-ioring-op-connect).
 - `network_protocol_coverage=datagram_peer_observed` means Runner observed
   datagram peer evidence from `sendto` or `sendmsg`, without a matching
   `connect()` event in the same capture window. Those counts require

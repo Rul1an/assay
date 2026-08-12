@@ -123,14 +123,11 @@ release ELF and presently unattached (`Unsupported`). Two producers fill
   attached, otherwise `absent`. It does not emit datagram labels.
 
 `network_endpoint_claim_scope = diagnostic_only` remains a non-exhaustive,
-connect-time bound: it is not an exact peer set. On one measured host
-(`assay-bpf-runner`, kernel `6.8.0-137-generic`, aarch64, checkout
-[`886ebce908401cb0a49502e7c7515f85fc9ceebd`](https://github.com/Rul1an/assay/commit/886ebce908401cb0a49502e7c7515f85fc9ceebd)),
-`IORING_OP_CONNECT` was invisible to `sys_enter_connect` and visible to
-attached connect4 (blocked only in the deny cell for `:9101`). That does not
-make Runner `connect_only` a connect4 requirement. CLI monitor artifact
-`run_id` pairing remains [#2342](https://github.com/Rul1an/assay/issues/2342)
-and is not fixed here.
+connect-time bound: it is not an exact peer set. That bound does not make
+Runner `connect_only` a connect4 requirement. The measured cell is
+[runtime-monitor: Measured IORING_OP_CONNECT](../../guides/runtime-monitor.md#measured-ioring-op-connect).
+CLI monitor artifact `run_id` pairing remains
+[#2342](https://github.com/Rul1an/assay/issues/2342) and is not fixed here.
 
 If network events may have
 been dropped before any network event was emitted, coverage is `unknown`.
