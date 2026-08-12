@@ -280,6 +280,15 @@ repos:
         pass_filenames: false
         files: ^(scripts/ci/test-ci-gate-expectations\.sh|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
 
+      - id: ci-job-timeouts-contract-self-test
+        name: CI job timeout-minutes contract
+        entry: bash scripts/ci/test-ci-job-timeouts-contract.sh --self-test
+        language: system
+        pass_filenames: false
+        # Pins every ci.yml job's timeout class (#2244 / CI-5B). Missing ceilings inherit GitHub's
+        # 360-minute default; this hook rejects that, wrong classes, and eBPF drift.
+        files: ^(scripts/ci/test-ci-job-timeouts-contract\.sh|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+
       - id: ci-gate-coverage
         name: Required CI gate waits on every gating job
         entry: bash -c 'python3 scripts/ci/check-ci-gate-coverage.py --self-test && python3 scripts/ci/check-ci-gate-coverage.py'
