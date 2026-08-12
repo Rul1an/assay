@@ -10,6 +10,7 @@ than for a missing file or a vacuous assertion.
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -143,6 +144,79 @@ class CheckRsaAdvisoryRemovedTests(unittest.TestCase):
             f"{MODULE.ADVISORY_ID} exceptions are removed:\n"
             f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}",
         )
+
+    def test_cli_rejects_metadata_file_argv_and_does_not_read_path(self) -> None:
+        """CLI must reject path argv; arbitrary paths must not be opened/read."""
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = Path(tmp) / "must_not_be_read.json"
+            # If the CLI still opened this path, evaluate would report rsa from it.
+            probe.write_text(json.dumps(metadata_with_rsa()), encoding="utf-8")
+            before = probe.read_text(encoding="utf-8")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(MODULE_PATH),
+                    "--metadata-file",
+                    str(probe),
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            after = probe.read_text(encoding="utf-8")
+            self.assertEqual(before, after, "argv path contents must be untouched")
+            self.assertNotEqual(proc.returncode, 0, proc.stderr)
+            err = proc.stderr
+            self.assertRegex(
+                err,
+                r"(?i)unexpected|unsupported|unknown|reject",
+                msg=f"must reject argv path surface, got:\n{err}",
+            )
+            self.assertNotIn(
+                "rsa 0.9.10",
+                err,
+                "failure must not come from reading the argv path as metadata",
+            )
+
+    def test_cli_rejects_unexpected_args(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(MODULE_PATH), "--not-a-real-flag"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(proc.returncode, 0, proc.stderr)
+        self.assertRegex(proc.stderr, r"(?i)unexpected|unsupported|unknown|reject")
+
+    def test_cli_accepts_metadata_on_stdin(self) -> None:
+        """Stdin metadata injection remains the supported non-live path."""
+        # Clean metadata + live clean policy sites → PASS.
+        proc = subprocess.run(
+            [sys.executable, str(MODULE_PATH)],
+            cwd=REPO_ROOT,
+            input=json.dumps(metadata_without_rsa()),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            proc.returncode,
+            0,
+            f"stdin clean metadata must pass:\n{proc.stdout}\n{proc.stderr}",
+        )
+        # rsa on stdin must still fail closed on the package property.
+        bad = subprocess.run(
+            [sys.executable, str(MODULE_PATH)],
+            cwd=REPO_ROOT,
+            input=json.dumps(metadata_with_rsa()),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(bad.returncode, 1, bad.stderr)
+        self.assertIn("package named rsa", bad.stderr)
 
 
 if __name__ == "__main__":

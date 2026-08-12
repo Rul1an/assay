@@ -99,11 +99,17 @@ def evaluate(root: Path, metadata: dict) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    if args:
+        # No argv path surface: metadata arrives on stdin or from cargo metadata.
+        print(
+            "FAIL: unexpected arguments "
+            f"{args!r}; pass metadata JSON on stdin or run with no args",
+            file=sys.stderr,
+        )
+        return 2
     root = repo_root()
     raw: str | None = None
-    if args and args[0] == "--metadata-file":
-        raw = Path(args[1]).read_text(encoding="utf-8")
-    elif not sys.stdin.isatty():
+    if not sys.stdin.isatty():
         stdin = sys.stdin.read()
         if stdin.strip():
             raw = stdin
