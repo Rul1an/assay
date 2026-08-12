@@ -342,15 +342,12 @@ repos:
         # job now sets RUSTUP_TOOLCHAIN for every step, but a hook runs on a developer machine where
         # nothing does, so this site was the one left uncovered (#2237). The two hooks answered the
         # same question differently, which is how the answer drifts.
-        # Keep the ignore list in lockstep with the three peer locations that carry it:
+        # Keep any ignore list in lockstep with the three peer locations that carry it:
         # deny.toml, .github/workflows/ci.yml and .cargo/audit.toml. Naming all of them matters —
-        # an incomplete peer list is how this hook drifted in the first place.
-        # Only RUSTSEC-2023-0071 (rsa Marvin Attack, reached via jsonwebtoken) still matches a
-        # crate in the tree and has no fixed release. The pyo3 pair (RUSTSEC-2026-0176/0177) was
-        # retired by the pyo3 0.29 migration (#1651) and the quick-xml pair
-        # (RUSTSEC-2026-0194/0195) by object_store 0.14.1; both were left here after they stopped
-        # matching anything, which is what let the list drift out of lockstep.
-        entry: bash -lc 'cargo-audit audit --ignore RUSTSEC-2023-0071'
+        # an incomplete peer list is how this hook drifted in the first place. The list is empty
+        # after CI-4C (#2231) removed the last matching exception; do not reintroduce ignores here
+        # without updating those peers and the rsa-removal contract check.
+        entry: bash -lc 'cargo-audit audit'
         language: system
         pass_filenames: false
         files: ^Cargo\.lock$
