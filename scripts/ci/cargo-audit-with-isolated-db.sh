@@ -9,8 +9,8 @@
 # specific path (tests, or an operator-chosen cache).
 #
 # Bash 3.2 compatible (macOS /bin/bash). Source-safe: sourcing defines helpers
-# only; executing runs the audit.
-set -euo pipefail
+# only and must not change the caller's shell options; executing enables
+# strict mode then runs the audit.
 
 # Resolve the advisory DB path. Prefer an explicit override; otherwise a bounded
 # assay-owned leaf under CARGO_HOME (outside any worktree). Fall back to TMPDIR
@@ -40,6 +40,9 @@ run_cargo_audit_with_isolated_db() {
   exec cargo-audit audit --db "${db}" "$@"
 }
 
+# Strict mode belongs to execution only. A top-level `set -euo pipefail` would
+# mutate a caller's options on `source` and break source-safety.
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  set -euo pipefail
   run_cargo_audit_with_isolated_db "$@"
 fi
