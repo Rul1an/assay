@@ -183,12 +183,17 @@ jobs:
       - name: Install cargo-deny
         run: ./scripts/ci/install-cargo-deny.sh
       - name: Install cargo-audit
-        # Version deliberately unpinned, unlike the sibling install two lines up. An advisory scanner
-        # is the one tool where floating is arguably right: a pinned scanner stops learning about new
-        # advisories, so the pin would age into a silent gap rather than a loud failure. Stated here
-        # because an unexplained asymmetry beside a pinned sibling reads as an oversight, and #2237
-        # holds the question of whether this reasoning survives scrutiny.
-        run: cargo install --locked cargo-audit
+        # Pin lives in scripts/ci/cargo-plugin-versions.sh (shared owner for later CI-4D2/3 plugins).
+        # Advisory freshness comes from refreshing the advisory DB in the audit steps below, not from
+        # resolving a new scanner binary on every run (#2224 / CI-4D1). `--locked` alone is not a pin:
+        # it locks cargo-audit's own dependencies from its published lockfile, not the tool version.
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/ci/cargo-plugin-versions.sh
+          source ./scripts/ci/cargo-plugin-versions.sh
+          echo "installing cargo-audit ${CARGO_AUDIT_VERSION}"
+          cargo install --locked --version "${CARGO_AUDIT_VERSION}" cargo-audit
+          assert_cargo_plugin_version cargo-audit "${CARGO_AUDIT_VERSION}"
       - name: Check Aya/eBPF dependency alignment
         run: ./scripts/ci/check-aya-ebpf-alignment.sh
       - name: cargo deny (advisories, licenses, bans, sources)
