@@ -204,9 +204,10 @@ jobs:
         # install asserted.
         run: cargo-deny check advisories bans licenses sources
       - name: cargo audit (RustSec)
-        run: |
-          rm -rf ~/.cargo/advisory-db
-          cargo-audit audit
+        # CI-4F / #2188: isolate cargo-audit's advisory DB from cargo-deny's plural root.
+        # Same runner as the pre-push hook and the fuzz audit below; do not restore
+        # `rm -rf ~/.cargo/advisory-db` — that deletes a shared global cache.
+        run: bash scripts/ci/cargo-audit-with-isolated-db.sh
       - name: rsa advisory-removal contract
         # CI-4C (#2231): rsa must stay out of the resolved tree, and the four ignore sites
         # (deny.toml, .cargo/audit.toml, this workflow, .pre-commit-config.yaml) must not
@@ -233,7 +234,8 @@ jobs:
           # repo cwd. That would defeat the reason this step exists. An advisory that matches only
           # the fuzz tree is then a deliberate decision, not a silent pass; there is nowhere for it
           # to be quietly excused, which is the point.
-          ( cd "${RUNNER_TEMP}" && cargo-audit audit --file "${GITHUB_WORKSPACE}/fuzz/Cargo.lock" )
+          # Same isolated-db runner as the root audit / pre-push hook (CI-4F / #2188).
+          ( cd "${RUNNER_TEMP}" && bash "${GITHUB_WORKSPACE}/scripts/ci/cargo-audit-with-isolated-db.sh" --file "${GITHUB_WORKSPACE}/fuzz/Cargo.lock" )
 
   clippy:
     name: Clippy (deny warnings)
@@ -788,7 +790,6 @@ jobs:
     concurrency:
       group: assay-bpf-runner-host
       cancel-in-progress: false
-      queue: max
     permissions:
       contents: read
     # Self-hosted runner has Rust in /opt/rust; jobs run with --noprofile so PATH can be minimal.

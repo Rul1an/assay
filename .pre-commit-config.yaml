@@ -131,17 +131,17 @@ repos:
         entry: bash -c 'python3 scripts/ci/test-agent-golden-path-skill.py && python3 scripts/ci/test-golden-path-mock-bounds.py'
         language: system
         pass_filenames: false
-        files: ^(scripts/docs/generate-agent-golden-path\.py|scripts/ci/(test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|test-golden-path-mock-bounds\.py)|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$
+        files: ^(scripts/docs/generate-agent-golden-path\.py|scripts/ci/(test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|test-golden-path-mock-bounds\.py|lib/golden-path-fixture-staging\.sh)|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$
 
       - id: agent-golden-path-skill-mutations
         name: Agent golden-path skill mutations
         entry: bash -c 'bash scripts/ci/test-agent-golden-path-skill-optimization.sh && bash scripts/ci/test-agent-golden-path-skill-hardening.sh'
         language: system
         pass_filenames: false
-        # The 86 mutation cases prove the validator has teeth, but their cost belongs
+        # The 92 mutation cases prove the validator has teeth, but their cost belongs
         # at the publish boundary rather than in every intermediate commit.
         stages: [pre-push]
-        files: ^(scripts/docs/generate-agent-golden-path\.py|scripts/ci/(test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|test-golden-path-mock-bounds\.py)|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$
+        files: ^(scripts/docs/generate-agent-golden-path\.py|scripts/ci/(test-agent-golden-path-skill(-(optimization|hardening)\.sh|\.py)|test-golden-path-mock-bounds\.py|lib/golden-path-fixture-staging\.sh)|docs/generated/agent-golden-path\.json|docs/guides/agent-golden-path\.md|\.(agents|claude)/skills/assay-golden-path/SKILL\.md|\.claude-plugin/.*|packaging/claude-plugin/.*|\.github/workflows/kernel-matrix\.yml|\.gitignore|\.gitattributes|\.pre-commit-config\.yaml)$
 
       - id: claude-plugin-install-workflow-self-test
         name: Claude plugin install workflow self-test
@@ -348,21 +348,30 @@ repos:
 
       - id: cargo-audit
         name: cargo audit (RustSec)
-        # `cargo-audit audit` rather than `cargo audit`, for the reason the neighbouring cargo-deny
-        # hook states: through cargo the toolchain resolves from rust-toolchain.toml. CI's dependency
-        # job now sets RUSTUP_TOOLCHAIN for every step, but a hook runs on a developer machine where
-        # nothing does, so this site was the one left uncovered (#2237). The two hooks answered the
-        # same question differently, which is how the answer drifts.
+        # Isolated advisory DB via scripts/ci/cargo-audit-with-isolated-db.sh (CI-4F / #2188).
+        # Same runner as both CI cargo-audit steps; do not call bare `cargo-audit audit` here.
+        # The runner invokes `cargo-audit audit` (not `cargo audit`) so rust-toolchain.toml
+        # resolution does not select a toolchain the developer never installed (#2237).
         # Keep any ignore list in lockstep with the three peer locations that carry it:
         # deny.toml, .github/workflows/ci.yml and .cargo/audit.toml. Naming all of them matters —
         # an incomplete peer list is how this hook drifted in the first place. The list is empty
         # after CI-4C (#2231) removed the last matching exception; do not reintroduce ignores here
         # without updating those peers and the rsa-removal contract check.
-        entry: bash -lc 'cargo-audit audit'
+        entry: bash scripts/ci/cargo-audit-with-isolated-db.sh
         language: system
         pass_filenames: false
         files: ^Cargo\.lock$
         stages: [pre-push]
+
+      - id: cargo-audit-isolated-db-self-test
+        name: cargo-audit isolated advisory DB
+        entry: bash scripts/ci/test-cargo-audit-with-isolated-db.sh
+        language: system
+        pass_filenames: false
+        # CI-4F / #2188: one runner for hook + both CI audits; deny.toml plural root;
+        # no global rm -rf of ~/.cargo/advisory-db. Mutations cover stripping --db,
+        # restoring the shared singular deny path, restoring rm -rf, and bare-audit bypass.
+        files: ^(scripts/ci/(cargo-audit-with-isolated-db|test-cargo-audit-with-isolated-db)\.sh|deny\.toml|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
 
       - id: install-cargo-deny-self-test
         name: cargo-deny install pin self-test

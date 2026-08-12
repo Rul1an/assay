@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/ci/lib/golden-path-fixture-staging.sh
+source "$SCRIPT_DIR/lib/golden-path-fixture-staging.sh"
+
 ROOT="$(git rev-parse --show-toplevel)"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
 # PR B adds discoverability, cwd wording, and issue-reference hardening cases to
 # the 58-case durability boundary established by PR B0.
-EXPECTED_CASES=86
+# CI-5C (#2196): +3 skill generator-destination omissions and +3 packaged-resource
+# destination drifts beyond the original baseline-only packaged drift case.
+EXPECTED_CASES=92
 # Parser-layer follow-ups stay outside the approved cumulative case chain. The
 # 22 probes are 4 workflow-key, 1 stages-key, 14 selector, 1 trigger-mode, and
 # 2 inline-parser checks; pin them so deletion cannot leave the cumulative total green.
@@ -90,55 +96,52 @@ case_git() {
 
 seed_case() {
   local case_root="$1"
+  stage_golden_path_fixtures "$case_root" "$ROOT"
   mkdir -p \
-    "$case_root/scripts/ci" \
-    "$case_root/scripts/docs" \
-    "$case_root/docs/generated" \
     "$case_root/docs/guides" \
-    "$case_root/examples/privileged-action-gate/policies" \
-    "$case_root/.agents/skills/assay-golden-path" \
-    "$case_root/.claude/skills/assay-golden-path" \
-    "$case_root/.claude-plugin" \
-    "$case_root/packaging/claude-plugin/.claude-plugin" \
-    "$case_root/packaging/claude-plugin/skills/assay-golden-path/references" \
-    "$case_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies" \
     "$case_root/.github/workflows"
-  cp "$ROOT/scripts/ci/test-agent-golden-path-skill.py" "$case_root/scripts/ci/"
-  cp "$ROOT/scripts/docs/generate-agent-golden-path.py" "$case_root/scripts/docs/"
-  cp "$ROOT/.gitignore" "$case_root/"
-  cp "$ROOT/.gitattributes" "$case_root/"
-  cp "$ROOT/.mcp.json" "$case_root/"
   cp "$ROOT/.pre-commit-config.yaml" "$case_root/"
-  cp "$ROOT/docs/generated/agent-golden-path.json" "$case_root/docs/generated/"
   cp "$ROOT/docs/guides/agent-golden-path.md" "$case_root/docs/guides/"
-  cp "$ROOT/examples/privileged-action-gate/mock_github_mcp.py" \
-    "$case_root/examples/privileged-action-gate/"
-  cp "$ROOT/examples/privileged-action-gate/baseline-approved.json" \
-    "$case_root/examples/privileged-action-gate/"
-  cp "$ROOT/examples/privileged-action-gate/policies/no-allowance.yaml" \
-    "$case_root/examples/privileged-action-gate/policies/"
-  cp "$ROOT/.agents/skills/assay-golden-path/SKILL.md" \
-    "$case_root/.agents/skills/assay-golden-path/"
-  cp "$ROOT/.claude/skills/assay-golden-path/SKILL.md" \
-    "$case_root/.claude/skills/assay-golden-path/"
-  cp "$ROOT/.claude-plugin/marketplace.json" "$case_root/.claude-plugin/"
-  cp "$ROOT/packaging/claude-plugin/.claude-plugin/plugin.json" \
-    "$case_root/packaging/claude-plugin/.claude-plugin/"
-  cp "$ROOT/packaging/claude-plugin/.mcp.json" "$case_root/packaging/claude-plugin/"
-  cp "$ROOT/packaging/claude-plugin/skills/assay-golden-path/SKILL.md" \
-    "$case_root/packaging/claude-plugin/skills/assay-golden-path/"
-  cp "$ROOT/packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json" \
-    "$case_root/packaging/claude-plugin/skills/assay-golden-path/references/"
-  cp "$ROOT/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/mock_github_mcp.py" \
-    "$case_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/"
-  cp "$ROOT/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json" \
-    "$case_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/"
-  cp "$ROOT/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml" \
-    "$case_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/"
   cp "$ROOT/.github/workflows/kernel-matrix.yml" "$case_root/.github/workflows/"
   case_git "$case_root" -c init.defaultBranch=main init -q
   case_git "$case_root" -c core.excludesFile= -c core.attributesFile= \
     add -f -- .
+}
+
+remove_generator_destination() {
+  local case_root="$1" destination="$2"
+  CASE_ROOT="$case_root" DESTINATION="$destination" python3 - <<'PY'
+from pathlib import Path
+import os
+
+path = Path(os.environ["CASE_ROOT"]) / "scripts/docs/generate-agent-golden-path.py"
+line = f'    ROOT / "{os.environ["DESTINATION"]}",\n'
+text = path.read_text(encoding="utf-8")
+if text.count(line) != 1:
+    raise SystemExit(f"generator destination is not unique: {line!r}")
+path.write_text(text.replace(line, "", 1), encoding="utf-8")
+PY
+}
+
+expect_generator_omits_destination() {
+  local name="$1" case_root="$2" destination="$3" expected="$4"
+  local output="$case_root/generator.log"
+  remove_generator_destination "$case_root" "$destination"
+  rm -f -- "$case_root/$destination"
+  if ! (cd "$case_root" && python3 scripts/docs/generate-agent-golden-path.py) \
+    >"$output" 2>&1
+  then
+    cat "$output" >&2
+    echo "FAIL: $name generator failed while proving omission of $destination" >&2
+    return 1
+  fi
+  if [[ -e "$case_root/$destination" ]]; then
+    echo "FAIL: $name: generator still produced $destination" >&2
+    return 1
+  fi
+  # The contract validator must reject the omitted destination by name; absence
+  # after generate alone does not prove the gate bites (#2196 review).
+  expect_named_failure "$name" "$case_root" "$expected"
 }
 
 append_skill_text() {
@@ -568,14 +571,38 @@ expect_named_failure \
   "$case_root" \
   "Claude plugin skill contains source-only path outside mapping: docs/generated/agent-golden-path.json"
 
-case_root="$SCRATCH/plugin-fixture-byte-drift"
-seed_case "$case_root"
-printf '\n' \
-  >> "$case_root/packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json"
-expect_named_failure \
-  "plugin fixture byte drift" \
-  "$case_root" \
-  "packaged plugin resource drifted: packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json"
+# Every generated destination must have a mutation that names it (CI-5C / #2196).
+declare -a GENERATOR_SKILL_DESTINATIONS=(
+  '.agents/skills/assay-golden-path/SKILL.md|skill evidence is missing: .agents/skills/assay-golden-path/SKILL.md'
+  '.claude/skills/assay-golden-path/SKILL.md|skill evidence is missing: .claude/skills/assay-golden-path/SKILL.md'
+  'packaging/claude-plugin/skills/assay-golden-path/SKILL.md|Claude plugin skill is missing: packaging/claude-plugin/skills/assay-golden-path/SKILL.md'
+)
+for row in "${GENERATOR_SKILL_DESTINATIONS[@]}"; do
+  IFS='|' read -r destination expected <<<"$row"
+  case_root="$SCRATCH/generator-omits-$(printf '%s' "$destination" | tr '/.' '--')"
+  seed_case "$case_root"
+  expect_generator_omits_destination \
+    "generator omits destination $destination" \
+    "$case_root" \
+    "$destination" \
+    "$expected"
+done
+
+declare -a PACKAGED_PLUGIN_DESTINATIONS=(
+  'packaging/claude-plugin/skills/assay-golden-path/references/agent-golden-path.json'
+  'packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/mock_github_mcp.py'
+  'packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/baseline-approved.json'
+  'packaging/claude-plugin/skills/assay-golden-path/assets/privileged-action-gate/policies/no-allowance.yaml'
+)
+for destination in "${PACKAGED_PLUGIN_DESTINATIONS[@]}"; do
+  case_root="$SCRATCH/plugin-destination-drift-$(printf '%s' "$destination" | tr '/.' '--')"
+  seed_case "$case_root"
+  printf '\n' >> "$case_root/$destination"
+  expect_named_failure \
+    "plugin destination byte drift $destination" \
+    "$case_root" \
+    "packaged plugin resource drifted: $destination"
+done
 
 case_root="$SCRATCH/plugin-resource-source-symlink"
 seed_case "$case_root"
