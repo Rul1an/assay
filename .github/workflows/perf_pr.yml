@@ -42,10 +42,14 @@ jobs:
       store: ${{ steps.detect.outputs.store_relevant }}
       suite: ${{ steps.detect.outputs.suite_relevant }}
     steps:
+      # Pin the event head SHA explicitly. After squash-merge a delayed non-closed
+      # event can otherwise land default checkout on current main while relevance
+      # still diffs github.event.pull_request.{base,head}.sha (#2326).
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
 
       # The previous gate matched `^crates/`, i.e. all 21 workspace crates, so
       # store_write_heavy ran and alerted for changes outside assay-core's compilation
@@ -60,6 +64,32 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          if [[ -z "${BASE_SHA}" || -z "${HEAD_SHA}" ]]; then
+            echo "::error::perf_pr event missing base/head SHA (BASE_SHA='${BASE_SHA:-}' HEAD_SHA='${HEAD_SHA:-}'); cannot compute relevance without exact event commits"
+            exit 1
+          fi
+          actual_head="$(git rev-parse HEAD)"
+          if [[ "${actual_head}" != "${HEAD_SHA}" ]]; then
+            echo "::error::checked-out HEAD ${actual_head} is not event head ${HEAD_SHA}; refusing to substitute main or any other ref for perf relevance"
+            exit 1
+          fi
+          ensure_event_commit() {
+            local sha="$1" label="$2"
+            if git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+              return 0
+            fi
+            echo "Fetching exact event ${label} commit ${sha}"
+            if ! git fetch --no-tags --depth=1 origin "${sha}"; then
+              echo "::error::exact event ${label} commit ${sha} could not be fetched from origin; fail closed (will not substitute main)"
+              exit 1
+            fi
+            if ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+              echo "::error::exact event ${label} commit ${sha} still missing after fetch; fail closed (will not substitute main)"
+              exit 1
+            fi
+          }
+          ensure_event_commit "${HEAD_SHA}" "head"
+          ensure_event_commit "${BASE_SHA}" "base"
           # The script writes only to stdout and never opens $GITHUB_OUTPUT or
           # $GITHUB_STEP_SUMMARY itself: opening a path read from the environment is an
           # uncontrolled-path sink (CodeQL py/path-injection). Routing happens here.
