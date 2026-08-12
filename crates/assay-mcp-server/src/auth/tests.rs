@@ -170,26 +170,30 @@ fn test_ssrf_ip_blocking() {
     }
 }
 
+fn pem_encode(label: &str, der: &[u8]) -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let b64 = STANDARD.encode(der);
+    let mut out = format!("-----BEGIN {label}-----\n");
+    for chunk in b64.as_bytes().chunks(64) {
+        out.push_str(std::str::from_utf8(chunk).expect("base64 is ascii"));
+        out.push('\n');
+    }
+    out.push_str(&format!("-----END {label}-----\n"));
+    out
+}
+
 #[tokio::test]
 async fn test_security_jwt_rs256_full_path() {
-    // Generate transient test keys at runtime
-    use rsa::{pkcs8::EncodePrivateKey, pkcs8::EncodePublicKey, RsaPrivateKey};
-    let mut rng = rand::thread_rng();
-    let bits = 2048;
-    let priv_key = RsaPrivateKey::new(&mut rng, bits).expect("failed to generate key");
-    let pub_key = priv_key.to_public_key();
+    // Generate transient RSA keys at runtime with aws-lc-rs (no checked-in PEM).
+    use aws_lc_rs::encoding::{AsDer, Pkcs8V1Der, PublicKeyX509Der};
+    use aws_lc_rs::rsa::{KeyPair, KeySize};
+    use aws_lc_rs::signature::KeyPair as _;
 
-    let priv_pem_str = priv_key
-        .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
-        .unwrap()
-        .to_string();
-    let pub_pem_str = pub_key
-        .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
-        .unwrap()
-        .to_string();
-
-    let priv_pem = priv_pem_str.as_bytes();
-    let pub_pem = pub_pem_str.as_bytes();
+    let key_pair = KeyPair::generate(KeySize::Rsa2048).expect("failed to generate RSA key");
+    let priv_der: Pkcs8V1Der<'_> = key_pair.as_der().expect("pkcs8 der");
+    let pub_der: PublicKeyX509Der<'_> = key_pair.public_key().as_der().expect("spki der");
+    let priv_pem_str = pem_encode("PRIVATE KEY", priv_der.as_ref());
+    let pub_pem_str = pem_encode("PUBLIC KEY", pub_der.as_ref());
 
     let header = Header::new(Algorithm::RS256);
     let claims = valid_claims();
@@ -197,12 +201,12 @@ async fn test_security_jwt_rs256_full_path() {
     let token = encode(
         &header,
         &claims,
-        &EncodingKey::from_rsa_pem(priv_pem).unwrap(),
+        &EncodingKey::from_rsa_pem(priv_pem_str.as_bytes()).unwrap(),
     )
     .unwrap();
 
-    // Setup Validator with Mock JWKS containing our public key
-    let validator = TokenValidator::new_with_static_key(pub_pem).unwrap();
+    // Setup Validator with the matching public SPKI PEM.
+    let validator = TokenValidator::new_with_static_key(pub_pem_str.as_bytes()).unwrap();
     let config = AuthConfig {
         mode: AuthMode::Strict,
         audience: vec!["assay-mcp".to_string()],

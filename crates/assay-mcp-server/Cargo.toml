@@ -35,7 +35,10 @@ moka = { version = "0.12", features = ["sync"] }
 
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "time"] }
-jsonwebtoken = { version = "11.0", default-features = false, features = ["rust_crypto", "use_pem"] }
+# aws_lc_rs (not rust_crypto): drops the rsa crate / RUSTSEC-2023-0071 from the tree.
+# aws-lc-rs is already resolved in this workspace via rustls/object_store; standalone
+# assay-mcp-server builds may compile it through this feature selection.
+jsonwebtoken = { version = "11.0", default-features = false, features = ["aws_lc_rs", "use_pem"] }
 base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 url = { version = "2.5", features = ["serde"] }
@@ -46,11 +49,11 @@ serde_json = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["full"] }
 tempfile.workspace = true
 wiremock = "0.6"
-jsonwebtoken = { version = "11.0", default-features = false, features = ["rust_crypto", "use_pem"] }
+jsonwebtoken = { version = "11.0", default-features = false, features = ["aws_lc_rs", "use_pem"] }
 base64 = "0.22"
 # uuid = { version = "1.0", features = ["v4"] } # Removed in favor of SystemTime
-rsa = "0.9"
-rand = "0.8"
+# Runtime RSA keygen for the legacy RS256 compatibility test (no checked-in PEM).
+aws-lc-rs = "1.16"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
