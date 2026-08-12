@@ -33,6 +33,7 @@ import urllib.request
 import zipfile
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 
 PROOF_WORKFLOW_NAME = "host-capability-proof"
 # Producer identity is validated by workflow PATH, not only display name: names are
@@ -45,6 +46,7 @@ CONTRACT_DOC = "docs/reference/runner/host-capability-proof.md"
 COMMENT_MARKER = "<!-- assay-host-capability-check -->"
 
 TRIGGER_PREFIX = "crates/assay-cli/src/diagnostics/"
+DOCTOR_ORCHESTRATION_EXAMPLE = "crates/assay-cli/src/cli/commands/doctor/implementation.rs"
 
 # Technical exemption, not a trust statement: a change to the gate cannot be proven by the
 # gate it is changing (see the RFC). These files get normal CI like any other file.
@@ -361,6 +363,7 @@ def self_test() -> int:
         (["crates/assay-cli/src/diagnostics/landlock_net_smoke.rs"], True),
         (["crates/assay-cli/src/diagnostics/format.rs"], True),
         (["crates/assay-cli/src/diagnostics/README.md"], False),
+        ([DOCTOR_ORCHESTRATION_EXAMPLE], False),
         (["crates/assay-cli/src/cli/commands/run.rs"], False),
         (["CHANGELOG.md"], False),
         (["docs/reference/runner/host-capability-proof.md"], False),
@@ -374,6 +377,19 @@ def self_test() -> int:
         required, _ = proof_required(files)
         if required != expected:
             failures.append(f"classification: {files} -> {required}, expected {expected}")
+
+    contract_path = Path(__file__).resolve().parents[2] / CONTRACT_DOC
+    doctor_contract_row = f"{DOCTOR_ORCHESTRATION_EXAMPLE} -> not required"
+    try:
+        contract_text = contract_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        failures.append(f"contract parity: cannot read {CONTRACT_DOC}: {exc}")
+    else:
+        if doctor_contract_row not in contract_text:
+            failures.append(
+                "contract parity: doctor orchestration non-trigger is not stated as "
+                f"{doctor_contract_row!r}"
+            )
 
     good = {
         "landlock": {

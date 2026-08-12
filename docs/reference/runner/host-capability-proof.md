@@ -41,6 +41,7 @@ trigger:
 
 never trigger:
   *.md anywhere (including under crates/assay-cli/src/diagnostics/)
+  crates/assay-cli/src/cli/commands/doctor/**
   docs/**
   CHANGELOG.md
   scripts/ci/assay_host_capability_check.py      (technical exemption, see below)
@@ -51,6 +52,17 @@ never trigger:
 Rendering (`format.rs`) and tests inside `diagnostics/` trigger deliberately: rendering determines how
 a claim reaches the reader, and tests determine how it is validated. The cost per trigger is one
 `assay doctor` run on the host.
+
+Doctor command orchestration is an explicit non-trigger. Changes under
+`crates/assay-cli/src/cli/commands/doctor/**` can alter the command envelope, preflight fields, or exit
+code, but those are host-independent CLI contracts covered by the ordinary cross-platform binary
+tests. This gate proves only that the host-dependent Landlock diagnostics surface was produced on the
+exact host and head; it does not certify the whole `assay doctor` command contract. The classifier
+self-test pins that boundary to this concrete example and fails if this contract row disappears:
+
+```text
+crates/assay-cli/src/cli/commands/doctor/implementation.rs -> not required
+```
 
 The checker script and the two workflows are exempt from this gate as a technical exemption, not a
 trust statement: a change to the gate cannot be proven by the gate it is changing. They receive
@@ -90,15 +102,15 @@ persistent host's `rustup`, `cargo`, or `rustc` shims. It keeps the workflow-lev
 job's Actions runtime token and does not justify repository Actions write
 access. Failed builds are not cached.
 
-The job has a 90-minute ceiling. This is a provisional cold-start budget: a
-30-minute run on Assay 5.0.0 timed out inside `cargo build`, while the existing
-delegated peer lane already uses a 90-minute bound on the same singleton host.
-The number is not a measured cold-build duration. A change to this producer
-must obtain an exact-head cold run followed by a warm run and tighten or retain
-the ceiling from that evidence. A deliberately cold run uses an empty workspace
-`target/` plus a proof-workflow cache-key miss; it must not delete unrelated
-global Cargo caches. Timeout, cancelled build, absent output, and failed upload
-remain non-success.
+The job has a 90-minute ceiling. Exact-head measurements on
+`b902bc87f4817b7b605a55edfd1c2c3d73596f56` recorded a 41m34s cold cache-miss run and an 18m41s
+warm cache-hit run. The warm path included a 10m10s restore of the 573 MB cache and a 6m01s build,
+so the cache is an availability mechanism, not a fast-path claim. One cold/warm pair is not a
+latency distribution or SLA; the 90-minute ceiling remains bounded headroom rather than a promised
+duration. A change to this producer must obtain an exact-head cold run followed by a warm run and
+tighten or retain the ceiling from that evidence. A deliberately cold run uses an empty workspace
+`target/` plus a proof-workflow cache-key miss; it must not delete unrelated global Cargo caches.
+Timeout, cancelled build, absent output, and failed upload remain non-success.
 
 Starting a `workflow_dispatch` run requires write access to the repository, so who-may-produce-proof
 is enforced by GitHub's own permission model, not by comment-author filtering.
@@ -203,6 +215,7 @@ crates/assay-cli/src/diagnostics/probes.rs              -> proof required
 crates/assay-cli/src/diagnostics/landlock_net_smoke.rs  -> proof required
 crates/assay-cli/src/diagnostics/format.rs              -> proof required
 crates/assay-cli/src/diagnostics/README.md              -> not required (Markdown exemption)
+crates/assay-cli/src/cli/commands/doctor/implementation.rs -> not required
 crates/assay-cli/src/cli/commands/run.rs                -> not required
 CHANGELOG.md                                            -> not required
 docs/reference/runner/host-capability-proof.md          -> not required
