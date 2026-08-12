@@ -64,20 +64,27 @@ deps_security_job() {
   ' "${wf}"
 }
 
-# Active (non-comment) lines of the Install cargo-audit step run block.
+# Active (non-comment, non-blank) lines of the Install cargo-audit step run block.
+# Comment ghosts must not satisfy source / --version / assert greps (#2317 review).
 install_cargo_audit_run() {
   local wf="$1"
   deps_security_job "${wf}" | awk '
+    function emit_active(line,    tmp) {
+      tmp = line
+      sub(/^[[:space:]]+/, "", tmp)
+      if (tmp == "" || tmp ~ /^#/) return
+      print line
+    }
     /^      - name: Install cargo-audit[[:space:]]*$/ { in_step=1; next }
     in_step && /^      - name:/ { exit }
     in_step && /^        run:[[:space:]]*\|[[:space:]]*$/ { in_run=1; next }
     in_step && /^        run:[[:space:]]+/ {
       sub(/^        run:[[:space:]]*/, "")
-      print
+      emit_active($0)
       exit
     }
     in_run && /^        [^[:space:]]/ { exit }
-    in_run { print }
+    in_run { emit_active($0) }
   '
 }
 
@@ -305,6 +312,58 @@ if ( check_workflow "${noassert}" ) >/dev/null 2>&1; then
   fail "removing version assertion left the contract green"
 fi
 ok "removing version assertion turns the contract red"
+
+echo "== mutation: comment ghosts + active unpinned install =="
+# source / pinned install / assert survive only as comments; active argv is unpinned.
+# Before active-line filtering this left check_workflow green (#2317 review).
+ghost="$(mktemp "${SANDBOX_ROOT}/ghost.XXXXXX.yml")"
+python3 - "${WORKFLOW}" "${ghost}" <<'PY'
+import pathlib, re, sys
+
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+text = src.read_text()
+pat = re.compile(
+    r"(      - name: Install cargo-audit\n"
+    r"(?:        #.*\n)*"
+    r"        run: \|\n)"
+    r"(?:          .*\n)+"
+)
+repl = (
+    "\\1"
+    "          set -euo pipefail\n"
+    "          # shellcheck source=scripts/ci/cargo-plugin-versions.sh\n"
+    "          # source ./scripts/ci/cargo-plugin-versions.sh\n"
+    '          # echo "installing cargo-audit ${CARGO_AUDIT_VERSION}"\n'
+    '          # cargo install --locked --version "${CARGO_AUDIT_VERSION}" cargo-audit\n'
+    '          # assert_cargo_plugin_version cargo-audit "${CARGO_AUDIT_VERSION}"\n'
+    "          cargo install --locked cargo-audit\n"
+)
+new, n = pat.subn(repl, text, count=1)
+if n != 1:
+    raise SystemExit(f"could not rewrite install block for ghost mutation (n={n})")
+dst.write_text(new)
+PY
+install_ghost="$(install_cargo_audit_run "${ghost}")"
+grep -qE 'cargo install --locked cargo-audit' <<<"${install_ghost}" \
+  || fail "ghost mutation did not leave an active unpinned cargo install"
+if grep -qE '^[[:space:]]*source[[:space:]].*cargo-plugin-versions\.sh' <<<"${install_ghost}"; then
+  fail "ghost mutation still leaves an active source line"
+fi
+if grep -qE -- '--version[[:space:]]+"\$\{CARGO_AUDIT_VERSION\}"' <<<"${install_ghost}"; then
+  fail "ghost mutation still leaves an active --version pin"
+fi
+if grep -qE '^[[:space:]]*assert_cargo_plugin_version[[:space:]]' <<<"${install_ghost}"; then
+  fail "ghost mutation still leaves an active assert_cargo_plugin_version"
+fi
+# Comment text must still contain the ghosts — otherwise we tested a different defect.
+grep -q 'source ./scripts/ci/cargo-plugin-versions.sh' "${ghost}" \
+  || fail "ghost mutation did not retain commented source"
+grep -q 'assert_cargo_plugin_version cargo-audit' "${ghost}" \
+  || fail "ghost mutation did not retain commented assert"
+if ( check_workflow "${ghost}" ) >/dev/null 2>&1; then
+  fail "comment-ghost pin left the contract green"
+fi
+ok "comment-ghost pin + active unpinned install turns the contract red"
 
 ok "cargo-plugin-versions contract mutations bite"
 echo "PASS: cargo-plugin-versions contract"
