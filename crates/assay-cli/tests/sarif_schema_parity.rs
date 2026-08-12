@@ -1,12 +1,16 @@
 //! The two `SARIF_SCHEMA` constants must name the same document.
 //!
-//! `assay-core` and `assay-evidence` each declare their own `SARIF_SCHEMA`, and neither
-//! can call the other: `assay-evidence` does not depend on `assay-core` and the arrow does
-//! not run the other way either. Until now the only thing holding them together was a doc
-//! comment on one of them saying to update the sibling, which is a convention rather than a
-//! constraint. Per one-rule-one-function a parity test is the sanctioned fallback when one
-//! rule cannot simply call the other; promoting the constant to `assay-common` so there is
-//! one of it is an ADR question rather than something to decide in a test file.
+//! `assay-core` and `assay-evidence` each declare their own `SARIF_SCHEMA`. Only one
+//! direction is blocked: `assay-evidence` cannot depend on `assay-core`. The other way is
+//! already open, since `assay-core -> assay-adapter-api -> assay-evidence` exists today, so
+//! `assay-core` could call the evidence constant without any new edge. That makes one rule
+//! reachable rather than impossible, and the choice between calling it and testing parity is
+//! a design question about which crate owns the value. Until now neither was done: what held
+//! the two together was a pair of reciprocal doc comments telling each other to update the
+//! sibling, which is a convention rather than a constraint. Per one-rule-one-function the
+//! parity test is the fallback while that question is open; deciding the owner, whether that
+//! is `assay-core` calling through or `assay-common` holding it, is an ADR question rather
+//! than something to settle in a test file.
 //!
 //! What this catches is the partial edit. A change applied to one constant leaves the tree
 //! looking consistent, because every emitter still produces a well-formed document and every
@@ -19,10 +23,13 @@
 //! choice of target rather than a test. `docs.oasis-open.org/.../errata01/os/schemas/...`
 //! is an OASIS-published artifact at a versioned path rather than a git ref, and it is the
 //! URL the schema document names as its own `id`, so the label and the document agree about
-//! what the document is. A `raw.githubusercontent.com/<org>/<repo>/main/...` URL resolves
-//! against whatever that branch holds today, which is how a sibling project in this space
-//! shipped a `$schema` that had 404'd since before its first release without anything
-//! noticing.
+//! what the document is. A `raw.githubusercontent.com/<org>/<repo>/<branch>/...` URL resolves
+//! against whatever that branch holds today, so the document a consumer validates against can
+//! change without any failure on our side. Our own risk here was not hypothetical: a `$schema`
+//! documented in `docs/architecture/SPEC-GitHub-Action-v2.1.md`, under a heading reading "SARIF
+//! Contract", pointed at a path that had already 404'd, and nothing checked it because the link
+//! checker walks markdown links rather than URLs quoted inside fenced examples or Rust
+//! literals.
 
 use assay_core::report::sarif::SARIF_SCHEMA as CORE_SCHEMA;
 use assay_evidence::lint::sarif::SARIF_SCHEMA as EVIDENCE_SCHEMA;
