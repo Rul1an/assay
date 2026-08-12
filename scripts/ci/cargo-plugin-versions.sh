@@ -16,6 +16,11 @@ export CARGO_AUDIT_VERSION="0.22.2"
 export CARGO_NEXTEST_VERSION="0.9.143"
 export CARGO_HACK_VERSION="0.6.45"
 export CARGO_SEMVER_CHECKS_VERSION="0.50.0"
+# CI-4D3 / #2224: optional public-api + mutants. Measured crates.io max_stable_version,
+# unyanked. cargo-public-api publishes no rust_version (do not claim formal MSRV; CI Rust
+# 1.96 compatibility is integration evidence only). cargo-mutants MSRV 1.88.
+export CARGO_PUBLIC_API_VERSION="0.52.0"
+export CARGO_MUTANTS_VERSION="27.1.0"
 
 # Where `cargo install` writes binaries: CARGO_INSTALL_ROOT, else CARGO_HOME, else ~/.cargo.
 cargo_plugin_bin_path() {
