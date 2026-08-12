@@ -22,10 +22,8 @@ pub mod dsse;
 pub mod tool_pattern;
 
 /// Monitor object ABI digest (`KEY_*` descriptor); shared by eBPF bake + monitor verify.
-pub mod object_abi;
-pub use object_abi::{
-    monitor_object_abi_digest, ConfigKeyDesc, MONITOR_CONFIG_KEYS, OBJECT_ABI_SYMBOL,
-};
+mod object_abi;
+pub use object_abi::*;
 
 pub const EVENT_OPENAT: u32 = 1;
 pub const EVENT_CONNECT: u32 = 2;
@@ -34,17 +32,6 @@ pub const EVENT_EXEC: u32 = 4;
 pub const EVENT_EXIT: u32 = 5;
 pub const EVENT_SENDTO: u32 = 6;
 pub const EVENT_SENDMSG: u32 = 7;
-
-pub const KEY_MONITOR_ALL: u32 = 100;
-pub const KEY_EMIT_INODE_RESOLVED: u32 = 101;
-/// Emit an observed-connect event for every ALLOWED connect, not just blocked ones.
-///
-/// Off by default and set only when a run asks for a peer set, because the allow path is the hot
-/// one: a monitored workload makes far more permitted connections than denied ones, and an
-/// unconditional emit would charge every existing user ring-buffer bandwidth for evidence they did
-/// not ask for. When it is off, `observed_peers` is honestly empty rather than quietly partial.
-pub const KEY_EMIT_OBSERVED_CONNECT: u32 = 102;
-pub const KEY_DEDUP_OPEN_PATHS: u32 = 103;
 
 pub const EVENT_FILE_BLOCKED: u32 = 10;
 pub const EVENT_CONNECT_BLOCKED: u32 = 20;
