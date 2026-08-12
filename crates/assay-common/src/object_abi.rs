@@ -55,15 +55,19 @@ pub const fn monitor_object_abi_digest() -> u32 {
 mod tests {
     use super::*;
 
+    /// Literals + independent golden digest; must fail on add/remove/rename/id/algorithm drift.
     #[test]
     fn exported_keys_and_descriptor_derive_together() {
-        let projected = [
-            ("KEY_MONITOR_ALL", KEY_MONITOR_ALL),
-            ("KEY_EMIT_INODE_RESOLVED", KEY_EMIT_INODE_RESOLVED),
-            ("KEY_EMIT_OBSERVED_CONNECT", KEY_EMIT_OBSERVED_CONNECT),
-            ("KEY_DEDUP_OPEN_PATHS", KEY_DEDUP_OPEN_PATHS),
-        ];
-        assert_eq!(MONITOR_CONFIG_KEYS, &projected);
-        assert_ne!(monitor_object_abi_digest(), 0);
+        assert_eq!(MONITOR_CONFIG_KEYS, &[
+            ("KEY_MONITOR_ALL", 100),
+            ("KEY_EMIT_INODE_RESOLVED", 101),
+            ("KEY_EMIT_OBSERVED_CONNECT", 102),
+            ("KEY_DEDUP_OPEN_PATHS", 103),
+        ]);
+        assert_eq!(
+            [KEY_MONITOR_ALL, KEY_EMIT_INODE_RESOLVED, KEY_EMIT_OBSERVED_CONNECT, KEY_DEDUP_OPEN_PATHS],
+            [100, 101, 102, 103],
+        );
+        assert_eq!(monitor_object_abi_digest(), 0x0736_2158);
     }
 }
