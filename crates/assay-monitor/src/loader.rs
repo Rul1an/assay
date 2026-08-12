@@ -501,14 +501,13 @@ impl LinuxMonitor {
                 return Err(e.into());
             }
         };
-        let link = csa.take_link(link_id).map_err(|e| {
+        let link = csa.take_link(link_id).inspect_err(|_| {
             self.probe_attachment.record_mode(
                 EGRESS_PEER_PROBE,
                 connect4_update(Connect4Fault::AttachFailed {
                     kernel_lacks_point: false,
                 }),
             );
-            e
         })?;
         self.probe_attachment.attached(EGRESS_PEER_PROBE);
         self.links.push(MonitorLink::CgroupSockAddr(link));
