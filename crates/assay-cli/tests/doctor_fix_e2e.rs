@@ -30,8 +30,12 @@ fn doctor_fix_yes_creates_missing_trace_file() {
         .arg(&trace)
         .arg("--fix")
         .arg("--yes")
+        // Non-zero because an error-severity diagnostic survives the repair, not a specific class.
+        // Which class that is belongs to `doctor_exit_class_contract.rs`, which pins it as the one
+        // `decide_exit` gives for the diagnostic; asserting the number here too would make this a
+        // second answer to that question and the two would be free to drift.
         .assert()
-        .code(1);
+        .failure();
 
     assert!(
         trace.exists(),
@@ -60,8 +64,9 @@ fn doctor_fix_dry_run_does_not_write_trace_file() {
         .arg("--fix")
         .arg("--dry-run")
         .arg("--yes")
+        // See above: this test owns "dry run writes nothing", not the exit class.
         .assert()
-        .code(1);
+        .failure();
 
     assert!(
         !trace.exists(),

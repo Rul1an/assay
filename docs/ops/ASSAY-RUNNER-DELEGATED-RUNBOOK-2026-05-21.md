@@ -22,11 +22,15 @@ The delegated workflow runs the Linux/eBPF gates that hosted CI cannot prove:
 | `kernel-only` | `scripts/ci/runner-spike-kernel-only-three-run-determinism.sh` | kernel observation, cgroup correlation, bundle verification, three-run determinism |
 | `kernel-policy` | `scripts/ci/runner-spike-kernel-policy-three-run-determinism.sh` | kernel plus policy correlation, bundle verification, three-run determinism |
 | `openai-agents-kernel-policy` | `scripts/ci/runner-spike-openai-agents-kernel-policy-three-run-determinism.sh` | kernel plus policy plus real `@openai/agents` SDK runtime correlation, bundle verification, three-run determinism |
-| `all` | all of the above, plus `scripts/ci/runner-spike-openai-agents-kernel-policy-hidden-write-three-run-determinism.sh` | full delegated proof, including the post-closure hidden-write semantic-gap expansion gate |
+| `all` | all of the above, plus `scripts/ci/runner-spike-openai-agents-kernel-policy-hidden-write-three-run-determinism.sh` and `scripts/ci/runner-spike-gemini-google-genai-three-run-determinism.sh` | full delegated proof, including Gemini and the post-closure hidden-write semantic-gap expansion gate |
 
 Each three-run script executes its single-run acceptance three times and then
 compares the deterministic artifacts. Kernel raw event ordering is not used as
 a causal-ordering claim; the bundle claim remains set/window based.
+
+`gemini-google-genai-kernel-policy` is an internal constituent of `all`, not a
+selectable `gates` input. Its three-run wrapper executes
+`scripts/ci/runner-spike-gemini-google-genai-acceptance.sh` internally.
 
 ## Host Requirements
 
@@ -388,6 +392,8 @@ PASS: runner-spike kernel+policy acceptance
 PASS: runner-spike kernel+policy three-run determinism
 PASS: runner-spike OpenAI Agents kernel+policy acceptance
 PASS: runner-spike OpenAI Agents kernel+policy three-run determinism
+PASS: runner-spike Gemini google-genai kernel+policy acceptance
+PASS: runner-spike Gemini google-genai kernel+policy three-run determinism
 ```
 
 Each acceptance line appears once per run inside its three-run wrapper. The

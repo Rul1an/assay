@@ -144,6 +144,13 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Verify CI hardening contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/test-ci-hardening-b1.sh
+          bash scripts/ci/test-structurizr-export-docker.sh
+
   # --- Dependency security (advisories, licenses, sources) ---
   deps-security:
     name: Dependency Security (cargo-deny + audit)
@@ -165,9 +172,9 @@ jobs:
       # the selection there too rather than being shadowed by the script's own default.
       #
       # Scope, deliberately: no step in this job builds or tests the workspace -- checkout, two tool
-      # installs, a `sed`-only alignment check, `cargo-deny check` and two `cargo audit` runs. This
-      # selects the toolchain that runs the dependency tooling, never one that compiles a crate, and
-      # `rust-toolchain.toml` stays the source for every job that does compile.
+      # installs, a `sed`-only alignment check, `cargo-deny check` and two `cargo audit` runs. The
+      # only crates this job compiles are the dependency tools themselves, installed from source.
+      # `rust-toolchain.toml` stays the source for every job that compiles workspace code.
       RUSTUP_TOOLCHAIN: stable
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -228,8 +235,9 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - name: Swatinem/rust-cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy
       - name: Install Linux deps (for build scripts)
         if: runner.os == 'Linux'
         shell: bash
@@ -245,9 +253,6 @@ jobs:
               -o Acquire::Languages=none
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
           }
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          components: clippy
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # `--all-targets` does not imply `--all-features`, so any test file gated behind a feature is
       # invisible to the sweep above: cfg strips it to an empty crate and clippy lints nothing.
@@ -269,8 +274,8 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - name: Swatinem/rust-cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - name: Set up Rust toolchain and cache
+        uses: ./.github/actions/setup-rust
       - name: Install Linux deps (for build scripts)
         if: runner.os == 'Linux'
         shell: bash
@@ -286,7 +291,6 @@ jobs:
               -o Acquire::Languages=none
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang libsqlite3-dev
           }
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       # Clippy above never sees rustdoc's lints: broken intra-doc links, unclosed HTML tags in doc
       # comments and bare URLs are diagnosed by rustdoc alone, and they are warn-by-default, so
       # nothing failed while a crate's documentation quietly stopped building. `assay-evidence`
@@ -593,7 +597,7 @@ jobs:
 
       - name: Sccache
         if: runner.os != 'macOS'
-        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -753,6 +757,7 @@ jobs:
       - name: Upload verification logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        # ci-gate: continue-on-error-ok -- diagnostic log upload only; a failed upload must not redden the eBPF smoke gate
         continue-on-error: true
         with:
           name: ci-smoke-logs-ubuntu

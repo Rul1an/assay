@@ -97,7 +97,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -108,7 +108,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -167,7 +167,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-a2a"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-acp"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -195,7 +195,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-api"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "assay-evidence",
  "hex",
@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "assay-adapter-ucp"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "assay-adapter-api",
  "assay-evidence",
@@ -221,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "assay-canonical"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "hex",
  "serde",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "assay-cli"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "anyhow",
  "assay-canonical",
@@ -292,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "assay-common"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "aya",
  "chrono",
@@ -304,7 +304,7 @@ dependencies = [
 
 [[package]]
 name = "assay-core"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "anyhow",
  "assay-adapter-api",
@@ -354,7 +354,7 @@ dependencies = [
 
 [[package]]
 name = "assay-ebpf"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "assay-common",
  "aya-ebpf",
@@ -363,7 +363,7 @@ dependencies = [
 
 [[package]]
 name = "assay-evidence"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "anyhow",
  "assay-canonical",
@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "assay-it"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "assay-core",
  "pyo3",
@@ -412,7 +412,7 @@ dependencies = [
 
 [[package]]
 name = "assay-mcp-server"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -442,7 +442,7 @@ dependencies = [
 
 [[package]]
 name = "assay-metrics"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "assay-monitor"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -476,7 +476,7 @@ dependencies = [
 
 [[package]]
 name = "assay-policy"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "anyhow",
  "ipnet",
@@ -488,7 +488,7 @@ dependencies = [
 
 [[package]]
 name = "assay-registry"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "anyhow",
  "assay-common",
@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "assay-runner-core"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "assay-common",
  "assay-monitor",
@@ -543,7 +543,7 @@ dependencies = [
 
 [[package]]
 name = "assay-runner-linux"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -552,7 +552,7 @@ dependencies = [
 
 [[package]]
 name = "assay-runner-schema"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -561,7 +561,7 @@ dependencies = [
 
 [[package]]
 name = "assay-sim"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "anyhow",
  "assay-adapter-api",
@@ -582,7 +582,7 @@ dependencies = [
 
 [[package]]
 name = "assay-xtask"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1047,9 +1047,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.6.4"
+version = "4.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d91e0c145792ef73a6ad36d27c75ac09f1832222a3c209689d90f534685ee5b7"
+checksum = "301b56658598e48f3648647ac6fc887be7e7108eddfa4e9b63fcf3ec58c0cadf"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1057,9 +1057,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.6.2"
+version = "4.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f09628afdcc538b57f3c6341e9c8e9970f18e4a481690a64974d7023bd33548b"
+checksum = "94a65403d1a1bd28f7dc68eb8506e8874808ee5eecb59298de588e2e1407a078"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1629,7 +1629,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1826,7 +1826,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2114,7 +2114,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-evidence-replay"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2643,9 +2643,9 @@ dependencies = [
 
 [[package]]
 name = "ipnet"
-version = "2.12.0"
+version = "2.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
+checksum = "6a756c3fac73139e83f14c2d742155dd2b78d3ee56597b419a0579b7bdd6dd78"
 dependencies = [
  "serde",
 ]
@@ -2791,9 +2791,9 @@ dependencies = [
 
 [[package]]
 name = "jsonschema"
-version = "0.49.2"
+version = "0.49.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8a77951c56b6a0af03c22af6953d6ffcfba9403c765578921f3f1089b999db6"
+checksum = "257549c093d8f3d043337ba0d507e8eeace2447dfae3f0ee37eb0f57d3df7655"
 dependencies = [
  "ahash",
  "bytecount",
@@ -2820,18 +2820,18 @@ dependencies = [
 
 [[package]]
 name = "jsonschema-regex"
-version = "0.49.2"
+version = "0.49.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4c2e64f341a1d6a15d2daa3c967e48921cf15b9c7f23a9899e8b63c7f7c4199"
+checksum = "91994f45017ed5e66aa8e59b8415f4cb033a6380d7200387b7cf117595fbdf85"
 dependencies = [
  "regex-syntax",
 ]
 
 [[package]]
 name = "jsonschema-value"
-version = "0.49.2"
+version = "0.49.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94e097778f3e9c6a33862077dbf07aca0360d0b18d2a7abc323da132df49ee83"
+checksum = "7ec7637f83e510868ae6ed625f7ebfbbde4554ee8ce49854caa5126a8b9b9ecb"
 dependencies = [
  "ahash",
  "bytecount",
@@ -3168,7 +3168,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3891,9 +3891,9 @@ dependencies = [
 
 [[package]]
 name = "pyo3"
-version = "0.29.0"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd274650b21d4bfc26a0a47587962c1edb425f69287324355cd040c3ea66071c"
+checksum = "fc153f5fd745cc038b5eed86622125969f8a39834a57bc96beaaf2512b1da729"
 dependencies = [
  "libc",
  "once_cell",
@@ -3905,18 +3905,18 @@ dependencies = [
 
 [[package]]
 name = "pyo3-build-config"
-version = "0.29.0"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5e2a7d2f0d013342f295c048ad19237add5154a55b1c5a254c0ec93d4109078"
+checksum = "bb77d9aa6d647507b55c69ee714d266d84c526c78ff0bc6dd8757f58591e64d1"
 dependencies = [
  "target-lexicon",
 ]
 
 [[package]]
 name = "pyo3-ffi"
-version = "0.29.0"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca85c467da1bbc8d866eea5deff9cf29ea5f7785054a17da36e65bda9c05845b"
+checksum = "3160087aa5733bce7d9a729f8c55f85a2a53b74742a09613178eeebff0722253"
 dependencies = [
  "libc",
  "pyo3-build-config",
@@ -3924,9 +3924,9 @@ dependencies = [
 
 [[package]]
 name = "pyo3-macros"
-version = "0.29.0"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ac53762fd065daa3194dd09337a38bd793a188100fd1a9304c4ab312d901771"
+checksum = "91f9d455db760a9a0b0ddeaac25f1390b8a36ba73dfbda9f127cac6fc340d4d5"
 dependencies = [
  "proc-macro2",
  "pyo3-macros-backend",
@@ -3936,9 +3936,9 @@ dependencies = [
 
 [[package]]
 name = "pyo3-macros-backend"
-version = "0.29.0"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ca3a1557399783172dc5bf39cfca835157732532cba56b71d2292161e53b362"
+checksum = "e343bcec300ff262f5806a33a4e51b6d097a8a46435f512fcb83e95592581625"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -4320,9 +4320,9 @@ dependencies = [
 
 [[package]]
 name = "referencing"
-version = "0.49.2"
+version = "0.49.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b772e96f8eb6badd4eb10fbc08b8a98244c09b4af37e72e8fa612c854604b870"
+checksum = "6efa2154ea6f5ce0fdecdd2a8d18f2fa1a39a8fbba91564f555a592e4dce8278"
 dependencies = [
  "ahash",
  "fluent-uri",
@@ -4533,7 +4533,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4591,7 +4591,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5005,7 +5005,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5186,7 +5186,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5199,7 +5199,7 @@ dependencies = [
  "parking_lot",
  "rustix",
  "signal-hook",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5322,9 +5322,9 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.54"
+version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e1d5e639ff6bab73cb6885cc7e7b1de96c3f32c68ec55f3952614bec1092244"
+checksum = "cdb87b95ec50ddfa440816d227a17b2ccbdda963a316a727fda0fc4334f7d134"
 dependencies = [
  "deranged",
  "libc",
@@ -5964,7 +5964,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

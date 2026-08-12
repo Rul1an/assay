@@ -1,0 +1,32 @@
+name: Setup Rust
+description: >
+  Install a SHA-pinned Rust toolchain and restore the cargo cache.
+  Callers keep an explicit checkout; this composite does not check out the repo.
+
+inputs:
+  toolchain:
+    description: Rust toolchain to install (passed to dtolnay/rust-toolchain).
+    required: false
+    default: stable
+  components:
+    description: Comma-separated rustup components (optional; empty adds none).
+    required: false
+    default: ""
+  cache-workspaces:
+    description: Workspace paths for Swatinem/rust-cache (optional; empty keeps action default).
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+
+    - name: Cache cargo
+      uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      with:
+        workspaces: ${{ inputs.cache-workspaces }}

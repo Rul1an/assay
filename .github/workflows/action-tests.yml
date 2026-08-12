@@ -37,6 +37,11 @@ jobs:
       - name: Exercise the release-blocking gate
         run: bash scripts/ci/test-release-blocking-gate.sh
 
+      # Runner-health used to publish healthy=true for expected_offline. Keep the state contract
+      # and its biting mutations on the PR path (#2256).
+      - name: Exercise the runner-health state contract
+        run: bash scripts/ci/test-check-runner-health.sh
+
       - name: Build CLI once
         run: cargo build --release --workspace --exclude assay-ebpf
 

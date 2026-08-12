@@ -35,7 +35,7 @@ dedicated and destructive cleanup is part of the contract.
 | Delegated workflow, runner labels, cleanup, checkout, sudo environment, preflight, or `scripts/ci/runner-spike-*.sh` | yes | yes | yes |
 | `@openai/agents`, `zod`, or fixture `package-lock.json` bump | yes | yes | yes |
 | `aya`, `aya-ebpf`, `aya-log-ebpf`, or BPF/runtime dependency bump | yes | yes | yes |
-| Workspace dependency bump that can affect `assay-runner-spike`, `assay-monitor`, `assay-ebpf`, `assay-cli`, policy correlation, or runner fixtures | yes | yes | yes |
+| `Cargo.lock` (any touch) | yes | yes (`gates=all`) | yes |
 | Delegated runbook wording that only clarifies existing behavior | yes | no | no |
 | Follow-up issue text, planning notes, or extraction-roadmap prose | yes | no | no |
 
@@ -85,6 +85,10 @@ cleanup and checkout.
    attested lane -- dispatch `Assay-Runner Lane Check` with `override_reason`.
    That records who decided and why in the commit status. It does not make
    proceeding without evidence safe; it makes it attributable.
+   No clock-skew tolerance is part of this verification contract: the attestation
+   checks no wall-clock field. A timestamp difference is therefore neither accepted
+   nor rejected by lane-check; subject digests, workflow identity, source head, and
+   invocation bind the proof instead.
 4. Do not treat a delegated skip as success. In the delegated lane, exit `40`
    means the runner contract has drifted.
 5. Do not bypass required repository checks for runner-impacting changes.
@@ -113,6 +117,14 @@ identical tree OIDs for every content-provenance path in
 without another delegated run. This does not claim anything about unrelated
 repository state; it only preserves the proof for the gated content the
 delegated host actually exercised.
+
+`Cargo.lock` is a literal member of `all_gate_paths` and is matched by path
+only: the classifier does not read the lockfile diff, does not ask which
+packages moved, and does not ask whether a bump reaches runner, monitor, eBPF,
+CLI, policy, or fixture surfaces. Every touch therefore requires a fresh
+`gates=all` delegated proof. `Cargo.lock` is also outside
+`content_provenance_paths`, so that proof cannot be reused across a head that
+touches it — content provenance reports the path as `unaddressed`.
 
 The workflow keeps `pull-requests: write` while the transition comment channel
 exists. Empirically, `issues: write` plus `pull-requests: read` is not enough to

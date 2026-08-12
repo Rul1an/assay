@@ -36,11 +36,11 @@ On failure: A missing or unstartable binary is a host spawn failure: no Assay pr
 
 ### 2. Preflight
 
-Run: `assay doctor --format json`
+Run: `assay doctor --format json --config <config>`
 
-Exit: Success `0`; invalid explicit config `2`.
+Exit: Success `0`; no config examined `0`; config examined, error-severity diagnostic `2`; invalid explicit config `2`.
 
-Stdout: Parses as `assay.doctor_report.v0`. Every report carries `config_check.status`, one of `checked`, `skipped` or `failed`. A config failure remains JSON and carries the top-level `reason_code` and `next_step` alongside `config_error.code`.
+Stdout: Parses as `assay.doctor_report.v0`. Every report carries `config_check.status`, one of `checked`, `skipped` or `failed`. Exit `0` on its own does not mean a config was examined: read `config_check.status` to tell a clean config from no config. A config that was examined and carries an error-severity `data_diagnostics[]` entry exits `2`, the class `decide_exit` gives that diagnostic for `assay validate` and `assay run` too; the text channel returns the same class for the same tree. A config failure remains JSON and carries the top-level `reason_code` and `next_step` alongside `config_error.code`.
 
 On failure: An explicit config that will not load, absent or unreadable alike, is exit `2` and names the failing file in a concrete JSON argv next step, the same exit class `assay run` gives the same file. The reason code is not always the same one, per the non-claim below.
 
@@ -90,11 +90,11 @@ On failure: Policy denial is not a process failure. A missing enforcement policy
 
 Run: `assay evidence show <bundle> --format json`
 
-Exit: Valid `0`; integrity failure `2`.
+Exit: Valid `0`; Valid with verification disabled `0`; integrity failure `2`; unreadable bundle `2`; format-contract failure `2`.
 
-Stdout: Success parses as an object containing `manifest` and `events`. Integrity failure produces no stdout.
+Stdout: Success parses as an object containing `manifest`, `events`, and `verify_mode`; the registered values are `enabled` and `disabled`, with `--no-verify` producing `disabled`. A recorded-value mismatch parses as `assay.run_summary.v1` with `E_EVIDENCE_INTEGRITY`; an unreadable path uses `E_EVIDENCE_UNREADABLE`.
 
-On failure: No JSON failure report, `reason_code`, or `next_step`: [gap #2164](https://github.com/Rul1an/assay/issues/2164).
+On failure: Only the four verifier codes that establish a recorded-value mismatch map to `E_EVIDENCE_INTEGRITY`; I/O, gzip, and tar failures use `E_EVIDENCE_UNREADABLE`. Format-contract failures still exit `2` with empty stdout: [gap #2219](https://github.com/Rul1an/assay/issues/2219).
 
 ### 8. Offline profile verification
 
@@ -122,5 +122,4 @@ On failure: Malformed NDJSON fails before projection and names the invalid input
 - Schema identity conventions outside this narrow contract remain owned by issue #2167.
 - A passing evidence integrity check does not prove an external side effect.
 - A doctor config failure does not distinguish an absent config from an unreadable one, and its recovery step is the invocation that produced it; both are owned by issue #2206.
-- A preflight exit 0 on the JSON channel does not mean the report carries no error-severity diagnostic; the text channel returns 1 in that case. Read data_diagnostics[].severity rather than the exit code alone. Owned by issue #2215.
 - Read config_check.status before reading data_diagnostics: only the value checked means a config was read, and on skipped the absent data_diagnostics records an unchecked config rather than a clean one.

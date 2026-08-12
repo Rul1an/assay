@@ -32,6 +32,32 @@ on:
       # head-side pre-commit leg when it changes, because the lane workflow
       # itself checks out the PR base and would validate the base copy.
       - ".github/workflows/assay-runner-lane-check.yml"
+      # setup-rust contract hook runs under Lint (pre-commit) in this workflow.
+      - ".github/actions/setup-rust/**"
+      - ".github/workflows/week8-sota-gates.yml"
+      # wave6 Rust jobs call setup-rust; keep contract hook on that surface.
+      - ".github/workflows/wave6-nightly-safety.yml"
+      # fuzz-smoke calls setup-rust with cache-workspaces; keep contract hook on that surface.
+      - ".github/workflows/fuzz-smoke.yml"
+      # ADR025 soak calls setup-rust (empty with-map / composite defaults).
+      - ".github/workflows/adr025-nightly-evidence.yml"
+      # Smoke Install assay calls setup-rust (empty with-map / composite defaults).
+      - ".github/workflows/smoke-install.yml"
+      # Runner Spike SDK calls setup-rust (empty with-map / composite defaults).
+      - ".github/workflows/runner-spike-sdk.yml"
+      # Perf family calls setup-rust (rustfmt with-map / forensic defaults).
+      - ".github/workflows/perf_main.yml"
+      - ".github/workflows/perf_pr.yml"
+      - ".github/workflows/perf_nightly.yml"
+      # Split Wave 0 Rust jobs call setup-rust (defaults / clippy with-map).
+      - ".github/workflows/split-wave0-gates.yml"
+      # CI clippy/rustdoc call setup-rust (clippy with-map / empty defaults).
+      - ".github/workflows/ci.yml"
+      # Direct-action exception inventory covers these workflows; keep contract hook on that surface.
+      - ".github/workflows/demo.yml"
+      - ".github/workflows/docs-auto-update.yml"
+      - ".github/workflows/parity.yml"
+      - ".github/workflows/release.yml"
       # Note: Cargo.toml/Cargo.lock removed - check-ebpf-changes job handles skip logic
   push:
     branches: [ "main", "debug/**" ]
@@ -51,6 +77,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: rustfmt, clippy
+
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
@@ -63,11 +93,6 @@ jobs:
           key: precommit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
           restore-keys: |
             precommit-${{ runner.os }}-
-
-      - name: Set up Rust (fmt + clippy)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          components: rustfmt, clippy
 
       - name: Install pre-commit (pinned)
         shell: bash

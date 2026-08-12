@@ -287,11 +287,7 @@ impl Provenance {
     fn new(assay_version: &str, verify_enabled: bool) -> Self {
         Self {
             assay_version: assay_version.to_string(),
-            verify_mode: if verify_enabled {
-                "enabled".to_string()
-            } else {
-                "disabled".to_string()
-            },
+            verify_mode: verification_mode(verify_enabled).to_string(),
             policy_pack_digest: None,
             baseline_digest: None,
             trace_digest: None,
@@ -300,6 +296,15 @@ impl Provenance {
             replay_mode: None,
             source_run_id: None,
         }
+    }
+}
+
+/// Return the registered verification-mode value used by machine-readable output.
+pub fn verification_mode(verify_enabled: bool) -> &'static str {
+    if verify_enabled {
+        "enabled"
+    } else {
+        "disabled"
     }
 }
 

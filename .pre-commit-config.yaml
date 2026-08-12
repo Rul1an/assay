@@ -161,6 +161,13 @@ repos:
         pass_filenames: false
         files: ^(scripts/ci/(reconcile-docs-auto-pr|test-reconcile-docs-auto-pr)\.sh|\.github/workflows/(docs-auto-update|ci|assay-runner-lane-check|host-capability-check)\.yml|\.pre-commit-config\.yaml)$
 
+      - id: host-capability-proof-contract
+        name: Host-capability proof cold-start contract
+        entry: bash scripts/ci/test-host-capability-proof-contract.sh --self-test
+        language: system
+        pass_filenames: false
+        files: ^(scripts/ci/test-host-capability-proof-contract\.sh|\.github/workflows/host-capability-proof\.yml|docs/reference/runner/host-capability-proof\.md|\.pre-commit-config\.yaml)$
+
       - id: aee-seal-producer-mutations
         name: ADR-045 seal producer mutations
         entry: python3 scripts/ci/test_aee_seal_producer_mutations.py
@@ -278,6 +285,13 @@ repos:
         # it believes it is checking.
         files: ^(scripts/ci/check-ci-gate-coverage\.py|\.github/workflows/ci\.yml|\.github/rulesets/main-required-ci-contexts\.json|\.pre-commit-config\.yaml)$
 
+      - id: setup-rust-composite-contract-self-test
+        name: Setup-rust composite contract
+        entry: bash scripts/ci/test-setup-rust-composite-contract.sh
+        language: system
+        pass_filenames: false
+        files: ^(\.github/actions/setup-rust/action\.yml|scripts/ci/test-setup-rust-composite-contract\.sh|\.pre-commit-config\.yaml|\.github/workflows/[^/]+\.ya?ml)$
+
       - id: mcp-registry-release-txn-self-test
         name: MCP Registry release transaction self-test
         entry: bash scripts/ci/test-mcp-registry-release-txn.sh
@@ -353,6 +367,16 @@ repos:
         # a version line that reads as evidence of a pin. The self-test drives stub cargo/cargo-deny
         # binaries on PATH, so it costs no network and no install.
         files: ^(scripts/ci/(install-cargo-deny|test-install-cargo-deny)\.sh|\.pre-commit-config\.yaml)$
+
+      - id: deps-security-toolchain-contract-self-test
+        name: deps-security toolchain contract
+        entry: bash scripts/ci/test-deps-security-toolchain-contract.sh
+        language: system
+        pass_filenames: false
+        # Protects the workflow half the install self-test cannot see: deleting or weakening
+        # deps-security's RUSTUP_TOOLCHAIN, and restoring the false "never compiles a crate" claim.
+        # files: includes ci.yml so a workflow-only edit still runs this gate in Lint (pre-commit).
+        files: ^(scripts/ci/(install-cargo-deny|test-deps-security-toolchain-contract)\.sh|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
       - id: cargo-clippy
         name: cargo clippy (workspace, deny warnings)
         entry: scripts/precommit/cargo-clippy.sh
