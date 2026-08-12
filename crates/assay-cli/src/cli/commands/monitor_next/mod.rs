@@ -609,6 +609,7 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                 stats.tracepoint_events_emitted,
                 stats.tracepoint_ringbuf_dropped
             );
+            emit_err!("{}", output::format_send_observation_summary(&stats));
             emit_err!(
                 "  • LSM ringbuf:        emitted={} dropped={}",
                 stats.lsm_events_emitted,
