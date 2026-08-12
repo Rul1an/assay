@@ -97,6 +97,11 @@ active_source_line() {
   grep -qE '^[[:space:]]*source[[:space:]]+(\./scripts/ci/cargo-plugin-versions\.sh|"(\./)?scripts/ci/cargo-plugin-versions\.sh")[[:space:]]*$' <<<"$1"
 }
 
+count_active_cargo_audit_installs() {
+  # grep -c exits 1 on zero matches; keep zero under set -e.
+  printf '%s\n' "$1" | grep -cE '^[[:space:]]*cargo[[:space:]]+install[[:space:]].*[[:space:]]cargo-audit[[:space:]]*$' || true
+}
+
 active_pinned_install_line() {
   grep -qE '^[[:space:]]*cargo[[:space:]]+install[[:space:]]+--locked[[:space:]]+--version[[:space:]]+"\$\{CARGO_AUDIT_VERSION\}"[[:space:]]+cargo-audit[[:space:]]*$' <<<"$1"
 }
@@ -112,7 +117,7 @@ active_assert_line() {
 
 check_workflow() {
   local wf="$1"
-  local job install_run
+  local job install_run install_count
 
   job="$(deps_security_job "${wf}")"
   [[ -n "${job}" ]] || fail "could not find deps-security job in ${wf##*/}"
@@ -125,7 +130,14 @@ check_workflow() {
     || fail "Install cargo-audit must have an active complete line sourcing scripts/ci/cargo-plugin-versions.sh; got:
 ${install_run}"
 
-  # Pin must be a complete active install argv via the shared variable.
+  # Exactly one active cargo install of cargo-audit, and it must be the pinned argv.
+  # A second install (pinned or unpinned) after assert would overwrite the pin while a
+  # presence-only check stayed green (#2317 review 4914399777).
+  install_count="$(count_active_cargo_audit_installs "${install_run}")"
+  [[ "${install_count}" -eq 1 ]] \
+    || fail "Install cargo-audit must have exactly one active cargo install of cargo-audit; found ${install_count}:
+${install_run}"
+
   active_pinned_install_line "${install_run}" \
     || fail "Install cargo-audit must have an active complete line: cargo install --locked --version \"\${CARGO_AUDIT_VERSION}\" cargo-audit; got:
 ${install_run}"
@@ -474,6 +486,38 @@ if ! ( check_workflow "${keep}" ) >/dev/null 2>&1; then
   fail "correctly pinned run: |+ turned the contract red"
 fi
 ok "correctly pinned run: |+ stays green"
+
+echo "== mutation: second active unpinned cargo-audit install =="
+# Keep source + pinned install + assert, then append an unpinned install that would overwrite
+# the pin at runtime while a presence-only check stayed green (#2317 review 4914399777).
+dual="$(mktemp "${SANDBOX_ROOT}/dual.XXXXXX.yml")"
+python3 - "${WORKFLOW}" "${dual}" <<'PY'
+import pathlib, sys
+
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+text = src.read_text()
+old = '          assert_cargo_plugin_version cargo-audit "${CARGO_AUDIT_VERSION}"\n'
+new = old + "          cargo install --locked cargo-audit\n"
+if old not in text:
+    raise SystemExit("could not find assert line to append a second install after")
+dst.write_text(text.replace(old, new, 1))
+PY
+dual_run="$(install_cargo_audit_run "${dual}")"
+[[ "$(count_active_cargo_audit_installs "${dual_run}")" -eq 2 ]] \
+  || fail "dual-install mutation did not leave two active cargo-audit installs"
+active_pinned_install_line "${dual_run}" \
+  || fail "dual-install mutation lost the pinned install line"
+active_source_line "${dual_run}" \
+  || fail "dual-install mutation lost the source line"
+active_assert_line "${dual_run}" \
+  || fail "dual-install mutation lost the assert line"
+grep -qE '^[[:space:]]*cargo[[:space:]]+install[[:space:]]+--locked[[:space:]]+cargo-audit[[:space:]]*$' \
+  <<<"${dual_run}" \
+  || fail "dual-install mutation did not append an active unpinned install"
+if ( check_workflow "${dual}" ) >/dev/null 2>&1; then
+  fail "second active unpinned cargo-audit install left the contract green"
+fi
+ok "second active unpinned cargo-audit install turns the contract red"
 
 ok "cargo-plugin-versions contract mutations bite"
 echo "PASS: cargo-plugin-versions contract"
