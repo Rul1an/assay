@@ -1,6 +1,8 @@
 use crate::config_flags::{apply_dedup_open_paths, apply_emit_observed_connect, FlagConfigSink};
 use crate::events::{self, EventStream};
-use crate::probes::{ProbeAttachment, EXPECTED_PROBES};
+use crate::probes::{
+    connect4_update, Connect4Fault, ModeUpdate, ProbeAttachment, EGRESS_PEER_PROBE, EXPECTED_PROBES,
+};
 use crate::{MonitorError, MonitorStatsSnapshot};
 use assay_common::{
     CidrRuleValue, KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL, MONITOR_STAT_CONNECT_EVENTS_EMITTED,
@@ -18,13 +20,21 @@ use assay_policy::tiers::CompiledPolicy;
 use aya::maps::lpm_trie::Key;
 use aya::{
     maps::{Array as AyaArray, HashMap as AyaHashMap, LpmTrie, RingBuf},
-    programs::{CgroupAttachMode, CgroupSockAddr, Lsm, TracePoint},
+    programs::{CgroupAttachMode, CgroupSockAddr, Lsm, ProgramError, TracePoint},
     Btf, Ebpf,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+
+fn attach_kernel_lacks_point(err: &ProgramError) -> bool {
+    // ENOENT=2, EOPNOTSUPP=95 on Linux.
+    match err {
+        ProgramError::SyscallError(sy) => matches!(sy.io_error.raw_os_error(), Some(2 | 95)),
+        _ => false,
+    }
+}
 
 #[cfg(target_os = "linux")]
 /// One-shot, actionable warning emitted on the first event-size mismatch of a run. Further
@@ -448,26 +458,67 @@ impl LinuxMonitor {
         cgroup_file: &std::fs::File,
     ) -> Result<(), MonitorError> {
         let mut bpf = self.bpf.lock().unwrap();
-        // Fail-closed: a missing program or a load/attach failure is a hard error, never a silent
-        // degrade. The caller (monitor) must refuse to run enforcement it could not actually install.
-        let prog = bpf.program_mut("connect4_hook").ok_or_else(|| {
-            MonitorError::EnforcementUnavailable(
-                "connect4_hook program not present in eBPF object".to_string(),
-            )
-        })?;
-        let csa: &mut CgroupSockAddr = TryInto::<&mut CgroupSockAddr>::try_into(&mut *prog)
-            .map_err(|e| {
-                MonitorError::EnforcementUnavailable(format!(
+        // Fail-closed. Inventory via connect4_update: missing→Unavailable, wrong-kind/load→Failed,
+        // attach ENOENT/EOPNOTSUPP→Unsupported, other attach→Failed.
+        let Some(prog) = bpf.program_mut("connect4_hook") else {
+            self.probe_attachment.record_mode(
+                EGRESS_PEER_PROBE,
+                connect4_update(Connect4Fault::MissingProgram),
+            );
+            return Err(MonitorError::EnforcementUnavailable(
+                "connect4_hook program not present in eBPF object".into(),
+            ));
+        };
+        let csa: &mut CgroupSockAddr = match TryInto::<&mut CgroupSockAddr>::try_into(&mut *prog) {
+            Ok(csa) => csa,
+            Err(e) => {
+                self.probe_attachment.record_mode(
+                    EGRESS_PEER_PROBE,
+                    connect4_update(Connect4Fault::WrongProgramKind),
+                );
+                return Err(MonitorError::EnforcementUnavailable(format!(
                     "connect4_hook is not a CgroupSockAddr program: {e}"
-                ))
-            })?;
-        csa.load()?;
-        let link_id = csa.attach(cgroup_file, CgroupAttachMode::Single)?;
-        let link = csa.take_link(link_id)?;
-        self.probe_attachment.attached("cgroup_sock_addr:connect4");
+                )));
+            }
+        };
+        if let Err(e) = csa.load() {
+            self.probe_attachment.record_mode(
+                EGRESS_PEER_PROBE,
+                connect4_update(Connect4Fault::LoadFailed),
+            );
+            return Err(e.into());
+        }
+        let link_id = match csa.attach(cgroup_file, CgroupAttachMode::Single) {
+            Ok(id) => id,
+            Err(e) => {
+                let lacks = attach_kernel_lacks_point(&e);
+                self.probe_attachment.record_mode(
+                    EGRESS_PEER_PROBE,
+                    connect4_update(Connect4Fault::AttachFailed {
+                        kernel_lacks_point: lacks,
+                    }),
+                );
+                return Err(e.into());
+            }
+        };
+        let link = csa.take_link(link_id).map_err(|e| {
+            self.probe_attachment.record_mode(
+                EGRESS_PEER_PROBE,
+                connect4_update(Connect4Fault::AttachFailed {
+                    kernel_lacks_point: false,
+                }),
+            );
+            e
+        })?;
+        self.probe_attachment.attached(EGRESS_PEER_PROBE);
         self.links.push(MonitorLink::CgroupSockAddr(link));
         println!("DEBUG: Attached cgroup connect4 egress enforcement");
         Ok(())
+    }
+
+    pub(crate) fn record_egress_failed(&mut self, reason: &'static str) {
+        self.probe_attachment
+            .record_mode(EGRESS_PEER_PROBE, ModeUpdate::Failed(reason));
     }
 
     pub fn snapshot_stats(&mut self) -> Result<MonitorStatsSnapshot, MonitorError> {

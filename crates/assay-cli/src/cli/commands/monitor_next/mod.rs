@@ -488,6 +488,7 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                     // like `absent` (not requested), so write the artifact BEFORE the fail-closed exit.
                     // Distinguish enforcement refusal from an infrastructure failure to retain the
                     // requested carrier.
+                    monitor.record_egress_failed("cgroup v2 root unavailable");
                     return Ok(failed_enforcement_exit(&args, exit_codes::EXIT_WOULD_BLOCK));
                 }
             };
@@ -495,6 +496,15 @@ async fn run_linux(args: super::MonitorArgs) -> anyhow::Result<i32> {
                 emit_err!(
                     "FATAL: egress enforcement requested but connect4 attach failed: {} (fail-closed, not running audit-only)",
                     e
+                );
+                return Ok(failed_enforcement_exit(&args, exit_codes::EXIT_WOULD_BLOCK));
+            }
+            // Fail-closed: a requested connect4 row must be terminal (Attached/Unavailable/Failed/
+            // kernel-Unsupported), never left NotRequested and never reported as a clean run.
+            if let Err(reason) = monitor.finalize_mode_aware(true) {
+                emit_err!(
+                    "FATAL: egress enforcement requested but mode-aware probe inventory is incomplete: {} (fail-closed)",
+                    reason
                 );
                 return Ok(failed_enforcement_exit(&args, exit_codes::EXIT_WOULD_BLOCK));
             }

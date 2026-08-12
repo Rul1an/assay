@@ -200,15 +200,6 @@ impl Monitor {
     ///
     /// On non-Linux targets nothing attaches, so every expected probe is reported as a blind spot
     /// rather than the record being absent: "no observation" is a fact, not a missing field.
-    /// The no-attachment baseline, so the non-Linux branch of `probe_attachment` is exercised by
-    /// tests that can actually run on a developer machine.
-    #[cfg(test)]
-    pub(crate) fn probe_attachment_for_tests() -> probes::ProbeAttachment {
-        let mut attachment = probes::ProbeAttachment::default();
-        attachment.reconcile(probes::EXPECTED_PROBES);
-        attachment
-    }
-
     #[must_use]
     pub fn probe_attachment(&self) -> probes::ProbeAttachment {
         #[cfg(target_os = "linux")]
@@ -280,6 +271,29 @@ impl Monitor {
         {
             let _ = cgroup_file;
             Err(MonitorError::NotSupported)
+        }
+    }
+
+    /// connect4 `Failed` when policy requested but attach never ran (e.g. cgroup root missing).
+    pub fn record_egress_failed(&mut self, reason: &'static str) {
+        #[cfg(target_os = "linux")]
+        self.inner.record_egress_failed(reason);
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = reason;
+        }
+    }
+
+    pub fn finalize_mode_aware(&self, network_policy_requested: bool) -> Result<(), &'static str> {
+        #[cfg(target_os = "linux")]
+        return self
+            .inner
+            .probe_attachment()
+            .finalize_mode_aware(network_policy_requested);
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = network_policy_requested;
+            Ok(())
         }
     }
 
