@@ -295,14 +295,15 @@ impl ProbeAttachment {
         &self,
         network_policy_requested: bool,
     ) -> Result<(), &'static str> {
-        if !network_policy_requested {
-            return Ok(());
-        }
         for p in PROBE_PROGRAMS.iter().filter(|p| {
             matches!(
                 p.class,
-                ProbeClass::Mode(ProbeCondition::RequiresNetworkPolicy)
-            )
+                ProbeClass::Mode(ProbeCondition::RequiresSendObservation)
+            ) || (network_policy_requested
+                && matches!(
+                    p.class,
+                    ProbeClass::Mode(ProbeCondition::RequiresNetworkPolicy)
+                ))
         }) {
             match self.outcome(p.surface_name) {
                 Some(
@@ -346,6 +347,11 @@ impl ProbeAttachment {
 mod tests {
     use super::*;
 
+    fn attach_send_observation(attachment: &mut ProbeAttachment) {
+        attachment.attached("sys_enter_sendto");
+        attachment.attached("sys_enter_sendmsg");
+    }
+
     #[test]
     fn is_complete_unchanged_for_always_probes() {
         let mut a = ProbeAttachment::default();
@@ -363,7 +369,8 @@ mod tests {
 
     #[test]
     fn no_policy_default_is_not_requested() {
-        let a = ProbeAttachment::default();
+        let mut a = ProbeAttachment::default();
+        attach_send_observation(&mut a);
         assert_eq!(
             a.outcome(EGRESS_PEER_PROBE),
             Some(ProbeOutcome::NotRequested)
@@ -428,6 +435,7 @@ mod tests {
     #[test]
     fn successful_attach_is_attached() {
         let mut a = ProbeAttachment::default();
+        attach_send_observation(&mut a);
         a.attached(EGRESS_PEER_PROBE);
         assert_eq!(a.outcome(EGRESS_PEER_PROBE), Some(ProbeOutcome::Attached));
         assert!(a.finalize_mode_aware(true).is_ok());
@@ -438,6 +446,33 @@ mod tests {
         assert_eq!(
             ProbeAttachment::default().finalize_mode_aware(true),
             Err("required probe requested but has no terminal status")
+        );
+    }
+
+    #[test]
+    fn send_observation_without_terminal_status_fails_without_network_policy() {
+        assert_eq!(
+            ProbeAttachment::default().finalize_mode_aware(false),
+            Err("required probe requested but has no terminal status")
+        );
+    }
+
+    #[test]
+    fn one_send_fault_does_not_change_the_other_send_status() {
+        let mut attachment = ProbeAttachment::default();
+        attachment.record_mode(
+            "sys_enter_sendto",
+            send_update(SendFault::AttachFailed {
+                kernel_lacks_point: false,
+            }),
+        );
+        assert_eq!(
+            attachment.outcome("sys_enter_sendto"),
+            Some(ProbeOutcome::Failed)
+        );
+        assert_eq!(
+            attachment.outcome("sys_enter_sendmsg"),
+            Some(ProbeOutcome::NotRequested)
         );
     }
 

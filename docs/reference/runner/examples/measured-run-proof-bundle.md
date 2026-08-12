@@ -104,13 +104,22 @@ How to read this:
   not lose any events the eBPF ring buffer handed us. If it had, this
   would say `degraded` and the count would be non-zero, and the rest of
   the bundle would have to be interpreted in that light.
-- `network_protocol_coverage: connect_only` is the honesty boundary for
-  the current Runner network surface: clean capture does not imply
-  protocol-complete QUIC peer attribution.
-- Runs that emit `sendto` or `sendmsg` peer events can report
+- `network_protocol_coverage: connect_only` on this fixture is the honesty
+  boundary for that archive: clean capture does not imply protocol-complete
+  QUIC peer attribution.
+- Archives that already carry `sendto` or `sendmsg` peer events can report
   `datagram_peer_observed` or `connect_and_datagram_peer_observed` instead.
   That strengthens the transport observation but does not, by itself, create
-  a request-level or exact peer-set claim.
+  a request-level or exact peer-set claim. `assay_monitor_sendto` and
+  `assay_monitor_sendmsg` are compiled into the release ELF and presently
+  unattached (`Unsupported`). This fixture is a Runner archive:
+  `assay runner-spike --kernel-capture` / `assay-runner-core`
+  `network_protocol_coverage_for` is **count-derived**, so `connect_only`
+  here means `connect_emitted > 0` from always-attached `sys_enter_connect`,
+  with **no** connect4 / network-policy requirement. Datagram labels require
+  send-event counts and are unreachable there while those TPs stay
+  unattached. CLI `assay monitor` `observation_health` is a different
+  producer (attach-derived from cgroup `connect4`, otherwise `absent`).
 - `network_endpoint_claim_scope: diagnostic_only` means any
   `network_endpoints` values are coarse/diagnostic evidence, not an
   exact datagram peer set.
