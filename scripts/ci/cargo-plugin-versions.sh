@@ -31,6 +31,10 @@ cargo_plugin_bin_path() {
 # Bind the assertion to Cargo's install location. Resolving through PATH lets an unrelated
 # binary earlier on PATH satisfy the pin while the install wrote nothing (#2226).
 #
+# cargo-hack is a Cargo subcommand and requires its subcommand token even when its installed
+# binary is invoked directly: `cargo-hack hack --version`. Other pinned plugins measured here
+# accept `<installed-binary> --version`.
+#
 # cargo-nextest alone prints a multi-line banner. Measured shape of line 1:
 #   cargo-nextest <semver> (<hex> <YYYY-MM-DD>)
 # Only that tool may take the first line and strip that documented suffix. Other plugins
@@ -45,7 +49,11 @@ assert_cargo_plugin_version() {
     echo "the pin lives in scripts/ci/cargo-plugin-versions.sh and is the only place to change it" >&2
     return 1
   fi
-  reported="$("${bin}" --version)"
+  if [[ "${name}" == "cargo-hack" ]]; then
+    reported="$("${bin}" hack --version)"
+  else
+    reported="$("${bin}" --version)"
+  fi
   if [[ "${name}" == "cargo-nextest" ]]; then
     reported="${reported%%$'\n'*}"
     # Bash 3.2: =~ + BASH_REMATCH. Require hex hash + ISO date inside the parens.
