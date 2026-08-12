@@ -387,19 +387,238 @@ fn the_evidence_integrity_boundary_reads_the_same_in_the_spec_and_the_code() {
     );
 }
 
+const REGISTRY_HEADER: &str = "pub enum ReasonCode {";
+const INTEGRITY_DECL: &str = "\n    EEvidenceIntegrity,";
+const BOUNDARY_INCLUDE: &str =
+    "#[doc = include_str!(\"exit_codes/evidence_integrity_boundary.md\")]";
+
+/// `text` with its string literals removed, and the number of brackets it leaves open.
+///
+/// The literals go first so that what is written *about* an attribute is never read as part of it:
+/// `#[serde(rename = "doc")]` names no `doc` path, and a `)` inside a note is not a closing
+/// bracket. `None` when the text closes a bracket it never opened or ends inside a literal —
+/// neither is a complete attribute, and both are refused rather than guessed at.
+fn code_of(text: &str) -> Option<(String, i32)> {
+    let mut code = String::with_capacity(text.len());
+    let mut depth = 0i32;
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => loop {
+                match chars.next()? {
+                    '\\' => {
+                        chars.next()?;
+                    }
+                    '"' => break,
+                    _ => {}
+                }
+            },
+            '(' | '[' | '{' => {
+                depth += 1;
+                code.push(c);
+            }
+            ')' | ']' | '}' => {
+                depth -= 1;
+                if depth < 0 {
+                    return None;
+                }
+                code.push(c);
+            }
+            _ => code.push(c),
+        }
+    }
+    Some((code, depth))
+}
+
+/// The identifiers in `code`, in source order. The first is the attribute's path.
+fn identifiers(code: &str) -> Vec<&str> {
+    code.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .filter(|token| !token.is_empty())
+        .collect()
+}
+
+/// Can this unit of source put text on the variant it precedes?
+///
+/// Two channels reach the rendered variant and both are refused. The `doc` namespace is written by
+/// `///`, `//!`, `/** */` and by an attribute whose path is `doc`; `#[deprecated]`'s note is
+/// written into the item-info stab, which rustdoc renders *ahead of* the doc block. A `cfg_attr`
+/// naming either path expands to one, so it goes with them.
+///
+/// The rule is the attribute's *path*, not the letters in the line. Asking whether the line
+/// contains `doc` refuses `#[allow(rustdoc::bare_urls)]`, which documents nothing, and a guard
+/// that fails on correct code is weakened by the next author who trips over it.
+///
+/// Admitted: a blank line, a `//` comment, and an attribute whose path is neither of those two,
+/// whether rustfmt kept it on one line or broke it across several. The one `doc`-path exception is
+/// `#[doc(alias = "…")]`, whose whole content is a search-index alias and which puts no prose on
+/// the item; `#[doc(hidden)]` is not admitted, because it removes the page the boundary text is
+/// meant to reach. Anything else this does not recognise — an attribute whose brackets do not
+/// balance, a `/* */` block, a bare token — is refused, since an unfamiliar shape is likelier to
+/// be a new way of documenting the variant than a new way of not documenting it.
+fn cannot_document(unit: &str) -> bool {
+    let unit = unit.trim();
+    if unit.is_empty() {
+        return true;
+    }
+    if unit.starts_with("//") {
+        return !unit.starts_with("///") && !unit.starts_with("//!");
+    }
+    let Some(attribute) = unit
+        .strip_prefix("#[")
+        .and_then(|rest| rest.strip_suffix(']'))
+    else {
+        return false;
+    };
+    let Some((code, 0)) = code_of(attribute) else {
+        return false;
+    };
+    let tokens = identifiers(&code);
+    match tokens.first() {
+        Some(&"doc") => tokens == ["doc", "alias"],
+        Some(&"deprecated") => false,
+        Some(&"cfg_attr") => !tokens
+            .iter()
+            .any(|token| *token == "doc" || *token == "deprecated"),
+        Some(_) => true,
+        None => false,
+    }
+}
+
+/// The lines above the variant, grouped into the units rustc reads: an attribute rustfmt has
+/// broken across source lines is one unit, every other line is a unit of its own, and each unit
+/// carries the index of its last line.
+///
+/// Grouping is what lets the rule above be about the attribute rather than about the line, so that
+/// a wrapped `#[cfg_attr(feature = "serde", serde(alias = "…"))]` is read as the one attribute it
+/// is. An attribute whose brackets never balance runs to the end of the region and is refused
+/// there, which is the direction every unrecognised shape goes.
+fn source_units(lines: &[&str]) -> Vec<(usize, String)> {
+    let mut units = Vec::new();
+    let mut start = 0;
+    while start < lines.len() {
+        let mut last = start;
+        let mut text = lines[start].trim().to_string();
+        if text.starts_with("#[") {
+            while code_of(&text).map(|(_, depth)| depth) != Some(0) && last + 1 < lines.len() {
+                last += 1;
+                text.push(' ');
+                text.push_str(lines[last].trim());
+            }
+        }
+        units.push((last, text));
+        start = last + 1;
+    }
+    units
+}
+
+/// Is this line a unit-variant declaration, i.e. the end of the previous variant's own text?
+///
+/// A trailing `// …` is dropped first. rustfmt keeps one, so a variant carrying a note about
+/// itself would otherwise not be recognised as the line the walk stops on, and the failure would
+/// name a line the author has no reason to connect to this variant.
+fn declares_a_variant(line: &str) -> bool {
+    let code = match line.find("//") {
+        Some(at) => &line[..at],
+        None => line,
+    };
+    let Some(name) = code.trim().strip_suffix(',') else {
+        return false;
+    };
+    name.starts_with(|c: char| c.is_ascii_uppercase()) && name.chars().all(char::is_alphanumeric)
+}
+
 #[test]
-fn the_doc_comment_transports_the_boundary_rather_than_restating_it() {
+fn nothing_but_the_boundary_include_documents_the_integrity_variant() {
     // `include_str!` is what makes the equality above cover the doc comment too. Replace it with a
     // hand-written `///` block and the row could be pinned while the definition drifts.
+    //
+    // The whole run of lines back to the previous variant is checked, not the line nearest the
+    // declaration. Checking only that line asserts "the include is present, adjacent to the
+    // variant", which is a neighbouring property: rustc concatenates `///` lines and `#[doc]`
+    // attributes on one item in source order, so a `///` line placed *above* the include also
+    // documents this variant and renders ahead of the boundary text in the shipped rustdoc while
+    // leaving that line untouched. That gap re-admitted a withdrawn "Merkle root ... inclusion
+    // proofs" claim past the test written to forbid it, because that test reads the fragment and
+    // the claim was not in the fragment.
+    //
+    // Walking up while a line *looks like* documentation is the same neighbouring property one
+    // step out: the walk stops at the first line without a `///` or `#[doc` prefix, and a
+    // continuation line, a `/**` opener and a `#[cfg_attr(` opener are all such lines, so live doc
+    // text above any of them was collected as absent. The walk therefore runs on units that
+    // *cannot* carry text and stops everywhere else, which makes an unrecognised shape a failure
+    // instead of a pass, and it must stop on the previous variant's declaration — anything else
+    // between the two variants is the second copy of the rule this forbids.
+    //
+    // Both rendered channels are refused, not just the `doc` namespace: `#[deprecated]`'s note is
+    // markdown-rendered into the item-info stab *ahead of* the doc block, which is this test's own
+    // failure shape reached through an attribute that is not a doc attribute.
+    //
+    // What this does not pin, so that it is not read as more than it is: doc text on `enum
+    // ReasonCode` itself, which documents the enum rather than this variant; the rendering step,
+    // since it reads the source rustdoc is given and not rustdoc's output; and an attribute macro,
+    // which expands to source this never sees.
     let src = read("crates/assay-cli/src/exit_codes.rs");
-    let head = src
-        .split_once("    EEvidenceIntegrity,")
-        .map(|(before_decl, _)| before_decl)
-        .expect("no `EEvidenceIntegrity` variant in the enum");
-    let last = head.lines().next_back().unwrap_or_default().trim();
     assert_eq!(
-        last, "#[doc = include_str!(\"exit_codes/evidence_integrity_boundary.md\")]",
-        "`EEvidenceIntegrity` is documented by {last:?} rather than by including {BOUNDARY}"
+        src.matches(REGISTRY_HEADER).count(),
+        1,
+        "`{REGISTRY_HEADER}` occurs more than once in crates/assay-cli/src/exit_codes.rs, so the \
+         slice read below is not necessarily the registry"
+    );
+    let body = src
+        .split_once(REGISTRY_HEADER)
+        .and_then(|(_, body)| body.split_once("\n}"))
+        .map(|(body, _)| body)
+        .expect("`pub enum ReasonCode` has no closing brace");
+    // Scoped to the enum body and required to be unique inside it, because the first textual match
+    // in the file is not necessarily the declaration: the same line inside an earlier comment made
+    // this assertion report on a location it does not name, green, with the claim live.
+    assert_eq!(
+        body.matches(INTEGRITY_DECL).count(),
+        1,
+        "`EEvidenceIntegrity,` occurs {} times in the `ReasonCode` body; the declaration this reads \
+         is then not necessarily the one it names",
+        body.matches(INTEGRITY_DECL).count()
+    );
+    let head = body
+        .split_once(INTEGRITY_DECL)
+        .map(|(above_decl, _)| above_decl)
+        .expect("no `EEvidenceIntegrity` variant in `ReasonCode`");
+    let lines: Vec<&str> = head.lines().collect();
+    let units = source_units(&lines);
+    let previous_variant = units
+        .iter()
+        .rposition(|(_, unit)| !(cannot_document(unit) || unit.as_str() == BOUNDARY_INCLUDE));
+    let own_text: &[&str] = match previous_variant {
+        Some(index) => {
+            let (last_line, unit) = &units[index];
+            assert!(
+                declares_a_variant(unit),
+                "`EEvidenceIntegrity`'s own text reaches back to {unit:?}, which does not declare \
+                 the previous variant. Every line between the two variants documents this one, so \
+                 anything there that is not the boundary include is a second copy of the rule, \
+                 free to contradict it while the §5.1 row stays correct. Blank lines, `//` \
+                 comments, and attributes whose path is neither `doc` nor `deprecated` — on one \
+                 line or broken across several — carry no text and are fine on either side of the \
+                 include; a `///` or `/** */` comment, a `#[doc = ...]`, a `#[deprecated]` note, \
+                 any `cfg_attr` naming either path, and any attribute whose brackets do not \
+                 balance are refused here rather than guessed at."
+            );
+            &lines[last_line + 1..]
+        }
+        // Nothing above but text that cannot document the variant, so it opens the enum body and
+        // there is no previous declaration to reach back to. That is a legitimate place for it;
+        // the include count below is what decides the case, rather than a panic asserting as
+        // impossible the state the author just created.
+        None => &lines,
+    };
+    assert_eq!(
+        own_text
+            .iter()
+            .filter(|line| line.trim() == BOUNDARY_INCLUDE)
+            .count(),
+        1,
+        "`EEvidenceIntegrity` is documented by {own_text:?} rather than by including {BOUNDARY} \
+         exactly once"
     );
 }
 
