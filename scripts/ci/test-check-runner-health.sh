@@ -114,7 +114,8 @@ run_check() {
     GITHUB_REPOSITORY="Rul1an/assay" \
     RUNNER_STATUS_TOKEN="runner-token" \
     QUEUE_TOKEN="queue-token" \
-    RUNNER_NAME="assay-bpf-runner" \
+    RUNNER_NAME="GitHub Actions 1000234011" \
+    ASSAY_RUNNER_NAME="assay-bpf-runner" \
     REQUIRED_RUNNER_LABEL="assay-bpf-runner" \
     GITHUB_OUTPUT="${out_file}" \
     GITHUB_STEP_SUMMARY="${summary_file}" \
@@ -360,6 +361,11 @@ grep -q 'RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_HEALTH_TOKEN || github.token }}
 # shellcheck disable=SC2016
 grep -q 'QUEUE_TOKEN: ${{ github.token }}' "${WORKFLOW}" \
   || fail "workflow must keep QUEUE_TOKEN separation"
+grep -q 'ASSAY_RUNNER_NAME: assay-bpf-runner' "${WORKFLOW}" \
+  || fail "workflow must use a namespaced runner-name variable"
+if grep -qE '^[[:space:]]+RUNNER_NAME:' "${WORKFLOW}"; then
+  fail "workflow must not override GitHub Actions reserved RUNNER_NAME"
+fi
 ok "token separation preserved"
 
 if grep -q "steps.check.outcome == 'failure'" "${WORKFLOW}"; then

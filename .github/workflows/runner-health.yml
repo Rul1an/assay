@@ -31,7 +31,7 @@ jobs:
           # for queue visibility.
           RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_HEALTH_TOKEN || github.token }}
           QUEUE_TOKEN: ${{ github.token }}
-          RUNNER_NAME: assay-bpf-runner
+          ASSAY_RUNNER_NAME: assay-bpf-runner
           REQUIRED_RUNNER_LABEL: assay-bpf-runner
         run: |
           bash scripts/ci/check-runner-health.sh
