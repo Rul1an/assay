@@ -107,13 +107,19 @@ pub(crate) fn format_monitor_event(event_type: u32, pid: u32, data: &[u8]) -> Op
 
     let line = match event_type {
         EVENT_OPENAT => format!("[PID {}] openat: {}", pid, decode_utf8_cstr(data)),
-        // Decode to ip:port, falling back to hex for a family we do not model. The raw form
-        // was unreadable in practice: a reader has to know that 0200 is AF_INET and that the
-        // next two bytes are a network-order port, and grepping a log for a decimal port
-        // against a hex payload silently finds nothing. That produced three false negatives
-        // while investigating egress coverage, each of which read like the monitor was blind.
-        EVENT_CONNECT => match assay_monitor::events::decode_raw_sockaddr(data) {
-            Some(peer) => format!("[PID {pid}] connect: {peer}"),
+        // Render the endpoint a reader is looking for. The raw form is unreadable in practice:
+        // it requires knowing that 0200 is AF_INET and that the next two bytes are a
+        // network-order port, and grepping a log for a decimal port against a hex payload
+        // silently finds nothing. That produced three false negatives while measuring egress
+        // coverage, each of which read like the monitor was blind.
+        //
+        // Reuses the decoder that already owns this rule. Note it is NOT the same layout as
+        // decode_blocked_socket_payload, which reads the projected payload the cgroup hook
+        // writes from the kernel's own bpf_sock_addr; these are the raw bytes the process
+        // passed to connect(2). Display only: the peer set that grounds a refutation still
+        // comes from cgroup events alone, for the reason `observed_peer` documents.
+        EVENT_CONNECT => match assay_monitor::events::decode_connect_sockaddr(data) {
+            Some(dest) => format!("[PID {pid}] connect: {}", dest.endpoint()),
             None => format!(
                 "[PID {}] connect sockaddr[0..32]=0x{}",
                 pid,
@@ -248,8 +254,34 @@ mod tests {
 
     #[test]
     fn connect_event_formats_exact_sockaddr_hex_line() {
+        // Fallback: 4 bytes is too short to carry an address, so the decoder declines and the
+        // raw form is printed rather than a confident decode of bytes we did not understand.
         let line = format_monitor_event(EVENT_CONNECT, 4242, &[0x02, 0x00, 0x00, 0x50]).unwrap();
         assert_eq!(line, "[PID 4242] connect sockaddr[0..32]=0x02000050");
+    }
+
+    /// The exact 32 bytes an `EVENT_CONNECT` carried on `assay-bpf-runner` (kernel 6.8,
+    /// aarch64) for a `connect(2)` to 127.0.0.1:9102, captured from a live run rather than
+    /// constructed. Pins the rendered line a reader actually sees.
+    #[test]
+    fn connect_event_renders_decoded_endpoint() {
+        let observed: [u8; 32] = [
+            0x02, 0x00, 0x23, 0x8e, 0x7f, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        ];
+        let line = format_monitor_event(EVENT_CONNECT, 4242, &observed).unwrap();
+        assert_eq!(line, "[PID 4242] connect: 127.0.0.1:9102");
+    }
+
+    #[test]
+    fn connect_event_port_is_not_read_host_order() {
+        // 0x238e is 9102 big-endian and 36387 little-endian. Reading it host-order would look
+        // entirely plausible in a log, which is why it is asserted against explicitly.
+        let observed: [u8; 8] = [0x02, 0x00, 0x23, 0x8e, 0x7f, 0x00, 0x00, 0x01];
+        let line = format_monitor_event(EVENT_CONNECT, 1, &observed).unwrap();
+        assert!(line.ends_with(":9102"), "got {line}");
+        assert!(!line.contains("36387"), "port read host-order: {line}");
     }
 
     #[test]
