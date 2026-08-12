@@ -1,18 +1,82 @@
 //! Probe attachment + mode-aware inventory (`not_requested`≠`unavailable`≠`failed`≠`unsupported`).
-//! Always probes: [`EXPECTED_PROBES`] + [`ProbeAttachment::reconcile`].
-//! Mode-aware: `default_status` / `apply_mode_update`; Linux loader seams via `connect4_update`.
+//! [`PROBE_PROGRAMS`] owns ELF names, surfaces, class, and attach spec; [`EXPECTED_PROBES`] is derived.
 
-pub const EXPECTED_PROBES: &[&str] = &[
-    "sys_enter_openat",
-    "sys_enter_openat2",
-    "sys_exit_openat",
-    "sys_exit_openat2",
-    "sys_enter_connect",
-    "sys_enter_fork",
-    "lsm:file_open",
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProbeClass {
+    Always,
+    Mode(ProbeCondition),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AttachSpec {
+    Tp(&'static str, &'static str),
+    Lsm(&'static str),
+    Cgroup4,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ProbeProgram {
+    pub elf_name: &'static str,
+    pub surface_name: &'static str,
+    pub class: ProbeClass,
+    pub attach: AttachSpec,
+}
+
+#[rustfmt::skip]
+pub(crate) const PROBE_PROGRAMS: &[ProbeProgram] = &[
+    ProbeProgram { elf_name: "assay_monitor_openat", surface_name: "sys_enter_openat", class: ProbeClass::Always, attach: AttachSpec::Tp("syscalls", "sys_enter_openat") },
+    ProbeProgram { elf_name: "assay_monitor_openat2", surface_name: "sys_enter_openat2", class: ProbeClass::Always, attach: AttachSpec::Tp("syscalls", "sys_enter_openat2") },
+    ProbeProgram { elf_name: "assay_monitor_openat_exit", surface_name: "sys_exit_openat", class: ProbeClass::Always, attach: AttachSpec::Tp("syscalls", "sys_exit_openat") },
+    ProbeProgram { elf_name: "assay_monitor_openat2_exit", surface_name: "sys_exit_openat2", class: ProbeClass::Always, attach: AttachSpec::Tp("syscalls", "sys_exit_openat2") },
+    ProbeProgram { elf_name: "assay_monitor_connect", surface_name: "sys_enter_connect", class: ProbeClass::Always, attach: AttachSpec::Tp("syscalls", "sys_enter_connect") },
+    ProbeProgram { elf_name: "assay_monitor_sendto", surface_name: "sys_enter_sendto", class: ProbeClass::Mode(ProbeCondition::Unsupported), attach: AttachSpec::None },
+    ProbeProgram { elf_name: "assay_monitor_sendmsg", surface_name: "sys_enter_sendmsg", class: ProbeClass::Mode(ProbeCondition::Unsupported), attach: AttachSpec::None },
+    ProbeProgram { elf_name: "assay_monitor_fork", surface_name: "sys_enter_fork", class: ProbeClass::Always, attach: AttachSpec::Tp("syscalls", "sys_enter_fork") },
+    ProbeProgram { elf_name: "file_open_lsm", surface_name: "lsm:file_open", class: ProbeClass::Always, attach: AttachSpec::Lsm("file_open") },
+    ProbeProgram { elf_name: "connect4_hook", surface_name: "cgroup_sock_addr:connect4", class: ProbeClass::Mode(ProbeCondition::RequiresNetworkPolicy), attach: AttachSpec::Cgroup4 },
+    ProbeProgram { elf_name: "connect6_hook", surface_name: "cgroup_sock_addr:connect6", class: ProbeClass::Mode(ProbeCondition::Unsupported), attach: AttachSpec::None },
 ];
 
+#[rustfmt::skip]
+const ALWAYS_N: usize = {
+    let mut n = 0; let mut i = 0;
+    while i < PROBE_PROGRAMS.len() {
+        if matches!(PROBE_PROGRAMS[i].class, ProbeClass::Always) { n += 1; }
+        i += 1;
+    }
+    n
+};
+
+#[rustfmt::skip]
+const fn always_surfaces() -> [&'static str; ALWAYS_N] {
+    let mut out = [""; ALWAYS_N]; let mut i = 0; let mut j = 0;
+    while i < PROBE_PROGRAMS.len() {
+        if matches!(PROBE_PROGRAMS[i].class, ProbeClass::Always) {
+            out[j] = PROBE_PROGRAMS[i].surface_name; j += 1;
+        }
+        i += 1;
+    }
+    out
+}
+
+pub const EXPECTED_PROBES: &[&str] = &always_surfaces();
+
 pub const EGRESS_PEER_PROBE: &str = "cgroup_sock_addr:connect4";
+
+#[cfg(any(test, target_os = "linux"))]
+#[rustfmt::skip]
+impl ProbeProgram {
+    pub(crate) fn by_elf(elf: &str) -> Option<&'static Self> {
+        PROBE_PROGRAMS.iter().find(|p| p.elf_name == elf)
+    }
+    pub(crate) fn tp(&self) -> (&'static str, &'static str) {
+        match self.attach { AttachSpec::Tp(c, n) => (c, n), _ => panic!("{}", self.elf_name) }
+    }
+    pub(crate) fn lsm(&self) -> &'static str {
+        match self.attach { AttachSpec::Lsm(h) => h, _ => panic!("{}", self.elf_name) }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProbeCondition {
@@ -34,31 +98,6 @@ pub struct ProbeStatus {
     pub outcome: ProbeOutcome,
     pub reason: &'static str,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ProbeSpec {
-    pub name: &'static str,
-    pub condition: ProbeCondition,
-}
-
-pub(crate) const MODE_AWARE_PROBES: &[ProbeSpec] = &[
-    ProbeSpec {
-        name: EGRESS_PEER_PROBE,
-        condition: ProbeCondition::RequiresNetworkPolicy,
-    },
-    ProbeSpec {
-        name: "cgroup_sock_addr:connect6",
-        condition: ProbeCondition::Unsupported,
-    },
-    ProbeSpec {
-        name: "sys_enter_sendto",
-        condition: ProbeCondition::Unsupported,
-    },
-    ProbeSpec {
-        name: "sys_enter_sendmsg",
-        condition: ProbeCondition::Unsupported,
-    },
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ModeUpdate {
@@ -146,8 +185,10 @@ pub(crate) fn apply_mode_update(
     }
 }
 
-fn mode_spec(name: &str) -> Option<&'static ProbeSpec> {
-    MODE_AWARE_PROBES.iter().find(|s| s.name == name)
+fn mode_row(name: &str) -> Option<&'static ProbeProgram> {
+    PROBE_PROGRAMS
+        .iter()
+        .find(|p| p.surface_name == name && matches!(p.class, ProbeClass::Mode(_)))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,8 +205,10 @@ impl Default for ProbeAttachment {
             skipped: Vec::new(),
             statuses: Vec::new(),
         };
-        for spec in MODE_AWARE_PROBES {
-            a.set_status(spec.name, default_status(spec.condition));
+        for p in PROBE_PROGRAMS {
+            if let ProbeClass::Mode(c) = p.class {
+                a.set_status(p.surface_name, default_status(c));
+            }
         }
         a
     }
@@ -181,20 +224,23 @@ impl ProbeAttachment {
     }
 
     pub(crate) fn record_mode(&mut self, probe: &'static str, update: ModeUpdate) {
-        let Some(spec) = mode_spec(probe) else {
+        let Some(row) = mode_row(probe) else {
+            return;
+        };
+        let ProbeClass::Mode(condition) = row.class else {
             return;
         };
         let current = self
             .status(probe)
-            .unwrap_or_else(|| default_status(spec.condition));
-        self.set_status(probe, apply_mode_update(spec.condition, current, update));
+            .unwrap_or_else(|| default_status(condition));
+        self.set_status(probe, apply_mode_update(condition, current, update));
     }
 
     pub fn attached(&mut self, probe: &'static str) {
         if !self.attached.contains(&probe) {
             self.attached.push(probe);
         }
-        if mode_spec(probe).is_some() {
+        if mode_row(probe).is_some() {
             self.record_mode(probe, ModeUpdate::Attached);
         }
     }
@@ -221,11 +267,13 @@ impl ProbeAttachment {
         if !network_policy_requested {
             return Ok(());
         }
-        for spec in MODE_AWARE_PROBES
-            .iter()
-            .filter(|s| s.condition == ProbeCondition::RequiresNetworkPolicy)
-        {
-            match self.outcome(spec.name) {
+        for p in PROBE_PROGRAMS.iter().filter(|p| {
+            matches!(
+                p.class,
+                ProbeClass::Mode(ProbeCondition::RequiresNetworkPolicy)
+            )
+        }) {
+            match self.outcome(p.surface_name) {
                 Some(
                     ProbeOutcome::Attached
                     | ProbeOutcome::Unavailable
@@ -374,5 +422,32 @@ mod tests {
             a.outcome("sys_enter_sendto"),
             Some(ProbeOutcome::Unsupported)
         );
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn program_table_is_the_inventory_owner() {
+        assert_eq!(PROBE_PROGRAMS.len(), 11);
+        assert_eq!(ALWAYS_N, 7);
+        let always: Vec<_> = PROBE_PROGRAMS.iter().filter(|p| matches!(p.class, ProbeClass::Always)).map(|p| p.surface_name).collect();
+        assert_eq!(EXPECTED_PROBES, always.as_slice());
+        assert_eq!(EGRESS_PEER_PROBE, PROBE_PROGRAMS.iter().find(|p| p.elf_name == "connect4_hook").unwrap().surface_name);
+        assert_eq!(PROBE_PROGRAMS.iter().map(|p| p.elf_name).collect::<Vec<_>>(), [
+            "assay_monitor_openat", "assay_monitor_openat2", "assay_monitor_openat_exit",
+            "assay_monitor_openat2_exit", "assay_monitor_connect", "assay_monitor_sendto",
+            "assay_monitor_sendmsg", "assay_monitor_fork", "file_open_lsm", "connect4_hook",
+            "connect6_hook",
+        ]);
+        for p in PROBE_PROGRAMS {
+            match (p.elf_name, p.class, p.attach) {
+                ("assay_monitor_sendto" | "assay_monitor_sendmsg" | "connect6_hook", ProbeClass::Mode(ProbeCondition::Unsupported), AttachSpec::None) => {
+                    assert!(!EXPECTED_PROBES.contains(&p.surface_name));
+                }
+                ("file_open_lsm", ProbeClass::Always, AttachSpec::Lsm("file_open")) => {}
+                ("connect4_hook", ProbeClass::Mode(ProbeCondition::RequiresNetworkPolicy), AttachSpec::Cgroup4) => {}
+                (_, ProbeClass::Always, AttachSpec::Tp("syscalls", n)) if n == p.surface_name => {}
+                other => panic!("{other:?}"),
+            }
+        }
     }
 }

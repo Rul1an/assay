@@ -42,6 +42,13 @@ pub enum MonitorError {
         guidance: &'static str,
     },
 
+    /// P2: Aya program-name set disagrees with the declared inventory (post-`Ebpf::load`).
+    #[error("monitor program set: {detail}. {guidance}")]
+    ProgramSet {
+        detail: String,
+        guidance: &'static str,
+    },
+
     #[error("invalid event size (got={got}, need={need})")]
     InvalidEvent { got: usize, need: usize },
 
