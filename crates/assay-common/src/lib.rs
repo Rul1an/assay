@@ -369,7 +369,7 @@ mod monitor_config_key_tests {
         }
 
         let mut config = HashMap::new();
-        // Opposite values: odd indices 1, even indices 0 — so adjacent flags differ.
+        // Opposite values: even indices 1, odd indices 0 — so adjacent flags differ.
         for (i, &key) in flag_keys.iter().enumerate() {
             config.insert(key, u32::from(i % 2 == 0));
         }
