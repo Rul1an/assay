@@ -12,9 +12,7 @@ use assay_common::{
     MONITOR_STAT_LSM_RINGBUF_DROPPED, MONITOR_STAT_OPENAT2_EVENTS_EMITTED,
     MONITOR_STAT_OPENAT2_RINGBUF_DROPPED, MONITOR_STAT_OPENAT_EVENTS_EMITTED,
     MONITOR_STAT_OPENAT_RINGBUF_DROPPED, MONITOR_STAT_SENDMSG_EVENTS_EMITTED,
-    MONITOR_STAT_SENDMSG_NON_IP_FAMILY, MONITOR_STAT_SENDMSG_NO_PEER,
     MONITOR_STAT_SENDMSG_RINGBUF_DROPPED, MONITOR_STAT_SENDTO_EVENTS_EMITTED,
-    MONITOR_STAT_SENDTO_NON_IP_FAMILY, MONITOR_STAT_SENDTO_NO_PEER,
     MONITOR_STAT_SENDTO_RINGBUF_DROPPED, MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED,
     MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED, SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR,
     SOCKET_STAT_BLOCKED_PORT, SOCKET_STAT_CHECKS, SOCKET_STAT_EVENTS_EMITTED,
@@ -357,11 +355,14 @@ impl LinuxMonitor {
                 }
                 Err((fault, detail)) => {
                     self.probe_attachment
-                        .record_mode(r.surface_name, send_update(fault));
+                        .record_attempt_failure(r.surface_name, send_update(fault));
                     eprintln!("WARN: Failed to attach {}: {}", r.surface_name, detail);
                 }
             }
         }
+        self.probe_attachment
+            .finalize_mode_aware(false)
+            .map_err(MonitorError::ProbeInventory)?;
         let r = ProbeProgram::by_elf("assay_monitor_fork").ok_or_else(unknown_probe)?;
         if let Some(prog) = bpf.program_mut(r.elf_name) {
             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
@@ -642,14 +643,7 @@ impl LinuxMonitor {
         stats.sendmsg_ringbuf_dropped = array
             .get(&MONITOR_STAT_SENDMSG_RINGBUF_DROPPED, 0)
             .unwrap_or(0);
-        stats.sendto_no_peer = array.get(&MONITOR_STAT_SENDTO_NO_PEER, 0).unwrap_or(0);
-        stats.sendmsg_no_peer = array.get(&MONITOR_STAT_SENDMSG_NO_PEER, 0).unwrap_or(0);
-        stats.sendto_non_ip_family = array
-            .get(&MONITOR_STAT_SENDTO_NON_IP_FAMILY, 0)
-            .unwrap_or(0);
-        stats.sendmsg_non_ip_family = array
-            .get(&MONITOR_STAT_SENDMSG_NON_IP_FAMILY, 0)
-            .unwrap_or(0);
+        crate::apply_send_honesty_counters(&mut stats, |key| array.get(&key, 0).unwrap_or(0));
 
         let map = bpf.map("SOCKET_STATS").ok_or(MonitorError::MapNotFound {
             name: "SOCKET_STATS",

@@ -55,6 +55,49 @@ pub struct MonitorStatsSnapshot {
     pub event_size_mismatch: u64,
 }
 
+#[cfg(any(test, target_os = "linux"))]
+fn apply_send_honesty_counters(stats: &mut MonitorStatsSnapshot, mut read: impl FnMut(u32) -> u32) {
+    use assay_common::{
+        MONITOR_STAT_SENDMSG_NON_IP_FAMILY, MONITOR_STAT_SENDMSG_NO_PEER,
+        MONITOR_STAT_SENDTO_NON_IP_FAMILY, MONITOR_STAT_SENDTO_NO_PEER,
+    };
+
+    stats.sendto_no_peer = read(MONITOR_STAT_SENDTO_NO_PEER);
+    stats.sendmsg_no_peer = read(MONITOR_STAT_SENDMSG_NO_PEER);
+    stats.sendto_non_ip_family = read(MONITOR_STAT_SENDTO_NON_IP_FAMILY);
+    stats.sendmsg_non_ip_family = read(MONITOR_STAT_SENDMSG_NON_IP_FAMILY);
+}
+
+#[cfg(test)]
+mod send_honesty_counter_tests {
+    use super::*;
+    use assay_common::{
+        MONITOR_STAT_SENDMSG_NON_IP_FAMILY, MONITOR_STAT_SENDMSG_NO_PEER,
+        MONITOR_STAT_SENDTO_NON_IP_FAMILY, MONITOR_STAT_SENDTO_NO_PEER,
+    };
+
+    #[test]
+    fn map_keys_project_to_the_matching_snapshot_fields() {
+        let mut stats = MonitorStatsSnapshot::default();
+        apply_send_honesty_counters(&mut stats, |key| match key {
+            MONITOR_STAT_SENDTO_NO_PEER => 11,
+            MONITOR_STAT_SENDMSG_NO_PEER => 22,
+            MONITOR_STAT_SENDTO_NON_IP_FAMILY => 33,
+            MONITOR_STAT_SENDMSG_NON_IP_FAMILY => 44,
+            other => panic!("unexpected counter key {other}"),
+        });
+        assert_eq!(
+            (
+                stats.sendto_no_peer,
+                stats.sendmsg_no_peer,
+                stats.sendto_non_ip_family,
+                stats.sendmsg_non_ip_family,
+            ),
+            (11, 22, 33, 44)
+        );
+    }
+}
+
 /// Per-hook attribution of drops on the tracepoint ring, and the part nothing claims.
 ///
 /// #1271 asks the diagnostic projection to distinguish loss layers, because "conflating them into

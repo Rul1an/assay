@@ -87,20 +87,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn loader_reads_all_send_honesty_counters() {
-        let src = include_str!("loader.rs");
-        for counter in [
-            "MONITOR_STAT_SENDTO_NO_PEER",
-            "MONITOR_STAT_SENDMSG_NO_PEER",
-            "MONITOR_STAT_SENDTO_NON_IP_FAMILY",
-            "MONITOR_STAT_SENDMSG_NON_IP_FAMILY",
-        ] {
-            assert_eq!(
-                src.matches(&format!(".get(&{counter}, 0)")).count(),
-                1,
-                "loader must read {counter} exactly once"
-            );
-        }
-    }
 }
