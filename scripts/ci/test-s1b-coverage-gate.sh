@@ -216,38 +216,92 @@ compile_active=$(active_run_lines "$compile_step")
 grep -qx 'bash scripts/ci/test-s1b-coverage-gate.sh' <<<"$compile_active" \
   || fail "Compile syscall harness must actively run the coverage-gate suite"
 pc="$(cd "$(dirname "$0")/../.." && pwd)/.pre-commit-config.yaml"
-grep -Fq 'id: s1b-coverage-gate-contract' "$pc" \
-  || fail "pre-commit must run the coverage-gate suite as an external contract"
-grep -Fq 'entry: bash scripts/ci/test-s1b-coverage-gate.sh' "$pc" \
-  || fail "pre-commit hook must execute the coverage-gate suite"
-hook_files=$(awk '
-  /id: s1b-coverage-gate-contract/ { p=1 }
-  p && /^      - id: / && !/s1b-coverage-gate-contract/ { exit }
-  p && /^[[:space:]]*files: / { print; exit }
-' "$pc")
-[[ -n "$hook_files" ]] || fail "s1b pre-commit hook missing files: regex"
-producer_rel='crates/assay-cli/src/cli/commands/monitor_next/output.rs'
-grep -Fq 'output\.rs' <<<"$hook_files" \
-  || fail "pre-commit files regex omits the send-observation producer"
-python3 -c '
-import re, sys
-line = sys.argv[1]
-m = re.search(r"files:\s+(\S+)$", line)
-sys.exit("could not parse files regex") if not m else None
-pat = m.group(1)
-prod = sys.argv[2]
-if not re.match(pat, prod):
-    sys.exit("files regex does not match producer path")
-if re.match(pat, "crates/assay-cli/src/lib.rs"):
-    sys.exit("files regex is not producer-scoped")
-' "$hook_files" "$producer_rel" \
-  || fail "pre-commit files regex does not select the producer path"
+ruby -ryaml - "$pc" <<'RUBY' || fail "s1b pre-commit hook YAML contract failed"
+path = ARGV[0]
+doc = YAML.safe_load_file(path, aliases: false)
+hooks = doc.fetch("repos").flat_map { |r| Array(r["hooks"]) }
+h = hooks.find { |x| x.is_a?(Hash) && x["id"] == "s1b-coverage-gate-contract" }
+abort "missing s1b-coverage-gate-contract hook" unless h
+abort "active entry drifted" unless h["entry"] == "bash scripts/ci/test-s1b-coverage-gate.sh"
+abort "language must be system" unless h["language"] == "system"
+abort "pass_filenames must be false" unless h["pass_filenames"] == false
+if h.key?("stages")
+  stages = Array(h["stages"]).map(&:to_s)
+  abort "stages must not be manual-only" if stages == ["manual"]
+  unless stages.include?("pre-commit") && stages.include?("pre-push")
+    abort "stages restrict away from pre-commit/pre-push"
+  end
+end
+pat = h.fetch("files")
+prod = "crates/assay-cli/src/cli/commands/monitor_next/output.rs"
+re = Regexp.new(pat)
+abort "files regex omits the send-observation producer" unless prod.match?(re)
+abort "files regex is not producer-scoped" if "crates/assay-cli/src/lib.rs".match?(re)
+RUBY
+km="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/kernel-matrix.yml"
+pr_paths=$(awk '
+  /^  pull_request:/ { p=1; next }
+  p && /^  [a-z]/ { exit }
+  p { print }
+' "$km")
+grep -Fq -- '- ".github/workflows/monitor-attach-smoke.yml"' <<<"$pr_paths" \
+  || fail "kernel-matrix pull_request.paths must include monitor-attach-smoke.yml"
 if grep -q 'bash scripts/ci/run-send-syscall-matrix.sh cleanup-selftest' "$wf"; then
   fail "workflow still invokes cleanup-selftest directly"
 fi
 if grep -q 'bash scripts/ci/run-send-syscall-matrix.sh mutation-selftest' "$wf"; then
   fail "workflow still invokes mutation-selftest directly"
 fi
+assert_send_matrix_step() {
+  local name="$1"
+  shift
+  local step active cmd
+  step=$(named_step "$wf" "$name")
+  [[ -n "$step" ]] || fail "missing step: $name"
+  if grep -Eq '^        continue-on-error[[:space:]]*:' <<<"$step"; then
+    fail "$name must not continue-on-error"
+  fi
+  if grep -Eq '^        if:[[:space:]]*false([[:space:]]|$)' <<<"$step"; then
+    fail "$name must not be disabled with if: false"
+  fi
+  grep -Fq "        if: \${{ github.event.inputs.proof_mode == 'send-matrix' }}" <<<"$step" \
+    || fail "$name must be send-matrix-conditioned"
+  active=$(active_run_lines "$step")
+  for cmd in "$@"; do
+    grep -qx "$cmd" <<<"$active" || fail "$name must actively run: $cmd"
+  done
+}
+assert_send_matrix_step "Positive syscall/effect matrix" \
+  'bash scripts/ci/run-send-syscall-matrix.sh positive'
+assert_send_matrix_step "Attach-disabled negative matrix" \
+  'bash scripts/ci/run-send-syscall-matrix.sh attach-disabled' \
+  'bash scripts/ci/run-send-syscall-matrix.sh disable-send-attach'
+disabled_step=$(named_step "$wf" "Attach-disabled negative matrix")
+disabled_active=$(active_run_lines "$disabled_step")
+grep -Fq 's1b-cell7-disabled' <<<"$disabled_active" \
+  || fail "attach-disabled active path must check the mutated-binary marker"
+# Workflow marker is not the driver precondition. Extract the attach-disabled
+# arm and require the mutated-binary python3 check on active (non-comment) lines.
+attach_disabled_case=$(awk '
+  /^  attach-disabled\)/ { p=1 }
+  p { print }
+  p && /;;[[:space:]]*$/ { exit }
+' "$DRIVER")
+[[ -n "$attach_disabled_case" ]] || fail "could not extract driver attach-disabled branch"
+attach_disabled_active=$(awk '
+  {
+    tmp = $0
+    sub(/^[[:space:]]+/, "", tmp)
+    if (tmp == "" || tmp ~ /^#/) next
+    print tmp
+  }
+' <<<"$attach_disabled_case")
+grep -Fq "python3 -c 'import pathlib,sys; sys.exit(0 if b\"s1b-cell7-disabled\" in pathlib.Path(sys.argv[1]).read_bytes() else 1)'" \
+  <<<"$attach_disabled_active" \
+  || fail "driver attach-disabled branch must python3-check s1b-cell7-disabled in ASSAY_BIN"
+grep -Fq 'fail "ASSAY_BIN is not the mutated rebuild (missing s1b-cell7-disabled)"' \
+  <<<"$attach_disabled_active" \
+  || fail "driver attach-disabled branch must fail if ASSAY_BIN is not the mutated rebuild"
 # First smoke step is Pre-clean; its YAML run: body (not the whole workflow)
 # must contain pkill/chattr/sudo find-delete/fail-closed empty, and that step
 # must sit immediately before actions/checkout. Global grep is prefix-vacuous.
@@ -267,8 +321,11 @@ second=$(printf '%s\n' "$step_names" | sed -n '2p')
   || fail "pre-clean must immediately precede Checkout, got ${second:-<empty>}"
 compile_idx=$(printf '%s\n' "$step_names" | grep -n '^Compile syscall harness$' | head -1 | cut -d: -f1)
 positive_idx=$(printf '%s\n' "$step_names" | grep -n '^Positive syscall/effect matrix$' | head -1 | cut -d: -f1)
+disabled_idx=$(printf '%s\n' "$step_names" | grep -n '^Attach-disabled negative matrix$' | head -1 | cut -d: -f1)
 [[ -n "$compile_idx" && -n "$positive_idx" && "$compile_idx" -lt "$positive_idx" ]] \
   || fail "coverage-gate suite step must run before the positive matrix"
+[[ -n "$disabled_idx" && "$positive_idx" -lt "$disabled_idx" ]] \
+  || fail "positive matrix must run before attach-disabled"
 preclean_run=$(awk '
   /^      - name: Pre-clean self-hosted workspace$/ { in_step=1; next }
   in_step && /^      - name: / { exit }
@@ -316,17 +373,20 @@ if grep -Eq '^        if:' <<<"$preclean_step"; then
   fail "Pre-clean must not have a disabling if"
 fi
 echo "ok: pre-clean run: block scoped before checkout"
-# Intentional: match the workflow's literal backup copy/mv/cmp, not expand here.
+# Restore pins are scoped to the Attach-disabled step's active run, not a
+# global grep (comment/string decoys in other steps must not satisfy them).
 # shellcheck disable=SC2016
-grep -Fq 'cp "$binbak"' "$wf" || fail "workflow restore does not copy pre-mutation backup"
+grep -Fq 'cp "$binbak"' <<<"$disabled_active" || fail "attach-disabled restore does not copy pre-mutation backup"
 # shellcheck disable=SC2016
-grep -Fq 'mv -f "$bin.tmp" "$bin"' "$wf" || fail "workflow restore does not atomically mv backup onto assay"
+grep -Fq 'mv -f "$bin.tmp" "$bin"' <<<"$disabled_active" \
+  || fail "attach-disabled restore does not atomically mv backup onto assay"
 # shellcheck disable=SC2016
-grep -Fq 'cmp -s "$bin" "$binbak"' "$wf" || fail "workflow restore does not verify restored binary matches backup"
-restore_fn=$(awk '/restore\(\) \{/,/^          \}/' "$wf")
-[[ -n "$restore_fn" ]] || fail "could not extract restore() from workflow"
+grep -Fq 'cmp -s "$bin" "$binbak"' <<<"$disabled_active" \
+  || fail "attach-disabled restore does not verify restored binary matches backup"
+restore_fn=$(awk '/^restore\(\) \{/,/^}$/' <<<"$disabled_active")
+[[ -n "$restore_fn" ]] || fail "could not extract restore() from attach-disabled active run"
 if grep -q 'cargo build' <<<"$restore_fn"; then
-  fail "workflow restore must not cargo build"
+  fail "attach-disabled restore must not cargo build"
 fi
 grep -q 'elapsed_ms' "$(cd "$(dirname "$0")" && pwd)/s1b-send-syscall-matrix.c" \
   || fail "timeout selftest does not assert elapsed_ms"
