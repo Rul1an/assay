@@ -38,6 +38,7 @@ ringbuf_drops_ok() {
   [[ "$found" -eq 1 ]]
 }
 
+# Must match assay-cli format_send_observation_summary exactly (full line).
 send_observation_ok() {
   local haystack="$1"
   shift
