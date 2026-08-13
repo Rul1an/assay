@@ -191,6 +191,135 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 3. Active outward installation claims.
+#
+# These checks are deliberately path- and claim-scoped. Historical release notes may name channels
+# that were proposed at the time; current entrypoints may advertise only channels with a verified
+# release artifact. The Python pattern has a token boundary so the supported `assay-it` package is
+# not mistaken for the unrelated `assay` package.
+# ---------------------------------------------------------------------------
+check_absent_regex() {
+  local file="$1" pattern="$2" label="$3"
+  if [ ! -f "$file" ]; then
+    fail "$file: checked outward document is missing"
+    return
+  fi
+  if grep -Eiq -- "$pattern" "$file"; then
+    fail "$file: $label"
+  fi
+}
+
+check_contains_fixed() {
+  local file="$1" expected="$2" label="$3"
+  if [ ! -f "$file" ]; then
+    fail "$file: checked outward document is missing"
+    return
+  fi
+  if ! grep -Fq -- "$expected" "$file"; then
+    fail "$file: $label"
+  fi
+}
+
+check_contains_line() {
+  local file="$1" expected="$2" label="$3"
+  if [ ! -f "$file" ]; then
+    fail "$file: checked outward document is missing"
+    return
+  fi
+  if ! grep -qxF -- "$expected" "$file"; then
+    fail "$file: $label"
+  fi
+}
+
+check_action_refs_pinned() {
+  local file="$1"
+  local refs invalid
+  refs="$(grep -E 'uses:[[:space:]]+' "$file" || true)"
+  [ -n "$refs" ] || return
+  invalid="$(printf '%s\n' "$refs" | grep -Ev 'uses:[[:space:]]+[^[:space:]]+@[0-9a-f]{40}([[:space:]]+#.*)?$' || true)"
+  if [ -n "$invalid" ]; then
+    fail "$file: GitHub Action references must use full immutable commit SHAs"
+  fi
+}
+
+check_install_command_count() {
+  local file="$1" expected_count="$2"
+  local expected="cargo install assay-cli --version $WORKSPACE_VERSION --locked"
+  local all_count current_count
+  all_count="$(grep -Ec 'cargo install assay-cli --version [^[:space:]]+ --locked' "$file" || true)"
+  current_count="$(grep -Fc "$expected" "$file" || true)"
+  if [ "$all_count" -ne "$expected_count" ] || [ "$current_count" -ne "$expected_count" ]; then
+    fail "$file: expected $expected_count current release-pinned install command(s)"
+  fi
+}
+
+check_rust_cli_installs() {
+  local file="$1" expected_count="$2"
+  check_install_command_count "$file" "$expected_count"
+  check_absent_regex "$file" 'cargo install assay([^[:alnum:]_-]|$)' \
+    'unsupported Rust CLI package; use assay-cli'
+}
+
+check_rust_cli_installs README.md 1
+check_rust_cli_installs docs/getting-started/index.md 1
+check_rust_cli_installs docs/getting-started/installation.md 2
+check_rust_cli_installs docs/getting-started/quickstart.md 1
+check_rust_cli_installs docs/getting-started/ci-integration.md 4
+check_rust_cli_installs docs/reference/cli/index.md 1
+check_rust_cli_installs docs/AIcontext/user-flows.md 1
+check_rust_cli_installs docs/use-cases/ci-gate.md 1
+
+release_link="Current release: [\`v$WORKSPACE_VERSION\`](https://github.com/Rul1an/assay/releases/tag/v$WORKSPACE_VERSION)"
+check_contains_fixed README.md "$release_link" 'current release link drift'
+check_contains_fixed docs/index.md "$release_link" 'current release link drift'
+
+for file in \
+  docs/getting-started/index.md \
+  docs/getting-started/installation.md \
+  docs/python-sdk/index.md \
+  docs/AIcontext/user-flows.md \
+  docs/migration-v1.2.md; do
+  check_absent_regex "$file" "pip(3|x)? install([[:space:]]+(-U|--upgrade|--user))*[[:space:]]+[\"']?assay([^[:alnum:]_-]|$)" \
+    'unsupported Python package'
+done
+
+check_absent_regex docs/getting-started/installation.md \
+  'brew install .*assay' 'unsupported Homebrew channel'
+check_absent_regex docs/getting-started/installation.md \
+  'scoop (bucket add|install) assay' 'unsupported Scoop channel'
+for file in docs/getting-started/installation.md docs/getting-started/ci-integration.md docs/use-cases/air-gapped.md; do
+  check_absent_regex "$file" 'ghcr\.io/.*/assay' 'unsupported GHCR image'
+done
+linux_archive="assay-v$WORKSPACE_VERSION-x86_64-unknown-linux-gnu.tar.gz"
+linux_archive_root="${linux_archive%.tar.gz}"
+linux_archive_url="https://github.com/Rul1an/assay/releases/download/v$WORKSPACE_VERSION/$linux_archive"
+check_contains_line docs/use-cases/air-gapped.md "curl -fLO $linux_archive_url" \
+  'current Linux release archive URL drift'
+check_contains_line docs/use-cases/air-gapped.md "curl -fLO $linux_archive_url.sha256" \
+  'current Linux release checksum URL drift'
+check_contains_fixed docs/use-cases/air-gapped.md "$linux_archive_root/assay" \
+  'current Linux release archive extraction drift'
+check_absent_regex docs/use-cases/air-gapped.md \
+  '(image:|docker (pull|run))[[:space:]]+[^[:space:]]*assay' 'unsupported runtime image'
+check_absent_regex docs/getting-started/installation.md \
+  'assay-windows-x86_64\.zip' 'obsolete Windows asset name'
+for file in \
+  docs/getting-started/ci-integration.md \
+  docs/getting-started/quickstart.md \
+  docs/AIcontext/user-flows.md \
+  docs/use-cases/ci-gate.md; do
+  check_action_refs_pinned "$file"
+done
+
+if ! grep -qxF "# assay $WORKSPACE_VERSION" docs/reference/cli/index.md; then
+  fail "docs/reference/cli/index.md: documented CLI version drift"
+fi
+for file in README.md docs/guides/editor-mcp-recipe.md; do
+  check_absent_regex "$file" 'assay mcp config-path (codex|<editor>)' \
+    'config-path does not support Codex'
+done
+
+# ---------------------------------------------------------------------------
 note ""
 if [ "$failures" -gt 0 ]; then
   note "release surface: $failures disagreement(s) with [workspace.package] version"

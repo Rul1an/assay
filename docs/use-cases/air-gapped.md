@@ -22,18 +22,16 @@ These environments prohibit:
 
 ## The Solution
 
-Assay runs **100% locally**:
-
-- ✅ No network calls during test execution
-- ✅ No telemetry or data collection
-- ✅ No external dependencies at runtime
-- ✅ Single binary, no cloud account needed
+Assay can evaluate captured local evidence without a hosted Assay service. For an air-gapped
+deployment, use local traces and policies, keep live replay and remote providers disabled, and
+enforce the network boundary at the host or container layer. The release archive provides a CLI
+binary and does not require an Assay cloud account.
 
 ---
 
 ## Architecture
 
-### Cloud-Based Tools (Not Compliant)
+### Hosted Data Path
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
@@ -45,7 +43,7 @@ Assay runs **100% locally**:
                        your network
 ```
 
-### Assay (Compliant)
+### Offline Assay Deployment
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -58,7 +56,7 @@ Assay runs **100% locally**:
 │         │                                            │
 │         ▼                                            │
 │  ┌─────────────┐                                    │
-│  │   SQLite    │  ✅ Everything stays local         │
+│  │   SQLite    │     Local evidence store            │
 │  │   (Local)   │                                    │
 │  └─────────────┘                                    │
 └─────────────────────────────────────────────────────┘
@@ -73,16 +71,18 @@ Assay runs **100% locally**:
 Download the binary on a connected machine:
 
 ```bash
-# On connected machine
-curl -L https://github.com/Rul1an/assay/releases/latest/download/assay-linux-x86_64.tar.gz -o assay.tar.gz
+# On a connected x86_64 Linux machine
+curl -fLO https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz
+curl -fLO https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
 ```
 
 Transfer to air-gapped environment:
 
 ```bash
-# On air-gapped machine
-tar -xzf assay.tar.gz
-sudo mv assay /usr/local/bin/
+# On the air-gapped x86_64 Linux machine
+tar -xzf assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz
+sudo install -m 0755 assay-v5.1.0-x86_64-unknown-linux-gnu/assay /usr/local/bin/assay
 assay --version
 ```
 
@@ -118,14 +118,13 @@ assay run \
 # .gitlab-ci.yml
 agent-tests:
   stage: test
-  image: internal-registry.corp/assay:v0.8.0
+  tags:
+    - air-gapped-runner
   script:
     - assay run --config eval.yaml --strict
   artifacts:
     reports:
       junit: .assay/reports/junit.xml
-  tags:
-    - air-gapped-runner
 ```
 
 ### Jenkins (On-Prem)
@@ -161,13 +160,16 @@ steps:
 
 ---
 
-## Compliance Mapping
+## Control Evidence Mapping
+
+The following outputs can support an organization's control assessment. They do not establish
+compliance, certification, or the behavior of systems outside the captured evidence.
 
 ### SOC 2
 
 | Control | Assay Feature |
 |---------|---------------|
-| CC6.1 — Logical access | No external API access |
+| CC6.1 — Logical access | Locally enforced network boundary and policy configuration |
 | CC7.2 — System monitoring | Local audit logs |
 | CC8.1 — Change management | Policy-as-code, Git versioned |
 
@@ -175,17 +177,17 @@ steps:
 
 | Requirement | Assay Feature |
 |-------------|---------------|
-| §164.312(a) — Access control | Local execution only |
+| §164.312(a) — Access control | Local policy and execution records |
 | §164.312(b) — Audit controls | Trace recording, local storage |
-| §164.312(e) — Transmission security | No transmission |
+| §164.312(e) — Transmission security | Host-level network controls and captured connection evidence |
 
 ### FedRAMP
 
 | Control | Assay Feature |
 |---------|---------------|
-| AC-4 — Information flow | No outbound connections |
+| AC-4 — Information flow | Host-level network controls and captured connection evidence |
 | AU-3 — Audit content | SARIF/JUnit reports |
-| SC-7 — Boundary protection | Runs within boundary |
+| SC-7 — Boundary protection | Deployment inside an operator-managed boundary |
 
 ---
 
@@ -201,22 +203,16 @@ steps:
 | Cache | `./.assay/store.db` |
 | Reports | `./.assay/reports/` |
 
-### No Telemetry
+### Network Boundary
 
-Assay collects **zero telemetry**:
-
-- No usage analytics
-- No crash reports
-- No license phone-home
-- No version checks
-
-Verify with network monitoring:
+Assay does not require an Assay-hosted telemetry or licensing service. Features configured with a
+remote provider or exporter can make outbound calls, so an air-gapped deployment must leave those
+features disabled and enforce its boundary independently. Verify the selected workflow under the
+same host policy used in production:
 
 ```bash
-# Run with network tracing
-strace -e trace=network assay run --config eval.yaml 2>&1 | grep -E "connect|sendto"
-
-# Output: (empty — no network calls)
+# Example observation only; an empty trace is not proof that every relevant probe attached.
+strace -f -e trace=network assay run --config eval.yaml --trace-file traces/session.jsonl
 ```
 
 ---
@@ -233,35 +229,26 @@ curl -s https://api.github.com/repos/Rul1an/assay/releases/latest | jq -r '.tag_
 
 ```bash
 # Connected machine
-curl -L https://github.com/Rul1an/assay/releases/download/v0.9.0/assay-linux-x86_64.tar.gz -o assay-0.9.0.tar.gz
+curl -fLO https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz
+curl -fLO https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
 
 # Transfer and install
-scp assay-0.9.0.tar.gz air-gapped-server:/tmp/
-ssh air-gapped-server 'tar -xzf /tmp/assay-0.9.0.tar.gz && sudo mv assay /usr/local/bin/'
+scp assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz air-gapped-server:/tmp/
+ssh air-gapped-server 'cd /tmp && tar -xzf assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz && sudo install -m 0755 assay-v5.1.0-x86_64-unknown-linux-gnu/assay /usr/local/bin/assay'
 ```
 
 ---
 
-## Docker (Air-Gapped Registry)
+## Containers
 
-### Build and Push to Internal Registry
+Assay does not currently ship a runtime container image or a root `Dockerfile`. For an air-gapped
+installation, mirror the verified release archive and checksum described above. The repository's
+`docker/Dockerfile.ebpf-builder` builds the eBPF toolchain only; it is not an Assay runtime image.
 
-```bash
-# On connected machine
-docker pull ghcr.io/rul1an/assay:v0.8.0
-docker tag ghcr.io/rul1an/assay:v0.8.0 internal-registry.corp/assay:v0.8.0
-docker save internal-registry.corp/assay:v0.8.0 -o assay-image.tar
-
-# Transfer and load
-docker load -i assay-image.tar
-docker push internal-registry.corp/assay:v0.8.0
-```
-
-### Use in CI
-
-```yaml
-image: internal-registry.corp/assay:v0.8.0
-```
+Install the verified binary on the air-gapped CI runner host or bake that binary into an
+organization-owned image using an internal build process. Assay does not provide or verify that
+image recipe.
 
 ---
 
@@ -269,13 +256,13 @@ image: internal-registry.corp/assay:v0.8.0
 
 ### "Connection refused" Errors
 
-If you see network errors, something is misconfigured. Assay should never make network calls:
+If an offline workflow attempts a connection, inspect the selected provider, exporter, replay mode,
+and host policy. Do not infer hermeticity from an empty application log; use host-level enforcement
+and observation with an explicit positive control.
 
 ```bash
-# Verify no network in trace
-assay run --config eval.yaml 2>&1 | grep -i network
-
-# Should be empty
+# Offline replay denies outbound access in the core policy layer by default.
+assay replay --bundle run.assay-replay
 ```
 
 ### Missing Dependencies

@@ -2,6 +2,8 @@
   "schema": "assay.agent_golden_path.v1",
   "schema_version": 1,
   "generated_by": "scripts/docs/generate-agent-golden-path.py",
+  "release_version": "5.1.0",
+  "release_tag": "v5.1.0",
   "source_issue": 2154,
   "journey_issue": 1975,
   "non_claims": [

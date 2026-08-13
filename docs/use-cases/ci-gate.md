@@ -57,10 +57,10 @@ jobs:
   assay:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Install Assay
-        run: cargo install assay
+        run: cargo install assay-cli --version 5.1.0 --locked
 
       - name: Run Tests
         run: |
@@ -73,7 +73,7 @@ jobs:
             --db :memory:
 
       - name: Upload Results
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43 # v4.37.5
         if: always()
         with:
           sarif_file: .assay/reports/results.sarif
@@ -235,7 +235,7 @@ For the Assay repo, required status checks are: **CI**, **Smoke Install (E2E)**,
 jobs:
   fast-tests:
     # Assay (milliseconds, free)
-    - uses: Rul1an/assay-action@v2
+    - uses: Rul1an/assay-action@f0c2125a73621830bcdf0b98355382c810df058b # v2
 
   slow-tests:
     needs: fast-tests  # Only if fast tests pass

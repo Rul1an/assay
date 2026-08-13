@@ -5,8 +5,10 @@ Add a policy gate to your MCP server in under 5 minutes.
 ## Install
 
 ```bash
-cargo install assay-cli
+cargo install assay-cli --version 5.1.0 --locked
 ```
+
+For exact stdout, exits, upgrade, and rollback behavior, use the [release-pinned agent golden path](../guides/agent-golden-path.md).
 
 ## Option A: Wrap an MCP Server (recommended)
 
@@ -66,8 +68,8 @@ jobs:
   assay:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: Rul1an/assay-action@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: Rul1an/assay-action@f0c2125a73621830bcdf0b98355382c810df058b # v2
 ```
 
 ## Next Steps

@@ -236,9 +236,12 @@ nav:
 
   - Guides:
     - guides/index.md
+    - Agent Golden Path: guides/agent-golden-path.md
+    - GitHub Action: guides/github-action.md
     - Sandbox Security: guides/sandbox-security.md
     - Coding-Agent Governance: guides/coding-agent-governance.md
     - Editor MCP Recipe: guides/editor-mcp-recipe.md
+    - Runtime Monitor: guides/runtime-monitor.md
     - Gateway Pattern: guides/gateway-pattern.md
     - OpenTelemetry & Langfuse: guides/otel-langfuse.md
 

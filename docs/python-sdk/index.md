@@ -1,11 +1,11 @@
 # Python SDK
 
-The `assay` package provides trace recording, validation, and coverage analysis.
+The `assay-it` distribution provides trace recording, validation, and coverage analysis.
 
 ## Installation
 
 ```bash
-pip install assay
+pip install assay-it
 ```
 
 ## Quick Start

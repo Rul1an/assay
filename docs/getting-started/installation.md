@@ -1,201 +1,88 @@
 # Installation
 
-Install Assay on your system.
+The current release is Assay `5.1.0` (`v5.1.0`). Install the CLI from one of the verified channels below.
 
----
+## CLI
 
-## Quick Install
+### Unix installer
 
-=== "pip (Python)"
+```bash
+curl -fsSL https://getassay.dev/install.sh | sh
+```
 
-    ```bash
-    pip install assay-it
-    ```
+### Cargo
 
-    Requires Python 3.9+. Installs the Python bindings and pytest plugin, not the full `assay` CLI.
+```bash
+cargo install assay-cli --version 5.1.0 --locked
+```
 
-=== "cargo (Rust)"
+The crate is `assay-cli`; the installed binary is `assay`. Releases starting with 3.36.0 declare Rust 1.89 as their MSRV. Repository development currently uses Rust 1.96.
 
-    ```bash
-    cargo install assay-cli --locked
-    ```
+### GitHub release assets
 
-    **Note:** The crate is named `assay-cli`, but the binary is `assay`.
-    Releases starting with 3.36.0 declare Rust 1.89 as their MSRV;
-    earlier releases did not declare an MSRV. `--locked` uses the lockfile shipped
-    with the release selected by Cargo. Builds from source (~2 minutes). See
-    [Rust support](../reference/rust-support.md).
+Download the asset for [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0), verify its published checksum, and place the binary on `PATH`.
 
-=== "Homebrew (macOS)"
+Windows x86-64 uses:
 
-    ```bash
-    brew install rul1an/tap/assay
-    ```
+```text
+assay-v5.1.0-x86_64-pc-windows-msvc.zip
+```
 
-    Installs pre-built binary.
+Assay does not currently document Homebrew, Scoop, or a public GHCR image as verified release channels.
 
-=== "Binary (Linux/macOS)"
+## Python SDK and pytest plugin
 
-    ```bash
-    curl -fsSL https://getassay.dev/install.sh | sh
-    ```
+```bash
+python -m pip install assay-it
+```
 
-    Installs `assay` to `~/.assay/bin` and updates your PATH.
+`assay-it` installs the Python SDK and pytest plugin. It does not install the `assay` CLI. The package named `assay` on PyPI is unrelated to this project.
 
----
-
-## Verify Installation
+## Verify the CLI
 
 ```bash
 assay --version
 ```
 
 Expected output:
-```
+
+```text
 assay 5.1.0
 ```
 
----
+The generated [agent golden path](../guides/agent-golden-path.md) additionally uses `assay version`, whose release-pinned output is `5.1.0`.
 
-## Platform-Specific Notes
+## Development build
 
-### macOS
-
-If you see a security warning:
+Behavior merged after `v5.1.0` is `Unreleased` and is not part of the release claim above.
 
 ```bash
-# Allow the binary
-xattr -d com.apple.quarantine /usr/local/bin/assay
-```
-
-### Windows
-
-=== "Cargo"
-
-    ```powershell
-    cargo install assay-cli --locked
-    ```
-
-=== "Scoop"
-
-    ```powershell
-    scoop bucket add assay https://github.com/Rul1an/scoop-assay
-    scoop install assay
-    ```
-
-=== "Binary"
-
-    Download `assay-windows-x86_64.zip` from [GitHub Releases](https://github.com/Rul1an/assay/releases) and add to PATH.
-
-### Docker
-
-```bash
-docker pull ghcr.io/rul1an/assay:latest
-
-# Run with volume mount
-docker run -v $(pwd):/workspace ghcr.io/rul1an/assay:latest \
-    run --config /workspace/eval.yaml
-```
-
----
-
-## Development Installation
-
-For contributors or those who want the latest features:
-
-```bash
-# Clone the repo
 git clone https://github.com/Rul1an/assay.git
 cd assay
-
-# Build in release mode
 cargo build --release
-
-# Run from target directory
 ./target/release/assay --version
 ```
 
----
+## CI
 
-## CI Installation
-
-### GitHub Actions
+For source installation in CI:
 
 ```yaml
 - name: Install Assay
-  run: cargo install assay-cli --locked
-
-# Or use our action (includes caching)
-- uses: Rul1an/assay-action@v2
+  run: cargo install assay-cli --version 5.1.0 --locked
 ```
 
-### GitLab CI
-
-```yaml
-before_script:
-  - cargo install assay-cli --locked
-```
-
-### Azure Pipelines
-
-```yaml
-- script: cargo install assay-cli --locked
-  displayName: 'Install Assay'
-```
-
----
+The GitHub Action is available as `Rul1an/assay-action@v2`; follow the [CI integration guide](ci-integration.md) for the repository's current permissions and pinning policy.
 
 ## Uninstall
 
-=== "pip"
-
-    ```bash
-    pip uninstall assay-it
-    ```
-
-=== "cargo"
-
-    ```bash
-    cargo uninstall assay-cli
-    ```
-
-=== "Homebrew"
-
-    ```bash
-    brew uninstall assay
-    ```
-
----
-
-## Troubleshooting
-
-### `cargo install` fails with SSL errors
-
 ```bash
-# Update certificates
-sudo apt-get update && sudo apt-get install -y ca-certificates
+cargo uninstall assay-cli
+python -m pip uninstall assay-it
 ```
 
-### `pip install` fails with permission errors
+For an installer-script or release-asset installation, remove the installed binary from the location reported by your shell's `command -v assay`.
 
-```bash
-# Use --user flag
-pip install --user assay
+## Next step
 
-# Or use pipx for isolated installation
-pipx install assay
-```
-
-### Binary not found after installation
-
-Ensure your PATH includes:
-
-- **Cargo:** `~/.cargo/bin`
-- **pip:** `~/.local/bin`
-- **Homebrew:** `/opt/homebrew/bin` (Apple Silicon) or `/usr/local/bin` (Intel)
-
----
-
-## Next Steps
-
-[:octicons-arrow-right-24: Quick Start — Run your first test](quickstart.md)
+Continue with the [release-pinned agent golden path](../guides/agent-golden-path.md) or the shorter [quick start](quickstart.md).

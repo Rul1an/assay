@@ -429,8 +429,9 @@ text = path.read_text(encoding="utf-8")
 mutation = os.environ["MUTATION"]
 hook_files = (
     "        files: ^(scripts/ci/(check-docs-generated-drift|"
-    "test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot)\\.sh|scripts/docs/"
-    "generate-agent-golden-path\\.py|\\.(agents|claude)/skills/"
+    "test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot)\\.sh|"
+    "scripts/ci/lib/workspace_version\\.py|scripts/docs/generate-agent-golden-path\\.py|"
+    "\\.(agents|claude)/skills/"
     "assay-golden-path/SKILL\\.md|\\.claude-plugin/.*|packaging/claude-plugin/.*)$\n"
 )
 root_anchor = "default_install_hook_types: [pre-commit, pre-push]\n"
@@ -1162,8 +1163,9 @@ from pathlib import Path
 path = Path(os.environ["CASE_ROOT"]) / ".pre-commit-config.yaml"
 source = (
     "        files: ^(scripts/ci/(check-docs-generated-drift|"
-    "test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot)\\.sh|scripts/docs/"
-    "generate-agent-golden-path\\.py|\\.(agents|claude)/skills/"
+    "test-check-docs-generated-drift(?:-safety)?|lib/drift-tree-snapshot)\\.sh|"
+    "scripts/ci/lib/workspace_version\\.py|scripts/docs/generate-agent-golden-path\\.py|"
+    "\\.(agents|claude)/skills/"
     "assay-golden-path/SKILL\\.md|\\.claude-plugin/.*|packaging/claude-plugin/.*)$\n"
 )
 replacement = "        stages: [pre-push]\n" + source
