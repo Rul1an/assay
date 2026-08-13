@@ -105,8 +105,8 @@ Start it with:
 Current release: `v5.1.0`
 
 Changes merged after that tag are tracked under `[Unreleased]` in
-[`CHANGELOG.md`](../CHANGELOG.md). No programme is active unless
-[`AGENTS.md`](../AGENTS.md) names its public ledger.
+`CHANGELOG.md`. No programme is active unless `AGENTS.md` names its public
+ledger.
 ```
 
 Add a short durable current index: shipped release, release-blocking issues, MVP productization (#1973/#1975/#1977), post-MVP backlog, and links to historical plans. Preserve the existing dated body under `## Historical roadmap record` instead of deleting or silently rewriting it. Do not add new per-PR completion tables.
@@ -121,7 +121,7 @@ Prepend:
 Status: historical roadmap
 
 This document records the P0-P2 DX programme as it was planned. It is not the
-current execution ledger. See [`ROADMAP.md`](ROADMAP.md), the current release,
+current execution ledger. See `ROADMAP.md`, the current release,
 and open GitHub issues for present state.
 ```
 
@@ -157,8 +157,7 @@ Status: historical submission record
 
 Last verified: 2026-03-17. This document records a submission plan and is not
 evidence that every listed channel shipped. Current verified channels and
-installation commands are in
-[`getting-started/installation.md`](getting-started/installation.md).
+installation commands are in `getting-started/installation.md`.
 ```
 
 Preserve the dated body under `## Historical submission plan`. Add the tombstone and current pointer without rewriting the original record. If an outward link exposes an unsupported availability claim, add a dated correction immediately above it rather than silently changing the historical text.
@@ -173,9 +172,9 @@ Replace the active-looking v0.3.4 checklist with a short historical pointer:
 This checklist belongs to the v0.3.4 launch period and is retained for
 provenance. It is not the release checklist for `v5.1.0`.
 
-- Current release process: [Release reference](../reference/release.md)
-- Current installation: [Installation](../getting-started/installation.md)
-- Current roadmap: [Roadmap](../ROADMAP.md)
+- Current release process: `reference/release.md`
+- Current installation: `getting-started/installation.md`
+- Current roadmap: `ROADMAP.md`
 ```
 
 - [ ] **Step 3: Verify status and links**
