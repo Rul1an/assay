@@ -80,21 +80,25 @@ silently assuming a method.
 The datagram-aware helpers are real vocabulary for archives that already
 carry those coverage values. `assay_monitor_sendto` and
 `assay_monitor_sendmsg` are compiled into the release ELF and always attempted
-as tracepoints. Runner archives from
-`assay runner-spike --kernel-capture` / `assay-runner-core`
-`network_protocol_coverage_for` are **count-derived**: `connect_emitted > 0`
-yields `connect_only` from always-attached `sys_enter_connect`, with **no**
-connect4 / network-policy requirement. Datagram labels require
-`sendto_emitted` or `sendmsg_emitted` > 0 and therefore an attached send
-tracepoint. CLI `assay monitor` `observation_health` is a
+as tracepoints.
+
+<a id="network-coverage-producers"></a>
+Descriptors are **producer-agnostic**: the same completeness string can be
+filled by different producers. The `method` field names the **Runner**
+tracepoint surface (`connect tracepoint` for `connect_only`). Runner archives
+from `assay runner-spike --kernel-capture` / `assay-runner-core`
+`network_protocol_coverage_for` are **count-derived**: `ConnectOnly` requires
+`connect_emitted > 0` **and** both `sendto_emitted` and `sendmsg_emitted` equal
+to 0; otherwise a non-zero send count with connect is
+`ConnectAndDatagramPeerObserved`. CLI `assay monitor` `observation_health` is a
 **different** producer: **attach-derived** from cgroup `connect4`
 (network-policy path), otherwise `absent`, and does not emit datagram labels.
 
-The seed `known_blind_spots` text "io_uring network operations" names the
-syscall-tracepoint ceiling used by the Runner helper; it is not a claim that
-connect4 was also blind. Runner `connect_only` does **not** require connect4,
-and CLI `connect_only` is not count-derived. The measured cell that
-demonstrates that split is
+The seed `known_blind_spots` text "io_uring network operations" is a
+**conservative ceiling** for that syscall-tracepoint method; it is not a claim
+that connect4 was also blind. A one-host connect4 measurement of
+`IORING_OP_CONNECT` does **not** lift that ceiling for CLI-produced
+`ConnectOnly`. The measured cell is
 [runtime-monitor: Measured IORING_OP_CONNECT](../../guides/runtime-monitor.md#measured-ioring-op-connect).
 
 ## Claim Kinds

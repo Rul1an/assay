@@ -73,19 +73,19 @@ was blocked by connect4 when `:9102` was denied. UDP connect then `sendmsg` to `
 peer evidence from the **connect-time** connect4 hook only; that row is not send-probe evidence.
 
 This cell does not claim that every io_uring connect is blocked, that other kernels or
-architectures match, or that io_uring `SEND` / `SENDMSG` is observed. Ring-buffer drops were `0`
-in every discriminator cell; shutdown was the monitor's internal `--duration`.
+architectures match, or that io_uring `SEND` / `SENDMSG` is observed. Ring-buffer drops were
+reported as `0` in every discriminator cell of that historical measurement; that broader
+zero-drop statement is recorded as reported, not re-proven here. Shutdown was the monitor's
+internal `--duration`.
 
-Two producers must not be collapsed when reading this result:
+The object loaded for a monitor run is `./target/assay-ebpf.o`, produced by
+`cargo xtask build-ebpf --release --no-docker`. That object's digest was **not retained**,
+so checkout-to-object binding is a **non-claim**.
 
-- CLI `assay monitor` `observation_health.network_protocol_coverage` is **attach-derived** from
-  cgroup `connect4` (network-policy path): `connect_only` if that probe attached, otherwise
-  `absent`. On this host, that is the surface that saw `IORING_OP_CONNECT`.
-- Runner archives (`assay runner-spike --kernel-capture` /
-  `assay-runner-core` `network_protocol_coverage_for`) are **count-derived**:
-  `connect_emitted > 0` yields `connect_only` from always-attached `sys_enter_connect`, with
-  **no** connect4 / network-policy requirement. On this host that tracepoint did not see
-  `IORING_OP_CONNECT`.
+On this host, `sys_enter_connect` did not see `IORING_OP_CONNECT`; attached cgroup
+`connect4` did. Those surfaces must not be collapsed. Coverage-label derivation (Runner
+counts vs CLI attach) is not restated here; see
+[coverage-descriptor-v0](../reference/runner/coverage-descriptor-v0.md#network-coverage-producers).
 
 ### `observed_peers` is diagnostic
 
@@ -159,21 +159,20 @@ The release eBPF object compiles **11** programs (`PROBE_PROGRAMS` in `assay-mon
 |---|---|---|
 | `connect4_hook` | `cgroup_sock_addr:connect4` | Requested only with a network policy; otherwise `not_requested` |
 | `connect6_hook` | `cgroup_sock_addr:connect6` | Compiled-but-unattached **enforcement** (`Unsupported` / `AttachSpec::None`) |
-| `assay_monitor_sendto` | `sys_enter_sendto` | Always attempted (`AlwaysAttempted`) as `syscalls/sys_enter_sendto` where supported; mode-aware terminal status |
-| `assay_monitor_sendmsg` | `sys_enter_sendmsg` | Always attempted (`AlwaysAttempted`) as `syscalls/sys_enter_sendmsg` where supported; mode-aware terminal status |
+| `assay_monitor_sendto` | `sys_enter_sendto` | Always attempted (`AlwaysAttempted`) as `syscalls/sys_enter_sendto`; mode-aware terminal status |
+| `assay_monitor_sendmsg` | `sys_enter_sendmsg` | Always attempted (`AlwaysAttempted`) as `syscalls/sys_enter_sendmsg`; mode-aware terminal status |
 
-Send attach is attempted where the kernel supports those tracepoints. Observed
-outcomes are kernel-dependent (`attached` / `failed` / `unavailable`). A missing
-tracepoint does **not** reliably map to `Unsupported`
-([#2350](https://github.com/Rul1an/assay/issues/2350)).
+Send attach is attempted **unconditionally**. Terminal outcomes are `attached` /
+`failed` / `unavailable` / `unsupported`. [#2350](https://github.com/Rul1an/assay/issues/2350)
+records that `Unsupported` classification is **not reliable**.
 
 S1b ([#2345](https://github.com/Rul1an/assay/pull/2345), now on `main` as
 `7816e3c4`) proved a bounded live matrix: explicit IPv4 `sendto`/`sendmsg`
 endpoint observation plus receiver effects; `no_peer` / `non_ip` counters; zero
-ring-buffer drops in that cell; an attach-disabled negative; and controlled
-shutdown. That matrix is not an io_uring `SEND` / `SENDMSG` result, not an
-exhaustive peer set, and not a multi-kernel, IPv6, QUIC, DNS, raw-socket, or
-tunnel claim.
+TRACEPOINT ring-buffer drops in that cell; an attach-disabled negative; and
+controlled shutdown. That matrix is not an io_uring `SEND` / `SENDMSG` result,
+not an exhaustive peer set, and not a multi-kernel, IPv6, QUIC, DNS, raw-socket,
+or tunnel claim.
 
 Mode-aware outcomes are distinct: `not_requested` ≠ `unavailable` ≠ `failed` ≠ `unsupported` ≠
 `attached` ([#2339](https://github.com/Rul1an/assay/pull/2339)). The CONFIG-ABI gate
@@ -193,4 +192,5 @@ Non-claims for this page:
 - program-set and CONFIG-ABI gates ≠ attach completeness;
 - no scalar trust score, no "complete egress", no certification
   ([ADR-042](../architecture/ADR-042-evidence-first-positioning.md));
+- checkout-to-object binding: `./target/assay-ebpf.o` digest was not retained;
 - monitor artifact `run_id` pairing remains [#2342](https://github.com/Rul1an/assay/issues/2342).
