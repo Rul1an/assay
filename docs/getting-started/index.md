@@ -2,6 +2,8 @@
 
 Get Assay running in 5 minutes.
 
+For the reproducible release contract, use the [release-pinned agent golden path](../guides/agent-golden-path.md). This page is the shorter human introduction.
+
 ## Overview
 
 This guide covers:
@@ -28,7 +30,7 @@ This guide covers:
 
 ```bash
 # Install
-pip install assay
+cargo install assay-cli --version 5.1.0 --locked
 
 # Import an MCP session as trace
 assay import --format inspector session.json --out-trace traces/session.jsonl
@@ -40,7 +42,7 @@ assay run --config eval.yaml --trace-file traces/session.jsonl
 # Copy the GitHub Action from ci-integration.md
 ```
 
-That's it. Your AI agent now has zero-flake regression tests.
+This runs the recorded evaluation path. A clean result still depends on the supplied config and trace being complete.
 
 ---
 
@@ -65,7 +67,7 @@ By the end of this guide, you'll understand:
 
     ---
 
-    Install Assay via pip, cargo, or Docker.
+    Install the Assay CLI from a verified release channel.
 
     [:octicons-arrow-right-24: Install now](installation.md)
 

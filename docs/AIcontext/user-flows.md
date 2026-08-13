@@ -27,7 +27,7 @@ flowchart TD
 ```
 
 **Steps:**
-1. **Install**: `pip install assay` or download binary
+1. **Install**: `cargo install assay-cli --version 5.1.0 --locked` or use a verified release asset; install the Python SDK separately with `pip install assay-it`
 2. **Initialize**: `assay init` - auto-detects project, generates secure defaults
 3. **Capture traces**: Use `AssayClient` or `assay import` to record tool calls
 4. **Validate**: `assay validate --config eval.yaml --trace-file traces.jsonl`
@@ -80,7 +80,7 @@ jobs:
   assay:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Run tests with Assay
         run: |
@@ -88,7 +88,7 @@ jobs:
           assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --sarif .assay/reports/sarif.json --junit .assay/reports/junit.xml
 
       - name: Verify AI agent behavior
-        uses: Rul1an/assay/assay-action@v2
+        uses: Rul1an/assay/assay-action@e65394d572d3fad649624ab3fa413be934b1d9fa # v2
         with:
           fail_on: error
 ```
@@ -98,7 +98,7 @@ jobs:
 - name: Run Assay
   run: assay ci --config eval.yaml --trace-file traces.jsonl --sarif assay-results.sarif --junit junit.xml
 - name: Upload SARIF
-  uses: github/codeql-action/upload-sarif@v4
+  uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43 # v4.37.5
   with:
     sarif_file: assay-results.sarif
 ```
@@ -243,8 +243,8 @@ assay run --config eval.yaml --baseline baseline.json
 ```mermaid
 flowchart TD
     start[Python Developer] --> install[Install SDK]
-    install --> pip[pip install assay]
-    pip --> import[Import Assay]
+    install --> sdk[pip install assay-it]
+    sdk --> import[Import Assay]
     import --> record[Record Traces]
     record --> validate[Validate Coverage]
     validate --> explain[Explain Violations]
@@ -254,7 +254,7 @@ flowchart TD
 
 **Python SDK Flow:**
 
-1. **Installation**: `pip install assay`
+1. **Installation**: `pip install assay-it` (the Python SDK; install the Rust CLI separately when the workflow invokes `assay` commands)
 2. **Recording**:
 ```python
 from assay import AssayClient

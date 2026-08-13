@@ -42,7 +42,7 @@ jobs:
   assay:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Run tests with Assay
         run: |
@@ -50,7 +50,7 @@ jobs:
           assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --sarif .assay/reports/sarif.json --junit .assay/reports/junit.xml
 
       - name: Verify AI agent behavior
-        uses: Rul1an/assay-action@v2
+        uses: Rul1an/assay-action@f0c2125a73621830bcdf0b98355382c810df058b # v2
         with:
           fail_on: error
 ```
@@ -96,7 +96,7 @@ assay:
   stage: test
   image: rust:latest
   before_script:
-    - cargo install assay
+    - cargo install assay-cli --version 5.1.0 --locked
   script:
     - assay ci --config eval.yaml --trace-file traces/golden.jsonl --junit .assay/reports/junit.xml
     - assay ci --config eval.yaml --trace-file traces/golden.jsonl --sarif .assay/reports/sarif.json
@@ -130,7 +130,7 @@ pool:
   vmImage: 'ubuntu-latest'
 
 steps:
-  - script: cargo install assay
+  - script: cargo install assay-cli --version 5.1.0 --locked
     displayName: 'Install Assay'
 
   - script: assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml
@@ -159,7 +159,7 @@ jobs:
       - checkout
       - run:
           name: Install Assay
-          command: cargo install assay
+          command: cargo install assay-cli --version 5.1.0 --locked
       - run:
           name: Run Tests
           command: assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml
@@ -185,7 +185,7 @@ pipeline {
     stages {
         stage('Install Assay') {
             steps {
-                sh 'cargo install assay'
+                sh 'cargo install assay-cli --version 5.1.0 --locked'
             }
         }
 
@@ -208,17 +208,7 @@ pipeline {
 
 ## Docker-Based CI
 
-For environments without Rust:
-
-```yaml
-# Any CI system
-steps:
-  - run: |
-      docker run --rm \
-        -v $(pwd):/workspace \
-        ghcr.io/rul1an/assay:latest \
-        run --config /workspace/eval.yaml --strict
-```
+For environments without a preinstalled Rust toolchain, download and verify the explicit `v5.1.0` release asset during a trusted setup stage, then cache that exact binary. Assay does not currently claim a verified public GHCR image.
 
 ---
 
@@ -238,7 +228,7 @@ your-repo/
 ### 2. Use `fail_on` for Strict Mode
 
 ```yaml
-- uses: Rul1an/assay-action@v2
+- uses: Rul1an/assay-action@f0c2125a73621830bcdf0b98355382c810df058b # v2
   with:
     fail_on: warn  # Fail on warnings AND errors
 ```
@@ -246,7 +236,7 @@ your-repo/
 ### 3. Cache Cargo Installation
 
 ```yaml
-- uses: actions/cache@v3
+- uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
   with:
     path: ~/.cargo
     key: cargo-${{ runner.os }}-assay
@@ -270,8 +260,8 @@ jobs:
   assay:
     # Evidence verification (fast)
     steps:
-      - uses: actions/checkout@v4
-      - uses: Rul1an/assay-action@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: Rul1an/assay-action@f0c2125a73621830bcdf0b98355382c810df058b # v2
 
   integration:
     needs: assay
@@ -293,7 +283,7 @@ jobs:
 ### Download Artifacts
 
 ```yaml
-- uses: actions/upload-artifact@v3
+- uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
   with:
     name: assay-reports
     path: .assay/reports/

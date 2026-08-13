@@ -12,6 +12,10 @@ All notable changes to this project will be documented in this file.
   Documentation only; no attach, schema, or runtime change.
 
 ### Changed
+- Correct the `5.1.0` packaging description: Claude Code and Cursor have
+  project-scoped MCP JSON manifests; Codex uses the equivalent TOML
+  configuration documented in the editor recipe. This is a documentation
+  correction, not a new distribution artifact.
 - Public docs now record that `assay_monitor_sendto` and `assay_monitor_sendmsg`
   are compiled into the release ELF / program set and always attempted as
   `sys_enter_sendto` / `sys_enter_sendmsg` tracepoints. Each attach has an

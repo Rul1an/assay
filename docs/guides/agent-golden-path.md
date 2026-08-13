@@ -14,6 +14,16 @@ the table. Binary-level tests in `assay-cli` and `assay-mcp-server` load the
 JSON and drive every recorded outcome through `CARGO_BIN_EXE_*`. Paths in
 angle brackets are replaced with temporary files or committed fixtures.
 
+<!-- agent-golden-path-release:start -->
+## Release-pinned start
+
+This journey is pinned to Assay `5.1.0` ([`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)).
+Install the CLI from a verified channel, then require `assay version` to print `5.1.0` before using the table below. Behavior merged after that tag is `Unreleased` and is not part of this release claim.
+
+Upgrade by installing a newer explicit release and re-running all nine steps.
+Roll back by reinstalling `v5.1.0` from the GitHub release assets and re-running the same journey.
+<!-- agent-golden-path-release:end -->
+
 <!-- agent-golden-path-discovery:start -->
 ## Project Skill Discovery
 

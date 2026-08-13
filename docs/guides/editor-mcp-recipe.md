@@ -30,11 +30,11 @@ Restart Claude Code after installation, then ask it to use
 needs from the isolated plugin cache. Python is optional for steps 1-5; only the
 protected-action simulation in step 6 runs the bundled Python fixture.
 
-The plugin starts `assay-mcp-server --policy-root .`. Claude Code `2.1.32` local
-scope was measured to start it from the consuming project, so `.` resolves policy
-files from that project. Other clients or scopes may choose another working
-directory. If that happens, override the Assay entry in project MCP configuration
-with an explicit absolute `--policy-root`; do not edit the installed plugin cache.
+The plugin starts `assay-mcp-server --policy-root .`. The `.` is resolved from the
+working directory supplied by the host; project scope does not by itself prove that
+the host selected the project root. If it did not, override the Assay entry in
+project MCP configuration with an explicit absolute `--policy-root`; do not edit
+the installed plugin cache.
 
 ### Update and inspect stale state
 
@@ -93,9 +93,15 @@ args = ["--policy-root", "."]
 The server is local stdio and needs no network or transport authentication. It
 evaluates policy and trace inputs supplied to its tools; it does not invoke or
 enforce the target MCP tool call. `--policy-root .` resolves policy paths against
-the server process's working directory. Project-scoped clients normally use the
-project root; if a host uses another directory, set an explicit local policy root
-in that client's uncommitted user or project configuration.
+the server process's working directory. If a host uses another directory, set an
+explicit local policy root in that client's uncommitted user or project
+configuration.
+
+The release build exposes `assay_check_args`, `assay_check_sequence`,
+`assay_policy_decide`, `assay_check_coverage`, and `assay_explain_trace`.
+`assay_test_outbound` is test-feature-only and is not part of the release surface.
+Plain stdio mode exposes these review tools; it does not imply the separate
+`proxy-enforce` mode is active.
 
 The rest of this guide covers a different surface: wrapping a real MCP server so
 Assay can enforce its tool calls at the protocol boundary.
@@ -152,7 +158,8 @@ In `.cursor/mcp.json`, same shape:
 ## Codex
 
 In your `AGENTS.md` / Codex MCP config, register the same wrapped command as the
-server entry. Use `assay mcp config-path` to locate the active config.
+server entry. Codex uses project `.codex/config.toml` or user
+`~/.codex/config.toml`; `assay mcp config-path` does not discover Codex config.
 
 ## Remote servers (provisional, MCP 2026-07-28)
 
