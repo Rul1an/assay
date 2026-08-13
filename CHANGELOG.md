@@ -13,19 +13,20 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Public docs now record that `assay_monitor_sendto` and `assay_monitor_sendmsg`
-  are compiled into the release ELF / program set and presently unattached
-  (`Unsupported`). Runner archives (`assay runner-spike --kernel-capture` /
+  are compiled into the release ELF / program set and always attempted as
+  `sys_enter_sendto` / `sys_enter_sendmsg` tracepoints. Each attach has an
+  explicit terminal outcome; availability remains kernel-dependent. Runner
+  archives (`assay runner-spike --kernel-capture` /
   `assay-runner-core` `network_protocol_coverage_for`) are count-derived:
   `connect_emitted > 0` yields `connect_only` from always-attached
   `sys_enter_connect`, with no connect4 / network-policy requirement; datagram
-  labels are unreachable there while those TPs stay unattached. CLI
+  labels require `sendto_emitted` or `sendmsg_emitted` > 0. CLI
   `assay monitor` `observation_health` is attach-derived from cgroup `connect4`
   (network-policy path), otherwise `absent`. `connect6_hook` is
   compiled-but-unattached **enforcement**; IPv6 connect observation remains on
-  always-attached `sys_enter_connect` (`AF_INET6` included). The send `no_peer`
-  / `non_ip` kernel-capture-note counters also lack userspace readback.
-  Documentation only; no attach, schema, or runtime change. The [3.15.0]
-  changelog line that described those send tracepoints as attached is
+  always-attached `sys_enter_connect` (`AF_INET6` included). Userspace reads the
+  four send `no_peer` / `non_ip` counters for terminal summaries and Runner
+  capture-note suffixes. No schema change. The [3.15.0] changelog line remains
   historical; this Unreleased note is the present-tense inventory.
 
 ## [5.1.0] - 2026-08-11

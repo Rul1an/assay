@@ -109,7 +109,7 @@ already carry `sendto` or `sendmsg` destination sockaddr events may report
 but still not a request-level or exact peer-set binding while
 `network_endpoint_claim_scope = diagnostic_only`.
 `assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
-release ELF and presently unattached (`Unsupported`). Two producers fill
+release ELF and always attempted as tracepoints. Two producers fill
 `network_protocol_coverage` and must not be collapsed:
 
 - Runner archives (`assay runner-spike --kernel-capture` /
@@ -117,7 +117,7 @@ release ELF and presently unattached (`Unsupported`). Two producers fill
   `connect_emitted > 0` yields `connect_only` from always-attached
   `sys_enter_connect`, with **no** connect4 / network-policy requirement.
   Datagram upgrades require `sendto_emitted` or `sendmsg_emitted` > 0 and
-  are unreachable while those TPs stay unattached.
+  therefore also require the corresponding send tracepoint to have attached.
 - CLI `assay monitor` `observation_health` is **attach-derived** from
   cgroup `connect4` (network-policy path): `connect_only` if that probe
   attached, otherwise `absent`. It does not emit datagram labels.

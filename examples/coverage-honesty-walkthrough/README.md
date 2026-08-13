@@ -16,9 +16,8 @@ The Runner observes side effects at the kernel boundary (file opens, network
 connects, process execs) without instrumenting the application.
 Datagram-peer coverage labels exist in the descriptor vocabulary, but
 `assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
-release ELF and presently unattached (`Unsupported`); those labels are
-unreachable on `assay runner-spike --kernel-capture` / `assay-runner-core`
-while those TPs stay unattached.
+release ELF and always attempted as tracepoints. Runner datagram labels require
+an attached send tracepoint and a non-zero send-event count.
 That raw observation is the only thing the whole chain is allowed to treat as
 ground truth. Everything downstream is a claim *about* this capture, bounded by
 how complete the capture was.
@@ -31,8 +30,8 @@ These examples are Runner archives: `assay runner-spike --kernel-capture` /
 `assay-runner-core` `network_protocol_coverage_for` is **count-derived**, so
 `connect_only` means `connect_emitted > 0` from always-attached
 `sys_enter_connect`, with **no** connect4 / network-policy requirement.
-Datagram labels require send-event counts and are unreachable there while
-those TPs stay unattached. CLI `assay monitor` `observation_health` is a
+Datagram labels require an attached send tracepoint and non-zero send-event
+counts. CLI `assay monitor` `observation_health` is a
 different producer (attach-derived from cgroup `connect4`, otherwise `absent`).
 This is the honesty
 ceiling: it says what the capture can and cannot support, before any claim is

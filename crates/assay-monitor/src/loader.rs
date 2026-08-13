@@ -2,22 +2,13 @@ use crate::config_flags::{apply_dedup_open_paths, apply_emit_observed_connect, F
 use crate::events::{self, EventStream};
 use crate::object_abi::{verify_object_abi_marker, REBUILD_EBPF_GUIDANCE};
 use crate::probes::{
-    connect4_update, Connect4Fault, ModeUpdate, ProbeAttachment, ProbeProgram, EGRESS_PEER_PROBE,
-    EXPECTED_PROBES,
+    connect4_update, send_update, Connect4Fault, ModeUpdate, ProbeAttachment, ProbeProgram,
+    SendFault, EGRESS_PEER_PROBE, EXPECTED_PROBES,
 };
 use crate::{MonitorError, MonitorStatsSnapshot};
-use assay_common::{
-    CidrRuleValue, KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL, MONITOR_STAT_CONNECT_EVENTS_EMITTED,
-    MONITOR_STAT_CONNECT_RINGBUF_DROPPED, MONITOR_STAT_LSM_EVENTS_EMITTED,
-    MONITOR_STAT_LSM_RINGBUF_DROPPED, MONITOR_STAT_OPENAT2_EVENTS_EMITTED,
-    MONITOR_STAT_OPENAT2_RINGBUF_DROPPED, MONITOR_STAT_OPENAT_EVENTS_EMITTED,
-    MONITOR_STAT_OPENAT_RINGBUF_DROPPED, MONITOR_STAT_SENDMSG_EVENTS_EMITTED,
-    MONITOR_STAT_SENDMSG_RINGBUF_DROPPED, MONITOR_STAT_SENDTO_EVENTS_EMITTED,
-    MONITOR_STAT_SENDTO_RINGBUF_DROPPED, MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED,
-    MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED, SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR,
-    SOCKET_STAT_BLOCKED_PORT, SOCKET_STAT_CHECKS, SOCKET_STAT_EVENTS_EMITTED,
-    SOCKET_STAT_RINGBUF_DROPPED,
-};
+// The `MONITOR_STAT_*` / `SOCKET_STAT_*` keys are deliberately not imported here: `snapshot_stats`
+// names no key, so it cannot get one wrong. They belong to `crate::project_snapshot`.
+use assay_common::{CidrRuleValue, KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL};
 use assay_policy::tiers::CompiledPolicy;
 use aya::maps::lpm_trie::Key;
 use aya::{
@@ -43,6 +34,39 @@ fn attach_kernel_lacks_point(err: &ProgramError) -> bool {
         ProgramError::SyscallError(sy) => matches!(sy.io_error.raw_os_error(), Some(2 | 95)),
         _ => false,
     }
+}
+
+#[cfg(target_os = "linux")]
+fn attach_send_tracepoint(
+    bpf: &mut Ebpf,
+    row: &ProbeProgram,
+) -> Result<aya::programs::trace_point::TracePointLink, (SendFault, String)> {
+    let prog = bpf.program_mut(row.elf_name).ok_or_else(|| {
+        (
+            SendFault::MissingProgram,
+            format!("{} is absent from the loaded eBPF object", row.elf_name),
+        )
+    })?;
+    let tp = TryInto::<&mut TracePoint>::try_into(&mut *prog)
+        .map_err(|error| (SendFault::WrongProgramKind, error.to_string()))?;
+    tp.load()
+        .map_err(|error| (SendFault::LoadFailed, error.to_string()))?;
+    let link_id = tp.attach(row.tp().0, row.tp().1).map_err(|error| {
+        (
+            SendFault::AttachFailed {
+                kernel_lacks_point: attach_kernel_lacks_point(&error),
+            },
+            error.to_string(),
+        )
+    })?;
+    tp.take_link(link_id).map_err(|error| {
+        (
+            SendFault::AttachFailed {
+                kernel_lacks_point: false,
+            },
+            error.to_string(),
+        )
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -310,6 +334,24 @@ impl LinuxMonitor {
                 println!("DEBUG: Attached Tracepoint sys_enter_connect");
             }
         }
+        for r in [
+            ProbeProgram::by_elf("assay_monitor_sendto").ok_or_else(unknown_probe)?,
+            ProbeProgram::by_elf("assay_monitor_sendmsg").ok_or_else(unknown_probe)?,
+        ] {
+            match attach_send_tracepoint(&mut bpf, r) {
+                Ok(link) => {
+                    self.probe_attachment.attached(r.surface_name);
+                    self.links.push(MonitorLink::TracePoint(link));
+                    println!("DEBUG: Attached Tracepoint {}", r.surface_name);
+                }
+                Err((fault, detail)) => {
+                    self.probe_attachment
+                        .record_attempt_failure(r.surface_name, send_update(fault));
+                    eprintln!("WARN: Failed to attach {}: {}", r.surface_name, detail);
+                }
+            }
+        }
+        crate::probe_inventory_result(self.probe_attachment.finalize_mode_aware(false))?;
         let r = ProbeProgram::by_elf("assay_monitor_fork").ok_or_else(unknown_probe)?;
         if let Some(prog) = bpf.program_mut(r.elf_name) {
             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
@@ -539,73 +581,33 @@ impl LinuxMonitor {
             .record_mode(EGRESS_PEER_PROBE, ModeUpdate::Failed(reason));
     }
 
+    /// Bind the two kernel stat arrays to the snapshot projection.
+    ///
+    /// Everything this method knows is which aya map each key space lives in. Which key feeds which
+    /// field is `crate::project_snapshot`'s business, and it is total there: this cannot forget a
+    /// field, because it names none. The eBPF side has always incremented the per-hook and honesty
+    /// counters (`connect_events.rs`); a read that goes missing here is a silent zero downstream,
+    /// indistinguishable from a clean run, which is why the projection is one call and not a list of
+    /// separately deletable assignments.
     pub fn snapshot_stats(&mut self) -> Result<MonitorStatsSnapshot, MonitorError> {
         let bpf = self.bpf.lock().unwrap();
-        let mut stats = MonitorStatsSnapshot::default();
 
         let map = bpf
             .map("STATS")
             .ok_or(MonitorError::MapNotFound { name: "STATS" })?;
-        let array: AyaArray<_, u32> = AyaArray::try_from(map)?;
-        stats.tracepoint_events_emitted = array
-            .get(&MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, 0)
-            .unwrap_or(0);
-        stats.tracepoint_ringbuf_dropped = array
-            .get(&MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED, 0)
-            .unwrap_or(0);
-        stats.lsm_events_emitted = array.get(&MONITOR_STAT_LSM_EVENTS_EMITTED, 0).unwrap_or(0);
-        stats.lsm_ringbuf_dropped = array.get(&MONITOR_STAT_LSM_RINGBUF_DROPPED, 0).unwrap_or(0);
-        stats.openat_events_emitted = array
-            .get(&MONITOR_STAT_OPENAT_EVENTS_EMITTED, 0)
-            .unwrap_or(0);
-        stats.openat_ringbuf_dropped = array
-            .get(&MONITOR_STAT_OPENAT_RINGBUF_DROPPED, 0)
-            .unwrap_or(0);
-        stats.openat2_events_emitted = array
-            .get(&MONITOR_STAT_OPENAT2_EVENTS_EMITTED, 0)
-            .unwrap_or(0);
-        stats.openat2_ringbuf_dropped = array
-            .get(&MONITOR_STAT_OPENAT2_RINGBUF_DROPPED, 0)
-            .unwrap_or(0);
-        stats.connect_events_emitted = array
-            .get(&MONITOR_STAT_CONNECT_EVENTS_EMITTED, 0)
-            .unwrap_or(0);
-        stats.connect_ringbuf_dropped = array
-            .get(&MONITOR_STAT_CONNECT_RINGBUF_DROPPED, 0)
-            .unwrap_or(0);
-        // The eBPF side has always incremented these (connect_events.rs), and userspace never read
-        // them back, so the snapshot reported 0 for two of the seven tracepoint hooks. Not a gate
-        // defect -- `tracepoint_ringbuf_dropped` is bumped alongside every per-hook counter, so the
-        // ring total was right -- but a drop on `sendto` or `sendmsg` could not be attributed to
-        // the hook that lost it, which is the whole job of the per-hook counters.
-        stats.sendto_events_emitted = array
-            .get(&MONITOR_STAT_SENDTO_EVENTS_EMITTED, 0)
-            .unwrap_or(0);
-        stats.sendto_ringbuf_dropped = array
-            .get(&MONITOR_STAT_SENDTO_RINGBUF_DROPPED, 0)
-            .unwrap_or(0);
-        stats.sendmsg_events_emitted = array
-            .get(&MONITOR_STAT_SENDMSG_EVENTS_EMITTED, 0)
-            .unwrap_or(0);
-        stats.sendmsg_ringbuf_dropped = array
-            .get(&MONITOR_STAT_SENDMSG_RINGBUF_DROPPED, 0)
-            .unwrap_or(0);
+        let stats_array: AyaArray<_, u32> = AyaArray::try_from(map)?;
 
         let map = bpf.map("SOCKET_STATS").ok_or(MonitorError::MapNotFound {
             name: "SOCKET_STATS",
         })?;
-        let array: AyaArray<_, u64> = AyaArray::try_from(map)?;
-        stats.socket_checks = array.get(&SOCKET_STAT_CHECKS, 0).unwrap_or(0);
-        stats.socket_blocked_cidr = array.get(&SOCKET_STAT_BLOCKED_CIDR, 0).unwrap_or(0);
-        stats.socket_blocked_port = array.get(&SOCKET_STAT_BLOCKED_PORT, 0).unwrap_or(0);
-        stats.socket_allowed = array.get(&SOCKET_STAT_ALLOWED, 0).unwrap_or(0);
-        stats.socket_events_emitted = array.get(&SOCKET_STAT_EVENTS_EMITTED, 0).unwrap_or(0);
-        stats.socket_ringbuf_dropped = array.get(&SOCKET_STAT_RINGBUF_DROPPED, 0).unwrap_or(0);
+        let socket_array: AyaArray<_, u64> = AyaArray::try_from(map)?;
 
-        // Userspace-tracked: filled by the consumer thread in `listen()`, not a kernel map.
-        stats.event_size_mismatch = self.event_size_mismatch.load(Ordering::Relaxed);
-
-        Ok(stats)
+        Ok(crate::project_snapshot(
+            |key| stats_array.get(&key, 0).unwrap_or(0),
+            |key| socket_array.get(&key, 0).unwrap_or(0),
+            // Userspace-tracked: filled by the consumer thread in `listen()`, not a kernel map.
+            self.event_size_mismatch.load(Ordering::Relaxed),
+        ))
     }
 
     pub fn listen(&mut self) -> Result<EventStream, MonitorError> {

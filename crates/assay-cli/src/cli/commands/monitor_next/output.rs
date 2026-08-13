@@ -26,6 +26,23 @@ pub(crate) fn dump_prefix_hex(data: &[u8], n: usize) -> String {
 }
 
 #[cfg(any(target_os = "linux", test))]
+pub(crate) fn format_send_observation_summary(
+    stats: &assay_monitor::MonitorStatsSnapshot,
+) -> String {
+    format!(
+        "  • Send observation:   sendto emitted={} dropped={} no_peer={} non_ip={}; sendmsg emitted={} dropped={} no_peer={} non_ip={}",
+        stats.sendto_events_emitted,
+        stats.sendto_ringbuf_dropped,
+        stats.sendto_no_peer,
+        stats.sendto_non_ip_family,
+        stats.sendmsg_events_emitted,
+        stats.sendmsg_ringbuf_dropped,
+        stats.sendmsg_no_peer,
+        stats.sendmsg_non_ip_family
+    )
+}
+
+#[cfg(any(target_os = "linux", test))]
 pub(crate) fn decode_file_blocked_payload(data: &[u8]) -> Option<(u64, u64, u64, u32)> {
     if data.len() < 28 {
         return None;
@@ -87,7 +104,9 @@ pub(crate) fn log_kill(
 /// formats are a producer contract: Plimsoll's capture scraper parses these exact shapes.
 #[cfg(any(target_os = "linux", test))]
 pub(crate) fn format_monitor_event(event_type: u32, pid: u32, data: &[u8]) -> Option<String> {
-    use assay_common::{EVENT_CONNECT, EVENT_FILE_BLOCKED, EVENT_OPENAT};
+    use assay_common::{
+        EVENT_CONNECT, EVENT_FILE_BLOCKED, EVENT_OPENAT, EVENT_SENDMSG, EVENT_SENDTO,
+    };
 
     // The live path always passes a full fixed-size event payload, but the slice contract is also
     // exercised by unit tests, so read fixed offsets with checked access and a zero fallback rather
@@ -126,6 +145,20 @@ pub(crate) fn format_monitor_event(event_type: u32, pid: u32, data: &[u8]) -> Op
                 dump_prefix_hex(data, 32)
             ),
         },
+        EVENT_SENDTO | EVENT_SENDMSG => {
+            let operation = if event_type == EVENT_SENDTO {
+                "sendto"
+            } else {
+                "sendmsg"
+            };
+            match assay_monitor::events::decode_connect_sockaddr(data) {
+                Some(dest) => format!("[PID {pid}] {operation}: {}", dest.endpoint()),
+                None => format!(
+                    "[PID {pid}] {operation} sockaddr[0..32]=0x{}",
+                    dump_prefix_hex(data, 32)
+                ),
+            }
+        }
         EVENT_FILE_BLOCKED => match decode_file_blocked_payload(data) {
             Some((dev, ino, cgroup_id, rule_id)) => format!(
                 "[PID {}] 🛡️ BLOCKED FILE: dev={} ino={} cgroup={} rule_id={}",
@@ -208,7 +241,10 @@ pub(crate) fn log_monitor_event(event: &assay_common::MonitorEvent, args: &Monit
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_blocked_net_payload, decode_file_blocked_payload, format_monitor_event};
+    use super::{
+        decode_blocked_net_payload, decode_file_blocked_payload, format_monitor_event,
+        format_send_observation_summary,
+    };
     use assay_common::{EVENT_CONNECT, EVENT_FILE_BLOCKED, EVENT_OPENAT};
 
     #[test]
@@ -258,6 +294,56 @@ mod tests {
         // raw form is printed rather than a confident decode of bytes we did not understand.
         let line = format_monitor_event(EVENT_CONNECT, 4242, &[0x02, 0x00, 0x00, 0x50]).unwrap();
         assert_eq!(line, "[PID 4242] connect sockaddr[0..32]=0x02000050");
+    }
+
+    #[test]
+    fn send_events_format_explicit_destination() {
+        let mut sockaddr = [0_u8; 16];
+        sockaddr[0..2].copy_from_slice(&2_u16.to_ne_bytes());
+        sockaddr[2..4].copy_from_slice(&9103_u16.to_be_bytes());
+        sockaddr[4..8].copy_from_slice(&[127, 0, 0, 1]);
+
+        assert_eq!(
+            format_monitor_event(assay_common::EVENT_SENDTO, 42, &sockaddr).as_deref(),
+            Some("[PID 42] sendto: 127.0.0.1:9103")
+        );
+        assert_eq!(
+            format_monitor_event(assay_common::EVENT_SENDMSG, 43, &sockaddr).as_deref(),
+            Some("[PID 43] sendmsg: 127.0.0.1:9103")
+        );
+    }
+
+    #[test]
+    fn send_event_formats_exact_sockaddr_hex_fallback() {
+        let data = [0x02, 0x00, 0x00, 0x50];
+
+        assert_eq!(
+            format_monitor_event(assay_common::EVENT_SENDTO, 42, &data).as_deref(),
+            Some("[PID 42] sendto sockaddr[0..32]=0x02000050")
+        );
+        assert_eq!(
+            format_monitor_event(assay_common::EVENT_SENDMSG, 43, &data).as_deref(),
+            Some("[PID 43] sendmsg sockaddr[0..32]=0x02000050")
+        );
+    }
+
+    #[test]
+    fn send_summary_exposes_per_hook_honesty_counters() {
+        let stats = assay_monitor::MonitorStatsSnapshot {
+            sendto_events_emitted: 1,
+            sendto_ringbuf_dropped: 2,
+            sendmsg_events_emitted: 3,
+            sendmsg_ringbuf_dropped: 4,
+            sendto_no_peer: 5,
+            sendmsg_no_peer: 6,
+            sendto_non_ip_family: 7,
+            sendmsg_non_ip_family: 8,
+            ..Default::default()
+        };
+        assert_eq!(
+            format_send_observation_summary(&stats),
+            "  • Send observation:   sendto emitted=1 dropped=2 no_peer=5 non_ip=7; sendmsg emitted=3 dropped=4 no_peer=6 non_ip=8"
+        );
     }
 
     /// The exact 32 bytes an `EVENT_CONNECT` carried on `assay-bpf-runner` (kernel 6.8,
