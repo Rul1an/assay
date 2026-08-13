@@ -8,10 +8,17 @@ ASSAY_BIN="${ASSAY_BIN:-$ROOT/target/release/assay}"
 ASSAY_EBPF="${ASSAY_EBPF:-$ROOT/target/assay-ebpf.o}"
 HARNESS_BIN="${HARNESS_BIN:-}"
 WORKDIR="${WORKDIR:-${RUNNER_TEMP:-/tmp}/s1b-send-matrix}"
+# Bound: C GO_FIFO_TIMEOUT_MS >= WAIT_LOG_MAX_BEFORE_GO * WAIT_LOG_ITERS * WAIT_LOG_SLEEP_S * 1000 + GO_TIMEOUT_MARGIN_MS
+WAIT_LOG_ITERS=60
+WAIT_LOG_SLEEP_S=0.5
+WAIT_LOG_MAX_BEFORE_GO=4
+GO_TIMEOUT_MARGIN_MS=30000
 MUTATION_OLD='attach_send_tracepoint(&mut bpf, r)'
 MUTATION_NEW='Err((SendFault::AttachFailed { kernel_lacks_point: false }, "s1b-cell7-disabled".to_string()))'
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
+[[ "$WAIT_LOG_MAX_BEFORE_GO" -ge 1 && "$GO_TIMEOUT_MARGIN_MS" -ge 0 ]] \
+  || fail "invalid GO bound constants"
 
 REAP_POLL_MAX="${REAP_POLL_MAX:-10}"
 REAP_POLL_SLEEP="${REAP_POLL_SLEEP:-0.1}"
@@ -36,6 +43,12 @@ ringbuf_drops_ok() {
     [[ "$line" =~ (^|[[:space:]])dropped=0([^[:alnum:]]|$) ]] || return 1
   done < <(grep 'Tracepoint ringbuf:' "$log" || true)
   [[ "$found" -eq 1 ]]
+}
+
+# Controlled SIGINT: monitor_next catches ctrl_c, breaks the select, returns OK (0).
+# 130 would mean the process died from the signal instead of that path.
+monitor_shutdown_ok() {
+  [[ "$1" -eq 0 ]]
 }
 
 # Must match assay-cli format_send_observation_summary exactly (full line).
@@ -73,13 +86,20 @@ reap_pid() {
 }
 
 cleanup() {
-  local pid
+  local pid wd
   for pid in "${MONITOR_PID:-}" "${HARNESS_PID:-}"; do
     reap_pid "$pid"
   done
   [[ -z "${FIFO:-}" ]] || rm -f "$FIFO"
   if [[ -n "${LEAF:-}" && -d "$LEAF" ]]; then
     rmdir "$LEAF" 2>/dev/null || true
+  fi
+  wd="${WORKDIR:-}"
+  if [[ -n "$wd" && -d "$wd" ]]; then
+    [[ "$wd" != "$ROOT" && "$wd" != / && "$wd" != /tmp ]] \
+      || fail "refusing to remove WORKDIR=$wd"
+    rm -rf "$wd"
+    [[ ! -e "$wd" ]] || fail "WORKDIR leftover $wd"
   fi
 }
 trap cleanup EXIT
@@ -140,13 +160,13 @@ PY
 
 wait_log() {
   local pat="$1" n
-  for ((n = 0; n < 60; n++)); do
+  for ((n = 0; n < WAIT_LOG_ITERS; n++)); do
     grep -q -- "$pat" "$LOG" && return 0
     if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
       cat "${LOG:-}" >&2 || true
       fail "monitor exited before matching: $pat"
     fi
-    sleep 0.5
+    sleep "$WAIT_LOG_SLEEP_S"
   done
   cat "${LOG:-}" >&2 || true
   fail "timeout waiting for: $pat"
@@ -212,6 +232,7 @@ run_matrix() {
   wait "$MONITOR_PID" || mc=$?
   MONITOR_PID=""
   echo "monitor exit=$mc"
+  monitor_shutdown_ok "$mc" || fail "monitor exit $mc is not controlled SIGINT shutdown (expected 0)"
 
   tcp="$(awk -F= '/^CELL1_TCP_PORT=/{print $2; exit}' "$HOUT")"
   p2="$(awk -F= '/^CELL2_UDP_PORT=/{print $2; exit}' "$HOUT")"
@@ -380,6 +401,8 @@ case "$MODE" in
     fi
     [[ ! -e "$fifo" ]] || fail "FIFO leftover $fifo"
     [[ ! -d "$leaf" ]] || fail "leaf leftover $leaf"
+    wd=$WORKDIR
+    [[ ! -e "$wd" ]] || fail "WORKDIR leftover $wd"
     echo "ok: cleanup-selftest" ;;
   coverage-gate) coverage_gate "${2:?coverage-gate requires a JSON path}" ;;
   mutation-selftest) mutation_selftest ;;
@@ -401,5 +424,9 @@ case "$MODE" in
     send_observation_ok "$(cat "$2")" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}" \
       || fail "send observation summary not exact"
     echo "ok: send-observation-selftest" ;;
-  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest" ;;
+  monitor-shutdown-selftest)
+    [[ -n "${2:-}" ]] || fail "monitor-shutdown-selftest requires an exit code"
+    monitor_shutdown_ok "$2" || fail "exit $2 is not controlled SIGINT shutdown"
+    echo "ok: monitor-shutdown-selftest" ;;
+  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest" ;;
 esac

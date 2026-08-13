@@ -19,6 +19,8 @@
             return die(m); \
     } while (0)
 
+#define GO_FIFO_TIMEOUT_MS 150000
+
 static int die(const char *msg) {
     perror(msg);
     return 1;
@@ -132,7 +134,7 @@ int main(int argc, char **argv) {
     }
     printf("HARNESS_PID=%d\n", getpid());
     fflush(stdout);
-    go = open_go_fifo(argv[1], 10000);
+    go = open_go_fifo(argv[1], GO_FIFO_TIMEOUT_MS);
     MUST(go >= 0, "GO fifo");
     close(go);
 

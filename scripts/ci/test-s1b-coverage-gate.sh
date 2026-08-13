@@ -99,8 +99,26 @@ cli_mod="$(cd "$(dirname "$0")/../.." && pwd)/crates/assay-cli/src/cli/commands/
 grep -Fq "${rb_prefix}{} dropped={}" "$cli_mod" \
   || fail "ringbuf formatter prefix missing from monitor_next/mod.rs"
 
-pos='  • Send observation:   sendto emitted=1 dropped=0 no_peer=1 non_ip=1; sendmsg emitted=1 dropped=0 no_peer=1 non_ip=1'
-dis='  • Send observation:   sendto emitted=0 dropped=0 no_peer=0 non_ip=0; sendmsg emitted=0 dropped=0 no_peer=0 non_ip=0'
+cli_out="$(cd "$(dirname "$0")/../.." && pwd)/crates/assay-cli/src/cli/commands/monitor_next/output.rs"
+so_fmt='  • Send observation:   sendto emitted={} dropped={} no_peer={} non_ip={}; sendmsg emitted={} dropped={} no_peer={} non_ip={}'
+grep -Fq 'fn format_send_observation_summary' "$cli_out" \
+  || fail "format_send_observation_summary missing from output.rs"
+grep -Fq "$so_fmt" "$cli_out" \
+  || fail "send observation formatter missing from output.rs format_send_observation_summary"
+so_printf="${so_fmt//'{}'/%s}"
+grep -Fq "$so_printf" "$DRIVER" \
+  || fail "driver send_observation_ok printf drifted from output.rs producer"
+so_line() {
+  local f="$so_fmt" v
+  for v in "$@"; do
+    f="${f/\{\}/$v}"
+  done
+  printf '%s\n' "$f"
+}
+pos="$(so_line 1 0 1 1 1 0 1 1)"
+dis="$(so_line 0 0 0 0 0 0 0 0)"
+pos="${pos%$'\n'}"
+dis="${dis%$'\n'}"
 printf '%s\n' "$pos" >"$tmp/so_pos_ok.log"
 printf '%s extra=9\n' "$pos" >"$tmp/so_pos_suffix.log"
 printf '%s; bogus=1\n' "$pos" >"$tmp/so_pos_token.log"
@@ -115,6 +133,42 @@ run_mode send-observation-selftest 0 "$tmp/so_pos_ok.log" 1 0 1 1 1 0 1 1
 run_mode send-observation-selftest 0 "$tmp/so_dis_ok.log" 0 0 0 0 0 0 0 0
 echo "ok: send-observation fixtures"
 
+run_mode monitor-shutdown-selftest 0 0
+run_mode monitor-shutdown-selftest nz 1
+run_mode monitor-shutdown-selftest nz 130
+run_mode monitor-shutdown-selftest nz 139
+grep -Fq 'tokio::signal::ctrl_c()' "$cli_mod" \
+  || fail "monitor SIGINT path missing tokio::signal::ctrl_c"
+grep -Fq 'monitor_shutdown_ok "$mc"' "$DRIVER" \
+  || fail "run_matrix does not assert controlled monitor shutdown"
+echo "ok: monitor SIGINT shutdown is exit 0, not 130/crash"
+
+wait_iters=$(sed -n 's/^WAIT_LOG_ITERS=//p' "$DRIVER" | head -1)
+wait_sleep=$(sed -n 's/^WAIT_LOG_SLEEP_S=//p' "$DRIVER" | head -1)
+wait_max=$(sed -n 's/^WAIT_LOG_MAX_BEFORE_GO=//p' "$DRIVER" | head -1)
+go_margin=$(sed -n 's/^GO_TIMEOUT_MARGIN_MS=//p' "$DRIVER" | head -1)
+go_ms=$(sed -n 's/^#define GO_FIFO_TIMEOUT_MS //p' "$(cd "$(dirname "$0")" && pwd)/s1b-send-syscall-matrix.c" | head -1)
+[[ -n "$wait_iters" && -n "$wait_sleep" && -n "$wait_max" && -n "$go_margin" && -n "$go_ms" ]] \
+  || fail "missing GO/wait_log bound constants"
+need=$(python3 -c "print(int($wait_max * $wait_iters * float('$wait_sleep') * 1000 + $go_margin))")
+[[ "$go_ms" -ge "$need" ]] || fail "GO_FIFO_TIMEOUT_MS=$go_ms < $wait_max*$wait_iters*${wait_sleep}s*1000+$go_margin=$need"
+grep -Fq 'n < WAIT_LOG_ITERS' "$DRIVER" || fail "wait_log does not use WAIT_LOG_ITERS"
+# shellcheck disable=SC2016
+grep -Fq 'sleep "$WAIT_LOG_SLEEP_S"' "$DRIVER" || fail "wait_log does not use WAIT_LOG_SLEEP_S"
+grep -Fq 'open_go_fifo(argv[1], GO_FIFO_TIMEOUT_MS)' \
+  "$(cd "$(dirname "$0")" && pwd)/s1b-send-syscall-matrix.c" \
+  || fail "harness GO wait does not use GO_FIFO_TIMEOUT_MS"
+n_wait=$(awk '
+  /^run_matrix\(\)/ { in_fn=1 }
+  in_fn && /^}/ { exit }
+  in_fn && /write_go/ { seen=1 }
+  in_fn && !seen && /wait_log "/ { n++ }
+  END { print n+0 }
+' "$DRIVER")
+[[ "$n_wait" -le "$wait_max" ]] \
+  || fail "run_matrix has $n_wait wait_log calls before GO, bound is $wait_max"
+echo "ok: harness GO wait covers attach wait_log budget"
+
 set +e
 timeout -k 2 12 bash "$DRIVER" cleanup-selftest >"$tmp/cleanup.out" 2>"$tmp/cleanup.err"
 cec=$?
@@ -124,8 +178,44 @@ grep -q 'ok: cleanup-selftest' "$tmp/cleanup.out" || fail "cleanup-selftest miss
 echo "ok: mutation-selftest and cleanup-selftest"
 
 wf="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/monitor-attach-smoke.yml"
-n=$(grep -cF 'bash scripts/ci/test-s1b-coverage-gate.sh' "$wf" || true)
-[[ "$n" -eq 1 ]] || fail "workflow must invoke the coverage-gate suite exactly once, got $n"
+named_step() {
+  awk -v step="$2" '
+    $0 ~ ("^      - name: " step "$") { in_step=1; print; next }
+    in_step && /^      - name: / { exit }
+    in_step { print }
+  ' "$1"
+}
+active_run_lines() {
+  awk '
+    function emit_active(line, tmp) {
+      tmp = line
+      sub(/^[[:space:]]+/, "", tmp)
+      if (tmp == "" || tmp ~ /^#/) return
+      print tmp
+    }
+    /^        run: \|/ { in_run=1; next }
+    in_run && /^        [^[:space:]]/ { exit }
+    in_run { emit_active($0) }
+  ' <<<"$1"
+}
+compile_step=$(named_step "$wf" "Compile syscall harness")
+[[ -n "$compile_step" ]] || fail "missing Compile syscall harness step"
+if grep -Eq '^        continue-on-error[[:space:]]*:' <<<"$compile_step"; then
+  fail "Compile syscall harness must not continue-on-error"
+fi
+if grep -Eq '^        if:[[:space:]]*false([[:space:]]|$)' <<<"$compile_step"; then
+  fail "Compile syscall harness must not be disabled with if: false"
+fi
+grep -Fq "        if: \${{ github.event.inputs.proof_mode == 'send-matrix' }}" <<<"$compile_step" \
+  || fail "Compile syscall harness must be send-matrix-conditioned"
+compile_active=$(active_run_lines "$compile_step")
+grep -qx 'bash scripts/ci/test-s1b-coverage-gate.sh' <<<"$compile_active" \
+  || fail "Compile syscall harness must actively run the coverage-gate suite"
+pc="$(cd "$(dirname "$0")/../.." && pwd)/.pre-commit-config.yaml"
+grep -Fq 'id: s1b-coverage-gate-contract' "$pc" \
+  || fail "pre-commit must run the coverage-gate suite as an external contract"
+grep -Fq 'entry: bash scripts/ci/test-s1b-coverage-gate.sh' "$pc" \
+  || fail "pre-commit hook must execute the coverage-gate suite"
 if grep -q 'bash scripts/ci/run-send-syscall-matrix.sh cleanup-selftest' "$wf"; then
   fail "workflow still invokes cleanup-selftest directly"
 fi
@@ -149,6 +239,10 @@ second=$(printf '%s\n' "$step_names" | sed -n '2p')
   || fail "first smoke step must be Pre-clean self-hosted workspace, got ${first:-<empty>}"
 [[ "$second" == "Checkout" ]] \
   || fail "pre-clean must immediately precede Checkout, got ${second:-<empty>}"
+compile_idx=$(printf '%s\n' "$step_names" | grep -n '^Compile syscall harness$' | head -1 | cut -d: -f1)
+positive_idx=$(printf '%s\n' "$step_names" | grep -n '^Positive syscall/effect matrix$' | head -1 | cut -d: -f1)
+[[ -n "$compile_idx" && -n "$positive_idx" && "$compile_idx" -lt "$positive_idx" ]] \
+  || fail "coverage-gate suite step must run before the positive matrix"
 preclean_run=$(awk '
   /^      - name: Pre-clean self-hosted workspace$/ { in_step=1; next }
   in_step && /^      - name: / { exit }
@@ -181,6 +275,20 @@ grep -Fq 'find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -print -quit' <<<"$pr
   || fail "Pre-clean run: must fail-closed assert the workspace is empty"
 grep -Fq 'ERROR: workspace not empty after' <<<"$preclean_run" \
   || fail "Pre-clean run: must fail-closed if the workspace is not empty"
+nonempty_branch=$(awk '
+  /mindepth 1 -maxdepth 1 -print -quit/ { p=1 }
+  p { print }
+  p && /[[:space:]]fi[[:space:]]*$/ { exit }
+' <<<"$preclean_run")
+grep -Eq '^[[:space:]]+exit 1[[:space:]]*$' <<<"$nonempty_branch" \
+  || fail "Pre-clean nonempty branch must fail-closed with exit 1"
+preclean_step=$(named_step "$wf" "Pre-clean self-hosted workspace")
+if grep -Eq '^        continue-on-error[[:space:]]*:' <<<"$preclean_step"; then
+  fail "Pre-clean must not continue-on-error"
+fi
+if grep -Eq '^        if:' <<<"$preclean_step"; then
+  fail "Pre-clean must not have a disabling if"
+fi
 echo "ok: pre-clean run: block scoped before checkout"
 # Intentional: match the workflow's literal backup copy/mv/cmp, not expand here.
 # shellcheck disable=SC2016
