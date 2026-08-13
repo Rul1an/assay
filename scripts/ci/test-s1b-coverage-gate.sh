@@ -24,6 +24,13 @@ fn_active() {
   ' "$DRIVER"
 }
 
+# Count every active signature, including `name () {`, `name ( ) {`, and Allman `name()` / `{`.
+# fn_active still extracts the canonical `name() {` body.
+count_active_fn_sigs() {
+  local blob="$1" name="$2"
+  printf '%s\n' "$blob" | grep -Ec "^${name}[[:space:]]*\\([[:space:]]*\\)|^function[[:space:]]+${name}([[:space:]]|\\(|$)" || true
+}
+
 # One POSIX Python stdlib process-group bound. Not GNU timeout(1).
 # Kills the session started for this command only — not a daemon/setsid guarantee.
 command -v python3 >/dev/null 2>&1 \
@@ -232,16 +239,53 @@ driver_active=$(awk '
     print tmp
   }
 ' "$DRIVER")
-n_run_matrix=$(printf '%s\n' "$driver_active" | grep -Ec '^run_matrix\(\) \{|^function run_matrix' || true)
+n_run_matrix=$(count_active_fn_sigs "$driver_active" run_matrix)
 [[ "$n_run_matrix" -eq 1 ]] || fail "driver must define run_matrix() exactly once"
-n_assert_effects=$(printf '%s\n' "$driver_active" | grep -Ec '^assert_matrix_effects\(\) \{|^function assert_matrix_effects' || true)
+n_assert_effects=$(count_active_fn_sigs "$driver_active" assert_matrix_effects)
 [[ "$n_assert_effects" -eq 1 ]] || fail "driver must define assert_matrix_effects() exactly once"
-n_wait_endpoint=$(printf '%s\n' "$driver_active" | grep -Ec '^wait_endpoint\(\) \{|^function wait_endpoint' || true)
+n_wait_endpoint=$(count_active_fn_sigs "$driver_active" wait_endpoint)
 [[ "$n_wait_endpoint" -eq 1 ]] || fail "driver must define wait_endpoint() exactly once"
-n_emit_diag=$(printf '%s\n' "$driver_active" | grep -Ec '^emit_matrix_diagnostics\(\) \{|^function emit_matrix_diagnostics' || true)
+n_emit_diag=$(count_active_fn_sigs "$driver_active" emit_matrix_diagnostics)
 [[ "$n_emit_diag" -eq 1 ]] || fail "driver must define emit_matrix_diagnostics() exactly once"
-n_fail=$(printf '%s\n' "$driver_active" | grep -Ec '^fail\(\) \{|^function fail' || true)
+n_fail=$(count_active_fn_sigs "$driver_active" fail)
 [[ "$n_fail" -eq 1 ]] || fail "driver must define fail() exactly once"
+python3 - "$DRIVER" "$tmp/mut-space-run.sh" "$tmp/mut-space-assert.sh" "$tmp/mut-allman-run.sh" <<'PY'
+from pathlib import Path
+import sys
+src = Path(sys.argv[1]).read_text()
+old = 'case "$MODE" in\n'
+if old not in src:
+    raise SystemExit("driver is missing case \"$MODE\" in")
+Path(sys.argv[2]).write_text(
+    src.replace(old, 'run_matrix ( ) { echo "ok: $MODE matrix"; return 0; }\n' + old, 1)
+)
+Path(sys.argv[3]).write_text(
+    src.replace(old, 'assert_matrix_effects () { :; }\n' + old, 1)
+)
+Path(sys.argv[4]).write_text(
+    src.replace(
+        old,
+        'run_matrix()\n{\n  echo "ok: $MODE matrix"\n  return 0\n}\n' + old,
+        1,
+    )
+)
+PY
+active_of() {
+  awk '
+    {
+      tmp = $0
+      sub(/^[[:space:]]+/, "", tmp)
+      if (tmp == "" || tmp ~ /^#/) next
+      print tmp
+    }
+  ' "$1"
+}
+n=$(count_active_fn_sigs "$(active_of "$tmp/mut-space-run.sh")" run_matrix)
+[[ "$n" -ne 1 ]] || fail "space-form later run_matrix() was not counted"
+n=$(count_active_fn_sigs "$(active_of "$tmp/mut-space-assert.sh")" assert_matrix_effects)
+[[ "$n" -ne 1 ]] || fail "space-form later assert_matrix_effects() was not counted"
+n=$(count_active_fn_sigs "$(active_of "$tmp/mut-allman-run.sh")" run_matrix)
+[[ "$n" -ne 1 ]] || fail "Allman later run_matrix() was not counted"
 run_matrix_active=$(fn_active run_matrix)
 # shellcheck disable=SC2016
 want_run_matrix=$(cat <<'EOF'
@@ -409,6 +453,51 @@ assert_nl_snippet "$case_active" "$(printf '%s\n' \
   'HOUT="${3:?}"' \
   'fail "diagnostics-selftest" ;;')" \
   "diagnostics-selftest case arm must call fail after binding LOG and HOUT"
+set +e
+ASSAY_BIN="$tmp/no-assay" HARNESS_BIN="$tmp/no-harness" ASSAY_EBPF="$tmp/no-ebpf.o" \
+  WORKDIR="$tmp/s1b-dispatch-wd" \
+  run_bounded 8 bash "$DRIVER" positive >"$tmp/disp.out" 2>"$tmp/disp.err"
+disp_ec=$?
+set -e
+[[ "$disp_ec" -ne 0 ]] || fail "positive with missing bins must not succeed"
+if grep -q 'usage:' "$tmp/disp.err"; then
+  fail "positive missing-bin failed as unknown mode: $(cat "$tmp/disp.err")"
+fi
+grep -Fxq 'FAIL: missing bin/object' "$tmp/disp.err" \
+  || fail "positive missing-bin must emit exact FAIL: missing bin/object: $(cat "$tmp/disp.err")"
+if grep -q '^ok:' "$tmp/disp.out"; then
+  fail "positive missing-bin printed ok: $(cat "$tmp/disp.out")"
+fi
+python3 - "$DRIVER" "$tmp/mut-pos-glob.sh" <<'PY'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = "  positive)\n"
+new = """  pos*)
+    echo "ok: $MODE matrix"
+    exit 0 ;;
+  positive)
+"""
+if old not in text:
+    raise SystemExit("driver is missing the positive) arm")
+dst.write_text(text.replace(old, new, 1))
+PY
+set +e
+ASSAY_BIN="$tmp/no-assay" HARNESS_BIN="$tmp/no-harness" ASSAY_EBPF="$tmp/no-ebpf.o" \
+  WORKDIR="$tmp/s1b-dispatch-wd" \
+  run_bounded 8 bash "$tmp/mut-pos-glob.sh" positive >"$tmp/posglob.out" 2>"$tmp/posglob.err"
+posglob_ec=$?
+set -e
+[[ "$posglob_ec" -eq 0 ]] \
+  || fail "pos*) mutant must exit 0 (got $posglob_ec) out=$(cat "$tmp/posglob.out") err=$(cat "$tmp/posglob.err")"
+grep -qx 'ok: positive matrix' "$tmp/posglob.out" \
+  || fail "pos*) mutant must print ok: positive matrix: out=$(cat "$tmp/posglob.out") err=$(cat "$tmp/posglob.err")"
+if grep -q 'FAIL:' "$tmp/posglob.err"; then
+  fail "pos*) mutant stderr must not contain FAIL: $(cat "$tmp/posglob.err")"
+fi
+[[ ! -s "$tmp/posglob.err" ]] \
+  || fail "pos*) mutant stderr must be empty: $(cat "$tmp/posglob.err")"
 
 wait_iters=$(sed -n 's/^WAIT_LOG_ITERS=//p' "$DRIVER" | head -1)
 wait_sleep=$(sed -n 's/^WAIT_LOG_SLEEP_S=//p' "$DRIVER" | head -1)
