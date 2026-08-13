@@ -6,18 +6,9 @@ use crate::probes::{
     SendFault, EGRESS_PEER_PROBE, EXPECTED_PROBES,
 };
 use crate::{MonitorError, MonitorStatsSnapshot};
-use assay_common::{
-    CidrRuleValue, KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL, MONITOR_STAT_CONNECT_EVENTS_EMITTED,
-    MONITOR_STAT_CONNECT_RINGBUF_DROPPED, MONITOR_STAT_LSM_EVENTS_EMITTED,
-    MONITOR_STAT_LSM_RINGBUF_DROPPED, MONITOR_STAT_OPENAT2_EVENTS_EMITTED,
-    MONITOR_STAT_OPENAT2_RINGBUF_DROPPED, MONITOR_STAT_OPENAT_EVENTS_EMITTED,
-    MONITOR_STAT_OPENAT_RINGBUF_DROPPED, MONITOR_STAT_SENDMSG_EVENTS_EMITTED,
-    MONITOR_STAT_SENDMSG_RINGBUF_DROPPED, MONITOR_STAT_SENDTO_EVENTS_EMITTED,
-    MONITOR_STAT_SENDTO_RINGBUF_DROPPED, MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED,
-    MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED, SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR,
-    SOCKET_STAT_BLOCKED_PORT, SOCKET_STAT_CHECKS, SOCKET_STAT_EVENTS_EMITTED,
-    SOCKET_STAT_RINGBUF_DROPPED,
-};
+// The `MONITOR_STAT_*` / `SOCKET_STAT_*` keys are deliberately not imported here: `snapshot_stats`
+// names no key, so it cannot get one wrong. They belong to `crate::project_snapshot`.
+use assay_common::{CidrRuleValue, KEY_EMIT_INODE_RESOLVED, KEY_MONITOR_ALL};
 use assay_policy::tiers::CompiledPolicy;
 use aya::maps::lpm_trie::Key;
 use aya::{
@@ -590,74 +581,33 @@ impl LinuxMonitor {
             .record_mode(EGRESS_PEER_PROBE, ModeUpdate::Failed(reason));
     }
 
+    /// Bind the two kernel stat arrays to the snapshot projection.
+    ///
+    /// Everything this method knows is which aya map each key space lives in. Which key feeds which
+    /// field is `crate::project_snapshot`'s business, and it is total there: this cannot forget a
+    /// field, because it names none. The eBPF side has always incremented the per-hook and honesty
+    /// counters (`connect_events.rs`); a read that goes missing here is a silent zero downstream,
+    /// indistinguishable from a clean run, which is why the projection is one call and not a list of
+    /// separately deletable assignments.
     pub fn snapshot_stats(&mut self) -> Result<MonitorStatsSnapshot, MonitorError> {
         let bpf = self.bpf.lock().unwrap();
-        let mut stats = MonitorStatsSnapshot::default();
 
         let map = bpf
             .map("STATS")
             .ok_or(MonitorError::MapNotFound { name: "STATS" })?;
-        let array: AyaArray<_, u32> = AyaArray::try_from(map)?;
-        stats.tracepoint_events_emitted = array
-            .get(&MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, 0)
-            .unwrap_or(0);
-        stats.tracepoint_ringbuf_dropped = array
-            .get(&MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED, 0)
-            .unwrap_or(0);
-        stats.lsm_events_emitted = array.get(&MONITOR_STAT_LSM_EVENTS_EMITTED, 0).unwrap_or(0);
-        stats.lsm_ringbuf_dropped = array.get(&MONITOR_STAT_LSM_RINGBUF_DROPPED, 0).unwrap_or(0);
-        stats.openat_events_emitted = array
-            .get(&MONITOR_STAT_OPENAT_EVENTS_EMITTED, 0)
-            .unwrap_or(0);
-        stats.openat_ringbuf_dropped = array
-            .get(&MONITOR_STAT_OPENAT_RINGBUF_DROPPED, 0)
-            .unwrap_or(0);
-        stats.openat2_events_emitted = array
-            .get(&MONITOR_STAT_OPENAT2_EVENTS_EMITTED, 0)
-            .unwrap_or(0);
-        stats.openat2_ringbuf_dropped = array
-            .get(&MONITOR_STAT_OPENAT2_RINGBUF_DROPPED, 0)
-            .unwrap_or(0);
-        stats.connect_events_emitted = array
-            .get(&MONITOR_STAT_CONNECT_EVENTS_EMITTED, 0)
-            .unwrap_or(0);
-        stats.connect_ringbuf_dropped = array
-            .get(&MONITOR_STAT_CONNECT_RINGBUF_DROPPED, 0)
-            .unwrap_or(0);
-        // The eBPF side has always incremented these (connect_events.rs), and userspace never read
-        // them back, so the snapshot reported 0 for two of the seven tracepoint hooks. Not a gate
-        // defect -- `tracepoint_ringbuf_dropped` is bumped alongside every per-hook counter, so the
-        // ring total was right -- but a drop on `sendto` or `sendmsg` could not be attributed to
-        // the hook that lost it, which is the whole job of the per-hook counters.
-        stats.sendto_events_emitted = array
-            .get(&MONITOR_STAT_SENDTO_EVENTS_EMITTED, 0)
-            .unwrap_or(0);
-        stats.sendto_ringbuf_dropped = array
-            .get(&MONITOR_STAT_SENDTO_RINGBUF_DROPPED, 0)
-            .unwrap_or(0);
-        stats.sendmsg_events_emitted = array
-            .get(&MONITOR_STAT_SENDMSG_EVENTS_EMITTED, 0)
-            .unwrap_or(0);
-        stats.sendmsg_ringbuf_dropped = array
-            .get(&MONITOR_STAT_SENDMSG_RINGBUF_DROPPED, 0)
-            .unwrap_or(0);
-        crate::apply_send_honesty_counters(&mut stats, |key| array.get(&key, 0).unwrap_or(0));
+        let stats_array: AyaArray<_, u32> = AyaArray::try_from(map)?;
 
         let map = bpf.map("SOCKET_STATS").ok_or(MonitorError::MapNotFound {
             name: "SOCKET_STATS",
         })?;
-        let array: AyaArray<_, u64> = AyaArray::try_from(map)?;
-        stats.socket_checks = array.get(&SOCKET_STAT_CHECKS, 0).unwrap_or(0);
-        stats.socket_blocked_cidr = array.get(&SOCKET_STAT_BLOCKED_CIDR, 0).unwrap_or(0);
-        stats.socket_blocked_port = array.get(&SOCKET_STAT_BLOCKED_PORT, 0).unwrap_or(0);
-        stats.socket_allowed = array.get(&SOCKET_STAT_ALLOWED, 0).unwrap_or(0);
-        stats.socket_events_emitted = array.get(&SOCKET_STAT_EVENTS_EMITTED, 0).unwrap_or(0);
-        stats.socket_ringbuf_dropped = array.get(&SOCKET_STAT_RINGBUF_DROPPED, 0).unwrap_or(0);
+        let socket_array: AyaArray<_, u64> = AyaArray::try_from(map)?;
 
-        // Userspace-tracked: filled by the consumer thread in `listen()`, not a kernel map.
-        stats.event_size_mismatch = self.event_size_mismatch.load(Ordering::Relaxed);
-
-        Ok(stats)
+        Ok(crate::project_snapshot(
+            |key| stats_array.get(&key, 0).unwrap_or(0),
+            |key| socket_array.get(&key, 0).unwrap_or(0),
+            // Userspace-tracked: filled by the consumer thread in `listen()`, not a kernel map.
+            self.event_size_mismatch.load(Ordering::Relaxed),
+        ))
     }
 
     pub fn listen(&mut self) -> Result<EventStream, MonitorError> {
