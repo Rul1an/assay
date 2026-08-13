@@ -338,7 +338,7 @@ impl CodingAgentCoverageReport {
     /// dimension the run claims. `None` when any claimed dimension is `Blocked` — a block binds
     /// harder than any rung, because there is no rung to take a minimum with.
     ///
-    /// `NothingClaimed` also maps to `None`, and that arm is unreachable here: [`Self::claimed`]
+    /// `NothingClaimed` also maps to `None`, and that arm is unreachable here: `Self::claimed`
     /// always yields the four fixed dimensions. The mapping is stated rather than assumed, because
     /// it is precisely the assumption that made a copy of this fold wrong elsewhere.
     pub fn weakest_ceiling(&self) -> Option<CodingAgentClaimCeiling> {
