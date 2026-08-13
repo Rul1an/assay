@@ -101,10 +101,14 @@ grep -Fq "${rb_prefix}{} dropped={}" "$cli_mod" \
 
 cli_out="$(cd "$(dirname "$0")/../.." && pwd)/crates/assay-cli/src/cli/commands/monitor_next/output.rs"
 so_fmt='  • Send observation:   sendto emitted={} dropped={} no_peer={} non_ip={}; sendmsg emitted={} dropped={} no_peer={} non_ip={}'
-grep -Fq 'fn format_send_observation_summary' "$cli_out" \
-  || fail "format_send_observation_summary missing from output.rs"
-grep -Fq "$so_fmt" "$cli_out" \
-  || fail "send observation formatter missing from output.rs format_send_observation_summary"
+so_fn=$(awk '
+  /fn format_send_observation_summary\(/ { p=1 }
+  p { print }
+  p && /^}$/ { exit }
+' "$cli_out")
+[[ -n "$so_fn" ]] || fail "could not extract format_send_observation_summary body"
+grep -Fq "$so_fmt" <<<"$so_fn" \
+  || fail "send observation formatter missing from format_send_observation_summary body"
 so_printf="${so_fmt//'{}'/%s}"
 grep -Fq "$so_printf" "$DRIVER" \
   || fail "driver send_observation_ok printf drifted from output.rs producer"
@@ -216,6 +220,28 @@ grep -Fq 'id: s1b-coverage-gate-contract' "$pc" \
   || fail "pre-commit must run the coverage-gate suite as an external contract"
 grep -Fq 'entry: bash scripts/ci/test-s1b-coverage-gate.sh' "$pc" \
   || fail "pre-commit hook must execute the coverage-gate suite"
+hook_files=$(awk '
+  /id: s1b-coverage-gate-contract/ { p=1 }
+  p && /^      - id: / && !/s1b-coverage-gate-contract/ { exit }
+  p && /^[[:space:]]*files: / { print; exit }
+' "$pc")
+[[ -n "$hook_files" ]] || fail "s1b pre-commit hook missing files: regex"
+producer_rel='crates/assay-cli/src/cli/commands/monitor_next/output.rs'
+grep -Fq 'output\.rs' <<<"$hook_files" \
+  || fail "pre-commit files regex omits the send-observation producer"
+python3 -c '
+import re, sys
+line = sys.argv[1]
+m = re.search(r"files:\s+(\S+)$", line)
+sys.exit("could not parse files regex") if not m else None
+pat = m.group(1)
+prod = sys.argv[2]
+if not re.match(pat, prod):
+    sys.exit("files regex does not match producer path")
+if re.match(pat, "crates/assay-cli/src/lib.rs"):
+    sys.exit("files regex is not producer-scoped")
+' "$hook_files" "$producer_rel" \
+  || fail "pre-commit files regex does not select the producer path"
 if grep -q 'bash scripts/ci/run-send-syscall-matrix.sh cleanup-selftest' "$wf"; then
   fail "workflow still invokes cleanup-selftest directly"
 fi

@@ -318,8 +318,9 @@ repos:
         language: system
         pass_filenames: false
         # External invocation: commenting the workflow suite line must not leave CI
-        # as the only runner of this contract. Trigger on the S1b four-file set.
-        files: ^(scripts/ci/(test-s1b-coverage-gate|run-send-syscall-matrix)\.sh|scripts/ci/s1b-send-syscall-matrix\.c|\.github/workflows/monitor-attach-smoke\.yml|\.pre-commit-config\.yaml)$
+        # as the only runner of this contract. Trigger on S1b scripts, workflow,
+        # pre-commit config, and the send-observation producer.
+        files: ^(scripts/ci/(test-s1b-coverage-gate|run-send-syscall-matrix)\.sh|scripts/ci/s1b-send-syscall-matrix\.c|\.github/workflows/monitor-attach-smoke\.yml|crates/assay-cli/src/cli/commands/monitor_next/output\.rs|\.pre-commit-config\.yaml)$
 
       - id: mcp-registry-release-txn-self-test
         name: MCP Registry release transaction self-test

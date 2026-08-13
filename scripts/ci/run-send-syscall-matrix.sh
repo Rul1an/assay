@@ -85,8 +85,28 @@ reap_pid() {
   kill -0 "$pid" 2>/dev/null && fail "pid $pid still alive after SIGKILL bound; hang is not clean"
 }
 
+s1b_owned_workdir() {
+  local wd="$1"
+  [[ -n "$wd" && "$wd" == /* ]] || return 1
+  case "$wd" in
+    *'/../'*|*/..|..) return 1 ;;
+  esac
+  if [[ -n "${RUNNER_TEMP:-}" && "$wd" == "${RUNNER_TEMP}/s1b-"* ]]; then
+    return 0
+  fi
+  [[ "$wd" == /tmp/s1b-* ]]
+}
+
+remove_owned_workdir() {
+  local wd="${1:-}"
+  [[ -n "$wd" && -d "$wd" ]] || return 0
+  s1b_owned_workdir "$wd" || fail "refusing to remove unowned WORKDIR=$wd"
+  rm -rf "$wd"
+  [[ ! -e "$wd" ]] || fail "WORKDIR leftover $wd"
+}
+
 cleanup() {
-  local pid wd
+  local pid
   for pid in "${MONITOR_PID:-}" "${HARNESS_PID:-}"; do
     reap_pid "$pid"
   done
@@ -94,13 +114,7 @@ cleanup() {
   if [[ -n "${LEAF:-}" && -d "$LEAF" ]]; then
     rmdir "$LEAF" 2>/dev/null || true
   fi
-  wd="${WORKDIR:-}"
-  if [[ -n "$wd" && -d "$wd" ]]; then
-    [[ "$wd" != "$ROOT" && "$wd" != / && "$wd" != /tmp ]] \
-      || fail "refusing to remove WORKDIR=$wd"
-    rm -rf "$wd"
-    [[ ! -e "$wd" ]] || fail "WORKDIR leftover $wd"
-  fi
+  remove_owned_workdir "${WORKDIR:-}"
 }
 trap cleanup EXIT
 trap 'exit 143' TERM
@@ -375,7 +389,8 @@ case "$MODE" in
       "$ASSAY_BIN" || fail "ASSAY_BIN is not the mutated rebuild (missing s1b-cell7-disabled)"
     run_matrix no ;;
   cleanup-selftest)
-    WORKDIR=$(mktemp -d)
+    WORKDIR=$(mktemp -d /tmp/s1b-cleanup-selftest-XXXXXX)
+    s1b_owned_workdir "$WORKDIR" || fail "cleanup-selftest WORKDIR is not an owned S1b path: $WORKDIR"
     FIFO=$WORKDIR/go.fifo
     mkfifo "$FIFO"
     bash -c 'trap "" TERM INT; echo ready; while :; do sleep 1; done' >/dev/null &
@@ -403,6 +418,19 @@ case "$MODE" in
     [[ ! -d "$leaf" ]] || fail "leaf leftover $leaf"
     wd=$WORKDIR
     [[ ! -e "$wd" ]] || fail "WORKDIR leftover $wd"
+    bad=$(mktemp -d)
+    printf 'keep\n' >"$bad/keep"
+    if s1b_owned_workdir "$bad"; then
+      fail "unowned path was accepted: $bad"
+    fi
+    set +e
+    ( remove_owned_workdir "$bad" )
+    rec=$?
+    set -e
+    [[ "$rec" -ne 0 ]] || fail "remove_owned_workdir deleted unowned path $bad"
+    [[ -f "$bad/keep" ]] || fail "unowned WORKDIR was deleted: $bad"
+    rm -rf "$bad"
+    WORKDIR=""
     echo "ok: cleanup-selftest" ;;
   coverage-gate) coverage_gate "${2:?coverage-gate requires a JSON path}" ;;
   mutation-selftest) mutation_selftest ;;
