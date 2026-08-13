@@ -216,28 +216,44 @@ compile_active=$(active_run_lines "$compile_step")
 grep -qx 'bash scripts/ci/test-s1b-coverage-gate.sh' <<<"$compile_active" \
   || fail "Compile syscall harness must actively run the coverage-gate suite"
 pc="$(cd "$(dirname "$0")/../.." && pwd)/.pre-commit-config.yaml"
-ruby -ryaml - "$pc" <<'RUBY' || fail "s1b pre-commit hook YAML contract failed"
-path = ARGV[0]
-doc = YAML.safe_load_file(path, aliases: false)
-hooks = doc.fetch("repos").flat_map { |r| Array(r["hooks"]) }
-h = hooks.find { |x| x.is_a?(Hash) && x["id"] == "s1b-coverage-gate-contract" }
-abort "missing s1b-coverage-gate-contract hook" unless h
-abort "active entry drifted" unless h["entry"] == "bash scripts/ci/test-s1b-coverage-gate.sh"
-abort "language must be system" unless h["language"] == "system"
-abort "pass_filenames must be false" unless h["pass_filenames"] == false
-if h.key?("stages")
-  stages = Array(h["stages"]).map(&:to_s)
-  abort "stages must not be manual-only" if stages == ["manual"]
-  unless stages.include?("pre-commit") && stages.include?("pre-push")
-    abort "stages restrict away from pre-commit/pre-push"
-  end
-end
-pat = h.fetch("files")
-prod = "crates/assay-cli/src/cli/commands/monitor_next/output.rs"
-re = Regexp.new(pat)
-abort "files regex omits the send-observation producer" unless prod.match?(re)
-abort "files regex is not producer-scoped" if "crates/assay-cli/src/lib.rs".match?(re)
-RUBY
+hook_active=$(awk '
+  $0 == "      - id: s1b-coverage-gate-contract" { p=1 }
+  p && $0 ~ /^      - id: / && $0 != "      - id: s1b-coverage-gate-contract" { exit }
+  p {
+    tmp = $0
+    sub(/^[[:space:]]+/, "", tmp)
+    if (tmp == "" || tmp ~ /^#/) next
+    print tmp
+  }
+' "$pc")
+[[ -n "$hook_active" ]] || fail "missing s1b-coverage-gate-contract hook"
+grep -qx 'entry: bash scripts/ci/test-s1b-coverage-gate.sh' <<<"$hook_active" \
+  || fail "active entry drifted"
+grep -qx 'language: system' <<<"$hook_active" || fail "language must be system"
+grep -qx 'pass_filenames: false' <<<"$hook_active" \
+  || fail "pass_filenames must be false"
+if grep -Eq '^stages:' <<<"$hook_active"; then
+  fail "s1b hook must not set stages"
+fi
+files_pat=$(awk '/^files: / { sub(/^files: /, ""); print; exit }' <<<"$hook_active")
+[[ -n "$files_pat" ]] || fail "files regex omits the send-observation producer"
+mkdir -p "$tmp/norb"
+ln -sfn "$(command -v python3)" "$tmp/norb/python3"
+if PATH="$tmp/norb" command -v ruby >/dev/null 2>&1; then
+  fail "ruby-free PATH still locates ruby"
+fi
+PATH="$tmp/norb" python3 -c '
+import re, sys
+cre = re.compile(sys.argv[1])
+if cre.search(sys.argv[2]) is None:
+    raise SystemExit("files regex omits the send-observation producer")
+if cre.search(sys.argv[3]) is not None:
+    raise SystemExit("files regex is not producer-scoped")
+' "$files_pat" \
+  "crates/assay-cli/src/cli/commands/monitor_next/output.rs" \
+  "crates/assay-cli/src/lib.rs" \
+  || fail "s1b pre-commit hook YAML contract failed without ruby on PATH"
+echo "ok: s1b hook YAML contract without ruby"
 km="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/kernel-matrix.yml"
 pr_paths=$(awk '
   /^  pull_request:/ { p=1; next }
