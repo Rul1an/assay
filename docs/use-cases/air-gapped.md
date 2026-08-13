@@ -242,20 +242,11 @@ ssh air-gapped-server 'tar -xzf /tmp/assay-0.9.0.tar.gz && sudo mv assay /usr/lo
 
 ---
 
-## Docker (Air-Gapped Registry)
+## Containers
 
-### Build and Push to Internal Registry
-
-```bash
-# On a connected, controlled build machine
-git checkout v5.1.0
-docker build -t internal-registry.corp/assay:v5.1.0 .
-docker save internal-registry.corp/assay:v5.1.0 -o assay-image.tar
-
-# Transfer and load
-docker load -i assay-image.tar
-docker push internal-registry.corp/assay:v5.1.0
-```
+Assay does not currently ship a runtime container image or a root `Dockerfile`. For an air-gapped
+installation, mirror the verified release archive and checksum described above. The repository's
+`docker/Dockerfile.ebpf-builder` builds the eBPF toolchain only; it is not an Assay runtime image.
 
 ### Use in CI
 

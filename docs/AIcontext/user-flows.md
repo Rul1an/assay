@@ -243,8 +243,8 @@ assay run --config eval.yaml --baseline baseline.json
 ```mermaid
 flowchart TD
     start[Python Developer] --> install[Install SDK]
-    install --> pip[cargo install assay-cli]
-    pip --> import[Import Assay]
+    install --> sdk[pip install assay-it]
+    sdk --> import[Import Assay]
     import --> record[Record Traces]
     record --> validate[Validate Coverage]
     validate --> explain[Explain Violations]
@@ -254,7 +254,7 @@ flowchart TD
 
 **Python SDK Flow:**
 
-1. **Installation**: `cargo install assay-cli --version 5.1.0 --locked`
+1. **Installation**: `pip install assay-it` (the Python SDK; install the Rust CLI separately when the workflow invokes `assay` commands)
 2. **Recording**:
 ```python
 from assay import AssayClient

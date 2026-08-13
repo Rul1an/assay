@@ -34,16 +34,34 @@ EOF_BIN
 chmod +x "$TMP/bin/assay"
 cat > "$TMP/docs/getting-started/installation.md" <<'DOC'
 assay 5.1.0
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-cli --version 5.1.0 --locked
+pip install assay-it
 assay-v5.1.0-x86_64-pc-windows-msvc.zip
 DOC
-printf '%s\n' 'pip install assay-it' > "$TMP/docs/getting-started/index.md"
+cat > "$TMP/docs/getting-started/index.md" <<'DOC'
+cargo install assay-cli --version 5.1.0 --locked
+pip install assay-it
+DOC
 printf '%s\n' 'supported examples' > "$TMP/docs/getting-started/ci-integration.md"
-printf '%s\n' '# assay 5.1.0' > "$TMP/docs/reference/cli/index.md"
+printf '%s\n' 'cargo install assay-cli --version 5.1.0 --locked' > "$TMP/docs/getting-started/quickstart.md"
+cat > "$TMP/docs/reference/cli/index.md" <<'DOC'
+# assay 5.1.0
+cargo install assay-cli --version 5.1.0 --locked
+DOC
 printf '%s\n' 'pip install assay-it' > "$TMP/docs/python-sdk/index.md"
 printf '%s\n' 'Build an image locally.' > "$TMP/docs/use-cases/air-gapped.md"
-printf '%s\n' 'Install the CLI with Cargo; install the SDK with pip install assay-it.' > "$TMP/docs/AIcontext/user-flows.md"
+cat > "$TMP/docs/AIcontext/user-flows.md" <<'DOC'
+cargo install assay-cli --version 5.1.0 --locked
+Install the SDK with pip install assay-it.
+DOC
 printf '%s\n' 'Historical correction: pip install assay-it.' > "$TMP/docs/migration-v1.2.md"
-printf '%s\n' 'Claude and Cursor config-path only.' > "$TMP/README.md"
+cat > "$TMP/README.md" <<'DOC'
+cargo install assay-cli --version 5.1.0 --locked
+Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)
+Claude and Cursor config-path only.
+DOC
+printf '%s\n' 'Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0)' > "$TMP/docs/index.md"
 printf '%s\n' 'Codex uses .codex/config.toml.' > "$TMP/docs/guides/editor-mcp-recipe.md"
 (
   cd "$TMP"
@@ -57,6 +75,7 @@ run_check() {
 
 run_check >/dev/null
 
+mutation_count=0
 mutate_and_expect_failure() {
   local name="$1" file="$2" sed_expr="$3" diagnostic="$4"
   local original="$TMP/$file" backup="$TMP/$file.$name"
@@ -73,21 +92,69 @@ mutate_and_expect_failure() {
     exit 1
   }
   mv "$backup" "$original"
+  mutation_count=$((mutation_count + 1))
   echo "PASS: $name"
 }
 
 mutate_and_expect_failure wrong-python-package docs/getting-started/index.md \
   's/pip install assay-it/pip install assay/' 'unsupported Python package'
+mutate_and_expect_failure wrong-python-package-installation docs/getting-started/installation.md \
+  's/pip install assay-it/pip install assay/' 'unsupported Python package'
+mutate_and_expect_failure wrong-python-package-sdk docs/python-sdk/index.md \
+  's/pip install assay-it/pip install assay/' 'unsupported Python package'
+mutate_and_expect_failure wrong-python-package-flow docs/AIcontext/user-flows.md \
+  's/pip install assay-it/pip install assay/' 'unsupported Python package'
+mutate_and_expect_failure wrong-python-package-migration docs/migration-v1.2.md \
+  's/pip install assay-it/pip install assay/' 'unsupported Python package'
+mutate_and_expect_failure wrong-python-package-upgrade docs/python-sdk/index.md \
+  's/pip install assay-it/pip install --upgrade assay/' 'unsupported Python package'
+mutate_and_expect_failure wrong-python-package-short-upgrade docs/python-sdk/index.md \
+  "s/pip install assay-it/pip install -U 'assay'/" 'unsupported Python package'
 mutate_and_expect_failure homebrew-channel docs/getting-started/installation.md \
   's/assay-v5.1.0-x86_64-pc-windows-msvc.zip/brew install rul1an\/tap\/assay/' 'unsupported Homebrew channel'
 mutate_and_expect_failure scoop-channel docs/getting-started/installation.md \
   's/assay-v5.1.0-x86_64-pc-windows-msvc.zip/scoop install assay/' 'unsupported Scoop channel'
 mutate_and_expect_failure ghcr-channel docs/getting-started/ci-integration.md \
   's/supported examples/docker pull ghcr.io\/rul1an\/assay:latest/' 'unsupported GHCR image'
+mutate_and_expect_failure ghcr-installation docs/getting-started/installation.md \
+  's/assay-v5.1.0-x86_64-pc-windows-msvc.zip/docker pull ghcr.io\/rul1an\/assay:latest/' 'unsupported GHCR image'
+mutate_and_expect_failure ghcr-air-gapped docs/use-cases/air-gapped.md \
+  's/Build an image locally./docker pull ghcr.io\/rul1an\/assay:latest/' 'unsupported GHCR image'
 mutate_and_expect_failure stale-windows-asset docs/getting-started/installation.md \
   's/assay-v5.1.0-x86_64-pc-windows-msvc.zip/assay-windows-x86_64.zip/' 'obsolete Windows asset name'
 mutate_and_expect_failure unsupported-codex-config-path README.md \
   's/Claude and Cursor config-path only./assay mcp config-path <editor>/' \
   'config-path does not support Codex'
+mutate_and_expect_failure unsupported-codex-literal README.md \
+  's/Claude and Cursor config-path only./assay mcp config-path codex/' \
+  'config-path does not support Codex'
+mutate_and_expect_failure unsupported-codex-guide docs/guides/editor-mcp-recipe.md \
+  's/Codex uses .codex\/config.toml./assay mcp config-path codex/' \
+  'config-path does not support Codex'
 
-echo 'release-surface mutations: 6 observed'
+for row in \
+  'README.md|stale-version-readme' \
+  'docs/getting-started/index.md|stale-version-getting-started' \
+  'docs/getting-started/installation.md|stale-version-installation' \
+  'docs/getting-started/quickstart.md|stale-version-quickstart' \
+  'docs/reference/cli/index.md|stale-version-cli-reference' \
+  'docs/AIcontext/user-flows.md|stale-version-user-flow'; do
+  file="${row%%|*}"
+  name="${row##*|}"
+  mutate_and_expect_failure "$name" "$file" \
+    's/assay-cli --version 5.1.0/assay-cli --version 5.0.0/g' \
+    'current release-pinned install command(s)'
+done
+
+mutate_and_expect_failure stale-release-readme README.md \
+  's/releases\/tag\/v5.1.0/releases\/tag\/v5.0.0/' 'current release link drift'
+mutate_and_expect_failure stale-release-doc-index docs/index.md \
+  's/releases\/tag\/v5.1.0/releases\/tag\/v5.0.0/' 'current release link drift'
+mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
+  's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
+
+if [ "$mutation_count" -ne 25 ]; then
+  echo "FAIL: expected 25 release-surface mutations, observed $mutation_count" >&2
+  exit 1
+fi
+echo "release-surface mutations: $mutation_count observed"

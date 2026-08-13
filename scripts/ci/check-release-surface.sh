@@ -209,13 +209,46 @@ check_absent_regex() {
   fi
 }
 
+check_contains_fixed() {
+  local file="$1" expected="$2" label="$3"
+  if [ ! -f "$file" ]; then
+    fail "$file: checked outward document is missing"
+    return
+  fi
+  if ! grep -Fq -- "$expected" "$file"; then
+    fail "$file: $label"
+  fi
+}
+
+check_install_command_count() {
+  local file="$1" expected_count="$2"
+  local expected="cargo install assay-cli --version $WORKSPACE_VERSION --locked"
+  local all_count current_count
+  all_count="$(grep -Ec 'cargo install assay-cli --version [^[:space:]]+ --locked' "$file" || true)"
+  current_count="$(grep -Fc "$expected" "$file" || true)"
+  if [ "$all_count" -ne "$expected_count" ] || [ "$current_count" -ne "$expected_count" ]; then
+    fail "$file: expected $expected_count current release-pinned install command(s)"
+  fi
+}
+
+check_install_command_count README.md 1
+check_install_command_count docs/getting-started/index.md 1
+check_install_command_count docs/getting-started/installation.md 2
+check_install_command_count docs/getting-started/quickstart.md 1
+check_install_command_count docs/reference/cli/index.md 1
+check_install_command_count docs/AIcontext/user-flows.md 1
+
+release_link="Current release: [\`v$WORKSPACE_VERSION\`](https://github.com/Rul1an/assay/releases/tag/v$WORKSPACE_VERSION)"
+check_contains_fixed README.md "$release_link" 'current release link drift'
+check_contains_fixed docs/index.md "$release_link" 'current release link drift'
+
 for file in \
   docs/getting-started/index.md \
   docs/getting-started/installation.md \
   docs/python-sdk/index.md \
   docs/AIcontext/user-flows.md \
   docs/migration-v1.2.md; do
-  check_absent_regex "$file" 'pip(3|x)? install( --user)? assay([^[:alnum:]_-]|$)' \
+  check_absent_regex "$file" "pip(3|x)? install([[:space:]]+(-U|--upgrade|--user))*[[:space:]]+[\"']?assay([^[:alnum:]_-]|$)" \
     'unsupported Python package'
 done
 
@@ -232,11 +265,10 @@ check_absent_regex docs/getting-started/installation.md \
 if ! grep -qxF "# assay $WORKSPACE_VERSION" docs/reference/cli/index.md; then
   fail "docs/reference/cli/index.md: documented CLI version drift"
 fi
-check_absent_regex README.md \
-  'assay mcp config-path <editor>' 'config-path does not support Codex'
-check_absent_regex docs/guides/editor-mcp-recipe.md \
-  'Use `assay mcp config-path` to locate the active config' \
-  'config-path does not support Codex'
+for file in README.md docs/guides/editor-mcp-recipe.md; do
+  check_absent_regex "$file" 'assay mcp config-path (codex|<editor>)' \
+    'config-path does not support Codex'
+done
 
 # ---------------------------------------------------------------------------
 note ""
