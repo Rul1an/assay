@@ -37,7 +37,61 @@ run "$tmp/future.json" nz
 echo "ok: coverage-gate contract"
 
 bash "$DRIVER" mutation-selftest
-bash "$DRIVER" cleanup-selftest
+
+run_mode() {
+  local mode="$1" want="$2"
+  local ec=0 label
+  shift 2
+  label="$mode $*"
+  set +e
+  bash "$DRIVER" "$mode" "$@" >"$tmp/out" 2>"$tmp/err"
+  ec=$?
+  set -e
+  if [[ "$want" == "0" ]]; then
+    [[ "$ec" -eq 0 ]] || fail "$label: expected 0 got $ec stderr=$(cat "$tmp/err")"
+    grep -q '^ok:' "$tmp/out" || fail "$label: missing ok: stdout=$(cat "$tmp/out")"
+  else
+    [[ "$ec" -ne 0 ]] || fail "$label: expected nonzero, got 0 stdout=$(cat "$tmp/out")"
+    if grep -q 'usage:' "$tmp/err"; then
+      fail "$label: failed as unknown mode, not a check: $(cat "$tmp/err")"
+    fi
+  fi
+}
+
+printf '[PID 1] sendto: 127.0.0.1:8080\n' >"$tmp/ep_8080.log"
+printf '[PID 1] sendto: 127.0.0.1:80\n' >"$tmp/ep_80.log"
+run_mode endpoint-line-selftest nz "$tmp/ep_8080.log" "127.0.0.1" "80"
+run_mode endpoint-line-selftest 0 "$tmp/ep_80.log" "127.0.0.1" "80"
+echo "ok: endpoint-line fixtures"
+
+printf 'NOT_HARNESS_OK\n' >"$tmp/h_not"
+printf 'foo HARNESS_OK bar\n' >"$tmp/h_sub"
+printf 'HARNESS_OK\n' >"$tmp/h_ok"
+run_mode harness-ok-selftest nz "$tmp/h_not"
+run_mode harness-ok-selftest nz "$tmp/h_sub"
+run_mode harness-ok-selftest 0 "$tmp/h_ok"
+echo "ok: harness-ok fixtures"
+
+printf '%s\n' \
+  'Tracepoint ringbuf: sendto dropped=0' \
+  'Tracepoint ringbuf: sendmsg dropped=1' >"$tmp/rb_mixed.log"
+printf '%s\n' 'send observation only, no ringbuf summary' >"$tmp/rb_none.log"
+printf '%s\n' 'Tracepoint ringbuf: sendto dropped=0' >"$tmp/rb_one.log"
+printf '%s\n' \
+  'Tracepoint ringbuf: sendto dropped=0' \
+  'Tracepoint ringbuf: sendmsg dropped=0' >"$tmp/rb_two.log"
+run_mode ringbuf-drop-selftest nz "$tmp/rb_mixed.log"
+run_mode ringbuf-drop-selftest nz "$tmp/rb_none.log"
+run_mode ringbuf-drop-selftest 0 "$tmp/rb_one.log"
+run_mode ringbuf-drop-selftest 0 "$tmp/rb_two.log"
+echo "ok: ringbuf-drop fixtures"
+
+set +e
+timeout -k 2 12 bash "$DRIVER" cleanup-selftest >"$tmp/cleanup.out" 2>"$tmp/cleanup.err"
+cec=$?
+set -e
+[[ "$cec" -eq 0 ]] || fail "cleanup-selftest ec=$cec err=$(cat "$tmp/cleanup.err")"
+grep -q 'ok: cleanup-selftest' "$tmp/cleanup.out" || fail "cleanup-selftest missing ok"
 echo "ok: mutation-selftest and cleanup-selftest"
 
 wf="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/monitor-attach-smoke.yml"

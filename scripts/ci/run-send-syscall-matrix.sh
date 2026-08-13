@@ -13,13 +13,60 @@ MUTATION_NEW='Err((SendFault::AttachFailed { kernel_lacks_point: false }, "s1b-c
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
+REAP_POLL_MAX="${REAP_POLL_MAX:-10}"
+REAP_POLL_SLEEP="${REAP_POLL_SLEEP:-0.1}"
+
+re_escape() {
+  printf '%s' "$1" | sed -e 's/[][\\.^$*+?(){}|]/\\&/g'
+}
+
+endpoint_line_ok() {
+  local file="$1" ip="$2" port="$3"
+  grep -Eq "$(re_escape "$ip"):$(re_escape "$port")$" "$file"
+}
+
+harness_ok() {
+  grep -qx 'HARNESS_OK' "$1"
+}
+
+ringbuf_drops_ok() {
+  local log="$1" line found=0
+  while IFS= read -r line; do
+    found=1
+    [[ "$line" == *dropped=0* ]] || return 1
+  done < <(grep 'Tracepoint ringbuf:' "$log" || true)
+  [[ "$found" -eq 1 ]]
+}
+
+wait_pid_gone() {
+  local pid="$1" n=0
+  while (( n < REAP_POLL_MAX )); do
+    kill -0 "$pid" 2>/dev/null || { wait "$pid" 2>/dev/null || true; return 0; }
+    sleep "$REAP_POLL_SLEEP"
+    n=$((n + 1))
+  done
+  return 1
+}
+
+reap_pid() {
+  local pid="${1:-}"
+  [[ -n "$pid" ]] || return 0
+  kill -0 "$pid" 2>/dev/null || { wait "$pid" 2>/dev/null || true; return 0; }
+  kill -INT "$pid" 2>/dev/null || true
+  wait_pid_gone "$pid" && return 0
+  kill -TERM "$pid" 2>/dev/null || true
+  wait_pid_gone "$pid" && return 0
+  kill -KILL "$pid" 2>/dev/null || true
+  kill -KILL -- "-$pid" 2>/dev/null || true
+  wait_pid_gone "$pid" && return 0
+  wait "$pid" 2>/dev/null || true
+  kill -0 "$pid" 2>/dev/null && fail "pid $pid still alive after SIGKILL bound; hang is not clean"
+}
+
 cleanup() {
   local pid
   for pid in "${MONITOR_PID:-}" "${HARNESS_PID:-}"; do
-    [[ -n "$pid" ]] || continue
-    kill -INT "$pid" 2>/dev/null || true
-    kill "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
+    reap_pid "$pid"
   done
   [[ -z "${FIFO:-}" ]] || rm -f "$FIFO"
   if [[ -n "${LEAF:-}" && -d "$LEAF" ]]; then
@@ -150,7 +197,7 @@ run_matrix() {
   wait "$HARNESS_PID" || hc=$?
   HARNESS_PID=""
   [[ "$hc" -eq 0 ]] || fail "harness exit $hc (receiver effect missing)"
-  grep -q 'HARNESS_OK' "$HOUT" || fail "harness did not print HARNESS_OK"
+  harness_ok "$HOUT" || fail "harness did not print HARNESS_OK"
 
   kill -INT "$MONITOR_PID" 2>/dev/null || true
   wait "$MONITOR_PID" || mc=$?
@@ -165,16 +212,16 @@ run_matrix() {
   for b in a2 a3 a4 a5 a6 a7; do
     grep -qi "CELL_OK recv=0x${b}" "$HOUT" || fail "receiver byte 0x${b} missing"
   done
-  grep -q "\\[PID ${hpid}\\] connect: 127.0.0.1:${tcp}" "$LOG" \
+  endpoint_line_ok "$LOG" "127.0.0.1" "$tcp" \
     || fail "cell 1 connect line missing for 127.0.0.1:${tcp}"
 
   summary="$(grep 'Send observation:' "$LOG" || true)"
   [[ -n "$summary" ]] || fail "missing Send observation summary"
 
   if [[ "$expect_send" == "yes" ]]; then
-    grep -q "\\[PID ${hpid}\\] sendto: 127.0.0.1:${p2}" "$LOG" \
+    endpoint_line_ok "$LOG" "127.0.0.1" "$p2" \
       || fail "cell 2 sendto endpoint missing"
-    grep -q "\\[PID ${hpid}\\] sendmsg: 127.0.0.1:${p3}" "$LOG" \
+    endpoint_line_ok "$LOG" "127.0.0.1" "$p3" \
       || fail "cell 3 sendmsg endpoint missing"
     [[ "$(grep -c "\\[PID ${hpid}\\] sendto:" "$LOG")" -eq 1 &&
       "$(grep -c "\\[PID ${hpid}\\] sendmsg:" "$LOG")" -eq 1 ]] ||
@@ -192,8 +239,7 @@ run_matrix() {
       <<<"$summary" || fail "attach-disabled send stats not all zero: $summary"
   fi
 
-  grep 'Tracepoint ringbuf:' "$LOG" | grep -q 'dropped=0' \
-    || fail "tracepoint drop field is not 0"
+  ringbuf_drops_ok "$LOG" || fail "tracepoint drop field is not 0"
   coverage_gate "$OH"
   echo "ok: $MODE matrix"
 }
@@ -302,14 +348,21 @@ case "$MODE" in
     WORKDIR=$(mktemp -d)
     FIFO=$WORKDIR/go.fifo
     mkfifo "$FIFO"
-    sleep 30 &
+    bash -c 'trap "" TERM INT; echo ready; while :; do sleep 1; done' >/dev/null &
     MONITOR_PID=$!
-    sleep 30 &
+    bash -c 'trap "" TERM INT; echo ready; while :; do sleep 1; done' >/dev/null &
     HARNESS_PID=$!
+    sleep 0.2
+    if ! kill -0 "$MONITOR_PID" 2>/dev/null || ! kill -0 "$HARNESS_PID" 2>/dev/null; then
+      fail "TERM-ignoring children died before cleanup"
+    fi
     LEAF=$(mktemp -d)
     mp=$MONITOR_PID hp=$HARNESS_PID fifo=$FIFO leaf=$LEAF
+    start=$(date +%s)
     cleanup
+    elapsed=$(( $(date +%s) - start ))
     MONITOR_PID="" HARNESS_PID="" FIFO="" LEAF=""
+    (( elapsed < 8 )) || fail "cleanup hung (${elapsed}s); hang is not clean"
     if kill -0 "$mp" 2>/dev/null; then
       fail "monitor pid $mp still alive"
     fi
@@ -321,5 +374,17 @@ case "$MODE" in
     echo "ok: cleanup-selftest" ;;
   coverage-gate) coverage_gate "${2:?coverage-gate requires a JSON path}" ;;
   mutation-selftest) mutation_selftest ;;
-  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|coverage-gate|mutation-selftest" ;;
+  endpoint-line-selftest)
+    [[ -n "${2:-}" && -n "${3:-}" && -n "${4:-}" ]] || fail "endpoint-line-selftest requires LOG IP PORT"
+    endpoint_line_ok "$2" "$3" "$4" || fail "endpoint line not ok"
+    echo "ok: endpoint-line-selftest" ;;
+  harness-ok-selftest)
+    [[ -n "${2:-}" ]] || fail "harness-ok-selftest requires a file"
+    harness_ok "$2" || fail "harness did not print HARNESS_OK"
+    echo "ok: harness-ok-selftest" ;;
+  ringbuf-drop-selftest)
+    [[ -n "${2:-}" ]] || fail "ringbuf-drop-selftest requires a log"
+    ringbuf_drops_ok "$2" || fail "tracepoint drop field is not 0"
+    echo "ok: ringbuf-drop-selftest" ;;
+  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest" ;;
 esac
