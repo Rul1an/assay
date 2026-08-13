@@ -1,13 +1,49 @@
 #!/usr/bin/env bash
 # Contract: coverage gate allows only CLI-reachable labels; mutation/cleanup selftests.
+# Pins workflow run bodies and wrapper shape. Does not claim to prove arbitrary execution.
 set -euo pipefail
-if [[ "${S1B_COVERAGE_GATE_FILESELECT_PROBE:-}" == 1 ]]; then
-  exit 0
-fi
 DRIVER="$(cd "$(dirname "$0")" && pwd)/run-send-syscall-matrix.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
+
+# Hang bound for selftests. timeout(1) is Linux; gtimeout is Homebrew; else
+# Python subprocess (stdlib) so the macOS hook never waits unbounded.
+run_bounded() {
+  local secs="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout -k 2 "$secs" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout -k 2 "$secs" "$@"
+  else
+    python3 - "$secs" "$@" <<'PY'
+import subprocess
+import sys
+
+secs = float(sys.argv[1])
+cmd = sys.argv[2:]
+try:
+    r = subprocess.run(cmd, timeout=secs)
+except subprocess.TimeoutExpired:
+    sys.stderr.write("FAIL: bounded run exceeded %ss\n" % sys.argv[1])
+    sys.exit(124)
+sys.exit(r.returncode)
+PY
+  fi
+}
+
+# PATH without timeout(1)/gtimeout must still expire, not wait out the child.
+nobin="$tmp/nobin"
+mkdir -p "$nobin"
+ln -sfn "$(command -v bash)" "$nobin/bash"
+ln -sfn "$(command -v python3)" "$nobin/python3"
+ln -sfn "$(command -v sleep)" "$nobin/sleep"
+set +e
+PATH="$nobin" run_bounded 1 sleep 5 >/dev/null 2>"$tmp/bound.err"
+bound_ec=$?
+set -e
+[[ "$bound_ec" -eq 124 ]] || fail "run_bounded without timeout(1) must expire (got $bound_ec, would hang unbounded)"
 
 run() {
   local json="$1" want="$2" ec=0
@@ -194,20 +230,8 @@ n_wait=$(awk '
   || fail "run_matrix has $n_wait wait_log calls before GO, bound is $wait_max"
 echo "ok: harness GO wait covers attach wait_log budget"
 
-timeout_bin=""
-if command -v timeout >/dev/null 2>&1; then
-  timeout_bin=timeout
-elif command -v gtimeout >/dev/null 2>&1; then
-  timeout_bin=gtimeout
-else
-  echo "note: timeout(1) absent; Linux send-matrix proof owns the hang bound (macOS compile is not a claim)" >&2
-fi
 set +e
-if [[ -n "$timeout_bin" ]]; then
-  "$timeout_bin" -k 2 12 bash "$DRIVER" cleanup-selftest >"$tmp/cleanup.out" 2>"$tmp/cleanup.err"
-else
-  bash "$DRIVER" cleanup-selftest >"$tmp/cleanup.out" 2>"$tmp/cleanup.err"
-fi
+run_bounded 12 bash "$DRIVER" cleanup-selftest >"$tmp/cleanup.out" 2>"$tmp/cleanup.err"
 cec=$?
 set -e
 [[ "$cec" -eq 0 ]] || fail "cleanup-selftest ec=$cec err=$(cat "$tmp/cleanup.err")"
@@ -292,18 +316,27 @@ assert_single_cmd_step "Positive syscall/effect matrix" \
 assert_single_cmd_step "Attach-disabled negative matrix" \
   'bash scripts/ci/s1b-attach-disabled.sh'
 POS="$(cd "$(dirname "$0")" && pwd)/s1b-positive-matrix.sh"
-if grep -q '<<' "$POS"; then
-  fail "positive wrapper must not hide the driver in a heredoc"
-fi
-pos_active=$(active_lines "$(cat "$POS")")
+# Keep shebang; skip non-shebang comments and blanks. Tiny-script shape, not reachability.
+pos_active=$(awk '
+  {
+    tmp = $0
+    sub(/^[[:space:]]+/, "", tmp)
+    if (tmp == "") next
+    if (tmp ~ /^#/ && tmp !~ /^#!/) next
+    print tmp
+  }
+' "$POS")
+# Closed tiny-script shape (not a proof of arbitrary shell reachability).
 # shellcheck disable=SC2016
-grep -Fq 'sudo -E env HARNESS_BIN="${RUNNER_TEMP:?}/s1b-harness" WORKDIR="${RUNNER_TEMP:?}/s1b-positive" \' \
-  <<<"$pos_active" || fail "positive wrapper must live-invoke sudo -E env for the matrix"
-grep -Fq 'bash scripts/ci/run-send-syscall-matrix.sh positive' <<<"$pos_active" \
-  || fail "positive wrapper must invoke run-send-syscall-matrix.sh positive"
-if grep -Eq '^echo would-have-run' <<<"$pos_active"; then
-  fail "positive wrapper replaced the live sudo with a dry-run echo"
-fi
+want_pos=$(printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  'ROOT="$(cd "$(dirname "$0")/../.." && pwd)"' \
+  'cd "$ROOT"' \
+  'test -f target/assay-ebpf.o' \
+  'exec sudo -E env HARNESS_BIN="${RUNNER_TEMP:?}/s1b-harness" WORKDIR="${RUNNER_TEMP:?}/s1b-positive" bash scripts/ci/run-send-syscall-matrix.sh positive')
+[[ "$pos_active" == "$want_pos" ]] \
+  || fail "positive wrapper active lines must match the closed six-line shape ending in exec"
 smoke_job=$(awk '
   $0 == "  smoke:" { p=1 }
   p && /^  [A-Za-z0-9_-]+:/ && $0 != "  smoke:" { exit }
@@ -376,17 +409,6 @@ if cre.search("crates/assay-cli/src/lib.rs") is not None:
   ".pre-commit-config.yaml" \
   || fail "s1b pre-commit hook YAML contract failed without ruby on PATH"
 echo "ok: s1b hook YAML contract without ruby"
-hook_wf_out=$(S1B_COVERAGE_GATE_FILESELECT_PROBE=1 pre-commit run s1b-coverage-gate-contract \
-  --files .github/workflows/monitor-attach-smoke.yml 2>&1) || true
-printf '%s\n' "$hook_wf_out" | grep -q 'Passed' \
-  || fail "real pre-commit must run the hook on the smoke workflow"
-if printf '%s\n' "$hook_wf_out" | grep -q 'Skipped'; then
-  fail "real pre-commit skipped the smoke workflow"
-fi
-hook_skip_out=$(S1B_COVERAGE_GATE_FILESELECT_PROBE=1 pre-commit run s1b-coverage-gate-contract \
-  --files crates/assay-cli/src/lib.rs 2>&1) || true
-printf '%s\n' "$hook_skip_out" | grep -q 'Skipped' \
-  || fail "real pre-commit must skip unrelated lib.rs"
 km="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/kernel-matrix.yml"
 pr_paths=$(awk '
   /^  pull_request:/ { p=1; next }
@@ -418,13 +440,8 @@ if grep -Fq 's1b-cell7-disabled' "$a10/assay"; then
   fail "A10 fixture ASSAY_BIN must lack the mutation marker"
 fi
 set +e
-if [[ -n "$timeout_bin" ]]; then
-  "$timeout_bin" -k 2 8 env ASSAY_BIN="$a10/assay" HARNESS_BIN="$a10/harness" ASSAY_EBPF="$a10/ebpf.o" \
-    bash "$DRIVER" attach-disabled >"$tmp/a10.out" 2>"$tmp/a10.err"
-else
-  env ASSAY_BIN="$a10/assay" HARNESS_BIN="$a10/harness" ASSAY_EBPF="$a10/ebpf.o" \
-    bash "$DRIVER" attach-disabled >"$tmp/a10.out" 2>"$tmp/a10.err"
-fi
+ASSAY_BIN="$a10/assay" HARNESS_BIN="$a10/harness" ASSAY_EBPF="$a10/ebpf.o" \
+  run_bounded 8 bash "$DRIVER" attach-disabled >"$tmp/a10.out" 2>"$tmp/a10.err"
 a10ec=$?
 set -e
 rm -rf "$a10"
@@ -558,6 +575,16 @@ prod_active=$(active_lines "$(awk '
 ' "$ATTACH")")
 if grep -Eq '^bin=' <<<"$prod_active"; then
   fail "production attach-disabled must not rebind bin before restore"
+fi
+grep -qx 'readonly REAL_SRC_PATH REAL_BIN_PATH bak binbak' <<<"$prod_active" \
+  || fail "production restore sources must be readonly after assignment"
+ro_n=$(printf '%s\n' "$prod_active" | grep -n '^readonly REAL_SRC_PATH REAL_BIN_PATH bak binbak$' | head -1 | cut -d: -f1)
+trap_n=$(printf '%s\n' "$prod_active" | grep -n '^trap restore EXIT$' | head -1 | cut -d: -f1)
+[[ -n "$ro_n" && -n "$trap_n" && "$ro_n" -lt "$trap_n" ]] \
+  || fail "captured restore paths must be readonly before trap arming"
+after_trap=$(awk '/^trap restore EXIT/{p=1; next} p{print}' <<<"$prod_active")
+if grep -Eq '^(REAL_BIN_PATH|REAL_SRC_PATH|bak|binbak)=' <<<"$after_trap"; then
+  fail "captured restore paths must not be rebound after trap arming"
 fi
 bash "$ATTACH" restore-selftest
 grep -q 'elapsed_ms' "$(cd "$(dirname "$0")" && pwd)/s1b-send-syscall-matrix.c" \

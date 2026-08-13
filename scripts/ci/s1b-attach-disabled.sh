@@ -33,6 +33,11 @@ if [[ "${1:-}" == restore-selftest ]]; then
   printf 'decoy-src\n' >"$src"
   printf 'mutated-bin\n' >"$REAL_BIN_PATH"
   printf 'mutated-src\n' >"$REAL_SRC_PATH"
+  readonly REAL_SRC_PATH REAL_BIN_PATH bak binbak
+  if (REAL_BIN_PATH="$t/rebind-decoy") 2>/dev/null; then
+    echo "FAIL: REAL_BIN_PATH rebind after capture succeeded" >&2
+    exit 1
+  fi
   restore
   grep -qx 'orig-bin' "$REAL_BIN_PATH" || { echo "FAIL: restore missed original binary" >&2; exit 1; }
   grep -qx 'orig-src' "$REAL_SRC_PATH" || { echo "FAIL: restore missed original source" >&2; exit 1; }
@@ -49,6 +54,7 @@ bak="$RUNNER_TEMP/loader.rs.s1b.bak"
 binbak="$RUNNER_TEMP/assay.s1b.bin.bak"
 cp "$REAL_SRC_PATH" "$bak"
 cp "$REAL_BIN_PATH" "$binbak"
+readonly REAL_SRC_PATH REAL_BIN_PATH bak binbak
 readonly -f restore
 trap restore EXIT
 trap 'exit 143' TERM
