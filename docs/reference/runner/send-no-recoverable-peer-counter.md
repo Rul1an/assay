@@ -2,13 +2,14 @@
 
 > **Status:** internal capture-fidelity detail. This page documents a counter
 > that makes an address-less send visible. It adds no Runner archive member, no
-> CLI output, no Trust Basis claim, and no stable report schema. The
-> kernel-capture note that would surface it is produced by
-> `assay runner-spike --kernel-capture` / `assay-runner-core`. Two gaps keep
-> it off that path: `assay_monitor_sendto` / `assay_monitor_sendmsg` are
-> compiled into the release ELF and presently unattached (`Unsupported`), and
-> userspace does not read back `sendto_no_peer` / `sendmsg_no_peer` (kernel
-> stat indices 14 and 15).
+> Trust Basis claim, and no stable report schema. The terminal monitor summary
+> reads the counter; the
+> kernel-capture note that surfaces it is produced by
+> `assay runner-spike --kernel-capture` / `assay-runner-core` when the
+> always-attempted send tracepoints attach. Userspace reads
+> `sendto_no_peer` / `sendmsg_no_peer` (kernel stat indices 14 and 15); a
+> failed or unavailable attach is reported as an unobserved surface, not
+> converted to a clean zero-observation claim.
 
 ## What it observes
 
@@ -35,10 +36,10 @@ counters when those tracepoints run:
   `send_no_recoverable_peer=sendto:<n> sendmsg:<m>`.
 
 `assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
-release ELF and inventoried `Unsupported` / unattached. Userspace does not
-read back `sendto_no_peer` / `sendmsg_no_peer`. An
-`assay runner-spike --kernel-capture` / `assay-runner-core` run therefore
-does not surface this counter.
+release ELF and always attempted as tracepoints. Userspace reads back
+`sendto_no_peer` / `sendmsg_no_peer`; when a count is non-zero,
+`assay runner-spike --kernel-capture` / `assay-runner-core` surfaces the
+capture-note suffix above. Probe attachment is still kernel-dependent.
 
 ## What it does not do (non-claims)
 
@@ -60,5 +61,5 @@ clean archives read identically before and after this change.
 
 Coverage honesty: the counter exists so an address-less send is not silently
 indistinguishable from "no such send happened." An
-`assay runner-spike --kernel-capture` / `assay-runner-core` run presently
-has neither attach nor userspace readback, so the counter is not surfaced.
+`assay runner-spike --kernel-capture` / `assay-runner-core` run surfaces the
+counter only when the relevant tracepoint attached and the count is non-zero.
