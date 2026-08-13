@@ -197,7 +197,7 @@ isolate_pid() {
 }
 
 run_matrix() {
-  local expect_send="$1" n=0 hpid="" hc=0 mc=0 tcp p2 p3 b summary
+  local expect_send="$1" n=0 hpid="" hc=0 mc=0
   mkdir -p "$WORKDIR"
   FIFO="$WORKDIR/go.fifo"
   LOG="$WORKDIR/monitor.log"
@@ -239,13 +239,18 @@ run_matrix() {
   write_go
   wait "$HARNESS_PID" || hc=$?
   HARNESS_PID=""
-  [[ "$hc" -eq 0 ]] || fail "harness exit $hc (receiver effect missing)"
-  harness_ok "$HOUT" || fail "harness did not print HARNESS_OK"
 
   kill -INT "$MONITOR_PID" 2>/dev/null || true
   wait "$MONITOR_PID" || mc=$?
   MONITOR_PID=""
   echo "monitor exit=$mc"
+  assert_matrix_effects "$expect_send" "$hpid" "$hc" "$mc"
+}
+
+assert_matrix_effects() {
+  local expect_send="$1" hpid="$2" hc="$3" mc="$4" tcp p2 p3 b summary
+  [[ "$hc" -eq 0 ]] || fail "harness exit $hc (receiver effect missing)"
+  harness_ok "$HOUT" || fail "harness did not print HARNESS_OK"
   monitor_shutdown_ok "$mc" || fail "monitor exit $mc is not controlled SIGINT shutdown (expected 0)"
 
   tcp="$(awk -F= '/^CELL1_TCP_PORT=/{print $2; exit}' "$HOUT")"

@@ -12,6 +12,18 @@ assert_nl_snippet() {
   [[ $'\n'"$blob"$'\n' == *$'\n'"$want"$'\n'* ]] || fail "$msg"
 }
 
+fn_active() {
+  awk -v name="$1" '
+    $0 ~ ("^" name "\\(\\) \\{") { p=1 }
+    p {
+      tmp = $0
+      sub(/^[[:space:]]+/, "", tmp)
+      if (tmp != "" && tmp !~ /^#/) print tmp
+    }
+    p && /^}/ { exit }
+  ' "$DRIVER"
+}
+
 # One POSIX Python stdlib process-group bound. Not GNU timeout(1).
 # Kills the session started for this command only — not a daemon/setsid guarantee.
 command -v python3 >/dev/null 2>&1 \
@@ -212,57 +224,104 @@ run_mode monitor-shutdown-selftest nz 130
 run_mode monitor-shutdown-selftest nz 139
 grep -Fq 'tokio::signal::ctrl_c()' "$cli_mod" \
   || fail "monitor SIGINT path missing tokio::signal::ctrl_c"
-run_matrix_active=$(awk '
-  /^run_matrix\(\)/ { p=1 }
-  p {
-    tmp = $0
-    sub(/^[[:space:]]+/, "", tmp)
-    if (tmp != "" && tmp !~ /^#/) print tmp
-  }
-  p && /^}/ { exit }
-' "$DRIVER")
+run_matrix_active=$(fn_active run_matrix)
 # shellcheck disable=SC2016
-assert_nl_snippet "$run_matrix_active" \
-  'monitor_shutdown_ok "$mc" || fail "monitor exit $mc is not controlled SIGINT shutdown (expected 0)"' \
-  "run_matrix does not fail-closed assert controlled monitor shutdown"
+want_run_matrix=$(cat <<'EOF'
+run_matrix() {
+local expect_send="$1" n=0 hpid="" hc=0 mc=0
+mkdir -p "$WORKDIR"
+FIFO="$WORKDIR/go.fifo"
+LOG="$WORKDIR/monitor.log"
+HOUT="$WORKDIR/harness.out"
+OH="$WORKDIR/observation-health.json"
+rm -f "$FIFO" "$LOG" "$HOUT" "$OH"
+mkfifo "$FIFO"
+echo "kernel=$(uname -r) host=$(uname -n) mode=$MODE"
+echo "object=$(sha256sum "$ASSAY_EBPF" | awk '{print $1}')"
+"$HARNESS_BIN" "$FIFO" >"$HOUT" 2>&1 &
+HARNESS_PID=$!
+while (( n < 40 )); do
+hpid="$(awk -F= '/^HARNESS_PID=/{print $2; exit}' "$HOUT" 2>/dev/null || true)"
+[[ -n "$hpid" ]] && break
+sleep 0.1
+n=$((n + 1))
+done
+[[ -n "$hpid" && "$hpid" == "$HARNESS_PID" ]] || fail "harness PID missing or mismatch"
+LEAF="$(isolate_pid "$hpid")"
+echo "isolated pid $hpid into $LEAF"
+"$ASSAY_BIN" monitor --pid "$hpid" --ebpf "$ASSAY_EBPF" --print \
+--observation-health "$OH" >"$LOG" 2>&1 &
+MONITOR_PID=$!
+wait_log "Assay Monitor running"
+wait_log "DEBUG: Attached Tracepoint sys_enter_connect"
+if [[ "$expect_send" == "yes" ]]; then
+wait_log "DEBUG: Attached Tracepoint sys_enter_sendto"
+wait_log "DEBUG: Attached Tracepoint sys_enter_sendmsg"
+elif send_debug; then
+fail "attach-disabled run still attached send tracepoints"
+fi
+kill -0 "$HARNESS_PID" 2>/dev/null || fail "harness died before GO"
+write_go
+wait "$HARNESS_PID" || hc=$?
+HARNESS_PID=""
+kill -INT "$MONITOR_PID" 2>/dev/null || true
+wait "$MONITOR_PID" || mc=$?
+MONITOR_PID=""
+echo "monitor exit=$mc"
+assert_matrix_effects "$expect_send" "$hpid" "$hc" "$mc"
+}
+EOF
+)
+[[ "$run_matrix_active" == "$want_run_matrix" ]] \
+  || fail "run_matrix active body must be the closed startup-then-assert shape"
+assert_effects_active=$(fn_active assert_matrix_effects)
 # shellcheck disable=SC2016
-assert_nl_snippet "$run_matrix_active" "$(printf '%s\n' \
-  'endpoint_line_ok "$LOG" "$hpid" "connect" "127.0.0.1" "$tcp" \' \
-  '|| fail "cell 1 connect line missing for 127.0.0.1:${tcp}"')" \
-  "run_matrix does not fail-closed live-call connect endpoint_line_ok"
-# shellcheck disable=SC2016
-assert_nl_snippet "$run_matrix_active" "$(printf '%s\n' \
-  'endpoint_line_ok "$LOG" "$hpid" "sendto" "127.0.0.1" "$p2" \' \
-  '|| fail "cell 2 sendto endpoint missing"')" \
-  "run_matrix does not fail-closed live-call sendto endpoint_line_ok"
-# shellcheck disable=SC2016
-assert_nl_snippet "$run_matrix_active" "$(printf '%s\n' \
-  'endpoint_line_ok "$LOG" "$hpid" "sendmsg" "127.0.0.1" "$p3" \' \
-  '|| fail "cell 3 sendmsg endpoint missing"')" \
-  "run_matrix does not fail-closed live-call sendmsg endpoint_line_ok"
-# shellcheck disable=SC2016
-assert_nl_snippet "$run_matrix_active" "$(printf '%s\n' \
-  '[[ "$(grep -c "\\[PID ${hpid}\\] sendto:" "$LOG")" -eq 1 &&' \
-  '"$(grep -c "\\[PID ${hpid}\\] sendmsg:" "$LOG")" -eq 1 ]] ||' \
-  'fail "expected exactly one sendto and one sendmsg endpoint line"')" \
-  "run_matrix does not fail-closed assert exactly one sendto and sendmsg line"
-# shellcheck disable=SC2016
-assert_nl_snippet "$run_matrix_active" "$(printf '%s\n' \
-  'send_observation_ok "$summary" 1 0 1 1 1 0 1 1 \' \
-  '|| fail "exact send counts missing: $summary"')" \
-  "run_matrix does not fail-closed live-call send_observation_ok for the positive cell"
-# shellcheck disable=SC2016
-assert_nl_snippet "$run_matrix_active" "$(printf '%s\n' \
-  'send_observation_ok "$summary" 0 0 0 0 0 0 0 0 \' \
-  '|| fail "attach-disabled send stats not all zero: $summary"')" \
-  "run_matrix does not fail-closed live-call send_observation_ok for attach-disabled"
-# shellcheck disable=SC2016
-assert_nl_snippet "$run_matrix_active" \
-  'ringbuf_drops_ok "$LOG" || fail "tracepoint drop field is not 0"' \
-  "run_matrix does not fail-closed live-call ringbuf_drops_ok"
-# shellcheck disable=SC2016
-assert_nl_snippet "$run_matrix_active" 'coverage_gate "$OH"' \
-  "run_matrix does not live-call coverage_gate as a closed standalone line"
+want_assert_effects=$(cat <<'EOF'
+assert_matrix_effects() {
+local expect_send="$1" hpid="$2" hc="$3" mc="$4" tcp p2 p3 b summary
+[[ "$hc" -eq 0 ]] || fail "harness exit $hc (receiver effect missing)"
+harness_ok "$HOUT" || fail "harness did not print HARNESS_OK"
+monitor_shutdown_ok "$mc" || fail "monitor exit $mc is not controlled SIGINT shutdown (expected 0)"
+tcp="$(awk -F= '/^CELL1_TCP_PORT=/{print $2; exit}' "$HOUT")"
+p2="$(awk -F= '/^CELL2_UDP_PORT=/{print $2; exit}' "$HOUT")"
+p3="$(awk -F= '/^CELL3_UDP_PORT=/{print $2; exit}' "$HOUT")"
+[[ -n "$tcp" && -n "$p2" && -n "$p3" ]] || fail "missing bound ports in harness stdout"
+grep -q "CELL_OK 1 accept" "$HOUT" || fail "cell 1 accept missing"
+for b in a2 a3 a4 a5 a6 a7; do
+grep -qi "CELL_OK recv=0x${b}" "$HOUT" || fail "receiver byte 0x${b} missing"
+done
+endpoint_line_ok "$LOG" "$hpid" "connect" "127.0.0.1" "$tcp" \
+|| fail "cell 1 connect line missing for 127.0.0.1:${tcp}"
+summary="$(grep 'Send observation:' "$LOG" || true)"
+[[ -n "$summary" ]] || fail "missing Send observation summary"
+if [[ "$expect_send" == "yes" ]]; then
+endpoint_line_ok "$LOG" "$hpid" "sendto" "127.0.0.1" "$p2" \
+|| fail "cell 2 sendto endpoint missing"
+endpoint_line_ok "$LOG" "$hpid" "sendmsg" "127.0.0.1" "$p3" \
+|| fail "cell 3 sendmsg endpoint missing"
+[[ "$(grep -c "\\[PID ${hpid}\\] sendto:" "$LOG")" -eq 1 &&
+"$(grep -c "\\[PID ${hpid}\\] sendmsg:" "$LOG")" -eq 1 ]] ||
+fail "expected exactly one sendto and one sendmsg endpoint line"
+send_observation_ok "$summary" 1 0 1 1 1 0 1 1 \
+|| fail "exact send counts missing: $summary"
+else
+if send_debug; then
+fail "send DEBUG attach lines present in attach-disabled run"
+fi
+if grep -Eq "\\[PID ${hpid}\\] send(to|msg):" "$LOG"; then
+fail "send endpoint lines present in attach-disabled run"
+fi
+send_observation_ok "$summary" 0 0 0 0 0 0 0 0 \
+|| fail "attach-disabled send stats not all zero: $summary"
+fi
+ringbuf_drops_ok "$LOG" || fail "tracepoint drop field is not 0"
+coverage_gate "$OH"
+echo "ok: $MODE matrix"
+}
+EOF
+)
+[[ "$assert_effects_active" == "$want_assert_effects" ]] \
+  || fail "assert_matrix_effects active body must be the closed effect-half shape"
 echo "ok: monitor SIGINT shutdown is exit 0, not 130/crash"
 
 case_active=$(awk '
@@ -685,6 +744,21 @@ set -e
 if grep -q 'rm -rf' "$tmp/preclean-sudo.log"; then
   fail "empty GITHUB_WORKSPACE reached sudo rm"
 fi
+: >"$tmp/preclean-sudo.log"
+ws="$tmp/preclean-ws"
+mkdir -p "$ws/residue"
+printf 'leftover\n' >"$ws/residue/keep"
+set +e
+GITHUB_WORKSPACE="$ws" \
+  PATH="$tmp/preclean-bin:/usr/bin:/bin" bash "$tmp/preclean-replay.sh" \
+  >"$tmp/preclean-ne.out" 2>"$tmp/preclean-ne.err"
+ne_ec=$?
+set -e
+[[ "$ne_ec" -ne 0 ]] || fail "pre-clean must fail when mock sudo leaves residue"
+grep -Fq 'ERROR: workspace not empty after delegated pre-clean' \
+  "$tmp/preclean-ne.out" "$tmp/preclean-ne.err" \
+  || fail "pre-clean residue must emit the workspace-not-empty diagnostic"
+[[ -f "$ws/residue/keep" ]] || fail "nonempty pre-clean replay lost its planted residue"
 echo "ok: pre-clean run: block scoped before checkout"
 ATTACH="$(cd "$(dirname "$0")" && pwd)/s1b-attach-disabled.sh"
 attach_active=$(active_lines "$(cat "$ATTACH")")
@@ -783,29 +857,29 @@ grep -Fq 'MUST(elapsed_ms >= SELFTEST_TIMEOUT_MIN_MS, "fifo selftest elapsed");'
   || fail "fifo selftest does not assert elapsed_ms >= SELFTEST_TIMEOUT_MIN_MS"
 grep -Fq 'fd = open_go_fifo(argv[2], 2000);' "$c_src" \
   || fail "fifo selftest does not call open_go_fifo with a 2000ms bound"
+cc_args=(-Wall -Werror)
+if [[ "$(uname -s)" == Darwin ]]; then
+  cc_args+=(-Wno-deprecated-declarations)
+fi
+cc "${cc_args[@]}" -o "$tmp/s1b-harness" "$c_src" 2>"$tmp/cc.err" \
+  || fail "fifo-selftest harness failed to compile: $(cat "$tmp/cc.err")"
 set +e
-cc -Wall -Werror -o "$tmp/s1b-harness" "$c_src" 2>"$tmp/cc.err"
-cc_ec=$?
+"$tmp/s1b-harness" --fifo-selftest "$tmp/missing-fifo" \
+  >"$tmp/fifo-miss.out" 2>"$tmp/fifo-miss.err"
+miss_ec=$?
 set -e
-if [[ "$cc_ec" -eq 0 ]]; then
-  set +e
-  "$tmp/s1b-harness" --fifo-selftest "$tmp/missing-fifo" \
-    >"$tmp/fifo-miss.out" 2>"$tmp/fifo-miss.err"
-  miss_ec=$?
-  set -e
-  [[ "$miss_ec" -ne 0 ]] || fail "fifo-selftest on a missing path must not succeed"
-  if grep -q FIFO_TIMEOUT_OK "$tmp/fifo-miss.out" "$tmp/fifo-miss.err"; then
-    fail "fifo-selftest on a missing path claimed FIFO_TIMEOUT_OK"
-  fi
-  printf 'x\n' >"$tmp/not-a-fifo"
-  set +e
-  "$tmp/s1b-harness" --fifo-selftest "$tmp/not-a-fifo" \
-    >"$tmp/fifo-reg.out" 2>"$tmp/fifo-reg.err"
-  reg_ec=$?
-  set -e
-  [[ "$reg_ec" -ne 0 ]] || fail "fifo-selftest on a regular file must not succeed"
-  if grep -q FIFO_TIMEOUT_OK "$tmp/fifo-reg.out" "$tmp/fifo-reg.err"; then
-    fail "fifo-selftest on a regular file claimed FIFO_TIMEOUT_OK"
-  fi
+[[ "$miss_ec" -ne 0 ]] || fail "fifo-selftest on a missing path must not succeed"
+if grep -q FIFO_TIMEOUT_OK "$tmp/fifo-miss.out" "$tmp/fifo-miss.err"; then
+  fail "fifo-selftest on a missing path claimed FIFO_TIMEOUT_OK"
+fi
+printf 'x\n' >"$tmp/not-a-fifo"
+set +e
+"$tmp/s1b-harness" --fifo-selftest "$tmp/not-a-fifo" \
+  >"$tmp/fifo-reg.out" 2>"$tmp/fifo-reg.err"
+reg_ec=$?
+set -e
+[[ "$reg_ec" -ne 0 ]] || fail "fifo-selftest on a regular file must not succeed"
+if grep -q FIFO_TIMEOUT_OK "$tmp/fifo-reg.out" "$tmp/fifo-reg.err"; then
+  fail "fifo-selftest on a regular file claimed FIFO_TIMEOUT_OK"
 fi
 echo "ok: restore copies exact pre-mutation binary; no cargo build in restore"
