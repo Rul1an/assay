@@ -244,7 +244,15 @@ pr_paths=$(awk '
   p && /^  [a-z]/ { exit }
   p { print }
 ' "$km")
-grep -Fq -- '- ".github/workflows/monitor-attach-smoke.yml"' <<<"$pr_paths" \
+active_pr_paths=$(awk '
+  {
+    tmp = $0
+    sub(/^[[:space:]]+/, "", tmp)
+    if (tmp == "" || tmp ~ /^#/) next
+    print tmp
+  }
+' <<<"$pr_paths")
+grep -qx -- '- ".github/workflows/monitor-attach-smoke.yml"' <<<"$active_pr_paths" \
   || fail "kernel-matrix pull_request.paths must include monitor-attach-smoke.yml"
 if grep -q 'bash scripts/ci/run-send-syscall-matrix.sh cleanup-selftest' "$wf"; then
   fail "workflow still invokes cleanup-selftest directly"
@@ -280,28 +288,26 @@ disabled_step=$(named_step "$wf" "Attach-disabled negative matrix")
 disabled_active=$(active_run_lines "$disabled_step")
 grep -Fq 's1b-cell7-disabled' <<<"$disabled_active" \
   || fail "attach-disabled active path must check the mutated-binary marker"
-# Workflow marker is not the driver precondition. Extract the attach-disabled
-# arm and require the mutated-binary python3 check on active (non-comment) lines.
-attach_disabled_case=$(awk '
-  /^  attach-disabled\)/ { p=1 }
-  p { print }
-  p && /;;[[:space:]]*$/ { exit }
-' "$DRIVER")
-[[ -n "$attach_disabled_case" ]] || fail "could not extract driver attach-disabled branch"
-attach_disabled_active=$(awk '
-  {
-    tmp = $0
-    sub(/^[[:space:]]+/, "", tmp)
-    if (tmp == "" || tmp ~ /^#/) next
-    print tmp
-  }
-' <<<"$attach_disabled_case")
-grep -Fq "python3 -c 'import pathlib,sys; sys.exit(0 if b\"s1b-cell7-disabled\" in pathlib.Path(sys.argv[1]).read_bytes() else 1)'" \
-  <<<"$attach_disabled_active" \
-  || fail "driver attach-disabled branch must python3-check s1b-cell7-disabled in ASSAY_BIN"
-grep -Fq 'fail "ASSAY_BIN is not the mutated rebuild (missing s1b-cell7-disabled)"' \
-  <<<"$attach_disabled_active" \
-  || fail "driver attach-disabled branch must fail if ASSAY_BIN is not the mutated rebuild"
+# Behavioral A10: unmarked ASSAY_BIN must fail closed before run_matrix.
+# A source-grep of the python3 line is comment/echo-vacuous.
+a10=$(mktemp -d)
+printf '#!/bin/sh\nexit 0\n' >"$a10/assay"
+printf '#!/bin/sh\nexit 0\n' >"$a10/harness"
+: >"$a10/ebpf.o"
+chmod +x "$a10/assay" "$a10/harness"
+if grep -Fq 's1b-cell7-disabled' "$a10/assay"; then
+  fail "A10 fixture ASSAY_BIN must lack the mutation marker"
+fi
+set +e
+timeout -k 2 8 env ASSAY_BIN="$a10/assay" HARNESS_BIN="$a10/harness" ASSAY_EBPF="$a10/ebpf.o" \
+  bash "$DRIVER" attach-disabled >"$tmp/a10.out" 2>"$tmp/a10.err"
+a10ec=$?
+set -e
+rm -rf "$a10"
+[[ "$a10ec" -ne 0 ]] || fail "attach-disabled accepted unmarked ASSAY_BIN"
+grep -Fq 'not the mutated rebuild' "$tmp/a10.err" \
+  || fail "attach-disabled must reject unmarked ASSAY_BIN before run_matrix: $(cat "$tmp/a10.err")"
+echo "ok: attach-disabled rejects unmarked ASSAY_BIN"
 # First smoke step is Pre-clean; its YAML run: body (not the whole workflow)
 # must contain pkill/chattr/sudo find-delete/fail-closed empty, and that step
 # must sit immediately before actions/checkout. Global grep is prefix-vacuous.
@@ -373,18 +379,18 @@ if grep -Eq '^        if:' <<<"$preclean_step"; then
   fail "Pre-clean must not have a disabling if"
 fi
 echo "ok: pre-clean run: block scoped before checkout"
-# Restore pins are scoped to the Attach-disabled step's active run, not a
-# global grep (comment/string decoys in other steps must not satisfy them).
-# shellcheck disable=SC2016
-grep -Fq 'cp "$binbak"' <<<"$disabled_active" || fail "attach-disabled restore does not copy pre-mutation backup"
-# shellcheck disable=SC2016
-grep -Fq 'mv -f "$bin.tmp" "$bin"' <<<"$disabled_active" \
-  || fail "attach-disabled restore does not atomically mv backup onto assay"
-# shellcheck disable=SC2016
-grep -Fq 'cmp -s "$bin" "$binbak"' <<<"$disabled_active" \
-  || fail "attach-disabled restore does not verify restored binary matches backup"
+# Restore pins are inside restore() only. An echo/string decoy elsewhere in
+# the step must not satisfy cp/mv/cmp after the real command is commented.
 restore_fn=$(awk '/^restore\(\) \{/,/^}$/' <<<"$disabled_active")
 [[ -n "$restore_fn" ]] || fail "could not extract restore() from attach-disabled active run"
+# shellcheck disable=SC2016
+grep -Fq 'cp "$binbak"' <<<"$restore_fn" || fail "attach-disabled restore does not copy pre-mutation backup"
+# shellcheck disable=SC2016
+grep -Fq 'mv -f "$bin.tmp" "$bin"' <<<"$restore_fn" \
+  || fail "attach-disabled restore does not atomically mv backup onto assay"
+# shellcheck disable=SC2016
+grep -Fq 'cmp -s "$bin" "$binbak"' <<<"$restore_fn" \
+  || fail "attach-disabled restore does not verify restored binary matches backup"
 if grep -q 'cargo build' <<<"$restore_fn"; then
   fail "attach-disabled restore must not cargo build"
 fi
