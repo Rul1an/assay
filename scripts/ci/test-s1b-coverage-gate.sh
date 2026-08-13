@@ -219,11 +219,17 @@ run_matrix_active=$(awk '
 grep -Fq 'monitor_shutdown_ok "$mc"' <<<"$run_matrix_active" \
   || fail "run_matrix does not assert controlled monitor shutdown"
 # shellcheck disable=SC2016
-grep -Fq 'send_observation_ok "$summary" 1 0 1 1 1 0 1 1' <<<"$run_matrix_active" \
-  || fail "run_matrix does not live-call send_observation_ok for the positive cell"
+want_send_yes=$(printf '%s\n' \
+  'send_observation_ok "$summary" 1 0 1 1 1 0 1 1 \' \
+  '|| fail "exact send counts missing: $summary"')
+[[ $'\n'"$run_matrix_active"$'\n' == *$'\n'"$want_send_yes"$'\n'* ]] \
+  || fail "run_matrix does not fail-closed live-call send_observation_ok for the positive cell"
 # shellcheck disable=SC2016
-grep -Fq 'send_observation_ok "$summary" 0 0 0 0 0 0 0 0' <<<"$run_matrix_active" \
-  || fail "run_matrix does not live-call send_observation_ok for attach-disabled"
+want_send_no=$(printf '%s\n' \
+  'send_observation_ok "$summary" 0 0 0 0 0 0 0 0 \' \
+  '|| fail "attach-disabled send stats not all zero: $summary"')
+[[ $'\n'"$run_matrix_active"$'\n' == *$'\n'"$want_send_no"$'\n'* ]] \
+  || fail "run_matrix does not fail-closed live-call send_observation_ok for attach-disabled"
 # shellcheck disable=SC2016
 grep -Fq 'ringbuf_drops_ok "$LOG"' <<<"$run_matrix_active" \
   || fail "run_matrix does not live-call ringbuf_drops_ok"
@@ -250,15 +256,23 @@ wait_log_active=$(awk '
   }
   p && /^}/ { exit }
 ' "$DRIVER")
-grep -Fq 'n < WAIT_LOG_ITERS' <<<"$wait_log_active" || fail "wait_log does not use WAIT_LOG_ITERS"
 # shellcheck disable=SC2016
-grep -Fq 'sleep "$WAIT_LOG_SLEEP_S"' <<<"$wait_log_active" || fail "wait_log does not use WAIT_LOG_SLEEP_S"
-# shellcheck disable=SC2016
-grep -Fq 'fail "timeout waiting for: $pat"' <<<"$wait_log_active" \
-  || fail "wait_log timeout must fail closed, not return 0"
-# shellcheck disable=SC2016
-grep -Fq 'fail "monitor exited before matching: $pat"' <<<"$wait_log_active" \
-  || fail "wait_log must fail if the monitor exits before the pattern"
+want_wait_log=$(printf '%s\n' \
+  'wait_log() {' \
+  'local pat="$1" n' \
+  'for ((n = 0; n < WAIT_LOG_ITERS; n++)); do' \
+  'grep -q -- "$pat" "$LOG" && return 0' \
+  'if ! kill -0 "$MONITOR_PID" 2>/dev/null; then' \
+  'cat "${LOG:-}" >&2 || true' \
+  'fail "monitor exited before matching: $pat"' \
+  'fi' \
+  'sleep "$WAIT_LOG_SLEEP_S"' \
+  'done' \
+  'cat "${LOG:-}" >&2 || true' \
+  'fail "timeout waiting for: $pat"' \
+  '}')
+[[ "$wait_log_active" == "$want_wait_log" ]] \
+  || fail "wait_log active body must be the closed fail-closed shape"
 grep -Fq 'open_go_fifo(argv[1], GO_FIFO_TIMEOUT_MS)' \
   "$(cd "$(dirname "$0")" && pwd)/s1b-send-syscall-matrix.c" \
   || fail "harness GO wait does not use GO_FIFO_TIMEOUT_MS"
@@ -703,6 +717,7 @@ fi
 restore_out=$(bash "$ATTACH" restore-selftest)
 [[ "$restore_out" == "ok: restore-selftest" ]] \
   || fail "restore-selftest stdout must be exactly ok: restore-selftest (got: ${restore_out:-<empty>})"
-grep -q 'elapsed_ms' "$(cd "$(dirname "$0")" && pwd)/s1b-send-syscall-matrix.c" \
-  || fail "timeout selftest does not assert elapsed_ms"
+grep -Fq 'MUST(elapsed_ms >= 1500, "timeout selftest elapsed");' \
+  "$(cd "$(dirname "$0")" && pwd)/s1b-send-syscall-matrix.c" \
+  || fail "timeout selftest does not assert elapsed_ms >= 1500"
 echo "ok: restore copies exact pre-mutation binary; no cargo build in restore"
