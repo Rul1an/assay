@@ -36,9 +36,9 @@ jobs:
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 25
     steps:
-      # Inline: before checkout no repo script is available. Root-owned leftovers
-      # (target/, target-ebpf/, .git) make actions/checkout delete .git then fail
-      # at git config --local. Pattern from runner-spike-delegated.yml.
+      # Inline: before checkout no repo script is available. Root-owned target
+      # leftovers can make checkout delete .git before cleanup fails. Pattern
+      # from runner-spike-delegated.yml.
       - name: Pre-clean self-hosted workspace
         shell: bash
         run: |
