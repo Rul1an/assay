@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Contract: coverage gate allows only CLI-reachable labels; mutation/cleanup selftests.
 set -euo pipefail
+if [[ "${S1B_COVERAGE_GATE_FILESELECT_PROBE:-}" == 1 ]]; then
+  exit 0
+fi
 DRIVER="$(cd "$(dirname "$0")" && pwd)/run-send-syscall-matrix.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -143,7 +146,16 @@ run_mode monitor-shutdown-selftest nz 130
 run_mode monitor-shutdown-selftest nz 139
 grep -Fq 'tokio::signal::ctrl_c()' "$cli_mod" \
   || fail "monitor SIGINT path missing tokio::signal::ctrl_c"
-grep -Fq 'monitor_shutdown_ok "$mc"' "$DRIVER" \
+run_matrix_active=$(awk '
+  /^run_matrix\(\)/ { p=1 }
+  p {
+    tmp = $0
+    sub(/^[[:space:]]+/, "", tmp)
+    if (tmp != "" && tmp !~ /^#/) print tmp
+  }
+  p && /^}/ { exit }
+' "$DRIVER")
+grep -Fq 'monitor_shutdown_ok "$mc"' <<<"$run_matrix_active" \
   || fail "run_matrix does not assert controlled monitor shutdown"
 echo "ok: monitor SIGINT shutdown is exit 0, not 130/crash"
 
@@ -156,9 +168,18 @@ go_ms=$(sed -n 's/^#define GO_FIFO_TIMEOUT_MS //p' "$(cd "$(dirname "$0")" && pw
   || fail "missing GO/wait_log bound constants"
 need=$(python3 -c "print(int($wait_max * $wait_iters * float('$wait_sleep') * 1000 + $go_margin))")
 [[ "$go_ms" -ge "$need" ]] || fail "GO_FIFO_TIMEOUT_MS=$go_ms < $wait_max*$wait_iters*${wait_sleep}s*1000+$go_margin=$need"
-grep -Fq 'n < WAIT_LOG_ITERS' "$DRIVER" || fail "wait_log does not use WAIT_LOG_ITERS"
+wait_log_active=$(awk '
+  /^wait_log\(\)/ { p=1 }
+  p {
+    tmp = $0
+    sub(/^[[:space:]]+/, "", tmp)
+    if (tmp != "" && tmp !~ /^#/) print tmp
+  }
+  p && /^}/ { exit }
+' "$DRIVER")
+grep -Fq 'n < WAIT_LOG_ITERS' <<<"$wait_log_active" || fail "wait_log does not use WAIT_LOG_ITERS"
 # shellcheck disable=SC2016
-grep -Fq 'sleep "$WAIT_LOG_SLEEP_S"' "$DRIVER" || fail "wait_log does not use WAIT_LOG_SLEEP_S"
+grep -Fq 'sleep "$WAIT_LOG_SLEEP_S"' <<<"$wait_log_active" || fail "wait_log does not use WAIT_LOG_SLEEP_S"
 grep -Fq 'open_go_fifo(argv[1], GO_FIFO_TIMEOUT_MS)' \
   "$(cd "$(dirname "$0")" && pwd)/s1b-send-syscall-matrix.c" \
   || fail "harness GO wait does not use GO_FIFO_TIMEOUT_MS"
@@ -173,8 +194,20 @@ n_wait=$(awk '
   || fail "run_matrix has $n_wait wait_log calls before GO, bound is $wait_max"
 echo "ok: harness GO wait covers attach wait_log budget"
 
+timeout_bin=""
+if command -v timeout >/dev/null 2>&1; then
+  timeout_bin=timeout
+elif command -v gtimeout >/dev/null 2>&1; then
+  timeout_bin=gtimeout
+else
+  echo "note: timeout(1) absent; Linux send-matrix proof owns the hang bound (macOS compile is not a claim)" >&2
+fi
 set +e
-timeout -k 2 12 bash "$DRIVER" cleanup-selftest >"$tmp/cleanup.out" 2>"$tmp/cleanup.err"
+if [[ -n "$timeout_bin" ]]; then
+  "$timeout_bin" -k 2 12 bash "$DRIVER" cleanup-selftest >"$tmp/cleanup.out" 2>"$tmp/cleanup.err"
+else
+  bash "$DRIVER" cleanup-selftest >"$tmp/cleanup.out" 2>"$tmp/cleanup.err"
+fi
 cec=$?
 set -e
 [[ "$cec" -eq 0 ]] || fail "cleanup-selftest ec=$cec err=$(cat "$tmp/cleanup.err")"
@@ -189,6 +222,16 @@ named_step() {
     in_step { print }
   ' "$1"
 }
+active_lines() {
+  awk '
+    {
+      tmp = $0
+      sub(/^[[:space:]]+/, "", tmp)
+      if (tmp == "" || tmp ~ /^#/) next
+      print tmp
+    }
+  ' <<<"$1"
+}
 active_run_lines() {
   awk '
     function emit_active(line, tmp) {
@@ -198,23 +241,91 @@ active_run_lines() {
       print tmp
     }
     /^        run: \|/ { in_run=1; next }
+    /^        run: >/ { in_run=1; next }
+    /^        run: / {
+      sub(/^        run: /, "")
+      print
+      next
+    }
     in_run && /^        [^[:space:]]/ { exit }
     in_run { emit_active($0) }
   ' <<<"$1"
 }
+normalized_run_body() {
+  awk '
+    /^        run: \|/ { in_run=1; next }
+    /^        run: >/ { in_run=1; next }
+    /^        run: / {
+      sub(/^        run: /, "")
+      print
+      exit
+    }
+    in_run && /^        [^[:space:]]/ { exit }
+    in_run {
+      line = $0
+      sub(/^          /, "", line)
+      print line
+    }
+  ' <<<"$1"
+}
+assert_single_cmd_step() {
+  local name="$1" want="$2" step body
+  step=$(named_step "$wf" "$name")
+  [[ -n "$step" ]] || fail "missing step: $name"
+  if grep -Eq '^        continue-on-error[[:space:]]*:' <<<"$step"; then
+    fail "$name must not continue-on-error"
+  fi
+  grep -qx "        if: \${{ github.event.inputs.proof_mode == 'send-matrix' }}" <<<"$step" \
+    || fail "$name must be send-matrix-conditioned"
+  body=$(active_lines "$(normalized_run_body "$step")")
+  [[ "$body" == "$want" ]] || fail "$name run body must be exactly: $want (got: ${body:-<empty>})"
+  if grep -Eq '\\$|\|\| true|<<|function |if false' <<<"$body"; then
+    fail "$name run body is not a single command"
+  fi
+}
 compile_step=$(named_step "$wf" "Compile syscall harness")
 [[ -n "$compile_step" ]] || fail "missing Compile syscall harness step"
-if grep -Eq '^        continue-on-error[[:space:]]*:' <<<"$compile_step"; then
-  fail "Compile syscall harness must not continue-on-error"
+assert_single_cmd_step "Compile syscall harness" \
+  'bash scripts/ci/s1b-compile-and-contract.sh'
+assert_single_cmd_step "Positive syscall/effect matrix" \
+  'bash scripts/ci/s1b-positive-matrix.sh'
+assert_single_cmd_step "Attach-disabled negative matrix" \
+  'bash scripts/ci/s1b-attach-disabled.sh'
+POS="$(cd "$(dirname "$0")" && pwd)/s1b-positive-matrix.sh"
+if grep -q '<<' "$POS"; then
+  fail "positive wrapper must not hide the driver in a heredoc"
 fi
-if grep -Eq '^        if:[[:space:]]*false([[:space:]]|$)' <<<"$compile_step"; then
-  fail "Compile syscall harness must not be disabled with if: false"
+pos_active=$(active_lines "$(cat "$POS")")
+# shellcheck disable=SC2016
+grep -Fq 'sudo -E env HARNESS_BIN="${RUNNER_TEMP:?}/s1b-harness" WORKDIR="${RUNNER_TEMP:?}/s1b-positive" \' \
+  <<<"$pos_active" || fail "positive wrapper must live-invoke sudo -E env for the matrix"
+grep -Fq 'bash scripts/ci/run-send-syscall-matrix.sh positive' <<<"$pos_active" \
+  || fail "positive wrapper must invoke run-send-syscall-matrix.sh positive"
+if grep -Eq '^echo would-have-run' <<<"$pos_active"; then
+  fail "positive wrapper replaced the live sudo with a dry-run echo"
 fi
-grep -qx "        if: \${{ github.event.inputs.proof_mode == 'send-matrix' }}" <<<"$compile_step" \
-  || fail "Compile syscall harness must be send-matrix-conditioned"
-compile_active=$(active_run_lines "$compile_step")
-grep -qx 'bash scripts/ci/test-s1b-coverage-gate.sh' <<<"$compile_active" \
-  || fail "Compile syscall harness must actively run the coverage-gate suite"
+smoke_job=$(awk '
+  $0 == "  smoke:" { p=1 }
+  p && /^  [A-Za-z0-9_-]+:/ && $0 != "  smoke:" { exit }
+  p { print }
+' "$wf")
+smoke_meta=$(awk '/^    steps:/{exit} {print}' <<<"$smoke_job")
+smoke_meta_active=$(active_lines "$smoke_meta")
+if grep -Eq '^if:' <<<"$smoke_meta_active"; then
+  fail "smoke job must not have if"
+fi
+if grep -Eq '^continue-on-error:' <<<"$smoke_meta_active"; then
+  fail "smoke job must not continue-on-error"
+fi
+pm_opts=$(awk '
+  /^      proof_mode:/ { p=1 }
+  p && /^      [a-z]/ && $0 !~ /^      proof_mode:/ { exit }
+  p && /^        options:/ { o=1; next }
+  o && /^        [a-z]/ { exit }
+  o { print }
+' "$wf")
+n_sm=$(active_lines "$pm_opts" | grep -Fcx -- '- send-matrix' || true)
+[[ "$n_sm" -eq 1 ]] || fail "proof_mode choices must contain send-matrix exactly once"
 pc="$(cd "$(dirname "$0")/../.." && pwd)/.pre-commit-config.yaml"
 hook_active=$(awk '
   $0 == "      - id: s1b-coverage-gate-contract" { p=1 }
@@ -235,6 +346,9 @@ grep -qx 'pass_filenames: false' <<<"$hook_active" \
 if grep -Eq '^stages:' <<<"$hook_active"; then
   fail "s1b hook must not set stages"
 fi
+if grep -Eq '^exclude:' <<<"$hook_active"; then
+  fail "s1b hook must not set exclude"
+fi
 files_pat=$(awk '/^files: / { sub(/^files: /, ""); print; exit }' <<<"$hook_active")
 [[ -n "$files_pat" ]] || fail "files regex omits the send-observation producer"
 mkdir -p "$tmp/norb"
@@ -245,15 +359,34 @@ fi
 PATH="$tmp/norb" python3 -c '
 import re, sys
 cre = re.compile(sys.argv[1])
-if cre.search(sys.argv[2]) is None:
-    raise SystemExit("files regex omits the send-observation producer")
-if cre.search(sys.argv[3]) is not None:
+for p in sys.argv[2:]:
+    if cre.search(p) is None:
+        raise SystemExit("files regex omits " + p)
+if cre.search("crates/assay-cli/src/lib.rs") is not None:
     raise SystemExit("files regex is not producer-scoped")
 ' "$files_pat" \
+  "scripts/ci/test-s1b-coverage-gate.sh" \
+  "scripts/ci/run-send-syscall-matrix.sh" \
+  "scripts/ci/s1b-compile-and-contract.sh" \
+  "scripts/ci/s1b-positive-matrix.sh" \
+  "scripts/ci/s1b-attach-disabled.sh" \
+  "scripts/ci/s1b-send-syscall-matrix.c" \
+  ".github/workflows/monitor-attach-smoke.yml" \
   "crates/assay-cli/src/cli/commands/monitor_next/output.rs" \
-  "crates/assay-cli/src/lib.rs" \
+  ".pre-commit-config.yaml" \
   || fail "s1b pre-commit hook YAML contract failed without ruby on PATH"
 echo "ok: s1b hook YAML contract without ruby"
+hook_wf_out=$(S1B_COVERAGE_GATE_FILESELECT_PROBE=1 pre-commit run s1b-coverage-gate-contract \
+  --files .github/workflows/monitor-attach-smoke.yml 2>&1) || true
+printf '%s\n' "$hook_wf_out" | grep -q 'Passed' \
+  || fail "real pre-commit must run the hook on the smoke workflow"
+if printf '%s\n' "$hook_wf_out" | grep -q 'Skipped'; then
+  fail "real pre-commit skipped the smoke workflow"
+fi
+hook_skip_out=$(S1B_COVERAGE_GATE_FILESELECT_PROBE=1 pre-commit run s1b-coverage-gate-contract \
+  --files crates/assay-cli/src/lib.rs 2>&1) || true
+printf '%s\n' "$hook_skip_out" | grep -q 'Skipped' \
+  || fail "real pre-commit must skip unrelated lib.rs"
 km="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/kernel-matrix.yml"
 pr_paths=$(awk '
   /^  pull_request:/ { p=1; next }
@@ -276,36 +409,6 @@ fi
 if grep -q 'bash scripts/ci/run-send-syscall-matrix.sh mutation-selftest' "$wf"; then
   fail "workflow still invokes mutation-selftest directly"
 fi
-assert_send_matrix_step() {
-  local name="$1"
-  shift
-  local step active cmd
-  step=$(named_step "$wf" "$name")
-  [[ -n "$step" ]] || fail "missing step: $name"
-  if grep -Eq '^        continue-on-error[[:space:]]*:' <<<"$step"; then
-    fail "$name must not continue-on-error"
-  fi
-  if grep -Eq '^        if:[[:space:]]*false([[:space:]]|$)' <<<"$step"; then
-    fail "$name must not be disabled with if: false"
-  fi
-  grep -qx "        if: \${{ github.event.inputs.proof_mode == 'send-matrix' }}" <<<"$step" \
-    || fail "$name must be send-matrix-conditioned"
-  active=$(active_run_lines "$step")
-  for cmd in "$@"; do
-    grep -qx "$cmd" <<<"$active" || fail "$name must actively run: $cmd"
-  done
-}
-assert_send_matrix_step "Positive syscall/effect matrix" \
-  'bash scripts/ci/run-send-syscall-matrix.sh positive'
-assert_send_matrix_step "Attach-disabled negative matrix" \
-  'bash scripts/ci/run-send-syscall-matrix.sh attach-disabled' \
-  'bash scripts/ci/run-send-syscall-matrix.sh disable-send-attach'
-disabled_step=$(named_step "$wf" "Attach-disabled negative matrix")
-disabled_active=$(active_run_lines "$disabled_step")
-grep -Fq 's1b-cell7-disabled' <<<"$disabled_active" \
-  || fail "attach-disabled active path must check the mutated-binary marker"
-# Behavioral A10: unmarked ASSAY_BIN must fail closed before run_matrix.
-# A source-grep of the python3 line is comment/echo-vacuous.
 a10=$(mktemp -d)
 printf '#!/bin/sh\nexit 0\n' >"$a10/assay"
 printf '#!/bin/sh\nexit 0\n' >"$a10/harness"
@@ -315,8 +418,13 @@ if grep -Fq 's1b-cell7-disabled' "$a10/assay"; then
   fail "A10 fixture ASSAY_BIN must lack the mutation marker"
 fi
 set +e
-timeout -k 2 8 env ASSAY_BIN="$a10/assay" HARNESS_BIN="$a10/harness" ASSAY_EBPF="$a10/ebpf.o" \
-  bash "$DRIVER" attach-disabled >"$tmp/a10.out" 2>"$tmp/a10.err"
+if [[ -n "$timeout_bin" ]]; then
+  "$timeout_bin" -k 2 8 env ASSAY_BIN="$a10/assay" HARNESS_BIN="$a10/harness" ASSAY_EBPF="$a10/ebpf.o" \
+    bash "$DRIVER" attach-disabled >"$tmp/a10.out" 2>"$tmp/a10.err"
+else
+  env ASSAY_BIN="$a10/assay" HARNESS_BIN="$a10/harness" ASSAY_EBPF="$a10/ebpf.o" \
+    bash "$DRIVER" attach-disabled >"$tmp/a10.out" 2>"$tmp/a10.err"
+fi
 a10ec=$?
 set -e
 rm -rf "$a10"
@@ -352,16 +460,9 @@ for s in "Compile syscall harness" "Positive syscall/effect matrix" "Attach-disa
   n=$(printf '%s\n' "$step_names" | grep -Fcx "$s" || true)
   [[ "$n" -eq 1 ]] || fail "$s must occur exactly once"
 done
-preclean_run=$(awk '
-  /^      - name: Pre-clean self-hosted workspace$/ { in_step=1; next }
-  in_step && /^      - name: / { exit }
-  in_step && /^        run: \|$/ { in_run=1; next }
-  in_run {
-    if ($0 ~ /^          / || $0 == "") { print; next }
-    exit
-  }
-' "$wf")
-[[ -n "$preclean_run" ]] || fail "could not extract first Pre-clean run: block"
+preclean_step=$(named_step "$wf" "Pre-clean self-hosted workspace")
+preclean_active=$(active_run_lines "$preclean_step")
+[[ -n "$preclean_active" ]] || fail "could not extract first Pre-clean run: block"
 next_until_checkout=$(awk '
   /^      - name: Pre-clean self-hosted workspace$/ { in_step=1; next }
   in_step && /^      - name: / { after=1 }
@@ -373,64 +474,92 @@ n_names=$(printf '%s\n' "$next_until_checkout" | grep -c '^      - name: ' || tr
 grep -q 'uses: actions/checkout@' <<<"$next_until_checkout" \
   || fail "step after Pre-clean must be actions/checkout"
 # shellcheck disable=SC2016
-grep -Fq 'sudo pkill -x assay' <<<"$preclean_run" || fail "Pre-clean run: must pkill assay"
+grep -Fq 'sudo pkill -x assay' <<<"$preclean_active" || fail "Pre-clean run: must pkill assay"
 # shellcheck disable=SC2016
-grep -Fq 'sudo chattr -R -i' <<<"$preclean_run" || fail "Pre-clean run: must chattr -i leftover immutable files"
+grep -Fq 'sudo chattr -R -i' <<<"$preclean_active" || fail "Pre-clean run: must chattr -i leftover immutable files"
 # shellcheck disable=SC2016
-grep -Fq 'find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec sudo rm -rf {} +' <<<"$preclean_run" \
+grep -Fq 'find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec sudo rm -rf {} +' <<<"$preclean_active" \
   || fail "Pre-clean run: must sudo-delete all top-level workspace entries"
 # shellcheck disable=SC2016
-grep -Fq 'find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -print -quit' <<<"$preclean_run" \
+grep -Fq 'find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -print -quit' <<<"$preclean_active" \
   || fail "Pre-clean run: must fail-closed assert the workspace is empty"
-grep -Fq 'ERROR: workspace not empty after' <<<"$preclean_run" \
+grep -Fq 'ERROR: workspace not empty after' <<<"$preclean_active" \
   || fail "Pre-clean run: must fail-closed if the workspace is not empty"
+grep -Fq 'ERROR: GITHUB_WORKSPACE empty; refusing pre-clean wipe' <<<"$preclean_active" \
+  || fail "Pre-clean must fail closed when GITHUB_WORKSPACE is empty"
+guard_n=$(printf '%s\n' "$preclean_active" | grep -n 'GITHUB_WORKSPACE empty' | head -1 | cut -d: -f1)
+wipe_n=$(printf '%s\n' "$preclean_active" | grep -n 'exec sudo rm -rf' | head -1 | cut -d: -f1)
+[[ -n "$guard_n" && -n "$wipe_n" && "$guard_n" -lt "$wipe_n" ]] \
+  || fail "empty GITHUB_WORKSPACE guard must precede sudo deletion"
+guard_to_wipe=$(awk '
+  /GITHUB_WORKSPACE empty/ { p=1 }
+  p { print }
+  /exec sudo rm -rf/ { exit }
+' <<<"$preclean_active")
+if grep -Eq '^(GITHUB_WORKSPACE=|unset GITHUB_WORKSPACE)' <<<"$guard_to_wipe"; then
+  fail "GITHUB_WORKSPACE must not be emptied between the empty-workspace guard and sudo deletion"
+fi
 nonempty_branch=$(awk '
   /mindepth 1 -maxdepth 1 -print -quit/ { p=1 }
   p { print }
   p && /[[:space:]]fi[[:space:]]*$/ { exit }
-' <<<"$preclean_run")
-grep -Eq '^[[:space:]]+exit 1[[:space:]]*$' <<<"$nonempty_branch" \
+' <<<"$preclean_active")
+grep -Eq '^[[:space:]]*exit 1[[:space:]]*$' <<<"$nonempty_branch" \
   || fail "Pre-clean nonempty branch must fail-closed with exit 1"
-preclean_step=$(named_step "$wf" "Pre-clean self-hosted workspace")
 if grep -Eq '^        continue-on-error[[:space:]]*:' <<<"$preclean_step"; then
   fail "Pre-clean must not continue-on-error"
 fi
 if grep -Eq '^        if:' <<<"$preclean_step"; then
   fail "Pre-clean must not have a disabling if"
 fi
+mkdir -p "$tmp/preclean-bin"
+: >"$tmp/preclean-sudo.log"
+printf '#!/bin/sh\necho MOCKSUDO "$@" >>%s\n' "$tmp/preclean-sudo.log" >"$tmp/preclean-bin/sudo"
+chmod +x "$tmp/preclean-bin/sudo"
+{
+  echo '#!/usr/bin/env bash'
+  echo 'set +e'
+  printf '%s\n' "$preclean_active"
+} >"$tmp/preclean-replay.sh"
+set +e
+GITHUB_WORKSPACE='' \
+  PATH="$tmp/preclean-bin:/usr/bin:/bin" bash "$tmp/preclean-replay.sh" \
+  >"$tmp/preclean-empty.out" 2>"$tmp/preclean-empty.err"
+gw_ec=$?
+set -e
+[[ "$gw_ec" -ne 0 ]] || fail "empty GITHUB_WORKSPACE must fail closed before sudo deletion"
+if grep -q 'rm -rf' "$tmp/preclean-sudo.log"; then
+  fail "empty GITHUB_WORKSPACE reached sudo rm"
+fi
 echo "ok: pre-clean run: block scoped before checkout"
-# Restore pins are inside restore() only. An echo/string decoy elsewhere in
-# the step must not satisfy cp/mv/cmp after the real command is commented.
-grep -Fqx 'trap restore EXIT' <<<"$disabled_active" \
-  || fail "attach-disabled must trap restore EXIT"
-n_restore=$(grep -Fcx 'restore() {' <<<"$disabled_active" || true)
+ATTACH="$(cd "$(dirname "$0")" && pwd)/s1b-attach-disabled.sh"
+attach_active=$(active_lines "$(cat "$ATTACH")")
+n_restore=$(printf '%s\n' "$attach_active" | grep -Ec '^restore\(\) \{|^function restore' || true)
 [[ "$n_restore" -eq 1 ]] || fail "attach-disabled must define restore() exactly once"
-restore_fn=$(awk '/^restore\(\) \{/,/^}$/' <<<"$disabled_active")
-[[ -n "$restore_fn" ]] || fail "could not extract restore() from attach-disabled active run"
-# shellcheck disable=SC2016
-grep -Fq 'cp "$binbak"' <<<"$restore_fn" || fail "attach-disabled restore does not copy pre-mutation backup"
-# shellcheck disable=SC2016
-grep -Fq 'mv -f "$bin.tmp" "$bin"' <<<"$restore_fn" \
-  || fail "attach-disabled restore does not atomically mv backup onto assay"
-# shellcheck disable=SC2016
-grep -Fq 'cmp -s "$bin" "$binbak"' <<<"$restore_fn" \
-  || fail "attach-disabled restore does not verify restored binary matches backup"
+grep -qx 'readonly -f restore' <<<"$attach_active" \
+  || fail "restore must be readonly so an alternate definition cannot replace it"
+last_exit=$(printf '%s\n' "$attach_active" | grep -E '^trap .* EXIT' | tail -1)
+[[ "$last_exit" == "trap restore EXIT" ]] || fail "effective EXIT trap must be restore"
+if printf '%s\n' "$attach_active" | grep -Eq '^trap - EXIT$|^trap '\'''\'' EXIT$|^trap "" EXIT$'; then
+  fail "EXIT trap must not be disarmed"
+fi
+restore_fn=$(awk '/^restore\(\) \{/,/^}$/' "$ATTACH")
+[[ -n "$restore_fn" ]] || fail "could not extract restore() from attach-disabled wrapper"
+grep -Fq 'REAL_BIN_PATH' <<<"$restore_fn" \
+  || fail "restore must write the captured REAL_BIN_PATH, not a rebound bin"
 if grep -q 'cargo build' <<<"$restore_fn"; then
   fail "attach-disabled restore must not cargo build"
 fi
+prod_active=$(active_lines "$(awk '
+  /^if \[\[ "\$\{1:-\}" == restore-selftest/ { skip=1 }
+  skip && /^fi$/ { skip=0; next }
+  skip { next }
+  { print }
+' "$ATTACH")")
+if grep -Eq '^bin=' <<<"$prod_active"; then
+  fail "production attach-disabled must not rebind bin before restore"
+fi
+bash "$ATTACH" restore-selftest
 grep -q 'elapsed_ms' "$(cd "$(dirname "$0")" && pwd)/s1b-send-syscall-matrix.c" \
   || fail "timeout selftest does not assert elapsed_ms"
-
-sim=$(mktemp -d)
-printf 'canonical-src\n' >"$sim/src"
-printf 'canonical-src\n' >"$sim/bak"
-printf 'canonical-bin\n' >"$sim/binbak"
-printf 'MUTATED-s1b-cell7-disabled\n' >"$sim/bin"
-cp "$sim/bak" "$sim/src"
-cp "$sim/binbak" "$sim/bin.tmp"
-cmp -s "$sim/bin.tmp" "$sim/binbak" || fail "temp copy hash mismatch"
-mv "$sim/bin.tmp" "$sim/bin"
-cmp -s "$sim/bin" "$sim/binbak" || fail "restored binary does not match pre-mutation backup"
-cmp -s "$sim/src" "$sim/bak" || fail "restore simulation did not restore source"
-rm -rf "$sim"
 echo "ok: restore copies exact pre-mutation binary; no cargo build in restore"

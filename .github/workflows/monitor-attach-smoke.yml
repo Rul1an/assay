@@ -43,6 +43,10 @@ jobs:
         shell: bash
         run: |
           set +e
+          if [[ -z "${GITHUB_WORKSPACE:-}" ]]; then
+            echo "ERROR: GITHUB_WORKSPACE empty; refusing pre-clean wipe" >&2
+            exit 1
+          fi
           sudo pkill -x assay 2>/dev/null || true
           sudo chattr -R -i "$GITHUB_WORKSPACE/.assay-test" 2>/dev/null || true
           sudo rm -rf "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.assay-test" 2>/dev/null || true
@@ -123,48 +127,12 @@ jobs:
 
       - name: Compile syscall harness
         if: ${{ github.event.inputs.proof_mode == 'send-matrix' }}
-        run: |
-          cc -Wall -Werror -o "$RUNNER_TEMP/s1b-harness" scripts/ci/s1b-send-syscall-matrix.c
-          "$RUNNER_TEMP/s1b-harness" --timeout-selftest
-          fifo="$RUNNER_TEMP/s1b-fifo-selftest"
-          rm -f "$fifo"
-          mkfifo "$fifo"
-          "$RUNNER_TEMP/s1b-harness" --fifo-selftest "$fifo"
-          rm -f "$fifo"
-          bash scripts/ci/test-s1b-coverage-gate.sh
+        run: bash scripts/ci/s1b-compile-and-contract.sh
 
       - name: Positive syscall/effect matrix
         if: ${{ github.event.inputs.proof_mode == 'send-matrix' }}
-        run: |
-          set -euo pipefail
-          test -f target/assay-ebpf.o
-          sudo -E env HARNESS_BIN="$RUNNER_TEMP/s1b-harness" WORKDIR="$RUNNER_TEMP/s1b-positive" \
-            bash scripts/ci/run-send-syscall-matrix.sh positive
+        run: bash scripts/ci/s1b-positive-matrix.sh
 
       - name: Attach-disabled negative matrix
         if: ${{ github.event.inputs.proof_mode == 'send-matrix' }}
-        run: |
-          set -euo pipefail
-          src=crates/assay-monitor/src/loader.rs
-          bak="$RUNNER_TEMP/loader.rs.s1b.bak"
-          bin=target/release/assay
-          binbak="$RUNNER_TEMP/assay.s1b.bin.bak"
-          cp "$src" "$bak"
-          cp "$bin" "$binbak"
-          restore() {
-            cp "$bak" "$src"
-            cp "$binbak" "$bin.tmp"
-            cmp -s "$bin.tmp" "$binbak"
-            mv -f "$bin.tmp" "$bin"
-            test -f "$bin"
-            cmp -s "$bin" "$binbak"
-            rm -f "$bak" "$binbak" "$bin.tmp"
-          }
-          trap restore EXIT
-          trap 'exit 143' TERM
-          trap 'exit 130' INT
-          bash scripts/ci/run-send-syscall-matrix.sh disable-send-attach
-          cargo build -p assay-cli --release
-          python3 -c 'import pathlib,sys; sys.exit(0 if b"s1b-cell7-disabled" in pathlib.Path("target/release/assay").read_bytes() else 1)'
-          sudo -E env HARNESS_BIN="$RUNNER_TEMP/s1b-harness" WORKDIR="$RUNNER_TEMP/s1b-disabled" \
-            bash scripts/ci/run-send-syscall-matrix.sh attach-disabled
+        run: bash scripts/ci/s1b-attach-disabled.sh
