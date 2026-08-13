@@ -289,17 +289,63 @@ pub struct CodingAgentCoverageReport {
     pub test: Option<CodingAgentClaimDecision>,
 }
 
+/// The result of folding a set of per-item ceilings into one answer for the whole set.
+///
+/// Three states rather than an `Option`, because an `Option` conflates two of them. A caller whose
+/// set can be empty and a caller whose set never is were both served by `Option` returning `None`,
+/// and the first caller then could not tell "nothing here made a claim" from "something here is
+/// blocked". That is the occurrence-versus-absence distinction this module exists to keep, so the
+/// fold is not allowed to lose it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum CodingAgentWeakestCeiling {
+    /// Nothing in the set claimed anything, so there is no rung to report and no gap either.
+    NothingClaimed,
+    /// At least one member is blocked. A block is not the bottom rung; it is the statement that no
+    /// rung applies, and there is nothing to take a minimum with.
+    Blocked,
+    /// The weakest rung across every member, all of which carried one.
+    Rung { ceiling: CodingAgentClaimCeiling },
+}
+
+/// Fold per-item ceilings into the strongest claim the whole set supports: the **weakest** rung
+/// across its members.
+///
+/// A fold and never a maximum. One member at the top rung does not raise what the set as a whole
+/// supports, and a reader who takes the strongest member away has learnt the wrong thing.
+///
+/// This is the single implementation of that rule. It used to exist twice — here over coverage
+/// dimensions and again in the CLI over side-effect calls — and the copy had already drifted at the
+/// moment it was written, because this container is never empty and that one can be.
+pub fn coding_agent_weakest_ceiling(
+    ceilings: impl IntoIterator<Item = Option<CodingAgentClaimCeiling>>,
+) -> CodingAgentWeakestCeiling {
+    let mut weakest: Option<CodingAgentClaimCeiling> = None;
+    for ceiling in ceilings {
+        let Some(ceiling) = ceiling else {
+            return CodingAgentWeakestCeiling::Blocked;
+        };
+        weakest = Some(weakest.map_or(ceiling, |w| w.min(ceiling)));
+    }
+    match weakest {
+        Some(ceiling) => CodingAgentWeakestCeiling::Rung { ceiling },
+        None => CodingAgentWeakestCeiling::NothingClaimed,
+    }
+}
+
 impl CodingAgentCoverageReport {
     /// The strongest claim this report as a whole supports: the **weakest** rung across every
     /// dimension the run claims. `None` when any claimed dimension is `Blocked` — a block binds
     /// harder than any rung, because there is no rung to take a minimum with.
+    ///
+    /// `NothingClaimed` also maps to `None`, and that arm is unreachable here: [`Self::claimed`]
+    /// always yields the four fixed dimensions. The mapping is stated rather than assumed, because
+    /// it is precisely the assumption that made a copy of this fold wrong elsewhere.
     pub fn weakest_ceiling(&self) -> Option<CodingAgentClaimCeiling> {
-        let mut weakest: Option<CodingAgentClaimCeiling> = None;
-        for decision in self.claimed() {
-            let ceiling = decision.ceiling?;
-            weakest = Some(weakest.map_or(ceiling, |w| w.min(ceiling)));
+        match coding_agent_weakest_ceiling(self.claimed().into_iter().map(|d| d.ceiling)) {
+            CodingAgentWeakestCeiling::Rung { ceiling } => Some(ceiling),
+            CodingAgentWeakestCeiling::Blocked | CodingAgentWeakestCeiling::NothingClaimed => None,
         }
-        weakest
     }
 
     /// Whether every claimed dimension supports at least `required` without degradation.

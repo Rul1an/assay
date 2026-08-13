@@ -27,8 +27,9 @@ use crate::exit_codes;
 use anyhow::{Context, Result};
 use assay_evidence::bundle::BundleReader;
 use assay_evidence::{
-    coding_agent_claim_decision, CodingAgentClaimKind, CodingAgentCoverageState,
-    CodingAgentGateDecision, CodingAgentSourceClass,
+    coding_agent_claim_decision, coding_agent_weakest_ceiling, CodingAgentClaimCeiling,
+    CodingAgentClaimDecision, CodingAgentClaimKind, CodingAgentCoverageState,
+    CodingAgentGateDecision, CodingAgentSourceClass, CodingAgentWeakestCeiling,
 };
 use assay_mcp_server::side_effect::{
     check_audit_record, AuditBinding, SideEffectLevel, PROVIDER_AUDIT_RECORD_SCHEMA,
@@ -93,6 +94,21 @@ struct CallRow {
     /// rule. `occurrence` asks "did this effect happen"; `bounded_negative` asks "did it not".
     occurrence_claim: CodingAgentGateDecision,
     bounded_negative_claim: CodingAgentGateDecision,
+    /// How strong the occurrence claim is allowed to be, on the published ceiling ladder.
+    ///
+    /// The gate has always computed this and this report used to drop it, which made the ladder's
+    /// ordering unobservable: `asserted` and `verified` both surfaced as a bare `Allowed`/`Degraded`
+    /// and a consumer could not tell a provider's own word from an independent record. Carrying the
+    /// rung is what makes `producer_reported < ... < independently_confirmed` mean something outside
+    /// the type system.
+    ///
+    /// Absent on two kinds of row, and they are different. A call that asserted no side effect gets
+    /// no rung because it made no occurrence claim to grade — publishing one there would attach a
+    /// ladder position to a claim nobody made. And a call whose occurrence claim is `Blocked` gets
+    /// none because a block is the statement that no rung applies. `asserted` distinguishes the two
+    /// for a reader, which is why this stays an `Option` here while the run-level answer does not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    occurrence_ceiling: Option<CodingAgentClaimCeiling>,
     /// What a below-harness observer could say about the claimed egress, when one was supplied.
     #[serde(skip_serializing_if = "Option::is_none")]
     egress: Option<EgressRefutation>,
@@ -108,6 +124,20 @@ struct Report {
     audit_records_unmatched: usize,
     calls: Vec<CallRow>,
     promoted: usize,
+    /// The strongest occurrence claim this report as a whole supports: the **weakest** rung across
+    /// every call that asserted a side effect.
+    ///
+    /// A fold and never a maximum. One independently corroborated call does not raise what the run
+    /// as a whole supports, and a reader who takes the strongest row away has learnt the wrong
+    /// thing.
+    ///
+    /// Always emitted, and three-state rather than an `Option`, because an absent field would say
+    /// two different things at once: that a refutation collapsed the run, and that no call in the
+    /// bundle asserted anything. Those are the occurrence-versus-absence cases this command exists
+    /// to keep apart, and the first draft of this field lost the distinction in the very field meant
+    /// to carry it. The fold itself lives in `assay-evidence` and is shared with the coverage
+    /// report's per-dimension version rather than copied.
+    weakest_occurrence_ceiling: CodingAgentWeakestCeiling,
     claims_not_made: &'static [&'static str],
 }
 
@@ -148,15 +178,34 @@ fn source_class_for(level: SideEffectLevel) -> CodingAgentSourceClass {
 /// audit record for a single call cannot support. `Partial` says exactly what is true: this
 /// occurrence is corroborated, the dimension is not covered, so occurrence claims pass and absence
 /// claims are blocked by `partial_coverage_blocks_absence_claim`.
+///
+/// Returns the whole decision rather than just its verdict. An earlier version took `.decision` here
+/// and threw the rung away, which left the ceiling ladder computed on every call and read by nobody
+/// — a rule that runs but decides nothing. The caller now takes the part it needs.
 fn claim_decision_for(
     level: SideEffectLevel,
     kind: CodingAgentClaimKind,
-) -> CodingAgentGateDecision {
+) -> CodingAgentClaimDecision {
     let coverage = match level {
         SideEffectLevel::Asserted => CodingAgentCoverageState::SelfReported,
         _ => CodingAgentCoverageState::Partial,
     };
-    coding_agent_claim_decision(source_class_for(level), coverage, kind).decision
+    coding_agent_claim_decision(source_class_for(level), coverage, kind)
+}
+
+/// The weakest occurrence rung across the calls that asserted a side effect.
+///
+/// Only asserting calls count. A tool that never claimed to change anything outside the process has
+/// nothing to corroborate, and folding its floor into the run's answer would report a weak run
+/// because it did some reading. That filter is exactly why this set can be empty and why the shared
+/// fold has to distinguish empty from blocked.
+fn weakest_occurrence_ceiling(calls: &[CallRow]) -> CodingAgentWeakestCeiling {
+    coding_agent_weakest_ceiling(
+        calls
+            .iter()
+            .filter(|c| c.asserted)
+            .map(|c| c.occurrence_ceiling),
+    )
 }
 
 /// Load `assay.provider_audit_record.v0` files from an import directory.
@@ -265,6 +314,7 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                 binding: None,
                 occurrence_claim: CodingAgentGateDecision::Blocked,
                 bounded_negative_claim: CodingAgentGateDecision::Blocked,
+                occurrence_ceiling: None,
                 egress: None,
             };
 
@@ -304,8 +354,12 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                     refute_egress(observation_health.as_ref(), &observed_peers, expected)
                 });
             }
-            row.occurrence_claim =
-                claim_decision_for(row.level, CodingAgentClaimKind::PositiveExistence);
+            let occurrence = claim_decision_for(row.level, CodingAgentClaimKind::PositiveExistence);
+            row.occurrence_claim = occurrence.decision;
+            // Only a call that asserted a side effect gets a rung. `occurrence_claim` is computed for
+            // every row and that predates this change, but a ladder position is a stronger thing to
+            // publish: it grades a claim, and a call that asserted nothing has not made one.
+            row.occurrence_ceiling = occurrence.ceiling.filter(|_| row.asserted);
 
             // A refutation overrides the ladder, including `verified`. If an imported audit record
             // says the call happened and a watching kernel observer says nothing left the cgroup,
@@ -315,12 +369,18 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
             // gap overturn real corroboration. The conflict is the finding.
             if row.egress.as_ref().is_some_and(EgressRefutation::refutes) {
                 row.occurrence_claim = CodingAgentGateDecision::Blocked;
+                // The rung goes with it. A blocked claim that still advertised
+                // `independently_confirmed` would let a reader take the number and drop the verdict,
+                // which is the exact misreading the refutation exists to prevent.
+                row.occurrence_ceiling = None;
             }
             row.bounded_negative_claim =
-                claim_decision_for(row.level, CodingAgentClaimKind::BoundedNegative);
+                claim_decision_for(row.level, CodingAgentClaimKind::BoundedNegative).decision;
             calls.push(row);
         }
     }
+
+    let weakest_occurrence_ceiling = weakest_occurrence_ceiling(&calls);
 
     let report = Report {
         schema: "assay.side_effect_verification.v0",
@@ -329,6 +389,7 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
         audit_records_unmatched: matched_records.iter().filter(|m| !**m).count(),
         calls,
         promoted,
+        weakest_occurrence_ceiling,
         claims_not_made: CLAIMS_NOT_MADE,
     };
 
@@ -340,14 +401,25 @@ pub fn cmd_verify_side_effects(args: &VerifySideEffectsArgs) -> Result<i32> {
                 "imported audit records: {} ({} matched no observed call)",
                 report.audit_records_imported, report.audit_records_unmatched
             );
+            println!(
+                "weakest occurrence ceiling: {}",
+                match report.weakest_occurrence_ceiling {
+                    CodingAgentWeakestCeiling::NothingClaimed =>
+                        "nothing_claimed (no call asserted a side effect)".to_string(),
+                    CodingAgentWeakestCeiling::Blocked =>
+                        "blocked (an asserting call is contradicted or unsupported)".to_string(),
+                    CodingAgentWeakestCeiling::Rung { ceiling } => format!("{ceiling:?}"),
+                }
+            );
             for c in &report.calls {
                 let level = serde_json::to_value(c.level)?;
                 println!(
-                    "  {:40} asserted={:5} level={:18} occurrence={:?} absence={:?}",
+                    "  {:40} asserted={:5} level={:18} occurrence={:?} ceiling={:?} absence={:?}",
                     c.tool,
                     c.asserted,
                     level.as_str().unwrap_or("?"),
                     c.occurrence_claim,
+                    c.occurrence_ceiling,
                     c.bounded_negative_claim
                 );
                 if let Some(e) = &c.egress {

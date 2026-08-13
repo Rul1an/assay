@@ -22,11 +22,12 @@ pub use bundle::{
 };
 pub use coding_agent::{
     coding_agent_claim_ceiling, coding_agent_claim_decision, coding_agent_evidence_event,
-    CodingAgentClaimCeiling, CodingAgentClaimDecision, CodingAgentClaimKind, CodingAgentCoverage,
-    CodingAgentCoverageGap, CodingAgentCoverageReport, CodingAgentCoverageState,
-    CodingAgentDeclaredScope, CodingAgentEvidencePayload, CodingAgentGateDecision,
-    CodingAgentNetworkPolicy, CodingAgentObservedEffects, CodingAgentSourceClass,
-    CODING_AGENT_EVIDENCE_EVENT_TYPE, CODING_AGENT_EVIDENCE_SOURCE,
+    coding_agent_weakest_ceiling, CodingAgentClaimCeiling, CodingAgentClaimDecision,
+    CodingAgentClaimKind, CodingAgentCoverage, CodingAgentCoverageGap, CodingAgentCoverageReport,
+    CodingAgentCoverageState, CodingAgentDeclaredScope, CodingAgentEvidencePayload,
+    CodingAgentGateDecision, CodingAgentNetworkPolicy, CodingAgentObservedEffects,
+    CodingAgentSourceClass, CodingAgentWeakestCeiling, CODING_AGENT_EVIDENCE_EVENT_TYPE,
+    CODING_AGENT_EVIDENCE_SOURCE,
 };
 pub use lint::packs::{load_pack, load_packs, LoadedPack, PackError, PackSource};
 pub use ndjson::{read_events, write_events, NdjsonEvents};
