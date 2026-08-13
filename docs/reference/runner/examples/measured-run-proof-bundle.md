@@ -111,14 +111,14 @@ How to read this:
   `datagram_peer_observed` or `connect_and_datagram_peer_observed` instead.
   That strengthens the transport observation but does not, by itself, create
   a request-level or exact peer-set claim. `assay_monitor_sendto` and
-  `assay_monitor_sendmsg` are compiled into the release ELF and presently
-  unattached (`Unsupported`). This fixture is a Runner archive:
+  `assay_monitor_sendmsg` are compiled into the release ELF and always
+  attempted as tracepoints. This fixture is a Runner archive:
   `assay runner-spike --kernel-capture` / `assay-runner-core`
   `network_protocol_coverage_for` is **count-derived**, so `connect_only`
   here means `connect_emitted > 0` from always-attached `sys_enter_connect`,
   with **no** connect4 / network-policy requirement. Datagram labels require
-  send-event counts and are unreachable there while those TPs stay
-  unattached. CLI `assay monitor` `observation_health` is a different
+  an attached send tracepoint and non-zero send-event counts; this fixture has
+  neither label. CLI `assay monitor` `observation_health` is a different
   producer (attach-derived from cgroup `connect4`, otherwise `absent`).
 - `network_endpoint_claim_scope: diagnostic_only` means any
   `network_endpoints` values are coarse/diagnostic evidence, not an

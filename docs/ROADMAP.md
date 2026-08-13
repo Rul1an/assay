@@ -219,12 +219,13 @@ identity.
 
 **Present tense (not a rewrite of those release lines):**
 `assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
-release ELF and inventoried `Unsupported` / unattached. Runner archives from
+release ELF and always attempted as tracepoints, with a terminal attach outcome
+recorded independently for each surface. Runner archives from
 `assay runner-spike --kernel-capture` / `assay-runner-core`
 `network_protocol_coverage_for` are **count-derived**: `connect_emitted > 0`
 yields `connect_only` from always-attached `sys_enter_connect`, with **no**
-connect4 / network-policy requirement. Datagram labels require send-event
-counts and are unreachable there while those TPs stay unattached. CLI
+connect4 / network-policy requirement. Datagram labels require non-zero
+send-event counts and therefore an attached send tracepoint. CLI
 `assay monitor` `observation_health` is a **different** producer:
 **attach-derived** from cgroup `connect4` (network-policy path), otherwise
 `absent`. `connect6_hook` is compiled-but-unattached **enforcement**; IPv6

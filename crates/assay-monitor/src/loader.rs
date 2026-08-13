@@ -2,8 +2,8 @@ use crate::config_flags::{apply_dedup_open_paths, apply_emit_observed_connect, F
 use crate::events::{self, EventStream};
 use crate::object_abi::{verify_object_abi_marker, REBUILD_EBPF_GUIDANCE};
 use crate::probes::{
-    connect4_update, Connect4Fault, ModeUpdate, ProbeAttachment, ProbeProgram, EGRESS_PEER_PROBE,
-    EXPECTED_PROBES,
+    connect4_update, send_update, Connect4Fault, ModeUpdate, ProbeAttachment, ProbeProgram,
+    SendFault, EGRESS_PEER_PROBE, EXPECTED_PROBES,
 };
 use crate::{MonitorError, MonitorStatsSnapshot};
 use assay_common::{
@@ -43,6 +43,39 @@ fn attach_kernel_lacks_point(err: &ProgramError) -> bool {
         ProgramError::SyscallError(sy) => matches!(sy.io_error.raw_os_error(), Some(2 | 95)),
         _ => false,
     }
+}
+
+#[cfg(target_os = "linux")]
+fn attach_send_tracepoint(
+    bpf: &mut Ebpf,
+    row: &ProbeProgram,
+) -> Result<aya::programs::trace_point::TracePointLink, (SendFault, String)> {
+    let prog = bpf.program_mut(row.elf_name).ok_or_else(|| {
+        (
+            SendFault::MissingProgram,
+            format!("{} is absent from the loaded eBPF object", row.elf_name),
+        )
+    })?;
+    let tp = TryInto::<&mut TracePoint>::try_into(&mut *prog)
+        .map_err(|error| (SendFault::WrongProgramKind, error.to_string()))?;
+    tp.load()
+        .map_err(|error| (SendFault::LoadFailed, error.to_string()))?;
+    let link_id = tp.attach(row.tp().0, row.tp().1).map_err(|error| {
+        (
+            SendFault::AttachFailed {
+                kernel_lacks_point: attach_kernel_lacks_point(&error),
+            },
+            error.to_string(),
+        )
+    })?;
+    tp.take_link(link_id).map_err(|error| {
+        (
+            SendFault::AttachFailed {
+                kernel_lacks_point: false,
+            },
+            error.to_string(),
+        )
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -310,6 +343,24 @@ impl LinuxMonitor {
                 println!("DEBUG: Attached Tracepoint sys_enter_connect");
             }
         }
+        for r in [
+            ProbeProgram::by_elf("assay_monitor_sendto").ok_or_else(unknown_probe)?,
+            ProbeProgram::by_elf("assay_monitor_sendmsg").ok_or_else(unknown_probe)?,
+        ] {
+            match attach_send_tracepoint(&mut bpf, r) {
+                Ok(link) => {
+                    self.probe_attachment.attached(r.surface_name);
+                    self.links.push(MonitorLink::TracePoint(link));
+                    println!("DEBUG: Attached Tracepoint {}", r.surface_name);
+                }
+                Err((fault, detail)) => {
+                    self.probe_attachment
+                        .record_attempt_failure(r.surface_name, send_update(fault));
+                    eprintln!("WARN: Failed to attach {}: {}", r.surface_name, detail);
+                }
+            }
+        }
+        crate::probe_inventory_result(self.probe_attachment.finalize_mode_aware(false))?;
         let r = ProbeProgram::by_elf("assay_monitor_fork").ok_or_else(unknown_probe)?;
         if let Some(prog) = bpf.program_mut(r.elf_name) {
             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {
@@ -590,6 +641,7 @@ impl LinuxMonitor {
         stats.sendmsg_ringbuf_dropped = array
             .get(&MONITOR_STAT_SENDMSG_RINGBUF_DROPPED, 0)
             .unwrap_or(0);
+        crate::apply_send_honesty_counters(&mut stats, |key| array.get(&key, 0).unwrap_or(0));
 
         let map = bpf.map("SOCKET_STATS").ok_or(MonitorError::MapNotFound {
             name: "SOCKET_STATS",

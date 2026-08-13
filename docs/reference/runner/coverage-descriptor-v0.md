@@ -79,14 +79,14 @@ silently assuming a method.
 
 The datagram-aware helpers are real vocabulary for archives that already
 carry those coverage values. `assay_monitor_sendto` and
-`assay_monitor_sendmsg` are compiled into the release ELF and presently
-unattached (`Unsupported`). Runner archives from
+`assay_monitor_sendmsg` are compiled into the release ELF and always attempted
+as tracepoints. Runner archives from
 `assay runner-spike --kernel-capture` / `assay-runner-core`
 `network_protocol_coverage_for` are **count-derived**: `connect_emitted > 0`
 yields `connect_only` from always-attached `sys_enter_connect`, with **no**
 connect4 / network-policy requirement. Datagram labels require
-`sendto_emitted` or `sendmsg_emitted` > 0 and are unreachable there while
-those TPs stay unattached. CLI `assay monitor` `observation_health` is a
+`sendto_emitted` or `sendmsg_emitted` > 0 and therefore an attached send
+tracepoint. CLI `assay monitor` `observation_health` is a
 **different** producer: **attach-derived** from cgroup `connect4`
 (network-policy path), otherwise `absent`, and does not emit datagram labels.
 
@@ -181,6 +181,7 @@ the Runner archive contract is unchanged. This helper still does not:
 Any consumer that mirrors the gate should preserve the same ceiling: when a
 run actually carries datagram peer observations, those can strengthen
 positive network evidence, but they do not permit exact peer-set or
-bounded-negative network claims while blind spots remain declared. Those
-datagram observations are unreachable on `assay runner-spike --kernel-capture`
-/ `assay-runner-core` while the send TPs stay unattached.
+bounded-negative network claims while blind spots remain declared. Datagram
+observations remain conditional: the corresponding send tracepoint must attach
+and emit at least one event. An attached-but-quiet probe is not positive
+evidence.

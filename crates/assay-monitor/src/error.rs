@@ -49,6 +49,9 @@ pub enum MonitorError {
         guidance: &'static str,
     },
 
+    #[error("monitor probe inventory is incomplete: {0}")]
+    ProbeInventory(&'static str),
+
     #[error("invalid event size (got={got}, need={need})")]
     InvalidEvent { got: usize, need: usize },
 

@@ -82,14 +82,15 @@ is `open_syscall_only` (io_uring and mmap-backed writes are blind spots);
 `datagram_peer_observed` and `connect_and_datagram_peer_observed` are
 vocabulary for archives that already carry `sendto`/`sendmsg` peers.
 `assay_monitor_sendto` and `assay_monitor_sendmsg` are compiled into the
-release ELF and presently unattached (`Unsupported`). Two producers fill
+release ELF and always attempted as tracepoints; each attach records a terminal
+outcome. Two producers fill
 `network_protocol_coverage` and must not be collapsed: Runner archives
 (`assay runner-spike --kernel-capture` / `assay-runner-core`
 `network_protocol_coverage_for`) are **count-derived** —
 `connect_emitted > 0` yields `connect_only` from always-attached
 `sys_enter_connect`, with **no** connect4 / network-policy requirement —
-while datagram labels require send-event counts and are unreachable there
-while those TPs stay unattached. CLI `assay monitor` `observation_health`
+while datagram labels require `sendto_emitted` or `sendmsg_emitted` > 0. CLI
+`assay monitor` `observation_health`
 is **attach-derived** from cgroup `connect4` (network-policy path),
 otherwise `absent`, and does not emit datagram labels. Process capture is
 `exec_only` (fork/clone gaps). None of the seed descriptors support complete
@@ -143,9 +144,9 @@ endpoint it emits:
   and the run's network coverage ceiling (`connect_only` on this example
   fixture). `datagram_peer_observed` and
   `connect_and_datagram_peer_observed` remain vocabulary for archives that
-  already carry those send events; those labels are unreachable on
-  `assay runner-spike --kernel-capture` / `assay-runner-core` while the send
-  TPs stay unattached.
+  carry those send events. `assay runner-spike --kernel-capture` /
+  `assay-runner-core` can emit those labels only when a send tracepoint
+  attached and its event count is non-zero.
 - `no_unexpected_filesystem_effect` and `no_unexpected_network_effect` —
   **blocked**, recorded in `blocked_claims` rather than emitted as cells.
 

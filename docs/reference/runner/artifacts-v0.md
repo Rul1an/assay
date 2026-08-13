@@ -256,13 +256,13 @@ Interpretation rules:
   datagram peer evidence from `sendto` or `sendmsg`, without a matching
   `connect()` event in the same capture window. Those counts require
   `assay_monitor_sendto` / `assay_monitor_sendmsg`, which are compiled into
-  the release ELF and presently unattached (`Unsupported`); datagram labels
-  are unreachable on `assay runner-spike --kernel-capture` /
-  `assay-runner-core` (and CLI `assay monitor` does not emit them either).
+  the release ELF and always attempted as tracepoints. Runner datagram labels
+  require an attached send probe and a non-zero send-event count. CLI
+  `assay monitor` does not emit those labels.
 - `network_protocol_coverage=connect_and_datagram_peer_observed` means Runner
   observed both `connect()` and datagram peer evidence in the same capture
-  window. The datagram half has the same compiled-but-unattached
-  `sendto`/`sendmsg` dependency.
+  window. The datagram half has the same attached-probe and non-zero
+  `sendto`/`sendmsg` count requirement.
 - `network_endpoint_claim_scope=diagnostic_only` means `network_endpoints`
   are useful for coarse/diagnostic review, not for exact peer-set claims on
   datagram protocols such as QUIC.
