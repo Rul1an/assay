@@ -38,6 +38,14 @@ ringbuf_drops_ok() {
   [[ "$found" -eq 1 ]]
 }
 
+send_observation_ok() {
+  local haystack="$1"
+  shift
+  local want
+  want="$(printf '  • Send observation:   sendto emitted=%s dropped=%s no_peer=%s non_ip=%s; sendmsg emitted=%s dropped=%s no_peer=%s non_ip=%s' "$@")"
+  grep -qxF -- "$want" <<<"$haystack"
+}
+
 wait_pid_gone() {
   local pid="$1" n=0
   while (( n < REAP_POLL_MAX )); do
@@ -226,8 +234,8 @@ run_matrix() {
     [[ "$(grep -c "\\[PID ${hpid}\\] sendto:" "$LOG")" -eq 1 &&
       "$(grep -c "\\[PID ${hpid}\\] sendmsg:" "$LOG")" -eq 1 ]] ||
       fail "expected exactly one sendto and one sendmsg endpoint line"
-    grep -q 'sendto emitted=1 dropped=0 no_peer=1 non_ip=1; sendmsg emitted=1 dropped=0 no_peer=1 non_ip=1' \
-      <<<"$summary" || fail "exact send counts missing: $summary"
+    send_observation_ok "$summary" 1 0 1 1 1 0 1 1 \
+      || fail "exact send counts missing: $summary"
   else
     if send_debug; then
       fail "send DEBUG attach lines present in attach-disabled run"
@@ -235,8 +243,8 @@ run_matrix() {
     if grep -Eq "\\[PID ${hpid}\\] send(to|msg):" "$LOG"; then
       fail "send endpoint lines present in attach-disabled run"
     fi
-    grep -q 'sendto emitted=0 dropped=0 no_peer=0 non_ip=0; sendmsg emitted=0 dropped=0 no_peer=0 non_ip=0' \
-      <<<"$summary" || fail "attach-disabled send stats not all zero: $summary"
+    send_observation_ok "$summary" 0 0 0 0 0 0 0 0 \
+      || fail "attach-disabled send stats not all zero: $summary"
   fi
 
   ringbuf_drops_ok "$LOG" || fail "tracepoint drop field is not 0"
@@ -387,5 +395,10 @@ case "$MODE" in
     [[ -n "${2:-}" ]] || fail "ringbuf-drop-selftest requires a log"
     ringbuf_drops_ok "$2" || fail "tracepoint drop field is not 0"
     echo "ok: ringbuf-drop-selftest" ;;
-  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest" ;;
+  send-observation-selftest)
+    [[ -n "${2:-}" && -n "${10:-}" ]] || fail "send-observation-selftest requires LOG and 8 counts"
+    send_observation_ok "$(cat "$2")" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}" \
+      || fail "send observation summary not exact"
+    echo "ok: send-observation-selftest" ;;
+  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest" ;;
 esac

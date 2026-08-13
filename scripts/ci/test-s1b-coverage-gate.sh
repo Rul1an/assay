@@ -92,6 +92,22 @@ run_mode ringbuf-drop-selftest 0 "$tmp/rb_one.log"
 run_mode ringbuf-drop-selftest 0 "$tmp/rb_two.log"
 echo "ok: ringbuf-drop fixtures"
 
+pos='  • Send observation:   sendto emitted=1 dropped=0 no_peer=1 non_ip=1; sendmsg emitted=1 dropped=0 no_peer=1 non_ip=1'
+dis='  • Send observation:   sendto emitted=0 dropped=0 no_peer=0 non_ip=0; sendmsg emitted=0 dropped=0 no_peer=0 non_ip=0'
+printf '%s\n' "$pos" >"$tmp/so_pos_ok.log"
+printf '%s extra=9\n' "$pos" >"$tmp/so_pos_suffix.log"
+printf '%s; bogus=1\n' "$pos" >"$tmp/so_pos_token.log"
+printf '%s\n' "$dis" >"$tmp/so_dis_ok.log"
+printf '%s extra=9\n' "$dis" >"$tmp/so_dis_suffix.log"
+printf '%s; bogus=1\n' "$dis" >"$tmp/so_dis_token.log"
+run_mode send-observation-selftest nz "$tmp/so_pos_suffix.log" 1 0 1 1 1 0 1 1
+run_mode send-observation-selftest nz "$tmp/so_pos_token.log" 1 0 1 1 1 0 1 1
+run_mode send-observation-selftest nz "$tmp/so_dis_suffix.log" 0 0 0 0 0 0 0 0
+run_mode send-observation-selftest nz "$tmp/so_dis_token.log" 0 0 0 0 0 0 0 0
+run_mode send-observation-selftest 0 "$tmp/so_pos_ok.log" 1 0 1 1 1 0 1 1
+run_mode send-observation-selftest 0 "$tmp/so_dis_ok.log" 0 0 0 0 0 0 0 0
+echo "ok: send-observation fixtures"
+
 set +e
 timeout -k 2 12 bash "$DRIVER" cleanup-selftest >"$tmp/cleanup.out" 2>"$tmp/cleanup.err"
 cec=$?
