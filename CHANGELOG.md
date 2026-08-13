@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Public docs record a one-host measured io_uring CONNECT bound (syscall
+  tracepoint blind; cgroup connect4 observed and blocked where measured).
+  Canonical cell:
+  [runtime-monitor](docs/guides/runtime-monitor.md#measured-ioring-op-connect).
+  Documentation only; no attach, schema, or runtime change.
+
 ### Changed
 - Public docs now record that `assay_monitor_sendto` and `assay_monitor_sendmsg`
   are compiled into the release ELF / program set and always attempted as
