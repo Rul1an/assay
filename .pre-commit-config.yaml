@@ -312,6 +312,16 @@ repos:
         pass_filenames: false
         files: ^(\.github/actions/setup-rust/action\.yml|scripts/ci/test-setup-rust-composite-contract\.sh|\.pre-commit-config\.yaml|\.github/workflows/[^/]+\.ya?ml)$
 
+      - id: s1b-coverage-gate-contract
+        name: S1b send-matrix coverage-gate contract
+        entry: bash scripts/ci/test-s1b-coverage-gate.sh
+        language: system
+        pass_filenames: false
+        # External invocation: commenting the workflow suite line must not leave CI
+        # as the only runner of this contract. Trigger on S1b scripts, workflow,
+        # pre-commit config, and the send-observation producer.
+        files: ^(scripts/ci/(test-s1b-coverage-gate|run-send-syscall-matrix|s1b-compile-and-contract|s1b-positive-matrix|s1b-attach-disabled)\.sh|scripts/ci/s1b-send-syscall-matrix\.c|\.github/workflows/(monitor-attach-smoke|kernel-matrix)\.yml|crates/assay-cli/src/cli/commands/monitor_next/(output|mod)\.rs|crates/assay-monitor/src/loader\.rs|\.pre-commit-config\.yaml)$
+
       - id: mcp-registry-release-txn-self-test
         name: MCP Registry release transaction self-test
         entry: bash scripts/ci/test-mcp-registry-release-txn.sh

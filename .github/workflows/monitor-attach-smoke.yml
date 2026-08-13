@@ -5,6 +5,8 @@ name: Monitor attach smoke
 # enforcement. This exists because a green `runner-spike` delegated lane is NOT evidence that
 # `assay monitor` can attach — they attach different program sets (see #1570). Manual dispatch so it
 # does not block unrelated PRs; run it to verify attach-health after touching monitor/eBPF code.
+# `proof_mode=send-matrix` reuses this registered workflow_dispatch entrypoint (GitHub cannot start a
+# workflow file that exists only on a feature branch). Default remains attach-smoke.
 
 on:
   workflow_dispatch:
@@ -13,6 +15,14 @@ on:
         description: "Build target/assay-ebpf.o from source before the smoke run"
         required: false
         default: "true"
+      proof_mode:
+        description: "attach-smoke (default) or send-matrix exact-syscall/effect cells"
+        required: false
+        type: choice
+        options:
+          - attach-smoke
+          - send-matrix
+        default: attach-smoke
 
 permissions:
   contents: read
@@ -26,6 +36,29 @@ jobs:
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 25
     steps:
+      # Inline: before checkout no repo script is available. Root-owned target
+      # leftovers can make checkout delete .git before cleanup fails. Pattern
+      # from runner-spike-delegated.yml.
+      - name: Pre-clean self-hosted workspace
+        shell: bash
+        run: |
+          set +e
+          if [[ -z "${GITHUB_WORKSPACE:-}" ]]; then
+            echo "ERROR: GITHUB_WORKSPACE empty; refusing pre-clean wipe" >&2
+            exit 1
+          fi
+          sudo pkill -x assay 2>/dev/null || true
+          sudo chattr -R -i "$GITHUB_WORKSPACE/.assay-test" 2>/dev/null || true
+          sudo rm -rf "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.assay-test" 2>/dev/null || true
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec sudo rm -rf {} + 2>/dev/null || true
+          sudo rm -rf /tmp/assay-runner-* /dev/shm/assay-runner-* /tmp/assay-test 2>/dev/null || true
+          if find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+            echo "ERROR: workspace not empty after delegated pre-clean"
+            find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 2 -ls | sed -n '1,200p'
+            exit 1
+          fi
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
+
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -50,6 +83,7 @@ jobs:
         run: python3 -m json.tool "${{ steps.canonical-ebpf.outputs.provenance-path }}"
 
       - name: Smoke - assay monitor must attach its observation probes
+        if: ${{ github.event.inputs.proof_mode != 'send-matrix' }}
         run: |
           set -euo pipefail
           OBJ="target/assay-ebpf.o"
@@ -75,6 +109,7 @@ jobs:
           echo "SMOKE PASS: assay monitor attached its observation probes."
 
       - name: ABI skew check - loaded object must emit the pinned MonitorEvent size
+        if: ${{ github.event.inputs.proof_mode != 'send-matrix' }}
         # Separate step so the attach proof above stays a pure attach proof. This is the
         # mechanical close condition of #1575: a canonical same-commit build that still emits
         # size-mismatched records means the loaded object was stale, and that must FAIL the run
@@ -89,3 +124,15 @@ jobs:
             exit 1
           fi
           echo "ABI SKEW PASS: no MonitorEvent size mismatch observed."
+
+      - name: Compile syscall harness
+        if: ${{ github.event.inputs.proof_mode == 'send-matrix' }}
+        run: bash scripts/ci/s1b-compile-and-contract.sh
+
+      - name: Positive syscall/effect matrix
+        if: ${{ github.event.inputs.proof_mode == 'send-matrix' }}
+        run: bash scripts/ci/s1b-positive-matrix.sh
+
+      - name: Attach-disabled negative matrix
+        if: ${{ github.event.inputs.proof_mode == 'send-matrix' }}
+        run: bash scripts/ci/s1b-attach-disabled.sh
