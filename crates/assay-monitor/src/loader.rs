@@ -360,9 +360,7 @@ impl LinuxMonitor {
                 }
             }
         }
-        self.probe_attachment
-            .finalize_mode_aware(false)
-            .map_err(MonitorError::ProbeInventory)?;
+        crate::probe_inventory_result(self.probe_attachment.finalize_mode_aware(false))?;
         let r = ProbeProgram::by_elf("assay_monitor_fork").ok_or_else(unknown_probe)?;
         if let Some(prog) = bpf.program_mut(r.elf_name) {
             if let Ok(tp) = TryInto::<&mut TracePoint>::try_into(&mut *prog) {

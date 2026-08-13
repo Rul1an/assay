@@ -19,6 +19,24 @@ pub mod tracepoint;
 
 use assay_common::MonitorEvent;
 
+#[cfg(any(test, target_os = "linux"))]
+fn probe_inventory_result(result: Result<(), &'static str>) -> Result<(), MonitorError> {
+    result.map_err(MonitorError::ProbeInventory)
+}
+
+#[cfg(test)]
+mod probe_inventory_result_tests {
+    use super::*;
+
+    #[test]
+    fn incomplete_probe_inventory_propagates_as_monitor_error() {
+        assert!(matches!(
+            probe_inventory_result(Err("missing terminal status")),
+            Err(MonitorError::ProbeInventory("missing terminal status"))
+        ));
+    }
+}
+
 // We use the alias from events, or define it here.
 pub type EventStream = tokio_stream::wrappers::ReceiverStream<Result<MonitorEvent, MonitorError>>;
 

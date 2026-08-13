@@ -5,11 +5,12 @@
 > no Trust Basis claim, and no stable report schema. The terminal monitor
 > summary reads the counter; the
 > kernel-capture note that surfaces it is produced by
-> `assay runner-spike --kernel-capture` / `assay-runner-core` when the
-> always-attempted send tracepoints attach. Userspace reads
-> `sendto_non_ip_family` / `sendmsg_non_ip_family` (kernel stat indices 16 and
-> 17); a failed or unavailable attach is reported as an unobserved surface,
-> not converted to a clean zero-observation claim.
+> `assay runner-spike --kernel-capture` / `assay-runner-core` when the send
+> tracepoints attach. Userspace reads `sendto_non_ip_family` /
+> `sendmsg_non_ip_family` (kernel stat indices 16 and 17). Separately, the live
+> `assay monitor` path always attempts those tracepoints and reports a failed
+> or unavailable attach as an unobserved surface rather than a clean
+> zero-observation claim. Runner archives do not carry that attach status.
 
 ## What it observes
 

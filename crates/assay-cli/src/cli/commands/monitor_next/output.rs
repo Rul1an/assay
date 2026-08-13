@@ -314,6 +314,20 @@ mod tests {
     }
 
     #[test]
+    fn send_event_formats_exact_sockaddr_hex_fallback() {
+        let data = [0x02, 0x00, 0x00, 0x50];
+
+        assert_eq!(
+            format_monitor_event(assay_common::EVENT_SENDTO, 42, &data).as_deref(),
+            Some("[PID 42] sendto sockaddr[0..32]=0x02000050")
+        );
+        assert_eq!(
+            format_monitor_event(assay_common::EVENT_SENDMSG, 43, &data).as_deref(),
+            Some("[PID 43] sendmsg sockaddr[0..32]=0x02000050")
+        );
+    }
+
+    #[test]
     fn send_summary_exposes_per_hook_honesty_counters() {
         let stats = assay_monitor::MonitorStatsSnapshot {
             sendto_events_emitted: 1,
