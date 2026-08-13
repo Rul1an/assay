@@ -76,21 +76,28 @@ run_mode harness-ok-selftest nz "$tmp/h_sub"
 run_mode harness-ok-selftest 0 "$tmp/h_ok"
 echo "ok: harness-ok fixtures"
 
+# Grammar from monitor_next/mod.rs emit_err! of
+# "  • Tracepoint ringbuf: emitted={} dropped={}" (not output.rs).
+rb_prefix='  • Tracepoint ringbuf: emitted='
 printf '%s\n' \
-  'Tracepoint ringbuf: sendto dropped=0' \
-  'Tracepoint ringbuf: sendmsg dropped=1' >"$tmp/rb_mixed.log"
+  "${rb_prefix}1 dropped=0" \
+  "${rb_prefix}1 dropped=1" >"$tmp/rb_mixed.log"
 printf '%s\n' 'send observation only, no ringbuf summary' >"$tmp/rb_none.log"
-printf '%s\n' 'Tracepoint ringbuf: sendto dropped=0' >"$tmp/rb_one.log"
+printf '%s\n' "${rb_prefix}1 dropped=0" >"$tmp/rb_one.log"
 printf '%s\n' \
-  'Tracepoint ringbuf: sendto dropped=0' \
-  'Tracepoint ringbuf: sendmsg dropped=0' >"$tmp/rb_two.log"
-printf '%s\n' 'Tracepoint ringbuf: sendto dropped=01' >"$tmp/rb_01.log"
+  "${rb_prefix}1 dropped=0" \
+  "${rb_prefix}2 dropped=0" >"$tmp/rb_two.log"
+printf '%s\n' "${rb_prefix}1 dropped=01" >"$tmp/rb_01.log"
 run_mode ringbuf-drop-selftest nz "$tmp/rb_mixed.log"
 run_mode ringbuf-drop-selftest nz "$tmp/rb_none.log"
 run_mode ringbuf-drop-selftest nz "$tmp/rb_01.log"
 run_mode ringbuf-drop-selftest 0 "$tmp/rb_one.log"
 run_mode ringbuf-drop-selftest 0 "$tmp/rb_two.log"
 echo "ok: ringbuf-drop fixtures"
+
+cli_mod="$(cd "$(dirname "$0")/../.." && pwd)/crates/assay-cli/src/cli/commands/monitor_next/mod.rs"
+grep -Fq "${rb_prefix}{} dropped={}" "$cli_mod" \
+  || fail "ringbuf formatter prefix missing from monitor_next/mod.rs"
 
 pos='  • Send observation:   sendto emitted=1 dropped=0 no_peer=1 non_ip=1; sendmsg emitted=1 dropped=0 no_peer=1 non_ip=1'
 dis='  • Send observation:   sendto emitted=0 dropped=0 no_peer=0 non_ip=0; sendmsg emitted=0 dropped=0 no_peer=0 non_ip=0'
