@@ -218,6 +218,18 @@ run_matrix_active=$(awk '
 ' "$DRIVER")
 grep -Fq 'monitor_shutdown_ok "$mc"' <<<"$run_matrix_active" \
   || fail "run_matrix does not assert controlled monitor shutdown"
+# shellcheck disable=SC2016
+grep -Fq 'send_observation_ok "$summary" 1 0 1 1 1 0 1 1' <<<"$run_matrix_active" \
+  || fail "run_matrix does not live-call send_observation_ok for the positive cell"
+# shellcheck disable=SC2016
+grep -Fq 'send_observation_ok "$summary" 0 0 0 0 0 0 0 0' <<<"$run_matrix_active" \
+  || fail "run_matrix does not live-call send_observation_ok for attach-disabled"
+# shellcheck disable=SC2016
+grep -Fq 'ringbuf_drops_ok "$LOG"' <<<"$run_matrix_active" \
+  || fail "run_matrix does not live-call ringbuf_drops_ok"
+# shellcheck disable=SC2016
+grep -Fq 'coverage_gate "$OH"' <<<"$run_matrix_active" \
+  || fail "run_matrix does not live-call coverage_gate"
 echo "ok: monitor SIGINT shutdown is exit 0, not 130/crash"
 
 wait_iters=$(sed -n 's/^WAIT_LOG_ITERS=//p' "$DRIVER" | head -1)
@@ -241,6 +253,12 @@ wait_log_active=$(awk '
 grep -Fq 'n < WAIT_LOG_ITERS' <<<"$wait_log_active" || fail "wait_log does not use WAIT_LOG_ITERS"
 # shellcheck disable=SC2016
 grep -Fq 'sleep "$WAIT_LOG_SLEEP_S"' <<<"$wait_log_active" || fail "wait_log does not use WAIT_LOG_SLEEP_S"
+# shellcheck disable=SC2016
+grep -Fq 'fail "timeout waiting for: $pat"' <<<"$wait_log_active" \
+  || fail "wait_log timeout must fail closed, not return 0"
+# shellcheck disable=SC2016
+grep -Fq 'fail "monitor exited before matching: $pat"' <<<"$wait_log_active" \
+  || fail "wait_log must fail if the monitor exits before the pattern"
 grep -Fq 'open_go_fifo(argv[1], GO_FIFO_TIMEOUT_MS)' \
   "$(cd "$(dirname "$0")" && pwd)/s1b-send-syscall-matrix.c" \
   || fail "harness GO wait does not use GO_FIFO_TIMEOUT_MS"
