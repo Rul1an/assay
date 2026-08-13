@@ -224,6 +224,18 @@ run_mode monitor-shutdown-selftest nz 130
 run_mode monitor-shutdown-selftest nz 139
 grep -Fq 'tokio::signal::ctrl_c()' "$cli_mod" \
   || fail "monitor SIGINT path missing tokio::signal::ctrl_c"
+driver_active=$(awk '
+  {
+    tmp = $0
+    sub(/^[[:space:]]+/, "", tmp)
+    if (tmp == "" || tmp ~ /^#/) next
+    print tmp
+  }
+' "$DRIVER")
+n_run_matrix=$(printf '%s\n' "$driver_active" | grep -Ec '^run_matrix\(\) \{|^function run_matrix' || true)
+[[ "$n_run_matrix" -eq 1 ]] || fail "driver must define run_matrix() exactly once"
+n_assert_effects=$(printf '%s\n' "$driver_active" | grep -Ec '^assert_matrix_effects\(\) \{|^function assert_matrix_effects' || true)
+[[ "$n_assert_effects" -eq 1 ]] || fail "driver must define assert_matrix_effects() exactly once"
 run_matrix_active=$(fn_active run_matrix)
 # shellcheck disable=SC2016
 want_run_matrix=$(cat <<'EOF'
