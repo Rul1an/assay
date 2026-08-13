@@ -60,8 +60,12 @@ run_mode() {
 
 printf '[PID 1] sendto: 127.0.0.1:8080\n' >"$tmp/ep_8080.log"
 printf '[PID 1] sendto: 127.0.0.1:80\n' >"$tmp/ep_80.log"
-run_mode endpoint-line-selftest nz "$tmp/ep_8080.log" "127.0.0.1" "80"
-run_mode endpoint-line-selftest 0 "$tmp/ep_80.log" "127.0.0.1" "80"
+printf '[PID 99] sendto: 127.0.0.1:80\n' >"$tmp/ep_wrong_pid.log"
+printf '[PID 1] connect: 127.0.0.1:80\n' >"$tmp/ep_wrong_op.log"
+run_mode endpoint-line-selftest nz "$tmp/ep_8080.log" "1" "sendto" "127.0.0.1" "80"
+run_mode endpoint-line-selftest nz "$tmp/ep_wrong_pid.log" "1" "sendto" "127.0.0.1" "80"
+run_mode endpoint-line-selftest nz "$tmp/ep_wrong_op.log" "1" "sendto" "127.0.0.1" "80"
+run_mode endpoint-line-selftest 0 "$tmp/ep_80.log" "1" "sendto" "127.0.0.1" "80"
 echo "ok: endpoint-line fixtures"
 
 printf 'NOT_HARNESS_OK\n' >"$tmp/h_not"
@@ -80,8 +84,10 @@ printf '%s\n' 'Tracepoint ringbuf: sendto dropped=0' >"$tmp/rb_one.log"
 printf '%s\n' \
   'Tracepoint ringbuf: sendto dropped=0' \
   'Tracepoint ringbuf: sendmsg dropped=0' >"$tmp/rb_two.log"
+printf '%s\n' 'Tracepoint ringbuf: sendto dropped=01' >"$tmp/rb_01.log"
 run_mode ringbuf-drop-selftest nz "$tmp/rb_mixed.log"
 run_mode ringbuf-drop-selftest nz "$tmp/rb_none.log"
+run_mode ringbuf-drop-selftest nz "$tmp/rb_01.log"
 run_mode ringbuf-drop-selftest 0 "$tmp/rb_one.log"
 run_mode ringbuf-drop-selftest 0 "$tmp/rb_two.log"
 echo "ok: ringbuf-drop fixtures"

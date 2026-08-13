@@ -21,8 +21,8 @@ re_escape() {
 }
 
 endpoint_line_ok() {
-  local file="$1" ip="$2" port="$3"
-  grep -Eq "$(re_escape "$ip"):$(re_escape "$port")$" "$file"
+  local file="$1" pid="$2" op="$3" ip="$4" port="$5"
+  grep -Eq "^$(re_escape "[PID ${pid}] ${op}: ${ip}:${port}")$" "$file"
 }
 
 harness_ok() {
@@ -33,7 +33,7 @@ ringbuf_drops_ok() {
   local log="$1" line found=0
   while IFS= read -r line; do
     found=1
-    [[ "$line" == *dropped=0* ]] || return 1
+    [[ "$line" =~ (^|[[:space:]])dropped=0([^[:alnum:]]|$) ]] || return 1
   done < <(grep 'Tracepoint ringbuf:' "$log" || true)
   [[ "$found" -eq 1 ]]
 }
@@ -212,16 +212,16 @@ run_matrix() {
   for b in a2 a3 a4 a5 a6 a7; do
     grep -qi "CELL_OK recv=0x${b}" "$HOUT" || fail "receiver byte 0x${b} missing"
   done
-  endpoint_line_ok "$LOG" "127.0.0.1" "$tcp" \
+  endpoint_line_ok "$LOG" "$hpid" "connect" "127.0.0.1" "$tcp" \
     || fail "cell 1 connect line missing for 127.0.0.1:${tcp}"
 
   summary="$(grep 'Send observation:' "$LOG" || true)"
   [[ -n "$summary" ]] || fail "missing Send observation summary"
 
   if [[ "$expect_send" == "yes" ]]; then
-    endpoint_line_ok "$LOG" "127.0.0.1" "$p2" \
+    endpoint_line_ok "$LOG" "$hpid" "sendto" "127.0.0.1" "$p2" \
       || fail "cell 2 sendto endpoint missing"
-    endpoint_line_ok "$LOG" "127.0.0.1" "$p3" \
+    endpoint_line_ok "$LOG" "$hpid" "sendmsg" "127.0.0.1" "$p3" \
       || fail "cell 3 sendmsg endpoint missing"
     [[ "$(grep -c "\\[PID ${hpid}\\] sendto:" "$LOG")" -eq 1 &&
       "$(grep -c "\\[PID ${hpid}\\] sendmsg:" "$LOG")" -eq 1 ]] ||
@@ -375,8 +375,9 @@ case "$MODE" in
   coverage-gate) coverage_gate "${2:?coverage-gate requires a JSON path}" ;;
   mutation-selftest) mutation_selftest ;;
   endpoint-line-selftest)
-    [[ -n "${2:-}" && -n "${3:-}" && -n "${4:-}" ]] || fail "endpoint-line-selftest requires LOG IP PORT"
-    endpoint_line_ok "$2" "$3" "$4" || fail "endpoint line not ok"
+    [[ -n "${2:-}" && -n "${3:-}" && -n "${4:-}" && -n "${5:-}" && -n "${6:-}" ]] \
+      || fail "endpoint-line-selftest requires LOG PID OP IP PORT"
+    endpoint_line_ok "$2" "$3" "$4" "$5" "$6" || fail "endpoint line not ok"
     echo "ok: endpoint-line-selftest" ;;
   harness-ok-selftest)
     [[ -n "${2:-}" ]] || fail "harness-ok-selftest requires a file"
