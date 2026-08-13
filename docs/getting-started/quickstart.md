@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - uses: Rul1an/assay-action@v2
+      - uses: Rul1an/assay-action@f0c2125a73621830bcdf0b98355382c810df058b # v2
 ```
 
 ## Next Steps

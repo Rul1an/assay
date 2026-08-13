@@ -88,7 +88,7 @@ jobs:
           assay ci --config ci-eval.yaml --trace-file traces/ci.jsonl --sarif .assay/reports/sarif.json --junit .assay/reports/junit.xml
 
       - name: Verify AI agent behavior
-        uses: Rul1an/assay/assay-action@v2
+        uses: Rul1an/assay/assay-action@e65394d572d3fad649624ab3fa413be934b1d9fa # v2
         with:
           fail_on: error
 ```
@@ -98,7 +98,7 @@ jobs:
 - name: Run Assay
   run: assay ci --config eval.yaml --trace-file traces.jsonl --sarif assay-results.sarif --junit junit.xml
 - name: Upload SARIF
-  uses: github/codeql-action/upload-sarif@v4
+  uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43 # v4.37.5
   with:
     sarif_file: assay-results.sarif
 ```

@@ -52,15 +52,18 @@ cargo install assay-cli --version 5.1.0 --locked
 uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
 supported examples
 DOC
-printf '%s\n' 'cargo install assay-cli --version 5.1.0 --locked' > "$TMP/docs/getting-started/quickstart.md"
+cat > "$TMP/docs/getting-started/quickstart.md" <<'DOC'
+cargo install assay-cli --version 5.1.0 --locked
+uses: Rul1an/assay-action@f0c2125a73621830bcdf0b98355382c810df058b
+DOC
 cat > "$TMP/docs/reference/cli/index.md" <<'DOC'
 # assay 5.1.0
 cargo install assay-cli --version 5.1.0 --locked
 DOC
 printf '%s\n' 'pip install assay-it' > "$TMP/docs/python-sdk/index.md"
 cat > "$TMP/docs/use-cases/air-gapped.md" <<'DOC'
-https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz
-https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+curl -fLO https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz
+curl -fLO https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
 assay-v5.1.0-x86_64-unknown-linux-gnu/assay
 No runtime image is shipped.
 DOC
@@ -71,6 +74,7 @@ DOC
 cat > "$TMP/docs/AIcontext/user-flows.md" <<'DOC'
 cargo install assay-cli --version 5.1.0 --locked
 Install the SDK with pip install assay-it.
+uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43
 DOC
 printf '%s\n' 'Historical correction: pip install assay-it.' > "$TMP/docs/migration-v1.2.md"
 cat > "$TMP/README.md" <<'DOC'
@@ -191,10 +195,19 @@ mutate_and_expect_failure wrong-air-gap-extraction docs/use-cases/air-gapped.md 
   'current Linux release archive extraction drift'
 mutate_and_expect_failure mutable-action-ci docs/getting-started/ci-integration.md \
   's/actions\/upload-artifact@[0-9a-f]*/actions\/upload-artifact@v7/' \
-  'mutable GitHub Action reference'
+  'GitHub Action references must use full immutable commit SHAs'
 mutate_and_expect_failure mutable-action-ci-gate docs/use-cases/ci-gate.md \
   's/github\/codeql-action\/upload-sarif@[0-9a-f]*/github\/codeql-action\/upload-sarif@v4/' \
-  'mutable GitHub Action reference'
+  'GitHub Action references must use full immutable commit SHAs'
+mutate_and_expect_failure mutable-action-quickstart docs/getting-started/quickstart.md \
+  's/Rul1an\/assay-action@[0-9a-f]*/Rul1an\/assay-action@main/' \
+  'GitHub Action references must use full immutable commit SHAs'
+mutate_and_expect_failure mutable-action-user-flow docs/AIcontext/user-flows.md \
+  's/github\/codeql-action\/upload-sarif@[0-9a-f]*/github\/codeql-action\/upload-sarif@latest/' \
+  'GitHub Action references must use full immutable commit SHAs'
+mutate_and_expect_failure missing-air-gap-archive docs/use-cases/air-gapped.md \
+  's#curl -fLO https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz$#archive download omitted#' \
+  'current Linux release archive URL drift'
 
 selector_backup="$TMP/.pre-commit-config.yaml.selector"
 cp "$TMP/.pre-commit-config.yaml" "$selector_backup"
@@ -230,8 +243,8 @@ mutate_and_expect_failure stale-release-doc-index docs/index.md \
 mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
   's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
 
-if [ "$mutation_count" -ne 35 ]; then
-  echo "FAIL: expected 35 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 38 ]; then
+  echo "FAIL: expected 38 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

@@ -220,6 +220,28 @@ check_contains_fixed() {
   fi
 }
 
+check_contains_line() {
+  local file="$1" expected="$2" label="$3"
+  if [ ! -f "$file" ]; then
+    fail "$file: checked outward document is missing"
+    return
+  fi
+  if ! grep -qxF -- "$expected" "$file"; then
+    fail "$file: $label"
+  fi
+}
+
+check_action_refs_pinned() {
+  local file="$1"
+  local refs invalid
+  refs="$(grep -E 'uses:[[:space:]]+' "$file" || true)"
+  [ -n "$refs" ] || return
+  invalid="$(printf '%s\n' "$refs" | grep -Ev 'uses:[[:space:]]+[^[:space:]]+@[0-9a-f]{40}([[:space:]]+#.*)?$' || true)"
+  if [ -n "$invalid" ]; then
+    fail "$file: GitHub Action references must use full immutable commit SHAs"
+  fi
+}
+
 check_install_command_count() {
   local file="$1" expected_count="$2"
   local expected="cargo install assay-cli --version $WORKSPACE_VERSION --locked"
@@ -271,9 +293,9 @@ done
 linux_archive="assay-v$WORKSPACE_VERSION-x86_64-unknown-linux-gnu.tar.gz"
 linux_archive_root="${linux_archive%.tar.gz}"
 linux_archive_url="https://github.com/Rul1an/assay/releases/download/v$WORKSPACE_VERSION/$linux_archive"
-check_contains_fixed docs/use-cases/air-gapped.md "$linux_archive_url" \
+check_contains_line docs/use-cases/air-gapped.md "curl -fLO $linux_archive_url" \
   'current Linux release archive URL drift'
-check_contains_fixed docs/use-cases/air-gapped.md "$linux_archive_url.sha256" \
+check_contains_line docs/use-cases/air-gapped.md "curl -fLO $linux_archive_url.sha256" \
   'current Linux release checksum URL drift'
 check_contains_fixed docs/use-cases/air-gapped.md "$linux_archive_root/assay" \
   'current Linux release archive extraction drift'
@@ -281,9 +303,12 @@ check_absent_regex docs/use-cases/air-gapped.md \
   '(image:|docker (pull|run))[[:space:]]+[^[:space:]]*assay' 'unsupported runtime image'
 check_absent_regex docs/getting-started/installation.md \
   'assay-windows-x86_64\.zip' 'obsolete Windows asset name'
-for file in docs/getting-started/ci-integration.md docs/use-cases/ci-gate.md; do
-  check_absent_regex "$file" 'uses:[[:space:]]+[^[:space:]]+@v[0-9]' \
-    'mutable GitHub Action reference'
+for file in \
+  docs/getting-started/ci-integration.md \
+  docs/getting-started/quickstart.md \
+  docs/AIcontext/user-flows.md \
+  docs/use-cases/ci-gate.md; do
+  check_action_refs_pinned "$file"
 done
 
 if ! grep -qxF "# assay $WORKSPACE_VERSION" docs/reference/cli/index.md; then
