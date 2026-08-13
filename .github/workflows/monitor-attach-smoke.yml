@@ -112,8 +112,7 @@ jobs:
           mkfifo "$fifo"
           "$RUNNER_TEMP/s1b-harness" --fifo-selftest "$fifo"
           rm -f "$fifo"
-          bash scripts/ci/run-send-syscall-matrix.sh cleanup-selftest
-          bash scripts/ci/run-send-syscall-matrix.sh mutation-selftest
+          bash scripts/ci/test-s1b-coverage-gate.sh
 
       - name: Positive syscall/effect matrix
         if: ${{ github.event.inputs.proof_mode == 'send-matrix' }}

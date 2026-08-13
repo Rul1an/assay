@@ -117,8 +117,14 @@ grep -q 'ok: cleanup-selftest' "$tmp/cleanup.out" || fail "cleanup-selftest miss
 echo "ok: mutation-selftest and cleanup-selftest"
 
 wf="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/monitor-attach-smoke.yml"
-grep -q 'bash scripts/ci/run-send-syscall-matrix.sh cleanup-selftest' "$wf" \
-  || fail "workflow does not invoke cleanup-selftest"
+n=$(grep -cF 'bash scripts/ci/test-s1b-coverage-gate.sh' "$wf" || true)
+[[ "$n" -eq 1 ]] || fail "workflow must invoke the coverage-gate suite exactly once, got $n"
+if grep -q 'bash scripts/ci/run-send-syscall-matrix.sh cleanup-selftest' "$wf"; then
+  fail "workflow still invokes cleanup-selftest directly"
+fi
+if grep -q 'bash scripts/ci/run-send-syscall-matrix.sh mutation-selftest' "$wf"; then
+  fail "workflow still invokes mutation-selftest directly"
+fi
 # Intentional: match the workflow's literal backup copy/mv/cmp, not expand here.
 # shellcheck disable=SC2016
 grep -Fq 'cp "$binbak"' "$wf" || fail "workflow restore does not copy pre-mutation backup"
