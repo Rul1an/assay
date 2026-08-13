@@ -210,7 +210,7 @@ fi
 if grep -Eq '^        if:[[:space:]]*false([[:space:]]|$)' <<<"$compile_step"; then
   fail "Compile syscall harness must not be disabled with if: false"
 fi
-grep -Fq "        if: \${{ github.event.inputs.proof_mode == 'send-matrix' }}" <<<"$compile_step" \
+grep -qx "        if: \${{ github.event.inputs.proof_mode == 'send-matrix' }}" <<<"$compile_step" \
   || fail "Compile syscall harness must be send-matrix-conditioned"
 compile_active=$(active_run_lines "$compile_step")
 grep -qx 'bash scripts/ci/test-s1b-coverage-gate.sh' <<<"$compile_active" \
@@ -288,7 +288,7 @@ assert_send_matrix_step() {
   if grep -Eq '^        if:[[:space:]]*false([[:space:]]|$)' <<<"$step"; then
     fail "$name must not be disabled with if: false"
   fi
-  grep -Fq "        if: \${{ github.event.inputs.proof_mode == 'send-matrix' }}" <<<"$step" \
+  grep -qx "        if: \${{ github.event.inputs.proof_mode == 'send-matrix' }}" <<<"$step" \
     || fail "$name must be send-matrix-conditioned"
   active=$(active_run_lines "$step")
   for cmd in "$@"; do
@@ -348,6 +348,10 @@ disabled_idx=$(printf '%s\n' "$step_names" | grep -n '^Attach-disabled negative 
   || fail "coverage-gate suite step must run before the positive matrix"
 [[ -n "$disabled_idx" && "$positive_idx" -lt "$disabled_idx" ]] \
   || fail "positive matrix must run before attach-disabled"
+for s in "Compile syscall harness" "Positive syscall/effect matrix" "Attach-disabled negative matrix"; do
+  n=$(printf '%s\n' "$step_names" | grep -Fcx "$s" || true)
+  [[ "$n" -eq 1 ]] || fail "$s must occur exactly once"
+done
 preclean_run=$(awk '
   /^      - name: Pre-clean self-hosted workspace$/ { in_step=1; next }
   in_step && /^      - name: / { exit }
@@ -397,6 +401,10 @@ fi
 echo "ok: pre-clean run: block scoped before checkout"
 # Restore pins are inside restore() only. An echo/string decoy elsewhere in
 # the step must not satisfy cp/mv/cmp after the real command is commented.
+grep -Fqx 'trap restore EXIT' <<<"$disabled_active" \
+  || fail "attach-disabled must trap restore EXIT"
+n_restore=$(grep -Fcx 'restore() {' <<<"$disabled_active" || true)
+[[ "$n_restore" -eq 1 ]] || fail "attach-disabled must define restore() exactly once"
 restore_fn=$(awk '/^restore\(\) \{/,/^}$/' <<<"$disabled_active")
 [[ -n "$restore_fn" ]] || fail "could not extract restore() from attach-disabled active run"
 # shellcheck disable=SC2016
