@@ -132,6 +132,56 @@ fi
 if grep -q 'bash scripts/ci/run-send-syscall-matrix.sh mutation-selftest' "$wf"; then
   fail "workflow still invokes mutation-selftest directly"
 fi
+# First smoke step is Pre-clean; its YAML run: body (not the whole workflow)
+# must contain pkill/chattr/sudo find-delete/fail-closed empty, and that step
+# must sit immediately before actions/checkout. Global grep is prefix-vacuous.
+step_names=$(awk '
+  /^    steps:/ { s=1; next }
+  s && /^  [a-z]/ { exit }
+  s && /^      - name: / {
+    sub(/^      - name: /, "")
+    print
+  }
+' "$wf")
+first=$(printf '%s\n' "$step_names" | sed -n '1p')
+second=$(printf '%s\n' "$step_names" | sed -n '2p')
+[[ "$first" == "Pre-clean self-hosted workspace" ]] \
+  || fail "first smoke step must be Pre-clean self-hosted workspace, got ${first:-<empty>}"
+[[ "$second" == "Checkout" ]] \
+  || fail "pre-clean must immediately precede Checkout, got ${second:-<empty>}"
+preclean_run=$(awk '
+  /^      - name: Pre-clean self-hosted workspace$/ { in_step=1; next }
+  in_step && /^      - name: / { exit }
+  in_step && /^        run: \|$/ { in_run=1; next }
+  in_run {
+    if ($0 ~ /^          / || $0 == "") { print; next }
+    exit
+  }
+' "$wf")
+[[ -n "$preclean_run" ]] || fail "could not extract first Pre-clean run: block"
+next_until_checkout=$(awk '
+  /^      - name: Pre-clean self-hosted workspace$/ { in_step=1; next }
+  in_step && /^      - name: / { after=1 }
+  after { print }
+  after && /uses: actions\/checkout@/ { exit }
+' "$wf")
+n_names=$(printf '%s\n' "$next_until_checkout" | grep -c '^      - name: ' || true)
+[[ "$n_names" -eq 1 ]] || fail "pre-clean must be immediately before actions/checkout, intervening names=$n_names"
+grep -q 'uses: actions/checkout@' <<<"$next_until_checkout" \
+  || fail "step after Pre-clean must be actions/checkout"
+# shellcheck disable=SC2016
+grep -Fq 'sudo pkill -x assay' <<<"$preclean_run" || fail "Pre-clean run: must pkill assay"
+# shellcheck disable=SC2016
+grep -Fq 'sudo chattr -R -i' <<<"$preclean_run" || fail "Pre-clean run: must chattr -i leftover immutable files"
+# shellcheck disable=SC2016
+grep -Fq 'find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec sudo rm -rf {} +' <<<"$preclean_run" \
+  || fail "Pre-clean run: must sudo-delete all top-level workspace entries"
+# shellcheck disable=SC2016
+grep -Fq 'find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -print -quit' <<<"$preclean_run" \
+  || fail "Pre-clean run: must fail-closed assert the workspace is empty"
+grep -Fq 'ERROR: workspace not empty after' <<<"$preclean_run" \
+  || fail "Pre-clean run: must fail-closed if the workspace is not empty"
+echo "ok: pre-clean run: block scoped before checkout"
 # Intentional: match the workflow's literal backup copy/mv/cmp, not expand here.
 # shellcheck disable=SC2016
 grep -Fq 'cp "$binbak"' "$wf" || fail "workflow restore does not copy pre-mutation backup"

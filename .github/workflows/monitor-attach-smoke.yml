@@ -36,6 +36,25 @@ jobs:
     runs-on: [self-hosted, linux, assay-bpf-runner]
     timeout-minutes: 25
     steps:
+      # Inline: before checkout no repo script is available. Root-owned leftovers
+      # (target/, target-ebpf/, .git) make actions/checkout delete .git then fail
+      # at git config --local. Pattern from runner-spike-delegated.yml.
+      - name: Pre-clean self-hosted workspace
+        shell: bash
+        run: |
+          set +e
+          sudo pkill -x assay 2>/dev/null || true
+          sudo chattr -R -i "$GITHUB_WORKSPACE/.assay-test" 2>/dev/null || true
+          sudo rm -rf "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/.assay-test" 2>/dev/null || true
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec sudo rm -rf {} + 2>/dev/null || true
+          sudo rm -rf /tmp/assay-runner-* /dev/shm/assay-runner-* /tmp/assay-test 2>/dev/null || true
+          if find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+            echo "ERROR: workspace not empty after delegated pre-clean"
+            find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 2 -ls | sed -n '1,200p'
+            exit 1
+          fi
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
+
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
