@@ -119,7 +119,7 @@ bash scripts/ci/test-check-release-surface.sh
 ASSAY_BIN=target/debug/assay bash scripts/ci/check-release-surface.sh
 ```
 
-Expected: the self-test reports all five mutations observed; the live checker still fails until Task 3 removes existing unsupported claims. Do not commit this intermediate red repository state. Keep these three paths owned by the same writer through Task 3.
+Expected: the self-test reports all six mutations observed; the live checker still fails until Task 3 removes existing unsupported claims. Do not commit this intermediate red repository state. Keep these three paths owned by the same writer through Task 3.
 
 ### Task 2: Make the generated journey release-pinned
 
@@ -371,7 +371,7 @@ Expected: all pass.
 
 - [ ] **Step 2: Re-run representative mutations**
 
-Require the release-surface self-test to report all five mutations and the existing golden-path hardening suite to report its expected case count:
+Require the release-surface self-test to report all six mutations and the existing golden-path hardening suite to report its expected case count:
 
 ```bash
 bash scripts/ci/test-check-release-surface.sh

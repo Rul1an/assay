@@ -49,7 +49,7 @@ assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
 
 ![Assay decides each MCP tool call before it runs, fail-closed, with the reason](demo/output/screenshots/mcp-wrap-demo.svg)
 
-Wire it into Cursor, Claude Code, or Codex in one line with `assay mcp config-path <editor>`. Python SDK: `pip install assay-it`. CI: [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security). No hosted backend, no API keys for core flows, deterministic by design. New to the threat model? The [OWASP MCP Top 10 mapping](docs/security/OWASP-MCP-TOP10-MAPPING.md) lays out, per risk, what Assay covers and what it deliberately does not.
+Project manifests are shipped for Claude Code and Cursor; Codex uses the equivalent TOML entry documented in the [editor MCP recipe](docs/guides/editor-mcp-recipe.md). `assay mcp config-path` supports Claude and Cursor only. Python SDK: `pip install assay-it`. CI: [GitHub Action](https://github.com/marketplace/actions/assay-ai-agent-security). No hosted backend and no API keys for core flows. New to the threat model? The [OWASP MCP Top 10 mapping](docs/security/OWASP-MCP-TOP10-MAPPING.md) lays out, per risk, what Assay covers and what it deliberately does not.
 
 ## What ships
 

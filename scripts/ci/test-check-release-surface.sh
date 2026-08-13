@@ -6,7 +6,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/scripts/ci" "$TMP/docs/getting-started" "$TMP/docs/reference/cli" \
-  "$TMP/docs/python-sdk" "$TMP/docs/use-cases" "$TMP/docs/AIcontext" "$TMP/crates/assay-x" "$TMP/bin"
+  "$TMP/docs/python-sdk" "$TMP/docs/use-cases" "$TMP/docs/AIcontext" "$TMP/docs/guides" \
+  "$TMP/crates/assay-x" "$TMP/bin"
 cp "$ROOT/scripts/ci/check-release-surface.sh" "$TMP/scripts/ci/"
 cat > "$TMP/Cargo.toml" <<'TOML'
 [workspace]
@@ -42,6 +43,8 @@ printf '%s\n' 'pip install assay-it' > "$TMP/docs/python-sdk/index.md"
 printf '%s\n' 'Build an image locally.' > "$TMP/docs/use-cases/air-gapped.md"
 printf '%s\n' 'Install the CLI with Cargo; install the SDK with pip install assay-it.' > "$TMP/docs/AIcontext/user-flows.md"
 printf '%s\n' 'Historical correction: pip install assay-it.' > "$TMP/docs/migration-v1.2.md"
+printf '%s\n' 'Claude and Cursor config-path only.' > "$TMP/README.md"
+printf '%s\n' 'Codex uses .codex/config.toml.' > "$TMP/docs/guides/editor-mcp-recipe.md"
 (
   cd "$TMP"
   git init -q
@@ -83,5 +86,8 @@ mutate_and_expect_failure ghcr-channel docs/getting-started/ci-integration.md \
   's/supported examples/docker pull ghcr.io\/rul1an\/assay:latest/' 'unsupported GHCR image'
 mutate_and_expect_failure stale-windows-asset docs/getting-started/installation.md \
   's/assay-v5.1.0-x86_64-pc-windows-msvc.zip/assay-windows-x86_64.zip/' 'obsolete Windows asset name'
+mutate_and_expect_failure unsupported-codex-config-path README.md \
+  's/Claude and Cursor config-path only./assay mcp config-path <editor>/' \
+  'config-path does not support Codex'
 
-echo 'release-surface mutations: 5 observed'
+echo 'release-surface mutations: 6 observed'

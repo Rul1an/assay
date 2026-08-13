@@ -158,7 +158,8 @@ In `.cursor/mcp.json`, same shape:
 ## Codex
 
 In your `AGENTS.md` / Codex MCP config, register the same wrapped command as the
-server entry. Use `assay mcp config-path` to locate the active config.
+server entry. Codex uses project `.codex/config.toml` or user
+`~/.codex/config.toml`; `assay mcp config-path` does not discover Codex config.
 
 ## Remote servers (provisional, MCP 2026-07-28)
 

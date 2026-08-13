@@ -232,6 +232,11 @@ check_absent_regex docs/getting-started/installation.md \
 if ! grep -qxF "# assay $WORKSPACE_VERSION" docs/reference/cli/index.md; then
   fail "docs/reference/cli/index.md: documented CLI version drift"
 fi
+check_absent_regex README.md \
+  'assay mcp config-path <editor>' 'config-path does not support Codex'
+check_absent_regex docs/guides/editor-mcp-recipe.md \
+  'Use `assay mcp config-path` to locate the active config' \
+  'config-path does not support Codex'
 
 # ---------------------------------------------------------------------------
 note ""
