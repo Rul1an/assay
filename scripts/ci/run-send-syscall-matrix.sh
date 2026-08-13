@@ -13,10 +13,26 @@ WAIT_LOG_ITERS=60
 WAIT_LOG_SLEEP_S=0.5
 WAIT_LOG_MAX_BEFORE_GO=4
 GO_TIMEOUT_MARGIN_MS=30000
+DIAG_MAX_LINES=200
 MUTATION_OLD='attach_send_tracepoint(&mut bpf, r)'
 MUTATION_NEW='Err((SendFault::AttachFailed { kernel_lacks_point: false }, "s1b-cell7-disabled".to_string()))'
 
-fail() { echo "FAIL: $*" >&2; exit 1; }
+emit_matrix_diagnostics() {
+  local f path
+  for f in LOG HOUT; do
+    path="${!f:-}"
+    [[ -n "$path" && -f "$path" ]] || continue
+    echo "----- begin $f -----" >&2
+    sed -n "1,${DIAG_MAX_LINES}p" "$path" >&2 || true
+    echo "----- end $f -----" >&2
+  done
+}
+
+fail() {
+  echo "FAIL: $*" >&2
+  emit_matrix_diagnostics
+  exit 1
+}
 [[ "$WAIT_LOG_MAX_BEFORE_GO" -ge 1 && "$GO_TIMEOUT_MARGIN_MS" -ge 0 ]] \
   || fail "invalid GO bound constants"
 
@@ -186,6 +202,18 @@ wait_log() {
   fail "timeout waiting for: $pat"
 }
 
+wait_endpoint() {
+  local pid="$1" op="$2" ip="$3" port="$4" n
+  for ((n = 0; n < WAIT_LOG_ITERS; n++)); do
+    endpoint_line_ok "$LOG" "$pid" "$op" "$ip" "$port" && return 0
+    if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
+      fail "monitor exited before matching: $op $ip:$port"
+    fi
+    sleep "$WAIT_LOG_SLEEP_S"
+  done
+  fail "timeout waiting for: $op $ip:$port"
+}
+
 isolate_pid() {
   local cur leaf
   cur="$(awk -F: '$1=="0"{print $3}' "/proc/${1}/cgroup")"
@@ -197,7 +225,7 @@ isolate_pid() {
 }
 
 run_matrix() {
-  local expect_send="$1" n=0 hpid="" hc=0 mc=0
+  local expect_send="$1" n=0 hpid="" hc=0 mc=0 p2 p3
   mkdir -p "$WORKDIR"
   FIFO="$WORKDIR/go.fifo"
   LOG="$WORKDIR/monitor.log"
@@ -239,6 +267,14 @@ run_matrix() {
   write_go
   wait "$HARNESS_PID" || hc=$?
   HARNESS_PID=""
+
+  if [[ "$expect_send" == "yes" ]]; then
+    p2="$(awk -F= '/^CELL2_UDP_PORT=/{print $2; exit}' "$HOUT")"
+    p3="$(awk -F= '/^CELL3_UDP_PORT=/{print $2; exit}' "$HOUT")"
+    [[ -n "$p2" && -n "$p3" ]] || fail "missing send ports in harness stdout"
+    wait_endpoint "$hpid" sendto "127.0.0.1" "$p2"
+    wait_endpoint "$hpid" sendmsg "127.0.0.1" "$p3"
+  fi
 
   kill -INT "$MONITOR_PID" 2>/dev/null || true
   wait "$MONITOR_PID" || mc=$?
@@ -461,5 +497,9 @@ case "$MODE" in
     [[ -n "${2:-}" ]] || fail "monitor-shutdown-selftest requires an exit code"
     monitor_shutdown_ok "$2" || fail "exit $2 is not controlled SIGINT shutdown"
     echo "ok: monitor-shutdown-selftest" ;;
-  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest" ;;
+  diagnostics-selftest)
+    LOG="${2:?}"
+    HOUT="${3:?}"
+    fail "diagnostics-selftest" ;;
+  *) fail "usage: $0 positive|attach-disabled|disable-send-attach|cleanup-selftest|coverage-gate|mutation-selftest|endpoint-line-selftest|harness-ok-selftest|ringbuf-drop-selftest|send-observation-selftest|monitor-shutdown-selftest|diagnostics-selftest" ;;
 esac

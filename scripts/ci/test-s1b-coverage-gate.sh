@@ -236,11 +236,17 @@ n_run_matrix=$(printf '%s\n' "$driver_active" | grep -Ec '^run_matrix\(\) \{|^fu
 [[ "$n_run_matrix" -eq 1 ]] || fail "driver must define run_matrix() exactly once"
 n_assert_effects=$(printf '%s\n' "$driver_active" | grep -Ec '^assert_matrix_effects\(\) \{|^function assert_matrix_effects' || true)
 [[ "$n_assert_effects" -eq 1 ]] || fail "driver must define assert_matrix_effects() exactly once"
+n_wait_endpoint=$(printf '%s\n' "$driver_active" | grep -Ec '^wait_endpoint\(\) \{|^function wait_endpoint' || true)
+[[ "$n_wait_endpoint" -eq 1 ]] || fail "driver must define wait_endpoint() exactly once"
+n_emit_diag=$(printf '%s\n' "$driver_active" | grep -Ec '^emit_matrix_diagnostics\(\) \{|^function emit_matrix_diagnostics' || true)
+[[ "$n_emit_diag" -eq 1 ]] || fail "driver must define emit_matrix_diagnostics() exactly once"
+n_fail=$(printf '%s\n' "$driver_active" | grep -Ec '^fail\(\) \{|^function fail' || true)
+[[ "$n_fail" -eq 1 ]] || fail "driver must define fail() exactly once"
 run_matrix_active=$(fn_active run_matrix)
 # shellcheck disable=SC2016
 want_run_matrix=$(cat <<'EOF'
 run_matrix() {
-local expect_send="$1" n=0 hpid="" hc=0 mc=0
+local expect_send="$1" n=0 hpid="" hc=0 mc=0 p2 p3
 mkdir -p "$WORKDIR"
 FIFO="$WORKDIR/go.fifo"
 LOG="$WORKDIR/monitor.log"
@@ -276,6 +282,13 @@ kill -0 "$HARNESS_PID" 2>/dev/null || fail "harness died before GO"
 write_go
 wait "$HARNESS_PID" || hc=$?
 HARNESS_PID=""
+if [[ "$expect_send" == "yes" ]]; then
+p2="$(awk -F= '/^CELL2_UDP_PORT=/{print $2; exit}' "$HOUT")"
+p3="$(awk -F= '/^CELL3_UDP_PORT=/{print $2; exit}' "$HOUT")"
+[[ -n "$p2" && -n "$p3" ]] || fail "missing send ports in harness stdout"
+wait_endpoint "$hpid" sendto "127.0.0.1" "$p2"
+wait_endpoint "$hpid" sendmsg "127.0.0.1" "$p3"
+fi
 kill -INT "$MONITOR_PID" 2>/dev/null || true
 wait "$MONITOR_PID" || mc=$?
 MONITOR_PID=""
@@ -286,6 +299,34 @@ EOF
 )
 [[ "$run_matrix_active" == "$want_run_matrix" ]] \
   || fail "run_matrix active body must be the closed startup-then-assert shape"
+wait_ep_block=$(printf '%s\n' \
+  'wait_endpoint "$hpid" sendto "127.0.0.1" "$p2"' \
+  'wait_endpoint "$hpid" sendmsg "127.0.0.1" "$p3"')
+[[ "$run_matrix_active" == *"$wait_ep_block"* ]] \
+  || fail "run_matrix must wait for sendto/sendmsg via wait_endpoint before SIGINT"
+python3 - "$DRIVER" "$tmp/mut-wait-driver.sh" <<'PY'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = '''    wait_endpoint "$hpid" sendto "127.0.0.1" "$p2"
+    wait_endpoint "$hpid" sendmsg "127.0.0.1" "$p3"
+'''
+if old not in text:
+    raise SystemExit("driver is missing the pre-SIGINT wait_endpoint calls")
+dst.write_text(text.replace(old, "", 1))
+PY
+mut_run_matrix=$(awk '
+  $0 ~ "^run_matrix\\(\\) \\{" { p=1 }
+  p {
+    tmp = $0
+    sub(/^[[:space:]]+/, "", tmp)
+    if (tmp != "" && tmp !~ /^#/) print tmp
+  }
+  p && /^}/ { exit }
+' "$tmp/mut-wait-driver.sh")
+[[ "$mut_run_matrix" != "$want_run_matrix" ]] \
+  || fail "removing pre-SIGINT wait_endpoint was not caught by the run_matrix pin"
 assert_effects_active=$(fn_active assert_matrix_effects)
 # shellcheck disable=SC2016
 want_assert_effects=$(cat <<'EOF'
@@ -361,6 +402,13 @@ run_matrix no ;;
 EOF
 )" \
   "attach-disabled case arm does not exact-call run_matrix no"
+# shellcheck disable=SC2016
+assert_nl_snippet "$case_active" "$(printf '%s\n' \
+  'diagnostics-selftest)' \
+  'LOG="${2:?}"' \
+  'HOUT="${3:?}"' \
+  'fail "diagnostics-selftest" ;;')" \
+  "diagnostics-selftest case arm must call fail after binding LOG and HOUT"
 
 wait_iters=$(sed -n 's/^WAIT_LOG_ITERS=//p' "$DRIVER" | head -1)
 wait_sleep=$(sed -n 's/^WAIT_LOG_SLEEP_S=//p' "$DRIVER" | head -1)
@@ -397,6 +445,93 @@ want_wait_log=$(printf '%s\n' \
   '}')
 [[ "$wait_log_active" == "$want_wait_log" ]] \
   || fail "wait_log active body must be the closed fail-closed shape"
+wait_endpoint_active=$(fn_active wait_endpoint)
+# shellcheck disable=SC2016
+want_wait_endpoint=$(printf '%s\n' \
+  'wait_endpoint() {' \
+  'local pid="$1" op="$2" ip="$3" port="$4" n' \
+  'for ((n = 0; n < WAIT_LOG_ITERS; n++)); do' \
+  'endpoint_line_ok "$LOG" "$pid" "$op" "$ip" "$port" && return 0' \
+  'if ! kill -0 "$MONITOR_PID" 2>/dev/null; then' \
+  'fail "monitor exited before matching: $op $ip:$port"' \
+  'fi' \
+  'sleep "$WAIT_LOG_SLEEP_S"' \
+  'done' \
+  'fail "timeout waiting for: $op $ip:$port"' \
+  '}')
+[[ "$wait_endpoint_active" == "$want_wait_endpoint" ]] \
+  || fail "wait_endpoint active body must boundedly wait via endpoint_line_ok"
+fail_active=$(fn_active fail)
+# shellcheck disable=SC2016
+want_fail=$(printf '%s\n' \
+  'fail() {' \
+  'echo "FAIL: $*" >&2' \
+  'emit_matrix_diagnostics' \
+  'exit 1' \
+  '}')
+[[ "$fail_active" == "$want_fail" ]] \
+  || fail "fail() must emit matrix diagnostics before exit"
+emit_active=$(fn_active emit_matrix_diagnostics)
+# shellcheck disable=SC2016
+want_emit=$(printf '%s\n' \
+  'emit_matrix_diagnostics() {' \
+  'local f path' \
+  'for f in LOG HOUT; do' \
+  'path="${!f:-}"' \
+  '[[ -n "$path" && -f "$path" ]] || continue' \
+  'echo "----- begin $f -----" >&2' \
+  'sed -n "1,${DIAG_MAX_LINES}p" "$path" >&2 || true' \
+  'echo "----- end $f -----" >&2' \
+  'done' \
+  '}')
+[[ "$emit_active" == "$want_emit" ]] \
+  || fail "emit_matrix_diagnostics must dump only bounded LOG and HOUT"
+diag_max=$(sed -n 's/^DIAG_MAX_LINES=//p' "$DRIVER" | head -1)
+[[ "$diag_max" == "200" ]] || fail "DIAG_MAX_LINES must be 200"
+printf 'MON_CANARY_S1B\n' >"$tmp/diag-mon.log"
+printf 'HAR_CANARY_S1B\n' >"$tmp/diag-har.out"
+set +e
+bash "$DRIVER" diagnostics-selftest "$tmp/diag-mon.log" "$tmp/diag-har.out" \
+  >"$tmp/diag.out" 2>"$tmp/diag.err"
+diag_ec=$?
+set -e
+[[ "$diag_ec" -ne 0 ]] || fail "diagnostics-selftest must exit nonzero"
+if grep -q 'usage:' "$tmp/diag.err"; then
+  fail "diagnostics-selftest failed as unknown mode: $(cat "$tmp/diag.err")"
+fi
+grep -Fq -- '----- begin LOG -----' "$tmp/diag.err" \
+  || fail "assertion failure must dump monitor log: $(cat "$tmp/diag.err")"
+grep -Fq 'MON_CANARY_S1B' "$tmp/diag.err" \
+  || fail "monitor log dump missing canary"
+grep -Fq -- '----- begin HOUT -----' "$tmp/diag.err" \
+  || fail "assertion failure must dump harness output"
+grep -Fq 'HAR_CANARY_S1B' "$tmp/diag.err" \
+  || fail "harness dump missing canary"
+if grep -Fq 'GITHUB_WORKSPACE' "$tmp/diag.err"; then
+  fail "diagnostics dumped unrelated workspace content"
+fi
+python3 - "$DRIVER" "$tmp/mut-fail-driver.sh" <<'PY'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+old = "  emit_matrix_diagnostics\n"
+if old not in text:
+    raise SystemExit("fail() is missing emit_matrix_diagnostics")
+dst.write_text(text.replace(old, "", 1))
+PY
+set +e
+bash "$tmp/mut-fail-driver.sh" diagnostics-selftest \
+  "$tmp/diag-mon.log" "$tmp/diag-har.out" >"$tmp/mut-diag.out" 2>"$tmp/mut-diag.err"
+mut_diag_ec=$?
+set -e
+[[ "$mut_diag_ec" -ne 0 ]] || fail "mutated fail() must still exit nonzero"
+if grep -Fq 'MON_CANARY_S1B' "$tmp/mut-diag.err"; then
+  fail "deleting emit_matrix_diagnostics still dumped the monitor log"
+fi
+if grep -Fq 'HAR_CANARY_S1B' "$tmp/mut-diag.err"; then
+  fail "deleting emit_matrix_diagnostics still dumped harness output"
+fi
 grep -Fq 'open_go_fifo(argv[1], GO_FIFO_TIMEOUT_MS)' \
   "$(cd "$(dirname "$0")" && pwd)/s1b-send-syscall-matrix.c" \
   || fail "harness GO wait does not use GO_FIFO_TIMEOUT_MS"
