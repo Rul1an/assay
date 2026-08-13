@@ -9,6 +9,7 @@ mkdir -p "$TMP/scripts/ci" "$TMP/docs/getting-started" "$TMP/docs/reference/cli"
   "$TMP/docs/python-sdk" "$TMP/docs/use-cases" "$TMP/docs/AIcontext" "$TMP/docs/guides" \
   "$TMP/crates/assay-x" "$TMP/bin"
 cp "$ROOT/scripts/ci/check-release-surface.sh" "$TMP/scripts/ci/"
+cp "$ROOT/.pre-commit-config.yaml" "$TMP/"
 cat > "$TMP/Cargo.toml" <<'TOML'
 [workspace]
 members = ["crates/assay-x"]
@@ -48,6 +49,7 @@ cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-cli --version 5.1.0 --locked
 cargo install assay-cli --version 5.1.0 --locked
+uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
 supported examples
 DOC
 printf '%s\n' 'cargo install assay-cli --version 5.1.0 --locked' > "$TMP/docs/getting-started/quickstart.md"
@@ -58,10 +60,14 @@ DOC
 printf '%s\n' 'pip install assay-it' > "$TMP/docs/python-sdk/index.md"
 cat > "$TMP/docs/use-cases/air-gapped.md" <<'DOC'
 https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz
+https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
 assay-v5.1.0-x86_64-unknown-linux-gnu/assay
 No runtime image is shipped.
 DOC
-printf '%s\n' 'cargo install assay-cli --version 5.1.0 --locked' > "$TMP/docs/use-cases/ci-gate.md"
+cat > "$TMP/docs/use-cases/ci-gate.md" <<'DOC'
+cargo install assay-cli --version 5.1.0 --locked
+uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43
+DOC
 cat > "$TMP/docs/AIcontext/user-flows.md" <<'DOC'
 cargo install assay-cli --version 5.1.0 --locked
 Install the SDK with pip install assay-it.
@@ -84,7 +90,27 @@ run_check() {
   (cd "$TMP" && ASSAY_BIN="$TMP/bin/assay" bash scripts/ci/check-release-surface.sh)
 }
 
+check_release_hook_selector() {
+  python3 - "$TMP/.pre-commit-config.yaml" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+lines = Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+start = next(i for i, line in enumerate(lines) if line.strip() == "- id: release-surface")
+end = next((i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("- id:")), len(lines))
+files_lines = [line.strip().removeprefix("files: ") for line in lines[start:end] if line.strip().startswith("files: ")]
+if len(files_lines) != 1:
+    raise SystemExit("release-surface hook must have one files selector")
+pattern = re.compile(files_lines[0])
+for path in ("docs/getting-started/ci-integration.md", "docs/use-cases/air-gapped.md", "docs/use-cases/ci-gate.md"):
+    if not pattern.search(path):
+        raise SystemExit(f"release-surface hook omits {path}")
+PY
+}
+
 run_check >/dev/null
+check_release_hook_selector
 
 mutation_count=0
 mutate_and_expect_failure() {
@@ -157,6 +183,31 @@ mutate_and_expect_failure obsolete-air-gap-asset docs/use-cases/air-gapped.md \
 mutate_and_expect_failure unsupported-runtime-image docs/use-cases/air-gapped.md \
   's/No runtime image is shipped./image: internal-registry.corp\/assay:v5.1.0/' \
   'unsupported runtime image'
+mutate_and_expect_failure stale-air-gap-checksum docs/use-cases/air-gapped.md \
+  's/\.tar.gz\.sha256/.tar.gz.old.sha256/' \
+  'current Linux release checksum URL drift'
+mutate_and_expect_failure wrong-air-gap-extraction docs/use-cases/air-gapped.md \
+  's/x86_64-unknown-linux-gnu\/assay/x86_64-unknown-linux-gnu\/bin\/assay/' \
+  'current Linux release archive extraction drift'
+mutate_and_expect_failure mutable-action-ci docs/getting-started/ci-integration.md \
+  's/actions\/upload-artifact@[0-9a-f]*/actions\/upload-artifact@v7/' \
+  'mutable GitHub Action reference'
+mutate_and_expect_failure mutable-action-ci-gate docs/use-cases/ci-gate.md \
+  's/github\/codeql-action\/upload-sarif@[0-9a-f]*/github\/codeql-action\/upload-sarif@v4/' \
+  'mutable GitHub Action reference'
+
+selector_backup="$TMP/.pre-commit-config.yaml.selector"
+cp "$TMP/.pre-commit-config.yaml" "$selector_backup"
+sed -i.bak 's/|ci-gate//' "$TMP/.pre-commit-config.yaml"
+rm -f "$TMP/.pre-commit-config.yaml.bak"
+if check_release_hook_selector >"$TMP/selector.out" 2>&1; then
+  echo "FAIL: release-surface selector mutation was not observed" >&2
+  exit 1
+fi
+grep -Fq 'release-surface hook omits docs/use-cases/ci-gate.md' "$TMP/selector.out"
+mv "$selector_backup" "$TMP/.pre-commit-config.yaml"
+mutation_count=$((mutation_count + 1))
+echo "PASS: release-surface selector covers ci-gate"
 
 for row in \
   'README.md|stale-version-readme' \
@@ -179,8 +230,8 @@ mutate_and_expect_failure stale-release-doc-index docs/index.md \
 mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
   's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
 
-if [ "$mutation_count" -ne 30 ]; then
-  echo "FAIL: expected 30 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 35 ]; then
+  echo "FAIL: expected 35 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

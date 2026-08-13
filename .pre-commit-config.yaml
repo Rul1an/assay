@@ -271,7 +271,7 @@ repos:
         # Triggers on the files it can be wrong about, plus itself. It does not need a binary: with
         # no `target/` build it falls back to the manifest version, so a release-prep commit is
         # checked without waiting on a compile.
-        files: ^(scripts/ci/(check|test-check)-release-surface\.sh|Cargo\.toml|README\.md|docs/(index\.md|getting-started/(index|installation|quickstart|ci-integration)\.md|reference/cli/index\.md|python-sdk/index\.md|use-cases/air-gapped\.md|AIcontext/user-flows\.md|migration-v1\.2\.md|guides/editor-mcp-recipe\.md)|\.pre-commit-config\.yaml)$
+        files: ^(scripts/ci/(check|test-check)-release-surface\.sh|Cargo\.toml|README\.md|docs/(index\.md|getting-started/(index|installation|quickstart|ci-integration)\.md|reference/cli/index\.md|python-sdk/index\.md|use-cases/(air-gapped|ci-gate)\.md|AIcontext/user-flows\.md|migration-v1\.2\.md|guides/editor-mcp-recipe\.md)|\.pre-commit-config\.yaml)$
 
       - id: ci-gate-expectations-self-test
         name: CI gate expectation contract

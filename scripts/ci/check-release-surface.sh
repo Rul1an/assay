@@ -273,12 +273,18 @@ linux_archive_root="${linux_archive%.tar.gz}"
 linux_archive_url="https://github.com/Rul1an/assay/releases/download/v$WORKSPACE_VERSION/$linux_archive"
 check_contains_fixed docs/use-cases/air-gapped.md "$linux_archive_url" \
   'current Linux release archive URL drift'
+check_contains_fixed docs/use-cases/air-gapped.md "$linux_archive_url.sha256" \
+  'current Linux release checksum URL drift'
 check_contains_fixed docs/use-cases/air-gapped.md "$linux_archive_root/assay" \
   'current Linux release archive extraction drift'
 check_absent_regex docs/use-cases/air-gapped.md \
   '(image:|docker (pull|run))[[:space:]]+[^[:space:]]*assay' 'unsupported runtime image'
 check_absent_regex docs/getting-started/installation.md \
   'assay-windows-x86_64\.zip' 'obsolete Windows asset name'
+for file in docs/getting-started/ci-integration.md docs/use-cases/ci-gate.md; do
+  check_absent_regex "$file" 'uses:[[:space:]]+[^[:space:]]+@v[0-9]' \
+    'mutable GitHub Action reference'
+done
 
 if ! grep -qxF "# assay $WORKSPACE_VERSION" docs/reference/cli/index.md; then
   fail "docs/reference/cli/index.md: documented CLI version drift"
