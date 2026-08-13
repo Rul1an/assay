@@ -98,11 +98,6 @@ claims yet, so every exhaustive set degrades and every bounded-negative claim
 blocks under the current seeds. That is the point: the gate must not silently
 upgrade a claim the method cannot back.
 
-Do not read Runner `connect_only` as a connect4 requirement, and do not read
-CLI `observation_health` as count-derived. The measured cell that shows why
-those producers must stay separate is
-[runtime-monitor: Measured IORING_OP_CONNECT](../../guides/runtime-monitor.md#measured-ioring-op-connect).
-
 ## Composition order
 
 The two gates compose, they do not vote. The decision for one
@@ -170,7 +165,3 @@ blocked negatives stay blocked, because gate two never permitted them.
 - The example mirrors the canonical Rust gate in
   `crates/assay-runner-schema/src/coverage.rs`; the Rust helper remains
   the source of truth if the two ever diverge.
-- The measured cell linked from
-  [runtime-monitor](../../guides/runtime-monitor.md#measured-ioring-op-connect)
-  does not generalize kernels, attach send probes, or fix monitor `run_id`
-  pairing ([#2342](https://github.com/Rul1an/assay/issues/2342)).

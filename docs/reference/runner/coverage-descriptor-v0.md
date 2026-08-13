@@ -172,10 +172,6 @@ Initial rules:
   capture into an exact peer set.
 - The descriptor does not make self-reported SDK or trace evidence
   measured.
-- The descriptor does not generalize the measured cell, require connect4
-  for Runner `connect_only`, or fix monitor `run_id` pairing
-  ([#2342](https://github.com/Rul1an/assay/issues/2342)). See
-  [runtime-monitor](../../guides/runtime-monitor.md#measured-ioring-op-connect).
 
 ## Wiring Status
 

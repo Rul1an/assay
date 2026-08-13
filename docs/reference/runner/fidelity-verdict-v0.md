@@ -122,13 +122,6 @@ release ELF and always attempted as tracepoints. Two producers fill
   cgroup `connect4` (network-policy path): `connect_only` if that probe
   attached, otherwise `absent`. It does not emit datagram labels.
 
-`network_endpoint_claim_scope = diagnostic_only` remains a non-exhaustive,
-connect-time bound: it is not an exact peer set. That bound does not make
-Runner `connect_only` a connect4 requirement. The measured cell is
-[runtime-monitor: Measured IORING_OP_CONNECT](../../guides/runtime-monitor.md#measured-ioring-op-connect).
-CLI monitor artifact `run_id` pairing remains
-[#2342](https://github.com/Rul1an/assay/issues/2342) and is not fixed here.
-
 If network events may have
 been dropped before any network event was emitted, coverage is `unknown`.
 

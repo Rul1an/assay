@@ -44,11 +44,10 @@ Uses the Cgroup `connect4` hook to enforce IPv4/TCP `connect()` rules:
   alone does not restrict unmatched traffic.
 
 IPv6 CIDR policies are refused before any rule map is changed; they are not silently reduced to
-their IPv4 subset. `connect6_hook` is compiled into the release ELF and presently unattached
-(`Unsupported`); it is IPv6 **enforcement**, not the connect observer.
-`sys_enter_connect` is always attached and handles `AF_INET6`. That tracepoint can **observe**
-`AF_INET6` connect syscalls; it is not IPv6 enforcement. IPv6 CIDR enforcement, UDP/QUIC,
-DNS resolution, already-open sockets, raw sockets, and
+their IPv4 subset. `connect6_hook` is compiled-but-unattached **enforcement** (`Unsupported`);
+it is not the connect observer. `sys_enter_connect` is always attached and handles `AF_INET6`.
+That tracepoint can **observe** `AF_INET6` connect syscalls; it is not IPv6 enforcement. IPv6
+CIDR enforcement, UDP/QUIC, DNS resolution, already-open sockets, raw sockets, and
 proxy/tunnel identity remain outside the enforcement claim tracked in issue #1576.
 
 <a id="measured-ioring-op-connect"></a>
@@ -152,7 +151,7 @@ At the end of a run, `assay monitor` also prints a summary of emitted and droppe
 ## 5. Probe inventory and non-claims
 
 The release eBPF object compiles **11** programs (`PROBE_PROGRAMS` in `assay-monitor`).
-`EXPECTED_PROBES` lists the **7** always-attempted attach surfaces
+`EXPECTED_PROBES` lists the **7** Always-class surfaces
 (`sys_enter_openat`, `sys_enter_openat2`, `sys_exit_openat`, `sys_exit_openat2`,
 `sys_enter_connect`, `sys_enter_fork`, `lsm:file_open`). The other four are mode-aware:
 
@@ -160,8 +159,21 @@ The release eBPF object compiles **11** programs (`PROBE_PROGRAMS` in `assay-mon
 |---|---|---|
 | `connect4_hook` | `cgroup_sock_addr:connect4` | Requested only with a network policy; otherwise `not_requested` |
 | `connect6_hook` | `cgroup_sock_addr:connect6` | Compiled-but-unattached **enforcement** (`Unsupported` / `AttachSpec::None`) |
-| `assay_monitor_sendto` | `sys_enter_sendto` | Compiled-but-unattached (`Unsupported` / `AttachSpec::None`) |
-| `assay_monitor_sendmsg` | `sys_enter_sendmsg` | Compiled-but-unattached (`Unsupported` / `AttachSpec::None`) |
+| `assay_monitor_sendto` | `sys_enter_sendto` | Always attempted (`AlwaysAttempted`) as `syscalls/sys_enter_sendto` where supported; mode-aware terminal status |
+| `assay_monitor_sendmsg` | `sys_enter_sendmsg` | Always attempted (`AlwaysAttempted`) as `syscalls/sys_enter_sendmsg` where supported; mode-aware terminal status |
+
+Send attach is attempted where the kernel supports those tracepoints. Observed
+outcomes are kernel-dependent (`attached` / `failed` / `unavailable`). A missing
+tracepoint does **not** reliably map to `Unsupported`
+([#2350](https://github.com/Rul1an/assay/issues/2350)).
+
+S1b ([#2345](https://github.com/Rul1an/assay/pull/2345), now on `main` as
+`7816e3c4`) proved a bounded live matrix: explicit IPv4 `sendto`/`sendmsg`
+endpoint observation plus receiver effects; `no_peer` / `non_ip` counters; zero
+ring-buffer drops in that cell; an attach-disabled negative; and controlled
+shutdown. That matrix is not an io_uring `SEND` / `SENDMSG` result, not an
+exhaustive peer set, and not a multi-kernel, IPv6, QUIC, DNS, raw-socket, or
+tunnel claim.
 
 Mode-aware outcomes are distinct: `not_requested` ≠ `unavailable` ≠ `failed` ≠ `unsupported` ≠
 `attached` ([#2339](https://github.com/Rul1an/assay/pull/2339)). The CONFIG-ABI gate
@@ -179,5 +191,6 @@ Non-claims for this page:
 - no UDP/QUIC/DNS/already-open-socket/raw-socket/proxy-tunnel identity claim;
 - `observed_peers` is diagnostic, not an exhaustive peer set;
 - program-set and CONFIG-ABI gates ≠ attach completeness;
-- no "complete egress" or exhaustive visibility claim;
+- no scalar trust score, no "complete egress", no certification
+  ([ADR-042](../architecture/ADR-042-evidence-first-positioning.md));
 - monitor artifact `run_id` pairing remains [#2342](https://github.com/Rul1an/assay/issues/2342).
