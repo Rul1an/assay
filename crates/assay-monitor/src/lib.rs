@@ -73,42 +73,34 @@ pub struct MonitorStatsSnapshot {
     pub event_size_mismatch: u64,
 }
 
-/// The whole map-to-snapshot projection, in one function, over two readers.
-///
-/// This used to be fourteen inline reads in `snapshot_stats` plus a second statement that applied
-/// the four send honesty counters. That second statement was deletable with no consequence: the
-/// projection had a unit test with a fake reader, but its *binding* to the real `STATS` map was
-/// guarded by nothing, and `MonitorStatsSnapshot::default()` filled the orphaned fields with 0 --
-/// byte-identical, downstream, to a genuinely clean run.
-///
-/// Collapsing both projections here makes the binding fall out of the types rather than out of a
-/// test. `snapshot_stats` has no snapshot to return without calling this, so deleting the call is a
-/// compile error; and the two readers differ in return type (`u32` for `STATS`, `u64` for
-/// `SOCKET_STATS`), so swapping them is a compile error too. Neither map type appears in the
-/// signature, so the projection stays testable on any host while the aya types stay in `loader.rs`.
-///
-/// Every field is written by a listed initializer -- no `..Default::default()` -- so dropping a
-/// read is a missing-field compile error rather than a silent zero.
 #[cfg(any(test, target_os = "linux"))]
-pub(crate) fn project_snapshot(
+use assay_common::{
+    MONITOR_STAT_CONNECT_EVENTS_EMITTED, MONITOR_STAT_CONNECT_RINGBUF_DROPPED,
+    MONITOR_STAT_LSM_EVENTS_EMITTED, MONITOR_STAT_LSM_RINGBUF_DROPPED,
+    MONITOR_STAT_OPENAT2_EVENTS_EMITTED, MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
+    MONITOR_STAT_OPENAT_EVENTS_EMITTED, MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
+    MONITOR_STAT_SENDMSG_EVENTS_EMITTED, MONITOR_STAT_SENDMSG_NON_IP_FAMILY,
+    MONITOR_STAT_SENDMSG_NO_PEER, MONITOR_STAT_SENDMSG_RINGBUF_DROPPED,
+    MONITOR_STAT_SENDTO_EVENTS_EMITTED, MONITOR_STAT_SENDTO_NON_IP_FAMILY,
+    MONITOR_STAT_SENDTO_NO_PEER, MONITOR_STAT_SENDTO_RINGBUF_DROPPED,
+    MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
+    SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR, SOCKET_STAT_BLOCKED_PORT, SOCKET_STAT_CHECKS,
+    SOCKET_STAT_EVENTS_EMITTED, SOCKET_STAT_RINGBUF_DROPPED,
+};
+
+/// Project both kernel stat arrays onto the snapshot.
+///
+/// One function rather than a list of separately deletable statements: `snapshot_stats` has no
+/// snapshot to return without calling this. The readers differ in return type because the arrays do
+/// -- `STATS` holds `u32`, `SOCKET_STATS` holds `u64` -- so they cannot be passed in swapped. Every
+/// field is named here, with no `..Default::default()`, so a dropped read is a compile error rather
+/// than a zero indistinguishable from a clean run.
+#[cfg(any(test, target_os = "linux"))]
+fn project_snapshot(
     mut read_stats: impl FnMut(u32) -> u32,
     mut read_socket: impl FnMut(u32) -> u64,
     event_size_mismatch: u64,
 ) -> MonitorStatsSnapshot {
-    use assay_common::{
-        MONITOR_STAT_CONNECT_EVENTS_EMITTED, MONITOR_STAT_CONNECT_RINGBUF_DROPPED,
-        MONITOR_STAT_LSM_EVENTS_EMITTED, MONITOR_STAT_LSM_RINGBUF_DROPPED,
-        MONITOR_STAT_OPENAT2_EVENTS_EMITTED, MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
-        MONITOR_STAT_OPENAT_EVENTS_EMITTED, MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
-        MONITOR_STAT_SENDMSG_EVENTS_EMITTED, MONITOR_STAT_SENDMSG_NON_IP_FAMILY,
-        MONITOR_STAT_SENDMSG_NO_PEER, MONITOR_STAT_SENDMSG_RINGBUF_DROPPED,
-        MONITOR_STAT_SENDTO_EVENTS_EMITTED, MONITOR_STAT_SENDTO_NON_IP_FAMILY,
-        MONITOR_STAT_SENDTO_NO_PEER, MONITOR_STAT_SENDTO_RINGBUF_DROPPED,
-        MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
-        SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR, SOCKET_STAT_BLOCKED_PORT,
-        SOCKET_STAT_CHECKS, SOCKET_STAT_EVENTS_EMITTED, SOCKET_STAT_RINGBUF_DROPPED,
-    };
-
     MonitorStatsSnapshot {
         tracepoint_events_emitted: read_stats(MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED),
         tracepoint_ringbuf_dropped: read_stats(MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED),
@@ -141,212 +133,72 @@ pub(crate) fn project_snapshot(
 #[cfg(test)]
 mod snapshot_projection_tests {
     use super::*;
-    use assay_common::{
-        MONITOR_STAT_CONNECT_EVENTS_EMITTED, MONITOR_STAT_CONNECT_RINGBUF_DROPPED,
-        MONITOR_STAT_LSM_EVENTS_EMITTED, MONITOR_STAT_LSM_RINGBUF_DROPPED,
-        MONITOR_STAT_OPENAT2_EVENTS_EMITTED, MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
-        MONITOR_STAT_OPENAT_EVENTS_EMITTED, MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
-        MONITOR_STAT_SENDMSG_EVENTS_EMITTED, MONITOR_STAT_SENDMSG_NON_IP_FAMILY,
-        MONITOR_STAT_SENDMSG_NO_PEER, MONITOR_STAT_SENDMSG_RINGBUF_DROPPED,
-        MONITOR_STAT_SENDTO_EVENTS_EMITTED, MONITOR_STAT_SENDTO_NON_IP_FAMILY,
-        MONITOR_STAT_SENDTO_NO_PEER, MONITOR_STAT_SENDTO_RINGBUF_DROPPED,
-        MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED, MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
-        SOCKET_STAT_ALLOWED, SOCKET_STAT_BLOCKED_CIDR, SOCKET_STAT_BLOCKED_PORT,
-        SOCKET_STAT_CHECKS, SOCKET_STAT_EVENTS_EMITTED, SOCKET_STAT_RINGBUF_DROPPED,
-    };
 
-    /// Totality, not a sample. Each reader returns its own key -- identity for `STATS`, identity
-    /// widened to `u64` for `SOCKET_STATS` -- so every field carries the key it was read from and
-    /// the whole snapshot can be compared against the key constants at once. A reader that returned
-    /// a fixed value would let a wrongly wired field pass; a reader that returns the key cannot.
-    /// The `MONITOR_STAT_*` keys are 0..=17 and the `SOCKET_STAT_*` keys are 0..=5, distinct
-    /// within their own array, so no two fields of the same reader can hold the same value: any
-    /// wrong wiring -- two fields swapped, a field pointed at another array's key, a read replaced by
-    /// a constant -- moves at least one field off its own key and fails here.
-    ///
-    /// The destructuring binding is load-bearing: a field added to `MonitorStatsSnapshot` without a
-    /// corresponding assertion is a compile error in this test, so the check cannot fall behind the
-    /// struct.
+    /// Totality: each reader returns its own key, so a correct projection produces the snapshot
+    /// whose every field is the key it was read from. One comparison, so no field can be omitted
+    /// from the check, and a field added to the struct is a compile error here.
     #[test]
     fn every_snapshot_field_reads_its_own_key() {
-        let MonitorStatsSnapshot {
-            tracepoint_events_emitted,
-            tracepoint_ringbuf_dropped,
-            lsm_events_emitted,
-            lsm_ringbuf_dropped,
-            openat_events_emitted,
-            openat_ringbuf_dropped,
-            openat2_events_emitted,
-            openat2_ringbuf_dropped,
-            connect_events_emitted,
-            connect_ringbuf_dropped,
-            sendto_events_emitted,
-            sendto_ringbuf_dropped,
-            sendmsg_events_emitted,
-            sendmsg_ringbuf_dropped,
-            sendto_no_peer,
-            sendmsg_no_peer,
-            sendto_non_ip_family,
-            sendmsg_non_ip_family,
-            socket_checks,
-            socket_blocked_cidr,
-            socket_blocked_port,
-            socket_allowed,
-            socket_events_emitted,
-            socket_ringbuf_dropped,
-            event_size_mismatch,
-        } = project_snapshot(|key| key, u64::from, 777);
-
         assert_eq!(
-            tracepoint_events_emitted, MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED,
-            "tracepoint_events_emitted"
-        );
-        assert_eq!(
-            tracepoint_ringbuf_dropped, MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
-            "tracepoint_ringbuf_dropped"
-        );
-        assert_eq!(
-            lsm_events_emitted, MONITOR_STAT_LSM_EVENTS_EMITTED,
-            "lsm_events_emitted"
-        );
-        assert_eq!(
-            lsm_ringbuf_dropped, MONITOR_STAT_LSM_RINGBUF_DROPPED,
-            "lsm_ringbuf_dropped"
-        );
-        assert_eq!(
-            openat_events_emitted, MONITOR_STAT_OPENAT_EVENTS_EMITTED,
-            "openat_events_emitted"
-        );
-        assert_eq!(
-            openat_ringbuf_dropped, MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
-            "openat_ringbuf_dropped"
-        );
-        assert_eq!(
-            openat2_events_emitted, MONITOR_STAT_OPENAT2_EVENTS_EMITTED,
-            "openat2_events_emitted"
-        );
-        assert_eq!(
-            openat2_ringbuf_dropped, MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
-            "openat2_ringbuf_dropped"
-        );
-        assert_eq!(
-            connect_events_emitted, MONITOR_STAT_CONNECT_EVENTS_EMITTED,
-            "connect_events_emitted"
-        );
-        assert_eq!(
-            connect_ringbuf_dropped, MONITOR_STAT_CONNECT_RINGBUF_DROPPED,
-            "connect_ringbuf_dropped"
-        );
-        assert_eq!(
-            sendto_events_emitted, MONITOR_STAT_SENDTO_EVENTS_EMITTED,
-            "sendto_events_emitted"
-        );
-        assert_eq!(
-            sendto_ringbuf_dropped, MONITOR_STAT_SENDTO_RINGBUF_DROPPED,
-            "sendto_ringbuf_dropped"
-        );
-        assert_eq!(
-            sendmsg_events_emitted, MONITOR_STAT_SENDMSG_EVENTS_EMITTED,
-            "sendmsg_events_emitted"
-        );
-        assert_eq!(
-            sendmsg_ringbuf_dropped, MONITOR_STAT_SENDMSG_RINGBUF_DROPPED,
-            "sendmsg_ringbuf_dropped"
-        );
-        assert_eq!(
-            sendto_no_peer, MONITOR_STAT_SENDTO_NO_PEER,
-            "sendto_no_peer"
-        );
-        assert_eq!(
-            sendmsg_no_peer, MONITOR_STAT_SENDMSG_NO_PEER,
-            "sendmsg_no_peer"
-        );
-        assert_eq!(
-            sendto_non_ip_family, MONITOR_STAT_SENDTO_NON_IP_FAMILY,
-            "sendto_non_ip_family"
-        );
-        assert_eq!(
-            sendmsg_non_ip_family, MONITOR_STAT_SENDMSG_NON_IP_FAMILY,
-            "sendmsg_non_ip_family"
-        );
-        assert_eq!(
-            socket_checks,
-            u64::from(SOCKET_STAT_CHECKS),
-            "socket_checks"
-        );
-        assert_eq!(
-            socket_blocked_cidr,
-            u64::from(SOCKET_STAT_BLOCKED_CIDR),
-            "socket_blocked_cidr"
-        );
-        assert_eq!(
-            socket_blocked_port,
-            u64::from(SOCKET_STAT_BLOCKED_PORT),
-            "socket_blocked_port"
-        );
-        assert_eq!(
-            socket_allowed,
-            u64::from(SOCKET_STAT_ALLOWED),
-            "socket_allowed"
-        );
-        assert_eq!(
-            socket_events_emitted,
-            u64::from(SOCKET_STAT_EVENTS_EMITTED),
-            "socket_events_emitted"
-        );
-        assert_eq!(
-            socket_ringbuf_dropped,
-            u64::from(SOCKET_STAT_RINGBUF_DROPPED),
-            "socket_ringbuf_dropped"
-        );
-        assert_eq!(
-            event_size_mismatch, 777,
-            "event_size_mismatch is not a map read"
+            project_snapshot(|k| k, u64::from, 777),
+            MonitorStatsSnapshot {
+                tracepoint_events_emitted: MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED,
+                tracepoint_ringbuf_dropped: MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
+                lsm_events_emitted: MONITOR_STAT_LSM_EVENTS_EMITTED,
+                lsm_ringbuf_dropped: MONITOR_STAT_LSM_RINGBUF_DROPPED,
+                openat_events_emitted: MONITOR_STAT_OPENAT_EVENTS_EMITTED,
+                openat_ringbuf_dropped: MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
+                openat2_events_emitted: MONITOR_STAT_OPENAT2_EVENTS_EMITTED,
+                openat2_ringbuf_dropped: MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
+                connect_events_emitted: MONITOR_STAT_CONNECT_EVENTS_EMITTED,
+                connect_ringbuf_dropped: MONITOR_STAT_CONNECT_RINGBUF_DROPPED,
+                sendto_events_emitted: MONITOR_STAT_SENDTO_EVENTS_EMITTED,
+                sendto_ringbuf_dropped: MONITOR_STAT_SENDTO_RINGBUF_DROPPED,
+                sendmsg_events_emitted: MONITOR_STAT_SENDMSG_EVENTS_EMITTED,
+                sendmsg_ringbuf_dropped: MONITOR_STAT_SENDMSG_RINGBUF_DROPPED,
+                sendto_no_peer: MONITOR_STAT_SENDTO_NO_PEER,
+                sendmsg_no_peer: MONITOR_STAT_SENDMSG_NO_PEER,
+                sendto_non_ip_family: MONITOR_STAT_SENDTO_NON_IP_FAMILY,
+                sendmsg_non_ip_family: MONITOR_STAT_SENDMSG_NON_IP_FAMILY,
+                socket_checks: u64::from(SOCKET_STAT_CHECKS),
+                socket_blocked_cidr: u64::from(SOCKET_STAT_BLOCKED_CIDR),
+                socket_blocked_port: u64::from(SOCKET_STAT_BLOCKED_PORT),
+                socket_allowed: u64::from(SOCKET_STAT_ALLOWED),
+                socket_events_emitted: u64::from(SOCKET_STAT_EVENTS_EMITTED),
+                socket_ringbuf_dropped: u64::from(SOCKET_STAT_RINGBUF_DROPPED),
+                event_size_mismatch: 777,
+            }
         );
     }
 
-    /// The identity reader only discriminates if the keys it returns are themselves distinct.
-    /// Without this, a projection that read every field from key 0 would still satisfy the totality
-    /// test if all the constants happened to collapse to 0.
+    /// A key that returns itself only discriminates between fields if the keys differ: two fields
+    /// reading one key, or two constants sharing a value, would let them swap undetected. Recording
+    /// what each reader was actually asked for checks that on the projection itself.
     #[test]
-    fn stat_keys_are_distinct_within_each_array() {
-        let monitor = [
-            MONITOR_STAT_TRACEPOINT_EVENTS_EMITTED,
-            MONITOR_STAT_TRACEPOINT_RINGBUF_DROPPED,
-            MONITOR_STAT_LSM_EVENTS_EMITTED,
-            MONITOR_STAT_LSM_RINGBUF_DROPPED,
-            MONITOR_STAT_OPENAT_EVENTS_EMITTED,
-            MONITOR_STAT_OPENAT_RINGBUF_DROPPED,
-            MONITOR_STAT_OPENAT2_EVENTS_EMITTED,
-            MONITOR_STAT_OPENAT2_RINGBUF_DROPPED,
-            MONITOR_STAT_CONNECT_EVENTS_EMITTED,
-            MONITOR_STAT_CONNECT_RINGBUF_DROPPED,
-            MONITOR_STAT_SENDTO_EVENTS_EMITTED,
-            MONITOR_STAT_SENDTO_RINGBUF_DROPPED,
-            MONITOR_STAT_SENDMSG_EVENTS_EMITTED,
-            MONITOR_STAT_SENDMSG_RINGBUF_DROPPED,
-            MONITOR_STAT_SENDTO_NO_PEER,
-            MONITOR_STAT_SENDMSG_NO_PEER,
-            MONITOR_STAT_SENDTO_NON_IP_FAMILY,
-            MONITOR_STAT_SENDMSG_NON_IP_FAMILY,
-        ];
-        let mut sorted = monitor.to_vec();
-        sorted.sort_unstable();
-        sorted.dedup();
-        assert_eq!(sorted.len(), monitor.len(), "MONITOR_STAT_* keys collide");
-
-        let socket = [
-            SOCKET_STAT_CHECKS,
-            SOCKET_STAT_BLOCKED_CIDR,
-            SOCKET_STAT_BLOCKED_PORT,
-            SOCKET_STAT_ALLOWED,
-            SOCKET_STAT_EVENTS_EMITTED,
-            SOCKET_STAT_RINGBUF_DROPPED,
-        ];
-        let mut sorted = socket.to_vec();
-        sorted.sort_unstable();
-        sorted.dedup();
-        assert_eq!(sorted.len(), socket.len(), "SOCKET_STAT_* keys collide");
+    fn no_two_fields_read_the_same_key() {
+        let (mut stats_keys, mut socket_keys) = (Vec::new(), Vec::new());
+        project_snapshot(
+            |k| {
+                stats_keys.push(k);
+                k
+            },
+            |k| {
+                socket_keys.push(k);
+                u64::from(k)
+            },
+            0,
+        );
+        assert_eq!(
+            (stats_keys.len(), socket_keys.len()),
+            (18, 6),
+            "reads per array"
+        );
+        for keys in [&mut stats_keys, &mut socket_keys] {
+            let read = keys.len();
+            keys.sort_unstable();
+            keys.dedup();
+            assert_eq!(keys.len(), read, "two fields read the same key");
+        }
     }
 }
 
