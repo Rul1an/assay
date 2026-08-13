@@ -30,7 +30,7 @@ pub(crate) fn format_send_observation_summary(
     stats: &assay_monitor::MonitorStatsSnapshot,
 ) -> String {
     format!(
-        "  • Send observation:    sendto emitted={} dropped={} no_peer={} non_ip={}; sendmsg emitted={} dropped={} no_peer={} non_ip={}",
+        "  • Send observation:   sendto emitted={} dropped={} no_peer={} non_ip={}; sendmsg emitted={} dropped={} no_peer={} non_ip={}",
         stats.sendto_events_emitted,
         stats.sendto_ringbuf_dropped,
         stats.sendto_no_peer,
@@ -328,7 +328,7 @@ mod tests {
         };
         assert_eq!(
             format_send_observation_summary(&stats),
-            "  • Send observation:    sendto emitted=1 dropped=2 no_peer=5 non_ip=7; sendmsg emitted=3 dropped=4 no_peer=6 non_ip=8"
+            "  • Send observation:   sendto emitted=1 dropped=2 no_peer=5 non_ip=7; sendmsg emitted=3 dropped=4 no_peer=6 non_ip=8"
         );
     }
 

@@ -79,14 +79,14 @@ silently assuming a method.
 
 The datagram-aware helpers are real vocabulary for archives that already
 carry those coverage values. `assay_monitor_sendto` and
-`assay_monitor_sendmsg` are compiled into the release ELF and presently
-unattached (`Unsupported`). Runner archives from
+`assay_monitor_sendmsg` are compiled into the release ELF and always attempted
+as tracepoints. Runner archives from
 `assay runner-spike --kernel-capture` / `assay-runner-core`
 `network_protocol_coverage_for` are **count-derived**: `connect_emitted > 0`
 yields `connect_only` from always-attached `sys_enter_connect`, with **no**
 connect4 / network-policy requirement. Datagram labels require
-`sendto_emitted` or `sendmsg_emitted` > 0 and are unreachable there while
-those TPs stay unattached. CLI `assay monitor` `observation_health` is a
+`sendto_emitted` or `sendmsg_emitted` > 0 and therefore an attached send
+tracepoint. CLI `assay monitor` `observation_health` is a
 **different** producer: **attach-derived** from cgroup `connect4`
 (network-policy path), otherwise `absent`, and does not emit datagram labels.
 

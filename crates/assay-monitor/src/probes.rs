@@ -30,8 +30,8 @@ pub(crate) const PROBE_PROGRAMS: &[ProbeProgram] = &[
     ProbeProgram { elf_name: "assay_monitor_openat_exit", surface_name: "sys_exit_openat", class: ProbeClass::Always, attach: AttachSpec::Tp("syscalls", "sys_exit_openat") },
     ProbeProgram { elf_name: "assay_monitor_openat2_exit", surface_name: "sys_exit_openat2", class: ProbeClass::Always, attach: AttachSpec::Tp("syscalls", "sys_exit_openat2") },
     ProbeProgram { elf_name: "assay_monitor_connect", surface_name: "sys_enter_connect", class: ProbeClass::Always, attach: AttachSpec::Tp("syscalls", "sys_enter_connect") },
-    ProbeProgram { elf_name: "assay_monitor_sendto", surface_name: "sys_enter_sendto", class: ProbeClass::Mode(ProbeCondition::RequiresSendObservation), attach: AttachSpec::Tp("syscalls", "sys_enter_sendto") },
-    ProbeProgram { elf_name: "assay_monitor_sendmsg", surface_name: "sys_enter_sendmsg", class: ProbeClass::Mode(ProbeCondition::RequiresSendObservation), attach: AttachSpec::Tp("syscalls", "sys_enter_sendmsg") },
+    ProbeProgram { elf_name: "assay_monitor_sendto", surface_name: "sys_enter_sendto", class: ProbeClass::Mode(ProbeCondition::AlwaysAttempted), attach: AttachSpec::Tp("syscalls", "sys_enter_sendto") },
+    ProbeProgram { elf_name: "assay_monitor_sendmsg", surface_name: "sys_enter_sendmsg", class: ProbeClass::Mode(ProbeCondition::AlwaysAttempted), attach: AttachSpec::Tp("syscalls", "sys_enter_sendmsg") },
     ProbeProgram { elf_name: "assay_monitor_fork", surface_name: "sys_enter_fork", class: ProbeClass::Always, attach: AttachSpec::Tp("syscalls", "sys_enter_fork") },
     ProbeProgram { elf_name: "file_open_lsm", surface_name: "lsm:file_open", class: ProbeClass::Always, attach: AttachSpec::Lsm("file_open") },
     ProbeProgram { elf_name: "connect4_hook", surface_name: "cgroup_sock_addr:connect4", class: ProbeClass::Mode(ProbeCondition::RequiresNetworkPolicy), attach: AttachSpec::Cgroup4 },
@@ -81,7 +81,7 @@ impl ProbeProgram {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProbeCondition {
     RequiresNetworkPolicy,
-    RequiresSendObservation,
+    AlwaysAttempted,
     Unsupported,
 }
 
@@ -164,20 +164,17 @@ pub(crate) fn send_update(fault: SendFault) -> ModeUpdate {
     }
 }
 
-pub(crate) fn default_status(c: ProbeCondition) -> ProbeStatus {
+pub(crate) fn default_status(c: ProbeCondition) -> Option<ProbeStatus> {
     match c {
-        ProbeCondition::RequiresNetworkPolicy => ProbeStatus {
+        ProbeCondition::RequiresNetworkPolicy => Some(ProbeStatus {
             outcome: ProbeOutcome::NotRequested,
             reason: "network policy not requested",
-        },
-        ProbeCondition::RequiresSendObservation => ProbeStatus {
-            outcome: ProbeOutcome::NotRequested,
-            reason: "send observation not requested",
-        },
-        ProbeCondition::Unsupported => ProbeStatus {
+        }),
+        ProbeCondition::AlwaysAttempted => None,
+        ProbeCondition::Unsupported => Some(ProbeStatus {
             outcome: ProbeOutcome::Unsupported,
             reason: "compiled; no attach owner",
-        },
+        }),
     }
 }
 
@@ -185,34 +182,32 @@ pub(crate) fn default_status(c: ProbeCondition) -> ProbeStatus {
 /// rows take the update. Unknown probes are not updated (`record_mode` no-ops).
 pub(crate) fn apply_mode_update(
     condition: ProbeCondition,
-    current: ProbeStatus,
+    current: Option<ProbeStatus>,
     update: ModeUpdate,
 ) -> ProbeStatus {
     match condition {
-        ProbeCondition::Unsupported => current,
-        ProbeCondition::RequiresNetworkPolicy | ProbeCondition::RequiresSendObservation => {
-            match update {
-                ModeUpdate::Attached => ProbeStatus {
-                    outcome: ProbeOutcome::Attached,
-                    reason: "attached",
-                },
-                #[cfg(any(test, target_os = "linux"))]
-                ModeUpdate::Unavailable(reason) => ProbeStatus {
-                    outcome: ProbeOutcome::Unavailable,
-                    reason,
-                },
-                #[cfg(any(test, target_os = "linux"))]
-                ModeUpdate::Failed(reason) => ProbeStatus {
-                    outcome: ProbeOutcome::Failed,
-                    reason,
-                },
-                #[cfg(any(test, target_os = "linux"))]
-                ModeUpdate::Unsupported(reason) => ProbeStatus {
-                    outcome: ProbeOutcome::Unsupported,
-                    reason,
-                },
-            }
-        }
+        ProbeCondition::Unsupported => current.expect("unsupported rows are seeded"),
+        ProbeCondition::RequiresNetworkPolicy | ProbeCondition::AlwaysAttempted => match update {
+            ModeUpdate::Attached => ProbeStatus {
+                outcome: ProbeOutcome::Attached,
+                reason: "attached",
+            },
+            #[cfg(any(test, target_os = "linux"))]
+            ModeUpdate::Unavailable(reason) => ProbeStatus {
+                outcome: ProbeOutcome::Unavailable,
+                reason,
+            },
+            #[cfg(any(test, target_os = "linux"))]
+            ModeUpdate::Failed(reason) => ProbeStatus {
+                outcome: ProbeOutcome::Failed,
+                reason,
+            },
+            #[cfg(any(test, target_os = "linux"))]
+            ModeUpdate::Unsupported(reason) => ProbeStatus {
+                outcome: ProbeOutcome::Unsupported,
+                reason,
+            },
+        },
     }
 }
 
@@ -238,7 +233,9 @@ impl Default for ProbeAttachment {
         };
         for p in PROBE_PROGRAMS {
             if let ProbeClass::Mode(c) = p.class {
-                a.set_status(p.surface_name, default_status(c));
+                if let Some(status) = default_status(c) {
+                    a.set_status(p.surface_name, status);
+                }
             }
         }
         a
@@ -261,10 +258,16 @@ impl ProbeAttachment {
         let ProbeClass::Mode(condition) = row.class else {
             return;
         };
-        let current = self
-            .status(probe)
-            .unwrap_or_else(|| default_status(condition));
+        let current = self.status(probe);
         self.set_status(probe, apply_mode_update(condition, current, update));
+    }
+
+    /// Record one failed attach attempt in both truth carriers: the mode-aware terminal outcome
+    /// and the legacy/operator-facing list of unobserved surfaces.
+    #[cfg(any(test, target_os = "linux"))]
+    pub(crate) fn record_attempt_failure(&mut self, probe: &'static str, update: ModeUpdate) {
+        self.record_mode(probe, update);
+        self.skipped(probe);
     }
 
     pub fn attached(&mut self, probe: &'static str) {
@@ -296,14 +299,12 @@ impl ProbeAttachment {
         network_policy_requested: bool,
     ) -> Result<(), &'static str> {
         for p in PROBE_PROGRAMS.iter().filter(|p| {
-            matches!(
-                p.class,
-                ProbeClass::Mode(ProbeCondition::RequiresSendObservation)
-            ) || (network_policy_requested
-                && matches!(
-                    p.class,
-                    ProbeClass::Mode(ProbeCondition::RequiresNetworkPolicy)
-                ))
+            matches!(p.class, ProbeClass::Mode(ProbeCondition::AlwaysAttempted))
+                || (network_policy_requested
+                    && matches!(
+                        p.class,
+                        ProbeClass::Mode(ProbeCondition::RequiresNetworkPolicy)
+                    ))
         }) {
             match self.outcome(p.surface_name) {
                 Some(
@@ -460,7 +461,7 @@ mod tests {
     #[test]
     fn one_send_fault_does_not_change_the_other_send_status() {
         let mut attachment = ProbeAttachment::default();
-        attachment.record_mode(
+        attachment.record_attempt_failure(
             "sys_enter_sendto",
             send_update(SendFault::AttachFailed {
                 kernel_lacks_point: false,
@@ -470,10 +471,9 @@ mod tests {
             attachment.outcome("sys_enter_sendto"),
             Some(ProbeOutcome::Failed)
         );
-        assert_eq!(
-            attachment.outcome("sys_enter_sendmsg"),
-            Some(ProbeOutcome::NotRequested)
-        );
+        assert_eq!(attachment.outcome("sys_enter_sendmsg"), None);
+        assert!(attachment.skipped_probes().contains(&"sys_enter_sendto"));
+        assert!(!attachment.skipped_probes().contains(&"sys_enter_sendmsg"));
     }
 
     #[test]
@@ -497,7 +497,7 @@ mod tests {
                 (row.surface_name, row.class, row.attach),
                 (
                     surface,
-                    ProbeClass::Mode(ProbeCondition::RequiresSendObservation),
+                    ProbeClass::Mode(ProbeCondition::AlwaysAttempted),
                     AttachSpec::Tp("syscalls", surface),
                 )
             );
@@ -510,10 +510,7 @@ mod tests {
     #[test]
     fn successful_send_attach_records_attached() {
         let mut attachment = ProbeAttachment::default();
-        assert_eq!(
-            attachment.outcome("sys_enter_sendto"),
-            Some(ProbeOutcome::NotRequested)
-        );
+        assert_eq!(attachment.outcome("sys_enter_sendto"), None);
         attachment.attached("sys_enter_sendto");
         assert_eq!(
             attachment.outcome("sys_enter_sendto"),
@@ -565,7 +562,7 @@ mod tests {
         ]);
         for p in PROBE_PROGRAMS {
             match (p.elf_name, p.class, p.attach) {
-                ("assay_monitor_sendto" | "assay_monitor_sendmsg", ProbeClass::Mode(ProbeCondition::RequiresSendObservation), AttachSpec::Tp("syscalls", n)) if n == p.surface_name => {
+                ("assay_monitor_sendto" | "assay_monitor_sendmsg", ProbeClass::Mode(ProbeCondition::AlwaysAttempted), AttachSpec::Tp("syscalls", n)) if n == p.surface_name => {
                     assert!(!EXPECTED_PROBES.contains(&p.surface_name));
                 }
                 ("connect6_hook", ProbeClass::Mode(ProbeCondition::Unsupported), AttachSpec::None) => {

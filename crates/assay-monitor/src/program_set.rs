@@ -88,19 +88,22 @@ mod tests {
     }
 
     #[test]
-    fn loader_reads_all_send_honesty_counters() {
+    fn send_attach_loop_finalizes_before_the_next_probe() {
         let src = include_str!("loader.rs");
-        for counter in [
-            "MONITOR_STAT_SENDTO_NO_PEER",
-            "MONITOR_STAT_SENDMSG_NO_PEER",
-            "MONITOR_STAT_SENDTO_NON_IP_FAMILY",
-            "MONITOR_STAT_SENDMSG_NON_IP_FAMILY",
-        ] {
-            assert_eq!(
-                src.matches(&format!(".get(&{counter}, 0)")).count(),
-                1,
-                "loader must read {counter} exactly once"
-            );
-        }
+        let send_loop = src
+            .find("for r in [\n            ProbeProgram::by_elf(\"assay_monitor_sendto\")")
+            .expect("send attach loop");
+        let finalize = src
+            .find(".finalize_mode_aware(false)")
+            .expect("always-attempted finalizer");
+        let next_probe = src
+            .find("ProbeProgram::by_elf(\"assay_monitor_fork\")")
+            .expect("next attach site");
+
+        assert!(send_loop < finalize && finalize < next_probe);
+        assert_eq!(src.matches(".finalize_mode_aware(false)").count(), 1);
+        assert!(src[send_loop..finalize].contains("record_attempt_failure"));
+        assert!(src[send_loop..finalize].contains("assay_monitor_sendmsg"));
     }
+
 }
