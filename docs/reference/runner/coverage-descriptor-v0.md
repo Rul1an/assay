@@ -181,6 +181,7 @@ the Runner archive contract is unchanged. This helper still does not:
 Any consumer that mirrors the gate should preserve the same ceiling: when a
 run actually carries datagram peer observations, those can strengthen
 positive network evidence, but they do not permit exact peer-set or
-bounded-negative network claims while blind spots remain declared. Those
-datagram observations are unreachable on `assay runner-spike --kernel-capture`
-/ `assay-runner-core` while the send TPs stay unattached.
+bounded-negative network claims while blind spots remain declared. Datagram
+observations remain conditional: the corresponding send tracepoint must attach
+and emit at least one event. An attached-but-quiet probe is not positive
+evidence.

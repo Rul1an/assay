@@ -178,8 +178,9 @@ pub(crate) fn default_status(c: ProbeCondition) -> Option<ProbeStatus> {
     }
 }
 
-/// Infallible mode-aware transitions. Declared-`Unsupported` rows keep their seed; policy-gated
-/// rows take the update. Unknown probes are not updated (`record_mode` no-ops).
+/// Infallible mode-aware transitions. Declared-`Unsupported` rows keep their seed;
+/// runtime-attempted rows take the update whether they are always attempted or policy-gated.
+/// Unknown probes are not updated (`record_mode` no-ops).
 pub(crate) fn apply_mode_update(
     condition: ProbeCondition,
     current: Option<ProbeStatus>,

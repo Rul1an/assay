@@ -104,6 +104,8 @@ mod tests {
         assert_eq!(src.matches(".finalize_mode_aware(false)").count(), 1);
         assert!(src[send_loop..finalize].contains("record_attempt_failure"));
         assert!(src[send_loop..finalize].contains("assay_monitor_sendmsg"));
+        assert!(src[send_loop..next_probe].contains("crate::probe_inventory_result"));
+        assert!(src[finalize..next_probe].contains("finalize_mode_aware(false))?"));
     }
 
 }
