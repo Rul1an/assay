@@ -20,6 +20,7 @@ stage_golden_path_fixtures() {
 
   cp "$repo_root/scripts/ci/test-agent-golden-path-skill.py" "$case_root/scripts/ci/"
   cp "$repo_root/scripts/docs/generate-agent-golden-path.py" "$case_root/scripts/docs/"
+  cp "$repo_root/Cargo.toml" "$case_root/"
   cp "$repo_root/.gitignore" "$case_root/"
   cp "$repo_root/.gitattributes" "$case_root/"
   cp "$repo_root/.mcp.json" "$case_root/"
