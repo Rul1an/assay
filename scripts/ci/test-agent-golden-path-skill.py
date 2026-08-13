@@ -10,10 +10,13 @@ import os
 import re
 from pathlib import Path
 import subprocess
-import tomllib
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/ci/lib"))
+from workspace_version import read_workspace_version  # noqa: E402
+
 CONTRACT_PATH = ROOT / "docs/generated/agent-golden-path.json"
 GUIDE_PATH = ROOT / "docs/guides/agent-golden-path.md"
 WORKFLOW_PATH = ROOT / ".github/workflows/kernel-matrix.yml"
@@ -1084,8 +1087,7 @@ def main() -> None:
         fail("unexpected golden-path contract schema")
     if contract.get("schema_version") != 1:
         fail("unexpected golden-path contract schema version")
-    workspace = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
-    version = workspace["workspace"]["package"]["version"]
+    version = read_workspace_version(ROOT / "Cargo.toml")
     if contract.get("release_version") != version:
         fail("golden-path release_version must match the workspace version")
     if contract.get("release_tag") != f"v{version}":

@@ -231,12 +231,21 @@ check_install_command_count() {
   fi
 }
 
-check_install_command_count README.md 1
-check_install_command_count docs/getting-started/index.md 1
-check_install_command_count docs/getting-started/installation.md 2
-check_install_command_count docs/getting-started/quickstart.md 1
-check_install_command_count docs/reference/cli/index.md 1
-check_install_command_count docs/AIcontext/user-flows.md 1
+check_rust_cli_installs() {
+  local file="$1" expected_count="$2"
+  check_install_command_count "$file" "$expected_count"
+  check_absent_regex "$file" 'cargo install assay([^[:alnum:]_-]|$)' \
+    'unsupported Rust CLI package; use assay-cli'
+}
+
+check_rust_cli_installs README.md 1
+check_rust_cli_installs docs/getting-started/index.md 1
+check_rust_cli_installs docs/getting-started/installation.md 2
+check_rust_cli_installs docs/getting-started/quickstart.md 1
+check_rust_cli_installs docs/getting-started/ci-integration.md 4
+check_rust_cli_installs docs/reference/cli/index.md 1
+check_rust_cli_installs docs/AIcontext/user-flows.md 1
+check_rust_cli_installs docs/use-cases/ci-gate.md 1
 
 release_link="Current release: [\`v$WORKSPACE_VERSION\`](https://github.com/Rul1an/assay/releases/tag/v$WORKSPACE_VERSION)"
 check_contains_fixed README.md "$release_link" 'current release link drift'
@@ -259,6 +268,15 @@ check_absent_regex docs/getting-started/installation.md \
 for file in docs/getting-started/installation.md docs/getting-started/ci-integration.md docs/use-cases/air-gapped.md; do
   check_absent_regex "$file" 'ghcr\.io/.*/assay' 'unsupported GHCR image'
 done
+linux_archive="assay-v$WORKSPACE_VERSION-x86_64-unknown-linux-gnu.tar.gz"
+linux_archive_root="${linux_archive%.tar.gz}"
+linux_archive_url="https://github.com/Rul1an/assay/releases/download/v$WORKSPACE_VERSION/$linux_archive"
+check_contains_fixed docs/use-cases/air-gapped.md "$linux_archive_url" \
+  'current Linux release archive URL drift'
+check_contains_fixed docs/use-cases/air-gapped.md "$linux_archive_root/assay" \
+  'current Linux release archive extraction drift'
+check_absent_regex docs/use-cases/air-gapped.md \
+  '(image:|docker (pull|run))[[:space:]]+[^[:space:]]*assay' 'unsupported runtime image'
 check_absent_regex docs/getting-started/installation.md \
   'assay-windows-x86_64\.zip' 'obsolete Windows asset name'
 

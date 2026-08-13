@@ -43,14 +43,25 @@ cat > "$TMP/docs/getting-started/index.md" <<'DOC'
 cargo install assay-cli --version 5.1.0 --locked
 pip install assay-it
 DOC
-printf '%s\n' 'supported examples' > "$TMP/docs/getting-started/ci-integration.md"
+cat > "$TMP/docs/getting-started/ci-integration.md" <<'DOC'
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-cli --version 5.1.0 --locked
+cargo install assay-cli --version 5.1.0 --locked
+supported examples
+DOC
 printf '%s\n' 'cargo install assay-cli --version 5.1.0 --locked' > "$TMP/docs/getting-started/quickstart.md"
 cat > "$TMP/docs/reference/cli/index.md" <<'DOC'
 # assay 5.1.0
 cargo install assay-cli --version 5.1.0 --locked
 DOC
 printf '%s\n' 'pip install assay-it' > "$TMP/docs/python-sdk/index.md"
-printf '%s\n' 'Build an image locally.' > "$TMP/docs/use-cases/air-gapped.md"
+cat > "$TMP/docs/use-cases/air-gapped.md" <<'DOC'
+https://github.com/Rul1an/assay/releases/download/v5.1.0/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz
+assay-v5.1.0-x86_64-unknown-linux-gnu/assay
+No runtime image is shipped.
+DOC
+printf '%s\n' 'cargo install assay-cli --version 5.1.0 --locked' > "$TMP/docs/use-cases/ci-gate.md"
 cat > "$TMP/docs/AIcontext/user-flows.md" <<'DOC'
 cargo install assay-cli --version 5.1.0 --locked
 Install the SDK with pip install assay-it.
@@ -119,7 +130,7 @@ mutate_and_expect_failure ghcr-channel docs/getting-started/ci-integration.md \
 mutate_and_expect_failure ghcr-installation docs/getting-started/installation.md \
   's/assay-v5.1.0-x86_64-pc-windows-msvc.zip/docker pull ghcr.io\/rul1an\/assay:latest/' 'unsupported GHCR image'
 mutate_and_expect_failure ghcr-air-gapped docs/use-cases/air-gapped.md \
-  's/Build an image locally./docker pull ghcr.io\/rul1an\/assay:latest/' 'unsupported GHCR image'
+  's/No runtime image is shipped./docker pull ghcr.io\/rul1an\/assay:latest/' 'unsupported GHCR image'
 mutate_and_expect_failure stale-windows-asset docs/getting-started/installation.md \
   's/assay-v5.1.0-x86_64-pc-windows-msvc.zip/assay-windows-x86_64.zip/' 'obsolete Windows asset name'
 mutate_and_expect_failure unsupported-codex-config-path README.md \
@@ -131,6 +142,21 @@ mutate_and_expect_failure unsupported-codex-literal README.md \
 mutate_and_expect_failure unsupported-codex-guide docs/guides/editor-mcp-recipe.md \
   's/Codex uses .codex\/config.toml./assay mcp config-path codex/' \
   'config-path does not support Codex'
+mutate_and_expect_failure wrong-rust-package-ci docs/getting-started/ci-integration.md \
+  's/cargo install assay-cli --version 5.1.0 --locked/cargo install assay/' \
+  'unsupported Rust CLI package'
+mutate_and_expect_failure wrong-rust-package-ci-gate docs/use-cases/ci-gate.md \
+  's/cargo install assay-cli --version 5.1.0 --locked/cargo install assay/' \
+  'unsupported Rust CLI package'
+mutate_and_expect_failure stale-air-gap-version docs/use-cases/air-gapped.md \
+  's/releases\/download\/v5.1.0/releases\/download\/v5.0.0/' \
+  'current Linux release archive URL drift'
+mutate_and_expect_failure obsolete-air-gap-asset docs/use-cases/air-gapped.md \
+  's/assay-v5.1.0-x86_64-unknown-linux-gnu.tar.gz/assay-linux-x86_64.tar.gz/' \
+  'current Linux release archive URL drift'
+mutate_and_expect_failure unsupported-runtime-image docs/use-cases/air-gapped.md \
+  's/No runtime image is shipped./image: internal-registry.corp\/assay:v5.1.0/' \
+  'unsupported runtime image'
 
 for row in \
   'README.md|stale-version-readme' \
@@ -153,8 +179,8 @@ mutate_and_expect_failure stale-release-doc-index docs/index.md \
 mutate_and_expect_failure stale-cli-version docs/reference/cli/index.md \
   's/# assay 5.1.0/# assay 5.0.0/' 'documented CLI version drift'
 
-if [ "$mutation_count" -ne 25 ]; then
-  echo "FAIL: expected 25 release-surface mutations, observed $mutation_count" >&2
+if [ "$mutation_count" -ne 30 ]; then
+  echo "FAIL: expected 30 release-surface mutations, observed $mutation_count" >&2
   exit 1
 fi
 echo "release-surface mutations: $mutation_count observed"

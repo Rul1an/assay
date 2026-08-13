@@ -96,7 +96,7 @@ assay:
   stage: test
   image: rust:latest
   before_script:
-    - cargo install assay
+    - cargo install assay-cli --version 5.1.0 --locked
   script:
     - assay ci --config eval.yaml --trace-file traces/golden.jsonl --junit .assay/reports/junit.xml
     - assay ci --config eval.yaml --trace-file traces/golden.jsonl --sarif .assay/reports/sarif.json
@@ -130,7 +130,7 @@ pool:
   vmImage: 'ubuntu-latest'
 
 steps:
-  - script: cargo install assay
+  - script: cargo install assay-cli --version 5.1.0 --locked
     displayName: 'Install Assay'
 
   - script: assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml
@@ -159,7 +159,7 @@ jobs:
       - checkout
       - run:
           name: Install Assay
-          command: cargo install assay
+          command: cargo install assay-cli --version 5.1.0 --locked
       - run:
           name: Run Tests
           command: assay ci --config eval.yaml --trace-file traces/golden.jsonl --strict --junit .assay/reports/junit.xml
@@ -185,7 +185,7 @@ pipeline {
     stages {
         stage('Install Assay') {
             steps {
-                sh 'cargo install assay'
+                sh 'cargo install assay-cli --version 5.1.0 --locked'
             }
         }
 

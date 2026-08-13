@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import json
 import stat
-import tomllib
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/ci/lib"))
+from workspace_version import read_workspace_version  # noqa: E402
+
 JSON_OUTPUT = ROOT / "docs/generated/agent-golden-path.json"
 MARKDOWN_OUTPUT = ROOT / "docs/guides/agent-golden-path.md"
 SKILL_OUTPUTS = (
@@ -71,8 +74,7 @@ SOURCE_REPO_CWD_RULE = (
 PYTHON_PLACEHOLDER_RULE = (
     "Replace `<python>` with `python3` on Unix-like hosts or `python` on Windows."
 )
-WORKSPACE = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
-RELEASE_VERSION = WORKSPACE["workspace"]["package"]["version"]
+RELEASE_VERSION = read_workspace_version(ROOT / "Cargo.toml")
 RELEASE_TAG = f"v{RELEASE_VERSION}"
 
 

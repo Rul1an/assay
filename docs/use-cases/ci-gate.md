@@ -60,7 +60,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Assay
-        run: cargo install assay
+        run: cargo install assay-cli --version 5.1.0 --locked
 
       - name: Run Tests
         run: |

@@ -139,11 +139,11 @@ Expected: the self-test reports all six mutations observed; the live checker sti
 
 - [ ] **Step 1: Add failing release-metadata assertions**
 
-In `scripts/ci/test-agent-golden-path-skill.py`, load the workspace version with `tomllib` and assert:
+In `scripts/ci/test-agent-golden-path-skill.py`, load the workspace version with the shared
+Python-3.10-compatible `scripts/ci/lib/workspace_version.py` reader and assert:
 
 ```python
-workspace = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
-version = workspace["workspace"]["package"]["version"]
+version = read_workspace_version(ROOT / "Cargo.toml")
 require_equal(contract.get("release_version"), version, "golden-path release_version")
 require_equal(contract.get("release_tag"), f"v{version}", "golden-path release_tag")
 ```
@@ -169,11 +169,10 @@ Expected: FAIL because `release_version` is absent.
 
 - [ ] **Step 3: Generate release metadata and the human start block**
 
-Use `tomllib` in the generator:
+Use the same shared workspace-version reader in the generator:
 
 ```python
-WORKSPACE = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
-RELEASE_VERSION = WORKSPACE["workspace"]["package"]["version"]
+RELEASE_VERSION = read_workspace_version(ROOT / "Cargo.toml")
 RELEASE_TAG = f"v{RELEASE_VERSION}"
 ```
 
