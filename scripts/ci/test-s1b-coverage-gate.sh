@@ -7,6 +7,11 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
+assert_nl_snippet() {
+  local blob="$1" want="$2" msg="$3"
+  [[ $'\n'"$blob"$'\n' == *$'\n'"$want"$'\n'* ]] || fail "$msg"
+}
+
 # One POSIX Python stdlib process-group bound. Not GNU timeout(1).
 # Kills the session started for this command only — not a daemon/setsid guarantee.
 command -v python3 >/dev/null 2>&1 \
@@ -216,27 +221,75 @@ run_matrix_active=$(awk '
   }
   p && /^}/ { exit }
 ' "$DRIVER")
-grep -Fq 'monitor_shutdown_ok "$mc"' <<<"$run_matrix_active" \
-  || fail "run_matrix does not assert controlled monitor shutdown"
 # shellcheck disable=SC2016
-want_send_yes=$(printf '%s\n' \
+assert_nl_snippet "$run_matrix_active" \
+  'monitor_shutdown_ok "$mc" || fail "monitor exit $mc is not controlled SIGINT shutdown (expected 0)"' \
+  "run_matrix does not fail-closed assert controlled monitor shutdown"
+# shellcheck disable=SC2016
+assert_nl_snippet "$run_matrix_active" "$(printf '%s\n' \
+  'endpoint_line_ok "$LOG" "$hpid" "connect" "127.0.0.1" "$tcp" \' \
+  '|| fail "cell 1 connect line missing for 127.0.0.1:${tcp}"')" \
+  "run_matrix does not fail-closed live-call connect endpoint_line_ok"
+# shellcheck disable=SC2016
+assert_nl_snippet "$run_matrix_active" "$(printf '%s\n' \
+  'endpoint_line_ok "$LOG" "$hpid" "sendto" "127.0.0.1" "$p2" \' \
+  '|| fail "cell 2 sendto endpoint missing"')" \
+  "run_matrix does not fail-closed live-call sendto endpoint_line_ok"
+# shellcheck disable=SC2016
+assert_nl_snippet "$run_matrix_active" "$(printf '%s\n' \
+  'endpoint_line_ok "$LOG" "$hpid" "sendmsg" "127.0.0.1" "$p3" \' \
+  '|| fail "cell 3 sendmsg endpoint missing"')" \
+  "run_matrix does not fail-closed live-call sendmsg endpoint_line_ok"
+# shellcheck disable=SC2016
+assert_nl_snippet "$run_matrix_active" "$(printf '%s\n' \
+  '[[ "$(grep -c "\\[PID ${hpid}\\] sendto:" "$LOG")" -eq 1 &&' \
+  '"$(grep -c "\\[PID ${hpid}\\] sendmsg:" "$LOG")" -eq 1 ]] ||' \
+  'fail "expected exactly one sendto and one sendmsg endpoint line"')" \
+  "run_matrix does not fail-closed assert exactly one sendto and sendmsg line"
+# shellcheck disable=SC2016
+assert_nl_snippet "$run_matrix_active" "$(printf '%s\n' \
   'send_observation_ok "$summary" 1 0 1 1 1 0 1 1 \' \
-  '|| fail "exact send counts missing: $summary"')
-[[ $'\n'"$run_matrix_active"$'\n' == *$'\n'"$want_send_yes"$'\n'* ]] \
-  || fail "run_matrix does not fail-closed live-call send_observation_ok for the positive cell"
+  '|| fail "exact send counts missing: $summary"')" \
+  "run_matrix does not fail-closed live-call send_observation_ok for the positive cell"
 # shellcheck disable=SC2016
-want_send_no=$(printf '%s\n' \
+assert_nl_snippet "$run_matrix_active" "$(printf '%s\n' \
   'send_observation_ok "$summary" 0 0 0 0 0 0 0 0 \' \
-  '|| fail "attach-disabled send stats not all zero: $summary"')
-[[ $'\n'"$run_matrix_active"$'\n' == *$'\n'"$want_send_no"$'\n'* ]] \
-  || fail "run_matrix does not fail-closed live-call send_observation_ok for attach-disabled"
+  '|| fail "attach-disabled send stats not all zero: $summary"')" \
+  "run_matrix does not fail-closed live-call send_observation_ok for attach-disabled"
 # shellcheck disable=SC2016
-grep -Fq 'ringbuf_drops_ok "$LOG"' <<<"$run_matrix_active" \
-  || fail "run_matrix does not live-call ringbuf_drops_ok"
+assert_nl_snippet "$run_matrix_active" \
+  'ringbuf_drops_ok "$LOG" || fail "tracepoint drop field is not 0"' \
+  "run_matrix does not fail-closed live-call ringbuf_drops_ok"
 # shellcheck disable=SC2016
-grep -Fq 'coverage_gate "$OH"' <<<"$run_matrix_active" \
-  || fail "run_matrix does not live-call coverage_gate"
+assert_nl_snippet "$run_matrix_active" 'coverage_gate "$OH"' \
+  "run_matrix does not live-call coverage_gate as a closed standalone line"
 echo "ok: monitor SIGINT shutdown is exit 0, not 130/crash"
+
+case_active=$(awk '
+  /^case "/ { p=1 }
+  p {
+    tmp = $0
+    sub(/^[[:space:]]+/, "", tmp)
+    if (tmp != "" && tmp !~ /^#/) print tmp
+  }
+  p && /^esac$/ { exit }
+' "$DRIVER")
+# shellcheck disable=SC2016
+assert_nl_snippet "$case_active" "$(printf '%s\n' \
+  'positive)' \
+  '[[ -x "${HARNESS_BIN:-}" && -x "$ASSAY_BIN" && -f "$ASSAY_EBPF" ]] || fail "missing bin/object"' \
+  'run_matrix yes ;;')" \
+  "positive case arm does not exact-call run_matrix yes"
+# shellcheck disable=SC2016
+assert_nl_snippet "$case_active" "$(cat <<'EOF'
+attach-disabled)
+[[ -x "${HARNESS_BIN:-}" && -x "$ASSAY_BIN" && -f "$ASSAY_EBPF" ]] || fail "missing bin/object"
+python3 -c 'import pathlib,sys; sys.exit(0 if b"s1b-cell7-disabled" in pathlib.Path(sys.argv[1]).read_bytes() else 1)' \
+"$ASSAY_BIN" || fail "ASSAY_BIN is not the mutated rebuild (missing s1b-cell7-disabled)"
+run_matrix no ;;
+EOF
+)" \
+  "attach-disabled case arm does not exact-call run_matrix no"
 
 wait_iters=$(sed -n 's/^WAIT_LOG_ITERS=//p' "$DRIVER" | head -1)
 wait_sleep=$(sed -n 's/^WAIT_LOG_SLEEP_S=//p' "$DRIVER" | head -1)
@@ -717,7 +770,42 @@ fi
 restore_out=$(bash "$ATTACH" restore-selftest)
 [[ "$restore_out" == "ok: restore-selftest" ]] \
   || fail "restore-selftest stdout must be exactly ok: restore-selftest (got: ${restore_out:-<empty>})"
-grep -Fq 'MUST(elapsed_ms >= 1500, "timeout selftest elapsed");' \
-  "$(cd "$(dirname "$0")" && pwd)/s1b-send-syscall-matrix.c" \
-  || fail "timeout selftest does not assert elapsed_ms >= 1500"
+c_src="$(cd "$(dirname "$0")" && pwd)/s1b-send-syscall-matrix.c"
+grep -Fq '#define SELFTEST_TIMEOUT_MIN_MS 1500' "$c_src" \
+  || fail "SELFTEST_TIMEOUT_MIN_MS must be 1500"
+grep -Fq 'MUST(elapsed_ms >= SELFTEST_TIMEOUT_MIN_MS, "timeout selftest elapsed");' "$c_src" \
+  || fail "timeout selftest does not assert elapsed_ms >= SELFTEST_TIMEOUT_MIN_MS"
+grep -Fq 'MUST(S_ISFIFO(st.st_mode), "fifo selftest not a fifo");' "$c_src" \
+  || fail "fifo selftest does not reject a non-FIFO path"
+grep -Fq 'MUST(ferr == ETIMEDOUT, "fifo selftest errno");' "$c_src" \
+  || fail "fifo selftest does not require ETIMEDOUT"
+grep -Fq 'MUST(elapsed_ms >= SELFTEST_TIMEOUT_MIN_MS, "fifo selftest elapsed");' "$c_src" \
+  || fail "fifo selftest does not assert elapsed_ms >= SELFTEST_TIMEOUT_MIN_MS"
+grep -Fq 'fd = open_go_fifo(argv[2], 2000);' "$c_src" \
+  || fail "fifo selftest does not call open_go_fifo with a 2000ms bound"
+set +e
+cc -Wall -Werror -o "$tmp/s1b-harness" "$c_src" 2>"$tmp/cc.err"
+cc_ec=$?
+set -e
+if [[ "$cc_ec" -eq 0 ]]; then
+  set +e
+  "$tmp/s1b-harness" --fifo-selftest "$tmp/missing-fifo" \
+    >"$tmp/fifo-miss.out" 2>"$tmp/fifo-miss.err"
+  miss_ec=$?
+  set -e
+  [[ "$miss_ec" -ne 0 ]] || fail "fifo-selftest on a missing path must not succeed"
+  if grep -q FIFO_TIMEOUT_OK "$tmp/fifo-miss.out" "$tmp/fifo-miss.err"; then
+    fail "fifo-selftest on a missing path claimed FIFO_TIMEOUT_OK"
+  fi
+  printf 'x\n' >"$tmp/not-a-fifo"
+  set +e
+  "$tmp/s1b-harness" --fifo-selftest "$tmp/not-a-fifo" \
+    >"$tmp/fifo-reg.out" 2>"$tmp/fifo-reg.err"
+  reg_ec=$?
+  set -e
+  [[ "$reg_ec" -ne 0 ]] || fail "fifo-selftest on a regular file must not succeed"
+  if grep -q FIFO_TIMEOUT_OK "$tmp/fifo-reg.out" "$tmp/fifo-reg.err"; then
+    fail "fifo-selftest on a regular file claimed FIFO_TIMEOUT_OK"
+  fi
+fi
 echo "ok: restore copies exact pre-mutation binary; no cargo build in restore"

@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/un.h>
@@ -20,6 +21,11 @@
     } while (0)
 
 #define GO_FIFO_TIMEOUT_MS 150000
+#define SELFTEST_TIMEOUT_MIN_MS 1500
+
+static long timespec_elapsed_ms(const struct timespec *t0, const struct timespec *t1) {
+    return (t1->tv_sec - t0->tv_sec) * 1000L + (t1->tv_nsec - t0->tv_nsec) / 1000000L;
+}
 
 static int die(const char *msg) {
     perror(msg);
@@ -116,16 +122,29 @@ int main(int argc, char **argv) {
         errno = 0;
         n = recv(fd, &g, 1, 0);
         MUST(clock_gettime(CLOCK_MONOTONIC, &t1) == 0, "clock end");
-        elapsed_ms = (t1.tv_sec - t0.tv_sec) * 1000L + (t1.tv_nsec - t0.tv_nsec) / 1000000L;
-        MUST(elapsed_ms >= 1500, "timeout selftest elapsed");
+        elapsed_ms = timespec_elapsed_ms(&t0, &t1);
+        MUST(elapsed_ms >= SELFTEST_TIMEOUT_MIN_MS, "timeout selftest elapsed");
         MUST(n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK), "timeout selftest errno");
         printf("TIMEOUT_OK errno=%d elapsed_ms=%ld\n", errno, elapsed_ms);
         return 0;
     }
     if (argc == 3 && strcmp(argv[1], "--fifo-selftest") == 0) {
-        int fd = open_go_fifo(argv[2], 2000);
+        struct stat st;
+        struct timespec t0, t1;
+        long elapsed_ms;
+        int fd;
+        int ferr;
+        MUST(stat(argv[2], &st) == 0, "fifo selftest path");
+        MUST(S_ISFIFO(st.st_mode), "fifo selftest not a fifo");
+        MUST(clock_gettime(CLOCK_MONOTONIC, &t0) == 0, "fifo clock start");
+        fd = open_go_fifo(argv[2], 2000);
+        ferr = errno;
+        MUST(clock_gettime(CLOCK_MONOTONIC, &t1) == 0, "fifo clock end");
+        elapsed_ms = timespec_elapsed_ms(&t0, &t1);
         MUST(fd < 0, "fifo selftest should time out");
-        printf("FIFO_TIMEOUT_OK\n");
+        MUST(ferr == ETIMEDOUT, "fifo selftest errno");
+        MUST(elapsed_ms >= SELFTEST_TIMEOUT_MIN_MS, "fifo selftest elapsed");
+        printf("FIFO_TIMEOUT_OK elapsed_ms=%ld\n", elapsed_ms);
         return 0;
     }
     if (argc != 2) {
