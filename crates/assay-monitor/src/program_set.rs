@@ -87,4 +87,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn send_attach_loop_finalizes_before_the_next_probe() {
+        let src = include_str!("loader.rs");
+        let send_loop = src
+            .find("for r in [\n            ProbeProgram::by_elf(\"assay_monitor_sendto\")")
+            .expect("send attach loop");
+        let finalize = src
+            .find(".finalize_mode_aware(false)")
+            .expect("always-attempted finalizer");
+        let next_probe = src
+            .find("ProbeProgram::by_elf(\"assay_monitor_fork\")")
+            .expect("next attach site");
+
+        assert!(send_loop < finalize && finalize < next_probe);
+        assert_eq!(src.matches(".finalize_mode_aware(false)").count(), 1);
+        assert!(src[send_loop..finalize].contains("record_attempt_failure"));
+        assert!(src[send_loop..finalize].contains("assay_monitor_sendmsg"));
+    }
+
 }
