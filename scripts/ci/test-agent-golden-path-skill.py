@@ -10,6 +10,7 @@ import os
 import re
 from pathlib import Path
 import subprocess
+import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -103,6 +104,8 @@ CURSOR_SCOPE = (
 )
 DISCOVERY_START = "<!-- agent-golden-path-discovery:start -->"
 DISCOVERY_END = "<!-- agent-golden-path-discovery:end -->"
+RELEASE_START = "<!-- agent-golden-path-release:start -->"
+RELEASE_END = "<!-- agent-golden-path-release:end -->"
 DISCOVERY_SKILL_ROOTS = (
     ".agents/skills/assay-golden-path/SKILL.md",
     ".claude/skills/assay-golden-path/SKILL.md",
@@ -244,6 +247,14 @@ def generated_discovery_block(guide: str) -> str:
     if DISCOVERY_START in before or DISCOVERY_END in before + after:
         fail("agent golden-path guide discovery markers are out of order")
     return block
+
+
+def generated_release_block(guide: str) -> str:
+    if guide.count(RELEASE_START) != 1 or guide.count(RELEASE_END) != 1:
+        fail("agent golden-path guide must contain exactly one release marker pair")
+    if guide.index(RELEASE_START) > guide.index(RELEASE_END):
+        fail("agent golden-path guide release markers are out of order")
+    return guide.split(RELEASE_START, 1)[1].split(RELEASE_END, 1)[0]
 
 
 def contract_issue_numbers(contract: dict[str, object]) -> set[int]:
@@ -1073,6 +1084,12 @@ def main() -> None:
         fail("unexpected golden-path contract schema")
     if contract.get("schema_version") != 1:
         fail("unexpected golden-path contract schema version")
+    workspace = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+    version = workspace["workspace"]["package"]["version"]
+    if contract.get("release_version") != version:
+        fail("golden-path release_version must match the workspace version")
+    if contract.get("release_tag") != f"v{version}":
+        fail("golden-path release_tag must match the workspace version")
     validate_plugin_skill(contract)
 
     payloads: list[bytes] = []
@@ -1084,6 +1101,17 @@ def main() -> None:
 
     text = payloads[0].decode("ascii")
     guide = read_bounded_evidence(GUIDE_PATH, "guide evidence").decode("utf-8")
+    release = generated_release_block(guide)
+    for required in (
+        f"Assay `{version}`",
+        f"`v{version}`",
+        "assay version",
+        "Upgrade",
+        "Roll back",
+        "Unreleased",
+    ):
+        if required not in release:
+            fail(f"guide release block omits required wording: {required!r}")
     discovery = generated_discovery_block(guide)
     for root in DISCOVERY_SKILL_ROOTS:
         if root not in discovery:

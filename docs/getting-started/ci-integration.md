@@ -42,7 +42,7 @@ jobs:
   assay:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Run tests with Assay
         run: |
@@ -208,17 +208,7 @@ pipeline {
 
 ## Docker-Based CI
 
-For environments without Rust:
-
-```yaml
-# Any CI system
-steps:
-  - run: |
-      docker run --rm \
-        -v $(pwd):/workspace \
-        ghcr.io/rul1an/assay:latest \
-        run --config /workspace/eval.yaml --strict
-```
+For environments without a preinstalled Rust toolchain, download and verify the explicit `v5.1.0` release asset during a trusted setup stage, then cache that exact binary. Assay does not currently claim a verified public GHCR image.
 
 ---
 
@@ -270,7 +260,7 @@ jobs:
   assay:
     # Evidence verification (fast)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: Rul1an/assay-action@v2
 
   integration:

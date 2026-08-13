@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import stat
+import tomllib
 from pathlib import Path
 
 
@@ -48,6 +49,8 @@ TABLE_START = "<!-- agent-golden-path-table:start -->"
 TABLE_END = "<!-- agent-golden-path-table:end -->"
 DISCOVERY_START = "<!-- agent-golden-path-discovery:start -->"
 DISCOVERY_END = "<!-- agent-golden-path-discovery:end -->"
+RELEASE_START = "<!-- agent-golden-path-release:start -->"
+RELEASE_END = "<!-- agent-golden-path-release:end -->"
 CURSOR_DOCS_URL = "https://cursor.com/docs/skills"
 CURSOR_DOCS_ACCESSED = "2026-08-09"
 SKILL_DESCRIPTION = (
@@ -68,6 +71,9 @@ SOURCE_REPO_CWD_RULE = (
 PYTHON_PLACEHOLDER_RULE = (
     "Replace `<python>` with `python3` on Unix-like hosts or `python` on Windows."
 )
+WORKSPACE = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+RELEASE_VERSION = WORKSPACE["workspace"]["package"]["version"]
+RELEASE_TAG = f"v{RELEASE_VERSION}"
 
 
 def stdout(kind: str, document: str | None = None) -> dict[str, object]:
@@ -559,6 +565,8 @@ CONTRACT: dict[str, object] = {
     "schema": "assay.agent_golden_path.v1",
     "schema_version": 1,
     "generated_by": "scripts/docs/generate-agent-golden-path.py",
+    "release_version": RELEASE_VERSION,
+    "release_tag": RELEASE_TAG,
     "source_issue": 2154,
     "journey_issue": 1975,
     "non_claims": [
@@ -628,6 +636,24 @@ def render_discovery() -> str:
     )
 
 
+def render_release() -> str:
+    return "\n".join(
+        (
+            "## Release-pinned start",
+            "",
+            f"This journey is pinned to Assay `{RELEASE_VERSION}` "
+            f"([`{RELEASE_TAG}`](https://github.com/Rul1an/assay/releases/tag/{RELEASE_TAG})).",
+            f"Install the CLI from a verified channel, then require `assay version` to print "
+            f"`{RELEASE_VERSION}` before using the table below. Behavior merged after that tag "
+            "is `Unreleased` and is not part of this release claim.",
+            "",
+            "Upgrade by installing a newer explicit release and re-running all nine steps.",
+            f"Roll back by reinstalling `{RELEASE_TAG}` from the GitHub release assets and "
+            "re-running the same journey.",
+        )
+    )
+
+
 def replace_generated_block(
     current: str, start: str, end: str, rendered: str, label: str
 ) -> str:
@@ -643,8 +669,15 @@ def replace_generated_block(
 
 
 def render_markdown(current: str) -> str:
-    with_discovery = replace_generated_block(
+    with_release = replace_generated_block(
         current,
+        RELEASE_START,
+        RELEASE_END,
+        render_release(),
+        "release",
+    )
+    with_discovery = replace_generated_block(
+        with_release,
         DISCOVERY_START,
         DISCOVERY_END,
         render_discovery(),

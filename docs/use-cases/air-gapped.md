@@ -118,7 +118,7 @@ assay run \
 # .gitlab-ci.yml
 agent-tests:
   stage: test
-  image: internal-registry.corp/assay:v0.8.0
+  image: internal-registry.corp/assay:v5.1.0
   script:
     - assay run --config eval.yaml --strict
   artifacts:
@@ -247,20 +247,20 @@ ssh air-gapped-server 'tar -xzf /tmp/assay-0.9.0.tar.gz && sudo mv assay /usr/lo
 ### Build and Push to Internal Registry
 
 ```bash
-# On connected machine
-docker pull ghcr.io/rul1an/assay:v0.8.0
-docker tag ghcr.io/rul1an/assay:v0.8.0 internal-registry.corp/assay:v0.8.0
-docker save internal-registry.corp/assay:v0.8.0 -o assay-image.tar
+# On a connected, controlled build machine
+git checkout v5.1.0
+docker build -t internal-registry.corp/assay:v5.1.0 .
+docker save internal-registry.corp/assay:v5.1.0 -o assay-image.tar
 
 # Transfer and load
 docker load -i assay-image.tar
-docker push internal-registry.corp/assay:v0.8.0
+docker push internal-registry.corp/assay:v5.1.0
 ```
 
 ### Use in CI
 
 ```yaml
-image: internal-registry.corp/assay:v0.8.0
+image: internal-registry.corp/assay:v5.1.0
 ```
 
 ---

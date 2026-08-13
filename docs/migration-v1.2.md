@@ -33,9 +33,12 @@ assay explain
 ## New Features
 
 ### Python SDK
-You can now install Assay as a Python library:
+
+> Correction (2026-08-13): the shipped Python distribution is `assay-it`; the PyPI package named `assay` is unrelated to this project.
+
+Install the SDK and pytest plugin:
 ```bash
-pip install assay
+pip install assay-it
 ```
 
 See [Python Quickstart](getting-started/python-quickstart.md) for details.

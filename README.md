@@ -23,7 +23,7 @@
 
 Agents got real tool access through MCP — and tool poisoning, rug pulls, and confused-deputy OAuth came with it. Most tools scan a server or filter a prompt. Assay sits at the tool-call boundary and does three things, in order.
 
-**One golden path:** [examples/privileged-action-gate/](examples/privileged-action-gate/) runs the enforcing proxy against a privileged action, offline, and writes the replayable evidence record a reviewer can check without trusting the agent. Start there.
+**One golden path:** the [release-pinned agent journey](docs/guides/agent-golden-path.md) records the nine driven CLI/MCP steps and their exit/stdout contracts. Its protected-action fixture lives in [examples/privileged-action-gate/](examples/privileged-action-gate/).
 
 ### Enforce, prove, stay honest
 
@@ -34,7 +34,7 @@ Agents got real tool access through MCP — and tool poisoning, rug pulls, and c
 ### Quickstart
 
 ```bash
-cargo install assay-cli
+cargo install assay-cli --version 5.1.0 --locked
 
 mkdir -p /tmp/assay-demo && echo "safe content" > /tmp/assay-demo/safe.txt
 assay mcp wrap --policy examples/mcp-quickstart/policy.yaml \
@@ -70,7 +70,7 @@ Wire it into Cursor, Claude Code, or Codex in one line with `assay mcp config-pa
               └─► 📊 Trust Basis → Trust Card → SARIF / CI
 ```
 
-New in **3.30.0:** an evidence event can carry an optional **soft `semantic_digest`** (with its `digest_profile`) beside the hard `content_hash` — a correlation/equivalence overlay for grouping records by canonical content across producers or points in time, computed via the [`assay-canonical`](crates/assay-canonical/) crate (RFC 8785 / JCS). It is never part of `content_hash`, never on the verify or admission path, and never substitutes integrity. [CHANGELOG.md](CHANGELOG.md) and release notes remain the authority for what is public; crates.io publication is separate from merge state.
+Current release: [`v5.1.0`](https://github.com/Rul1an/assay/releases/tag/v5.1.0). [CHANGELOG.md](CHANGELOG.md) and release notes remain the authority for released behavior; merged changes after the tag are `Unreleased`, and crates.io publication is separate from merge state.
 
 ## Is this for me?
 
@@ -119,7 +119,7 @@ schemas:
     required: ["path"]
 ```
 
-Generate one from observed behaviour with `assay init --from-trace trace.jsonl`, or migrate a legacy `constraints:` policy with `assay policy migrate`. See [Policy Files](docs/reference/config/policies.md).
+`assay init --from-trace trace.jsonl` generates the runtime-observation policy used by the trace-generation flow (`files`, `network`, and `processes`); it is not an MCP authorization policy. Migrate a legacy MCP `constraints:` policy with `assay policy migrate`. See [Policy Files](docs/reference/config/policies.md).
 
 ## Why Assay
 

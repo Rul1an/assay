@@ -265,13 +265,13 @@ repos:
 
       - id: release-surface
         name: Release surface names the current version
-        entry: bash scripts/ci/check-release-surface.sh
+        entry: bash -c 'bash scripts/ci/test-check-release-surface.sh && bash scripts/ci/check-release-surface.sh'
         language: system
         pass_filenames: false
         # Triggers on the files it can be wrong about, plus itself. It does not need a binary: with
         # no `target/` build it falls back to the manifest version, so a release-prep commit is
         # checked without waiting on a compile.
-        files: ^(scripts/ci/check-release-surface\.sh|Cargo\.toml|docs/getting-started/installation\.md|\.pre-commit-config\.yaml)$
+        files: ^(scripts/ci/(check|test-check)-release-surface\.sh|Cargo\.toml|docs/(getting-started/(index|installation|ci-integration)\.md|reference/cli/index\.md|python-sdk/index\.md|use-cases/air-gapped\.md|AIcontext/user-flows\.md|migration-v1\.2\.md)|\.pre-commit-config\.yaml)$
 
       - id: ci-gate-expectations-self-test
         name: CI gate expectation contract

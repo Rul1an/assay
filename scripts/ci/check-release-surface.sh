@@ -191,6 +191,49 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 3. Active outward installation claims.
+#
+# These checks are deliberately path- and claim-scoped. Historical release notes may name channels
+# that were proposed at the time; current entrypoints may advertise only channels with a verified
+# release artifact. The Python pattern has a token boundary so the supported `assay-it` package is
+# not mistaken for the unrelated `assay` package.
+# ---------------------------------------------------------------------------
+check_absent_regex() {
+  local file="$1" pattern="$2" label="$3"
+  if [ ! -f "$file" ]; then
+    fail "$file: checked outward document is missing"
+    return
+  fi
+  if grep -Eiq -- "$pattern" "$file"; then
+    fail "$file: $label"
+  fi
+}
+
+for file in \
+  docs/getting-started/index.md \
+  docs/getting-started/installation.md \
+  docs/python-sdk/index.md \
+  docs/AIcontext/user-flows.md \
+  docs/migration-v1.2.md; do
+  check_absent_regex "$file" 'pip(3|x)? install( --user)? assay([^[:alnum:]_-]|$)' \
+    'unsupported Python package'
+done
+
+check_absent_regex docs/getting-started/installation.md \
+  'brew install .*assay' 'unsupported Homebrew channel'
+check_absent_regex docs/getting-started/installation.md \
+  'scoop (bucket add|install) assay' 'unsupported Scoop channel'
+for file in docs/getting-started/installation.md docs/getting-started/ci-integration.md docs/use-cases/air-gapped.md; do
+  check_absent_regex "$file" 'ghcr\.io/.*/assay' 'unsupported GHCR image'
+done
+check_absent_regex docs/getting-started/installation.md \
+  'assay-windows-x86_64\.zip' 'obsolete Windows asset name'
+
+if ! grep -qxF "# assay $WORKSPACE_VERSION" docs/reference/cli/index.md; then
+  fail "docs/reference/cli/index.md: documented CLI version drift"
+fi
+
+# ---------------------------------------------------------------------------
 note ""
 if [ "$failures" -gt 0 ]; then
   note "release surface: $failures disagreement(s) with [workspace.package] version"

@@ -27,7 +27,7 @@ flowchart TD
 ```
 
 **Steps:**
-1. **Install**: `pip install assay` or download binary
+1. **Install**: `cargo install assay-cli --version 5.1.0 --locked` or use a verified release asset; install the Python SDK separately with `pip install assay-it`
 2. **Initialize**: `assay init` - auto-detects project, generates secure defaults
 3. **Capture traces**: Use `AssayClient` or `assay import` to record tool calls
 4. **Validate**: `assay validate --config eval.yaml --trace-file traces.jsonl`
@@ -80,7 +80,7 @@ jobs:
   assay:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Run tests with Assay
         run: |
@@ -243,7 +243,7 @@ assay run --config eval.yaml --baseline baseline.json
 ```mermaid
 flowchart TD
     start[Python Developer] --> install[Install SDK]
-    install --> pip[pip install assay]
+    install --> pip[cargo install assay-cli]
     pip --> import[Import Assay]
     import --> record[Record Traces]
     record --> validate[Validate Coverage]
@@ -254,7 +254,7 @@ flowchart TD
 
 **Python SDK Flow:**
 
-1. **Installation**: `pip install assay`
+1. **Installation**: `cargo install assay-cli --version 5.1.0 --locked`
 2. **Recording**:
 ```python
 from assay import AssayClient
