@@ -7,43 +7,66 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-# Hang bound for selftests. timeout(1) is Linux; gtimeout is Homebrew; else
-# Python subprocess (stdlib) so the macOS hook never waits unbounded.
+# One POSIX Python stdlib process-group bound. Not GNU timeout(1).
+# Kills the session started for this command only — not a daemon/setsid guarantee.
+command -v python3 >/dev/null 2>&1 \
+  || fail "coverage-gate hang bound requires python3"
 run_bounded() {
   local secs="$1"
   shift
-  if command -v timeout >/dev/null 2>&1; then
-    timeout -k 2 "$secs" "$@"
-  elif command -v gtimeout >/dev/null 2>&1; then
-    gtimeout -k 2 "$secs" "$@"
-  else
-    python3 - "$secs" "$@" <<'PY'
+  python3 - "$secs" "$@" <<'PY'
+import os
+import signal
 import subprocess
 import sys
 
 secs = float(sys.argv[1])
 cmd = sys.argv[2:]
+p = subprocess.Popen(cmd, start_new_session=True)
 try:
-    r = subprocess.run(cmd, timeout=secs)
+    sys.exit(p.wait(timeout=secs))
 except subprocess.TimeoutExpired:
+    try:
+        os.killpg(p.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        p.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        pass
+    # Leader exit is not proof the group is empty (TERM-ignoring grandchild).
+    try:
+        os.killpg(p.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    p.wait()
     sys.stderr.write("FAIL: bounded run exceeded %ss\n" % sys.argv[1])
     sys.exit(124)
-sys.exit(r.returncode)
 PY
-  fi
 }
 
-# PATH without timeout(1)/gtimeout must still expire, not wait out the child.
-nobin="$tmp/nobin"
-mkdir -p "$nobin"
-ln -sfn "$(command -v bash)" "$nobin/bash"
-ln -sfn "$(command -v python3)" "$nobin/python3"
-ln -sfn "$(command -v sleep)" "$nobin/sleep"
+gpy="$tmp/s1b_gc_$$.py"
+printf '%s\n' \
+  'import signal' \
+  'import time' \
+  'signal.signal(signal.SIGTERM, signal.SIG_IGN)' \
+  'signal.signal(signal.SIGINT, signal.SIG_IGN)' \
+  'time.sleep(30)' >"$gpy"
+trap 'pkill -f "$gpy" >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT
 set +e
-PATH="$nobin" run_bounded 1 sleep 5 >/dev/null 2>"$tmp/bound.err"
+t0=$(python3 -c 'import time; print(time.time())')
+run_bounded 1 bash -c "python3 \"$gpy\" & wait" >/dev/null 2>"$tmp/bound.err"
 bound_ec=$?
+t1=$(python3 -c 'import time; print(time.time())')
 set -e
-[[ "$bound_ec" -eq 124 ]] || fail "run_bounded without timeout(1) must expire (got $bound_ec, would hang unbounded)"
+elapsed=$(python3 -c "print($t1 - $t0)")
+[[ "$bound_ec" -eq 124 ]] || fail "run_bounded must expire a parent+grandchild (got $bound_ec)"
+python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) < 8 else 1)" "$elapsed" \
+  || fail "run_bounded elapsed ${elapsed}s not within the bound"
+if pgrep -f "$gpy" >/dev/null 2>&1; then
+  fail "run_bounded leaked a grandchild"
+fi
+pkill -f "$gpy" >/dev/null 2>&1 || true
 
 run() {
   local json="$1" want="$2" ec=0
@@ -75,7 +98,9 @@ run "$tmp/both.json" nz
 run "$tmp/future.json" nz
 echo "ok: coverage-gate contract"
 
-bash "$DRIVER" mutation-selftest
+mut_out=$(bash "$DRIVER" mutation-selftest)
+[[ "$mut_out" == "ok: mutation uniqueness, restore, into-fails, to_string-compiles" ]] \
+  || fail "mutation-selftest stdout must be exactly the uniqueness marker (got: ${mut_out:-<empty>})"
 
 run_mode() {
   local mode="$1" want="$2"
@@ -293,19 +318,21 @@ normalized_run_body() {
   ' <<<"$1"
 }
 assert_single_cmd_step() {
-  local name="$1" want="$2" step body
+  local name="$1" want="$2" step body n_if
   step=$(named_step "$wf" "$name")
   [[ -n "$step" ]] || fail "missing step: $name"
   if grep -Eq '^        continue-on-error[[:space:]]*:' <<<"$step"; then
     fail "$name must not continue-on-error"
   fi
+  if grep -Eq '^        shell:' <<<"$step"; then
+    fail "$name must not override shell"
+  fi
+  n_if=$(grep -c '^        if:' <<<"$step" || true)
+  [[ "$n_if" -eq 1 ]] || fail "$name must have exactly one if: (got $n_if)"
   grep -qx "        if: \${{ github.event.inputs.proof_mode == 'send-matrix' }}" <<<"$step" \
     || fail "$name must be send-matrix-conditioned"
   body=$(active_lines "$(normalized_run_body "$step")")
   [[ "$body" == "$want" ]] || fail "$name run body must be exactly: $want (got: ${body:-<empty>})"
-  if grep -Eq '\\$|\|\| true|<<|function |if false' <<<"$body"; then
-    fail "$name run body is not a single command"
-  fi
 }
 compile_step=$(named_step "$wf" "Compile syscall harness")
 [[ -n "$compile_step" ]] || fail "missing Compile syscall harness step"
@@ -315,17 +342,20 @@ assert_single_cmd_step "Positive syscall/effect matrix" \
   'bash scripts/ci/s1b-positive-matrix.sh'
 assert_single_cmd_step "Attach-disabled negative matrix" \
   'bash scripts/ci/s1b-attach-disabled.sh'
+# Keep shebang; skip blanks and non-shebang comments. Tiny-script shape, not reachability.
+script_active_lines() {
+  awk '
+    {
+      tmp = $0
+      sub(/^[[:space:]]+/, "", tmp)
+      if (tmp == "") next
+      if (tmp ~ /^#/ && tmp !~ /^#!/) next
+      print tmp
+    }
+  '
+}
 POS="$(cd "$(dirname "$0")" && pwd)/s1b-positive-matrix.sh"
-# Keep shebang; skip non-shebang comments and blanks. Tiny-script shape, not reachability.
-pos_active=$(awk '
-  {
-    tmp = $0
-    sub(/^[[:space:]]+/, "", tmp)
-    if (tmp == "") next
-    if (tmp ~ /^#/ && tmp !~ /^#!/) next
-    print tmp
-  }
-' "$POS")
+pos_active=$(script_active_lines <"$POS")
 # Closed tiny-script shape (not a proof of arbitrary shell reachability).
 # shellcheck disable=SC2016
 want_pos=$(printf '%s\n' \
@@ -337,6 +367,25 @@ want_pos=$(printf '%s\n' \
   'exec sudo -E env HARNESS_BIN="${RUNNER_TEMP:?}/s1b-harness" WORKDIR="${RUNNER_TEMP:?}/s1b-positive" bash scripts/ci/run-send-syscall-matrix.sh positive')
 [[ "$pos_active" == "$want_pos" ]] \
   || fail "positive wrapper active lines must match the closed six-line shape ending in exec"
+COMPILE="$(cd "$(dirname "$0")" && pwd)/s1b-compile-and-contract.sh"
+compile_active=$(script_active_lines <"$COMPILE")
+# shellcheck disable=SC2016
+want_compile=$(printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  'ROOT="$(cd "$(dirname "$0")/../.." && pwd)"' \
+  'cd "$ROOT"' \
+  'out="${RUNNER_TEMP:-/tmp}/s1b-harness"' \
+  'cc -Wall -Werror -o "$out" scripts/ci/s1b-send-syscall-matrix.c' \
+  '"$out" --timeout-selftest' \
+  'fifo="${RUNNER_TEMP:-/tmp}/s1b-fifo-selftest"' \
+  'rm -f "$fifo"' \
+  'mkfifo "$fifo"' \
+  '"$out" --fifo-selftest "$fifo"' \
+  'rm -f "$fifo"' \
+  'bash scripts/ci/test-s1b-coverage-gate.sh')
+[[ "$compile_active" == "$want_compile" ]] \
+  || fail "compile wrapper active lines must match the closed tiny-script shape"
 smoke_job=$(awk '
   $0 == "  smoke:" { p=1 }
   p && /^  [A-Za-z0-9_-]+:/ && $0 != "  smoke:" { exit }
@@ -406,6 +455,9 @@ if cre.search("crates/assay-cli/src/lib.rs") is not None:
   "scripts/ci/s1b-send-syscall-matrix.c" \
   ".github/workflows/monitor-attach-smoke.yml" \
   "crates/assay-cli/src/cli/commands/monitor_next/output.rs" \
+  "crates/assay-cli/src/cli/commands/monitor_next/mod.rs" \
+  "crates/assay-monitor/src/loader.rs" \
+  ".github/workflows/kernel-matrix.yml" \
   ".pre-commit-config.yaml" \
   || fail "s1b pre-commit hook YAML contract failed without ruby on PATH"
 echo "ok: s1b hook YAML contract without ruby"
@@ -567,12 +619,56 @@ grep -Fq 'REAL_BIN_PATH' <<<"$restore_fn" \
 if grep -q 'cargo build' <<<"$restore_fn"; then
   fail "attach-disabled restore must not cargo build"
 fi
-prod_active=$(active_lines "$(awk '
+prod_active=$(awk '
   /^if \[\[ "\$\{1:-\}" == restore-selftest/ { skip=1 }
   skip && /^fi$/ { skip=0; next }
   skip { next }
   { print }
-' "$ATTACH")")
+' "$ATTACH" | script_active_lines)
+# shellcheck disable=SC2016
+want_attach_prod=$(cat <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT"
+restore() {
+cp "$bak" "$REAL_SRC_PATH"
+local tmpf="${REAL_BIN_PATH}.tmp"
+cp "$binbak" "$tmpf"
+cmp -s "$tmpf" "$binbak"
+mv -f "$tmpf" "$REAL_BIN_PATH"
+test -f "$REAL_BIN_PATH"
+cmp -s "$REAL_BIN_PATH" "$binbak"
+rm -f "$bak" "$binbak" "$tmpf"
+}
+REAL_SRC_PATH="$ROOT/crates/assay-monitor/src/loader.rs"
+REAL_BIN_PATH="$ROOT/target/release/assay"
+: "${RUNNER_TEMP:?RUNNER_TEMP required}"
+bak="$RUNNER_TEMP/loader.rs.s1b.bak"
+binbak="$RUNNER_TEMP/assay.s1b.bin.bak"
+cp "$REAL_SRC_PATH" "$bak"
+cp "$REAL_BIN_PATH" "$binbak"
+readonly REAL_SRC_PATH REAL_BIN_PATH bak binbak
+readonly -f restore
+trap restore EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+bash scripts/ci/run-send-syscall-matrix.sh disable-send-attach
+cargo build -p assay-cli --release
+python3 -c 'import pathlib,sys; sys.exit(0 if b"s1b-cell7-disabled" in pathlib.Path(sys.argv[1]).read_bytes() else 1)' \
+"$REAL_BIN_PATH" || {
+echo "FAIL: ASSAY_BIN is not the mutated rebuild (missing s1b-cell7-disabled)" >&2
+exit 1
+}
+sudo -E env HARNESS_BIN="$RUNNER_TEMP/s1b-harness" WORKDIR="$RUNNER_TEMP/s1b-disabled" \
+bash scripts/ci/run-send-syscall-matrix.sh attach-disabled
+EOF
+)
+[[ "$prod_active" == "$want_attach_prod" ]] \
+  || fail "attach-disabled production active lines must match the closed shape ending in attach-disabled"
+last_prod=$(printf '%s\n' "$prod_active" | tail -1)
+[[ "$last_prod" == 'bash scripts/ci/run-send-syscall-matrix.sh attach-disabled' ]] \
+  || fail "attach-disabled production path must end in the load-bearing attach-disabled invocation"
 if grep -Eq '^bin=' <<<"$prod_active"; then
   fail "production attach-disabled must not rebind bin before restore"
 fi
@@ -586,7 +682,9 @@ after_trap=$(awk '/^trap restore EXIT/{p=1; next} p{print}' <<<"$prod_active")
 if grep -Eq '^(REAL_BIN_PATH|REAL_SRC_PATH|bak|binbak)=' <<<"$after_trap"; then
   fail "captured restore paths must not be rebound after trap arming"
 fi
-bash "$ATTACH" restore-selftest
+restore_out=$(bash "$ATTACH" restore-selftest)
+[[ "$restore_out" == "ok: restore-selftest" ]] \
+  || fail "restore-selftest stdout must be exactly ok: restore-selftest (got: ${restore_out:-<empty>})"
 grep -q 'elapsed_ms' "$(cd "$(dirname "$0")" && pwd)/s1b-send-syscall-matrix.c" \
   || fail "timeout selftest does not assert elapsed_ms"
 echo "ok: restore copies exact pre-mutation binary; no cargo build in restore"
