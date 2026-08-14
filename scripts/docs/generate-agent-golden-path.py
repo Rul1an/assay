@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -822,7 +823,7 @@ def read_plugin_resource(source: Path) -> bytes:
     return payload
 
 
-def main() -> None:
+def rendered_outputs() -> list[tuple[Path, bytes]]:
     current = MARKDOWN_OUTPUT.read_text(encoding="utf-8")
     rendered_markdown = render_markdown(current)
     rendered_skill = render_skill()
@@ -830,22 +831,49 @@ def main() -> None:
     rendered_contract = (json.dumps(CONTRACT, indent=2, ensure_ascii=True) + "\n").encode(
         "ascii"
     )
-    plugin_resources = [
-        (rendered_contract if source == JSON_OUTPUT else read_plugin_resource(source), output)
-        for source, output in PLUGIN_RESOURCE_COPIES
+    outputs: list[tuple[Path, bytes]] = [
+        (JSON_OUTPUT, rendered_contract),
+        (MARKDOWN_OUTPUT, rendered_markdown.encode("utf-8")),
+        *[(output, rendered_skill.encode("ascii")) for output in SKILL_OUTPUTS],
+        *[(output, rendered_plugin_skill.encode("ascii")) for output in PLUGIN_SKILL_OUTPUTS],
     ]
+    for source, output in PLUGIN_RESOURCE_COPIES:
+        payload = (
+            rendered_contract if source == JSON_OUTPUT else read_plugin_resource(source)
+        )
+        outputs.append((output, payload))
+    return outputs
 
-    JSON_OUTPUT.write_bytes(rendered_contract)
-    MARKDOWN_OUTPUT.write_text(rendered_markdown, encoding="utf-8")
-    for output in SKILL_OUTPUTS:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(rendered_skill, encoding="ascii")
-    for output in PLUGIN_SKILL_OUTPUTS:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(rendered_plugin_skill, encoding="ascii")
-    for payload, output in plugin_resources:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(payload)
+
+def write_outputs(outputs: list[tuple[Path, bytes]]) -> None:
+    for path, payload in outputs:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+
+
+def check_outputs(outputs: list[tuple[Path, bytes]]) -> None:
+    drifted = [
+        path
+        for path, expected in outputs
+        if not path.is_file() or path.read_bytes() != expected
+    ]
+    if not drifted:
+        return
+    print("error: generated golden-path outputs drifted:", file=sys.stderr)
+    for path in drifted:
+        print(path.relative_to(ROOT).as_posix(), file=sys.stderr)
+    raise SystemExit(1)
+
+
+def main(argv: list[str] | None = None) -> None:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv == ["--check"]:
+        check_outputs(rendered_outputs())
+        return
+    if argv:
+        raise SystemExit("unknown argument: " + " ".join(argv))
+    write_outputs(rendered_outputs())
 
 
 if __name__ == "__main__":

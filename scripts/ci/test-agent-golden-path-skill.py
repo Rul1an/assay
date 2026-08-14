@@ -1279,6 +1279,19 @@ def main() -> None:
             ):
                 fail(f"{hook_id} does not cover {required_path}")
 
+    check_mode_test = "scripts/ci/test-generate-agent-golden-path-check.py"
+    contract_hook = parse_precommit_hook(
+        precommit_text,
+        "agent-golden-path-skill-contract",
+        "agent-golden-path-skill-contract",
+    )
+    if not precommit_pattern_matches(
+        contract_hook.files_pattern,
+        check_mode_test,
+        "agent-golden-path-skill-contract files selector",
+    ):
+        fail(f"agent-golden-path-skill-contract does not cover {check_mode_test}")
+
     print("agent golden-path skill: portable, byte-identical, and contract-complete")
 
 
