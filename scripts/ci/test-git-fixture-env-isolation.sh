@@ -4,11 +4,24 @@ set -euo pipefail
 
 # The harness itself creates a linked worktree, so it must cross the same boundary first.
 # shellcheck source=scripts/ci/lib/clear-git-repository-env.sh
+# shellcheck disable=SC1091
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clear-git-repository-env.sh"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+HELPER="$ROOT/scripts/ci/lib/clear-git-repository-env.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+
+# Keep the static production list honest against the Git version running the gate. The helper
+# cannot query Git safely, but this harness has already crossed the repository-state boundary.
+while IFS= read -r name; do
+  # The single quotes deliberately defer indirect expansion to the isolated child shell.
+  # shellcheck disable=SC2016
+  if ! env "$name=sentinel" bash -c 'source "$1"; [[ -z ${!2+x} ]]' bash "$HELPER" "$name"; then
+    echo "FAIL: fixture helper left repository-local variable $name set" >&2
+    exit 1
+  fi
+done < <(git rev-parse --local-env-vars)
 
 MAIN="$TMP/main"
 WORKTREE="$TMP/worktree"
