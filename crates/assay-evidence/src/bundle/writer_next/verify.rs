@@ -537,7 +537,7 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<Verifie
                 //
                 // What this does not close: the contract is internal, so a *consistent* rewrite
                 // satisfies it. Rewrite the manifest run_id and every event's run_id and id
-                // together and the bundle still verifies, because the chain root is computed over
+                // together and the bundle still verifies, because the run-root digest is computed over
                 // content hashes that exclude identity by design. Binding a bundle to its identity
                 // needs a second digest, not a stricter version of this check.
                 // The id contract is `run_id:seq`, so it only means something if the split is
@@ -633,8 +633,8 @@ fn verify_bundle_snapshot(source: &[u8], limits: VerifyLimits) -> Result<Verifie
             // Check 14, the bundle id contract. The profile makes it normative -- "the manifest's
             // `run_root` and `bundle_id` MUST both equal it" -- but nothing derives one from the
             // other at read time, so the two could disagree and still verify. Ordered after the
-            // chain check on purpose: a mutated run_root stays a root mismatch, and this fires
-            // only when the chain is sound and its second copy in the manifest is not.
+            // run-root digest check on purpose: a mutated run_root stays a root mismatch, and this
+            // fires only when the run-root digest is sound and its second copy in the manifest is not.
             //
             // Compared against the *computed* root rather than `m.run_root`. The two are equal
             // by the check above, so this is the same comparison today; it stops being the same

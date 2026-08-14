@@ -82,6 +82,11 @@ The design follows the current consensus for secret hygiene and evidence sanitiz
   redacted form and the raw secret never enters the hash input (you cannot brute-force a secret back out
   of the manifest).
 
+> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
+> event content-hash strings, with a trailing newline, in event sequence order —
+> not a tree root, and not `event_id` bytes. The historical wording above describes
+> the model used at the time and is not a claim about the shipped evidence format.
+
 ## Goals
 
 - No raw secret-shaped value in any serialized byte of a default-mode bundle (argv, surface fields,
@@ -134,6 +139,12 @@ decided choice (see Decisions). Properties:
   salt would have destroyed that.
 - Deterministic and replay-stable: same `(installation_secret, value)` always yields the same token, so
   VCR replay and Merkle hashing stay stable.
+
+> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
+> event content-hash strings, with a trailing newline, in event sequence order —
+> not a tree root, and not `event_id` bytes. The historical wording above describes
+> the model used at the time and is not a claim about the shipped evidence format.
+
 - Not reversible: the raw value is keyed-hashed, never stored, never logged. The keyed hash also means a
   bundle leaked without the installation secret cannot be brute-forced back to the value by an outsider
   (an unkeyed hash of a short/low-entropy secret would be brute-forceable).
@@ -202,6 +213,11 @@ so two bundles can be told to share a redaction domain without the key ever appe
   fail-closed backstop, not a second redactor. It applies the same rule set AND the same allowlist as
   the boundary pass, so an allowlisted-safe value does not trip a spurious failure, and an already
   redacted `<redacted:...>` placeholder no longer matches any rule.
+
+> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
+> event content-hash strings, with a trailing newline, in event sequence order —
+> not a tree root, and not `event_id` bytes. The historical wording above describes
+> the model used at the time and is not a claim about the shipped evidence format.
 
 Redaction happens strictly before hashing/signing, so the manifest and signature cover the redacted
 content and the raw value is absent from the hash preimage. The assertion sweep likewise runs before

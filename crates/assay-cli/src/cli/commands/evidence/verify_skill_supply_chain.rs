@@ -1,6 +1,6 @@
 //! EXPERIMENTAL: semantic verification of skill supply-chain carriers inside an evidence bundle.
 //!
-//! `BundleReader::open` verifies bundle integrity (manifest hashes + Merkle root). This command layers
+//! `BundleReader::open` verifies manifest hashes and the deterministic run-root digest. This command layers
 //! the pinned carrier contract on top: every `assay.skill_supply_chain.v0` event is re-validated
 //! fail-closed (closed vocabularies, worst-wins verdict recompute, coverage honesty, signal
 //! coherence), and duplicate root identities fail because the reviewed subject would be ambiguous.

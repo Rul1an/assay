@@ -20,7 +20,7 @@
 //! requires them to name an immutable artifact, so this is the only shape a conforming consumer
 //! can act on.
 //!
-//! Before ADR-044 the subject digest was `manifest.run_root`, a chain over per-event content
+//! Before ADR-044 the subject digest was `manifest.run_root`, a flat deterministic run-root digest over per-event content
 //! hashes covering only `{specversion, type, datacontenttype, subject?, data}`. Two bundles with
 //! different `run_id`, producer, timestamps and PII flags share it, so it named no artifact and,
 //! being nobody's archive hash, matched none either. Such statements carry the `v0` predicate type

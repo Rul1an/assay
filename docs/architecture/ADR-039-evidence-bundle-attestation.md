@@ -15,6 +15,11 @@ offline as a portable claim. As of 2026 the in-toto Attestation Framework (ITE-6
 the common envelope that Sigstore and SLSA already use, and SCITT continues through
 the IETF, synergising with RATS and WIMSE.
 
+> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
+> event content-hash strings, with a trailing newline, in event sequence order —
+> not a tree root, and not `event_id` bytes. The historical wording above describes
+> the model used at the time and is not a claim about the shipped evidence format.
+
 ## Decision
 
 Emit the bundle manifest and the coverage/claim verdict as an in-toto v1 Statement

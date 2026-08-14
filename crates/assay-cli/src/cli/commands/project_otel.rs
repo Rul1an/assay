@@ -93,7 +93,7 @@ fn run_tool_decision_truth(bundle: &Path, out: Option<&Path>) -> anyhow::Result<
             return Ok(EXIT_CONFIG_ERROR);
         }
     };
-    // BundleReader::open verifies bundle integrity (manifest hashes + Merkle root).
+    // BundleReader::open verifies manifest hashes and the deterministic run-root digest.
     let reader = match assay_evidence::bundle::BundleReader::open(file) {
         Ok(r) => r,
         Err(e) => {

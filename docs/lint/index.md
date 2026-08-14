@@ -50,7 +50,7 @@ credential there is disclosed to everyone who can read the evidence, including a
 is shared with for audit.
 
 **How to fix.** Redact the value at the producer before the event is written. Rewriting the bundle
-afterwards changes its content hashes and invalidates the Merkle root.
+afterwards changes its content hashes and invalidates the recorded run-root digest.
 
 **Note.** The match is a literal substring test, not a validator. It has both false positives
 (`token=` in prose) and false negatives (a credential with no recognised prefix).

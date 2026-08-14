@@ -152,6 +152,30 @@ jobs:
           bash scripts/ci/test-ci-hardening-b1.sh
           bash scripts/ci/test-structurizr-export-docker.sh
 
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Evidence vocabulary guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          pin="$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+          text = Path(".github/workflows/kernel-matrix.yml").read_text()
+          match = re.search(r"pip install pre-commit==([0-9.]+)", text)
+          if not match:
+              raise SystemExit("kernel-matrix.yml must pin pre-commit==VERSION")
+          print(match.group(1))
+          PY
+          )"
+          echo "pre-commit pin: ${pin}"
+          python3 -m pip install --user "pre-commit==${pin}"
+          export PATH="${HOME}/.local/bin:${PATH}"
+          bash scripts/ci/test-evidence-vocabulary.sh
+          python3 scripts/ci/check-evidence-vocabulary.py
+
   # --- Dependency security (advisories, licenses, sources) ---
   deps-security:
     name: Dependency Security (cargo-deny + audit)

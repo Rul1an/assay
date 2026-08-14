@@ -623,13 +623,27 @@ fn nothing_but_the_boundary_include_documents_the_integrity_variant() {
 }
 
 #[test]
-fn the_boundary_claims_no_structure_the_verifier_does_not_build() {
-    // `compute_run_root` is a flat sha256 over the concatenated content hashes, so "Merkle" would
-    // promise inclusion proofs and sub-range verification that do not exist. ADR-042's stop list
-    // makes that an unearned claim rather than loose wording, and one file now carries it.
-    let boundary = read(BOUNDARY);
+fn the_boundary_states_the_canonical_flat_digest_formula() {
+    let boundary = flowed(&read(BOUNDARY));
+    assert!(
+        boundary.contains(
+            "`run_root` is SHA-256 over newline-delimited event content-hash strings, with a \
+             trailing newline, in event sequence order."
+        ),
+        "{BOUNDARY} must state the canonical run_root formula"
+    );
+    assert!(
+        boundary.contains("flat digest"),
+        "{BOUNDARY} must identify run_root as a flat digest"
+    );
+    assert!(
+        !boundary.contains("hash chain")
+            && !boundary.contains("integrity chain")
+            && !boundary.contains("concatenated"),
+        "{BOUNDARY} must not describe run_root as a chain or delimiter-free concatenation"
+    );
     assert!(
         !boundary.contains("Merkle"),
-        "{BOUNDARY} names a Merkle structure; `run_root` is a hash chain"
+        "{BOUNDARY} must not name a structure the verifier does not build"
     );
 }

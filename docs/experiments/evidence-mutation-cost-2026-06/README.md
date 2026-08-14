@@ -23,6 +23,11 @@ This is a measurement, not a blanket security claim. Two things are reported:
    size and gzip ratio, bytes per event, the Merkle inclusion-proof size (ceil(log2(N)) hashes), and
    DSSE sign and verify time over the run anchor.
 
+> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
+> event content-hash strings, with a trailing newline, in event sequence order —
+> not a tree root, and not `event_id` bytes. The historical wording above describes
+> the model used at the time and is not a claim about the shipped evidence format.
+
 It is tamper-evident, not tamper-proof. A host that holds both code execution and the signing key is
 out of scope: it can simply re-sign, which is why production deployments anchor externally (a
 transparency log or a timestamping authority). And there is one honest internal limitation the

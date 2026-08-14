@@ -164,7 +164,7 @@ Every action your agent takes becomes a signed event in a content-addressed evid
 [[slnc 500]] \
 Explore everything interactively. See exactly what happened. \
 [[slnc 500]] \
-Merkle root, SHA-256, JCS canonicalization. Cryptographic proof of what your agent actually did. \
+SHA-256 content hashes, JCS canonicalization, deterministic run-root digest. \
 [[slnc 500]] \
 Attack simulation tests your gates against known vectors. Bitflip, truncation, injection, blocked or bypassed, you'll know. \
 [[slnc 1000]] \

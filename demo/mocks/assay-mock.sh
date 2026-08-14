@@ -11,7 +11,7 @@ if [[ "$CMD" == "bundle" && "$SUB" == "verify" ]]; then
     sleep 0.5
     echo "Bundle ID: bafybeigdyrzt5sPp75Pozf"
     sleep 0.2
-    echo "Merkle Root: 8f4b2e1c9d3a..."
+    echo "Run-root digest: 8f4b2e1c9d3a..."
     sleep 0.2
     echo "  Leaf 0 [INIT]: Valid (Sig: ed25519)"
     sleep 0.1

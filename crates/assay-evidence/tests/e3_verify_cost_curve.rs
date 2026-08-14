@@ -4,7 +4,8 @@
 //!   - verify time (median),
 //!   - compressed bundle bytes and bytes-per-event,
 //!   - gzip ratio (compressed / uncompressed events),
-//!   - Merkle inclusion-proof size = ceil(log2(N)) hashes,
+//!   - synthetic_log2_hash_count = ceil(log2(N)) comparison model used by this
+//!     experiment (not consumed by production verification; `run_root` is a flat digest),
 //!   - DSSE sign / verify time over the run anchor.
 //!
 //! Rationale: signed/attested artifact lines are widening, but the cost of verification is rarely
@@ -23,9 +24,12 @@ use assay_evidence::types::EvidenceEvent;
 use assay_evidence::{verify_bundle_with_limits, BundleWriter, VerifyLimits};
 use chrono::{TimeZone, Utc};
 use ed25519_dalek::SigningKey;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::io::Cursor;
+use std::sync::Mutex;
 use std::time::Instant;
+
+static E3_OUT_DIR_LOCK: Mutex<()> = Mutex::new(());
 
 const ENTROPY_ALPHABET: &[u8; 64] =
     b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
@@ -108,13 +112,38 @@ fn time_verify_ms(bundle: &[u8], limits: &VerifyLimits, reps: usize) -> f64 {
     median(samples)
 }
 
-/// ceil(log2(n)) — number of sibling hashes in an inclusion proof for N leaves.
-fn inclusion_proof_hashes(n: u64) -> u32 {
+/// ceil(log2(n)) comparison model used by this experiment.
+/// Production verification does not consume it; `run_root` is a flat digest.
+fn synthetic_log2_hash_count(n: u64) -> u32 {
     if n <= 1 {
         0
     } else {
         u64::BITS - (n - 1).leading_zeros()
     }
+}
+
+fn cost_row(
+    events: usize,
+    verify_ms: f64,
+    verify_reps: usize,
+    compressed_bytes: u64,
+    events_bytes: u64,
+) -> Value {
+    let gzip_ratio = if events_bytes > 0 {
+        compressed_bytes as f64 / events_bytes as f64
+    } else {
+        0.0
+    };
+    json!({
+        "events": events,
+        "verify_ms_median": verify_ms,
+        "verify_reps": verify_reps,
+        "compressed_bytes": compressed_bytes,
+        "events_bytes": events_bytes,
+        "bytes_per_event_compressed": compressed_bytes as f64 / events as f64,
+        "gzip_ratio": gzip_ratio,
+        "synthetic_log2_hash_count": synthetic_log2_hash_count(events as u64),
+    })
 }
 
 /// Ordinary least squares for verify_ms ~ a + b*events.
@@ -179,8 +208,88 @@ fn dsse_sign_verify_ms(reps: usize) -> (f64, f64) {
     (median(sign), median(verify))
 }
 
+fn requested_e3_out_dir() -> Option<String> {
+    match std::env::var("E3_OUT_DIR") {
+        Ok(d) if !d.is_empty() => Some(d),
+        _ => None,
+    }
+}
+
+fn cost_artifact_document(
+    profile: &str,
+    payload_bytes: usize,
+    rows: Vec<Value>,
+    fit: (f64, f64, f64),
+    dsse: (f64, f64),
+) -> Value {
+    let (slope, intercept, r2) = fit;
+    let (sign_full, verify_full) = dsse;
+    json!({
+        "schema": "assay.experiment.evidence_verify_cost.v0",
+        "profile": profile,
+        "payload_bytes_per_event": payload_bytes,
+        "synthetic_log2_model": {
+            "column": "synthetic_log2_hash_count",
+            "formula": "ceil(log2(N))",
+            "consumed_by_production_verification": false,
+            "note": "Comparison model only. Production verification does not consume it; run_root is SHA-256 over newline-delimited event content-hash strings, with a trailing newline, in event sequence order.",
+        },
+        "rows": rows,
+        "fit": {
+            "slope_ms_per_event": slope,
+            "intercept_ms": intercept,
+            "ms_per_1k_events": slope * 1_000.0,
+            "r2": r2,
+        },
+        "dsse": {
+            "sign_ms_median": sign_full,
+            "verify_ms_median": verify_full,
+            "reps": 101,
+        },
+    })
+}
+
+#[test]
+fn e3_focused_output_emits_synthetic_log2_not_withdrawn_label() {
+    let _guard = E3_OUT_DIR_LOCK.lock().expect("E3_OUT_DIR lock");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let output_path = tmp.path().join("cost.json");
+    let rows = vec![cost_row(2, 0.0, 1, 0, 0)];
+    let cost = cost_artifact_document("test", 256, rows, (0.0, 0.0, 1.0), (0.0, 0.0));
+    std::fs::write(&output_path, serde_json::to_string_pretty(&cost).unwrap())
+        .expect("write cost.json");
+    let parsed: Value =
+        serde_json::from_str(&std::fs::read_to_string(&output_path).expect("read cost.json"))
+            .expect("parse cost.json");
+    assert!(
+        parsed["rows"][0].get("synthetic_log2_hash_count").is_some(),
+        "focused output must emit synthetic_log2_hash_count"
+    );
+    assert!(
+        parsed["rows"][0]
+            .get(concat!("inclusion", "_proof_hashes"))
+            .is_none(),
+        "producer must not emit the withdrawn snake_case proof-size key"
+    );
+    assert_eq!(
+        parsed["synthetic_log2_model"]["column"],
+        "synthetic_log2_hash_count"
+    );
+}
+
+#[test]
+fn e3_has_no_generic_user_controlled_output_path_helper() {
+    const SOURCE: &str = include_str!("e3_verify_cost_curve.rs");
+    let forbidden = concat!("fn write_cost_json", "(out_dir: &str");
+    assert!(
+        !SOURCE.contains(forbidden),
+        "keep the E3_OUT_DIR write in the full-sweep producer; a generic helper reintroduces the CodeQL tainted-path finding"
+    );
+}
+
 #[test]
 fn e3_verify_cost_curve() {
+    let _guard = E3_OUT_DIR_LOCK.lock().expect("E3_OUT_DIR lock");
     // Smoke: always exercise the cost path on a small bundle so it cannot rot.
     let smoke = build_bundle(256, 128);
     let smoke_ms = time_verify_ms(&smoke, &VerifyLimits::default(), 3);
@@ -191,9 +300,9 @@ fn e3_verify_cost_curve() {
         "DSSE timing must be non-negative"
     );
 
-    let out_dir = match std::env::var("E3_OUT_DIR") {
-        Ok(d) if !d.is_empty() => d,
-        _ => return, // CI fast path: smoke only.
+    let out_dir = match requested_e3_out_dir() {
+        Some(d) => d,
+        None => return, // CI fast path: smoke only.
     };
 
     // Full sweep: payload fixed at 256 bytes/event; reps shrink as N grows.
@@ -221,21 +330,7 @@ fn e3_verify_cost_curve() {
             .unwrap_or(0);
         let verify_ms = time_verify_ms(&bundle, &limits, reps);
         let compressed = bundle.len() as u64;
-        let gzip_ratio = if events_bytes > 0 {
-            compressed as f64 / events_bytes as f64
-        } else {
-            0.0
-        };
-        rows.push(json!({
-            "events": events,
-            "verify_ms_median": verify_ms,
-            "verify_reps": reps,
-            "compressed_bytes": compressed,
-            "events_bytes": events_bytes,
-            "bytes_per_event_compressed": compressed as f64 / events as f64,
-            "gzip_ratio": gzip_ratio,
-            "inclusion_proof_hashes": inclusion_proof_hashes(events as u64),
-        }));
+        rows.push(cost_row(events, verify_ms, reps, compressed, events_bytes));
         fit_points.push((events as f64, verify_ms));
     }
 
@@ -247,24 +342,13 @@ fn e3_verify_cost_curve() {
     } else {
         "release"
     };
-    let cost = json!({
-        "schema": "assay.experiment.evidence_verify_cost.v0",
-        "profile": profile,
-        "payload_bytes_per_event": payload_bytes,
-        "rows": rows,
-        "fit": {
-            "slope_ms_per_event": slope,
-            "intercept_ms": intercept,
-            "ms_per_1k_events": slope * 1_000.0,
-            "r2": r2,
-        },
-        "dsse": {
-            "sign_ms_median": sign_full,
-            "verify_ms_median": verify_full,
-            "reps": 101,
-        },
-    });
-
+    let cost = cost_artifact_document(
+        profile,
+        payload_bytes,
+        rows,
+        (slope, intercept, r2),
+        (sign_full, verify_full),
+    );
     std::fs::create_dir_all(&out_dir).expect("create out dir");
     std::fs::write(
         format!("{out_dir}/cost.json"),

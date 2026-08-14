@@ -8,7 +8,9 @@ site_name: Assay
 site_url: https://docs.getassay.dev
 site_description: "CI-native evidence compiler and Trust Basis artifacts for agent systems"
 site_author: Assay Team
-exclude_docs: /README.md
+exclude_docs: |
+  /README.md
+  /superpowers/plans/
 
 repo_name: Rul1an/assay
 repo_url: https://github.com/Rul1an/assay

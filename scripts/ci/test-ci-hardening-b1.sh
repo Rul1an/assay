@@ -624,6 +624,46 @@ else
   fail "ci.yml does not actively invoke both hardening contracts in the scope job"
 fi
 
+echo "== required CI workflow actively runs evidence-vocabulary self-test and live checker =="
+if python3 - "${CI_WF}" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1]).read()
+match = re.search(r"(?ms)^  scope:\n(.*?)(?=^  [a-zA-Z][\w-]*:|\Z)", text)
+if not match:
+    sys.exit("scope job missing from ci.yml")
+section = match.group(1)
+step = re.search(
+    r"(?ms)^      - name: Evidence vocabulary guard\n(?P<body>(?:        .+\n)+)",
+    section,
+)
+if not step:
+    sys.exit("scope job missing 'Evidence vocabulary guard' step")
+body = step.group("body")
+for forbidden in ("if:", "continue-on-error:"):
+    if re.search(rf"(?m)^        {re.escape(forbidden)}", body):
+        sys.exit(f"evidence-vocabulary step must not use {forbidden}")
+active = [
+    line.strip()
+    for line in body.splitlines()
+    if line.startswith("          ") and not line.lstrip().startswith("#")
+]
+required = (
+    "bash scripts/ci/test-evidence-vocabulary.sh",
+    "python3 scripts/ci/check-evidence-vocabulary.py",
+)
+missing = [cmd for cmd in required if cmd not in active]
+if missing:
+    sys.exit("active commands missing: " + ", ".join(missing))
+sys.exit(0)
+PY
+then
+  ok "ci.yml scope job actively runs evidence-vocabulary self-test and live checker"
+else
+  fail "ci.yml does not actively invoke evidence-vocabulary in the scope job"
+fi
+
 if [[ "${failures}" -ne 0 ]]; then
   echo "ci-hardening-b1 contract: ${failures} failure(s)" >&2
   exit 1

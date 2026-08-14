@@ -1,6 +1,6 @@
 //! EXPERIMENTAL (Eb.4): promote side-effect levels in a bundle against imported provider audit records.
 //!
-//! `BundleReader::open` verifies bundle integrity first (manifest hashes + Merkle root); this layers
+//! `BundleReader::open` verifies manifest hashes and the deterministic run-root digest; this layers
 //! the side-effect ladder of `docs/reference/side-effect-receipt.md` on top. For every observed
 //! tool-decision that asserted a side effect, it looks for an imported
 //! `assay.provider_audit_record.v0` whose binding recomputes AND matches that call's action

@@ -69,6 +69,11 @@ These are engineering strengths that distinguish Assay. Refactors are only good 
 5. **Adaptive judge (SPRT-inspired)** + seed-based blind labeling
 6. **Security hardening**: terminal sanitization state machine, sim/chaos attacks, strict JSON handling
 
+> Correction (2026-08-14): the shipped `run_root` is SHA-256 over newline-delimited
+> event content-hash strings, with a trailing newline, in event sequence order —
+> not a tree root, and not `event_id` bytes. The historical wording above describes
+> the model used at the time and is not a claim about the shipped evidence format.
+
 ---
 
 ## 3) Critical Debt Inventory (Ranked by ROI)

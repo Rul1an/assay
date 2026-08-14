@@ -30,8 +30,7 @@ See exactly what happened.
 
 7
 00:00:17,000 --> 00:00:23,000
-Merkle root, SHA-256, JCS canonicalization.
-Cryptographic proof of what your agent actually did.
+SHA-256 content hashes, JCS canonicalization, deterministic run-root digest.
 
 8
 00:00:23,000 --> 00:00:29,000

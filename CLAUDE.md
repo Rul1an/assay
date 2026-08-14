@@ -105,7 +105,7 @@ CLI main.rs -> dispatch() -> build_runner() -> Runner::run_suite()
 ### Evidence Bundle Format
 
 Evidence bundles are `.tar.gz` files containing:
-- `manifest.json`: Schema v1, run metadata, file hashes (SHA-256), Merkle root
+- `manifest.json`: Schema v1, run metadata, file hashes (SHA-256), and a deterministic SHA-256 run-root digest
 - `events.ndjson`: CloudEvents-style evidence events (JCS canonicalized, content-addressed IDs)
 
 Verification: `assay_evidence::verify_bundle_with_limits()` with `VerifyLimits` (100MB compressed, 1GB decompressed, 100k events).

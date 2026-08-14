@@ -272,9 +272,10 @@ fn test_verifier_rejects_missing_content_hash_raw_tar() {
         "schema_version": 1,
         // Equal to run_root, so the bundle_id contract is not what rejects this fixture.
         // The manifest is not otherwise conformant -- `run_root` below is a single event's
-        // content hash rather than a chain over one, which `compute_run_root` would not
-        // produce -- but verification stops at the missing content_hash long before the
-        // chain check, so that stays out of the way of what this test is about.
+        // content hash rather than a flat deterministic run-root digest over one, which
+        // `compute_run_root` would not produce -- but verification stops at the missing
+        // content_hash long before the run-root digest check, so that stays out of the way
+        // of what this test is about.
         "bundle_id": correct_hash,
         "producer": {"name": "test", "version": "1.0"},
         "run_id": "run_deterministic_test",

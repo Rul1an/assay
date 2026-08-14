@@ -3,7 +3,7 @@
 //! This module provides cryptographic primitives for:
 //! - Content-addressed event hashing (content_hash)
 //! - Stream identity (run_id:seq)
-//! - Run integrity chain (run_root)
+//! - Deterministic run-root digest (run_root)
 //!
 //! # Security Invariants
 //!
@@ -120,9 +120,9 @@ pub fn compute_stream_id(run_id: &str, seq: u64) -> String {
     format!("{}:{}", run_id, seq)
 }
 
-/// Calculate the Run Root (Integrity Chain).
+/// Calculate the deterministic run-root digest.
 ///
-/// Creates a hash chain over all content hashes in sequence order.
+/// Hashes newline-delimited content-hash strings in event sequence order.
 /// This proves the integrity and ordering of the entire event stream.
 ///
 /// # Algorithm
@@ -323,6 +323,29 @@ mod tests {
         let root2 = compute_run_root(&reversed);
 
         assert_ne!(root1, root2, "run_root must be order-sensitive");
+    }
+
+    /// Pin the shipped digest: each event content-hash string, then `b"\n"`, in
+    /// event sequence order — not delimiter-free concat and not manifest order.
+    #[test]
+    fn test_run_root_newline_delimited_content_hashes_in_event_order() {
+        let hashes = vec!["sha256:aaa".to_string(), "sha256:bbb".to_string()];
+        let mut hasher = Sha256::new();
+        hasher.update(b"sha256:aaa");
+        hasher.update(b"\n");
+        hasher.update(b"sha256:bbb");
+        hasher.update(b"\n");
+        let expected = format!("sha256:{}", hex::encode(hasher.finalize()));
+        assert_eq!(compute_run_root(&hashes), expected);
+
+        let mut no_newline = Sha256::new();
+        no_newline.update(b"sha256:aaasha256:bbb");
+        let delimiter_free = format!("sha256:{}", hex::encode(no_newline.finalize()));
+        assert_ne!(
+            compute_run_root(&hashes),
+            delimiter_free,
+            "run_root is not delimiter-free concat of content-hash strings"
+        );
     }
 
     /// Verify empty run_root is valid
