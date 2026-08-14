@@ -300,14 +300,20 @@ case_root="$SCRATCH/workspace-leads-published-release"
 seed_case "$case_root"
 CASE_ROOT="$case_root" python3 - <<'PY'
 import os
+import re
 from pathlib import Path
 
 path = Path(os.environ["CASE_ROOT"]) / "Cargo.toml"
 text = path.read_text(encoding="utf-8")
-anchor = '[workspace.package]\nversion = "5.1.0"'
-if text.count(anchor) != 1:
+text, count = re.subn(
+    r'(?m)^(\[workspace\.package\]\nversion = ")[^"]+("\s*)$',
+    r'\g<1>999.999.999\2',
+    text,
+    count=1,
+)
+if count != 1:
     raise SystemExit("workspace package version fixture is not unique")
-path.write_text(text.replace(anchor, '[workspace.package]\nversion = "5.2.0"', 1), encoding="utf-8")
+path.write_text(text, encoding="utf-8")
 PY
 if ! (cd "$case_root" && python3 scripts/docs/generate-agent-golden-path.py) \
   >"$case_root/workspace-leads.log" 2>&1
@@ -320,14 +326,26 @@ CASE_ROOT="$case_root" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
+import subprocess
 
 root = Path(os.environ["CASE_ROOT"])
 contract = json.loads(
     (root / "docs/generated/agent-golden-path.json").read_text(encoding="utf-8")
 )
-if contract.get("release_version") != "5.1.0" or contract.get("release_tag") != "v5.1.0":
+release_tag_result = subprocess.run(
+    ["bash", "scripts/ci/read-assay-release-tag.sh"],
+    cwd=root,
+    check=False,
+    capture_output=True,
+    text=True,
+)
+if release_tag_result.returncode != 0:
+    raise SystemExit("failed to read published release tag in hardening fixture")
+release_tag = release_tag_result.stdout.strip()
+release_version = release_tag.removeprefix("v")
+if contract.get("release_version") != release_version or contract.get("release_tag") != release_tag:
     raise SystemExit(
-        "golden path followed workspace 5.2.0 instead of published release v5.1.0"
+        "golden path followed synthetic workspace version instead of published release pin"
     )
 PY
 record_structural_probe_pass "workspace may lead published golden-path release"
