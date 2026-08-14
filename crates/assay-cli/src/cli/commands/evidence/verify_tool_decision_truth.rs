@@ -1,6 +1,6 @@
 //! EXPERIMENTAL: semantic verification of tool-decision-truth recipe rows inside an evidence bundle.
 //!
-//! `BundleReader::open` verifies bundle integrity (manifest hashes + Merkle root). This command layers
+//! `BundleReader::open` verifies manifest hashes and the deterministic run-root digest. This command layers
 //! the tool-decision-truth semantics on top: it pairs every recipe-row event with the carrier event it
 //! cites BY CONTENT DIGEST (`evidence_ref.digest == carrier_content_digest(carrier)`), then runs
 //! `verify_recipe_row` fail-closed. A row that cites no carrier, a tampered carrier or row, a stale or
@@ -71,7 +71,7 @@ pub(crate) struct Check {
 pub fn cmd_verify_tool_decision_truth(args: VerifyToolDecisionTruthArgs) -> Result<i32> {
     let file = File::open(&args.bundle)
         .with_context(|| format!("failed to open bundle {}", args.bundle.display()))?;
-    // BundleReader::open verifies bundle integrity (manifest hashes + Merkle root) before we read events.
+    // BundleReader::open verifies manifest hashes and the deterministic run-root digest before we read events.
     let reader = BundleReader::open(file).context("bundle integrity verification failed")?;
     let events = reader
         .events_vec()

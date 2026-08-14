@@ -57,7 +57,7 @@ row_example-tdt:1_verifies                   ok   row coheres with the carrier i
 Claims not made: policy_correctness, intent_or_maliciousness, runtime_enforcement, tool_result_truth
 ```
 
-`BundleReader` checks bundle integrity (manifest hashes + Merkle root) first; this command layers the
+`BundleReader` checks bundle integrity (manifest hashes and the deterministic run-root digest) first; this command layers the
 tool-decision-truth semantics on top. It pairs every recipe row with the carrier it cites **by content
 digest**, then runs the fail-closed check. A tampered carrier or row, a stale or understated verdict, a
 duplicate carrier content digest, two rows citing one digest, or a payload that does not self-declare the

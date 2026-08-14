@@ -19,7 +19,7 @@ Core loop:
 
 It's written in Rust. It runs offline. No telemetry. No vendor lock-in. No signup.
 
-The evidence bundle format uses content-addressed events (JCS canonicalization, SHA-256, Merkle root) — so you can cryptographically prove what an agent did, without sending data to a third-party SaaS.
+The evidence bundle format uses content-addressed events (JCS canonicalization, SHA-256, and a deterministic run-root digest). A verifier can recompute whether carried bytes match the recorded manifest. That does not prove an external side effect or provider outcome.
 
 Repo: https://github.com/Rul1an/assay
 
