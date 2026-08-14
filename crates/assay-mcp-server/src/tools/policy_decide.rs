@@ -53,9 +53,13 @@ pub async fn policy_decide(ctx: &ToolContext, args: &Value) -> Result<Value> {
             Err(e) => return ToolError::new("E_POLICY_PARSE", &e.to_string()).result(),
         };
 
-        // Extract blocklist
+        // Extract blocklist. Absent stays empty (allow). A present value that is
+        // not a string sequence is a parse error and must not be cached.
         let list: Vec<String> = if let Some(l) = policy_yaml.get("blocklist") {
-            serde_json::from_value(l.clone()).unwrap_or_default()
+            match serde_json::from_value(l.clone()) {
+                Ok(list) => list,
+                Err(e) => return ToolError::new("E_POLICY_PARSE", &e.to_string()).result(),
+            }
         } else {
             vec![]
         };
