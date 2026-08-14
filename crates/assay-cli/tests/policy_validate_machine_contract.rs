@@ -178,17 +178,27 @@ fn json_mode_reports_valid_and_malformed_policies_on_stdout() {
     let recovery = recovery_argv(&malformed_json);
     assert_eq!(
         recovery,
-        ["assay", "policy", "validate", "--input", malformed_name],
-        "the hostile path must remain one argv element"
+        vec![
+            "assay".to_string(),
+            "policy".to_string(),
+            "validate".to_string(),
+            format!("--input={malformed_name}"),
+            "--format".to_string(),
+            "json".to_string()
+        ],
+        "the hostile path must remain one fused argv element"
     );
     let recovered = assay(dir.path(), &recovery[1..]);
     assert_eq!(recovered.status.code(), Some(2));
-    let recovered_stderr = String::from_utf8_lossy(&recovered.stderr);
-    assert!(
-        recovered_stderr.contains("E_POLICY_PARSE"),
-        "the published next_step must reach validation, not Clap usage: {recovered_stderr}"
+    let recovered_json: Value =
+        serde_json::from_slice(&recovered.stdout).expect("policy recovery must stay JSON");
+    assert_eq!(
+        recovered_json["reason_code"],
+        "E_POLICY_PARSE",
+        "the published next_step must reach validation, not Clap usage: {}",
+        String::from_utf8_lossy(&recovered.stderr)
     );
-    assert!(!recovered_stderr.contains("Usage:"));
+    assert!(!String::from_utf8_lossy(&recovered.stderr).contains("Usage:"));
 
     let valid_again = assay(dir.path(), &valid_args);
     let malformed_again = assay(dir.path(), &malformed_args);

@@ -54,11 +54,11 @@ assay explain --trace traces.jsonl --policy policy.yaml  # Explain violations
 ### Config Errors (exit 2)
 | Code | Meaning | Next Step |
 |------|---------|-----------|
-| `E_CFG_PARSE` | YAML/JSON parse error | argv `["assay","doctor","--config","<file>"]` |
+| `E_CFG_PARSE` | YAML/JSON parse error | argv `["assay","doctor","--config=<file>","--format","json"]` |
 | `E_TRACE_NOT_FOUND` | Trace file missing | Check path exists |
 | `E_MISSING_CONFIG` | Config file missing | `assay init` |
 | `E_BASELINE_INVALID` | Baseline file invalid | `assay baseline record` |
-| `E_POLICY_PARSE` | Policy YAML syntax error | argv `["assay","policy","validate","--input","<file>"]` |
+| `E_POLICY_PARSE` | Policy YAML syntax error | argv `["assay","policy","validate","--input=<file>","--format","json"]` |
 
 Parse a `Run argv:` JSON array and pass its elements directly to a process API. Never join
 caller-controlled path elements into a shell command.

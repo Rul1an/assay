@@ -201,7 +201,7 @@ flowchart TD
 | Error | Reason Code | Recovery Action |
 |-------|-------------|-----------------|
 | Trace file not found | `E_TRACE_NOT_FOUND` | Check path, use `assay import` |
-| Config parse error | `E_CFG_PARSE` | Parse `Run argv: ["assay","doctor","--config","<file>"]` and execute the argv directly (no shell) |
+| Config parse error | `E_CFG_PARSE` | Parse `Run argv: ["assay","doctor","--config=<file>","--format","json"]` and execute the argv directly (no shell) |
 | Judge unavailable | `E_JUDGE_UNAVAILABLE` | Check API key, retry later |
 | Rate limited | `E_RATE_LIMIT` | Wait, reduce parallelism |
 | Test failed | `E_TEST_FAILED` | Run `assay explain` |

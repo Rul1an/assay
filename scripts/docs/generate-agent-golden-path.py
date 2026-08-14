@@ -190,7 +190,7 @@ STEPS: list[dict[str, object]] = [
                 stdout("json", "assay.doctor_report.v0"),
                 ["doctor", "--format", "json", "--config", "<config>"],
                 reason_code="E_CFG_PARSE",
-                next_step='Run argv: ["assay","doctor","--config","<config>"]',
+                next_step='Run argv: ["assay","doctor","--config=<config>","--format","json"]',
                 config_error_code="E_CFG_PARSE",
             ),
         ],
@@ -307,7 +307,7 @@ STEPS: list[dict[str, object]] = [
                 ],
                 reason_code="E_POLICY_PARSE",
                 next_step=(
-                    'Run argv: ["assay","policy","validate","--input","<policy>"]'
+                    'Run argv: ["assay","policy","validate","--input=<policy>","--format","json"]'
                 ),
             ),
         ],

@@ -122,7 +122,7 @@
             "document": "assay.doctor_report.v0"
           },
           "reason_code": "E_CFG_PARSE",
-          "next_step": "Run argv: [\"assay\",\"doctor\",\"--config\",\"<config>\"]",
+          "next_step": "Run argv: [\"assay\",\"doctor\",\"--config=<config>\",\"--format\",\"json\"]",
           "gap_issue": null,
           "config_error_code": "E_CFG_PARSE"
         }
@@ -259,7 +259,7 @@
             "document": "assay.run_summary.v1"
           },
           "reason_code": "E_POLICY_PARSE",
-          "next_step": "Run argv: [\"assay\",\"policy\",\"validate\",\"--input\",\"<policy>\"]",
+          "next_step": "Run argv: [\"assay\",\"policy\",\"validate\",\"--input=<policy>\",\"--format\",\"json\"]",
           "gap_issue": null
         }
       ],
