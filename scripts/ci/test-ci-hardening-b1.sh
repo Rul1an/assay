@@ -584,10 +584,7 @@ body = step.group("body")
 for forbidden in ("if:", "continue-on-error:"):
     if re.search(rf"(?m)^        {re.escape(forbidden)}", body):
         sys.exit(f"hardening step must not use {forbidden}")
-required_env = (
-    "GH_TOKEN: ${{ github.token }}",
-    "GITHUB_REPOSITORY: ${{ github.repository }}",
-)
+required_env = ("GH_TOKEN: ${{ github.token }}",)
 missing_env = [entry for entry in required_env if entry not in body]
 if missing_env:
     sys.exit("hardening step environment missing: " + ", ".join(missing_env))

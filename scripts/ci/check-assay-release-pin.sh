@@ -64,7 +64,8 @@ if [[ -n "${ASSAY_RELEASE_METADATA_FILE:-}" ]]; then
   fi
   metadata_path="${ASSAY_RELEASE_METADATA_FILE}"
 else
-  repo="${GITHUB_REPOSITORY:-Rul1an/assay}"
+  # Release existence is an upstream property, including when this runs on a fork.
+  repo="${ASSAY_RELEASE_REPOSITORY:-Rul1an/assay}"
   gh_bin="${ASSAY_GH_BIN:-gh}"
   metadata_path="$(mktemp)"
   metadata_is_temporary=true

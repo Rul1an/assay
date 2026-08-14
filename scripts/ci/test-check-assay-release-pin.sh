@@ -38,7 +38,6 @@ run_api_check() {
   ASSAY_WORKSPACE_MANIFEST="${manifest}" \
     ASSAY_RELEASE_TAG_FILE="${pin_file}" \
     ASSAY_GH_BIN="${fake_gh}" \
-    GITHUB_REPOSITORY="Rul1an/assay" \
     "${CHECKER}" --published
 }
 
@@ -128,6 +127,22 @@ exit 71
 EOF
 chmod +x "${fake_gh}"
 expect_fail "failed to obtain latest published release metadata for Rul1an/assay" run_api_check
+
+echo "== fork CI still queries the authoritative upstream release =="
+write_manifest "5.1.0"
+write_pin "v5.1.0"
+write_release "v5.1.0"
+cat >"${fake_gh}" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" != "api repos/Rul1an/assay/releases/latest" ]]; then
+  exit 72
+fi
+cat "${ASSAY_RELEASE_METADATA_FIXTURE}"
+EOF
+chmod +x "${fake_gh}"
+GITHUB_REPOSITORY="contributor/assay" \
+  ASSAY_RELEASE_METADATA_FIXTURE="${metadata}" \
+  run_api_check
 
 echo "== oversized release metadata fails before parsing =="
 python3 - "${metadata}" <<'PY'
