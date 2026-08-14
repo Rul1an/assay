@@ -61,6 +61,9 @@ done
 printf '%s\n' "${url:-<missing-url>}" >>"${CURL_URLS:?}"
 if [[ "$url" == *"/repos/Rul1an/assay/releases/latest" ]]; then
   payload='{"tag_name":"v9.9.9"}'
+  if [[ -n "${LATEST_API_PAYLOAD:-}" ]]; then
+    payload="$LATEST_API_PAYLOAD"
+  fi
   if [[ -n "$out" ]]; then
     printf '%s\n' "$payload" >"$out"
   else
@@ -176,6 +179,34 @@ expect_latest_path() {
   ok "$label resolves via the latest API (exit $rc)"
 }
 
+# A latest-API body with more than one tag_name line extracts to a multiline
+# VERSION. Line-oriented grep would treat that as stable and curl the asset
+# with the full invalid tag. Fail closed; the latest query is not an asset curl.
+expect_latest_rejects_multiline_tags() {
+  local label="latest-multiline-tags"
+  local payload
+  payload=$'{"tag_name":"evil-not-a-tag"}\n{"tag_name":"v9.9.9"}'
+  local run_dir="$SCRATCH/latest-multiline"
+  local rc
+  rc="$(LATEST_API_PAYLOAD="$payload" run_installer "latest" "$run_dir")"
+  if [[ "$rc" -eq 0 ]]; then
+    fail "$label: installer accepted a multiline latest-API tag (exit 0)"
+    sed 's/^/      /' "$run_dir/installer.log" >&2 || true
+    return
+  fi
+  if ! grep -Fq -- "/repos/Rul1an/assay/releases/latest" "$run_dir/urls"; then
+    fail "$label: did not query the latest-release API (exit $rc)"
+    sed 's/^/      /' "$run_dir/urls" >&2 || true
+    return
+  fi
+  if grep -Fq -- "/releases/download/" "$run_dir/urls"; then
+    fail "$label: multiline latest-API tag proceeded to asset curl"
+    sed 's/^/      /' "$run_dir/urls" >&2
+    return
+  fi
+  ok "$label fails closed with no asset curl (exit $rc)"
+}
+
 expect_cmdsubst_does_not_create_sentinel() {
   local run_dir="$SCRATCH/deny-cmdsubst"
   local sentinel="$run_dir/PWNED"
@@ -205,6 +236,7 @@ run_contract() {
   expect_same_v_tag_url "prefixed" "v5.2.0"
   expect_latest_path "literal-latest" "latest"
   expect_latest_path "unset" "unset"
+  expect_latest_rejects_multiline_tags
   expect_fail_before_network "empty" "empty"
   expect_fail_before_network "bare-v" "v"
   expect_fail_before_network "dotdot" ".."
@@ -279,6 +311,10 @@ mutations = {
         'if [ "$1" = "latest" ]; then\n        printf \'%s\\n\' "latest"',
         'if [ "$1" = "latest" ]; then\n        printf \'%s\\n\' "vlatest"',
     ),
+    "drop-tag-prefilter": (
+        '    case "$1" in\n        ""|*[[:space:]]*|*/*|*..*)\n            return 1\n            ;;\n    esac\n    printf \'%s\\n\' "$1" | grep -Eq \'^v[0-9]+[.][0-9]+[.][0-9]+$\'',
+        '    printf \'%s\\n\' "$1" | grep -Eq \'^v[0-9]+[.][0-9]+[.][0-9]+$\'',
+    ),
 }
 if name not in mutations:
     raise SystemExit(f"unknown mutation {name!r}")
@@ -308,6 +344,7 @@ if [[ "$failures" -eq 0 ]]; then
   expect_mutation_bites "unprefixed-archive"
   expect_mutation_bites "malformed-as-latest"
   expect_mutation_bites "latest-v-prefix"
+  expect_mutation_bites "drop-tag-prefilter"
 fi
 
 if [[ "$failures" -ne 0 ]]; then

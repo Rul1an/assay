@@ -40,9 +40,16 @@ log_success() { printf "${GREEN}${BOLD}[OK]${NC} %s\n" "$1"; }
 log_warn() { printf "${YELLOW}${BOLD}[WARN]${NC} %s\n" "$1"; }
 log_error() { printf "${RED}${BOLD}[ERROR]${NC} %s\n" "$1"; exit 1; }
 
-# One predicate for "this is a published stable software tag". The latest
-# resolver and explicit ASSAY_VERSION both use it so they cannot drift.
+# One predicate for "this is a published stable software tag". Total /
+# fail-closed for empty, whitespace, slash, and `..` so line-oriented
+# grep cannot accept a multiline extraction. Explicit and latest both
+# use this function; normalize does not repeat the reject rule.
 is_stable_release_tag() {
+    case "$1" in
+        ""|*[[:space:]]*|*/*|*..*)
+            return 1
+            ;;
+    esac
     printf '%s\n' "$1" | grep -Eq '^v[0-9]+[.][0-9]+[.][0-9]+$'
 }
 
@@ -53,11 +60,6 @@ normalize_install_version() {
         printf '%s\n' "latest"
         return 0
     fi
-    case "$1" in
-        ""|*[[:space:]]*|*/*|*..*)
-            return 1
-            ;;
-    esac
     _candidate="$1"
     case "$_candidate" in
         v*) ;;
