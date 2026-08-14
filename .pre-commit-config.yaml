@@ -173,10 +173,17 @@ repos:
         entry: bash scripts/ci/test-evidence-vocabulary.sh
         language: system
         pass_filenames: false
-        # The checker scans every tracked text file. This hook only proves the
-        # guard still has teeth; the live-tree hook is added once current and
-        # historical false claims are removed.
         files: ^(scripts/ci/(check-evidence-vocabulary\.py|test-evidence-vocabulary\.sh)|\.pre-commit-config\.yaml)$
+
+      - id: evidence-vocabulary
+        name: Evidence vocabulary guard
+        entry: python3 scripts/ci/check-evidence-vocabulary.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        # No files: filter. A start-condition regex of today's surfaces would
+        # skip a new path such as docs/new-page.md, which is the recurrence
+        # this hook exists to catch. The scan is ~1.7s.
 
       - id: aee-seal-producer-mutations
         name: ADR-045 seal producer mutations

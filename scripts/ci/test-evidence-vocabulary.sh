@@ -180,11 +180,9 @@ for rel in allow:
     if rel in guard_paths:
         raise SystemExit(f"FAIL: guard path {rel} must not be in ALLOWED_MERKLE_USES")
     if "verify_side_effects.rs" in rel:
-        raise SystemExit(
-            "FAIL: verify_side_effects.rs must not have an allowlist or TEMPORARY_DEBT exception"
-        )
+        raise SystemExit("FAIL: verify_side_effects.rs must not have an allowlist exception")
 if getattr(module, "TEMPORARY_DEBT", None):
-    raise SystemExit("FAIL: TEMPORARY_DEBT must be empty; reserved file stays a live finding")
+    raise SystemExit("FAIL: TEMPORARY_DEBT must not exist; no reserved false-claim exception")
 
 legacy = getattr(module, "LEGACY_IDENTIFIERS", None)
 if not isinstance(legacy, dict) or not legacy:
@@ -210,15 +208,12 @@ with redirect_stdout(buf):
     rc = module.check_tree(root, allow)
 out = buf.getvalue()
 findings = [line for line in out.splitlines() if ": unapproved Merkle claim:" in line or ": false run_root-as-Merkle claim:" in line]
-if rc == 0:
-    raise SystemExit("FAIL: live checker must stay RED while verify_side_effects is uncorrected")
-if len(findings) != 1 or "verify_side_effects.rs" not in findings[0]:
+if rc != 0 or findings:
     raise SystemExit(
-        "FAIL: live checker must have exactly one product finding "
-        "(verify_side_effects.rs); got "
-        f"{len(findings)}:\n" + out
+        "FAIL: live checker must exit 0 with no product findings; got "
+        f"rc={rc} findings={len(findings)}:\n" + out
     )
-print("ok: live checker RED on reserved verify_side_effects.rs only")
+print("ok: live checker GREEN")
 PY
 
 # Sibling under scripts/ci/ is still an outward claim. The two guard paths are not.
@@ -311,6 +306,75 @@ if rc == 0 or "produce_video.sh" not in out or "Merkle root in narration" not in
         "FAIL: filename identifiers must not mask a claim in the same file:\n" + out
     )
 print("ok: merkle-chain filename identifiers are not claims")
+PY
+
+python3 - "$ROOT/.pre-commit-config.yaml" "$CHECKER" "$TMP" "$FALSE_INJECT" <<'PY'
+import subprocess
+import sys
+from pathlib import Path
+
+config_path, checker, tmp, false_inject = sys.argv[1:]
+text = Path(config_path).read_text()
+marker = "      - id: evidence-vocabulary\n"
+start = text.find(marker)
+if start < 0:
+    raise SystemExit("FAIL: evidence-vocabulary hook missing from .pre-commit-config.yaml")
+rest = text[start + 1 :]
+nxt = rest.find("\n      - id:")
+block = text[start : start + 1 + nxt] if nxt >= 0 else text[start:]
+
+def uncommented_keys(src: str) -> list[str]:
+    keys = []
+    for line in src.splitlines():
+        code = line.split("#", 1)[0].rstrip()
+        if ":" in code:
+            keys.append(code.strip().split(":", 1)[0])
+    return keys
+
+keys = uncommented_keys(block)
+if "files" in keys:
+    raise SystemExit(
+        "FAIL: evidence-vocabulary must not have a files: start-condition regex"
+    )
+if "pass_filenames" not in keys or "pass_filenames: false" not in block:
+    raise SystemExit("FAIL: evidence-vocabulary must set pass_filenames: false")
+if "always_run" not in keys or "always_run: true" not in block:
+    raise SystemExit("FAIL: evidence-vocabulary must set always_run: true")
+
+dest = Path(tmp) / "hook-new-page"
+dest.mkdir()
+(dest / "scripts" / "ci").mkdir(parents=True)
+(dest / "docs").mkdir()
+(dest / "scripts" / "ci" / "check-evidence-vocabulary.py").write_bytes(Path(checker).read_bytes())
+(dest / ".pre-commit-config.yaml").write_text(
+    "repos:\n  - repo: local\n    hooks:\n" + block.rstrip() + "\n"
+)
+(dest / "docs" / "new-page.md").write_text(false_inject + "\n")
+subprocess.run(["git", "init", "-q"], cwd=dest, check=True)
+subprocess.run(
+    ["git", "add", "-A", "--", "docs/new-page.md", "scripts/ci/check-evidence-vocabulary.py"],
+    cwd=dest,
+    check=True,
+)
+proc = subprocess.run(
+    ["pre-commit", "run", "evidence-vocabulary", "--color", "never"],
+    cwd=dest,
+    check=False,
+    capture_output=True,
+    text=True,
+)
+out = proc.stdout + proc.stderr
+if proc.returncode == 0:
+    raise SystemExit(
+        "FAIL: real evidence-vocabulary hook did not fail on staged docs/new-page.md:\n"
+        + out
+    )
+if "new-page.md" not in out:
+    raise SystemExit(
+        "FAIL: hook failed but did not report docs/new-page.md (may have been skipped):\n"
+        + out
+    )
+print("ok: real pre-commit hook fails on a new unlisted docs/new-page.md")
 PY
 
 echo "ok: evidence-vocabulary mutations"

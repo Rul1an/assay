@@ -32,7 +32,7 @@ SCAN_PATH_EXCLUDES = (
 # Genuine constructions, generated identifiers, and explicit negative
 # spec/test assertions only. Measured on origin/main at
 # b34bc2f8ef5d97d2ec3d4988852cba90ff9b396f; each pattern has ≥1 hit.
-# Do not restore the vacuous draft pairs. Do not list verify_side_effects.rs.
+# Do not restore the vacuous draft pairs. Do not list false product claims.
 ALLOWED_MERKLE_USES: dict[str, tuple[str, ...]] = {
     "docs/architecture/SPEC-Outward-Product-Truth-v1.md": (
         r"not a Merkle root",
@@ -76,8 +76,6 @@ LEGACY_IDENTIFIERS: dict[str, tuple[str, ...]] = {
     ),
     "demo/scenes/merkle-chain.tape": (r"Output demo/scenes/merkle-chain\.mp4",),
 }
-
-TEMPORARY_DEBT: tuple[str, ...] = ()
 
 FALSE_CLAIM_RE = re.compile(
     r"run_root\s+is\s+a\s+merkle\s+root",  # affirmative run_root-as-Merkle
@@ -186,12 +184,6 @@ def check_tree(
 ) -> int:
     rules = ALLOWED_MERKLE_USES if allowlist is None else allowlist
     idents = LEGACY_IDENTIFIERS if identifiers is None else identifiers
-    if TEMPORARY_DEBT:
-        print("evidence-vocabulary=failed")
-        print("TEMPORARY_DEBT is non-empty; reserved false claims are not green")
-        for item in TEMPORARY_DEBT:
-            print(item)
-        return 1
     stale = allowlist_staleness(root, rules) + allowlist_staleness(root, idents)
     findings = scan_findings(root, git_files(root), rules, idents)
     if stale or findings:
