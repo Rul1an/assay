@@ -179,8 +179,9 @@ expect_latest_path() {
 expect_cmdsubst_does_not_create_sentinel() {
   local run_dir="$SCRATCH/deny-cmdsubst"
   local sentinel="$run_dir/PWNED"
+  # Literal dollar-paren, not an expansion: the installer must not create $sentinel.
   local version
-  version='$(touch '"$sentinel"')'
+  version="\$(touch ${sentinel})"
   local rc
   rc="$(run_installer "$version" "$run_dir")"
   if [[ "$rc" -eq 0 ]]; then
